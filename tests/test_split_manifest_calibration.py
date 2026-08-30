@@ -628,7 +628,7 @@ def test_count_door_round_trip_earns_a_checked_selection_disjointness(tmp_path, 
     from tcip_mcp.pipelines.resolution import (
         dataset_hash, read_operating_point_sidecar, verify_stamp_binding,
     )
-    from tcip_mcp.tools.training_tools import _auto_train_val, _persist_split_manifest
+    from tcip_mcp.pipelines.data.split_construction import auto_train_val, persist_split_manifest
 
     root = _two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
@@ -641,9 +641,9 @@ def test_count_door_round_trip_earns_a_checked_selection_disjointness(tmp_path, 
         "split": {"manifest_dir": str(out)},
     }
     experiment_id = "exp_round_trip_bound"
-    train_ds, val_ds, _ = _auto_train_val("detection", data_cfg, None)
+    train_ds, val_ds, _ = auto_train_val("detection", data_cfg, None)
     create_experiment(experiment_id, {})
-    _persist_split_manifest(experiment_id, train_ds, val_ds, data_cfg)
+    persist_split_manifest(experiment_id, train_ds, val_ds, data_cfg)
 
     universe = _calibration_this_date(manifest)
     dh = dataset_hash(root / "annotations" / DATES[0], stems=universe)

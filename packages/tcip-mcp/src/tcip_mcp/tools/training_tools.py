@@ -51,7 +51,8 @@ def _split_manifest_drawn_conflicts(data_cfg: dict, split_cfg: dict) -> list[str
     ``data.val_images_dir`` (checked separately, its own refusal): a document a manifest never
     read (``coco_json``/``label_format='coco'``), or a drawn split's own parameters
     (:data:`_SPLIT_MANIFEST_CONFLICT_KEYS`). Shared by ``preflight_config`` and
-    ``_auto_train_val``'s manifest branch, so the two report the identical set for one config.
+    :func:`~tcip_mcp.pipelines.data.split_construction.auto_train_val`'s manifest branch, so the
+    two report the identical set for one config.
     """
     conflicts = [k for k in _SPLIT_MANIFEST_CONFLICT_KEYS if split_cfg.get(k) is not None]
     if data_cfg.get("coco_json"):
@@ -228,7 +229,7 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
     # grouping policy is actually declared, probes the dataset's stems the same way the channel
     # check probes a sample image, and never false-fails on an empty/absent/unreadable dir. Catches
     # an unrecognized ``group_by`` or an incomplete ``group_key_map`` here, at preflight, rather
-    # than deep in ``_auto_train_val`` where it would otherwise raise.
+    # than deep in ``auto_train_val`` where it would otherwise raise.
     data_cfg_dict: dict = data_cfg if isinstance(data_cfg, dict) else {}
     split_cfg = data_cfg_dict.get("split")
     split_cfg_dict: dict = split_cfg if isinstance(split_cfg, dict) else {}
@@ -247,7 +248,7 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
                     issues.append(f"data.split: {exc}")
 
     # Split-manifest binding: only what preflight can answer without the run's real admission
-    # (bind_manifest_stems itself never runs here; the checks below mirror _auto_train_val's).
+    # (bind_manifest_stems itself never runs here; the checks below mirror auto_train_val's).
     manifest_dir = split_cfg_dict.get("manifest_dir")
     if manifest_dir:
         task_for_manifest = (model_source.get("task") if isinstance(model_source, dict) else None) \
@@ -606,12 +607,11 @@ def launch_training(
     experiment_id = config.get("experiment_id") or run.run_id
     try:
         from tcip_mcp.experiments import update_status
+        from tcip_mcp.pipelines.data.split_construction import dataset_identity
 
-        # The dataset identity this run trains on, computed once and passed to the immutable
-        # lineage record. The child recomputes the identical fingerprint independently for
-        # split.json, cheap, and "recompute-on-read" is this fact's own stated authority, so
-        # there's no need to thread it across the process boundary.
-        ds_id, ds_fp = _dataset_identity(data_cfg)
+        # The dataset identity this run trains on, passed to the immutable lineage record; the
+        # child recomputes it independently for split.json ("recompute-on-read" is its authority).
+        ds_id, ds_fp = dataset_identity(data_cfg)
         experiment_id = _ensure_experiment(
             experiment_id, config, data_cfg.get("images_dir"), resume_from, run.run_id,
             output_dir=run.output_dir, dataset_id=ds_id, dataset_fingerprint=ds_fp,
@@ -1208,6 +1208,7 @@ def _run_hpo_trial(config: dict, report, base_config: dict, trial_dir: str) -> N
         stamp_effective_data_geometry,
     )
     from tcip_mcp.pipelines.data.samplers import build_sampler
+    from tcip_mcp.pipelines.data.split_construction import auto_train_val
     from torch.utils.data import DataLoader
 
     model_source = merged.get("model_source")
@@ -1253,7 +1254,7 @@ def _run_hpo_trial(config: dict, report, base_config: dict, trial_dir: str) -> N
             transforms = build_augmentation(aug_cfg)
 
         # Auto-val gives the val_loader that the composite objective / the scheduler need.
-        train_ds, val_ds, _label_digests = _auto_train_val(task, data_cfg, transforms)
+        train_ds, val_ds, _label_digests = auto_train_val(task, data_cfg, transforms)
         # Stamped before training so a pruned/failed trial's resolved-config snapshot still
         # records the geometry the trial actually trained on.
         stamp_effective_data_geometry(data_cfg, train_ds)
@@ -1632,46 +1633,6 @@ def _preflight_points(param_space: dict) -> list[tuple[str, dict]]:
     return points
 
 
-def _dataset_identity(data_cfg: dict) -> tuple[str | None, str | None]:
-    """``(dataset_id, dataset_fingerprint)`` for the run's dataset, the content end of the
-    reproduce-a-number chain. The fingerprint is recomputed here (recompute-on-read is authority); the
-    id comes from the dataset's ``dataset.json`` if it was registered. ``(None, None)`` for a bespoke /
-    imageless run (no dataset_root), matching ``dataset_hash=None`` rather than fabricating identity.
-
-    A version-refused identity (``tcip_store.SchemaVersionRefused``) is a real, wrong identity a
-    delivered number could rest on, never the same fact as not-registered, so it propagates rather
-    than being caught here: this function's own caller already wraps the call in a best-effort
-    ``except Exception`` that logs and continues the run, instead of silently recording
-    ``(None, fp)`` as though the dataset were simply unregistered.
-    """
-    images_dir = data_cfg.get("images_dir")
-    if not images_dir:
-        return None, None
-
-    from tcip_store import SchemaVersionRefused
-
-    from tcip_mcp.dataset_layout import dataset_root_of, require_dataset_identity
-    from tcip_mcp.pipelines.resolution import dataset_fingerprint
-
-    root = dataset_root_of(images_dir)
-    if root is None:
-        return None, None
-    try:
-        fp = dataset_fingerprint(root)
-    except OSError as exc:
-        # A fingerprint read failure must not sink the whole experiment record; degrade to None.
-        logger.warning("dataset_fingerprint failed for %s: %s", root, exc)
-        fp = None
-    ds_id = None
-    try:
-        ds_id = require_dataset_identity(root).get("id")
-    except SchemaVersionRefused:
-        raise
-    except ValueError:
-        ds_id = None
-    return ds_id, fp
-
-
 def _ensure_experiment(
     experiment_id: str, config: dict, data_source, resume_from: str, run_id: str,
     *, output_dir: str, dataset_id: str | None = None, dataset_fingerprint: str | None = None,
@@ -1727,106 +1688,6 @@ def _ensure_experiment(
                       dataset_id=dataset_id, dataset_fingerprint=dataset_fingerprint)
     stamp_run_identity(fresh_id, run_id, output_dir)
     return fresh_id
-
-
-def _persist_split_manifest(experiment_id: str, train_ds, val_ds, data_cfg: dict, *,
-                            dataset_id: str | None = None,
-                            dataset_fingerprint: str | None = None,
-                            label_digests: dict | None = None) -> None:
-    """Persist which stems (+ seed + dataset_hash + dataset identity) produced this run's metrics.
-
-    ``label_digests`` (``_auto_train_val``'s own third return value for a manifest-bound run,
-    ``None`` otherwise) is written as ``split.json``'s own top-level ``label_digests`` key,
-    beside ``manifest_binding`` rather than inside it, so a selection-disjointness check can
-    name a calibration label that moved since the draw without the durable config, a checkpoint
-    or a trial's resolved config ever carrying a per-stem digest.
-
-    The same seed yields a different split if the label set changes, so a metric is only reproducible
-    with the exact train/val membership recorded beside it. The whole-dataset ``dataset_fingerprint``
-    (+ id) records the content identity too, so this artifact is literally "fingerprint + split",
-    content identity + membership + seed in one immutable record. Best-effort against an ordinary
-    write failure, but a write refused because the experiment is already terminal
-    (:class:`~tcip_mcp.experiments.ExperimentTerminal`) propagates: a run whose provenance record
-    was refused is a failed run, not a silently degraded one.
-
-    The one writer of that member; :func:`~tcip_mcp.experiments.read_split_manifest` is the one
-    reader every consumer of the membership goes through. Records ``date``, the labels
-    directory's own capture date (``manifest_date_key``'s empty string for a flat tree, never
-    ``None``), for every run, bound or not, so a later selection check can scope itself to one
-    date without re-deriving it from the config, and can tell a flat run's own date apart from a
-    caller that derived no date to compare at all.
-    When ``data_cfg["split"]`` carries a ``manifest_binding`` (a run bound to a
-    ``data.split.manifest_dir`` split manifest, see :func:`_auto_train_val`), its counts and the
-    two dataset hashes ride into this record too, so a reviewer opening this one file can see
-    that a recorded partition, not a drawn one, governed the run.
-    """
-    def _stems(ds) -> list[str]:
-        # set(): a tiled dataset's ``stems`` repeats one entry per tile, and a manifest member
-        # list is a set of units, never a per-example list.
-        return sorted(set(getattr(ds, "stems", None) or getattr(ds, "_stems", []) or []))
-
-    from tcip_mcp.experiments import ExperimentTerminal
-
-    try:
-        from tcip_store import store
-
-        from tcip_mcp.dataset_layout import annotation_date
-        from tcip_mcp.experiments import experiment_exists, refuse_if_terminal, split_key, status_key
-        from tcip_mcp.pipelines.data.splits import manifest_date_key
-        from tcip_mcp.pipelines.resolution import dataset_hash
-
-        labels_dir = data_cfg.get("labels_dir", "")
-        dh = None
-        if labels_dir and Path(labels_dir).is_dir():
-            dh = dataset_hash(labels_dir)
-        split = data_cfg.get("split", {})
-        resolved_group_by = split.get("resolved_group_by")
-        # A spatial_strip split's members are per-region identities, never the bare stem;
-        # _auto_train_val already computed and stashed them (the dataset only knows tile positions).
-        spatial = split.get("spatial_manifest") if resolved_group_by == "spatial_strip" else None
-        train_members = spatial["train_identities"] if spatial else _stems(train_ds)
-        val_members = (spatial["val_identities"] if spatial
-                       else (_stems(val_ds) if val_ds is not None else []))
-        manifest = {
-            "train": train_members,
-            "val": val_members,
-            "seed": int(split.get("resolved_seed", split.get("seed", 42))),
-            "dataset_hash": dh,
-            "dataset_id": dataset_id,
-            "dataset_fingerprint": dataset_fingerprint,
-            # The actually resolved grouping ("explicit_map"/"external"/a named strategy/
-            # "spatial_strip"/None); _train_disjointness recomputes group keys from this.
-            "group_by": resolved_group_by,
-            # manifest_date_key's empty string for a flat tree, never None: a selection check
-            # must tell a flat run's own date apart from a caller that derived none to compare.
-            "date": manifest_date_key(annotation_date(labels_dir)),
-        }
-        resolved_group_key_map = split.get("resolved_group_key_map") or split.get("group_key_map")
-        if resolved_group_by == "explicit_map" and resolved_group_key_map:
-            # The map itself: without it _train_disjointness has a policy name but no way to
-            # compute group keys for stems outside this run.
-            manifest["group_key_map"] = resolved_group_key_map
-        if spatial:
-            manifest["spatial"] = spatial
-        if split.get("manifest_binding"):
-            # A run bound to a named split manifest: its counts and hashes ride here too.
-            manifest["manifest_binding"] = split["manifest_binding"]
-        if label_digests:
-            manifest["label_digests"] = label_digests
-        if experiment_exists(experiment_id):
-            key, st_key = split_key(experiment_id), status_key(experiment_id)
-            try:
-                with store.transaction(key, st_key) as txn:
-                    state = (txn.read(st_key, default={}) or {}).get("state")
-                    refuse_if_terminal(experiment_id, "persist_split_manifest", state)
-                    txn.write(key, manifest)
-            except ExperimentTerminal as exc:
-                from tcip_mcp.experiments import audit_refusal_reraising
-                audit_refusal_reraising(experiment_id, "persist_split_manifest", {}, exc)
-    except ExperimentTerminal:
-        raise
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("split manifest persist failed for %s: %s", experiment_id, exc)
 
 
 def _dataset_source_kwargs(task: str, data_cfg: dict) -> dict:
@@ -1915,7 +1776,8 @@ def _reserve_calibration_feasibility_issues(
 
     Structurally inapplicable configs (not detection, tiling disabled, a multi-stem dataset that
     would use the group-balanced split instead) are always flagged, cheaply, no dataset build
-    needed. The single-source geometry :func:`_spatial_single_source_split` itself would derive
+    needed. The single-source geometry
+    :func:`~tcip_mcp.pipelines.data.split_construction.spatial_single_source_split` itself would derive
     (extent, strip-layout feasibility, an empty side after real filtering) is checked by actually
     calling it, real dataset construction, so gated on ``smoke=True`` like this function's other
     dataset/model-touching checks (a plain, non-smoke ``preflight_config`` call still catches the
@@ -1951,11 +1813,12 @@ def _reserve_calibration_feasibility_issues(
 
     try:
         from tcip_mcp.pipelines.data.datasets import build_dataset
+        from tcip_mcp.pipelines.data.split_construction import spatial_single_source_split
 
         base = build_dataset(
             "detection", images_dir=images_dir, labels_dir=labels_dir,
             subject=data_cfg.get("subject"), attribute=data_cfg.get("attribute"))
-        _spatial_single_source_split(
+        spatial_single_source_split(
             stems[0], dict(data_cfg), tiling_cfg, base, dict(split_cfg), None)
     except (ValueError, UnreadableLabelDocument) as exc:
         return [f"data.split.reserve_calibration_fraction: {exc}"]
@@ -1966,159 +1829,6 @@ def _reserve_calibration_feasibility_issues(
     return []
 
 
-def _spatial_single_source_split(
-    stem: str, data_cfg: dict, tiling: dict, base, split_cfg: dict, transforms,
-) -> tuple | None:
-    """A train/val split over one detection source's own tile lattice, by disjoint pixel strips.
-
-    Called only from ``_auto_train_val``'s single-source branch: there is no second stem to hold
-    out whole, but a tiled source has many tiles, and :func:`~tcip_mcp.pipelines.data.splits.
-    spatial_strip_split` can hold out disjoint, buffered regions of them. ``base`` is the
-    already-built (untiled) ``DetectionDataset`` for this one source, reused for every view (its
-    construction, and the class/subject/id-map resolution inside it, cost nothing extra to
-    share). A test region is derived and reserved alongside train/val (excluded from both, so it
-    is genuinely held out) but no dataset is built for it: nothing downstream consumes a third
-    dataset from this function today, so only its geometry and kept-tile count are recorded,
-    material the block-aware calibration mechanism (``pipelines.block_calibration``) consumes
-    without recomputing the split.
-
-    ``split_cfg["reserve_calibration_fraction"]`` (opt-in, default unset/0) reserves a fourth
-    region, ``calibration``, alongside train/val/test, at that fraction of the axis: material for
-    the same block-calibration mechanism's calibration-side bands. Unset, this function's
-    behavior (fractions, split_names, every returned value) is byte-identical to the 3-way split
-    it has always run. When explicitly set, all three of :func:`spatial_strip_split`'s distinct
-    silent-``None``-return reasons (no extent from the label file; the strip layout itself
-    infeasible; an empty train/val/test/calibration side surviving tile filtering) instead raise
-    ``ValueError`` naming which one fired: an opt-in reserved region silently degrading to no
-    validation at all would be exactly the kind of measurement-integrity gap this mechanism exists
-    to close, unlike the unrequested 3-way case, where that same silent degradation is correct.
-
-    Returns ``(train_ds, val_ds)``, or ``None`` when ``reserve_calibration_fraction`` was not
-    requested and the extent is unknown or no strip layout can populate both train and val, in
-    which case the caller falls back to training without validation. A present, unreadable label
-    document raises :class:`~tcip_annotation.json_io.UnreadableLabelDocument` unconditionally,
-    the same whether or not ``reserve_calibration_fraction`` was requested: a corrupt label is
-    never the same fact as one recording no width/height, and silently falling back to no
-    validation over a document nobody can read would be exactly the gap this mechanism exists to
-    close.
-    """
-    from tcip_mcp.pipelines.data.datasets import TiledDetectionDataset, tile_kwargs_from_tiling
-    from tcip_mcp.pipelines.data.splits import image_extent_from_labels, spatial_strip_split
-
-    reserve_cal = float(split_cfg.get("reserve_calibration_fraction") or 0.0)
-
-    extent = image_extent_from_labels(data_cfg.get("labels_dir", ""), stem)
-    if extent is None:
-        msg = f"its label file carries no width/height for {stem!r}"
-        if reserve_cal:
-            raise ValueError(
-                f"reserve_calibration_fraction={reserve_cal} requires a resolvable extent: {msg}; "
-                "a calibration region cannot be reserved without one.")
-        logger.warning("Spatial train/val split for %r skipped: %s; training without "
-                       "validation.", stem, msg)
-        return None
-    width, height = extent
-
-    raw_kwargs = tile_kwargs_from_tiling(tiling)
-    # keep_regions is this function's own to set from the derived split, never inherited from
-    # the caller's tiling dict (which has no meaningful keep_regions in a single-source launch).
-    tile_kwargs = {k: v for k, v in raw_kwargs.items() if k != "keep_regions"}
-    # Matches TiledDetectionDataset.__init__'s own defaults: the geometry below must agree with
-    # what the datasets built further down actually resolve to.
-    tile_size = tile_kwargs.get("tile_size", 224)
-    overlap = tile_kwargs.get("overlap", 0.2)
-    val_ratio = float(split_cfg.get("val_ratio", 0.2))
-    test_ratio = float(split_cfg.get("test_ratio", 0.1))
-    seed = int(split_cfg.get("seed", 42))
-    if reserve_cal:
-        train_ratio = 1.0 - val_ratio - test_ratio - reserve_cal
-        split_names: tuple[str, ...] = ("train", "val", "test", "calibration")
-        fractions: tuple[float, ...] = (train_ratio, val_ratio, test_ratio, reserve_cal)
-    else:
-        train_ratio = 1.0 - val_ratio - test_ratio
-        split_names = ("train", "val", "test")
-        fractions = (train_ratio, val_ratio, test_ratio)
-
-    try:
-        spatial = spatial_strip_split(
-            width, height, tile_size, overlap, fractions=fractions, split_names=split_names,
-            seed=seed, buffer=tiling.get("buffer"),
-        )
-    except ValueError as exc:
-        if reserve_cal:
-            raise ValueError(
-                f"reserve_calibration_fraction={reserve_cal}: 4-way spatial split infeasible for "
-                f"{stem!r} at this mosaic size/tile size ({exc}); reduce the fraction or drop "
-                "reserve_calibration_fraction."
-            ) from exc
-        logger.warning(
-            "Spatial train/val split for %r could not be derived (%s); training without "
-            "validation.", stem, exc,
-        )
-        return None
-
-    train_ds = TiledDetectionDataset(
-        base, transforms=transforms, keep_regions=spatial.regions["train"], **tile_kwargs)
-    val_ds = TiledDetectionDataset(
-        base, transforms=None, keep_regions=spatial.regions["val"], **tile_kwargs)
-    empty_reserved_side = False
-    if reserve_cal:
-        # A tile lattice occupying the region (spatial_strip_split's own check) is not proof it
-        # carries GT: an all-background region still passes that but skip_empty filters it to 0.
-        test_ds = TiledDetectionDataset(
-            base, transforms=None, keep_regions=spatial.regions["test"], **tile_kwargs)
-        cal_ds = TiledDetectionDataset(
-            base, transforms=None, keep_regions=spatial.regions["calibration"], **tile_kwargs)
-        empty_reserved_side = test_ds.num_samples == 0 or cal_ds.num_samples == 0
-    if train_ds.num_samples == 0 or val_ds.num_samples == 0 or empty_reserved_side:
-        if reserve_cal:
-            raise ValueError(
-                f"reserve_calibration_fraction={reserve_cal}: the derived 4-way strip layout for "
-                f"{stem!r} left a side with zero kept (or zero GT-bearing) tiles after filtering "
-                f"(kept_tiles={spatial.kept_tiles}); reduce the fraction or drop "
-                "reserve_calibration_fraction."
-            )
-        logger.warning(
-            "Spatial train/val split for %r yielded an empty side after tile filtering; "
-            "training without validation.", stem,
-        )
-        return None
-
-    def _identities(ds) -> list[str]:
-        raw = {spatial.identity_for(s, tx, ty) for s, tx, ty in ds.tile_entries}
-        return sorted(name for name in raw if name is not None)
-
-    split_cfg["resolved_group_by"] = "spatial_strip"
-    split_cfg["spatial_manifest"] = {
-        "stem": stem,
-        "train_identities": _identities(train_ds), "val_identities": _identities(val_ds),
-        "train_region": spatial.regions.get("train", []),
-        "val_region": spatial.regions.get("val", []),
-        "test_region": spatial.regions.get("test", []),
-        "calibration_region": spatial.regions.get("calibration", []),
-        "kept_test_tiles": spatial.kept_tiles.get("test", 0),
-        "kept_calibration_tiles": spatial.kept_tiles.get("calibration", 0),
-        "width": spatial.width, "height": spatial.height, "tile_size": spatial.tile_size,
-        "overlap": spatial.overlap, "axis": spatial.axis, "buffer": spatial.buffer,
-        "seed": spatial.seed, "requested_fractions": dict(zip(spatial.split_names,
-                                                               spatial.requested_fractions)),
-        "realized_fractions": spatial.realized_fractions,
-        "realized_discard_fraction": spatial.realized_discard_fraction,
-        "kept_train_tiles": spatial.kept_tiles.get("train", 0),
-        "kept_val_tiles": spatial.kept_tiles.get("val", 0),
-        "tiles_dropped_past_extent": spatial.tiles_dropped_past_extent,
-        "tiles_dropped_outside_regions": spatial.tiles_dropped_outside_regions,
-        "raster_content_identity": _spatial_split_raster_identity(data_cfg, stem),
-    }
-    logger.info(
-        "Spatial train/val split for %r: %d train / %d val tiles (axis=%s, "
-        "realized_fractions=%s, realized_discard_fraction=%.3f).",
-        stem, train_ds.num_samples, val_ds.num_samples, spatial.axis,
-        spatial.realized_fractions, spatial.realized_discard_fraction,
-    )
-    return train_ds, val_ds
-
-
 def _spatial_split_raster_identity(data_cfg: dict, stem: str) -> dict | None:
     """This mosaic's own :func:`~tcip_mcp.pipelines.raster_source.raster_content_identity`, best
     effort: recorded into ``spatial_manifest`` at spatial-split time (the training source is first
@@ -2126,7 +1836,7 @@ def _spatial_split_raster_identity(data_cfg: dict, stem: str) -> dict | None:
     _export_predictions_raster``) to gate a block-calibrated bundle's claim scope to this exact
     mosaic. A provenance write must never sink a launch: an unreadable/unsupported source (a
     bespoke ``dataset_source``, a corrupt file) logs and returns ``None`` rather than raising, the
-    same posture ``_persist_split_manifest`` already takes for its own best-effort writes.
+    same posture ``persist_split_manifest`` already takes for its own best-effort writes.
     """
     try:
         from tcip_mcp.pipelines.derivations import probe_channels
@@ -2212,302 +1922,6 @@ def _build_full_admitted_dataset(
     full_ds = build_dataset(task, **build_src, transforms=transforms)
     stems = list(getattr(full_ds, "stems", None) or getattr(full_ds, "_stems", []))
     return full_ds, stems, build_src
-
-
-def _auto_train_val(task: str, data_cfg: dict, transforms):
-    """Build ``(train_ds, val_ds, label_digests)`` for a run, deriving a leakage-free val split.
-
-    ``label_digests`` is ``None`` on every path but the manifest-bound one (1.5 below), where it
-    carries the per-stem digests :func:`_persist_split_manifest` writes onto ``split.json``
-    beside, never inside, ``manifest_binding``: passed as its own value rather than through
-    ``data_cfg["split"]`` since that block is copied whole into the durable config and every
-    checkpoint, and per-stem digests must not multiply through every copy.
-
-    Resolution order:
-      1. ``data.val_images_dir`` set -> build val from it explicitly (a CSV-driven task -
-         classification/ordinal/regression - also requires ``data.val_csv_path``; there is no
-         graceful fallback to the train CSV the way the geometry tasks fall back to the train
-         labels/masks dir, see the CSV branch below for why).
-      1.5. ``data.split.manifest_dir`` set (detection/instance_seg only) -> bind this run's own
-         admission to the named ``split_manifest`` record (:func:`~tcip_mcp.pipelines.data.
-         splits.bind_manifest_stems`) instead of drawing a split. A recorded partition is an
-         explicit split ``auto_val`` does not govern, checked ahead of its gate below; every
-         conflict, task, date, images-root and binding refusal here raises to the caller, and so
-         does a build failure while binding, never degrading to training on the manifest's
-         held-out side with no validation. The manifest's calibration side never builds a
-         loader; its own bound count and unadmitted count ride into ``manifest_binding`` beside
-         ``labels_hash_now`` (over all three bound sides) and ``labels_hash_at_split``, a pair
-         nothing currently reads back, kept for a reviewer to compare by eye.
-      2. ``data.auto_val`` (default True) and a stem-capable task
-         (detection / instance_seg / semantic_seg / classification) -> derive a
-         group-aware train/val split (no held-out test) so the trainer receives
-         a real validation loader. Train keeps augmentation; val gets none.
-      3. ordinal / regression, ``auto_val`` disabled, a tiny/single-group set, or
-         most failures -> ``(full_train_ds, None)``. ``resolve_group_key_fn`` (an
-         unrecognized ``split.group_by`` or a ``split.group_key_map`` missing stem
-         coverage) is called outside any handler here and its ``ValueError`` propagates
-         to the caller, silently training without validation on a policy error the
-         caller could have fixed is worse than surfacing it. A present, unreadable
-         validation label (``UnreadableLabelDocument``) from the explicit ``val_images_dir``
-         build propagates too, rather than degrading to a run with no validation over a
-         document nobody can read. Every other failure in this function (dataset build
-         errors, a malformed ``val_ratio``/``seed``, a ``group_balanced_split`` failure)
-         still degrades to ``(full_train_ds, None)``.
-
-    Reads ``auto_val`` / ``val_*`` / ``split.*`` from ``data_cfg`` (== config["data"]).
-    """
-    from tcip_annotation.json_io import UnreadableLabelDocument
-    from tcip_mcp.pipelines.data.datasets import build_dataset
-    from tcip_mcp.pipelines.data.splits import (
-        group_balanced_split, count_label_lines, resolve_group_key_fn,
-    )
-
-    STEM_TASKS = {"detection", "instance_seg", "semantic_seg", "classification"}
-
-    src = _dataset_source_kwargs(task, data_cfg)
-    tiling = data_cfg.get("tiling")  # detection tiling (None for other tasks/configs)
-
-    split_cfg_raw = data_cfg.get("split")
-    split_cfg_raw = split_cfg_raw if isinstance(split_cfg_raw, dict) else {}
-    manifest_dir = split_cfg_raw.get("manifest_dir")
-
-    # A binding block an earlier bound launch left behind is cleared here; only the manifest
-    # branch below writes it back, and only when this run itself binds.
-    for _stale_key in (
-        "manifest_binding", "resolved_group_by", "resolved_group_key_map", "resolved_seed",
-    ):
-        split_cfg_raw.pop(_stale_key, None)
-
-    # 1. Explicit validation source.
-    val_images = data_cfg.get("val_images_dir")
-    if manifest_dir and val_images:
-        raise ValueError(
-            "data.split.manifest_dir conflicts with data.val_images_dir: two membership "
-            "sources for one run's validation split."
-        )
-    if val_images:
-        # This path builds train/val from two separate directories with no computed grouping,
-        # there is no group policy to persist. Record that shape explicitly so
-        # _persist_split_manifest writes a distinct "external" marker rather than leaving the field
-        # unset, which _train_disjointness would otherwise be unable to tell apart from a
-        # split.json where the field was never set at all.
-        data_cfg.setdefault("split", {})["resolved_group_by"] = "external"
-        try:
-            train_ds = build_dataset(task, **src, transforms=transforms, tiling=tiling)
-            val_src = dict(src)
-            val_src["images_dir"] = val_images
-            if task in ("detection", "instance_seg"):
-                val_src["labels_dir"] = data_cfg.get("val_labels_dir", data_cfg.get("labels_dir", ""))
-            elif task == "semantic_seg":
-                val_src["masks_dir"] = data_cfg.get("val_masks_dir", data_cfg.get("masks_dir", ""))
-            elif task in ("classification", "ordinal", "regression"):
-                val_csv = data_cfg.get("val_csv_path")
-                if not val_csv:
-                    # A CSV dataset reads every row eagerly as a real item and only fails per-item
-                    # at __getitem__ time (deep inside a later training-loop iteration) if a row's
-                    # image isn't in val_images_dir - unlike the geometry tasks above, where a
-                    # missing per-image label file degrades gracefully to "no label". Falling back
-                    # to the train csv_path here would risk silently building a val_ds that crashes
-                    # mid-training instead of failing now, so require it explicitly.
-                    raise ValueError(
-                        "val_images_dir set for a CSV-driven task also requires "
-                        "data.val_csv_path; the train CSV's rows won't generally match a "
-                        "different val_images_dir."
-                    )
-                val_src["csv_path"] = val_csv
-            return train_ds, build_dataset(task, **val_src, transforms=None, tiling=tiling), None
-        except UnreadableLabelDocument:
-            raise
-        except Exception as exc:
-            logger.warning("Explicit val build failed (%s); training without validation.", exc)
-            return build_dataset(task, **src, transforms=transforms, tiling=tiling), None, None
-
-    # 1.5. A named split manifest is an explicit partition auto_val does not govern; every
-    # refusal here, and any build failure while binding to it, raises rather than degrading.
-    if manifest_dir:
-        conflicts = _split_manifest_drawn_conflicts(data_cfg, split_cfg_raw)
-        if conflicts:
-            raise ValueError(
-                f"data.split.manifest_dir conflicts with {sorted(conflicts)}: a recorded "
-                "partition and a drawn split's own parameters/source cannot both govern one run."
-            )
-        if task not in ("detection", "instance_seg"):
-            raise ValueError(
-                f"data.split.manifest_dir names a split manifest, and only detection and "
-                f"instance_seg admit through the trainable_stems draw a manifest is drawn "
-                f"through; task={task!r} cannot bind to one."
-            )
-
-        from tcip_mcp.dataset_layout import annotation_date
-        from tcip_mcp.pipelines.data.splits import (
-            bind_manifest_stems, manifest_date_key, member_identity_parts,
-            refuse_if_images_root_moved,
-        )
-        from tcip_mcp.pipelines.resolution import dataset_hash, manifest_digest
-        from tcip_mcp.pipelines.resolution import label_digests as compute_label_digests
-        from tcip_mcp.tools.data_tools import read_split_manifest_dir
-
-        manifest = read_split_manifest_dir(manifest_dir)
-        labels_dir, images_dir = data_cfg.get("labels_dir", ""), data_cfg.get("images_dir", "")
-        run_date = annotation_date(labels_dir)
-        declared_date = data_cfg.get("date")
-        if declared_date is not None and declared_date != run_date:
-            raise ValueError(
-                f"data.date={declared_date!r} disagrees with the date data.labels_dir={labels_dir!r} "
-                f"is under ({run_date!r}); a split manifest binds under one date, so the negative "
-                "confirmations and the manifest must be read under the same one."
-            )
-        date = run_date
-        # The admission draw below reads confirmed negatives under src["date"]; it must agree.
-        src["date"] = date
-        date_block = (manifest.get("members") or {}).get(manifest_date_key(date))
-        if date_block is None:
-            raise ValueError(
-                f"split manifest at {manifest_dir!r} holds no members under date {date!r}; it "
-                f"holds members under {sorted(manifest.get('members') or {})}."
-            )
-        refuse_if_images_root_moved(
-            "data.images_dir", images_dir, date_block.get("images_root"), date)
-
-        subject, attribute = src.get("subject"), src.get("attribute")
-        if not subject:
-            raise ValueError(
-                "data.split.manifest_dir requires data.subject: a manifest binds by subject, "
-                "and this run's own admission has none to compare against it."
-            )
-        detected_label_format = _checked_label_format(task, data_cfg, src)
-        full_ds, admitted, build_src = _build_full_admitted_dataset(
-            task, data_cfg, src, transforms, detected_label_format)
-        binding = bind_manifest_stems(
-            manifest, date, subject, attribute, admitted,
-            admission_counts=getattr(full_ds, "sample_counts", None))
-
-        split_cfg = data_cfg.setdefault("split", {})
-        split_cfg["resolved_group_by"] = manifest.get("group_by")
-        manifest_group_key_map = manifest.get("group_key_map")
-        if manifest_group_key_map:
-            split_cfg["resolved_group_key_map"] = {
-                member_identity_parts(identity)[1]: group_key
-                for identity, group_key in manifest_group_key_map.items()
-                if member_identity_parts(identity)[0] == date
-            }
-        split_cfg["resolved_seed"] = manifest.get("seed")
-        split_cfg["manifest_binding"] = {
-            "manifest_dir": manifest_dir, "subject": subject, "attribute": attribute,
-            "date": date, "labels_hash_at_split": date_block.get("dataset_hash"),
-            "labels_hash_now": dataset_hash(
-                labels_dir, stems=binding.train + binding.val + binding.calibration),
-            "dataset_fingerprint_at_split": manifest.get("dataset_fingerprint"),
-            "assigned": binding.assigned, "train_bound": binding.train_bound,
-            "val_bound": binding.val_bound, "calibration_bound": binding.calibration_bound,
-            "calibration_unadmitted": binding.calibration_unadmitted,
-            "other_dates": binding.other_dates,
-        }
-        # Kept out of split_cfg/manifest_binding: that block is copied whole into the durable
-        # config and every checkpoint. Handed to _persist_split_manifest as its own parameter.
-        bound_stems = sorted(set(binding.train) | set(binding.val) | set(binding.calibration))
-        label_digests_block = {
-            "at_split": date_block.get("label_digests"),
-            "at_run": compute_label_digests(labels_dir, bound_stems),
-            "manifest_sha256": manifest_digest(manifest),
-        }
-        # Only detection/instance_seg reach here (checked above), so the build is the plain
-        # stems=-narrowed geometry path, never the classification CSV/folder branch below.
-        train_ds = build_dataset(
-            task, **build_src, transforms=transforms, stems=binding.train, tiling=tiling)
-        val_ds = build_dataset(
-            task, **build_src, transforms=None, stems=binding.val, tiling=tiling)
-        return train_ds, val_ds, label_digests_block
-
-    if not data_cfg.get("auto_val", True) or task not in STEM_TASKS:
-        return build_dataset(task, **src, transforms=transforms, tiling=tiling), None, None
-
-    # 2. Auto group-aware train/val split. A dataset-level COCO here is a caller-fixable config
-    # error, raised outside the handler below rather than degraded.
-    detected_label_format = _checked_label_format(task, data_cfg, src)
-    try:
-        full_ds, stems, build_src = _build_full_admitted_dataset(
-            task, data_cfg, src, transforms, detected_label_format)
-    except Exception as exc:
-        logger.warning("Auto train/val split failed (%s); training without validation.", exc)
-        return build_dataset(task, **src, transforms=transforms, tiling=tiling), None, None
-
-    if len(stems) < 2:
-        # A single source can't hold out a whole stem, but a tiled detection source can still
-        # hold out disjoint pixel blocks of its own tile lattice, see _spatial_single_source_split.
-        split_cfg = data_cfg.setdefault("split", {})
-        if task == "detection" and tiling and tiling.get("enabled", True):
-            spatial_ds = _spatial_single_source_split(
-                stems[0], data_cfg, tiling, full_ds, split_cfg, transforms)
-            if spatial_ds is not None:
-                return (*spatial_ds, None)
-        return build_dataset(task, **src, transforms=transforms, tiling=tiling), None, None
-
-    # setdefault (not get): the resolved grouping is written back so a later
-    # _persist_split_manifest call can record what was actually used.
-    split_cfg = data_cfg.setdefault("split", {})
-    group_by = split_cfg.get("group_by", "tile_prefix")
-    group_key_map = split_cfg.get("group_key_map")
-    # Deliberately outside any try/except: a malformed grouping policy is a caller-config error
-    # and must reach the caller, not degrade silently like the failures handled below.
-    group_key_fn = resolve_group_key_fn(group_by, stems, group_key_map=group_key_map)
-    split_cfg["resolved_group_by"] = "explicit_map" if group_key_map else group_by
-
-    try:
-        val_ratio = float(split_cfg.get("val_ratio", 0.2))
-        seed = int(split_cfg.get("seed", 42))
-        stratify = split_cfg.get("stratify_foreground", True)
-
-        annotation_counts = None
-        if stratify and task in ("detection", "instance_seg"):
-            labels_dir = data_cfg.get("labels_dir", "")
-            annotation_counts = {s: count_label_lines(labels_dir, s) for s in stems}
-
-        parts = group_balanced_split(
-            stems, annotation_counts=annotation_counts, group_key_fn=group_key_fn,
-            splits=(1.0 - val_ratio, val_ratio, 0.0), seed=seed,
-        )
-        train_stems, val_stems = parts["train"], parts["val"]
-        if (not val_stems or not train_stems) and group_by != "stem" and not group_key_map:
-            # Too few *groups* under the requested policy starved val (e.g. two sources whose
-            # tile-prefix collapses to one group); retry at stem-level grouping before giving up.
-            stem_key_fn = resolve_group_key_fn("stem", stems)
-            retry_parts = group_balanced_split(
-                stems, annotation_counts=annotation_counts, group_key_fn=stem_key_fn,
-                splits=(1.0 - val_ratio, val_ratio, 0.0), seed=seed,
-            )
-            if retry_parts["train"] and retry_parts["val"]:
-                logger.info(
-                    "Auto train/val split for %s: group_by=%r left val empty (too few groups); "
-                    "retried at stem-level grouping.", task, group_by,
-                )
-                parts = retry_parts
-                train_stems, val_stems = parts["train"], parts["val"]
-                split_cfg["resolved_group_by"] = "stem"
-        if not val_stems or not train_stems:
-            logger.warning(
-                "Auto train/val split for %s: no grouping policy could populate both sides; "
-                "training without validation.", task,
-            )
-            return build_dataset(task, **src, transforms=transforms, tiling=tiling), None, None
-
-        if task == "classification":
-            stem_to_label = dict(zip(getattr(full_ds, "_stems", []), getattr(full_ds, "_labels", [])))
-            train_ds = build_dataset(
-                task, images_dir=src["images_dir"], transforms=transforms,
-                stems=train_stems, labels=[stem_to_label[s] for s in train_stems])
-            val_ds = build_dataset(
-                task, images_dir=src["images_dir"], transforms=None,
-                stems=val_stems, labels=[stem_to_label[s] for s in val_stems])
-        else:
-            train_ds = build_dataset(task, **build_src, transforms=transforms, stems=train_stems, tiling=tiling)
-            val_ds = build_dataset(task, **build_src, transforms=None, stems=val_stems, tiling=tiling)
-        logger.info("Auto train/val split for %s: %d train / %d val stems.",
-                    task, len(train_stems), len(val_stems))
-        return train_ds, val_ds, None
-    except Exception as exc:
-        logger.warning("Auto train/val split failed (%s); training without validation.", exc)
-        return build_dataset(task, **src, transforms=transforms, tiling=tiling), None, None
 
 
 def get_worst_predictions(

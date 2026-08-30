@@ -2,7 +2,7 @@
 
 ``split.json`` is the immutable record a reviewer reconstructs a metric from: which units trained,
 which validated, and which pixel regions each side occupied. These drive the real writer
-(``_auto_train_val`` into ``_persist_split_manifest``) and read the result back, including through
+(``auto_train_val`` into ``persist_split_manifest``) and read the result back, including through
 the geometric disjointness check that consumes it.
 """
 
@@ -45,12 +45,12 @@ def _data_cfg(images_dir: Path, labels_dir: Path, **split) -> dict:
 
 def _persisted_split(experiment_id: str, data_cfg: dict) -> dict:
     from tcip_mcp.experiments import create_experiment, read_split_manifest
-    from tcip_mcp.tools.training_tools import _auto_train_val, _persist_split_manifest
+    from tcip_mcp.pipelines.data.split_construction import auto_train_val, persist_split_manifest
 
-    train_ds, val_ds, _ = _auto_train_val("detection", data_cfg, None)
+    train_ds, val_ds, _ = auto_train_val("detection", data_cfg, None)
     assert val_ds is not None, "the fixture must produce a real validation side"
     create_experiment(experiment_id, {})
-    _persist_split_manifest(experiment_id, train_ds, val_ds, data_cfg)
+    persist_split_manifest(experiment_id, train_ds, val_ds, data_cfg)
     return read_split_manifest(experiment_id)
 
 

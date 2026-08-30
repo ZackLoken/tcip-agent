@@ -688,8 +688,8 @@ def _patch_hpo_trial_machinery(monkeypatch, fake_train, captured=None):
     """Stub dataset building + training + loaders so a trial runs instantly, no Ray."""
     import torch.utils.data as tud
     from tcip_mcp.pipelines.data import samplers
+    from tcip_mcp.pipelines.data import split_construction as sc
     from tcip_mcp.pipelines.training import generic_trainer as gt
-    from tcip_mcp.tools import training_tools as tt
 
     ds = _FakeDataset()
 
@@ -698,7 +698,7 @@ def _patch_hpo_trial_machinery(monkeypatch, fake_train, captured=None):
             captured["transforms"] = transforms
         return ds, ds, None
 
-    monkeypatch.setattr(tt, "_auto_train_val", fake_auto_train_val)
+    monkeypatch.setattr(sc, "auto_train_val", fake_auto_train_val)
     monkeypatch.setattr(gt, "train", fake_train)
     monkeypatch.setattr(samplers, "build_sampler", lambda *a, **k: None)
     monkeypatch.setattr(tud, "DataLoader", lambda *a, **k: object())
@@ -922,8 +922,8 @@ def test_run_hpo_trial_bespoke_custom_key_not_falsely_flagged_unconsumed(monkeyp
     pytest.importorskip("torch")
     from tcip_mcp.tools.training_tools import _run_hpo_trial, trial_config_key
 
-    import tcip_mcp.tools.training_tools as tt
-    monkeypatch.setattr(tt, "_auto_train_val",
+    from tcip_mcp.pipelines.data import split_construction as sc
+    monkeypatch.setattr(sc, "auto_train_val",
                         lambda task, data_cfg, transforms: (_FakeDataset(), _FakeDataset(), None))
     import torch.utils.data as tud
     monkeypatch.setattr(tud, "DataLoader", lambda *a, **k: object())
@@ -1176,7 +1176,7 @@ def test_an_ordinary_sweep_payload_still_runs_its_search(tmp_path, monkeypatch):
     assert seen == [{"lr": [0.1, 0.01]}]
 
 
-# _dataset_identity: a version-refused identity propagates rather than reading as unregistered.
+# dataset_identity: a version-refused identity propagates rather than reading as unregistered.
 
 def test_dataset_identity_propagates_a_version_refused_identity(tmp_path, monkeypatch):
     """``except ValueError: ds_id = None`` must not swallow a version refusal identically to
@@ -1187,7 +1187,7 @@ def test_dataset_identity_propagates_a_version_refused_identity(tmp_path, monkey
     from tcip_store import SchemaVersionRefused
 
     from tcip_mcp.dataset_layout import dataset_identity_key
-    from tcip_mcp.tools.training_tools import _dataset_identity
+    from tcip_mcp.pipelines.data.split_construction import dataset_identity
 
     monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
     images_dir = tmp_path / "images"
@@ -1198,16 +1198,16 @@ def test_dataset_identity_propagates_a_version_refused_identity(tmp_path, monkey
     ts.put_blob(key, ts.RECORD_JSON.encode(document))
 
     with pytest.raises(SchemaVersionRefused):
-        _dataset_identity({"images_dir": str(images_dir)})
+        dataset_identity({"images_dir": str(images_dir)})
 
 
 def test_dataset_identity_tolerates_a_genuinely_unregistered_dataset(tmp_path, monkeypatch):
     """The admitting half: no identity document at all still reads as (None, fp), not a refusal."""
-    from tcip_mcp.tools.training_tools import _dataset_identity
+    from tcip_mcp.pipelines.data.split_construction import dataset_identity
 
     monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
     images_dir = tmp_path / "images"
     images_dir.mkdir()
 
-    ds_id, fp = _dataset_identity({"images_dir": str(images_dir)})
+    ds_id, fp = dataset_identity({"images_dir": str(images_dir)})
     assert ds_id is None

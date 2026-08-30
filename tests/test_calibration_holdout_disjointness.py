@@ -36,7 +36,7 @@ def _save_png(path: Path) -> None:
 
 
 def _detection_dataset(root: Path, stems: list[str]) -> tuple[Path, Path]:
-    """One image + one foreground annotation per stem: enough for build_dataset/_auto_train_val."""
+    """One image + one foreground annotation per stem: enough for build_dataset/auto_train_val."""
     images_dir = root / "images"
     labels_dir = root / "labels"
     labels_dir.mkdir(parents=True, exist_ok=True)
@@ -120,12 +120,12 @@ def test_external_marker_still_catches_a_real_leak(tmp_path, monkeypatch):
 
 
 def test_group_key_map_end_to_end_not_permanently_blocked(tmp_path):
-    """group_key_map, exercised through _auto_train_val -> _persist_split_manifest ->
+    """group_key_map, exercised through auto_train_val -> persist_split_manifest ->
     _train_disjointness, must not permanently block the model, and the persisted map must
     actually be used for a real group-level leak check, not just declared unresolvable."""
     from tcip_mcp.experiments import create_experiment, read_split_manifest
     from tcip_mcp.pipelines.operating_point import _train_disjointness
-    from tcip_mcp.tools.training_tools import _auto_train_val, _persist_split_manifest
+    from tcip_mcp.pipelines.data.split_construction import auto_train_val, persist_split_manifest
 
     stems = ["imgA0", "imgA1", "imgB0", "imgB1"]
     images_dir, labels_dir = _detection_dataset(tmp_path / "ds", stems)
@@ -135,7 +135,7 @@ def test_group_key_map_end_to_end_not_permanently_blocked(tmp_path):
         "auto_val": True,
         "split": {"val_ratio": 0.5, "seed": 1, "group_key_map": dict(group_key_map)},
     }
-    train_ds, val_ds, _ = _auto_train_val("detection", data_cfg, None)
+    train_ds, val_ds, _ = auto_train_val("detection", data_cfg, None)
     assert val_ds is not None
     # The two groups (gA/gB) never straddle train/val: group-coherent by construction.
     train_groups = {group_key_map[s] for s in train_ds.stems}
@@ -143,7 +143,7 @@ def test_group_key_map_end_to_end_not_permanently_blocked(tmp_path):
     assert train_groups.isdisjoint(val_groups)
 
     create_experiment("e1", {})
-    _persist_split_manifest("e1", train_ds, val_ds, data_cfg)
+    persist_split_manifest("e1", train_ds, val_ds, data_cfg)
     split = read_split_manifest("e1")
     assert split["group_by"] == "explicit_map"
     assert split["group_key_map"] == group_key_map  # the map itself, not just the policy name
@@ -158,7 +158,7 @@ def test_group_key_map_end_to_end_not_permanently_blocked(tmp_path):
     # different stem mapped to the same group as a training stem must be caught.
     train_group = group_key_map[train_ds.stems[0]]
     data_cfg["split"]["group_key_map"]["extra_leak_stem"] = train_group
-    _persist_split_manifest("e1", train_ds, val_ds, data_cfg)
+    persist_split_manifest("e1", train_ds, val_ds, data_cfg)
     td_leak = _train_disjointness("e1", {"extra_leak_stem"}, set())
     assert td_leak["unresolvable"] is False
     assert td_leak["leaked_groups"] == [train_group]
@@ -303,13 +303,13 @@ def test_train_disjointness_spatial_strip_geometric_admits_calibration_region(tm
 
 
 def test_train_disjointness_geometric_check_end_to_end_with_persisted_regions(tmp_path):
-    """The real pipeline: _auto_train_val -> _persist_split_manifest persists train_region/
+    """The real pipeline: auto_train_val -> persist_split_manifest persists train_region/
     val_region (this phase's own addition), and _train_disjointness's geometric check reads
     them back correctly -- a calibration rect drawn from inside the persisted val region reads
     clean, and one drawn from inside the persisted train region is caught."""
     from tcip_mcp.experiments import create_experiment, read_split_manifest
     from tcip_mcp.pipelines.operating_point import _train_disjointness
-    from tcip_mcp.tools.training_tools import _auto_train_val, _persist_split_manifest
+    from tcip_mcp.pipelines.data.split_construction import auto_train_val, persist_split_manifest
 
     images_dir, labels_dir, stem = _big_single_source(tmp_path / "ds", 4000, 3000)
     data_cfg = {
@@ -317,11 +317,11 @@ def test_train_disjointness_geometric_check_end_to_end_with_persisted_regions(tm
         "auto_val": True, "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
         "split": {"val_ratio": 0.25, "test_ratio": 0.1, "seed": 1},
     }
-    train_ds, val_ds, _ = _auto_train_val("detection", data_cfg, None)
+    train_ds, val_ds, _ = auto_train_val("detection", data_cfg, None)
     assert val_ds is not None
 
     create_experiment("exp_geo_e2e", {})
-    _persist_split_manifest("exp_geo_e2e", train_ds, val_ds, data_cfg)
+    persist_split_manifest("exp_geo_e2e", train_ds, val_ds, data_cfg)
     split = read_split_manifest("exp_geo_e2e")
     train_region = split["spatial"]["train_region"]
     val_region = split["spatial"]["val_region"]
@@ -363,7 +363,7 @@ def test_spatial_manifest_never_reads_as_a_bare_stem_leak(tmp_path):
     must still read clean end to end through the real training-launch path."""
     from tcip_mcp.experiments import create_experiment, read_split_manifest
     from tcip_mcp.pipelines.operating_point import _train_disjointness
-    from tcip_mcp.tools.training_tools import _auto_train_val, _persist_split_manifest
+    from tcip_mcp.pipelines.data.split_construction import auto_train_val, persist_split_manifest
 
     images_dir, labels_dir, stem = _big_single_source(tmp_path / "ds", 4000, 3000)
     data_cfg = {
@@ -371,11 +371,11 @@ def test_spatial_manifest_never_reads_as_a_bare_stem_leak(tmp_path):
         "auto_val": True, "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
         "split": {"val_ratio": 0.25, "test_ratio": 0.1, "seed": 1},
     }
-    train_ds, val_ds, _ = _auto_train_val("detection", data_cfg, None)
+    train_ds, val_ds, _ = auto_train_val("detection", data_cfg, None)
     assert val_ds is not None
 
     create_experiment("exp_spatial_e2e", {})
-    _persist_split_manifest("exp_spatial_e2e", train_ds, val_ds, data_cfg)
+    persist_split_manifest("exp_spatial_e2e", train_ds, val_ds, data_cfg)
     split = read_split_manifest("exp_spatial_e2e")
     assert split["group_by"] == "spatial_strip"
     assert stem not in split["train"]  # the bare stem itself is never a member
