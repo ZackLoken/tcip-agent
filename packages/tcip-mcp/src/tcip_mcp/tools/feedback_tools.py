@@ -355,9 +355,9 @@ def prioritize_review_queue(
     """Rank un-reviewed images by active-learning informativeness for the next review batch.
 
     Scores every candidate with ``method`` and returns the most uncertain/diverse frames first.
-    The sibling tool ``triage_predictions`` partitions predictions by confidence instead, and can
-    auto-accept the most confident ones as ground truth; that is a different, more consequential
-    capability kept as its own door.
+    The sibling tool ``triage_predictions`` sorts predictions by confidence instead, returning a
+    confident set for a caller to accept as ground truth rather than writing anything itself; that
+    is a different, more consequential capability kept as its own door.
 
     When ``checkpoint_path`` names a registry entry produced by a run bound to a split manifest
     (``manifest_binding`` on that run's ``split.json``), each ``queue`` entry carries
@@ -465,15 +465,17 @@ def triage_predictions(
     review_state_dir: str = "",
     project_path: str = "",
 ) -> dict:
-    """Partition a checkpoint's own predictions by confidence into auto-accept, needs-review and unscoreable queues.
+    """Sort a checkpoint's own predictions by confidence into auto-accept, needs-review and unscoreable queues.
 
-    Auto-accepts predictions at or above ``auto_threshold`` as ground truth, routes those between
-    ``low`` and ``high`` into the needs-review queue, and separates out predictions with no
+    Returns predictions at or above ``auto_threshold`` as the confident set for a caller to accept
+    as ground truth; this tool writes nothing itself. Routes predictions between ``low`` and
+    ``high`` into the needs-review queue, which can overlap the confident set when
+    ``auto_threshold`` sits below ``high``, and separates out predictions with no
     confidence-bearing signal at all (e.g. a regression head's point estimate) into their own
     ``unscoreable_images`` list rather than let them silently vanish from every output. The
     sibling tool ``prioritize_review_queue`` ranks images by active-learning informativeness
-    instead, without ever turning a prediction into ground truth; this tool is the more
-    consequential capability and stays agent-only.
+    instead, never surfacing a confident set for acceptance; this tool is the more consequential
+    capability and stays agent-only.
 
     Args:
         checkpoint_path: Trained model checkpoint (drives predictions).
@@ -484,12 +486,13 @@ def triage_predictions(
         skip_reviewed: Exclude already-completed images before triaging.
         low: Lower confidence bound for the needs-review band.
         high: Upper confidence bound for the needs-review band.
-        auto_threshold: Confidence at/above which a prediction is auto-accepted as ground truth.
-            ``None`` (default) refuses to auto-accept: turning predictions into GT at a pinned 0.8
-            fabricates labels the model was never confirmed to get right. Derive this threshold
-            from the model's validated confidence distribution and confirm with a breeder
-            spot-check that high-conf actually equals truth, then pass it explicitly: the result
-            is stamped as requiring that confirmation.
+        auto_threshold: Confidence at/above which a prediction joins the confident set this tool
+            returns for a caller to accept as ground truth. ``None`` (default) refuses to
+            auto-accept: turning predictions into GT at a pinned 0.8 fabricates labels the model
+            was never confirmed to get right. Derive this threshold from the model's validated
+            confidence distribution and confirm with a breeder spot-check that high-conf actually
+            equals truth, then pass it explicitly: the result is stamped as requiring that
+            confirmation.
         bucket: Which prediction bucket's completed reviews ``skip_reviewed`` skips, as
             ``prediction_buckets.bucket_key_of`` spells it. Omitted reads the store's sole bucket
             and refuses, naming them, when it holds several.
