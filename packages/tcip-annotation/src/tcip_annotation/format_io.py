@@ -85,7 +85,7 @@ def detect_format(path: str) -> AnnotFormat:
     p = Path(path)
     candidates = prediction_documents(p) if p.is_dir() else [p]
     for candidate in candidates:
-        fmt = _detect_json_format(candidate)
+        fmt = detect_json_format(candidate)
         if fmt is not None:
             return fmt
     raise ValueError(
@@ -99,7 +99,7 @@ def _shape_markers(data: dict) -> AnnotFormat | None:
 
     A dataset-level COCO carries an ``images`` list and/or ``categories``; a per-image file
     carries a singular ``image`` string. Both use ``annotations``, so the COCO markers are
-    checked first. Read only through :func:`_detect_json_format`, the one classification a
+    checked first. Read only through :func:`detect_json_format`, the one classification a
     format-free detection and a caller's stated-``fmt`` claim both go through, so the two can
     never disagree about what shape a document is.
     """
@@ -110,13 +110,17 @@ def _shape_markers(data: dict) -> AnnotFormat | None:
     return None
 
 
-def _detect_json_format(path: Path) -> AnnotFormat | None:
+def detect_json_format(path: Path) -> AnnotFormat | None:
     """``"json"`` / ``"coco"`` from a file's keys, or ``None`` if the path is missing or is a
     decodable dict that is neither. Raises on the old ``objects`` shape rather than sniffing it
     (it is converted, not read), and raises :class:`~tcip_annotation.json_io.UnreadableLabelDocument`,
     through the shared loader, for a *present* file that will not decode as a dict at all: a
     missing candidate is not evidence of a broken document, only an absent one, and stays
     ``detect_format``'s own "cannot determine" refusal rather than an unreadable-document one.
+    Public: a caller with a single file already in hand and no directory to search (this
+    module's own ``load_annotations`` claim check, ``label_queries.dir_label_format``) reaches
+    this single-file classification directly rather than through ``detect_format``'s own
+    directory-or-raise contract, which does not fit either caller's shape.
 
     Reads through :func:`~tcip_annotation.json_io.load_json_document`, not the version-checked
     ``load_label_document``: the shape is not yet known when this decode happens, and this
@@ -361,7 +365,7 @@ def load_annotations(
     ``read_annotations``/``parse_coco_annotations`` below either way.
 
     A caller-supplied ``fmt`` is a claim the document must satisfy, not a bypass of detection,
-    checked through the same :func:`_detect_json_format` a format-free call resolves through (the
+    checked through the same :func:`detect_json_format` a format-free call resolves through (the
     old ``objects`` schema included, refused there rather than sniffed): a present document whose
     keys carry the other format's markers, or neither format's, is refused, naming the format
     asked for and the shape its keys actually carry, rather than silently answering an empty
@@ -372,7 +376,7 @@ def load_annotations(
     if fmt is None:
         fmt = detect_format(path)
     elif Path(path).is_file():
-        shape = _detect_json_format(Path(path))
+        shape = detect_json_format(Path(path))
         if shape != fmt:
             raise ValueError(
                 f"{path} was asked to be read as {fmt!r}, but its keys carry "

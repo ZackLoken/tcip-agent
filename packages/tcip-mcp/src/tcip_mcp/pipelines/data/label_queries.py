@@ -159,7 +159,7 @@ def first_labels_json(labels_dir) -> Path | None:
     that in fact holds a document nobody can make sense of, the opposite of what "the first" here
     is supposed to name. Reads through the unchecked ``load_json_document``, not
     ``load_label_document``: this directory's shape (json or a dataset-level COCO export) is not
-    yet decided here, only ``dir_label_format``'s own ``_detect_json_format`` call decides it, so
+    yet decided here, only ``dir_label_format``'s own ``detect_json_format`` call decides it, so
     this precondition read must not apply the per-image version ceiling to a file that may turn
     out COCO-shaped.
     """
@@ -188,13 +188,13 @@ def dir_label_format(labels_dir) -> str | None:
     from this function's own re-check of the same file, uncaught here: an unreadable document is
     not the same fact as an unrecognized one.
     """
-    from tcip_annotation.format_io import _detect_json_format
+    from tcip_annotation.format_io import detect_json_format
 
     jp = first_labels_json(labels_dir)
     if jp is None:
         return None
     try:
-        return _detect_json_format(jp)
+        return detect_json_format(jp)
     except ValueError:
         return None
 
@@ -270,7 +270,9 @@ def trainable_stems(
         coco_names = set(by_id.values())
         coco_annotated = {by_id.get(a.get("image_id"), "") for a in coco.get("annotations", [])}
         # Which images to_coco_dataset dropped for attribute-incompleteness, read from its own
-        # record rather than re-derived; their absence from ``images`` is otherwise indistinguishable from an unconfirmed-empty one, and reporting that reason would be a lie.
+        # record rather than re-derived; their absence from ``images`` is otherwise
+        # indistinguishable from an unconfirmed-empty one, and reporting that reason would be a
+        # lie.
         incomplete_names = {str(n) for n in coco.get("excluded_incomplete_attribute", [])}
     elif attribute is not None and id_map is not None:
         # Direct-JSON path: the same rail, through the same reader the loader uses.
@@ -299,8 +301,13 @@ def trainable_stems(
             continue
         if coco_names is not None:
             if image_name not in coco_names:
-                # assemble_coco already dropped it, but not why. A quarantined negative is dropped the same way an unconfirmed one is (assemble_coco's confirmed_negative_names call never sees a quarantined name as a negative), so it must be checked here too, or a
-                # human-confirmed-but-schema-stale negative reads as "nobody ever looked" instead of "looked, but the schema changed since", the exact distinction this count exists to preserve, and the one the direct-JSON branch below already gets right.
+                # assemble_coco already dropped it, but not why. A quarantined negative is
+                # dropped the same way an unconfirmed one is (assemble_coco's
+                # confirmed_negative_names call never sees a quarantined name as a negative), so
+                # it must be checked here too, or a human-confirmed-but-schema-stale negative
+                # reads as "nobody ever looked" instead of "looked, but the schema changed
+                # since", the exact distinction this count exists to preserve, and the one the
+                # direct-JSON branch below already gets right.
                 if image_name in quarantined:
                     counts["quarantined_stale_definition"] += 1
                     continue
@@ -313,8 +320,10 @@ def trainable_stems(
                 keep.append(stem)
                 counts["annotated"] += 1
             elif image_name in negatives:
-                # Zero annotations is a negative only with a human Complete. assemble_coco already enforces that, but an externally supplied coco_json never went through it, so the
-                # confirmation is re-checked here rather than inferred from the file's shape.
+                # Zero annotations is a negative only with a human Complete. assemble_coco
+                # already enforces that, but an externally supplied coco_json never went through
+                # it, so the confirmation is re-checked here rather than inferred from the
+                # file's shape.
                 keep.append(stem)
                 counts["confirmed_negative"] += 1
             elif image_name in quarantined:

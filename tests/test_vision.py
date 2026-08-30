@@ -1356,7 +1356,7 @@ class TestFullPipelineIntegration:
         # Step 3: propose_annotations stages the candidates for real
         self._propose(monkeypatch, img_path, MOCK_CANDIDATES)
 
-        # Step 4: Accept with class assignments
+        # Step 4: Accept with subject assignments
         result = stage_accepted_proposals(
             image_path=img_path,
             assignments=[

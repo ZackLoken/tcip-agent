@@ -369,7 +369,7 @@ def propose_annotations(
         "engine": engine,
         "summary": f"Engine {engine!r} proposed {len(candidates)} candidates{region_note}."
                    f"{stage_note} Review the numbered overlay, then call stage_accepted_proposals "
-                   f"with class assignments.",
+                   f"with subject assignments.",
         "candidate_count": len(candidates),
         "staged": staged,
         "candidates": [
