@@ -130,7 +130,7 @@ def test_tabulate_counts_forwards_split_manifest_dir_to_run_inference(tmp_path, 
         lambda spec, record, kind, registry=None: stated)
 
     itools.tabulate_counts(
-        _ckpt(tmp_path), str(tmp_path), str(tmp_path / "out.csv"), "some_trait",
+        _ckpt(tmp_path), str(tmp_path), str(tmp_path / "out.csv"), trait="some_trait",
         split_manifest_dir=str(tmp_path / "m"))
 
     assert captured.get("split_manifest_dir") == str(tmp_path / "m")
