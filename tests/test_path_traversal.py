@@ -91,19 +91,21 @@ def test_training_launch_output_dir_guard_is_a_no_op_when_unrestricted(tmp_path)
     assert result["error"] == "Invalid config"
 
 
-def test_images_route_blocks_outside_allowed_root(tmp_path, tmp_path_factory: pytest.TempPathFactory):
+def test_annotate_labels_route_blocks_outside_allowed_root(
+    tmp_path, tmp_path_factory: pytest.TempPathFactory
+):
     pytest.importorskip("fastapi")
     from fastapi import HTTPException
     from PIL import Image
 
-    from tcip_web.routes.images import get_dimensions
+    from tcip_web.routes.annotate import load_labels
 
     img = tmp_path / "ok.jpg"
     Image.new("RGB", (8, 8)).save(img)
     outside = tmp_path_factory.mktemp("outside") / "secret.jpg"
     Image.new("RGB", (8, 8)).save(outside)
 
-    assert get_dimensions(str(img))["width"] == 8       # inside the workspace -> served
+    assert load_labels(str(img))["img_width"] == 8       # inside the workspace -> served
     with pytest.raises(HTTPException) as ei:
-        get_dimensions(str(outside))                     # a sibling workspace -> 403
+        load_labels(str(outside))                         # a sibling workspace -> 403
     assert ei.value.status_code == 403

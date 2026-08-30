@@ -710,26 +710,6 @@ def serve_image(
                     headers={**cache_headers, **extra})
 
 
-@router.get("/dimensions")
-def get_dimensions(path: str = Query(...)) -> dict:
-    """Return the EXIF-oriented (width, height) of an image (header-only where possible).
-
-    Channel-aware: ``resolve_image_source`` folds a ``.bandgroup`` manifest (or a genuinely
-    multi-band raster) into the real frame ``image_dimensions`` measures, instead of a bare
-    channel-blind PIL header read misreporting a multi-band GeoTIFF's axes.
-    """
-    from tcip_mcp.pipelines.data.band_groups import BandGroupIncomplete
-    from tcip_mcp.pipelines.image_utils import image_dimensions, resolve_image_source
-
-    src = _checked(path)
-    try:
-        source = resolve_image_source(src.parent, src.stem)
-    except BandGroupIncomplete as exc:
-        raise HTTPException(409, str(exc)) from exc
-    w, h = image_dimensions(source)
-    return {"path": path, "width": w, "height": h}
-
-
 @router.get("/bands")
 def get_bands(path: str = Query(...)) -> dict:
     """Band count + per-band stats for ``path``: the picker's symbology data, and the one fact

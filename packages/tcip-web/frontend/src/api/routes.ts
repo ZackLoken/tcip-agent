@@ -19,7 +19,6 @@ export const ROUTES = {
   getHealth: "/health",
   getImages: "/api/images",
   getImagesBands: "/api/images/bands",
-  getImagesDimensions: "/api/images/dimensions",
   getImagesOverviewsStatus: "/api/images/overviews/status",
   getInferenceJobs: "/api/inference/jobs",
   getMetaReports: "/api/meta/reports",
