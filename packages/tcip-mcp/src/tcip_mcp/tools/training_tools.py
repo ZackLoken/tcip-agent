@@ -97,13 +97,14 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
             answer with directly.
     """
     from tcip_mcp.pipelines.schemas import validate_train_config_schema
+    from tcip_mcp.pipelines.model_build import DATASET_SOURCE_KEY, MODEL_SOURCE_KEY, TRAINING_SOURCE_KEY
 
     # Pydantic schema: type/structure of data/training.
     issues: list[str] = list(validate_train_config_schema(config))
     warnings: list[str] = []
 
     # model_source presence + builder importability (the one build path).
-    model_source = config.get("model_source")
+    model_source = config.get(MODEL_SOURCE_KEY)
     if not model_source:
         issues.append("Missing 'model_source' section")
     elif not isinstance(model_source, dict) or not model_source.get("builder"):
@@ -117,7 +118,6 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
 
     # training_source seam (mirrors model_source/dataset_source above), a bare "module:function"
     # string, not a dict.
-    from tcip_mcp.pipelines.model_build import DATASET_SOURCE_KEY, TRAINING_SOURCE_KEY
     training_source = config.get(TRAINING_SOURCE_KEY)
     if training_source is not None:
         if not isinstance(training_source, str) or not training_source:
@@ -435,7 +435,7 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
                 check_model_contract, overfit_check, render_overfit_report,
             )
 
-            ms = config.get("model_source") or {}
+            ms = config.get(MODEL_SOURCE_KEY) or {}
             task = ms.get("task") or (config.get("data") or {}).get("task", "detection")
             dims = resolve_contract_dims(config, task)
             model = build_model(config)
@@ -1211,9 +1211,10 @@ def _run_hpo_trial(config: dict, report, base_config: dict, trial_dir: str) -> N
     from tcip_mcp.pipelines.training.run_registry import create_run
     from tcip_mcp.pipelines.data.samplers import build_sampler
     from tcip_mcp.pipelines.data.split_construction import auto_train_val
+    from tcip_mcp.pipelines.model_build import MODEL_SOURCE_KEY
     from torch.utils.data import DataLoader
 
-    model_source = merged.get("model_source")
+    model_source = merged.get(MODEL_SOURCE_KEY)
     # setdefault, not get: the geometry stamp below mutates this dict and must land in the
     # resolved-config snapshot written from merged.
     data_cfg = merged.setdefault("data", {})
@@ -1416,10 +1417,11 @@ def run_hpo(
 
     from tcip_mcp.pipelines.training.evaluation import HIGHER_IS_BETTER_BY_METRIC
     from tcip_mcp.pipelines.training.generic_trainer import resolve_selection_metric
+    from tcip_mcp.pipelines.model_build import MODEL_SOURCE_KEY
 
     # Ray forbids setting metric/mode anywhere but the Tuner, so the direction is resolved once
     # here, from base_config, and every trial's own resolution (_run_hpo_trial) must agree with it.
-    hpo_model_source = base_config.get("model_source") or {}
+    hpo_model_source = base_config.get(MODEL_SOURCE_KEY) or {}
     hpo_eval_cfg = (base_config.get("training") or {}).get("evaluation") \
         or base_config.get("evaluation") or {}
     hpo_task = hpo_model_source.get("task") \
