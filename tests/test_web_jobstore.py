@@ -544,34 +544,48 @@ def test_job_registry_register_get_persist_rehydrate_match_the_module_shape(tmp_
     def to_summary(j):
         return {"job_id": j.job_id, "status": j.status, "platform_root": j.platform_root}
 
-    registry = JobRegistry("inference_jobs")
+    def factory(s, root):
+        return J(s["job_id"], status=s["status"], platform_root=s.get("platform_root") or root)
+
+    registry = JobRegistry("inference_jobs", to_summary=to_summary, from_summary=factory)
     job = J("j1", status="completed")
-    registry.register(job.job_id, job, root=job.platform_root, to_summary=to_summary)
+    registry.register(job.job_id, job, job_root=job.platform_root)
 
     assert registry.get("j1") is job
     assert registry.list(root) == [job]
     assert registry.list("root-b") == []
 
     registry.jobs.clear()
-
-    def factory(s, root):
-        return J(s["job_id"], status=s["status"], platform_root=s.get("platform_root") or root)
-
-    registry.rehydrate(factory)
+    registry.rehydrate()
     assert registry.get("j1").status == "completed"
     assert registry.get("j1").status in TERMINAL_STATUSES
 
 
+def test_job_registry_named_registry_refuses_without_a_summary_codec():
+    """A registry that persists must not be able to skip its persist (or its rehydrate)
+    silently by a caller simply omitting the codec at one call site: the codec is required at
+    construction, once, so a named registry with none refuses to exist rather than register."""
+    from tcip_web.jobstore import JobRegistry
+
+    with pytest.raises(ValueError, match="inference_jobs"):
+        JobRegistry("inference_jobs")
+    with pytest.raises(ValueError):
+        JobRegistry("inference_jobs", to_summary=lambda j: {})
+    with pytest.raises(ValueError):
+        JobRegistry("inference_jobs", from_summary=lambda s, root: s)
+
+
 def test_job_registry_persist_is_a_no_op_for_an_unpersisted_registry(tmp_path, monkeypatch):
     """images.py's overview-build registry carries no root concept and persists nothing:
-    JobRegistry(None) must not write or read anything through jobstore's own store."""
+    JobRegistry(None) must not write or read anything through jobstore's own store, and needs
+    neither codec to be constructed."""
     monkeypatch.chdir(tmp_path)
     from tcip_web.jobstore import JobRegistry
 
     registry = JobRegistry(None)
-    registry.register("ovr1", object(), root=None, to_summary=lambda j: {"job_id": "ovr1"})
-    registry.persist(lambda j: {"job_id": "ovr1"})  # no-op: no store binding required
-    registry.rehydrate(lambda s, root: s)  # no-op
+    registry.register("ovr1", object(), job_root=None)
+    registry.persist()  # no-op: no store binding required
+    registry.rehydrate()  # no-op
     assert list(registry.jobs) == ["ovr1"]
 
 
@@ -604,9 +618,13 @@ def test_registered_job_summaries_persist_byte_stable_through_job_registry(tmp_p
     for k, v in summary.items():
         setattr(job, k, v)
 
-    registry = JobRegistry("inference_jobs")
+    registry = JobRegistry(
+        "inference_jobs",
+        to_summary=lambda j: {k: getattr(j, k) for k in summary},
+        from_summary=lambda s, root: s,
+    )
     registry.jobs["a"] = job
-    registry.persist(lambda j: {k: getattr(j, k) for k in summary})
+    registry.persist()
 
     after = load("inference_jobs")
     assert after == before

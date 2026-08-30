@@ -50,7 +50,22 @@ class HPOJob:
     platform_root: str = field(default_factory=_current_root)
 
 
-_registry = jobstore.JobRegistry(HPO_REGISTRY)
+def _summary(job: HPOJob) -> dict:
+    return {"sweep_id": job.sweep_id, "status": job.status,
+            "error": job.error, "has_result": bool(job.result),
+            "platform_root": job.platform_root}
+
+
+def _from_summary(s: dict, root: str) -> HPOJob:
+    return HPOJob(
+        sweep_id=s["sweep_id"], status=jobstore.rehydrated_status(s), error=s.get("error"),
+        platform_root=s.get("platform_root") or root,
+    )
+
+
+_registry = jobstore.JobRegistry(
+    HPO_REGISTRY, to_summary=_summary, from_summary=_from_summary, id_field="sweep_id",
+)
 """The dict-plus-lock live registry for this route's own sweeps (see ``jobstore.JobRegistry``),
 the shared home review.py's priority queue and inference.py's jobs adopt too. ``_sweeps``/
 ``_lock`` below are this registry's own dict and lock, bound under their historical names since
@@ -244,11 +259,11 @@ def _persist() -> None:
     reaches the right root's file even from a background worker after this process has since
     adopted another project.
     """
-    _registry.persist(_summary)
+    _registry.persist()
 
 
 def rehydrate_for_current_root() -> None:
-    """Merge this root's persisted sweeps, not already live, into memory.
+    """Merge this root's persisted sweeps, not already live, into memory via :func:`_from_summary`.
 
     Called at startup and again after this process repins to another root. Worker threads
     behind a persisted non-terminal sweep are gone, so it is surfaced as ``interrupted``.
@@ -258,15 +273,7 @@ def rehydrate_for_current_root() -> None:
     adopting N roots without ever launching one here still keeps this process's memory
     bounded rather than growing by ``MAX_JOBS`` for every root adopted.
     """
-    from tcip_web import jobstore
-
-    def _from_summary(s: dict, root: str) -> HPOJob:
-        return HPOJob(
-            sweep_id=s["sweep_id"], status=jobstore.rehydrated_status(s), error=s.get("error"),
-            platform_root=s.get("platform_root") or root,
-        )
-
-    _registry.rehydrate(_from_summary, id_field="sweep_id")
+    _registry.rehydrate()
 
 
 class LaunchHPOPayload(BaseModel):
@@ -327,7 +334,7 @@ def launch_hpo(payload: LaunchHPOPayload) -> dict:
     output_dir = payload.output_dir or str(hpo_root())
 
     job = HPOJob(sweep_id=f"hpo-{uuid.uuid4().hex[:8]}")
-    _registry.register(job.sweep_id, job, root=job.platform_root, to_summary=_summary)
+    _registry.register(job.sweep_id, job, job_root=job.platform_root)
     t = threading.Thread(target=_worker, args=(job, payload, output_dir), daemon=True)
     with _lock:
         for sweep_id in [sid for sid, done in _workers.items() if not done.is_alive()]:

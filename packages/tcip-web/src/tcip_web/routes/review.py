@@ -891,11 +891,6 @@ class PriorityQueueJob:
     platform_root: str = field(default_factory=_pq_current_root)
 
 
-_pq_registry = jobstore.JobRegistry(REVIEW_PRIORITY_REGISTRY)
-"""The dict-plus-lock live registry for this queue's own jobs (see ``jobstore.JobRegistry``),
-the shared home inference.py's and tuning.py's own registries adopt too."""
-
-
 def _pq_summary(job: PriorityQueueJob) -> dict:
     return {
         "job_id": job.job_id, "status": job.status, "error": job.error,
@@ -905,12 +900,35 @@ def _pq_summary(job: PriorityQueueJob) -> dict:
     }
 
 
+def _pq_from_summary(s: dict, root: str) -> PriorityQueueJob:
+    return PriorityQueueJob(
+        job_id=s["job_id"],
+        checkpoint_path="",
+        images_dir="",
+        dataset_root="",
+        status=jobstore.rehydrated_status(s),
+        error=s.get("error"),
+        queue=s.get("queue") or [],
+        total_candidates=s.get("total_candidates", 0),
+        reviewed_skipped=s.get("reviewed_skipped", 0),
+        marks_unresolved=s.get("marks_unresolved"),
+        platform_root=s.get("platform_root") or root,
+    )
+
+
+_pq_registry = jobstore.JobRegistry(
+    REVIEW_PRIORITY_REGISTRY, to_summary=_pq_summary, from_summary=_pq_from_summary,
+)
+"""The dict-plus-lock live registry for this queue's own jobs (see ``jobstore.JobRegistry``),
+the shared home inference.py's and tuning.py's own registries adopt too."""
+
+
 def _pq_persist() -> None:
-    _pq_registry.persist(_pq_summary)
+    _pq_registry.persist()
 
 
 def _pq_register(job: PriorityQueueJob) -> None:
-    _pq_registry.register(job.job_id, job, root=job.platform_root, to_summary=_pq_summary)
+    _pq_registry.register(job.job_id, job, job_root=job.platform_root)
 
 
 def _pq_get(job_id: str) -> Optional[PriorityQueueJob]:
@@ -921,7 +939,8 @@ def _pq_get(job_id: str) -> Optional[PriorityQueueJob]:
 
 
 def rehydrate_for_current_root() -> None:
-    """Merge this root's persisted priority-queue jobs, not already live, into memory.
+    """Merge this root's persisted priority-queue jobs, not already live, into memory via
+    :func:`_pq_from_summary`.
 
     Called at startup and again after this process repins to another root, the same
     treatment ``routes.inference``/``routes.tuning`` give their own registries. The worker
@@ -932,24 +951,7 @@ def rehydrate_for_current_root() -> None:
     registering one here still keeps this process's memory bounded rather than growing by
     ``MAX_JOBS`` for every root adopted.
     """
-    from tcip_web import jobstore
-
-    def _from_summary(s: dict, root: str) -> PriorityQueueJob:
-        return PriorityQueueJob(
-            job_id=s["job_id"],
-            checkpoint_path="",
-            images_dir="",
-            dataset_root="",
-            status=jobstore.rehydrated_status(s),
-            error=s.get("error"),
-            queue=s.get("queue") or [],
-            total_candidates=s.get("total_candidates", 0),
-            reviewed_skipped=s.get("reviewed_skipped", 0),
-            marks_unresolved=s.get("marks_unresolved"),
-            platform_root=s.get("platform_root") or root,
-        )
-
-    _pq_registry.rehydrate(_from_summary)
+    _pq_registry.rehydrate()
 
 
 def _pq_worker(job: PriorityQueueJob) -> None:

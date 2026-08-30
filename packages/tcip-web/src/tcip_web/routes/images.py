@@ -855,18 +855,14 @@ def build_image_overviews(payload: OverviewBuildPayload) -> dict:
     rather than starting a second one over the same sidecar. Poll ``/overviews/status``.
     """
     src = _checked(payload.path)
-    # Scan-then-insert under one lock acquisition: two concurrent requests for the same path
-    # must not both pass the scan and both start a build.
-    with _overview_registry.lock:
-        for existing in _overview_registry.jobs.values():
-            if existing.path == str(src) and existing.status in ("pending", "running"):
-                return _overview_summary(existing)
-        job = OverviewJob(job_id=f"ovr-{uuid.uuid4().hex[:8]}", path=str(src))
-        _overview_registry.jobs[job.job_id] = job
-        jobstore.evict_terminal(_overview_registry.jobs, None)  # no root concept of its own
-    thread = threading.Thread(target=_overview_worker, args=(job,), daemon=True)
-    job.thread = thread
-    thread.start()
+    job, created = _overview_registry.find_or_register(
+        lambda existing: existing.path == str(src) and existing.status in ("pending", "running"),
+        lambda: OverviewJob(job_id=f"ovr-{uuid.uuid4().hex[:8]}", path=str(src)),
+    )
+    if created:
+        thread = threading.Thread(target=_overview_worker, args=(job,), daemon=True)
+        job.thread = thread
+        thread.start()
     return _overview_summary(job)
 
 
