@@ -100,13 +100,13 @@ def _rewrite_label(root: Path, date: str, stem: str, *, offset: float) -> None:
 
 def _bind_run(root: Path, out: Path, experiment_id: str, *, date: str = DATES[0]) -> dict | None:
     """A run bound to the manifest at ``out``, for ``date``: the exact sequence
-    ``subprocess_worker.run`` follows (``_auto_train_val`` then ``_persist_split_manifest``),
+    ``subprocess_worker.run`` follows (``auto_train_val`` then ``persist_split_manifest``),
     called directly so no real training subprocess is needed. Returns the run's own
-    ``label_digests`` block (``_auto_train_val``'s third return value), never read back through
+    ``label_digests`` block (``auto_train_val``'s third return value), never read back through
     ``data_cfg``.
     """
     from tcip_mcp.experiments import create_experiment
-    from tcip_mcp.tools.training_tools import _auto_train_val, _persist_split_manifest
+    from tcip_mcp.pipelines.data.split_construction import auto_train_val, persist_split_manifest
 
     data_cfg = {
         "images_dir": str(root / "images" / date),
@@ -114,9 +114,9 @@ def _bind_run(root: Path, out: Path, experiment_id: str, *, date: str = DATES[0]
         "subject": SUBJECT, "attribute": None,
         "split": {"manifest_dir": str(out)},
     }
-    train_ds, val_ds, label_digests = _auto_train_val("detection", data_cfg, None)
+    train_ds, val_ds, label_digests = auto_train_val("detection", data_cfg, None)
     create_experiment(experiment_id, {})
-    _persist_split_manifest(experiment_id, train_ds, val_ds, data_cfg,
+    persist_split_manifest(experiment_id, train_ds, val_ds, data_cfg,
                             label_digests=label_digests)
     return label_digests
 
@@ -474,10 +474,10 @@ def test_an_unbound_run_calibrated_under_a_caller_named_manifest_seals_null_keys
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A run with no ``manifest_binding`` at all (never went through the manifest branch of
-    ``_auto_train_val``), calibrated under a caller-named manifest anyway: the four
+    ``auto_train_val``), calibrated under a caller-named manifest anyway: the four
     label-movement keys are ``null`` with the reason, and the row still delivers."""
     from tcip_mcp.experiments import create_experiment
-    from tcip_mcp.tools.training_tools import _auto_train_val, _persist_split_manifest
+    from tcip_mcp.pipelines.data.split_construction import auto_train_val, persist_split_manifest
 
     monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
     root = _dataset(tmp_path / "ds")
@@ -489,10 +489,10 @@ def test_an_unbound_run_calibrated_under_a_caller_named_manifest_seals_null_keys
         "labels_dir": str(root / "annotations" / DATES[0]),
         "subject": SUBJECT, "attribute": None,
     }
-    train_ds, val_ds, label_digests = _auto_train_val("detection", flat_cfg, None)
+    train_ds, val_ds, label_digests = auto_train_val("detection", flat_cfg, None)
     assert label_digests is None
     create_experiment("exp_unbound", {})
-    _persist_split_manifest("exp_unbound", train_ds, val_ds, flat_cfg, label_digests=label_digests)
+    persist_split_manifest("exp_unbound", train_ds, val_ds, flat_cfg, label_digests=label_digests)
 
     sd, shippable = _seal(root, out, "exp_unbound", tmp_path, real_stem_ids=False)
 
@@ -613,7 +613,7 @@ def test_manifest_digest_is_the_one_function_the_bind_write_and_the_calibration_
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """``resolution.manifest_digest`` is the sha256 hex digest over ``RECORD_JSON.encode``, and
-    the run's own ``split.json`` (written by ``_persist_split_manifest``, the bind side) already
+    the run's own ``split.json`` (written by ``persist_split_manifest``, the bind side) already
     carries that value for the manifest it bound to, the same value a caller's own re-encoding
     produces: the two spellings this test's own independent oracle (``_manifest_sha256``) and the
     production side must agree on."""
@@ -701,7 +701,7 @@ def test_make_splits_calls_the_combined_helper_not_dataset_hash_and_label_digest
 def test_auto_train_vals_third_return_value_never_lands_in_the_split_config(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """``label_digests`` rides only as ``_auto_train_val``'s own third return value: ``data_cfg
+    """``label_digests`` rides only as ``auto_train_val``'s own third return value: ``data_cfg
     ["split"]`` (the block copied whole into the durable experiment config and embedded in every
     checkpoint) never gains the key, so neither does anything downstream that merges it. This is
     coverage of the source the durable config, every checkpoint's embedded config and every
@@ -713,7 +713,7 @@ def test_auto_train_vals_third_return_value_never_lands_in_the_split_config(
 
     from tcip_mcp.experiments import config_key, create_experiment
     from tcip_mcp.pipelines.training.subprocess_worker import _patch_experiment_config_split
-    from tcip_mcp.tools.training_tools import _auto_train_val
+    from tcip_mcp.pipelines.data.split_construction import auto_train_val
 
     monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
     root = _dataset(tmp_path / "ds")
@@ -726,7 +726,7 @@ def test_auto_train_vals_third_return_value_never_lands_in_the_split_config(
         "subject": SUBJECT, "attribute": None,
         "split": {"manifest_dir": str(out)},
     }
-    _train_ds, _val_ds, label_digests = _auto_train_val("detection", data_cfg, None)
+    _train_ds, _val_ds, label_digests = auto_train_val("detection", data_cfg, None)
 
     assert label_digests is not None
     assert "label_digests" not in data_cfg["split"]

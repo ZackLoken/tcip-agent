@@ -512,7 +512,7 @@ def _bind_dataset_run(
     use for the canonical dated layout, parameterized over which directory this date's images
     actually live in."""
     from tcip_mcp.experiments import create_experiment
-    from tcip_mcp.tools.training_tools import _auto_train_val, _persist_split_manifest
+    from tcip_mcp.pipelines.data.split_construction import auto_train_val, persist_split_manifest
 
     data_cfg = {
         "images_dir": str(images_dir),
@@ -520,9 +520,9 @@ def _bind_dataset_run(
         "subject": _FLAT_SUBJECT, "attribute": None,
         "split": {"manifest_dir": str(manifest_dir)},
     }
-    train_ds, val_ds, label_digests = _auto_train_val("detection", data_cfg, None)
+    train_ds, val_ds, label_digests = auto_train_val("detection", data_cfg, None)
     create_experiment(experiment_id, {})
-    _persist_split_manifest(experiment_id, train_ds, val_ds, data_cfg, label_digests=label_digests)
+    persist_split_manifest(experiment_id, train_ds, val_ds, data_cfg, label_digests=label_digests)
 
 
 def test_prioritize_review_queue_marks_a_flat_images_tree_dataset_correctly(tmp_path, monkeypatch):

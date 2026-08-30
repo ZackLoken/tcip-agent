@@ -216,11 +216,11 @@ def test_class_distribution_on_a_shared_coco_scopes_to_its_own_stems(tmp_path):
 
 
 def test_auto_train_val_refuses_a_dataset_level_coco_misrouted_as_labels_dir(tmp_path, caplog):
-    """training_tools._auto_train_val's own COCO-assembly branch must refuse the same shape
+    """training_tools.auto_train_val's own COCO-assembly branch must refuse the same shape
     build_dataset does, rather than silently training without validation on it: the refusal
     reaches the caller directly, never as a fallback build's own second raise behind a misleading
     "training without validation" warning."""
-    from tcip_mcp.tools.training_tools import _auto_train_val
+    from tcip_mcp.pipelines.data.split_construction import auto_train_val
 
     images = tmp_path / "images"
     labels = tmp_path / "detect"
@@ -230,7 +230,7 @@ def test_auto_train_val_refuses_a_dataset_level_coco_misrouted_as_labels_dir(tmp
         {"images": [{"id": 1, "file_name": "img0.jpg"}], "annotations": [], "categories": []}))
 
     with pytest.raises(ValueError, match="data.labels_dir="):
-        _auto_train_val("detection", {"images_dir": str(images), "labels_dir": str(labels),
+        auto_train_val("detection", {"images_dir": str(images), "labels_dir": str(labels),
                                       "subject": CATKIN}, None)
     assert "training without validation" not in caplog.text
 
@@ -239,7 +239,7 @@ def test_auto_train_val_raises_on_a_corrupt_explicit_validation_label(tmp_path):
     """A present, unreadable label under val_labels_dir must abort the run rather than silently
     training without validation over a document nobody can read."""
     from tcip_annotation.json_io import UnreadableLabelDocument, write_annotations
-    from tcip_mcp.tools.training_tools import _auto_train_val
+    from tcip_mcp.pipelines.data.split_construction import auto_train_val
 
     train_images = tmp_path / "images"
     train_labels = tmp_path / "labels"
@@ -253,7 +253,7 @@ def test_auto_train_val_raises_on_a_corrupt_explicit_validation_label(tmp_path):
     (val_labels / "img1.json").write_bytes(b"{not json")
 
     with pytest.raises(UnreadableLabelDocument):
-        _auto_train_val("detection", {
+        auto_train_val("detection", {
             "images_dir": str(train_images), "labels_dir": str(train_labels),
             "val_images_dir": str(val_images), "val_labels_dir": str(val_labels),
             "subject": CATKIN,

@@ -391,13 +391,13 @@ def test_resolve_operating_point_cal_rects_switches_to_geometric_check(tmp_path,
 def _persist_run_split(experiment_id, tmp_path, *, date, train, val,
                        group_by=None, manifest_dir=None):
     """A real ``split.json`` for one producing run, written through the platform's own
-    ``_persist_split_manifest``, never composed by hand: ``train``/``val`` are bare stems under
+    ``persist_split_manifest``, never composed by hand: ``train``/``val`` are bare stems under
     ``date``, ``group_by`` an already-resolved policy (``"external"``/``"spatial_strip"``/a named
     strategy), and ``manifest_dir`` (when given) records the run as bound to that manifest."""
     from types import SimpleNamespace
 
     from tcip_mcp.experiments import create_experiment, experiment_exists
-    from tcip_mcp.tools.training_tools import _persist_split_manifest
+    from tcip_mcp.pipelines.data.split_construction import persist_split_manifest
 
     if not experiment_exists(experiment_id):
         create_experiment(experiment_id, {})
@@ -409,7 +409,7 @@ def _persist_run_split(experiment_id, tmp_path, *, date, train, val,
     data_cfg = {"labels_dir": str(tmp_path / "annotations" / date), "split": split_cfg}
     train_ds = SimpleNamespace(stems=list(train))
     val_ds = SimpleNamespace(stems=list(val))
-    _persist_split_manifest(experiment_id, train_ds, val_ds, data_cfg)
+    persist_split_manifest(experiment_id, train_ds, val_ds, data_cfg)
 
 
 def test_selection_disjointness_leaked_whole_directory_calibration_of_a_bound_checkpoint(
@@ -562,14 +562,14 @@ def test_selection_disjointness_not_applicable_for_a_flat_run_with_no_calibratio
     from types import SimpleNamespace
 
     from tcip_mcp.experiments import create_experiment
-    from tcip_mcp.tools.training_tools import _persist_split_manifest
+    from tcip_mcp.pipelines.data.split_construction import persist_split_manifest
 
     monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
     create_experiment("exp_sel_flat_no_date", {})
     data_cfg = {"labels_dir": str(tmp_path / "annotations"),
                "split": {"resolved_group_by": "tile_prefix",
                         "manifest_binding": {"manifest_dir": "some/manifest"}}}
-    _persist_split_manifest(
+    persist_split_manifest(
         "exp_sel_flat_no_date", SimpleNamespace(stems=["z"]), SimpleNamespace(stems=["c_0"]),
         data_cfg)
 
@@ -598,14 +598,14 @@ def test_selection_disjointness_applicable_when_a_flat_calibration_matches_a_fla
 
     from tcip_mcp.experiments import create_experiment
     from tcip_mcp.pipelines.data.splits import manifest_date_key
-    from tcip_mcp.tools.training_tools import _persist_split_manifest
+    from tcip_mcp.pipelines.data.split_construction import persist_split_manifest
 
     monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
     create_experiment("exp_sel_flat_match", {})
     data_cfg = {"labels_dir": str(tmp_path / "annotations"),
                "split": {"resolved_group_by": "tile_prefix",
                         "manifest_binding": {"manifest_dir": "some/manifest"}}}
-    _persist_split_manifest(
+    persist_split_manifest(
         "exp_sel_flat_match", SimpleNamespace(stems=["z"]), SimpleNamespace(stems=["c_0"]),
         data_cfg)
 

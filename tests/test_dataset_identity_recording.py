@@ -96,14 +96,14 @@ def test_compare_experiments_mixed_none_fingerprint_is_unknown_not_same(exp_dir)
 
 def test_dataset_identity_helper_registered_vs_bespoke(tmp_path):
     from tcip_mcp.tools.project_tools import register_dataset
-    from tcip_mcp.tools.training_tools import _dataset_identity
+    from tcip_mcp.pipelines.data.split_construction import dataset_identity
 
     _make_dataset(tmp_path)
     reg = register_dataset(str(tmp_path), crop="hazelnut")
-    ds_id, fp = _dataset_identity({"images_dir": str(tmp_path / "images" / "2-11-26")})
+    ds_id, fp = dataset_identity({"images_dir": str(tmp_path / "images" / "2-11-26")})
     assert ds_id == reg["id"] and fp == reg["fingerprint"]
     # bespoke / imageless run -> no fabricated identity
-    assert _dataset_identity({}) == (None, None)
+    assert dataset_identity({}) == (None, None)
 
 
 def test_dataset_identity_fingerprint_io_error_degrades_to_none(tmp_path, monkeypatch):
@@ -112,30 +112,30 @@ def test_dataset_identity_fingerprint_io_error_degrades_to_none(tmp_path, monkey
     silently drops the whole experiment record (lineage/status/split.json) for a run that still
     trains, which is strictly worse than losing only the fingerprint."""
     import tcip_mcp.pipelines.resolution as resolution
-    from tcip_mcp.tools.training_tools import _dataset_identity
+    from tcip_mcp.pipelines.data.split_construction import dataset_identity
 
     _make_dataset(tmp_path)
 
     def _raise(_root):
         raise OSError("simulated I/O error mid-scan")
 
-    # _dataset_identity does `from tcip_mcp.pipelines.resolution import dataset_fingerprint`
+    # dataset_identity does `from tcip_mcp.pipelines.resolution import dataset_fingerprint`
     # locally at call time, so it must be patched at the source module.
     monkeypatch.setattr(resolution, "dataset_fingerprint", _raise)
-    ds_id, fp = _dataset_identity({"images_dir": str(tmp_path / "images" / "2-11-26")})
+    ds_id, fp = dataset_identity({"images_dir": str(tmp_path / "images" / "2-11-26")})
     assert fp is None
     assert ds_id is None  # no dataset.json registered in this fixture
 
 
 def test_persist_split_manifest_records_identity(exp_dir):
-    from tcip_mcp.tools.training_tools import _persist_split_manifest
+    from tcip_mcp.pipelines.data.split_construction import persist_split_manifest
 
     create_experiment("e1", {})
 
     class _DS:
         stems = ["a", "b"]
 
-    _persist_split_manifest("e1", _DS(), None, {"labels_dir": ""},
+    persist_split_manifest("e1", _DS(), None, {"labels_dir": ""},
                             dataset_id="x", dataset_fingerprint="yz")
     split = ts.read(exp.split_key("e1"))
     assert split["dataset_id"] == "x" and split["dataset_fingerprint"] == "yz"

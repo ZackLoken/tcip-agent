@@ -144,6 +144,7 @@ def test_worker_leaves_a_spatial_runs_identities_out_of_the_durable_config(tmp_p
 
     import tcip_mcp.tools.training_tools as ttools
     from tcip_mcp.experiments import config_key, create_experiment
+    from tcip_mcp.pipelines.data import split_construction as sc
     from tcip_mcp.pipelines.training import subprocess_worker as worker
 
     monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
@@ -167,7 +168,7 @@ def test_worker_leaves_a_spatial_runs_identities_out_of_the_durable_config(tmp_p
     def stop(*args, **kwargs):
         raise StopAfterSplit
 
-    monkeypatch.setattr(ttools, "_auto_train_val", stub_auto_train_val)
+    monkeypatch.setattr(sc, "auto_train_val", stub_auto_train_val)
     monkeypatch.setattr(worker, "_resolve_run_id_map", stop)
     with pytest.raises(StopAfterSplit):
         worker.run("run1", "exp1", str(out), "")

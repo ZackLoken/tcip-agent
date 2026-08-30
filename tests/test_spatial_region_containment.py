@@ -100,7 +100,7 @@ def test_persisted_four_way_geometry_admits_its_calibration_region_and_refuses_t
     """
     import tcip_store as ts
     from tcip_mcp.experiments import create_experiment, split_key
-    from tcip_mcp.tools.training_tools import _auto_train_val, _persist_split_manifest
+    from tcip_mcp.pipelines.data.split_construction import auto_train_val, persist_split_manifest
 
     images_dir, labels_dir, stem = _mosaic_dataset(tmp_path / "ds")
     data_cfg = {
@@ -109,11 +109,11 @@ def test_persisted_four_way_geometry_admits_its_calibration_region_and_refuses_t
         "split": {"val_ratio": 0.2, "test_ratio": 0.1, "seed": 1,
                   "reserve_calibration_fraction": 0.15},
     }
-    train_ds, val_ds, _ = _auto_train_val("detection", data_cfg, None)
+    train_ds, val_ds, _ = auto_train_val("detection", data_cfg, None)
     assert val_ds is not None
 
     create_experiment("exp_four_way", {})
-    _persist_split_manifest("exp_four_way", train_ds, val_ds, data_cfg)
+    persist_split_manifest("exp_four_way", train_ds, val_ds, data_cfg)
     spatial = ts.read(split_key("exp_four_way"))["spatial"]
     cal_region = spatial["calibration_region"]
     assert cal_region, "the writer produced no calibration region to read back"

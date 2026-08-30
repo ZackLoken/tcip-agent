@@ -147,8 +147,8 @@ def _patch_trial_machinery(monkeypatch, train_ds):
     import torch.utils.data as tud
 
     from tcip_mcp.pipelines.data import samplers
+    from tcip_mcp.pipelines.data import split_construction as sc
     from tcip_mcp.pipelines.training import generic_trainer as gt
-    from tcip_mcp.tools import training_tools as tt
 
     def fake_train(run, train_loader, val_loader, task="detection",
                    epoch_callback=None, resume_from=""):
@@ -157,7 +157,7 @@ def _patch_trial_machinery(monkeypatch, train_ds):
         return run
 
     monkeypatch.setattr(
-        tt, "_auto_train_val", lambda task, data_cfg, transforms: (train_ds, None, None))
+        sc, "auto_train_val", lambda task, data_cfg, transforms: (train_ds, None, None))
     monkeypatch.setattr(gt, "train", fake_train)
     monkeypatch.setattr(samplers, "build_sampler", lambda *a, **k: None)
     monkeypatch.setattr(tud, "DataLoader", lambda *a, **k: object())

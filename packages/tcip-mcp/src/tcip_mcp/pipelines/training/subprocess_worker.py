@@ -134,7 +134,7 @@ def _resolve_run_id_map(task: str, data_cfg: dict) -> tuple[str, str | None, dic
     ``assign_class_ids`` is a pure function of
     ``(registry, subject, attribute)``, "same registry + scope -> identical map, every call"
     (``class_registry.py``), so re-resolving it here from ``data_cfg``'s own
-    subject/attribute/labels_dir, the same inputs ``_auto_train_val`` already resolved it from
+    subject/attribute/labels_dir, the same inputs ``auto_train_val`` already resolved it from
     internally (``training_tools.py``'s own COCO-assembly branch calls this exact function),
     reproduces the identical map without depending on which internal dataset shape got built.
 
@@ -176,7 +176,9 @@ def run(run_id: str, experiment_id: str, output_dir: str, resume_from: str) -> N
     from tcip_mcp.pipelines.training.generic_trainer import (
         attach_run, seeded_loader_kwargs, stamp_effective_data_geometry, task_collate,
     )
-    from tcip_mcp.tools.training_tools import _auto_train_val, _dataset_identity, _persist_split_manifest
+    from tcip_mcp.pipelines.data.split_construction import (
+        auto_train_val, dataset_identity, persist_split_manifest,
+    )
 
     # This is its own process entry point: without this the whole run reads through GDAL's
     # stock cache default instead of the platform budget the server/backend entry points set.
@@ -206,7 +208,7 @@ def run(run_id: str, experiment_id: str, output_dir: str, resume_from: str) -> N
         from tcip_mcp.pipelines.data.augmentations import build_augmentation
         transforms = build_augmentation(aug_config)
 
-    train_ds, val_ds, label_digests = _auto_train_val(task, data_cfg, transforms)
+    train_ds, val_ds, label_digests = auto_train_val(task, data_cfg, transforms)
 
     split_cfg = data_cfg.get("split")
     if _is_manifest_bound_split(split_cfg):
@@ -271,10 +273,10 @@ def run(run_id: str, experiment_id: str, output_dir: str, resume_from: str) -> N
     # The dataset identity this run trains on, recomputed here (recompute-on-read is this fact's
     # own stated authority) rather than threaded across the process boundary; same deterministic
     # result the parent's own copy (used for the lineage record) already produced.
-    ds_id, ds_fp = _dataset_identity(data_cfg)
-    _persist_split_manifest(experiment_id, train_ds, val_ds, data_cfg,
-                            dataset_id=ds_id, dataset_fingerprint=ds_fp,
-                            label_digests=label_digests)
+    ds_id, ds_fp = dataset_identity(data_cfg)
+    persist_split_manifest(experiment_id, train_ds, val_ds, data_cfg,
+                           dataset_id=ds_id, dataset_fingerprint=ds_fp,
+                           label_digests=label_digests)
 
     from tcip_mcp.pipelines.training.envelope import TrainContext, run_training_envelope
 

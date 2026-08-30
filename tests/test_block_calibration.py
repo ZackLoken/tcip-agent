@@ -92,7 +92,7 @@ def _build_experiment(tmp_path: Path, *, reserve_frac: float = 0.15,
     ``spatial_manifest``.
     """
     from tcip_mcp.experiments import create_experiment
-    from tcip_mcp.tools.training_tools import _auto_train_val, _persist_split_manifest
+    from tcip_mcp.pipelines.data.split_construction import auto_train_val, persist_split_manifest
 
     root = tmp_path / "ds"
     images_dir, labels_dir = root / "images", root / "annotations"
@@ -114,10 +114,10 @@ def _build_experiment(tmp_path: Path, *, reserve_frac: float = 0.15,
     }
     if plant_csv_paths:
         data_cfg["plant_csv_paths"] = plant_csv_paths
-    train_ds, val_ds, _ = _auto_train_val("detection", data_cfg, None)
+    train_ds, val_ds, _ = auto_train_val("detection", data_cfg, None)
     assert val_ds is not None
     create_experiment(experiment_id, {"data": data_cfg})
-    _persist_split_manifest(experiment_id, train_ds, val_ds, data_cfg)
+    persist_split_manifest(experiment_id, train_ds, val_ds, data_cfg)
 
     checkpoint_path = _bespoke_detection_checkpoint(tmp_path)
     return {
@@ -1008,7 +1008,7 @@ def _build_attribute_scoped_experiment(
     from tcip_mcp.pipelines.model_build import build_model
     from tcip_mcp.pipelines.training.subprocess_worker import _resolve_run_id_map
     from tcip_mcp.tools.model_tools import register_model
-    from tcip_mcp.tools.training_tools import _auto_train_val, _persist_split_manifest
+    from tcip_mcp.pipelines.data.split_construction import auto_train_val, persist_split_manifest
 
     def _write_registry(values: tuple[str, ...]) -> None:
         write_registry(root / "classes.json", ClassRegistry(subjects=(
@@ -1035,12 +1035,12 @@ def _build_attribute_scoped_experiment(
         "split": {"val_ratio": 0.2, "test_ratio": 0.15, "seed": 1,
                   "reserve_calibration_fraction": 0.15},
     }
-    train_ds, val_ds, _ = _auto_train_val("detection", data_cfg, None)
+    train_ds, val_ds, _ = auto_train_val("detection", data_cfg, None)
     assert val_ds is not None
     _subject, _attribute, recorded_id_map = _resolve_run_id_map("detection", data_cfg)
     data_cfg["id_map"] = dict(recorded_id_map)
     create_experiment(experiment_id, {"data": data_cfg})
-    _persist_split_manifest(experiment_id, train_ds, val_ds, data_cfg)
+    persist_split_manifest(experiment_id, train_ds, val_ds, data_cfg)
 
     _write_registry(reordered_values)
 

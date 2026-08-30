@@ -1,7 +1,7 @@
 """Training and tuning binding to a named split manifest (``data.split.manifest_dir``).
 
 The manifest is drawn by ``make_splits`` (see ``test_data_tools.py``); this file covers the
-consumer side: ``bind_manifest_stems``, ``read_split_manifest_dir``, and ``_auto_train_val``'s own
+consumer side: ``bind_manifest_stems``, ``read_split_manifest_dir``, and ``auto_train_val``'s own
 branch that binds a run to one.
 """
 
@@ -251,7 +251,7 @@ def test_read_split_manifest_dir_refuses_a_record_with_no_subject_or_members(tmp
         read_split_manifest_dir(out)
 
 
-# -- _auto_train_val's manifest branch -------------------------------------------
+# -- auto_train_val's manifest branch -------------------------------------------
 
 
 def _run_data_cfg(root: Path, manifest_dir: Path, date: str, *, subject: str = SUBJECT,
@@ -299,7 +299,7 @@ def test_auto_train_val_admits_a_confirmed_negative_with_data_date_unset(tmp_pat
     own date, the date the split manifest was drawn under, so a manifest member confirmed
     negative under that date still admits."""
     from tcip_mcp.dataset_layout import record_image_statuses, status_bucket
-    from tcip_mcp.tools.training_tools import _auto_train_val
+    from tcip_mcp.pipelines.data.split_construction import auto_train_val
 
     root = _dataset_with_a_confirmed_negative(tmp_path / "ds")
     record_image_statuses(root, status_bucket(SUBJECT, DATES[0]), {"n.jpg": "negative"},
@@ -314,20 +314,20 @@ def test_auto_train_val_admits_a_confirmed_negative_with_data_date_unset(tmp_pat
         "split": {"manifest_dir": str(out)},
     }
 
-    train_ds, val_ds, _ = _auto_train_val("detection", data_cfg, None)
+    train_ds, val_ds, _ = auto_train_val("detection", data_cfg, None)
 
     assert "n" in train_ds.stems + val_ds.stems
 
 
 def test_auto_train_val_binds_to_the_manifests_own_partition_for_its_date(tmp_path: Path):
-    from tcip_mcp.tools.training_tools import _auto_train_val
+    from tcip_mcp.pipelines.data.split_construction import auto_train_val
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
     manifest = _draw(root, out)
     data_cfg = _run_data_cfg(root, out, DATES[0])
 
-    train_ds, val_ds, _ = _auto_train_val("detection", data_cfg, None)
+    train_ds, val_ds, _ = auto_train_val("detection", data_cfg, None)
 
     date_members = {s for identity in manifest["splits"]["train"] + manifest["splits"]["val"]
                    for d, s in [identity.split("/", 1)] if d == DATES[0]}
@@ -344,15 +344,15 @@ def test_auto_train_val_second_bind_on_the_same_config_binds_again(tmp_path: Pat
     """The write-back lands under keys the conflict check never reads, so a second bind on the
     same config dict (a bespoke ``ctx.auto_train_val`` loop reusing ``run.config``) binds again
     rather than refusing against its own first bind."""
-    from tcip_mcp.tools.training_tools import _auto_train_val
+    from tcip_mcp.pipelines.data.split_construction import auto_train_val
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
     _draw(root, out)
     data_cfg = _run_data_cfg(root, out, DATES[0])
 
-    _auto_train_val("detection", data_cfg, None)
-    train_ds, val_ds, _ = _auto_train_val("detection", data_cfg, None)
+    auto_train_val("detection", data_cfg, None)
+    train_ds, val_ds, _ = auto_train_val("detection", data_cfg, None)
 
     assert train_ds.stems and val_ds.stems
 
@@ -362,7 +362,7 @@ def test_auto_train_val_binds_an_explicit_map_manifest_twice_and_persists_its_na
     """A manifest drawn with an agent-derived ``group_key_map`` binds from a fresh config, binds
     again on the same config dict, and its per-date narrowed map survives into ``split.json``."""
     from tcip_mcp.experiments import create_experiment, read_split_manifest
-    from tcip_mcp.tools.training_tools import _auto_train_val, _persist_split_manifest
+    from tcip_mcp.pipelines.data.split_construction import auto_train_val, persist_split_manifest
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
@@ -376,14 +376,14 @@ def test_auto_train_val_binds_an_explicit_map_manifest_twice_and_persists_its_na
     assert "error" not in result, result
     data_cfg = _run_data_cfg(root, out, DATES[0])
 
-    _auto_train_val("detection", data_cfg, None)
-    train_ds, val_ds, _ = _auto_train_val("detection", data_cfg, None)
+    auto_train_val("detection", data_cfg, None)
+    train_ds, val_ds, _ = auto_train_val("detection", data_cfg, None)
 
     assert train_ds.stems and val_ds.stems
     assert data_cfg["split"]["resolved_group_key_map"] == dict(stem_groups)
 
     create_experiment("exp_explicit_map_bind", {})
-    _persist_split_manifest("exp_explicit_map_bind", train_ds, val_ds, data_cfg)
+    persist_split_manifest("exp_explicit_map_bind", train_ds, val_ds, data_cfg)
     persisted = read_split_manifest("exp_explicit_map_bind")
     assert persisted["group_key_map"] == dict(stem_groups)
 
@@ -391,13 +391,14 @@ def test_auto_train_val_binds_an_explicit_map_manifest_twice_and_persists_its_na
 def test_preflight_config_on_a_bound_config_admits_it_again(tmp_path: Path):
     """Preflighting a config already bound once (the same conflict-key rail this file's other
     preflight tests exercise) must not itself read as a conflict."""
-    from tcip_mcp.tools.training_tools import _auto_train_val, preflight_config
+    from tcip_mcp.tools.training_tools import preflight_config
+    from tcip_mcp.pipelines.data.split_construction import auto_train_val
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
     _draw(root, out)
     data_cfg = _run_data_cfg(root, out, DATES[0])
-    _auto_train_val("detection", data_cfg, None)
+    auto_train_val("detection", data_cfg, None)
 
     result = preflight_config(_preflight_config(root, out, DATES[0], split=data_cfg["split"]))
 
@@ -411,32 +412,32 @@ def test_relaunch_from_the_durable_record_binds_again(tmp_path: Path):
     import tcip_store as ts
     from tcip_mcp.experiments import config_key, create_experiment
     from tcip_mcp.pipelines.training.subprocess_worker import _patch_experiment_config_split
-    from tcip_mcp.tools.training_tools import _auto_train_val
+    from tcip_mcp.pipelines.data.split_construction import auto_train_val
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
     _draw(root, out)
     data_cfg = _run_data_cfg(root, out, DATES[0])
-    _auto_train_val("detection", data_cfg, None)
+    auto_train_val("detection", data_cfg, None)
 
     create_experiment("exp_relaunch_split_bind", {"data": dict(data_cfg)})
     _patch_experiment_config_split("exp_relaunch_split_bind", data_cfg["split"])
     durable_data_cfg = ts.read(config_key("exp_relaunch_split_bind"))["data"]
 
-    train_ds, val_ds, _ = _auto_train_val("detection", durable_data_cfg, None)
+    train_ds, val_ds, _ = auto_train_val("detection", durable_data_cfg, None)
 
     assert train_ds.stems and val_ds.stems
 
 
 def test_auto_train_val_binds_the_same_tree_for_the_other_subject(tmp_path: Path):
-    from tcip_mcp.tools.training_tools import _auto_train_val
+    from tcip_mcp.pipelines.data.split_construction import auto_train_val
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
     _draw(root, out, subject=OTHER_SUBJECT, seed=0)
     data_cfg = _run_data_cfg(root, out, DATES[0], subject=OTHER_SUBJECT)
 
-    train_ds, val_ds, _ = _auto_train_val("detection", data_cfg, None)
+    train_ds, val_ds, _ = auto_train_val("detection", data_cfg, None)
 
     # Only stems "c", "d", "e" and "f" carry the other subject on this date; the manifest's own
     # calibration side holds out some of them, so train+val is a subset, never the whole four.
@@ -445,7 +446,7 @@ def test_auto_train_val_binds_the_same_tree_for_the_other_subject(tmp_path: Path
 
 
 def test_auto_train_val_binds_an_attribute_scoped_tree(tmp_path: Path):
-    from tcip_mcp.tools.training_tools import _auto_train_val
+    from tcip_mcp.pipelines.data.split_construction import auto_train_val
 
     root = _attribute_scoped_dataset(tmp_path / "ds")
     out = tmp_path / "m"
@@ -454,7 +455,7 @@ def test_auto_train_val_binds_an_attribute_scoped_tree(tmp_path: Path):
     assert "error" not in result, result
     data_cfg = _run_data_cfg(root, out, DATES[0], attribute="condition")
 
-    train_ds, val_ds, _ = _auto_train_val("detection", data_cfg, None)
+    train_ds, val_ds, _ = auto_train_val("detection", data_cfg, None)
 
     all_assessed = {"assessed_a", "assessed_b", "assessed_c", "assessed_d"}
     assert set(train_ds.stems + val_ds.stems) <= all_assessed
@@ -463,7 +464,7 @@ def test_auto_train_val_binds_an_attribute_scoped_tree(tmp_path: Path):
 
 
 def test_auto_train_val_manifest_conflicts_with_val_images_dir(tmp_path: Path):
-    from tcip_mcp.tools.training_tools import _auto_train_val
+    from tcip_mcp.pipelines.data.split_construction import auto_train_val
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
@@ -472,11 +473,11 @@ def test_auto_train_val_manifest_conflicts_with_val_images_dir(tmp_path: Path):
     data_cfg["val_images_dir"] = str(root / "images" / DATES[1])
 
     with pytest.raises(ValueError, match="val_images_dir"):
-        _auto_train_val("detection", data_cfg, None)
+        auto_train_val("detection", data_cfg, None)
 
 
 def test_auto_train_val_manifest_conflicts_with_a_drawn_splits_own_parameters(tmp_path: Path):
-    from tcip_mcp.tools.training_tools import _auto_train_val
+    from tcip_mcp.pipelines.data.split_construction import auto_train_val
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
@@ -485,11 +486,11 @@ def test_auto_train_val_manifest_conflicts_with_a_drawn_splits_own_parameters(tm
     data_cfg["split"]["val_ratio"] = 0.3
 
     with pytest.raises(ValueError, match="val_ratio"):
-        _auto_train_val("detection", data_cfg, None)
+        auto_train_val("detection", data_cfg, None)
 
 
 def test_auto_train_val_manifest_refuses_a_task_it_does_not_admit(tmp_path: Path):
-    from tcip_mcp.tools.training_tools import _auto_train_val
+    from tcip_mcp.pipelines.data.split_construction import auto_train_val
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
@@ -497,11 +498,11 @@ def test_auto_train_val_manifest_refuses_a_task_it_does_not_admit(tmp_path: Path
     data_cfg = _run_data_cfg(root, out, DATES[0])
 
     with pytest.raises(ValueError, match="semantic_seg"):
-        _auto_train_val("semantic_seg", data_cfg, None)
+        auto_train_val("semantic_seg", data_cfg, None)
 
 
 def test_auto_train_val_manifest_refuses_a_disagreeing_date(tmp_path: Path):
-    from tcip_mcp.tools.training_tools import _auto_train_val
+    from tcip_mcp.pipelines.data.split_construction import auto_train_val
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
@@ -510,11 +511,11 @@ def test_auto_train_val_manifest_refuses_a_disagreeing_date(tmp_path: Path):
     data_cfg["date"] = DATES[1]
 
     with pytest.raises(ValueError, match="data.date"):
-        _auto_train_val("detection", data_cfg, None)
+        auto_train_val("detection", data_cfg, None)
 
 
 def test_auto_train_val_manifest_refuses_an_images_root_mismatch(tmp_path: Path):
-    from tcip_mcp.tools.training_tools import _auto_train_val
+    from tcip_mcp.pipelines.data.split_construction import auto_train_val
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
@@ -524,13 +525,13 @@ def test_auto_train_val_manifest_refuses_an_images_root_mismatch(tmp_path: Path)
     data_cfg = _run_data_cfg(root, out, DATES[0], images_dir=other_images)
 
     with pytest.raises(ValueError, match="images_root"):
-        _auto_train_val("detection", data_cfg, None)
+        auto_train_val("detection", data_cfg, None)
 
 
 def test_auto_train_val_manifest_refuses_a_moved_images_root_by_name(tmp_path: Path):
     """A manifest's recorded images_root that no longer exists on disk (a moved or renamed
     dataset) answers the named refusal, never a bare crash from comparing against a gone path."""
-    from tcip_mcp.tools.training_tools import _auto_train_val
+    from tcip_mcp.pipelines.data.split_construction import auto_train_val
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
@@ -540,7 +541,7 @@ def test_auto_train_val_manifest_refuses_a_moved_images_root_by_name(tmp_path: P
     data_cfg = _run_data_cfg(root, out, DATES[0], images_dir=moved)
 
     with pytest.raises(ValueError, match="images_root"):
-        _auto_train_val("detection", data_cfg, None)
+        auto_train_val("detection", data_cfg, None)
 
 
 def test_preflight_config_flags_a_moved_images_root_by_name(tmp_path: Path):
@@ -561,7 +562,7 @@ def test_preflight_config_flags_a_moved_images_root_by_name(tmp_path: Path):
 def test_auto_train_val_manifest_binding_failure_raises_rather_than_degrading(tmp_path: Path):
     """A stem the data no longer admits (the label emptied since the split was drawn) must raise
     to the caller, never silently degrade to training on the manifest's held-out side."""
-    from tcip_mcp.tools.training_tools import _auto_train_val
+    from tcip_mcp.pipelines.data.split_construction import auto_train_val
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
@@ -572,7 +573,7 @@ def test_auto_train_val_manifest_binding_failure_raises_rather_than_degrading(tm
     data_cfg = _run_data_cfg(root, out, DATES[0])
 
     with pytest.raises(ValueError, match="not in this run's admitted"):
-        _auto_train_val("detection", data_cfg, None)
+        auto_train_val("detection", data_cfg, None)
 
 
 def test_auto_train_val_manifest_refuses_a_dataset_level_coco_misrouted_as_labels_dir(
@@ -581,7 +582,7 @@ def test_auto_train_val_manifest_refuses_a_dataset_level_coco_misrouted_as_label
     raised ahead of admission and never folded into a binding failure."""
     import json
 
-    from tcip_mcp.tools.training_tools import _auto_train_val
+    from tcip_mcp.pipelines.data.split_construction import auto_train_val
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
@@ -595,7 +596,7 @@ def test_auto_train_val_manifest_refuses_a_dataset_level_coco_misrouted_as_label
         {"images": [], "annotations": [], "categories": []}))
 
     with pytest.raises(ValueError, match="data.labels_dir="):
-        _auto_train_val("detection", data_cfg, None)
+        auto_train_val("detection", data_cfg, None)
 
 
 def test_auto_train_val_reads_the_label_format_once_per_run(tmp_path: Path, monkeypatch):
@@ -603,6 +604,7 @@ def test_auto_train_val_reads_the_label_format_once_per_run(tmp_path: Path, monk
     once: the caller reads it ahead of its own handler, and the admission build it feeds into
     never re-reads it."""
     import tcip_mcp.tools.training_tools as ttools
+    from tcip_mcp.pipelines.data.split_construction import auto_train_val
 
     calls: list[None] = []
     real = ttools._checked_label_format
@@ -617,7 +619,7 @@ def test_auto_train_val_reads_the_label_format_once_per_run(tmp_path: Path, monk
     out = tmp_path / "m"
     _draw(root, out)
     manifest_cfg = _run_data_cfg(root, out, DATES[0])
-    ttools._auto_train_val("detection", manifest_cfg, None)
+    auto_train_val("detection", manifest_cfg, None)
     assert len(calls) == 1
 
     calls.clear()
@@ -626,27 +628,27 @@ def test_auto_train_val_reads_the_label_format_once_per_run(tmp_path: Path, monk
         "labels_dir": str(root / "annotations" / DATES[0]),
         "subject": SUBJECT, "attribute": None,
     }
-    ttools._auto_train_val("detection", auto_cfg, None)
+    auto_train_val("detection", auto_cfg, None)
     assert len(calls) == 1
 
 
-# -- _persist_split_manifest / the worker's config patch --------------------------
+# -- persist_split_manifest / the worker's config patch --------------------------
 
 
 def test_persist_split_manifest_carries_the_manifest_binding(tmp_path: Path):
     from tcip_mcp.experiments import create_experiment, read_split_manifest
     from tcip_mcp.pipelines.data.splits import bind_manifest_stems
     from tcip_mcp.pipelines.resolution import dataset_hash
-    from tcip_mcp.tools.training_tools import _auto_train_val, _persist_split_manifest
+    from tcip_mcp.pipelines.data.split_construction import auto_train_val, persist_split_manifest
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
     manifest = _draw(root, out)
     data_cfg = _run_data_cfg(root, out, DATES[0])
-    train_ds, val_ds, _ = _auto_train_val("detection", data_cfg, None)
+    train_ds, val_ds, _ = auto_train_val("detection", data_cfg, None)
 
     create_experiment("exp_manifest_binding", {})
-    _persist_split_manifest("exp_manifest_binding", train_ds, val_ds, data_cfg)
+    persist_split_manifest("exp_manifest_binding", train_ds, val_ds, data_cfg)
 
     persisted = read_split_manifest("exp_manifest_binding")
     assert persisted["date"] == DATES[0]
@@ -672,7 +674,7 @@ def test_persist_split_manifest_carries_no_stale_binding_when_this_run_did_not_b
     run's ``manifest_binding``) relaunched with no ``manifest_dir`` draws its own split and
     records none of the earlier binding beside the drawn membership."""
     from tcip_mcp.experiments import create_experiment, read_split_manifest
-    from tcip_mcp.tools.training_tools import _auto_train_val, _persist_split_manifest
+    from tcip_mcp.pipelines.data.split_construction import auto_train_val, persist_split_manifest
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     data_cfg = {
@@ -686,7 +688,7 @@ def test_persist_split_manifest_carries_no_stale_binding_when_this_run_did_not_b
         },
     }
 
-    train_ds, val_ds, _ = _auto_train_val("detection", data_cfg, None)
+    train_ds, val_ds, _ = auto_train_val("detection", data_cfg, None)
 
     assert val_ds is not None
     assert "manifest_binding" not in data_cfg["split"]
@@ -694,7 +696,7 @@ def test_persist_split_manifest_carries_no_stale_binding_when_this_run_did_not_b
     assert "resolved_seed" not in data_cfg["split"]
 
     create_experiment("exp_relaunch_no_manifest", {})
-    _persist_split_manifest("exp_relaunch_no_manifest", train_ds, val_ds, data_cfg)
+    persist_split_manifest("exp_relaunch_no_manifest", train_ds, val_ds, data_cfg)
 
     persisted = read_split_manifest("exp_relaunch_no_manifest")
     assert "manifest_binding" not in persisted
@@ -720,7 +722,7 @@ def test_worker_leaves_a_relaunched_spatial_runs_stale_binding_out_of_the_durabl
     """A launch config inherited from an earlier bound run (its ``data.split`` still carrying
     that run's ``manifest_binding``) relaunched with no ``manifest_dir`` over a single-source,
     spatially splittable tree must not mirror any binding into the durable record: the real
-    ``_auto_train_val`` clears the stale block before it resolves its own spatial split, so the
+    ``auto_train_val`` clears the stale block before it resolves its own spatial split, so the
     worker's patch-back gate never fires."""
     import tcip_store as ts
     from tcip_mcp.experiments import config_key, create_experiment
@@ -831,7 +833,7 @@ def test_preflight_config_accepts_an_empty_string_attribute_the_child_normalizes
 
 def test_hpo_trial_snapshot_carries_the_manifest_binding(tmp_path: Path, monkeypatch):
     """A tuning trial binds to the manifest its base config names through the same
-    ``_auto_train_val`` branch a launched run uses, and the trial's persisted resolved config
+    ``auto_train_val`` branch a launched run uses, and the trial's persisted resolved config
     carries that binding, so a sweep's provenance names the partition each trial trained on."""
     import torch.utils.data as tud
 
