@@ -216,7 +216,7 @@ def test_class_distribution_on_a_shared_coco_scopes_to_its_own_stems(tmp_path):
 
 
 def test_auto_train_val_refuses_a_dataset_level_coco_misrouted_as_labels_dir(tmp_path, caplog):
-    """training_tools.auto_train_val's own COCO-assembly branch must refuse the same shape
+    """split_construction.auto_train_val's own COCO-assembly branch must refuse the same shape
     build_dataset does, rather than silently training without validation on it: the refusal
     reaches the caller directly, never as a fallback build's own second raise behind a misleading
     "training without validation" warning."""

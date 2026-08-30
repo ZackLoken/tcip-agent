@@ -1,4 +1,4 @@
-"""Task-agnostic training loop for a bespoke ``model_source`` model, alone in this module.
+"""Task-agnostic training loop for a bespoke ``model_source`` model.
 
 This trainer works with *any* task type (detection, classification,
 ordinal, regression, segmentation) because it delegates everything
@@ -9,8 +9,8 @@ early stopping, mixed precision, gradient accumulation, checkpoints.
 
 The run registry (``TrainRun``, create/attach/get/list/cancel_run) lives in
 ``run_registry.py``; the collate functions (``task_collate`` and friends) live in
-``collation.py``; ``checkpoint_key``/``write_checkpoint``/``RUN_CHECKPOINT_STORE`` stay here,
-a distinct persistence concern from either.
+``collation.py``; ``checkpoint_key``/``write_checkpoint``/``RUN_CHECKPOINT_STORE`` are this
+module's own persistence concern, distinct from either.
 """
 
 from __future__ import annotations

@@ -408,7 +408,7 @@ def _spatial_strip_geometric_disjointness(spatial: dict, cal_rects: dict, hold_r
     """The geometric form of the spatial_strip check: a cal/holdout rect must be fully contained
     in a persisted non-train region (``val_region``/``test_region``/``calibration_region``, the
     last only present on a four-way split) and disjoint from every persisted train region, read
-    from ``spatial`` (the ``split.json`` ``"spatial"`` block ``_persist_split_manifest`` writes).
+    from ``spatial`` (the ``split.json`` ``"spatial"`` block ``persist_split_manifest`` writes).
     Compares real geometry, so it catches a leak the lexical stem-identity check can't: a rect
     that spills into the reserved train area from a source stem whose name never matches the
     training stem's own.

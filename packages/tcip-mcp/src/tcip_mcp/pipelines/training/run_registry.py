@@ -80,9 +80,10 @@ def create_run(config: dict, output_dir: str, origin: str = "training") -> Train
     # uuid suffix (not len(_RUNS)): same-second launches from this process, or from a
     # different process sharing the experiments dir, must never collide on one run_id.
     run_id = f"run_{int(time.time())}_{uuid.uuid4().hex[:6]}"
-    # Never start an unseeded run: draw one from OS entropy and record it in the config so
-    # the effective seed is always on record (every checkpoint embeds it) and reproducible.
+    # Never start an unseeded run: draw one from OS entropy if the caller set none.
     if config.get("seed", config.get("training", {}).get("seed")) is None:
+        # Written into the config in place: launch_training's post-create_run snapshot and
+        # every checkpoint both embed it, so the drawn seed is always on record and rerun-exact.
         config["seed"] = random.SystemRandom().randrange(2**31)
         logger.info("Run %s: no seed configured; drew seed=%d.", run_id, config["seed"])
     run = TrainRun(run_id=run_id, config=config, output_dir=output_dir, origin=origin)
