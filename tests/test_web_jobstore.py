@@ -124,14 +124,14 @@ def test_inference_rehydrate_marks_dead_jobs_interrupted(tmp_path, monkeypatch):
         {"job_id": "dead", "status": "running", "done": 1, "total": 5,
          "images_dir": "i", "output_dir": "o", "error": None},
     ])
-    inference._jobs.clear()
+    inference._registry.jobs.clear()
     try:
         inference.rehydrate_for_current_root()
         jobs = {j["job_id"]: j for j in inference.list_jobs()["jobs"]}
         assert jobs["done"]["status"] == "completed"      # terminal preserved
         assert jobs["dead"]["status"] == "interrupted"    # thread gone -> not resumable
     finally:
-        inference._jobs.clear()
+        inference._registry.jobs.clear()
 
 
 def test_tuning_rehydrate_marks_dead_sweeps_interrupted(tmp_path, monkeypatch):
@@ -143,14 +143,14 @@ def test_tuning_rehydrate_marks_dead_sweeps_interrupted(tmp_path, monkeypatch):
         {"sweep_id": "s_done", "status": "completed", "error": None, "has_result": True},
         {"sweep_id": "s_dead", "status": "running", "error": None, "has_result": False},
     ])
-    tuning._sweeps.clear()
+    tuning._registry.jobs.clear()
     try:
         tuning.rehydrate_for_current_root()
         got = {s["sweep_id"]: s for s in tuning.list_sweeps()["sweeps"]}
         assert got["s_done"]["status"] == "completed"
         assert got["s_dead"]["status"] == "interrupted"
     finally:
-        tuning._sweeps.clear()
+        tuning._registry.jobs.clear()
 
 
 def test_inference_jobs_persist_list_and_rehydrate_per_root_across_a_repin(tmp_path, monkeypatch):
@@ -187,11 +187,11 @@ def test_inference_jobs_persist_list_and_rehydrate_per_root_across_a_repin(tmp_p
         assert [d["job_id"] for d in docs_a] == ["a1"]
         assert [d["job_id"] for d in docs_b] == ["b1"]
 
-        inference._jobs.clear()
+        inference._registry.jobs.clear()
         inference.rehydrate_for_current_root()
         assert [j["job_id"] for j in inference.list_jobs()["jobs"]] == ["b1"]
     finally:
-        inference._jobs.clear()
+        inference._registry.jobs.clear()
 
 
 def test_inference_rehydrate_restores_dropped_nonpositive_boxes(tmp_path, monkeypatch):
@@ -207,13 +207,13 @@ def test_inference_rehydrate_restores_dropped_nonpositive_boxes(tmp_path, monkey
     job.dropped_boxes = 3
     inference._register(job)
 
-    inference._jobs.clear()
+    inference._registry.jobs.clear()
     try:
         inference.rehydrate_for_current_root()
         jobs = {j["job_id"]: j for j in inference.list_jobs()["jobs"]}
         assert jobs["j-dropped"]["dropped_nonpositive_boxes"] == 3
     finally:
-        inference._jobs.clear()
+        inference._registry.jobs.clear()
 
 
 def test_review_priority_queue_persists_lists_and_rehydrates_per_root_across_a_repin(
@@ -315,7 +315,7 @@ def test_tuning_sweeps_persist_list_and_rehydrate_per_root_across_a_repin(tmp_pa
 
     job_a = tuning.HPOJob(sweep_id="hpo-a1")
     with tuning._lock:
-        tuning._sweeps[job_a.sweep_id] = job_a
+        tuning._registry.jobs[job_a.sweep_id] = job_a
     tuning._persist()
 
     proj_b = workspace.project_path("chestnut_burr_other")
@@ -324,7 +324,7 @@ def test_tuning_sweeps_persist_list_and_rehydrate_per_root_across_a_repin(tmp_pa
 
     job_b = tuning.HPOJob(sweep_id="hpo-b1")
     with tuning._lock:
-        tuning._sweeps[job_b.sweep_id] = job_b
+        tuning._registry.jobs[job_b.sweep_id] = job_b
     tuning._persist()
 
     try:
@@ -335,11 +335,11 @@ def test_tuning_sweeps_persist_list_and_rehydrate_per_root_across_a_repin(tmp_pa
         assert [d["sweep_id"] for d in docs_a] == ["hpo-a1"]
         assert [d["sweep_id"] for d in docs_b] == ["hpo-b1"]
 
-        tuning._sweeps.clear()
+        tuning._registry.jobs.clear()
         tuning.rehydrate_for_current_root()
-        assert set(tuning._sweeps) == {"hpo-b1"}
+        assert set(tuning._registry.jobs) == {"hpo-b1"}
     finally:
-        tuning._sweeps.clear()
+        tuning._registry.jobs.clear()
 
 
 def test_inference_cancel_endpoint_and_worker(tmp_path, monkeypatch):
@@ -398,7 +398,7 @@ def test_inference_cancel_reaches_a_job_launched_under_a_previous_root(tmp_path,
 
     from tcip_mcp import workspace
     from tcip_web.routes._body_common import EmptyBodyPayload
-    from tcip_web.routes.inference import InferenceJob, _get, _jobs, _register, cancel_job
+    from tcip_web.routes.inference import InferenceJob, _get, _register, _registry, cancel_job
 
     job = InferenceJob(
         job_id="launched-under-a", checkpoint_path="c", images_dir="i", output_dir="o",
@@ -421,7 +421,7 @@ def test_inference_cancel_reaches_a_job_launched_under_a_previous_root(tmp_path,
             cancel_job("never-launched", EmptyBodyPayload())
         assert miss.value.status_code == 404
     finally:
-        _jobs.clear()
+        _registry.jobs.clear()
 
 
 def test_rehydrate_bounds_the_whole_dict_across_every_root_it_adopts(tmp_path, monkeypatch):
@@ -444,14 +444,14 @@ def test_rehydrate_bounds_the_whole_dict_across_every_root_it_adopts(tmp_path, m
         ]
         persist_to(job_registry_key("inference_jobs", root=proj), summaries)
 
-    inference._jobs.clear()
+    inference._registry.jobs.clear()
     try:
         for name in names:
             workspace.set_active_project(name)
             inference.rehydrate_for_current_root()
-        assert len(inference._jobs) <= MAX_JOBS
+        assert len(inference._registry.jobs) <= MAX_JOBS
     finally:
-        inference._jobs.clear()
+        inference._registry.jobs.clear()
 
 
 def test_priority_queue_by_id_reaches_a_job_launched_under_a_previous_root(tmp_path, monkeypatch):
@@ -513,15 +513,14 @@ def test_rehydrate_never_displaces_a_job_still_live_from_another_root(tmp_path, 
         job_b.status = "completed"
         inference._register(job_b)
 
-        # job_a is never cleared from _jobs: it is still live in memory when the rehydrate
-        # for root B's own registry runs, the shape a repin takes in the running process.
+        # job_a is never cleared from the registry: still live when root B's rehydrate runs.
         inference.rehydrate_for_current_root()
 
-        assert inference._jobs["live-a"] is job_a
+        assert inference._registry.jobs["live-a"] is job_a
         assert job_a.status == "running"
         assert job_a.done == 2 and job_a.total == 5
     finally:
-        inference._jobs.clear()
+        inference._registry.jobs.clear()
 
 
 def test_job_registry_register_get_persist_rehydrate_match_the_module_shape(tmp_path, monkeypatch):

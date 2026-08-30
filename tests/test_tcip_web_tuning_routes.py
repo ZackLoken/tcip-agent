@@ -153,7 +153,7 @@ def test_a_live_sweep_is_not_listed_twice_by_its_own_manifest(client, hpo_root, 
     from tcip_web.routes import tuning
 
     _write_sweep(hpo_root, "hpo_dup00001", status="completed")
-    monkeypatch.setitem(tuning._sweeps, "hpo_dup00001",
+    monkeypatch.setitem(tuning._registry.jobs, "hpo_dup00001",
                         tuning.HPOJob(sweep_id="hpo_dup00001", status="running"))
 
     sweeps = client.get("/api/tuning/sweeps").json()["sweeps"]
@@ -232,18 +232,19 @@ def test_get_sweep_serves_the_manifest_result_for_a_rehydrated_completed_sweep(
 
     job = tuning.HPOJob(sweep_id="hpo_rehydr01", status="completed")
     with tuning._lock:
-        tuning._sweeps[job.sweep_id] = job
+        tuning._registry.jobs[job.sweep_id] = job
     tuning._persist()
-    tuning._sweeps.clear()
+    tuning._registry.jobs.clear()
     tuning.rehydrate_for_current_root()
 
     try:
-        assert tuning._sweeps["hpo_rehydr01"].result == {}  # the rehydrated entry itself is bare
+        # the rehydrated entry itself is bare
+        assert tuning._registry.jobs["hpo_rehydr01"].result == {}
         body = client.get("/api/tuning/sweeps/hpo_rehydr01").json()
         assert body["result"]["best_params"] == {"lr": 0.01}
         assert body["result"]["best_value_state"] == "nan"
     finally:
-        tuning._sweeps.clear()
+        tuning._registry.jobs.clear()
 
 
 def test_list_trials_reports_platform_trial_dirs_only(client, hpo_root) -> None:
@@ -518,7 +519,7 @@ def test_a_launched_sweep_stays_reachable_after_the_backend_repins(
     assert resp.status_code == 200
     sweep_id = resp.json()["sweep_id"]
     assert tuning.wait_for_workers(timeout_s=_worker_join_bound()) == ()
-    assert tuning._sweeps[sweep_id].platform_root == str(launch_root)
+    assert tuning._registry.jobs[sweep_id].platform_root == str(launch_root)
 
     other_proj = workspace.project_path("chestnut_burr_other")
     (other_proj / ".tcip").mkdir(parents=True)

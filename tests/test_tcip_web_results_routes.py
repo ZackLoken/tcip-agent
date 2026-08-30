@@ -838,8 +838,8 @@ def test_inference_list_jobs_carries_each_jobs_warning(client: TestClient) -> No
                    if r["job_id"] == "inf-warn-test")
         assert row["warning"] == "3 images carried no readable capture date"
     finally:
-        with inference_routes._job_lock:
-            inference_routes._jobs.pop("inf-warn-test", None)
+        with inference_routes._registry.lock:
+            inference_routes._registry.jobs.pop("inf-warn-test", None)
 
 
 def test_inference_stream_to_a_missing_job_sends_a_typed_terminal_frame(
@@ -867,8 +867,8 @@ def test_inference_by_id_job_route_is_retired(client: TestClient) -> None:
     try:
         assert client.get("/api/inference/jobs/inf-retired-test").status_code == 404
     finally:
-        with inference_routes._job_lock:
-            inference_routes._jobs.pop("inf-retired-test", None)
+        with inference_routes._registry.lock:
+            inference_routes._registry.jobs.pop("inf-retired-test", None)
 
 
 def test_phenology_measurement_refuses_when_the_delivered_dataset_carries_no_registry(

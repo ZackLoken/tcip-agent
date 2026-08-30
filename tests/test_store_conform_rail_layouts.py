@@ -226,12 +226,12 @@ def test_the_priority_queue_and_hpo_registries_are_claimed_beside_inference_jobs
                                      dataset_root="d")
         )
         with tuning._lock:
-            tuning._sweeps["hpo1"] = tuning.HPOJob(sweep_id="hpo1")
+            tuning._registry.jobs["hpo1"] = tuning.HPOJob(sweep_id="hpo1")
         tuning._persist()
 
         names = {p.name for p in unconformed_files(str(tmp_path), ROOT)}
     review._pq_registry.jobs.clear()
-    tuning._sweeps.clear()
+    tuning._registry.jobs.clear()
 
     assert "review_priority_jobs.json" in names
     assert "hpo_sweeps.json" in names
