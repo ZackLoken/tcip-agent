@@ -133,6 +133,7 @@ def force_redraw_cal_holdout_split(
         )
         from tcip_mcp.tools.data_tools import read_split_manifest_dir
 
+        assert labels_dir is not None, "the split_manifest_dir refusal above requires it"
         manifest = read_split_manifest_dir(split_manifest_dir)
         present, _ = label_image_stems(labels_dir, images_dir)
         try:
@@ -153,6 +154,7 @@ def force_redraw_cal_holdout_split(
                              "never reads, so state the root those labels' own lock lives under."}
 
     if identity_hash is None:
+        assert labels_dir is not None, "the earlier refusal above requires one of the two"
         # dataset_hash enumerates through prediction_documents and hashes each file's raw bytes;
         # it never parses one, so it cannot raise the named error the other reads here guard for.
         identity_hash = dataset_hash(labels_dir, stems=manifest_stems)
@@ -170,6 +172,8 @@ def force_redraw_cal_holdout_split(
                        "holdout": old_lock.get("holdout", [])} if old_lock else None)
 
     if manifest_stems is not None:
+        # Set only inside the split_manifest_dir branch above, which already required labels_dir.
+        assert labels_dir is not None, "manifest_stems is only set where labels_dir was required"
         stems = manifest_stems
         try:
             annotation_counts = {
