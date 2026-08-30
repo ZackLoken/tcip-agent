@@ -74,7 +74,8 @@ applied twice or skipped.
 | `segment_prompt` | Engine-assisted polygon generation from point/box/grid prompts (`engine='sam'` default) |
 | `score_predictions` | Score predictions vs GT (image file or dataset dir); `detail=True` adds per-detection TP/FP/FN match data |
 | `push_panel_data` | Push an arbitrary event to a GUI panel over the tcip-web backend, not restricted to images/annotations |
-| `prioritize_review_queue` | Rank unlabeled images by uncertainty/diversity (`strategy="informativeness"`, default), or `strategy="confidence_triage"` to partition by confidence |
+| `prioritize_review_queue` | Rank unlabeled images by active-learning uncertainty/diversity for the next review batch |
+| `triage_predictions` | Partition a checkpoint's own predictions by confidence into auto-accept, needs-review and unscoreable queues |
 | `materialize_review_dataset` | Turn human review verdicts into a curated training set (accepted/edited → labels, rejected → hard negatives) with experiment lineage |
 
 ## Engine-assisted auto-labeling (the engine is a capability, not a fixed method)
