@@ -626,7 +626,7 @@ def archive_project(project_path: str, output_path: str = "", include_models: bo
         return {"error": f"a store database under {root} could not be exported before "
                          f"archiving, so the bundle cannot be vouched for: {exc}"}
 
-    from tcip_mcp.tools.bundle import AnchorMisplaced, account_for
+    from tcip_mcp.tools.bundle import BLOB_CHECKPOINTS, AnchorMisplaced, account_for, blob_home
 
     try:
         accounting = account_for(root)
@@ -643,12 +643,13 @@ def archive_project(project_path: str, output_path: str = "", include_models: bo
     out = Path(output_path)
     out.parent.mkdir(parents=True, exist_ok=True)
 
-    models_dir = root / ".tcip" / "models"
+    # A registered checkpoint is not confined to .tcip/models; blob_home is the one recognizer.
+    is_checkpoint = {
+        p: blob_home(root, p, accounting.registered_checkpoints) == BLOB_CHECKPOINTS
+        for p in accounting.blobs
+    }
     members = [entry.path for plan in accounting.plans for entry in plan.entries]
-    members += [
-        p for p in accounting.blobs
-        if include_models or p.parent != models_dir or p.suffix != ".pt"
-    ]
+    members += [p for p in accounting.blobs if include_models or not is_checkpoint[p]]
 
     files_added = 0
     try:
@@ -678,9 +679,7 @@ def archive_project(project_path: str, output_path: str = "", include_models: bo
                          f"hold a mix of before and after: {'; '.join(moved)}. The incomplete "
                          "archive was removed; stop the writers and archive again."}
 
-    checkpoints_excluded = 0 if include_models else sum(
-        1 for p in accounting.blobs if p.parent == models_dir and p.suffix == ".pt"
-    )
+    checkpoints_excluded = 0 if include_models else sum(1 for v in is_checkpoint.values() if v)
     return {
         "output_path": str(out),
         "files_added": files_added,
@@ -952,7 +951,7 @@ def _run_import_into_staging(zp: Path, staging: Path, dest: Path) -> dict:
 
     blob_classes: dict[str, int] = {}
     for blob in accounting.blobs:
-        home = blob_home(tree, blob)
+        home = blob_home(tree, blob, accounting.registered_checkpoints)
         blob_classes[home] = blob_classes.get(home, 0) + 1
 
     dataset_paths_unresolved = _external_dataset_paths(dest)

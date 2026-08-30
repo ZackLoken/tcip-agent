@@ -547,6 +547,50 @@ def test_archive_project_reports_checkpoints_excluded_by_default(tmp_path: Path)
     assert result_included["left_behind"]["checkpoints_excluded"] == 0
 
 
+def test_archive_project_includes_a_registered_run_checkpoint_outside_tcip_models(
+    tmp_path: Path, monkeypatch,
+):
+    """A checkpoint registered through ``register_model_from_experiment`` sits wherever
+    ``launch_training`` actually wrote it, ``.tcip/experiments/<experiment_id>/model_final.pt``
+    under the platform's own default ``output_dir``, not under ``.tcip/models/``.
+    ``include_models=True`` must bundle it there too, or a breeder who trusts the flag gets an
+    archive with no model in it at all."""
+    from tcip_mcp.experiments import (
+        complete_run,
+        create_experiment,
+        experiment_dir,
+        register_model_from_experiment,
+        update_status,
+    )
+
+    src = tmp_path / "src_project"
+    init_project(str(src), site="north orchard")
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(src))
+
+    exp_id = "exp_ckpt_bundle"
+    create_experiment(exp_id, {"model_source": {"builder": "x:y"}})
+    update_status(exp_id, "running")
+    ckpt_dir = experiment_dir(exp_id)
+    ckpt_dir.mkdir(parents=True)
+    weights = ckpt_dir / "model_final.pt"
+    weights.write_bytes(b"the real weights this run produced")
+    completed = complete_run(exp_id, str(weights))
+    assert "error" not in completed, completed
+    registered = register_model_from_experiment(exp_id, str(weights), project_path=str(src))
+    assert "error" not in registered, registered
+
+    result = archive_project(str(src), str(tmp_path / "export.zip"), include_models=True)
+    assert "error" not in result
+
+    import zipfile
+
+    with zipfile.ZipFile(str(tmp_path / "export.zip")) as zf:
+        names = zf.namelist()
+    assert any(n.endswith("model_final.pt") for n in names), (
+        f"a registered run checkpoint outside .tcip/models/ is missing from the archive: {names}"
+    )
+
+
 def test_archive_project_admits_a_symlink_spelled_project(tmp_path: Path):
     """A project reached through a symlink must archive rather than raising ValueError out of
     the door: archive_project resolves project_path once and uses that resolved root for both

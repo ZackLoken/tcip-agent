@@ -60,6 +60,11 @@ class BundleAccounting:
     home that no plan already adopts; ``bookkeeping`` and ``unaccounted`` are class 1 and class 4
     respectively, over every other file the tree holds; ``collisions`` names any file two
     different derived roots both adopted, which no shipped claim table can produce on its own.
+    ``registered_checkpoints`` is the subset of ``blobs`` :func:`blob_home` calls
+    ``BLOB_CHECKPOINTS`` on the strength of a model registry entry rather than sitting under
+    ``.tcip/models``; computed once here, while ``tree`` still holds its own registry index, so
+    a caller classifying blobs after moving or deleting the tree (``import_project``, once it has
+    renamed staging onto the destination) still has it to pass back in.
     """
 
     tree: Path
@@ -69,6 +74,7 @@ class BundleAccounting:
     bookkeeping: tuple[Path, ...]
     unaccounted: tuple[Path, ...]
     collisions: tuple[Path, ...]
+    registered_checkpoints: frozenset[Path]
 
 
 def _is_at_or_under(candidate: Path, root: Path) -> bool:
@@ -150,7 +156,43 @@ def derive_roots(tree: str | Path) -> tuple[DerivedRoot, ...]:
     return tuple(derived)
 
 
-def _blob_files(tree: Path, claimed: frozenset[str]) -> tuple[Path, ...]:
+def _registered_checkpoint_paths(tree: Path) -> frozenset[Path]:
+    """Every checkpoint a model registry entry under ``tree`` points at, resolved, restricted to
+    ones actually inside ``tree``.
+
+    ``register_model`` admits any checkpoint path an explicit-mode caller names, and
+    ``register_model_from_experiment`` registers wherever a run's own ``output_dir`` wrote its
+    weights (``.tcip/experiments/<experiment_id>/`` by ``launch_training``'s own default), so a
+    registered checkpoint is not confined to the ``.tcip/models/`` convenience location
+    :func:`_blob_files`'s own glob covers. A registry the index will not decode is a concern for
+    the checks that already read it (``doctor.py``'s ``check_registry``), not a reason to refuse
+    a bundle: this reads best-effort and answers with no checkpoints found rather than raising.
+    """
+    from tcip_store import StoreError
+
+    from tcip_mcp.model_registry import read_registry_index
+
+    try:
+        entries = read_registry_index(tree)
+    except StoreError:
+        return frozenset()
+    found: set[Path] = set()
+    for entry in entries if isinstance(entries, list) else []:
+        raw = entry.get("checkpoint_path") if isinstance(entry, dict) else None
+        if not raw:
+            continue
+        candidate = Path(raw)
+        if not candidate.is_absolute():
+            candidate = tree / candidate
+        resolved = candidate.resolve()
+        if resolved.is_file() and _is_at_or_under(resolved, tree):
+            found.add(resolved)
+    return frozenset(found)
+
+
+def _blob_files(
+    tree: Path, claimed: frozenset[str], registered_checkpoints: frozenset[Path],
+) -> tuple[Path, ...]:
     """Every file under a recognized blob home that no record or log plan already adopts."""
     from tcip_mcp.dataset_layout import annotation_root as _annotation_root
     from tcip_mcp.dataset_layout import classes_path, dataset_identity_path
@@ -188,6 +230,8 @@ def _blob_files(tree: Path, claimed: frozenset[str]) -> tuple[Path, ...]:
     if models_dir.is_dir():
         for f in models_dir.glob("*.pt"):
             _add(f)
+    for f in registered_checkpoints:
+        _add(f)
     return tuple(found)
 
 
@@ -208,9 +252,19 @@ BLOB_HOMES = (
 same homes rather than re-deriving its own notion of what a blob is."""
 
 
-def blob_home(tree: Path, path: Path) -> str:
+def blob_home(
+    tree: Path, path: Path, registered_checkpoints: frozenset[Path] = frozenset(),
+) -> str:
     """Which recognized blob home ``path`` (already known to be one of ``account_for``'s blobs)
-    belongs to, in the same terms :func:`_blob_files` found it by."""
+    belongs to, in the same terms :func:`_blob_files` found it by.
+
+    ``registered_checkpoints`` (``BundleAccounting.registered_checkpoints``, computed once by
+    :func:`account_for` while ``tree`` still holds its own registry index) names every checkpoint
+    a registry entry points at outside ``.tcip/models``; pass it back in for a caller classifying
+    blobs after the tree has moved (``import_project``, past its own rename), when a fresh
+    registry read would find nothing there any more. Omitted, this still recognizes every
+    checkpoint physically under ``.tcip/models``, the one home a pre-registry-aware caller knew.
+    """
     from tcip_mcp.dataset_layout import annotation_root as _annotation_root
     from tcip_mcp.dataset_layout import classes_path, dataset_identity_path
     from tcip_mcp.dataset_layout import image_root as _image_root
@@ -223,7 +277,7 @@ def blob_home(tree: Path, path: Path) -> str:
         return BLOB_IMAGERY
     if _is_at_or_under(path, _annotation_root(tree)):
         return BLOB_LABELS
-    if path.parent == tree / ".tcip" / "models":
+    if path.parent == tree / ".tcip" / "models" or path in registered_checkpoints:
         return BLOB_CHECKPOINTS
     experiments = tree / ".tcip" / "experiments"
     if _is_at_or_under(path, experiments):
@@ -274,7 +328,8 @@ def account_for(tree: str | Path) -> BundleAccounting:
     collisions = _cross_root_collisions(plans)
 
     claimed = frozenset(os.path.normcase(str(entry.path)) for plan in plans for entry in plan.entries)
-    blobs = _blob_files(root, claimed)
+    registered_checkpoints = _registered_checkpoint_paths(root)
+    blobs = _blob_files(root, claimed, registered_checkpoints)
     blob_paths = frozenset(os.path.normcase(str(p)) for p in blobs)
 
     bookkeeping: list[Path] = []
@@ -289,7 +344,7 @@ def account_for(tree: str | Path) -> BundleAccounting:
     return BundleAccounting(
         tree=root, derived=derived, plans=plans, blobs=blobs,
         bookkeeping=tuple(sorted(bookkeeping)), unaccounted=tuple(sorted(unaccounted)),
-        collisions=collisions,
+        collisions=collisions, registered_checkpoints=registered_checkpoints,
     )
 
 
