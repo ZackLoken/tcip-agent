@@ -1303,9 +1303,10 @@ Writers: the `@audited` decorator, `packages/tcip-mcp/src/tcip_mcp/audit.py:174`
 a call in the platform log unless the tool declares `@audited(scope_arg=...)` naming the
 argument that carries the dataset it mutates a record of, resolved by `dataset_scope_of`, line
 147 (through the same canonicalizer the tool body uses, when the declaration passes one as
-`scope_via`); `record_event`, same file, line 121, which is what code that is not an `@audited`
-MCP tool emits through (the training envelope's open/close events, and each GUI route's own
-`_audit` helper). Both address the log through `audit_log_key`, same file, line 84, and append
+`scope_via`); `record_event`, same file, line 121, which is what code that is neither an MCP tool
+nor a script-invoked door demoted from one emits through (the training envelope's open/close
+events, and each GUI route's own `_audit` helper). Both address the log through `audit_log_key`,
+same file, line 84, and append
 through the storage seam. What a failed append means is where the two part: `record_event` warns
 and returns, through `_write_entry`, same file, line 103, because its callers bracket work rather
 than follow a mutation; the decorator raises `MutationCommittedWithoutAuditLine`, line 57,
@@ -1872,7 +1873,7 @@ Phase 3 verdict: single. The posted payload carries `active_subject` beside `sub
 ## S06. Append-only audit log .tcip/audit.jsonl
 
 Must agree: mutations from any process land in the log their scope names, a dataset's own for a record travelling with the data and the platform's otherwise, with the same entry shape.
-Side A: `packages/tcip-mcp/src/tcip_mcp/audit.py:241` (`def audited(`, taking a declared `scope_arg` naming which tool argument carries the dataset a scoped tool mutates a record of) and `record_event`, line 121, the one emitter for code that is not an `@audited` tool; both address the log through `audit_log_key`, line 84, and differ only in what a failed append means: `record_event` warns through `_write_entry`, line 103, while the decorator refuses, since its append runs after the tool body.
+Side A: `packages/tcip-mcp/src/tcip_mcp/audit.py:241` (`def audited(`, taking a declared `scope_arg` naming which tool argument carries the dataset a scoped tool mutates a record of) and `record_event`, line 121, the one emitter for code that is neither an MCP tool nor a script-invoked door demoted from one; both address the log through `audit_log_key`, line 84, and differ only in what a failed append means: `record_event` warns through `_write_entry`, line 103, while the decorator refuses, since its append runs after the tool body.
 Side B: `packages/tcip-web/src/tcip_web/routes/review.py:90` (`def _audit(scope: str, tool: str, arguments: dict) -> None:`, which calls `record_event` with the scope its event belongs to; `routes/results.py:54` and `routes/inference.py:84` do the same for their own roots).
 Phase 3 verdict: single.
 

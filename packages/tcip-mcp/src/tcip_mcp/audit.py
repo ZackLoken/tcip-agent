@@ -7,8 +7,10 @@ entries sit, one JSON object per line on the file backend.
 The log is scoped: an event whose subject is a record that travels with a dataset is recorded
 in that dataset's own log, so the provenance travels with the data, and a platform event is
 recorded in the platform's log. Each event is written once, to the one log its scope names:
-:func:`record_event` for code that is not an MCP tool, and :func:`audited` for the tools, which
-name the argument carrying the dataset location with ``@audited(scope_arg=...)``.
+:func:`audited` for the platform's doors (every MCP tool in ``tools/``, plus the script-invoked
+doors demoted from them, keeping ``@audited`` without registering), which name the argument
+carrying the dataset location with ``@audited(scope_arg=...)``, and :func:`record_event` for
+code that is neither.
 
 An append the decorator cannot make is a refusal, not a warning, because the append runs after
 the tool body: see :class:`MutationCommittedWithoutAuditLine`.
