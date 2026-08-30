@@ -633,17 +633,21 @@ def test_import_project_admits_a_bundle_holding_a_registered_run_checkpoint(
     assert (dest / ".tcip" / "experiments" / exp_id / "model_final.pt").is_file()
 
 
-def test_import_project_discloses_a_registry_checkpoint_path_unresolved_at_the_destination(
+def test_import_project_admits_a_registered_checkpoint_with_no_disclosure(
     tmp_path: Path, monkeypatch,
 ):
-    """The imported registry still names the exporting project's absolute checkpoint path, which
-    import_project never rewrites; the response must name that stale path, the same disclosure
-    shape as dataset_paths_unresolved, rather than leaving it to be discovered as a training-time
-    load failure."""
+    """A run's own checkpoint, registered under the project's own tree, comes back from an
+    archive/import round trip with nothing to disclose: the writer already spelled it relative
+    to the registry's scope root, so the moved tree's registry still resolves under it, unlike
+    the pre-family behavior this test used to pin (every checkpoint_path was stored absolute, so
+    the imported registry always named the exporting root's stale path). The stored entry itself
+    stays relative; the resolved response is absolute; weights load by digest either way, since
+    loading never reads the stored path."""
     from tcip_mcp.experiments import (
         complete_run, create_experiment, experiment_dir, register_model_from_experiment,
         update_status,
     )
+    from tcip_mcp.model_registry import ModelRegistry, read_registry_index, registry_index_key
 
     src = tmp_path / "src_project"
     init_project(str(src), site="north orchard")
@@ -660,6 +664,7 @@ def test_import_project_discloses_a_registry_checkpoint_path_unresolved_at_the_d
     assert "error" not in completed, completed
     registered = register_model_from_experiment(exp_id, str(weights), project_path=str(src))
     assert "error" not in registered, registered
+    assert Path(registered["checkpoint"]).is_absolute()
 
     zip_path = tmp_path / "export.zip"
     exported = archive_project(str(src), str(zip_path), include_models=True)
@@ -669,7 +674,21 @@ def test_import_project_discloses_a_registry_checkpoint_path_unresolved_at_the_d
     imported = import_project(str(zip_path), str(dest))
 
     assert "error" not in imported, imported
-    assert imported["checkpoint_paths_unresolved"] == [str(weights)]
+    assert imported["dataset_paths_unresolved"] == []
+    assert imported["checkpoint_paths_unresolved"] == []
+    assert imported["external_checkpoints"] == []
+
+    raw = tcip_store.read(registry_index_key(dest))
+    stored = raw["entries"][0]["checkpoint_path"]
+    assert not Path(stored).is_absolute(), stored
+    assert ".." not in Path(stored).parts
+
+    entries = read_registry_index(dest)
+    assert entries[0]["checkpoint_path"] == stored
+
+    resolved = ModelRegistry(str(dest)).get_model(entries[0]["name"])["checkpoint_path"]
+    assert Path(resolved).is_absolute()
+    assert Path(resolved).is_file()
 
 
 def test_archive_project_bundles_a_registered_tcip_models_checkpoint_once(tmp_path: Path):
