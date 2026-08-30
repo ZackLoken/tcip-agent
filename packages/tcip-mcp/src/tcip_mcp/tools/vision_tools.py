@@ -278,7 +278,10 @@ def _point_note(n: int) -> str:
 
 
 def _box_dict(a: Annotation, index: Callable[[str], int]) -> dict:
-    b = bbox_of(a.geometry)
+    geometry = a.geometry
+    assert not isinstance(geometry, Point) and geometry is not None, \
+        "every caller passes a _boxable-filtered or box-rendered annotation"
+    b = bbox_of(geometry)
     d = {"x1": b.x1, "y1": b.y1, "x2": b.x2, "y2": b.y2, "class_id": index(a.subject)}
     if a.score is not None:
         d["confidence"] = a.score
@@ -286,7 +289,9 @@ def _box_dict(a: Annotation, index: Callable[[str], int]) -> dict:
 
 
 def _poly_dict(a: Annotation, index: Callable[[str], int]) -> dict:
-    return {"rings": [[[p[0], p[1]] for p in ring] for ring in a.geometry.rings],
+    geometry = a.geometry
+    assert isinstance(geometry, Polygon), "called only for the segmentation task's own shapes"
+    return {"rings": [[[p[0], p[1]] for p in ring] for ring in geometry.rings],
             "class_id": index(a.subject)}
 
 
