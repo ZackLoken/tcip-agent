@@ -377,6 +377,7 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | scripts/_paths.py | Shared path resolution for the one-off analysis scripts: no machine-specific hardcoding. | 0 | 5 |
 | scripts/_store_bootstrap.py | Re-exports the store catalogue from tcip_mcp.store_catalogue, and which roots a project's records live in. | 3 | 2 |
 | scripts/adopt_store.py | Move a root's existing record and log files into a store database. | 1 | 0 |
+| scripts/archive_project.py | Export an annotation project as a portable ZIP archive, through the demoted `archive_project` function. | 1 | 0 |
 | scripts/calibrate_operating_point.py | Calibrate + held-out validate a detection operating point over a labeled split. | 7 | 0 |
 | scripts/check_architecture_citations.py | Verify ARCHITECTURE.md's file:line citations against the code they quote, for CI. | 0 | 0 |
 | scripts/check_architecture_doc.py | Verify ARCHITECTURE.md's module-ownership tables against the tree, for CI. | 0 | 0 |
@@ -686,7 +687,7 @@ Docstring is the function's docstring first line, verbatim.
 | `calibrate_ordinal_regression_operating_point` | `phenology_tools.py:605` | yes | Calibrate and validate a trait's ordinal-rank or continuous-value prediction against a |
 | `compute_phenology` | `phenology_tools.py:804` | yes | Per-plant phenology milestones from classified predictions + a plant mapping. |  <!-- queued: P5-43 unify -->
 
-### project_tools.py (7 tools)
+### project_tools.py (6 tools)
 
 | tool | line | audited | docstring first line |
 |---|---|---|---|
@@ -695,7 +696,6 @@ Docstring is the function's docstring first line, verbatim.
 | `set_active_project` | `project_tools.py:306` | yes | Set the workspace's active project so the GUI opens it. |
 | `view_gui_state` | `project_tools.py:395` | yes | The live GUI session the human is looking at: active project, dataset, date, trait, tab, and the |
 | `inspect_project` | `project_tools.py:442` | yes | Get an overview of a TCIP project. |
-| `archive_project` | `project_tools.py:582` | yes | Export an annotation project as a portable ZIP archive. |  <!-- queued: P5-07 demote-to-script -->
 | `import_project` | `project_tools.py:809` | yes | Import an annotation project from a ZIP archive. |  <!-- queued: P5-08 demote-to-script -->
 
 `tools/bundle.py` (not a tool module: no `@mcp.tool()` sites) is the one membership accounting
@@ -738,7 +738,7 @@ anything.
 | `capture_live_canvas` | `vision_tools.py:1081` | yes | Render exactly what the human's GUI canvas shows right now: image, shapes, viewport. |
 | `overlay_reference_grid` | `vision_tools.py:1211` | yes | Render image with a labeled reference-grid overlay for spatial referencing. |
 
-8 + 2 + 4 + 2 + 4 + 1 + 4 + 3 + 1 + 1 + 5 + 7 + 1 + 7 + 1 + 5 = 56 tools across 16 modules.
+8 + 2 + 4 + 2 + 4 + 1 + 4 + 3 + 1 + 1 + 5 + 6 + 1 + 7 + 1 + 5 = 55 tools across 16 modules.
 
 ## 2. HTTP routes and WebSocket endpoints
 
