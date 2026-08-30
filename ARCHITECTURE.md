@@ -742,7 +742,7 @@ anything.
 
 ## 2. HTTP routes and WebSocket endpoints
 
-`packages/tcip-web/src/tcip_web/app.py` builds the FastAPI app, registers 6 HTTP routes
+`packages/tcip-web/src/tcip_web/app.py` builds the FastAPI app, registers 5 HTTP routes
 and 2 WebSocket routes directly, then calls `register_all(app)` from
 `packages/tcip-web/src/tcip_web/routes/__init__.py`, which `include_router`s 16 route
 modules under `routes/`, each with a fixed prefix. Verified: `routes/__init__.py`,
@@ -752,7 +752,7 @@ the response shape `training.py` and `tuning.py` both answer in, and `_body_comm
 `EmptyBodyPayload`, the empty body model six path-parameter-only routes now declare so the
 browser must send a preflighted request rather than reaching the handler as a simple one.
 
-Total HTTP routes at HEAD: 89 (6 on `app.py` plus 83 across the 16 route modules, both counts
+Total HTTP routes at HEAD: 88 (5 on `app.py` plus 83 across the 16 route modules, both counts
 obtained this session by grepping `@app.get/post(` and `@router.get/post(` and summing);
 websocket routes are counted separately, below, and excluded from this total. Each per-router
 heading's own route count (and their sum, 86) includes any websocket route it lists, since
@@ -778,8 +778,7 @@ registered at HEAD.
 | GET | `/health` | `health` | `app.py:315` |
 | GET | `/` | `index` | `app.py:323` |
 | POST | `/api/events/{panel}` | `post_panel_event` | `app.py:387` |
-| GET | `/api/events/{panel}/recent` | `get_recent_panel_events` | `app.py:438` |  <!-- queued: P5-82 delete -->
-| WS | `/ws/panel/{panel}` | `panel_ws` | `app.py:447` |
+| WS | `/ws/panel/{panel}` | `panel_ws` | `app.py:438` |
 
 ### routes/annotate.py, prefix `/api/annotate` (3 routes)
 
@@ -948,9 +947,9 @@ registered at HEAD.
 | POST | `/sweeps/{sweep_id}/trials/{trial_id}/tensorboard` | `launch_trial_tensorboard` | `routes/tuning.py:565` |
 | POST | `/sweeps/{sweep_id}/trials/{trial_id}/tensorboard/stop` | `stop_trial_tensorboard` | `routes/tuning.py:579` |
 
-### 11 routes with no located frontend caller
+### 10 routes with no located frontend caller
 
-Per phase0's `web-surface.md`, these 11 registered backend routes had no caller found
+Per phase0's `web-surface.md`, these 10 registered backend routes had no caller found
 under `packages/tcip-web/frontend/src/` by literal-path grep. Not re-derived this
 session; restated from phase0 as the brief instructs, with each route's line verified
 above against HEAD.
@@ -960,7 +959,6 @@ above against HEAD.
 | GET | `/health` | not fetched from `frontend/src`; a liveness endpoint |
 | GET | `/` | loaded by the browser's own navigation, not via fetch/XHR from app code |
 | POST | `/api/events/{panel}` | posted by MCP tools (`tcip_mcp.web_client`), not by the browser |
-| GET | `/api/events/{panel}/recent` | no caller found |
 | GET | `/api/state` | no caller found |
 | GET | `/api/images/dimensions` | no caller found |  <!-- queued: P5-72 delete -->
 | GET | `/api/inference/jobs/{job_id}/preview` | no caller found; `inferenceApi` has no `preview` function |  <!-- queued: P5-125 delete -->

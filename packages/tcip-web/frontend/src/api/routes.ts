@@ -15,7 +15,6 @@ export const ROUTES = {
   getCoverageGrid: "/api/coverage/grid",
   getDatasetImages: "/api/dataset/images",
   getDatasetTree: "/api/dataset/tree",
-  getEventsByPanelRecent: (panel: string) => `/api/events/${encodeURIComponent(panel)}/recent`,
   getFsList: "/api/fs/list",
   getHealth: "/health",
   getImages: "/api/images",
