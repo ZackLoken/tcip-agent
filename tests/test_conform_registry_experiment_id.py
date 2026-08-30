@@ -11,7 +11,12 @@ import pytest
 
 import tcip_store as ts
 
-from tcip_mcp.model_registry import ModelRegistry, load_registered_checkpoint, registry_index_key
+from tcip_mcp.model_registry import (
+    ModelRegistry,
+    load_registered_checkpoint,
+    read_registry_index,
+    registry_index_key,
+)
 
 SCRIPT = Path(__file__).parent.parent / "scripts" / "conform_registry_experiment_id.py"
 
@@ -25,7 +30,8 @@ def _load_script():
 
 
 def _seed_index(root: Path, entries: list[dict]) -> None:
-    ts.replace(registry_index_key(root), entries, expect=ts.Version.ABSENT)
+    ts.replace(registry_index_key(root), {"schema_version": 2, "entries": entries},
+               expect=ts.Version.ABSENT)
 
 
 def _entry(name: str, **overrides) -> dict:
@@ -47,7 +53,7 @@ def test_plan_names_the_null_experiment_id_each_entry_would_get_without_writing(
     assert any("untagged" in ln and "experiment_id=null" in ln for ln in lines)
 
     # --plan writes nothing.
-    index = ts.read(registry_index_key(root))
+    index = read_registry_index(root)
     assert "experiment_id" not in index[0]
 
 
@@ -77,7 +83,7 @@ def test_a_tagged_entry_with_no_matching_run_resolves_to_null_and_drops_the_tag(
     for line in lines:
         assert "experiment_id=null" in line and "experiment:" in line
 
-    index = ts.read(registry_index_key(root))
+    index = read_registry_index(root)
     for entry in index:
         assert entry["experiment_id"] is None
         assert entry["tags"] == []
@@ -104,7 +110,7 @@ def test_a_tagged_entry_whose_run_recorded_the_same_digest_binds_and_drops_the_t
     applied = script._apply(root)
     assert "experiment_id='exp1'" in applied[0]
 
-    index = ts.read(registry_index_key(root))
+    index = read_registry_index(root)
     assert index[0]["experiment_id"] == "exp1"
     assert index[0]["tags"] == []
 
@@ -157,7 +163,7 @@ def test_main_returns_2_for_an_unreadable_index_and_0_once_conformed(tmp_path, m
     finally:
         sys.argv = old_argv
 
-    index = ts.read(registry_index_key(conformable_root))
+    index = read_registry_index(conformable_root)
     assert index[0]["experiment_id"] is None
 
 

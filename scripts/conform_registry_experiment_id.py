@@ -31,6 +31,11 @@ predates ``metrics_source`` also predates ``experiment_id``: conform it here fir
 re-register it through ``register_model`` to add ``metrics_source`` (``best_model`` and
 ``scripts/doctor.py`` name this order for that entry).
 
+Reads and writes through the registry's own version-2 document boundary
+(``tcip_mcp.model_registry``): a version-1 (bare array) index refuses by name, naming
+``scripts/conform_model_registry_paths.py`` as the remedy to run first, since this script's own
+conform assumes the wrap has already happened.
+
 Exit codes: 0 once every root named was conformed, whatever bindings its entries ended up with, or
 had nothing to conform; 2 if any root's registry index will not read.
 """
@@ -47,7 +52,12 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "packages" / "tcip-store" 
 import tcip_store as ts  # noqa: E402
 from tcip_store.binding import bind_default  # noqa: E402
 
-from tcip_mcp.model_registry import registry_index_key  # noqa: E402
+from tcip_mcp.model_registry import (  # noqa: E402
+    RegistryVersionRefused,
+    _read_registry_document,
+    _write_registry_document,
+    registry_index_key,
+)
 
 
 def _experiment_tag(tags) -> str | None:
@@ -111,20 +121,25 @@ def _plan(root: Path) -> list[str]:
 
 def _apply(root: Path) -> list[str]:
     """Write every conformed entry back inside the index's own transaction, returning the
-    outcome lines."""
+    outcome lines.
+
+    Reads and writes through the version-2 document pair: a version-1 (bare array) index
+    refuses by name, naming ``scripts/conform_model_registry_paths.py`` as the remedy to run
+    first, since this script would otherwise iterate a version-2 mapping's own keys.
+    """
     key = registry_index_key(root)
     outcomes: list[str] = []
     with ts.transaction(key) as txn:
-        index = txn.read(key, default=[])
+        document = _read_registry_document(txn.read(key, default=None))
         new_index = []
-        for entry in index:
+        for entry in document["entries"]:
             if "experiment_id" in entry:
                 new_index.append(entry)
                 continue
             conformed, line = _conform_entry(entry, root=root, plan=False)
             outcomes.append(line)
             new_index.append(conformed)
-        txn.write(key, new_index)
+        txn.write(key, _write_registry_document(new_index))
     return outcomes
 
 
@@ -141,7 +156,7 @@ def main() -> int:
         root = root.resolve()
         try:
             lines = _plan(root)
-        except ts.StoreError as exc:
+        except (ts.StoreError, RegistryVersionRefused) as exc:
             print(f"{root}: refused, {exc}")
             any_unreadable = True
             continue
@@ -156,7 +171,7 @@ def main() -> int:
 
         try:
             applied = _apply(root)
-        except ts.StoreError as exc:
+        except (ts.StoreError, RegistryVersionRefused) as exc:
             print(f"{root}: refused, {exc}")
             any_unreadable = True
             continue
