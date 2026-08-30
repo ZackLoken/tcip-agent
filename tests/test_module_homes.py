@@ -76,7 +76,11 @@ def _assert_one_home(
     names: set[str], old_path: Path, new_path: Path,
     node_types: tuple[type, ...] = (ast.FunctionDef, ast.AsyncFunctionDef),
     extra_roots: tuple[Path, ...] = (),
+    roots: "tuple[Path, ...] | None" = None,
 ) -> None:
+    """``roots`` scopes the "defined nowhere else" scan; defaults to :func:`_package_roots`
+    (tcip_mcp + tcip_annotation) for the training-layer moves this file started with. A move
+    confined to tcip_web (the batch's own routes reshape) passes ``roots=(_web_src_root(),)``."""
     assert old_path.is_file(), f"{old_path} does not exist"
     assert new_path.is_file(), f"{new_path} does not exist"
 
@@ -91,7 +95,8 @@ def _assert_one_home(
     assert not duplicated, f"{new_path.name} defines {sorted(duplicated)} more than once"
 
     elsewhere: dict[str, set[str]] = {}
-    for root in (*_package_roots(), *extra_roots):
+    base = roots if roots is not None else _package_roots()
+    for root in (*base, *extra_roots):
         for py_file in root.rglob("*.py"):
             if py_file in (old_path, new_path):
                 continue
@@ -411,3 +416,29 @@ def test_job_registry_class_is_the_one_home_for_the_dict_plus_lock_registry_shap
             continue
         other = _def_name_counts(py_file, node_types=(ast.ClassDef,))
         assert "JobRegistry" not in other, f"{py_file} also defines JobRegistry"
+
+
+def test_validate_reference_and_its_exclusive_helpers_moved_to_validation_module():
+    """validate_reference and the two helpers only it used (``_dataset_root_of_all``,
+    ``_recorded_prediction_digests``) moved out of review.py into routes/validation.py, public and
+    unaliased; the route path is unchanged (checked live in test_review_path_confinement.py and
+    test_review_validation_affordance.py, which still call POST /api/review/validate_reference).
+    ``_prediction_digest``, ``_get_engine``, ``_bucket_of_dir``, ``_guard_path`` and ``_audit``
+    stay in review.py: each is also used by a route that stayed (mark_complete, /action,
+    /matches), so validation.py imports them rather than restating them."""
+    _assert_one_home(
+        {"validate_reference", "_dataset_root_of_all", "_recorded_prediction_digests"},
+        _web_module_path("routes/review.py"),
+        _web_module_path("routes/validation.py"),
+        roots=(_web_src_root(),),
+    )
+
+
+def test_validate_reference_request_and_response_models_moved_to_validation_module():
+    _assert_one_home(
+        {"ValidateReferenceRequest", "ValidateReferenceResponse"},
+        _web_module_path("routes/review.py"),
+        _web_module_path("routes/validation.py"),
+        node_types=(ast.ClassDef,),
+        roots=(_web_src_root(),),
+    )
