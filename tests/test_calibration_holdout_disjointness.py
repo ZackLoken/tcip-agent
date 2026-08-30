@@ -775,7 +775,7 @@ def test_calibration_discloses_excluded_incomplete_attribute_count(tmp_path):
 
 
 def test_calibration_attribute_registry_refusal_reaches_the_caller(tmp_path):
-    """_calibrate_operating_point's bare `except Exception` around _resolve_registry_id_map must
+    """_calibrate_operating_point's bare `except Exception` around resolve_registry_id_map must
     not silently degrade an attribute-classification calibration to a single-class GT read when
     the registry read fails for a real reason, sitting directly on the calibration/
     operating-point rail, worse than the delivery-grade-eval instance of the same bug. No
@@ -825,10 +825,10 @@ def test_calibration_gt_id_map_prefers_the_training_recorded_map_over_a_fresh_re
 
     def _boom(*a, **kw):
         raise AssertionError(
-            "_resolve_registry_id_map must not be called when the checkpoint carries its own "
+            "resolve_registry_id_map must not be called when the checkpoint carries its own "
             "recorded id_map")
 
-    monkeypatch.setattr("tcip_mcp.pipelines.data.datasets._resolve_registry_id_map", _boom)
+    monkeypatch.setattr("tcip_mcp.pipelines.data.label_queries.resolve_registry_id_map", _boom)
 
     # No classes.json exists for this dataset, so the pre-fix code (which always re-derived from
     # the registry when `subject` was set) would have raised the ValueError

@@ -159,6 +159,23 @@ def test_train_run_class_has_one_home():
     )
 
 
+def test_label_query_functions_have_one_home():
+    """The label-store/registry query library (``image_name_map`` through ``assemble_coco``)
+    moved out of ``datasets.py`` into ``pipelines/data/label_queries.py``. A name a consumer
+    outside the library reads (``datasets.py`` itself, or an outside-layer tool/pipeline module)
+    lost its underscore; a helper only ``label_queries.py`` calls internally kept its private
+    name."""
+    _assert_one_home(
+        {"image_name_map", "authored_frame", "resolved_classes_path", "resolve_registry_id_map",
+         "coco_det_targets", "json_det_targets", "first_labels_json", "dir_label_format",
+         "trainable_stems", "require_samples", "_label_record_state", "_raw_status_store",
+         "confirmed_negative_names", "_exclude_contradicted", "confirmed_negative_records",
+         "assemble_coco"},
+        _module_path("pipelines/data/datasets.py"),
+        _module_path("pipelines/data/label_queries.py"),
+    )
+
+
 def _literal_loads(tree: ast.AST, literal: str) -> list[ast.AST]:
     return [
         node for node in ast.walk(tree)

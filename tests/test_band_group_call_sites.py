@@ -67,7 +67,7 @@ def grouped_dataset(tmp_path: Path) -> Path:
 
 
 def test_image_name_map_uses_manifest_filename_for_a_group(grouped_dataset):
-    from tcip_mcp.pipelines.data.datasets import image_name_map
+    from tcip_mcp.pipelines.data.label_queries import image_name_map
     from tcip_mcp.dataset_layout import image_dir
 
     names = image_name_map(image_dir(grouped_dataset, "2026-04-01"))

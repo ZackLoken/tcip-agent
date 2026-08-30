@@ -92,7 +92,8 @@ def test_the_only_status_that_confirms_a_negative_is_the_negative_one(tmp_path):
     it. Reading it as a confirmation of emptiness turns a populated image into a negative nobody
     stated, so only the negative token confirms one, and it still confirms it.
     """
-    from tcip_mcp.pipelines.data.datasets import DetectionDataset, confirmed_negative_names
+    from tcip_mcp.pipelines.data.datasets import DetectionDataset
+    from tcip_mcp.pipelines.data.label_queries import confirmed_negative_names
 
     images, labels = tmp_path / "images", tmp_path / "annotations"
     labels.mkdir(parents=True)

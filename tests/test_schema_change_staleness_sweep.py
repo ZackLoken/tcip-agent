@@ -25,7 +25,7 @@ from tcip_mcp.dataset_layout import (
     status_bucket,
 )
 from tcip_store.file_backend import FileBackend
-from tcip_mcp.pipelines.data.datasets import confirmed_negative_names
+from tcip_mcp.pipelines.data.label_queries import confirmed_negative_names
 from tcip_mcp.tools.annotation_tools import write_class_map
 from tcip_web.app import app
 

@@ -88,7 +88,7 @@ def test_resolve_run_id_map_none_for_coco_or_bespoke_source(tmp_path):
 
 
 def test_resolve_run_id_map_none_for_attribute_scope_with_no_registry(tmp_path):
-    """The one legitimate degraded case _resolve_registry_id_map itself names: must not raise."""
+    """The one legitimate degraded case resolve_registry_id_map itself names: must not raise."""
     from tcip_mcp.pipelines.training.subprocess_worker import _resolve_run_id_map
 
     labels_dir = tmp_path / "labels"

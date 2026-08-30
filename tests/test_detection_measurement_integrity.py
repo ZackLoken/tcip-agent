@@ -318,9 +318,9 @@ def test_evaluate_scores_a_contradicted_negative_on_its_actual_content_and_names
 
 def test_attribute_registry_refusal_reaches_the_caller(tmp_path, monkeypatch):
     """run_full_frame_evaluation must not let a bare `except Exception` around
-    _resolve_registry_id_map swallow an attribute-classification registry refusal and silently
+    resolve_registry_id_map swallow an attribute-classification registry refusal and silently
     score against zero ground truth instead of refusing. An attribute needs a real classes.json
-    to order its values (_resolve_registry_id_map's own deliberate ValueError); no classes.json
+    to order its values (resolve_registry_id_map's own deliberate ValueError); no classes.json
     exists here, so this must propagate as a real refusal, not a quietly-empty GT read."""
     import tcip_mcp.pipelines.inference.predictor as predictor_mod
     from tcip_mcp.pipelines.training.eval_runners import run_full_frame_evaluation

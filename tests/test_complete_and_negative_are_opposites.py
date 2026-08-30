@@ -15,7 +15,7 @@ from fastapi.testclient import TestClient
 
 from tcip_annotation.json_io import write_annotations
 from tcip_annotation.state import Annotation, BBox
-from tcip_mcp.pipelines.data.datasets import confirmed_negative_names
+from tcip_mcp.pipelines.data.label_queries import confirmed_negative_names
 from tcip_web.app import app
 
 
@@ -179,7 +179,7 @@ def test_a_contradicted_negative_still_trains_on_its_actual_content(
     """The exclusion never drops the image: its label file holds real content, so a trainable-stems
     enumeration over the same directory admits it by that content, the rail admitting valid work
     rather than silently shrinking the run's negative count."""
-    from tcip_mcp.pipelines.data.datasets import trainable_stems
+    from tcip_mcp.pipelines.data.label_queries import trainable_stems
 
     labels = tmp_path / "annotations"
     labels.mkdir()

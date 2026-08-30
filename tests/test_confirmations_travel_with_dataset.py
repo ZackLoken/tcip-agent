@@ -88,7 +88,7 @@ def test_dataset_fingerprint_stable_with_no_confirmations_store(tmp_path):
 # right answer either way without ever consulting the ancestor, so a naive fixture could pass for
 # the wrong reason).
 def test_confirmed_negative_names_ignores_an_unrelated_ancestor_store(tmp_path):
-    from tcip_mcp.pipelines.data.datasets import confirmed_negative_names
+    from tcip_mcp.pipelines.data.label_queries import confirmed_negative_names
 
     # A project ancestor that happens to sit above the dataset, with its own negatives: simulates
     # a project referencing a dataset that lives elsewhere.
@@ -112,7 +112,7 @@ def test_confirmed_negative_names_ignores_an_unrelated_ancestor_store(tmp_path):
 # (c) quarantine: a stamped digest that no longer matches the current schema is excluded.
 def test_quarantine_excludes_a_confirmation_stamped_under_a_since_changed_schema(tmp_path):
     from tcip_mcp.class_registry import attribute_schema_digest
-    from tcip_mcp.pipelines.data.datasets import confirmed_negative_names
+    from tcip_mcp.pipelines.data.label_queries import confirmed_negative_names
 
     root = _dataset(tmp_path, negative=False, subjects=(
         Subject(name="catkin", attributes=(
@@ -138,7 +138,7 @@ def test_quarantine_excludes_a_confirmation_stamped_under_a_since_changed_schema
 
 def test_quarantine_does_not_fire_when_schema_is_unchanged(tmp_path):
     from tcip_mcp.class_registry import attribute_schema_digest
-    from tcip_mcp.pipelines.data.datasets import confirmed_negative_names
+    from tcip_mcp.pipelines.data.label_queries import confirmed_negative_names
 
     root = _dataset(tmp_path, negative=False, subjects=(
         Subject(name="catkin", attributes=(
@@ -161,7 +161,7 @@ def test_unstamped_confirmation_is_admitted_not_quarantined(tmp_path):
     test fixture) has no digest sidecar at all. Punishing that by quarantine-by-default would
     silently empty every one of them, exactly the 'strengthened rail rejects legitimate work'
     failure to avoid."""
-    from tcip_mcp.pipelines.data.datasets import confirmed_negative_names
+    from tcip_mcp.pipelines.data.label_queries import confirmed_negative_names
 
     root = _dataset(tmp_path, negative=False)
     _confirm_negative(root, "catkin", "img_001.jpg")  # no digest= kwarg -> no sidecar written
@@ -176,7 +176,7 @@ def test_unstamped_confirmation_is_admitted_not_quarantined(tmp_path):
 # (e) trainable_stems surfaces a quarantine event as its own count, distinct from unconfirmed-empty.
 def test_trainable_stems_reports_quarantined_stale_definition(tmp_path):
     from tcip_mcp.class_registry import attribute_schema_digest
-    from tcip_mcp.pipelines.data.datasets import trainable_stems
+    from tcip_mcp.pipelines.data.label_queries import trainable_stems
 
     root = _dataset(tmp_path, negative=False, subjects=(
         Subject(name="catkin", attributes=(
@@ -201,7 +201,7 @@ def test_trainable_stems_reports_quarantined_stale_definition(tmp_path):
 # never resurrect a different image's stale, never-re-reviewed confirmation.
 def test_quarantine_is_per_image_not_per_bucket(tmp_path):
     from tcip_mcp.class_registry import attribute_schema_digest
-    from tcip_mcp.pipelines.data.datasets import confirmed_negative_names
+    from tcip_mcp.pipelines.data.label_queries import confirmed_negative_names
 
     root = _dataset(tmp_path, negative=False, subjects=(
         Subject(name="catkin", attributes=(

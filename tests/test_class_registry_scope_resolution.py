@@ -97,7 +97,7 @@ def test_digest_ignores_free_text_provenance():
 def test_confirmation_is_quarantined_when_an_attribute_type_is_redefined(tmp_path):
     """The consequence the digest exists to prevent: a negative confirmed while the attribute was
     categorical must not read as current after the same values are redeclared as ranks."""
-    from tcip_mcp.pipelines.data.datasets import confirmed_negative_names
+    from tcip_mcp.pipelines.data.label_queries import confirmed_negative_names
 
     root = tmp_path / "dataset"
     labels_dir = root / "annotations"

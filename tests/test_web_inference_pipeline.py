@@ -129,7 +129,7 @@ def test_web_worker_resolves_id_map_from_predictor_config(tmp_path, monkeypatch)
 
     class FakePredictor:
         # A single-subject detector's config, the same shape run_inference reads
-        # (predictor.config["data"]["subject"]), no classes.json needed, _resolve_registry_id_map
+        # (predictor.config["data"]["subject"]), no classes.json needed, resolve_registry_id_map
         # synthesizes {subject: 0} for a plain single-class run.
         config = {"data": {"subject": "catkin"}}
 

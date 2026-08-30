@@ -20,7 +20,7 @@ import tcip_store as ts
 from tcip_mcp import class_registry
 from tcip_mcp.class_registry import Attribute, ClassRegistry, Subject, attribute_schema_digest
 from tcip_mcp.dataset_layout import image_status_digest_key, image_status_key, status_bucket
-from tcip_mcp.pipelines.data.datasets import confirmed_negative_names
+from tcip_mcp.pipelines.data.label_queries import confirmed_negative_names
 from tcip_mcp.pipelines.feedback.materialize import curated_manifest_key, materialize_dataset
 
 

@@ -192,7 +192,7 @@ def run_full_frame_evaluation(
     boxes/counts, never on its masks. A mask-quality gate is separate work; do not report this
     number as one.
     """
-    from tcip_mcp.pipelines.data.datasets import _json_det_targets, _resolve_registry_id_map
+    from tcip_mcp.pipelines.data.label_queries import json_det_targets, resolve_registry_id_map
     from tcip_mcp.pipelines.inference.predictor import (
         build_predictor, explicit_edge_provenance, resolve_tile_regime,
     )
@@ -235,14 +235,15 @@ def run_full_frame_evaluation(
     tile_size, overlap = tile_param.value, resolved_overlap
 
     img_dir, lbl_dir = Path(images_dir), Path(labels_dir)
-    # GT category ids come from the run's single assign_class_ids map (_json_det_targets), so
+    # GT category ids come from the run's single assign_class_ids map (json_det_targets), so
     # delivery-grade GT never diverges from training; not caught here, so its own ValueError propagates.
     _gt_id_map = None
     if subject:
-        _reg, _gt_id_map = _resolve_registry_id_map(lbl_dir, subject, attribute)
+        _reg, _gt_id_map = resolve_registry_id_map(lbl_dir, subject, attribute)
     # Same negative rail training uses: an image with no label record has no GT, so scoring it
     # would turn every correct detection into a false positive and drag down this delivery number.
-    from tcip_mcp.pipelines.data.datasets import IMAGE_EXTS, image_name_map, trainable_stems
+    from tcip_mcp.pipelines.data.datasets import IMAGE_EXTS
+    from tcip_mcp.pipelines.data.label_queries import image_name_map, trainable_stems
 
     names = image_name_map(img_dir)
     contradicted_negatives: set[str] = set()
@@ -263,7 +264,7 @@ def run_full_frame_evaluation(
         if gt_file.is_file() and _gt_id_map is not None:
             # Same loader-side reader + id map the training targets use (1-indexed to match the
             # predictor's torchvision labels), so this delivery-grade GT can't diverge from training.
-            gboxes, glabels, n_unlabeled = _json_det_targets(str(gt_file), subject, attribute, _gt_id_map)
+            gboxes, glabels, n_unlabeled = json_det_targets(str(gt_file), subject, attribute, _gt_id_map)
             # An instance unlabeled for `attribute` gives this image incomplete GT for this scope;
             # excluded from delivery-grade scoring entirely, never scored against its labeled subset.
             if n_unlabeled:

@@ -108,7 +108,7 @@ def test_hard_negatives_survive_into_training(tmp_path):
     """
     from PIL import Image
 
-    from tcip_mcp.pipelines.data.datasets import confirmed_negative_names
+    from tcip_mcp.pipelines.data.label_queries import confirmed_negative_names
 
     src = tmp_path / "src"
     src.mkdir()

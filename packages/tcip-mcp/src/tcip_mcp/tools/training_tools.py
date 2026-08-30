@@ -342,7 +342,7 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
             contradicted_negatives: set[str] = set()
             from tcip_annotation.json_io import UnreadableLabelDocument
             try:
-                from tcip_mcp.pipelines.data.datasets import trainable_stems
+                from tcip_mcp.pipelines.data.label_queries import trainable_stems
                 stems, sample_counts = trainable_stems(
                     labels_dir, images_dir, subject=data_cfg.get("subject"),
                     date=data_cfg.get("date"), contradicted_out=contradicted_negatives)

@@ -18,7 +18,7 @@ torch = pytest.importorskip("torch")
 
 from tcip_mcp import class_registry  # noqa: E402
 from tcip_mcp.dataset_layout import classes_path  # noqa: E402
-from tcip_mcp.pipelines.data.datasets import _resolve_registry_id_map  # noqa: E402
+from tcip_mcp.pipelines.data.label_queries import resolve_registry_id_map  # noqa: E402
 from tcip_mcp.pipelines.inference.predictor import KIND_TCIP_MODULE, detect_kind  # noqa: E402
 from tcip_mcp.pipelines.model_build import (  # noqa: E402
     build_model,
@@ -102,7 +102,7 @@ def test_contract_dims_take_the_registry_count_without_the_loader_background_off
     }
     dims = resolve_contract_dims(cfg, "detection")
 
-    _registry, id_map = _resolve_registry_id_map(str(labels_dir), "leaf", "condition")
+    _registry, id_map = resolve_registry_id_map(str(labels_dir), "leaf", "condition")
     assert len(id_map) == 3  # the three condition values this registry declares
     assert dims == {"in_chans": 5, "num_classes": len(id_map), "img_size": 640}
     assert dims["num_classes"] != cfg["model_source"]["builder_kwargs"]["num_classes"]
@@ -122,7 +122,7 @@ def test_contract_dims_count_only_the_subject_for_a_single_class_scope(tmp_path)
     }
     dims = resolve_contract_dims(cfg, "instance_seg")
 
-    _registry, id_map = _resolve_registry_id_map(str(labels_dir), "catkin", None)
+    _registry, id_map = resolve_registry_id_map(str(labels_dir), "catkin", None)
     assert len(id_map) == 1
     assert dims["num_classes"] == len(id_map)
 
