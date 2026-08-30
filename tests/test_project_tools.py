@@ -661,6 +661,34 @@ def test_archive_project_bundles_a_registered_tcip_models_checkpoint_once(tmp_pa
     assert len(matching) == 1, f"m.pt bundled more than once: {names}"
 
 
+def test_archive_project_carries_a_registered_checkpoint_inside_model_src_when_models_excluded(
+    tmp_path: Path,
+):
+    """A bespoke run's model_src/ snapshot travels regardless of include_models. A checkpoint that
+    happens to sit inside that snapshot, and is also registered, must classify as model_src, not
+    as a checkpoint blob include_models=False is entitled to drop."""
+    from tcip_mcp.model_registry import ModelRegistry
+
+    src = tmp_path / "src_project"
+    init_project(str(src), site="north orchard")
+    model_src = src / ".tcip" / "experiments" / "exp_001" / "model_src" / "abcd1234"
+    model_src.mkdir(parents=True)
+    ckpt = model_src / "weights.pt"
+    ckpt.write_bytes(b"snapshot-bundled weights")
+    ModelRegistry(str(src)).register_model("snap", str(ckpt), {}, metrics_source=None)
+
+    result = archive_project(str(src), str(tmp_path / "export.zip"), include_models=False)
+    assert "error" not in result, result
+
+    import zipfile
+
+    with zipfile.ZipFile(str(tmp_path / "export.zip")) as zf:
+        names = zf.namelist()
+    assert any(n.endswith("weights.pt") for n in names), (
+        f"a checkpoint inside a model_src snapshot must travel regardless of include_models: {names}"
+    )
+
+
 def test_archive_project_admits_a_symlink_spelled_project(tmp_path: Path):
     """A project reached through a symlink must archive rather than raising ValueError out of
     the door: archive_project resolves project_path once and uses that resolved root for both

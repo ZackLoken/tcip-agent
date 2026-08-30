@@ -281,6 +281,12 @@ def blob_home(
     recognized as a checkpoint by shape alone, whether or not any registry names it, so the same
     file classifies the same way on both sides of that move. Omitted, this still recognizes every
     checkpoint physically under ``.tcip/models`` or shaped as one under ``.tcip/experiments/``.
+
+    A ``model_src`` snapshot is classified before either checkpoint clause is even consulted: a
+    bespoke run's snapshotted source travels with the archive regardless of ``include_models``
+    (``archive_project``'s stated invariant), so a checkpoint that happens to sit inside that
+    snapshot, or to share its own registry entry's path with one, must never be narrowed away as
+    a checkpoint instead.
     """
     from tcip_mcp.dataset_layout import annotation_root as _annotation_root
     from tcip_mcp.dataset_layout import classes_path, dataset_identity_path
@@ -294,15 +300,15 @@ def blob_home(
         return BLOB_IMAGERY
     if _is_at_or_under(path, _annotation_root(tree)):
         return BLOB_LABELS
-    if path.parent == tree / ".tcip" / "models" or path in registered_checkpoints:
-        return BLOB_CHECKPOINTS
     experiments = tree / ".tcip" / "experiments"
     if _is_at_or_under(path, experiments):
-        if path.suffix == ".pt":
-            return BLOB_CHECKPOINTS
         rel = path.relative_to(experiments).parts
         if len(rel) >= 2 and rel[1] == "model_src":
             return BLOB_MODEL_SRC
+    if path.parent == tree / ".tcip" / "models" or path in registered_checkpoints:
+        return BLOB_CHECKPOINTS
+    if _is_at_or_under(path, experiments) and path.suffix == ".pt":
+        return BLOB_CHECKPOINTS
     return BLOB_OTHER
 
 
