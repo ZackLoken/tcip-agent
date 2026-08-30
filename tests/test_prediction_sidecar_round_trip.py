@@ -66,6 +66,7 @@ def _held_out_calibration(*, tiled: bool, tile_size: int | None = None,
 
 
 def _export(tmp_path, monkeypatch, *, calibration, tile, tile_size=None):
+    import tcip_mcp.pipelines.calibration as calibration_pipeline
     import tcip_mcp.pipelines.inference.predictor as predictor_mod
     import tcip_mcp.tools.inference_tools as itools
     from tests._verified_checkpoint_fixtures import registered_checkpoint
@@ -80,7 +81,7 @@ def _export(tmp_path, monkeypatch, *, calibration, tile, tile_size=None):
     bundle, inputs = calibration
     evidence = {"resolver": "resolve_operating_point", "inputs": inputs,
                 "reference_inputs": {"label_dirs": {"calibration": str(images_dir)}}}
-    monkeypatch.setattr(itools, "_calibrate_operating_point",
+    monkeypatch.setattr(calibration_pipeline, "calibrate_operating_point",
                         lambda *a, **k: (bundle, "H", 0, evidence))
     monkeypatch.setattr(predictor_mod, "build_predictor", lambda checkpoint, **kw: _BucketStub())
     monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))

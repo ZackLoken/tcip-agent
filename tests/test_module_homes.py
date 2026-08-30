@@ -366,6 +366,18 @@ def test_checkpoint_marker_keys_have_one_home():
             assert imported, f"{name} reads {const_name} without importing it from model_build"
 
 
+def test_calibration_sweep_functions_have_one_home():
+    """``calibrate_operating_point`` (de-underscored from ``_calibrate_operating_point``) and
+    ``sweep_summary`` (de-underscored from ``_sweep_summary``) moved out of
+    ``tools/inference_tools.py`` into ``pipelines/calibration.py``, their consumers being
+    cross-module (``_run_inference_verified`` and a dozen-plus test files)."""
+    _assert_one_home(
+        {"calibrate_operating_point", "sweep_summary"},
+        _module_path("tools/inference_tools.py"),
+        _module_path("pipelines/calibration.py"),
+    )
+
+
 def test_accept_proposals_is_absent_from_package_source():
     """The rename's structural half: the retired name ``accept_proposals`` is gone from every
     package's shipped source, not just from the live MCP registry the manifest test checks (a

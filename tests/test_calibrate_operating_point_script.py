@@ -1,7 +1,7 @@
 """``scripts/calibrate_operating_point.py``'s calibration-pass detection cap and conf-floor threading.
 
 The script's in-model detection cap must match the already-safe MCP path (``run_inference`` ->
-``_calibrate_operating_point``, which passes ``max_dets=DEFAULT_MAX_DETS`` to ``build_predictor``
+``calibrate_operating_point``, which passes ``max_dets=DEFAULT_MAX_DETS`` to ``build_predictor``
 before the floor call) exactly: same constant, both entry doors, not two independently-typed caps
 that could silently drift apart, since flooring conf to 0.01 for the sweep without also raising the
 cap would truncate a dense calibration image's low-conf tail before the sweep ever saw it.

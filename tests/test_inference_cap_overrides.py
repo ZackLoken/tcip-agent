@@ -49,6 +49,7 @@ def _calibration_records() -> list[dict]:
 def inference_call(tmp_path, monkeypatch):
     """Call ``run_inference`` with the model pass stubbed, the real resolver behind calibration."""
     from tcip_mcp import model_registry as model_registry_module
+    from tcip_mcp.pipelines import calibration as calibration_pipeline
     from tcip_mcp.pipelines.inference import predictor as predictor_module
     from tcip_mcp.tools import inference_tools
 
@@ -88,7 +89,7 @@ def inference_call(tmp_path, monkeypatch):
     monkeypatch.setattr(
         model_registry_module, "load_registered_checkpoint",
         lambda *a, **kw: stub_verified_checkpoint(str(checkpoint)))
-    monkeypatch.setattr(inference_tools, "_calibrate_operating_point", _spy_calibrate)
+    monkeypatch.setattr(calibration_pipeline, "calibrate_operating_point", _spy_calibrate)
 
     def _call(**kwargs):
         result = inference_tools.run_inference(

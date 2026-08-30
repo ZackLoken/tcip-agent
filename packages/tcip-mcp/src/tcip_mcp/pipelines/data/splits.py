@@ -984,7 +984,7 @@ def label_image_stems(
 ) -> tuple[list[str], dict[str, "Path | BandGroupRef"]]:
     """Stems with a readable per-image label file, one scan shared by every caller.
 
-    ``_calibrate_operating_point`` and ``force_redraw_cal_holdout_split`` both call this rather
+    ``calibrate_operating_point`` and ``force_redraw_cal_holdout_split`` both call this rather
     than scanning independently, so they agree on what "the dataset's stems" are: a caller
     passing ``images_dir`` gets the stronger labels-intersect-images stem universe, one that
     only globs labels gets the weaker (and possibly stale, if an image was deleted/renamed)
@@ -1119,7 +1119,7 @@ def resolve_manifest_calibration_universe(
     ``attribute`` must equal the door's, the labels directory's date
     (:func:`~tcip_mcp.dataset_layout.annotation_date`) must be one the manifest holds members
     under, and the manifest's ``images_root`` for that date must be the door's ``images_dir``,
-    each refusing by name. Called from ``_calibrate_operating_point``, ``evaluate_model``,
+    each refusing by name. Called from ``calibrate_operating_point``, ``evaluate_model``,
     ``force_redraw_cal_holdout_split`` and ``scripts/calibrate_operating_point.py`` so none of
     the four drift into disagreeing about what a manifest-restricted read reads.
 

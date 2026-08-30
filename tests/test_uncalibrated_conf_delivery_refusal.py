@@ -136,6 +136,7 @@ def test_a_calibrated_conf_delivers_the_count_csv_untouched(tmp_path, monkeypatc
     The predictions it counted are persisted and stamped, and the CSV's own validity is read back
     off that stamp, so the number in the file rests on an artifact anyone can re-read.
     """
+    import tcip_mcp.pipelines.calibration as calibration
     import tcip_mcp.tools.inference_tools as itools
     from tcip_mcp.pipelines.resolution import (
         VALIDATED_HELD_OUT, read_operating_point_sidecar, verify_stamp_binding,
@@ -145,7 +146,7 @@ def test_a_calibrated_conf_delivers_the_count_csv_untouched(tmp_path, monkeypatc
     bundle, inputs = _held_out_bundle()
     evidence = {"resolver": "resolve_operating_point", "inputs": inputs,
                 "reference_inputs": {"label_dirs": {"calibration": str(images_dir)}}}
-    monkeypatch.setattr(itools, "_calibrate_operating_point",
+    monkeypatch.setattr(calibration, "calibrate_operating_point",
                         lambda *a, **k: (bundle, "H", 0, evidence))
     out_csv = tmp_path / "counts.csv"
     bucket = tmp_path / "predictions" / "baseline" / "2026-01-01"

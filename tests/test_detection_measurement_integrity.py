@@ -765,7 +765,7 @@ def test_default_path_unchanged(tmp_path, monkeypatch):
     assert "sweep_summary" not in r  # provenance shape unchanged on the default path
 
 
-def _stand_in_calibration(monkeypatch, itools, labels_dir, **overrides):
+def _stand_in_calibration(monkeypatch, calibration_pipeline, labels_dir, **overrides):
     """Stand in for the calibration pass, returning what it returns: the resolved bundle, its
     dataset identity, no excluded stems, and the evidence a delivery door reopens the gate over."""
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
@@ -776,19 +776,20 @@ def _stand_in_calibration(monkeypatch, itools, labels_dir, **overrides):
     bundle = resolve_operating_point("catkin", experiment_id=None, **inputs)
     evidence = {"resolver": "resolve_operating_point", "inputs": inputs,
                 "reference_inputs": {"label_dirs": {"calibration": str(labels_dir)}}}
-    monkeypatch.setattr(itools, "_calibrate_operating_point",
+    monkeypatch.setattr(calibration_pipeline, "calibrate_operating_point",
                         lambda *a, **k: (bundle, "H", 0, evidence))
     return bundle
 
 
 def test_calibration_wires_resolved_conf(tmp_path, monkeypatch):
     import tcip_store as ts
+    import tcip_mcp.pipelines.calibration as calibration_pipeline
     import tcip_mcp.tools.inference_tools as itools
     import tcip_mcp.pipelines.inference.predictor as predictor_mod
 
     # tiled=False: this test's real run_inference call below is tile=False (tile_size only
     # gates a bundle when tiled, so the mocked bundle must match the real regime it stands in for).
-    _stand_in_calibration(monkeypatch, itools, tmp_path, tiled=False)
+    _stand_in_calibration(monkeypatch, calibration_pipeline, tmp_path, tiled=False)
     stub = _CalStub()
     _patch_build_predictor(monkeypatch, predictor_mod, lambda: stub)
     monkeypatch.chdir(tmp_path)  # sweep artifact under .tcip/artifacts
@@ -812,10 +813,11 @@ def test_sweep_artifact_is_content_addressed_not_label_hash_only(tmp_path, monke
     """Two calibrations on the same checkpoint+labels but different predictor-path
     settings must not collide on the sweep artifact filename."""
     import tcip_store as ts
+    import tcip_mcp.pipelines.calibration as calibration_pipeline
     import tcip_mcp.tools.inference_tools as itools
     import tcip_mcp.pipelines.inference.predictor as predictor_mod
 
-    _stand_in_calibration(monkeypatch, itools, tmp_path, tiled=True)
+    _stand_in_calibration(monkeypatch, calibration_pipeline, tmp_path, tiled=True)
     stub = _CalStub()
     _patch_build_predictor(monkeypatch, predictor_mod, lambda: stub)
     monkeypatch.chdir(tmp_path)
@@ -847,15 +849,14 @@ def test_export_predictions_sidecar_carries_sweep_pointer(tmp_path, monkeypatch)
     from pathlib import PurePosixPath
 
     import tcip_store as ts
+    import tcip_mcp.pipelines.calibration as calibration_pipeline
     import tcip_mcp.tools.inference_tools as itools
     import tcip_mcp.pipelines.inference.predictor as predictor_mod
     from tcip_mcp.pipelines.resolution import read_operating_point_sidecar
 
-    # tiled=False here matches the real tile=False the export_predictions call below makes: an
-    # operating point resolved as if the run always tiles (resolve_operating_point's own tiled
-    # default) would carry a gating tile_size dimension that the actual untiled call never runs
-    # at, and the delivery gate now refuses on exactly that kind of mismatch.
-    _stand_in_calibration(monkeypatch, itools, tmp_path, tiled=False)
+    # tiled=False matches the real tile=False export_predictions runs at below, so the gate
+    # never sees a mismatched tile_size dimension against the actual untiled call.
+    _stand_in_calibration(monkeypatch, calibration_pipeline, tmp_path, tiled=False)
     stub = _CalStub()
     _patch_build_predictor(monkeypatch, predictor_mod, lambda: stub)
     monkeypatch.chdir(tmp_path)
@@ -880,6 +881,7 @@ def test_export_predictions_sidecar_carries_sweep_pointer(tmp_path, monkeypatch)
 def test_cross_dataset_inheritance_flagged(tmp_path, monkeypatch):
     """Inferencing the same labeled set with a bundle scoped to a different hash flags inheritance and
     refuses to stamp validated=True (validated and shippable_issues stay consistent)."""
+    import tcip_mcp.pipelines.calibration as calibration_pipeline
     import tcip_mcp.tools.inference_tools as itools
     import tcip_mcp.pipelines.inference.predictor as predictor_mod
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
@@ -896,7 +898,7 @@ def test_cross_dataset_inheritance_flagged(tmp_path, monkeypatch):
     bundle = resolve_operating_point("catkin", experiment_id=None, **inputs)
     evidence = {"resolver": "resolve_operating_point", "inputs": inputs,
                 "reference_inputs": {"label_dirs": {"calibration": str(tmp_path)}}}
-    monkeypatch.setattr(itools, "_calibrate_operating_point",
+    monkeypatch.setattr(calibration_pipeline, "calibrate_operating_point",
                         lambda *a, **k: (bundle, "H", 0, evidence))
     _patch_build_predictor(monkeypatch, predictor_mod, _CalStub)
     monkeypatch.chdir(tmp_path)
@@ -915,6 +917,7 @@ def test_manifest_calibration_subset_of_inference_target_is_still_comparable(tmp
     """Under a manifest the calibration's own universe is a held-out subset of the labelled
     directory; inferring the whole directory is still the same labelled set, so the firewall
     compares real hashes instead of reading a fully-labelled target as unlabeled."""
+    import tcip_mcp.pipelines.calibration as calibration_pipeline
     import tcip_mcp.tools.inference_tools as itools
     import tcip_mcp.pipelines.inference.predictor as predictor_mod
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
@@ -933,7 +936,7 @@ def test_manifest_calibration_subset_of_inference_target_is_still_comparable(tmp
         },
         "calibration_stems": ["a"],
     }
-    monkeypatch.setattr(itools, "_calibrate_operating_point",
+    monkeypatch.setattr(calibration_pipeline, "calibrate_operating_point",
                         lambda *a, **k: (bundle, "H", 0, evidence))
     _patch_build_predictor(monkeypatch, predictor_mod, _CalStub)
     monkeypatch.chdir(tmp_path)
@@ -965,6 +968,7 @@ def test_manifest_calibration_firewall_hashes_the_universe(
     inference target compares real, matching hashes and validates; a genuine subset or disjoint
     target stays the honest not-comparable case, in both cases regardless of whether
     calibration_images_dir is given."""
+    import tcip_mcp.pipelines.calibration as calibration_pipeline
     import tcip_mcp.tools.inference_tools as itools
     import tcip_mcp.pipelines.inference.predictor as predictor_mod
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
@@ -986,7 +990,7 @@ def test_manifest_calibration_firewall_hashes_the_universe(
         },
         "calibration_stems": universe,
     }
-    monkeypatch.setattr(itools, "_calibrate_operating_point",
+    monkeypatch.setattr(calibration_pipeline, "calibrate_operating_point",
                         lambda *a, **k: (bundle, dh, 0, evidence))
     _patch_build_predictor(monkeypatch, predictor_mod, _CalStub)
     monkeypatch.chdir(tmp_path)
@@ -1017,6 +1021,7 @@ def test_manifest_calibration_reports_its_exclusion_counts_on_the_response(tmp_p
     universe, the train side's, the val side's and the unassigned ones, as counts beside the
     incomplete attribute count, so the caller learns the exclusions without opening the persisted
     evidence."""
+    import tcip_mcp.pipelines.calibration as calibration_pipeline
     import tcip_mcp.tools.inference_tools as itools
     import tcip_mcp.pipelines.inference.predictor as predictor_mod
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
@@ -1037,7 +1042,7 @@ def test_manifest_calibration_reports_its_exclusion_counts_on_the_response(tmp_p
         "excluded": {"excluded_training_stems": ["b", "c"], "excluded_validation_stems": ["e"],
                     "excluded_unassigned_stems": ["d"]},
     }
-    monkeypatch.setattr(itools, "_calibrate_operating_point",
+    monkeypatch.setattr(calibration_pipeline, "calibrate_operating_point",
                         lambda *a, **k: (bundle, "H", 0, evidence))
     _patch_build_predictor(monkeypatch, predictor_mod, _CalStub)
     monkeypatch.chdir(tmp_path)
@@ -1060,11 +1065,12 @@ def test_manifest_calibration_reports_its_exclusion_counts_on_the_response(tmp_p
 def test_unlabeled_target_is_not_comparable_but_shippable(tmp_path, monkeypatch):
     """An unlabeled inference target has no GT hash to compare: record it as such and still ship when
     the held-out calibration passed (no validated/shippable_issues contradiction)."""
+    import tcip_mcp.pipelines.calibration as calibration_pipeline
     import tcip_mcp.tools.inference_tools as itools
     import tcip_mcp.pipelines.inference.predictor as predictor_mod
 
     # tiled=False: matches the real run_inference call below (tile=False).
-    _stand_in_calibration(monkeypatch, itools, tmp_path, tiled=False)
+    _stand_in_calibration(monkeypatch, calibration_pipeline, tmp_path, tiled=False)
     _patch_build_predictor(monkeypatch, predictor_mod, _CalStub)
     monkeypatch.chdir(tmp_path)
 

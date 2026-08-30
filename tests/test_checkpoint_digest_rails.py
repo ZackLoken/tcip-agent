@@ -664,7 +664,7 @@ def test_load_registered_checkpoints_version_refusal_is_caught_by_a_door(tmp_pat
 # Rail 3: a sweep record edited after the run is refused by _calibration_evidence through
 # export_predictions, naming both digests.
 
-def _stand_in_calibration(monkeypatch, itools, labels_dir):
+def _stand_in_calibration(monkeypatch, calibration_pipeline, labels_dir):
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
     from tests._dense_op_fixtures import dense_records
 
@@ -683,7 +683,7 @@ def _stand_in_calibration(monkeypatch, itools, labels_dir):
     bundle = resolve_operating_point("catkin", experiment_id=None, **inputs)
     evidence = {"resolver": "resolve_operating_point", "inputs": inputs,
                 "reference_inputs": {"label_dirs": {"calibration": str(labels_dir)}}}
-    monkeypatch.setattr(itools, "_calibrate_operating_point",
+    monkeypatch.setattr(calibration_pipeline, "calibrate_operating_point",
                         lambda *a, **k: (bundle, "H", 0, evidence))
 
 
@@ -692,6 +692,7 @@ def test_export_predictions_refuses_a_sweep_record_edited_after_the_run(tmp_path
     family's baseline (f4413a14) does not carry, so a run against that baseline dies in setup
     rather than on the assertion this test names. See the driven-through-real-doors version
     below for the guard."""
+    import tcip_mcp.pipelines.calibration as calibration_pipeline
     import tcip_mcp.tools.inference_tools as itools
 
     monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
@@ -699,7 +700,7 @@ def test_export_predictions_refuses_a_sweep_record_edited_after_the_run(tmp_path
     _bespoke_checkpoint(ckpt)
     _register(tmp_path, str(ckpt))
     images_dir, _ = _images(tmp_path)
-    _stand_in_calibration(monkeypatch, itools, tmp_path)
+    _stand_in_calibration(monkeypatch, calibration_pipeline, tmp_path)
 
     real_verified = itools._run_inference_verified
     captured: dict = {}
@@ -747,6 +748,7 @@ def test_export_predictions_refuses_a_sweep_record_edited_after_the_run_through_
     export_predictions reads back and refuses on."""
     import tcip_store.store as store_mod
 
+    import tcip_mcp.pipelines.calibration as calibration_pipeline
     import tcip_mcp.tools.inference_tools as itools
 
     monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
@@ -754,7 +756,7 @@ def test_export_predictions_refuses_a_sweep_record_edited_after_the_run_through_
     _bespoke_checkpoint(ckpt)
     _register(tmp_path, str(ckpt))
     images_dir, _ = _images(tmp_path)
-    _stand_in_calibration(monkeypatch, itools, tmp_path)
+    _stand_in_calibration(monkeypatch, calibration_pipeline, tmp_path)
 
     r1 = itools.run_inference(str(ckpt), images_dir=str(images_dir), trait="catkin",
                               calibration_labels_dir=str(tmp_path))
@@ -793,6 +795,7 @@ def test_export_predictions_refuses_a_sweep_whose_evidence_the_codec_cannot_carr
     the swallowed warning the pre-family code left behind. The admitting half of this branch is
     already covered: test_a_bespoke_module_exposing_its_own_knob_reaches_a_validated_point in
     test_detector_operating_point_holder.py is an ordinary calibrated run surviving it."""
+    import tcip_mcp.pipelines.calibration as calibration_pipeline
     import tcip_mcp.tools.inference_tools as itools
     from PIL import Image
     from tcip_annotation import json_io
@@ -812,14 +815,14 @@ def test_export_predictions_refuses_a_sweep_whose_evidence_the_codec_cannot_carr
         json_io.write_annotations(str(labels_dir / f"img{i}.json"),
                                   [Annotation(subject="catkin", geometry=box)], size, size)
 
-    real_calibrate = itools._calibrate_operating_point
+    real_calibrate = calibration_pipeline.calibrate_operating_point
 
     def _nan_evidence(*a, **kw):
         bundle, dh, n_excluded, evidence = real_calibrate(*a, **kw)
         evidence["inputs"]["staged_conf_floor"] = float("nan")
         return bundle, dh, n_excluded, evidence
 
-    monkeypatch.setattr(itools, "_calibrate_operating_point", _nan_evidence)
+    monkeypatch.setattr(calibration_pipeline, "calibrate_operating_point", _nan_evidence)
 
     out = tmp_path / "preds"
     refused = itools.export_predictions(ckpt, str(images_dir), str(out), trait="catkin",
