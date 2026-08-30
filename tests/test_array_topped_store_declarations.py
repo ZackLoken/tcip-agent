@@ -1,8 +1,9 @@
-"""The three registered stores whose frozen document is a top-level JSON array, not an object:
-the model registry index, the project dataset registry, and the web job registry. None has an
-object to hold ``schema_version`` on, so each declares ``cannot_carry_field`` naming the array-top
-shape, rather than the version check silently no-opping on them with no stated reason. The
-document bytes these stores write are unchanged; only the descriptor's own classification is new.
+"""Three registered stores wrap a top-level JSON array of entries rather than a keyed record: the
+project dataset registry and the web job registry declare ``cannot_carry_field`` naming the
+array-top shape, since neither has an object to hold ``schema_version`` on. The model registry
+index used to be the same shape; it now wraps into ``{schema_version, entries}`` (the
+relative-paths family) and declares a cleared ``cannot_carry_field`` with a ceiling of 2 instead,
+covered separately below.
 """
 
 from __future__ import annotations
@@ -10,27 +11,47 @@ from __future__ import annotations
 from pathlib import Path
 
 import tcip_store as ts
-from tcip_mcp.model_registry import MODEL_REGISTRY_STORE, read_registry_index
+from tcip_mcp.model_registry import (
+    MODEL_REGISTRY_STORE,
+    ModelRegistry,
+    read_registry_index,
+    registry_index_key,
+)
 from tcip_mcp.tools.project_tools import DATASET_REGISTRY_STORE, read_datasets, register_dataset
 from tcip_web import jobstore
 
 
-def _array_topped_stores() -> tuple[str, ...]:
-    return (MODEL_REGISTRY_STORE, DATASET_REGISTRY_STORE, jobstore.JOB_REGISTRY_STORE)
+def _cannot_carry_stores() -> tuple[str, ...]:
+    return (DATASET_REGISTRY_STORE, jobstore.JOB_REGISTRY_STORE)
 
 
-def test_every_array_topped_store_declares_cannot_carry_with_the_array_top_wording():
-    for name in _array_topped_stores():
+def test_every_still_array_topped_store_declares_cannot_carry_with_the_array_top_wording():
+    for name in _cannot_carry_stores():
         descriptor = ts.get_descriptor(name)
         assert descriptor.frozen
         assert descriptor.cannot_carry_field, name
         assert "array" in descriptor.cannot_carry_field
 
 
-def test_model_registry_index_composes_with_its_own_declaration(tmp_path: Path):
-    entries = read_registry_index(tmp_path)  # a real project with nothing registered
-    assert entries == []
-    ts.check_schema_version(ts.get_descriptor(MODEL_REGISTRY_STORE), entries)
+def test_model_registry_declares_a_cleared_cannot_carry_field_and_ceiling_two():
+    descriptor = ts.get_descriptor(MODEL_REGISTRY_STORE)
+    assert descriptor.frozen
+    assert descriptor.cannot_carry_field == ""
+    assert descriptor.schema_version == 2
+
+
+def test_model_registry_document_composes_with_its_own_declaration(tmp_path: Path):
+    ckpt = tmp_path / "m.pt"
+    ckpt.write_bytes(b"weights")
+    ModelRegistry(str(tmp_path)).register_model("a", str(ckpt), {}, metrics_source=None)
+
+    raw = ts.read(registry_index_key(tmp_path))
+    assert raw["schema_version"] == 2
+    ts.check_schema_version(ts.get_descriptor(MODEL_REGISTRY_STORE), raw)
+
+
+def test_model_registry_index_reads_as_an_empty_list_for_a_fresh_project(tmp_path: Path):
+    assert read_registry_index(tmp_path) == []
 
 
 def test_dataset_registry_composes_with_its_own_declaration(tmp_path: Path):
