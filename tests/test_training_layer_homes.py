@@ -57,3 +57,32 @@ def test_get_worst_predictions_has_one_home():
         _module_path("tools/training_tools.py"),
         _module_path("tools/vision_tools.py"),
     )
+
+
+def test_run_registry_functions_have_one_home():
+    """``create_run``, ``attach_run``, ``get_run``, ``list_runs`` and ``cancel_run`` moved out of
+    ``generic_trainer.py`` into ``pipelines/training/run_registry.py``, as one unit with
+    ``TrainRun`` (checked separately below, it is a class, not a function)."""
+    _assert_one_home(
+        {"create_run", "attach_run", "get_run", "list_runs", "cancel_run"},
+        _module_path("pipelines/training/generic_trainer.py"),
+        _module_path("pipelines/training/run_registry.py"),
+    )
+
+
+def test_train_run_class_has_one_home():
+    old_defs = {
+        node.name for node in ast.parse(
+            _module_path("pipelines/training/generic_trainer.py").read_text(encoding="utf-8"),
+        ).body
+        if isinstance(node, ast.ClassDef)
+    }
+    new_path = _module_path("pipelines/training/run_registry.py")
+    new_defs: set[str] = set()
+    if new_path.is_file():
+        new_defs = {
+            node.name for node in ast.parse(new_path.read_text(encoding="utf-8")).body
+            if isinstance(node, ast.ClassDef)
+        }
+    assert "TrainRun" not in old_defs, "generic_trainer.py still defines TrainRun"
+    assert "TrainRun" in new_defs, "run_registry.py never defines TrainRun"

@@ -231,13 +231,13 @@ def test_never_launched_experiment_is_absent_from_the_route(tmp_path, monkeypatc
 
 def test_list_runs_excludes_hpo_trials(monkeypatch) -> None:
     # HPO trial runs (origin='hpo_trial') must not leak into the Training-tab list.
-    from tcip_mcp.pipelines.training import generic_trainer as gt
+    from tcip_mcp.pipelines.training import run_registry as rr
 
-    monkeypatch.setattr(gt, "_RUNS", {})
-    gt.create_run({"model_source": {"builder": "x:y"}}, "out_a", origin="training")
-    gt.create_run({"model_source": {"builder": "x:y"}}, "out_b", origin="hpo_trial")
+    monkeypatch.setattr(rr, "_RUNS", {})
+    rr.create_run({"model_source": {"builder": "x:y"}}, "out_a", origin="training")
+    rr.create_run({"model_source": {"builder": "x:y"}}, "out_b", origin="hpo_trial")
 
-    default = {r["run_id"] for r in gt.list_runs()}
+    default = {r["run_id"] for r in rr.list_runs()}
     assert len(default) == 1  # only the standalone training run
-    assert all(gt._RUNS[rid].origin == "training" for rid in default)
-    assert len(gt.list_runs(include_hpo_trials=True)) == 2  # full set on request
+    assert all(rr._RUNS[rid].origin == "training" for rid in default)
+    assert len(rr.list_runs(include_hpo_trials=True)) == 2  # full set on request

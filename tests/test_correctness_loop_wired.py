@@ -15,7 +15,7 @@ pytest.importorskip("torchvision")
 
 from tcip_mcp.pipelines.model_build import resolve_contract_dims  # noqa: E402
 from tcip_mcp.pipelines.training.envelope import TrainContext  # noqa: E402
-from tcip_mcp.pipelines.training.generic_trainer import create_run  # noqa: E402
+from tcip_mcp.pipelines.training.run_registry import create_run  # noqa: E402
 
 
 def _broken_builder(**kwargs):

@@ -884,7 +884,7 @@ def test_evaluate_model_under_the_manifest_scores_exactly_calibration_universe_f
     duplicated here."""
     import tcip_mcp.pipelines.training.evaluation as evaluation
     from tcip_mcp.pipelines.data.splits import calibration_universe_from_manifest, label_image_stems
-    from tcip_mcp.pipelines.training.generic_trainer import create_run
+    from tcip_mcp.pipelines.training.run_registry import create_run
     from tcip_mcp.tools.training_tools import evaluate_model
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
@@ -932,7 +932,7 @@ def test_evaluate_model_under_manifest_writes_and_reads_back_test_results(
     import tcip_mcp.pipelines.training.evaluation as evaluation
     from tcip_mcp.pipelines.data.splits import calibration_universe_from_manifest, label_image_stems
     from tcip_mcp.pipelines.training.evaluation import evaluation_results_key
-    from tcip_mcp.pipelines.training.generic_trainer import create_run
+    from tcip_mcp.pipelines.training.run_registry import create_run
     from tcip_mcp.tools.training_tools import evaluate_model
 
     class _DummyModel:
@@ -984,7 +984,7 @@ def test_evaluate_model_reads_confirmed_negatives_under_the_universes_own_date(
     import tcip_mcp.pipelines.training.evaluation as evaluation
     from tcip_mcp.dataset_layout import record_image_statuses, status_bucket
     from tcip_mcp.pipelines.data.splits import member_identity
-    from tcip_mcp.pipelines.training.generic_trainer import create_run
+    from tcip_mcp.pipelines.training.run_registry import create_run
     from tcip_mcp.tools.data_tools import split_manifest_key
     from tcip_mcp.tools.training_tools import evaluate_model
     from tests._verified_checkpoint_fixtures import registered_checkpoint
@@ -1037,7 +1037,7 @@ def test_evaluate_model_manifest_refuses_a_disagreeing_date(tmp_path: Path, monk
     assertion is what fails, not an unrelated checkpoint-loading crash reached by continuing past
     a refusal the tree under test does not raise."""
     import tcip_mcp.pipelines.training.evaluation as evaluation
-    from tcip_mcp.pipelines.training.generic_trainer import create_run
+    from tcip_mcp.pipelines.training.run_registry import create_run
     from tcip_mcp.tools.training_tools import evaluate_model
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
@@ -1079,7 +1079,7 @@ def test_evaluate_model_scores_a_one_foreground_group_calibration_side_the_door_
         calibration_universe_from_manifest, count_label_lines, label_image_stems,
         member_identity_parts,
     )
-    from tcip_mcp.pipelines.training.generic_trainer import create_run
+    from tcip_mcp.pipelines.training.run_registry import create_run
     from tcip_mcp.tools.data_tools import split_manifest_key
     from tcip_mcp.tools.training_tools import evaluate_model
     from tests._verified_checkpoint_fixtures import registered_checkpoint
@@ -1126,7 +1126,7 @@ def test_evaluate_model_scores_a_one_foreground_group_calibration_side_the_door_
 
 def test_evaluate_model_manifest_refuses_a_subject_mismatch(tmp_path: Path):
     from tcip_mcp.tools.training_tools import evaluate_model
-    from tcip_mcp.pipelines.training.generic_trainer import create_run
+    from tcip_mcp.pipelines.training.run_registry import create_run
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")

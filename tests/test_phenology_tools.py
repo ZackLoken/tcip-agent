@@ -1475,7 +1475,8 @@ def test_calibrate_ordinal_regression_operating_point_ordinal_e2e(
     from torch.utils.data import DataLoader
 
     from tcip_mcp.pipelines.data.datasets import build_dataset
-    from tcip_mcp.pipelines.training.generic_trainer import create_run, task_collate, train
+    from tcip_mcp.pipelines.training.generic_trainer import task_collate, train
+    from tcip_mcp.pipelines.training.run_registry import create_run
     from tcip_mcp.tools.phenology_tools import calibrate_ordinal_regression_operating_point
     from tests.test_e2e_tasktypes import _model_source, _save_png, _train_config, _write_csv
 
@@ -1537,7 +1538,8 @@ def test_calibrate_ordinal_regression_operating_point_regression_e2e(
     from torch.utils.data import DataLoader
 
     from tcip_mcp.pipelines.data.datasets import build_dataset
-    from tcip_mcp.pipelines.training.generic_trainer import create_run, task_collate, train
+    from tcip_mcp.pipelines.training.generic_trainer import task_collate, train
+    from tcip_mcp.pipelines.training.run_registry import create_run
     from tcip_mcp.tools.phenology_tools import calibrate_ordinal_regression_operating_point
     from tests.test_e2e_tasktypes import _model_source, _save_png, _train_config, _write_csv
 

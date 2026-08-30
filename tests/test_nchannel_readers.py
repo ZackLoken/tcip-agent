@@ -44,7 +44,8 @@ def test_grayscale_classification_end_to_end(tmp_path):
     from torch.utils.data import DataLoader
 
     from tcip_mcp.pipelines.data.datasets import build_dataset
-    from tcip_mcp.pipelines.training.generic_trainer import create_run, task_collate, train
+    from tcip_mcp.pipelines.training.generic_trainer import task_collate, train
+    from tcip_mcp.pipelines.training.run_registry import create_run
 
     images_dir = tmp_path / "images"
     images_dir.mkdir()

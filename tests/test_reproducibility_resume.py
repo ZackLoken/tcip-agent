@@ -44,7 +44,8 @@ import tcip_mcp.pipelines.components.necks  # noqa: F401,E402
 import tcip_mcp.pipelines.components.heads  # noqa: F401,E402
 import tcip_mcp.pipelines.components.losses  # noqa: F401,E402
 from tcip_mcp.pipelines.data.datasets import build_dataset  # noqa: E402
-from tcip_mcp.pipelines.training.generic_trainer import create_run, task_collate, train  # noqa: E402
+from tcip_mcp.pipelines.training.generic_trainer import task_collate, train
+from tcip_mcp.pipelines.training.run_registry import create_run  # noqa: E402
 from torch.utils.data import DataLoader  # noqa: E402
 
 

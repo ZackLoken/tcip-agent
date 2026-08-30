@@ -180,7 +180,7 @@ def test_worker_leaves_a_spatial_runs_identities_out_of_the_durable_config(tmp_p
 
 
 def test_attach_run_preserves_given_run_id():
-    from tcip_mcp.pipelines.training.generic_trainer import attach_run, create_run, get_run
+    from tcip_mcp.pipelines.training.run_registry import attach_run, create_run, get_run
 
     run = attach_run("run_fixed_id", {"model_source": {"builder": "x:y"}}, "out")
     assert run.run_id == "run_fixed_id"
@@ -267,7 +267,7 @@ def test_launch_training_child_receives_resolved_experiment_id(tmp_path, monkeyp
 
 
 def test_cancel_sentinel_written_and_polled(tmp_path):
-    from tcip_mcp.pipelines.training.generic_trainer import attach_run, cancel_run
+    from tcip_mcp.pipelines.training.run_registry import attach_run, cancel_run
 
     run = attach_run("run_sentinel", {"model_source": {"builder": "x:y"}}, str(tmp_path))
     run.pid = 12345  # subprocess-delegated
@@ -284,7 +284,7 @@ def test_ctx_should_cancel_and_dispatch_classification_honor_sentinel(tmp_path):
     see a sentinel-only cancellation, and dispatch_train_body must classify the resulting run as
     'cancelled', not 'completed'."""
     from tcip_mcp.pipelines.training.envelope import TrainContext, dispatch_train_body
-    from tcip_mcp.pipelines.training.generic_trainer import attach_run
+    from tcip_mcp.pipelines.training.run_registry import attach_run
 
     run = attach_run("run_ctx_cancel", {"training_source": "tests.test_training_subprocess_isolation:_bespoke_loop"},
                      str(tmp_path))
@@ -314,7 +314,7 @@ def test_cancel_run_falls_back_to_disk_when_not_in_local_registry(tmp_path, monk
     writes to a guessed path nobody polls; this confirms the real path instead."""
     monkeypatch.chdir(tmp_path)
     from tcip_mcp.experiments import create_experiment, stamp_run_identity
-    from tcip_mcp.pipelines.training.generic_trainer import cancel_run
+    from tcip_mcp.pipelines.training.run_registry import cancel_run
 
     real_output_dir = tmp_path / "real_run_dir"
     real_output_dir.mkdir()
@@ -327,7 +327,7 @@ def test_cancel_run_falls_back_to_disk_when_not_in_local_registry(tmp_path, monk
 
 def test_cancel_run_unknown_run_refuses_honestly(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    from tcip_mcp.pipelines.training.generic_trainer import cancel_run
+    from tcip_mcp.pipelines.training.run_registry import cancel_run
 
     assert cancel_run("no-such-run-anywhere") is False
 
@@ -450,7 +450,7 @@ def test_update_status_error_is_keyword_only_and_backward_compatible(tmp_path, m
 def test_check_training_status_falls_back_to_disk_for_delegated_run(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     from tcip_mcp.experiments import create_experiment, log_metrics, stamp_run_identity, update_status
-    from tcip_mcp.pipelines.training.generic_trainer import attach_run
+    from tcip_mcp.pipelines.training.run_registry import attach_run
     from tcip_mcp.tools.training_tools import check_training_status
 
     run = attach_run("run_delegated", {"model_source": {"builder": "x:y"}}, "out_dir")
@@ -518,7 +518,7 @@ def test_list_training_runs_overlays_a_pid_bearing_entry_from_disk(tmp_path, mon
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
     from tcip_mcp.experiments import create_experiment, log_metrics, stamp_run_identity, update_status
-    from tcip_mcp.pipelines.training.generic_trainer import attach_run
+    from tcip_mcp.pipelines.training.run_registry import attach_run
     from tcip_mcp.tools.training_tools import list_training_runs
 
     run = attach_run("run_pid_overlay", {"model_source": {"builder": "my_models:burr_det"}}, "out_dir")
@@ -539,7 +539,7 @@ def test_list_training_runs_leaves_in_process_runs_untouched(tmp_path, monkeypat
     """A run with no pid (every existing synchronous test) is reported from the live in-memory
     record exactly as before. The disk overlay must never touch it."""
     monkeypatch.chdir(tmp_path)
-    from tcip_mcp.pipelines.training.generic_trainer import create_run
+    from tcip_mcp.pipelines.training.run_registry import create_run
     from tcip_mcp.tools.training_tools import list_training_runs
 
     run = create_run({"model_source": {"builder": "x:y"}}, "out_dir")
@@ -626,7 +626,7 @@ def test_max_wall_clock_seconds_terminates_hung_run(tmp_path, monkeypatch):
     import time
 
     from tcip_mcp.experiments import create_experiment, status_key, update_status
-    from tcip_mcp.pipelines.training.generic_trainer import attach_run
+    from tcip_mcp.pipelines.training.run_registry import attach_run
     from tcip_mcp.tools.training_tools import _watch_wall_clock
     from tcip_store import DecodeError, read
 
@@ -677,7 +677,7 @@ def test_max_wall_clock_seconds_writes_to_the_launch_root_after_an_adopt(tmp_pat
 
     from tcip_mcp import workspace
     from tcip_mcp.experiments import create_experiment, status_key, update_status
-    from tcip_mcp.pipelines.training.generic_trainer import attach_run
+    from tcip_mcp.pipelines.training.run_registry import attach_run
     from tcip_mcp.tools.training_tools import _watch_wall_clock
     from tcip_store import DecodeError, read
 
@@ -768,14 +768,14 @@ def test_inspect_compute_resources_reports_gpu_free_memory(monkeypatch):
 def test_inspect_compute_resources_counts_subprocess_delegated_running_runs(tmp_path, monkeypatch):
     """active_training_runs must count from the disk-aware _all_training_runs() (the internal
     function list_training_runs() and inspect_compute_resources() both build on), not the raw
-    in-memory generic_trainer.list_runs(): a subprocess-delegated run's parent-side
+    in-memory run_registry.list_runs(): a subprocess-delegated run's parent-side
     TrainRun.status never leaves its create_run-time "created" default once the child starts
     mutating its own separate copy, so the raw call always reports 0 for it. This is the common
     case for a subprocess-launched run, not an edge case, and it's the exact number the tool
     exists to give the agent before it decides whether to launch another concurrent run."""
     monkeypatch.chdir(tmp_path)
     from tcip_mcp.experiments import create_experiment, stamp_run_identity, update_status
-    from tcip_mcp.pipelines.training.generic_trainer import attach_run
+    from tcip_mcp.pipelines.training.run_registry import attach_run
     from tcip_mcp.tools.training_tools import inspect_compute_resources
 
     # _RUNS is a process-global registry other tests in this session also populate. Compare a

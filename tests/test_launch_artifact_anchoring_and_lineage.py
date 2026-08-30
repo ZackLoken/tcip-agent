@@ -271,7 +271,7 @@ def test_the_launch_record_the_worker_reads_carries_the_seed_and_the_hoisted_tra
     the training child performs: tcip_store.read(launch_config_key(output_dir)), the call
     subprocess_worker.run() makes, not a second parse of config.json. normalize_train_config
     (schemas.py) hoists every key set under config["training"] onto the top level when the top
-    level doesn't already have it, and generic_trainer.create_run draws a seed into
+    level doesn't already have it, and run_registry.create_run draws a seed into
     config["seed"] before this document is written, so the document the worker reads must carry
     both, plus the model_contract launch_training records and the resolved experiment_id: a
     document only the writer's own test has seen is one the worker's read could silently

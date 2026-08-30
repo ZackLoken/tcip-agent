@@ -17,7 +17,7 @@ from tcip_mcp.audit import audit_log_key  # noqa: E402
 from tcip_mcp.experiments import artifacts_key, env_key, lineage_key  # noqa: E402
 from tcip_mcp.pipelines.inference.predictor import KIND_TCIP_MODULE  # noqa: E402
 from tcip_mcp.pipelines.training.envelope import TrainContext, run_training_envelope  # noqa: E402
-from tcip_mcp.pipelines.training.generic_trainer import create_run  # noqa: E402
+from tcip_mcp.pipelines.training.run_registry import create_run  # noqa: E402
 
 
 def _audit_events(root, tool="training_run"):
@@ -211,7 +211,8 @@ def test_envelope_records_resume_provenance_in_env_json(tmp_path, monkeypatch):
     from PIL import Image
     from torch.utils.data import DataLoader
     from tcip_mcp.pipelines.data.datasets import build_dataset
-    from tcip_mcp.pipelines.training.generic_trainer import create_run as gt_create_run, task_collate, train
+    from tcip_mcp.pipelines.training.generic_trainer import task_collate, train
+    from tcip_mcp.pipelines.training.run_registry import create_run as gt_create_run
     from tcip_mcp.experiments import create_experiment, update_status
 
     images_dir = tmp_path / "images"

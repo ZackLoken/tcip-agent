@@ -51,7 +51,7 @@ def test_run_config_exposes_top_level_stages_after_normalize(tmp_path, monkeypat
     not the default single stage."""
     monkeypatch.chdir(tmp_path)
     from tcip_mcp.pipelines.schemas import normalize_train_config
-    from tcip_mcp.pipelines.training.generic_trainer import create_run
+    from tcip_mcp.pipelines.training.run_registry import create_run
 
     run = create_run(normalize_train_config(GUI_CONFIG), str(tmp_path))
     assert run.config["stages"] == GUI_CONFIG["training"]["stages"]

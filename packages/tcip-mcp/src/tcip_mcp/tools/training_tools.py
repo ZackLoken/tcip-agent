@@ -584,7 +584,7 @@ def launch_training(
     config["model_contract"] = model_contract_record
 
     from tcip_mcp.experiments import experiments_dir
-    from tcip_mcp.pipelines.training.generic_trainer import create_run
+    from tcip_mcp.pipelines.training.run_registry import create_run
     from tcip_mcp.project_paths import resolve_output_path
 
     # Training artifacts (weights, tensorboard, metrics) live with the project the run belongs
@@ -707,7 +707,7 @@ def _child_env_for_launch(config: dict) -> dict[str, str]:
     except Exception:
         count = 0
     if count > 1:
-        from tcip_mcp.pipelines.training.generic_trainer import _RUNS_LOCK
+        from tcip_mcp.pipelines.training.run_registry import _RUNS_LOCK
         with _RUNS_LOCK:
             idx = next(_gpu_round_robin) % count
         env["CUDA_VISIBLE_DEVICES"] = str(idx)
@@ -757,7 +757,7 @@ def check_training_status(run_id: str) -> dict:
     Args:
         run_id: Training run identifier.
     """
-    from tcip_mcp.pipelines.training.generic_trainer import get_run
+    from tcip_mcp.pipelines.training.run_registry import get_run
     run = get_run(run_id)
 
     result: dict[str, Any] | None = None
@@ -855,7 +855,7 @@ def _all_training_runs(*, read_progress: bool) -> list[dict[str, Any]]:
     where there is one, else the run's own config, else ``None``). Rows: this process's own, in
     registry order, then the disk-only rows, sorted by experiment id.
     """
-    from tcip_mcp.pipelines.training.generic_trainer import list_runs
+    from tcip_mcp.pipelines.training.run_registry import list_runs
 
     live = list_runs()
     disk = _launched_training_runs(read_progress=read_progress)
@@ -907,7 +907,7 @@ def cancel_training(run_id: str) -> dict:
     Args:
         run_id: Training run identifier (from launch_training).
     """
-    from tcip_mcp.pipelines.training.generic_trainer import cancel_run, get_run
+    from tcip_mcp.pipelines.training.run_registry import cancel_run, get_run
     if not cancel_run(run_id):
         return {"error": f"Run not found: {run_id}"}
     run = get_run(run_id)
@@ -1204,9 +1204,10 @@ def _run_hpo_trial(config: dict, report, base_config: dict, trial_dir: str) -> N
     from tcip_mcp.pipelines.training.envelope import TrainContext, dispatch_train_body
     from tcip_mcp.pipelines.training.evaluation import HIGHER_IS_BETTER_BY_METRIC
     from tcip_mcp.pipelines.training.generic_trainer import (
-        _improves, create_run, resolve_selection_metric, task_collate, seeded_loader_kwargs,
+        _improves, resolve_selection_metric, task_collate, seeded_loader_kwargs,
         stamp_effective_data_geometry,
     )
+    from tcip_mcp.pipelines.training.run_registry import create_run
     from tcip_mcp.pipelines.data.samplers import build_sampler
     from tcip_mcp.pipelines.data.split_construction import auto_train_val
     from torch.utils.data import DataLoader
@@ -2022,7 +2023,8 @@ def evaluate_model(
     import torch
     from torch.utils.data import DataLoader
 
-    from tcip_mcp.pipelines.training.generic_trainer import checkpoint_key, get_run, task_collate
+    from tcip_mcp.pipelines.training.generic_trainer import checkpoint_key, task_collate
+    from tcip_mcp.pipelines.training.run_registry import get_run
     from tcip_mcp.pipelines.training.evaluation import (
         run_full_frame_evaluation, run_test_evaluation,
     )
