@@ -200,7 +200,7 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | packages/tcip-web/src/tcip_web/agent_session_start.py | SessionStart ritual hook: inject the session-start ritual directive naming the active project. | 2 | 0 |
 | packages/tcip-web/src/tcip_web/app.py | FastAPI application: REST API for MCP tools + WebSocket for GUI state sync. | 10 | 3 |
 | packages/tcip-web/src/tcip_web/identity.py | Current-user identity for provenance stamping (created_by / accepted_by). | 0 | 5 |  <!-- queued: P5-329 unwired -->
-| packages/tcip-web/src/tcip_web/jobstore.py | Persistence + memory-cap helpers for the web's async job registries. | 1 | 7 |
+| packages/tcip-web/src/tcip_web/jobstore.py | Persistence + memory-cap helpers for the web's async job registries, plus `JobRegistry`, the shared dict-plus-lock live registry inference.py, tuning.py and review.py's priority queue adopt. | 1 | 7 |
 | packages/tcip-web/src/tcip_web/label_annotations_cache.py | The mtime-and-size-keyed label-document parse memo shared by the classes, dataset and review routes. | 1 | 3 |
 | packages/tcip-web/src/tcip_web/paths.py | Path resolution helpers with traversal protection. | 3 | 13 |
 | packages/tcip-web/src/tcip_web/routes/__init__.py | Route modules for the tcip-web FastAPI backend. | 16 | 1 |
@@ -213,16 +213,17 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | packages/tcip-web/src/tcip_web/routes/coverage.py | View-coverage routes: the reference grid over a raster and the per-image record of two per-cell facts: which cells were served to the browser at native resolution (a delivery fact) and which cells were swept in the viewport at or above the breeder's own working scale (a sweep fact). | 11 | 2 |
 | packages/tcip-web/src/tcip_web/routes/dataset.py | Dataset discovery + selection routes. | 5 | 2 |
 | packages/tcip-web/src/tcip_web/routes/fs.py | Local-filesystem directory browsing for the frontend's folder picker. | 1 | 1 |
-| packages/tcip-web/src/tcip_web/routes/images.py | Image serving: the one path pixels reach the browser through. | 11 | 3 |  <!-- queued: P5-234 merge-or-split -->
+| packages/tcip-web/src/tcip_web/routes/images.py | Image serving: the one path pixels reach the browser through. | 11 | 3 |
 | packages/tcip-web/src/tcip_web/routes/inference.py | Inference routes: async tiled runs + live progress WebSocket. | 15 | 2 |
 | packages/tcip-web/src/tcip_web/routes/meta.py | Meta-loop routes: surface Claude's friction reports and retrospectives. | 2 | 1 |
 | packages/tcip-web/src/tcip_web/routes/projects.py | Workspace project discovery + the active-project marker. | 4 | 1 |
 | packages/tcip-web/src/tcip_web/routes/results.py | Results routes: plant-mapping, per-plant phenology curves, CSV export, the operationalization record surface, the trait-spec statement surface, and the read-only delivery-event list. | 13 | 1 |
-| packages/tcip-web/src/tcip_web/routes/review.py | Review routes: compute matches, walk detections, record actions, save GT. | 17 | 2 |  <!-- queued: P5-228 merge-or-split -->
+| packages/tcip-web/src/tcip_web/routes/review.py | Review routes: verdict/GT recording plus the image-status group and the priority queue; validate_reference moved to routes/validation.py. | 17 | 2 |
 | packages/tcip-web/src/tcip_web/routes/sessions.py | Session-tracking routes: annotation_stats.json equivalent. | 2 | 3 |
 | packages/tcip-web/src/tcip_web/routes/terminal.py | Agent terminal routes: the HTTP/WS surface over :mod:`tcip_web.terminal`. | 3 | 5 |
 | packages/tcip-web/src/tcip_web/routes/training.py | Training routes: validate config, launch, list runs, live metrics stream. | 9 | 2 |
 | packages/tcip-web/src/tcip_web/routes/tuning.py | HPO / Tuning routes: launch + list + per-trial visibility. | 8 | 2 |
+| packages/tcip-web/src/tcip_web/routes/validation.py | Validation routes: promote a completed review into a validation reference. | 6 | 1 |
 | packages/tcip-web/src/tcip_web/state.py | In-memory GUI state + debounced persistence to ``.tcip/state/gui.json``. | 1 | 6 |
 | packages/tcip-web/src/tcip_web/trust_boundary.py | The network trust boundary: which connections the backend serves and which names it answers to. | 0 | 5 |
 | packages/tcip-web/src/tcip_web/terminal.py | Embedded agent terminal: run the real Claude Code CLI in a PTY. | 3 | 3 |
@@ -800,7 +801,7 @@ anything.
 
 `packages/tcip-web/src/tcip_web/app.py` builds the FastAPI app, registers 5 HTTP routes
 and 2 WebSocket routes directly, then calls `register_all(app)` from
-`packages/tcip-web/src/tcip_web/routes/__init__.py`, which `include_router`s 16 route
+`packages/tcip-web/src/tcip_web/routes/__init__.py`, which `include_router`s 17 route
 modules under `routes/`, each with a fixed prefix. Verified: `routes/__init__.py`,
 `routes/_metrics_common.py`, and `routes/_body_common.py` define no routes of their own (0
 `@router.*` decorator sites in any of the three); `_metrics_common.py` holds `metrics_response`,
@@ -808,12 +809,12 @@ the response shape `training.py` and `tuning.py` both answer in, and `_body_comm
 `EmptyBodyPayload`, the empty body model six path-parameter-only routes now declare so the
 browser must send a preflighted request rather than reaching the handler as a simple one.
 
-Total HTTP routes at HEAD: 82 (5 on `app.py` plus 77 across the 16 route modules, both counts
+Total HTTP routes at HEAD: 81 (5 on `app.py` plus 76 across the 17 route modules, both counts
 obtained this session by grepping `@app.get/post(` and `@router.get/post(` and summing);
 websocket routes are counted separately, below, and excluded from this total. Each per-router
-heading's own route count (and their sum, 80) includes any websocket route it lists, since
+heading's own route count (and their sum, 79) includes any websocket route it lists, since
 `routes/inference.py`, `routes/terminal.py` and `routes/training.py` each carry one; net of
-those three, the 16 modules hold the 77 HTTP routes counted here.
+those three, the 17 modules hold the 76 HTTP routes counted here.
 
 Total WebSocket routes at HEAD: 5 (`/ws/state`, `/ws/panel/{panel}` on `app.py`;
 `/api/terminal/ws/{session_id}` on `routes/terminal.py`; `/api/inference/jobs/{job_id}/stream`  <!-- queued: P5-124 unify -->
@@ -916,16 +917,15 @@ registered at HEAD.
 | GET | `` (root) | `list_projects` | `routes/projects.py:100` |
 | POST | `/active` | `set_active_project` | `routes/projects.py:142` |  <!-- queued: P5-90 move-to-gui-or-automatic -->
 
-### routes/results.py, prefix `/api/results` (15 routes)
+### routes/results.py, prefix `/api/results` (14 routes)
 
 | method | path | handler | line |
 |---|---|---|---|
 | POST | `/plant_mapping/build` | `build_plant_mapping` | `routes/results.py:178` |
 | POST | `/plant_mapping/load` | `load_plant_mapping` | `routes/results.py:270` |
 | GET | `/plant_mapping/list` | `list_plant_mappings` | `routes/results.py:289` |
-| POST | `/per_plant_curves` | `per_plant_curves` | `routes/results.py:561` |  <!-- queued: P5-130 merge-or-split -->
-| POST | `/onset_dates` | `onset_dates` | `routes/results.py:595` |  <!-- queued: P5-131 merge-or-split -->
-| POST | `/export_csv` | `export_csv` | `routes/results.py:629` |
+| POST | `/phenology_measurement` | `phenology_measurement` | `routes/results.py:561` |
+| POST | `/export_csv` | `export_csv` | `routes/results.py:613` |
 | GET | `/traits` | `list_traits` | `routes/results.py:1054` |
 | GET | `/operationalization` | `get_operationalization` | `routes/results.py:753` |
 | GET | `/operationalizations` | `list_operationalizations` | `routes/results.py:769` |
@@ -936,7 +936,7 @@ registered at HEAD.
 | GET | `/delivery-events` | `list_delivery_events` | `routes/results.py:1033` |
 | GET | `/models/registered` | `registered_models` | `routes/results.py:1083` |
 
-### routes/review.py, prefix `/api/review` (9 routes)
+### routes/review.py, prefix `/api/review` (8 routes)
 
 | method | path | handler | line |
 |---|---|---|---|
@@ -944,7 +944,6 @@ registered at HEAD.
 | POST | `/action` | `record_action` | `routes/review.py:577` |
 | POST | `/mark_complete` | `mark_complete` | `routes/review.py:713` |
 | POST | `/backup_labels` | `backup_labels` | `routes/review.py:775` |
-| POST | `/validate_reference` | `validate_reference` | `routes/review.py:809` |
 | GET | `/image_statuses` | `image_statuses` | `routes/review.py:1202` |
 | GET | `/generation_conf` | `get_generation_conf` | `routes/review.py:1232` |
 | POST | `/queue/launch` | `launch_priority_queue` | `routes/review.py:1414` |
@@ -995,6 +994,12 @@ registered at HEAD.
 | POST | `/sweeps/{sweep_id}/tensorboard` | `launch_sweep_tensorboard` | `routes/tuning.py:548` |
 | POST | `/sweeps/{sweep_id}/trials/{trial_id}/tensorboard` | `launch_trial_tensorboard` | `routes/tuning.py:565` |
 | POST | `/sweeps/{sweep_id}/trials/{trial_id}/tensorboard/stop` | `stop_trial_tensorboard` | `routes/tuning.py:579` |
+
+### routes/validation.py, prefix `/api/review` (1 route)
+
+| method | path | handler | line |
+|---|---|---|---|
+| POST | `/validate_reference` | `validate_reference` | `routes/validation.py:84` |
 
 ### 5 routes with no located frontend caller
 
@@ -1970,10 +1975,10 @@ Side A: `packages/tcip-mcp/src/tcip_mcp/web_client.py:106` (`def gui_snapshot_ke
 Side B: `packages/tcip-mcp/src/tcip_mcp/tools/project_tools.py:411` (`gui = tcip_store.read(gui_snapshot_key(project_root), default=None)`, the MCP read through the same key).
 Phase 3 verdict: single.
 
-## S11. Live canvas state files canvas_live.json / canvas_shapes.json  <!-- queued: P5-274 unify -->
+## S11. Live canvas state files canvas_live.json / canvas_shapes.json
 
-Must agree: browser payload, backend file writer, and MCP reader agree on the two-file split and the (image_path, tab) identity check.
-Side A: `packages/tcip-mcp/src/tcip_mcp/web_client.py:142` (`def canvas_meta_key(`, the meta document's one address, with `canvas_geometry_key`, line 144, addressing the geometry document; the two stores are declared as `CANVAS_META_STORE` and `CANVAS_GEOMETRY_STORE`, lines 111 and 112; `packages/tcip-web/src/tcip_web/routes/canvas.py:85` writes meta through the key, geometry first at line 78).
+Must agree: backend file writer and MCP reader agree on the two-file split, the (image_path, tab) identity check, and which root the pair lives under. The writer resolves the root through the same pinned `project_root()` the reader uses, validating the browser payload's own claim against it (403 on mismatch) rather than trusting it, so the two cannot land on different files for the same session.
+Side A: `packages/tcip-mcp/src/tcip_mcp/web_client.py:142` (`def canvas_meta_key(`, the meta document's one address, with `canvas_geometry_key`, line 144, addressing the geometry document; the two stores are declared as `CANVAS_META_STORE` and `CANVAS_GEOMETRY_STORE`, lines 111 and 112; `packages/tcip-web/src/tcip_web/routes/canvas.py:117` writes meta through the key, geometry first at line 110, both keyed on `_pinned_root_matching`'s return, line 104).
 Side B: `packages/tcip-mcp/src/tcip_mcp/tools/vision_tools.py:730` (`meta_doc = canvas_meta_key(root)`, the MCP read through the same keys) and `packages/tcip-mcp/src/tcip_mcp/tools/vision_tools.py:731` (`shapes_doc = canvas_geometry_key(root)`, the geometry read one line after).
 Phase 3 verdict: single.
 
