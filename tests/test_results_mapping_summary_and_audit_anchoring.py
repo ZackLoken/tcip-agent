@@ -152,7 +152,7 @@ def test_every_phenology_door_refuses_a_mapping_name_that_names_no_mapping(
     from tests._binding_fixtures import write_plant_mapping
 
     body = _phenology_fixture(tmp_path, validated=True, detections=4)
-    assert client.post("/api/results/onset_dates", json=body).status_code == 200
+    assert client.post("/api/results/phenology_measurement", json=body).status_code == 200
 
     write_plant_mapping(tmp_path, "empty", {}, dataset_root=tmp_path / "ds")
     for mapping_name, expected_status, expected_detail in (
@@ -160,10 +160,9 @@ def test_every_phenology_door_refuses_a_mapping_name_that_names_no_mapping(
         ("not_written_yet", 404, "not_written_yet"),
     ):
         broken = {**body, "mapping_name": mapping_name}
-        for route in ("per_plant_curves", "onset_dates"):
-            resp = client.post(f"/api/results/{route}", json=broken)
-            assert resp.status_code == expected_status, (route, mapping_name)
-            assert expected_detail in resp.json()["detail"], route
+        resp = client.post("/api/results/phenology_measurement", json=broken)
+        assert resp.status_code == expected_status, mapping_name
+        assert expected_detail in resp.json()["detail"]
         resp = client.post(
             "/api/results/export_csv",
             json={**broken, "payload": "milestones", "filename": "x.csv"})

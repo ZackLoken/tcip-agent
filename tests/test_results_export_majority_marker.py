@@ -53,7 +53,7 @@ def test_the_majority_marker_reports_the_specs_reading_not_the_gates_verdict(
     assert spec.majority_provisional is True
     body = _phenology_fixture(tmp_path, validated=True, detections=100)
 
-    disclosure = client.post("/api/results/onset_dates", json=body).json()
+    disclosure = client.post("/api/results/phenology_measurement", json=body).json()
     assert disclosure["provisional"] is False
     assert disclosure["validated"]["operating_point"] == VALIDATED_HELD_OUT
     assert disclosure["validated"]["classifier"] == VALIDATED_HELD_OUT

@@ -669,28 +669,22 @@ export function ResultsTab() {
         acknowledge_unvalidated: acknowledgeUnvalidated,
       };
       setLastRequest(request);
-      const curveRes = await resultsApi.perPlantCurves(request);
+      // One request computes both projections from one server-side measurement: a milestone
+      // date and the curve it was read off cannot disagree.
+      const res = await resultsApi.phenologyMeasurement(request);
       // The numbers and the evidence that qualifies them arrive together, so the tables below can
       // never render an unvalidated phenology measurement as though it were a delivery.
-      setProvisional(curveRes.provisional);
-      setValidity(curveRes.validated);
-      setCapturesUnverified(curveRes.captures_unverified ?? []);
-      setPlantCsvsUnverified(curveRes.plant_csvs_unverified ?? []);
+      setProvisional(res.provisional);
+      setValidity(res.validated);
+      setCapturesUnverified(res.captures_unverified ?? []);
+      setPlantCsvsUnverified(res.plant_csvs_unverified ?? []);
       setUnvalidatedRefusal(null);
-      const unclassified = curveRes.positive_class_assessed === false;
+      const unclassified = res.positive_class_assessed === false;
       setPositiveClassUnassessed(unclassified);
-      setCurves(curveRes.rows ?? []);
-      if (unclassified) {
-        // No positive-state class → the fraction is not a phenology measurement. Don't derive
-        // milestones from it at all, so there is nothing to export (belt-and-braces with the
-        // disabled export buttons + the compute_phenology MCP tool's hard refusal).
-        setOnset([]);
-      } else {
-        // Same inputs, not the curve rows: the server recomputes rather than trusting a table the
-        // client hands back, so a milestone date and the curve it was read off cannot disagree.
-        const onsetRes = await resultsApi.onsetDates(request);
-        setOnset(onsetRes.rows ?? []);
-      }
+      setCurves(res.curves.rows ?? []);
+      // No positive-state class: not a phenology measurement, so the milestones projection is
+      // dropped rather than shown (belt-and-braces with the disabled export buttons).
+      setOnset(unclassified ? [] : (res.milestones.rows ?? []));
     } catch (e) {
       // A refusal naming its own kind is routed by that kind, before any prose is read.
       const refusal = operationalizationRefusalOf(e);

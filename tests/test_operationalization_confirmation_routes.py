@@ -461,8 +461,8 @@ def test_a_project_root_outside_the_allowed_roots_is_refused_at_every_results_do
         "predictions_by_date": {},
         "trait": fx.CROSSING_TRAIT,
     }
-    for route in ("per_plant_curves", "onset_dates"):
-        assert client.post(f"/api/results/{route}", json=phenology_body).status_code == 403, route
+    assert client.post(
+        "/api/results/phenology_measurement", json=phenology_body).status_code == 403
     assert client.post(
         "/api/results/export_csv", json={**phenology_body, "payload": "milestones"}
     ).status_code == 403
@@ -488,7 +488,7 @@ def test_a_delivery_door_still_runs_for_a_project_root_the_guard_admits(
     store.open_project(tmp_path.resolve())
 
     resp = client.post(
-        "/api/results/onset_dates",
+        "/api/results/phenology_measurement",
         json={
             "project_root": str(tmp_path),
             "mapping_name": "mapping",

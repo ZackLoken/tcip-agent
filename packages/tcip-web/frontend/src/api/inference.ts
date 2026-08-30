@@ -130,10 +130,11 @@ export interface PhenologyRequest {
   acknowledge_unvalidated?: boolean;
 }
 
-// Every door returns the evidence that qualifies its numbers alongside them, so no surface can
-// render a phenology measurement bare.
-export interface PhenologyResponse<Row> {
-  rows: Row[];
+// One door returns both projections from one server-side measurement, so no surface can render
+// either projection bare, and a milestone date and the curve it was read off cannot disagree.
+export interface PhenologyMeasurementResponse {
+  curves: { rows: PerPlantRow[]; n_plants: number; positive_class_id: number | null };
+  milestones: { rows: OnsetRow[] };
   // Per-dimension reconciled state, e.g. { operating_point: "validated_held_out", classifier: "false" }.
   validated: Record<string, string>;
   // True when any dimension lacked on-disk evidence, including when the caller acknowledged it,
@@ -143,8 +144,6 @@ export interface PhenologyResponse<Row> {
   // False when nothing was ever classified along the trait's positive-class axis: the ratios are
   // then not a valid phenology measurement (run + validate the classifier first).
   positive_class_assessed: boolean;
-  n_plants?: number;
-  positive_class_id?: number | null;
   // What this delivery could not verify, not merely what it did not read: a bare date omitted,
   // absent, or archived (predictions still counted), or "date/name" for one uncheckable capture.
   captures_unverified: string[];
@@ -358,11 +357,8 @@ export const resultsApi = {
   // Every mapping name persisted under the open project, for the Results tab's name picker.
   listPlantMappings: () => getJson<{ names: string[] }>(ROUTES.getResultsPlantMappingList),
 
-  perPlantCurves: (body: PhenologyRequest) =>
-    postJson<PhenologyResponse<PerPlantRow>>(ROUTES.postResultsPerPlantCurves, body),
-
-  onsetDates: (body: PhenologyRequest) =>
-    postJson<PhenologyResponse<OnsetRow>>(ROUTES.postResultsOnsetDates, body),
+  phenologyMeasurement: (body: PhenologyRequest) =>
+    postJson<PhenologyMeasurementResponse>(ROUTES.postResultsPhenologyMeasurement, body),
 
   /** Enumerates what exists, keyed by trait plus delivery kind; the served `statement_fields`
    *  names what the `record_seen` hash covers, so the browser holds no list of its own to drift. */

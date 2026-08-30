@@ -161,13 +161,12 @@ def test_currant_bloom_json_doors_deliver_its_own_schema_when_validated(
     client: TestClient, tmp_path: Path,
 ) -> None:
     body = _currant_bloom_fixture(tmp_path, validated=True, fractions=(0.75, 1.0), detections=4)
-    for route in ("per_plant_curves", "onset_dates"):
-        resp = client.post(f"/api/results/{route}", json=body)
-        assert resp.status_code == 200, route
-        assert resp.json()["provisional"] is False, route
-        assert resp.json()["rows"], route
-    rows = client.post("/api/results/onset_dates", json=body).json()["rows"]
-    onset = next(r for r in rows if r["plant_id"] == "BUSH_A")
+    resp = client.post("/api/results/phenology_measurement", json=body)
+    assert resp.status_code == 200
+    out = resp.json()
+    assert out["provisional"] is False
+    assert out["curves"]["rows"] and out["milestones"]["rows"]
+    onset = next(r for r in out["milestones"]["rows"] if r["plant_id"] == "BUSH_A")
     # currant_bloom's own column names, not catkin's, and no majority alias column at all.
     assert "bloom_05per_date" in onset and "bloom_50per_date" in onset and "bloom_95per_date" in onset
     assert "catkin_elongation_date" not in onset
@@ -187,9 +186,8 @@ def test_currant_bloom_refuses_unvalidated_evidence_on_every_door(
     client: TestClient, tmp_path: Path,
 ) -> None:
     body = _currant_bloom_fixture(tmp_path, validated=False)
-    for route in ("per_plant_curves", "onset_dates"):
-        resp = client.post(f"/api/results/{route}", json=body)
-        assert resp.status_code == 400, route
-        assert "operating_point" in resp.json()["detail"], route
+    resp = client.post("/api/results/phenology_measurement", json=body)
+    assert resp.status_code == 400
+    assert "operating_point" in resp.json()["detail"]
     for payload in ("curves", "milestones"):
         assert _export(client, body, payload).status_code == 400, payload
