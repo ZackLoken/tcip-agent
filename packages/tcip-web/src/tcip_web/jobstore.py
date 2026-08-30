@@ -1,10 +1,12 @@
 """Persistence + memory-cap helpers for the web's async job registries.
 
-The inference/HPO/review-priority-queue routes keep an in-memory dict of background jobs;
-left unbounded, this dict leaks memory, and every job vanishes on restart. These helpers
-atomically persist job summaries to ``.tcip/state/<name>.json`` and evict the oldest
-*terminal* jobs so the live registry stays bounded. (Running jobs can't survive a restart,
-their threads are gone, so the persisted file is a record, not a resumable state.)
+The inference/HPO/review-priority-queue routes, and images.py's overview builds, each keep an
+in-memory dict of background jobs; left unbounded, a dict like this leaks memory, and (for the
+three that persist) every job vanishes on restart. These helpers atomically persist job
+summaries to ``.tcip/state/<name>.json`` and evict the oldest *terminal* jobs so a live
+registry stays bounded, whether or not it persists. (Running jobs can't survive a restart,
+their threads are gone, so a persisted file is a record, not a resumable state; images.py's
+registry carries no root concept of its own and persists nothing.)
 
 One registry document per job kind per platform root: a job carries the root it launched
 under (``platform_root``, set on the request thread at launch), and :func:`persist_grouped`
@@ -211,8 +213,9 @@ def rehydrated_status(summary: dict) -> JobStatus:
 
 class JobRegistry:
     """The dict-plus-lock live-job registry shape restated around each of inference.py's,
-    review.py's priority queue's, and tuning's own job dataclass: register, get, list, persist
-    (where a registry persists) and rehydrate, sharing this module's own
+    review.py's priority queue's, tuning's own job dataclass, and images.py's overview builds
+    (which adopts it unnamed, with no root concept): register, get, list, persist (where a
+    registry persists) and rehydrate, sharing this module's own
     :func:`evict_terminal`/:func:`find_job`/:func:`persist_grouped`/:func:`load` underneath.
 
     Holds no knowledge of a job's own shape: a caller's dataclass and worker logic stays in its

@@ -139,7 +139,7 @@ differs from phase0 record: the Phase 0 inventory (`docs/audit/phase0/module-inv
 | packages/tcip-mcp/src/tcip_mcp/tools/meta_tools.py | Meta-loop tools for self-improvement. | 4 | 4 |
 | packages/tcip-mcp/src/tcip_mcp/tools/model_tools.py | Model management tools, registry, listing, comparison. | 7 | 2 |
 | packages/tcip-mcp/src/tcip_mcp/tools/operationalization_tools.py | The agent's statement tool for trait operationalizations; it can state, never confirm. | 4 | 1 |
-| packages/tcip-mcp/src/tcip_mcp/tools/trait_spec_authoring_tools.py | The agent's authoring tool for a trait spec that does not yet exist; it can author, never confirm. | 3 | 1 |
+| packages/tcip-mcp/src/tcip_mcp/tools/trait_spec_authoring_tools.py | The agent's two doors for a trait spec: `author_trait_spec` creates (or restates, when a spec exists with no statement), `update_trait_spec_fields` edits fields on one already on record; neither confirms. | 3 | 1 |
 | packages/tcip-mcp/src/tcip_mcp/tools/orthomosaic_tools.py | Orthomosaic MCP tools: per-plant delivery from a persisted whole-raster prediction bucket plus a plant-locations CSV. | 12 | 1 |
 | packages/tcip-mcp/src/tcip_mcp/tools/phenology_tools.py | Phenology MCP tools, the agent-facing surface for the per-plant phenology pipeline: plant mapping, the positive-state classifier's own calibration gate, and compute_phenology. | 19 | 5 |
 | packages/tcip-mcp/src/tcip_mcp/tools/project_tools.py | Project management tools. | 10 | 7 |
@@ -202,10 +202,10 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | packages/tcip-web/src/tcip_web/agent_session_start.py | SessionStart ritual hook: inject the session-start ritual directive naming the active project. | 2 | 0 |
 | packages/tcip-web/src/tcip_web/app.py | FastAPI application: REST API for MCP tools + WebSocket for GUI state sync. | 10 | 3 |
 | packages/tcip-web/src/tcip_web/identity.py | Current-user identity for provenance stamping (created_by / accepted_by). | 0 | 5 |  <!-- queued: P5-329 unwired -->
-| packages/tcip-web/src/tcip_web/jobstore.py | Persistence + memory-cap helpers for the web's async job registries, plus `JobRegistry`, the shared dict-plus-lock live registry inference.py, tuning.py and review.py's priority queue adopt. | 1 | 7 |
+| packages/tcip-web/src/tcip_web/jobstore.py | Persistence + memory-cap helpers for the web's async job registries, plus `JobRegistry`, the shared dict-plus-lock live registry inference.py, tuning.py, review.py's priority queue and images.py's overview builds adopt. | 1 | 7 |
 | packages/tcip-web/src/tcip_web/label_annotations_cache.py | The mtime-and-size-keyed label-document parse memo shared by the classes, dataset and review routes. | 1 | 3 |
 | packages/tcip-web/src/tcip_web/paths.py | Path resolution helpers with traversal protection. | 3 | 13 |
-| packages/tcip-web/src/tcip_web/routes/__init__.py | Route modules for the tcip-web FastAPI backend. | 16 | 1 |
+| packages/tcip-web/src/tcip_web/routes/__init__.py | Route modules for the tcip-web FastAPI backend. | 17 | 1 |
 | packages/tcip-web/src/tcip_web/routes/_body_common.py | The empty JSON body a route with only path parameters declares, forcing a browser onto a preflighted request instead of a simple one. | 0 | 3 |
 | packages/tcip-web/src/tcip_web/routes/_coverage_models.py | The view-coverage record's viewing context, declared once so `routes/coverage.py` and `routes/images.py` agree on its shape, and so `scripts/generate_frontend_types.py` can render it for the browser instead of the browser hand-transcribing it. | 1 | 4 |
 | packages/tcip-web/src/tcip_web/routes/_metrics_common.py | The shape both metric routes serve, from whichever log the caller resolved. | 0 | 2 |
@@ -695,7 +695,7 @@ Docstring is the function's docstring first line, verbatim.
 | tool | line | audited | docstring first line |
 |---|---|---|---|
 | `force_redraw_cal_holdout_split` | `calibration_tools.py:24` | yes | Deliberately redraw a locked calibration/holdout split. |
-| `calibrate_ordinal_regression_operating_point` | `calibration_tools.py:255` | yes | Calibrate and validate a trait's ordinal-rank or continuous-value prediction against a |
+| `calibrate_ordinal_regression_operating_point` | `calibration_tools.py:259` | yes | Calibrate and validate a trait's ordinal-rank or continuous-value prediction against a |
 
 ### ingest_tools.py (1 tool)
 
@@ -730,8 +730,8 @@ Docstring is the function's docstring first line, verbatim.
 
 | tool | line | audited | docstring first line |
 |---|---|---|---|
-| `author_trait_spec` | `trait_spec_authoring_tools.py:21` | yes | Register a trait that does not yet exist, and record why, in the breeder's terms. |
-| `update_trait_spec_fields` | `trait_spec_authoring_tools.py:126` | yes | Update one or more fields on an already-registered trait's spec. |
+| `author_trait_spec` | `trait_spec_authoring_tools.py:23` | yes | Register a trait that does not yet exist, and record why, in the breeder's terms. |
+| `update_trait_spec_fields` | `trait_spec_authoring_tools.py:128` | yes | Update one or more fields on an already-registered trait's spec. |
 
 ### orthomosaic_tools.py (1 tool)
 
@@ -744,8 +744,8 @@ Docstring is the function's docstring first line, verbatim.
 | tool | line | audited | docstring first line |
 |---|---|---|---|
 | `build_plant_mapping` | `phenology_tools.py:31` | yes | Assign each geolocated image to a plant, then persist the mapping under this project. |
-| `calibrate_classifier_operating_point` | `phenology_tools.py:397` | yes | Calibrate and validate the trait's positive-class classifier against held-out GT. |
-| `compute_phenology` | `phenology_tools.py:537` | yes | Per-plant phenology milestones from classified predictions + a plant mapping. |  <!-- queued: P5-43 unify -->
+| `calibrate_classifier_operating_point` | `phenology_tools.py:402` | yes | Calibrate and validate the trait's positive-class classifier against held-out GT. |
+| `compute_phenology` | `phenology_tools.py:542` | yes | Per-plant phenology milestones from classified predictions + a plant mapping. |  <!-- queued: P5-43 unify -->
 
 ### project_tools.py (5 tools)
 
@@ -855,7 +855,7 @@ registered at HEAD.
 
 | method | path | handler | line |
 |---|---|---|---|
-| POST | `/state` | `push_canvas_state` | `routes/canvas.py:102` |
+| POST | `/state` | `push_canvas_state` | `routes/canvas.py:70` |
 
 ### routes/classes.py, prefix `/api/classes` (6 routes)
 
@@ -899,16 +899,16 @@ registered at HEAD.
 | GET | `` (root) | `serve_image` | `routes/images.py:500` |
 | GET | `/bands` | `get_bands` | `routes/images.py:715` |
 | POST | `/overviews` | `build_image_overviews` | `routes/images.py:850` |
-| GET | `/overviews/status` | `get_overview_job` | `routes/images.py:874` |
+| GET | `/overviews/status` | `get_overview_job` | `routes/images.py:870` |
 
 ### routes/inference.py, prefix `/api/inference` (3 HTTP + 1 WS)
 
 | method | path | handler | line |
 |---|---|---|---|
-| POST | `/launch` | `launch_inference` | `routes/inference.py:431` |
-| GET | `/jobs` | `list_jobs` | `routes/inference.py:530` |
-| POST | `/jobs/{job_id}/cancel` | `cancel_job` | `routes/inference.py:535` |
-| WS | `/jobs/{job_id}/stream` | `stream_job` | `routes/inference.py:545` |
+| POST | `/launch` | `launch_inference` | `routes/inference.py:429` |
+| GET | `/jobs` | `list_jobs` | `routes/inference.py:528` |
+| POST | `/jobs/{job_id}/cancel` | `cancel_job` | `routes/inference.py:533` |
+| WS | `/jobs/{job_id}/stream` | `stream_job` | `routes/inference.py:543` |
 
 ### routes/meta.py, prefix `/api/meta` (2 routes)
 
@@ -932,16 +932,16 @@ registered at HEAD.
 | POST | `/plant_mapping/load` | `load_plant_mapping` | `routes/results.py:270` |
 | GET | `/plant_mapping/list` | `list_plant_mappings` | `routes/results.py:289` |
 | POST | `/phenology_measurement` | `phenology_measurement` | `routes/results.py:561` |
-| POST | `/export_csv` | `export_csv` | `routes/results.py:613` |
-| GET | `/traits` | `list_traits` | `routes/results.py:1038` |
-| GET | `/operationalization` | `get_operationalization` | `routes/results.py:737` |
-| GET | `/operationalizations` | `list_operationalizations` | `routes/results.py:753` |
-| POST | `/operationalization/confirm` | `confirm_operationalization` | `routes/results.py:791` |
-| GET | `/trait-spec-statement` | `get_trait_spec_statement` | `routes/results.py:893` |
-| GET | `/trait-spec-statements` | `list_trait_spec_statements` | `routes/results.py:909` |
-| POST | `/trait-spec-statement/confirm` | `confirm_trait_spec_statement` | `routes/results.py:951` |
-| GET | `/delivery-events` | `list_delivery_events` | `routes/results.py:1017` |
-| GET | `/models/registered` | `registered_models` | `routes/results.py:1067` |
+| POST | `/export_csv` | `export_csv` | `routes/results.py:617` |
+| GET | `/traits` | `list_traits` | `routes/results.py:1042` |
+| GET | `/operationalization` | `get_operationalization` | `routes/results.py:741` |
+| GET | `/operationalizations` | `list_operationalizations` | `routes/results.py:757` |
+| POST | `/operationalization/confirm` | `confirm_operationalization` | `routes/results.py:795` |
+| GET | `/trait-spec-statement` | `get_trait_spec_statement` | `routes/results.py:897` |
+| GET | `/trait-spec-statements` | `list_trait_spec_statements` | `routes/results.py:913` |
+| POST | `/trait-spec-statement/confirm` | `confirm_trait_spec_statement` | `routes/results.py:955` |
+| GET | `/delivery-events` | `list_delivery_events` | `routes/results.py:1021` |
+| GET | `/models/registered` | `registered_models` | `routes/results.py:1071` |
 
 ### routes/review.py, prefix `/api/review` (8 routes)
 
@@ -953,8 +953,8 @@ registered at HEAD.
 | POST | `/backup_labels` | `backup_labels` | `routes/review.py:750` |
 | GET | `/image_statuses` | `image_statuses` | `routes/review.py:804` |
 | GET | `/generation_conf` | `get_generation_conf` | `routes/review.py:834` |
-| POST | `/queue/launch` | `launch_priority_queue` | `routes/review.py:1001` |
-| GET | `/queue/{job_id}` | `get_priority_queue_job` | `routes/review.py:1029` |
+| POST | `/queue/launch` | `launch_priority_queue` | `routes/review.py:1003` |
+| GET | `/queue/{job_id}` | `get_priority_queue_job` | `routes/review.py:1031` |
 
 ### routes/sessions.py, prefix `/api/sessions` (4 routes)
 
@@ -992,15 +992,15 @@ registered at HEAD.
 
 | method | path | handler | line |
 |---|---|---|---|
-| POST | `/launch` | `launch_hpo` | `routes/tuning.py:314` |  <!-- queued: P5-113 delete -->
-| GET | `/sweeps` | `list_sweeps` | `routes/tuning.py:341` |
-| GET | `/sweeps/{sweep_id}` | `get_sweep` | `routes/tuning.py:357` |
-| GET | `/sweeps/{sweep_id}/trials` | `list_trials` | `routes/tuning.py:389` |
-| GET | `/sweeps/{sweep_id}/trials/{trial_id}/metrics` | `get_trial_metrics` | `routes/tuning.py:422` |
-| GET | `/ray-dashboard` | `get_ray_dashboard` | `routes/tuning.py:449` |
-| POST | `/sweeps/{sweep_id}/tensorboard` | `launch_sweep_tensorboard` | `routes/tuning.py:535` |
-| POST | `/sweeps/{sweep_id}/trials/{trial_id}/tensorboard` | `launch_trial_tensorboard` | `routes/tuning.py:552` |
-| POST | `/sweeps/{sweep_id}/trials/{trial_id}/tensorboard/stop` | `stop_trial_tensorboard` | `routes/tuning.py:566` |
+| POST | `/launch` | `launch_hpo` | `routes/tuning.py:316` |  <!-- queued: P5-113 delete -->
+| GET | `/sweeps` | `list_sweeps` | `routes/tuning.py:343` |
+| GET | `/sweeps/{sweep_id}` | `get_sweep` | `routes/tuning.py:359` |
+| GET | `/sweeps/{sweep_id}/trials` | `list_trials` | `routes/tuning.py:391` |
+| GET | `/sweeps/{sweep_id}/trials/{trial_id}/metrics` | `get_trial_metrics` | `routes/tuning.py:424` |
+| GET | `/ray-dashboard` | `get_ray_dashboard` | `routes/tuning.py:451` |
+| POST | `/sweeps/{sweep_id}/tensorboard` | `launch_sweep_tensorboard` | `routes/tuning.py:537` |
+| POST | `/sweeps/{sweep_id}/trials/{trial_id}/tensorboard` | `launch_trial_tensorboard` | `routes/tuning.py:554` |
+| POST | `/sweeps/{sweep_id}/trials/{trial_id}/tensorboard/stop` | `stop_trial_tensorboard` | `routes/tuning.py:568` |
 
 ### routes/validation.py, prefix `/api/review` (1 route)
 
@@ -1971,8 +1971,8 @@ Phase 3 verdict: single. An HPO trial with no experiment record still appends to
 
 Must agree: a job's own summary is written and reloaded against the root it launched under, not
 whatever root this process happens to have pinned when either side runs.
-Side A: `packages/tcip-web/src/tcip_web/jobstore.py:83` (`def job_registry_key(`, the one address each registry is written and reloaded through, on the store `JOB_REGISTRY_STORE` declared at `jobstore.py:61` (`JOB_REGISTRY_STORE = "job_registry"`); an explicit `root` composes the key directly, and only its absence falls back to `current_root`, which itself resolves `project_root`).
-Side B: `packages/tcip-web/src/tcip_web/routes/inference.py` (inference job registry, calls `jobstore.persist_grouped`/`jobstore.load`).
+Side A: `packages/tcip-web/src/tcip_web/jobstore.py:85` (`def job_registry_key(`, the one address each registry is written and reloaded through, on the store `JOB_REGISTRY_STORE` declared at `jobstore.py:63` (`JOB_REGISTRY_STORE = "job_registry"`); an explicit `root` composes the key directly, and only its absence falls back to `current_root`, which itself resolves `project_root`).
+Side B: `packages/tcip-web/src/tcip_web/routes/inference.py` (inference job registry, calls `jobstore.JobRegistry.persist`/`.rehydrate`, which call `persist_grouped`/`load` in turn).
 Phase 3 verdict: duplicated.
 
 ## S10. Live GUI state .tcip/state/gui.json  <!-- queued: P5-284 unify -->
@@ -2105,7 +2105,7 @@ Phase 3 verdict: single.
 
 Must agree: the MCP registrar and the GUI model pickers read one registry entry shape.
 Side A: `packages/tcip-mcp/src/tcip_mcp/model_registry.py:65` (`def read_registry_index(`, the read path for everything outside the module; `register_model`, line 200, replaces one entry by name inside one `tcip_store.transaction` on the key `registry_index_key`, line 36, mints).
-Side B: `packages/tcip-web/src/tcip_web/routes/results.py:1066` (`@router.get("/models/registered")`, serving `model_tools.list_registered_models`) and the browser's one entry declaration, `packages/tcip-web/frontend/src/api/inference.ts:16` (`export interface RegisteredModel {`), held field by field against an entry the real registrar wrote by `tests/test_registry_entry_shape_agreement.py`.
+Side B: `packages/tcip-web/src/tcip_web/routes/results.py:1070` (`@router.get("/models/registered")`, serving `model_tools.list_registered_models`) and the browser's one entry declaration, `packages/tcip-web/frontend/src/api/inference.ts:16` (`export interface RegisteredModel {`), held field by field against an entry the real registrar wrote by `tests/test_registry_entry_shape_agreement.py`.
 Phase 3 verdict: single.
 
 ## S28. operating_point.json prediction-bucket sidecar
@@ -2240,7 +2240,7 @@ Phase 3 verdict: single.
 
 Must agree: every URL the browser builds matches a registered FastAPI route path and method.
 Side A: `packages/tcip-web/frontend/src/api/routes.ts` (generated: the browser's only copy of the paths, each named for its method).
-Side B: `packages/tcip-web/src/tcip_web/routes/__init__.py` (`register_all` mounts 16 routers with fixed prefixes).
+Side B: `packages/tcip-web/src/tcip_web/routes/__init__.py` (`register_all` mounts 17 routers with fixed prefixes).
 Phase 3 verdict: single. The api/ helpers keep their hand-written signatures and reference a generated name; `scripts/generate_frontend_routes.py` projects the registered routes into that module, and `tests/test_frontend_route_paths.py` fails when the projection is stale or a call site writes a path of its own.
 
 ## S47. GuiState shape between state.py and store/types.ts  <!-- queued: P5-287 unify -->
@@ -2267,8 +2267,8 @@ Phase 3 verdict: duplicated.
 ## S50. Inference job stream WebSocket  <!-- queued: P5-304 unify -->
 
 Must agree: the browser recognizes the terminal frame and the status vocabulary the backend uses.
-Side A: `packages/tcip-web/src/tcip_web/routes/inference.py:544` (`@router.websocket("/jobs/{job_id}/stream")`).
-Side B: `packages/tcip-web/src/tcip_web/jobstore.py:99` (`TERMINAL_STATUSES = frozenset({"completed", "failed", "cancelled", "interrupted"})`).
+Side A: `packages/tcip-web/src/tcip_web/routes/inference.py:542` (`@router.websocket("/jobs/{job_id}/stream")`).
+Side B: `packages/tcip-web/src/tcip_web/jobstore.py:101` (`TERMINAL_STATUSES = frozenset({"completed", "failed", "cancelled", "interrupted"})`).
 Phase 3 verdict: duplicated.
 
 ## S51. Training run stream WebSocket  <!-- queued: P5-297 unify -->

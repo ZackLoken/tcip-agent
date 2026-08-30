@@ -319,9 +319,8 @@ def _export(client: TestClient, body: dict, payload: str = "milestones", **extra
 
 
 def test_every_phenology_door_refuses_unvalidated_evidence(client: TestClient, tmp_path: Path) -> None:
-    # Only the CSV door used to reconcile anything, so the curve and milestone doors returned the
-    # same phenotype with no gate at all: the breeder read unvalidated phenology dates on screen and
-    # met the refusal only on clicking Download. All three now read the same evidence.
+    # Only the CSV door used to reconcile anything; curve/milestone returned unvalidated
+    # phenotype until a Download refusal. Both doors now read the same evidence.
     body = _phenology_fixture(tmp_path, validated=False)
     for route in GATE_DOORS:
         resp = client.post(f"/api/results/{route}", json=body)
