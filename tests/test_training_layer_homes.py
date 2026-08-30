@@ -19,6 +19,8 @@ def _module_path(rel: str) -> Path:
 
 
 def _top_level_def_names(path: Path) -> set[str]:
+    if not path.is_file():
+        return set()
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
     return {
         node.name for node in tree.body
