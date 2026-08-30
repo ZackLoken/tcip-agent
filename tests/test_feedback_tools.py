@@ -198,25 +198,28 @@ def test_prioritize_review_queue_checkpoint_missing(tmp_path):
     assert "error" in r  # early guard, no torch import needed
 
 
-def test_prioritize_review_queue_skips_what_the_dataset_s_own_store_holds(tmp_path):
+def test_triage_predictions_skips_what_the_dataset_s_own_store_holds(tmp_path):
     """The dataset root is enough to find the verdicts: both reviewed images drop out of the queue.
 
     A store the tool could not find would rank every image again and send the breeder back through
     a review they already finished.
     """
+    from tcip_mcp.tools.feedback_tools import triage_predictions
+
     dataset_root, images = _setup(tmp_path)
     ckpt = tmp_path / "m.pt"
     ckpt.write_bytes(b"stub")
 
-    r = prioritize_review_queue(
-        checkpoint_path=str(ckpt), images_dir=str(images), dataset_root=str(dataset_root),
-        strategy="confidence_triage")
+    r = triage_predictions(
+        checkpoint_path=str(ckpt), images_dir=str(images), dataset_root=str(dataset_root))
     assert r["reviewed_skipped"] == 2
     assert r["total_images"] == 0
 
 
-def test_prioritize_review_queue_skips_what_a_stated_store_holds(tmp_path):
+def test_triage_predictions_skips_what_a_stated_store_holds(tmp_path):
     """A review recorded outside the dataset still filters the queue when its store is stated."""
+    from tcip_mcp.tools.feedback_tools import triage_predictions
+
     dataset_root = tmp_path / "dataset"
     dataset_root.mkdir()
     external = _seed_verdicts(tmp_path / "elsewhere" / "state")
@@ -224,9 +227,9 @@ def test_prioritize_review_queue_skips_what_a_stated_store_holds(tmp_path):
     ckpt = tmp_path / "m.pt"
     ckpt.write_bytes(b"stub")
 
-    r = prioritize_review_queue(
+    r = triage_predictions(
         checkpoint_path=str(ckpt), images_dir=str(images), dataset_root=str(dataset_root),
-        strategy="confidence_triage", review_state_dir=str(external))
+        review_state_dir=str(external))
     assert r["reviewed_skipped"] == 2
 
 
@@ -253,14 +256,15 @@ def test_prioritize_review_queue_rejects_non_composed_kind(tmp_path, monkeypatch
     assert "error" in r and "foreign_kind" in r["error"]
 
 
-def test_prioritize_review_queue_confidence_triage_surfaces_unscoreable(tmp_path, monkeypatch):
+def test_triage_predictions_surfaces_unscoreable(tmp_path, monkeypatch):
     """A regression checkpoint's predictions carry no confidence signal at all (RegressionHead's
-    point estimate, deliberately no distributional output). confidence_triage must route them
+    point estimate, deliberately no distributional output). triage_predictions must route them
     into review rather than silently drop them from every output, and tag them distinctly via
     unscoreable_images so a caller can tell this apart from a genuinely medium-confidence item."""
     from types import SimpleNamespace
 
     import tcip_mcp.pipelines.inference.predictor as predmod
+    from tcip_mcp.tools.feedback_tools import triage_predictions
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
     ckpt = registered_checkpoint(tmp_path, project_root=tmp_path)
@@ -273,9 +277,8 @@ def test_prioritize_review_queue_confidence_triage_surfaces_unscoreable(tmp_path
         predmod, "build_predictor",
         lambda *a, **k: SimpleNamespace(predict_batch=lambda sources: predictions))
 
-    r = prioritize_review_queue(
-        checkpoint_path=str(ckpt), images_dir=str(images), strategy="confidence_triage",
-        project_path=str(tmp_path))
+    r = triage_predictions(
+        checkpoint_path=str(ckpt), images_dir=str(images), project_path=str(tmp_path))
     assert r["needs_review"] == 1
     assert r["review_images"] == ["a.jpg"]
     assert r["unscoreable_images"] == ["a.jpg"]
@@ -379,7 +382,7 @@ def test_prioritize_review_queue_marks_a_bound_runs_calibration_side(tmp_path, m
 
     r = prioritize_review_queue(
         checkpoint_path=ckpt_path, images_dir=str(root / "images" / date),
-        strategy="informativeness", project_path=str(tmp_path))
+        project_path=str(tmp_path))
     assert "error" not in r, r
     assert r["queue"], r
     for entry in r["queue"]:
@@ -400,8 +403,7 @@ def test_prioritize_review_queue_unbound_run_carries_no_marks_or_reason(tmp_path
     _stub_scorer(monkeypatch)
 
     r = prioritize_review_queue(
-        checkpoint_path=ckpt, images_dir=str(images), strategy="informativeness",
-        project_path=str(tmp_path))
+        checkpoint_path=ckpt, images_dir=str(images), project_path=str(tmp_path))
     assert "error" not in r, r
     assert r["queue"], r
     assert all("calibration_member" not in entry for entry in r["queue"])
@@ -437,7 +439,7 @@ def test_prioritize_review_queue_marks_unresolved_when_the_manifest_cannot_be_re
 
     r = prioritize_review_queue(
         checkpoint_path=ckpt_path, images_dir=str(root / "images" / date),
-        strategy="informativeness", project_path=str(tmp_path))
+        project_path=str(tmp_path))
     assert "error" not in r, r
     assert r["queue"], r
     assert all("calibration_member" not in entry for entry in r["queue"])
@@ -547,7 +549,7 @@ def test_prioritize_review_queue_marks_a_flat_images_tree_dataset_correctly(tmp_
 
     r = prioritize_review_queue(
         checkpoint_path=ckpt_path, images_dir=str(root / "images"),
-        strategy="informativeness", project_path=str(tmp_path))
+        project_path=str(tmp_path))
     assert "error" not in r, r
     assert r["queue"], r
     assert "marks_unresolved" not in r
@@ -587,7 +589,7 @@ def test_prioritize_review_queue_a_bound_run_never_marks_another_dates_calibrati
 
     r = prioritize_review_queue(
         checkpoint_path=ckpt_path, images_dir=str(root / "images"),
-        strategy="informativeness", project_path=str(tmp_path))
+        project_path=str(tmp_path))
     assert "error" not in r, r
     assert r["queue"], r
     assert "marks_unresolved" not in r
@@ -618,7 +620,7 @@ def test_prioritize_review_queue_a_root_mismatch_yields_marks_unresolved_not_fal
     # A real directory, just not the one the manifest recorded for the bound date.
     r = prioritize_review_queue(
         checkpoint_path=ckpt_path, images_dir=str(root / "images" / other_date),
-        strategy="informativeness", project_path=str(tmp_path))
+        project_path=str(tmp_path))
     assert "error" not in r, r
     assert r["queue"], r
     assert all("calibration_member" not in entry for entry in r["queue"])
@@ -649,7 +651,7 @@ def test_prioritize_review_queue_a_corrupted_split_record_yields_marks_unresolve
 
     r = prioritize_review_queue(
         checkpoint_path=ckpt_path, images_dir=str(root / "images" / date),
-        strategy="informativeness", project_path=str(tmp_path))
+        project_path=str(tmp_path))
     assert "error" not in r, r
     assert r["queue"], r
     assert all("calibration_member" not in entry for entry in r["queue"])
@@ -657,8 +659,21 @@ def test_prioritize_review_queue_a_corrupted_split_record_yields_marks_unresolve
     assert "could not be read" in r["marks_unresolved"]
 
 
+def test_prioritize_review_queue_signature_drops_the_triage_only_parameters():
+    """The confidence-triage capability split off with its own parameters: prioritize_review_queue
+    carries no strategy flag and none of triage_predictions's own knobs."""
+    import inspect
+
+    params = inspect.signature(prioritize_review_queue).parameters
+    assert "strategy" not in params
+    assert "low" not in params
+    assert "high" not in params
+    assert "auto_threshold" not in params
+
+
 def test_feedback_tools_register_in_manifest():
     from tcip_mcp.server import list_registered_tools
     names = list_registered_tools()
     assert "materialize_review_dataset" in names
     assert "prioritize_review_queue" in names
+    assert "triage_predictions" in names

@@ -97,9 +97,8 @@ def test_job_completes_and_carries_the_tool_s_own_queue(client, tmp_path: Path, 
     assert len(calls) == 1
     assert calls[0]["dataset_root"] == str(tmp_path)
     assert "review_state_dir" not in calls[0]
-    # Only ever the ranking strategy: confidence_triage's auto-accept-as-GT path is not
-    # reachable through this route.
-    assert calls[0]["strategy"] == "informativeness"
+    # The route calls the ranking tool only; triage_predictions's auto-accept-as-GT path is not reachable through it.
+    assert "strategy" not in calls[0]
 
 
 def test_job_fails_honestly_on_the_tool_s_own_refusal(client, tmp_path: Path, monkeypatch):
