@@ -53,7 +53,7 @@ from tcip_mcp.tools import (
     meta_tools,
     project_tools,
     training_tools,
-    vision_tools,
+    proposal_tools,
 )
 from tcip_store.file_backend import (
     DATABASE_FILENAME,
@@ -1453,7 +1453,7 @@ REGISTERED = {
         f".tcip/retrospectives/{RETROSPECTIVE_UNDER_TEST}.md"),
     "proposal_staging": Registered(
         {"engine": "sam", "candidates": [{"candidate_id": 1, "score": 0.9, "note": "ü"}]},
-        lambda root: vision_tools.proposal_staging_key(root, "2026-03-04", PROPOSAL_STEM),
+        lambda root: proposal_tools.proposal_staging_key(root, "2026-03-04", PROPOSAL_STEM),
         f".tcip/state/proposals/2026-03-04/{PROPOSAL_STEM}.json"),
     "backend_port": Registered(
         "8765", lambda root: web_client.backend_port_key(), ".tcip/state/web_port.txt",
