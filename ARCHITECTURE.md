@@ -124,11 +124,12 @@ differs from phase0 record: the Phase 0 inventory (`docs/audit/phase0/module-inv
 | packages/tcip-mcp/src/tcip_mcp/statements.py | Comparable-value and content-hash primitives shared by every statement kind. | 0 | 2 |
 | packages/tcip-mcp/src/tcip_mcp/store_catalogue.py | The whole store catalogue in one import: every module that registers a store, package-only so account_for reaches it with no repo root on sys.path. | 35 | 2 |
 | packages/tcip-mcp/src/tcip_mcp/tools/__init__.py | Tool sub-package: each module registers tools with the MCP server. | 0 | 0 |
-| packages/tcip-mcp/src/tcip_mcp/tools/annotation_tools.py | Annotation tools, load, save, and evaluate name-based annotations via MCP. | 15 | 1 |  <!-- queued: P5-233 merge-or-split -->
+| packages/tcip-mcp/src/tcip_mcp/tools/annotation_tools.py | Annotation tools: load, save, and evaluate name-based annotations via MCP. | 12 | 2 |
 | packages/tcip-mcp/src/tcip_mcp/tools/bundle.py | The shared membership accounting archive_project and import_project both compose from: derives every root a project tree is or holds and classifies each file into bookkeeping, a claimed record/log, a blob, or unaccounted. | 6 | 1 |
 | packages/tcip-mcp/src/tcip_mcp/tools/data_tools.py | Data management tools: load datasets, validate quality, split data. | 12 | 3 |
 | packages/tcip-mcp/src/tcip_mcp/tools/experiment_tools.py | Experiment tracking MCP tools: create, log, compare, and trace experiments. | 4 | 2 |
 | packages/tcip-mcp/src/tcip_mcp/tools/feedback_tools.py | Review -> retrain feedback MCP tools. | 11 | 2 |
+| packages/tcip-mcp/src/tcip_mcp/tools/gui_tools.py | GUI-driving tools: push data to a panel, or drive the live Annotate/Review tab to a frame. | 9 | 1 |
 | packages/tcip-mcp/src/tcip_mcp/tools/inference_tools.py | Inference MCP tools: run models on images, export results. | 22 | 4 |  <!-- queued: P5-225 merge-or-split -->
 | packages/tcip-mcp/src/tcip_mcp/tools/ingest_tools.py | Image ingestion: turn a raw folder of photos into a structured TCIP project. | 8 | 1 |
 | packages/tcip-mcp/src/tcip_mcp/tools/meta_tools.py | Meta-loop tools for self-improvement. | 4 | 4 |
@@ -138,9 +139,10 @@ differs from phase0 record: the Phase 0 inventory (`docs/audit/phase0/module-inv
 | packages/tcip-mcp/src/tcip_mcp/tools/orthomosaic_tools.py | Orthomosaic MCP tools: per-plant delivery from a persisted whole-raster prediction bucket plus a plant-locations CSV. | 12 | 1 |
 | packages/tcip-mcp/src/tcip_mcp/tools/phenology_tools.py | Phenology MCP tools, the agent-facing surface for the per-plant phenology pipeline. | 19 | 4 |  <!-- queued: P5-235 merge-or-split -->
 | packages/tcip-mcp/src/tcip_mcp/tools/project_tools.py | Project management tools. | 10 | 7 |
+| packages/tcip-mcp/src/tcip_mcp/tools/proposal_tools.py | Proposal-workflow tools: turn a chosen auto-labeling engine's output into predictions for canvas review. | 20 | 1 |
 | packages/tcip-mcp/src/tcip_mcp/tools/scale_tools.py | Physical per-pixel scale calibration: the delivery-gating producer for ``resolve_scale.json``. | 10 | 1 |
 | packages/tcip-mcp/src/tcip_mcp/tools/training_tools.py | Training MCP tools, config validation, launch training, HPO, status. | 30 | 8 |
-| packages/tcip-mcp/src/tcip_mcp/tools/vision_tools.py | Vision tools: render annotations and predictions for visual analysis. | 25 | 2 |  <!-- queued: P5-231 merge-or-split -->
+| packages/tcip-mcp/src/tcip_mcp/tools/vision_tools.py | Vision tools: render annotations and predictions for visual analysis. | 22 | 3 |
 | packages/tcip-mcp/src/tcip_mcp/traits.py | Trait knowledge, the human-defined *semantics* of each measurable trait (Tier C). | 4 | 21 |
 | packages/tcip-mcp/src/tcip_mcp/utils/__init__.py | Shared low-level utilities for tcip-mcp. | 0 | 0 |
 | packages/tcip-mcp/src/tcip_mcp/web_client.py | HTTP client for MCP tools to push state to the tcip-web backend. | 2 | 9 |
@@ -636,18 +638,14 @@ check must match the decorator name rather than the whole line).
 Tables below group by defining module. Column "line" is the `def`/`async def` line.
 Docstring is the function's docstring first line, verbatim.
 
-### annotation_tools.py (8 tools)
+### annotation_tools.py (4 tools)
 
 | tool | line | audited | docstring first line |
 |---|---|---|---|
-| `read_annotations` | `annotation_tools.py:92` | yes | Load the ground-truth labels and predictions for a single image. |
-| `save_annotations` | `annotation_tools.py:141` | yes | Write an image's annotations to its single per-image label file (all subjects, one file). |
-| `score_predictions` | `annotation_tools.py:443` | yes | Score on-disk predictions against on-disk ground truth (COCOeval). |
-| `segment_prompt` | `annotation_tools.py:479` | yes | Turn an interactive prompt (points, a box, or grid cells) into mask polygon rings, via an engine. |
-| `push_panel_data` | `annotation_tools.py:575` | yes | Push structured data to a TCIP GUI panel via the tcip-web backend. |
-| `focus` | `annotation_tools.py:609` | yes | Drive the live GUI to a (subject, date) frame, the Annotate tab or the Review tab. |
-| `stage_proposals` | `annotation_tools.py:851` | yes | Stage model-/agent-proposed shapes to ``predictions/<model>/<date>/<stem>.json`` for canvas |
-| `write_class_map` | `annotation_tools.py:1043` | yes | Author the dataset's nested class registry, a thin wrapper over ``class_registry``. |
+| `read_annotations` | `annotation_tools.py:82` | yes | Load the ground-truth labels and predictions for a single image. |
+| `save_annotations` | `annotation_tools.py:131` | yes | Write an image's annotations to its single per-image label file (all subjects, one file). |
+| `score_predictions` | `annotation_tools.py:433` | yes | Score on-disk predictions against on-disk ground truth (COCOeval). |
+| `write_class_map` | `annotation_tools.py:469` | yes | Author the dataset's nested class registry, a thin wrapper over ``class_registry``. |
 
 ### data_tools.py (2 tools)
 
@@ -671,6 +669,13 @@ Docstring is the function's docstring first line, verbatim.
 |---|---|---|---|
 | `materialize_review_dataset` | `feedback_tools.py:166` | yes | Build a curated detection dataset from human review verdicts. |
 | `prioritize_review_queue` | `feedback_tools.py:286` | yes | Order un-reviewed images for the next review batch. |  <!-- queued: P5-51 merge-or-split -->
+
+### gui_tools.py (2 tools)
+
+| tool | line | audited | docstring first line |
+|---|---|---|---|
+| `push_panel_data` | `gui_tools.py:37` | yes | Push structured data to a TCIP GUI panel via the tcip-web backend. |
+| `focus` | `gui_tools.py:71` | yes | Drive the live GUI to a (subject, date) frame, the Annotate tab or the Review tab. |
 
 ### inference_tools.py (4 tools)
 
@@ -754,6 +759,15 @@ unaccounted. `archive_project` bundles the record/log and blob classes; `import_
 on any bookkeeping, collided, undecodable or unaccounted member before adopting or moving
 anything.
 
+### proposal_tools.py (4 tools)
+
+| tool | line | audited | docstring first line |
+|---|---|---|---|
+| `propose_annotations` | `proposal_tools.py:179` | yes | Propose candidate annotations on an image for review, using a chosen auto-labeling engine. |
+| `stage_accepted_proposals` | `proposal_tools.py:389` | yes | Stage reviewed proposals, each assigned a subject, as predictions for canvas review. |
+| `segment_prompt` | `proposal_tools.py:519` | yes | Turn an interactive prompt (points, a box, or grid cells) into mask polygon rings, via an engine. |
+| `stage_proposals` | `proposal_tools.py:616` | yes | Stage model-/agent-proposed shapes to ``predictions/<model>/<date>/<stem>.json`` for canvas |
+
 ### scale_tools.py (1 tool)
 
 | tool | line | audited | docstring first line |
@@ -772,15 +786,13 @@ anything.
 | `run_hpo` | `training_tools.py:1326` | yes | Run hyperparameter optimization on Ray Tune, training each trial for real. |
 | `evaluate_model` | `training_tools.py:1838` | yes | Evaluate a trained checkpoint on a (held-out) dataset and write test_results.json. |
 
-### vision_tools.py (5 tools)
+### vision_tools.py (3 tools)
 
 | tool | line | audited | docstring first line |
 |---|---|---|---|
-| `visualize` | `vision_tools.py:300` | yes | Render annotations, predictions, a GT-vs-prediction comparison, or a sample grid. |
-| `propose_annotations` | `vision_tools.py:840` | yes | Propose candidate annotations on an image for review, using a chosen auto-labeling engine. |
-| `stage_accepted_proposals` | `vision_tools.py:1046` | yes | Stage reviewed proposals, each assigned a subject, as predictions for canvas review. |
-| `capture_live_canvas` | `vision_tools.py:1176` | yes | Render exactly what the human's GUI canvas shows right now: image, shapes, viewport. |
-| `overlay_reference_grid` | `vision_tools.py:1311` | yes | Render image with a labeled reference-grid overlay for spatial referencing. |
+| `visualize` | `vision_tools.py:214` | yes | Render annotations, predictions, a GT-vs-prediction comparison, or a sample grid. |
+| `capture_live_canvas` | `vision_tools.py:699` | yes | Render exactly what the human's GUI canvas shows right now: image, shapes, viewport. |
+| `overlay_reference_grid` | `vision_tools.py:834` | yes | Render image with a labeled reference-grid overlay for spatial referencing. |
 
 ## 2. HTTP routes and WebSocket endpoints
 
@@ -1559,10 +1571,9 @@ Seam S29 ("Prediction-bucket immutability"), verdict `both-sides-one-implementat
 `phase0_implementation: once, shared`: `tests/test_prediction_bucket_resolution.py:39,48`,
 `tests/test_review_channel.py:287,312,325`, `tests/test_export_predictions_bucket_handling.py:60`,
 `tests/test_orthomosaic_tools.py:241-248`, `tests/test_tcip_web_routes.py:898`. Gap: the seam's
-fourth named caller, `vision_tools.py:1033` inside `stage_accepted_proposals`'s `except
+fourth named caller, `proposal_tools.py:487` inside `stage_accepted_proposals`'s `except
 BucketHasVerdicts` block, has no test coverage; every `stage_accepted_proposals` test writes
-into a fresh, verdict-free
-bucket.
+into a fresh, verdict-free bucket.
 
 ## 18. `operating_point.json`, prediction-bucket provenance sidecar
 
@@ -1912,9 +1923,9 @@ Phase 3 verdict: duplicated.
 ## S05. Panel event_type vocabulary  <!-- queued: P5-272 unify -->
 
 Must agree: the Python poster, the FastAPI hub, and the browser handler use the same event_type strings.
-Side A: `packages/tcip-mcp/src/tcip_mcp/tools/annotation_tools.py:760` (`result = post_panel_event("app", "annotate_focus", payload)`).
+Side A: `packages/tcip-mcp/src/tcip_mcp/tools/gui_tools.py:218` (`result = post_panel_event("app", "annotate_focus", payload)`).
 Side B: `packages/tcip-web/src/tcip_web/app.py:410` (`if event.event_type == PANEL_EVENT_REVIEW_FOCUS:`).
-Phase 3 verdict: single. The posted payload carries `active_subject` beside `subject` (`packages/tcip-mcp/src/tcip_mcp/tools/annotation_tools.py:914`), the key both readers take (`packages/tcip-web/src/tcip_web/app.py:296`, `frontend/src/lib/annotateFocus.ts:21,54`), held by `tests/test_event_integration.py`'s producer-driven test, which posts the focus tool's own event and asserts the advisory state's `active_subject`.
+Phase 3 verdict: single. The posted payload carries `active_subject` beside `subject` (`packages/tcip-mcp/src/tcip_mcp/tools/gui_tools.py:216`), the key both readers take (`packages/tcip-web/src/tcip_web/app.py:296`, `frontend/src/lib/annotateFocus.ts:21,54`), held by `tests/test_event_integration.py`'s producer-driven test, which posts the focus tool's own event and asserts the advisory state's `active_subject`.
 
 ## S06. Append-only audit log .tcip/audit.jsonl
 

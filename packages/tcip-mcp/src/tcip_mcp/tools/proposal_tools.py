@@ -3,9 +3,9 @@ canvas review.
 
 propose_annotations and segment_prompt each ask an engine (the built-in SAM reference, or a
 bespoke 'module:factory' the agent brings) to look at pixels and offer candidates or a prompted
-mask. stage_accepted_proposals and stage_proposals each land shapes in the predictions tree through the
-same verdict-guarded staging door, for a human to accept, reject or edit on the Review canvas.
-Neither ever writes ground truth.
+mask. stage_accepted_proposals and stage_proposals each land shapes in the predictions tree
+through the same verdict-guarded staging door, for a human to accept, reject or edit on the
+Review canvas. Neither ever writes ground truth.
 """
 
 from __future__ import annotations
