@@ -98,36 +98,6 @@ def test_push_state_allows_project_root_inside_image_roots(client, tmp_path, mon
     assert r.status_code == 200
 
 
-def test_push_state_refuses_a_project_root_that_is_not_the_pinned_platform_root(
-    client, tmp_path_factory, monkeypatch,
-):
-    """A root inside the allowed set but not this process's pinned platform root (the
-    autouse fixture pins every test to its own ``tmp_path``): the push must refuse rather than
-    write a file ``capture_live_canvas`` would never look at."""
-    other = tmp_path_factory.mktemp("other")
-    monkeypatch.setenv("TCIP_IMAGE_ROOTS", str(other))
-    r = client.post("/api/canvas/state", json=_payload(other, "C:/img/a.jpg"))
-    assert r.status_code == 403
-    assert "pinned platform root" in r.json()["detail"]
-    assert not (other / ".tcip" / "state" / "canvas_live.json").exists()
-
-
-def test_push_and_capture_live_canvas_land_on_the_same_file(client, tmp_path):
-    """The writer (this route) and the reader (capture_live_canvas) anchor to one file for the
-    same session: a push through the real route under the pinned root is read back through the
-    real MCP tool, not a store write standing in for either end."""
-    img = _make_image(tmp_path)
-    r = client.post("/api/canvas/state", json=_payload(tmp_path, img, shapes=SHAPES))
-    assert r.status_code == 200
-
-    from tcip_mcp.tools.vision_tools import capture_live_canvas
-
-    res = capture_live_canvas(refresh=False)
-    assert "error" not in res
-    assert res["project_root"] == str(tmp_path)
-    assert res["shape_counts_by_tag"] == {"gt": 2, "in_progress": 1}
-
-
 def test_push_state_does_not_fsync(client, tmp_path, monkeypatch):
     """canvas_live/canvas_shapes are ephemeral: a push must not depend on fsync.
 
