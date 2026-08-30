@@ -400,12 +400,12 @@ def test_a_results_door_refuses_until_a_project_is_open_and_then_serves_its_own_
 ) -> None:
     body = _phenology_fixture(tmp_path, validated=True, fractions=(0.75, 1.0), detections=4)
     store.close_project()
-    refused = client.post("/api/results/per_plant_curves", json=body)
+    refused = client.post("/api/results/phenology_measurement", json=body)
     assert refused.status_code == 409
     assert "open a project" in refused.json()["detail"]
 
     _open(client, tmp_path, tmp_path / "ds")
-    assert client.post("/api/results/per_plant_curves", json=body).status_code == 200
+    assert client.post("/api/results/phenology_measurement", json=body).status_code == 200
 
 
 @pytest.mark.usefixtures("seed_catkin_operationalization", "closed_project")
@@ -415,7 +415,7 @@ def test_a_delivery_cannot_name_one_project_while_another_is_open(
     body = _phenology_fixture(tmp_path, validated=True, fractions=(0.75, 1.0), detections=4)
     other = _project(tmp_path / "other")
     _open(client, other)
-    resp = client.post("/api/results/per_plant_curves", json=body)
+    resp = client.post("/api/results/phenology_measurement", json=body)
     assert resp.status_code == 403
     assert "not the open project" in resp.json()["detail"]
     assert not (other / "results_export").exists()
@@ -434,10 +434,9 @@ def test_a_delivery_from_another_projects_evidence_is_refused_by_name(
     _open(client, b)
 
     diverted = {**body, "project_root": str(b)}
-    for route in ("per_plant_curves", "onset_dates"):
-        resp = client.post(f"/api/results/{route}", json=diverted)
-        assert resp.status_code == 403, route
-        assert "does not belong to project" in resp.json()["detail"]
+    resp = client.post("/api/results/phenology_measurement", json=diverted)
+    assert resp.status_code == 403
+    assert "does not belong to project" in resp.json()["detail"]
     resp = client.post("/api/results/export_csv",
                        json={**diverted, "payload": "milestones", "filename": "x.csv"})
     assert resp.status_code == 403
@@ -462,13 +461,13 @@ def test_a_delivery_from_a_dataset_registered_to_the_open_project_is_admitted(
         d: str(copied / Path(p).relative_to(tmp_path / "ds"))
         for d, p in body["predictions_by_date"].items()}}
     _open(client, tmp_path)
-    refused = client.post("/api/results/per_plant_curves", json=relocated)
+    refused = client.post("/api/results/phenology_measurement", json=relocated)
     assert refused.status_code == 403
     assert "does not belong to project" in refused.json()["detail"]
 
     upsert_dataset(tmp_path, {"id": "ds-1", "path": str(copied), "crop": "hazelnut",
                               "fingerprint": "f"})
-    resp = client.post("/api/results/per_plant_curves", json=relocated)
+    resp = client.post("/api/results/phenology_measurement", json=relocated)
     assert resp.status_code not in (403, 409), resp.text
 
 

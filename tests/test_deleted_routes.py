@@ -23,6 +23,10 @@ DELETED_ROUTES = [
     ("POST", "/api/review/save_gt"),
     ("GET", "/api/dataset/images"),
     ("POST", "/api/annotate/open"),
+    # The two phenology doors merged into one, POST /api/results/phenology_measurement,
+    # returning both projections from one _measure_phenology run.
+    ("POST", "/api/results/per_plant_curves"),
+    ("POST", "/api/results/onset_dates"),
 ]
 
 

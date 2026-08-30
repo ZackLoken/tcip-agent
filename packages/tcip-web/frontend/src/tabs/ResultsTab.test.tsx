@@ -89,13 +89,11 @@ describe("ResultsTab structured predictions-by-date picker", () => {
       },
       label_problem: null,
     });
-    const curvesSpy = vi.spyOn(resultsApi, "perPlantCurves").mockResolvedValue({
-      rows: [],
-      n_plants: 0,
-      positive_class_id: 1,
+    const measurementSpy = vi.spyOn(resultsApi, "phenologyMeasurement").mockResolvedValue({
+      curves: { rows: [], n_plants: 0, positive_class_id: 1 },
+      milestones: { rows: [] },
       ...VALIDATED,
     });
-    vi.spyOn(resultsApi, "onsetDates").mockResolvedValue({ rows: [], ...VALIDATED });
 
     render(<ResultsTab />);
     await waitFor(() => expect(api.dataset.tree).toHaveBeenCalledWith("C:/data"));
@@ -114,10 +112,10 @@ describe("ResultsTab structured predictions-by-date picker", () => {
     expect(selects[1]).toBeDisabled();
 
     fireEvent.click(screen.getByRole("button", { name: /compute curves/i }));
-    await waitFor(() => expect(curvesSpy).toHaveBeenCalled());
+    await waitFor(() => expect(measurementSpy).toHaveBeenCalled());
     // The dir is the one the tree response supplied for that (date, model), not a path the tab
     // assembled: a client-built convention is exactly what stopped matching the writers.
-    expect(curvesSpy.mock.calls[0][0].predictions_by_date).toEqual({
+    expect(measurementSpy.mock.calls[0][0].predictions_by_date).toEqual({
       "2026-01-01": "C:/data/predictions/baseline/2026-01-01",
     });
   });
@@ -133,13 +131,11 @@ describe("ResultsTab structured predictions-by-date picker", () => {
       prediction_dirs: { "2026-01-01": { baseline: "C:/data/predictions/baseline/2026-01-01" } },
       label_problem: "C:/data/annotations/2026-01-08/IMG_0000.json does not decode as JSON",
     });
-    vi.spyOn(resultsApi, "perPlantCurves").mockResolvedValue({
-      rows: [],
-      n_plants: 0,
-      positive_class_id: 1,
+    vi.spyOn(resultsApi, "phenologyMeasurement").mockResolvedValue({
+      curves: { rows: [], n_plants: 0, positive_class_id: 1 },
+      milestones: { rows: [] },
       ...VALIDATED,
     });
-    vi.spyOn(resultsApi, "onsetDates").mockResolvedValue({ rows: [], ...VALIDATED });
 
     render(<ResultsTab />);
 
@@ -162,13 +158,11 @@ describe("ResultsTab structured predictions-by-date picker", () => {
       prediction_dirs: { "2026-01-01": { baseline: "C:/data/predictions/baseline/2026-01-01" } },
       label_problem: null,
     });
-    const curvesSpy = vi.spyOn(resultsApi, "perPlantCurves").mockResolvedValue({
-      rows: [],
-      n_plants: 0,
-      positive_class_id: 1,
+    const measurementSpy = vi.spyOn(resultsApi, "phenologyMeasurement").mockResolvedValue({
+      curves: { rows: [], n_plants: 0, positive_class_id: 1 },
+      milestones: { rows: [] },
       ...VALIDATED,
     });
-    vi.spyOn(resultsApi, "onsetDates").mockResolvedValue({ rows: [], ...VALIDATED });
 
     render(<ResultsTab />);
     // The trait resolves from the project's registered traits asynchronously; wait for it before
@@ -180,8 +174,8 @@ describe("ResultsTab structured predictions-by-date picker", () => {
       target: { value: "" },
     });
     fireEvent.click(screen.getByRole("button", { name: /compute curves/i }));
-    await waitFor(() => expect(curvesSpy).toHaveBeenCalled());
-    expect(curvesSpy.mock.calls[0][0].predictions_by_date).toEqual({});
+    await waitFor(() => expect(measurementSpy).toHaveBeenCalled());
+    expect(measurementSpy.mock.calls[0][0].predictions_by_date).toEqual({});
   });
 });
 
@@ -266,7 +260,7 @@ describe("ResultsTab evidence gate", () => {
   it("hands an unvalidated-evidence refusal to the calibration flow, not the raw error line", async () => {
     mockTree();
     // Opens like the backend refusal message, which the tab must classify as a refusal.
-    vi.spyOn(resultsApi, "perPlantCurves").mockRejectedValue(
+    vi.spyOn(resultsApi, "phenologyMeasurement").mockRejectedValue(
       new Error(
         "phenology delivery requires a validated classifier and count operating point, " +
           "reconciled from the prediction buckets' own sidecars (never a caller-asserted " +
@@ -285,13 +279,11 @@ describe("ResultsTab evidence gate", () => {
 
   it("keeps both CSV doors shut while the displayed numbers are provisional", async () => {
     mockTree();
-    vi.spyOn(resultsApi, "perPlantCurves").mockResolvedValue({
-      rows: [CURVE_ROW],
-      n_plants: 1,
-      positive_class_id: 1,
+    vi.spyOn(resultsApi, "phenologyMeasurement").mockResolvedValue({
+      curves: { rows: [CURVE_ROW], n_plants: 1, positive_class_id: 1 },
+      milestones: { rows: [ONSET_ROW] },
       ...UNVALIDATED,
     });
-    vi.spyOn(resultsApi, "onsetDates").mockResolvedValue({ rows: [ONSET_ROW], ...UNVALIDATED });
 
     await renderAndCompute();
     await waitFor(() => expect(screen.getByText("P1")).toBeInTheDocument());
@@ -305,13 +297,11 @@ describe("ResultsTab evidence gate", () => {
 
   it("opens both CSV doors once the same rows arrive on validated evidence", async () => {
     mockTree();
-    vi.spyOn(resultsApi, "perPlantCurves").mockResolvedValue({
-      rows: [CURVE_ROW],
-      n_plants: 1,
-      positive_class_id: 1,
+    vi.spyOn(resultsApi, "phenologyMeasurement").mockResolvedValue({
+      curves: { rows: [CURVE_ROW], n_plants: 1, positive_class_id: 1 },
+      milestones: { rows: [ONSET_ROW] },
       ...VALIDATED,
     });
-    vi.spyOn(resultsApi, "onsetDates").mockResolvedValue({ rows: [ONSET_ROW], ...VALIDATED });
 
     await renderAndCompute();
     await waitFor(() => expect(screen.getByText("P1")).toBeInTheDocument());
@@ -324,7 +314,7 @@ describe("ResultsTab evidence gate", () => {
 
 describe("ResultsTab onset table validity marker", () => {
   async function computeWithOnsetRows(
-    rows: Awaited<ReturnType<typeof resultsApi.onsetDates>>["rows"],
+    rows: Awaited<ReturnType<typeof resultsApi.phenologyMeasurement>>["milestones"]["rows"],
   ) {
     vi.spyOn(api.dataset, "tree").mockResolvedValue({
       dataset_root: "C:/data",
@@ -336,25 +326,27 @@ describe("ResultsTab onset table validity marker", () => {
       prediction_dirs: { "2026-01-01": { baseline: "C:/data/predictions/baseline/2026-01-01" } },
       label_problem: null,
     });
-    vi.spyOn(resultsApi, "perPlantCurves").mockResolvedValue({
-      rows: [
-        {
-          plant_id: "P1",
-          accession: null,
-          date: "2026-01-01",
-          n_images: 1,
-          n_total: 10,
-          n_positive: 3,
-          n_unclassified: 0,
-          n_missing: 0,
-          ratio: 0.3,
-        },
-      ],
-      n_plants: 1,
-      positive_class_id: 1,
+    vi.spyOn(resultsApi, "phenologyMeasurement").mockResolvedValue({
+      curves: {
+        rows: [
+          {
+            plant_id: "P1",
+            accession: null,
+            date: "2026-01-01",
+            n_images: 1,
+            n_total: 10,
+            n_positive: 3,
+            n_unclassified: 0,
+            n_missing: 0,
+            ratio: 0.3,
+          },
+        ],
+        n_plants: 1,
+        positive_class_id: 1,
+      },
+      milestones: { rows },
       ...VALIDATED,
     });
-    vi.spyOn(resultsApi, "onsetDates").mockResolvedValue({ rows, ...VALIDATED });
 
     render(<ResultsTab />);
     // The trait resolves from the project's registered traits asynchronously; wait for it before
@@ -689,7 +681,7 @@ describe("ResultsTab operationalization records", () => {
       prediction_dirs: { "2026-01-01": { baseline: "C:/data/predictions/baseline/2026-01-01" } },
       label_problem: null,
     });
-    vi.spyOn(resultsApi, "perPlantCurves").mockRejectedValue(
+    vi.spyOn(resultsApi, "phenologyMeasurement").mockRejectedValue(
       new StructuredRefusalError(
         {
           kind: "operationalization",
@@ -737,25 +729,27 @@ describe("ResultsTab operationalization records", () => {
       prediction_dirs: { "2026-01-01": { baseline: "C:/data/predictions/baseline/2026-01-01" } },
       label_problem: null,
     });
-    vi.spyOn(resultsApi, "perPlantCurves").mockResolvedValue({
-      rows: [
-        {
-          plant_id: "P1",
-          accession: null,
-          date: "2026-01-01",
-          n_images: 1,
-          n_total: 10,
-          n_positive: 3,
-          n_unclassified: 0,
-          n_missing: 0,
-          ratio: 0.3,
-        },
-      ],
-      n_plants: 1,
-      positive_class_id: 1,
+    vi.spyOn(resultsApi, "phenologyMeasurement").mockResolvedValue({
+      curves: {
+        rows: [
+          {
+            plant_id: "P1",
+            accession: null,
+            date: "2026-01-01",
+            n_images: 1,
+            n_total: 10,
+            n_positive: 3,
+            n_unclassified: 0,
+            n_missing: 0,
+            ratio: 0.3,
+          },
+        ],
+        n_plants: 1,
+        positive_class_id: 1,
+      },
+      milestones: { rows: [] },
       ...VALIDATED_EVIDENCE,
     });
-    vi.spyOn(resultsApi, "onsetDates").mockResolvedValue({ rows: [], ...VALIDATED_EVIDENCE });
     // exportCsv is left unmocked: the refusal has to survive its own blob path, not a stub.
     vi.stubGlobal(
       "fetch",

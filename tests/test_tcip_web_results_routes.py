@@ -206,20 +206,20 @@ def _expected_validation_record(body: dict) -> str:
     return "; ".join(sorted(pointers))
 
 
-def test_per_plant_curves_uses_mapping_and_counts(client: TestClient, tmp_path: Path) -> None:
+def test_phenology_measurement_uses_mapping_and_counts(client: TestClient, tmp_path: Path) -> None:
     body = _phenology_fixture(tmp_path, validated=True, fractions=(0.75, 1.0), detections=4)
-    resp = client.post("/api/results/per_plant_curves", json=body)
+    resp = client.post("/api/results/phenology_measurement", json=body)
     assert resp.status_code == 200
     out = resp.json()
-    assert out["n_plants"] == 2
+    assert out["curves"]["n_plants"] == 2
     assert out["positive_class_assessed"] is True
-    by_key = {(r["plant_id"], r["date"]): r for r in out["rows"]}
+    by_key = {(r["plant_id"], r["date"]): r for r in out["curves"]["rows"]}
     assert by_key[("PLANT_A", "2026-02-11")]["n_total"] == 4
     assert by_key[("PLANT_A", "2026-02-11")]["ratio"] == 0.75
     assert by_key[("PLANT_B", "2026-02-25")]["ratio"] == 1.0
 
 
-def test_per_plant_curves_reports_the_real_image_count_not_a_hardcoded_one(
+def test_phenology_measurement_reports_the_real_image_count_not_a_hardcoded_one(
     client: TestClient, tmp_path: Path,
 ) -> None:
     # The row used to assert `n_images: 1` unconditionally while per_plant_series aggregates every
@@ -228,29 +228,33 @@ def test_per_plant_curves_reports_the_real_image_count_not_a_hardcoded_one(
     # all of them.
     body = _phenology_fixture(tmp_path, validated=True, images_per_plant=3, fractions=(0.5,),
                           detections=4)
-    rows = client.post("/api/results/per_plant_curves", json=body).json()["rows"]
+    rows = client.post(
+        "/api/results/phenology_measurement", json=body).json()["curves"]["rows"]
     row = next(r for r in rows if r["plant_id"] == "PLANT_A")
     assert row["n_images"] == 3
     assert row["n_total"] == 12
 
 
-def test_per_plant_curves_flags_unclassified_predictions(client: TestClient, tmp_path: Path) -> None:
+def test_phenology_measurement_flags_unclassified_predictions(
+    client: TestClient, tmp_path: Path,
+) -> None:
     # Bare single-class detector output: the bucket's id_map has no attribute axis, so the run
     # never assessed the positive-state class. Must disclose that rather than pass the counts off
     # as a phenology measurement, and must never report a fabricated ratio.
     body = _phenology_fixture(tmp_path, validated=True, fractions=(0.0,), id_map={"catkin": 0},
                           detections=2)
-    out = client.post("/api/results/per_plant_curves", json=body).json()
+    out = client.post("/api/results/phenology_measurement", json=body).json()
     assert out["positive_class_assessed"] is False
-    row = out["rows"][0]
+    row = out["curves"]["rows"][0]
     assert row["n_total"] == 2
     assert row["n_unclassified"] == 2
     assert row["ratio"] is None
 
 
-def test_onset_dates_finds_crossings(client: TestClient, tmp_path: Path) -> None:
+def test_phenology_measurement_finds_crossings(client: TestClient, tmp_path: Path) -> None:
     body = _phenology_fixture(tmp_path, validated=True, detections=100)
-    rows = client.post("/api/results/onset_dates", json=body).json()["rows"]
+    rows = client.post(
+        "/api/results/phenology_measurement", json=body).json()["milestones"]["rows"]
     onset = next(r for r in rows if r["plant_id"] == "PLANT_A")
     assert onset["catkin_05per_date"] is not None
     assert onset["catkin_50per_date"] is not None
@@ -259,7 +263,7 @@ def test_onset_dates_finds_crossings(client: TestClient, tmp_path: Path) -> None
     assert onset["catkin_elongation_date"] == onset["catkin_95per_date"]
 
 
-def test_onset_dates_ignores_undated_bucket(client: TestClient, tmp_path: Path) -> None:
+def test_phenology_measurement_ignores_undated_bucket(client: TestClient, tmp_path: Path) -> None:
     # The ingest 'undated/' bucket (and any non-ISO folder) sorts to the (0,0,0) sentinel. It must
     # not crash interpolation or leak '0000-00-00' into a delivered date.
     body = _phenology_fixture(tmp_path, validated=True, fractions=(0.0, 1.0), detections=10)
@@ -275,7 +279,8 @@ def test_onset_dates_ignores_undated_bucket(client: TestClient, tmp_path: Path) 
     build.unreadable["undated"] = []
     pm.persist_mapping(build, project_root, body["mapping_name"])
     body["predictions_by_date"]["undated"] = body["predictions_by_date"]["2026-02-11"]
-    rows = client.post("/api/results/onset_dates", json=body).json()["rows"]
+    rows = client.post(
+        "/api/results/phenology_measurement", json=body).json()["milestones"]["rows"]
     for row in rows:
         for key in ("catkin_05per_date", "catkin_50per_date", "catkin_95per_date"):
             assert row[key] != "0000-00-00"
@@ -283,14 +288,15 @@ def test_onset_dates_ignores_undated_bucket(client: TestClient, tmp_path: Path) 
                 assert row[key].startswith("2026-")
 
 
-def test_onset_dates_discloses_zero_observations_distinctly_from_valid(
+def test_phenology_measurement_discloses_zero_observations_distinctly_from_valid(
     client: TestClient, tmp_path: Path,
 ) -> None:
     # A plant fully classified and fully observed can still have zero real detections on every date
     # (e.g. before emergence): n_observed_dates lets the GUI distinguish "no observations" from real
     # detection data, which otherwise read identically as "valid" next to blank milestone cells.
     body = _phenology_fixture(tmp_path, validated=True, fractions=(0.0, 0.0), detections=0)
-    row = client.post("/api/results/onset_dates", json=body).json()["rows"][0]
+    row = client.post(
+        "/api/results/phenology_measurement", json=body).json()["milestones"]["rows"][0]
     assert row["n_dates_unclassified"] == 0
     assert row["n_dates_missing_images"] == 0
     assert row["n_observed_dates"] == 0
@@ -299,12 +305,12 @@ def test_onset_dates_discloses_zero_observations_distinctly_from_valid(
 
 def test_phenology_doors_reject_a_malformed_payload_with_422_not_500(client: TestClient) -> None:
     # A payload missing required inputs is a structured 422, never an unhandled KeyError/500.
-    for route in ("per_plant_curves", "onset_dates", "export_csv"):
+    for route in ("phenology_measurement", "export_csv"):
         resp = client.post(f"/api/results/{route}", json={"trait": "catkin"})
         assert resp.status_code == 422, route
 
 
-GATE_DOORS = ("per_plant_curves", "onset_dates")
+GATE_DOORS = ("phenology_measurement",)
 
 
 def _export(client: TestClient, body: dict, payload: str = "milestones", **extra):
@@ -334,7 +340,8 @@ def test_every_phenology_door_delivers_on_real_bucket_evidence(client: TestClien
         resp = client.post(f"/api/results/{route}", json=body)
         assert resp.status_code == 200, route
         assert resp.json()["provisional"] is False, route
-        assert resp.json()["rows"], route
+        assert resp.json()["curves"]["rows"], route
+        assert resp.json()["milestones"]["rows"], route
     for payload in ("curves", "milestones"):
         resp = _export(client, body, payload)
         assert resp.status_code == 200, payload
@@ -482,8 +489,8 @@ def test_no_caller_field_can_raise_the_reconciled_validity(client: TestClient, t
     # stamp column names the delivered CSV itself uses) must be inert. Extra fields are ignored by
     # the payload model, so the refusal is byte-identical to the one with no assertion at all.
     body = _phenology_fixture(tmp_path, validated=False)
-    bare = client.post("/api/results/per_plant_curves", json=body)
-    optimistic = client.post("/api/results/per_plant_curves", json={
+    bare = client.post("/api/results/phenology_measurement", json=body)
+    optimistic = client.post("/api/results/phenology_measurement", json={
         **body,
         "operating_point_validated": "held_out_annotations",
         "positive_state_classifier_validated": "held_out_annotations",
@@ -506,7 +513,7 @@ def test_a_genuinely_unvalidated_classifier_refuses_even_when_the_count_is_valid
             "validated": False, "trait": "catkin",
             "operating_point": {"classifier": {"value": "elongated", "validated_against": "false"}},
         }, "classifier_operating_point")
-    resp = client.post("/api/results/onset_dates", json=body)
+    resp = client.post("/api/results/phenology_measurement", json=body)
     assert resp.status_code == 400
     assert "['classifier']" in resp.json()["detail"]
 
@@ -540,15 +547,14 @@ def test_exported_milestone_csv_carries_the_canonical_schema_and_its_provenance(
     assert cells["captures_unverified"] != ""
 
 
-def test_curve_and_milestone_doors_report_the_same_measurement(
+def test_curve_and_milestone_projections_share_one_measurement(
     client: TestClient, tmp_path: Path,
 ) -> None:
-    # Both doors project one per_plant_phenology result, so a milestone date and the curve it was
-    # read off cannot come from different numbers. The milestone door used to recompute from rows
-    # the client handed back.
+    # One request computes both projections off one per_plant_phenology result, so a milestone
+    # date and the curve it was read off cannot come from different numbers.
     body = _phenology_fixture(tmp_path, validated=True, detections=100)
-    curves = client.post("/api/results/per_plant_curves", json=body).json()["rows"]
-    milestones = client.post("/api/results/onset_dates", json=body).json()["rows"]
+    out = client.post("/api/results/phenology_measurement", json=body).json()
+    curves, milestones = out["curves"]["rows"], out["milestones"]["rows"]
     a_curve = sorted((r for r in curves if r["plant_id"] == "PLANT_A"), key=lambda r: r["date"])
     a_row = next(r for r in milestones if r["plant_id"] == "PLANT_A")
     assert a_row["n_dates"] == len(a_curve)
@@ -558,15 +564,41 @@ def test_curve_and_milestone_doors_report_the_same_measurement(
     assert a_row["catkin_95per_date"] <= a_curve[-1]["date"]
 
 
+def test_phenology_measurement_response_carries_every_field_the_two_deleted_doors_did(
+    client: TestClient, tmp_path: Path,
+) -> None:
+    """Field-by-field parity: the merged door's ``curves`` projection against per_plant_curves'
+    old ``{rows, n_plants, positive_class_id, **disclosure}`` shape, ``milestones`` against
+    onset_dates' old ``{rows, **disclosure}`` shape (disclosure now sits once at the top level,
+    identical for both since one measurement produced it). The two routes are deleted, so this
+    reconstructs what each one used to assemble from the surviving producer
+    (_PhenologyMeasurement.curve_rows/milestone_rows, _disclosure) it always delegated to, rather
+    than calling a route that no longer exists.
+    """
+    from tcip_web.routes.results import PhenologyPayload, _disclosure, _measure_phenology
+
+    body = _phenology_fixture(tmp_path, validated=True, detections=100)
+    response = client.post("/api/results/phenology_measurement", json=body).json()
+
+    measurement = _measure_phenology(PhenologyPayload(**body))
+    assert response["curves"] == {
+        "rows": measurement.curve_rows(),
+        "n_plants": len(measurement.plants["rows"]),
+        "positive_class_id": measurement.positive_class_id,
+    }
+    assert response["milestones"] == {"rows": measurement.milestone_rows()}
+    for key, value in _disclosure(measurement).items():
+        assert response[key] == value, key
+
+
 def test_web_and_mcp_phenology_doors_agree_on_validity(client: TestClient, tmp_path: Path) -> None:
-    # Two delivery doors read the same on-disk evidence for the same trait: the web route's
-    # onset_dates and the MCP tool's compute_phenology. Both route through the identical
-    # tcip_mcp.pipelines.resolution reconciliation functions, so identical inputs must stamp
-    # identical validity, never two independently-derived answers that happen to usually agree.
+    # The web route's phenology_measurement and the MCP tool's compute_phenology read the same
+    # on-disk evidence through the identical tcip_mcp.pipelines.resolution reconciliation.
     from tcip_mcp.tools.phenology_tools import compute_phenology
 
     body = _phenology_fixture(tmp_path, validated=True, detections=100)
-    web_validated = client.post("/api/results/onset_dates", json=body).json()["validated"]
+    web_validated = client.post(
+        "/api/results/phenology_measurement", json=body).json()["validated"]
 
     mcp_result = compute_phenology(
         trait=body["trait"], mapping_name=body["mapping_name"],
@@ -616,7 +648,8 @@ def test_a_classifier_calibrated_for_another_trait_does_not_validate_this_delive
     assert resp.status_code == 400
     assert "was earned for trait" in resp.json()["detail"]
     assert "chestnut_bur" in resp.json()["detail"]
-    assert client.post("/api/results/onset_dates", json=body).status_code == 400
+    assert client.post(
+        "/api/results/phenology_measurement", json=body).status_code == 400
 
 
 def test_a_classifier_calibrated_against_another_experiment_does_not_validate_this_delivery(
@@ -739,9 +772,9 @@ def test_export_refuses_a_bucket_whose_id_map_never_carried_the_positive_class(
     # with ZERO detections is trivially "fully classified", so an axis-less bucket with no
     # detections read as classified and the export door had nothing left to refuse on.
     body = _phenology_fixture(tmp_path, validated=True, id_map={"catkin": 0}, detections=0)
-    curves = client.post("/api/results/per_plant_curves", json=body)
-    assert curves.status_code == 200
-    assert curves.json()["positive_class_assessed"] is False
+    measured = client.post("/api/results/phenology_measurement", json=body)
+    assert measured.status_code == 200
+    assert measured.json()["positive_class_assessed"] is False
     resp = client.post("/api/results/export_csv",
                        json={**body, "payload": "milestones", "filename": "x.csv"})
     assert resp.status_code == 400
@@ -838,7 +871,7 @@ def test_inference_by_id_job_route_is_retired(client: TestClient) -> None:
             inference_routes._jobs.pop("inf-retired-test", None)
 
 
-def test_per_plant_curves_refuses_when_the_delivered_dataset_carries_no_registry(
+def test_phenology_measurement_refuses_when_the_delivered_dataset_carries_no_registry(
     client: TestClient, tmp_path: Path,
 ) -> None:
     """The confirmed record and its registry live at the project root; the delivered buckets
@@ -848,7 +881,7 @@ def test_per_plant_curves_refuses_when_the_delivered_dataset_carries_no_registry
     bucket.mkdir(parents=True)
     store.open_project(tmp_path.resolve())
 
-    resp = client.post("/api/results/per_plant_curves", json={
+    resp = client.post("/api/results/phenology_measurement", json={
         "project_root": str(tmp_path), "mapping_name": "valley",
         "predictions_by_date": {"2026-02-11": str(bucket)}, "trait": "catkin",
     })

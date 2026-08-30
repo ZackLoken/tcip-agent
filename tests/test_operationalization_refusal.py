@@ -521,7 +521,7 @@ def test_all_three_web_doors_refuse_identically(client: TestClient, tmp_path: Pa
     _withdraw(tmp_path, "catkin")
 
     details = [_web_refusal(client, body, route)
-               for route in ("per_plant_curves", "onset_dates", "export_csv")]
+               for route in ("phenology_measurement", "export_csv")]
 
     assert all(d == details[0] for d in details), details
     assert details[0]["kind"] == "operationalization"
@@ -540,7 +540,7 @@ def test_hand_edited_spec_is_caught_at_read_time(client: TestClient, tmp_path: P
     body = _delivery(tmp_path, validated=True)
     _hand_edit_spec(tmp_path, "catkin", milestone_fractions=[0.5])
 
-    detail = _web_refusal(client, body, "onset_dates")
+    detail = _web_refusal(client, body, "phenology_measurement")
 
     assert detail["state"] == 3
     assert "milestone_fractions has changed since" in detail["message"]
@@ -563,7 +563,7 @@ def test_acknowledge_does_not_clear_the_precondition_at_every_door(
     assert not out_csv.exists()
 
     acknowledged = {**body, "acknowledge_unvalidated": True}
-    for route in ("per_plant_curves", "onset_dates", "export_csv"):
+    for route in ("phenology_measurement", "export_csv"):
         assert _web_refusal(client, acknowledged, route)["kind"] == "operationalization", route
 
 
@@ -751,11 +751,11 @@ def test_the_screen_doors_still_honor_acknowledge_unvalidated_for_the_evidence_g
     body = _delivery(tmp_path, validated=False)
     acknowledged = {**body, "acknowledge_unvalidated": True}
 
-    for route in ("per_plant_curves", "onset_dates"):
-        resp = client.post(f"/api/results/{route}", json=acknowledged)
-        assert resp.status_code == 200, (route, resp.text)
-        assert resp.json()["provisional"] is True, route
-    assert client.post("/api/results/onset_dates", json=body).status_code == 400
+    resp = client.post("/api/results/phenology_measurement", json=acknowledged)
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["provisional"] is True
+    assert client.post(
+        "/api/results/phenology_measurement", json=body).status_code == 400
 
 
 def test_an_unstated_and_gate_unvalidated_delivery_reports_the_precondition_alone(
@@ -769,7 +769,7 @@ def test_an_unstated_and_gate_unvalidated_delivery_reports_the_precondition_alon
     body = _delivery(tmp_path, validated=False)
     _withdraw(tmp_path, "catkin")
 
-    detail = _web_refusal(client, body, "onset_dates")
+    detail = _web_refusal(client, body, "phenology_measurement")
 
     assert detail["kind"] == "operationalization"
     assert "validated classifier and count operating point" not in detail["message"]

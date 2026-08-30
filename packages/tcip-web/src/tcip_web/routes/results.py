@@ -557,13 +557,17 @@ def _disclosure(measurement: _PhenologyMeasurement) -> dict:
     }
 
 
-@router.post("/per_plant_curves")
-def per_plant_curves(payload: PhenologyPayload) -> dict:
-    """Per-(plant, date) positive-fraction curve from classified predictions.
+@router.post("/phenology_measurement")
+def phenology_measurement(payload: PhenologyPayload) -> dict:
+    """Both phenology projections (the per-(plant, date) curve and the per-plant milestone
+    dates) from one ``_measure_phenology`` run.
 
-    Gated on the same reconciled evidence as the CSV door (see ``_measure_phenology``): a curve IS the delivered
-    phenology measurement, just un-summarised, so it is refused on unvalidated evidence unless the caller
-    explicitly acknowledges, in which case it ships marked provisional rather than bare.
+    The two used to be separate doors that each ran the full measurement independently for the
+    same payload, though ``per_plant_phenology`` (called once inside ``_measure_phenology``) was
+    already their one shared producer; ResultsTab always called both on one Compute click. One
+    door removes the two-computation shape structurally rather than by convention: gated on the
+    same reconciled evidence either projection used to gate on separately, refused unless the
+    caller explicitly acknowledges, in which case both ship marked provisional rather than bare.
     """
     measurement = _measure_phenology(payload)
     if not measurement.gate.ok:
@@ -572,49 +576,29 @@ def per_plant_curves(payload: PhenologyPayload) -> dict:
     from tcip_mcp.operationalization import STATE_CROSSING_DATES
     from tcip_mcp.pipelines.resolution import record_delivery_binding_event
 
-    record_delivery_binding_event("results.per_plant_curves", None,
-                                  measurement.pred_dirs, measurement.bindings,
-                                  measurement_documents=["operating_point",
-                                                         "classifier_operating_point"],
-                                  scale_document=None,
-                                  trait=payload.trait, delivery_kind=STATE_CROSSING_DATES,
-                                  project_root=measurement.project_root,
-                                  plant_mapping=measurement.plant_mapping_disclosure)
+    # One event per historical door name, so a delivery-events reader still finds one
+    # "results.per_plant_curves" and one "results.onset_dates" entry per Compute click.
+    for door in ("results.per_plant_curves", "results.onset_dates"):
+        record_delivery_binding_event(door, None,
+                                      measurement.pred_dirs, measurement.bindings,
+                                      measurement_documents=["operating_point",
+                                                             "classifier_operating_point"],
+                                      scale_document=None,
+                                      trait=payload.trait, delivery_kind=STATE_CROSSING_DATES,
+                                      project_root=measurement.project_root,
+                                      plant_mapping=measurement.plant_mapping_disclosure)
     return {
-        "rows": measurement.curve_rows(),
-        "n_plants": len(measurement.plants["rows"]),
-        "positive_class_id": measurement.positive_class_id,
+        "curves": {
+            "rows": measurement.curve_rows(),
+            "n_plants": len(measurement.plants["rows"]),
+            "positive_class_id": measurement.positive_class_id,
+        },
+        "milestones": {"rows": measurement.milestone_rows()},
         **_disclosure(measurement),
     }
 
 
-# ── Milestone dates + CSV export ───────────────────────────────────────
-
-
-@router.post("/onset_dates")
-def onset_dates(payload: PhenologyPayload) -> dict:
-    """Each plant's phenology milestones, computed from the buckets rather than from caller rows.
-
-    Takes the same inputs as ``per_plant_curves``: both doors project one ``per_plant_phenology``
-    result rather than accepting a caller-composed table, so a milestone date and the curve it was
-    read off can never come from different numbers.
-    """
-    measurement = _measure_phenology(payload)
-    if not measurement.gate.ok:
-        raise HTTPException(400, _refusal(measurement))
-    _still_stated(measurement, payload.trait)
-    from tcip_mcp.operationalization import STATE_CROSSING_DATES
-    from tcip_mcp.pipelines.resolution import record_delivery_binding_event
-
-    record_delivery_binding_event("results.onset_dates", None,
-                                  measurement.pred_dirs, measurement.bindings,
-                                  measurement_documents=["operating_point",
-                                                         "classifier_operating_point"],
-                                  scale_document=None,
-                                  trait=payload.trait, delivery_kind=STATE_CROSSING_DATES,
-                                  project_root=measurement.project_root,
-                                  plant_mapping=measurement.plant_mapping_disclosure)
-    return {"rows": measurement.milestone_rows(), **_disclosure(measurement)}
+# ── CSV export ───────────────────────────────────────────────────────────
 
 
 class ExportCsvPayload(PhenologyPayload):

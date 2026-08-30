@@ -22,7 +22,7 @@ from tests.test_tcip_web_results_routes import _phenology_fixture
 
 pytestmark = pytest.mark.usefixtures("seed_catkin_operationalization")
 
-DOORS = ("per_plant_curves", "onset_dates")
+DOORS = ("phenology_measurement",)
 
 
 @pytest.fixture
@@ -73,7 +73,7 @@ def test_a_refusal_over_the_count_operating_point_says_the_classifier_is_validat
     """One dimension's evidence removed, the other's left in place: the refusal names the count
     operating point alone and still reports the classifier's real on-disk reference."""
     body = _phenology_fixture(tmp_path, validated=True, detections=4)
-    assert client.post("/api/results/onset_dates", json=body).status_code == 200
+    assert client.post("/api/results/phenology_measurement", json=body).status_code == 200
     _unvalidate_count_operating_point(body)
 
     for route in DOORS:
@@ -122,9 +122,9 @@ def test_the_two_refusals_do_not_read_alike(client: TestClient, tmp_path: Path) 
     _unvalidate_classifier(classifier_broken)
 
     store.open_project(Path(count_broken["project_root"]).resolve())
-    count_detail = _refusal_detail(client, count_broken, "onset_dates")
+    count_detail = _refusal_detail(client, count_broken, "phenology_measurement")
     store.open_project(Path(classifier_broken["project_root"]).resolve())
-    classifier_detail = _refusal_detail(client, classifier_broken, "onset_dates")
+    classifier_detail = _refusal_detail(client, classifier_broken, "phenology_measurement")
     assert count_detail != classifier_detail
     assert "['classifier']" not in count_detail
     assert "['operating_point']" not in classifier_detail
