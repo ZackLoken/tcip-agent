@@ -34,10 +34,13 @@ flower elongation/receptivity call.
 > Provisional operationalization (pending breeder confirmation). `crops.yml` is the
 > immutable authority ("Date when most catkins have elongated"). The implementation computes
 > `catkin_elongation_date` as the 95% majority crossing (= `catkin_95per_date`), the
-> current best-guess reading of that text. The confirmation path is the same one every trait
-> uses: state it with `state_trait_operationalization(delivery_kind="state_crossing_dates")`
-> and have the breeder confirm it in the Results tab; a disagreement changes the statement, not
-> this file. `positive_onset_date`
+> current best-guess reading of that text, recorded on the trait spec as `majority_milestone`
+> and flagged `majority_provisional`. That confirmation path is not
+> `state_trait_operationalization`, which confirms `state_crossing_dates`' own fields
+> (`positive_class_name`, `milestone_on`, `milestone_fractions`) and does not touch this
+> mapping; a disagreement over which crossing the majority date means is corrected on the
+> trait spec itself, through `update_trait_spec_fields` (or set at authoring time via
+> `author_trait_spec`), not this file. `positive_onset_date`
 > (first date any elongation appears) remains a separate helper, not the delivered trait.
 
 Not a count-of-peak. Do not normalize catkin *count* to the season peak and call the

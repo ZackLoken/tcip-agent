@@ -127,11 +127,14 @@ Full workflow:
    verdict-guarded staging helper so a re-run never orphans recorded verdicts
 4. Agent reads the staged result with its own image-capable read tool → visual QA pass
 
-Visual QA is not optional after either write: after `accept_proposals` or `segment_prompt` stages
-a result, read it before moving to the next image. Catching a wrong class or a sloppy mask before
-it reaches human review is cheaper than catching it after. `capture_live_canvas` renders the
-human's live GUI canvas the same way (their own image, viewport, and unsaved or in-progress
-shapes), so the agent can comment on work in progress before they save.
+Visual QA is not optional: read what each tool actually leaves. `accept_proposals` stages
+predictions and returns a box render (each accepted polygon's bounding box, not its mask outline)
+to read before moving to the next image, catching a wrong class or a badly placed box.
+`segment_prompt` writes nothing itself; its returned rings become annotations only once
+`save_annotations` writes them, and reading that saved result is the QA pass for mask quality.
+`capture_live_canvas` renders the human's live GUI canvas the same way (their own image,
+viewport, and unsaved or in-progress shapes), so the agent can comment on work in progress
+before they save.
 
 Corrective loop (for missed objects):
 1. `overlay_reference_grid(image_path)` → labeled reference grid ('A1' top-left) for spatial reference
@@ -206,11 +209,13 @@ frames → they accept on the canvas → only then does it become GT. See
   `replace_image_status_store` rather than by hand. `to_coco_dataset` silently skips an
   empty file that is not in that set, treating it as unannotated. You cannot manufacture
   negatives; writing empty label files does not create them; only the human's Complete does.
-  `python scripts/doctor.py <root>` walks label files against the status store when the store
-  reads, flagging a disk/status disagreement, a status entry in a shape it cannot read, and a
-  stored `"complete"` whose label file holds no annotation of the confirmed subject; if the
-  store itself will not read, it emits one warning and reports negatives unverified rather than
-  walking any label file. Never delete empty label files without asking.
+  `python scripts/doctor.py <root>` runs separate checks bound to what each one reads:
+  `check_negatives` reads the status store through the same seam `validate_data_quality` does,
+  and on a store that will not read, emits one warning and reports negatives unverified rather
+  than walking any label file; `check_status_tokens` reads the raw store file directly and
+  walks it regardless, flagging a status entry in a shape it cannot read and a stored
+  `"complete"` whose label file holds no annotation of the confirmed subject. Never delete
+  empty label files without asking.
 
 ## Active Learning
 

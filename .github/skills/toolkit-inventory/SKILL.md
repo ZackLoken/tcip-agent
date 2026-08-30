@@ -106,7 +106,10 @@ to be findable: save under `"model_best"`/`"model_final"`, or call `ctx.set_fina
 HPO is a capability, not a fixed algorithm; see the `run_hpo` tool's own docstring for the
 search-algorithm/scheduler menu (call `available_search_algs()` / `available_schedulers()` for
 what this machine actually has installed), the sweep's on-disk layout, and its refusal shape.
-One seam the docstring doesn't carry: `tune_search(objective_fn, param_space, …)` is the
+An uninstalled pick (an install that skipped the hpo extra) errors clearly, never silently
+swapped for another algorithm: `build_search_alg` raises `ValueError` naming the missing
+backend and what's actually available. One seam the docstring doesn't carry:
+`tune_search(objective_fn, param_space, …)` is the
 bring-your-own-objective seam under `run_hpo`. Bring your own `objective_fn(config, report)`
 (call `report(value)` each step) for a search that isn't a training sweep; `storage_path` is
 required, trial results land where you say, never Ray's home-directory default.
@@ -129,8 +132,11 @@ candidates, `segment(image, points/box)` for one prompted mask) and register it 
 `register_proposal_engine(name, engine)` so `engine=<name>` resolves to it, or bring one by dotted
 `module:factory` with no registration at all, so you can wire, trial, and compare techniques and
 deduce which serves a task best by how well each engine's high-conf proposals survive breeder
-review. `available_engines()` is the discovery call, listing the resolvable built-ins on this
-machine rather than a table this doc would have to keep in step with the registry.
+review. `available_engines()` is the discovery call: it lists every name
+`register_proposal_engine` has registered (SAM included unconditionally; SAM's own import is
+lazy, attempted only when the engine actually runs), so presence there means registration, not
+a per-machine importability probe, and never a table this doc would have to keep in step with
+the registry.
 
 Candidates use a neutral schema (`candidate_id` / `bbox` / `area` / `rings` / `score` / `engine`
 / `engine_meta`) so the shared review/staging path stays method-agnostic. `rings` is `Polygon.rings`
@@ -141,10 +147,12 @@ occlusion-split object identically.
 ## Active learning: the scorer registry (`pipelines.active_learning.scorer`)
 
 An acquisition function is a capability, not a fixed menu; scorers resolve through a dict registry
-you can extend rather than a welded `if/elif`. `resolve_scorer(method, task)` resolves a built-in
-name, a registered one, or a dotted `module:factory` you wrote; an unresolvable name raises
-`ValueError` naming the built-ins itself, rather than silently substituting one. Register your own
-(margin, least-confidence, …) with `register_scorer(name, factory)`.
+you can extend rather than a welded `if/elif`. Implement `BaseScorer.score(image_paths, model,
+device) -> list[tuple[str, float]]` ((path, score) pairs sorted descending, highest = most
+valuable) and register your own (margin, least-confidence, …) with `register_scorer(name,
+factory)`. `resolve_scorer(method, task)` resolves a built-in name, a registered one, or a
+dotted `module:factory` you wrote; an unresolvable name raises `ValueError` naming the
+built-ins itself, rather than silently substituting one.
 
 `require_composed_detector` (`active_learning.helpers`) is the honest guard the logit-reading
 scorers use: it returns an error rather than reading logits off a non-`nn.Module` model, and

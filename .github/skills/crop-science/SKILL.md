@@ -38,11 +38,9 @@ Reproductive and vegetative events run in a genotype- and site-specific sequence
 dormancy → budbreak → bloom → fruit/nut set → ripening → harvest → senescence. Timing is
 commonly framed with Growing Degree Days (GDD): thermal accumulation above a base
 temperature predicts phenophase transitions. GDD is a *scheduling* aid: it tells
-you roughly when to fly or walk a row, and it transfers poorly across sites and cultivars.
-An uncited literature recollection holds that GDD explains only around two-thirds of
-growing-season-onset variance on average; no source is retained for that figure, so treat it
-as an unconfirmed recollection, not a settled number, until a citation is found. It does not
-read a phenophase from an image.
+you roughly when to fly or walk a row, and it transfers poorly across sites and cultivars; how
+much growing-season-onset variance it actually explains is unconfirmed (see Needs expert
+confirmation). It does not read a phenophase from an image.
 
 The consequence for capture: a milestone trait is a crossing between two visit dates,
 not a single-image reading. Date traits (`catkin_05per_date`, `catkin_50per_date`,
@@ -194,6 +192,9 @@ they are not settled facts:
 - GDD base/upper thresholds and phenophase calendars are genotype- and site-specific for
   the Savanna Institute plantings; confirm with the breeding team rather than porting generic
   tree-crop models.
+- The often-repeated figure that GDD explains only around two-thirds of growing-season-onset
+  variance on average is an uncited literature recollection with no source retained; treat it
+  as unconfirmed, not a settled number, until a citation is found.
 - NIRS chemistry accuracy figures are from published models on related nuts; a
   calibration must be built and validated on TCIP's own crop/matrix before any chemistry
   trait is delivered.
