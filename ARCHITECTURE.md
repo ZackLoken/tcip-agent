@@ -110,7 +110,7 @@ differs from phase0 record: the Phase 0 inventory (`docs/audit/phase0/module-inv
 | packages/tcip-mcp/src/tcip_mcp/pipelines/training/envelope.py | The audited training envelope + ``TrainContext``. | 16 | 2 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/training/eval_runners.py | Orchestrates a checkpoint evaluation run (tile-level or delivery-grade full-frame) and writes its scored result; ``evaluation.py`` keeps the metrics computation itself. | 10 | 2 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/training/evaluation.py | Task-aware evaluation metrics + composite selection objective. | 7 | 11 |
-| packages/tcip-mcp/src/tcip_mcp/pipelines/training/generic_trainer.py | Task-agnostic training loop for a bespoke ``model_source`` model. | 11 | 8 |
+| packages/tcip-mcp/src/tcip_mcp/pipelines/training/generic_trainer.py | Task-agnostic training loop for a bespoke ``model_source`` model. | 11 | 6 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/training/hpo.py | HPO, hyperparameter optimization on Ray Tune. | 1 | 3 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/training/optimizer_factory.py | Optimizer factory with differential learning rate support. | 0 | 2 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/training/run_registry.py | In-process registry of live training runs: ``TrainRun``, its cancel-sentinel protocol, and the create/attach/get/list/cancel operations over the process-global ``_RUNS`` map. | 1 | 3 |
@@ -266,7 +266,7 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | packages/tcip-web/frontend/src/components/ErrorBoundary.test.tsx | (none found) | 1 | 0 |
 | packages/tcip-web/frontend/src/components/ErrorBoundary.tsx | (none found) | 0 | 2 |
 | packages/tcip-web/frontend/src/components/HaloLabel.test.tsx | (none found) | 1 | 0 |
-| packages/tcip-web/frontend/src/components/HaloLabel.tsx | A label with a blurred black halo behind the coloured fill, so a shape or detection name stays legible over any part of the underlying image; shared by the Annotate and Review canvases. | 0 | 1 |
+| packages/tcip-web/frontend/src/components/HaloLabel.tsx | A label with a blurred black halo behind the coloured fill, so a shape or detection name stays legible over any part of the underlying image; shared by the Annotate and Review canvases. | 0 | 4 |
 | packages/tcip-web/frontend/src/components/HelpOverlay.test.tsx | (none found) | 1 | 0 |
 | packages/tcip-web/frontend/src/components/HelpOverlay.tsx | (none found) | 1 | 2 |
 | packages/tcip-web/frontend/src/components/ProjectBreadcrumb.test.tsx | (none found) | 3 | 0 |
@@ -369,10 +369,10 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | packages/tcip-web/frontend/src/lib/viewGeometry.test.ts | (none found) | 1 | 0 |
 | packages/tcip-web/frontend/src/lib/viewGeometry.ts | Shared view math for the canvas: fit the view to a pixel rect and clamp pan offsets. | 2 | 7 |
 | packages/tcip-web/frontend/src/main.tsx | (none found) | 1 | 0 |
-| packages/tcip-web/frontend/src/store/appState.ts | The composed store state type: one slice interface per labelled group, combined into the type every slice's StateCreator is checked against. | 11 | 1 |
+| packages/tcip-web/frontend/src/store/appState.ts | The composed store state type: one slice interface per labelled group, combined into the type every slice's StateCreator is checked against. | 11 | 12 |
 | packages/tcip-web/frontend/src/store/exportSurface.test.ts | (none found) | 1 | 0 |
 | packages/tcip-web/frontend/src/store/guiStateShape.test.ts | (none found) | 2 | 0 |
-| packages/tcip-web/frontend/src/store/index.ts | (none found) | 3 | 54 |  <!-- queued: P5-238 merge-or-split -->
+| packages/tcip-web/frontend/src/store/index.ts | (none found) | 13 | 34 |
 | packages/tcip-web/frontend/src/store/mergeSnapshot.test.ts | (none found) | 3 | 0 |
 | packages/tcip-web/frontend/src/store/slices/agentActivity.ts | Holds the last agent-pushed panel event from the /ws/panel subscription, sequenced so an effect can react to each new one. | 1 | 3 |
 | packages/tcip-web/frontend/src/store/slices/bandSelection.ts | Holds the breeder's chosen band composite per band-set signature, one entry per distinct band set seen this session. | 2 | 2 |
@@ -390,14 +390,14 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | packages/tcip-web/frontend/src/store/terminalOpenPolicy.test.ts | (none found) | 1 | 0 |
 | packages/tcip-web/frontend/src/store/types.ts | Types mirroring the Python backend's GuiState and the name-based label schema. | 1 | 29 |
 | packages/tcip-web/frontend/src/tabs/AnnotateTab.test.tsx | (none found) | 5 | 0 |
-| packages/tcip-web/frontend/src/tabs/AnnotateTab.tsx | (none found) | 26 | 2 |  <!-- queued: P5-236 merge-or-split -->
+| packages/tcip-web/frontend/src/tabs/AnnotateTab.tsx | (none found) | 26 | 2 |
 | packages/tcip-web/frontend/src/tabs/InferenceTab.test.tsx | (none found) | 4 | 0 |
 | packages/tcip-web/frontend/src/tabs/InferenceTab.tsx | (none found) | 2 | 2 |
 | packages/tcip-web/frontend/src/tabs/MetaTab.tsx | (none found) | 4 | 1 |
 | packages/tcip-web/frontend/src/tabs/ResultsTab.test.tsx | (none found) | 4 | 0 |
 | packages/tcip-web/frontend/src/tabs/ResultsTab.tsx | (none found) | 7 | 2 |
 | packages/tcip-web/frontend/src/tabs/ReviewTab.test.tsx | (none found) | 6 | 0 |
-| packages/tcip-web/frontend/src/tabs/ReviewTab.tsx | (none found) | 24 | 2 |  <!-- queued: P5-237 merge-or-split -->
+| packages/tcip-web/frontend/src/tabs/ReviewTab.tsx | (none found) | 24 | 2 |
 | packages/tcip-web/frontend/src/tabs/RunMonitorLayout.tsx | The shell the Training and Tuning tabs share: a fixed-width scrolling sidebar of runs beside a detail region. | 0 | 2 |
 | packages/tcip-web/frontend/src/tabs/TrainingTab.tsx | (none found) | 9 | 1 |
 | packages/tcip-web/frontend/src/tabs/TuningTab.tsx | (none found) | 9 | 1 |
@@ -776,11 +776,11 @@ anything.
 
 | tool | line | audited | docstring first line |
 |---|---|---|---|
-| `visualize` | `vision_tools.py:295` | yes | Render annotations, predictions, a GT-vs-prediction comparison, or a sample grid. |
-| `propose_annotations` | `vision_tools.py:835` | yes | Propose candidate annotations on an image for review, using a chosen auto-labeling engine. |
-| `accept_proposals` | `vision_tools.py:1041` | yes | Assign classes to reviewed proposals and stage them as predictions for canvas review. |
-| `capture_live_canvas` | `vision_tools.py:1171` | yes | Render exactly what the human's GUI canvas shows right now: image, shapes, viewport. |
-| `overlay_reference_grid` | `vision_tools.py:1306` | yes | Render image with a labeled reference-grid overlay for spatial referencing. |
+| `visualize` | `vision_tools.py:300` | yes | Render annotations, predictions, a GT-vs-prediction comparison, or a sample grid. |
+| `propose_annotations` | `vision_tools.py:840` | yes | Propose candidate annotations on an image for review, using a chosen auto-labeling engine. |
+| `accept_proposals` | `vision_tools.py:1046` | yes | Assign classes to reviewed proposals and stage them as predictions for canvas review. |
+| `capture_live_canvas` | `vision_tools.py:1176` | yes | Render exactly what the human's GUI canvas shows right now: image, shapes, viewport. |
+| `overlay_reference_grid` | `vision_tools.py:1311` | yes | Render image with a labeled reference-grid overlay for spatial referencing. |
 
 ## 2. HTTP routes and WebSocket endpoints
 
@@ -1955,7 +1955,7 @@ Phase 3 verdict: single.
 
 Must agree: browser payload, backend file writer, and MCP reader agree on the two-file split and the (image_path, tab) identity check.
 Side A: `packages/tcip-mcp/src/tcip_mcp/web_client.py:142` (`def canvas_meta_key(`, the meta document's one address, with `canvas_geometry_key`, line 144, addressing the geometry document; the two stores are declared as `CANVAS_META_STORE` and `CANVAS_GEOMETRY_STORE`, lines 111 and 112; `packages/tcip-web/src/tcip_web/routes/canvas.py:85` writes meta through the key, geometry first at line 78).
-Side B: `packages/tcip-mcp/src/tcip_mcp/tools/vision_tools.py:1202` (`meta_doc = canvas_meta_key(root)`, the MCP read through the same keys) and `packages/tcip-mcp/src/tcip_mcp/tools/vision_tools.py:1203` (`shapes_doc = canvas_geometry_key(root)`, the geometry read one line after).
+Side B: `packages/tcip-mcp/src/tcip_mcp/tools/vision_tools.py:1207` (`meta_doc = canvas_meta_key(root)`, the MCP read through the same keys) and `packages/tcip-mcp/src/tcip_mcp/tools/vision_tools.py:1208` (`shapes_doc = canvas_geometry_key(root)`, the geometry read one line after).
 Phase 3 verdict: single.
 
 ## S12. Friction reports and retrospectives under .tcip/

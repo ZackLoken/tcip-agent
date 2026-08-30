@@ -138,9 +138,15 @@ describe("applyEditDrag (polygon)", () => {
 });
 
 describe("seedEditShape", () => {
-  it("seeds a box shape from a box detection geometry", () => {
+  it("seeds a box shape from a box detection geometry, aliasing the caller's array by design", () => {
     const geom: ReviewGeom = { kind: "box", box: [10, 20, 100, 200] };
-    expect(seedEditShape(geom)).toEqual(box([10, 20, 100, 200]));
+    const seeded = seedEditShape(geom);
+    expect(seeded).toEqual(box([10, 20, 100, 200]));
+    // A box has no in-place mutator (unlike the polygon points below): drag math always
+    // produces a fresh box, so sharing the source array here has never been a mutation risk.
+    if (seeded.kind === "box") {
+      expect(seeded.box).toBe(geom.box);
+    }
   });
 
   it("seeds a polygon shape from the single ring, copying each point", () => {
