@@ -848,7 +848,7 @@ registered at HEAD.
 
 | method | path | handler | line |
 |---|---|---|---|
-| POST | `/state` | `push_canvas_state` | `routes/canvas.py:70` |
+| POST | `/state` | `push_canvas_state` | `routes/canvas.py:102` |
 
 ### routes/classes.py, prefix `/api/classes` (6 routes)
 
@@ -889,19 +889,19 @@ registered at HEAD.
 
 | method | path | handler | line |
 |---|---|---|---|
-| GET | `` (root) | `serve_image` | `routes/images.py:499` |
-| GET | `/bands` | `get_bands` | `routes/images.py:714` |
-| POST | `/overviews` | `build_image_overviews` | `routes/images.py:847` |
-| GET | `/overviews/status` | `get_overview_job` | `routes/images.py:871` |
+| GET | `` (root) | `serve_image` | `routes/images.py:500` |
+| GET | `/bands` | `get_bands` | `routes/images.py:715` |
+| POST | `/overviews` | `build_image_overviews` | `routes/images.py:850` |
+| GET | `/overviews/status` | `get_overview_job` | `routes/images.py:874` |
 
 ### routes/inference.py, prefix `/api/inference` (3 HTTP + 1 WS)
 
 | method | path | handler | line |
 |---|---|---|---|
-| POST | `/launch` | `launch_inference` | `routes/inference.py:443` |
-| GET | `/jobs` | `list_jobs` | `routes/inference.py:542` |
-| POST | `/jobs/{job_id}/cancel` | `cancel_job` | `routes/inference.py:547` |
-| WS | `/jobs/{job_id}/stream` | `stream_job` | `routes/inference.py:557` |
+| POST | `/launch` | `launch_inference` | `routes/inference.py:431` |
+| GET | `/jobs` | `list_jobs` | `routes/inference.py:530` |
+| POST | `/jobs/{job_id}/cancel` | `cancel_job` | `routes/inference.py:535` |
+| WS | `/jobs/{job_id}/stream` | `stream_job` | `routes/inference.py:545` |
 
 ### routes/meta.py, prefix `/api/meta` (2 routes)
 
@@ -926,28 +926,28 @@ registered at HEAD.
 | GET | `/plant_mapping/list` | `list_plant_mappings` | `routes/results.py:289` |
 | POST | `/phenology_measurement` | `phenology_measurement` | `routes/results.py:561` |
 | POST | `/export_csv` | `export_csv` | `routes/results.py:613` |
-| GET | `/traits` | `list_traits` | `routes/results.py:1054` |
-| GET | `/operationalization` | `get_operationalization` | `routes/results.py:753` |
-| GET | `/operationalizations` | `list_operationalizations` | `routes/results.py:769` |
-| POST | `/operationalization/confirm` | `confirm_operationalization` | `routes/results.py:807` |
-| GET | `/trait-spec-statement` | `get_trait_spec_statement` | `routes/results.py:909` |
-| GET | `/trait-spec-statements` | `list_trait_spec_statements` | `routes/results.py:925` |
-| POST | `/trait-spec-statement/confirm` | `confirm_trait_spec_statement` | `routes/results.py:967` |
-| GET | `/delivery-events` | `list_delivery_events` | `routes/results.py:1033` |
-| GET | `/models/registered` | `registered_models` | `routes/results.py:1083` |
+| GET | `/traits` | `list_traits` | `routes/results.py:1038` |
+| GET | `/operationalization` | `get_operationalization` | `routes/results.py:737` |
+| GET | `/operationalizations` | `list_operationalizations` | `routes/results.py:753` |
+| POST | `/operationalization/confirm` | `confirm_operationalization` | `routes/results.py:791` |
+| GET | `/trait-spec-statement` | `get_trait_spec_statement` | `routes/results.py:893` |
+| GET | `/trait-spec-statements` | `list_trait_spec_statements` | `routes/results.py:909` |
+| POST | `/trait-spec-statement/confirm` | `confirm_trait_spec_statement` | `routes/results.py:951` |
+| GET | `/delivery-events` | `list_delivery_events` | `routes/results.py:1017` |
+| GET | `/models/registered` | `registered_models` | `routes/results.py:1067` |
 
 ### routes/review.py, prefix `/api/review` (8 routes)
 
 | method | path | handler | line |
 |---|---|---|---|
-| POST | `/matches` | `compute_image_matches` | `routes/review.py:451` |
-| POST | `/action` | `record_action` | `routes/review.py:577` |
-| POST | `/mark_complete` | `mark_complete` | `routes/review.py:713` |
-| POST | `/backup_labels` | `backup_labels` | `routes/review.py:775` |
-| GET | `/image_statuses` | `image_statuses` | `routes/review.py:1202` |
-| GET | `/generation_conf` | `get_generation_conf` | `routes/review.py:1232` |
-| POST | `/queue/launch` | `launch_priority_queue` | `routes/review.py:1414` |
-| GET | `/queue/{job_id}` | `get_priority_queue_job` | `routes/review.py:1442` |
+| POST | `/matches` | `compute_image_matches` | `routes/review.py:426` |
+| POST | `/action` | `record_action` | `routes/review.py:552` |
+| POST | `/mark_complete` | `mark_complete` | `routes/review.py:688` |
+| POST | `/backup_labels` | `backup_labels` | `routes/review.py:750` |
+| GET | `/image_statuses` | `image_statuses` | `routes/review.py:804` |
+| GET | `/generation_conf` | `get_generation_conf` | `routes/review.py:834` |
+| POST | `/queue/launch` | `launch_priority_queue` | `routes/review.py:1001` |
+| GET | `/queue/{job_id}` | `get_priority_queue_job` | `routes/review.py:1029` |
 
 ### routes/sessions.py, prefix `/api/sessions` (4 routes)
 
@@ -985,15 +985,15 @@ registered at HEAD.
 
 | method | path | handler | line |
 |---|---|---|---|
-| POST | `/launch` | `launch_hpo` | `routes/tuning.py:320` |  <!-- queued: P5-113 delete -->
-| GET | `/sweeps` | `list_sweeps` | `routes/tuning.py:351` |
-| GET | `/sweeps/{sweep_id}` | `get_sweep` | `routes/tuning.py:369` |
-| GET | `/sweeps/{sweep_id}/trials` | `list_trials` | `routes/tuning.py:402` |
-| GET | `/sweeps/{sweep_id}/trials/{trial_id}/metrics` | `get_trial_metrics` | `routes/tuning.py:435` |
-| GET | `/ray-dashboard` | `get_ray_dashboard` | `routes/tuning.py:462` |
-| POST | `/sweeps/{sweep_id}/tensorboard` | `launch_sweep_tensorboard` | `routes/tuning.py:548` |
-| POST | `/sweeps/{sweep_id}/trials/{trial_id}/tensorboard` | `launch_trial_tensorboard` | `routes/tuning.py:565` |
-| POST | `/sweeps/{sweep_id}/trials/{trial_id}/tensorboard/stop` | `stop_trial_tensorboard` | `routes/tuning.py:579` |
+| POST | `/launch` | `launch_hpo` | `routes/tuning.py:314` |  <!-- queued: P5-113 delete -->
+| GET | `/sweeps` | `list_sweeps` | `routes/tuning.py:341` |
+| GET | `/sweeps/{sweep_id}` | `get_sweep` | `routes/tuning.py:357` |
+| GET | `/sweeps/{sweep_id}/trials` | `list_trials` | `routes/tuning.py:389` |
+| GET | `/sweeps/{sweep_id}/trials/{trial_id}/metrics` | `get_trial_metrics` | `routes/tuning.py:422` |
+| GET | `/ray-dashboard` | `get_ray_dashboard` | `routes/tuning.py:449` |
+| POST | `/sweeps/{sweep_id}/tensorboard` | `launch_sweep_tensorboard` | `routes/tuning.py:535` |
+| POST | `/sweeps/{sweep_id}/trials/{trial_id}/tensorboard` | `launch_trial_tensorboard` | `routes/tuning.py:552` |
+| POST | `/sweeps/{sweep_id}/trials/{trial_id}/tensorboard/stop` | `stop_trial_tensorboard` | `routes/tuning.py:566` |
 
 ### routes/validation.py, prefix `/api/review` (1 route)
 
@@ -1265,7 +1265,7 @@ before the outgoing digest is gone.
 `packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:782`, imported by the web route module.
 
 The token a Complete stores here is subject-scoped before it ever reaches a writer: `mark_complete`,
-`packages/tcip-web/src/tcip_web/routes/review.py:713`, derives it from the GT file through
+`packages/tcip-web/src/tcip_web/routes/review.py:688`, derives it from the GT file through
 `annotations_hold_subject`, scoped to the confirmed subject, and the browser posts that value on
 through `set_image_status`.
 
@@ -1908,7 +1908,7 @@ end.
 
 Must agree: all three processes resolve `.tcip/` against the same directory.
 Side A: `packages/tcip-mcp/src/tcip_mcp/project_paths.py:44` (`ENV_VAR = "TCIP_PROJECT_ROOT"`).
-Side B: `packages/tcip-web/src/tcip_web/routes/images.py:168` (`_render_cache_dir` calls `project_paths.resolve_state_or`, the pinned resolver at `project_paths.py:68`, rather than reading the environment variable itself).
+Side B: `packages/tcip-web/src/tcip_web/routes/images.py:169` (`_render_cache_dir` calls `project_paths.resolve_state_or`, the pinned resolver at `project_paths.py:68`, rather than reading the environment variable itself).
 Phase 3 verdict: single.
 
 ## S02. Workspace root and the .active project marker
@@ -1943,7 +1943,7 @@ Phase 3 verdict: single. The posted payload carries `active_subject` beside `sub
 
 Must agree: mutations from any process land in the log their scope names, a dataset's own for a record travelling with the data and the platform's otherwise, with the same entry shape.
 Side A: `packages/tcip-mcp/src/tcip_mcp/audit.py:243` (`def audited(`, taking a declared `scope_arg` naming which tool argument carries the dataset a scoped tool mutates a record of) and `record_event`, line 121, the one emitter for code that is neither an MCP tool nor a script-invoked door demoted from one; both address the log through `audit_log_key`, line 84, and differ only in what a failed append means: `record_event` warns through `_write_entry`, line 103, while the decorator refuses, since its append runs after the tool body.
-Side B: `packages/tcip-web/src/tcip_web/routes/review.py:90` (`def _audit(scope: str, tool: str, arguments: dict) -> None:`, which calls `record_event` with the scope its event belongs to; `routes/results.py:54` and `routes/inference.py:84` do the same for their own roots).
+Side B: `packages/tcip-web/src/tcip_web/routes/review.py:93` (`def _audit(scope: str, tool: str, arguments: dict) -> None:`, which calls `record_event` with the scope its event belongs to; `routes/results.py:54` and `routes/inference.py:84` do the same for their own roots).
 Phase 3 verdict: single.
 
 ## S07. Experiment record .tcip/experiments/<id>/
@@ -1964,7 +1964,7 @@ Phase 3 verdict: single. An HPO trial with no experiment record still appends to
 
 Must agree: a job's own summary is written and reloaded against the root it launched under, not
 whatever root this process happens to have pinned when either side runs.
-Side A: `packages/tcip-web/src/tcip_web/jobstore.py:81` (`def job_registry_key(`, the one address each registry is written and reloaded through, on the store `JOB_REGISTRY_STORE` declared at `jobstore.py:59` (`JOB_REGISTRY_STORE = "job_registry"`); an explicit `root` composes the key directly, and only its absence falls back to `current_root`, which itself resolves `project_root`).
+Side A: `packages/tcip-web/src/tcip_web/jobstore.py:83` (`def job_registry_key(`, the one address each registry is written and reloaded through, on the store `JOB_REGISTRY_STORE` declared at `jobstore.py:61` (`JOB_REGISTRY_STORE = "job_registry"`); an explicit `root` composes the key directly, and only its absence falls back to `current_root`, which itself resolves `project_root`).
 Side B: `packages/tcip-web/src/tcip_web/routes/inference.py` (inference job registry, calls `jobstore.persist_grouped`/`jobstore.load`).
 Phase 3 verdict: duplicated.
 
@@ -2098,7 +2098,7 @@ Phase 3 verdict: single.
 
 Must agree: the MCP registrar and the GUI model pickers read one registry entry shape.
 Side A: `packages/tcip-mcp/src/tcip_mcp/model_registry.py:65` (`def read_registry_index(`, the read path for everything outside the module; `register_model`, line 200, replaces one entry by name inside one `tcip_store.transaction` on the key `registry_index_key`, line 36, mints).
-Side B: `packages/tcip-web/src/tcip_web/routes/results.py:1082` (`@router.get("/models/registered")`, serving `model_tools.list_registered_models`) and the browser's one entry declaration, `packages/tcip-web/frontend/src/api/inference.ts:16` (`export interface RegisteredModel {`), held field by field against an entry the real registrar wrote by `tests/test_registry_entry_shape_agreement.py`.
+Side B: `packages/tcip-web/src/tcip_web/routes/results.py:1066` (`@router.get("/models/registered")`, serving `model_tools.list_registered_models`) and the browser's one entry declaration, `packages/tcip-web/frontend/src/api/inference.ts:16` (`export interface RegisteredModel {`), held field by field against an entry the real registrar wrote by `tests/test_registry_entry_shape_agreement.py`.
 Phase 3 verdict: single.
 
 ## S28. operating_point.json prediction-bucket sidecar
@@ -2260,8 +2260,8 @@ Phase 3 verdict: duplicated.
 ## S50. Inference job stream WebSocket  <!-- queued: P5-304 unify -->
 
 Must agree: the browser recognizes the terminal frame and the status vocabulary the backend uses.
-Side A: `packages/tcip-web/src/tcip_web/routes/inference.py:556` (`@router.websocket("/jobs/{job_id}/stream")`).
-Side B: `packages/tcip-web/src/tcip_web/jobstore.py:97` (`TERMINAL_STATUSES = frozenset({"completed", "failed", "cancelled", "interrupted"})`).
+Side A: `packages/tcip-web/src/tcip_web/routes/inference.py:544` (`@router.websocket("/jobs/{job_id}/stream")`).
+Side B: `packages/tcip-web/src/tcip_web/jobstore.py:99` (`TERMINAL_STATUSES = frozenset({"completed", "failed", "cancelled", "interrupted"})`).
 Phase 3 verdict: duplicated.
 
 ## S51. Training run stream WebSocket  <!-- queued: P5-297 unify -->
@@ -2274,7 +2274,7 @@ Phase 3 verdict: duplicated.
 ## S52. Image-serve response headers  <!-- queued: P5-301 unify -->
 
 Must agree: header names and value encodings match.
-Side A: `packages/tcip-web/src/tcip_web/routes/images.py:692` (`"X-TCIP-Stats-Source": json.dumps(stats_source.model_dump(), allow_nan=False),`).
+Side A: `packages/tcip-web/src/tcip_web/routes/images.py:693` (`"X-TCIP-Stats-Source": json.dumps(stats_source.model_dump(), allow_nan=False),`).
 Side B: `packages/tcip-web/frontend/src/lib/imageLoader.ts:55` (`const statsSourceRaw = headers.get("X-TCIP-Stats-Source");`).
 Phase 3 verdict: duplicated.
 
@@ -2310,7 +2310,7 @@ Phase 3 verdict: duplicated.
 
 Must agree: the TP/FP/FN classification the browser draws is the one the matching library computed.
 Side A: `packages/tcip-annotation/src/tcip_annotation/matching.py` (`compute_matches` / `compute_classified_trait_matches`).
-Side B: `packages/tcip-web/src/tcip_web/routes/review.py:378` (`class MatchesResponse(BaseModel):`).
+Side B: `packages/tcip-web/src/tcip_web/routes/review.py:353` (`class MatchesResponse(BaseModel):`).
 Phase 3 verdict: restated-in-test.
 
 ## S58. Reference-grid geometry
