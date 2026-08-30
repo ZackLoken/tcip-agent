@@ -434,15 +434,6 @@ async def post_panel_event(panel: str, event: PanelEvent, request: Request):
     return {"status": "ok", "panel": panel, "event_type": event.event_type, **root_fields}
 
 
-@app.get("/api/events/{panel}/recent")
-def get_recent_panel_events(panel: str, limit: int = 16):
-    """Return the last N events for a panel (useful on browser reconnect)."""
-    if panel not in VALID_PANELS:
-        return {"error": f"unknown panel: {panel}", "valid": sorted(VALID_PANELS)}
-    events = list(_recent_events.get(panel, ()))
-    return {"panel": panel, "events": events[-limit:]}
-
-
 @app.websocket("/ws/panel/{panel}")
 async def panel_ws(websocket: WebSocket, panel: str):
     """Stream panel events to a browser client."""

@@ -58,19 +58,29 @@ class TestPostPanelEventRoute:
             assert resp.status_code == 200
             assert resp.json()["status"] == "ok", f"panel {panel} should be valid"
 
-    def test_recent_events_returned(self, client: TestClient) -> None:
-        client.post(
-            "/api/events/tuning",
-            json={"event_type": "trial_update", "data": {"trial": 1}},
-        )
-        client.post(
-            "/api/events/tuning",
-            json={"event_type": "trial_update", "data": {"trial": 2}},
-        )
-        resp = client.get("/api/events/tuning/recent?limit=2")
-        events = resp.json()["events"]
-        assert len(events) == 2
-        assert events[-1]["data"]["trial"] == 2
+    def test_events_posted_while_connected_are_delivered_live_in_order(
+        self, client: TestClient
+    ) -> None:
+        """A subscriber connected to a panel receives events pushed after it joined, in the
+        order they were posted: the live half of what the deleted recent-events route served
+        over HTTP to a reconnecting browser."""
+        from tcip_web import app as web_app
+
+        with client.websocket_connect("ws://127.0.0.1/ws/panel/tuning") as ws:
+            for _ in range(len(web_app._recent_events.get("tuning", ()))):
+                ws.receive_json()  # drain whatever earlier tests already posted to this panel
+            client.post(
+                "/api/events/tuning",
+                json={"event_type": "trial_update", "data": {"trial": 1}},
+            )
+            client.post(
+                "/api/events/tuning",
+                json={"event_type": "trial_update", "data": {"trial": 2}},
+            )
+            first = ws.receive_json()
+            second = ws.receive_json()
+        assert first["data"] == {"trial": 1}
+        assert second["data"] == {"trial": 2}
 
     def test_review_focus_persists_advisory_state(self, client: TestClient) -> None:
         # The agent reads gui state back via view_gui_state: a focus event must
@@ -214,21 +224,25 @@ class TestActiveProjectChangedRoute:
         import shutil
 
         from tcip_mcp import workspace
+        from tcip_web import app as web_app
 
         proj = workspace.project_path("chestnut_burr_valley")
         (proj / ".tcip").mkdir(parents=True)
         workspace.set_active_project("chestnut_burr_valley")
         shutil.rmtree(proj / ".tcip")
 
-        resp = client.post(
-            "/api/events/app",
-            json={"event_type": "active_project_changed",
-                  "data": {"name": "chestnut_burr_valley"}},
-        )
-        body = resp.json()
-        assert "chestnut_burr_valley" in body["platform_root_problem"]
-        recent = client.get("/api/events/app/recent").json()
-        assert recent["events"][-1]["event_type"] == "active_project_changed"
+        with client.websocket_connect("ws://127.0.0.1/ws/panel/app") as ws:
+            for _ in range(len(web_app._recent_events.get("app", ()))):
+                ws.receive_json()  # drain whatever earlier tests already posted to this panel
+            resp = client.post(
+                "/api/events/app",
+                json={"event_type": "active_project_changed",
+                      "data": {"name": "chestnut_burr_valley"}},
+            )
+            body = resp.json()
+            assert "chestnut_burr_valley" in body["platform_root_problem"]
+            broadcast = ws.receive_json()
+        assert broadcast["event_type"] == "active_project_changed"
 
     def test_an_event_naming_no_project_leaves_the_root_alone(
         self, client: TestClient

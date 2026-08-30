@@ -8,6 +8,8 @@ guessed. The header names are one map shared with the client, read here through 
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -30,38 +32,48 @@ def client() -> TestClient:
     return TestClient(app, base_url="http://127.0.0.1")
 
 
-def _last_event(client: TestClient, event_type: str) -> dict:
-    recent = client.get("/api/events/meta/recent").json()["events"]
-    return [event for event in recent if event["event_type"] == event_type][-1]
+def _post_and_capture_broadcast(
+    client: TestClient, event_type: str, data: dict, headers: dict | None = None
+) -> tuple[Any, dict]:
+    """Post a panel event while subscribed to its live broadcast, returning the HTTP response
+    and what the broadcast carried: the replacement for reading the event back through the
+    since-deleted recent-events route."""
+    from tcip_web import app as web_app
+
+    with client.websocket_connect("ws://127.0.0.1/ws/panel/meta") as ws:
+        for _ in range(len(web_app._recent_events.get("meta", ()))):
+            ws.receive_json()  # drain whatever earlier tests already posted to this panel
+        posted = client.post(
+            "/api/events/meta", json={"event_type": event_type, "data": data},
+            headers=headers or {},
+        )
+        event = ws.receive_json()
+    return posted, event
 
 
 def test_a_push_with_the_identity_headers_is_replayed_with_what_it_declared(
     client: TestClient,
 ) -> None:
-    posted = client.post("/api/events/meta", json={"event_type": "identity_declared", "data": {}},
-                         headers=DECLARED_HEADERS)
+    posted, event = _post_and_capture_broadcast(
+        client, "identity_declared", {}, headers=DECLARED_HEADERS
+    )
     assert posted.status_code == 200, posted.text
-
-    event = _last_event(client, "identity_declared")
     assert [event[field] for field in IDENTITY_FIELDS] == [
         "reviewing-harness", "1.2.3", "mcp_0123", "term_abc", "0b56e764", "high"
     ]
 
 
 def test_a_push_without_the_headers_is_replayed_with_the_fields_empty(client: TestClient) -> None:
-    posted = client.post("/api/events/meta", json={"event_type": "identity_absent", "data": {}})
+    posted, event = _post_and_capture_broadcast(client, "identity_absent", {})
     assert posted.status_code == 200, posted.text
     assert posted.json()["status"] == "ok"
-
-    event = _last_event(client, "identity_absent")
     assert [event[field] for field in IDENTITY_FIELDS] == [None] * len(IDENTITY_FIELDS)
 
 
 def test_a_partial_declaration_records_only_what_was_sent(client: TestClient) -> None:
-    client.post("/api/events/meta", json={"event_type": "identity_partial", "data": {}},
-                headers={"X-TCIP-Agent-Client-Name": "reviewing-harness"})
-
-    event = _last_event(client, "identity_partial")
+    _, event = _post_and_capture_broadcast(
+        client, "identity_partial", {}, headers={"X-TCIP-Agent-Client-Name": "reviewing-harness"}
+    )
     assert event["agent_client_name"] == "reviewing-harness"
     assert event["agent_client_version"] is None
     assert event["agent_session"] is None
