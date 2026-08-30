@@ -17,16 +17,10 @@ Both records declare ``durable=False``, so a push returns after the atomic repla
 any flush: this is ephemeral live-view state re-pushed every heartbeat (as often as every
 debounce cycle), not durable review/annotation history, and a crash losing the last push costs
 nothing, the next push repaints it.
-
-The web backend pins one platform root per process; a push lands only under that pinned root
-(``_pinned_root_matching``), never under whatever the browser's own payload claims, since
-``capture_live_canvas`` always reads the pinned root and a push under any other one would
-write a file it never looks at.
 """
 
 from __future__ import annotations
 
-import os
 import time
 from datetime import datetime, timezone
 from typing import Optional
@@ -35,7 +29,6 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from tcip_store import replace
 
-from tcip_mcp.project_paths import project_root as platform_root
 from tcip_mcp.web_client import canvas_geometry_key, canvas_meta_key
 from tcip_web.paths import assert_path_allowed
 
@@ -62,9 +55,10 @@ class CanvasStatePayload(BaseModel):
 
 
 def _guard_project_root(project_root: str) -> str:
-    """Confine a client-supplied project_root to the allowed roots and hand back its resolved
-    spelling; 403 on escape. Confinement only: whether it is also the root this push must land
-    under is :func:`_pinned_root_matching` below.
+    """Confine a client-supplied project_root and hand back the resolved spelling the writes use.
+
+    This route writes files under project_root, so the confinement is the same one every other
+    path-taking route applies; 403 on escape.
     """
     try:
         return str(assert_path_allowed(project_root))
@@ -72,36 +66,9 @@ def _guard_project_root(project_root: str) -> str:
         raise HTTPException(403, str(exc)) from exc
 
 
-def _pinned_root_matching(stated_root: str) -> str:
-    """This process's pinned platform root, once ``stated_root`` is confirmed to be it.
-
-    ``capture_live_canvas`` (the only reader of what this route writes) anchors to
-    ``tcip_mcp.project_paths.project_root()``, this process's own pinned root, never to a
-    caller-supplied value; a push landing under any other root would write a file the reader
-    never looks at. Compared by filesystem identity, not by string equality, the same rail
-    ``results._open_project_root`` uses for its own open-project check: a resolved payload path
-    and an unresolved pinned one can name the same directory without being the same string.
-    """
-    root = str(platform_root())
-    try:
-        same = os.path.samefile(stated_root, root)
-    except OSError as exc:
-        raise HTTPException(
-            403, f"project_root {stated_root} cannot be compared with the pinned platform "
-                 f"root {root}: {exc}") from exc
-    if not same:
-        raise HTTPException(
-            403, f"project_root {stated_root} is not this process's pinned platform root "
-                 f"{root}; capture_live_canvas reads live canvas state from the pinned root, "
-                 "so a push under a different one would never be seen. Adopt this project "
-                 "(set_active_project) before pushing canvas state for it.")
-    return root
-
-
 @router.post("/state")
 def push_canvas_state(payload: CanvasStatePayload) -> dict:
-    stated_root = _guard_project_root(payload.project_root)
-    project_root = _pinned_root_matching(stated_root)
+    project_root = _guard_project_root(payload.project_root)
     now = time.time()
 
     if payload.shapes is not None:
