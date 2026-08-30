@@ -247,10 +247,11 @@ def test_an_npz_captures_confirmed_negative_is_recognized(tmp_path: Path):
 def test_an_undecodable_label_is_a_finding_beside_a_readable_json_and_a_readable_coco_file(
     tmp_path: Path,
 ):
-    """The reader refusal a genuinely undecodable document raises (as opposed to a decodable but
-    unrecognized shape, covered above) must surface as a per-file error finding, never propagate
-    out of the walk, and must not stop the readable json and coco candidates in the same
-    directory from being read and reported normally."""
+    """Coverage, not a guard: an undecodable document is already refused by ``detect_format``'s
+    own decode before the per-format read this test's fixture exercises is ever reached, so this
+    passes unchanged whichever reader the json branch calls. It records that the refusal still
+    surfaces as a per-file error finding beside a readable json and coco candidate in the same
+    directory, never propagating out of the walk."""
     root = tmp_path / "ds"
     labels_dir = root / "annotations" / DATE
     labels_dir.mkdir(parents=True)
