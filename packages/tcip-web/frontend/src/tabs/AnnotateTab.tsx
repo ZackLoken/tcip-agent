@@ -37,12 +37,15 @@ import {
 import { canvasToAnnotations } from "@/lib/labelSerde";
 import {
   computePolygonBboxes,
+  derivedBoxFromPolygon,
   findHitPoint,
   findHoveredPolygon,
   pointInRings,
-  ringsBbox,
+  pointToSegmentDist,
+  withRing,
 } from "@/lib/polygonGeometry";
 import { applyEditDrag, hitTestEdit, MIN_BOX_SIDE, type EditDrag } from "@/lib/editGeometry";
+import { nextMode } from "@/lib/toolMode";
 import { useStore } from "@/store";
 import type { Box, Mode, PointShape, PolygonShape } from "@/store/types";
 
@@ -53,49 +56,6 @@ const STREAM_MIN_DIST_CANVAS = 6; // screen px between vertices laid down in Str
 // Screen-px grab radius for a placed point: the whole mark is its own handle, so this matches the
 // mark's outer reach (see the tick geometry in PointOverlay) rather than a hidden smaller target.
 const POINT_HIT_CANVAS = 11;
-
-/** A polygon's read-only derived box (the axis-aligned bounds of every ring), for box-mode display
- *  only. Reuses ringsBbox (the same min/max the loader and COCO export re-derive), so it can't
- *  drift. */
-function derivedBoxFromPolygon(p: PolygonShape): Box {
-  const [x1, y1, x2, y2] = ringsBbox(p.rings);
-  return { x1, y1, x2, y2, subject: p.subject, attributes: {} };
-}
-
-/** One ring replaced, the rest of the annotation untouched (an edit belongs to one contour). */
-function withRing(p: PolygonShape, ringIdx: number, ring: [number, number][]): PolygonShape {
-  const rings = p.rings.slice();
-  rings[ringIdx] = ring;
-  return { ...p, rings };
-}
-
-/** The mode `m` advances to: Point -> Box -> Polygon -> Point, the toolbar's left-to-right order
- *  (the array below is a rotation of the same cycle, so the transitions are unchanged). */
-function nextMode(mode: Mode): Mode {
-  const order: Mode[] = ["box", "polygon", "point"];
-  return order[(order.indexOf(mode) + 1) % order.length];
-}
-
-function pointToSegmentDist(
-  px: number,
-  py: number,
-  ax: number,
-  ay: number,
-  bx: number,
-  by: number,
-): { dist: number; t: number; proj: [number, number] } {
-  const dx = bx - ax;
-  const dy = by - ay;
-  const len_sq = dx * dx + dy * dy;
-  if (len_sq === 0) {
-    const d = Math.hypot(px - ax, py - ay);
-    return { dist: d, t: 0, proj: [ax, ay] };
-  }
-  const t = Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / len_sq));
-  const proj: [number, number] = [ax + t * dx, ay + t * dy];
-  const d = Math.hypot(px - proj[0], py - proj[1]);
-  return { dist: d, t, proj };
-}
 
 /**
  * The committed boxes + polygons (content layer). Memoized, and crucially, the mouse

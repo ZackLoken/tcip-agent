@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import { applyEditDrag, clampShapeToImage, hitTestEdit, type EditShape } from "@/lib/editGeometry";
+import {
+  applyEditDrag,
+  clampShapeToImage,
+  hitTestEdit,
+  seedEditShape,
+  type EditShape,
+} from "@/lib/editGeometry";
+import type { ReviewGeom } from "@/lib/reviewGeometry";
 
 const box = (b: [number, number, number, number]): EditShape => ({ kind: "box", box: b });
 const poly = (points: [number, number][]): EditShape => ({ kind: "polygon", points });
@@ -127,6 +134,27 @@ describe("applyEditDrag (polygon)", () => {
         [10, 20],
       ]),
     );
+  });
+});
+
+describe("seedEditShape", () => {
+  it("seeds a box shape from a box detection geometry", () => {
+    const geom: ReviewGeom = { kind: "box", box: [10, 20, 100, 200] };
+    expect(seedEditShape(geom)).toEqual(box([10, 20, 100, 200]));
+  });
+
+  it("seeds a polygon shape from the single ring, copying each point", () => {
+    const ring: [number, number][] = [
+      [0, 0],
+      [10, 0],
+      [10, 10],
+    ];
+    const geom: ReviewGeom = { kind: "polygon", rings: [ring] };
+    const seeded = seedEditShape(geom);
+    expect(seeded).toEqual(poly(ring));
+    if (seeded.kind === "polygon") {
+      expect(seeded.points).not.toBe(ring); // a fresh copy, so dragging can't mutate matches
+    }
   });
 });
 
