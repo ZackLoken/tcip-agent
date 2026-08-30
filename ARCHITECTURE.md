@@ -674,7 +674,7 @@ Docstring is the function's docstring first line, verbatim.
 |---|---|---|---|
 | `materialize_review_dataset` | `feedback_tools.py:168` | yes | Build a curated detection dataset from human review verdicts. |
 | `prioritize_review_queue` | `feedback_tools.py:343` | yes | Rank un-reviewed images by active-learning informativeness for the next review batch. |
-| `triage_predictions` | `feedback_tools.py:456` | yes | Partition a checkpoint's own predictions by confidence into auto-accept, needs-review and unscoreable queues. |
+| `triage_predictions` | `feedback_tools.py:456` | yes | Sort a checkpoint's own predictions by confidence into auto-accept, needs-review and unscoreable queues (the first two can overlap). |
 
 ### gui_tools.py (2 tools)
 
