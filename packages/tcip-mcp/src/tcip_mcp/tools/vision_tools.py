@@ -307,6 +307,13 @@ def visualize(
     visualize_predictions / visualize_comparison / visualize_dataset_sample). Saves to
     .tcip/artifacts/viz/ and returns ``image_path`` for the agent's own image-capable read tool.
 
+    Rendering conventions, shared across every source: boxes/masks color by class through the
+    20-class palette in ``tcip_annotation.viz`` (consistent with the GUI annotation canvas); a
+    'comparison' render outlines GT green and predictions red, with yellow center-to-center
+    lines joining matched pairs; a label carries the class name and, where the shape carries a
+    confidence score, the score. Every render is resized to at most
+    ``display_bounds.VIZ_ARTIFACT_MAX_EDGE`` (1024px) on its longest edge before saving.
+
     Args:
         source: What to render:
             'annotations' = ground-truth labels on a single image (path = image file);
@@ -763,6 +770,11 @@ def propose_annotations(
     render path and neutral candidate data. Read the render with your own image-capable read
     tool, then call accept_proposals to assign classes and stage the accepted ones as predictions.
 
+    Each candidate renders as a colored, semi-transparent filled polygon (every ring of an
+    occlusion-split candidate drawn, not just the largest) with a large numbered label at its
+    centroid, colors cycling through the shared class palette; the candidate id in that number is
+    the same id ``assignments`` names below.
+
     On an image under a dataset's ``images/`` tree, the candidates are staged keyed by the
     dataset, capture date and stem, alongside the content identity of the pixels the engine ran
     on: ``accept_proposals`` reads the record back by that same address and refuses if the
@@ -1087,12 +1099,13 @@ def capture_live_canvas(
 ) -> dict:
     """Render exactly what the human's GUI canvas shows right now: image, shapes, viewport.
 
-    The GUI continuously pushes its canvas state (image, viewport, classes, and the
-    display-resolved shapes with the exact colors/tags it renders, including unsaved edits and
-    an in-progress drawing) to ``.tcip/state/canvas_live.json``. This tool reads the region being
-    shown at up to ``max_edge``, renders that state over it, and returns the artifact path for
-    the agent's own image-capable read tool, plus the classes schema, review legend,
-    per-tag/per-creator counts, and the state's age.
+    The GUI continuously pushes its canvas state to ``.tcip/state/canvas_live.json`` as a hybrid
+    stream: a tiny heartbeat on pan/zoom (image and viewport only), and the full display-resolved
+    geometry (image, viewport, classes, and the shapes with the exact colors/tags the canvas
+    renders, including unsaved edits and an in-progress drawing) whenever the shapes themselves
+    change. This tool reads the region being shown at up to ``max_edge``, renders that state over
+    it, and returns the artifact path for the agent's own image-capable read tool, plus the
+    classes schema, review legend, per-tag/per-creator counts, and the state's age.
 
     Args:
         refresh: Ping the GUI (via the panel-event hub) to push fresh state first, waiting
@@ -1219,9 +1232,13 @@ def overlay_reference_grid(
 
     The grid lives in the raster's native pixel frame: square cells of ``tile_size``
     native pixels named spreadsheet-style ('A1' top-left; letter columns A-Z then AA,
-    AB, ..., 1-based number rows). When ``tile_size`` is omitted it derives from the
-    image dims and the artifact bound (``reference_grid.derive_pointing_tile_size``) so
-    the rendered labels stay legible. Every response echoes the full grid geometry
+    AB, ..., 1-based number rows). Rendered in yellow on the cells' true boundaries; a cell
+    against the image edge clips to the frame rather than drawing past it. A cell's name draws
+    only when the rendered cell is large enough to hold the label legibly, so labels decimate
+    toward the edges of a fine grid rather than overlapping. When ``tile_size`` is omitted it
+    derives from the image dims and the artifact bound
+    (``reference_grid.derive_pointing_tile_size``) so the rendered labels stay legible. Every
+    response echoes the full grid geometry
     (``tile_size``, ``overlap``, ``cols``, ``rows``, ``width``, ``height``): pass the
     echoed ``tile_size``/``overlap`` to ``segment_prompt(grid_cells=...)`` so a cell name
     resolves against the grid that was actually rendered.
