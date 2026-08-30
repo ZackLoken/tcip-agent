@@ -80,6 +80,26 @@ def test_collation_functions_have_one_home():
     )
 
 
+def test_eval_runner_functions_have_one_home():
+    """``run_test_evaluation``, ``run_full_frame_evaluation`` and ``write_evaluation_result``
+    moved out of ``evaluation.py`` into ``pipelines/training/eval_runners.py``, as one unit;
+    ``evaluation_results_key`` (checked separately below, it names the evaluation_results store,
+    not a function these three call, though it does move with them) travels too."""
+    _assert_one_home(
+        {"run_test_evaluation", "run_full_frame_evaluation", "write_evaluation_result"},
+        _module_path("pipelines/training/evaluation.py"),
+        _module_path("pipelines/training/eval_runners.py"),
+    )
+
+
+def test_evaluation_results_key_has_one_home():
+    _assert_one_home(
+        {"evaluation_results_key"},
+        _module_path("pipelines/training/evaluation.py"),
+        _module_path("pipelines/training/eval_runners.py"),
+    )
+
+
 def test_train_run_class_has_one_home():
     old_defs = {
         node.name for node in ast.parse(

@@ -142,7 +142,7 @@ def test_full_frame_evaluation_defaults_agree_with_the_shared_inference_defaults
     import inspect
 
     from tcip_mcp.pipelines.resolution import DEFAULT_MAX_DETS, DEFAULT_NMS_IOU
-    from tcip_mcp.pipelines.training.evaluation import run_full_frame_evaluation
+    from tcip_mcp.pipelines.training.eval_runners import run_full_frame_evaluation
 
     params = inspect.signature(run_full_frame_evaluation).parameters
     assert params["global_nms_iou"].default == DEFAULT_NMS_IOU

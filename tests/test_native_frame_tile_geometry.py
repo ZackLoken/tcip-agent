@@ -498,7 +498,7 @@ def test_delivery_grade_evaluation_admits_a_native_frame_basis_and_reproduces_th
     tile through and undo, so the two runs are not merely two identical no-resize calls."""
     import tcip_mcp.pipelines.inference.predictor as predictor_mod
     from tcip_mcp.pipelines.inference.predictor import resolve_tile_regime
-    from tcip_mcp.pipelines.training.evaluation import run_full_frame_evaluation
+    from tcip_mcp.pipelines.training.eval_runners import run_full_frame_evaluation
     from tests._verified_checkpoint_fixtures import stub_verified_checkpoint
 
     images_dir, labels_dir = tmp_path / "images", tmp_path / "labels"
@@ -553,7 +553,7 @@ def test_delivery_grade_evaluation_forwards_the_native_frame_resize_into_predict
     native-frame checkpoint whose recorded chain pins one must reach ``predict_tiled`` with it, not
     silently run each tile at its own native size."""
     import tcip_mcp.pipelines.inference.predictor as predictor_mod
-    from tcip_mcp.pipelines.training.evaluation import run_full_frame_evaluation
+    from tcip_mcp.pipelines.training.eval_runners import run_full_frame_evaluation
     from tests._verified_checkpoint_fixtures import stub_verified_checkpoint
 
     images_dir, labels_dir = tmp_path / "images", tmp_path / "labels"

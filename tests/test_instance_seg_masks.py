@@ -353,7 +353,7 @@ def test_run_full_frame_evaluation_tiled_instance_seg_scores_boxes(instance_seg_
     from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.model_registry import load_registered_checkpoint
-    from tcip_mcp.pipelines.training.evaluation import (
+    from tcip_mcp.pipelines.training.eval_runners import (
         evaluation_results_key,
         run_full_frame_evaluation,
     )

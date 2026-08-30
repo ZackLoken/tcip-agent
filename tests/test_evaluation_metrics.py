@@ -33,8 +33,10 @@ from tcip_mcp.pipelines.training.evaluation import (  # noqa: E402
     r_squared,
     regression_metrics,
     resolve_match_criterion,
-    run_test_evaluation,
     sweep_operating_point,
+)
+from tcip_mcp.pipelines.training.eval_runners import (  # noqa: E402
+    run_test_evaluation,
     write_evaluation_result,
 )
 from tcip_mcp.pipelines.training.generic_trainer import (  # noqa: E402
@@ -682,7 +684,7 @@ def test_run_test_evaluation_records_effective_iou_type(tmp_path, monkeypatch):
     import tcip_store as ts
 
     from tcip_mcp.model_registry import load_registered_checkpoint
-    from tcip_mcp.pipelines.training.evaluation import evaluation_results_key
+    from tcip_mcp.pipelines.training.eval_runners import evaluation_results_key
     from tcip_mcp.tools.model_tools import register_model
 
     result = register_model(name="iou-type-check", checkpoint_path=str(ckpt_path), config={},
@@ -714,7 +716,7 @@ def test_both_eval_regimes_share_common_keys_and_keep_their_own_apart(tmp_path, 
     import tcip_mcp.pipelines.model_build as model_build
     import tcip_mcp.pipelines.training.evaluation as evaluation
     from tcip_mcp.model_registry import load_registered_checkpoint
-    from tcip_mcp.pipelines.training.evaluation import (
+    from tcip_mcp.pipelines.training.eval_runners import (
         evaluation_results_key, run_full_frame_evaluation,
     )
     from tcip_mcp.tools.model_tools import register_model

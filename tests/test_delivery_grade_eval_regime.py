@@ -47,7 +47,7 @@ def test_gating_path_honors_explicit_max_dets_le_100(tmp_path, monkeypatch):
     verbatim, even at or below 100: that's the exact value _max_dets_from_density's own floor
     legitimately derives for a sparse dataset, so silently substituting 1000 would clobber a real
     value."""
-    import tcip_mcp.pipelines.training.evaluation as evaluation
+    import tcip_mcp.pipelines.training.eval_runners as evaluation
     from tcip_mcp.tools.training_tools import evaluate_model
 
     captured: dict = {}
@@ -69,7 +69,7 @@ def test_gating_path_honors_explicit_max_dets_le_100(tmp_path, monkeypatch):
 
 
 def test_gating_path_defaults_max_dets_to_1000_when_unset(tmp_path, monkeypatch):
-    import tcip_mcp.pipelines.training.evaluation as evaluation
+    import tcip_mcp.pipelines.training.eval_runners as evaluation
     from tcip_mcp.pipelines.resolution import DEFAULT_MAX_DETS
     from tcip_mcp.tools.training_tools import evaluate_model
 
@@ -95,7 +95,7 @@ def test_diagnostic_path_defaults_max_dets_to_100_when_unset(tmp_path, monkeypat
     """The COCOeval maxDets convention default for the other (tile-level/diagnostic) regime,
     distinct from the gating regime's 1000, resolved without the two colliding via a shared
     sentinel value."""
-    import tcip_mcp.pipelines.training.evaluation as evaluation
+    import tcip_mcp.pipelines.training.eval_runners as evaluation
     from tcip_mcp.tools.training_tools import evaluate_model
 
     captured: dict = {}
@@ -116,7 +116,7 @@ def test_diagnostic_path_defaults_max_dets_to_100_when_unset(tmp_path, monkeypat
 
 
 def test_diagnostic_path_honors_explicit_max_dets(tmp_path, monkeypatch):
-    import tcip_mcp.pipelines.training.evaluation as evaluation
+    import tcip_mcp.pipelines.training.eval_runners as evaluation
     from tcip_mcp.tools.training_tools import evaluate_model
 
     captured: dict = {}
@@ -141,7 +141,7 @@ def test_bare_checkpoint_path_reuses_its_own_stamped_tiling_and_subject(tmp_path
     """A checkpoint path (not a run id) carries its own stamped config["data"] the same way a run
     id's in-memory config does: evaluate_model must not silently lose tiling/subject reuse just
     because the caller passed a path instead of a run id."""
-    import tcip_mcp.pipelines.training.evaluation as evaluation
+    import tcip_mcp.pipelines.training.eval_runners as evaluation
     from tcip_mcp.tools.training_tools import evaluate_model
 
     captured: dict = {}
@@ -175,7 +175,7 @@ def test_gate_translates_geometry_refusal_to_error_dict(tmp_path, monkeypatch):
     """evaluate_model is an @mcp.tool() surface that returns {"error": ...} for every other
     failure: a bare raise from run_full_frame_evaluation would surface as an MCP exception
     instead, inconsistent with the rest of this tool's contract."""
-    import tcip_mcp.pipelines.training.evaluation as evaluation
+    import tcip_mcp.pipelines.training.eval_runners as evaluation
     from tcip_mcp.tools.training_tools import evaluate_model
 
     def _refuse(*a, **kw):
@@ -197,7 +197,7 @@ def test_gate_translates_geometry_refusal_to_error_dict(tmp_path, monkeypatch):
 def test_gate_translates_unreadable_label_to_error_dict(tmp_path, monkeypatch):
     """A present, unreadable label document raised out of run_full_frame_evaluation is this
     tool's own {"error": ...} shape too, not a raise through the MCP boundary."""
-    import tcip_mcp.pipelines.training.evaluation as evaluation
+    import tcip_mcp.pipelines.training.eval_runners as evaluation
     from tcip_annotation.json_io import UnreadableLabelDocument
     from tcip_mcp.tools.training_tools import evaluate_model
 
@@ -222,7 +222,7 @@ def test_cap_hit_stamped_when_explicit_max_dets_truncates(tmp_path):
     detectable. A caller-explicit cap that actually binds on real detections must be visible in
     the result, not silently assumed safe."""
     import tcip_mcp.pipelines.inference.predictor as predictor_mod
-    from tcip_mcp.pipelines.training.evaluation import run_full_frame_evaluation
+    from tcip_mcp.pipelines.training.eval_runners import run_full_frame_evaluation
 
     from PIL import Image
     from tcip_annotation import json_io
