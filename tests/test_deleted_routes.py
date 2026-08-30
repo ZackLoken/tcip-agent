@@ -17,6 +17,7 @@ from tcip_web.app import app
 DELETED_ROUTES = [
     ("GET", "/api/events/{panel}/recent"),
     ("GET", "/api/terminal/sessions"),
+    ("GET", "/api/inference/jobs/{job_id}/preview"),
 ]
 
 

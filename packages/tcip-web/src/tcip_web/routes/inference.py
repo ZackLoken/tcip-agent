@@ -142,7 +142,7 @@ def _register(job: InferenceJob) -> None:
 
 def _get(job_id: str) -> Optional[InferenceJob]:
     """A job by id, from any root this process holds: a repin to another project must not
-    make an in-flight job unreachable for cancelling, previewing or streaming it."""
+    make an in-flight job unreachable for cancelling or streaming it."""
     from tcip_web import jobstore
     with _job_lock:
         return jobstore.find_job(_jobs, job_id)
@@ -160,8 +160,8 @@ def rehydrate_for_current_root() -> None:
 
     Called at startup and again after this process repins to another root: the worker
     threads behind a persisted non-terminal job are gone, so it is surfaced as
-    ``interrupted``. Only the fields the API exposes are restored (the per-image results list
-    isn't persisted), so ``/preview`` comes back empty. An interrupted job's ``done`` and
+    ``interrupted``. Only the fields the API exposes are restored; the per-image results list
+    isn't persisted and comes back empty. An interrupted job's ``done`` and
     ``dropped_boxes`` are whatever the last persist wrote, not a live measurement: the worker
     only persists at launch and once more when it finishes or dies, so a crash mid-run restores
     the counts as of launch rather than the work actually done before the crash. Merges by job
@@ -554,20 +554,6 @@ def launch_inference(payload: LaunchInferencePayload) -> dict:
 @router.get("/jobs")
 def list_jobs() -> dict:
     return {"jobs": [_summary(j) for j in _list_jobs()]}
-
-
-@router.get("/jobs/{job_id}/preview")
-def get_preview(job_id: str, limit: int = 12) -> dict:
-    j = _get(job_id)
-    if j is None:
-        raise HTTPException(404, f"job not found: {job_id}")
-    preview = j.results[:limit]
-    return {
-        "job_id": job_id,
-        "images_dir": j.images_dir,
-        "output_dir": j.output_dir,
-        "preview": preview,
-    }
 
 
 @router.post("/jobs/{job_id}/cancel")

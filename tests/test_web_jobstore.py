@@ -393,7 +393,7 @@ def test_inference_cancel_endpoint_and_worker(tmp_path, monkeypatch):
 
 def test_inference_cancel_reaches_a_job_launched_under_a_previous_root(tmp_path, monkeypatch):
     """Cancelling a run one launched is legitimate work: a repin to another project must not
-    make the job invisible to preview, cancel or stream, only to the list route."""
+    make the job invisible to cancel or stream, only to the list route."""
     from fastapi import HTTPException
 
     from tcip_mcp import workspace
