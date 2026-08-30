@@ -19,6 +19,10 @@ stages:
     epochs: 10
 ```
 
+Illustrative shape: the stage count, freeze depths, and epoch counts above are one example, not
+a template; derive them per dataset (backbone size, object difficulty, data volume) rather than
+pinning this shape.
+
 Each stage has its own epoch count and freeze depth. Learning rate is not per-stage: the
 top-level `optimizer` block's `backbone_lr`/`head_lr` apply uniformly across every stage (a
 per-stage `lr` key is accepted but ignored; `preflight_config` warns if you set one). The
@@ -32,6 +36,9 @@ early_stopping:
   patience: 7        # Epochs without improvement before stopping
   min_delta: 0.0001  # Minimum change to count as improvement
 ```
+
+Illustrative shape: the `patience` and `min_delta` values above are one example; derive or tune
+them per dataset's own convergence noise, never pinned.
 
 Early stopping and `model_best.pt` share the same selection criterion; there is no separate
 `metric`/`mode` key on `early_stopping`. Both are driven by `evaluation.selection_metric`

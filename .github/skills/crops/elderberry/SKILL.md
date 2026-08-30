@@ -71,8 +71,8 @@ in each trait's crops.yml definition. Trait names are verbatim.
 - Leaf morphology (calibrated close-up or flatbed scan; needs a scale): `leaf_length`,
   `leaf_width`, `leaf_length_width_ratio`.
 - Stem descriptor (close-up): `stem_internode_length`.
-- Berry size (calibrated macro/close-up; resolution-gated, see the `crop-science` skill's
-  resolution-gate guidance, effective GSD roughly 2-3x smaller than the ~3-6 mm berry):
+- Berry size (calibrated macro/close-up; resolution-gated by the `crop-science` skill's
+  flagged resolution-gate rule, unconfirmed for this berry size, not restated here as a ratio):
   `fruit_diameter`, `fruit_diameter_range`. Valid only from a *validated mask* with in-frame
   physical-scale calibration: an uncalibrated pixel length is not millimeters, and at this size
   the imaging setup needs to actually resolve the berry, not just calibrate whatever it captures.
