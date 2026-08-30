@@ -208,7 +208,7 @@ def export_detection_csv(
     measurement_validated: str | None = None,
     pred_dirs: list[str] | None = None,
     acknowledge_unvalidated: bool = False,
-) -> tuple[str, dict]:
+) -> tuple[str, dict, dict]:
     """Export per-image detection counts to CSV.
 
     The count is the phenotype for count traits, so this is a delivery door: it refuses a *bare*
@@ -265,19 +265,31 @@ def export_detection_csv(
         acknowledge_unvalidated: Write an unvalidated count as a flagged provisional CSV.
 
     Returns:
-        ``(path, tail)``: the path to the written CSV, and the ``_PROVENANCE_COLUMNS`` tail
-        ``delivered_tail`` composed and wrote into every row, so a caller that needs one of those
-        cells back (a response echoing the CSV's own ``measurement_validated``, say) reads the
-        value actually written rather than re-deriving or re-asserting it a second time.
+        ``(path, tail, summary)``: the path to the written CSV, the ``_PROVENANCE_COLUMNS`` tail
+        ``delivered_tail`` composed and wrote into every row (so a caller that needs one of those
+        cells back, a response echoing the CSV's own ``measurement_validated``, say, reads the
+        value actually written rather than re-deriving or re-asserting it a second time), and the
+        gate's own evaluation summary (``stamp``, ``unvalidated``, ``tile_size_operative``,
+        ``tile_size_validated``, ``binding_notes``) so a door composes its response fields from
+        this call's single authoritative gate rather than re-reconciling the same buckets itself.
+
+    Raises:
+        DeliveryRefused: the gate refused (an unvalidated dimension with no acknowledgement);
+            carries the ``DeliveryGateResult`` and the reconciler's binding notes.
+        ValueError: the ``trait``'s ``per_image_count`` operationalization is unrecorded, not
+            breeder-confirmed, or was withdrawn since the first check; never carries a gate result,
+            so a caller must not read a delivered count off this raise.
     """
     from tcip_mcp.operationalization import (
         PER_IMAGE_COUNT,
         check_operationalization,
         resolve_trait_and_record,
     )
+    from tcip_annotation.json_io import safe_score
     from tcip_mcp.pipelines.postprocessing.phenology import bucket_id_map
     from tcip_mcp.pipelines.resolution import (
         VALIDATED_FALSE,
+        DeliveryRefused,
         binding_notes_text,
         check_delivery_gate,
         delivered_tail,
@@ -299,6 +311,7 @@ def export_detection_csv(
     # unvalidated rather than trusting the caller's bare string (mirrors export_aggregated_csv).
     flags: dict[str, str | None] = {"measurement": VALIDATED_FALSE}
     measurement_recon: dict = {"bindings": {}}
+    tile_recon: dict = {"operative": False, "validated": None, "binding_notes": {}}
     if pred_dirs:
         # Reconciled from the buckets' own sidecars, floored against the caller assertion, never
         # trusted from the string alone (mirrors export_aggregated_csv's count-trait gating).
@@ -312,7 +325,7 @@ def export_detection_csv(
     gate = check_delivery_gate(flags, acknowledge_unvalidated=acknowledge_unvalidated)
     if not gate.ok:
         notes = binding_notes_text(measurement_recon.get("binding_notes", {}))
-        raise ValueError(f"{gate.reason} {notes}".rstrip())
+        raise DeliveryRefused(gate, notes)
 
     # A confirmation withdrawn or a field moved since the first check refuses here, before anything.
     spec_now, record_now, _ = resolve_trait_and_record(trait, PER_IMAGE_COUNT)
@@ -334,9 +347,11 @@ def export_detection_csv(
 
         for r in image_results:
             detection_count, scores = positive_detections(r)
-            avg_conf = sum(scores) / len(scores) if scores else 0.0
+            # Quantized at the persisted precision before averaging, never a re-spelled round(x, 4).
+            safe_scores = [safe_score(s) for s in scores]
+            avg_conf = sum(safe_scores) / len(safe_scores) if safe_scores else 0.0
             writer.writerow({
-                "image": Path(r.get("image", "")).name,
+                "image": Path(r.get("image", "")).stem,
                 "detection_count": detection_count,
                 "avg_confidence": round(avg_conf, 4),
                 "measurement_document": _MEASUREMENT_DOCUMENT,
@@ -348,4 +363,12 @@ def export_detection_csv(
                                   measurement_documents=[_MEASUREMENT_DOCUMENT],
                                   scale_document=None,
                                   trait=trait, delivery_kind=PER_IMAGE_COUNT)
-    return output_path, stamp
+    summary = {
+        "stamp": gate.stamp,
+        "unvalidated": gate.unvalidated,
+        "tile_size_operative": tile_recon["operative"],
+        "tile_size_validated": tile_recon.get("validated"),
+        "binding_notes": binding_notes_text(
+            {**measurement_recon.get("binding_notes", {}), **tile_recon.get("binding_notes", {})}),
+    }
+    return output_path, stamp, summary
