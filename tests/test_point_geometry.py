@@ -221,7 +221,7 @@ def test_records_from_annotation_omits_a_point_and_its_category() -> None:
 
 
 def test_worst_predictions_does_not_count_a_point_as_a_detection(tmp_path: Path) -> None:
-    from tcip_mcp.tools.training_tools import get_worst_predictions
+    from tcip_mcp.tools.vision_tools import get_worst_predictions
 
     gt_dir, pred_dir = tmp_path / "gt", tmp_path / "pred"
     gt_dir.mkdir()
