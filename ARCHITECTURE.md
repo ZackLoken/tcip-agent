@@ -752,12 +752,12 @@ the response shape `training.py` and `tuning.py` both answer in, and `_body_comm
 `EmptyBodyPayload`, the empty body model six path-parameter-only routes now declare so the
 browser must send a preflighted request rather than reaching the handler as a simple one.
 
-Total HTTP routes at HEAD: 83 (5 on `app.py` plus 78 across the 16 route modules, both counts
+Total HTTP routes at HEAD: 82 (5 on `app.py` plus 77 across the 16 route modules, both counts
 obtained this session by grepping `@app.get/post(` and `@router.get/post(` and summing);
 websocket routes are counted separately, below, and excluded from this total. Each per-router
-heading's own route count (and their sum, 81) includes any websocket route it lists, since
+heading's own route count (and their sum, 80) includes any websocket route it lists, since
 `routes/inference.py`, `routes/terminal.py` and `routes/training.py` each carry one; net of
-those three, the 16 modules hold the 78 HTTP routes counted here.
+those three, the 16 modules hold the 77 HTTP routes counted here.
 
 Total WebSocket routes at HEAD: 5 (`/ws/state`, `/ws/panel/{panel}` on `app.py`;
 `/api/terminal/ws/{session_id}` on `routes/terminal.py`; `/api/inference/jobs/{job_id}/stream`  <!-- queued: P5-124 unify -->
@@ -815,14 +815,13 @@ registered at HEAD.
 | GET | `/completeness` | `get_completeness` | `routes/coverage.py:279` |
 | POST | `/completeness` | `post_completeness` | `routes/coverage.py:324` |
 
-### routes/dataset.py, prefix `/api/dataset` (4 routes)
+### routes/dataset.py, prefix `/api/dataset` (3 routes)
 
 | method | path | handler | line |
 |---|---|---|---|
 | GET | `/tree` | `get_dataset_tree` | `routes/dataset.py:154` |  <!-- queued: P5-83 unify -->
-| GET | `/images` | `list_images` | `routes/dataset.py:200` |  <!-- queued: P5-84 delete -->
-| POST | `/select` | `select_dataset` | `routes/dataset.py:222` |
-| POST | `/nav` | `set_current_image` | `routes/dataset.py:319` |
+| POST | `/select` | `select_dataset` | `routes/dataset.py:208` |
+| POST | `/nav` | `set_current_image` | `routes/dataset.py:305` |
 
 ### routes/fs.py, prefix `/api/fs` (1 route)
 

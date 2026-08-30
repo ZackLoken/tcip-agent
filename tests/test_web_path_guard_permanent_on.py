@@ -223,16 +223,15 @@ def test_dataset_routes_refuse_an_outside_root_and_serve_an_inside_one(
     _image(outside / "images" / "2026-02-11" / "a.jpg")
 
     assert client.get("/api/dataset/tree", params={"dataset_root": str(outside)}).status_code == 403
-    assert client.get("/api/dataset/images",
-                      params={"dataset_root": str(outside), "date": "2026-02-11"}).status_code == 403
     assert client.post("/api/dataset/select", json={
         "project_root": str(outside), "dataset_root": str(outside)}).status_code == 403
     assert store.project_root is None
 
     assert client.get("/api/dataset/tree", params={"dataset_root": str(inside)}).status_code == 200
-    listed = client.get("/api/dataset/images",
-                        params={"dataset_root": str(inside), "date": "2026-02-11"})
-    assert listed.status_code == 200 and listed.json()["images"] == ["a.jpg"]
+    selected = client.post("/api/dataset/select", json={
+        "project_root": str(inside), "dataset_root": str(inside), "date": "2026-02-11"})
+    assert selected.status_code == 200
+    assert selected.json()["selection"]["image_list"] == ["a.jpg"]
     _open(client, inside)
     assert store.project_root == inside.resolve()
 

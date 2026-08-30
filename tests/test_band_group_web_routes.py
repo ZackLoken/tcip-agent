@@ -52,16 +52,6 @@ def grouped_dataset(tmp_path: Path) -> Path:
 # ── routes/dataset.py ────────────────────────────────────────────────────────────────────
 
 
-def test_dataset_images_route_folds_the_group(client: TestClient, grouped_dataset: Path):
-    resp = client.get("/api/dataset/images", params={
-        "dataset_root": str(grouped_dataset), "date": "2026-05-01",
-    })
-    assert resp.status_code == 200
-    body = resp.json()
-    assert body["count"] == 2
-    assert sorted(body["images"]) == ["cap_001.bandgroup", "plain_002.jpg"]
-
-
 def test_dataset_select_route_folds_the_group(client: TestClient, grouped_dataset: Path):
     resp = client.post("/api/dataset/select", json={
         "project_root": str(grouped_dataset), "dataset_root": str(grouped_dataset),

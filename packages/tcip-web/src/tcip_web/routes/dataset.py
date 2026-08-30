@@ -39,7 +39,7 @@ from tcip_mcp.dataset_layout import (
 )
 from tcip_mcp.pipelines.image_utils import BandGroupRef, list_logical_images
 from tcip_web.label_annotations_cache import cached_label_annotations
-from tcip_web.paths import assert_path_allowed, safe_join
+from tcip_web.paths import assert_path_allowed
 from tcip_web.state import DatasetSelection, store
 
 router = APIRouter(prefix="/api/dataset", tags=["dataset"])
@@ -194,20 +194,6 @@ def get_dataset_tree(dataset_root: str) -> DatasetTree:
     if len(_tree_cache) > _TREE_CACHE_MAX:
         _tree_cache.popitem(last=False)
     return tree
-
-
-@router.get("/images")
-def list_images(dataset_root: str, date: str) -> dict:
-    """List image files on a specific date."""
-    root = _guarded(dataset_root)
-    try:
-        date_dir = safe_join(root, "images", date)
-    except ValueError as exc:
-        raise HTTPException(400, str(exc)) from exc
-    if not date_dir.is_dir():
-        raise HTTPException(404, f"images/{date} not found under {root}")
-    items = _logical_image_names(date_dir)
-    return {"dataset_root": str(root), "date": date, "images": items, "count": len(items)}
 
 
 class SelectionRequest(BaseModel):

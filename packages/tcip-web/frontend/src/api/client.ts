@@ -177,11 +177,6 @@ export const api = {
         label_problem: string | null;
       }>(`${ROUTES.getDatasetTree}?${q({ dataset_root })}`),
 
-    listImages: (dataset_root: string, date: string) =>
-      call<{ images: string[]; count: number; dataset_root: string; date: string }>(
-        `${ROUTES.getDatasetImages}?${q({ dataset_root, date })}`,
-      ),
-
     select: (body: {
       project_root: string;
       dataset_root: string;
