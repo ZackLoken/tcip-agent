@@ -176,7 +176,7 @@ def _det_dataset(tmp_path, n=3, size=128):
 
 def _capture_run_test_evaluation(monkeypatch):
     """Patch run_test_evaluation to record the built dataset + tiling instead of loading a model."""
-    import tcip_mcp.pipelines.training.eval_runners as evaluation
+    import tcip_mcp.pipelines.training.eval_runners as runners
 
     captured: dict = {}
 
@@ -185,7 +185,7 @@ def _capture_run_test_evaluation(monkeypatch):
         captured["tiling"] = kw.get("tiling")
         return {"tiled": bool(kw.get("tiling")), "eval_regime": "tile-level"}
 
-    monkeypatch.setattr(evaluation, "run_test_evaluation", _fake)
+    monkeypatch.setattr(runners, "run_test_evaluation", _fake)
     return captured
 
 

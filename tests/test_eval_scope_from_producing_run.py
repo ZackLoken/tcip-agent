@@ -43,7 +43,7 @@ def test_run_id_evaluation_scopes_ground_truth_to_the_runs_own_subject(
         tmp_path: Path, monkeypatch) -> None:
     """With no caller-supplied subject, the evaluation dataset reads the subject the run trained
     on, so the ground truth it scores against holds that subject's objects and no others."""
-    import tcip_mcp.pipelines.training.eval_runners as evaluation
+    import tcip_mcp.pipelines.training.eval_runners as runners
     from tcip_mcp.pipelines.training.run_registry import create_run
     from tcip_mcp.tools.training_tools import evaluate_model
     from tests._verified_checkpoint_fixtures import registered_checkpoint
@@ -62,7 +62,7 @@ def test_run_id_evaluation_scopes_ground_truth_to_the_runs_own_subject(
         captured["ds"] = loader.dataset
         return {"tiled": False, "eval_regime": "tile-level"}
 
-    monkeypatch.setattr(evaluation, "run_test_evaluation", _fake)
+    monkeypatch.setattr(runners, "run_test_evaluation", _fake)
 
     res = evaluate_model(run.run_id, str(images_dir), str(labels_dir), task="detection")
     assert "error" not in res, res
@@ -77,7 +77,7 @@ def test_a_caller_supplied_subject_still_wins_over_the_runs_own(
         tmp_path: Path, monkeypatch) -> None:
     """Reuse never overrides an explicit scope: evaluating the same run against another subject
     stays possible, and reads that subject's ground truth."""
-    import tcip_mcp.pipelines.training.eval_runners as evaluation
+    import tcip_mcp.pipelines.training.eval_runners as runners
     from tcip_mcp.pipelines.training.run_registry import create_run
     from tcip_mcp.tools.training_tools import evaluate_model
     from tests._verified_checkpoint_fixtures import registered_checkpoint
@@ -96,7 +96,7 @@ def test_a_caller_supplied_subject_still_wins_over_the_runs_own(
         captured["ds"] = loader.dataset
         return {"tiled": False, "eval_regime": "tile-level"}
 
-    monkeypatch.setattr(evaluation, "run_test_evaluation", _fake)
+    monkeypatch.setattr(runners, "run_test_evaluation", _fake)
 
     res = evaluate_model(run.run_id, str(images_dir), str(labels_dir), task="detection",
                          subject="catkin")

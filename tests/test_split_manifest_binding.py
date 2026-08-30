@@ -882,7 +882,7 @@ def test_evaluate_model_under_the_manifest_scores_exactly_calibration_universe_f
     universe the calibration door draws through), and records the stem count. The universe's own
     source side within the manifest is calibration_universe_from_manifest's concern, not
     duplicated here."""
-    import tcip_mcp.pipelines.training.eval_runners as evaluation
+    import tcip_mcp.pipelines.training.eval_runners as runners
     from tcip_mcp.pipelines.data.splits import calibration_universe_from_manifest, label_image_stems
     from tcip_mcp.pipelines.training.run_registry import create_run
     from tcip_mcp.tools.training_tools import evaluate_model
@@ -909,7 +909,7 @@ def test_evaluate_model_under_the_manifest_scores_exactly_calibration_universe_f
         captured["kw"] = kw
         return {"tiled": False, "eval_regime": "tile-level"}
 
-    monkeypatch.setattr(evaluation, "run_test_evaluation", _fake)
+    monkeypatch.setattr(runners, "run_test_evaluation", _fake)
 
     res = evaluate_model(run.run_id, str(images_dir), str(labels_dir), task="detection",
                          split_manifest_dir=str(out))
@@ -981,7 +981,7 @@ def test_evaluate_model_reads_confirmed_negatives_under_the_universes_own_date(
     negative on the calibration side is admitted, not dropped as an unconfirmed empty label."""
     import tcip_store as ts
 
-    import tcip_mcp.pipelines.training.eval_runners as evaluation
+    import tcip_mcp.pipelines.training.eval_runners as runners
     from tcip_mcp.dataset_layout import record_image_statuses, status_bucket
     from tcip_mcp.pipelines.data.splits import member_identity
     from tcip_mcp.pipelines.training.run_registry import create_run
@@ -1022,7 +1022,7 @@ def test_evaluate_model_reads_confirmed_negatives_under_the_universes_own_date(
         captured["kw"] = kw
         return {"tiled": False, "eval_regime": "tile-level"}
 
-    monkeypatch.setattr(evaluation, "run_test_evaluation", _fake)
+    monkeypatch.setattr(runners, "run_test_evaluation", _fake)
 
     res = evaluate_model(run.run_id, str(images_dir), str(labels_dir), task="detection",
                          split_manifest_dir=str(out))
@@ -1036,7 +1036,7 @@ def test_evaluate_model_manifest_refuses_a_disagreeing_date(tmp_path: Path, monk
     """A real (if minimal) checkpoint and a stubbed run_test_evaluation, so the refusal's own
     assertion is what fails, not an unrelated checkpoint-loading crash reached by continuing past
     a refusal the tree under test does not raise."""
-    import tcip_mcp.pipelines.training.eval_runners as evaluation
+    import tcip_mcp.pipelines.training.eval_runners as runners
     from tcip_mcp.pipelines.training.run_registry import create_run
     from tcip_mcp.tools.training_tools import evaluate_model
 
@@ -1055,7 +1055,7 @@ def test_evaluate_model_manifest_refuses_a_disagreeing_date(tmp_path: Path, monk
     reg = register_model(name="split-binding-date-model", checkpoint_path=ckpt_path, config={})
     assert "error" not in reg, reg
     monkeypatch.setattr(
-        evaluation, "run_test_evaluation",
+        runners, "run_test_evaluation",
         lambda ckpt, loader, device, task, output_dir, **kw:
             {"tiled": False, "eval_regime": "tile-level"})
 
@@ -1074,7 +1074,7 @@ def test_evaluate_model_scores_a_one_foreground_group_calibration_side_the_door_
     (the locked cal/holdout draw's halving)."""
     import tcip_store as ts
 
-    import tcip_mcp.pipelines.training.eval_runners as evaluation
+    import tcip_mcp.pipelines.training.eval_runners as runners
     from tcip_mcp.pipelines.data.splits import (
         calibration_universe_from_manifest, count_label_lines, label_image_stems,
         member_identity_parts,
@@ -1109,7 +1109,7 @@ def test_evaluate_model_scores_a_one_foreground_group_calibration_side_the_door_
     registered_checkpoint(Path(run.output_dir), project_root=tmp_path, filename="model_best.pt")
 
     monkeypatch.setattr(
-        evaluation, "run_test_evaluation",
+        runners, "run_test_evaluation",
         lambda ckpt, loader, device, task, output_dir, **kw:
             {"tiled": False, "eval_regime": "tile-level"})
 
