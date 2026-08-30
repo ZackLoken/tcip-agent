@@ -13,8 +13,9 @@ The on-disk default for both GT and predictions is one per-image, COCO-shaped `.
 schema without reading any label document (`accept_proposals` reads back the proposal
 record `propose_annotations` staged in a prior run, not a label file); `export_predictions` reads it only
 when it calibrates a confidence operating point, through `run_inference`. A dataset-level
-COCO training set is assembled from these per-image files (`datasets.py`'s
-`to_coco_dataset`), not authored directly. An unspecified format resolves to `.json`
+COCO training set is assembled from these per-image files (`tcip_annotation.json_io`'s
+`to_coco_dataset`, called from `pipelines/data/datasets.py`), not authored directly. An
+unspecified format resolves to `.json`
 (`dataset_layout.py`'s `label_ext()`).
 
 ## Import/export formats
@@ -62,17 +63,17 @@ applied twice or skipped.
 1. Initial labeling: manual or engine-assisted bounding box and polygon annotation
 2. Review: IoU matching between predictions and ground truth to accept/correct/reject
 3. Active learning: score unlabeled images by model uncertainty to prioritize annotation effort
-4. Quality audit: coverage analysis, inter-annotator agreement
+4. Quality audit: coverage analysis
 
 ## Tools
 
 | Tool | Purpose |
 |------|---------|
-| `read_annotations` | Load labels for a set of images (auto-detects format) |
+| `read_annotations` | Load the ground-truth labels and predictions for a single image (auto-detects format) |
 | `save_annotations` | Write annotations to any supported format |
 | `segment_prompt` | Engine-assisted polygon generation from point/box/grid prompts (`engine='sam'` default) |
 | `score_predictions` | Score predictions vs GT (image file or dataset dir); `detail=True` adds per-detection TP/FP/FN match data |
-| `push_panel_data` | Send images + annotations to the annotation or review panel |
+| `push_panel_data` | Push an arbitrary event to a GUI panel over the tcip-web backend, not restricted to images/annotations |
 | `prioritize_review_queue` | Rank unlabeled images by uncertainty/diversity (`strategy="informativeness"`, default), or `strategy="confidence_triage"` to partition by confidence |
 | `materialize_review_dataset` | Turn human review verdicts into a curated training set (accepted/edited → labels, rejected → hard negatives) with experiment lineage |
 
@@ -199,10 +200,11 @@ frames → they accept on the canvas → only then does it become GT. See
   `replace_image_status_store` rather than by hand. `to_coco_dataset` silently skips an
   empty file that is not in that set, treating it as unannotated. You cannot manufacture
   negatives; writing empty label files does not create them; only the human's Complete does.
-  `python scripts/doctor.py <root>` flags every empty-label/status disagreement, a status entry in
-  a shape it cannot read, and a stored `"complete"` whose label file holds no annotation of the
-  confirmed subject. Never delete empty label files without asking.
-- Cohen's κ: inter-annotator agreement (if multiple annotators)
+  `python scripts/doctor.py <root>` walks label files against the status store when the store
+  reads, flagging a disk/status disagreement, a status entry in a shape it cannot read, and a
+  stored `"complete"` whose label file holds no annotation of the confirmed subject; if the
+  store itself will not read, it emits one warning and reports negatives unverified rather than
+  walking any label file. Never delete empty label files without asking.
 
 ## Active Learning
 
