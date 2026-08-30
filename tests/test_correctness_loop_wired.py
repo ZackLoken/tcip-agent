@@ -106,7 +106,7 @@ def test_resolve_contract_dims_falls_back_without_inventing():
 
 
 def test_resolve_contract_dims_attribute_without_registry_raises_not_silently_falls_back(tmp_path):
-    """A bare `except Exception: pass` around _resolve_registry_id_map
+    """A bare `except Exception: pass` around resolve_registry_id_map
     must not fall open to the head's declared num_classes for any read failure, only the legitimate
     "no subject in scope" case: falling open more broadly would mask a real problem (an
     attribute-classification config with no classes.json to order its values) as a healthy

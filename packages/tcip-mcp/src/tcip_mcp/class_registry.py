@@ -290,7 +290,7 @@ def _sweep_schema_change(
     A confirmation and its digest stamp are two transactions, status first, so a stamp that could not
     be written never rejects the human's confirmation and unstamped confirmations legitimately exist
     (see ``tcip_web.routes.classes._stamp_digest``). An unstamped confirmation reads as valid
-    (``tcip_mcp.pipelines.data.datasets.confirmed_negative_names`` quarantines only a stamp that
+    (``tcip_mcp.pipelines.data.label_queries.confirmed_negative_names`` quarantines only a stamp that
     positively disagrees), which is right until the vocabulary changes underneath it: from then on
     nothing distinguishes it from a confirmation made under the new schema, and it trains against a
     definition its human never saw. ``outgoing`` (``None`` for a first-ever write, or a stored

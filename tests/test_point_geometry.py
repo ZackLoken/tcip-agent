@@ -147,14 +147,14 @@ def test_write_coco_interop_export_skips_a_point(tmp_path: Path) -> None:
 
 
 def test_json_det_targets_yields_no_box_for_a_point(tmp_path: Path) -> None:
-    from tcip_mcp.pipelines.data.datasets import _json_det_targets
+    from tcip_mcp.pipelines.data.label_queries import json_det_targets
 
     label = tmp_path / "IMG_0001.json"
     json_io.write_annotations(label, [
         Annotation(subject="catkin", geometry=Point(20.0, 20.0)),
         Annotation(subject="catkin", geometry=BOX),
     ], 100, 80)
-    boxes, labels, n_unlabeled = _json_det_targets(str(label), "catkin", None, {"catkin": 0})
+    boxes, labels, n_unlabeled = json_det_targets(str(label), "catkin", None, {"catkin": 0})
     assert boxes == [[10.0, 10.0, 30.0, 30.0]]
     assert labels == [1]
     assert n_unlabeled == 0  # a point is not an unlabeled instance either: it is not an instance
@@ -164,7 +164,7 @@ def test_a_point_only_image_is_not_a_trainable_sample(tmp_path: Path) -> None:
     """``_label_record_state``'s ``has_objects`` is target membership, not mere annotatedness: a
     point-only image kept on the direct-json path would train as a zero-object negative no human
     confirmed: the exact fabrication the function's docstring exists to prevent."""
-    from tcip_mcp.pipelines.data.datasets import _label_record_state
+    from tcip_mcp.pipelines.data.label_queries import _label_record_state
 
     labels = tmp_path / "annotations"
     labels.mkdir()

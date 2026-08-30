@@ -55,7 +55,7 @@ def _reg_id_map(subject=CATKIN, attribute=None, values=()):
 # ── format detection ────────────────────────────────────────────────────────
 
 def test_dir_label_format_detects_json(tmp_path):
-    from tcip_mcp.pipelines.data.datasets import dir_label_format
+    from tcip_mcp.pipelines.data.label_queries import dir_label_format
     d = tmp_path / "detect"
     d.mkdir()
     json_io.write_annotations(d / "a.json", [_box(10, 10, 50, 50)], 100, 100)
@@ -65,7 +65,7 @@ def test_dir_label_format_detects_json(tmp_path):
 def test_dir_label_format_ignores_non_canonical_json(tmp_path):
     """A LabelMe-style .json (``shapes``, no ``annotations``) is not the canonical store: don't claim
     it, so it never gets silently assembled as though it were per-image JSON."""
-    from tcip_mcp.pipelines.data.datasets import dir_label_format
+    from tcip_mcp.pipelines.data.label_queries import dir_label_format
     d = tmp_path / "labels"
     d.mkdir()
     (d / "a.json").write_text(json.dumps({"shapes": [{"label": "x", "points": [[1, 1], [2, 2]]}]}))
@@ -73,7 +73,7 @@ def test_dir_label_format_ignores_non_canonical_json(tmp_path):
 
 
 def test_dir_label_format_empty(tmp_path):
-    from tcip_mcp.pipelines.data.datasets import dir_label_format
+    from tcip_mcp.pipelines.data.label_queries import dir_label_format
     assert dir_label_format(tmp_path / "nope") is None
 
 
@@ -81,7 +81,7 @@ def test_dir_label_format_detects_a_dataset_level_coco(tmp_path):
     """A dataset-level COCO's 'images'/'categories' markers are checked before 'annotations', the
     same priority format_io reads a file's shape with everywhere else, so a labels_dir holding one
     reads 'coco' here too rather than being misclaimed as our per-image json."""
-    from tcip_mcp.pipelines.data.datasets import dir_label_format
+    from tcip_mcp.pipelines.data.label_queries import dir_label_format
     d = tmp_path / "detect"
     d.mkdir()
     (d / "dataset.json").write_text(json.dumps(
@@ -92,7 +92,7 @@ def test_dir_label_format_detects_a_dataset_level_coco(tmp_path):
 def test_dir_label_format_treats_the_old_objects_schema_as_unrecognized(tmp_path):
     """The old 'objects' schema, which format_io's detection raises on, is never our per-image
     json; dir_label_format's own never-raise contract folds that raise into None."""
-    from tcip_mcp.pipelines.data.datasets import dir_label_format
+    from tcip_mcp.pipelines.data.label_queries import dir_label_format
     d = tmp_path / "detect"
     d.mkdir()
     (d / "a.json").write_text(json.dumps({"objects": [{"label": "catkin"}]}))
@@ -102,7 +102,7 @@ def test_dir_label_format_treats_the_old_objects_schema_as_unrecognized(tmp_path
 def test_first_labels_json_excludes_a_bucket_sidecar(tmp_path):
     """A directory holding only a bucket's own provenance stamp has no first label document: the
     sidecar is never mistaken for one, the same walk ``dir_label_format`` shares."""
-    from tcip_mcp.pipelines.data.datasets import first_labels_json
+    from tcip_mcp.pipelines.data.label_queries import first_labels_json
     d = tmp_path / "detect"
     d.mkdir()
     (d / "operating_point.json").write_text("{}")
@@ -115,7 +115,7 @@ def test_first_labels_json_excludes_a_bucket_sidecar(tmp_path):
 # ── assemble_coco ───────────────────────────────────────────────────────────
 
 def test_assemble_coco_pairs_labels_with_images(tmp_path):
-    from tcip_mcp.pipelines.data.datasets import assemble_coco
+    from tcip_mcp.pipelines.data.label_queries import assemble_coco
     images = tmp_path / "images"
     labels = tmp_path / "detect"
     labels.mkdir()
@@ -139,7 +139,7 @@ def test_assemble_coco_with_no_stems_excludes_a_bucket_sidecar(tmp_path):
     """With no explicit ``stems``, the stem universe comes from prediction_documents, so a
     sidecar beside a real label never mints a spurious entry, even when an image happens to
     share the sidecar's own stem (a stray file the platform never ingested this way)."""
-    from tcip_mcp.pipelines.data.datasets import assemble_coco
+    from tcip_mcp.pipelines.data.label_queries import assemble_coco
     images = tmp_path / "images"
     labels = tmp_path / "detect"
     labels.mkdir()
@@ -154,7 +154,7 @@ def test_assemble_coco_with_no_stems_excludes_a_bucket_sidecar(tmp_path):
 
 
 def test_assemble_coco_includes_only_confirmed_negatives(tmp_path):
-    from tcip_mcp.pipelines.data.datasets import assemble_coco
+    from tcip_mcp.pipelines.data.label_queries import assemble_coco
     images = tmp_path / "images"
     labels = tmp_path / "annotations"
     labels.mkdir(parents=True)
@@ -169,7 +169,7 @@ def test_assemble_coco_includes_only_confirmed_negatives(tmp_path):
 
 
 def test_assemble_coco_skips_stem_without_image(tmp_path):
-    from tcip_mcp.pipelines.data.datasets import assemble_coco
+    from tcip_mcp.pipelines.data.label_queries import assemble_coco
     images = tmp_path / "images"
     labels = tmp_path / "detect"
     labels.mkdir()
@@ -189,7 +189,8 @@ def test_class_distribution_on_a_shared_coco_scopes_to_its_own_stems(tmp_path):
     split. ``class_distribution``'s COCO branch must honor ``self.stems`` rather than iterating
     ``self._coco["annotations"]`` directly, or train and val report the identical, unsplit
     whole-dataset distribution instead of their own."""
-    from tcip_mcp.pipelines.data.datasets import assemble_coco, build_dataset, _resolve_registry_id_map
+    from tcip_mcp.pipelines.data.datasets import build_dataset
+    from tcip_mcp.pipelines.data.label_queries import assemble_coco, resolve_registry_id_map
 
     images, labels = tmp_path / "images", tmp_path / "annotations"
     stems = [f"img{i}" for i in range(4)]
@@ -198,7 +199,7 @@ def test_class_distribution_on_a_shared_coco_scopes_to_its_own_stems(tmp_path):
     for i, stem in enumerate(stems):
         json_io.write_annotations(labels / f"{stem}.json", [_box(10, 10, 30, 30)] * (i + 1), 100, 100)
 
-    _reg, id_map = _resolve_registry_id_map(labels, CATKIN, None)
+    _reg, id_map = resolve_registry_id_map(labels, CATKIN, None)
     shared_coco = assemble_coco(labels, images, subject=CATKIN, date=None, id_map=id_map)  # over all 4 stems
 
     train_ds = build_dataset("detection", images_dir=str(images), labels_dir=str(labels),
@@ -369,7 +370,8 @@ def _assert_one_mask_over_both_lobes(target) -> None:
 def test_instance_seg_rasterizes_a_two_ring_instance_into_one_mask(tmp_path, via):
     """An occlusion-split instance (a catkin behind a branch) is one object with two regions. Both
     label paths must rasterize every ring into that instance's single mask."""
-    from tcip_mcp.pipelines.data.datasets import InstanceSegDataset, assemble_coco
+    from tcip_mcp.pipelines.data.datasets import InstanceSegDataset
+    from tcip_mcp.pipelines.data.label_queries import assemble_coco
 
     images, labels = tmp_path / "images", tmp_path / "annotations"
     labels.mkdir(parents=True)
@@ -407,7 +409,7 @@ def test_instance_seg_two_single_ring_instances_stay_two_masks(tmp_path):
 def test_assemble_coco_keeps_both_rings_of_an_instance(tmp_path):
     """Training assembly carries the whole instance into COCO: one annotation, two segmentation
     rings, and a box over their union."""
-    from tcip_mcp.pipelines.data.datasets import assemble_coco
+    from tcip_mcp.pipelines.data.label_queries import assemble_coco
 
     images, labels = tmp_path / "images", tmp_path / "annotations"
     labels.mkdir(parents=True)
@@ -456,7 +458,8 @@ def test_only_annotated_and_confirmed_negatives_train(tmp_path, label_format):
     Enumerating samples from images_dir served unannotated images as zero-box samples, so a
     project where the breeder labelled 30 of 400 trained on 370 images asserted to be empty.
     """
-    from tcip_mcp.pipelines.data.datasets import assemble_coco, build_dataset
+    from tcip_mcp.pipelines.data.datasets import build_dataset
+    from tcip_mcp.pipelines.data.label_queries import assemble_coco
 
     images, labels = _rail_fixture(tmp_path)
     kwargs = {"images_dir": str(images), "labels_dir": str(labels), "subject": CATKIN}
@@ -565,7 +568,8 @@ def test_confirmed_negative_survives_an_uppercase_extension(tmp_path, ext):
     """
     from PIL import Image as _Image
 
-    from tcip_mcp.pipelines.data.datasets import assemble_coco, build_dataset
+    from tcip_mcp.pipelines.data.datasets import build_dataset
+    from tcip_mcp.pipelines.data.label_queries import assemble_coco
 
     images = tmp_path / "images"
     labels = tmp_path / "annotations"
@@ -639,7 +643,8 @@ def test_external_coco_zero_annotation_image_still_needs_a_human_complete(tmp_pa
 def test_a_confirmation_does_not_leak_across_subjects(tmp_path):
     """A Complete is a statement about one trait. Re-applying it elsewhere trains an image full of
     bushes as containing no bushes."""
-    from tcip_mcp.pipelines.data.datasets import build_dataset, confirmed_negative_names
+    from tcip_mcp.pipelines.data.datasets import build_dataset
+    from tcip_mcp.pipelines.data.label_queries import confirmed_negative_names
 
     images = tmp_path / "images"
     labels = tmp_path / "annotations"
@@ -669,7 +674,7 @@ def test_unresolvable_subject_refuses_rather_than_dropping_negatives(tmp_path):
     subject from its path; the confirmations live dataset-native, a sibling of ``labels/``'s own
     resolved root, not found by walking arbitrarily far up an ancestor chain.
     """
-    from tcip_mcp.pipelines.data.datasets import confirmed_negative_names
+    from tcip_mcp.pipelines.data.label_queries import confirmed_negative_names
 
     labels = tmp_path / "labels"
     labels.mkdir(parents=True)
@@ -687,7 +692,7 @@ def test_a_derived_tree_without_negatives_does_not_refuse(tmp_path):
     own documented split -> train path; with no confirmed negatives in the project there is nothing
     to drop, so it must proceed.
     """
-    from tcip_mcp.pipelines.data.datasets import confirmed_negative_names
+    from tcip_mcp.pipelines.data.label_queries import confirmed_negative_names
 
     labels = tmp_path / "labels"
     labels.mkdir(parents=True)
@@ -700,7 +705,7 @@ def test_a_derived_tree_without_negatives_does_not_refuse(tmp_path):
 def test_split_tree_carries_its_confirmed_negatives(tmp_path):
     """make_splits(materialize=True) emits {train,val,test}/labels, which cannot name its subject,
     so it must carry the confirmations rather than inherit them by accident."""
-    from tcip_mcp.pipelines.data.datasets import confirmed_negative_names
+    from tcip_mcp.pipelines.data.label_queries import confirmed_negative_names
     from tcip_mcp.tools.data_tools import make_splits
 
     images = tmp_path / "images"
@@ -785,7 +790,7 @@ def test_quarantined_negative_reads_the_same_reason_on_both_label_paths(tmp_path
     same real reason, two different label paths must not disagree on which it was."""
     from tcip_mcp import class_registry
     from tcip_mcp.class_registry import write_registry
-    from tcip_mcp.pipelines.data.datasets import assemble_coco, trainable_stems
+    from tcip_mcp.pipelines.data.label_queries import assemble_coco, trainable_stems
 
     images = tmp_path / "images"
     labels = tmp_path / "annotations"
@@ -820,7 +825,7 @@ def test_json_det_targets_skips_unlabeled_instead_of_raising(tmp_path):
     """The loader's own per-image target reader must accept the same partially-attributed data
     to_coco_dataset does: an unlabeled instance is excluded, not a hard abort, while an
     undecodable value still raises."""
-    from tcip_mcp.pipelines.data.datasets import _json_det_targets
+    from tcip_mcp.pipelines.data.label_queries import json_det_targets
 
     path = tmp_path / "IMG_A.json"
     json_io.write_annotations(path, [
@@ -830,7 +835,7 @@ def test_json_det_targets_skips_unlabeled_instead_of_raising(tmp_path):
     ], 100, 100)
 
     id_map = {"elongated": 0, "dormant": 1}
-    boxes, labels, n_unlabeled = _json_det_targets(str(path), "catkin", "elongation", id_map)
+    boxes, labels, n_unlabeled = json_det_targets(str(path), "catkin", "elongation", id_map)
     assert len(boxes) == 1 and labels == [2]  # 0-indexed 1 ("dormant") + 1 for background
     assert n_unlabeled == 1  # the second instance, disclosed rather than silently dropped
 
@@ -840,7 +845,7 @@ def test_json_det_targets_skips_unlabeled_instead_of_raising(tmp_path):
                   attributes={"elongation": "not-a-real-value"}),
     ], 100, 100)
     with pytest.raises(ValueError):
-        _json_det_targets(str(undecodable), "catkin", "elongation", id_map)
+        json_det_targets(str(undecodable), "catkin", "elongation", id_map)
 
 
 def test_detection_dataset_excludes_partially_labeled_stem_from_training(tmp_path):

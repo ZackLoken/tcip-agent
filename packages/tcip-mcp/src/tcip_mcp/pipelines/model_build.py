@@ -146,9 +146,9 @@ def resolve_contract_dims(config: dict, task: str) -> dict:
     # whose read fails for a real reason (corrupted classes.json, an attribute needing a registry
     # that isn't there) must not be silently swallowed into the same fallback.
     if task in ("detection", "instance_seg") and data.get("subject"):
-        from tcip_mcp.pipelines.data.datasets import _resolve_registry_id_map
+        from tcip_mcp.pipelines.data.label_queries import resolve_registry_id_map
 
-        _reg, id_map = _resolve_registry_id_map(
+        _reg, id_map = resolve_registry_id_map(
             data.get("labels_dir", ""), data.get("subject"), data.get("attribute"))
         num_classes = len(id_map)
 

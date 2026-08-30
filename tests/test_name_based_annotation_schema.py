@@ -35,7 +35,7 @@ def _write_registry(root: Path, *subjects: Subject) -> ClassRegistry:
 
 # (a) a registry decodes its own labels after the flip.
 def test_registry_decodes_its_own_labels(tmp_path):
-    from tcip_mcp.pipelines.data.datasets import assemble_coco
+    from tcip_mcp.pipelines.data.label_queries import assemble_coco
 
     registry = _write_registry(tmp_path, Subject(name="catkin"))
     images_dir = tmp_path / "images"
@@ -59,7 +59,7 @@ def test_registry_decodes_its_own_labels(tmp_path):
 
 # (b) a geometry-less annotation round-trips and its image is not collapsed to empty/negative.
 def test_geometryless_annotation_roundtrips_and_marks_image_annotated(tmp_path):
-    from tcip_mcp.pipelines.data.datasets import assemble_coco
+    from tcip_mcp.pipelines.data.label_queries import assemble_coco
 
     registry = _write_registry(tmp_path, Subject(name="catkin"))
     images_dir = tmp_path / "images"
@@ -83,7 +83,8 @@ def test_geometryless_annotation_roundtrips_and_marks_image_annotated(tmp_path):
 
 # (c) loader.num_classes == class_registry.num_classes == len(assemble_coco categories), one map.
 def test_num_classes_agree_on_one_assign_class_ids_map(tmp_path):
-    from tcip_mcp.pipelines.data.datasets import assemble_coco, build_dataset
+    from tcip_mcp.pipelines.data.datasets import build_dataset
+    from tcip_mcp.pipelines.data.label_queries import assemble_coco
 
     registry = _write_registry(tmp_path, Subject(name="catkin"))
     images_dir = tmp_path / "images"
@@ -107,7 +108,7 @@ def test_num_classes_agree_on_one_assign_class_ids_map(tmp_path):
 
 # (d) confirmed_negative_names recovers negatives and refuses (not silent-empty) with no subject.
 def test_confirmed_negatives_thread_subject_and_refuse_when_unthreaded(tmp_path):
-    from tcip_mcp.pipelines.data.datasets import confirmed_negative_names
+    from tcip_mcp.pipelines.data.label_queries import confirmed_negative_names
 
     labels_dir = tmp_path / "annotations" / "2-11-26"
     labels_dir.mkdir(parents=True)
@@ -299,7 +300,7 @@ def test_save_annotations_accepts_rings(tmp_path):
 # (h) the direct-json and COCO loader paths agree: a geometry-less-only image is a target on neither,
 # so it is never trained as a fabricated zero-object negative (the two-paths-disagree measurement bug).
 def test_geometryless_only_image_is_not_a_trainable_stem_on_either_path(tmp_path):
-    from tcip_mcp.pipelines.data.datasets import assemble_coco, trainable_stems
+    from tcip_mcp.pipelines.data.label_queries import assemble_coco, trainable_stems
 
     registry = _write_registry(tmp_path, Subject(name="catkin"))
     images_dir = tmp_path / "images"

@@ -188,7 +188,7 @@ def test_the_gui_route_records_the_person_whose_confirmation_it_is(
     The identity convention marks a person as ``user:<name>``, so a breeder's own confirmation is
     distinguishable from one a harvest transcribed without consulting a second store.
     """
-    from tcip_mcp.pipelines.data.datasets import confirmed_negative_names
+    from tcip_mcp.pipelines.data.label_queries import confirmed_negative_names
 
     body = {"project_root": str(tmp_path), "dataset_root": str(tmp_path),
             "image_name": "IMG_0009.JPG", "status": "negative", "subject": "catkin",

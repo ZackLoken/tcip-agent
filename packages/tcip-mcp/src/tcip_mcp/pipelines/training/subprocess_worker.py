@@ -145,9 +145,9 @@ def _resolve_run_id_map(task: str, data_cfg: dict) -> tuple[str, str | None, dic
     can be authored in any order, and a bespoke builder owns its class space entirely, so
     re-deriving here could stamp a map that is the wrong id space for what the run actually
     trained on, exactly the class of error class-aware admission exists to prevent; ``build_dataset``
-    itself only calls ``_resolve_registry_id_map`` on the same predicate, datasets.py's own
+    itself only calls ``resolve_registry_id_map`` on the same predicate, datasets.py's own
     ``has_coco``/``dataset_source`` branch), or the one legitimate degraded case
-    ``_resolve_registry_id_map`` itself names (an attribute scope with no ``classes.json`` for this
+    ``resolve_registry_id_map`` itself names (an attribute scope with no ``classes.json`` for this
     labels dir), honest: no map recorded, decode falls through to its own live-registry
     re-derivation.
     """
@@ -158,12 +158,12 @@ def _resolve_run_id_map(task: str, data_cfg: dict) -> tuple[str, str | None, dic
     if data_cfg.get(DATASET_SOURCE_KEY) or data_cfg.get("coco_json") \
             or (data_cfg.get("label_format") or "").lower() == "coco":
         return None
-    from tcip_mcp.pipelines.data.datasets import _resolve_registry_id_map
+    from tcip_mcp.pipelines.data.label_queries import resolve_registry_id_map
 
     subject = data_cfg["subject"]
     attribute = data_cfg.get("attribute")
     try:
-        _reg, id_map = _resolve_registry_id_map(data_cfg.get("labels_dir", ""), subject, attribute)
+        _reg, id_map = resolve_registry_id_map(data_cfg.get("labels_dir", ""), subject, attribute)
     except ValueError:
         return None
     return (subject, attribute, id_map) if id_map else None

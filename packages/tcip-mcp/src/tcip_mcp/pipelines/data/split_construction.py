@@ -347,7 +347,7 @@ def checked_label_format(task: str, data_cfg: dict, src: dict) -> str | None:
     labels_dir, images_dir = src.get("labels_dir", ""), src.get("images_dir", "")
     if not (labels_dir and images_dir):
         return None
-    from tcip_mcp.pipelines.data.datasets import dir_label_format, first_labels_json
+    from tcip_mcp.pipelines.data.label_queries import dir_label_format, first_labels_json
 
     fmt = dir_label_format(labels_dir)
     if fmt == "coco":
@@ -386,10 +386,10 @@ def build_full_admitted_dataset(
     labels_dir, images_dir = src.get("labels_dir", ""), src.get("images_dir", "")
 
     if detected_label_format == "json":
-        from tcip_mcp.pipelines.data.datasets import _resolve_registry_id_map, assemble_coco
+        from tcip_mcp.pipelines.data.label_queries import assemble_coco, resolve_registry_id_map
         subject, attribute = src.get("subject"), src.get("attribute")
-        _reg, id_map = _resolve_registry_id_map(labels_dir, subject, attribute)
-        assert subject is not None, "_resolve_registry_id_map already refused an empty subject"
+        _reg, id_map = resolve_registry_id_map(labels_dir, subject, attribute)
+        assert subject is not None, "resolve_registry_id_map already refused an empty subject"
         build_src["coco_data"] = assemble_coco(
             labels_dir, images_dir, subject=subject, attribute=attribute, id_map=id_map,
             date=src.get("date"))

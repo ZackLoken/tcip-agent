@@ -125,7 +125,7 @@ def test_the_carried_confirmation_still_names_who_made_it(tmp_path: Path):
 def test_carried_confirmation_round_trips_through_the_confirmed_negative_reader(tmp_path: Path):
     """The reader every training path uses recovers the confirmation from the split tree, so the
     image trains as a hard negative instead of an unconfirmed empty."""
-    from tcip_mcp.pipelines.data.datasets import confirmed_negative_names
+    from tcip_mcp.pipelines.data.label_queries import confirmed_negative_names
 
     out, _ = _materialize(tmp_path, subject=SUBJECT)
     holder = _split_holding(out, f"{NEGATIVE_STEM}.jpg")

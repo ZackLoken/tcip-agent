@@ -475,8 +475,8 @@ def make_splits(
 
     Writing a manifest (``output_path`` given, or ``materialize=True``) draws its members
     through the platform's own admission for the tasks a manifest can bind to
-    (``tcip_mcp.pipelines.data.datasets.trainable_stems``, the same function a training run's own
-    draw uses): for each capture date the dataset holds, every image carrying an annotation of
+    (``tcip_mcp.pipelines.data.label_queries.trainable_stems``, the same function a training run's
+    own draw uses): for each capture date the dataset holds, every image carrying an annotation of
     ``subject`` (with every instance assessed for ``attribute``, when one is given) or a human's
     negative confirmation for it. ``subject`` is therefore required to write a manifest; a call
     with neither ``output_path`` nor ``materialize`` answers over every image in the tree instead,
@@ -655,7 +655,7 @@ def make_splits(
                          "or materialize=True): pass the object class the run will admit under, "
                          "or drop both output_path and materialize for a stats-only call."}
 
-    from tcip_mcp.pipelines.data.datasets import _resolve_registry_id_map, trainable_stems
+    from tcip_mcp.pipelines.data.label_queries import resolve_registry_id_map, trainable_stems
     from tcip_mcp.pipelines.image_utils import AmbiguousImageStem, BandGroupIncomplete
     from tcip_mcp.pipelines.resolution import dataset_hash_and_label_digests
 
@@ -681,7 +681,7 @@ def make_splits(
                          "both sides of the split. Give each date its own images/<date>/ "
                          "bucket, or merge the colliding label entries into one."}
     try:
-        _, id_map = _resolve_registry_id_map(date_dirs[0][1], subject, attribute)
+        _, id_map = resolve_registry_id_map(date_dirs[0][1], subject, attribute)
     except tcip_store.SchemaVersionRefused as exc:
         return {"error": f"cannot resolve the class registry for the split: {exc}"}
     except ValueError as exc:
@@ -934,7 +934,7 @@ def _compute_negative_carry(label_map: dict, parts: dict, image_map: dict,
         RegistryError, attribute_schema_digest, read_registry,
     )
     from tcip_mcp.dataset_layout import classes_path, dataset_root_of
-    from tcip_mcp.pipelines.data.datasets import confirmed_negative_records
+    from tcip_mcp.pipelines.data.label_queries import confirmed_negative_records
     from tcip_mcp.pipelines.image_utils import logical_image_name
 
     src_dirs = {Path(p).parent for p in label_map.values()}

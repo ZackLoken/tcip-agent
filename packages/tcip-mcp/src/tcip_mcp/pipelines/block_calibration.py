@@ -273,7 +273,7 @@ def resolve_block_calibration_records(
             "file lives under."
         )
 
-    from tcip_mcp.pipelines.data.datasets import _json_det_targets
+    from tcip_mcp.pipelines.data.label_queries import json_det_targets
     from tcip_mcp.pipelines.image_utils import resolve_image_source
     from tcip_mcp.tools.inference_tools import resolve_decode_id_map
 
@@ -286,7 +286,7 @@ def resolve_block_calibration_records(
         )
 
     gt_path = str(Path(labels_dir) / f"{stem}.json")
-    gt_boxes, gt_labels, n_unlabeled = _json_det_targets(gt_path, subject, attribute, id_map)
+    gt_boxes, gt_labels, n_unlabeled = json_det_targets(gt_path, subject, attribute, id_map)
     if n_unlabeled:
         raise BlockCalibrationRefused(
             f"block calibration refused: {n_unlabeled} instance(s) in {stem!r} are unlabeled for "

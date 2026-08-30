@@ -161,25 +161,13 @@ def resolve_decode_id_map(predictor, images_dir: str | None, *,
     if not (subject and images_dir):
         return None
 
-    from tcip_mcp.pipelines.data.datasets import _resolve_registry_id_map, resolved_classes_path
+    from tcip_mcp.pipelines.data.label_queries import resolve_registry_id_map, resolved_classes_path
 
-    # Precondition check, not a broad except: attribute-scoped decode with no classes.json for
-    # this dataset is a legitimate, honest degraded case write_predictions_json already documents
-    # and accepts ("the raw 0-indexed id is used as the name... never a re-derivation"), id_map
-    # stays None rather than crashing on already-completed, valid prediction work. Reuses
-    # resolved_classes_path, the same "does a registry exist" check _resolve_registry_id_map's
-    # own refusal is built on, not a second independent re-derivation of that fact. A registry
-    # that is present but fails to read/resolve for a real reason (corrupted file, an id-space
-    # mismatch) still propagates loudly, this precondition only short-circuits the one case
-    # that's supposed to degrade honestly, the same case _resolve_registry_id_map's own
-    # attribute-without-registry ValueError names. Not the same shape as model_build.py's
-    # resolve_contract_dims precondition (that one gates on subject alone and lets the
-    # attribute-without-registry refusal reach the caller); this site's downstream consumer has
-    # its own documented accepted-degradation contract that resolve_contract_dims's caller does
-    # not.
+    # Precondition check, not a broad except: attribute-scoped decode with no classes.json for this dataset is a legitimate, honest degraded case write_predictions_json already documents and accepts ("the raw 0-indexed id is used as the name... never a re-derivation"), id_map stays None rather than crashing on already-completed, valid prediction work. Reuses resolved_classes_path, the same "does a registry exist" check resolve_registry_id_map's own refusal is built on, not a second independent re-derivation of that fact.
+    # A registry that is present but fails to read/resolve for a real reason (corrupted file, an id-space mismatch) still propagates loudly, this precondition only short-circuits the one case that's supposed to degrade honestly, the same case resolve_registry_id_map's own attribute-without-registry ValueError names. Not the same shape as model_build.py's resolve_contract_dims precondition (that one gates on subject alone and lets the attribute-without-registry refusal reach the caller); this site's downstream consumer has its own documented accepted-degradation contract that resolve_contract_dims's caller does not.
     if attribute is not None and resolved_classes_path(images_dir) is None:
         return None
-    _reg, id_map = _resolve_registry_id_map(images_dir, subject, attribute)
+    _reg, id_map = resolve_registry_id_map(images_dir, subject, attribute)
     return id_map
 
 
@@ -261,7 +249,7 @@ def _calibrate_operating_point(predictor, trait, labels_dir, images_dir, *,
     ``excluded_unassigned_stems``).
     """
     from tcip_annotation.json_io import require_reference_ground_truth
-    from tcip_mcp.pipelines.data.datasets import _json_det_targets, _resolve_registry_id_map
+    from tcip_mcp.pipelines.data.label_queries import json_det_targets, resolve_registry_id_map
     from tcip_mcp.pipelines.data.splits import (
         cal_holdout_scope_root, count_label_lines, label_image_stems, manifest_date_key,
         resolve_locked_cal_holdout_split, same_directory,
@@ -297,19 +285,13 @@ def _calibrate_operating_point(predictor, trait, labels_dir, images_dir, *,
             "under a different manifest would check its selection disjointness against a side "
             "the checkpoint was never trained or chosen with."
         )
-    # Prefers the training run's own recorded map over a fresh registry read, the same preference
-    # resolve_decode_id_map applies to decode: the model can only speak the vocabulary it was
-    # trained on, so a classes.json whose declared attribute-value order was edited since training
-    # must not silently relabel the calibration GT. No try/except on the registry fallback:
-    # _resolve_registry_id_map's only exception is its own deliberate ValueError refusal, which must
-    # reach the caller on the calibration rail rather than silently degrade to a single-class GT
-    # read. Its one legitimate "no registry, that's fine" case (single-class, no attribute) already
-    # returns normally without raising.
+    # Prefers the training run's own recorded map over a fresh registry read, the same preference resolve_decode_id_map applies to decode: the model can only speak the vocabulary it was trained on, so a classes.json whose declared attribute-value order was edited since training must not silently relabel the calibration GT.
+    # No try/except on the registry fallback: resolve_registry_id_map's only exception is its own deliberate ValueError refusal, which must reach the caller on the calibration rail rather than silently degrade to a single-class GT read. Its one legitimate "no registry, that's fine" case (single-class, no attribute) already returns normally without raising.
     _cal_id_map = None
     if _subject:
         _cal_id_map = _recorded_training_id_map(predictor)
         if _cal_id_map is None:
-            _reg, _cal_id_map = _resolve_registry_id_map(labels_dir, _subject, _attribute)
+            _reg, _cal_id_map = resolve_registry_id_map(labels_dir, _subject, _attribute)
     # Labels-intersect-images-on-disk: the shared scan force_redraw_cal_holdout_split
     # now also uses, so the two paths can't disagree about which stems exist. A stem whose image was
     # deleted/renamed never even enters the split universe here.
@@ -386,7 +368,7 @@ def _calibrate_operating_point(predictor, trait, labels_dir, images_dir, *,
             # id map); with no run subject in scope, fall back to a single-class read of every box.
             gt_path = str(labels_p / f"{s}.json")
             if _subject and _cal_id_map is not None:
-                gboxes, glabels, n_unlabeled = _json_det_targets(gt_path, _subject, _attribute, _cal_id_map)
+                gboxes, glabels, n_unlabeled = json_det_targets(gt_path, _subject, _attribute, _cal_id_map)
                 # An image with any instance unlabeled for `attribute` has
                 # incomplete GT for this scope, excluded from the calibration/holdout record set
                 # entirely (whole-image, the missing-label-file precedent), never scored against

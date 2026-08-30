@@ -15,7 +15,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from tcip_annotation.json_io import write_annotations
-from tcip_mcp.pipelines.data.datasets import confirmed_negative_names
+from tcip_mcp.pipelines.data.label_queries import confirmed_negative_names
 from tcip_web.app import app
 
 CATKIN_TWO_STATES = {"elongation": {"type": "categorical", "values": ["dormant", "elongated"]}}
