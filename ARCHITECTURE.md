@@ -1074,7 +1074,7 @@ Names not re-exported in `__all__` but importable directly from their defining s
 ## 4. Entry points
 
 `python -m tcip_mcp`: `packages/tcip-mcp/src/tcip_mcp/__main__.py:1-5` imports `main`
-from `tcip_mcp.server` and calls it: `packages/tcip-mcp/src/tcip_mcp/server.py:65`
+from `tcip_mcp.server` and calls it: `packages/tcip-mcp/src/tcip_mcp/server.py:67`
 (`def main()`). `server.py:9` defines `mcp = MCPServer("tcip-pipeline")`, the object every
 `@mcp.tool()` decorator in `packages/tcip-mcp/src/tcip_mcp/tools/*.py` registers against
 (`python scripts/list_tools.py` lists them; the count is never written down, since it drifts).
@@ -1193,7 +1193,7 @@ Path: `<dataset_root>/classes.json`.
 Writer: `tcip_mcp.class_registry.replace_registry`,
 `packages/tcip-mcp/src/tcip_mcp/class_registry.py:346`, the one write both registry doors call
 (the GUI's `save_classes` and the tool's `write_class_map`,
-`packages/tcip-mcp/src/tcip_mcp/tools/annotation_tools.py:1043`).
+`packages/tcip-mcp/src/tcip_mcp/tools/annotation_tools.py:469`).
 
 Readers: `tcip_mcp.class_registry.read_registry`, `class_registry.py:213`;
 `tcip_mcp.dataset_layout.list_subjects` (delegates to `class_registry`),
@@ -1278,7 +1278,7 @@ Writers: `_stamp_digest`, `packages/tcip-web/src/tcip_web/routes/classes.py:265`
 `packages/tcip-mcp/src/tcip_mcp/class_registry.py:284`, called through `replace_registry`
 (`packages/tcip-mcp/src/tcip_mcp/class_registry.py:346`) by both registry writers,
 `save_classes` (`packages/tcip-web/src/tcip_web/routes/classes.py:161`) and `write_class_map`
-(`packages/tcip-mcp/src/tcip_mcp/tools/annotation_tools.py:1043`), before the new registry lands.
+(`packages/tcip-mcp/src/tcip_mcp/tools/annotation_tools.py:469`), before the new registry lands.
 A status and its stamp are two transactions, status first, so unstamped confirmations
 legitimately exist; the outgoing registry is the last moment their digest is recoverable, so the
 sweep records it there and they read as predating the change instead of as made under the new
@@ -1967,7 +1967,7 @@ Phase 3 verdict: single.
 
 Must agree: browser payload, backend file writer, and MCP reader agree on the two-file split and the (image_path, tab) identity check.
 Side A: `packages/tcip-mcp/src/tcip_mcp/web_client.py:142` (`def canvas_meta_key(`, the meta document's one address, with `canvas_geometry_key`, line 144, addressing the geometry document; the two stores are declared as `CANVAS_META_STORE` and `CANVAS_GEOMETRY_STORE`, lines 111 and 112; `packages/tcip-web/src/tcip_web/routes/canvas.py:85` writes meta through the key, geometry first at line 78).
-Side B: `packages/tcip-mcp/src/tcip_mcp/tools/vision_tools.py:1207` (`meta_doc = canvas_meta_key(root)`, the MCP read through the same keys) and `packages/tcip-mcp/src/tcip_mcp/tools/vision_tools.py:1208` (`shapes_doc = canvas_geometry_key(root)`, the geometry read one line after).
+Side B: `packages/tcip-mcp/src/tcip_mcp/tools/vision_tools.py:730` (`meta_doc = canvas_meta_key(root)`, the MCP read through the same keys) and `packages/tcip-mcp/src/tcip_mcp/tools/vision_tools.py:731` (`shapes_doc = canvas_geometry_key(root)`, the geometry read one line after).
 Phase 3 verdict: single.
 
 ## S12. Friction reports and retrospectives under .tcip/
@@ -2029,7 +2029,7 @@ Phase 3 verdict: single.
 
 Must agree: every reader refuses rather than guesses when a file's format is undetermined.
 Side A: `packages/tcip-annotation/src/tcip_annotation/format_io.py:68` (`def detect_format(path: str) -> AnnotFormat:`).
-Side B: `packages/tcip-mcp/src/tcip_mcp/tools/annotation_tools.py:114` (`file_fmt = fmt or detect_format(str(gt_path))`).
+Side B: `packages/tcip-mcp/src/tcip_mcp/tools/annotation_tools.py:104` (`file_fmt = fmt or detect_format(str(gt_path))`).
 Phase 3 verdict: single.
 
 ## S20. classes.json class registry
@@ -2346,7 +2346,7 @@ Phase 3 verdict: duplicated.
 ## S64. MCP tool registry against documented tool names  <!-- queued: P5-303 unify -->
 
 Must agree: any document naming a tool names one the server actually registers.
-Side A: `packages/tcip-mcp/src/tcip_mcp/server.py:37` (`def list_registered_tools() -> list[str]:`).
+Side A: `packages/tcip-mcp/src/tcip_mcp/server.py:39` (`def list_registered_tools() -> list[str]:`).
 Side B: `scripts/list_tools.py:15` (`from tcip_mcp.server import list_registered_tools`).
 Phase 3 verdict: duplicated.
 
