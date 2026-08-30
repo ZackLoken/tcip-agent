@@ -308,11 +308,15 @@ def visualize(
     .tcip/artifacts/viz/ and returns ``image_path`` for the agent's own image-capable read tool.
 
     Rendering conventions, shared across every source: boxes/masks color by class through the
-    20-class palette in ``tcip_annotation.viz`` (consistent with the GUI annotation canvas); a
-    'comparison' render outlines GT green and predictions red, with yellow center-to-center
-    lines joining matched pairs; a label carries the class name and, where the shape carries a
-    confidence score, the score. Every render is resized to at most
-    ``display_bounds.VIZ_ARTIFACT_MAX_EDGE`` (1024px) on its longest edge before saving.
+    20-class palette in ``tcip_annotation.viz``, indexed by first-seen order within one render
+    call; this is not the GUI annotation canvas's own coloring (a per-subject-name hash into its
+    own smaller palette) and is not stable across renders. A 'comparison' render outlines GT
+    green and predictions red, with yellow center-to-center lines joining matched pairs. A
+    detection label carries the class name and, when the box carries a confidence score, the
+    score; a segmentation label carries the class name only. Each source image is read at up to
+    ``display_bounds.VIZ_ARTIFACT_MAX_EDGE`` (1024px) on its longest edge before rendering; for
+    source='dataset' the per-sample renders built this way are then tiled into a grid that saves
+    at ``cols`` x 256 by ``rows`` x 256 pixels, growing with ``n``.
 
     Args:
         source: What to render:
@@ -773,7 +777,7 @@ def propose_annotations(
     Each candidate renders as a colored, semi-transparent filled polygon (every ring of an
     occlusion-split candidate drawn, not just the largest) with a large numbered label at its
     centroid, colors cycling through the shared class palette; the candidate id in that number is
-    the same id ``assignments`` names below.
+    the same id ``accept_proposals``' ``assignments`` parameter names.
 
     On an image under a dataset's ``images/`` tree, the candidates are staged keyed by the
     dataset, capture date and stem, alongside the content identity of the pixels the engine ran
@@ -1099,13 +1103,17 @@ def capture_live_canvas(
 ) -> dict:
     """Render exactly what the human's GUI canvas shows right now: image, shapes, viewport.
 
-    The GUI continuously pushes its canvas state to ``.tcip/state/canvas_live.json`` as a hybrid
-    stream: a tiny heartbeat on pan/zoom (image and viewport only), and the full display-resolved
-    geometry (image, viewport, classes, and the shapes with the exact colors/tags the canvas
-    renders, including unsaved edits and an in-progress drawing) whenever the shapes themselves
-    change. This tool reads the region being shown at up to ``max_edge``, renders that state over
-    it, and returns the artifact path for the agent's own image-capable read tool, plus the
-    classes schema, review legend, per-tag/per-creator counts, and the state's age.
+    The GUI continuously pushes its canvas state under ``.tcip/state/``, split into two documents
+    so the cadences never contend: ``canvas_live.json``, a meta document written on every push
+    (image, viewport, classes, legend, counts, tab, mode, active_subject, dirty and user), and
+    ``canvas_shapes.json``, the full display-resolved geometry (the shapes with the exact
+    colors/tags the canvas renders, including unsaved edits and an in-progress drawing), written
+    only when the shapes themselves change. A heartbeat (meta only, no geometry write) fires on
+    view and meta changes, and as the downgrade while a pointer interaction is live, with the
+    full geometry pushed once on release rather than per tick. This tool reads the region being
+    shown at up to ``max_edge``, renders that state over it, and returns the artifact path for
+    the agent's own image-capable read tool, plus the classes schema, review legend,
+    per-tag/per-creator counts, and the state's age.
 
     Args:
         refresh: Ping the GUI (via the panel-event hub) to push fresh state first, waiting
@@ -1234,9 +1242,10 @@ def overlay_reference_grid(
     native pixels named spreadsheet-style ('A1' top-left; letter columns A-Z then AA,
     AB, ..., 1-based number rows). Rendered in yellow on the cells' true boundaries; a cell
     against the image edge clips to the frame rather than drawing past it. A cell's name draws
-    only when the rendered cell is large enough to hold the label legibly, so labels decimate
-    toward the edges of a fine grid rather than overlapping. When ``tile_size`` is omitted it
-    derives from the image dims and the artifact bound
+    only when the rendered cell's short edge clears the label's legibility floor and the label's
+    own width fits inside the cell; either check failing skips the name and leaves the boundary
+    alone, a property of that cell's own size rather than a rule biased toward grid edges. When
+    ``tile_size`` is omitted it derives from the image dims and the artifact bound
     (``reference_grid.derive_pointing_tile_size``) so the rendered labels stay legible. Every
     response echoes the full grid geometry
     (``tile_size``, ``overlap``, ``cols``, ``rows``, ``width``, ``height``): pass the

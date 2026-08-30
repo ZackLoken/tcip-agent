@@ -25,7 +25,8 @@ from tcip_annotation.utils import auto_orient_image
 if TYPE_CHECKING:
     import numpy as np
 
-# 20-class color palette (RGB), consistent with the GUI annotation canvas
+# 20-class color palette (RGB), indexed by class id modulo its length; the same palette across
+# every renderer in this module, not the GUI annotation canvas's own colors
 COLOR_PALETTE: list[tuple[int, int, int]] = [
     (255, 0, 0),       # red
     (0, 255, 0),       # green
