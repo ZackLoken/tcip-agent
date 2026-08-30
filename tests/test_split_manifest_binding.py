@@ -603,17 +603,17 @@ def test_auto_train_val_reads_the_label_format_once_per_run(tmp_path: Path, monk
     """Neither the manifest branch nor the auto path reads ``data.labels_dir``'s format more than
     once: the caller reads it ahead of its own handler, and the admission build it feeds into
     never re-reads it."""
-    import tcip_mcp.tools.training_tools as ttools
+    import tcip_mcp.pipelines.data.split_construction as sc
     from tcip_mcp.pipelines.data.split_construction import auto_train_val
 
     calls: list[None] = []
-    real = ttools._checked_label_format
+    real = sc.checked_label_format
 
     def counting(task, data_cfg, src):
         calls.append(None)
         return real(task, data_cfg, src)
 
-    monkeypatch.setattr(ttools, "_checked_label_format", counting)
+    monkeypatch.setattr(sc, "checked_label_format", counting)
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"

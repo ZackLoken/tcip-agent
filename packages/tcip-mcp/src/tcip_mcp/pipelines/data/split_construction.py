@@ -153,6 +153,30 @@ def persist_split_manifest(experiment_id: str, train_ds, val_ds, data_cfg: dict,
         logger.warning("split manifest persist failed for %s: %s", experiment_id, exc)
 
 
+def spatial_split_raster_identity(data_cfg: dict, stem: str) -> dict | None:
+    """This mosaic's own :func:`~tcip_mcp.pipelines.raster_source.raster_content_identity`, best
+    effort: recorded into ``spatial_manifest`` at spatial-split time (the training source is first
+    known to be a raster here), read back at export time (``inference_tools.
+    _export_predictions_raster``) to gate a block-calibrated bundle's claim scope to this exact
+    mosaic. A provenance write must never sink a launch: an unreadable/unsupported source (a
+    bespoke ``dataset_source``, a corrupt file) logs and returns ``None`` rather than raising, the
+    same posture ``persist_split_manifest`` already takes for its own best-effort writes.
+    """
+    try:
+        from tcip_mcp.pipelines.derivations import probe_channels
+        from tcip_mcp.pipelines.image_utils import resolve_image_source
+        from tcip_mcp.pipelines.raster_source import content_identity
+
+        source = resolve_image_source(data_cfg.get("images_dir", ""), stem)
+        nc = probe_channels(source)
+        identity = content_identity(source, nc)
+        import dataclasses
+        return dataclasses.asdict(identity)
+    except Exception as exc:  # noqa: BLE001, best-effort provenance, never sinks the split/launch
+        logger.warning("raster content identity for %r could not be recorded: %s", stem, exc)
+        return None
+
+
 def spatial_single_source_split(
     stem: str, data_cfg: dict, tiling: dict, base, split_cfg: dict, transforms,
 ) -> tuple | None:
@@ -275,10 +299,6 @@ def spatial_single_source_split(
         raw = {spatial.identity_for(s, tx, ty) for s, tx, ty in ds.tile_entries}
         return sorted(name for name in raw if name is not None)
 
-    # Kept in training_tools.py: shared with nothing else here, imported back to avoid a
-    # load-time cycle.
-    from tcip_mcp.tools.training_tools import _spatial_split_raster_identity
-
     split_cfg["resolved_group_by"] = "spatial_strip"
     split_cfg["spatial_manifest"] = {
         "stem": stem,
@@ -299,7 +319,7 @@ def spatial_single_source_split(
         "kept_val_tiles": spatial.kept_tiles.get("val", 0),
         "tiles_dropped_past_extent": spatial.tiles_dropped_past_extent,
         "tiles_dropped_outside_regions": spatial.tiles_dropped_outside_regions,
-        "raster_content_identity": _spatial_split_raster_identity(data_cfg, stem),
+        "raster_content_identity": spatial_split_raster_identity(data_cfg, stem),
     }
     logger.info(
         "Spatial train/val split for %r: %d train / %d val tiles (axis=%s, "
@@ -308,6 +328,77 @@ def spatial_single_source_split(
         spatial.realized_fractions, spatial.realized_discard_fraction,
     )
     return train_ds, val_ds
+
+
+def checked_label_format(task: str, data_cfg: dict, src: dict) -> str | None:
+    """The per-image label format this run's ``data.labels_dir`` holds (``"json"``, ``"coco"``
+    never returned, see below), or ``None`` for a task/config the check does not apply to.
+
+    Refuses a dataset-level assembled COCO document sitting in ``data.labels_dir`` rather than
+    per-image label files: a caller-fixable config error, since the per-image files in that
+    directory would be shadowed by the assembled export, silently training on the wrong source
+    being worse than refusing. Called once per run, by each caller of
+    :func:`build_full_admitted_dataset` ahead of its own handler and never from inside the
+    helper, so neither the auto path's degrade handler nor a manifest bind can catch this
+    refusal and fold it into "training without validation".
+    """
+    if task not in ("detection", "instance_seg") or data_cfg.get("label_format") or data_cfg.get("coco_json"):
+        return None
+    labels_dir, images_dir = src.get("labels_dir", ""), src.get("images_dir", "")
+    if not (labels_dir and images_dir):
+        return None
+    from tcip_mcp.pipelines.data.datasets import dir_label_format, first_labels_json
+
+    fmt = dir_label_format(labels_dir)
+    if fmt == "coco":
+        offending = first_labels_json(labels_dir)
+        raise ValueError(
+            f"data.labels_dir={labels_dir!r} holds a dataset-level COCO file "
+            f"({offending}): if the per-image label files in this directory are the ones "
+            "that should train, move it out of data.labels_dir; if this COCO export is "
+            "the intended label source, set data.coco_json (or data.label_format='coco') "
+            "to train on it directly."
+        )
+    return fmt
+
+
+def build_full_admitted_dataset(
+    task: str, data_cfg: dict, src: dict, transforms, detected_label_format: str | None,
+):
+    """The full, admitted-set dataset for one run's data config, plus the ``build_dataset`` kwargs
+    that produced it: one implementation, called both by the auto-split path (inside its own
+    degrading handler) and by a split-manifest bind (unwrapped, so a real build failure raises
+    rather than degrading to no validation over a recorded partition), so the two can never
+    disagree about what this run admits.
+
+    ``detected_label_format`` is the caller's own :func:`checked_label_format` result: a
+    dataset-level COCO document sitting in ``data.labels_dir`` is refused there, ahead of the
+    caller's own handler, never re-read (and so never re-refused) here.
+
+    Returns ``(full_ds, stems, build_src)``: ``stems`` is the task path's own admitted set
+    (``full_ds.stems``/``full_ds._stems``), and ``build_src`` is ``src`` plus any assembled
+    ``coco_data``/``label_format``/``num_classes`` the COCO branch added, for a caller that narrows
+    it with ``stems=`` afterward.
+    """
+    from tcip_mcp.pipelines.data.datasets import build_dataset
+
+    build_src = dict(src)
+    labels_dir, images_dir = src.get("labels_dir", ""), src.get("images_dir", "")
+
+    if detected_label_format == "json":
+        from tcip_mcp.pipelines.data.datasets import _resolve_registry_id_map, assemble_coco
+        subject, attribute = src.get("subject"), src.get("attribute")
+        _reg, id_map = _resolve_registry_id_map(labels_dir, subject, attribute)
+        assert subject is not None, "_resolve_registry_id_map already refused an empty subject"
+        build_src["coco_data"] = assemble_coco(
+            labels_dir, images_dir, subject=subject, attribute=attribute, id_map=id_map,
+            date=src.get("date"))
+        build_src["label_format"] = "coco"
+        build_src["num_classes"] = len(id_map)
+
+    full_ds = build_dataset(task, **build_src, transforms=transforms)
+    stems = list(getattr(full_ds, "stems", None) or getattr(full_ds, "_stems", []))
+    return full_ds, stems, build_src
 
 
 def auto_train_val(task: str, data_cfg: dict, transforms):
@@ -358,8 +449,7 @@ def auto_train_val(task: str, data_cfg: dict, transforms):
         group_balanced_split, count_label_lines, resolve_group_key_fn,
     )
     from tcip_mcp.tools.training_tools import (
-        _build_full_admitted_dataset, _checked_label_format, _dataset_source_kwargs,
-        _split_manifest_drawn_conflicts,
+        _dataset_source_kwargs, _split_manifest_drawn_conflicts,
     )
 
     STEM_TASKS = {"detection", "instance_seg", "semantic_seg", "classification"}
@@ -468,8 +558,8 @@ def auto_train_val(task: str, data_cfg: dict, transforms):
                 "data.split.manifest_dir requires data.subject: a manifest binds by subject, "
                 "and this run's own admission has none to compare against it."
             )
-        detected_label_format = _checked_label_format(task, data_cfg, src)
-        full_ds, admitted, build_src = _build_full_admitted_dataset(
+        detected_label_format = checked_label_format(task, data_cfg, src)
+        full_ds, admitted, build_src = build_full_admitted_dataset(
             task, data_cfg, src, transforms, detected_label_format)
         binding = bind_manifest_stems(
             manifest, date, subject, attribute, admitted,
@@ -517,9 +607,9 @@ def auto_train_val(task: str, data_cfg: dict, transforms):
 
     # 2. Auto group-aware train/val split. A dataset-level COCO here is a caller-fixable config
     # error, raised outside the handler below rather than degraded.
-    detected_label_format = _checked_label_format(task, data_cfg, src)
+    detected_label_format = checked_label_format(task, data_cfg, src)
     try:
-        full_ds, stems, build_src = _build_full_admitted_dataset(
+        full_ds, stems, build_src = build_full_admitted_dataset(
             task, data_cfg, src, transforms, detected_label_format)
     except Exception as exc:
         logger.warning("Auto train/val split failed (%s); training without validation.", exc)
