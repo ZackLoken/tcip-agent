@@ -230,7 +230,7 @@ def test_the_priority_queue_and_hpo_registries_are_claimed_beside_inference_jobs
         tuning._persist()
 
         names = {p.name for p in unconformed_files(str(tmp_path), ROOT)}
-    review._pq_jobs.clear()
+    review._pq_registry.jobs.clear()
     tuning._sweeps.clear()
 
     assert "review_priority_jobs.json" in names

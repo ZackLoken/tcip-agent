@@ -21,8 +21,10 @@ terminal jobs.
 from __future__ import annotations
 
 import logging
+import threading
+from collections.abc import Callable
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from tcip_store import (
     RECORD_JSON,
@@ -193,3 +195,88 @@ def evict_terminal(jobs: dict, root: str | None, max_jobs: int = MAX_JOBS) -> No
         ]
         for jid in evictable_any[:total_overflow]:
             jobs.pop(jid, None)
+
+
+def rehydrated_status(summary: dict) -> JobStatus:
+    """A persisted job's status as a rehydrate should read it back.
+
+    Any status this process does not consider terminal is surfaced as ``"interrupted"``: the
+    worker thread behind it is gone after a restart or a repin, so it can never reach one of
+    :data:`TERMINAL_STATUSES` on its own. A summary with no recorded status at all reads the
+    same way, since there is nothing else it could mean.
+    """
+    status = summary.get("status", "interrupted")
+    return status if status in TERMINAL_STATUSES else "interrupted"
+
+
+class JobRegistry:
+    """The dict-plus-lock live-job registry shape restated around each of inference.py's,
+    review.py's priority queue's, and tuning's own job dataclass: register, get, list, persist
+    (where a registry persists) and rehydrate, sharing this module's own
+    :func:`evict_terminal`/:func:`find_job`/:func:`persist_grouped`/:func:`load` underneath.
+
+    Holds no knowledge of a job's own shape: a caller's ``to_summary``/``factory`` functions
+    supply that, so each module keeps its own dataclass and worker logic, only the dict, the
+    lock and the four operations move here.
+    """
+
+    def __init__(self, name: str | None = None) -> None:
+        """``name`` is the persisted registry (one of :data:`JOB_REGISTRY_DOCUMENTS`) this
+        registry reads and writes through :func:`persist_grouped`/:func:`load`; ``None`` for a
+        registry with no root concept of its own that persists nothing (images.py's overview
+        builds)."""
+        self.name = name
+        self.jobs: dict[str, Any] = {}
+        self.lock = threading.Lock()
+
+    def register(
+        self, job_id: str, job: Any, *, root: str | None,
+        to_summary: Callable[[Any], dict] | None = None,
+    ) -> None:
+        """Add ``job`` under ``job_id``, evict overflow (:func:`evict_terminal`'s own two
+        passes: ``root``'s own share, then the whole dict), then persist every live job if this
+        registry does. ``root`` is the job's own ``platform_root`` for a per-root registry, or
+        ``None`` for one with no root concept, matching :func:`evict_terminal`'s own contract."""
+        with self.lock:
+            self.jobs[job_id] = job
+            evict_terminal(self.jobs, root)
+        if to_summary is not None:
+            self.persist(to_summary)
+
+    def get(self, job_id: str) -> Any:
+        """A job by id, from any root this process holds: see :func:`find_job`."""
+        with self.lock:
+            return find_job(self.jobs, job_id)
+
+    def list(self, root: str | None = None) -> list[Any]:
+        """Every live job, or only ``root``'s own share when given."""
+        with self.lock:
+            if root is None:
+                return list(self.jobs.values())
+            return [j for j in self.jobs.values() if getattr(j, "platform_root", None) == root]
+
+    def persist(self, to_summary: Callable[[Any], dict]) -> None:
+        """Write every live job's own summary, grouped by root; a no-op for an unpersisted
+        registry (``name`` is ``None``)."""
+        if self.name is None:
+            return
+        with self.lock:
+            summaries = [to_summary(j) for j in self.jobs.values()]
+        persist_grouped(self.name, summaries)
+
+    def rehydrate(self, factory: Callable[[dict, str], Any], *, id_field: str = "job_id") -> None:
+        """Merge this root's persisted summaries, not already live, into memory via ``factory``
+        (a persisted summary plus the current root -> a job instance), then bound the dict the
+        same way :meth:`register` does. A no-op for an unpersisted registry, which has nothing to
+        rehydrate from. ``id_field`` names the summary's own id key (``job_id`` for inference and
+        the review priority queue, ``sweep_id`` for HPO)."""
+        if self.name is None:
+            return
+        root = current_root()
+        with self.lock:
+            for s in load(self.name):
+                jid = s.get(id_field)
+                if not jid or jid in self.jobs:
+                    continue
+                self.jobs[jid] = factory(s, root)
+            evict_terminal(self.jobs, root)
