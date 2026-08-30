@@ -57,44 +57,11 @@ implementing a half-understood method.
 
 ## 2. Implement: against the platform toolkit
 
-The platform is built so a technique from a paper is a first-class citizen, not a fork. You own
-the model *and* the training loop; see `pipeline-design`'s "You own the model and the training loop"
-for the full contract; the seams you use here are:
-
-- A bespoke `nn.Module`. Write the architecture from the paper (or the one primitive it changes)
-  as a normal PyTorch module. Lazy-import torch inside the function body per the repo contract. Point
-  `pipelines.model_build.build_model` at it via a `model_source`, an *importable* builder
-  (`{"builder": "my_module:build_net", "builder_kwargs": {...}, "source_files": [...], "task": ...,
-  "in_chans": ...}`), imported not `exec`'d, so the run reproduces from source.
-- The model contract is the only hard boundary. `pipelines.model_contract` /
-  `check_model_contract` require just that your module trains (finite-gradient loss) and emits
-  inference output the library scorers consume. You don't call it by hand: `launch_training` smokes
-  it automatically (`preflight_config(smoke=True)` builds the model + runs the contract at the
-  *resolved* in_chans/num_classes/img_size before the training subprocess spawns), so a broken builder fails the
-  launch instead of wasting a run. From inside a custom loop, `ctx.check_contract()` self-proves at
-  the same resolved dims; prove it learns cheaply first with `ctx.overfit_check()` (voluntary,
-  non-gating). For a task outside the ones `build_dataset` routes, pass `sample_batch=`, an
-  `(images, targets)` pair from your dataset, since no synthetic target shape is invented for it.
-  `launch_training(overfit_check=True)` runs the same diagnostic at launch, on the contract's own
-  batch, and records the result on the run's `model_contract`, before your loop ever starts.
-- A custom `train(ctx)` when the technique needs one (a new loss schedule, a two-stage curriculum,
-  a contrastive pretext, EMA weights, a distillation loop). Point `training_source` at it. The
-  `TrainContext` (`pipelines.training.envelope`) hands you the craft library: leakage-free loaders,
-  `ctx.build_optimizer` / `ctx.build_scheduler` / `ctx.evaluate` / `ctx.set_seed`, the
-  progressive-unfreeze primitive `ctx.apply_stage_freeze`, `ctx.tiled_dataset`, `ctx.calibrate`,
-  and the correctness checks `ctx.check_contract` / `ctx.overfit_check`, plus the envelope-owned
-  sinks `ctx.log_metrics`, `ctx.save_checkpoint`, `ctx.record_artifact`, `ctx.should_cancel`. Route
-  metrics and checkpoints through those sinks and the run stays audited, immutably versioned, and
-  provenance-snapshotted no matter what your loop does. `ctx.record_artifact` is a free-form sink
-  for any other name; the reserved name `"model_weights"` routes to `ctx.set_final_weights`
-  instead, with a warning, since that name is the run's deliverable. `ctx.default_train()` is a
-  convenience to call, extend, or replace.
-
-  Registration needs one more explicit fact: save under `"model_best"`/`"model_final"`, or
-  call `ctx.set_final_weights(path)` yourself; otherwise a "completed" run with no discoverable
-  weights is marked `failed` rather than registering a nonexistent path. Under `run_hpo`, call
-  `ctx.report_objective(value)` to report trial progress for pruning if your loop's own metrics
-  don't share the stock trainer's key names.
+You own the model *and* the training loop; see `pipeline-design`'s "You own the model and the
+training loop" for the full `model_source`/`training_source`/`ctx` contract. One fact that
+contract doesn't carry: for a task outside the ones `build_dataset` routes, the model-contract
+proof takes `sample_batch=`, an `(images, targets)` pair from your dataset, since no synthetic
+target shape is invented for it.
 
 Fit to the data in hand, don't transplant blind. A paper's hyperparameters are for its dataset.
 Derive the operating points from *your* data at runtime (CLAUDE.md: derive, don't pin): anchor sizes
