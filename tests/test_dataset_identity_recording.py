@@ -111,7 +111,7 @@ def test_dataset_identity_fingerprint_io_error_degrades_to_none(tmp_path, monkey
     None, not raise: raising here propagates out of launch_training's tracking try/except and
     silently drops the whole experiment record (lineage/status/split.json) for a run that still
     trains, which is strictly worse than losing only the fingerprint."""
-    import tcip_mcp.pipelines.resolution as resolution
+    import tcip_mcp.pipelines.data.dataset_fingerprint as dataset_fingerprint_mod
     from tcip_mcp.pipelines.data.split_construction import dataset_identity
 
     _make_dataset(tmp_path)
@@ -119,9 +119,9 @@ def test_dataset_identity_fingerprint_io_error_degrades_to_none(tmp_path, monkey
     def _raise(_root):
         raise OSError("simulated I/O error mid-scan")
 
-    # dataset_identity does `from tcip_mcp.pipelines.resolution import dataset_fingerprint`
-    # locally at call time, so it must be patched at the source module.
-    monkeypatch.setattr(resolution, "dataset_fingerprint", _raise)
+    # dataset_identity does `from tcip_mcp.pipelines.data.dataset_fingerprint import
+    # dataset_fingerprint` locally at call time, so it must be patched at the source module.
+    monkeypatch.setattr(dataset_fingerprint_mod, "dataset_fingerprint", _raise)
     ds_id, fp = dataset_identity({"images_dir": str(tmp_path / "images" / "2-11-26")})
     assert fp is None
     assert ds_id is None  # no dataset.json registered in this fixture

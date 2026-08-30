@@ -15,7 +15,7 @@ from PIL import Image
 import tcip_store as ts
 from tcip_mcp.audit import audit_log_key
 from tcip_mcp.dataset_layout import region_completeness_key
-from tcip_mcp.pipelines.resolution import dataset_fingerprint
+from tcip_mcp.pipelines.data.dataset_fingerprint import dataset_fingerprint
 from tcip_store.adoption import adopt_root
 from tcip_store.file_backend import FileBackend
 from tcip_store.layout_claims import ROOT

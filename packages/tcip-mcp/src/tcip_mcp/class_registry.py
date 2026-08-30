@@ -195,8 +195,8 @@ def _checked_registry_document(data: bytes, *, path: str | Path) -> dict:
     Raises :class:`RegistryError` for bytes that do not decode as JSON. Propagates
     :class:`tcip_store.SchemaVersionRefused`, uncaught: a newer writer's document is a policy
     fact, never the same fact as corruption, so a caller (:func:`replace_registry`'s
-    ``allow_removals`` repair path, ``resolution._registry_term``) that tolerates or folds
-    ``RegistryError`` away must not do the same to this.
+    ``allow_removals`` repair path, ``dataset_fingerprint._registry_term``) that tolerates or
+    folds ``RegistryError`` away must not do the same to this.
     """
     import tcip_store
 
@@ -219,8 +219,8 @@ def read_registry(path: str | Path) -> ClassRegistry:
     empty one would let every name-based label under it train as an unknown subject. A
     ``schema_version`` this reader does not accept propagates as
     :class:`tcip_store.SchemaVersionRefused`, uncaught, distinguishable from ``RegistryError``: a
-    newer writer's registry must refuse whatever reads it (``resolution._registry_term``'s own
-    fingerprint computation included), never fold into the "no registry" answer a genuinely
+    newer writer's registry must refuse whatever reads it (``dataset_fingerprint._registry_term``'s
+    own fingerprint computation included), never fold into the "no registry" answer a genuinely
     unregistered dataset gets.
     """
     import tcip_store

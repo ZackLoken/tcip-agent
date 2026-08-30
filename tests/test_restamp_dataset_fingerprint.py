@@ -18,7 +18,7 @@ from PIL import Image
 
 import tcip_store as ts
 from tcip_mcp.dataset_layout import dataset_identity_key, require_dataset_identity
-from tcip_mcp.pipelines.resolution import dataset_fingerprint
+from tcip_mcp.pipelines.data.dataset_fingerprint import dataset_fingerprint
 from tcip_mcp.tools.project_tools import read_datasets, register_dataset, upsert_dataset
 
 _SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "restamp_dataset_fingerprint.py"

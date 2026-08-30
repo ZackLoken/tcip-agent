@@ -27,7 +27,7 @@ from tcip_mcp.pipelines.data.band_groups import (
     write_band_group_manifest,
 )
 from tcip_mcp.pipelines.image_utils import list_logical_images
-from tcip_mcp.pipelines.resolution import dataset_fingerprint
+from tcip_mcp.pipelines.data.dataset_fingerprint import dataset_fingerprint
 from tcip_mcp.tools.project_tools import register_dataset
 from tcip_annotation.format_io import _parse_coco_json, detect_format
 from tcip_annotation.json_io import (
@@ -123,7 +123,7 @@ def test_a_registry_above_the_ceiling_refuses_replace_registry_rather_than_repai
 
 
 def test_a_registry_above_the_ceiling_refuses_the_dataset_fingerprint(tmp_path):
-    """resolution._registry_term folds a genuinely absent/undecodable registry into "", the
+    """dataset_fingerprint._registry_term folds a genuinely absent/undecodable registry into "", the
     fingerprint's own no-registry answer, but a version refusal is a wrong content identity a
     delivered number could rest on, so it must refuse the whole fingerprint computation instead."""
     images_dir = tmp_path / "images"
