@@ -411,6 +411,16 @@ def test_ordinal_regression_tasks_constant_has_one_home():
             assert "_ORDINAL_REGRESSION_TASKS" not in _assign_name_counts(py_file), py_file
 
 
+def test_update_trait_spec_fields_has_one_home():
+    """``update_trait_spec_fields`` moved out of ``tools/phenology_tools.py`` into
+    ``tools/trait_spec_authoring_tools.py``, beside ``author_trait_spec``, decorator intact."""
+    _assert_one_home(
+        {"update_trait_spec_fields"},
+        _module_path("tools/phenology_tools.py"),
+        _module_path("tools/trait_spec_authoring_tools.py"),
+    )
+
+
 def test_accept_proposals_is_absent_from_package_source():
     """The rename's structural half: the retired name ``accept_proposals`` is gone from every
     package's shipped source, not just from the live MCP registry the manifest test checks (a

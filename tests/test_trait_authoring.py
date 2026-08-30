@@ -240,7 +240,7 @@ def test_write_trait_spec_fields_refuses_a_spec_still_carrying_the_deleted_prove
 
 
 def test_update_trait_spec_fields_tool_end_to_end(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    from tcip_mcp.tools.phenology_tools import update_trait_spec_fields
+    from tcip_mcp.tools.trait_spec_authoring_tools import update_trait_spec_fields
 
     specs_dir = tmp_path / "trait_specs"
     monkeypatch.setattr(traits, "_TRAIT_SPECS_RELPATH", specs_dir)

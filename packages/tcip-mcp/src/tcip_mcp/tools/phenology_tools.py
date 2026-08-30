@@ -150,48 +150,6 @@ def build_plant_mapping(
     }
 
 
-@mcp.tool()
-@audited
-def update_trait_spec_fields(
-    project_root: str, trait_name: str, fields: dict
-) -> dict:
-    """Update one or more fields on an already-registered trait's spec.
-
-    Hand-editing a trait spec's YAML directly bypasses the audit record and skips re-validation.
-    This refuses if the trait has no existing spec file (creating a new
-    trait is a separate, still-manual authoring step) or if the merged result would fail the same
-    crops.yml cross-check every config-authored spec already goes through. Returns the updated
-    spec.
-
-    This is what a real localization-kind derivation (from actual GT box geometry) or a real
-    breeder-answered count objective gets recorded through, never a silent default and never
-    copied from another trait's values, both durable, audited facts instead of living only in a
-    session's memory.
-
-    An operationalization the breeder confirmed covers the field values it was confirmed against,
-    so a field this call moves can leave one superseded. That is reported in `superseded`, naming
-    the delivery kind and both values, as a convenience so the agent learns here rather than at the
-    next delivery refusal. It is not the enforcement point: the delivery precondition re-reads the
-    spec and refuses on its own, which also catches a spec edited by hand.
-
-    Args:
-        project_root: The project whose spec registry to update. Required: the platform root this
-            process is pinned to can be a different project entirely, and a spec written to the
-            wrong registry is a measurement decision recorded where nothing reads it.
-        trait_name: Name of the already-registered trait whose spec file to update.
-        fields: `TraitSpec` field names to new values, merged into the existing spec (unknown
-            fields, off-vocab `delivers` entries, or an invalid value refuse the whole write).
-    """
-    from tcip_mcp import operationalization, traits
-
-    spec = traits.write_trait_spec_fields(trait_name, fields, project_root=project_root)
-    updated = traits._encode_spec(spec)
-    updated["superseded"] = operationalization.superseded_confirmations(
-        project_root, trait_name, spec=spec
-    )
-    return updated
-
-
 def _resolve_positive_class_id(trait_name: str, predictions_by_date: dict[str, str]) -> tuple[int | None, str]:
     """Thin wrapper over ``phenology.resolve_positive_class_id`` (the one resolution both delivery
     doors' positive-class-id surfaces call), for this tool's trait-name-based callers."""
