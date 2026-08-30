@@ -22,6 +22,7 @@ DELETED_ROUTES = [
     ("GET", "/api/review/image_status"),
     ("POST", "/api/review/save_gt"),
     ("GET", "/api/dataset/images"),
+    ("POST", "/api/annotate/open"),
 ]
 
 

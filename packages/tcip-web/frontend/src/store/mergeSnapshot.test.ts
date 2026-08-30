@@ -35,7 +35,6 @@ function snapshot(over: Partial<GuiState> = {}): GuiState {
       filter_class: "all",
       detection_idx: 0,
     },
-    pred_reference: null,
     ...over,
   };
 }
@@ -82,12 +81,8 @@ describe("mergeSnapshot ownership model", () => {
     expect(s().gui.dataset.image_list).toHaveLength(3);
   });
 
-  it("adopts a new dataset identity and resets index + pred_reference + reviewStatus", () => {
-    useStore.setState((st) => ({
-      gui: {
-        ...st.gui,
-        pred_reference: { type: "box", coords: [0, 0, 1, 1], confidence: null },
-      },
+  it("adopts a new dataset identity and resets index + reviewStatus", () => {
+    useStore.setState(() => ({
       reviewStatus: {
         byImage: { "a.jpg": "completed" },
         hasDetections: { "a.jpg": true },
@@ -101,7 +96,6 @@ describe("mergeSnapshot ownership model", () => {
     );
     expect(s().gui.dataset.date).toBe("3-2-26");
     expect(s().gui.dataset.current_image_index).toBe(0);
-    expect(s().gui.pred_reference).toBeNull();
     expect(s().reviewStatus).toEqual({
       byImage: {},
       hasDetections: {},

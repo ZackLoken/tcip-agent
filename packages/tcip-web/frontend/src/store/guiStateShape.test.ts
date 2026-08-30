@@ -34,7 +34,6 @@ describe("the GUI state the browser opens with", () => {
         filter_class: "all",
         detection_idx: 0,
       },
-      pred_reference: null,
     });
   });
 });
@@ -65,7 +64,6 @@ describe("adopting a different dataset selection", () => {
           filter_class: "all",
           detection_idx: 0,
         },
-        pred_reference: null,
       },
       wsVersion: 4,
     });
@@ -93,7 +91,6 @@ describe("adopting a different dataset selection", () => {
         filter_class: "all",
         detection_idx: 0,
       },
-      pred_reference: null,
     };
 
     s().mergeSnapshot(incoming, 5);

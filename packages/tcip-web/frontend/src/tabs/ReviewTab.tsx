@@ -110,7 +110,6 @@ export function ReviewTab() {
   const setLoading = useStore((s) => s.setReviewLoading);
   const setDetectionIdx = useStore((s) => s.setReviewDetectionIdx);
   const markDetReviewed = useStore((s) => s.markDetectionReviewed);
-  const setPredReference = useStore((s) => s.setPredReference);
   // Shared annotation status (coloring, Complete lock), synced when a verdict authors GT.
   const setStoreImageStatus = useStore((s) => s.setImageStatus);
   // Image-level review status (its own store slice) drives Review navigation: which images are
@@ -634,7 +633,6 @@ export function ReviewTab() {
 
   function stepImage(delta: number) {
     nav.stepImage(delta);
-    setPredReference(null);
   }
 
   function stepDetection(delta: number) {
