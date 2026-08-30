@@ -275,7 +275,7 @@ def export_detection_csv(
 
     Raises:
         DeliveryRefused: the gate refused (an unvalidated dimension with no acknowledgement);
-            carries the ``DeliveryGateResult`` and the reconciler's binding notes.
+            carries the ``DeliveryGateResult`` and both reconcilers' binding notes.
         ValueError: the ``trait``'s ``per_image_count`` operationalization is unrecorded, not
             breeder-confirmed, or was withdrawn since the first check; never carries a gate result,
             so a caller must not read a delivered count off this raise.
@@ -324,7 +324,8 @@ def export_detection_csv(
 
     gate = check_delivery_gate(flags, acknowledge_unvalidated=acknowledge_unvalidated)
     if not gate.ok:
-        notes = binding_notes_text(measurement_recon.get("binding_notes", {}))
+        notes = binding_notes_text(
+            {**measurement_recon.get("binding_notes", {}), **tile_recon.get("binding_notes", {})})
         raise DeliveryRefused(gate, notes)
 
     # A confirmation withdrawn or a field moved since the first check refuses here, before anything.

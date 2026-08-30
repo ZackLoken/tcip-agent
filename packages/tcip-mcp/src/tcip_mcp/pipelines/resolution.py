@@ -2504,7 +2504,8 @@ class DeliveryRefused(ValueError):
     from the writer's other, count-free raises (a withdrawn operationalization): a bare
     ``ValueError`` cannot be told apart without a second classification of the same writer's own
     raises, drifting from it the moment either changes. ``str(self)`` is the gate's reason plus
-    the reconciler's binding notes, for a caller content to just log or propagate the message.
+    every gated dimension's own reconciler's binding notes, for a caller content to just log or
+    propagate the message.
     """
 
     def __init__(self, gate: DeliveryGateResult, notes: str = "") -> None:
