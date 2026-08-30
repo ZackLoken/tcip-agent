@@ -133,19 +133,19 @@ def test_web_inference_worker_refuses_an_unregistered_checkpoint(tmp_path, monke
     assert job.done == 0
 
 
-def test_prioritize_review_queue_refuses_an_unregistered_checkpoint(tmp_path, monkeypatch):
+def test_triage_predictions_refuses_an_unregistered_checkpoint(tmp_path, monkeypatch):
     monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
     ckpt = _bespoke_checkpoint(tmp_path / "m.pt")
     images_dir, _ = _images(tmp_path)
 
-    from tcip_mcp.tools.feedback_tools import prioritize_review_queue
+    from tcip_mcp.tools.feedback_tools import triage_predictions
 
-    r = prioritize_review_queue(ckpt, str(images_dir), strategy="confidence_triage")
+    r = triage_predictions(ckpt, str(images_dir))
     assert "error" in r
     assert "register_model" in r["error"]
 
 
-def test_prioritize_review_queue_refuses_by_the_stated_project_path(tmp_path):
+def test_triage_predictions_refuses_by_the_stated_project_path(tmp_path):
     """project_path, not just the process root, is where the load looks: registered under a
     root the call does not name, the checkpoint still refuses, naming the root it did name."""
     registered_root = tmp_path / "registered"
@@ -156,17 +156,16 @@ def test_prioritize_review_queue_refuses_by_the_stated_project_path(tmp_path):
     _register(registered_root, ckpt)
     images_dir, _ = _images(tmp_path)
 
-    from tcip_mcp.tools.feedback_tools import prioritize_review_queue
+    from tcip_mcp.tools.feedback_tools import triage_predictions
 
-    r = prioritize_review_queue(ckpt, str(images_dir), strategy="confidence_triage",
-                                project_path=str(other_root))
+    r = triage_predictions(ckpt, str(images_dir), project_path=str(other_root))
     assert "error" in r
     assert "register_model" in r["error"]
     assert repr(str(other_root)) in r["error"]
     assert str(registered_root) not in r["error"]
 
 
-def test_prioritize_review_queue_admits_a_checkpoint_registered_under_the_stated_project_path(
+def test_triage_predictions_admits_a_checkpoint_registered_under_the_stated_project_path(
     tmp_path,
 ):
     """The admitting direction, roles reversed: project_path naming the root the checkpoint
@@ -177,10 +176,9 @@ def test_prioritize_review_queue_admits_a_checkpoint_registered_under_the_stated
     _register(registered_root, ckpt)
     images_dir, _ = _images(tmp_path)
 
-    from tcip_mcp.tools.feedback_tools import prioritize_review_queue
+    from tcip_mcp.tools.feedback_tools import triage_predictions
 
-    r = prioritize_review_queue(ckpt, str(images_dir), strategy="confidence_triage",
-                                project_path=str(registered_root))
+    r = triage_predictions(ckpt, str(images_dir), project_path=str(registered_root))
     assert "error" not in r, r
 
 
