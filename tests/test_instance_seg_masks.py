@@ -304,6 +304,48 @@ def test_tabulate_counts_instance_seg_writes_csv_tiled(instance_seg_ckpt, tmp_pa
     assert out_path.is_file()
 
 
+def test_tabulate_counts_instance_seg_live_and_bucket_regime_agree_on_masks(
+    instance_seg_ckpt, tmp_path,
+):
+    """The write-side geometry drop (write_predictions_json's geometry_extent_ok on the mask
+    polygon) is the only extent filter a masks-backed CSV row goes through in either regime now:
+    the live-with-predictions_dir path counts the just-published documents through the same
+    reader the bucket regime uses, so a masked detection's box-based extent (irrelevant to a
+    polygon) can no longer diverge the two regimes' counts."""
+    import csv
+    from datetime import datetime
+
+    from tcip_mcp.tools.inference_tools import tabulate_counts
+    from tests import _operationalization_fixtures as fx
+
+    images_dir = tmp_path / "images"
+    _image(images_dir)
+    _register_instance_seg_ckpt(instance_seg_ckpt, tmp_path)
+    fx.seed_confirmed_count(tmp_path)
+
+    bucket = tmp_path / "ds" / "predictions" / "baseline" / "2026-01-01"
+    csv_a = tmp_path / "a.csv"
+    live = tabulate_counts(instance_seg_ckpt, str(images_dir), str(csv_a), trait=fx.COUNT_TRAIT,
+                           device="cpu", tile_size=TILE, acknowledge_unvalidated=True,
+                           predictions_dir=str(bucket))
+    assert "error" not in live, live
+
+    csv_b = tmp_path / "b.csv"
+    reread = tabulate_counts(predictions_dir=str(bucket), output_path=str(csv_b),
+                             trait=fx.COUNT_TRAIT, acknowledge_unvalidated=True)
+    assert "error" not in reread, reread
+
+    rows_a = list(csv.DictReader(csv_a.open()))
+    rows_b = list(csv.DictReader(csv_b.open()))
+    assert len(rows_a) == len(rows_b) == 1
+    for key in rows_a[0]:
+        if key == "produced_at":
+            datetime.fromisoformat(rows_a[0][key])
+            datetime.fromisoformat(rows_b[0][key])
+            continue
+        assert rows_a[0][key] == rows_b[0][key], key
+
+
 def test_export_predictions_stamps_mask_binarize_provenance_when_masks_present(instance_seg_ckpt, tmp_path):
     """The unvalidated mask-binarize threshold must not be stamped into Annotation.attributes
     (the domain trait namespace, which would pollute GT). It travels once, as a run constant,
