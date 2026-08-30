@@ -845,10 +845,10 @@ registered at HEAD.
 
 | method | path | handler | line |
 |---|---|---|---|
-| POST | `/launch` | `launch_inference` | `routes/inference.py:456` |
-| GET | `/jobs` | `list_jobs` | `routes/inference.py:555` |
-| POST | `/jobs/{job_id}/cancel` | `cancel_job` | `routes/inference.py:560` |
-| WS | `/jobs/{job_id}/stream` | `stream_job` | `routes/inference.py:570` |
+| POST | `/launch` | `launch_inference` | `routes/inference.py:443` |
+| GET | `/jobs` | `list_jobs` | `routes/inference.py:542` |
+| POST | `/jobs/{job_id}/cancel` | `cancel_job` | `routes/inference.py:547` |
+| WS | `/jobs/{job_id}/stream` | `stream_job` | `routes/inference.py:557` |
 
 ### routes/meta.py, prefix `/api/meta` (2 routes)
 
@@ -1092,7 +1092,7 @@ Writers: `tcip_annotation.json_io.write_annotations`,
 `tcip_annotation.format_io.save_annotations` (`fmt="json"`),
 `packages/tcip-annotation/src/tcip_annotation/format_io.py:283`;
 `tcip_annotation.review_engine.ReviewEngine.save_gt`,
-`packages/tcip-annotation/src/tcip_annotation/review_engine.py:848`;
+`packages/tcip-annotation/src/tcip_annotation/review_engine.py:842`;
 `tcip_mcp.prediction_buckets.stage_prediction_shapes`,
 `packages/tcip-mcp/src/tcip_mcp/prediction_buckets.py:254`.
 
@@ -1577,12 +1577,12 @@ every declared document (183).
 Path: `<project_root>/.tcip/state/gui.json`, addressed by `gui_snapshot_key`,
 `packages/tcip-web/src/tcip_web/state.py:18`.
 
-Writer: `StateStore._flush_sync`, `tcip_web/state.py:251`, debounced 0.5s after `mutate`/`replace`, which
+Writer: `StateStore._flush_sync`, `tcip_web/state.py:250`, debounced 0.5s after `mutate`/`replace`, which
 resolves the destination at flush time so a project switch during the debounce window cannot write
 one project's snapshot into another's. The store is declared `durable=False`: the snapshot is
 rewritten every debounce cycle and losing the last one costs a re-selection, not history.
 
-Reader: `StateStore.load_from_disk`, `tcip_web/state.py:264`.
+Reader: `StateStore.load_from_disk`, `tcip_web/state.py:263`.
 
 `StateStore.mutate`, `tcip_web/state.py:30`, validates the merged mutation through `GuiState`
 before holding it, raising `GuiMutationInvalid` (`tcip_web/state.py:29`) on a field that does not
@@ -1629,12 +1629,12 @@ composing a state dir of its own.
 
 Writer: `ReviewEngine._save_image`, `review_engine.py:310`, called by `mark_image_reviewed`
 (`review_engine.py:356`), `unmark_image_reviewed` (`review_engine.py:398`),
-`record_detection_action` (`review_engine.py:665`), `check_image_review_complete`
-(`review_engine.py:802`); `save_review_state`, `review_engine.py:330`, flushes every shard.
+`record_detection_action` (`review_engine.py:659`), `check_image_review_complete`
+(`review_engine.py:796`); `save_review_state`, `review_engine.py:330`, flushes every shard.
 
 Readers: `ReviewEngine.load_review_state`, `review_engine.py:286`, which enumerates the store's
-keys (`review_engine.py:206`) at construction; `find_reviewed_entry`, `review_engine.py:549`,
-and its spatial-hash cache `_build_reviewed_lookup`, `review_engine.py:530`.
+keys (`review_engine.py:206`) at construction; `find_reviewed_entry`, `review_engine.py:543`,
+and its spatial-hash cache `_build_reviewed_lookup`, `review_engine.py:524`.
 
 Seam S16 ("ReviewEngine shard-store directory"), verdict `both-sides-restated`,
 `phase0_implementation: mixed`: `tests/test_review_channel.py:267-325`,
@@ -1880,7 +1880,7 @@ Phase 3 verdict: single. The posted payload carries `active_subject` beside `sub
 ## S06. Append-only audit log .tcip/audit.jsonl
 
 Must agree: mutations from any process land in the log their scope names, a dataset's own for a record travelling with the data and the platform's otherwise, with the same entry shape.
-Side A: `packages/tcip-mcp/src/tcip_mcp/audit.py:241` (`def audited(`, taking a declared `scope_arg` naming which tool argument carries the dataset a scoped tool mutates a record of) and `record_event`, line 121, the one emitter for code that is neither an MCP tool nor a script-invoked door demoted from one; both address the log through `audit_log_key`, line 84, and differ only in what a failed append means: `record_event` warns through `_write_entry`, line 103, while the decorator refuses, since its append runs after the tool body.
+Side A: `packages/tcip-mcp/src/tcip_mcp/audit.py:243` (`def audited(`, taking a declared `scope_arg` naming which tool argument carries the dataset a scoped tool mutates a record of) and `record_event`, line 121, the one emitter for code that is neither an MCP tool nor a script-invoked door demoted from one; both address the log through `audit_log_key`, line 84, and differ only in what a failed append means: `record_event` warns through `_write_entry`, line 103, while the decorator refuses, since its append runs after the tool body.
 Side B: `packages/tcip-web/src/tcip_web/routes/review.py:90` (`def _audit(scope: str, tool: str, arguments: dict) -> None:`, which calls `record_event` with the scope its event belongs to; `routes/results.py:54` and `routes/inference.py:84` do the same for their own roots).
 Phase 3 verdict: single.
 
@@ -2163,7 +2163,7 @@ Differs from phase0 record: phase0 cited a line inside the function's body rathe
 ## S45. Review verdicts promoted into a calibration reference
 
 Must agree: a breeder-confirmed sample reaches the operating-point sweep in the same record shape GT annotations do, and passes the same gate.
-Side A: `packages/tcip-annotation/src/tcip_annotation/review_engine.py:665` (`def record_detection_action(`, the one writer of a stored verdict entry).
+Side A: `packages/tcip-annotation/src/tcip_annotation/review_engine.py:659` (`def record_detection_action(`, the one writer of a stored verdict entry).
 Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/feedback/verdicts.py:74` (`decode_verdict`, the one read of that entry, over the affirming actions declared at line 18), called by `pipelines/feedback/review_calibration.py:282` for the calibration reference and `pipelines/feedback/materialize.py:85` for the curated dataset. What each consumer then emits from the affirmed box (COCO xywh scaled by the image, pixel corners for a label file) stays its own.
 Phase 3 verdict: single.
 
@@ -2177,8 +2177,8 @@ Phase 3 verdict: single. The api/ helpers keep their hand-written signatures and
 ## S47. GuiState shape between state.py and store/types.ts  <!-- queued: P5-287 unify -->
 
 Must agree: the snapshot the backend serializes deserializes into the store's typed shape.
-Side A: `packages/tcip-web/src/tcip_web/state.py:101` (`class GuiState(BaseModel):`).
-Side B: `packages/tcip-web/frontend/src/store/types.ts:47` (`export interface GuiState {`).
+Side A: `packages/tcip-web/src/tcip_web/state.py:100` (`class GuiState(BaseModel):`).
+Side B: `packages/tcip-web/frontend/src/store/types.ts:49` (`export interface GuiState {`).
 Phase 3 verdict: duplicated.
 
 ## S48. State WebSocket snapshot protocol  <!-- queued: P5-288 unify -->
@@ -2198,7 +2198,7 @@ Phase 3 verdict: duplicated.
 ## S50. Inference job stream WebSocket  <!-- queued: P5-304 unify -->
 
 Must agree: the browser recognizes the terminal frame and the status vocabulary the backend uses.
-Side A: `packages/tcip-web/src/tcip_web/routes/inference.py:569` (`@router.websocket("/jobs/{job_id}/stream")`).
+Side A: `packages/tcip-web/src/tcip_web/routes/inference.py:556` (`@router.websocket("/jobs/{job_id}/stream")`).
 Side B: `packages/tcip-web/src/tcip_web/jobstore.py:97` (`TERMINAL_STATUSES = frozenset({"completed", "failed", "cancelled", "interrupted"})`).
 Phase 3 verdict: duplicated.
 
