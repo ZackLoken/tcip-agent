@@ -838,7 +838,10 @@ def import_project(zip_path: str, destination: str) -> dict:
     The response carries per-root adopted counts, blob counts per class, ``database_built``
     (whether adoption ran or the file layout was kept), ``dataset_paths_unresolved`` (the
     registered datasets whose absolute path stayed verbatim because they are outside the imported
-    tree), and ``files_extracted``.
+    tree), ``checkpoint_paths_unresolved`` (registered checkpoint paths that do not resolve to a
+    file under the destination, since the model registry entry itself is never rewritten by this
+    door either, exactly the same disclosure shape as ``dataset_paths_unresolved``), and
+    ``files_extracted``.
 
     Args:
         zip_path: Path to the ``.tcip.zip`` archive.
@@ -901,7 +904,9 @@ def _run_import_into_staging(zp: Path, staging: Path, dest: Path) -> dict:
     from tcip_store.errors import StoreError
     from tcip_store.file_backend import DEFAULT_LOCK_TIMEOUT_S
 
-    from tcip_mcp.tools.bundle import AnchorMisplaced, account_for, blob_home
+    from tcip_mcp.tools.bundle import (
+        AnchorMisplaced, account_for, blob_home, unresolved_registered_checkpoints,
+    )
 
     try:
         files_extracted = _extract_zip(zp, staging)
@@ -959,6 +964,7 @@ def _run_import_into_staging(zp: Path, staging: Path, dest: Path) -> dict:
         blob_classes[home] = blob_classes.get(home, 0) + 1
 
     dataset_paths_unresolved = _external_dataset_paths(dest)
+    checkpoint_paths_unresolved = list(unresolved_registered_checkpoints(dest))
 
     return {
         "destination": str(dest),
@@ -967,6 +973,7 @@ def _run_import_into_staging(zp: Path, staging: Path, dest: Path) -> dict:
         "adopted": adopted,
         "blob_counts": blob_classes,
         "dataset_paths_unresolved": dataset_paths_unresolved,
+        "checkpoint_paths_unresolved": checkpoint_paths_unresolved,
     }
 
 

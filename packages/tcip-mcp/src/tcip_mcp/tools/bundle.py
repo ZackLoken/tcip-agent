@@ -156,6 +156,18 @@ def derive_roots(tree: str | Path) -> tuple[DerivedRoot, ...]:
     return tuple(derived)
 
 
+def _resolve_checkpoint_entry(tree: Path, raw: str) -> Path | None:
+    """The absolute, existing-under-``tree`` path a registry's ``checkpoint_path`` entry
+    (``raw``, exactly as stored) resolves to, or ``None`` when it does not: an absolute path
+    naming a different tree entirely (the exporting root, read back from a staged or destination
+    copy of its registry), or a relative one with nothing at it any more."""
+    candidate = Path(raw)
+    if not candidate.is_absolute():
+        candidate = tree / candidate
+    resolved = candidate.resolve()
+    return resolved if resolved.is_file() and _is_at_or_under(resolved, tree) else None
+
+
 def _registered_checkpoint_paths(tree: Path) -> frozenset[Path]:
     """Every checkpoint a model registry entry under ``tree`` points at, resolved, restricted to
     ones actually inside ``tree``.
@@ -181,13 +193,37 @@ def _registered_checkpoint_paths(tree: Path) -> frozenset[Path]:
         raw = entry.get("checkpoint_path") if isinstance(entry, dict) else None
         if not raw:
             continue
-        candidate = Path(raw)
-        if not candidate.is_absolute():
-            candidate = tree / candidate
-        resolved = candidate.resolve()
-        if resolved.is_file() and _is_at_or_under(resolved, tree):
+        resolved = _resolve_checkpoint_entry(tree, raw)
+        if resolved is not None:
             found.add(resolved)
     return frozenset(found)
+
+
+def unresolved_registered_checkpoints(tree: Path) -> tuple[str, ...]:
+    """Every registry ``checkpoint_path`` entry under ``tree`` that does not resolve to an
+    existing file under it, named exactly as the registry itself carries it: the entries
+    :func:`_registered_checkpoint_paths` (the same reader, the same per-entry resolution) leaves
+    out. A moved tree (``import_project``, past its own rename) still carries the exporting
+    root's own registry verbatim, so an absolute checkpoint_path it wrote stays unreachable
+    through ``load_registered_checkpoint`` at the new location; this names that fact for
+    disclosure rather than the registry rewriting itself, which stays no door's job here.
+    """
+    from tcip_store import StoreError
+
+    from tcip_mcp.model_registry import read_registry_index
+
+    try:
+        entries = read_registry_index(tree)
+    except StoreError:
+        return ()
+    unresolved: list[str] = []
+    for entry in entries if isinstance(entries, list) else []:
+        raw = entry.get("checkpoint_path") if isinstance(entry, dict) else None
+        if not raw:
+            continue
+        if _resolve_checkpoint_entry(tree, raw) is None:
+            unresolved.append(str(raw))
+    return tuple(sorted(unresolved))
 
 
 def _blob_files(
@@ -389,4 +425,5 @@ __all__ = [
     "account_for",
     "blob_home",
     "derive_roots",
+    "unresolved_registered_checkpoints",
 ]
