@@ -841,7 +841,7 @@ registered at HEAD.
 
 | method | path | handler | line |
 |---|---|---|---|
-| POST | `/launch` | `launch_inference` | `routes/inference.py:456` |  <!-- queued: P5-105 delete -->
+| POST | `/launch` | `launch_inference` | `routes/inference.py:456` |
 | GET | `/jobs` | `list_jobs` | `routes/inference.py:555` |
 | POST | `/jobs/{job_id}/cancel` | `cancel_job` | `routes/inference.py:560` |
 | WS | `/jobs/{job_id}/stream` | `stream_job` | `routes/inference.py:570` |
@@ -865,7 +865,7 @@ registered at HEAD.
 | method | path | handler | line |
 |---|---|---|---|
 | POST | `/plant_mapping/build` | `build_plant_mapping` | `routes/results.py:178` |
-| POST | `/plant_mapping/load` | `load_plant_mapping` | `routes/results.py:270` |  <!-- queued: P5-129 delete -->
+| POST | `/plant_mapping/load` | `load_plant_mapping` | `routes/results.py:270` |
 | GET | `/plant_mapping/list` | `list_plant_mappings` | `routes/results.py:289` |
 | POST | `/per_plant_curves` | `per_plant_curves` | `routes/results.py:561` |  <!-- queued: P5-130 merge-or-split -->
 | POST | `/onset_dates` | `onset_dates` | `routes/results.py:595` |  <!-- queued: P5-131 merge-or-split -->
@@ -917,7 +917,7 @@ registered at HEAD.
 | method | path | handler | line |
 |---|---|---|---|
 | POST | `/validate` | `preflight_config_route` | `routes/training.py:54` |  <!-- queued: P5-104 delete -->
-| POST | `/launch` | `launch_training_route` | `routes/training.py:68` |  <!-- queued: P5-113 delete -->
+| POST | `/launch` | `launch_training_route` | `routes/training.py:68` |  <!-- queued: P5-105 delete -->
 | GET | `/runs` | `list_runs_route` | `routes/training.py:88` |
 | GET | `/runs/{run_id}` | `get_run` | `routes/training.py:101` |
 | POST | `/runs/{run_id}/tensorboard` | `launch_run_tensorboard` | `routes/training.py:108` |
@@ -930,7 +930,7 @@ registered at HEAD.
 
 | method | path | handler | line |
 |---|---|---|---|
-| POST | `/launch` | `launch_hpo` | `routes/tuning.py:320` |
+| POST | `/launch` | `launch_hpo` | `routes/tuning.py:320` |  <!-- queued: P5-113 delete -->
 | GET | `/sweeps` | `list_sweeps` | `routes/tuning.py:351` |
 | GET | `/sweeps/{sweep_id}` | `get_sweep` | `routes/tuning.py:369` |
 | GET | `/sweeps/{sweep_id}/trials` | `list_trials` | `routes/tuning.py:402` |
@@ -953,7 +953,7 @@ above against HEAD.
 | GET | `/` | loaded by the browser's own navigation, not via fetch/XHR from app code |
 | POST | `/api/events/{panel}` | posted by MCP tools (`tcip_mcp.web_client`), not by the browser |
 | GET | `/api/state` | no caller found |
-| POST | `/api/training/compare` | no caller found; `trainingApi` has no `compare` function |  <!-- queued: P5-111 delete -->
+| POST | `/api/training/compare` | no caller found; `trainingApi` has no `compare` function; kept as the backend for the comparison view, which wires it |  <!-- queued: P5-111 keep-as-tool -->
 
 ## 3. tcip-annotation importable public symbols
 
