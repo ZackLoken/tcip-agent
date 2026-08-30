@@ -1556,6 +1556,8 @@ def compare_experiments(experiment_ids: list[str], *, stale_seconds: float = 600
     that log itself can't be read. Reading it costs one scan of the platform audit log for the
     whole call, on top of one :func:`get_experiment` per experiment compared.
     """
+    from tcip_mcp.pipelines.model_build import MODEL_SOURCE_KEY
+
     comparisons: list[dict[str, Any]] = []
     refused_index = _index_refused_mutations(experiment_ids)
 
@@ -1597,7 +1599,7 @@ def compare_experiments(experiment_ids: list[str], *, stale_seconds: float = 600
 
         # Get config summary
         config = exp.get("config", {})
-        model_source = config.get("model_source", {})
+        model_source = config.get(MODEL_SOURCE_KEY, {})
         summary["model"] = model_source.get("builder", "unknown")
 
         # Dataset identity (the content end of the reproduce-a-number chain), from the immutable lineage.

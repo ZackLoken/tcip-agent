@@ -181,6 +181,7 @@ def run(run_id: str, experiment_id: str, output_dir: str, resume_from: str) -> N
     from tcip_mcp.pipelines.data.split_construction import (
         auto_train_val, dataset_identity, persist_split_manifest,
     )
+    from tcip_mcp.pipelines.model_build import MODEL_SOURCE_KEY
 
     # This is its own process entry point: without this the whole run reads through GDAL's
     # stock cache default instead of the platform budget the server/backend entry points set.
@@ -196,7 +197,7 @@ def run(run_id: str, experiment_id: str, output_dir: str, resume_from: str) -> N
     config = store.read(launch_config_key(output_dir))
     run_obj = attach_run(run_id, config, output_dir)
 
-    model_source = config.get("model_source", {})
+    model_source = config.get(MODEL_SOURCE_KEY, {})
     # setdefault, not get: the geometry stamp below mutates this dict and must land in config.
     data_cfg = config.setdefault("data", {})
     train_cfg = config.get("training", {})

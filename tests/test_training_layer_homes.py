@@ -118,3 +118,72 @@ def test_train_run_class_has_one_home():
         }
     assert "TrainRun" not in old_defs, "generic_trainer.py still defines TrainRun"
     assert "TrainRun" in new_defs, "run_registry.py never defines TrainRun"
+
+
+def _literal_loads(tree: ast.AST, literal: str) -> list[ast.AST]:
+    return [
+        node for node in ast.walk(tree)
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+            and node.func.attr in ("get", "pop", "setdefault") and node.args
+            and isinstance(node.args[0], ast.Constant) and node.args[0].value == literal)
+        or (isinstance(node, ast.Subscript) and isinstance(node.ctx, ast.Load)
+            and isinstance(node.slice, ast.Constant) and node.slice.value == literal)
+        or (isinstance(node, ast.Compare)
+            and any(isinstance(op, (ast.In, ast.NotIn)) for op in node.ops)
+            and isinstance(node.left, ast.Constant) and node.left.value == literal)
+    ]
+
+
+def test_checkpoint_marker_keys_have_one_home():
+    """Structural (AST-only, no import of the modules under test): every reader of the two
+    checkpoint payload marker keys, the importable model reference and the weights, spells them
+    only through ``model_build.MODEL_SOURCE_KEY``/``STATE_DICT_KEY``, never the bare
+    ``"model_source"``/``"model_state_dict"`` literal. The literal scan covers every load shape
+    the key could still hide behind: a ``.get(``/``.pop(``/``.setdefault(`` call, a subscript, or
+    an ``in``/``not in`` membership test. A reader importing the constant under a local
+    re-spelling instead of the real one would still pass the absence half alone, so the second
+    half requires a genuine ``from tcip_mcp.pipelines.model_build import ...``, not just a
+    same-named local variable or an import from anywhere else. ``model_build.py`` itself defines
+    both constants rather than reading them, so it is excluded from both halves.
+    """
+    keys = {
+        "model_source": ("MODEL_SOURCE_KEY", {
+            "experiments.py": _module_path("experiments.py"),
+            "pipelines/training/subprocess_worker.py":
+                _module_path("pipelines/training/subprocess_worker.py"),
+            "tools/training_tools.py": _module_path("tools/training_tools.py"),
+            "pipelines/training/generic_trainer.py":
+                _module_path("pipelines/training/generic_trainer.py"),
+            "pipelines/inference/generic_predictor.py":
+                _module_path("pipelines/inference/generic_predictor.py"),
+            "pipelines/inference/predictor.py": _module_path("pipelines/inference/predictor.py"),
+        }),
+        "model_state_dict": ("STATE_DICT_KEY", {
+            "pipelines/training/generic_trainer.py":
+                _module_path("pipelines/training/generic_trainer.py"),
+            "pipelines/training/eval_runners.py":
+                _module_path("pipelines/training/eval_runners.py"),
+            "pipelines/inference/generic_predictor.py":
+                _module_path("pipelines/inference/generic_predictor.py"),
+            "pipelines/inference/predictor.py": _module_path("pipelines/inference/predictor.py"),
+        }),
+    }
+
+    for literal, (const_name, files) in keys.items():
+        for name, path in files.items():
+            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+            stray = _literal_loads(tree, literal)
+            assert not stray, f"{name} still reads a raw {literal!r} literal"
+
+            loaded = any(
+                isinstance(n, ast.Name) and n.id == const_name and isinstance(n.ctx, ast.Load)
+                for n in ast.walk(tree)
+            )
+            assert loaded, f"{name} never loads {const_name}"
+
+            imported = any(
+                isinstance(n, ast.ImportFrom) and n.module == "tcip_mcp.pipelines.model_build"
+                and any(a.name == const_name for a in n.names)
+                for n in ast.walk(tree)
+            )
+            assert imported, f"{name} reads {const_name} without importing it from model_build"
