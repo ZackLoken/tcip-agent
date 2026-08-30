@@ -135,3 +135,51 @@ def test_a_web_route_writes_its_delivery_event_under_the_payloads_root_not_the_p
         r for r in _delivery_event_records(pinned_root) if r["door"] == "results.per_plant_curves"
     ]
     assert pinned_records == []
+
+
+def test_phenology_measurement_records_onset_dates_only_when_the_positive_class_was_assessed(
+    tmp_path: Path,
+) -> None:
+    """The deleted onset_dates door itself recorded its event unconditionally, but ResultsTab
+    never called that door at all when positive_class_assessed was false; the merged door now
+    runs both projections every time, so it must enforce that same condition itself rather than
+    recording an onset-projection event the pre-merge flow never produced."""
+    from fastapi.testclient import TestClient
+
+    from tcip_web.app import app
+
+    from tests.test_tcip_web_results_routes import _phenology_fixture
+
+    client = TestClient(app, base_url="http://127.0.0.1")
+
+    unclassified = _phenology_fixture(
+        tmp_path, validated=True, fractions=(0.0,), id_map={"catkin": 0}, detections=2)
+    resp = client.post("/api/results/phenology_measurement", json=unclassified)
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["positive_class_assessed"] is False
+
+    doors = {r["door"] for r in _delivery_event_records(tmp_path.resolve())}
+    assert "results.per_plant_curves" in doors
+    assert "results.onset_dates" not in doors
+
+
+def test_phenology_measurement_records_onset_dates_when_the_positive_class_was_assessed(
+    tmp_path: Path,
+) -> None:
+    """The parity counterpart: a run that did assess the positive class still records both
+    projection events, the merged door's baseline behavior."""
+    from fastapi.testclient import TestClient
+
+    from tcip_web.app import app
+
+    from tests.test_tcip_web_results_routes import _phenology_fixture
+
+    client = TestClient(app, base_url="http://127.0.0.1")
+
+    assessed = _phenology_fixture(tmp_path, validated=True, detections=100)
+    resp = client.post("/api/results/phenology_measurement", json=assessed)
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["positive_class_assessed"] is True
+
+    doors = {r["door"] for r in _delivery_event_records(tmp_path.resolve())}
+    assert {"results.per_plant_curves", "results.onset_dates"} <= doors
