@@ -660,8 +660,11 @@ class TestInferenceToolOutputSchema:
         assert res["image_count"] == len(counts)
         assert res["total_detections"] == sum(counts.values())
         assert res["operating_point_validated"] == VALIDATED_HELD_OUT
+        # The delivered image cell is the stem, this platform's image identity everywhere else,
+        # never a basename with an extension the read side cannot honestly reproduce.
+        stem_counts = {Path(name).stem: n for name, n in counts.items()}
         rows = list(csv.DictReader(out_csv.read_text(encoding="utf-8").splitlines()))
-        assert {r["image"]: int(r["detection_count"]) for r in rows} == counts
+        assert {r["image"]: int(r["detection_count"]) for r in rows} == stem_counts
 
 
 class TestHpoToolOutputSchema:
