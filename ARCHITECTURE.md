@@ -752,12 +752,12 @@ the response shape `training.py` and `tuning.py` both answer in, and `_body_comm
 `EmptyBodyPayload`, the empty body model six path-parameter-only routes now declare so the
 browser must send a preflighted request rather than reaching the handler as a simple one.
 
-Total HTTP routes at HEAD: 87 (5 on `app.py` plus 82 across the 16 route modules, both counts
+Total HTTP routes at HEAD: 86 (5 on `app.py` plus 81 across the 16 route modules, both counts
 obtained this session by grepping `@app.get/post(` and `@router.get/post(` and summing);
 websocket routes are counted separately, below, and excluded from this total. Each per-router
-heading's own route count (and their sum, 85) includes any websocket route it lists, since
+heading's own route count (and their sum, 84) includes any websocket route it lists, since
 `routes/inference.py`, `routes/terminal.py` and `routes/training.py` each carry one; net of
-those three, the 16 modules hold the 82 HTTP routes counted here.
+those three, the 16 modules hold the 81 HTTP routes counted here.
 
 Total WebSocket routes at HEAD: 5 (`/ws/state`, `/ws/panel/{panel}` on `app.py`;
 `/api/terminal/ws/{session_id}` on `routes/terminal.py`; `/api/inference/jobs/{job_id}/stream`  <!-- queued: P5-124 unify -->
@@ -840,15 +840,14 @@ registered at HEAD.
 | POST | `/overviews` | `build_image_overviews` | `routes/images.py:867` |
 | GET | `/overviews/status` | `get_overview_job` | `routes/images.py:891` |
 
-### routes/inference.py, prefix `/api/inference` (4 HTTP + 1 WS)
+### routes/inference.py, prefix `/api/inference` (3 HTTP + 1 WS)
 
 | method | path | handler | line |
 |---|---|---|---|
 | POST | `/launch` | `launch_inference` | `routes/inference.py:456` |  <!-- queued: P5-105 delete -->
 | GET | `/jobs` | `list_jobs` | `routes/inference.py:555` |
-| GET | `/jobs/{job_id}/preview` | `get_preview` | `routes/inference.py:560` |
-| POST | `/jobs/{job_id}/cancel` | `cancel_job` | `routes/inference.py:574` |
-| WS | `/jobs/{job_id}/stream` | `stream_job` | `routes/inference.py:584` |
+| POST | `/jobs/{job_id}/cancel` | `cancel_job` | `routes/inference.py:560` |
+| WS | `/jobs/{job_id}/stream` | `stream_job` | `routes/inference.py:570` |
 
 ### routes/meta.py, prefix `/api/meta` (2 routes)
 
@@ -946,9 +945,9 @@ registered at HEAD.
 | POST | `/sweeps/{sweep_id}/trials/{trial_id}/tensorboard` | `launch_trial_tensorboard` | `routes/tuning.py:565` |
 | POST | `/sweeps/{sweep_id}/trials/{trial_id}/tensorboard/stop` | `stop_trial_tensorboard` | `routes/tuning.py:579` |
 
-### 9 routes with no located frontend caller
+### 8 routes with no located frontend caller
 
-Per phase0's `web-surface.md`, these 9 registered backend routes had no caller found
+Per phase0's `web-surface.md`, these 8 registered backend routes had no caller found
 under `packages/tcip-web/frontend/src/` by literal-path grep. Not re-derived this
 session; restated from phase0 as the brief instructs, with each route's line verified
 above against HEAD.
@@ -960,7 +959,6 @@ above against HEAD.
 | POST | `/api/events/{panel}` | posted by MCP tools (`tcip_mcp.web_client`), not by the browser |
 | GET | `/api/state` | no caller found |
 | GET | `/api/images/dimensions` | no caller found |  <!-- queued: P5-72 delete -->
-| GET | `/api/inference/jobs/{job_id}/preview` | no caller found; `inferenceApi` has no `preview` function |  <!-- queued: P5-125 delete -->
 | GET | `/api/review/image_status` | singular form; no caller found (plural `/api/review/image_statuses` is called) |  <!-- queued: P5-141 delete -->
 | POST | `/api/review/save_gt` | no caller found; `api.review` has no `saveGt` function |  <!-- queued: P5-139 delete -->
 | POST | `/api/training/compare` | no caller found; `trainingApi` has no `compare` function |  <!-- queued: P5-111 delete -->
