@@ -2497,6 +2497,22 @@ class DeliveryGateResult:
         return self.stamp[dimension]
 
 
+class DeliveryRefused(ValueError):
+    """A writer's delivery-gate refusal, carrying the ``DeliveryGateResult`` it refused on.
+
+    A door composing its own counts-bearing refusal response needs to tell this refusal apart
+    from the writer's other, count-free raises (a withdrawn operationalization): a bare
+    ``ValueError`` cannot be told apart without a second classification of the same writer's own
+    raises, drifting from it the moment either changes. ``str(self)`` is the gate's reason plus
+    the reconciler's binding notes, for a caller content to just log or propagate the message.
+    """
+
+    def __init__(self, gate: DeliveryGateResult, notes: str = "") -> None:
+        super().__init__(f"{gate.reason} {notes}".rstrip())
+        self.gate = gate
+        self.notes = notes
+
+
 _DIMENSION_REFERENCES: dict[str, tuple[str, ...]] = {
     "operating_point": _ACCEPTED_REFERENCES["annotations"],
     "measurement": _ACCEPTED_REFERENCES["annotations"],
@@ -2504,15 +2520,18 @@ _DIMENSION_REFERENCES: dict[str, tuple[str, ...]] = {
     "tile_size": _ACCEPTED_REFERENCES["geometry"],
     "scale": _ACCEPTED_REFERENCES["physical"],
     "claim_scope": CLAIM_SCOPE_REFERENCES,
-    "persisted_predictions": (),
 }
 """Which references clear which delivery-gate dimension, every row read from the kind's own
 acceptance table so no reference-to-kind pairing is stated a second time. The count, measurement
 and classifier dimensions are annotations-kind even for dimensional and ordinal/regression
 traits: every reconciler that feeds them resolves through a ``_DOCUMENT_PARAM`` entry declared
 ``"annotations"``, and a physical scale is its own ``"scale"`` dimension, never folded into
-``"measurement"``. ``"persisted_predictions"`` is floor-only (nothing clears it): it exists to
-state that an in-memory pass has no bucket behind its counts."""
+``"measurement"``. A dimension cleared by nothing (an empty tuple) states a missing prerequisite
+rather than a reference of any kind, see ``check_delivery_gate``'s cleared-by-nothing refusal arm;
+no production dimension reaches that arm today (``tabulate_counts``'s in-memory pass with no
+``predictions_dir`` now floors through ``export_detection_csv``'s own no-``pred_dirs`` measurement
+floor instead), so this stays documentation of a mechanism a future floor-only dimension can use,
+not a live assertion."""
 
 
 def check_delivery_gate(
