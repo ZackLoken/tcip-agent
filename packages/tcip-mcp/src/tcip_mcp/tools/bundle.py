@@ -193,7 +193,13 @@ def _registered_checkpoint_paths(tree: Path) -> frozenset[Path]:
 def _blob_files(
     tree: Path, claimed: frozenset[str], registered_checkpoints: frozenset[Path],
 ) -> tuple[Path, ...]:
-    """Every file under a recognized blob home that no record or log plan already adopts."""
+    """Every file under a recognized blob home that no record or log plan already adopts.
+
+    A ``.pt`` file anywhere under ``.tcip/experiments/`` is found by shape alone, in addition to
+    a registry-named path and the ``.tcip/models`` convenience location: a run's own checkpoint
+    (``launch_training``'s default ``output_dir``) is not confined to either, and a tree that has
+    moved away from where it was registered (a staged import) still has to find it.
+    """
     from tcip_mcp.dataset_layout import annotation_root as _annotation_root
     from tcip_mcp.dataset_layout import classes_path, dataset_identity_path
     from tcip_mcp.dataset_layout import image_root as _image_root
@@ -226,6 +232,8 @@ def _blob_files(
             if model_src.is_dir():
                 for f in model_src.rglob("*"):
                     _add(f)
+        for f in experiments.rglob("*.pt"):
+            _add(f)
     models_dir = tree / ".tcip" / "models"
     if models_dir.is_dir():
         for f in models_dir.glob("*.pt"):
@@ -262,8 +270,11 @@ def blob_home(
     :func:`account_for` while ``tree`` still holds its own registry index) names every checkpoint
     a registry entry points at outside ``.tcip/models``; pass it back in for a caller classifying
     blobs after the tree has moved (``import_project``, past its own rename), when a fresh
-    registry read would find nothing there any more. Omitted, this still recognizes every
-    checkpoint physically under ``.tcip/models``, the one home a pre-registry-aware caller knew.
+    registry read would find nothing there any more, since the moved tree's own registry still
+    names the exporting root's absolute paths. A ``.pt`` file under ``.tcip/experiments/`` is
+    recognized as a checkpoint by shape alone, whether or not any registry names it, so the same
+    file classifies the same way on both sides of that move. Omitted, this still recognizes every
+    checkpoint physically under ``.tcip/models`` or shaped as one under ``.tcip/experiments/``.
     """
     from tcip_mcp.dataset_layout import annotation_root as _annotation_root
     from tcip_mcp.dataset_layout import classes_path, dataset_identity_path
@@ -281,6 +292,8 @@ def blob_home(
         return BLOB_CHECKPOINTS
     experiments = tree / ".tcip" / "experiments"
     if _is_at_or_under(path, experiments):
+        if path.suffix == ".pt":
+            return BLOB_CHECKPOINTS
         rel = path.relative_to(experiments).parts
         if len(rel) >= 2 and rel[1] == "model_src":
             return BLOB_MODEL_SRC

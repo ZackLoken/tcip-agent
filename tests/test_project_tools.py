@@ -593,6 +593,46 @@ def test_archive_project_includes_a_registered_run_checkpoint_outside_tcip_model
     )
 
 
+def test_import_project_admits_a_bundle_holding_a_registered_run_checkpoint(
+    tmp_path: Path, monkeypatch,
+):
+    """archive_project(include_models=True) bundles a run's registered checkpoint from wherever
+    it actually sits; the staged tree's own registry still names the exporting project's absolute
+    path, which does not resolve under staging, so import_project must still recognize and admit
+    the checkpoint by its own shape rather than refusing its sibling door's own archive."""
+    from tcip_mcp.experiments import (
+        complete_run, create_experiment, experiment_dir, register_model_from_experiment,
+        update_status,
+    )
+
+    src = tmp_path / "src_project"
+    init_project(str(src), site="north orchard")
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(src))
+
+    exp_id = "exp_roundtrip"
+    create_experiment(exp_id, {"model_source": {"builder": "x:y"}})
+    update_status(exp_id, "running")
+    ckpt_dir = experiment_dir(exp_id)
+    # The file backend materializes the experiment directory; the database backend does not.
+    ckpt_dir.mkdir(parents=True, exist_ok=True)
+    weights = ckpt_dir / "model_final.pt"
+    weights.write_bytes(b"the real weights this run produced")
+    completed = complete_run(exp_id, str(weights))
+    assert "error" not in completed, completed
+    registered = register_model_from_experiment(exp_id, str(weights), project_path=str(src))
+    assert "error" not in registered, registered
+
+    zip_path = tmp_path / "export.zip"
+    exported = archive_project(str(src), str(zip_path), include_models=True)
+    assert "error" not in exported, exported
+
+    dest = tmp_path / "restored"
+    imported = import_project(str(zip_path), str(dest))
+
+    assert "error" not in imported, imported
+    assert (dest / ".tcip" / "experiments" / exp_id / "model_final.pt").is_file()
+
+
 def test_archive_project_admits_a_symlink_spelled_project(tmp_path: Path):
     """A project reached through a symlink must archive rather than raising ValueError out of
     the door: archive_project resolves project_path once and uses that resolved root for both
