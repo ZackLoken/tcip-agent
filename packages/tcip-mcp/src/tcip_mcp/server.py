@@ -28,6 +28,7 @@ import tcip_mcp.tools.scale_tools  # noqa: F401, E402
 import tcip_mcp.tools.annotation_tools  # noqa: F401, E402
 import tcip_mcp.tools.vision_tools  # noqa: F401, E402
 import tcip_mcp.tools.proposal_tools  # noqa: F401, E402
+import tcip_mcp.tools.gui_tools  # noqa: F401, E402
 import tcip_mcp.tools.feedback_tools  # noqa: F401, E402
 import tcip_mcp.tools.training_tools  # noqa: F401, E402
 import tcip_mcp.tools.inference_tools  # noqa: F401, E402

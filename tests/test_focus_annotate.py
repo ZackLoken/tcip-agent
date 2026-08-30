@@ -12,7 +12,7 @@ from pathlib import Path
 from tcip_annotation import json_io
 from tcip_annotation.state import Annotation, BBox, Point, Polygon
 from tcip_mcp.dataset_layout import annotation_dir, image_dir
-from tcip_mcp.tools.annotation_tools import focus
+from tcip_mcp.tools.gui_tools import focus
 
 
 def _scene(root: Path, date: str, images: list[str]) -> None:

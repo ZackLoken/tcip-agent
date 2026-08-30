@@ -16,7 +16,7 @@ def test_polygon_iou_valid_and_degenerate():
 
 
 def test_push_panel_data_reports_delivered_flag():
-    from tcip_mcp.tools.annotation_tools import push_panel_data
+    from tcip_mcp.tools.gui_tools import push_panel_data
     res = push_panel_data("review", "load_matches", {"x": 1})
     # The delivery outcome is now an explicit bool: "backend down" can't read as success.
     assert "delivered" in res and isinstance(res["delivered"], bool)

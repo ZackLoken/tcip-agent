@@ -170,7 +170,7 @@ class TestPostPanelEventRoute:
         what a field is called cannot both keep passing.
         """
         from tcip_mcp import web_client
-        from tcip_mcp.tools.annotation_tools import focus
+        from tcip_mcp.tools.gui_tools import focus
 
         posted: dict = {}
 
@@ -290,7 +290,7 @@ class TestPushPanelDataTool:
 
     def test_no_subscribers_when_backend_down(self, tmp_path: Path, monkeypatch) -> None:
         """Backend not running → graceful 'no_subscribers' status."""
-        from tcip_mcp.tools.annotation_tools import push_panel_data
+        from tcip_mcp.tools.gui_tools import push_panel_data
 
         # Point port discovery at an unused port in an isolated project root
         monkeypatch.setenv("TCIP_WEB_PORT", "59999")  # very unlikely to be bound
@@ -307,7 +307,7 @@ class TestPushPanelDataTool:
 
     def test_invalid_panel_rejected(self) -> None:
         """Unknown panel names return an error before any HTTP call."""
-        from tcip_mcp.tools.annotation_tools import push_panel_data
+        from tcip_mcp.tools.gui_tools import push_panel_data
 
         result = push_panel_data(panel="bogus", event_type="test", data={})
         assert "error" in result

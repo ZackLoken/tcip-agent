@@ -339,7 +339,7 @@ def test_mcp_read_annotations_tool_returns_a_point(tmp_path: Path) -> None:
 
 def test_subject_task_names_a_point_only_frame(tmp_path: Path) -> None:
     """A point-only frame is annotated (a non-None task) but is neither 'detect' nor 'segment'."""
-    from tcip_mcp.tools.annotation_tools import _subject_task
+    from tcip_mcp.tools.gui_tools import _subject_task
 
     assert _subject_task([Annotation(subject="catkin", geometry=Point(1.0, 1.0))], "catkin") == "point"
     assert _subject_task([Annotation(subject="catkin", geometry=BOX)], "catkin") == "detect"

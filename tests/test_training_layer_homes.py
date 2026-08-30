@@ -193,6 +193,18 @@ def test_annotation_side_proposal_tools_have_one_home():
     )
 
 
+def test_gui_driving_tools_have_one_home():
+    """``push_panel_data``, ``focus`` and their private drivers ``_focus_annotate``/
+    ``_focus_review`` moved out of ``annotation_tools.py`` into ``tools/gui_tools.py``, with the
+    helpers only they used (``_subject_task``, ``_logical_image_names``)."""
+    _assert_one_home(
+        {"push_panel_data", "focus", "_focus_annotate", "_focus_review",
+         "_subject_task", "_logical_image_names"},
+        _module_path("tools/annotation_tools.py"),
+        _module_path("tools/gui_tools.py"),
+    )
+
+
 def test_checkpoint_marker_keys_have_one_home():
     """Structural (AST-only, no import of the modules under test): every reader of the two
     checkpoint payload marker keys, the importable model reference and the weights, spells them

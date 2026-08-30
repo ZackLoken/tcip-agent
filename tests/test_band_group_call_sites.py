@@ -152,7 +152,7 @@ def test_dims_for_a_grouped_capture_path(grouped_dataset):
 
 
 def test_focus_annotate_lands_on_the_grouped_capture_by_manifest_name(grouped_dataset):
-    from tcip_mcp.tools.annotation_tools import focus
+    from tcip_mcp.tools.gui_tools import focus
 
     res = focus("annotate", str(grouped_dataset), str(grouped_dataset), "catkin", "2026-04-01")
     assert "error" not in res
