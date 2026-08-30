@@ -94,15 +94,14 @@ def registry_path_for(dataset_root: str | Path, project_root: str | Path) -> str
     relative form than the project's own ``"."``) reads the same after a cross-machine move;
     :func:`dataset_entry_path` resolves it back by posix parts.
     """
+    from tcip_mcp.registry_paths import nearest_containing_ancestor
+
     dataset_root, project_root = Path(dataset_root), Path(project_root)
     if dataset_root.is_dir() and project_root.is_dir():
         resolved = dataset_root.resolve()
-        for ancestor in (resolved, *resolved.parents):
-            try:
-                if os.path.samefile(ancestor, project_root):
-                    return resolved.relative_to(ancestor).as_posix()
-            except OSError:
-                continue
+        ancestor = nearest_containing_ancestor(resolved, project_root, tolerant=True)
+        if ancestor is not None:
+            return resolved.relative_to(ancestor).as_posix()
         return str(resolved)
     return str(dataset_root)
 
@@ -113,12 +112,16 @@ def entry_is_external(entry: dict) -> bool:
     An external dataset is the one kind :func:`registry_path_for` stores absolute; every other
     entry is the project's own tree or a directory under it, stored relative. The one spelling
     of this test, so a caller asking "is this dataset external" agrees with the writer's own
-    rule rather than re-deriving it.
+    rule rather than re-deriving it. Grammar-aware (:func:`~tcip_mcp.registry_paths.is_external_form`)
+    rather than ``Path.is_absolute()`` alone, so a Windows drive or UNC spelling reads as
+    external whichever platform reads it.
     """
     path = entry.get("path")
     if not path:
         return False
-    return Path(path).is_absolute()
+    from tcip_mcp.registry_paths import is_external_form
+
+    return is_external_form(str(path))
 
 
 def dataset_entry_path(project_root: str | Path, entry: dict) -> Path:
@@ -628,11 +631,12 @@ def archive_project(project_path: str, output_path: str = "", include_models: bo
         return {"error": f"a store database under {root} could not be exported before "
                          f"archiving, so the bundle cannot be vouched for: {exc}"}
 
+    from tcip_mcp.model_registry import RegistryVersionRefused
     from tcip_mcp.tools.bundle import BLOB_CHECKPOINTS, AnchorMisplaced, account_for, blob_home
 
     try:
         accounting = account_for(root)
-    except AnchorMisplaced as exc:
+    except (AnchorMisplaced, RegistryVersionRefused) as exc:
         return {"error": str(exc)}
 
     if not output_path:
@@ -835,13 +839,24 @@ def import_project(zip_path: str, destination: str) -> dict:
     state); the staging tree this run made is removed whether the run refused, raised, or
     succeeded (a success has already moved it onto ``destination``, so removal there is a no-op).
 
+    Before accounting for the extracted tree, the model registry index is conformed in place,
+    directly against the extracted files
+    (:func:`~tcip_mcp.model_registry.conform_registry_paths_on_disk`; the extracted tree is
+    always loose files at this point regardless of which backend the process is bound to, since
+    adoption has not run yet): a legacy version-1 index wraps to version 2 and every entry's
+    ``checkpoint_path`` is respelled relative to the staging tree, so an archive made before this
+    respelling existed still lands with its weights loadable at the new location. A conform
+    refusal (an index this reader does not recognize at all) refuses the whole import before
+    anything is accounted for or moved, leaving the destination untouched.
+
     The response carries per-root adopted counts, blob counts per class, ``database_built``
     (whether adoption ran or the file layout was kept), ``dataset_paths_unresolved`` (the
     registered datasets whose absolute path stayed verbatim because they are outside the imported
-    tree), ``checkpoint_paths_unresolved`` (registered checkpoint paths that do not resolve to a
-    file under the destination, since the model registry entry itself is never rewritten by this
-    door either, exactly the same disclosure shape as ``dataset_paths_unresolved``), and
-    ``files_extracted``.
+    tree), ``checkpoint_paths_unresolved`` (registered checkpoint paths that are supposed to
+    resolve under the destination and do not, since the model registry entry itself is never
+    rewritten by this door beyond the conform above), ``external_checkpoints`` (registered
+    checkpoints whose path is a designed-external claim, each with whether it currently exists),
+    and ``files_extracted``.
 
     Args:
         zip_path: Path to the ``.tcip.zip`` archive.
@@ -904,8 +919,10 @@ def _run_import_into_staging(zp: Path, staging: Path, dest: Path) -> dict:
     from tcip_store.errors import StoreError
     from tcip_store.file_backend import DEFAULT_LOCK_TIMEOUT_S
 
+    from tcip_mcp.model_registry import RegistryVersionRefused, conform_registry_paths_on_disk
     from tcip_mcp.tools.bundle import (
-        AnchorMisplaced, account_for, blob_home, unresolved_registered_checkpoints,
+        AnchorMisplaced, account_for, blob_home, external_registered_checkpoints,
+        unresolved_registered_checkpoints,
     )
 
     try:
@@ -914,8 +931,13 @@ def _run_import_into_staging(zp: Path, staging: Path, dest: Path) -> dict:
         return {"error": f"{zp} is not a readable ZIP archive: {exc}"}
 
     try:
+        conform_registry_paths_on_disk(staging)
+    except RegistryVersionRefused as exc:
+        return {"error": f"the extracted registry index could not be conformed: {exc}"}
+
+    try:
         accounting = account_for(staging)
-    except (AnchorMisplaced, StoreError) as exc:
+    except (AnchorMisplaced, StoreError, RegistryVersionRefused) as exc:
         return {"error": str(exc)}
 
     tree = accounting.tree
@@ -965,6 +987,7 @@ def _run_import_into_staging(zp: Path, staging: Path, dest: Path) -> dict:
 
     dataset_paths_unresolved = _external_dataset_paths(dest)
     checkpoint_paths_unresolved = list(unresolved_registered_checkpoints(dest))
+    external_checkpoints = list(external_registered_checkpoints(dest))
 
     return {
         "destination": str(dest),
@@ -974,11 +997,13 @@ def _run_import_into_staging(zp: Path, staging: Path, dest: Path) -> dict:
         "blob_counts": blob_classes,
         "dataset_paths_unresolved": dataset_paths_unresolved,
         "checkpoint_paths_unresolved": checkpoint_paths_unresolved,
+        "external_checkpoints": external_checkpoints,
     }
 
 
 def _external_dataset_paths(project_root: Path) -> list[str]:
     """The imported project's own registered dataset entries that stay absolute (external),
-    disclosed rather than silently kept: the door never rewrites any registry entry (2.3)."""
+    disclosed rather than silently kept: the door never rewrites a dataset registry entry, only
+    the model registry's own checkpoint paths get a conform step (see :func:`import_project`)."""
     entries = read_datasets(project_root)
     return sorted(str(e["path"]) for e in entries if entry_is_external(e))
