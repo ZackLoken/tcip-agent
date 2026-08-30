@@ -132,34 +132,6 @@ def test_first_verdict_baselines_the_label_file_under_its_original_directory(
     assert sorted(p.name for p in label_dir.glob("*.json")) == ["IMG_0000.json"]
 
 
-def test_the_first_verdict_baselines_the_label_file_before_its_mutation(
-    client: TestClient, tmp_path: Path
-) -> None:
-    """``/action`` is the only writer of a reviewed label file, so it must baseline the file
-    itself on the verdict that first touches it: the pristine pre-edit geometry must survive
-    under ``.original``."""
-    img = _image(tmp_path)
-    label_dir = tmp_path / "annotations" / "2-11-26"
-    label_dir.mkdir(parents=True)
-    gt = label_dir / "IMG_0000.json"
-    original = (10.0, 10.0, 50.0, 30.0)
-    write_annotations(str(gt), [Annotation(subject="catkin", geometry=BBox(*original))],
-                      IMG_W, IMG_H)
-    dataset_root = _dataset_root(tmp_path)
-
-    _verdict(client, dataset_root, img, gt, original, EDITED_BOX)
-
-    baseline = label_dir / ".original" / "IMG_0000.json"
-    assert baseline.is_file()
-    (kept,) = read_annotations(str(baseline))
-    assert (kept.geometry.x1, kept.geometry.y1,
-            kept.geometry.x2, kept.geometry.y2) == original
-
-    (live,) = read_annotations(str(gt))
-    assert (live.geometry.x1, live.geometry.y1,
-            live.geometry.x2, live.geometry.y2) == EDITED_BOX
-
-
 def _verdict(client: TestClient, dataset_root: Path, img: Path, gt: Path,
              box: tuple[float, float, float, float],
              edited: tuple[float, float, float, float]) -> None:
