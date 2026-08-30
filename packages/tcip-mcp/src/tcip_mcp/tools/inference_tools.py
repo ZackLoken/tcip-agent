@@ -1673,9 +1673,12 @@ def tabulate_counts(
 
     Meaning door: ``trait``'s per-image-count operationalization must be recorded and
     breeder-confirmed, checked before the pass runs (live) or the bucket is read (bucket regime),
-    not after. This function returns ``image_count`` and ``total_detections`` on a gate refusal as
-    well as on success, so a check placed after the gate would hand back the very numbers it
-    refused to write; an operationalization refusal (withdrawn or never recorded) carries neither.
+    not after. Only the CSV's own delivery-gate refusal, raised after the pass or the bucket read,
+    returns ``image_count`` and ``total_detections`` beside the error, so a check placed after that
+    gate would hand back the very numbers it refused to write; an operationalization refusal
+    (withdrawn or never recorded), and every refusal the shared publish bracket raises before the
+    CSV's own gate ever runs (a fabricated tile scale, an unearned count claim, a frozen lineage
+    pointer), carry neither.
 
     The live regime's own ``checkpoint_sha256``/``experiment_id`` are the run's asserted identity,
     never corroborated; the bucket regime's are the stamp's own asserted identity, labelled so, no
@@ -1683,7 +1686,10 @@ def tabulate_counts(
     ``producer_model_sha256``/``producing_experiment_id`` columns, and this response's
     ``measurement_validated``, are ``export_detection_csv``'s returned tail, corroborated against
     what a record outside the stamp actually answers for, so the two can legitimately differ (or
-    the tail can read unknown where the asserted identity does not).
+    the tail can read unknown where the asserted identity does not). ``validated`` is live-only:
+    the run's own verdict over the dimensions it resolved, absent from the bucket regime's response
+    since no run happens there; the gate's own outcome travels in ``measurement_validated``/
+    ``operating_point_validated``/``tile_size_validated`` in both regimes.
 
     Args:
         checkpoint_path: Path to model .pt checkpoint (live regime; required with ``images_dir``,
@@ -1845,6 +1851,7 @@ def tabulate_counts(
     dropped_boxes = 0
     bucket_published = False
     lineage_linked = None
+    csv_rows = result["results"]
     if bucket is not None:
         pub = _publish_bucket_bracket(
             result, out=bucket, checkpoint_path=checkpoint_path, trait=trait, images_dir=images_dir,
@@ -1854,6 +1861,9 @@ def tabulate_counts(
         dropped_boxes = pub["dropped_boxes"]
         lineage_linked = pub["lineage_linked"]
         bucket_published = True
+        # Counted off the just-published documents through the bucket regime's own reader, so this
+        # CSV and a bucket-regime re-read of it count by the identical predicate.
+        csv_rows = _bucket_csv_rows(bucket)
 
     provenance = {
         "producer_model_sha256": result.get("checkpoint_sha256"),
@@ -1862,7 +1872,7 @@ def tabulate_counts(
     }
     try:
         csv_path, tail, summary = export_detection_csv(
-            result["results"], output_path, provenance=provenance, trait=trait,
+            csv_rows, output_path, provenance=provenance, trait=trait,
             measurement_validated=op_ref,
             pred_dirs=[str(bucket)] if bucket is not None else None,
             acknowledge_unvalidated=acknowledge_unvalidated,
@@ -1941,6 +1951,27 @@ def tabulate_counts(
     return out
 
 
+def _bucket_csv_rows(bucket_path: Path) -> list[dict]:
+    """A prediction bucket's own per-image documents as ``export_detection_csv``'s row source.
+
+    Real detections only (``detection_annotations``, a ``Point`` excluded), ordered by document
+    stem rather than trusted to ``prediction_documents``' own filename sort (which would diverge
+    from the live regime's sorted-stem enumeration once ``.json`` changes a stem's relative
+    order). The one reader every documents-backed CSV path shares, so a masked detection the
+    write side kept on its stored polygon's extent cannot be dropped again by a different,
+    box-based predicate downstream.
+    """
+    from tcip_annotation.json_io import detection_annotations, prediction_documents, safe_score
+
+    documents = sorted(prediction_documents(bucket_path), key=lambda p: p.stem)
+    image_results = []
+    for doc in documents:
+        annotations = detection_annotations(doc)
+        scores = [safe_score(a.score) for a in annotations if a.score is not None]
+        image_results.append({"image": str(doc), "count": len(annotations), "scores": scores})
+    return image_results
+
+
 def _tabulate_counts_from_bucket(predictions_dir: str, output_path: str, *, trait: str,
                                  acknowledge_unvalidated: bool, stated_basis) -> dict:
     """``tabulate_counts``'s bucket regime: an existing, reviewed prediction bucket in, no GPU.
@@ -1949,7 +1980,6 @@ def _tabulate_counts_from_bucket(predictions_dir: str, output_path: str, *, trai
     reviewed bucket is the point. Refuses on the bucket's own mandatory stamp shape before
     counting anything, so a mosaic bucket or a directory with no stamp at all is never counted.
     """
-    from tcip_annotation.json_io import detection_annotations, prediction_documents, safe_score
     from tcip_mcp.operationalization import (
         PER_IMAGE_COUNT,
         check_operationalization,
@@ -1973,7 +2003,7 @@ def _tabulate_counts_from_bucket(predictions_dir: str, output_path: str, *, trai
             "confirmed for it. Deliver a per-plant count from it through "
             "deliver_orthomosaic_plant_counts instead."
         )}
-    if sidecar.get("images_dir") is None:
+    if not sidecar.get("images_dir"):
         return {"error": (
             f"{bucket_path}'s stamp records neither images_dir nor raster_path: it is not a "
             "per-image prediction bucket this door can read."
@@ -1985,12 +2015,12 @@ def _tabulate_counts_from_bucket(predictions_dir: str, output_path: str, *, trai
             "bucket produced for one trait cannot deliver acknowledged under another."
         )}
 
-    documents = prediction_documents(bucket_path)
-    image_results = []
-    for doc in documents:
-        annotations = detection_annotations(doc)
-        scores = [safe_score(a.score) for a in annotations if a.score is not None]
-        image_results.append({"image": str(doc), "count": len(annotations), "scores": scores})
+    image_results = _bucket_csv_rows(bucket_path)
+    if not image_results:
+        return {"error": (
+            f"{bucket_path} carries a readable stamp but no prediction documents: an empty "
+            "bucket is not a per-image count either."
+        )}
     image_count = len(image_results)
     total_detections = sum(r["count"] for r in image_results)
 
@@ -2012,7 +2042,6 @@ def _tabulate_counts_from_bucket(predictions_dir: str, output_path: str, *, trai
             "operating_point_validated": exc.gate.stamp.get("measurement", VALIDATED_FALSE),
             "tile_size_validated": exc.gate.stamp.get("tile_size"),
             "operating_point": sidecar.get("operating_point"),
-            "validated": False,
             "image_count": image_count,
             "total_detections": total_detections,
             "predictions_dir": str(bucket_path),
@@ -2033,7 +2062,6 @@ def _tabulate_counts_from_bucket(predictions_dir: str, output_path: str, *, trai
         "tile_size_validated": (
             summary["stamp"].get("tile_size") if summary["tile_size_operative"] else None),
         "measurement_validated": tail["measurement_validated"],
-        "validated": len(summary["unvalidated"]) == 0,
         "checkpoint_sha256": sidecar.get("checkpoint_sha256"),
         "experiment_id": sidecar.get("experiment_id"),
         "predictions_dir": str(bucket_path),
