@@ -157,6 +157,41 @@ def canvas_geometry_key(project_root: str) -> Key:
     return Key(CANVAS_GEOMETRY_STORE, project_root, _GEOMETRY_PARTS)
 
 
+_BINDING_DOC = RootedFileLocator(prefix=(".tcip", "state"), suffix=".json")
+"""The canvas-open binding, one record per workspace."""
+
+CANVAS_OPEN_BINDING_STORE = "canvas_open_binding"
+_BINDING_PARTS = ("canvas_open_binding",)
+register_store(
+    StoreDescriptor(
+        name=CANVAS_OPEN_BINDING_STORE,
+        kind="record",
+        key_fields=("document",),
+        frozen=True,
+        codec=RECORD_JSON,
+        concurrency="cas",
+        locator=_BINDING_DOC,
+    )
+)
+
+
+def canvas_open_binding_key(*, create: bool = True) -> Key:
+    """Which root the GUI currently has open: ``{generation, root, project_name, issued_at}``.
+
+    Workspace-scoped, one record: ``/dataset/select`` is the one writer, reading the current
+    record inside a transaction to decide whether ``root`` changed (bumping ``generation``) before
+    writing, so an unconditional write would drop a concurrent select's bump. ``root`` is the
+    server's own resolved open root, never a client string; ``project_name`` is the workspace
+    project name when ``root`` is one, else ``None`` (a registered dataset root or a
+    ``TCIP_IMAGE_ROOTS`` entry binds by root all the same). A reader that must not bring a
+    workspace directory into existence on a bare read (``capture_live_canvas``) passes
+    ``create=False``.
+    """
+    from tcip_mcp import workspace
+
+    return Key(CANVAS_OPEN_BINDING_STORE, str(workspace.workspace_root(create=create)), _BINDING_PARTS)
+
+
 ActiveTab = Literal["annotate", "review", "training", "tuning", "inference", "results", "meta"]
 """The GUI's tabs: the vocabulary ``GuiState.active_tab`` holds and ``POST /api/state/tab``
 validates against."""

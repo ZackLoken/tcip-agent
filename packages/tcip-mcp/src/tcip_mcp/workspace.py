@@ -244,6 +244,37 @@ def resolve_project_path(given: str) -> str:
     return str(project_path(name)) if name else given
 
 
+def workspace_project_name(root: Path) -> Optional[str]:
+    """``root``'s workspace project name, when it is exactly one project's own directory; else
+    ``None``.
+
+    Compared by filesystem identity (``os.path.samefile`` against the workspace root, not string
+    equality), so a case variant or a substituted drive of the same directory still resolves. A
+    root nested inside a project, the workspace root itself, or a directory the workspace does
+    not consider adoptable (:func:`adoptable_project_root`) names no project. The one predicate
+    :mod:`tcip_web.routes.dataset` calls to name the ``canvas_open_binding`` record's
+    ``project_name``, and :mod:`tcip_mcp.tools.vision_tools` calls the same way to name a
+    divergent binding's project.
+    """
+    ws = workspace_root(create=False)
+    resolved = Path(root)
+    if not resolved.is_dir():
+        return None
+    try:
+        if not os.path.samefile(resolved.parent, ws):
+            return None
+    except OSError:
+        return None
+    name = resolved.name
+    if not is_valid_name(name):
+        return None
+    try:
+        adoptable_project_root(name)
+    except ValueError:
+        return None
+    return name
+
+
 def set_active_project(name: str) -> Path:
     """Adopt a workspace project: write the marker atomically and repin platform state to it.
 
