@@ -577,10 +577,12 @@ def _database_counters(root: Path) -> dict[tuple[str, str], int]:
     return counters
 
 
-@mcp.tool()
 @audited
 def archive_project(project_path: str, output_path: str = "", include_models: bool = False) -> dict:
     """Export an annotation project as a portable ZIP archive.
+
+    Not an MCP tool: run through ``scripts/archive_project.py``, per the admission standard
+    (packages/tcip-mcp/CLAUDE.md), while staying importable for its own tests.
 
     Composes the bundle from the shared membership accounting
     (:func:`tcip_mcp.tools.bundle.account_for`), the same one ``import_project`` judges by: every
