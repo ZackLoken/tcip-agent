@@ -21,7 +21,6 @@ import type {
   Mode,
   PointShape,
   PolygonShape,
-  PredictionReference,
   ReviewFilters,
   ReviewImageStatus,
   ReviewStatusFilter,
@@ -56,7 +55,6 @@ const DEFAULT_STATE: GuiState = {
   mode: "box",
   active_subject: null,
   review: DEFAULT_REVIEW,
-  pred_reference: null,
 };
 
 /**
@@ -345,7 +343,6 @@ export interface AppState {
   setView: (view: ViewState) => void;
   setMode: (mode: Mode) => void;
   setActiveSubject: (subject: string | null) => void;
-  setPredReference: (p: PredictionReference | null) => void;
 
   /** Registry helpers. ``version`` is the stored registry's compare-and-set token to carry into
    *  the next save; omitted (or null) for a caller with no version to assert, such as a test
@@ -601,7 +598,6 @@ export const useStore = create<AppState>()((set, get) => ({
             ...incoming,
             active_tab: loadLastTab(incoming.dataset.project_root) ?? "annotate",
             active_subject: incoming.active_subject ?? null,
-            pred_reference: null,
           },
           reviewStatus: DEFAULT_REVIEW_STATUS,
           wsVersion: nextVersion,
@@ -610,9 +606,9 @@ export const useStore = create<AppState>()((set, get) => ({
 
       if (identityChanged) {
         // New dataset selection: adopt it wholesale (including its index) and drop
-        // any stale prediction-reference overlay and reviewStatus. The active tab stays put.
+        // the stale reviewStatus. The active tab stays put.
         return {
-          gui: { ...local, dataset: inDs, pred_reference: null },
+          gui: { ...local, dataset: inDs },
           reviewStatus: DEFAULT_REVIEW_STATUS,
           wsVersion: nextVersion,
         };
@@ -621,8 +617,8 @@ export const useStore = create<AppState>()((set, get) => ({
       // prediction dir) but keep the user's navigation position and the local
       // image_list reference (same identity => same list; reusing the ref avoids
       // spuriously re-firing effects keyed on it, like registry/status hydration).
-      // Everything else (active_tab / mode / active_subject / view / review /
-      // pred_reference) is client-owned; keep local.
+      // Everything else (active_tab / mode / active_subject / view / review) is
+      // client-owned; keep local.
       return {
         gui: {
           ...local,
@@ -646,7 +642,6 @@ export const useStore = create<AppState>()((set, get) => ({
   setView: (view) => set((s) => ({ gui: { ...s.gui, view } })),
   setMode: (mode) => set((s) => ({ gui: { ...s.gui, mode } })),
   setActiveSubject: (active_subject) => set((s) => ({ gui: { ...s.gui, active_subject } })),
-  setPredReference: (pred_reference) => set((s) => ({ gui: { ...s.gui, pred_reference } })),
 
   setRegistry: (subjects, version = null) =>
     set(() => ({ registry: { subjects, loaded: true, version } })),

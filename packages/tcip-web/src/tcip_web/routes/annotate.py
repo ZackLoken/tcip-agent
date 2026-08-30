@@ -26,7 +26,6 @@ from tcip_mcp.pipelines.image_utils import image_dimensions, resolve_image_sourc
 from tcip_store import Version, VersionConflict
 from tcip_web.identity import resolve_user, user_id
 from tcip_web.paths import assert_path_allowed
-from tcip_web.state import PredictionReference, store
 
 logger = logging.getLogger(__name__)
 
@@ -237,46 +236,3 @@ def save_labels(payload: SavePayload) -> dict:
         # New version token so the client can save again without a reload.
         "base_mtime": token,
     }
-
-
-class OpenImagePayload(BaseModel):
-    image_path: str
-    image_index: Optional[int] = None
-    scale: Optional[float] = None
-    offset_x: Optional[float] = None
-    offset_y: Optional[float] = None
-    mode: Optional[str] = None
-    pred_reference: Optional[PredictionReference] = None
-
-
-@router.post("/open")
-async def open_image(payload: OpenImagePayload) -> dict:
-    """Command the Annotate tab to load an image with an optional view + pred-reference.
-
-    Used by the Review tab's Edit / FP-Accept flow to drive the Annotate tab
-    with the same zoom and a dashed blue pred-reference overlay.
-    """
-    updates: dict = {"active_tab": "annotate"}
-    view_update = {}
-    if payload.scale is not None:
-        view_update["scale"] = payload.scale
-    if payload.offset_x is not None:
-        view_update["offset_x"] = payload.offset_x
-    if payload.offset_y is not None:
-        view_update["offset_y"] = payload.offset_y
-    if view_update:
-        view = store.state.view.model_copy(update=view_update)
-        updates["view"] = view
-    if payload.mode is not None:
-        updates["mode"] = payload.mode
-    if payload.pred_reference is not None:
-        updates["pred_reference"] = payload.pred_reference
-    else:
-        updates["pred_reference"] = None
-
-    if payload.image_index is not None:
-        dataset = store.state.dataset.model_copy(update={"current_image_index": payload.image_index})
-        updates["dataset"] = dataset
-
-    await store.mutate(updates)
-    return {"status": "ok", "image_path": payload.image_path}

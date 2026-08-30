@@ -65,7 +65,10 @@ class DatasetSelection(BaseModel):
 
 
 class PredictionReference(BaseModel):
-    """Overlay shown in the Annotate tab when user drew via Edit-from-Review."""
+    """Shape of the ``pred_reference`` field below: part of ``gui_snapshot``'s frozen version 1
+    schema, held to it for every already-persisted ``gui.json``. It has no producer since the
+    Review-to-Annotate hand-off route was removed; the working shape for a reviewer's edit is
+    the in-place Edit flow inside Review itself."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -113,6 +116,8 @@ class GuiState(BaseModel):
     mode: AnnotateMode = "box"
     active_subject: str = ""
     review: ReviewFilters = Field(default_factory=ReviewFilters)
+    # No producer: kept only because gui_snapshot is frozen at version 1 and every persisted
+    # gui.json already carries this field. See PredictionReference's own docstring.
     pred_reference: Optional[PredictionReference] = None
 
 

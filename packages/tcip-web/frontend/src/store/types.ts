@@ -30,14 +30,6 @@ export interface ViewState {
   offset_y: number;
 }
 
-/** Dashed reference overlay shown in the Annotate tab (Review→Edit flow). Display-only:
- *  a name-based label carries its subject, but the reference itself just needs geometry. */
-export interface PredictionReference {
-  type: "box" | "polygon";
-  coords: number[] | number[][];
-  confidence: number | null;
-}
-
 export interface ReviewFilters {
   iou_threshold: number;
   conf_threshold: number;
@@ -60,7 +52,6 @@ export interface GuiState {
   // The subject a new shape is authored for (was an integer active_class). Client-owned.
   active_subject: string | null;
   review: ReviewFilters;
-  pred_reference: PredictionReference | null;
 }
 
 /* ── Label schema (name-based, one unified file per image) ───────────────── */

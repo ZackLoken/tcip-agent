@@ -1416,16 +1416,6 @@ def test_dataset_state_route_is_retired(client: TestClient) -> None:
     assert client.get("/api/dataset/state").status_code == 404
 
 
-def test_annotate_open_rejects_an_unknown_mode(client: TestClient) -> None:
-    before = client.get("/api/state").json()["mode"]
-    resp = client.post("/api/annotate/open", json={
-        "image_path": "IMG_0000.JPG", "mode": "lasso",
-    })
-    assert resp.status_code == 400
-    assert "lasso" in resp.json()["detail"]
-    assert client.get("/api/state").json()["mode"] == before
-
-
 # ── /api/fs (folder browser) ───────────────────────────────────────────────
 
 

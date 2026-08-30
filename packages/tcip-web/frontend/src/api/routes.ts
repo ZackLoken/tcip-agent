@@ -51,7 +51,6 @@ export const ROUTES = {
   getTuningSweepsBySweepIdTrialsByTrialIdMetrics: (sweepId: string, trialId: string) =>
     `/api/tuning/sweeps/${encodeURIComponent(sweepId)}/trials/${encodeURIComponent(trialId)}/metrics`,
   postAnnotateLabels: "/api/annotate/labels",
-  postAnnotateOpen: "/api/annotate/open",
   postCanvasState: "/api/canvas/state",
   postClassesImageStatus: "/api/classes/image_status",
   postClassesImageStatusBulk: "/api/classes/image_status/bulk",

@@ -25,8 +25,6 @@ import type {
   DatasetSelection,
   ImageLabels,
   MatchesResponse,
-  Mode,
-  PredictionReference,
   ReviewImageStatus,
   TabName,
 } from "@/store/types";
@@ -342,20 +340,6 @@ export const api = {
       const data = (await resp.json()) as { base_mtime: string | null };
       return { status: "ok", base_mtime: data.base_mtime };
     },
-
-    openImage: (body: {
-      image_path: string;
-      image_index?: number;
-      scale?: number;
-      offset_x?: number;
-      offset_y?: number;
-      mode?: Mode;
-      pred_reference?: PredictionReference | null;
-    }) =>
-      call<{ status: string; image_path: string }>(ROUTES.postAnnotateOpen, {
-        method: "POST",
-        body: JSON.stringify(body),
-      }),
   },
 
   review: {

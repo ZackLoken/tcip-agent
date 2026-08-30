@@ -43,7 +43,7 @@ import {
 } from "@/lib/polygonGeometry";
 import { applyEditDrag, hitTestEdit, MIN_BOX_SIDE, type EditDrag } from "@/lib/editGeometry";
 import { useStore } from "@/store";
-import type { Box, Mode, PointShape, PolygonShape, PredictionReference } from "@/store/types";
+import type { Box, Mode, PointShape, PolygonShape } from "@/store/types";
 
 const SNAP_RADIUS_CANVAS = 15;
 const VERTEX_HANDLE_RADIUS = 4;
@@ -261,7 +261,6 @@ export function AnnotateTab() {
   const setView = useStore((s) => s.setView);
   const mode = useStore((s) => s.gui.mode);
   const activeSubject = useStore((s) => s.gui.active_subject);
-  const predRef = useStore((s) => s.gui.pred_reference);
   // The subject registry (subject -> {description?, attributes?}); drives colours (name-derived,
   // GUI-local) and the per-instance attribute editor.
   const registry = useStore((s) => s.registry.subjects);
@@ -284,7 +283,6 @@ export function AnnotateTab() {
   const commitCurrentPolygon = useStore((s) => s.commitCurrentPolygon);
   const selectPolygon = useStore((s) => s.selectPolygon);
   const markClean = useStore((s) => s.markClean);
-  const setPredReference = useStore((s) => s.setPredReference);
   const pushUndo = useStore((s) => s.pushUndo);
   const setActiveSubject = useStore((s) => s.setActiveSubject);
 
@@ -829,7 +827,6 @@ export function AnnotateTab() {
     // Shared filtered traversal; the label-load effect flushes the outgoing image
     // (save + telemetry) when the index changes, so no explicit save is needed here.
     nav.stepImage(delta);
-    setPredReference(null);
     selectPolygon(null);
   }
 
@@ -1591,9 +1588,6 @@ export function AnnotateTab() {
             pointTickOuter={pointTickOuter}
             scaleLineW={scaleLineW}
           />
-
-          {/* Prediction reference (static per navigation) */}
-          {predRef && <PredReferenceOverlay pred={predRef} lineW={scaleLineW} />}
         </CanvasStage>
 
         {ioError && (
@@ -2178,31 +2172,5 @@ function HaloLabel({
       />
       <Text x={x + 2} y={y - size - 2} text={text} fill={fill} fontSize={size} fontStyle="bold" />
     </>
-  );
-}
-
-function PredReferenceOverlay({ pred, lineW }: { pred: PredictionReference; lineW: number }) {
-  if (pred.type === "box") {
-    const [x1, y1, x2, y2] = pred.coords as number[];
-    return (
-      <Rect
-        x={x1}
-        y={y1}
-        width={x2 - x1}
-        height={y2 - y1}
-        stroke="#00BFFF"
-        strokeWidth={2 * lineW}
-        dash={[8 * lineW, 4 * lineW]}
-      />
-    );
-  }
-  return (
-    <Line
-      points={(pred.coords as number[][]).flat()}
-      closed
-      stroke="#00BFFF"
-      strokeWidth={2 * lineW}
-      dash={[8 * lineW, 4 * lineW]}
-    />
   );
 }
