@@ -2027,7 +2027,7 @@ def evaluate_model(
     from tcip_mcp.pipelines.training.generic_trainer import checkpoint_key
     from tcip_mcp.pipelines.training.collation import task_collate
     from tcip_mcp.pipelines.training.run_registry import get_run
-    from tcip_mcp.pipelines.training.evaluation import (
+    from tcip_mcp.pipelines.training.eval_runners import (
         run_full_frame_evaluation, run_test_evaluation,
     )
     from tcip_mcp.pipelines.data.datasets import build_dataset

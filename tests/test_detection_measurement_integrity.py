@@ -176,7 +176,7 @@ def _det_dataset(tmp_path, n=3, size=128):
 
 def _capture_run_test_evaluation(monkeypatch):
     """Patch run_test_evaluation to record the built dataset + tiling instead of loading a model."""
-    import tcip_mcp.pipelines.training.evaluation as evaluation
+    import tcip_mcp.pipelines.training.eval_runners as evaluation
 
     captured: dict = {}
 
@@ -243,7 +243,7 @@ def test_explicit_tiling_override_on_checkpoint(tmp_path, monkeypatch):
 def test_full_frame_counts_straddling_object_once(tmp_path, monkeypatch):
     import tcip_store as ts
     import tcip_mcp.pipelines.inference.predictor as predictor_mod
-    from tcip_mcp.pipelines.training.evaluation import evaluation_results_key, run_full_frame_evaluation
+    from tcip_mcp.pipelines.training.eval_runners import evaluation_results_key, run_full_frame_evaluation
 
     from PIL import Image
     from tcip_annotation import json_io
@@ -284,7 +284,7 @@ def test_evaluate_scores_a_contradicted_negative_on_its_actual_content_and_names
     pass."""
     import tcip_mcp.pipelines.inference.predictor as predictor_mod
     from tcip_mcp.dataset_layout import CONFIRMED_NEGATIVE, record_image_statuses, status_bucket
-    from tcip_mcp.pipelines.training.evaluation import run_full_frame_evaluation
+    from tcip_mcp.pipelines.training.eval_runners import run_full_frame_evaluation
 
     from PIL import Image
     from tcip_annotation import json_io
@@ -323,7 +323,7 @@ def test_attribute_registry_refusal_reaches_the_caller(tmp_path, monkeypatch):
     to order its values (_resolve_registry_id_map's own deliberate ValueError); no classes.json
     exists here, so this must propagate as a real refusal, not a quietly-empty GT read."""
     import tcip_mcp.pipelines.inference.predictor as predictor_mod
-    from tcip_mcp.pipelines.training.evaluation import run_full_frame_evaluation
+    from tcip_mcp.pipelines.training.eval_runners import run_full_frame_evaluation
 
     from PIL import Image
     from tcip_annotation import json_io
@@ -426,7 +426,7 @@ def test_gate_refuses_unresolvable_tile_geometry(tmp_path):
     gate rather than silently score it at an ungrounded scale, on the path the docstring calls
     "the number that gates a phenotype delivery"."""
     import tcip_mcp.pipelines.inference.predictor as predictor_mod
-    from tcip_mcp.pipelines.training.evaluation import run_full_frame_evaluation
+    from tcip_mcp.pipelines.training.eval_runners import run_full_frame_evaluation
 
     images_dir = tmp_path / "images"
     labels_dir = tmp_path / "labels"
@@ -456,7 +456,7 @@ def test_gate_derives_tile_geometry_from_checkpoint(tmp_path):
     governs the gate instead of an arbitrary fixed scale, avoiding a scale mismatch (~2.9x for this
     checkpoint) between the geometry the gate assumes and the geometry the model was trained at."""
     import tcip_mcp.pipelines.inference.predictor as predictor_mod
-    from tcip_mcp.pipelines.training.evaluation import run_full_frame_evaluation
+    from tcip_mcp.pipelines.training.eval_runners import run_full_frame_evaluation
 
     from PIL import Image
     from tcip_annotation import json_io

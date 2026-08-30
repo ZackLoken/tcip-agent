@@ -46,7 +46,7 @@ from tcip_mcp.pipelines import image_utils, model_build, resolution
 from tcip_mcp.pipelines.data import band_groups, splits
 from tcip_mcp.pipelines.feedback import materialize
 from tcip_mcp.pipelines.postprocessing import plant_mapping
-from tcip_mcp.pipelines.training import evaluation, generic_trainer, hpo
+from tcip_mcp.pipelines.training import eval_runners, generic_trainer, hpo
 from tcip_mcp.tools import (
     data_tools,
     inference_tools,
@@ -1567,7 +1567,7 @@ REGISTERED = {
     "evaluation_results": Registered(
         {"map50": 0.5, "tp": 3, "eval_regime": "full-frame-single-pass", "trait": "messgröße",
          "loss": None, "loss_state": "positive_infinity"},
-        evaluation.evaluation_results_key, "test_results.json"),
+        eval_runners.evaluation_results_key, "test_results.json"),
     "cal_holdout_split_lock": Registered(
         {"identity_hash": LOCK_IDENTITY, "calibration": ["a_1"], "holdout": ["b_2"], "seed": 0,
          "redraw_history": []},
