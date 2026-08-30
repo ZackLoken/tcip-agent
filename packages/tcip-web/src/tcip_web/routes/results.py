@@ -576,9 +576,7 @@ def phenology_measurement(payload: PhenologyPayload) -> dict:
     from tcip_mcp.operationalization import STATE_CROSSING_DATES
     from tcip_mcp.pipelines.resolution import record_delivery_binding_event
 
-    # One event per historical door name, so a delivery-events reader still finds one
-    # "results.per_plant_curves" and one "results.onset_dates" entry per Compute click.
-    for door in ("results.per_plant_curves", "results.onset_dates"):
+    def _record(door: str) -> None:
         record_delivery_binding_event(door, None,
                                       measurement.pred_dirs, measurement.bindings,
                                       measurement_documents=["operating_point",
@@ -587,6 +585,12 @@ def phenology_measurement(payload: PhenologyPayload) -> dict:
                                       trait=payload.trait, delivery_kind=STATE_CROSSING_DATES,
                                       project_root=measurement.project_root,
                                       plant_mapping=measurement.plant_mapping_disclosure)
+
+    # per_plant_curves records whenever the gate passes, its deleted door's own condition.
+    # onset_dates only when the positive class was assessed, restoring ResultsTab's own old gate.
+    _record("results.per_plant_curves")
+    if measurement.positive_class_assessed:
+        _record("results.onset_dates")
     return {
         "curves": {
             "rows": measurement.curve_rows(),
