@@ -215,33 +215,78 @@ class JobRegistry:
     (where a registry persists) and rehydrate, sharing this module's own
     :func:`evict_terminal`/:func:`find_job`/:func:`persist_grouped`/:func:`load` underneath.
 
-    Holds no knowledge of a job's own shape: a caller's ``to_summary``/``factory`` functions
-    supply that, so each module keeps its own dataclass and worker logic, only the dict, the
-    lock and the four operations move here.
+    Holds no knowledge of a job's own shape: a caller's dataclass and worker logic stays in its
+    own module; only the dict, the lock and the four operations move here. The job-shape codec
+    (``to_summary``/``from_summary``) is fixed once at construction rather than passed to each
+    call, so a named registry's :meth:`register` can never skip its own persist by a caller
+    simply omitting the argument at one call site.
     """
 
-    def __init__(self, name: str | None = None) -> None:
+    def __init__(
+        self,
+        name: str | None = None,
+        *,
+        to_summary: Callable[[Any], dict] | None = None,
+        from_summary: Callable[[dict, str], Any] | None = None,
+        id_field: str = "job_id",
+    ) -> None:
         """``name`` is the persisted registry (one of :data:`JOB_REGISTRY_DOCUMENTS`) this
         registry reads and writes through :func:`persist_grouped`/:func:`load`; ``None`` for a
         registry with no root concept of its own that persists nothing (images.py's overview
-        builds)."""
+        builds), which needs neither codec below and so refuses neither.
+
+        ``to_summary`` turns a live job into its persisted summary dict; ``from_summary`` turns
+        a persisted summary plus the current root back into a job instance for
+        :meth:`rehydrate`. A named registry must supply both here: a registry that persists but
+        was constructed with no codec would otherwise skip every :meth:`register`'s persist (or
+        every :meth:`rehydrate`) silently, exactly the gap this refusal closes. ``id_field``
+        names the summary's own id key (``job_id`` for inference and the review priority queue,
+        ``sweep_id`` for HPO).
+        """
+        if name is not None and (to_summary is None or from_summary is None):
+            raise ValueError(
+                f"JobRegistry({name!r}) persists and must be constructed with both "
+                "to_summary and from_summary"
+            )
         self.name = name
         self.jobs: dict[str, Any] = {}
         self.lock = threading.Lock()
+        self._to_summary = to_summary
+        self._from_summary = from_summary
+        self._id_field = id_field
 
-    def register(
-        self, job_id: str, job: Any, *, root: str | None,
-        to_summary: Callable[[Any], dict] | None = None,
-    ) -> None:
+    def register(self, job_id: str, job: Any, *, job_root: str | None) -> None:
         """Add ``job`` under ``job_id``, evict overflow (:func:`evict_terminal`'s own two
-        passes: ``root``'s own share, then the whole dict), then persist every live job if this
-        registry does. ``root`` is the job's own ``platform_root`` for a per-root registry, or
-        ``None`` for one with no root concept, matching :func:`evict_terminal`'s own contract."""
+        passes: ``job_root``'s own share, then the whole dict), then persist every live job if
+        this registry does. ``job_root`` is the job's own ``platform_root`` for a per-root
+        registry, or ``None`` for one with no root concept, matching :func:`evict_terminal`'s
+        own contract -- distinct from :meth:`list`'s ``root``, where ``None`` means every root
+        this process holds rather than an exact match against ``None``."""
         with self.lock:
             self.jobs[job_id] = job
-            evict_terminal(self.jobs, root)
-        if to_summary is not None:
-            self.persist(to_summary)
+            evict_terminal(self.jobs, job_root)
+        self.persist()
+
+    def find_or_register(
+        self, match: Callable[[Any], bool], make: Callable[[], Any], *, job_root: str | None = None,
+    ) -> tuple[Any, bool]:
+        """Under one lock acquisition: the first live job ``match`` accepts, or ``make()``'s new
+        job once inserted and evicted the way :meth:`register` does. Returns ``(job, created)``,
+        ``created`` true only when ``make()`` ran, so the caller knows whether to start work for
+        it. The scan-then-insert compound a caller needs when two concurrent requests naming the
+        same underlying work (one raster's overview build, one path) must not both pass the scan
+        and both start a second job: the check and the insert must run under one lock
+        acquisition, so :meth:`register` (which takes its own lock separately) is not the right
+        call for this."""
+        with self.lock:
+            for job in self.jobs.values():
+                if match(job):
+                    return job, False
+            job = make()
+            self.jobs[getattr(job, self._id_field)] = job
+            evict_terminal(self.jobs, job_root)
+        self.persist()
+        return job, True
 
     def get(self, job_id: str) -> Any:
         """A job by id, from any root this process holds: see :func:`find_job`."""
@@ -255,28 +300,27 @@ class JobRegistry:
                 return list(self.jobs.values())
             return [j for j in self.jobs.values() if getattr(j, "platform_root", None) == root]
 
-    def persist(self, to_summary: Callable[[Any], dict]) -> None:
-        """Write every live job's own summary, grouped by root; a no-op for an unpersisted
-        registry (``name`` is ``None``)."""
+    def persist(self) -> None:
+        """Write every live job's own summary, grouped by root, through the codec given at
+        construction; a no-op for an unpersisted registry (``name`` is ``None``)."""
         if self.name is None:
             return
         with self.lock:
-            summaries = [to_summary(j) for j in self.jobs.values()]
+            summaries = [self._to_summary(j) for j in self.jobs.values()]
         persist_grouped(self.name, summaries)
 
-    def rehydrate(self, factory: Callable[[dict, str], Any], *, id_field: str = "job_id") -> None:
-        """Merge this root's persisted summaries, not already live, into memory via ``factory``
-        (a persisted summary plus the current root -> a job instance), then bound the dict the
-        same way :meth:`register` does. A no-op for an unpersisted registry, which has nothing to
-        rehydrate from. ``id_field`` names the summary's own id key (``job_id`` for inference and
-        the review priority queue, ``sweep_id`` for HPO)."""
+    def rehydrate(self) -> None:
+        """Merge this root's persisted summaries, not already live, into memory via the
+        ``from_summary`` codec given at construction, then bound the dict the same way
+        :meth:`register` does. A no-op for an unpersisted registry, which has nothing to
+        rehydrate from."""
         if self.name is None:
             return
         root = current_root()
         with self.lock:
             for s in load(self.name):
-                jid = s.get(id_field)
+                jid = s.get(self._id_field)
                 if not jid or jid in self.jobs:
                     continue
-                self.jobs[jid] = factory(s, root)
+                self.jobs[jid] = self._from_summary(s, root)
             evict_terminal(self.jobs, root)

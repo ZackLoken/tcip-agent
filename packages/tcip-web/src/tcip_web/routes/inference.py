@@ -97,7 +97,44 @@ class InferenceJob:
     platform_root: str = field(default_factory=_current_root)
 
 
-_registry = jobstore.JobRegistry(INFERENCE_REGISTRY)
+def _summary(job: InferenceJob) -> dict:
+    return {
+        "job_id": job.job_id, "status": job.status, "done": job.done, "total": job.total,
+        "images_dir": job.images_dir, "output_dir": job.output_dir, "error": job.error,
+        "warning": job.warning, "dropped_nonpositive_boxes": job.dropped_boxes,
+        "platform_root": job.platform_root,
+    }
+
+
+def _from_summary(s: dict, root: str) -> InferenceJob:
+    """A persisted summary, rehydrated: only the fields the API exposes are restored. An
+    interrupted job's ``done`` and ``dropped_boxes`` are whatever the last persist wrote, not a
+    live measurement: the worker only persists at launch and once more when it finishes or dies,
+    so a crash mid-run restores the counts as of launch rather than the work actually done
+    before the crash."""
+    return InferenceJob(
+        job_id=s["job_id"],
+        checkpoint_path="",
+        images_dir=s.get("images_dir", ""),
+        output_dir=s.get("output_dir", ""),
+        tile=None,  # a dead job's own tile choice is never read again; honest, not fabricated
+        conf=0.0,
+        iou=0.0,
+        slice_hw=(0, 0),
+        overlap=0.0,
+        total=s.get("total", 0),
+        done=s.get("done", 0),
+        platform_root=s.get("platform_root") or root,
+        status=jobstore.rehydrated_status(s),
+        error=s.get("error"),
+        warning=s.get("warning"),
+        dropped_boxes=s.get("dropped_nonpositive_boxes", 0),
+    )
+
+
+_registry = jobstore.JobRegistry(
+    INFERENCE_REGISTRY, to_summary=_summary, from_summary=_from_summary,
+)
 """The dict-plus-lock live registry for this route's own jobs (see ``jobstore.JobRegistry``),
 the shared home review.py's priority queue and tuning.py's sweeps adopt too. ``_jobs``/
 ``_job_lock`` below are this registry's own dict and lock, bound under their historical names
@@ -121,21 +158,12 @@ def _audit_dataset_write(dataset_root: str, tool: str, arguments: dict) -> None:
     record_event(tool, arguments, source="gui", scope=dataset_root)
 
 
-def _summary(job: InferenceJob) -> dict:
-    return {
-        "job_id": job.job_id, "status": job.status, "done": job.done, "total": job.total,
-        "images_dir": job.images_dir, "output_dir": job.output_dir, "error": job.error,
-        "warning": job.warning, "dropped_nonpositive_boxes": job.dropped_boxes,
-        "platform_root": job.platform_root,
-    }
-
-
 def _persist() -> None:
-    _registry.persist(_summary)
+    _registry.persist()
 
 
 def _register(job: InferenceJob) -> None:
-    _registry.register(job.job_id, job, root=job.platform_root, to_summary=_summary)
+    _registry.register(job.job_id, job, job_root=job.platform_root)
 
 
 def _get(job_id: str) -> Optional[InferenceJob]:
@@ -150,42 +178,17 @@ def _list_jobs() -> list[InferenceJob]:
 
 
 def rehydrate_for_current_root() -> None:
-    """Merge this root's persisted jobs, not already live, into memory.
+    """Merge this root's persisted jobs, not already live, into memory via :func:`_from_summary`.
 
     Called at startup and again after this process repins to another root: the worker
     threads behind a persisted non-terminal job are gone, so it is surfaced as
-    ``interrupted``. Only the fields the API exposes are restored. An interrupted job's
-    ``done`` and ``dropped_boxes`` are whatever the last persist wrote, not a live measurement:
-    the worker only persists at launch and once more when it finishes or dies, so a crash mid-run
-    restores the counts as of launch rather than the work actually done before the crash. Merges by job
-    id rather than requiring an empty registry first, so it never displaces a job still live
-    from another root. Bounds the dict afterwards the same way registering a job does, so
-    adopting N roots without ever registering a job here still keeps this process's memory
-    bounded rather than growing by ``MAX_JOBS`` for every root adopted.
+    ``interrupted``. Merges by job id rather than requiring an empty registry first, so it
+    never displaces a job still live from another root. Bounds the dict afterwards the same
+    way registering a job does, so adopting N roots without ever registering a job here still
+    keeps this process's memory bounded rather than growing by ``MAX_JOBS`` for every root
+    adopted.
     """
-    from tcip_web import jobstore
-
-    def _from_summary(s: dict, root: str) -> InferenceJob:
-        return InferenceJob(
-            job_id=s["job_id"],
-            checkpoint_path="",
-            images_dir=s.get("images_dir", ""),
-            output_dir=s.get("output_dir", ""),
-            tile=None,  # a dead job's own tile choice is never read again; honest, not fabricated
-            conf=0.0,
-            iou=0.0,
-            slice_hw=(0, 0),
-            overlap=0.0,
-            total=s.get("total", 0),
-            done=s.get("done", 0),
-            platform_root=s.get("platform_root") or root,
-            status=jobstore.rehydrated_status(s),
-            error=s.get("error"),
-            warning=s.get("warning"),
-            dropped_boxes=s.get("dropped_nonpositive_boxes", 0),
-        )
-
-    _registry.rehydrate(_from_summary)
+    _registry.rehydrate()
 
 
 # ── Worker ─────────────────────────────────────────────────────────────
