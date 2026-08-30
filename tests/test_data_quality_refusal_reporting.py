@@ -244,6 +244,46 @@ def test_an_npz_captures_confirmed_negative_is_recognized(tmp_path: Path):
     assert not any("No matching image" in i["message"] for i in result["issues"])
 
 
+def test_an_undecodable_label_is_a_finding_beside_a_readable_json_and_a_readable_coco_file(
+    tmp_path: Path,
+):
+    """The reader refusal a genuinely undecodable document raises (as opposed to a decodable but
+    unrecognized shape, covered above) must surface as a per-file error finding, never propagate
+    out of the walk, and must not stop the readable json and coco candidates in the same
+    directory from being read and reported normally."""
+    root = tmp_path / "ds"
+    labels_dir = root / "annotations" / DATE
+    labels_dir.mkdir(parents=True)
+    _write_image(root / "images" / DATE / "plotA_0_0.jpg", 96, 64)
+    _write_image(root / "images" / DATE / "plotC_0_0.jpg", 96, 64)
+
+    json_io.write_annotations(
+        labels_dir / "plotA_0_0.json",
+        [Annotation(subject="catkin", geometry=BBox(11, 7, 39, 51))], 96, 64,
+    )
+    (labels_dir / "plotB_0_0.json").write_bytes(b"{not json")
+    (root / "annotations.json").write_text(json.dumps({
+        "images": [{"id": 1, "file_name": "plotC_0_0.jpg", "width": 96, "height": 64}],
+        "annotations": [
+            {"id": 1, "image_id": 1, "category_id": 1, "bbox": [1, 1, 10, 10], "area": 100,
+             "iscrowd": 0},
+        ],
+        "categories": [{"id": 1, "name": "leaf"}],
+    }), encoding="utf-8")
+
+    result = validate_data_quality(str(root))
+
+    assert result["total_labels"] == 3
+    assert sorted(result["format"]) == ["coco", "json"]
+    errors = [i for i in result["issues"] if i["level"] == "error"]
+    assert len(errors) == 1
+    assert Path(errors[0]["file"]).stem == "plotB_0_0"
+    assert "will not read" in errors[0]["message"]
+    assert [i for i in result["issues"] if i["level"] == "warning"] == []
+    assert result["subjects"] == ["catkin", "leaf"]
+    assert result["is_valid"] is False
+
+
 def test_reported_subjects_are_the_ones_present_in_the_label_files(tmp_path: Path):
     """The subject list is a census of every label file's contents, not a reading of the
     registry: a subject declared but never annotated is absent, and a subject annotated only in

@@ -327,9 +327,8 @@ def validate_data_quality(folder_path: str) -> dict:
     if not Path(folder_path).is_dir():
         return {"error": f"Directory not found: {folder_path}"}
 
-    from tcip_annotation import json_io
-    from tcip_annotation.format_io import _parse_coco_json, detect_format
-    from tcip_annotation.json_io import UnreadableLabelDocument
+    from tcip_annotation.format_io import detect_format, load_annotations
+    from tcip_annotation.json_io import UnreadableLabelDocument, load_json_document
     from tcip_mcp.dataset_layout import (
         annotation_date, confirmed_negative_names_any_subject, normalize_status_store,
         read_image_status_store, resolve_image_name,
@@ -368,7 +367,7 @@ def validate_data_quality(folder_path: str) -> dict:
             if stem not in image_stems:
                 issues.append({"level": "error", "file": label_path, "message": "No matching image"})
             try:
-                anns = json_io.read_annotations(label_path)
+                anns = load_annotations(label_path, fmt="json")
             except UnreadableLabelDocument as exc:
                 issues.append({"level": "error", "file": label_path,
                               "message": f"label file will not read: {exc}"})
@@ -383,7 +382,9 @@ def validate_data_quality(folder_path: str) -> dict:
                                   "subject; excluded from training"})
         elif file_fmt == "coco":
             try:
-                coco = _parse_coco_json(label_path)
+                # load_json_document is the same shared decode format_io.load_annotations itself runs a
+                # coco document through; this call needs the raw document (categories, images list), not one image's parsed records.
+                coco = load_json_document(label_path)
                 for c in coco.get("categories", []):
                     if c.get("name"):
                         subjects.add(str(c["name"]))
