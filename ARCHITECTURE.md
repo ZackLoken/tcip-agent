@@ -752,12 +752,12 @@ the response shape `training.py` and `tuning.py` both answer in, and `_body_comm
 `EmptyBodyPayload`, the empty body model six path-parameter-only routes now declare so the
 browser must send a preflighted request rather than reaching the handler as a simple one.
 
-Total HTTP routes at HEAD: 84 (5 on `app.py` plus 79 across the 16 route modules, both counts
+Total HTTP routes at HEAD: 83 (5 on `app.py` plus 78 across the 16 route modules, both counts
 obtained this session by grepping `@app.get/post(` and `@router.get/post(` and summing);
 websocket routes are counted separately, below, and excluded from this total. Each per-router
-heading's own route count (and their sum, 82) includes any websocket route it lists, since
+heading's own route count (and their sum, 81) includes any websocket route it lists, since
 `routes/inference.py`, `routes/terminal.py` and `routes/training.py` each carry one; net of
-those three, the 16 modules hold the 79 HTTP routes counted here.
+those three, the 16 modules hold the 78 HTTP routes counted here.
 
 Total WebSocket routes at HEAD: 5 (`/ws/state`, `/ws/panel/{panel}` on `app.py`;
 `/api/terminal/ws/{session_id}` on `routes/terminal.py`; `/api/inference/jobs/{job_id}/stream`  <!-- queued: P5-124 unify -->
@@ -882,7 +882,7 @@ registered at HEAD.
 | GET | `/delivery-events` | `list_delivery_events` | `routes/results.py:1033` |
 | GET | `/models/registered` | `registered_models` | `routes/results.py:1083` |
 
-### routes/review.py, prefix `/api/review` (10 routes)
+### routes/review.py, prefix `/api/review` (9 routes)
 
 | method | path | handler | line |
 |---|---|---|---|
@@ -890,12 +890,11 @@ registered at HEAD.
 | POST | `/action` | `record_action` | `routes/review.py:577` |
 | POST | `/mark_complete` | `mark_complete` | `routes/review.py:713` |
 | POST | `/backup_labels` | `backup_labels` | `routes/review.py:775` |
-| POST | `/save_gt` | `save_gt` | `routes/review.py:796` |
-| POST | `/validate_reference` | `validate_reference` | `routes/review.py:848` |
-| GET | `/image_statuses` | `image_statuses` | `routes/review.py:1241` |
-| GET | `/generation_conf` | `get_generation_conf` | `routes/review.py:1271` |
-| POST | `/queue/launch` | `launch_priority_queue` | `routes/review.py:1453` |
-| GET | `/queue/{job_id}` | `get_priority_queue_job` | `routes/review.py:1481` |
+| POST | `/validate_reference` | `validate_reference` | `routes/review.py:809` |
+| GET | `/image_statuses` | `image_statuses` | `routes/review.py:1202` |
+| GET | `/generation_conf` | `get_generation_conf` | `routes/review.py:1232` |
+| POST | `/queue/launch` | `launch_priority_queue` | `routes/review.py:1414` |
+| GET | `/queue/{job_id}` | `get_priority_queue_job` | `routes/review.py:1442` |
 
 ### routes/sessions.py, prefix `/api/sessions` (4 routes)
 
@@ -943,9 +942,9 @@ registered at HEAD.
 | POST | `/sweeps/{sweep_id}/trials/{trial_id}/tensorboard` | `launch_trial_tensorboard` | `routes/tuning.py:565` |
 | POST | `/sweeps/{sweep_id}/trials/{trial_id}/tensorboard/stop` | `stop_trial_tensorboard` | `routes/tuning.py:579` |
 
-### 6 routes with no located frontend caller
+### 5 routes with no located frontend caller
 
-Per phase0's `web-surface.md`, these 6 registered backend routes had no caller found
+Per phase0's `web-surface.md`, these 5 registered backend routes had no caller found
 under `packages/tcip-web/frontend/src/` by literal-path grep. Not re-derived this
 session; restated from phase0 as the brief instructs, with each route's line verified
 above against HEAD.
@@ -956,7 +955,6 @@ above against HEAD.
 | GET | `/` | loaded by the browser's own navigation, not via fetch/XHR from app code |
 | POST | `/api/events/{panel}` | posted by MCP tools (`tcip_mcp.web_client`), not by the browser |
 | GET | `/api/state` | no caller found |
-| POST | `/api/review/save_gt` | no caller found; `api.review` has no `saveGt` function |  <!-- queued: P5-139 delete -->
 | POST | `/api/training/compare` | no caller found; `trainingApi` has no `compare` function |  <!-- queued: P5-111 delete -->
 
 ## 3. tcip-annotation importable public symbols

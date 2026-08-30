@@ -80,7 +80,6 @@ export const ROUTES = {
   postReviewMarkComplete: "/api/review/mark_complete",
   postReviewMatches: "/api/review/matches",
   postReviewQueueLaunch: "/api/review/queue/launch",
-  postReviewSaveGt: "/api/review/save_gt",
   postReviewValidateReference: "/api/review/validate_reference",
   postSessionsEnd: "/api/sessions/end",
   postSessionsImageEvent: "/api/sessions/image_event",

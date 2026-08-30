@@ -132,12 +132,12 @@ def test_first_verdict_baselines_the_label_file_under_its_original_directory(
     assert sorted(p.name for p in label_dir.glob("*.json")) == ["IMG_0000.json"]
 
 
-def test_save_gt_baselines_the_label_file_before_its_first_mutation(
+def test_the_first_verdict_baselines_the_label_file_before_its_mutation(
     client: TestClient, tmp_path: Path
 ) -> None:
-    """``/save_gt`` can be the first writer to touch a label file (a GUI edit with no verdict
-    behind it), so it must baseline the file itself rather than relying on ``/action`` to have
-    run first: the pristine pre-edit geometry must survive under ``.original`` either way."""
+    """``/action`` is the only writer of a reviewed label file, so it must baseline the file
+    itself on the verdict that first touches it: the pristine pre-edit geometry must survive
+    under ``.original``."""
     img = _image(tmp_path)
     label_dir = tmp_path / "annotations" / "2-11-26"
     label_dir.mkdir(parents=True)
@@ -147,14 +147,7 @@ def test_save_gt_baselines_the_label_file_before_its_first_mutation(
                       IMG_W, IMG_H)
     dataset_root = _dataset_root(tmp_path)
 
-    resp = client.post("/api/review/save_gt", json={
-        "dataset_root": str(dataset_root),
-        "image_name": "IMG_0000.JPG",
-        "image_path": str(img),
-        "label_path": str(gt),
-        "annotations": [{"subject": "catkin", "bbox": list(EDITED_BOX)}],
-    })
-    assert resp.status_code == 200, resp.text
+    _verdict(client, dataset_root, img, gt, original, EDITED_BOX)
 
     baseline = label_dir / ".original" / "IMG_0000.json"
     assert baseline.is_file()

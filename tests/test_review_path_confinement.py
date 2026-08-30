@@ -52,26 +52,37 @@ def _dataset_root(allowed: Path) -> Path:
     return allowed
 
 
-def test_save_gt_confines_the_label_file_it_writes(
+def test_action_confines_the_gt_file_it_writes(
     client: TestClient, allowed: Path, outside: Path
 ) -> None:
-    escaped = outside / "stolen.json"
-    payload = {
+    original = (12.0, 20.0, 52.0, 44.0)
+    edited = (30.0, 30.0, 70.0, 70.0)
+    base = {
         "dataset_root": str(_dataset_root(allowed)),
         "image_name": "IMG_0007.JPG",
         "image_path": str(_image(allowed)),
-        "annotations": [{"subject": "catkin", "bbox": [12.0, 20.0, 52.0, 44.0]}],
+        "det_type": "fn", "class_name": "catkin",
+        "conf": None, "iou": None,
+        "gt_idx": 0, "pred_idx": None,
+        "bbox": list(original),
+        "action": "edited",
+        "edited_box": list(edited),
     }
 
-    refused = client.post("/api/review/save_gt", json={**payload, "label_path": str(escaped)})
+    escaped = outside / "stolen.json"
+    refused = client.post("/api/review/action", json={**base, "gt_path": str(escaped)})
     assert refused.status_code == 403
     assert not escaped.exists()
 
     inside = allowed / "annotations" / "2-11-26" / "IMG_0007.json"
-    accepted = client.post("/api/review/save_gt", json={**payload, "label_path": str(inside)})
+    inside.parent.mkdir(parents=True)
+    write_annotations(str(inside), [Annotation(subject="catkin", geometry=BBox(*original))],
+                      IMG_W, IMG_H)
+    accepted = client.post("/api/review/action", json={**base, "gt_path": str(inside)})
     assert accepted.status_code == 200
     (written,) = read_annotations(str(inside))
-    assert written.subject == "catkin"
+    assert (written.geometry.x1, written.geometry.y1,
+            written.geometry.x2, written.geometry.y2) == edited
 
 
 def test_mark_complete_confines_the_paths_it_reads(

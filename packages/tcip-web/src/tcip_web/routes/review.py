@@ -26,7 +26,7 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from tcip_annotation import (
     BBox,
@@ -39,7 +39,7 @@ from tcip_annotation import (
     compute_matches,
 )
 from tcip_annotation.json_io import (
-    UnreadableLabelDocument, annotation_from_payload, bbox_from_corners, check_box_extent,
+    UnreadableLabelDocument, bbox_from_corners, check_box_extent,
     prediction_documents, read_annotations,
 )
 from tcip_annotation.review_engine import capture_label_baseline
@@ -242,7 +242,7 @@ def _image_dims(path: str) -> tuple[int, int]:
 def _guard_path(path: Optional[str]) -> Optional[str]:
     """Confine a client-supplied label/dir path and hand back its resolved spelling, or None.
 
-    ``save_gt`` / ``backup_labels`` write to caller-provided paths, so every writer uses the
+    ``/action`` / ``backup_labels`` write to caller-provided paths, so every writer uses the
     path this returns, never the string the client sent. 403 on escape.
     """
     if not path:
@@ -258,7 +258,7 @@ def _ensure_original_backup(label_path: Optional[str]) -> None:
     pristine original without a copy no matter which of the two ran first. New GT files a verdict
     is creating have no original to preserve, so they are skipped, and an already-held baseline is
     kept rather than replaced by this call's read of a file the platform may already have edited.
-    Called from both ``/action`` and ``/save_gt``, the two routes that can rewrite a GT file.
+    Called from ``/action``, the one route that rewrites a GT file.
     """
     if not label_path:
         return
@@ -778,45 +778,6 @@ def backup_labels(payload: BackupPayload) -> dict:
     engine = _get_engine(payload.dataset_root)
     n = engine.backup_original_labels(*label_dirs)
     return {"status": "ok", "files_backed_up": n}
-
-
-class SaveGtPayload(BaseModel):
-    dataset_root: str
-    image_name: str
-    image_path: str
-    # Non-empty: a save with nowhere to write can never succeed, so it is refused (422).
-    label_path: str = Field(min_length=1)
-    # [{subject, bbox?: [x1,y1,x2,y2], rings?: [[[x,y]...], ...], point?: [x,y], attributes?,
-    #   created_by?, ...}]
-    annotations: list[dict] = []
-    user: Optional[str] = None    # GUI-set author; stamped as created_by unless the shape carries one
-
-
-@router.post("/save_gt")
-def save_gt(payload: SaveGtPayload) -> dict:
-    """Persist edited GT (post-review modification) for a single image."""
-    w, h = _image_dims(payload.image_path)
-    label_path = _guard_path(payload.label_path)
-    engine = _get_engine(payload.dataset_root)
-
-    # The reviewer authors this committed GT; a shape that round-trips its own provenance keeps it.
-    author = user_id(resolve_user(payload.user))
-    now_iso = datetime.now(timezone.utc).isoformat()
-
-    try:
-        gt = [annotation_from_payload(d, author=author, now=now_iso) for d in payload.annotations]
-    except ValueError as exc:
-        raise HTTPException(400, str(exc)) from exc
-    ctx = ReviewContext(img_name=payload.image_name, img_width=w, img_height=h, gt=gt)
-    _ensure_original_backup(label_path)  # baseline this file before its first mutation
-    ok = engine.save_gt(ctx, path=label_path)
-    # Ground truth travels with its dataset, so the edit is recorded beside the labels it changed.
-    _audit(payload.dataset_root, "gui_review_save_gt", {
-        "image_name": payload.image_name,
-        "label_path": label_path,
-        "n_annotations": len(payload.annotations),
-    })
-    return {"status": "ok" if ok else "partial"}
 
 
 # ── Promote a completed review into a validation reference ─────────────────
