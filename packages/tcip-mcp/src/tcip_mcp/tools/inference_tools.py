@@ -1,4 +1,6 @@
-"""Inference MCP tools: run models on images, export results."""
+"""Inference MCP tools: run_inference, export_predictions and tabulate_counts, sharing one
+verified body (``_run_inference_verified``) so the firewalled operating point (conf/NMS/tiling/
+max_dets) resolves identically for every door that runs a model over images."""
 
 from __future__ import annotations
 

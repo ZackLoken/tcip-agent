@@ -1,11 +1,16 @@
 """Phenology MCP tools, the agent-facing surface for the per-plant phenology pipeline.
 
-Two composable steps over the canonical ``pipelines.postprocessing`` modules, so the agent
-composes tools instead of scripting into the web backend (and a milestone date means exactly
-what it means in the web Results tab):
+Three tools over the canonical ``pipelines.postprocessing`` modules, so the agent composes tools
+instead of scripting into the web backend (and a milestone date means exactly what it means in
+the web Results tab):
 
-    build_plant_mapping   geolocated images + plant CSVs → a named mapping under the project
-    compute_phenology     that mapping + classified predictions → <phenology_prefix>_phenology.csv
+    build_plant_mapping                   geolocated images + plant CSVs → a named mapping
+                                           under the project
+    calibrate_classifier_operating_point   the positive-state classifier's own held-out
+                                           validation gate, distinct from the count operating
+                                           point export_predictions calibrates
+    compute_phenology                      that mapping + classified predictions →
+                                           <phenology_prefix>_phenology.csv
 
 See the ``phenology`` skill for the whole pattern (isolate → detect → classify state →
 per-plant fraction → crossings).
