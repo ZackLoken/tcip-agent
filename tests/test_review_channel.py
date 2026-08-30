@@ -16,7 +16,7 @@ from PIL import Image
 from tcip_annotation import json_io
 from tcip_annotation.state import Annotation, BBox, Polygon
 from tcip_mcp.dataset_layout import image_dir, prediction_dir
-from tcip_mcp.tools.annotation_tools import focus
+from tcip_mcp.tools.gui_tools import focus
 from tcip_mcp.tools.proposal_tools import stage_proposals
 
 
