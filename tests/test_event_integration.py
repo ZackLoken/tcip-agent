@@ -82,6 +82,31 @@ class TestPostPanelEventRoute:
         assert first["data"] == {"trial": 1}
         assert second["data"] == {"trial": 2}
 
+    def test_events_posted_before_connecting_are_replayed_on_connect(
+        self, client: TestClient
+    ) -> None:
+        """The ring buffer's whole reason to exist: a browser that connects after events
+        already landed still sees them, in the order they were posted, replayed on the
+        connection itself (the deleted GET recent-events route's job, now served by the
+        on-connect loop at connect time rather than over a separate HTTP call)."""
+        from tcip_web import app as web_app
+
+        panel = "results"
+        preexisting = len(web_app._recent_events.get(panel, ()))
+        client.post("/api/events/results",
+                    json={"event_type": "count_ready", "data": {"count": 11}})
+        client.post("/api/events/results",
+                    json={"event_type": "count_ready", "data": {"count": 22}})
+
+        with client.websocket_connect(f"ws://127.0.0.1/ws/panel/{panel}") as ws:
+            for _ in range(preexisting):
+                ws.receive_json()  # drain whatever earlier tests already posted to this panel
+            first = ws.receive_json()
+            second = ws.receive_json()
+        assert first["event_type"] == "count_ready"
+        assert first["data"] == {"count": 11}
+        assert second["data"] == {"count": 22}
+
     def test_review_focus_persists_advisory_state(self, client: TestClient) -> None:
         # The agent reads gui state back via view_gui_state: a focus event must
         # land there even though the browser applies it with local setters only.
