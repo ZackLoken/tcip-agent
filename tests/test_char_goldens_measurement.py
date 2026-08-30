@@ -346,6 +346,7 @@ def test_golden_consolidated_operating_point_defaults():
     from tcip_mcp.pipelines import operating_point as OP
     from tcip_mcp.pipelines import resolution as R
     from tcip_mcp.pipelines.inference import generic_predictor as GP
+    from tcip_mcp.pipelines.training import eval_runners as runners
     from tcip_mcp.pipelines.training import evaluation as EV
     from tcip_mcp.tools import training_tools as TT
 
@@ -398,7 +399,7 @@ def test_golden_consolidated_operating_point_defaults():
     assert coco_sig.parameters["conf_threshold"].default == 0.25
     assert coco_sig.parameters["iou_threshold"].default == 0.5
     assert coco_sig.parameters["max_dets"].default == 100
-    ff_sig = inspect.signature(EV.run_full_frame_evaluation)
+    ff_sig = inspect.signature(runners.run_full_frame_evaluation)
     assert ff_sig.parameters["global_nms_iou"].default == 0.3
     # tile_size/overlap are no longer pinned constants (640/0.2): an honest None
     # sentinel resolved from the checkpoint's persisted geometry (or refused) by resolve_tile_geometry.
@@ -416,7 +417,7 @@ def test_golden_evaluate_model_resolves_max_dets_per_regime_when_unset(tmp_path,
     would ratify "the default is unspecified" rather than pin the two real behaviors (1000 on the
     delivery-gating regime, 100 on the tile-level/diagnostic regime)."""
     from tcip_mcp.pipelines import resolution as R
-    from tcip_mcp.pipelines.training import evaluation as EV
+    from tcip_mcp.pipelines.training import eval_runners as runners
     from tcip_mcp.tools import training_tools as TT
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
@@ -430,11 +431,11 @@ def test_golden_evaluate_model_resolves_max_dets_per_regime_when_unset(tmp_path,
         captured["diagnostic_max_dets"] = kw.get("max_dets")
         return {"tiled": False, "eval_regime": "tile-level"}
 
-    orig_gate = EV.run_full_frame_evaluation
-    orig_diag = EV.run_test_evaluation
+    orig_gate = runners.run_full_frame_evaluation
+    orig_diag = runners.run_test_evaluation
     try:
-        EV.run_full_frame_evaluation = _fake_gate
-        EV.run_test_evaluation = _fake_diagnostic
+        runners.run_full_frame_evaluation = _fake_gate
+        runners.run_test_evaluation = _fake_diagnostic
 
         from PIL import Image
         from tcip_annotation import json_io
@@ -456,8 +457,8 @@ def test_golden_evaluate_model_resolves_max_dets_per_regime_when_unset(tmp_path,
         TT.evaluate_model(str(ckpt), str(images_dir), str(labels_dir), task="detection",
                           subject="catkin")
     finally:
-        EV.run_full_frame_evaluation = orig_gate
-        EV.run_test_evaluation = orig_diag
+        runners.run_full_frame_evaluation = orig_gate
+        runners.run_test_evaluation = orig_diag
 
     assert captured["gate_max_dets"] == R.DEFAULT_MAX_DETS == 1000
     assert captured["diagnostic_max_dets"] == 100
