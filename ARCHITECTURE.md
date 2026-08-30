@@ -668,12 +668,13 @@ Docstring is the function's docstring first line, verbatim.
 | `list_experiments` | `experiment_tools.py:83` | yes | Enumerate every experiment the store holds a status record for. |
 | `compare_experiments` | `experiment_tools.py:106` | yes | Side-by-side comparison of multiple experiments. |
 
-### feedback_tools.py (2 tools)
+### feedback_tools.py (3 tools)
 
 | tool | line | audited | docstring first line |
 |---|---|---|---|
-| `materialize_review_dataset` | `feedback_tools.py:166` | yes | Build a curated detection dataset from human review verdicts. |
-| `prioritize_review_queue` | `feedback_tools.py:286` | yes | Order un-reviewed images for the next review batch. |  <!-- queued: P5-51 merge-or-split -->
+| `materialize_review_dataset` | `feedback_tools.py:168` | yes | Build a curated detection dataset from human review verdicts. |
+| `prioritize_review_queue` | `feedback_tools.py:343` | yes | Rank un-reviewed images by active-learning informativeness for the next review batch. |
+| `triage_predictions` | `feedback_tools.py:456` | yes | Partition a checkpoint's own predictions by confidence into auto-accept, needs-review and unscoreable queues. |
 
 ### gui_tools.py (2 tools)
 
@@ -716,7 +717,7 @@ Docstring is the function's docstring first line, verbatim.
 
 | tool | line | audited | docstring first line |
 |---|---|---|---|
-| `register_model` | `model_tools.py:18` | yes | Register a trained model in the project model registry. |  <!-- queued: P5-23 merge-or-split -->
+| `register_model` | `model_tools.py:18` | yes | Register a trained model in the project model registry. |
 | `list_registered_models` | `model_tools.py:78` | yes | List models in the project registry. |
 | `select_best_model` | `model_tools.py:126` | yes | Get the best registered model by an explicit metric, no default is assumed. |
 
