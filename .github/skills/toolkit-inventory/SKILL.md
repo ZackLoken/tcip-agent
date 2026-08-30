@@ -122,15 +122,15 @@ already runs in its own Ray-managed process, and `resources_per_trial` (omit to 
 GPU share from the host's real device count and `max_concurrent`) tells Ray how much of the host
 each one may actually use. Ray persists trials under `output_dir` (also the TensorBoard logdir).
 
-## Concurrent runs: `inspect_compute_resources`
+## Concurrent runs: `scripts/inspect_compute_resources.py`
 
 Every `launch_training`/`run_hpo` call already trains in its own OS process (crash/OOM isolation
 between concurrent runs), but nothing caps how many you launch at once or how much of the host each
 one claims; that's a judgment call, not a platform-enforced number (a pinned memory/CPU ceiling
 would be right on one host and wrong on the next). Before launching another concurrent candidate,
-`inspect_compute_resources()` gives you the actual facts to reason from: free VRAM per GPU, host
-CPU/RAM headroom (`None` if `psutil` isn't installed; everything else still works), and how many
-runs this process's own registry currently reports running.
+`python scripts/inspect_compute_resources.py` gives you the actual facts to reason from: free VRAM
+per GPU, host CPU/RAM headroom (`None` if `psutil` isn't installed; everything else still works),
+and how many runs this process's own registry currently reports running.
 
 ## Auto-labeling: the proposal-engine registry (`pipelines.proposal`)
 
