@@ -4,13 +4,29 @@ Every tool call is logged with timestamp, tool name, arguments, result status, a
 an append-only store: entries are added, never rewritten. The bound backend decides where those
 entries sit, one JSON object per line on the file backend.
 
-The log is scoped: an event whose subject is a record that travels with a dataset is recorded
-in that dataset's own log, so the provenance travels with the data, and a platform event is
-recorded in the platform's log. Each event is written once, to the one log its scope names:
+One store, ``audit_log``, addressed under three kinds of root: the platform audit log (the
+pinned platform state root, the default when a caller names no other), a dataset's audit log
+(a record that travels with the data), and a project's audit log (a record that is the project's
+own, such as a delivery or a plant-mapping build). A project that has been adopted (see
+``project_paths``) coincides with the platform root, so from then on a project's own log and the
+platform log are one file at one key. Each event is written once, to the one log its scope names:
 :func:`audited` for the platform's doors (every MCP tool in ``tools/``, plus the script-invoked
 doors demoted from them, keeping ``@audited`` without registering), which name the argument
-carrying the dataset location with ``@audited(scope_arg=...)``, and :func:`record_event` for
-code that is neither.
+carrying the dataset or project location with ``@audited(scope_arg=...)``, and :func:`record_event`
+/ :func:`record_event_or_raise` for code that is neither.
+
+An entry's ``scope`` field is a version-2 line's own convention, stamped by :func:`_stamp_scope`,
+the one implementation :func:`audited`, :func:`record_event` and :func:`record_event_or_raise` all
+resolve a caller's scope through. When present, ``scope`` names the resolved root the entry was
+filed under (a dataset's or a project's); its absence on a version-2 line means the writer took
+the platform default, never that the entry's category is unknown. A line written before this
+marker existed predates it and claims neither: its schema_version is absent (the frozen version 1)
+and it is read as neither confirming nor denying a scope. Three disclosures for a moved log: a
+stamped absolute scope travels in a shared or imported archive exactly as the log body's other
+absolute paths already do, unredacted; ``scope`` records a write-time fact, never a location claim,
+so a relocated import's lines still name the exporting machine's own root and nothing reconciles
+them against where the archive now sits; and a project archive is provenance-preserving, not
+path-sanitized, by the same standing choice.
 
 An append the decorator cannot make is a refusal, not a warning, because the append runs after
 the tool body: see :class:`MutationCommittedWithoutAuditLine`.
@@ -49,6 +65,7 @@ register_store(
         kind="log",
         key_fields=("document",),
         frozen=True,
+        schema_version=2,
         codec=LOG_JSON,
         locator=_AUDIT_LOG,
     )
@@ -116,6 +133,26 @@ def audit_log_key(scope: str | Path | None = None) -> Key:
     return Key(AUDIT_LOG_STORE, str(root.resolve()), _AUDIT_PARTS)
 
 
+def _stamp_scope(entry: dict[str, Any], scope: str | Path | None) -> Key:
+    """Resolve ``scope`` once, stamp ``entry`` with what that resolution found, and return the
+    same log's Key: the one implementation :func:`audited`, :func:`record_event` and
+    :func:`record_event_or_raise` all write an entry's scope through, so the root a line names
+    and the root its Key addresses can never drift apart into two separately-resolved answers.
+
+    ``entry["schema_version"]`` is stamped ``2`` on every call. ``entry["scope"]`` is stamped
+    with the resolved root only when the caller passed one; a call that took the platform default
+    (``scope is None``) leaves the field unset, matching :func:`audited`'s own long-standing
+    convention of stamping whenever a declared scope argument resolved a root at all, dataset or
+    project, even one that happens to equal the platform root.
+    """
+    root = Path(scope) if scope is not None else platform_audit_scope()
+    resolved = str(root.resolve())
+    entry["schema_version"] = 2
+    if scope is not None:
+        entry["scope"] = resolved
+    return Key(AUDIT_LOG_STORE, resolved, _AUDIT_PARTS)
+
+
 def _redact(args: dict[str, Any]) -> dict[str, Any]:
     """Redact sensitive fields from tool arguments."""
     return {
@@ -164,7 +201,7 @@ def _write_entry(entry: dict[str, Any], scope: str | Path | None = None) -> None
     the failure, not this function.
     """
     try:
-        append(audit_log_key(scope), entry)
+        append(_stamp_scope(entry, scope), entry)
     except Exception:
         # A dropped audit line is a real provenance gap, surface it, don't bury it at debug.
         logger.warning("Failed to write audit entry", exc_info=True)
@@ -207,7 +244,7 @@ def record_event_or_raise(
     """
     entry = _entry(tool, arguments, status, extra)
     try:
-        append(audit_log_key(scope), entry)
+        append(_stamp_scope(entry, scope), entry)
     except Exception as exc:
         logger.warning("Failed to write the audit entry for %s", tool, exc_info=True)
         raise AuditEntryNotWritten(tool, exc) from exc
@@ -312,10 +349,8 @@ def audited(
                 raw = logged_args.get(scope_arg) if scope_arg else None
                 if raw is not None:
                     scope = dataset_scope_of(scope_via(raw) if scope_via else raw)
-                if scope is not None:
-                    entry["scope"] = str(scope)
                 entry["duration_ms"] = round((time.monotonic() - t0) * 1000, 1)
-                append(audit_log_key(scope), entry)
+                append(_stamp_scope(entry, scope), entry)
 
             # One entry per call by construction: the two paths are exclusive, and neither
             # writer sits inside a handler that could run the other.
