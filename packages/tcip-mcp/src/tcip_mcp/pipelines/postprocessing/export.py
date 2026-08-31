@@ -190,7 +190,8 @@ def _mask_geometry_for_export(
 
 
 _PROVENANCE_COLUMNS = ["producer_model_sha256", "producing_experiment_id", "operating_point_conf",
-                       "produced_at", "measurement_validated", "validation_record"]
+                       "produced_at", "operating_point_validated", "unvalidated_dimensions",
+                       "validation_record"]
 
 _MEASUREMENT_DOCUMENT = "operating_point"
 """What this CSV's counts always rest on: a per-image detection count is always the count
@@ -205,7 +206,7 @@ def export_detection_csv(
     provenance: dict | None = None,
     *,
     trait: str,
-    measurement_validated: str | None = None,
+    operating_point_validated: str | None = None,
     pred_dirs: list[str] | None = None,
     acknowledge_unvalidated: bool = False,
 ) -> tuple[str, dict, dict]:
@@ -215,8 +216,8 @@ def export_detection_csv(
     write (an unvalidated count with no acknowledgement) via the shared ``check_delivery_gate`` and
     stamps the reconciled validity into every row. Pass ``pred_dirs`` (the prediction buckets the
     counts came from) so the count operating point's validity is read from each
-    ``operating_point.json`` sidecar and floored against ``measurement_validated`` (never trusted
-    from the string alone). A bucket produced by a tiled run gates on its ``tile_size`` too, the same
+    ``operating_point.json`` sidecar and floored against ``operating_point_validated`` (never
+    trusted from the string alone). A bucket produced by a tiled run gates on its ``tile_size`` too, the same
     operating point's other gating dimension: the tile edge scales the per-image counts this CSV
     reports, so a run with no persisted training geometry, no recoverable native-frame edge, and no
     explicit caller override refuses here. Untiled buckets are never gated on it. This CSV carries
@@ -226,9 +227,9 @@ def export_detection_csv(
     ``resolve_scale.json``/``reconcile_scale_validity``) is never operative here: there is nothing in
     this CSV's own shape for a physical scale to have produced, so gating on it would manufacture a
     refusal over a dimension that can't apply to a count. Without ``pred_dirs`` there is no on-disk
-    source for the count's validity, so the measurement dimension floors to unvalidated regardless
-    of the caller's string, mirroring ``export_aggregated_csv``: a bare caller-asserted reference is
-    never trusted on its own, and ``acknowledge_unvalidated=True`` is the only route to delivery on
+    source for the count's validity, so the operating_point dimension floors to unvalidated
+    regardless of the caller's string, mirroring ``export_aggregated_csv``: a bare caller-asserted
+    reference is never trusted on its own, and ``acknowledge_unvalidated=True`` is the only route to delivery on
     that path. Either way, ``acknowledge_unvalidated=True`` writes a clearly-flagged provisional
     CSV stamped ``validated=false``. The ``provenance`` stamp (producing checkpoint sha, experiment
     id, operating-point conf, timestamp) travels alongside; the number is only as trustworthy as the
@@ -257,8 +258,8 @@ def export_detection_csv(
         trait: The registered trait whose confirmed per-image-count operationalization this
             delivery rests on. Required: a count CSV under no trait states nothing about what was
             counted.
-        measurement_validated: The count operating point's reconciled validity reference. Floored
-            against each bucket's on-disk sidecar when ``pred_dirs`` is given; floored to
+        operating_point_validated: The count operating point's reconciled validity reference.
+            Floored against each bucket's on-disk sidecar when ``pred_dirs`` is given; floored to
             unvalidated otherwise, since nothing on disk backs it.
         pred_dirs: Prediction buckets to reconcile the count operating point's (and, if tiled, the
             tile-geometry) validity from.
@@ -267,7 +268,7 @@ def export_detection_csv(
     Returns:
         ``(path, tail, summary)``: the path to the written CSV, the ``_PROVENANCE_COLUMNS`` tail
         ``delivered_tail`` composed and wrote into every row (so a caller that needs one of those
-        cells back, a response echoing the CSV's own ``measurement_validated``, say, reads the
+        cells back, a response echoing the CSV's own ``operating_point_validated``, say, reads the
         value actually written rather than re-deriving or re-asserting it a second time), and the
         gate's own evaluation summary (``stamp``, ``unvalidated``, ``tile_size_operative``,
         ``tile_size_validated``, ``binding_notes``) so a door composes its response fields from
@@ -309,15 +310,15 @@ def export_detection_csv(
 
     # With no pred_dirs nothing on disk backs the count's validity, so the dimension floors to
     # unvalidated rather than trusting the caller's bare string (mirrors export_aggregated_csv).
-    flags: dict[str, str | None] = {"measurement": VALIDATED_FALSE}
-    measurement_recon: dict = {"bindings": {}}
+    flags: dict[str, str | None] = {"operating_point": VALIDATED_FALSE}
+    operating_point_recon: dict = {"bindings": {}}
     tile_recon: dict = {"operative": False, "validated": None, "binding_notes": {}}
     if pred_dirs:
         # Reconciled from the buckets' own sidecars, floored against the caller assertion, never
         # trusted from the string alone (mirrors export_aggregated_csv's count-trait gating).
-        measurement_recon = reconcile_operating_point_validity(
-            pred_dirs, trait=trait, asserted=measurement_validated)
-        flags["measurement"] = measurement_recon["validated"]
+        operating_point_recon = reconcile_operating_point_validity(
+            pred_dirs, trait=trait, asserted=operating_point_validated)
+        flags["operating_point"] = operating_point_recon["validated"]
         tile_recon = reconcile_tile_size_validity(pred_dirs)
         if tile_recon["operative"]:
             flags["tile_size"] = tile_recon["validated"]
@@ -325,7 +326,7 @@ def export_detection_csv(
     gate = check_delivery_gate(flags, acknowledge_unvalidated=acknowledge_unvalidated)
     if not gate.ok:
         notes = binding_notes_text(
-            {**measurement_recon.get("binding_notes", {}), **tile_recon.get("binding_notes", {})})
+            {**operating_point_recon.get("binding_notes", {}), **tile_recon.get("binding_notes", {})})
         raise DeliveryRefused(gate, notes)
 
     # A confirmation withdrawn or a field moved since the first check refuses here, before anything.
@@ -337,7 +338,7 @@ def export_detection_csv(
 
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
 
-    stamp = delivered_tail(provenance, measurement_recon["bindings"], gate,
+    stamp = delivered_tail(provenance, operating_point_recon["bindings"], gate,
                            columns=_PROVENANCE_COLUMNS)
     fieldnames = (["image", "detection_count", "avg_confidence", "measurement_document"]
                  + _PROVENANCE_COLUMNS)
@@ -360,7 +361,7 @@ def export_detection_csv(
             })
 
     record_delivery_binding_event("export_detection_csv", output_path, pred_dirs,
-                                  measurement_recon["bindings"],
+                                  operating_point_recon["bindings"],
                                   measurement_documents=[_MEASUREMENT_DOCUMENT],
                                   scale_document=None,
                                   trait=trait, delivery_kind=PER_IMAGE_COUNT)
@@ -370,6 +371,6 @@ def export_detection_csv(
         "tile_size_operative": tile_recon["operative"],
         "tile_size_validated": tile_recon.get("validated"),
         "binding_notes": binding_notes_text(
-            {**measurement_recon.get("binding_notes", {}), **tile_recon.get("binding_notes", {})}),
+            {**operating_point_recon.get("binding_notes", {}), **tile_recon.get("binding_notes", {})}),
     }
     return output_path, stamp, summary

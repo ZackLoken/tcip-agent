@@ -276,7 +276,7 @@ def _worker(job: InferenceJob) -> None:
             job.status = "failed"
             tile_desc = f"{resolved_tile}px" if resolved_tile is not None else "no resolvable size"
             job.error = (
-                f"inference refused: unvalidated measurement dimension(s) {list(gate.unvalidated)}. "
+                f"inference refused: unvalidated dimension(s) {list(gate.unvalidated)}. "
                 f"This run's tile scale ({tile_desc}) has no real basis: the checkpoint records no "
                 "training tile geometry and no tile size was stated for this run, so the counts it "
                 "would produce rest on nothing that justifies them. Run untiled, or use a checkpoint "

@@ -30,7 +30,8 @@ it in `pipelines/postprocessing/aggregation.py` if this table looks stale):
 | producer_model_sha256 | string | Checkpoint hash of the model that produced the predictions; blank when the bucket names an experiment nothing outside it can corroborate |
 | producing_experiment_id | string | The run that produced the predictions, blank when there was none or nothing corroborates it; never the calibration a claim was earned under |
 | produced_at | string | Timestamp this CSV was written, stamped by the shared tail composition; never the producing run's own timestamp |
-| measurement_validated | string | The reconciled validity state stamped into every row by the delivery gate |
+| operating_point_validated | string | The named dimension's cleared reference (paired with `measurement_document`, e.g. `measurement_document=ordinal_operating_point` beside this column naming which document it answers for), floored false whenever any other gated dimension with no column of its own (tile_size, scale, claim_scope) is unvalidated |
+| unvalidated_dimensions | string | Every gated dimension that floored the row above, comma-joined; blank when everything cleared |
 | validation_record | string | `experiment:digest` of the validation record the delivered claim was verified against; blank when the numbers rest on no record |
 
 ## Aggregation Rules
@@ -107,9 +108,9 @@ uncharacterized, which is a claim about a quantity that has been defined.
 ## The delivery gate (measurement integrity)
 
 Every phenotype-delivery door refuses a bare write: an unvalidated measurement number with no
-acknowledgement. The count/date/value is the phenotype, so each door reconciles every measurement
-dimension the deliverable rests on against a reference of that dimension's own kind (for the
-count/measurement/classifier dimensions, held-out GT or a breeder-confirmed output sample, see the
+acknowledgement. The count/date/value is the phenotype, so each door reconciles every dimension
+the deliverable rests on against a reference of that dimension's own kind (for the
+operating_point/classifier dimensions, held-out GT or a breeder-confirmed output sample, see the
 `evaluation` and `cv-research` skills; a tile scale needs a geometry basis, a physical scale a
 physical measurement, and no kind stands in for another), reading the predictions' own sidecar,
 one of the five measurement-document kinds a bucket can carry (`operating_point.json`,
@@ -137,16 +138,19 @@ only when every dimension it was handed clears, and otherwise refuses (or, with
   delivery gate then runs exactly once, inside the writer, never a second time at the door. Without
   a `predictions_dir`, the door calls the writer with no bucket at all, and the writer's own
   no-`pred_dirs` floor is what refuses (or ships provisionally under `acknowledge_unvalidated`);
-  the door's own response then reports the live run's narrowed references honestly
-  (`operating_point_validated`/`tile_size_validated`, accepted-or-false by construction), since
-  there is no bucket for a second gate call to reconcile against. With a bucket (either regime),
-  those same response fields instead quote the writer's own returned gate-and-reconciliation
-  summary, never a second gate call. The bucket regime (`predictions_dir` alone) reads an existing
-  bucket's own stamp and hands the writer that same bucket, with no run at all standing behind it.
-  `export_detection_csv` and `export_aggregated_csv` both gate at the writer the same way: pass
-  `pred_dirs` so the validity is reconciled from each bucket's own sidecar rather than trusting a
-  bare caller string. Without `pred_dirs`, either writer floors `measurement_validated` to
-  unvalidated regardless of what the caller asserted; there is no carve-out. A continuous or
+  the door's own response then reports the live run's own narrowed conf reference honestly under
+  `run_conf_validated_against` (accepted-or-false by construction), a different fact from
+  `operating_point_validated`, which floors false on this path since nothing on disk backs it
+  without a bucket for a second gate call to reconcile against. With a bucket (either regime),
+  `operating_point_validated`/`tile_size_validated` instead quote the writer's own returned
+  gate-and-reconciliation summary, never a second gate call, and `unvalidated_dimensions` names
+  whichever dimension floored the row. The bucket regime (`predictions_dir` alone) reads an
+  existing bucket's own stamp and hands the writer that same bucket, with no run at all standing
+  behind it. `export_detection_csv` and `export_aggregated_csv` both gate at the writer the same
+  way: pass `pred_dirs` so the validity is reconciled from each bucket's own sidecar rather than
+  trusting a bare caller string. Without `pred_dirs`, either writer floors
+  `operating_point_validated` to unvalidated regardless of what the caller asserted; there is no
+  carve-out. A continuous or
   ordinal trait's on-disk measurement-validity producer is
   `calibrate_ordinal_regression_operating_point`, which stamps `ordinal_operating_point.json` /
   `regression_operating_point.json`; `export_aggregated_csv` reconciles against it the same way it
@@ -165,7 +169,7 @@ only when every dimension it was handed clears, and otherwise refuses (or, with
   naming both edges. A delivery that mixes buckets across tiers travels under the weakest
   tier present. An untiled run is never gated on it.
 - To ship a provisional result, pass `acknowledge_unvalidated=True`: the door writes but stamps
-  `measurement_validated=false` so the un-trustworthiness travels with the CSV. This is for an honest
+  `operating_point_validated=false` so the un-trustworthiness travels with the CSV. This is for an honest
   provisional delivery, never for silently shipping a bare number. A tile scale with no real basis at
   all has no value to ship provisionally either, so `acknowledge_unvalidated` cannot admit that case:
   it refuses unconditionally.

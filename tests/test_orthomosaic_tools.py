@@ -400,7 +400,7 @@ def test_deliver_orthomosaic_plant_counts_refuses_unacknowledged_then_admits(tmp
     refused = deliver_orthomosaic_plant_counts(
         str(bucket_dir), str(raster_path), [str(plant_csv)], str(out_csv), delivered_phenotype="stem_count")
     assert "error" in refused
-    assert refused["unvalidated_dimensions"] == ["measurement"]
+    assert refused["unvalidated_dimensions"] == "operating_point"
     assert refused["operating_point_validated"] == "false"
     assert refused["n_detections"] == 3 and refused["n_mapped"] == 3
     assert not out_csv.exists()
@@ -409,7 +409,8 @@ def test_deliver_orthomosaic_plant_counts_refuses_unacknowledged_then_admits(tmp
         str(bucket_dir), str(raster_path), [str(plant_csv)], str(out_csv), delivered_phenotype="stem_count",
         acknowledge_unvalidated=True)
     assert "error" not in admitted
-    assert admitted["measurement_validated"] == "false"
+    assert admitted["operating_point_validated"] == "false"
+    assert admitted["unvalidated_dimensions"] == "operating_point"
     assert admitted["n_detections"] == 3
     assert admitted["n_mapped"] == 3
     assert admitted["n_unmapped"] == 0
@@ -419,12 +420,14 @@ def test_deliver_orthomosaic_plant_counts_refuses_unacknowledged_then_admits(tmp
     reader = csv.DictReader(out_csv.open(newline=""))
     rows = {r["plant_id"]: r for r in reader}
     assert "trait_name" not in (reader.fieldnames or [])
+    assert "operating_point_validated" in (reader.fieldnames or [])
+    assert "measurement_validated" not in (reader.fieldnames or [])
     assert rows["plot0"]["value"] == "2"
     assert rows["plot2"]["value"] == "1"
     assert rows["plot1"]["value"] == "0"
     assert rows["plot3"]["value"] == "0"
     for r in rows.values():
-        assert r["measurement_validated"] == "false"
+        assert r["operating_point_validated"] == "false"
         assert r["delivered_phenotype"] == "stem_count"
 
 

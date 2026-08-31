@@ -1285,10 +1285,12 @@ def test_tabulate_counts_never_launders_a_bare_validated_bool_into_a_reference(t
         assert "error" in r, conf_prov
         assert r["operating_point_validated"] == VALIDATED_FALSE
         assert r["validated"] is False
-    # ...and the rail still admits the legitimate case: a real annotations reference delivers.
+    # ...and the rail still admits the legitimate case: a real annotations reference delivers,
+    # reported under its own name; the CSV-facing column still floors with no bucket to back it.
     ok = _tabulate_counts_over(
         monkeypatch, tmp_path,
         {"conf": {"value": 0.6, "validated_against": "reviewer_confirmed_annotations"}},
         validated=True, acknowledge=True)
     assert "error" not in ok
-    assert ok["operating_point_validated"] == "reviewer_confirmed_annotations"
+    assert ok["operating_point_validated"] == VALIDATED_FALSE
+    assert ok["run_conf_validated_against"] == "reviewer_confirmed_annotations"

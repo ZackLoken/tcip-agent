@@ -1669,7 +1669,7 @@ def tabulate_counts(
     operating point and (if tiled) the tile geometry, reconciled from the bucket's own sidecar
     rather than trusted from a caller string; ships unless every dimension clears, or
     ``acknowledge_unvalidated=True`` writes a clearly-flagged provisional CSV stamped
-    ``measurement_validated=false``. A refused delivery still names what happened to a
+    ``operating_point_validated=false``. A refused delivery still names what happened to a
     ``predictions_dir`` the live regime published before the CSV's own gate ran
     (``bucket_published``, ``bucket_redirected``, ``lineage_linked``, beside ``csv_delivered:
     false``): the bucket is the caller's own stated ``predictions_dir`` intent, published under
@@ -1700,12 +1700,17 @@ def tabulate_counts(
     never corroborated; the bucket regime's are the stamp's own asserted identity, labelled so, no
     ``conf_source`` (not a stamp key, never fabricated from one). Either way the CSV's own
     ``producer_model_sha256``/``producing_experiment_id`` columns, and this response's
-    ``measurement_validated``, are ``export_detection_csv``'s returned tail, corroborated against
-    what a record outside the stamp actually answers for, so the two can legitimately differ (or
-    the tail can read unknown where the asserted identity does not). ``validated`` is live-only:
-    the run's own verdict over the dimensions it resolved, absent from the bucket regime's response
-    since no run happens there; the gate's own outcome travels in ``measurement_validated``/
-    ``operating_point_validated``/``tile_size_validated`` in both regimes.
+    ``operating_point_validated``, are ``export_detection_csv``'s returned tail, corroborated
+    against what a record outside the stamp actually answers for, so the two can legitimately
+    differ (or the tail can read unknown where the asserted identity does not). ``validated`` is
+    live-only: the run's own verdict over the dimensions it resolved, absent from the bucket
+    regime's response since no run happens there; the gate's own outcome travels in
+    ``operating_point_validated``/``tile_size_validated`` in both regimes, with
+    ``unvalidated_dimensions`` naming every dimension that floored the row when the two can
+    diverge. The live regime with no ``predictions_dir`` carries one further fact nothing on disk
+    backs: ``run_conf_validated_against``, the run's own narrowed conf reference, distinct from
+    ``operating_point_validated`` (which floors false on that path, since nothing persisted answers
+    for it).
 
     Args:
         checkpoint_path: Path to model .pt checkpoint (live regime; required with ``images_dir``,
@@ -1747,7 +1752,7 @@ def tabulate_counts(
             (forwarded to ``run_inference``; see its own doc for the best-effort resolution when
             omitted).
         acknowledge_unvalidated: Both regimes. Write the count CSV even when a gated dimension is
-            unvalidated, stamping it ``measurement_validated=false`` so the un-trustworthiness
+            unvalidated, stamping it ``operating_point_validated=false`` so the un-trustworthiness
             travels downstream.
         predictions_dir: Live regime: directory to persist the counted predictions into, resolved
             and stamped the way ``export_predictions`` resolves and stamps a bucket (a relative
@@ -1892,12 +1897,14 @@ def tabulate_counts(
     try:
         csv_path, tail, summary = export_detection_csv(
             csv_rows, output_path, provenance=provenance, trait=trait,
-            measurement_validated=op_ref,
+            operating_point_validated=op_ref,
             pred_dirs=[str(bucket)] if bucket is not None else None,
             acknowledge_unvalidated=acknowledge_unvalidated,
         )
     except DeliveryRefused as exc:
         reason = str(exc)
+        op_validated = exc.gate.stamp.get("operating_point", VALIDATED_FALSE)
+        tile_validated = exc.gate.stamp.get("tile_size", tile_ref)
         if bucket is None:
             reason += (
                 " These counts were read off an in-memory pass with no prediction bucket behind "
@@ -1905,10 +1912,6 @@ def tabulate_counts(
                 "which is what a validated count CSV rests on; an unvalidated bucket can also be "
                 "promoted to validated later through the review validation route, with no re-run."
             )
-            op_validated, tile_validated = op_ref, tile_ref
-        else:
-            op_validated = exc.gate.stamp.get("measurement", VALIDATED_FALSE)
-            tile_validated = exc.gate.stamp.get("tile_size", tile_ref)
         refusal = {
             "error": reason,
             "operating_point_validated": op_validated,
@@ -1918,6 +1921,10 @@ def tabulate_counts(
             "image_count": result["image_count"],
             "total_detections": result["total_detections"],
         }
+        if bucket is None:
+            # The run's own narrowed reference, distinct from the gate stamp above: nothing on
+            # disk backs it without a bucket, so it never answers for operating_point_validated.
+            refusal["run_conf_validated_against"] = op_ref
         if bucket is not None:
             refusal["bucket_published"] = bucket_published
             refusal["predictions_dir"] = str(bucket)
@@ -1945,19 +1952,22 @@ def tabulate_counts(
         # count-bearing deliverable; the numbers are only as trustworthy as what stands behind them.
         "operating_point": result.get("operating_point"),
         "validated": bool(result.get("validated", False)),
-        "measurement_validated": tail["measurement_validated"],
-        # With a bucket, the writer's own reconciliation (the single authoritative gate); without
-        # one, the run's own narrowed references, accepted-or-false by construction, no gate call.
-        "operating_point_validated": (
-            summary["stamp"].get("measurement", VALIDATED_FALSE) if bucket is not None else op_ref),
+        # The CSV's own written cell, the gate stamp floored across every gated dimension
+        # without a column of its own; unvalidated_dimensions names the floorer.
+        "operating_point_validated": tail["operating_point_validated"],
         "tile_size_validated": (
             (summary["stamp"].get("tile_size") if summary["tile_size_operative"] else None)
             if bucket is not None else tile_ref),
+        "unvalidated_dimensions": tail["unvalidated_dimensions"],
         "conf_source": result.get("conf_source"),
         "checkpoint_sha256": result.get("checkpoint_sha256"),
         "experiment_id": result.get("experiment_id"),
         "predictions_dir": str(bucket) if bucket is not None else None,
     }
+    if bucket is None:
+        # The run's own narrowed reference, distinct from operating_point_validated above,
+        # which floors false here since nothing on disk backs it without a bucket.
+        out["run_conf_validated_against"] = op_ref
     if bucket is not None:
         out["bucket_redirected"] = resolution.redirected
         out["verdict_guard_operative"] = bucket_root is not None
@@ -2103,13 +2113,13 @@ def _tabulate_counts_from_bucket(predictions_dir: str, output_path: str, *, trai
     try:
         csv_path, tail, summary = export_detection_csv(
             image_results, output_path, provenance=provenance, trait=trait,
-            measurement_validated=None, pred_dirs=[str(bucket_path)],
+            operating_point_validated=None, pred_dirs=[str(bucket_path)],
             acknowledge_unvalidated=acknowledge_unvalidated,
         )
     except DeliveryRefused as exc:
         refusal = {
             "error": str(exc),
-            "operating_point_validated": exc.gate.stamp.get("measurement", VALIDATED_FALSE),
+            "operating_point_validated": exc.gate.stamp.get("operating_point", VALIDATED_FALSE),
             "tile_size_validated": exc.gate.stamp.get("tile_size"),
             "operating_point": sidecar.get("operating_point"),
             "image_count": image_count,
@@ -2131,10 +2141,10 @@ def _tabulate_counts_from_bucket(predictions_dir: str, output_path: str, *, trai
         "image_count": image_count,
         "total_detections": total_detections,
         "operating_point": sidecar.get("operating_point"),
-        "operating_point_validated": summary["stamp"].get("measurement", VALIDATED_FALSE),
+        "operating_point_validated": tail["operating_point_validated"],
         "tile_size_validated": (
             summary["stamp"].get("tile_size") if summary["tile_size_operative"] else None),
-        "measurement_validated": tail["measurement_validated"],
+        "unvalidated_dimensions": tail["unvalidated_dimensions"],
         "checkpoint_sha256": sidecar.get("checkpoint_sha256"),
         "experiment_id": sidecar.get("experiment_id"),
         "predictions_dir": str(bucket_path),

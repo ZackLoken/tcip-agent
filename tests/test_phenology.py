@@ -402,7 +402,7 @@ def test_write_phenology_csv_refuses_and_writes_nothing_when_a_dimension_is_unva
     """The writer runs its own delivery gate before opening the file, the way its sibling writers
     (``export_aggregated_csv``, ``export_detection_csv``) do; a call whose flags do not clear
     refuses rather than delivering a silent bare number."""
-    with pytest.raises(ValueError, match="unvalidated measurement dimension"):
+    with pytest.raises(ValueError, match="unvalidated dimension"):
         phenology.write_phenology_csv(
             "test", [], tmp_path / "out.csv", CATKIN,
             flags={"classifier": None, "operating_point": None}, acknowledge_unvalidated=False,

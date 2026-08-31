@@ -211,7 +211,7 @@ def _aggregated(tmp_path, bucket: Path, *, name: str = "counts.csv"):
         [{"plant_id": "plot0", "value": 3, "observations": 1, "value_key": "count",
           "measurement_document": "operating_point"}],
         str(tmp_path / name),
-        delivered_phenotype="stem_count", measurement_validated=VALIDATED_HELD_OUT,
+        delivered_phenotype="stem_count", operating_point_validated=VALIDATED_HELD_OUT,
         pred_dirs=[str(bucket)])
     return path
 
@@ -221,7 +221,7 @@ def test_delivery_gate_ships_a_bucket_scoped_to_the_mosaic_it_was_produced_on(tm
         tmp_path, "preds", _validated_count_stamp(claim_scope=VALIDATED_SAME_MOSAIC_IDENTITY))
     out = _aggregated(tmp_path, bucket)
     rows = list(csv.DictReader(Path(out).open(newline="")))
-    assert rows[0]["measurement_validated"] == VALIDATED_HELD_OUT
+    assert rows[0]["operating_point_validated"] == VALIDATED_HELD_OUT
 
 
 def test_delivery_gate_refuses_a_bucket_whose_claim_scope_cleared_nothing(tmp_path):
@@ -247,7 +247,7 @@ def test_delivery_gate_never_gates_a_bucket_that_records_no_claim_scope(tmp_path
     bucket = _hand_written_bucket(tmp_path, "preds", _validated_count_stamp())
     out = _aggregated(tmp_path, bucket)
     rows = list(csv.DictReader(Path(out).open(newline="")))
-    assert rows[0]["measurement_validated"] == VALIDATED_HELD_OUT
+    assert rows[0]["operating_point_validated"] == VALIDATED_HELD_OUT
 
 
 def test_orthomosaic_precondition_precedes_the_raster_identity_refusal(tmp_path, monkeypatch):

@@ -382,7 +382,7 @@ def delivered_golden(body: dict, produced_at: bytes) -> bytes:
     record = _expected_validation_record(body).encode()
     sha = producer_checkpoint_sha256("exp-1").encode()
     row = (b",2,2,0,0,2026-02-24,2026-02-12,2026-02-18,2026-02-24,interpolated,interpolated,"
-           b"interpolated,interpolated,true,0.4,held_out_annotations,held_out_annotations,"
+           b"interpolated,interpolated,true,0.4,held_out_annotations,held_out_annotations,,"
            + sha + b",exp-1," + produced_at + b"," + record + b"," + mapping_sha + b","
            + captures_unverified + b",\r\n")
     return (
@@ -390,7 +390,8 @@ def delivered_golden(body: dict, produced_at: bytes) -> bytes:
         b"catkin_elongation_date,catkin_05per_date,catkin_50per_date,catkin_95per_date,"
         b"catkin_elongation_date_bound,catkin_05per_date_bound,catkin_50per_date_bound,"
         b"catkin_95per_date_bound,catkin_elongation_crossing_unconfirmed,operating_point_conf,"
-        b"operating_point_validated,positive_state_classifier_validated,producer_model_sha256,"
+        b"operating_point_validated,positive_state_classifier_validated,unvalidated_dimensions,"
+        b"producer_model_sha256,"
         b"producing_experiment_id,produced_at,validation_record,plant_mapping_sha256,"
         b"captures_unverified,plant_csvs_unverified\r\n"
         + b"PLANT_A,AccA" + row

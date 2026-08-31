@@ -196,7 +196,7 @@ _STRATEGIES = {
 
 
 _PROVENANCE_COLUMNS = ["producer_model_sha256", "producing_experiment_id", "produced_at",
-                       "measurement_validated", "validation_record"]
+                       "operating_point_validated", "unvalidated_dimensions", "validation_record"]
 
 def _unit_from_value_key(value_key: str) -> tuple[str, str] | None:
     """``(display_unit, linear_basis)`` a value_key implies (``area_mm2`` -> ``("mm2", "mm")``,
@@ -282,7 +282,7 @@ def export_aggregated_csv(
     pipeline_version: str = "",
     provenance: dict | None = None,
     *,
-    measurement_validated: str | None = None,
+    operating_point_validated: str | None = None,
     pred_dirs: list[str] | None = None,
     images_dir: str | None = None,
     scale_capture_id: str | None = None,
@@ -294,9 +294,10 @@ def export_aggregated_csv(
     authority for it: plant_id, crop, delivered_phenotype, value, units, value_key, measurement_document,
     scale_document, confidence, n_images, pipeline_version, plant_id_source,
     plant_id_distance_m_max, then ``_PROVENANCE_COLUMNS`` (producer_model_sha256,
-    producing_experiment_id, produced_at, measurement_validated, validation_record) so the final
-    per-plant value is traceable to the exact model that produced it and carries its own validity
-    stamp. Those cells are built by ``delivered_tail`` from the verification the gate already ran,
+    producing_experiment_id, produced_at, operating_point_validated, unvalidated_dimensions,
+    validation_record) so the final per-plant value is traceable to the exact model that produced
+    it and carries its own validity stamp. Those cells are built by ``delivered_tail`` from the
+    verification the gate already ran,
     so a producer this delivery cannot corroborate is reported unknown rather than repeated from
     the stamp that asserted it, ``produced_at`` is the write's own timestamp rather than one the
     caller asserts, and ``validation_record`` names the record a reader can open to see what the
@@ -318,7 +319,7 @@ def export_aggregated_csv(
     with no acknowledgement) via the shared ``check_delivery_gate`` and stamps the reconciled
     validity into every row. Pass ``pred_dirs`` (the prediction buckets the values came from) so the
     stated document's own sidecar is reconciled from each bucket and floored against
-    ``measurement_validated`` (never trusted from the string alone). Under ``operating_point``, a
+    ``operating_point_validated`` (never trusted from the string alone). Under ``operating_point``, a
     tiled bucket also gates on its ``tile_size``: the tile edge scales the per-image counts this
     per-plant value aggregates, so a run with no persisted training geometry, no recoverable
     native-frame edge, and no explicit caller override refuses here; untiled buckets are never
@@ -337,9 +338,9 @@ def export_aggregated_csv(
     construction) and refuses under ``operating_point``, since a dimensional number from a detection
     or segmentation bucket with no scale behind it has nothing answering for its unit; with no
     ``pred_dirs``, the delivery has no on-disk validity producer at all regardless of unit, and
-    floors to unvalidated exactly as the measurement dimension does, shippable only through
+    floors to unvalidated exactly as the operating_point dimension does, shippable only through
     ``acknowledge_unvalidated``. When operative, each bucket's ``resolve_scale.json`` is reconciled
-    the same floor-from-disk way the measurement dimension is, checked against the delivered unit
+    the same floor-from-disk way the operating_point dimension is, checked against the delivered unit
     and the delivered trait (``reconcile_scale_validity``), which recomputes the claim's imagery
     digest from ``images_dir`` (required whenever ``scale_document`` is stated alongside
     ``pred_dirs``). ``scale_capture_id`` scopes that reconciliation to one capture when the
@@ -379,12 +380,12 @@ def export_aggregated_csv(
         crop: Crop species name.
         pipeline_version: Pipeline identifier.
         provenance: Optional producing-model stamp added as trailing columns.
-        measurement_validated: Honored only when ``pred_dirs`` is also given (floors the on-disk
-            validity, never raises it). Ignored, not a delivery path, when ``pred_dirs`` is empty,
-            see the note above.
+        operating_point_validated: Honored only when ``pred_dirs`` is also given (floors the
+            on-disk validity, never raises it). Ignored, not a delivery path, when ``pred_dirs`` is
+            empty, see the note above.
         pred_dirs: Prediction buckets to reconcile validity from: the results' own stated
             ``measurement_document``, and ``scale_document`` when stated; floored against
-            ``measurement_validated``.
+            ``operating_point_validated``.
         images_dir: The buckets' own images directory, required when ``scale_document`` is stated
             (with ``pred_dirs`` given) to recompute a scale claim's imagery digest.
         scale_capture_id: The capture this delivery's physical scale must match, when the scale is
@@ -491,11 +492,11 @@ def export_aggregated_csv(
     # one reconciles, regardless of measurement_document.
     claim_scope_recon: dict = (reconcile_claim_scope_validity(pred_dirs) if pred_dirs
                                else {"operative": False, "validated": None})
-    measurement_recon: dict = {"bindings": {}}
+    operating_point_recon: dict = {"bindings": {}}
     if pred_dirs:
-        measurement_recon = _reconcilers[measurement_document](
-            pred_dirs, trait=trait, asserted=measurement_validated)
-        state = measurement_recon["validated"]
+        operating_point_recon = _reconcilers[measurement_document](
+            pred_dirs, trait=trait, asserted=operating_point_validated)
+        state = operating_point_recon["validated"]
         if measurement_document == "operating_point":
             tile_recon = reconcile_tile_size_validity(pred_dirs)
         if scale_document is not None:
@@ -513,7 +514,7 @@ def export_aggregated_csv(
     else:
         # No pred_dirs, no on-disk source; a bare caller-asserted string is never trusted alone.
         state = VALIDATED_FALSE
-    flags: dict[str, str | None] = {"measurement": state}
+    flags: dict[str, str | None] = {"operating_point": state}
     if tile_recon["operative"]:
         flags["tile_size"] = tile_recon["validated"]
     if scale_recon["operative"]:
@@ -523,7 +524,7 @@ def export_aggregated_csv(
     gate = check_delivery_gate(flags, acknowledge_unvalidated=acknowledge_unvalidated)
     if not gate.ok:
         notes = " ".join(filter(None, (
-            binding_notes_text(measurement_recon.get("binding_notes", {})),
+            binding_notes_text(operating_point_recon.get("binding_notes", {})),
             binding_notes_text(tile_recon.get("binding_notes", {})),
             binding_notes_text(scale_recon.get("binding_notes", {})),
             binding_notes_text(claim_scope_recon.get("binding_notes", {})),
@@ -540,7 +541,7 @@ def export_aggregated_csv(
 
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
 
-    stamp = delivered_tail(provenance, measurement_recon["bindings"], gate,
+    stamp = delivered_tail(provenance, operating_point_recon["bindings"], gate,
                            columns=_PROVENANCE_COLUMNS)
     fieldnames = [
         "plant_id", "crop", "delivered_phenotype", "value", "units", "value_key",
@@ -572,7 +573,7 @@ def export_aggregated_csv(
             })
 
     record_delivery_binding_event("export_aggregated_csv", output_path, pred_dirs,
-                                  measurement_recon["bindings"],
+                                  operating_point_recon["bindings"],
                                   measurement_documents=[measurement_document],
                                   scale_document=scale_document,
                                   trait=trait, delivery_kind=delivery_kind)
