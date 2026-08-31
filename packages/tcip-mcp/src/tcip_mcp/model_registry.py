@@ -557,7 +557,8 @@ def _candidate_checkpoint_paths(root: Path, raw: str) -> set[Path]:
         found.update(p for p in experiments_dir.rglob("*.pt") if p.is_file())
     raw_parts = PurePosixPath(Path(raw).as_posix()).parts
     if ".tcip" in raw_parts:
-        suffix = Path(root, *raw_parts[raw_parts.index(".tcip") :])
+        last_tcip = len(raw_parts) - 1 - raw_parts[::-1].index(".tcip")
+        suffix = Path(root, *raw_parts[last_tcip:])
         if suffix.is_file():
             found.add(suffix)
     basename = Path(raw).name

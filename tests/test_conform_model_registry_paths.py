@@ -302,6 +302,28 @@ def test_conform_skips_a_directory_shaped_like_a_checkpoint_under_experiments(tm
     assert entries[0]["checkpoint_path"] == ".tcip/models/real.pt"
 
 
+def test_candidate_checkpoint_paths_derives_the_suffix_from_the_last_tcip_segment(tmp_path: Path):
+    """A stored path carrying two ``.tcip`` segments (a stale export nested under a backup tree
+    that is itself named ``.tcip``-something, or similar) must derive its version-1 suffix from
+    the last one, the segment nearest the actual checkpoint, matching the entry's own claim
+    rather than an unrelated ancestor that happens to share the name. Coverage: the basename
+    fallback in the same enumeration already finds this file by name alone, so this does not by
+    itself distinguish the last-segment rule from the first-segment one it replaces; it pins the
+    suffix construction's own intent directly."""
+    from tcip_mcp.model_registry import _candidate_checkpoint_paths
+
+    root = tmp_path / "dest"
+    (root / ".tcip" / "models").mkdir(parents=True)
+    real = root / ".tcip" / "models" / "m.pt"
+    real.write_bytes(b"weights")
+
+    raw = "/backup/.tcip/exports/project/.tcip/models/m.pt"
+
+    candidates = _candidate_checkpoint_paths(root, raw)
+
+    assert real.resolve() in candidates
+
+
 def test_conform_refuses_a_malformed_mapping():
     from tcip_mcp.model_registry import _document_entries_for_conform
 
