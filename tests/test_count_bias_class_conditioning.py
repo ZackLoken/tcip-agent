@@ -619,7 +619,7 @@ def test_a_class_missing_entirely_gets_the_missing_class_message_not_the_single_
     assert "single image" not in out["reason"]
 
 
-def test_sweep_summary_surfaces_per_class_tolerance_and_typical_count():
+def test_gate_evidence_summary_surfaces_per_class_tolerance_and_typical_count():
     """Per-class provenance fields were added to `gate_evidence_summary` (the agent-facing compact view)
     but nothing asserted they actually reach its output -- deleting them left the suite green.
     Drives a real refusal through the real door end to end, then checks the compact view a caller

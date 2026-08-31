@@ -486,7 +486,7 @@ def test_describe_review_validation_content_shared_with_calibration_message():
     assert "share content" in out["reason"]
 
 
-def test_sweep_summary_surfaces_disjointness_fields():
+def test_gate_evidence_summary_surfaces_disjointness_fields():
     from tcip_mcp.pipelines.calibration import gate_evidence_summary
     from tcip_mcp.pipelines.resolution import VALIDATED_FALSE, derived
 
@@ -507,7 +507,7 @@ def test_sweep_summary_surfaces_disjointness_fields():
     assert out["pooled_count_bias_tolerance"] == 4.0
 
 
-def test_sweep_summary_surfaces_split_policy_divergence():
+def test_gate_evidence_summary_surfaces_split_policy_divergence():
     """attach_split_policy_provenance writes into conf.gate_evidence; gate_evidence_summary must forward those
     keys too, or run_inference's actual response never shows a caller their declared seed/ratio
     didn't take effect against an existing lock -- only the persisted sweep artifact would."""

@@ -314,7 +314,7 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
         update_sidecar,
     )
     from tcip_mcp.prediction_buckets import review_state_dir_of
-    from tcip_store.errors import StoreError
+    from tcip_store.errors import SchemaVersionRefused, StoreBusy
 
     op_prov = bundle.to_provenance()["operating_point"]
     ref_hash = review_reference_hash(
@@ -413,7 +413,11 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
                     stamp_body=earned)
             if update_sidecar(d, _promotion_of(d, earned)):
                 stamped.append(d)
-    except (ValueError, StoreError) as exc:
+    except StoreBusy as exc:
+        # Contention is a retryable infrastructure fault, never a malformed request; the
+        # dataset select route's own StoreBusy handling is the platform's precedent.
+        raise HTTPException(503, str(exc)) from exc
+    except (ValueError, SchemaVersionRefused) as exc:
         raise HTTPException(400, str(exc)) from None
 
     # The sidecar this stamps sits in the prediction bucket, which travels with the dataset.

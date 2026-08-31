@@ -924,10 +924,12 @@ STAMP_EXTENSION_KEYS: dict[str, str] = {
     "raster_content_identity": "the raster-export door, recorded for every run of that regime",
     "overlap": "the web inference worker",
     "overlap_source": "the web inference worker",
-    "calibration_curve_path": "the shared per-image bucket publisher behind export_predictions and "
-                 "tabulate_counts's live path, for a calibrated run that persisted a curve",
-    "gate_evidence_summary": "the shared per-image bucket publisher behind export_predictions and "
-                     "tabulate_counts's live path, for a calibrated run that persisted a curve",
+    "calibration_curve_path": "the shared per-image bucket publisher behind export_predictions "
+                              "and tabulate_counts's live path, for a calibrated run that "
+                              "persisted a curve",
+    "gate_evidence_summary": "the shared per-image bucket publisher behind export_predictions "
+                             "and tabulate_counts's live path, for a calibrated run that "
+                             "persisted a curve",
     "image_filenames": "the per-image bucket publishers (the shared image-bucket publisher behind "
                        "export_predictions and tabulate_counts's live path, and the web inference "
                        "worker): each prediction document stem mapped to its source image's "

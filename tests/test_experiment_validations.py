@@ -305,8 +305,13 @@ def test_read_validations_admits_an_old_row_with_no_schema_version(tmp_path):
     create_experiment(experiment_id, TRAINING_CONFIG)
     old_row = _row()
     del old_row["schema_version"]
+    # Digest taken at write time and the row relocated by it beside a version-2 sibling,
+    # so the proof is identification in a mixed-vintage log, not dict self-equality.
+    digest_at_write = validation_digest(old_row)
     ts.append(validations_key(experiment_id), old_row)
+    ts.append(validations_key(experiment_id), _row())
 
     rows = read_validations(experiment_id)
-    assert rows == [old_row]
-    assert validation_digest(old_row) == validation_digest(rows[0])
+    assert old_row in rows and len(rows) == 2
+    matched = [r for r in rows if validation_digest(r) == digest_at_write]
+    assert matched == [old_row]

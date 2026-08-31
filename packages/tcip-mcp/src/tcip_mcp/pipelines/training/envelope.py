@@ -200,7 +200,7 @@ class TrainContext:
 
     # ---- measurement primitives (compose for dimensional traits) ----
     def calibrate(self, trait_name: str, **kwargs: Any) -> Any:
-        """Resolve the trait's operating point (conf/tile/max_dets) from record sweeps, the derived,
+        """Resolve the trait's operating point (conf/tile/max_dets) from record gate evidence, the derived,
         held-out-validated point, not a pin. Pass calibration_records/holdout_records (kwargs mirror
         ``resolve_operating_point``, including ``tiled``: pass it explicitly, stating whether the
         pass that produced your records actually tiled, the same fact ``staged_conf_floor`` below

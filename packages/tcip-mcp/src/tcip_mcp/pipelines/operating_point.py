@@ -964,8 +964,8 @@ def resolve_operating_point(
                 "localization_tolerance_frac", loc_frac,
                 derived_from="trait default (underivable: no same-class neighbor in this GT)")
         tol = loc_frac * gt_class_avg_size(calibration_records)
-        cal_sweep = derive_operating_point_curve(calibration_records, tolerance=tol)
-        conf = picker(cal_sweep)
+        cal_curve = derive_operating_point_curve(calibration_records, tolerance=tol)
+        conf = picker(cal_curve)
         conf = DEFAULT_CONF if conf is None else conf
         # conf-censoring guard: a count-unbiased 'validated' claim is only honest if the picked conf
         # sits strictly above the floor the reference was staged at, not merely if the reference's
@@ -985,8 +985,8 @@ def resolve_operating_point(
             # conf_grid makes derive_operating_point_curve evaluate exactly the conf that will ship, never
             # an approximation from the holdout's own independently-built grid (which need not
             # contain, or be anywhere near, the calibration-chosen conf).
-            hold_sweep = derive_operating_point_curve(holdout_records, tolerance=hold_tol, conf_grid=[conf])
-            hb = hold_sweep["curve"][0]  # the exact-conf holdout bias entry
+            hold_curve = derive_operating_point_curve(holdout_records, tolerance=hold_tol, conf_grid=[conf])
+            hb = hold_curve["curve"][0]  # the exact-conf holdout bias entry
             # The calibration side re-measured at the shipped conf (not read off its own grid, which
             # need not contain it), the only comparable basis for asking which classes the holdout
             # was actually able to check, below.
@@ -1170,7 +1170,7 @@ def resolve_operating_point(
                 failures.append("count_error_dispersion_too_high")
             passed = not failures
 
-            gate_evidence = {"calibration": cal_sweep, "f1_max_conf": pick_f1_max(cal_sweep),
+            gate_evidence = {"calibration": cal_curve, "f1_max_conf": pick_f1_max(cal_curve),
                           "holdout_bias": hb,
                           "count_bias_tolerance_frac": count_bias_tolerance_frac,
                           "count_bias_tolerance_frac_source": (
@@ -1215,7 +1215,7 @@ def resolve_operating_point(
             # records which reference (GT vs review-confirmed) cleared the gate.
             validated = validated_reference if passed else VALIDATED_FALSE
         else:
-            gate_evidence = {"calibration": cal_sweep, "conf_censored": censored,
+            gate_evidence = {"calibration": cal_curve, "conf_censored": censored,
                           "conf_floor_mismatch": floor_mismatch, "staged_conf_floor": staged_conf_floor,
                           "staged_conf_floor_attribute_path": staged_conf_floor_attribute_path,
                           "calibration_observed_min_score": _min_dt_score(calibration_records),

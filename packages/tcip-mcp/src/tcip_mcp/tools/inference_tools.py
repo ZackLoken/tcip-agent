@@ -598,7 +598,7 @@ def _run_inference_verified(
             extra["n_excluded_unassigned_stems"] = len(manifest_excluded["excluded_unassigned_stems"])
         # The full curve can be large, persist it and return the path (provenance emits has_gate_evidence).
         # The record's own body is its identity, so a curve differing from a prior one is never lost.
-        sweep_body = {
+        curve_body = {
             "schema_version": 2,
             "trait": trait,
             "dataset_hash": cal_hash,
@@ -612,7 +612,7 @@ def _run_inference_verified(
             "calibration_evidence": evidence,
         }
         try:
-            sweep_identity = calibration_curve_identity(sweep_body)
+            curve_identity_hex = calibration_curve_identity(curve_body)
         except (TypeError, ValueError) as exc:
             return {"error": f"the operating-point curve for trait {trait!r} could not be kept "
                              f"(its body cannot be recorded): {exc}"}
@@ -620,12 +620,12 @@ def _run_inference_verified(
         from tcip_store import store
 
         try:
-            store.replace(calibration_curve_key(sweep_identity), sweep_body)
+            store.replace(calibration_curve_key(curve_identity_hex), curve_body)
         except Exception:
             logger.warning("could not persist operating-point curve", exc_info=True)
         else:
-            extra["calibration_curve_path"] = str(calibration_curve_path(sweep_identity))
-            extra["calibration_evidence_key"] = sweep_identity
+            extra["calibration_curve_path"] = str(calibration_curve_path(curve_identity_hex))
+            extra["calibration_evidence_key"] = curve_identity_hex
     else:
         # Raw inference has no per-dataset calibration: the model already carries score_threshold as
         # its in-model conf; the bundle stamps it validated_against=false so the un-trustworthiness of
