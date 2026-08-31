@@ -36,6 +36,25 @@ def _select(client: TestClient, root: Path, **over) -> dict:
     return r.json()
 
 
+def _write_binding_raw(workspace: Path, *, generation: int, root: Path,
+                       project_name: str | None = None) -> None:
+    """Write a canvas_open_binding record as a plain file, bypassing the store seam entirely.
+
+    Used only by guard proofs run against a baseline that predates this store's registration:
+    a seam call (even a lazy import inside a helper) would raise ``ImportError`` there, which
+    ``prove_test_fails_before.py`` treats as unreached rather than as evidence. A raw file at the
+    exact path the store's own locator would place it under carries no such dependency.
+    """
+    import json
+
+    doc = workspace / ".tcip" / "state" / "canvas_open_binding.json"
+    doc.parent.mkdir(parents=True, exist_ok=True)
+    doc.write_text(json.dumps({
+        "generation": generation, "root": str(root), "project_name": project_name,
+        "issued_at": "2026-01-01T00:00:00+00:00",
+    }), encoding="utf-8")
+
+
 def _mint_binding(root: Path, *, generation: int = 1, project_name: str | None = None) -> None:
     """Write a canvas_open_binding record directly through the seam, for an MCP-only test with
     no HTTP round trip to mint one through."""
@@ -493,8 +512,6 @@ def test_capture_live_canvas_hit_case_divergence_is_not_silently_rendered(tmp_pa
     (bypassing the store seam), so this stays constructible against a baseline that predates the
     canvas_open_binding registration entirely: no symbol this proof needs is new at the parent.
     """
-    import json
-
     from tcip_store.file_backend import FileBackend
 
     tcip_store.bind(FileBackend())
@@ -503,12 +520,7 @@ def test_capture_live_canvas_hit_case_divergence_is_not_silently_rendered(tmp_pa
     _write_state(tmp_path, img)  # A's own (this reader's) stale documents: a "hit"
 
     workspace = tmp_path.parent
-    binding_doc = workspace / ".tcip" / "state" / "canvas_open_binding.json"
-    binding_doc.parent.mkdir(parents=True, exist_ok=True)
-    binding_doc.write_text(json.dumps({
-        "generation": 7, "root": str(workspace / "elsewhere"),
-        "project_name": None, "issued_at": "2026-01-01T00:00:00+00:00",
-    }), encoding="utf-8")
+    _write_binding_raw(workspace, generation=7, root=workspace / "elsewhere")
 
     from tcip_mcp.tools.vision_tools import capture_live_canvas
     res = capture_live_canvas(refresh=False)
@@ -577,11 +589,13 @@ def test_capture_live_canvas_generation_fence_retries_once_then_answers_divergen
     not produce a false live result: it retries once, and if the mismatch persists, answers with
     the divergence rather than the render it just produced."""
     import tcip_store as ts
+    from tcip_store.file_backend import FileBackend
 
+    tcip_store.bind(FileBackend())
     monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
     img = _make_image(tmp_path)
     _write_state(tmp_path, img)
-    _mint_binding(tmp_path, generation=1)
+    _write_binding_raw(tmp_path.parent, generation=1, root=tmp_path)
 
     real_read = ts.read
     reads = {"n": 0}
