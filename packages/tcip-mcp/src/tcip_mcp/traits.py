@@ -115,8 +115,8 @@ class TraitSpec:
     # The "majority" milestone (a crops.yml date such as "most pistillate flowers have opened")
     # maps to this crossing key (e.g. "95per"); read-semantics, not a frozen literal in phenology.py.
     majority_milestone: str = ""
-    # Marks the majority crossing mapping as not yet breeder-confirmed; the delivered column spells
-    # it crossing_unconfirmed, this stored field keeps the older word by a recorded scope ruling.
+    # Marks the majority crossing mapping as not yet breeder-confirmed; the delivered column
+    # spells the same fact crossing_unconfirmed while this stored key keeps its older word.
     majority_provisional: bool = False
     # Phenology CSV column vocabulary: the milestone-column prefix and the label the majority
     # alias/crossing-unconfirmed columns carry, so the delivered schema derives its own names.
