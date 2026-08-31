@@ -40,14 +40,20 @@ def _write_binding_raw(workspace: Path, *, generation: int, root: Path,
                        project_name: str | None = None) -> None:
     """Write a canvas_open_binding record as a plain file, bypassing the store seam entirely.
 
-    Used only by guard proofs run against a baseline that predates this store's registration:
-    a seam call (even a lazy import inside a helper) would raise ``ImportError`` there, which
-    ``prove_test_fails_before.py`` treats as unreached rather than as evidence. A raw file at the
-    exact path the store's own locator would place it under carries no such dependency.
+    Used only by guard proofs run against a baseline that predates this store's registration: a
+    seam call (even a lazy import inside a helper) would raise ``ImportError`` there, which
+    ``prove_test_fails_before.py`` treats as unreached rather than as evidence. The path is still
+    computed through the generic ``RootedFileLocator`` primitive (the same one the registered
+    store's own locator wraps), not hand-spelled, so the layout is stated once even though this
+    fixture cannot go through the registration itself; that primitive predates this store by a
+    wide margin, so it carries none of the baseline dependency the registration would.
     """
     import json
 
-    doc = workspace / ".tcip" / "state" / "canvas_open_binding.json"
+    from tcip_store.file_backend import RootedFileLocator
+
+    locator = RootedFileLocator(prefix=(".tcip", "state"), suffix=".json")
+    doc = workspace / locator.relative_path(str(workspace), ("canvas_open_binding",))
     doc.parent.mkdir(parents=True, exist_ok=True)
     doc.write_text(json.dumps({
         "generation": generation, "root": str(root), "project_name": project_name,
@@ -172,6 +178,17 @@ def test_push_answers_409_on_a_stale_generation_and_nothing_lands_under_the_old_
     r2 = client.post("/api/canvas/state", json=fresh)
     assert r2.status_code == 200
     assert _meta(second_root)["image_path"] == "C:/img/b.jpg"
+
+
+def test_push_answers_409_on_no_binding_at_all(client, tmp_path):
+    """The refusal's other half: a push before any select has ever run names a missing record,
+    not a generation mismatch."""
+    r = client.post("/api/canvas/state", json=_payload("C:/img/a.jpg", 1, shapes=SHAPES))
+    assert r.status_code == 409
+    detail = r.json()["detail"]
+    assert detail["generation"] is None
+    assert detail["project_name"] is None
+    assert not (tmp_path / ".tcip" / "state" / "canvas_live.json").exists()
 
 
 def test_push_lands_under_a_non_workspace_root_bound_with_a_null_project_name(
@@ -408,12 +425,15 @@ def test_capture_live_canvas_no_binding_names_the_consulted_workspace_root(tmp_p
 
 
 def test_capture_live_canvas_binding_present_but_no_state_pushed_yet(tmp_path, monkeypatch):
+    """The binding already names this same pinned root, so the message must not suggest
+    set_active_project toward a project it has already confirmed is the open one."""
     monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
     _mint_binding(tmp_path)
     from tcip_mcp.tools.vision_tools import capture_live_canvas
     res = capture_live_canvas(refresh=False)
     assert "error" in res
     assert "no live canvas state" in res["error"].lower()
+    assert "set_active_project" not in res["error"]
 
 
 def test_capture_live_canvas_renders_pushed_state(tmp_path, monkeypatch):
@@ -562,6 +582,24 @@ def test_capture_live_canvas_render_last_known_renders_labelled_not_live(
     assert "not live" in rendered["summary"]
 
 
+def test_capture_live_canvas_render_last_known_with_nothing_pushed_names_the_divergence(
+    tmp_path, monkeypatch, tmp_path_factory,
+):
+    """render_last_known=True with nothing ever pushed under this pinned root: the message must
+    not drop the divergence already in hand, nor tell the caller to set_active_project toward a
+    nameless root set_active_project cannot converge."""
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    other = tmp_path_factory.mktemp("elsewhere")
+    _mint_binding(other, generation=3, project_name=None)
+
+    from tcip_mcp.tools.vision_tools import capture_live_canvas
+    res = capture_live_canvas(refresh=False, render_last_known=True)
+    assert "error" in res
+    assert "set_active_project" not in res["error"]
+    assert res["divergence"]["bound_root"] == str(other)
+    assert "reselect this project in the GUI" in res["divergence"]["converge"]
+
+
 def test_capture_live_canvas_unreadable_binding_store_is_reported_distinctly(tmp_path, monkeypatch):
     """An unreadable binding store must not read as absent (which would misname the fix as
     'open a project') nor escape the audited tool as a raw exception."""
@@ -582,20 +620,43 @@ def test_capture_live_canvas_unreadable_binding_store_is_reported_distinctly(tmp
     assert "could not read the canvas-open binding" in res["error"].lower()
 
 
+def test_capture_live_canvas_binding_oserror_is_reported_distinctly(tmp_path, monkeypatch):
+    """A permission or path-shape fault on the binding record is an OSError, not a StoreError:
+    the softener widens to catch it too, rather than letting it escape the audited tool raw."""
+    import tcip_store as ts
+
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    real_read = ts.read
+
+    def _boom(key, **kwargs):
+        if key.store == "canvas_open_binding":
+            raise PermissionError("simulated permission fault")
+        return real_read(key, **kwargs)
+
+    monkeypatch.setattr(ts, "read", _boom)
+    from tcip_mcp.tools.vision_tools import capture_live_canvas
+    res = capture_live_canvas(refresh=False)
+    assert "error" in res
+    assert "could not read the canvas-open binding" in res["error"].lower()
+
+
 def test_capture_live_canvas_generation_fence_retries_once_then_answers_divergence(
     tmp_path, monkeypatch,
 ):
     """A project switch mid-call (the binding moves between the two reads the fence takes) must
     not produce a false live result: it retries once, and if the mismatch persists, answers with
-    the divergence rather than the render it just produced."""
-    import tcip_store as ts
-    from tcip_store.file_backend import FileBackend
+    the divergence rather than the render it just produced.
 
-    tcip_store.bind(FileBackend())
+    Minted through the seam (``_mint_binding``), not a raw file: unlike the hit-case divergence
+    guard above, this test has no baseline-constructibility need to bypass the store, so it runs
+    on whichever backend the leg actually bound rather than being pinned to the file backend.
+    """
+    import tcip_store as ts
+
     monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
     img = _make_image(tmp_path)
     _write_state(tmp_path, img)
-    _write_binding_raw(tmp_path.parent, generation=1, root=tmp_path)
+    _mint_binding(tmp_path, generation=1)
 
     real_read = ts.read
     reads = {"n": 0}
