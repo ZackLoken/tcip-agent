@@ -218,7 +218,7 @@ def as_text(stream: object) -> str:
 
 def failed_run_meta(family: str, exc: BaseException) -> dict:
     """A metadata row for a run that raised, shaped like a real one so the summary still prints."""
-    return {
+    meta = {
         "question_id": None, "condition": None, "condition_description": None,
         "family": family, "executable": None, "harness_version": "unknown",
         "model_requested": None, "model_resolved": None, "model_source": None,
@@ -227,6 +227,8 @@ def failed_run_meta(family: str, exc: BaseException) -> dict:
         "response_chars": 0, "response_source": "runner_error",
         "runner_error": f"{type(exc).__name__}: {exc}",
     }
+    meta["fault"] = describe_fault(meta)
+    return meta
 
 
 def now() -> str:
@@ -332,20 +334,20 @@ EXECUTABLES = {"claude": CLAUDE, "codex": CODEX, "antigravity": AGY}
 STDIN_FAMILIES = {"claude", "codex"}
 
 
-def describe_fault(meta: dict, failed_extraction: set[str]) -> str:
+def describe_fault(meta: dict) -> str:
     """Why this run does not count as an answer, or an empty string when it does.
 
-    The reasons the exit gate already refuses on, said in words rather than left to a reader to
-    infer from a table cell.
+    Computed once, at the point ``meta.json`` is written, and carried in the record itself under
+    ``fault`` rather than re-derived later from ``response_source``/``exit_code`` at the aggregate
+    table: a run with zero captured response characters is never a successful answer, whatever
+    code path emptied it out (a harness that writes nothing at all, an answer field present but
+    blank, a stream whose extraction gave up), so the check is on the character count itself
+    rather than a list of the response-source names known to produce one today.
     """
     if meta["exit_code"] != 0:
         return f"the harness exited {meta['exit_code']}"
-    if meta["response_source"] == "empty_response":
+    if meta["response_chars"] == 0:
         return "it produced no answer text, so there is nothing to review"
-    if meta["response_source"] == "extraction_failed":
-        return "no answer could be extracted from what it returned"
-    if meta["response_source"] in failed_extraction:
-        return f"its answer was not usable ({meta['response_source']})"
     if meta.get("model_mismatch"):
         return (f"it ran on {meta.get('model_used')} after {meta['model_resolved']} was asked for, "
                 "so the answer is not the comparison that was requested")
@@ -562,6 +564,7 @@ def run_one(family: str, question_id: str, condition_name: str, prompt: str,
         "response_chars": len(response),
         "response_source": response_source,
     }
+    meta["fault"] = describe_fault(meta)
     (run_dir / "meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
     return meta
 
@@ -651,9 +654,7 @@ def main() -> int:
     summary = args.out / args.question_id / args.condition / "summary.json"
     summary.write_text(json.dumps(results, indent=2), encoding="utf-8")
     print(f"\nwrote {summary}")
-    failed_extraction = {"extraction_failed", "empty_response"}
-    faults = [(m["family"], describe_fault(m, failed_extraction)) for m in results]
-    faults = [(family, why) for family, why in faults if why]
+    faults = [(m["family"], m["fault"]) for m in results if m["fault"]]
     print_verdict(faults, len(results))
     return 0 if not faults else 1
 

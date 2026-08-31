@@ -242,6 +242,48 @@ def test_an_empty_response_through_main_fails_the_run(runner, tmp_path, monkeypa
     assert runner.main() != 0
 
 
+def test_completely_empty_stdout_does_not_read_as_a_clean_run(runner, tmp_path, monkeypatch):
+    """A harness that writes nothing at all falls through extraction to a raw, empty string,
+    a response-source name the exit gate never special-cased; the check has to be on the
+    character count itself, not on a list of the names known to produce an empty one."""
+    monkeypatch.setattr(runner.subprocess, "run", _stub_run(""))
+    monkeypatch.setattr(runner, "harness_version", lambda *a, **k: "stub-version")
+    monkeypatch.setattr(runner.shutil, "which", lambda *a, **k: "/stub/harness")
+    monkeypatch.setitem(runner.BUILDERS, "antigravity", lambda *a, **k: (["stub", "argv"], None))
+    (tmp_path / "q.txt").write_text("question", encoding="utf-8")
+
+    monkeypatch.setattr(sys, "argv", [
+        "cross_family_ask.py", "--question-id", "qid",
+        "--prompt-file", str(tmp_path / "q.txt"), "--families", "antigravity",
+        "--model", "stub-model", "--cwd", str(tmp_path),
+        "--out", str(tmp_path / "out"), "--timeout", "5",
+    ])
+
+    assert runner.main() != 0
+
+    meta = json.loads(
+        (tmp_path / "out" / "qid" / "as-shipped" / "antigravity" / "meta.json").read_text(encoding="utf-8"))
+    assert meta["response_source"] == "raw_stdout"
+    assert meta["fault"]
+
+
+def test_a_runs_own_fault_verdict_is_recorded_in_its_meta_json(runner, tmp_path, monkeypatch):
+    """The record a later reader inspects on its own must already carry why a run failed, not
+    only the aggregate table printed at the end of this process's own stdout."""
+    monkeypatch.setattr(runner.subprocess, "run", _stub_run("a real answer from the harness"))
+    monkeypatch.setattr(runner, "harness_version", lambda *a, **k: "stub-version")
+    monkeypatch.setitem(runner.BUILDERS, "codex", lambda *a, **k: (["stub", "argv"], None))
+    (tmp_path / "q.txt").write_text("question", encoding="utf-8")
+
+    meta = runner.run_one("codex", "qid", "as-shipped", "question",
+                          tmp_path, tmp_path / "out", 5, "stub-model", None)
+    assert meta["fault"] == ""
+
+    on_disk = json.loads(
+        (tmp_path / "out" / "qid" / "as-shipped" / "codex" / "meta.json").read_text(encoding="utf-8"))
+    assert on_disk["fault"] == ""
+
+
 def test_a_small_plain_text_stdout_still_returns_as_a_raw_stdout_answer_through_main(
     runner, tmp_path, monkeypatch
 ):
