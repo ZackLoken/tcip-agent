@@ -291,7 +291,7 @@ def export_aggregated_csv(
     """Export per-plant aggregated results to a delivery CSV.
 
     Follows the per-plant CSV schema from the delivery skill, the ``fieldnames`` list below is the
-    authority for it: plant_id, crop, trait_name, value, units, value_key, measurement_document,
+    authority for it: plant_id, crop, delivered_phenotype, value, units, value_key, measurement_document,
     scale_document, confidence, n_images, pipeline_version, plant_id_source,
     plant_id_distance_m_max, then ``_PROVENANCE_COLUMNS`` (producer_model_sha256,
     producing_experiment_id, produced_at, measurement_validated, validation_record) so the final
@@ -535,7 +535,7 @@ def export_aggregated_csv(
     stamp = delivered_tail(provenance, measurement_recon["bindings"], gate,
                            columns=_PROVENANCE_COLUMNS)
     fieldnames = [
-        "plant_id", "crop", "trait_name", "value", "units", "value_key",
+        "plant_id", "crop", "delivered_phenotype", "value", "units", "value_key",
         "measurement_document", "scale_document",
         "confidence", "n_images", "pipeline_version",
         "plant_id_source", "plant_id_distance_m_max",
@@ -549,7 +549,7 @@ def export_aggregated_csv(
             writer.writerow({
                 "plant_id": r["plant_id"],
                 "crop": crop,
-                "trait_name": delivered_phenotype,
+                "delivered_phenotype": delivered_phenotype,
                 "value": r.get("value", ""),
                 "units": units,
                 "value_key": r.get("value_key", ""),

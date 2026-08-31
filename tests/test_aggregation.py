@@ -216,11 +216,13 @@ def test_export_aggregated_csv(tmp_path):
     )
 
     with open(out_path, newline="") as f:
-        rows = list(csv.DictReader(f))
+        reader = csv.DictReader(f)
+        rows = list(reader)
+        assert "trait_name" not in (reader.fieldnames or [])
 
     assert [r["plant_id"] for r in rows] == ["PLANT_001", "PLANT_002"]
     assert rows[0]["crop"] == "hazelnut"
-    assert rows[0]["trait_name"] == "stem_count"
+    assert rows[0]["delivered_phenotype"] == "stem_count"
     assert rows[0]["n_images"] == "3"
 
 

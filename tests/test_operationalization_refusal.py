@@ -1051,8 +1051,9 @@ def test_a_per_plant_csv_no_longer_ships_under_the_writers_own_default_name(
 ):
     """The other permissive delivery: a per-plant CSV whose delivered_phenotype came from a default.
 
-    That default shipped a trait_name column holding a word the crop vocabulary does not carry, so
-    no record could be keyed by it. The argument is required now and nothing is written without it.
+    That default shipped a delivered-phenotype column holding a word the crop vocabulary does not
+    carry, so no record could be keyed by it. The argument is required now and nothing is written
+    without it.
     """
     from tcip_mcp.pipelines.postprocessing.aggregation import export_aggregated_csv
 
