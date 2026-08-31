@@ -120,7 +120,7 @@ def test_delivery_refuses_a_pixel_identical_raster_whose_tiepoint_moved(tmp_path
 
     out_csv = tmp_path / "counts.csv"
     refused = deliver_orthomosaic_plant_counts(
-        str(bucket), str(moved), [str(plant_csv)], str(out_csv), trait_name="stem_count",
+        str(bucket), str(moved), [str(plant_csv)], str(out_csv), delivered_phenotype="stem_count",
         acknowledge_unvalidated=True)
 
     assert "error" in refused
@@ -144,7 +144,7 @@ def test_delivery_refuses_a_raster_of_different_content(tmp_path, monkeypatch):
 
     out_csv = tmp_path / "counts.csv"
     refused = deliver_orthomosaic_plant_counts(
-        str(bucket), str(other), [str(plant_csv)], str(out_csv), trait_name="stem_count",
+        str(bucket), str(other), [str(plant_csv)], str(out_csv), delivered_phenotype="stem_count",
         acknowledge_unvalidated=True)
 
     assert "error" in refused
@@ -165,7 +165,7 @@ def test_delivery_refuses_a_bucket_that_records_no_raster_identity(tmp_path, mon
 
     out_csv = tmp_path / "counts.csv"
     refused = deliver_orthomosaic_plant_counts(
-        str(bucket), str(raster_path), [str(plant_csv)], str(out_csv), trait_name="stem_count")
+        str(bucket), str(raster_path), [str(plant_csv)], str(out_csv), delivered_phenotype="stem_count")
 
     assert "error" in refused
     assert "export_predictions" in refused["error"]
@@ -192,7 +192,7 @@ def test_delivery_admits_the_raster_the_bucket_was_produced_on(tmp_path, monkeyp
 
     out_csv = tmp_path / "counts.csv"
     delivered = deliver_orthomosaic_plant_counts(
-        str(bucket), str(raster_path), [str(plant_csv)], str(out_csv), trait_name="stem_count",
+        str(bucket), str(raster_path), [str(plant_csv)], str(out_csv), delivered_phenotype="stem_count",
         acknowledge_unvalidated=True)
 
     assert "error" not in delivered
@@ -211,7 +211,7 @@ def _aggregated(tmp_path, bucket: Path, *, name: str = "counts.csv"):
         [{"plant_id": "plot0", "value": 3, "observations": 1, "value_key": "count",
           "measurement_document": "operating_point"}],
         str(tmp_path / name),
-        trait_name="stem_count", measurement_validated=VALIDATED_HELD_OUT,
+        delivered_phenotype="stem_count", measurement_validated=VALIDATED_HELD_OUT,
         pred_dirs=[str(bucket)])
     return path
 
@@ -268,7 +268,7 @@ def test_orthomosaic_precondition_precedes_the_raster_identity_refusal(tmp_path,
     out_csv = tmp_path / "counts.csv"
     refused = deliver_orthomosaic_plant_counts(
         str(bucket), str(raster_path), [str(plant_csv)], str(out_csv),
-        trait_name="bark_thickness", acknowledge_unvalidated=True)
+        delivered_phenotype="bark_thickness", acknowledge_unvalidated=True)
 
     assert "no operationalization is recorded" in refused["error"]
     assert "export_predictions" not in refused["error"]

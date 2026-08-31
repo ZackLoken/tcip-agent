@@ -253,7 +253,7 @@ def test_export_aggregated_csv_carries_provenance(tmp_path):
     export_aggregated_csv(
         [{"plant_id": "p1", "value": 5, "observations": 2, "value_key": "count",
           "measurement_document": "operating_point"}],
-        str(out), trait_name="stem_count",
+        str(out), delivered_phenotype="stem_count",
         provenance={"producer_model_sha256": sha, "producing_experiment_id": "expA"},
         measurement_validated="held_out_annotations", acknowledge_unvalidated=True)
     rows = list(__import__("csv").DictReader(out.open()))
@@ -289,7 +289,7 @@ def test_export_aggregated_csvs_produced_at_is_the_write_time_never_a_buckets_ow
     export_aggregated_csv(
         [{"plant_id": "p1", "value": 5, "observations": 2, "value_key": "count",
           "measurement_document": "operating_point"}],
-        str(out), trait_name="stem_count", pred_dirs=[str(bucket)])
+        str(out), delivered_phenotype="stem_count", pred_dirs=[str(bucket)])
 
     rows = list(__import__("csv").DictReader(out.open()))
     assert rows[0]["produced_at"] != "2020-01-01T00:00:00+00:00"

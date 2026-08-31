@@ -341,6 +341,18 @@ def test_export_predictions_raster_bucket_immutability(tmp_path, monkeypatch):
 # ── deliver_orthomosaic_plant_counts ─────────────────────────────────────
 
 
+def test_deliver_orthomosaic_plant_counts_signature_carries_delivered_phenotype_not_trait_name():
+    """The vocabulary-sense parameter is delivered_phenotype; trait_name (the registry sense
+    the rest of the tool surface keeps) is no longer a valid keyword here."""
+    import inspect
+
+    from tcip_mcp.tools.orthomosaic_tools import deliver_orthomosaic_plant_counts
+
+    params = inspect.signature(deliver_orthomosaic_plant_counts).parameters
+    assert "delivered_phenotype" in params
+    assert "trait_name" not in params
+
+
 def _run_bucket(tmp_path, monkeypatch, raster_path: Path) -> tuple[Path, str]:
     """A real bucket via export_predictions's raster_path regime (explicit tile_size, so it
     writes without acknowledgement); returns (bucket dir, prediction stem)."""
@@ -386,12 +398,12 @@ def test_deliver_orthomosaic_plant_counts_refuses_unacknowledged_then_admits(tmp
 
     out_csv = tmp_path / "counts.csv"
     refused = deliver_orthomosaic_plant_counts(
-        str(bucket_dir), str(raster_path), [str(plant_csv)], str(out_csv), trait_name="stem_count")
+        str(bucket_dir), str(raster_path), [str(plant_csv)], str(out_csv), delivered_phenotype="stem_count")
     assert "error" in refused
     assert not out_csv.exists()
 
     admitted = deliver_orthomosaic_plant_counts(
-        str(bucket_dir), str(raster_path), [str(plant_csv)], str(out_csv), trait_name="stem_count",
+        str(bucket_dir), str(raster_path), [str(plant_csv)], str(out_csv), delivered_phenotype="stem_count",
         acknowledge_unvalidated=True)
     assert "error" not in admitted
     assert admitted["measurement_validated"] == "false"
@@ -450,7 +462,7 @@ def test_deliver_orthomosaic_plant_counts_floors_a_stamp_earned_for_a_different_
 
     out_csv = tmp_path / "counts.csv"
     refused = deliver_orthomosaic_plant_counts(
-        str(bucket_dir), str(raster_path), [str(plant_csv)], str(out_csv), trait_name="stem_count")
+        str(bucket_dir), str(raster_path), [str(plant_csv)], str(out_csv), delivered_phenotype="stem_count")
     assert "error" in refused
     assert not out_csv.exists()
     assert str(bucket_dir) in refused["error"]
@@ -475,7 +487,7 @@ def test_deliver_orthomosaic_plant_counts_far_detection_is_unmapped(tmp_path, mo
 
     out_csv = tmp_path / "counts.csv"
     result = deliver_orthomosaic_plant_counts(
-        str(bucket_dir), str(raster_path), [str(plant_csv)], str(out_csv), trait_name="stem_count",
+        str(bucket_dir), str(raster_path), [str(plant_csv)], str(out_csv), delivered_phenotype="stem_count",
         acknowledge_unvalidated=True)
     assert "error" not in result
     assert result["n_detections"] == 2
@@ -551,7 +563,7 @@ def test_deliver_orthomosaic_plant_counts_rotated_raster_refuses_cleanly(tmp_pat
 
     result = deliver_orthomosaic_plant_counts(
         str(bucket_dir), str(raster_path), [str(plant_csv)], str(tmp_path / "counts.csv"),
-        trait_name="stem_count", acknowledge_unvalidated=True)
+        delivered_phenotype="stem_count", acknowledge_unvalidated=True)
     assert "error" in result
     assert "ModelTransformationTag" in result["error"]
 
@@ -574,7 +586,7 @@ def test_deliver_orthomosaic_keeps_a_bespoke_producer_checkpoint(tmp_path, monke
     out_csv = tmp_path / "counts.csv"
     result = deliver_orthomosaic_plant_counts(
         str(bucket_dir), str(raster_path), [str(plant_csv)], str(out_csv),
-        trait_name="stem_count", acknowledge_unvalidated=True)
+        delivered_phenotype="stem_count", acknowledge_unvalidated=True)
 
     from tcip_mcp.pipelines.resolution import read_operating_point_sidecar
 
@@ -622,7 +634,7 @@ def test_deliver_orthomosaic_drops_a_producer_no_experiment_answers_for(tmp_path
     out_csv = tmp_path / "counts.csv"
     result = deliver_orthomosaic_plant_counts(
         str(bucket_dir), str(raster_path), [str(plant_csv)], str(out_csv),
-        trait_name="stem_count", acknowledge_unvalidated=True)
+        delivered_phenotype="stem_count", acknowledge_unvalidated=True)
 
     assert "error" not in result
     assert result["checkpoint_sha256"] is None

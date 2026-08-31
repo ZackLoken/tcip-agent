@@ -192,6 +192,16 @@ def test_unknown_strategy_raises():
 # ── CSV export ────────────────────────────────────────────────────────────
 
 
+def test_export_aggregated_csv_signature_carries_delivered_phenotype_not_trait_name():
+    """The vocabulary-sense parameter is delivered_phenotype; trait_name (the registry sense the
+    rest of the trait-facing surface keeps) is no longer a valid keyword here."""
+    import inspect
+
+    params = inspect.signature(export_aggregated_csv).parameters
+    assert "delivered_phenotype" in params
+    assert "trait_name" not in params
+
+
 def test_export_aggregated_csv(tmp_path):
     results = [
         {"plant_id": "PLANT_001", "value": 7, "observations": 3, "value_key": "count",
@@ -201,7 +211,7 @@ def test_export_aggregated_csv(tmp_path):
     ]
     out_path = tmp_path / "out" / "aggregated.csv"
     export_aggregated_csv(
-        results, str(out_path), trait_name="stem_count", crop="hazelnut",
+        results, str(out_path), delivered_phenotype="stem_count", crop="hazelnut",
         acknowledge_unvalidated=True,
     )
 
@@ -224,7 +234,7 @@ def test_export_aggregated_csv_units_derived_from_value_key(tmp_path):
     ]
     out_path = tmp_path / "out.csv"
     export_aggregated_csv(
-        results, str(out_path), trait_name="plant_surface_area",
+        results, str(out_path), delivered_phenotype="plant_surface_area",
         acknowledge_unvalidated=True,
     )
     with open(out_path, newline="") as f:
@@ -236,7 +246,7 @@ def test_export_aggregated_csv_count_trait_has_blank_units(tmp_path):
     results = [{"plant_id": "PLANT_001", "value": 4, "observations": 3, "value_key": "count",
                 "measurement_document": "operating_point"}]
     out_path = tmp_path / "out.csv"
-    export_aggregated_csv(results, str(out_path), trait_name="stem_count",
+    export_aggregated_csv(results, str(out_path), delivered_phenotype="stem_count",
                           acknowledge_unvalidated=True)
     with open(out_path, newline="") as f:
         rows = list(csv.DictReader(f))
@@ -260,7 +270,7 @@ def test_export_aggregated_csv_refuses_unit_mismatch_against_crops_yml(tmp_path)
                 "measurement_document": "operating_point"}]
     out_path = tmp_path / "out.csv"
     with pytest.raises(ValueError, match="declared units|refusing"):
-        export_aggregated_csv(results, str(out_path), trait_name=mismatched_trait,
+        export_aggregated_csv(results, str(out_path), delivered_phenotype=mismatched_trait,
                               acknowledge_unvalidated=True)
 
 
@@ -278,7 +288,7 @@ def test_export_aggregated_csv_never_labels_a_pixel_value_with_crops_yml_units(t
                 "value_key": "principal_axis_extent_px",
                 "measurement_document": "regression_operating_point"}]
     out_path = tmp_path / "out.csv"
-    export_aggregated_csv(results, str(out_path), trait_name="bark_thickness",
+    export_aggregated_csv(results, str(out_path), delivered_phenotype="bark_thickness",
                           acknowledge_unvalidated=True)
     with open(out_path, newline="") as f:
         rows = list(csv.DictReader(f))
@@ -398,7 +408,7 @@ def test_export_aggregated_csv_writes_value_key_column(tmp_path):
     results = [{"plant_id": "P1", "value": 1.0, "observations": 1, "value_key": "area_mm2",
                 "measurement_document": "operating_point"}]
     out_path = tmp_path / "out.csv"
-    export_aggregated_csv(results, str(out_path), trait_name="plant_surface_area",
+    export_aggregated_csv(results, str(out_path), delivered_phenotype="plant_surface_area",
                           acknowledge_unvalidated=True)
     with open(out_path, newline="") as f:
         rows = list(csv.DictReader(f))
@@ -418,7 +428,7 @@ def test_delivery_skill_documents_the_real_csv_schema(tmp_path):
     export_aggregated_csv(
         [{"plant_id": "P1", "value": 1.0, "observations": 1, "value_key": "count",
           "measurement_document": "operating_point"}],
-        str(out_path), trait_name="stem_count", acknowledge_unvalidated=True)
+        str(out_path), delivered_phenotype="stem_count", acknowledge_unvalidated=True)
     with open(out_path, newline="") as f:
         written = next(csv.reader(f))
 
