@@ -15,6 +15,18 @@ import os
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
 
+def is_at_or_under(candidate: Path, root: Path) -> bool:
+    """Whether ``candidate`` is ``root`` itself or sits somewhere under it, by plain path
+    arithmetic (no filesystem access): the one predicate every caller deciding "is this path
+    inside that tree" shares, rather than each reimplementing ``relative_to``'s own try/except.
+    """
+    try:
+        candidate.relative_to(root)
+        return True
+    except ValueError:
+        return False
+
+
 def is_external_form(stored: str) -> bool:
     """Whether ``stored`` is an absolute path by either platform's own path grammar.
 
@@ -130,6 +142,7 @@ __all__ = [
     "RegistryPathEmpty",
     "RegistryPathTraversal",
     "checkpoint_registry_path_for",
+    "is_at_or_under",
     "is_external_form",
     "nearest_containing_ancestor",
     "resolved_registry_path",
