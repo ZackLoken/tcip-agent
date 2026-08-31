@@ -38,6 +38,7 @@ from tcip_mcp.registry_paths import (
     RegistryPathEmpty,
     RegistryPathTraversal,
     checkpoint_registry_path_for,
+    is_at_or_under,
     is_external_form,
     resolved_registry_path,
 )
@@ -517,14 +518,6 @@ def _register_entry(
     return entry
 
 
-def _is_at_or_under(candidate: Path, root: Path) -> bool:
-    try:
-        candidate.relative_to(root)
-        return True
-    except ValueError:
-        return False
-
-
 def _document_entries_for_conform(raw: object) -> tuple[list[dict], bool]:
     """(entries, was_already_v2) for the conform script's own read.
 
@@ -612,7 +605,7 @@ def _conform_entries(
         direct = Path(raw) if is_external_form(str(raw)) else root.joinpath(*PurePosixPath(raw).parts)
         direct_resolved = direct.resolve()
         if (
-            _is_at_or_under(direct_resolved, root)
+            is_at_or_under(direct_resolved, root)
             and direct_resolved.is_file()
             and expected_sha is not None
             and _cached_sha256(hash_cache, direct_resolved) == expected_sha

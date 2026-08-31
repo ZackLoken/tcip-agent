@@ -273,6 +273,18 @@ def test_register_model_from_experiment_checkpoint_field_is_resolved_absolute(
     assert Path(registered["checkpoint"]) == weights.resolve()
 
 
+# ── one shared at-or-under predicate, not a second copy per module ─────────────────────────
+
+
+def test_model_registry_and_bundle_share_the_same_at_or_under_function():
+    import tcip_mcp.model_registry as model_registry
+    import tcip_mcp.tools.bundle as bundle
+    from tcip_mcp.registry_paths import is_at_or_under
+
+    assert model_registry.is_at_or_under is is_at_or_under
+    assert bundle._is_at_or_under is is_at_or_under
+
+
 # ── resolved_registry_path's traversal refusal, both grammars ──────────────────────────────
 
 

@@ -27,6 +27,8 @@ from tcip_store.adoption import AdoptionPlan, plan_root
 from tcip_store.file_backend import _is_bookkeeping
 from tcip_store.layout_claims import CURATED, EXPERIMENTS, HPO_ROOT, ROOT, RUN, SPLITS, STATE, SWEEP
 
+from tcip_mcp.registry_paths import is_at_or_under as _is_at_or_under
+
 SPLIT_MANIFEST_NAME = "split_manifest.json"
 CURATED_MANIFEST_NAME = "curated_manifest.json"
 
@@ -48,6 +50,7 @@ class DerivedRoot:
 
     path: Path
     layout: str
+
 
 
 @dataclass(frozen=True)
@@ -75,14 +78,6 @@ class BundleAccounting:
     unaccounted: tuple[Path, ...]
     collisions: tuple[Path, ...]
     registered_checkpoints: frozenset[Path]
-
-
-def _is_at_or_under(candidate: Path, root: Path) -> bool:
-    try:
-        candidate.relative_to(root)
-        return True
-    except ValueError:
-        return False
 
 
 def _validate_anchor(
