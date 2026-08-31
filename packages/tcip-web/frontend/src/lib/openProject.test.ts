@@ -35,6 +35,7 @@ function project(overrides: Partial<ProjectSummary> & { name: string }): Project
 beforeEach(() => {
   vi.mocked(api.dataset.select).mockResolvedValue({
     status: "ok",
+    generation: 1,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     selection: {} as any,
   });
@@ -220,6 +221,7 @@ describe("adoptWorkspaceProject", () => {
     const p = project({ name: "hz", dates: ["2026-02-11"] });
     vi.mocked(api.dataset.select).mockResolvedValue({
       status: "ok",
+      generation: 1,
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       selection: {} as any,
       label_problem: "C:/data/annotations/2026-02-11/IMG_0000.json does not decode as JSON",

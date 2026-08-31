@@ -114,7 +114,7 @@ describe("adopting a different dataset selection", () => {
       },
     };
 
-    s().mergeSnapshot(incoming, 5);
+    s().mergeSnapshot(incoming, 5, null, null);
 
     expect(s().gui.dataset).toEqual({
       project_root: "/proj/beta",
@@ -165,7 +165,7 @@ describe("booting with no local dataset yet", () => {
       pred_reference: { type: "box", coords: [1, 2, 3, 4], subject: "leaf", confidence: 0.9 },
     } as unknown as GuiState;
 
-    s().mergeSnapshot(incoming, 1);
+    s().mergeSnapshot(incoming, 1, null, null);
 
     expect("pred_reference" in s().gui).toBe(false);
   });

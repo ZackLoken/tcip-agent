@@ -50,13 +50,13 @@ describe("per-project last-used tab", () => {
 
   it("opening a project restores its recorded tab", () => {
     recordLastTab(ROOT, "inference");
-    s().applyRestoredDataset(selection());
+    s().applyRestoredDataset(selection(), 1);
     expect(s().gui.active_tab).toBe("inference");
   });
 
   it("first-ever open of a project lands on Annotate", () => {
     useStore.setState((st) => ({ gui: { ...st.gui, active_tab: "review" } }));
-    s().applyRestoredDataset(selection());
+    s().applyRestoredDataset(selection(), 1);
     expect(s().gui.active_tab).toBe("annotate");
   });
 
@@ -71,7 +71,7 @@ describe("per-project last-used tab", () => {
       const other: TabName = tab === "annotate" ? "review" : "annotate";
       recordLastTab(ROOT, tab);
       useStore.setState((st) => ({ gui: { ...st.gui, active_tab: other } }));
-      s().applyRestoredDataset(selection());
+      s().applyRestoredDataset(selection(), 1);
       expect(s().gui.active_tab).toBe(tab);
     }
   });
@@ -113,7 +113,7 @@ describe("saved review filters on reopening a dataset", () => {
       statusFilter: "negative",
     });
 
-    s().applyRestoredDataset(sel);
+    s().applyRestoredDataset(sel, 1);
 
     expect(s().gui.review.iou_threshold).toBe(0.7);
     expect(s().gui.review.conf_threshold).toBe(0.4);
@@ -125,7 +125,7 @@ describe("saved review filters on reopening a dataset", () => {
   });
 
   it("keeps the live filters when this dataset has nothing saved", () => {
-    s().applyRestoredDataset(selection());
+    s().applyRestoredDataset(selection(), 1);
     expect(s().gui.review).toEqual(LIVE_FILTERS);
     expect(s().imageStatus.activeFilter).toBe("all");
   });
@@ -134,7 +134,7 @@ describe("saved review filters on reopening a dataset", () => {
     useStore.setState((st) => ({
       imageStatus: { ...st.imageStatus, staleMarks: ["a.jpg"] },
     }));
-    s().applyRestoredDataset(selection({ subject: "subject_b" }));
+    s().applyRestoredDataset(selection({ subject: "subject_b" }), 1);
     expect(s().imageStatus.staleMarks).toEqual([]);
   });
 });

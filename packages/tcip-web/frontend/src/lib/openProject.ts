@@ -38,7 +38,7 @@ export async function openWorkspaceProject(
     model_name: modelName || null,
   });
   recordRecentProject(p.name, p.path);
-  useStore.getState().applyRestoredDataset(res.selection);
+  useStore.getState().applyRestoredDataset(res.selection, res.generation);
   toastLabelProblem(res.label_problem);
   return res.selection;
 }

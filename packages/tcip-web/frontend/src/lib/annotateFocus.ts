@@ -37,7 +37,7 @@ export async function applyAnnotateFocus(d: AnnotateFocusData): Promise<void> {
       date: d.date ?? null,
       model_name: null,
     });
-    useStore.getState().applyRestoredDataset(res.selection);
+    useStore.getState().applyRestoredDataset(res.selection, res.generation);
     toastLabelProblem(res.label_problem);
   }
   // Apply the view controls after any dataset switch has resolved, so a same-identity

@@ -45,7 +45,7 @@ export async function applyReviewFocus(d: ReviewFocusData): Promise<void> {
       date: d.date ?? null,
       model_name: d.model_name ?? null,
     });
-    useStore.getState().applyRestoredDataset(res.selection);
+    useStore.getState().applyRestoredDataset(res.selection, res.generation);
     toastLabelProblem(res.label_problem);
   }
 

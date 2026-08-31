@@ -113,6 +113,7 @@ describe("recent-projects menu", () => {
     );
     vi.mocked(api.dataset.select).mockResolvedValue({
       status: "ok",
+      generation: 1,
       selection: {
         project_root: "/w/beta",
         dataset_root: "/w/beta",
@@ -139,6 +140,7 @@ describe("switching date", () => {
   it("does not write the active-project marker (not an adoption)", async () => {
     vi.mocked(api.dataset.select).mockResolvedValue({
       status: "ok",
+      generation: 1,
       selection: {
         project_root: "/w/alpha",
         dataset_root: "/w/alpha",

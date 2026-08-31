@@ -252,13 +252,17 @@ export function AnnotateTab() {
   const buildCanvasBodyRef = useRef<() => CanvasStateBody | null>(() => null);
   buildCanvasBodyRef.current = () => {
     if (!imgPath || !dataset.project_root) return null;
-    // Never push mid-transition: after an image change the canvas briefly still holds the
-    // previous image's shapes: attaching them to the new image_path would show the agent a
-    // false canvas. Wait until the loaded-labels identity matches (the post-load push covers it).
+    // Never push mid-transition: attaching the previous image's still-live shapes to the new
+    // image_path would show the agent a false canvas; wait until the loaded identity matches.
     if (loadedPathsRef.current?.image !== imgPath) return null;
+    // Binding-presence gate: a dataset without an adopted generation (pre-feature data, a
+    // deleted binding, an export/adopt pass) must stop pushing rather than fabricate one.
+    const generation = useStore.getState().bindingGeneration;
+    useStore.getState().setCanvasBindingMissing(generation == null);
+    if (generation == null) return null;
     const host = measureCanvasHost();
     return {
-      project_root: dataset.project_root,
+      binding_generation: generation,
       tab: "annotate",
       image_path: imgPath,
       image: currentImageName ?? "",

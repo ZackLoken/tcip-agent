@@ -51,7 +51,9 @@ export interface CanvasShape {
 }
 
 export interface CanvasStateBody {
-  project_root: string;
+  /** The canvas_open_binding generation this body was built against; the write-authority token,
+   *  never a project_root (the server resolves the write destination from its own record). */
+  binding_generation: number;
   tab: Extract<TabName, "annotate" | "review">;
   image_path: string;
   image: string;

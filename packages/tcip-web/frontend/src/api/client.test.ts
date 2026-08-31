@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { RENDER_CACHE_VERSION } from "@/api/types.generated";
 import { api } from "@/api/client";
+import { stateSocket } from "@/api/ws";
 
 function stubFetch(status: number, body: unknown = {}) {
   vi.stubGlobal(
@@ -38,6 +39,39 @@ describe("annotate.save lost-update handling", () => {
       base_mtime: "1",
     });
     expect(res.status).toBe("conflict");
+  });
+});
+
+describe("canvas.pushState 409 recovery", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  const body = () => ({
+    binding_generation: 3,
+    tab: "annotate" as const,
+    image_path: "/p/img.jpg",
+    image: "img.jpg",
+    img_width: 100,
+    img_height: 80,
+    viewport: null,
+    classes: [],
+    shapes: null,
+  });
+
+  it("returns ok + shapes_written on a 200", async () => {
+    stubFetch(200, { status: "ok", shapes_written: true });
+    const res = await api.canvas.pushState(body());
+    expect(res).toEqual({ status: "ok", shapes_written: true });
+  });
+
+  it("returns a conflict and triggers a resync on a 409, never adopting its generation", async () => {
+    const resync = vi.spyOn(stateSocket, "resync").mockImplementation(() => {});
+    stubFetch(409, { error: "the GUI's open project has changed", generation: 7 });
+    const res = await api.canvas.pushState(body());
+    expect(res).toEqual({ status: "conflict" });
+    expect(resync).toHaveBeenCalledTimes(1);
   });
 });
 
