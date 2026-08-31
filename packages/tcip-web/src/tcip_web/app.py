@@ -50,6 +50,9 @@ async def _lifespan(_app: FastAPI):
     """
     log_exposure_opt_in()
     bind_startup_root()
+    # The canvas-open binding record outlives this process's restart; read it once now so the
+    # first connect-time replay answers from the durable record rather than a fresh None.
+    await asyncio.to_thread(_gui_store.refresh_binding_generation_from_record)
     # Size GDAL's block cache once per process, at the entry point, never at source construction.
     from tcip_mcp.pipelines.raster_source import configure_gdal_cache
 
@@ -76,8 +79,6 @@ async def _lifespan(_app: FastAPI):
     # Off-loop: terminate can block seconds (taskkill / SIGTERM grace), and stalling the
     # event loop here would break the in-flight WebSocket close handshakes.
     try:
-        import asyncio
-
         from tcip_web.routes import terminal as terminal_routes
 
         await asyncio.to_thread(terminal_routes.shutdown_all)
@@ -242,6 +243,8 @@ async def state_ws(websocket: WebSocket) -> None:
     await websocket.accept()
     _state_watchers.add(websocket)
     try:
+        # Connects are rare: re-read the binding record before replaying, off the event loop.
+        await asyncio.to_thread(_gui_store.refresh_binding_generation_from_record)
         await websocket.send_json(
             state_snapshot_message(_gui_store.snapshot(), _gui_store.version)
         )
