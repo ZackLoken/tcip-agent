@@ -502,7 +502,7 @@ def test_write_phenology_csv_records_the_delivery_event_without_a_door_calling_i
 def test_write_phenology_csv_cells_are_exactly_the_schemas_provenance_columns(tmp_path):
     """No ``stamp`` parameter exists any more: the writer composes its own provenance cells and
     returns them, so this pins that the set it returns is exactly the schema's provenance columns
-    plus the trait's own majority-provisional marker, nothing else."""
+    plus the trait's own majority crossing-unconfirmed marker, nothing else."""
     flags, bindings, pred_dirs = _real_delivery_flags(tmp_path)
 
     cells = phenology.write_phenology_csv(
@@ -510,13 +510,13 @@ def test_write_phenology_csv_cells_are_exactly_the_schemas_provenance_columns(tm
         basis=schema_basis(), operating_point_conf=0.4, producer={}, bindings=bindings,
         pred_dirs=pred_dirs, project_root=tmp_path, plant_mapping=_NO_MAPPING)
 
-    expected = set(phenology.PROVENANCE_COLUMNS) | {phenology.majority_provisional_column(CATKIN)}
+    expected = set(phenology.PROVENANCE_COLUMNS) | {phenology.majority_crossing_unconfirmed_column(CATKIN)}
     assert set(cells) == expected
 
 
 def test_write_phenology_curve_csv_writes_the_curve_schema(tmp_path):
     """The curve table gets its own writer, sharing the same gate/cells/event machinery as the
-    milestone table, minus the milestone-only majority-provisional marker."""
+    milestone table, minus the milestone-only majority crossing-unconfirmed marker."""
     flags, bindings, pred_dirs = _real_delivery_flags(tmp_path)
     row = {"plant_id": "P1", "accession": "acc-9", "date": "2026-02-11", "n_images": 1,
           "n_total": 2, "n_positive": 1, "n_unclassified": 0, "n_missing": 0, "ratio": 0.5}
@@ -583,9 +583,9 @@ def test_phenology_csv_columns_name_no_column_without_a_producer(spec):
     produced = set(phenology.plant_milestones(series, spec))
     schema = set(phenology.phenology_csv_columns(spec))
     prefixed = {c for c in schema if c.startswith(spec.phenology_prefix + "_")}
-    # The provisional marker is stamped by the writer rather than computed here, and exists
-    # only when the spec names a majority alias for it to qualify.
-    marker = phenology.majority_provisional_column(spec)
+    # The crossing-unconfirmed marker is stamped by the writer rather than computed here, and
+    # exists only when the spec names a majority alias for it to qualify.
+    marker = phenology.majority_crossing_unconfirmed_column(spec)
     stamped = {marker} if marker else set()
     assert prefixed - produced - stamped == set()
     assert produced - schema == set()  # and nothing computed is silently dropped
@@ -610,15 +610,16 @@ _MAJORITY_ALIAS_SPEC = TraitSpec(
 )
 
 
-def test_the_majority_provisional_column_name_has_one_owner():
+def test_the_majority_crossing_unconfirmed_column_name_has_one_owner():
     """The marker column is named from the spec's own prefix and majority label, and the schema
     declares exactly the name that owner returns, so a delivery door stamping through the same owner
     cannot name the column differently from the schema that must declare it.
     """
-    assert phenology.majority_provisional_column(_MAJORITY_ALIAS_SPEC) == "unit_crossing_provisional"
+    assert (phenology.majority_crossing_unconfirmed_column(_MAJORITY_ALIAS_SPEC)
+            == "unit_crossing_crossing_unconfirmed")
     declared = [c for c in phenology.phenology_csv_columns(_MAJORITY_ALIAS_SPEC)
-                if c.endswith("_provisional")]
-    assert declared == [phenology.majority_provisional_column(_MAJORITY_ALIAS_SPEC)]
+                if c.endswith("_crossing_unconfirmed")]
+    assert declared == [phenology.majority_crossing_unconfirmed_column(_MAJORITY_ALIAS_SPEC)]
 
 
 def test_a_spec_naming_no_majority_crossing_has_no_marker_column():
@@ -626,9 +627,9 @@ def test_a_spec_naming_no_majority_crossing_has_no_marker_column():
     declares no marker column, while the trait's own milestone dates still ship.
     """
     no_alias = replace(_MAJORITY_ALIAS_SPEC, majority_milestone="")
-    assert phenology.majority_provisional_column(no_alias) is None
+    assert phenology.majority_crossing_unconfirmed_column(no_alias) is None
     columns = phenology.phenology_csv_columns(no_alias)
-    assert not [c for c in columns if c.endswith("_provisional")]
+    assert not [c for c in columns if c.endswith("_crossing_unconfirmed")]
     assert "unit_95per_date" in columns
 
 

@@ -59,7 +59,7 @@ def test_the_majority_marker_reports_the_specs_reading_not_the_gates_verdict(
     assert disclosure["validated"]["classifier"] == VALIDATED_HELD_OUT
 
     row = _export_row(client, body)
-    marker = phenology.majority_provisional_column(spec)
+    marker = phenology.majority_crossing_unconfirmed_column(spec)
     assert marker in row
     assert row[marker] == "true"
     assert row[marker] == str(spec.majority_provisional).lower()
@@ -88,6 +88,6 @@ def test_the_web_and_mcp_deliveries_agree_on_the_majority_marker(
     with out_csv.open(newline="", encoding="utf-8") as fh:
         mcp_row = next(iter(csv.DictReader(fh)))
 
-    marker = phenology.majority_provisional_column(get_trait("catkin"))
+    marker = phenology.majority_crossing_unconfirmed_column(get_trait("catkin"))
     assert marker in mcp_row
     assert web_row[marker] == mcp_row[marker]

@@ -155,10 +155,10 @@ def test_each_trait_carries_its_own_majority_mapping_marker(tmp_path: Path):
     catkin = _deliver(tmp_path, CATKIN_SPEC, validated=True)
     pistillate = _deliver(tmp_path, PISTILLATE_SPEC, validated=True)
 
-    assert catkin["catkin_elongation_provisional"] == "true"
-    assert pistillate["pistillate_flowering_provisional"] == "false"
-    assert "pistillate_flowering_provisional" not in catkin
-    assert "catkin_elongation_provisional" not in pistillate
+    assert catkin["catkin_elongation_crossing_unconfirmed"] == "true"
+    assert pistillate["pistillate_flowering_crossing_unconfirmed"] == "false"
+    assert "pistillate_flowering_crossing_unconfirmed" not in catkin
+    assert "catkin_elongation_crossing_unconfirmed" not in pistillate
 
 
 def test_the_majority_mapping_marker_is_not_the_delivery_gates_verdict(tmp_path: Path):
@@ -168,7 +168,7 @@ def test_the_majority_mapping_marker_is_not_the_delivery_gates_verdict(tmp_path:
     dimension reports its own state in its own column beside it."""
     pistillate = _deliver(tmp_path, PISTILLATE_SPEC, validated=False)
 
-    assert pistillate["pistillate_flowering_provisional"] == "false"
+    assert pistillate["pistillate_flowering_crossing_unconfirmed"] == "false"
     assert pistillate["positive_state_classifier_validated"] == "false"
     assert pistillate["operating_point_validated"] == "held_out_annotations"
 
@@ -178,6 +178,6 @@ def test_an_unconfirmed_majority_reading_survives_a_cleared_delivery_gate(tmp_pa
     majority mapping is still unconfirmed in a delivery whose measurement dimensions all cleared."""
     catkin = _deliver(tmp_path, CATKIN_SPEC, validated=True)
 
-    assert catkin["catkin_elongation_provisional"] == "true"
+    assert catkin["catkin_elongation_crossing_unconfirmed"] == "true"
     assert catkin["operating_point_validated"] != "false"
     assert catkin["positive_state_classifier_validated"] != "false"

@@ -22,7 +22,7 @@ Milestones, per plant, from that plant's elongated-fraction time series:
 
 | Trait | Definition |
 |-------|------------|
-| `catkin_elongation_date` | date most catkins have elongated (`crops.yml`: "Date when most catkins have elongated"); see the provisional operationalization below for what this maps to |
+| `catkin_elongation_date` | date most catkins have elongated (`crops.yml`: "Date when most catkins have elongated"); see the crossing-unconfirmed operationalization below for what this maps to |
 | `catkin_05per_date` | date the elongated fraction crosses 5% |
 | `catkin_50per_date` | date the elongated fraction crosses 50% |
 | `catkin_95per_date` | date the elongated fraction crosses 95% |
@@ -31,11 +31,11 @@ Crossings interpolate linearly between the two neighbouring capture dates. Pisti
 milestones (`pistillate_05/50/95per_date`) are the identical pattern on the pistillate-
 flower elongation/receptivity call.
 
-> Provisional operationalization (pending breeder confirmation). `crops.yml` is the
+> Crossing-unconfirmed operationalization (pending breeder confirmation). `crops.yml` is the
 > immutable authority ("Date when most catkins have elongated"). The implementation computes
 > `catkin_elongation_date` as the 95% majority crossing (= `catkin_95per_date`), the
 > current best-guess reading of that text, recorded on the trait spec as `majority_milestone`
-> and flagged `majority_provisional`. That confirmation path is not
+> and flagged crossing-unconfirmed via `majority_provisional`. That confirmation path is not
 > `state_trait_operationalization`, which confirms `state_crossing_dates`' own fields
 > (`positive_class_name`, `milestone_on`, `milestone_fractions`) and does not touch this
 > mapping; a disagreement over which crossing the majority date means is corrected on the
@@ -70,7 +70,7 @@ count-bias gate). See the `evaluation` skill.
 per date:  images ─► detect catkins ─► call each catkin elongated vs not (validated)
                   ─► write per-image JSON preds (carrying the elongation call)
 across dates: plant mapping (image → plant_id) ─► per (plant, date) elongated fraction
-                  ─► crossings at 5/50/95% (see the provisional operationalization above) ─► per-plant CSV
+                  ─► crossings at 5/50/95% (see the crossing-unconfirmed operationalization above) ─► per-plant CSV
                   ─► carry genotype/accession through to the deliverable
 ```
 

@@ -3,7 +3,7 @@
 Pins the softened scope-provisional behavior: registering trait #2 is a breeder-authored config
 edit (cross-checked against the crops.yml controlled vocab, never agent-invented), the elongated
 class id is a mapping fact derived from classes.json by name (never a pinned default), and the
-provisional 95%-mapping marker travels with the delivery. There are no built-in traits: catkin is
+crossing-unconfirmed 95%-mapping marker travels with the delivery. There are no built-in traits: catkin is
 authored the same way as any other trait; this module's ``pytestmark``
 requests ``conftest.py``'s ``seed_catkin_trait_spec``, which writes a real config file matching
 ``tests/_trait_fixtures.CATKIN`` into this test's pinned platform state root, so ``get_trait("catkin")``
@@ -487,7 +487,7 @@ def test_compute_phenology_derives_class_id_and_delivers(tmp_path: Path):
     assert "error" not in res, res
     assert res["positive_class_assessed"] is True
     assert out_csv.exists()
-    assert "catkin_elongation_provisional" in phenology.phenology_csv_columns(get_trait("catkin"))
+    assert "catkin_elongation_crossing_unconfirmed" in phenology.phenology_csv_columns(get_trait("catkin"))
 
 
 @pytest.mark.usefixtures("seed_catkin_operationalization")

@@ -18,8 +18,8 @@ columns with no code change:
                                             when the spec names one
 
 A spec's majority-crossing alias is a breeder-confirmed reading of the trait's own definition
-text, flagged provisional (``TraitSpec.majority_provisional``) until confirmed; correct the
-mapping in the spec if the breeder rules otherwise. ``positive_onset_date`` (the first date
+text, flagged crossing-unconfirmed (``TraitSpec.majority_provisional``) until confirmed; correct
+the mapping in the spec if the breeder rules otherwise. ``positive_onset_date`` (the first date
 any positive-state observation appears) is a separate helper, not the delivered trait.
 
 This module is pure (stdlib only, plus ``resolution.py`` and ``operationalization.py``, both of
@@ -58,8 +58,8 @@ def _milestone_columns(spec) -> list[tuple[str, str]]:
     The single owner of which milestone columns exist. ``plant_milestones`` iterates it to emit each
     date and its bound; the schema functions map it to names. The majority alias enters only when the
     spec names a crossing for it, and declaration and production share this same condition, so a
-    trait with no ``majority_milestone`` never declares a majority date/bound/provisional column that
-    no producer fills.
+    trait with no ``majority_milestone`` never declares a majority date/bound/crossing-unconfirmed
+    column that no producer fills.
     """
     cols = [(key, key) for key in _milestone_targets(spec)]
     if spec.majority_milestone:
@@ -78,9 +78,9 @@ def milestone_date_columns(spec) -> list[str]:
     return [f"{spec.phenology_prefix}_{sfx}_date" for sfx, _ in _milestone_columns(spec)]
 
 
-def majority_provisional_column(spec) -> str | None:
-    """The column that marks a trait's majority alias as a provisional reading, or ``None`` when the
-    spec names no majority crossing for it to qualify.
+def majority_crossing_unconfirmed_column(spec) -> str | None:
+    """The column that marks a trait's majority alias as not yet breeder-confirmed, or ``None`` when
+    the spec names no majority crossing for it to qualify.
 
     The single owner of that column's name. ``phenology_csv_columns`` declares it, and
     ``_write_phenology_delivery`` (the one writer both ``write_phenology_csv`` and
@@ -91,19 +91,19 @@ def majority_provisional_column(spec) -> str | None:
     """
     if not spec.majority_milestone:
         return None
-    return f"{spec.phenology_prefix}_{spec.majority_label}_provisional"
+    return f"{spec.phenology_prefix}_{spec.majority_label}_crossing_unconfirmed"
 
 
 def phenology_csv_columns(spec) -> list[str]:
     """The delivered per-plant phenology CSV schema for one trait, derived from its ``TraitSpec``.
 
     The milestone/alias column names come from the spec (``phenology_prefix`` + each milestone key,
-    plus the majority alias/provisional columns built from ``majority_label``) so the schema carries
-    no trait vocabulary of its own: every registered trait resolves through its own spec to its own
-    prefix and columns with no change here. The surrounding provenance columns (operating point,
-    classifier validation, producer identity, coverage disclosure) are genuinely trait-neutral.
+    plus the majority alias/crossing-unconfirmed columns built from ``majority_label``) so the schema
+    carries no trait vocabulary of its own: every registered trait resolves through its own spec to
+    its own prefix and columns with no change here. The surrounding provenance columns (operating
+    point, classifier validation, producer identity, coverage disclosure) are genuinely trait-neutral.
     """
-    provisional_column = majority_provisional_column(spec)
+    crossing_unconfirmed_column = majority_crossing_unconfirmed_column(spec)
     return [
         "plant_id",
         "accession",
@@ -125,7 +125,7 @@ def phenology_csv_columns(spec) -> list[str]:
         # claim the data does not support, which is the failure mode this platform exists to
         # prevent.
         *[f"{c}_bound" for c in milestone_date_columns(spec)],
-        *([provisional_column] if provisional_column else []),
+        *([crossing_unconfirmed_column] if crossing_unconfirmed_column else []),
         *PROVENANCE_COLUMNS,
     ]
 
@@ -548,10 +548,10 @@ def _write_phenology_delivery(
     """Gate, compose and write one phenology delivery's provenance cells, then record the delivery.
 
     Shared by ``write_phenology_csv`` (the milestone table) and ``write_phenology_curve_csv`` (the
-    curve table): the schema (``columns``) and whether the majority-provisional marker applies
-    (``include_majority_marker``) are the only difference between the two tables, so both entry
-    points call through here rather than each running its own gate, composing its own cells, or
-    recording its own delivery event.
+    curve table): the schema (``columns``) and whether the majority crossing-unconfirmed marker
+    applies (``include_majority_marker``) are the only difference between the two tables, so both
+    entry points call through here rather than each running its own gate, composing its own cells,
+    or recording its own delivery event.
 
     Runs ``check_delivery_gate`` over ``flags`` itself, the way its sibling writers
     (``export_aggregated_csv``, ``export_detection_csv``) run their own gate before opening a file:
@@ -564,8 +564,8 @@ def _write_phenology_delivery(
     validity columns, the producer tail and ``produced_at``, all through the shared
     ``resolution.delivered_tail``, the one composition every delivered tail routes through, and,
     when ``include_majority_marker`` is set, the trait's majority-alias marker through
-    ``majority_provisional_column``) and returns them, so a caller fills its own response from what
-    was actually written rather than re-deriving the same values.
+    ``majority_crossing_unconfirmed_column``) and returns them, so a caller fills its own response
+    from what was actually written rather than re-deriving the same values.
     Records the delivery through ``record_delivery_binding_event`` after the file is written, under
     the caller-stated ``door`` and the explicit ``project_root``, so a delivered phenology CSV
     cannot exist without both the gate having run and the delivery having been recorded.
@@ -611,9 +611,9 @@ def _write_phenology_delivery(
         bindings, gate,
         columns=tuple(PROVENANCE_COLUMNS))
     if include_majority_marker:
-        provisional_column = majority_provisional_column(spec)
-        if provisional_column:
-            cells[provisional_column] = "true" if spec.majority_provisional else "false"
+        crossing_unconfirmed_column = majority_crossing_unconfirmed_column(spec)
+        if crossing_unconfirmed_column:
+            cells[crossing_unconfirmed_column] = "true" if spec.majority_provisional else "false"
 
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -651,9 +651,9 @@ def write_phenology_csv(
     """Write per-plant milestone rows to the canonical delivery CSV, for the given trait's spec.
 
     Emits exactly ``phenology_csv_columns(spec)`` through ``_write_phenology_delivery``: the gate,
-    the composed provenance cells (including the trait's majority-provisional marker when the spec
-    names one) and the recorded delivery event are all that function's, not a second copy of any of
-    them. ``door`` is the name ``record_delivery_binding_event`` records the delivery under.
+    the composed provenance cells (including the trait's majority crossing-unconfirmed marker when
+    the spec names one) and the recorded delivery event are all that function's, not a second copy
+    of any of them. ``door`` is the name ``record_delivery_binding_event`` records the delivery under.
     ``plant_mapping`` is ``_write_phenology_delivery``'s own required disclosure dict.
     """
     return _write_phenology_delivery(
@@ -684,7 +684,8 @@ def write_phenology_curve_csv(
 
     Emits exactly ``curve_csv_columns()`` through ``_write_phenology_delivery``, the same gate,
     provenance composition and delivery recording ``write_phenology_csv`` runs, minus the
-    milestone-only majority-provisional marker: a curve names no crossing for one to qualify.
+    milestone-only majority crossing-unconfirmed marker: a curve names no crossing for one to
+    qualify.
     ``plant_mapping`` is ``_write_phenology_delivery``'s own required disclosure dict.
     """
     return _write_phenology_delivery(
