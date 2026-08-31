@@ -17,12 +17,15 @@ Convention: the canonical layout (see :mod:`tcip_mcp.dataset_layout`):
 from __future__ import annotations
 
 from collections import OrderedDict
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
+import tcip_store as ts
 
+from tcip_mcp import workspace
 from tcip_mcp.dataset_layout import (
     annotation_dir,
     annotation_root,
@@ -38,6 +41,7 @@ from tcip_mcp.dataset_layout import (
     subjects_with_labels,
 )
 from tcip_mcp.pipelines.image_utils import list_logical_images, logical_image_name
+from tcip_mcp.web_client import canvas_open_binding_key
 from tcip_web.label_annotations_cache import cached_label_annotations
 from tcip_web.paths import assert_path_allowed
 from tcip_web.state import DatasetSelection, store
@@ -195,6 +199,32 @@ class SelectionRequest(BaseModel):
     model_name: Optional[str] = None
 
 
+def _write_canvas_binding(root: Path) -> int:
+    """Record ``root`` as the GUI's open root; return the generation now in force.
+
+    Read-modify-write inside a transaction, the store's own ``cas`` policy: the current record
+    is read to decide whether ``root`` actually changed (generation bumps only then, so a
+    same-project re-select or ordinary navigation never supersedes a sibling tab), and the write
+    is staged in the same transaction so a concurrent select cannot land between the read and the
+    write and have its own bump silently dropped.
+    """
+    key = canvas_open_binding_key()
+    root_str = str(root)
+    with ts.transaction(key) as txn:
+        current = txn.read(key, default=None)
+        if current is not None and ts.canonical_path(current["root"]) == ts.canonical_path(root_str):
+            generation = current["generation"]
+        else:
+            generation = (current["generation"] + 1) if current is not None else 1
+        txn.write(key, {
+            "generation": generation,
+            "root": root_str,
+            "project_name": workspace.workspace_project_name(root),
+            "issued_at": datetime.now(timezone.utc).isoformat(),
+        })
+    return generation
+
+
 @router.post("/select")
 async def select_dataset(req: SelectionRequest) -> dict:
     """Set the active dataset for the GUI; broadcasts a state delta."""
@@ -203,9 +233,21 @@ async def select_dataset(req: SelectionRequest) -> dict:
     if not root.is_dir():
         raise HTTPException(404, f"dataset_root not found: {req.dataset_root}")
 
+    # Recorded before anything else so a busy binding store refuses the whole select rather
+    # than leaving the GUI's own state half-adopted with no canvas binding to match it.
+    try:
+        generation = _write_canvas_binding(project_root)
+    except ts.StoreBusy as exc:
+        raise HTTPException(
+            503, f"could not record which project the GUI has open: {exc}"
+        ) from exc
+
     # Rehydrate any persisted GUI state for this project first (so backend state
     # survives a restart), then apply the fresh selection on top via mutate().
     store.open_project(project_root)
+    # Held beside project_root so the broadcast envelope and the connect-time replay can read
+    # it off the in-memory store rather than re-reading the binding store on every broadcast.
+    store.set_binding_generation(generation)
 
     image_list: list[str] = []
     if req.date:
@@ -286,6 +328,9 @@ async def select_dataset(req: SelectionRequest) -> dict:
     return {
         "status": "ok",
         "selection": selection.model_dump(mode="json"),
+        # The canvas-open binding's current generation, for the client to adopt in the same
+        # store update as the selection: see CanvasStatePayload.binding_generation.
+        "generation": generation,
         "annotations_present": annotations_present,
         "predictions_present": predictions_present,
         "label_problem": label_problem,
