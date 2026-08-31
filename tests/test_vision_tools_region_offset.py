@@ -57,7 +57,7 @@ def patched_frame(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """A dataset image with one red patch at ``PATCH``, and the patch engine wired in."""
     from tcip_mcp.pipelines import proposal
 
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     images = tmp_path / "images"
     images.mkdir()
     arr = np.full((FRAME_H, FRAME_W, 3), 20, dtype=np.uint8)

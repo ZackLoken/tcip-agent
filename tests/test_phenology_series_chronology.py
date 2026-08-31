@@ -219,7 +219,7 @@ def test_a_bucket_the_prediction_writer_produced_reads_back_with_its_own_classes
 
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     ckpt = registered_checkpoint(tmp_path, project_root=tmp_path)
     images_dir = tmp_path / "images"
     images_dir.mkdir()

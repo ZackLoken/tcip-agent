@@ -6,7 +6,7 @@ class id is a mapping fact derived from classes.json by name (never a pinned def
 provisional 95%-mapping marker travels with the delivery. There are no built-in traits: catkin is
 authored the same way as any other trait; this module's ``pytestmark``
 requests ``conftest.py``'s ``seed_catkin_trait_spec``, which writes a real config file matching
-``tests/_trait_fixtures.CATKIN`` into this test's pinned project root, so ``get_trait("catkin")``
+``tests/_trait_fixtures.CATKIN`` into this test's pinned platform state root, so ``get_trait("catkin")``
 keeps resolving by default the way it did when a builtin was unconditionally present.
 """
 

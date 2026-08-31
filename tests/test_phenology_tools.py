@@ -1481,7 +1481,7 @@ def test_calibrate_ordinal_regression_operating_point_ordinal_e2e(
     from tcip_mcp.tools.calibration_tools import calibrate_ordinal_regression_operating_point
     from tests.test_e2e_tasktypes import _model_source, _save_png, _train_config, _write_csv
 
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     images_dir = tmp_path / "images"
     rows = []
     for i in range(10):
@@ -1545,7 +1545,7 @@ def test_calibrate_ordinal_regression_operating_point_regression_e2e(
     from tcip_mcp.tools.calibration_tools import calibrate_ordinal_regression_operating_point
     from tests.test_e2e_tasktypes import _model_source, _save_png, _train_config, _write_csv
 
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     images_dir = tmp_path / "images"
     rows = []
     for i in range(10):
@@ -1641,7 +1641,7 @@ def test_calibrate_ordinal_regression_operating_point_admits_a_loose_images_dire
 
     from tcip_mcp.tools.model_tools import register_model
 
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     reg = register_model(name="loose-dir", checkpoint_path=str(checkpoint), config={},
                          project_path=str(tmp_path))
     assert "error" not in reg, reg

@@ -79,7 +79,7 @@ def _run(tmp_path, monkeypatch, in_chans):
                         lambda *a, **k: (bundle, "H", 0, evidence))
     monkeypatch.setattr(predictor_mod, "build_predictor",
                         lambda checkpoint, **kw: _ChannelStub(in_chans))
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     ckpt = registered_checkpoint(tmp_path, project_root=tmp_path)
     return itools.run_inference(
         str(ckpt), image_paths=[_rgb_image(tmp_path)], images_dir=str(tmp_path), device="cpu",

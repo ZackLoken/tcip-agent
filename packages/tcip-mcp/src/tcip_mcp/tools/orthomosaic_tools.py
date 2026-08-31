@@ -100,7 +100,7 @@ def deliver_orthomosaic_plant_counts(
         plant_csv_paths: One or more plant-locations CSVs (columns ``plot_name``,
             ``accession_name``, ``WGS84_centroid_x/y``, …).
         output_csv_path: Where to write the delivered per-plant CSV. A relative path resolves
-            against the project root, never the server process's cwd.
+            against the platform state root, never the server process's cwd.
         delivered_phenotype: The crop-vocabulary delivered phenotype this CSV ships under, resolved
             to the registered trait whose spec delivers it and whose confirmed operationalization
             this delivery rests on.

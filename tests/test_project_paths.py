@@ -9,19 +9,19 @@ from pathlib import Path
 import tcip_mcp.project_paths as pp
 
 
-def test_project_root_defaults_to_cwd(monkeypatch, tmp_path: Path) -> None:
+def test_platform_state_root_defaults_to_cwd(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.delenv(pp.ENV_VAR, raising=False)
     monkeypatch.chdir(tmp_path)
-    assert pp.project_root() == tmp_path
+    assert pp.platform_state_root() == tmp_path
 
 
-def test_project_root_honors_env(monkeypatch, tmp_path: Path) -> None:
+def test_platform_state_root_honors_env(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv(pp.ENV_VAR, str(tmp_path))
     # Even from a different cwd, the pinned root wins: the whole point (no fragmentation).
     other = tmp_path / "sub"
     other.mkdir()
     monkeypatch.chdir(other)
-    assert pp.project_root() == tmp_path
+    assert pp.platform_state_root() == tmp_path
 
 
 def test_repo_root_finds_the_marker() -> None:
@@ -51,7 +51,7 @@ def test_repo_root_climbs_past_a_package_level_claude_md(tmp_path: Path, monkeyp
 
 def test_pin_sets_env_to_repo_root_when_unset(monkeypatch) -> None:
     monkeypatch.delenv(pp.ENV_VAR, raising=False)
-    binding = pp.pin_project_root(from_marker=False)
+    binding = pp.pin_platform_root(from_marker=False)
     assert os.environ.get(pp.ENV_VAR) == str(binding.root)
     assert binding.source == "repo_root"
     assert binding.inherited_root is None
@@ -62,7 +62,7 @@ def test_pin_sets_env_to_repo_root_when_unset(monkeypatch) -> None:
 def test_pin_respects_a_preset_root(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv(pp.ENV_VAR, str(tmp_path))
     # An operator-provided root is not overridden when the process does not opt into the marker.
-    binding = pp.pin_project_root(from_marker=False)
+    binding = pp.pin_platform_root(from_marker=False)
     assert binding.root == tmp_path
     assert binding.source == "inherited"
     assert binding.inherited_root == str(tmp_path)
@@ -82,7 +82,7 @@ def test_pin_from_marker_prefers_the_marker_over_an_inherited_root(
     inherited.mkdir()
     monkeypatch.setenv(pp.ENV_VAR, str(inherited))  # an inherited root predating this bind
 
-    binding = pp.pin_project_root(from_marker=True)
+    binding = pp.pin_platform_root(from_marker=True)
     assert binding.root == proj_root
     assert binding.source == "marker"
     assert binding.inherited_root == str(inherited)
@@ -93,7 +93,7 @@ def test_pin_from_marker_prefers_the_marker_over_an_inherited_root(
 def test_pin_from_marker_falls_back_to_repo_root_when_nothing_inherited(monkeypatch) -> None:
     # The per-test workspace holds no marker: no project to bind from and nothing inherited.
     monkeypatch.delenv(pp.ENV_VAR, raising=False)
-    binding = pp.pin_project_root(from_marker=True)
+    binding = pp.pin_platform_root(from_marker=True)
     assert binding.source == "repo_root"
     assert binding.inherited_root is None
     assert binding.marker_problem is None
@@ -114,7 +114,7 @@ def test_pin_from_marker_records_a_dangling_marker_and_keeps_the_inherited_root(
     inherited.mkdir()
     monkeypatch.setenv(pp.ENV_VAR, str(inherited))
 
-    binding = pp.pin_project_root(from_marker=True)
+    binding = pp.pin_platform_root(from_marker=True)
     assert binding.source == "inherited"
     assert binding.root == inherited
     assert binding.marker_problem is not None
@@ -163,7 +163,7 @@ def test_pin_from_marker_keeps_a_transient_read_failure_even_when_a_retry_would_
 
     monkeypatch.setattr(workspace, "active_project_if_present", flaky)
 
-    binding = pp.pin_project_root(from_marker=True)
+    binding = pp.pin_platform_root(from_marker=True)
     assert binding.marker_problem == "could not acquire the workspace lock within 30s"
 
 
@@ -200,7 +200,7 @@ def test_repin_platform_root_records_the_previous_root_as_inherited(
 
 def test_restore_binding_resets_the_root_binding_to_a_snapshot() -> None:
     original = pp.root_binding()
-    pp.pin_project_root(from_marker=False)
+    pp.pin_platform_root(from_marker=False)
     assert pp.root_binding() is not original
 
     pp.restore_binding(original)

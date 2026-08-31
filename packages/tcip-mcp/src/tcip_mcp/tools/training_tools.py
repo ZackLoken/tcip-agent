@@ -534,7 +534,7 @@ def launch_training(
         config: Full training configuration dict with model_source, data, training sections.
         output_dir: Directory for checkpoints and logs. Empty defaults to the experiment store
             (``<project>/.tcip/experiments``, the same base the experiment records use); a
-            relative path resolves against the project root, never the server process's cwd.
+            relative path resolves against the platform state root, never the server process's cwd.
         resume_from: Optional path to a ``checkpoint_epoch_*.pt`` to resume from
             (restores model + optimizer + scheduler + scaler and continues).
         max_wall_clock_seconds: Optional hard timeout. If the training process hasn't exited on its
@@ -633,9 +633,9 @@ def launch_training(
 
     # Captured once, beside the child's environment snapshot: the watchdog below writes about
     # this run under the root it launched under, even if this process later adopts another.
-    from tcip_mcp.project_paths import project_root
+    from tcip_mcp.project_paths import platform_state_root
 
-    launch_root = project_root()
+    launch_root = platform_state_root()
     child_env = _child_env_for_launch(config)
 
     proc = subprocess.Popen(
@@ -1017,7 +1017,7 @@ class _AccessTrackingConfig(dict):
 def hpo_root(output_dir: str = "", *, root: Path | str | None = None) -> Path:
     """Where HPO sweeps live: ``output_dir`` when the caller named one, else ``.tcip/hpo``
     under ``root`` (default: the platform state root). A relative ``output_dir`` resolves
-    against the project root, never the server process's cwd.
+    against the platform state root, never the server process's cwd.
 
     ``root`` lets a caller that already knows which project a sweep belongs to (its own
     registry entry's launch root) resolve its directory there, rather than under whatever
@@ -1026,11 +1026,11 @@ def hpo_root(output_dir: str = "", *, root: Path | str | None = None) -> Path:
     The one resolver for that decision. Anything that has to find a sweep on disk (the
     Tuning routes included) calls this rather than rebuilding the same default.
     """
-    from tcip_mcp.project_paths import project_root, resolve_output_path
+    from tcip_mcp.project_paths import platform_state_root, resolve_output_path
 
     if output_dir:
         return resolve_output_path(output_dir)
-    base = Path(root) if root is not None else project_root()
+    base = Path(root) if root is not None else platform_state_root()
     return base / ".tcip" / "hpo"
 
 

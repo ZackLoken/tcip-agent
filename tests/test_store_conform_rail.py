@@ -205,12 +205,12 @@ def test_a_restored_archive_reads_back_at_once_with_no_hand_adoption(tmp_path, m
     platform_files.mkdir()
     platform_database.mkdir()
 
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(platform_files))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(platform_files))
     with bound(FileBackend()):
         ts.replace(dataset_layout.image_status_key(source), negative, expect=ts.Version.ABSENT)
         assert "error" not in archive_project(str(source), str(tmp_path / "bundle.zip"))
 
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(platform_database))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(platform_database))
     with bound(SqliteBackend()):
         # The order a long-lived process reaches a destination in: it answers about the root,
         # then the bundle lands in it, then something reads.

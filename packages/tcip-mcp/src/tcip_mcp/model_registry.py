@@ -298,7 +298,7 @@ def load_registered_checkpoint(
     into one ``bytes`` object; the digest is taken over that exact object through
     :func:`_sha256_of_bytes` (the same function :meth:`ModelRegistry.register_model` hashes with,
     so registration and this load are literally the same bytes-to-digest code); the registry
-    index of ``project_path`` (or, unset, :func:`~tcip_mcp.project_paths.project_root`) is read
+    index of ``project_path`` (or, unset, :func:`~tcip_mcp.project_paths.platform_state_root`) is read
     and every entry whose ``sha256`` equals the digest is collected; none of them raises
     :class:`UnregisteredCheckpoint`, naming the path, the digest, the root searched, and the
     remedy. Several entries naming one digest must agree on producer or the load refuses (see
@@ -316,10 +316,10 @@ def load_registered_checkpoint(
     The digest and the load are over one immutable byte string, so no replacement of the file, in
     place or by rename, on either platform, can separate them.
     """
-    from tcip_mcp.project_paths import project_root
+    from tcip_mcp.project_paths import platform_state_root
 
     ckpt = Path(checkpoint_path)
-    root = project_path or str(project_root())
+    root = project_path or str(platform_state_root())
     with open(ckpt, "rb") as f:
         data = f.read()
     digest = _sha256_of_bytes(data)

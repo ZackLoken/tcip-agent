@@ -150,12 +150,12 @@ def main() -> int:
         mapping_name = "smoke-valley"
         csv_out = root / "delivery" / "catkin_phenology.csv"
 
-        # Trait registration is per-project state resolved via $TCIP_PROJECT_ROOT
+        # Trait registration is per-project state resolved via $TCIP_STATE_ROOT
         # (tcip_mcp.project_paths.resolve_state); the outer chdir into a separate audit-only
         # tmpdir does not point resolution at root, so pin it explicitly for this run, restoring
         # whatever the process already had once done.
-        _saved_project_root = os.environ.get("TCIP_PROJECT_ROOT")
-        os.environ["TCIP_PROJECT_ROOT"] = str(root)
+        _saved_platform_root = os.environ.get("TCIP_STATE_ROOT")
+        os.environ["TCIP_STATE_ROOT"] = str(root)
         try:
             from tcip_mcp.traits import registered_crops
             from tcip_mcp.tools.project_tools import init_project, register_dataset
@@ -245,10 +245,10 @@ def main() -> int:
                               DATES[0] <= d05 and d95 <= DATES[-1],
                               f"range={DATES[0]}..{DATES[-1]} 05={d05} 95={d95}")
         finally:
-            if _saved_project_root is None:
-                os.environ.pop("TCIP_PROJECT_ROOT", None)
+            if _saved_platform_root is None:
+                os.environ.pop("TCIP_STATE_ROOT", None)
             else:
-                os.environ["TCIP_PROJECT_ROOT"] = _saved_project_root
+                os.environ["TCIP_STATE_ROOT"] = _saved_platform_root
             # Windows can't remove the tempdir the bound backend still holds a database handle
             # into; close it before the enclosing TemporaryDirectory context tears the tree down.
             backend.close()

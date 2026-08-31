@@ -74,9 +74,9 @@ def main() -> None:
     bind_default()
     # Pin before any tool resolves a .tcip path: inside the agent terminal this binds from
     # the marker, elsewhere it keeps the historical setdefault; set_active_project repins later.
-    from tcip_mcp.project_paths import pin_project_root
+    from tcip_mcp.project_paths import pin_platform_root
 
-    pin_project_root(from_marker=binds_from_marker(os.environ))
+    pin_platform_root(from_marker=binds_from_marker(os.environ))
     # Size GDAL's block cache once per process, at the entry point, never at source construction.
     from tcip_mcp.pipelines.raster_source import configure_gdal_cache
 

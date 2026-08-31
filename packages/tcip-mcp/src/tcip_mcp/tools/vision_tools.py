@@ -30,7 +30,7 @@ from tcip_annotation.viz import (
 from tcip_mcp.audit import audited
 from tcip_mcp.pipelines.display_bounds import VIZ_ARTIFACT_MAX_EDGE
 from tcip_mcp.pipelines.resolution import DEFAULT_CONF
-from tcip_mcp.project_paths import project_root
+from tcip_mcp.project_paths import platform_state_root
 from tcip_mcp.server import mcp
 
 if TYPE_CHECKING:
@@ -770,7 +770,7 @@ def capture_live_canvas(
     from tcip_mcp import workspace
     from tcip_mcp.web_client import canvas_geometry_key, canvas_meta_key, canvas_open_binding_key
 
-    root = str(project_root())
+    root = str(platform_state_root())
     meta_doc = canvas_meta_key(root)
     shapes_doc = canvas_geometry_key(root)
 

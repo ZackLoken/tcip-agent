@@ -220,7 +220,7 @@ def test_export_predictions_redirects_a_bespoke_bucket_against_its_own_datasets_
 
     platform_root = tmp_path / "platform"
     (platform_root / ".tcip" / "state").mkdir(parents=True)
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(platform_root))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(platform_root))
 
     dataset_root = tmp_path / "dataset"
     images_dir = dataset_root / "images" / "2026-01-01"
@@ -274,7 +274,7 @@ def test_export_predictions_writes_a_bucket_under_no_dataset_root_and_says_the_g
 
     platform_root = tmp_path / "platform"
     (platform_root / ".tcip" / "state").mkdir(parents=True)
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(platform_root))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(platform_root))
 
     images_dir = tmp_path / "captures"
     images_dir.mkdir()
@@ -311,7 +311,7 @@ def _canonical_bucket_with_a_verdict(tmp_path, monkeypatch) -> tuple:
 
     platform_root = tmp_path / "platform"
     (platform_root / ".tcip" / "state").mkdir(parents=True)
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(platform_root))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(platform_root))
 
     dataset_root = tmp_path / "dataset"
     images_dir = dataset_root / "images" / "2026-01-01"
@@ -387,7 +387,7 @@ def test_export_predictions_writes_a_canonical_bucket_with_no_verdicts_in_place(
 
     platform_root = tmp_path / "platform"
     (platform_root / ".tcip" / "state").mkdir(parents=True)
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(platform_root))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(platform_root))
 
     dataset_root = tmp_path / "dataset"
     images_dir = dataset_root / "images" / "2026-01-01"

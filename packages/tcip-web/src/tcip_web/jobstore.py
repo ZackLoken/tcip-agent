@@ -39,7 +39,7 @@ from tcip_store import (
 )
 from tcip_store.file_backend import RootedFileLocator
 
-from tcip_mcp.project_paths import project_root
+from tcip_mcp.project_paths import platform_state_root
 
 logger = logging.getLogger(__name__)
 
@@ -79,7 +79,7 @@ register_store(
 def current_root() -> str:
     """This process's platform-state root, resolved: the value a job's own ``platform_root``
     field carries and :func:`job_registry_key`'s default group."""
-    return str(project_root().resolve())
+    return str(platform_state_root().resolve())
 
 
 def job_registry_key(name: str, *, root: str | Path | None = None) -> Key:

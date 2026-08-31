@@ -8,7 +8,7 @@ there is one source of truth for the workspace location, the same spirit as
 :mod:`tcip_mcp.dataset_layout` for the in-project layout.
 
 The active-project marker (``<workspace>/.active``) records which workspace project
-is the startup root of a process that opts in (``tcip_mcp.project_paths.pin_project_root``,
+is the startup root of a process that opts in (``tcip_mcp.project_paths.pin_platform_root``,
 ``from_marker=True``) and which one the GUI should open. The agent sets it after ingesting
 a project so the breeder flow ("I structured your images, opening
 ``<crop>_<subject>_<phenotype>``") closes the loop; adopting it also repins the adopting
@@ -178,7 +178,7 @@ def adoptable_project_root(name: str) -> Path:
     The one predicate every reader that must tell "no marker" apart from "the marker names a
     project that is not adoptable" calls: :func:`set_active_project`, :func:`
     active_project_if_present` (folding the raise to ``None``), and
-    ``tcip_mcp.project_paths.pin_project_root`` when binding from the marker.
+    ``tcip_mcp.project_paths.pin_platform_root`` when binding from the marker.
     """
     if not is_valid_name(name):
         raise ValueError(f"invalid project name: {name!r}")
@@ -193,7 +193,7 @@ def active_project_if_present(*, create: bool = True) -> Optional[tuple[str, Pat
 
     Collapses "no marker" and "marker names a project that is gone" into the same ``None``:
     a caller that must tell those two apart (the session-start hook's directive,
-    ``project_paths.pin_project_root``) reads :func:`read_active_project` and
+    ``project_paths.pin_platform_root``) reads :func:`read_active_project` and
     :func:`adoptable_project_root` itself. One check shared by every reader that must not
     report a name whose project has vanished: the workspace projects list route's
     ``active``/``active_path`` fields and the session-start hook's directive both read this.
@@ -218,7 +218,7 @@ def marker_problem(*, create: bool = False) -> Optional[str]:
     Call only after :func:`active_project_if_present` has already answered ``None``: it folds
     "no marker" and "the marker names a project that is not adoptable" together, and this is
     the one place that tells them apart, for every reader that needs to
-    (``project_paths.pin_project_root``, the workspace projects' divergence report, the web
+    (``project_paths.pin_platform_root``, the workspace projects' divergence report, the web
     backend's own re-read on the agent's adopt signal). A store refusal or a lock timeout
     reading the marker is caught and returned as the problem text, the same as an unadoptable
     name, since either way the process must carry on rather than raise.

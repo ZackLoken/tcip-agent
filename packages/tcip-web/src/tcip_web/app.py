@@ -105,11 +105,11 @@ def bind_startup_root() -> None:
     ``set_active_project`` repin that lands before the first request already leaves a
     binding in place, and this must not replace it with a fresh marker read.
     """
-    from tcip_mcp.project_paths import pin_project_root, root_binding
+    from tcip_mcp.project_paths import pin_platform_root, root_binding
 
     if root_binding() is not None:
         return
-    pin_project_root(from_marker=True)
+    pin_platform_root(from_marker=True)
 
 
 _bind_startup_root_lock = threading.Lock()

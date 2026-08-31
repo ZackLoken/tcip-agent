@@ -44,7 +44,7 @@ def _join_sweep_workers():
 @pytest.fixture
 def hpo_root(tmp_path, monkeypatch) -> Path:
     """Point the platform state root at a tmp dir so the routes read this test's sweeps."""
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     root = tmp_path / ".tcip" / "hpo"
     root.mkdir(parents=True)
     return root

@@ -230,7 +230,7 @@ def test_conform_over_a_real_import_produced_registry(tmp_path: Path, monkeypatc
 
     src = tmp_path / "src_project"
     init_project(str(src), site="north orchard")
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(src))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(src))
     create_experiment("exp1", {"model_source": {"builder": "x:y"}})
     update_status("exp1", "running")
     ckpt_dir = experiment_dir("exp1")

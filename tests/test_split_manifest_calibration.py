@@ -588,7 +588,7 @@ def test_manifest_calibrations_evidence_earns_a_validated_record_through_export(
                     for p in paths]
 
     monkeypatch.setattr(predictor_mod, "build_predictor", lambda checkpoint, **kw: _BucketStub())
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
 
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
@@ -692,7 +692,7 @@ def test_count_door_round_trip_earns_a_checked_selection_disjointness(tmp_path, 
                     for p in paths]
 
     monkeypatch.setattr(predictor_mod, "build_predictor", lambda checkpoint, **kw: _BucketStub())
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
 
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 

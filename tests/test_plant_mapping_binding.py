@@ -1023,14 +1023,14 @@ def test_two_projects_mapping_one_dataset_under_the_same_name_each_deliver_throu
 
     images_root, plant_csv, preds_by_date = _write_scene(dataset_root)
 
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(proj_a))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(proj_a))
     build_a = build_plant_mapping(
         name="valley", images_root=str(images_root), plant_csv_paths=[str(plant_csv)],
         dates=[DATES[0]])
     assert "error" not in build_a, build_a
     _seed_currant_bloom_trait(proj_a)
 
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(proj_b))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(proj_b))
     build_b = build_plant_mapping(
         name="valley", images_root=str(images_root), plant_csv_paths=[str(plant_csv)],
         dates=list(DATES))
@@ -1041,7 +1041,7 @@ def test_two_projects_mapping_one_dataset_under_the_same_name_each_deliver_throu
     assert plant_mapping.load_mapping(proj_a, "valley").dates == [DATES[0]]
     assert set(plant_mapping.load_mapping(proj_b, "valley").dates) == set(DATES)
 
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(proj_a))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(proj_a))
     out_csv_a = proj_a / "out.csv"
     res_a = compute_phenology(
         trait="currant_bloom", mapping_name="valley",
@@ -1050,7 +1050,7 @@ def test_two_projects_mapping_one_dataset_under_the_same_name_each_deliver_throu
     assert "error" not in res_a, res_a
     assert out_csv_a.exists()
 
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(proj_b))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(proj_b))
     out_csv_b = proj_b / "out.csv"
     res_b = compute_phenology(
         trait="currant_bloom", mapping_name="valley", predictions_by_date=preds_by_date,
@@ -1060,7 +1060,7 @@ def test_two_projects_mapping_one_dataset_under_the_same_name_each_deliver_throu
 
     # A date proj_a's own (narrower) mapping does not cover refuses through proj_a's own
     # record, unaffected by proj_b's wider mapping under the identical name.
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(proj_a))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(proj_a))
     out_csv_a2 = proj_a / "out2.csv"
     res_a2 = compute_phenology(
         trait="currant_bloom", mapping_name="valley", predictions_by_date=preds_by_date,

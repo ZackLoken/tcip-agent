@@ -26,7 +26,7 @@ from tcip_mcp.pipelines.resolution import (  # noqa: E402
 )
 
 # No built-in traits: seed_catkin_trait_spec (conftest.py) writes a real catkin.yml into this
-# test's pinned project root so resolve_operating_point_from_review("catkin", ...) keeps
+# test's pinned platform state root so resolve_operating_point_from_review("catkin", ...) keeps
 # resolving by default.
 pytestmark = pytest.mark.usefixtures("seed_catkin_trait_spec")
 

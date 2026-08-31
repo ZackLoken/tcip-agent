@@ -17,7 +17,7 @@ from tcip_mcp.pipelines.training.evaluation import (  # noqa: E402
 )
 
 # No built-in traits: seed_catkin_trait_spec (conftest.py) writes a real catkin.yml into this
-# test's pinned project root so resolve_operating_point("catkin", ...) keeps resolving by default.
+# test's pinned platform state root so resolve_operating_point("catkin", ...) keeps resolving by default.
 pytestmark = pytest.mark.usefixtures("seed_catkin_trait_spec")
 
 _DENSE_RECORDS_DEFAULTS = inspect.signature(dense_records).parameters
@@ -270,7 +270,7 @@ def test_resolve_operating_point_train_disjointness_fires(tmp_path, monkeypatch)
     from tcip_mcp.experiments import split_key
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
 
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     tcip_store.replace(split_key("exp1"), {"train": ["a_0_0", "a_0_1"], "group_by": "tile_prefix"})
 
     # Calibration/holdout share tile group "a" (stem "a_0_2") with the training split above.
@@ -288,7 +288,7 @@ def test_resolve_operating_point_train_disjointness_fires(tmp_path, monkeypatch)
 def test_resolve_operating_point_train_disjointness_unresolvable_when_split_missing(tmp_path, monkeypatch):
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
 
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     # A known experiment_id whose split.json can't be read fails closed (unresolvable), unlike the
     # experiment_id=None case (a foreign/unregistered checkpoint).
     cal, hold = good_cal_holdout()
@@ -309,7 +309,7 @@ def test_resolve_operating_point_train_disjointness_resolvable_no_leak_still_val
     from tcip_mcp.experiments import split_key
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
 
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     tcip_store.replace(split_key("exp2"), {"train": ["z_0_0", "z_0_1"], "group_by": "tile_prefix"})
 
     # Calibration/holdout use id prefixes "c"/"h", disjoint from training's "z" group.
@@ -335,7 +335,7 @@ def test_resolve_operating_point_cal_rects_none_is_byte_identical(tmp_path, monk
     from tcip_mcp.experiments import split_key
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
 
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     tcip_store.replace(split_key("exp_rects_noop"), {
         "train": ["mosaic::strip_x_1"], "group_by": "spatial_strip",
     })
@@ -364,7 +364,7 @@ def test_resolve_operating_point_cal_rects_switches_to_geometric_check(tmp_path,
     from tcip_mcp.experiments import split_key
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
 
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     tcip_store.replace(split_key("exp_rects_geo"), {
         "train": ["mosaic::strip_x_1"], "group_by": "spatial_strip",
         "spatial": {
@@ -419,7 +419,7 @@ def test_selection_disjointness_leaked_whole_directory_calibration_of_a_bound_ch
     date (no split_manifest_dir stated for this particular calibration), still sweeps its own
     selection members and floors with the token: the check runs whenever the record carries a
     manifest_binding, whether or not this calibration itself names one."""
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     date = "2-11-26"
     _persist_run_split(
         "exp_sel_leak_whole", tmp_path, date=date, train=["z"], val=["c_0"],
@@ -446,7 +446,7 @@ def test_selection_disjointness_leaked_manifest_calibration_of_a_self_drawn_chec
     """A checkpoint that drew its own split, calibrated under a stated manifest on its own date,
     is checked against its own val the same way: the universe a manifest names may be exactly
     the side this checkpoint was chosen on."""
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     date = "2-11-26"
     _persist_run_split(
         "exp_sel_leak_manifest", tmp_path, date=date, train=["z"], val=["c_0"],
@@ -468,7 +468,7 @@ def test_selection_disjointness_leaked_manifest_calibration_of_a_self_drawn_chec
 
 
 def test_selection_disjointness_not_applicable_across_dates(tmp_path, monkeypatch):
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     _persist_run_split(
         "exp_sel_other_date", tmp_path, date="2-11-26", train=["z"], val=["c_0", "h_0"],
         manifest_dir="some/manifest",
@@ -488,7 +488,7 @@ def test_selection_disjointness_not_applicable_across_dates(tmp_path, monkeypatc
 
 
 def test_selection_disjointness_not_applicable_on_a_spatial_record(tmp_path, monkeypatch):
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     date = "2-11-26"
     _persist_run_split(
         "exp_sel_spatial", tmp_path, date=date, train=["mosaic::strip_x_0"],
@@ -512,7 +512,7 @@ def test_selection_disjointness_not_applicable_on_an_external_val_record(tmp_pat
     """A run trained with an explicit val_images_dir and calibrated under a manifest validates,
     the selection check not-applicable: the val came from a directory the record's date says
     nothing about."""
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     date = "2-11-26"
     _persist_run_split(
         "exp_sel_external", tmp_path, date=date, train=["z"], val=["c_0", "h_0"],
@@ -535,7 +535,7 @@ def test_selection_disjointness_not_applicable_on_an_external_val_record(tmp_pat
 def test_selection_disjointness_not_applicable_for_a_manifest_less_calibration(tmp_path, monkeypatch):
     """A checkpoint that drew its own split, calibrated with no manifest named, behaves exactly
     as before this family: the selection check is not-applicable and never blocks validation."""
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     date = "2-11-26"
     _persist_run_split(
         "exp_sel_no_manifest", tmp_path, date=date, train=["z"], val=["v_0"],
@@ -564,7 +564,7 @@ def test_selection_disjointness_not_applicable_for_a_flat_run_with_no_calibratio
     from tcip_mcp.experiments import create_experiment
     from tcip_mcp.pipelines.data.split_construction import persist_split_manifest
 
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     create_experiment("exp_sel_flat_no_date", {})
     data_cfg = {"labels_dir": str(tmp_path / "annotations"),
                "split": {"resolved_group_by": "tile_prefix",
@@ -600,7 +600,7 @@ def test_selection_disjointness_applicable_when_a_flat_calibration_matches_a_fla
     from tcip_mcp.pipelines.data.splits import manifest_date_key
     from tcip_mcp.pipelines.data.split_construction import persist_split_manifest
 
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     create_experiment("exp_sel_flat_match", {})
     data_cfg = {"labels_dir": str(tmp_path / "annotations"),
                "split": {"resolved_group_by": "tile_prefix",

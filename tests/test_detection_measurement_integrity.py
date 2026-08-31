@@ -21,7 +21,7 @@ from tcip_mcp.pipelines.training.evaluation import (  # noqa: E402
 )
 
 # No built-in traits: seed_catkin_trait_spec (conftest.py) writes a real
-# catkin.yml into this test's pinned project root so trait="catkin" call sites keep resolving.
+# catkin.yml into this test's pinned platform state root so trait="catkin" call sites keep resolving.
 pytestmark = pytest.mark.usefixtures("seed_catkin_trait_spec")
 
 
@@ -195,7 +195,7 @@ def test_run_id_reuses_training_tiling(tmp_path, monkeypatch):
     from tcip_mcp.tools.training_tools import evaluate_model
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     images_dir, labels_dir = _det_dataset(tmp_path)
     run = create_run({"data": {"tiling": {"enabled": True, "tile_size": 64}}}, str(tmp_path / "out"))
     out = Path(run.output_dir)
@@ -214,7 +214,7 @@ def test_explicit_checkpoint_stays_untiled(tmp_path, monkeypatch):
     from tcip_mcp.tools.training_tools import evaluate_model
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     images_dir, labels_dir = _det_dataset(tmp_path)
     ckpt = registered_checkpoint(tmp_path, project_root=str(tmp_path), filename="model.pt")
 
@@ -230,7 +230,7 @@ def test_explicit_tiling_override_on_checkpoint(tmp_path, monkeypatch):
     from tcip_mcp.tools.training_tools import evaluate_model
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     images_dir, labels_dir = _det_dataset(tmp_path)
     ckpt = registered_checkpoint(tmp_path, project_root=str(tmp_path), filename="model.pt")
 
@@ -663,8 +663,8 @@ def test_launch_training_persists_effective_tile_geometry(tmp_path, monkeypatch)
     assert tiling["overlap"] == pytest.approx(0.2)
 
     # Let the subprocess actually finish rather than leaking it: it keeps writing to this test's
-    # pinned TCIP_PROJECT_ROOT, and a late write after the test moves on would resolve against
-    # whoever is running then (tests repin TCIP_PROJECT_ROOT per test, they don't isolate the OS
+    # pinned TCIP_STATE_ROOT, and a late write after the test moves on would resolve against
+    # whoever is running then (tests repin TCIP_STATE_ROOT per test, they don't isolate the OS
     # process tree). Asserting specifically on "completed" (not just any terminal state) is what
     # makes the poisoned gt.train monkeypatch load-bearing: if the child ran inside this process,
     # it would hit _poison_train and the run would be "failed", not "completed".

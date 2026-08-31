@@ -44,14 +44,14 @@ N_MATCHED = 12
 N_SWAPPED = 3
 
 # no built-in traits, seed_catkin_trait_spec (conftest.py) writes a real catkin.yml into this
-# test's pinned project root so resolve_operating_point("catkin", ...) keeps resolving by default.
+# test's pinned platform state root so resolve_operating_point("catkin", ...) keeps resolving by default.
 pytestmark = pytest.mark.usefixtures("seed_catkin_trait_spec")
 
 
 @pytest.fixture(autouse=True)
 def _hermetic_platform_root(tmp_path):
-    """The cal/holdout split locks under ``$TCIP_PROJECT_ROOT/.tcip``: keep it out of the repo."""
-    os.environ["TCIP_PROJECT_ROOT"] = str(tmp_path)  # conftest restores the prior value
+    """The cal/holdout split locks under ``$TCIP_STATE_ROOT/.tcip``: keep it out of the repo."""
+    os.environ["TCIP_STATE_ROOT"] = str(tmp_path)  # conftest restores the prior value
 
 
 def _entry(action, cid, gt, pred, conf):
@@ -305,7 +305,7 @@ def test_per_class_keys_survive_the_sweep_artifact_round_trip():
         "catkin", tiled=True, dataset_hash="h", staged_conf_floor=0.05,
         calibration_records=_gt_records("cal", 4, swap_classes=True),
         holdout_records=_gt_records("hold", 4, swap_classes=True, offset=5000.0))
-    path = Path(os.environ["TCIP_PROJECT_ROOT"]) / "sweep.json"
+    path = Path(os.environ["TCIP_STATE_ROOT"]) / "sweep.json"
     path.write_text(json.dumps({"sweep": b.params["conf"].sweep}), encoding="utf-8")
     reloaded = json.loads(path.read_text(encoding="utf-8"))["sweep"]
     assert reloaded["holdout_bias"]["per_class"] == b.params["conf"].sweep["holdout_bias"]["per_class"]

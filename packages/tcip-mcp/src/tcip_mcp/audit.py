@@ -35,7 +35,7 @@ from tcip_mcp.project_paths import resolve_state
 logger = logging.getLogger(__name__)
 
 # Relative default (tests rebind this constant). At write time ``resolve_state`` anchors it to
-# ``$TCIP_PROJECT_ROOT`` when pinned, so processes from different dirs don't fragment the log.
+# ``$TCIP_STATE_ROOT`` when pinned, so processes from different dirs don't fragment the log.
 AUDIT_ROOT = Path(".")
 
 _AUDIT_LOG = RootedFileLocator(prefix=(".tcip",), suffix=".jsonl")

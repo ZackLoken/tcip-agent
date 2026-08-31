@@ -1,6 +1,6 @@
 """Adopting a project unifies platform state under one ``<project>/.tcip/``.
 
-``set_active_project`` repins ``TCIP_PROJECT_ROOT`` so the audit log, the experiment store,
+``set_active_project`` repins ``TCIP_STATE_ROOT`` so the audit log, the experiment store,
 and the model registry all resolve under the adopted project (self-contained + portable).
 The conftest ``_restore_platform_root_env`` autouse fixture keeps the in-process repin from
 leaking into other tests.
@@ -25,9 +25,9 @@ def _adopt(tmp_path, monkeypatch, name="hazelnut_catkin_valley") -> Path:
 
 def test_adoption_repins_platform_root(tmp_path, monkeypatch):
     proj = _adopt(tmp_path, monkeypatch)
-    from tcip_mcp.project_paths import project_root, resolve_state
+    from tcip_mcp.project_paths import platform_state_root, resolve_state
 
-    assert project_root() == proj
+    assert platform_state_root() == proj
     assert resolve_state(Path(".tcip/audit.jsonl")) == proj / ".tcip" / "audit.jsonl"
     assert resolve_state(Path(".tcip/experiments")) == proj / ".tcip" / "experiments"
 
@@ -71,28 +71,28 @@ def test_viz_mirrors_the_platform_root_env_var_name():
 def test_no_adoption_keeps_cwd_default(tmp_path, monkeypatch):
     # Without adoption (env unset), the platform root stays the cwd, the default
     # that keeps tests and un-pinned runs hermetic.
-    monkeypatch.delenv("TCIP_PROJECT_ROOT", raising=False)
+    monkeypatch.delenv("TCIP_STATE_ROOT", raising=False)
     monkeypatch.chdir(tmp_path)
-    from tcip_mcp.project_paths import project_root
+    from tcip_mcp.project_paths import platform_state_root
 
-    assert project_root() == tmp_path
+    assert platform_state_root() == tmp_path
 
 
 def test_app_import_alone_leaves_the_platform_root_at_cwd(tmp_path, monkeypatch):
     """Importing ``tcip_web.app`` is a served app's own bind, never an importer's: a fresh
-    interpreter that only imports the module, with no ``TCIP_PROJECT_ROOT`` inherited, stays
+    interpreter that only imports the module, with no ``TCIP_STATE_ROOT`` inherited, stays
     on its own cwd rather than silently repinning to the workspace marker's project (see
     tests/test_tcip_web_app_startup_root.py for when the pin actually happens)."""
     import subprocess
     import sys
 
     _adopt(tmp_path, monkeypatch)
-    monkeypatch.delenv("TCIP_PROJECT_ROOT", raising=False)
+    monkeypatch.delenv("TCIP_STATE_ROOT", raising=False)
 
     code = (
         "import tcip_web.app\n"
-        "from tcip_mcp.project_paths import project_root\n"
-        "print(project_root())\n"
+        "from tcip_mcp.project_paths import platform_state_root\n"
+        "print(platform_state_root())\n"
     )
     result = subprocess.run(
         [sys.executable, "-c", code], capture_output=True, text=True, cwd=str(tmp_path), timeout=60,

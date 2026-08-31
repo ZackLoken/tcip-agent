@@ -268,11 +268,11 @@ def test_lock_survives_an_active_project_repin(tmp_path, monkeypatch):
     dataset_root = tmp_path / "ds"
     dataset_root.mkdir()
     stems = _grouped(8)
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path / "before_adoption"))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path / "before_adoption"))
     first = resolve_locked_cal_holdout_split(
         stems, identity_hash="repin-test", scope_root=dataset_root, seed=1)
 
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path / "adopted_project"))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path / "adopted_project"))
     after = resolve_locked_cal_holdout_split(
         stems, identity_hash="repin-test", scope_root=dataset_root, seed=2, group_by="stem")
 

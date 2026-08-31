@@ -43,8 +43,8 @@ def main(argv: list[str] | None = None) -> int:
                              "layout places it under none.")
     parser.add_argument("--project-root", required=True,
                         help="The registry root the checkpoint must be named under: this script "
-                             "binds only the backend, and project_root() falls back to the "
-                             "working directory, which would search an empty index.")
+                             "binds only the backend, and platform_state_root() falls back to "
+                             "the working directory, which would search an empty index.")
     parser.add_argument("--experiment-id", default=None,
                         help="Producing experiment id recorded in the printed provenance.")
     parser.add_argument("--val-ratio", type=float, default=0.5,

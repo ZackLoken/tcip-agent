@@ -91,7 +91,7 @@ def test_canvas_shapes_are_drawn_at_the_resolution_the_pixels_were_served_at(
     without that same reduction shows the agent every polygon, box and point enlarged and
     displaced while the tool reports it as the human's live canvas.
     """
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     from tcip_mcp.tools.vision_tools import capture_live_canvas
 
     image = _canvas_image(tmp_path)
@@ -121,7 +121,7 @@ def test_a_capture_no_gui_answered_reports_the_state_as_last_known(
     what the human is looking at right now. Reading an unchanged heartbeat as a fresh answer
     presents a stale canvas, and its stale shape counts, as the live one.
     """
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     from tcip_mcp import web_client
     from tcip_mcp.tools.vision_tools import capture_live_canvas
 
@@ -151,7 +151,7 @@ def test_a_capture_the_gui_answered_reports_the_state_as_live(
 ) -> None:
     """A GUI that pushes fresh state in response to the ping is reported as live: the refresh
     round trip has to admit the answered case, not only flag the unanswered one."""
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     from tcip_mcp import web_client
     from tcip_mcp.tools.vision_tools import capture_live_canvas
 

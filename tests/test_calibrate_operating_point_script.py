@@ -90,7 +90,7 @@ def test_script_and_mcp_path_share_the_same_cap_constant(monkeypatch, tmp_path):
     monkeypatch.setattr("tcip_mcp.pipelines.operating_point.resolve_operating_point", _resolve_op)
     monkeypatch.setattr("tcip_mcp.pipelines.operating_point.attach_split_policy_provenance",
                         lambda b, locked: None)
-    monkeypatch.setattr("tcip_mcp.project_paths.project_root", lambda: tmp_path)
+    monkeypatch.setattr("tcip_mcp.project_paths.platform_state_root", lambda: tmp_path)
 
     from scripts.calibrate_operating_point import main
 
@@ -158,7 +158,7 @@ def test_script_threads_applied_floor_and_shared_cap(monkeypatch, tmp_path):
     monkeypatch.setattr("tcip_mcp.pipelines.operating_point.resolve_operating_point", _resolve_op)
     monkeypatch.setattr("tcip_mcp.pipelines.operating_point.attach_split_policy_provenance",
                         lambda b, locked: None)
-    monkeypatch.setattr("tcip_mcp.project_paths.project_root", lambda: tmp_path)
+    monkeypatch.setattr("tcip_mcp.project_paths.platform_state_root", lambda: tmp_path)
 
     from scripts.calibrate_operating_point import main
 
@@ -223,7 +223,7 @@ def test_script_collection_cap_is_density_derived_not_the_flat_default(monkeypat
     monkeypatch.setattr("tcip_mcp.pipelines.operating_point.resolve_operating_point", _resolve_op)
     monkeypatch.setattr("tcip_mcp.pipelines.operating_point.attach_split_policy_provenance",
                         lambda b, locked: None)
-    monkeypatch.setattr("tcip_mcp.project_paths.project_root", lambda: tmp_path)
+    monkeypatch.setattr("tcip_mcp.project_paths.platform_state_root", lambda: tmp_path)
 
     from scripts.calibrate_operating_point import main
 
@@ -273,7 +273,7 @@ def test_script_writes_nothing_into_the_experiment_record(monkeypatch, tmp_path,
     monkeypatch.setattr("tcip_mcp.pipelines.operating_point.resolve_operating_point", _resolve_op)
     monkeypatch.setattr("tcip_mcp.pipelines.operating_point.attach_split_policy_provenance",
                         lambda b, locked: None)
-    monkeypatch.setattr("tcip_mcp.project_paths.project_root", lambda: tmp_path)
+    monkeypatch.setattr("tcip_mcp.project_paths.platform_state_root", lambda: tmp_path)
 
     from scripts.calibrate_operating_point import main
 

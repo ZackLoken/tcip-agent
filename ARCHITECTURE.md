@@ -422,7 +422,7 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | Module path | Ownership (one line) | In-repo imports | Imported by |
 |---|---|---|---|
 | scripts/_paths.py | Shared path resolution for the one-off analysis scripts: no machine-specific hardcoding. | 0 | 5 |
-| scripts/_script_root.py | Resolve-or-refuse `$TCIP_PROJECT_ROOT` pinning shared by the demoted-tool scripts. | 1 | 5 |
+| scripts/_script_root.py | Resolve-or-refuse `$TCIP_STATE_ROOT` pinning shared by the demoted-tool scripts. | 1 | 5 |
 | scripts/_store_bootstrap.py | Re-exports the store catalogue from tcip_mcp.store_catalogue, and which roots a project's records live in. | 3 | 2 |
 | scripts/adopt_store.py | Move a root's existing record and log files into a store database. | 1 | 0 |
 | scripts/archive_project.py | Export an annotation project as a portable ZIP archive, through the demoted `archive_project` function. | 2 | 0 |
@@ -1106,7 +1106,7 @@ from `tcip_mcp.server` and calls it: `packages/tcip-mcp/src/tcip_mcp/server.py:6
 it needs no pin first; the app pins the platform-state root at the lifespan's startup or,
 when a request is served before the lifespan has run, at that first request, never at import:
 `bind_startup_root` (`packages/tcip-web/src/tcip_web/app.py:93`) reads the workspace's
-active-project marker (`tcip_mcp.project_paths.pin_project_root(from_marker=True)`) the first
+active-project marker (`tcip_mcp.project_paths.pin_platform_root(from_marker=True)`) the first
 time either the lifespan (`app.py:50`) or the startup middleware (`app.py:131`) calls it, so
 every way the app is served (this entry point, a bare `uvicorn tcip_web.app:app`,
 `--lifespan off`, the reloader's child) pins a root before anything resolves a `.tcip` path. Exposure is a property
@@ -1938,10 +1938,10 @@ the primary implementation. Both fields are
 reported as-is below; the Phase 3 verdict is the one used for the seam count at the
 end.
 
-## S01. Platform state root pin (TCIP_PROJECT_ROOT)
+## S01. Platform state root pin (TCIP_STATE_ROOT)
 
 Must agree: all three processes resolve `.tcip/` against the same directory.
-Side A: `packages/tcip-mcp/src/tcip_mcp/project_paths.py:44` (`ENV_VAR = "TCIP_PROJECT_ROOT"`).
+Side A: `packages/tcip-mcp/src/tcip_mcp/project_paths.py:44` (`ENV_VAR = "TCIP_STATE_ROOT"`).
 Side B: `packages/tcip-web/src/tcip_web/routes/images.py:169` (`_render_cache_dir` calls `project_paths.resolve_state_or`, the pinned resolver at `project_paths.py:68`, rather than reading the environment variable itself).
 Phase 3 verdict: single.
 
@@ -1998,7 +1998,7 @@ Phase 3 verdict: single. An HPO trial with no experiment record still appends to
 
 Must agree: a job's own summary is written and reloaded against the root it launched under, not
 whatever root this process happens to have pinned when either side runs.
-Side A: `packages/tcip-web/src/tcip_web/jobstore.py:85` (`def job_registry_key(`, the one address each registry is written and reloaded through, on the store `JOB_REGISTRY_STORE` declared at `jobstore.py:63` (`JOB_REGISTRY_STORE = "job_registry"`); an explicit `root` composes the key directly, and only its absence falls back to `current_root`, which itself resolves `project_root`).
+Side A: `packages/tcip-web/src/tcip_web/jobstore.py:85` (`def job_registry_key(`, the one address each registry is written and reloaded through, on the store `JOB_REGISTRY_STORE` declared at `jobstore.py:63` (`JOB_REGISTRY_STORE = "job_registry"`); an explicit `root` composes the key directly, and only its absence falls back to `current_root`, which itself resolves `platform_state_root`).
 Side B: `packages/tcip-web/src/tcip_web/routes/inference.py` (inference job registry, calls `jobstore.JobRegistry.persist`/`.rehydrate`, which call `persist_grouped`/`load` in turn).
 Phase 3 verdict: duplicated.
 

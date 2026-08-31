@@ -64,7 +64,7 @@ def _write_geo_raster(path: Path, *, height: int = 64, width: int = 64, channels
 
 def _bespoke_detection_checkpoint(tmp_path: Path, *, in_chans: int = 3, tile_size: int = TILE) -> str:
     """Write a bespoke detection checkpoint and register it in explicit mode against the
-    platform state root the caller has already pinned (``TCIP_PROJECT_ROOT``), so a caller can
+    platform state root the caller has already pinned (``TCIP_STATE_ROOT``), so a caller can
     hand its bare path to a door that resolves the registry itself."""
     from tcip_mcp.pipelines.model_build import build_model
     from tcip_mcp.tools.model_tools import register_model
@@ -122,7 +122,7 @@ def test_export_predictions_raster_writes_bucket_with_explicit_tile_size(tmp_pat
     """An explicit tile_size clears the tile_size gate on its own (no acknowledgement needed);
     the persisted bucket carries one prediction file for the whole raster plus a real
     operating_point.json sidecar in the same shape every other bucket writes."""
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path / "proj"))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path / "proj"))
     (tmp_path / "proj" / ".tcip" / "state").mkdir(parents=True, exist_ok=True)
 
     raster_path = tmp_path / "mosaic.tif"
@@ -167,7 +167,7 @@ def test_a_second_orthomosaic_export_against_a_completed_experiment_refuses_befo
     """A pointer is checked before its write: a second export against an experiment whose
     lineage.predictions is already populated and terminal refuses by name, before the raster
     pass runs, so no second bucket is written to orphan."""
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path / "proj"))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path / "proj"))
     (tmp_path / "proj" / ".tcip" / "state").mkdir(parents=True, exist_ok=True)
 
     from tcip_mcp.experiments import create_experiment, update_status
@@ -200,7 +200,7 @@ def test_a_same_path_orthomosaic_export_against_a_completed_experiment_admits_th
     """A rail must admit valid work: re-exporting into the same raster bucket path records the
     same lineage value the completed experiment already holds, so the additive lock's same-value
     conjunct admits it rather than refusing a legitimate re-run."""
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path / "proj"))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path / "proj"))
     (tmp_path / "proj" / ".tcip" / "state").mkdir(parents=True, exist_ok=True)
 
     from tcip_mcp.experiments import create_experiment, update_status
@@ -231,7 +231,7 @@ def test_export_predictions_raster_refuses_missing_checkpoint_cleanly(tmp_path, 
     refusal in this door uses, never an uncaught FileNotFoundError out of the MCP tool: the
     raster regime builds its own predictor directly rather than going through run_inference's own
     existence check."""
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path / "proj"))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path / "proj"))
     (tmp_path / "proj" / ".tcip" / "state").mkdir(parents=True, exist_ok=True)
 
     raster_path = tmp_path / "mosaic.tif"
@@ -249,7 +249,7 @@ def test_export_predictions_raster_refuses_missing_checkpoint_cleanly(tmp_path, 
 
 def test_export_predictions_raster_refuses_missing_raster_cleanly(tmp_path, monkeypatch):
     """Same shape for a missing raster_path."""
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path / "proj"))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path / "proj"))
     (tmp_path / "proj" / ".tcip" / "state").mkdir(parents=True, exist_ok=True)
     ckpt = _bespoke_detection_checkpoint(tmp_path)
 
@@ -269,7 +269,7 @@ def test_export_predictions_raster_refuses_when_tile_size_has_no_real_basis(tmp_
     run instead, so this refusal is unconditional: acknowledge_unvalidated=True cannot un-stick it
     either, since there is no value to provisionally proceed with, never crashing mid-pass on a
     ``None`` tile_size."""
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path / "proj"))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path / "proj"))
     (tmp_path / "proj" / ".tcip" / "state").mkdir(parents=True, exist_ok=True)
 
     raster_path = tmp_path / "mosaic.tif"
@@ -296,7 +296,7 @@ def test_export_predictions_raster_bucket_immutability(tmp_path, monkeypatch):
     immutability the images_dir regime already enforces, shared rather than reimplemented."""
     platform_root = tmp_path / "platform"
     (platform_root / ".tcip" / "state").mkdir(parents=True)
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(platform_root))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(platform_root))
 
     raster_path = tmp_path / "mosaic.tif"
     _write_geo_raster(raster_path)
@@ -379,7 +379,7 @@ def _replace_boxes(pred_path: Path, boxes: list[tuple[float, float, float, float
 
 
 def test_deliver_orthomosaic_plant_counts_refuses_unacknowledged_then_admits(tmp_path, monkeypatch):
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path / "proj"))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path / "proj"))
     (tmp_path / "proj" / ".tcip" / "state").mkdir(parents=True, exist_ok=True)
 
     raster_path = tmp_path / "mosaic.tif"
@@ -430,7 +430,7 @@ def test_deliver_orthomosaic_plant_counts_floors_a_stamp_earned_for_a_different_
 ):
     """A count stamp validated for one trait must not answer for a per-plant delivery under a
     different trait: the refusal names the sidecar and both traits."""
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path / "proj"))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path / "proj"))
     (tmp_path / "proj" / ".tcip" / "state").mkdir(parents=True, exist_ok=True)
 
     raster_path = tmp_path / "mosaic.tif"
@@ -472,7 +472,7 @@ def test_deliver_orthomosaic_plant_counts_floors_a_stamp_earned_for_a_different_
 
 
 def test_deliver_orthomosaic_plant_counts_far_detection_is_unmapped(tmp_path, monkeypatch):
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path / "proj"))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path / "proj"))
     (tmp_path / "proj" / ".tcip" / "state").mkdir(parents=True, exist_ok=True)
 
     raster_path = tmp_path / "mosaic.tif"
@@ -504,7 +504,7 @@ def test_deliver_orthomosaic_plant_counts_far_detection_is_unmapped(tmp_path, mo
 def test_deliver_orthomosaic_plant_counts_rotated_raster_refuses_cleanly(tmp_path, monkeypatch):
     """A raster this module can't georeference (here: a ModelTransformationTag, refused by
     OrthomosaicGeoreference itself) surfaces as a clean error, not an uncaught exception."""
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path / "proj"))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path / "proj"))
     (tmp_path / "proj" / ".tcip" / "state").mkdir(parents=True, exist_ok=True)
 
     raster_path = tmp_path / "mosaic.tif"
@@ -574,7 +574,7 @@ def test_deliver_orthomosaic_keeps_a_bespoke_producer_checkpoint(tmp_path, monke
     """A bucket a bespoke checkpoint produced belongs to no experiment, so its checkpoint hash
     stands on its own and travels into the provisional delivery. The claim it carries is another
     matter: nothing validated the operating point, so it names no validation record."""
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path / "proj"))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path / "proj"))
     (tmp_path / "proj" / ".tcip" / "state").mkdir(parents=True, exist_ok=True)
 
     raster_path = tmp_path / "mosaic.tif"
@@ -615,7 +615,7 @@ def test_deliver_orthomosaic_keeps_a_bespoke_producer_checkpoint(tmp_path, monke
 def test_deliver_orthomosaic_drops_a_producer_no_experiment_answers_for(tmp_path, monkeypatch):
     """The recorded route's own shape: a stamp naming a run the experiment store never held. The
     provisional CSV says the producer is unknown instead of naming an experiment that never ran."""
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path / "proj"))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path / "proj"))
     (tmp_path / "proj" / ".tcip" / "state").mkdir(parents=True, exist_ok=True)
 
     raster_path = tmp_path / "mosaic.tif"

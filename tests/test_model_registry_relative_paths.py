@@ -258,7 +258,7 @@ def test_register_model_from_experiment_checkpoint_field_is_resolved_absolute(
 
     project = tmp_path / "proj"
     init_project(str(project), site="north orchard")
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(project))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(project))
     create_experiment("exp1", {"model_source": {"builder": "x:y"}})
     update_status("exp1", "running")
     ckpt_dir = experiment_dir("exp1")

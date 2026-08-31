@@ -116,7 +116,7 @@ def test_a_web_route_writes_its_delivery_event_under_the_payloads_root_not_the_p
 
     pinned_root = tmp_path / "pinned"
     pinned_root.mkdir()
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(pinned_root))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(pinned_root))
 
     payload_root = tmp_path / "payload_project"
     body = _phenology_fixture(payload_root, validated=True, fractions=(0.75, 1.0), detections=4)

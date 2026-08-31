@@ -134,7 +134,7 @@ def _run_one_search() -> dict:
 
     from tcip_mcp.pipelines.training.hpo import tune_search
 
-    # The autouse fixture pins TCIP_PROJECT_ROOT to each test's own tmp dir; storing there
+    # The autouse fixture pins TCIP_STATE_ROOT to each test's own tmp dir; storing there
     # keeps every fake sweep inside the test's isolated platform state root.
     return tune_search(
         objective_fn=lambda config, report: None,
@@ -143,7 +143,7 @@ def _run_one_search() -> dict:
         search_alg="random",
         scheduler=None,
         resources_per_trial={"cpu": 1.0, "gpu": 0.0},
-        storage_path=str(Path(os.environ["TCIP_PROJECT_ROOT"]) / "hpo"),
+        storage_path=str(Path(os.environ["TCIP_STATE_ROOT"]) / "hpo"),
     )
 
 
@@ -154,7 +154,7 @@ def _isolated_lifecycle_state(monkeypatch, tmp_path):
 
     monkeypatch.setattr(hpo, "_active_searches", 0, raising=False)
     monkeypatch.setattr(hpo, "_ray_started_here", False, raising=False)
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
 
 
 def test_finished_sweep_leaves_a_concurrent_sweep_s_cluster_running(monkeypatch):

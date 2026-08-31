@@ -108,7 +108,7 @@ def test_identity_resolution_matches_a_registered_checkpoint_by_content(
 
     root = tmp_path / "proj"
     root.mkdir()
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(root))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(root))
 
     other = tmp_path / "other_run.pt"
     torch.save({"model_state_dict": {}, "note": "a different run entirely"}, other)

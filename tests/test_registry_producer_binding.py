@@ -22,7 +22,7 @@ import pytest
 def test_update_lineage_refuses_the_two_completion_fields(tmp_path, monkeypatch):
     from tcip_mcp.experiments import create_experiment, update_lineage, update_status
 
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     exp_id = "exp-rail3"
     create_experiment(exp_id, {"model_source": {"builder": "x:y"}})
     update_status(exp_id, "running")
@@ -42,7 +42,7 @@ def test_update_lineage_refuses_a_completion_field_even_beside_a_legitimate_one(
     does not land either, unlike the identity fields' pop-and-audit treatment."""
     from tcip_mcp.experiments import create_experiment, update_lineage, update_status
 
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     exp_id = "exp-rail3b"
     create_experiment(exp_id, {"model_source": {"builder": "x:y"}})
     update_status(exp_id, "running")
@@ -70,7 +70,7 @@ def test_corroborated_producer_reports_unknown_when_stamped_bytes_disagree_with_
     from tcip_mcp.model_registry import _sha256_of_bytes
     from tcip_mcp.pipelines.resolution import corroborated_producer
 
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     exp_id = "exp-rail6"
     create_experiment(exp_id, {"model_source": {"builder": "x:y"}})
     update_status(exp_id, "running")
@@ -90,7 +90,7 @@ def test_corroborated_producer_reports_unknown_when_stamped_bytes_disagree_with_
 def test_update_lineage_still_records_predictions_data_source_and_review_session(tmp_path, monkeypatch):
     from tcip_mcp.experiments import create_experiment, update_lineage, update_status
 
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     exp_id = "exp-rail9"
     create_experiment(exp_id, {"model_source": {"builder": "x:y"}})
     update_status(exp_id, "running")
@@ -110,7 +110,7 @@ def test_resumed_run_records_and_binds_its_own_weights(tmp_path, monkeypatch):
     from tcip_mcp.pipelines.resolution import corroborated_producer
     from tcip_mcp.tools.training_tools import _ensure_experiment
 
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     base = "exp-rail11-base"
     create_experiment(base, {"model_source": {"builder": "x:y"}})
     update_status(base, "running")
@@ -152,7 +152,7 @@ def test_forged_tag_never_feeds_the_experiment_s_own_recorded_checkpoint(tmp_pat
     from tcip_mcp.pipelines.resolution import corroborated_producer, experiment_recorded_checkpoint
     from tcip_mcp.tools.model_tools import register_model
 
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     exp_id = "exp-rail1"
     create_experiment(exp_id, {"model_source": {"builder": "x:y"}})
     update_status(exp_id, "running")
@@ -194,7 +194,7 @@ def test_register_model_from_experiment_refuses_bytes_the_run_did_not_record(tmp
     )
     from tcip_mcp.model_registry import ModelRegistry, _sha256_of_bytes
 
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     exp_id = "exp-rail2"
     create_experiment(exp_id, {"model_source": {"builder": "x:y"}})
     update_status(exp_id, "running")
@@ -242,7 +242,7 @@ def test_register_model_from_experiment_refuses_a_project_path_not_the_experimen
 ):
     from tcip_mcp.experiments import complete_run, create_experiment, register_model_from_experiment, update_status
 
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     exp_id = "exp-rail4"
     create_experiment(exp_id, {"model_source": {"builder": "x:y"}})
     update_status(exp_id, "running")
@@ -263,7 +263,7 @@ def test_register_model_from_experiment_admits_a_differently_spelled_own_root(tm
     from tcip_mcp.experiments import complete_run, create_experiment, register_model_from_experiment, update_status
     from tcip_mcp.model_registry import ModelRegistry
 
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     exp_id = "exp-rail9b"
     create_experiment(exp_id, {"model_source": {"builder": "x:y"}})
     update_status(exp_id, "running")
@@ -295,7 +295,7 @@ def test_explicit_mode_refuses_to_replace_a_run_bound_entry(tmp_path, monkeypatc
     from tcip_mcp.experiments import complete_run, create_experiment, register_model_from_experiment, update_status
     from tcip_mcp.model_registry import ModelRegistry
 
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     exp_id = "exp-rail5"
     create_experiment(exp_id, {"model_source": {"builder": "x:y"}})
     update_status(exp_id, "running")
@@ -320,7 +320,7 @@ def test_a_second_run_s_binding_under_a_bound_name_refuses_naming_the_run(tmp_pa
     from tcip_mcp.experiments import complete_run, create_experiment, register_model_from_experiment, update_status
     from tcip_mcp.model_registry import ModelRegistry
 
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     exp_id = "exp-rail5c"
     create_experiment(exp_id, {"model_source": {"builder": "x:y"}})
     update_status(exp_id, "running")
@@ -355,7 +355,7 @@ def test_missing_experiment_id_key_refuses_the_load(tmp_path, monkeypatch):
     from tcip_mcp.model_registry import UnregisteredCheckpoint, load_registered_checkpoint, registry_index_key
     import tcip_store as ts
 
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     ckpt = tmp_path / "pre_field.pt"
     torch.save({"model_state_dict": {}}, ckpt)
     from tcip_mcp.model_registry import _sha256_of_bytes
@@ -380,7 +380,7 @@ def test_register_model_from_experiment_twice_and_from_a_copy_both_admit(tmp_pat
     from tcip_mcp.experiments import complete_run, create_experiment, register_model_from_experiment, update_status
     from tcip_mcp.model_registry import ModelRegistry
 
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     exp_id = "exp-rail10"
     create_experiment(exp_id, {"model_source": {"builder": "x:y"}})
     update_status(exp_id, "running")
@@ -409,7 +409,7 @@ def test_model_registry_replace_event_carries_superseded_experiment_id(tmp_path,
     from tcip_mcp.audit import audit_log_key
     from tcip_mcp.model_registry import ModelRegistry
 
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     reg = ModelRegistry(str(tmp_path))
     ckpt_a = tmp_path / "a.pt"
     ckpt_a.write_bytes(b"first content")
@@ -429,7 +429,7 @@ def test_model_registry_replace_event_carries_superseded_experiment_id(tmp_path,
 def test_caller_tag_still_round_trips_and_filters(tmp_path, monkeypatch):
     from tcip_mcp.model_registry import ModelRegistry
 
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     reg = ModelRegistry(str(tmp_path))
     ckpt = tmp_path / "m.pt"
     ckpt.write_bytes(b"weights")
@@ -446,7 +446,7 @@ def test_a_bound_run_s_weights_registered_under_a_new_name_binds_the_new_entry(t
     from tcip_mcp.experiments import complete_run, create_experiment, register_model_from_experiment, update_status
     from tcip_mcp.model_registry import ModelRegistry
 
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     exp_id = "exp-rail18"
     create_experiment(exp_id, {"model_source": {"builder": "x:y"}})
     update_status(exp_id, "running")

@@ -414,7 +414,7 @@ def test_capture_live_canvas_no_binding_names_the_consulted_workspace_root(tmp_p
     opening a project in the GUI creates one. Nothing else is written (no canvas state either),
     so this also covers the plain absence case the old 'no live canvas state' message used to
     answer for a different reason."""
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     from tcip_mcp.tools.vision_tools import capture_live_canvas
     from tcip_mcp.workspace import workspace_root
 
@@ -427,7 +427,7 @@ def test_capture_live_canvas_no_binding_names_the_consulted_workspace_root(tmp_p
 def test_capture_live_canvas_binding_present_but_no_state_pushed_yet(tmp_path, monkeypatch):
     """The binding already names this same pinned root, so the message must not suggest
     set_active_project toward a project it has already confirmed is the open one."""
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     _mint_binding(tmp_path)
     from tcip_mcp.tools.vision_tools import capture_live_canvas
     res = capture_live_canvas(refresh=False)
@@ -437,7 +437,7 @@ def test_capture_live_canvas_binding_present_but_no_state_pushed_yet(tmp_path, m
 
 
 def test_capture_live_canvas_renders_pushed_state(tmp_path, monkeypatch):
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     img = _make_image(tmp_path)
     _write_state(tmp_path, img)
     _mint_binding(tmp_path)
@@ -458,7 +458,7 @@ def test_capture_live_canvas_renders_pushed_state(tmp_path, monkeypatch):
 def test_capture_live_canvas_renders_exactly_the_viewport_region(tmp_path, monkeypatch):
     """The tool reads the visible rectangle and renders that, so the artifact is the region the
     human sees rather than the whole frame."""
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     img = _make_image(tmp_path)
     _write_state(tmp_path, img)
     _mint_binding(tmp_path)
@@ -473,7 +473,7 @@ def test_capture_live_canvas_renders_exactly_the_viewport_region(tmp_path, monke
 
 
 def test_capture_live_canvas_full_frame_downscales_to_max_edge(tmp_path, monkeypatch):
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     img = _make_image(tmp_path)
     _write_state(tmp_path, img)
     _mint_binding(tmp_path)
@@ -492,7 +492,7 @@ def test_capture_live_canvas_reads_a_multiband_raster_without_writing_a_preview(
     import numpy as np
     import tifffile
 
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     images = tmp_path / "images"
     images.mkdir()
     rng = np.random.default_rng(3)
@@ -510,7 +510,7 @@ def test_capture_live_canvas_reads_a_multiband_raster_without_writing_a_preview(
 
 def test_capture_live_canvas_identity_stale_shapes_do_not_render(tmp_path, monkeypatch):
     """Geometry left over from a previous image must not render under the current one."""
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     img = _make_image(tmp_path)
     _write_state(tmp_path, img, shapes_image="C:/img/other.jpg")  # stale identity
     _mint_binding(tmp_path)
@@ -535,7 +535,7 @@ def test_capture_live_canvas_hit_case_divergence_is_not_silently_rendered(tmp_pa
     from tcip_store.file_backend import FileBackend
 
     tcip_store.bind(FileBackend())
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     img = _make_image(tmp_path)
     _write_state(tmp_path, img)  # A's own (this reader's) stale documents: a "hit"
 
@@ -551,7 +551,7 @@ def test_capture_live_canvas_hit_case_divergence_is_not_silently_rendered(tmp_pa
 def test_capture_live_canvas_miss_case_also_answers_divergence(tmp_path, monkeypatch, tmp_path_factory):
     """The divergence is the default answer on a miss (this reader has nothing of its own) just
     as much as on a hit."""
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     other = tmp_path_factory.mktemp("elsewhere")
     _mint_binding(other, generation=3, project_name="hazelnut_catkin_valley")
 
@@ -565,7 +565,7 @@ def test_capture_live_canvas_miss_case_also_answers_divergence(tmp_path, monkeyp
 def test_capture_live_canvas_render_last_known_renders_labelled_not_live(
     tmp_path, monkeypatch, tmp_path_factory,
 ):
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     img = _make_image(tmp_path)
     _write_state(tmp_path, img)
     other = tmp_path_factory.mktemp("elsewhere")
@@ -588,7 +588,7 @@ def test_capture_live_canvas_render_last_known_with_nothing_pushed_names_the_div
     """render_last_known=True with nothing ever pushed under this pinned root: the message must
     not drop the divergence already in hand, nor tell the caller to set_active_project toward a
     nameless root set_active_project cannot converge."""
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     other = tmp_path_factory.mktemp("elsewhere")
     _mint_binding(other, generation=3, project_name=None)
 
@@ -605,7 +605,7 @@ def test_capture_live_canvas_unreadable_binding_store_is_reported_distinctly(tmp
     'open a project') nor escape the audited tool as a raw exception."""
     import tcip_store as ts
 
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     real_read = ts.read
 
     def _boom(key, **kwargs):
@@ -625,7 +625,7 @@ def test_capture_live_canvas_binding_oserror_is_reported_distinctly(tmp_path, mo
     the softener widens to catch it too, rather than letting it escape the audited tool raw."""
     import tcip_store as ts
 
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     real_read = ts.read
 
     def _boom(key, **kwargs):
@@ -653,7 +653,7 @@ def test_capture_live_canvas_generation_fence_retries_once_then_answers_divergen
     """
     import tcip_store as ts
 
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     img = _make_image(tmp_path)
     _write_state(tmp_path, img)
     _mint_binding(tmp_path, generation=1)

@@ -52,7 +52,7 @@ def test_resolve_model_identity_from_registry(tmp_path, monkeypatch):
     from tcip_mcp.experiments import complete_run, create_experiment, register_model_from_experiment
     from tcip_mcp.model_registry import load_registered_checkpoint, resolve_model_identity
 
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     ckpt = tmp_path / "best.pt"
     torch.save({"model_state_dict": {}}, ckpt)
     create_experiment("expR", {"model_source": {"builder": "x:y"}})
@@ -127,7 +127,7 @@ def exp_store(tmp_path, monkeypatch):
     import tcip_mcp.experiments as exp
     monkeypatch.setattr(exp, "EXPERIMENTS_DIR", tmp_path / "experiments")
     # Route the refused-mutation audit to the tmp project so it never touches the repo log.
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     return exp
 
 

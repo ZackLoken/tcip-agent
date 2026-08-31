@@ -133,7 +133,7 @@ def test_run_inference_images_dir_folds_a_grouped_capture(tmp_path, monkeypatch)
     pass, no images_dir mixing (see module docstring)."""
     from tcip_mcp.tools.inference_tools import run_inference
 
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     images_dir = tmp_path / "images"
     images_dir.mkdir()
     _write_group(images_dir, "capture_001")

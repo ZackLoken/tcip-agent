@@ -399,7 +399,7 @@ def test_run_inference_tiles_a_native_frame_checkpoint_and_says_what_it_rests_on
     from tcip_mcp.tools.inference_tools import run_inference
     from tcip_mcp.tools.model_tools import register_model
 
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     ckpt = _native_frame_checkpoint(tmp_path, {"resize": [32, 32]})
     result = register_model(name="native-frame-tiles", checkpoint_path=ckpt, config={},
                             project_path=str(tmp_path))
@@ -424,7 +424,7 @@ def test_run_inference_leaves_a_native_frame_checkpoint_untiled_unless_asked(tmp
     from tcip_mcp.tools.inference_tools import run_inference
     from tcip_mcp.tools.model_tools import register_model
 
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     ckpt = _native_frame_checkpoint(tmp_path)
     result = register_model(name="native-frame-untiled", checkpoint_path=ckpt, config={},
                             project_path=str(tmp_path))
@@ -443,7 +443,7 @@ def test_an_unreadable_recorded_augmentation_config_does_not_sink_an_untiled_run
     from tcip_mcp.tools.inference_tools import run_inference
     from tcip_mcp.tools.model_tools import register_model
 
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     ckpt = _native_frame_checkpoint(tmp_path, {"not_a_transform": 0.5})
     result = register_model(name="native-frame-unreadable-aug", checkpoint_path=ckpt, config={},
                             project_path=str(tmp_path))
@@ -717,7 +717,7 @@ def test_run_inference_refuses_a_stated_edge_that_contradicts_persisted_geometry
     from tcip_mcp.tools.inference_tools import run_inference
     from tcip_mcp.tools.model_tools import register_model
 
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     ckpt = _tiled_checkpoint(tmp_path, 128)
     result = register_model(name="tiled-128-contradiction", checkpoint_path=ckpt, config={},
                             project_path=str(tmp_path))
@@ -737,7 +737,7 @@ def test_run_inference_refuses_a_stated_edge_that_contradicts_the_native_frame(
     from tcip_mcp.tools.inference_tools import run_inference
     from tcip_mcp.tools.model_tools import register_model
 
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     ckpt = _native_frame_checkpoint_of_size(tmp_path, 512)
     result = register_model(name="native-512-contradiction", checkpoint_path=ckpt, config={},
                             project_path=str(tmp_path))
@@ -755,7 +755,7 @@ def test_run_inference_admits_an_explicit_edge_matching_persisted_geometry(tmp_p
     from tcip_mcp.tools.inference_tools import run_inference
     from tcip_mcp.tools.model_tools import register_model
 
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     ckpt = _tiled_checkpoint(tmp_path, TILE)
     result = register_model(name="tiled-native-edge-match", checkpoint_path=ckpt, config={},
                             project_path=str(tmp_path))

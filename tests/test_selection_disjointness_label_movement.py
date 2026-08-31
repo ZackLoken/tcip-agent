@@ -189,7 +189,7 @@ def _manifest_sha256(out: Path) -> str:
 def test_a_label_rewritten_between_draw_and_bind_names_the_stem_and_still_seals(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     root = _dataset(tmp_path / "ds")
     out = tmp_path / "m"
     manifest = _draw(root, out)
@@ -211,7 +211,7 @@ def test_a_label_rewritten_between_draw_and_bind_names_the_stem_and_still_seals(
 def test_a_label_restored_before_calibration_is_named_in_both_windows(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     root = _dataset(tmp_path / "ds")
     out = tmp_path / "m"
     manifest = _draw(root, out)
@@ -240,7 +240,7 @@ def test_a_label_restored_before_calibration_is_named_in_both_windows(
 def test_a_label_rewritten_after_the_run_names_the_run_to_now_window(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     root = _dataset(tmp_path / "ds")
     out = tmp_path / "m"
     manifest = _draw(root, out)
@@ -310,7 +310,7 @@ def test_the_second_window_still_names_a_moved_calibration_side_stem(tmp_path: P
 def test_nothing_touched_delivers_with_every_list_empty(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     root = _dataset(tmp_path / "ds")
     out = tmp_path / "m"
     _draw(root, out)
@@ -361,7 +361,7 @@ def test_the_review_path_genuinely_runs_and_seals_null_second_window_when_nothin
     called with ``split_manifest_dir`` the way a caller-named-manifest calibration does."""
     from tcip_mcp.pipelines.feedback import resolve_operating_point_from_review
 
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     root = _dataset(tmp_path / "ds")
     out = tmp_path / "m"
     _draw(root, out)
@@ -392,7 +392,7 @@ def test_the_review_path_names_a_calibration_side_label_moved_before_the_bind(
     the only exercise, in the repository, of ``_selection_movement_sentence``."""
     from tcip_mcp.pipelines.feedback import describe_review_validation, resolve_operating_point_from_review
 
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     root = _dataset(tmp_path / "ds")
     out = tmp_path / "m"
     _draw(root, out)
@@ -425,7 +425,7 @@ def test_a_withdrawn_calibration_member_is_named_through_the_absent_file_digest(
 ) -> None:
     from tcip_mcp.dataset_layout import record_image_statuses, status_bucket
 
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     root = _dataset(tmp_path / "ds")
     out = tmp_path / "m"
     manifest = _draw(root, out)
@@ -448,7 +448,7 @@ def test_a_withdrawn_calibration_member_is_named_through_the_absent_file_digest(
 def test_a_redraw_between_run_and_calibration_is_named_beside_a_moved_label(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     root = _dataset(tmp_path / "ds")
     out = tmp_path / "m"
     manifest = _draw(root, out, seed=2)
@@ -479,7 +479,7 @@ def test_an_unbound_run_calibrated_under_a_caller_named_manifest_seals_null_keys
     from tcip_mcp.experiments import create_experiment
     from tcip_mcp.pipelines.data.split_construction import auto_train_val, persist_split_manifest
 
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     root = _dataset(tmp_path / "ds")
     out = tmp_path / "m"
     _draw(root, out)
@@ -518,7 +518,7 @@ def test_read_split_manifest_dir_refuses_a_members_block_without_label_digests(
 
     from tcip_mcp.tools.data_tools import read_split_manifest_dir, split_manifest_key
 
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     root = _dataset(tmp_path / "ds")
     out = tmp_path / "m"
     manifest = _draw(root, out)
@@ -544,7 +544,7 @@ def test_read_split_manifest_dir_refuses_a_members_block_with_an_empty_label_dig
 
     from tcip_mcp.tools.data_tools import read_split_manifest_dir, split_manifest_key
 
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     root = _dataset(tmp_path / "ds")
     out = tmp_path / "m"
     manifest = _draw(root, out)
@@ -560,7 +560,7 @@ def test_read_split_manifest_dir_admits_a_manifest_make_splits_wrote(
 ) -> None:
     from tcip_mcp.tools.data_tools import read_split_manifest_dir
 
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     root = _dataset(tmp_path / "ds")
     out = tmp_path / "m"
     _draw(root, out)
@@ -620,7 +620,7 @@ def test_manifest_digest_is_the_one_function_the_bind_write_and_the_calibration_
     from tcip_mcp.experiments import read_split_manifest
     from tcip_mcp.pipelines.resolution import manifest_digest
 
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     root = _dataset(tmp_path / "ds")
     out = tmp_path / "m"
     _draw(root, out)
@@ -678,7 +678,7 @@ def test_make_splits_calls_the_combined_helper_not_dataset_hash_and_label_digest
 
     from tcip_mcp.pipelines import resolution
 
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     root = _dataset(tmp_path / "ds")
     out = tmp_path / "m"
 
@@ -715,7 +715,7 @@ def test_auto_train_vals_third_return_value_never_lands_in_the_split_config(
     from tcip_mcp.pipelines.training.subprocess_worker import _patch_experiment_config_split
     from tcip_mcp.pipelines.data.split_construction import auto_train_val
 
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     root = _dataset(tmp_path / "ds")
     out = tmp_path / "m"
     _draw(root, out)

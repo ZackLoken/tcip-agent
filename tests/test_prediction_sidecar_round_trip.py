@@ -84,7 +84,7 @@ def _export(tmp_path, monkeypatch, *, calibration, tile, tile_size=None):
     monkeypatch.setattr(calibration_pipeline, "calibrate_operating_point",
                         lambda *a, **k: (bundle, "H", 0, evidence))
     monkeypatch.setattr(predictor_mod, "build_predictor", lambda checkpoint, **kw: _BucketStub())
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     ckpt = registered_checkpoint(tmp_path, project_root=tmp_path)
     result = itools.export_predictions(
         str(ckpt), images_dir=str(images_dir),

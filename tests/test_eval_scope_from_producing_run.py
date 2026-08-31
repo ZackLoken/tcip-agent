@@ -48,7 +48,7 @@ def test_run_id_evaluation_scopes_ground_truth_to_the_runs_own_subject(
     from tcip_mcp.tools.training_tools import evaluate_model
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     images_dir, labels_dir = _two_subject_dataset(tmp_path / "ds")
     run = create_run({"data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
                                "subject": "leaf"}}, str(tmp_path / "runs"))
@@ -82,7 +82,7 @@ def test_a_caller_supplied_subject_still_wins_over_the_runs_own(
     from tcip_mcp.tools.training_tools import evaluate_model
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     images_dir, labels_dir = _two_subject_dataset(tmp_path / "ds")
     run = create_run({"data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
                                "subject": "leaf"}}, str(tmp_path / "runs"))

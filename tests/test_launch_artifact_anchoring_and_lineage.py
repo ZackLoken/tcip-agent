@@ -80,13 +80,14 @@ def test_a_relative_output_dir_anchors_to_the_project_root_not_the_process_cwd(
         tmp_path: Path, monkeypatch, recorded_children) -> None:
     """A relative ``output_dir`` names a directory inside the project. The run directory handed to
     the child, the launch config written into it, and the path stamped into the experiment's
-    status.json all resolve under the project root, never under the launching process's cwd."""
+    status.json all resolve under the platform state root, never under the launching process's
+    cwd."""
     pytest.importorskip("torchvision")
     project = tmp_path / "project"
     server_cwd = tmp_path / "server_cwd"
     project.mkdir()
     server_cwd.mkdir()
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(project))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(project))
     monkeypatch.chdir(server_cwd)
 
     images_dir, labels_dir = _canonical_dataset(project / "ds")
@@ -117,7 +118,7 @@ def test_an_absolute_output_dir_stays_the_callers_own_choice(
     scratch = tmp_path / "scratch_volume"
     project.mkdir()
     scratch.mkdir()
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(project))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(project))
 
     images_dir, labels_dir = _canonical_dataset(project / "ds")
     res = training_tools_launch(_detection_config(images_dir, labels_dir), str(scratch))
@@ -163,7 +164,7 @@ def test_launch_records_what_the_smoke_contract_checked(
     pytest.importorskip("torchvision")
     project = tmp_path / "project"
     project.mkdir()
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(project))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(project))
 
     images_dir, labels_dir = _canonical_dataset(project / "ds")
     launched_config = _detection_config(images_dir, labels_dir)
@@ -190,7 +191,7 @@ def test_launch_omitting_overfit_check_records_null(
     pytest.importorskip("torchvision")
     project = tmp_path / "project"
     project.mkdir()
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(project))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(project))
 
     images_dir, labels_dir = _canonical_dataset(project / "ds")
     res = training_tools_launch(_detection_config(images_dir, labels_dir), "")
@@ -211,7 +212,7 @@ def test_launch_with_overfit_check_records_the_rendered_report(
 
     project = tmp_path / "project"
     project.mkdir()
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(project))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(project))
 
     images_dir, labels_dir = _canonical_dataset(project / "ds")
     res = training_tools.launch_training(
@@ -240,7 +241,7 @@ def test_launch_with_overfit_check_over_a_diverging_model_proceeds_with_a_json_s
 
     project = tmp_path / "project"
     project.mkdir()
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(project))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(project))
 
     images_dir, labels_dir = _canonical_dataset(project / "ds")
     config = {
@@ -279,7 +280,7 @@ def test_the_launch_record_the_worker_reads_carries_the_seed_and_the_hoisted_tra
     pytest.importorskip("torchvision")
     project = tmp_path / "project"
     project.mkdir()
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(project))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(project))
 
     images_dir, labels_dir = _canonical_dataset(project / "ds")
     res = training_tools_launch(_detection_config(images_dir, labels_dir), "")

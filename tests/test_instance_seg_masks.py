@@ -210,7 +210,7 @@ def _image(directory: Path, name: str = "img.png", size: int = 128) -> str:
 
 
 def _register_instance_seg_ckpt(ckpt_path: str, project_root: Path) -> None:
-    """Register the module-scoped checkpoint against one test's own pinned project root."""
+    """Register the module-scoped checkpoint against one test's own pinned platform state root."""
     from tcip_mcp.tools.model_tools import register_model
 
     result = register_model(name="instance-seg-test-model", checkpoint_path=ckpt_path,

@@ -81,17 +81,17 @@ def confidence_sweep_key(record_digest: str) -> Key:
             f"sweep identity {record_digest!r} is not a single name: an identity carrying a path "
             "separator would address a record outside the artifact store"
         )
-    from tcip_mcp.project_paths import project_root
+    from tcip_mcp.project_paths import platform_state_root
 
-    return Key(CONFIDENCE_SWEEP_STORE, str(project_root().resolve()), (record_digest,))
+    return Key(CONFIDENCE_SWEEP_STORE, str(platform_state_root().resolve()), (record_digest,))
 
 
 def confidence_sweep_path(record_digest: str) -> Path:
     """Where that sweep lands on disk, for the provenance that names the file it was kept in."""
-    from tcip_mcp.project_paths import project_root
+    from tcip_mcp.project_paths import platform_state_root
 
     key = confidence_sweep_key(record_digest)
-    return project_root().joinpath(
+    return platform_state_root().joinpath(
         *_SweepArtifactLocator().relative_path(key.root, key.parts).parts
     )
 
@@ -1404,11 +1404,11 @@ def export_predictions(
 
     Args:
         checkpoint_path: Path to model .pt checkpoint. Must be registered under this process's
-            project root (``register_model``, explicit mode for a foreign or bespoke checkpoint)
-            or this door refuses before loading it.
+            platform state root (``register_model``, explicit mode for a foreign or bespoke
+            checkpoint) or this door refuses before loading it.
         images_dir: Directory containing input images (mutually exclusive with ``raster_path``).
         output_dir: Directory for output .json prediction file(s). A relative path resolves
-            against the project root, never the server process's cwd.
+            against the platform state root, never the server process's cwd.
         conf_threshold: Minimum confidence score. ``None`` (default) states nothing and forwards
             that on, leaving the value to run at the platform default; a stated value is an
             explicit override even when it equals the platform default.
@@ -1695,9 +1695,9 @@ def tabulate_counts(
 
     Args:
         checkpoint_path: Path to model .pt checkpoint (live regime; required with ``images_dir``,
-            absent for the bucket regime). Must be registered under this process's project root
-            (``register_model``, explicit mode for a foreign or bespoke checkpoint) or this door
-            refuses before loading it.
+            absent for the bucket regime). Must be registered under this process's platform state
+            root (``register_model``, explicit mode for a foreign or bespoke checkpoint) or this
+            door refuses before loading it.
         images_dir: Directory containing input images (live regime; required with
             ``checkpoint_path``, absent for the bucket regime).
         output_path: Path for the output CSV file. Required; a relative path resolves against the
@@ -1737,7 +1737,7 @@ def tabulate_counts(
             travels downstream.
         predictions_dir: Live regime: directory to persist the counted predictions into, resolved
             and stamped the way ``export_predictions`` resolves and stamps a bucket (a relative
-            path resolves against the project root; a bucket carrying review verdicts redirects to
+            path resolves against the platform state root; a bucket carrying review verdicts redirects to
             a fresh variant); omitted, the CSV can only be delivered provisionally. Bucket regime:
             the existing bucket to read (required, resolved the same way; no writable-bucket
             resolution or redirect, since nothing is written).

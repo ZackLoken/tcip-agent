@@ -32,9 +32,9 @@ def test_binds_under_the_given_workspace_not_the_machines_live_marker(tmp_path, 
     live_proj = live_ws / "elderberry_cyme_bloom"
     (live_proj / ".tcip").mkdir(parents=True)
     monkeypatch.setenv("TCIP_WORKSPACE", str(live_ws))
-    monkeypatch.delenv("TCIP_PROJECT_ROOT", raising=False)
+    monkeypatch.delenv("TCIP_STATE_ROOT", raising=False)
     ws_mod.set_active_project("elderberry_cyme_bloom")
-    monkeypatch.delenv("TCIP_PROJECT_ROOT", raising=False)
+    monkeypatch.delenv("TCIP_STATE_ROOT", raising=False)
     project_paths.restore_binding(None)
     monkeypatch.setenv("TCIP_TERMINAL_CLI", "tcip-smoke-test-nonexistent-cli")
 

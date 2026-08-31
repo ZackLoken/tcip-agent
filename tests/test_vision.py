@@ -60,13 +60,12 @@ def viz_dataset(tmp_path: Path) -> Path:
 # â”€â”€ Rendering engine tests â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
-def test_default_output_resolves_under_project_root(tmp_path, monkeypatch):
-    # The default viz dir must resolve under TCIP_PROJECT_ROOT (the active project), not the
-    # process CWD: the agent's CWD is often the repo, which fragmented renders away from the
-    # project. The returned path is absolute so callers know which root it used.
+def test_default_output_resolves_under_the_platform_state_root(tmp_path, monkeypatch):
+    # Must resolve under TCIP_STATE_ROOT, not the process CWD (often the repo, which
+    # fragmented renders away from the project); the returned path is absolute.
     from tcip_annotation.viz import _default_output
 
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     out = Path(_default_output("detections"))
     assert out.is_absolute()
     assert out.parent == (tmp_path / ".tcip" / "artifacts" / "viz").resolve()
@@ -75,7 +74,7 @@ def test_default_output_resolves_under_project_root(tmp_path, monkeypatch):
 def test_default_output_falls_back_to_cwd_when_unset(tmp_path, monkeypatch):
     from tcip_annotation.viz import _default_output
 
-    monkeypatch.delenv("TCIP_PROJECT_ROOT", raising=False)
+    monkeypatch.delenv("TCIP_STATE_ROOT", raising=False)
     monkeypatch.chdir(tmp_path)
     out = Path(_default_output("detections"))
     assert out.parent == (tmp_path / ".tcip" / "artifacts" / "viz").resolve()
@@ -482,7 +481,7 @@ class TestVisualizeDatasetSample:
 
         from tcip_mcp.tools import vision_tools
 
-        monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+        monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
         images = tmp_path / "images"
         images.mkdir()
         rng = np.random.default_rng(5)

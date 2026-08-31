@@ -290,7 +290,7 @@ def test_ordinal_evaluate_model_e2e(tmp_path: Path, monkeypatch):
     from tcip_mcp.tools.model_tools import register_model
     from tcip_mcp.tools.training_tools import evaluate_model
 
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     images_dir = tmp_path / "images"
     rows = []
     for i in range(6):
@@ -323,7 +323,7 @@ def test_regression_evaluate_model_e2e(tmp_path: Path, monkeypatch):
     from tcip_mcp.tools.model_tools import register_model
     from tcip_mcp.tools.training_tools import evaluate_model
 
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     images_dir = tmp_path / "images"
     rows = []
     for i in range(6):

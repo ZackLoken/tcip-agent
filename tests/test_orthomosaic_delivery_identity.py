@@ -49,7 +49,7 @@ def _recorded_meaning(tmp_path):
 
 
 def _project(tmp_path, monkeypatch) -> None:
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path / "proj"))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path / "proj"))
     (tmp_path / "proj" / ".tcip" / "state").mkdir(parents=True, exist_ok=True)
 
 

@@ -315,7 +315,7 @@ def _run_with_bundle(tmp_path, monkeypatch, calibration):
                         lambda *a, **k: (bundle, "H", 0, evidence))
     monkeypatch.setattr(predictor_mod, "build_predictor",
                         lambda checkpoint, **kw: _OneDetectionStub())
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     image = tmp_path / "capture.png"
     _save_png(image)
     ckpt = registered_checkpoint(tmp_path, project_root=tmp_path)

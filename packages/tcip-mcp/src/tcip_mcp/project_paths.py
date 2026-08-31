@@ -3,12 +3,12 @@
 Durable *platform* state, the ``@audited`` log, the experiment store, and the model
 registry, anchors here so a whole project is self-contained under one ``<root>/.tcip/``.
 
-Resolution order (``project_root`` / ``resolve_state``, evaluated at use time):
-  1. ``$TCIP_PROJECT_ROOT`` if set.
+Resolution order (``platform_state_root`` / ``resolve_state``, evaluated at use time):
+  1. ``$TCIP_STATE_ROOT`` if set.
   2. otherwise the current working directory, the historical default, so nothing changes
      for tests or an un-pinned run.
 
-A long-lived process binds the variable once at startup, through :func:`pin_project_root`.
+A long-lived process binds the variable once at startup, through :func:`pin_platform_root`.
 A process that opts in (``from_marker=True``: the web backend always, the MCP server inside
 the platform's own agent terminal) binds from the workspace's active-project marker when one
 names an adoptable project, else keeps whatever it inherited, else the repo root. A process
@@ -41,11 +41,11 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-ENV_VAR = "TCIP_PROJECT_ROOT"
+ENV_VAR = "TCIP_STATE_ROOT"
 
 
-def project_root() -> Path:
-    """The platform state root: ``$TCIP_PROJECT_ROOT`` if set, else the current directory."""
+def platform_state_root() -> Path:
+    """The platform state root: ``$TCIP_STATE_ROOT`` if set, else the current directory."""
     override = os.environ.get(ENV_VAR)
     return Path(override) if override else Path.cwd()
 
@@ -55,12 +55,13 @@ def resolve_output_path(path: "str | Path") -> Path:
     anchored to the platform state root.
 
     An absolute path is the caller's own explicit choice and is returned unchanged. A relative
-    path resolves against :func:`project_root`, never the process cwd: the MCP server and the web
-    backend both run with a cwd unrelated to any project (the repo root), so a relative output
-    path means inside the project, not wherever the server process happens to have been launched.
+    path resolves against :func:`platform_state_root`, never the process cwd: the MCP server and
+    the web backend both run with a cwd unrelated to any project (the repo root), so a relative
+    output path means inside the project, not wherever the server process happens to have been
+    launched.
     """
     p = Path(path)
-    return p if p.is_absolute() else project_root() / p
+    return p if p.is_absolute() else platform_state_root() / p
 
 
 def resolve_state(path: Path) -> Path:
@@ -68,7 +69,7 @@ def resolve_state(path: Path) -> Path:
 
     - An already-absolute ``path`` is returned unchanged (e.g. a test that rebinds
       ``AUDIT_PATH``/``EXPERIMENTS_DIR`` to a tmp dir).
-    - A relative ``path`` is prefixed with ``$TCIP_PROJECT_ROOT`` when pinned, so a process
+    - A relative ``path`` is prefixed with ``$TCIP_STATE_ROOT`` when pinned, so a process
       launched from a subdir still writes to the one platform ``.tcip/``.
     - When unpinned, a relative ``path`` is returned as-is → resolved against the current
       directory at use, preserving the historical default (and per-test cwd isolation).
@@ -82,7 +83,7 @@ def resolve_state(path: Path) -> Path:
 def resolve_state_or(path: Path, fallback: Path) -> Path:
     """The pinned resolution of a relative platform-state path, or the caller's own fallback.
 
-    ``$TCIP_PROJECT_ROOT`` set: the same resolution :func:`resolve_state` gives. Unset: returns
+    ``$TCIP_STATE_ROOT`` set: the same resolution :func:`resolve_state` gives. Unset: returns
     ``fallback`` rather than ``path`` unchanged, for a caller (e.g. an unpinned render cache) that
     needs somewhere real to write when there is no pinned project, not a path resolved against
     whatever the process cwd happens to be.
@@ -114,7 +115,7 @@ def repo_root_from_here() -> Path:
 
 @dataclass(frozen=True)
 class RootBinding:
-    """How a process's platform-state root was decided by :func:`pin_project_root`, or set
+    """How a process's platform-state root was decided by :func:`pin_platform_root`, or set
     since by :func:`repin_platform_root`.
 
     ``source`` is ``"marker"`` (the workspace's active-project marker supplied the root),
@@ -140,7 +141,7 @@ _binding: Optional[RootBinding] = None
 
 
 def root_binding() -> Optional[RootBinding]:
-    """This process's :class:`RootBinding`, or ``None`` before either :func:`pin_project_root`
+    """This process's :class:`RootBinding`, or ``None`` before either :func:`pin_platform_root`
     or :func:`repin_platform_root` has run: every test (until it calls ``set_active_project``,
     which repins) and any other standalone use, since none of those call either."""
     return _binding
@@ -149,8 +150,8 @@ def root_binding() -> Optional[RootBinding]:
 def restore_binding(binding: Optional[RootBinding]) -> None:
     """Restore this process's :class:`RootBinding` to a snapshot a caller took earlier.
 
-    For a caller that must undo its own :func:`pin_project_root`/:func:`repin_platform_root`
-    calls once it is done, the way a test's fixture restores the ``$TCIP_PROJECT_ROOT``
+    For a caller that must undo its own :func:`pin_platform_root`/:func:`repin_platform_root`
+    calls once it is done, the way a test's fixture restores the ``$TCIP_STATE_ROOT``
     environment variable around a test that adopts a project.
     """
     global _binding
@@ -158,10 +159,10 @@ def restore_binding(binding: Optional[RootBinding]) -> None:
 
 
 def repin_platform_root(root: Path) -> None:
-    """Set ``$TCIP_PROJECT_ROOT`` to ``root`` and record the change as an ``"adopted"``
+    """Set ``$TCIP_STATE_ROOT`` to ``root`` and record the change as an ``"adopted"``
     :class:`RootBinding`.
 
-    The one writer of the variable: :func:`pin_project_root`'s startup bind,
+    The one writer of the variable: :func:`pin_platform_root`'s startup bind,
     ``workspace.set_active_project``'s adopt, and the web backend's repin on the agent's
     adopt signal all go through here, so there is one place that changes it, and
     :func:`root_binding` reports the current root immediately after any of them.
@@ -174,7 +175,7 @@ def repin_platform_root(root: Path) -> None:
     )
 
 
-def pin_project_root(*, from_marker: bool) -> RootBinding:
+def pin_platform_root(*, from_marker: bool) -> RootBinding:
     """Bind this process's platform-state root at startup and record how it was decided.
 
     ``from_marker=True`` (the web backend always; the MCP server inside the platform's own

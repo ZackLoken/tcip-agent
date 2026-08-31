@@ -441,7 +441,7 @@ def _stub_scorer(monkeypatch) -> None:
 def test_prioritize_review_queue_marks_a_bound_runs_calibration_side(tmp_path, monkeypatch):
     """A checkpoint whose run was bound to a split manifest marks each ranked candidate against
     that manifest's own calibration side; no mark exists at all before this family."""
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     from tests.test_selection_disjointness_label_movement import DATES, _bind_run, _dataset, _draw
 
     root = _dataset(tmp_path / "data")
@@ -493,7 +493,7 @@ def test_prioritize_review_queue_marks_unresolved_when_the_manifest_cannot_be_re
 ):
     """A bound run whose named manifest can no longer be read serves the queue with no marks and
     a stated ``marks_unresolved`` reason, never a guess at membership."""
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     import tcip_store as ts
     from tests.test_selection_disjointness_label_movement import DATES, _bind_run, _dataset, _draw
     from tcip_mcp.tools.data_tools import split_manifest_key
@@ -610,7 +610,7 @@ def test_prioritize_review_queue_marks_a_flat_images_tree_dataset_correctly(tmp_
     (no images/<date>/ bucket) still marks its calibration side correctly: the manifest's own
     recorded images_root for that date is the flat root, never a date guessed from images_dir's
     path shape (which cannot tell a flat root apart from a dateless one)."""
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     date = "2026-03-01"
     root = _bucketed_labels_flat_images_dataset(tmp_path / "data", date)
     manifest_dir = tmp_path / "manifest"
@@ -642,7 +642,7 @@ def test_prioritize_review_queue_a_bound_run_never_marks_another_dates_calibrati
     like the single-date rail above), bound to the flat one, marks only that date's own
     calibration side: a stem that is a calibration member under the other, canonical, unbound
     date must never read as a member here, even though the same stem name recurs under both."""
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     canonical_date, flat_date = "2026-03-01", "2026-03-15"
     root = _mixed_two_date_dataset(tmp_path / "data", canonical_date, flat_date)
     manifest_dir = tmp_path / "manifest"
@@ -682,7 +682,7 @@ def test_prioritize_review_queue_a_root_mismatch_yields_marks_unresolved_not_fal
     """images_dir that is not the bound date's recorded images_root cannot be that date's
     member by path shape; the response says so under marks_unresolved rather than mark every
     candidate a confident non-member."""
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     from tests.test_selection_disjointness_label_movement import DATES, _bind_run, _dataset, _draw
 
     root = _dataset(tmp_path / "data")
@@ -711,7 +711,7 @@ def test_prioritize_review_queue_a_corrupted_split_record_yields_marks_unresolve
 ):
     """A bound run whose own split.json will not decode must not read as an unbound run: the
     corruption is named under marks_unresolved rather than folded onto silence."""
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     from tests._record_damage_fixtures import damage_record
     from tests.test_selection_disjointness_label_movement import DATES, _bind_run, _dataset, _draw
     from tcip_mcp.experiments import split_key

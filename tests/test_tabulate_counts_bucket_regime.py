@@ -594,7 +594,7 @@ assert "torch" not in sys.modules, "the bucket regime pulled torch into sys.modu
 print("ok")
 """
     import os
-    env = {**os.environ, "TCIP_PROJECT_ROOT": str(tmp_path)}
+    env = {**os.environ, "TCIP_STATE_ROOT": str(tmp_path)}
     result = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True,
                             timeout=60, env=env)
     assert result.returncode == 0, result.stderr

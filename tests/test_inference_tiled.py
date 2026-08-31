@@ -94,7 +94,7 @@ def test_predict_tiled_stamps_cap_hit_when_the_full_frame_cap_truncates(tmp_path
 def test_run_inference_tile_flag(tmp_path, monkeypatch):
     from tcip_mcp.tools.inference_tools import run_inference
 
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     ckpt = _detection_checkpoint(tmp_path)
     img = _image(tmp_path)
 
@@ -181,7 +181,7 @@ def test_run_inference_prefers_the_checkpoints_own_recorded_id_map(tmp_path, mon
                    "data": {"subject": "catkin", "attribute": "elongation",
                             "id_map": recorded_id_map}},
     }, str(ckpt_path))
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     result = register_model(name="test-model", checkpoint_path=str(ckpt_path), config={},
                             project_path=str(tmp_path))
     assert "error" not in result, result

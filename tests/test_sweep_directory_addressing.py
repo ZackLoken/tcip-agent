@@ -52,7 +52,7 @@ def test_a_sweeps_manifest_records_the_directory_that_holds_it(
 
 def test_a_sweep_launched_without_an_output_dir_is_addressed_the_same_way(
         tmp_path: Path, real_hpo_base_config, monkeypatch) -> None:
-    """The default store under the project root addresses a sweep exactly as an explicit
+    """The default store under the platform state root addresses a sweep exactly as an explicit
     ``output_dir`` does, so a reader needs no second convention for agent-launched sweeps."""
     observed: dict = {}
     tt = _stub_sweep(monkeypatch, observed)
