@@ -121,20 +121,20 @@ REGRESSION_CRITERIA: dict[str, Callable[[Any, Any], float | None]] = {
 }
 
 # The same interim-platform-default shape as `_DEFAULT_KAPPA_FLOOR`, and literally the same
-# statistic: ordinal's only currently-registered criterion (`quadratic_weighted_kappa`) is exactly
+# statistic: ordinal's only registered criterion is the classifier path's own kappa.
 
-# the classifier path's own kappa, an interim, platform-chosen placeholder, never a validated or
-# cited convention, used only when a trait hasn't authored `TraitSpec.ordinal_agreement_floor` (None).
+# An interim, platform-chosen placeholder, never a validated or cited convention, used only
+# when a trait hasn't authored `TraitSpec.ordinal_agreement_floor` (None).
 _DEFAULT_ORDINAL_AGREEMENT_FLOOR = 0.41
 
 # The same interim-platform-default shape, for whichever regression criterion a calibration
-# actually used. A plain "explains meaningfully more than half the addressable skill/agreement"
+# actually used: a plain "explains more than half the addressable skill" default.
 
-# default, not a cited statistical convention: R² and CCC have different scales/conventions (see
-# `TraitSpec.regression_skill_floor`'s docstring), so this single number is an interim,
+# R² and CCC have different scales (see `TraitSpec.regression_skill_floor`'s docstring), so
+# this single number is an interim, platform-chosen placeholder for either.
 
-# platform-chosen placeholder for either, never a validated or cited convention, until a trait
-# authors its own floor paired with its own criterion choice, used only when it hasn't (None).
+# Never a validated or cited convention: it applies only when a trait hasn't authored its own
+# floor paired with its own criterion choice (None).
 _DEFAULT_REGRESSION_SKILL_FLOOR = 0.5
 
 
@@ -1578,10 +1578,8 @@ def _resolve_scalar_operating_point(
     # A non-finite score compares false against every bound, so it is its own failure.
     score_state = non_finite_state(score) if isinstance(score, float) else None
     comparable = score is not None and score_state is None
-    # score > 0.0 is the universal, domain-input-free minimum (better than the criterion's own
-    # trivial/chance baseline); floor is the trait's own authored bar, or the platform's interim
-
-    # default, the same two-floor shape resolve_classifier_operating_point's kappa check uses.
+    # score > 0.0 is the domain-input-free minimum (beat the criterion's chance baseline); floor
+    # is the trait's authored bar or the platform's interim default, as in the kappa check.
     compensating_error_ok = comparable and score > 0.0 and score > floor
 
     failures: list[str] = []

@@ -372,6 +372,7 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | packages/tcip-web/frontend/src/lib/reviewGeometry.ts | The single source of a review detection's geometry. | 1 | 0 |
 | packages/tcip-web/frontend/src/lib/runStatus.test.ts | (none found) | 2 | 0 |
 | packages/tcip-web/frontend/src/lib/runStatus.ts | Statuses a training run or a sweep never leaves, so a poll keyed on one can stop. | 1 | 3 |
+| packages/tcip-web/frontend/src/lib/statementFields.test.ts | (none found) | 2 | 0 |
 | packages/tcip-web/frontend/src/lib/statementFields.ts | Breeder-facing labels for every field a statement record carries. | 0 | 2 |
 | packages/tcip-web/frontend/src/lib/toolMode.test.ts | (none found) | 1 | 0 |
 | packages/tcip-web/frontend/src/lib/toolMode.ts | Advances the Annotate toolbar's drawing-tool mode one step around its box -> polygon -> point cycle. | 1 | 1 |
@@ -571,6 +572,7 @@ A module counts as zero-importer when no other module in its own scanned tree re
 | tcip-web-frontend | packages/tcip-web/frontend/src/lib/reviewFocus.test.ts |
 | tcip-web-frontend | packages/tcip-web/frontend/src/lib/reviewGeometry.ts |
 | tcip-web-frontend | packages/tcip-web/frontend/src/lib/runStatus.test.ts |
+| tcip-web-frontend | packages/tcip-web/frontend/src/lib/statementFields.test.ts |
 | tcip-web-frontend | packages/tcip-web/frontend/src/lib/viewGeometry.test.ts |
 | tcip-web-frontend | packages/tcip-web/frontend/src/main.tsx |
 | tcip-web-frontend | packages/tcip-web/frontend/src/store/guiStateShape.test.ts |

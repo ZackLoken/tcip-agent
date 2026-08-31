@@ -1921,7 +1921,7 @@ def test_calibrate_physical_scale_refuses_an_image_with_two_reference_annotation
 
 
 def test_calibrate_physical_scale_refuses_with_no_authored_tolerance(tmp_path):
-    """TraitSpec.scale_tolerance_frac unset has no platform-provisional fallback: the tool refuses
+    """TraitSpec.scale_tolerance_frac unset has no platform default fallback: the tool refuses
     and names the field, never validating against a platform-invented number."""
     from tcip_mcp.tools.scale_tools import calibrate_physical_scale
 

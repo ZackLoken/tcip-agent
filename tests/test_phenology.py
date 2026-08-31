@@ -606,7 +606,7 @@ _MAJORITY_ALIAS_SPEC = TraitSpec(
     majority_milestone="95per",
     majority_provisional=True,
     phenology_prefix="unit",
-    majority_label="crossing",
+    majority_label="peak",
 )
 
 
@@ -616,7 +616,7 @@ def test_the_majority_crossing_unconfirmed_column_name_has_one_owner():
     cannot name the column differently from the schema that must declare it.
     """
     assert (phenology.majority_crossing_unconfirmed_column(_MAJORITY_ALIAS_SPEC)
-            == "unit_crossing_crossing_unconfirmed")
+            == "unit_peak_crossing_unconfirmed")
     declared = [c for c in phenology.phenology_csv_columns(_MAJORITY_ALIAS_SPEC)
                 if c.endswith("_crossing_unconfirmed")]
     assert declared == [phenology.majority_crossing_unconfirmed_column(_MAJORITY_ALIAS_SPEC)]
