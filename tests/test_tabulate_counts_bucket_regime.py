@@ -528,6 +528,9 @@ def test_live_and_bucket_regime_produce_the_same_csv_rows(tmp_path, monkeypatch)
     rows_a = list(csv.DictReader(csv_a.open()))
     rows_b = list(csv.DictReader(csv_b.open()))
     assert len(rows_a) == len(rows_b) == 1
+    # The delivered cell carries the source extension, not the bare stem the .json document lost.
+    assert rows_a[0]["image"] == "a.png"
+    assert "image_note" not in live and "image_note" not in bucket_result
     for key in rows_a[0]:
         if key == "produced_at":
             from datetime import datetime
@@ -536,6 +539,27 @@ def test_live_and_bucket_regime_produce_the_same_csv_rows(tmp_path, monkeypatch)
             datetime.fromisoformat(rows_b[0][key])
             continue
         assert rows_a[0][key] == rows_b[0][key], key
+
+
+def test_bucket_regime_falls_back_to_the_stem_for_a_bucket_with_no_filename_map(tmp_path):
+    """A bucket published before the image_filenames map existed carries no such key in its stamp:
+    the delivered image cell falls back to the bare document stem, and the response discloses the
+    fallback through image_note rather than silently reading as a filename."""
+    import tcip_mcp.tools.inference_tools as itools
+
+    bucket = tmp_path / "ds" / "predictions" / "baseline" / "2026-01-01"
+    _write_real_prediction(bucket, "a")
+    stamp = {"trait": fx.COUNT_TRAIT, "images_dir": str(tmp_path), "raster_path": None,
+             "operating_point": {"conf": {"value": 0.5, "validated_against": VALIDATED_FALSE}}}
+    write_bound_sidecar(bucket, stamp, dataset_root=tmp_path)
+
+    out_csv = tmp_path / "o.csv"
+    r = itools.tabulate_counts(predictions_dir=str(bucket), output_path=str(out_csv),
+                               trait=fx.COUNT_TRAIT, acknowledge_unvalidated=True)
+    assert "error" not in r, r
+    assert "predates the image filename map" in r["image_note"]
+    rows = list(csv.DictReader(out_csv.open()))
+    assert rows[0]["image"] == "a"
 
 
 def test_bucket_regime_reads_a_real_published_bucket_with_no_torch_import(tmp_path):

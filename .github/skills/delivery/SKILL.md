@@ -65,9 +65,12 @@ Examples use real `crops.yml` trait names; verify any trait against `crops.yml` 
 | `materialize_review_dataset` | Turn human review verdicts into a curated training set for re-delivery after correction; see `annotation` skill |
 
 `tabulate_counts` produces a different, per-image `image, detection_count,
-avg_confidence` CSV, not the per-plant schema above (the `image` cell is the stem, never a
-basename with an extension, this platform's image identity everywhere else). Don't reach for it
-when the per-plant schema is what's wanted. Two source regimes: live (`checkpoint_path` +
+avg_confidence` CSV, not the per-plant schema above (the `image` cell is the source basename with
+its extension, this platform's image identity everywhere else). The bucket regime resolves it from
+the stamp's `image_filenames` map (each prediction document's stem mapped to its source image's
+filename, recorded at publication) and falls back to the bare stem, disclosed in the response's
+`image_note`, for a bucket stamped before that map existed or for a stem the map does not name.
+Don't reach for it when the per-plant schema is what's wanted. Two source regimes: live (`checkpoint_path` +
 `images_dir`, routing through `run_inference`, optionally persisting the counted predictions into
 `predictions_dir` under `export_predictions`'s own publish contract) or bucket (`predictions_dir`
 alone, no GPU, reading an existing reviewed bucket's own stamp), exactly one stated.

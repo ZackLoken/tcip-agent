@@ -29,9 +29,9 @@ if TYPE_CHECKING:
 
 __all__ = [
     "AmbiguousImageStem", "BandGroupIncomplete", "BandGroupRef", "IMAGE_EXTS",
-    "capture_kind", "crop_pad_tile", "flat_image_key", "image_dimensions", "list_logical_images",
-    "load_image", "load_multiband", "logical_image_name", "pad_tile", "pil_to_tensor",
-    "place_logical_image", "resolve_image_source", "stem_of", "to_pil_if_faithful",
+    "capture_kind", "crop_pad_tile", "display_source_path", "flat_image_key", "image_dimensions",
+    "list_logical_images", "load_image", "load_multiband", "logical_image_name", "pad_tile",
+    "pil_to_tensor", "place_logical_image", "resolve_image_source", "stem_of", "to_pil_if_faithful",
 ]
 
 
@@ -269,6 +269,21 @@ def stem_of(source: "str | Path | BandGroupRef") -> str:
     if isinstance(source, BandGroupRef):
         return source.stem
     return Path(source).stem
+
+
+def display_source_path(source: "str | Path | BandGroupRef") -> str:
+    """A JSON-safe, human-meaningful identity string for a predict result's ``image`` field.
+
+    A :class:`BandGroupRef` has no single sibling file that names the logical image, its own
+    ``.bandgroup`` manifest path is the closest thing (stable, on disk, unique per capture); a plain
+    path/string is returned as-is. A caller decoding the source itself keeps passing the original
+    source object (never this string) to ``load_image``/``load_multiband``, so a band-grouped
+    capture still decodes through the channel-aware loader instead of a stringified dataclass repr
+    that no reader can open.
+    """
+    if isinstance(source, BandGroupRef):
+        return str(source.manifest_path)
+    return str(source)
 
 
 def _channels_from_shape(shape: tuple[int, ...]) -> int:

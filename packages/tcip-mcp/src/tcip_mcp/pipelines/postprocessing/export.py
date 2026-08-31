@@ -352,7 +352,7 @@ def export_detection_csv(
             safe_scores = [safe_score(s) for s in scores]
             avg_conf = sum(safe_scores) / len(safe_scores) if safe_scores else 0.0
             writer.writerow({
-                "image": Path(r.get("image", "")).stem,
+                "image": Path(r.get("image", "")).name,
                 "detection_count": detection_count,
                 "avg_confidence": round(avg_conf, 4),
                 "measurement_document": _MEASUREMENT_DOCUMENT,

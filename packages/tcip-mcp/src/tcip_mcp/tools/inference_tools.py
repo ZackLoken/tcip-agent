@@ -914,6 +914,7 @@ def _publish_image_predictions(out: Path, result: dict, *, checkpoint_path: str,
         dropped += write_predictions_json(out_json, r, created_by=producer, id_map=id_map)
         written.append(str(out_json))
 
+    image_filenames = {Path(r["image"]).stem: Path(r["image"]).name for r in result["results"]}
     op_stamp = operating_point_stamp(
         result.get("operating_point"),
         validated=draft is not None,
@@ -931,6 +932,7 @@ def _publish_image_predictions(out: Path, result: dict, *, checkpoint_path: str,
         produced_at=result.get("produced_at"),
         sweep_path=result.get("sweep_path"),
         sweep_summary=result.get("sweep_summary"),
+        image_filenames=image_filenames,
     )
     if has_masks:
         # The run-constant mask-binarize threshold travels once here rather than per-annotation.
@@ -1861,9 +1863,8 @@ def tabulate_counts(
         dropped_boxes = pub["dropped_boxes"]
         lineage_linked = pub["lineage_linked"]
         bucket_published = True
-        # Counted off the just-published documents through the bucket regime's own reader, so this
-        # CSV and a bucket-regime re-read of it count by the identical predicate.
-        csv_rows = _bucket_csv_rows(bucket)
+        # Counted off the just-published documents, filenames off the run's own just-written stamp.
+        csv_rows, _fallback_stems = _bucket_csv_rows(bucket, pub["op_stamp"].get("image_filenames"))
 
     provenance = {
         "producer_model_sha256": result.get("checkpoint_sha256"),
@@ -1951,7 +1952,9 @@ def tabulate_counts(
     return out
 
 
-def _bucket_csv_rows(bucket_path: Path) -> list[dict]:
+def _bucket_csv_rows(
+    bucket_path: Path, filename_map: dict[str, str] | None,
+) -> tuple[list[dict], list[str]]:
     """A prediction bucket's own per-image documents as ``export_detection_csv``'s row source.
 
     Real detections only (``detection_annotations``, a ``Point`` excluded), ordered by document
@@ -1960,16 +1963,28 @@ def _bucket_csv_rows(bucket_path: Path) -> list[dict]:
     order). The one reader every documents-backed CSV path shares, so a masked detection the
     write side kept on its stored polygon's extent cannot be dropped again by a different,
     box-based predicate downstream.
+
+    Each row's ``image`` value is the stamp-recorded source filename (``filename_map[doc.stem]``,
+    the basename with extension the publisher stamped): a document's own filename is only ever
+    ``<stem>.json``, which carries no extension to recover. A ``filename_map`` that is absent
+    entirely, or names no entry for a given stem, falls that row back to the bare stem; the second
+    return value lists the stems that fell back, so a caller can disclose the fallback rather than
+    let the CSV's own cells silently say less than the caller believes.
     """
     from tcip_annotation.json_io import detection_annotations, prediction_documents, safe_score
 
     documents = sorted(prediction_documents(bucket_path), key=lambda p: p.stem)
     image_results = []
+    fallback_stems = []
     for doc in documents:
         annotations = detection_annotations(doc)
         scores = [safe_score(a.score) for a in annotations if a.score is not None]
-        image_results.append({"image": str(doc), "count": len(annotations), "scores": scores})
-    return image_results
+        filename = (filename_map or {}).get(doc.stem)
+        if filename is None:
+            filename = doc.stem
+            fallback_stems.append(doc.stem)
+        image_results.append({"image": filename, "count": len(annotations), "scores": scores})
+    return image_results, fallback_stems
 
 
 def _tabulate_counts_from_bucket(predictions_dir: str, output_path: str, *, trait: str,
@@ -2015,7 +2030,8 @@ def _tabulate_counts_from_bucket(predictions_dir: str, output_path: str, *, trai
             "bucket produced for one trait cannot deliver acknowledged under another."
         )}
 
-    image_results = _bucket_csv_rows(bucket_path)
+    filename_map = sidecar.get("image_filenames")
+    image_results, fallback_stems = _bucket_csv_rows(bucket_path, filename_map)
     if not image_results:
         return {"error": (
             f"{bucket_path} carries a readable stamp but no prediction documents: an empty "
@@ -2023,6 +2039,18 @@ def _tabulate_counts_from_bucket(predictions_dir: str, output_path: str, *, trai
         )}
     image_count = len(image_results)
     total_detections = sum(r["count"] for r in image_results)
+
+    image_note = None
+    if filename_map is None:
+        image_note = (
+            f"{bucket_path}'s stamp predates the image filename map: every image cell in this "
+            "CSV carries the bare document stem, not the source image's filename."
+        )
+    elif fallback_stems:
+        image_note = (
+            f"{bucket_path}'s stamp's image filename map names no entry for stem(s) "
+            f"{sorted(fallback_stems)}: those rows' image cells carry the bare stem."
+        )
 
     op = sidecar.get("operating_point") or {}
     provenance = {
@@ -2037,7 +2065,7 @@ def _tabulate_counts_from_bucket(predictions_dir: str, output_path: str, *, trai
             acknowledge_unvalidated=acknowledge_unvalidated,
         )
     except DeliveryRefused as exc:
-        return {
+        refusal = {
             "error": str(exc),
             "operating_point_validated": exc.gate.stamp.get("measurement", VALIDATED_FALSE),
             "tile_size_validated": exc.gate.stamp.get("tile_size"),
@@ -2046,6 +2074,9 @@ def _tabulate_counts_from_bucket(predictions_dir: str, output_path: str, *, trai
             "total_detections": total_detections,
             "predictions_dir": str(bucket_path),
         }
+        if image_note is not None:
+            refusal["image_note"] = image_note
+        return refusal
 
     spec_now, record_now, _ = resolve_trait_and_record(trait, PER_IMAGE_COUNT)
     still_stated = check_operationalization(
@@ -2053,7 +2084,7 @@ def _tabulate_counts_from_bucket(predictions_dir: str, output_path: str, *, trai
     if not still_stated.ok:
         return {"error": still_stated.message}
 
-    return {
+    out = {
         "csv_path": csv_path,
         "image_count": image_count,
         "total_detections": total_detections,
@@ -2066,3 +2097,6 @@ def _tabulate_counts_from_bucket(predictions_dir: str, output_path: str, *, trai
         "experiment_id": sidecar.get("experiment_id"),
         "predictions_dir": str(bucket_path),
     }
+    if image_note is not None:
+        out["image_note"] = image_note
+    return out
