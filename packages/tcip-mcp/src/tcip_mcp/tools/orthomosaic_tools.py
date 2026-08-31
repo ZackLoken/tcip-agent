@@ -38,7 +38,7 @@ def deliver_orthomosaic_plant_counts(
     raster_path: str,
     plant_csv_paths: list[str],
     output_csv_path: str,
-    trait_name: str,
+    delivered_phenotype: str,
     crop: str = "",
     pipeline_version: str = "",
     nn_tolerance_m: float | None = None,
@@ -101,9 +101,9 @@ def deliver_orthomosaic_plant_counts(
             ``accession_name``, ``WGS84_centroid_x/y``, …).
         output_csv_path: Where to write the delivered per-plant CSV. A relative path resolves
             against the project root, never the server process's cwd.
-        trait_name: The crop-vocabulary delivered phenotype this CSV ships under, resolved to the
-            registered trait whose spec delivers it and whose confirmed operationalization this
-            delivery rests on.
+        delivered_phenotype: The crop-vocabulary delivered phenotype this CSV ships under, resolved
+            to the registered trait whose spec delivers it and whose confirmed operationalization
+            this delivery rests on.
         crop: Crop species name.
         pipeline_version: Pipeline identifier.
         nn_tolerance_m: Nearest-neighbour match tolerance (m). ``None`` (default) derives it from
@@ -136,13 +136,13 @@ def deliver_orthomosaic_plant_counts(
 
     # First refusal in this body: how a number was attributed says nothing until it has a meaning.
     try:
-        trait = resolve_trait_for_phenotype(trait_name)
+        trait = resolve_trait_for_phenotype(delivered_phenotype)
         spec, record, _specs_dir = resolve_trait_and_record(trait, PER_PLANT_COUNT_AGGREGATE)
     except (TraitUnknownError, ValueError) as exc:
         return {"error": str(exc)}
     # This door never delivers a crossing kind, so it has no registry to check a positive class against.
     stated = check_operationalization(
-        spec, record, PER_PLANT_COUNT_AGGREGATE, delivered_phenotype=trait_name,
+        spec, record, PER_PLANT_COUNT_AGGREGATE, delivered_phenotype=delivered_phenotype,
         value_keys=[_PER_PLANT_VALUE_KEY], registry=None)
     if not stated.ok:
         return {"error": stated.message}
@@ -242,7 +242,7 @@ def deliver_orthomosaic_plant_counts(
 
     try:
         csv_path, tail = export_aggregated_csv(
-            agg, output_csv_path, trait_name=trait_name, crop=crop,
+            agg, output_csv_path, delivered_phenotype=delivered_phenotype, crop=crop,
             pipeline_version=pipeline_version, provenance=provenance,
             pred_dirs=[predictions_dir],
             acknowledge_unvalidated=acknowledge_unvalidated,

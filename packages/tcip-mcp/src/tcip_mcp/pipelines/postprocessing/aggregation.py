@@ -13,10 +13,10 @@ different shape of computation than a per-image summary statistic, implemented o
 
 Usage:
     results = aggregate_per_plant(image_results, strategy="count")
-    export_aggregated_csv(results, "output.csv", trait_name="stem_count")
+    export_aggregated_csv(results, "output.csv", delivered_phenotype="stem_count")
 
-``trait_name`` is a crop-vocabulary delivered-phenotype name (``stem_count`` is one, as an example
-rather than as the shape), which is what the CSV column and the unit cross-check are about.
+``delivered_phenotype`` is a crop-vocabulary delivered-phenotype name (``stem_count`` is one, as an
+example rather than as the shape), which is what the CSV column and the unit cross-check are about.
 """
 
 from __future__ import annotations
@@ -222,7 +222,7 @@ def _is_pixel_space_key(value_key: str) -> bool:
 
 
 def _resolve_units(
-    trait_name: str, results: list[dict], measurement_document: str
+    delivered_phenotype: str, results: list[dict], measurement_document: str
 ) -> tuple[str, str | None]:
     """``(display_unit, linear_basis)`` implied by the aggregated values' own value_key, crops.yml's
     declared unit is a cross-check only, never a fallback source under ``operating_point``. A
@@ -251,10 +251,11 @@ def _resolve_units(
     if len(implied_pairs) > 1:
         implied_units = {display for display, _linear_basis in implied_pairs}
         raise ValueError(
-            f"export_aggregated_csv: results for trait {trait_name!r} imply more than one physical "
-            f"unit ({sorted(implied_units)}) across rows, cannot label a single units column."
+            f"export_aggregated_csv: results for delivered phenotype {delivered_phenotype!r} imply "
+            f"more than one physical unit ({sorted(implied_units)}) across rows, cannot label a "
+            "single units column."
         )
-    declared = crops_units().get(trait_name)
+    declared = crops_units().get(delivered_phenotype)
     pair = next(iter(implied_pairs), None)
     if pair is None:
         explicitly_px = any(_is_pixel_space_key(r.get("value_key", "")) for r in results)
@@ -265,9 +266,10 @@ def _resolve_units(
     display, linear_basis = pair
     if declared is not None and linear_basis != declared:
         raise ValueError(
-            f"export_aggregated_csv: trait {trait_name!r} is declared units={declared!r} in "
-            f"crops.yml, but the aggregated values' own key implies {linear_basis!r}, refusing to "
-            "ship a mismatched unit label rather than guessing which one is right."
+            f"export_aggregated_csv: delivered phenotype {delivered_phenotype!r} is declared "
+            f"units={declared!r} in crops.yml, but the aggregated values' own key implies "
+            f"{linear_basis!r}, refusing to ship a mismatched unit label rather than guessing which "
+            "one is right."
         )
     return display, linear_basis
 
@@ -275,7 +277,7 @@ def _resolve_units(
 def export_aggregated_csv(
     results: list[dict],
     output_path: str,
-    trait_name: str,
+    delivered_phenotype: str,
     crop: str = "",
     pipeline_version: str = "",
     provenance: dict | None = None,
@@ -358,13 +360,13 @@ def export_aggregated_csv(
     an uncalibrated conf does. A bucket recording no claim scope never acquires the dimension.
 
     Meaning door: the delivered value has to have a recorded, breeder-confirmed meaning before it
-    ships. ``trait_name`` is the crop-vocabulary phenotype the CSV column carries and the unit
-    cross-check reads; the record that says what the number means is keyed by the registered trait
-    whose spec delivers that phenotype, resolved here, refusing when no registered trait delivers it
-    and when more than one does. Which of the three aggregate kinds is confirmed follows from
-    ``measurement_document``, since a count, an ordinal and a regression aggregate rest on three
-    different floors. Every delivered row carries a value key, and every one must be inside the
-    confirmed set: a row with no stated quantity has nothing to check against what the breeder
+    ships. ``delivered_phenotype`` is the crop-vocabulary phenotype the CSV column carries and the
+    unit cross-check reads; the record that says what the number means is keyed by the registered
+    trait whose spec delivers that phenotype, resolved here, refusing when no registered trait
+    delivers it and when more than one does. Which of the three aggregate kinds is confirmed follows
+    from ``measurement_document``, since a count, an ordinal and a regression aggregate rest on
+    three different floors. Every delivered row carries a value key, and every one must be inside
+    the confirmed set: a row with no stated quantity has nothing to check against what the breeder
     confirmed. A plant whose own value is ``None`` (no observation carried the value_key at all)
     refuses, naming the plant: a missing measurement must never ship as an empty cell beside a
     validated stamp.
@@ -372,8 +374,8 @@ def export_aggregated_csv(
     Args:
         results: Output from aggregate_per_plant().
         output_path: Path for the output CSV file.
-        trait_name: The crop-vocabulary delivered phenotype this CSV ships under. Required, and
-            resolved to the registered trait whose spec delivers it.
+        delivered_phenotype: The crop-vocabulary delivered phenotype this CSV ships under.
+            Required, and resolved to the registered trait whose spec delivers it.
         crop: Crop species name.
         pipeline_version: Pipeline identifier.
         provenance: Optional producing-model stamp added as trailing columns.
@@ -411,17 +413,17 @@ def export_aggregated_csv(
     )
 
     measurement_document, scale_document = _resolve_statement(results, MEASUREMENT_DOCUMENTS)
-    units, linear_basis = _resolve_units(trait_name, results, measurement_document)
+    units, linear_basis = _resolve_units(delivered_phenotype, results, measurement_document)
 
     from tcip_mcp.traits import crops_units
 
-    declared_unit = crops_units().get(trait_name)
+    declared_unit = crops_units().get(delivered_phenotype)
     if measurement_document == "operating_point" and declared_unit and not units:
         raise ValueError(
-            f"export_aggregated_csv: trait {trait_name!r} is declared units={declared_unit!r} in "
-            "crops.yml, but the aggregated values' own value_key implies no physical unit under "
-            "an operating_point measurement document; a pixel-space value delivered under a "
-            "unit-declared trait is not that trait's number."
+            f"export_aggregated_csv: delivered phenotype {delivered_phenotype!r} is declared "
+            f"units={declared_unit!r} in crops.yml, but the aggregated values' own value_key "
+            "implies no physical unit under an operating_point measurement document; a pixel-space "
+            "value delivered under a unit-declared phenotype is not that phenotype's number."
         )
     if scale_document is not None and not units:
         raise ValueError(
@@ -446,10 +448,10 @@ def export_aggregated_csv(
     none_valued = sorted(r["plant_id"] for r in results if r.get("value") is None)
     if none_valued:
         raise ValueError(
-            f"export_aggregated_csv: plant(s) {none_valued} carry no {trait_name!r} observation at "
-            "all (value is None); a missing measurement must never ship as an empty cell beside a "
-            "validated stamp. Filter these plants out before calling this door to deliver only the "
-            "plants that do carry a value."
+            f"export_aggregated_csv: plant(s) {none_valued} carry no {delivered_phenotype!r} "
+            "observation at all (value is None); a missing measurement must never ship as an empty "
+            "cell beside a validated stamp. Filter these plants out before calling this door to "
+            "deliver only the plants that do carry a value."
         )
 
     from tcip_mcp.operationalization import (
@@ -460,12 +462,12 @@ def export_aggregated_csv(
     )
 
     delivery_kind = aggregate_delivery_kind(measurement_document)
-    trait = resolve_trait_for_phenotype(trait_name)
+    trait = resolve_trait_for_phenotype(delivered_phenotype)
     value_keys = [r.get("value_key", "") for r in results]
     spec, record, _specs_dir = resolve_trait_and_record(trait, delivery_kind)
     # This door never delivers a crossing kind, so it has no registry to check a positive class against.
     stated = check_operationalization(
-        spec, record, delivery_kind, delivered_phenotype=trait_name, value_keys=value_keys,
+        spec, record, delivery_kind, delivered_phenotype=delivered_phenotype, value_keys=value_keys,
         registry=None)
     if not stated.ok:
         raise ValueError(stated.message)
@@ -523,7 +525,7 @@ def export_aggregated_csv(
     # A confirmation withdrawn or a field moved since the first check refuses here, before anything.
     spec_now, record_now, _ = resolve_trait_and_record(trait, delivery_kind)
     still_stated = check_operationalization(
-        spec_now, record_now, delivery_kind, delivered_phenotype=trait_name,
+        spec_now, record_now, delivery_kind, delivered_phenotype=delivered_phenotype,
         value_keys=value_keys, registry=None, basis=stated.basis)
     if not still_stated.ok:
         raise ValueError(still_stated.message)
@@ -547,7 +549,7 @@ def export_aggregated_csv(
             writer.writerow({
                 "plant_id": r["plant_id"],
                 "crop": crop,
-                "trait_name": trait_name,
+                "trait_name": delivered_phenotype,
                 "value": r.get("value", ""),
                 "units": units,
                 "value_key": r.get("value_key", ""),
