@@ -88,13 +88,13 @@ uncharacterized, which is a claim about a quantity that has been defined.
   names is the counted subject, checked against the recorded `id_map` of every bucket that
   recorded one. A bucket-regime call also refuses a bucket whose own stamp names a different,
   non-`None` trait, validated or not.
-- `export_aggregated_csv` and `deliver_orthomosaic_plant_counts` take `trait_name`, which stays a
-  crop-vocabulary delivered-phenotype name (the CSV column and the unit cross-check read it), and
-  resolve it to the registered trait whose spec `delivers` it: none or more than one refuses. Which
-  record applies follows from the records' own `measurement_document` (`operating_point`,
-  `ordinal_operating_point` or `regression_operating_point`), since a count, an ordinal and a
-  regression aggregate rest on three different spec floors and are three separate confirmations.
-  Every row carries a value key and every one has to be inside the confirmed set.
+- `export_aggregated_csv` and `deliver_orthomosaic_plant_counts` take `delivered_phenotype`, a
+  crop-vocabulary delivered-phenotype name (the `trait_name` CSV column and the unit cross-check
+  read it), and resolve it to the registered trait whose spec `delivers` it: none or more than one
+  refuses. Which record applies follows from the records' own `measurement_document`
+  (`operating_point`, `ordinal_operating_point` or `regression_operating_point`), since a count, an
+  ordinal and a regression aggregate rest on three different spec floors and are three separate
+  confirmations. Every row carries a value key and every one has to be inside the confirmed set.
 - A `state_crossing_dates` statement and every delivery under it are checked against the delivered
   dataset's own class registry, never a bare spec value: `state_trait_operationalization` resolves
   it from `dataset_root` (given explicitly, or the project root's own registry when that project is
