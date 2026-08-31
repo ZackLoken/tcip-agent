@@ -24,6 +24,7 @@ export function TopBar() {
   const activeTab = useStore((s) => s.gui.active_tab);
   const setActiveTab = useStore((s) => s.setActiveTab);
   const wsStatus = useStore((s) => s.wsStatus);
+  const canvasBindingMissing = useStore((s) => s.canvasBindingMissing);
   const terminalOpen = useStore((s) => s.terminalOpen);
   const setTerminalOpen = useStore((s) => s.setTerminalOpen);
 
@@ -34,8 +35,14 @@ export function TopBar() {
     const t = setTimeout(() => setGraceOver(true), 2000);
     return () => clearTimeout(t);
   }, []);
-  const degraded =
+  const wsDegraded =
     wsStatus === "error" || wsStatus === "disconnected" || (wsStatus === "connecting" && graceOver);
+  const degraded = wsDegraded || canvasBindingMissing;
+  const label = wsDegraded
+    ? wsStatus === "connecting"
+      ? "reconnecting…"
+      : "disconnected, retrying"
+    : "canvas not synced, reopen the project";
 
   return (
     <div className="h-topbar grid grid-cols-[1fr_auto_1fr] items-center px-3 border-b border-tcip-border bg-tcip-panel shrink-0">
@@ -64,18 +71,16 @@ export function TopBar() {
       </div>
 
       <div className="flex items-center justify-self-end">
-        {/* Connection state: visible only when something is wrong; it self-dismisses
-            when the auto-reconnect succeeds. */}
+        {/* Connection/canvas-binding state: visible only when something is wrong; it
+            self-dismisses once the underlying condition resolves. */}
         {degraded && (
           <div className="flex items-center gap-1.5 h-6 px-2 mr-2 rounded-full border border-tcip-border bg-tcip-bg text-[11px]">
             <span
               className={`w-2 h-2 rounded-full ${
-                wsStatus === "connecting" ? "bg-tcip-fn" : "bg-tcip-fp"
+                wsStatus === "connecting" && wsDegraded ? "bg-tcip-fn" : "bg-tcip-fp"
               }`}
             />
-            <span className="text-tcip-muted">
-              {wsStatus === "connecting" ? "reconnecting…" : "disconnected, retrying"}
-            </span>
+            <span className="text-tcip-muted">{label}</span>
           </div>
         )}
 
