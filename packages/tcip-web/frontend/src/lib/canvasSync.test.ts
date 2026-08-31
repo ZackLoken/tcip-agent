@@ -732,6 +732,30 @@ describe("createCanvasPusher", () => {
     expect(posts[0].shapes).not.toBeNull(); // ...but the owed geometry ships with it
   });
 
+  it("a conflict-resolved full post re-arms the geometry, the masquerade case", async () => {
+    // pushState resolves {status:"conflict"} on a 409 rather than rejecting; the re-arm must
+    // still fire, or a later heartbeat pairs fresh meta with the pre-conflict geometry.
+    const posts: CanvasStateBody[] = [];
+    let conflict = true;
+    const p = createCanvasPusher(
+      (b) => {
+        if (conflict) return Promise.resolve({ status: "conflict" as const });
+        posts.push(b);
+        return Promise.resolve({ status: "ok" as const, shapes_written: true });
+      },
+      { debounceMs: 100, maxWaitMs: 1000 },
+    );
+    p.schedule(body, true);
+    vi.advanceTimersByTime(150); // fires; the post resolves as a conflict
+    await Promise.resolve();
+    await Promise.resolve();
+    conflict = false;
+    p.schedule(body, false); // a mere heartbeat follows...
+    vi.advanceTimersByTime(150);
+    expect(posts).toHaveLength(1);
+    expect(posts[0].shapes).not.toBeNull(); // ...but the owed geometry ships with it
+  });
+
   it("with no options, a burst waits out the documented trailing debounce and then posts", () => {
     const posts: CanvasStateBody[] = [];
     const p = createCanvasPusher((b) => {
