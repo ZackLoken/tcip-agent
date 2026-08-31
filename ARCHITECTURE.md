@@ -1994,7 +1994,7 @@ end.
 ## S01. Platform state root pin (TCIP_STATE_ROOT)
 
 Must agree: all three processes resolve `.tcip/` against the same directory.
-Side A: `packages/tcip-mcp/src/tcip_mcp/project_paths.py:44` (`ENV_VAR = "TCIP_STATE_ROOT"`).
+Side A: `packages/tcip-mcp/src/tcip_mcp/project_paths.py:45` (`ENV_VAR = "TCIP_STATE_ROOT"`).
 Side B: `packages/tcip-web/src/tcip_web/routes/images.py:169` (`_render_cache_dir` calls `project_paths.resolve_state_or`, the pinned resolver at `project_paths.py:83`, rather than reading the environment variable itself).
 Phase 3 verdict: single.
 
