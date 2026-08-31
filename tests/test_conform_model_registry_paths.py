@@ -225,6 +225,30 @@ def test_conform_hashes_each_candidate_at_most_once_per_run(tmp_path: Path, monk
     assert calls.count(candidate.resolve()) == 1
 
 
+def test_conform_skips_a_directory_shaped_like_a_checkpoint_under_experiments(tmp_path: Path):
+    """A directory named ``*.pt`` under ``.tcip/experiments`` (a run's own output directory can
+    be named however a bespoke loop likes) must never reach ``stat``/hash as a relocation
+    candidate; the real checkpoint elsewhere is still found and the entry still relocates."""
+    root = tmp_path / "dest"
+    (root / ".tcip" / "experiments" / "weird_dir.pt").mkdir(parents=True)
+    (root / ".tcip" / "models").mkdir(parents=True)
+    content = b"the real checkpoint bytes"
+    digest = hashlib.sha256(content).hexdigest()
+    real = root / ".tcip" / "models" / "real.pt"
+    real.write_bytes(content)
+
+    _seed_v1(root, [_entry(
+        "m", "/exporting/root/.tcip/models/real.pt", digest, len(content),
+        file_size_bytes=None,
+    )])
+
+    lines = conform_registry_paths(root)
+
+    assert any("relocated" in ln for ln in lines)
+    entries = read_registry_index(root)
+    assert entries[0]["checkpoint_path"] == ".tcip/models/real.pt"
+
+
 def test_conform_refuses_a_malformed_mapping():
     from tcip_mcp.model_registry import _document_entries_for_conform
 
