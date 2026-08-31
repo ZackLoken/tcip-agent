@@ -1400,7 +1400,7 @@ canonicalizer when the declaration passes one as `scope_via`). Eleven doors decl
 dataset-scoped (`save_annotations`, `tools/annotation_tools.py:132`; `write_class_map`, same
 file, line 470; `force_redraw_cal_holdout_split`, `tools/calibration_tools.py:24`;
 `materialize_review_dataset`, `tools/feedback_tools.py:168`; `export_predictions`,
-`tools/inference_tools.py:1323`; `register_dataset`, `tools/project_tools.py:165`;
+`tools/inference_tools.py:1326`; `register_dataset`, `tools/project_tools.py:165`;
 `propose_annotations`, `tools/proposal_tools.py:179`; `stage_accepted_proposals`, same file, line
 389; `stage_proposals`, same file, line 616) and two project-scoped
 (`state_trait_operationalization`, `tools/operationalization_tools.py:19`; `author_trait_spec`,
@@ -1447,7 +1447,7 @@ path-sanitized, by the same standing choice.
 Readers: two production parsers, both reading through the storage seam's `read_log` rather than
 decoding lines by hand, and both refusing (never scanning past) a page reporting corruption or an
 unknown `schema_version`. `experiments._index_refused_mutations`,
-`packages/tcip-mcp/src/tcip_mcp/experiments.py:1491`, one scan of the platform audit log
+`packages/tcip-mcp/src/tcip_mcp/experiments.py:1493`, one scan of the platform audit log
 (`audit_log_key()`, no scope) indexing every `experiment_mutation_refused` entry by
 `arguments.experiment_id`, shared by `compare_experiments`, line 1532, across every experiment it
 compares in one call; `page.corrupt`/`page.version_refused` both fail the whole call (`None`, not
