@@ -107,14 +107,17 @@ def resolved_registry_path(root: str | Path, stored: str) -> Path:
     every writer spells); an absolute one (:func:`is_external_form`) is returned unchanged, the
     entry's own positive external claim. Raises :class:`RegistryPathEmpty` for an empty or
     missing value, and :class:`RegistryPathTraversal` for a relative value carrying a ``..``
-    segment, never resolved to wherever it happens to land.
+    segment under either platform's own path grammar (:func:`is_external_form`'s own
+    dual-grammar reasoning: a Windows-spelled traversal must refuse the same as a POSIX one,
+    never silently resolve outside ``root`` on the platform that does not split it), never
+    resolved to wherever it happens to land.
     """
     if not stored:
         raise RegistryPathEmpty("registry entry carries no path to resolve")
     if is_external_form(stored):
         return Path(stored)
     parts = PurePosixPath(stored).parts
-    if ".." in parts:
+    if ".." in parts or ".." in PureWindowsPath(stored).parts:
         raise RegistryPathTraversal(
             f"registry entry path {stored!r} carries a '..' segment, never a legitimate "
             "relative spelling under version 2's convention"
