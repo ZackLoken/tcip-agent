@@ -130,7 +130,7 @@ def resolve_decode_id_map(predictor, images_dir: str | None, *,
                           scope: tuple[str | None, str | None] | None = None) -> dict | None:
     """This run's name->id map for recording + decoding predictions.
 
-    The one resolution every door that writes predictions to disk calls, this tool's own
+    The one resolution every entry point that writes predictions to disk calls, this tool's own
     ``run_inference`` and the web GUI's inference worker (``tcip_web.routes.inference``), never a
     second implementation (CLAUDE.md: "when two code paths must agree, call one from the other").
 
@@ -148,7 +148,7 @@ def resolve_decode_id_map(predictor, images_dir: str | None, *,
     A registry read that fails for a real reason (corrupted file, an id-space mismatch) propagates
     loudly from here, but ``run_inference`` lets that reach its own caller, while the GUI worker
     (``routes/inference.py``) wraps this whole call in a broad except and degrades to ``id_map=None``
-    on any failure; the two doors share this one resolution but choose different failure postures on
+    on any failure; the two entry points share this one resolution but choose different failure postures on
     top of it, not two different resolutions.
 
     ``scope`` is the ``(subject, attribute)`` the registry fallback derives against, defaulting to
@@ -668,7 +668,7 @@ def _run_inference_verified(
 
     # This run's name→id map, reused for both recording and decode, so export records it in
     # operating_point.json and decodes predictions to names through this one map, consistent
-    # within the run. The one resolution both doors that write predictions to disk use (this tool
+    # within the run. The one resolution both entry points that write predictions to disk use (this tool
     # and the web GUI's own inference worker, routes/inference.py), never a second implementation.
     id_map = resolve_decode_id_map(predictor, images_dir)
     out = {

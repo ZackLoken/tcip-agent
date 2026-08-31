@@ -49,7 +49,7 @@ importers, so nothing constrains you to a format someone else's tool happened to
 ## Coordinate frame: upright, EXIF applied once
 
 Every coordinate (normalized or pixel) lives in the EXIF-upright frame. Images are
-decoded through one door, `load_image` (`image_utils.py`) / `get_image_dimensions`, and
+decoded through one entry point, `load_image` (`image_utils.py`) / `get_image_dimensions`, and
 both orient through one shared EXIF orientation-tag read, so the GUI canvas, the model,
 tiling, and viz all share one pixel space. This matters most for
 Orientation-6 phone/camera JPEGs whose stored frame is transposed (e.g. 5712×4284 ↔

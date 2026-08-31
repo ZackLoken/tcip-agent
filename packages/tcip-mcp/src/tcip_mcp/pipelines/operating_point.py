@@ -1,7 +1,7 @@
 """Resolve the detection operating point (conf/NMS/max_dets/tile) per dataset, at runtime.
 
 This is the single place all four consumers, train-eval, test-eval, inference, export, get the
-operating point, so the same model + images can't yield different counts by entry door (the audit's
+operating point, so the same model + images can't yield different counts by entry point (the audit's
 divergent-defaults bug). The confidence threshold requires validation against an annotations
 reference: derived by a center-match count-unbiased sweep over a reference sized to the trait,
 and validated on a disjoint held-out split of that reference, GT annotations
