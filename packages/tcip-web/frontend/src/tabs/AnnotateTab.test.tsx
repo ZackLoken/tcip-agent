@@ -5,6 +5,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { api } from "@/api/client";
 import type { SaveResult } from "@/api/client";
 import { classesApi, subjectColor } from "@/api/classes";
+import { notifyCanvasStateRequest } from "@/lib/canvasSync";
 import { sessionsApi } from "@/api/sessions";
 import { useStore } from "@/store";
 import { AnnotateTab } from "@/tabs/AnnotateTab";
@@ -1071,5 +1072,40 @@ describe("AnnotateTab labels show on selection or hover only", () => {
     fireEvent.mouseUp(stage(), { clientX: 100, clientY: 100 });
     await flush();
     expect(labelsNamed("tip").length).toBeGreaterThan(0);
+  });
+});
+
+describe("AnnotateTab canvas-push binding-presence gate", () => {
+  it("blocks the push and sets canvasBindingMissing when no generation is adopted", async () => {
+    useStore.setState({ bindingGeneration: null });
+    const pushSpy = vi
+      .spyOn(api.canvas, "pushState")
+      .mockResolvedValue({ status: "ok", shapes_written: true });
+    render(<AnnotateTab />);
+    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
+    await flush();
+
+    act(() => notifyCanvasStateRequest());
+    await flush();
+
+    expect(pushSpy).not.toHaveBeenCalled();
+    expect(useStore.getState().canvasBindingMissing).toBe(true);
+  });
+
+  it("pushes with the adopted generation and clears canvasBindingMissing", async () => {
+    useStore.setState({ bindingGeneration: 3, canvasBindingMissing: true });
+    const pushSpy = vi
+      .spyOn(api.canvas, "pushState")
+      .mockResolvedValue({ status: "ok", shapes_written: true });
+    render(<AnnotateTab />);
+    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
+    await flush();
+
+    act(() => notifyCanvasStateRequest());
+    await flush();
+
+    expect(pushSpy).toHaveBeenCalled();
+    expect(pushSpy.mock.calls[0][0].binding_generation).toBe(3);
+    expect(useStore.getState().canvasBindingMissing).toBe(false);
   });
 });

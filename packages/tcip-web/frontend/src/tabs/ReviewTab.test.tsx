@@ -4,6 +4,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 
 import { api } from "@/api/client";
 import { resultsApi } from "@/api/inference";
+import { notifyCanvasStateRequest } from "@/lib/canvasSync";
 import { applyReviewFocus } from "@/lib/reviewFocus";
 import { useStore } from "@/store";
 import type { Annotation, Detection, MatchesResponse } from "@/store/types";
@@ -1446,5 +1447,38 @@ describe("ReviewTab zoom-to-detection clamping", () => {
     // below zero (image edge pinned to the canvas edge, no gap).
     expect(v.offset_x).toBeLessThanOrEqual(0);
     expect(v.offset_y).toBeLessThanOrEqual(0);
+  });
+});
+
+describe("ReviewTab canvas-push binding-presence gate", () => {
+  it("blocks the push and sets canvasBindingMissing when no generation is adopted", async () => {
+    useStore.setState({ bindingGeneration: null });
+    const pushSpy = vi
+      .spyOn(api.canvas, "pushState")
+      .mockResolvedValue({ status: "ok", shapes_written: true });
+    render(<ReviewTab />);
+    await waitFor(() => expect(matchesSpy).toHaveBeenCalledTimes(1));
+
+    act(() => notifyCanvasStateRequest());
+    await act(async () => {});
+
+    expect(pushSpy).not.toHaveBeenCalled();
+    expect(useStore.getState().canvasBindingMissing).toBe(true);
+  });
+
+  it("pushes with the adopted generation and clears canvasBindingMissing", async () => {
+    useStore.setState({ bindingGeneration: 5, canvasBindingMissing: true });
+    const pushSpy = vi
+      .spyOn(api.canvas, "pushState")
+      .mockResolvedValue({ status: "ok", shapes_written: true });
+    render(<ReviewTab />);
+    await waitFor(() => expect(matchesSpy).toHaveBeenCalledTimes(1));
+
+    act(() => notifyCanvasStateRequest());
+    await act(async () => {});
+
+    expect(pushSpy).toHaveBeenCalled();
+    expect(pushSpy.mock.calls[0][0].binding_generation).toBe(5);
+    expect(useStore.getState().canvasBindingMissing).toBe(false);
   });
 });
