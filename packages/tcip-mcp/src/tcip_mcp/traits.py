@@ -154,7 +154,7 @@ class TraitSpec:
     # on, see `insufficient_holdout_images`/`insufficient_holdout_images_per_class`) the floor
     # itself never exceeds 0.5. What a given calibration was actually held to (both terms combined) is
     # read from the per-scope `pooled_count_bias_tolerance`/`per_class_count_bias_tolerance` in a
-    # run's own sweep record, rather than inferred from this fraction alone.
+    # run's own gate-evidence record, rather than inferred from this fraction alone.
     count_bias_tolerance_frac: float | None = None
     # Max acceptable p90 |per-image count error| (a tail statistic, not a mean, a population mean
     # can hide one badly-off image among many) on the held-out split. No default: an invented number

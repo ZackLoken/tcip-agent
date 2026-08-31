@@ -64,7 +64,7 @@
     "classifier_operating_point_sidecar": {
       "kind": "record",
       "frozen": true,
-      "schema_version": 1,
+      "schema_version": 2,
       "cannot_carry_field": null
     },
     "coco_documents": {
@@ -76,7 +76,7 @@
     "confidence_sweep": {
       "kind": "record",
       "frozen": true,
-      "schema_version": 1,
+      "schema_version": 2,
       "cannot_carry_field": null
     },
     "curated_manifest": {
@@ -154,7 +154,7 @@
     "experiment_validations": {
       "kind": "log",
       "frozen": true,
-      "schema_version": 1,
+      "schema_version": 2,
       "cannot_carry_field": null
     },
     "flat_image": {
@@ -256,13 +256,13 @@
     "operating_point_sidecar": {
       "kind": "record",
       "frozen": true,
-      "schema_version": 1,
+      "schema_version": 2,
       "cannot_carry_field": null
     },
     "ordinal_operating_point_sidecar": {
       "kind": "record",
       "frozen": true,
-      "schema_version": 1,
+      "schema_version": 2,
       "cannot_carry_field": null
     },
     "plant_mapping": {
@@ -310,13 +310,13 @@
     "regression_operating_point_sidecar": {
       "kind": "record",
       "frozen": true,
-      "schema_version": 1,
+      "schema_version": 2,
       "cannot_carry_field": null
     },
     "resolve_scale_sidecar": {
       "kind": "record",
       "frozen": true,
-      "schema_version": 1,
+      "schema_version": 2,
       "cannot_carry_field": null
     },
     "retrospectives": {

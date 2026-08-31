@@ -131,23 +131,23 @@ def _labeled_reference(tmp_path):
     return images_dir, labels_dir
 
 
-def _persisted_sweep(run_inference_result: dict) -> dict:
-    """The full sweep dict a ``run_inference`` calibration persisted, read back by the same key
-    the response names (``calibration_evidence_key``): the response's own ``sweep_summary`` is a
-    compact, response-safe subset, this is the whole thing.
+def _persisted_gate_evidence(run_inference_result: dict) -> dict:
+    """The full gate-evidence dict a ``run_inference`` calibration persisted, read back by the same
+    key the response names (``calibration_evidence_key``): the response's own
+    ``gate_evidence_summary`` is a compact, response-safe subset, this is the whole thing.
     """
     from tcip_store import store
 
-    from tcip_mcp.tools.inference_tools import confidence_sweep_key
+    from tcip_mcp.tools.inference_tools import calibration_curve_key
 
-    body = store.read(confidence_sweep_key(run_inference_result["calibration_evidence_key"]))
-    return body["sweep"]
+    body = store.read(calibration_curve_key(run_inference_result["calibration_evidence_key"]))
+    return body["gate_evidence"]
 
 
 def test_a_bespoke_module_exposing_its_own_knob_reaches_a_validated_point(tmp_path, monkeypatch):
     """Built through build_model, calibrated through run_inference: a hand-rolled, non-torchvision
     module that exposes score_thresh on itself reaches a validated operating point, with the
-    attribute path it was applied on recorded. Also the admitting half of the sweep-identity
+    attribute path it was applied on recorded. Also the admitting half of the curve-identity
     codec check: an ordinary calibration's evidence carries nothing the codec refuses, so it
     survives the check test_checkpoint_digest_rails.py's NaN-evidence test drives to a refusal."""
     from tcip_mcp.tools.inference_tools import run_inference
@@ -161,23 +161,24 @@ def test_a_bespoke_module_exposing_its_own_knob_reaches_a_validated_point(tmp_pa
 
     assert "error" not in r, r
     assert r["validated"] is True
-    sweep = _persisted_sweep(r)
-    assert sweep["failures"] == []
-    assert sweep["staged_conf_floor_attribute_path"] == "self"
-    assert sweep["conf_censored"] is False
-    assert "conf_floor_unstated" not in sweep["failures"]
+    gate_evidence = _persisted_gate_evidence(r)
+    assert gate_evidence["failures"] == []
+    assert gate_evidence["staged_conf_floor_attribute_path"] == "self"
+    assert gate_evidence["conf_censored"] is False
+    assert "conf_floor_unstated" not in gate_evidence["failures"]
 
-    # The sweep round trip: the response's own digest agrees with the record read back under it.
+    # The curve round trip: the response's own digest agrees with the record read back under it.
     from tcip_store import store
 
     from tcip_mcp.tools.inference_tools import (
-        _calibration_evidence, confidence_sweep_identity, confidence_sweep_key,
+        _calibration_evidence, calibration_curve_identity, calibration_curve_key,
     )
 
     key = r["calibration_evidence_key"]
-    body = store.read(confidence_sweep_key(key))
-    assert confidence_sweep_identity(body) == key
+    body = store.read(calibration_curve_key(key))
+    assert calibration_curve_identity(body) == key
     assert _calibration_evidence(r) == body["calibration_evidence"]
+    assert body["schema_version"] == 2
 
 
 def test_a_module_exposing_no_knob_refuses_unstated_not_censored(tmp_path, monkeypatch):
@@ -194,11 +195,11 @@ def test_a_module_exposing_no_knob_refuses_unstated_not_censored(tmp_path, monke
 
     assert "error" not in r, r
     assert r["validated"] is False
-    sweep = _persisted_sweep(r)
-    assert sweep["staged_conf_floor_attribute_path"] is None
-    assert sweep["conf_censored"] is False
-    assert "conf_floor_unstated" in sweep["failures"]
-    assert "conf_censored" not in sweep["failures"]
+    gate_evidence = _persisted_gate_evidence(r)
+    assert gate_evidence["staged_conf_floor_attribute_path"] is None
+    assert gate_evidence["conf_censored"] is False
+    assert "conf_floor_unstated" in gate_evidence["failures"]
+    assert "conf_censored" not in gate_evidence["failures"]
 
 
 def test_model_contract_records_the_holders_own_knobs():

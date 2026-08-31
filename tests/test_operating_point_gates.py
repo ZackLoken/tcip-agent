@@ -53,11 +53,11 @@ def _records(idp="c", *, shift: float = 0.0):
 # ── Exact-conf holdout evaluation, not a nearest-neighbor snap ─────────────
 #
 # Every other holdout fixture in this module gives the holdout its own detection scores drawn from
-# the same set calibration used, so the holdout's own auto-built conf grid (``sweep_operating_point``
+# the same set calibration used, so the holdout's own auto-built conf grid (``derive_operating_point_curve``
 # with no explicit ``conf_grid``) already contains the calibration-picked conf exactly, meaning the
 # deleted nearest-neighbor snap (``count_bias_at``, no longer a symbol anywhere; reconstructed below
 # as ``_old_nearest_neighbor_bias`` to prove the two approaches differ) and the current exact-conf
-# call (``sweep_operating_point(holdout_records, conf_grid=[conf])``) would land on the identical
+# call (``derive_operating_point_curve(holdout_records, conf_grid=[conf])``) would land on the identical
 # curve point in every one of those tests. These two fixtures instead give the holdout a sparse
 # detection-score set that deliberately excludes the calibration-picked conf (0.9), so the nearest
 # grid point the old snap would have found is a genuinely different threshold with genuinely
@@ -75,9 +75,9 @@ def _cal_picks_conf_point_nine():
 def _old_nearest_neighbor_bias(holdout_records, tolerance, conf):
     """Reconstruction of the deleted ``count_bias_at``: the curve entry nearest ``conf`` on the
     holdout's own auto-built grid, not an exact evaluation at ``conf`` itself."""
-    from tcip_mcp.pipelines.training.evaluation import sweep_operating_point
+    from tcip_mcp.pipelines.training.evaluation import derive_operating_point_curve
 
-    sweep = sweep_operating_point(holdout_records, tolerance=tolerance)
+    sweep = derive_operating_point_curve(holdout_records, tolerance=tolerance)
     return min(sweep["curve"], key=lambda c: abs(c["conf"] - conf))
 
 
@@ -107,12 +107,12 @@ def test_exact_conf_eval_catches_a_catastrophic_bias_the_old_snap_would_have_mis
     b = resolve_operating_point("catkin", tiled=True, dataset_hash="h1", calibration_records=cal,
                                 holdout_records=hold, staged_conf_floor=0.01)
     conf = b.get("conf")
-    hb = conf.sweep["holdout_bias"]
+    hb = conf.gate_evidence["holdout_bias"]
     assert hb["conf"] == pytest.approx(0.9)           # evaluated at the conf that will actually ship
     assert hb["count_bias_mean"] == pytest.approx(-80.0)  # the TRUE bias at that conf: total miss
     assert hb["count_bias_mean"] != pytest.approx(old["count_bias_mean"])  # the two approaches differ
     assert conf.validated_against == "false"            # exact eval correctly refuses...
-    assert "count_bias_exceeds_tolerance" in conf.sweep["failures"]  # ...the old snap would not have
+    assert "count_bias_exceeds_tolerance" in conf.gate_evidence["failures"]  # ...the old snap would not have
 
 
 def test_exact_conf_eval_admits_a_reference_the_old_snap_would_have_unfairly_failed():
@@ -141,12 +141,12 @@ def test_exact_conf_eval_admits_a_reference_the_old_snap_would_have_unfairly_fai
     b = resolve_operating_point("catkin", tiled=True, dataset_hash="h1", calibration_records=cal,
                                 holdout_records=hold, staged_conf_floor=0.01)
     conf = b.get("conf")
-    hb = conf.sweep["holdout_bias"]
+    hb = conf.gate_evidence["holdout_bias"]
     assert hb["conf"] == pytest.approx(0.9)            # evaluated at the conf that will actually ship
     assert hb["count_bias_mean"] == pytest.approx(0.0)  # the TRUE bias at that conf: clean
     assert hb["count_bias_mean"] != pytest.approx(old["count_bias_mean"])  # the two approaches differ
     assert conf.validated_against == "held_out_annotations"  # exact eval correctly admits...
-    assert conf.sweep["failures"] == []                  # ...what the old snap would have refused
+    assert conf.gate_evidence["failures"] == []                  # ...what the old snap would have refused
 
 
 # ── Dispersion and localization-quality floor ──────────────────────────────
@@ -175,11 +175,11 @@ def test_tp_zero_bias_zero_holdout_fails_the_localization_floor():
     b = resolve_operating_point("catkin", tiled=True, dataset_hash="h1", calibration_records=cal,
                                 holdout_records=hold, staged_conf_floor=0.0)
     conf = b.get("conf")
-    hb = conf.sweep["holdout_bias"]
+    hb = conf.gate_evidence["holdout_bias"]
     assert hb["tp"] == 0
     assert hb["count_bias_mean"] == pytest.approx(0.0)  # the degenerate case: bias vanishes...
     assert conf.validated_against == "false"               # ...but this must not pass silently
-    assert "localization_quality_floor_failed" in conf.sweep["failures"]
+    assert "localization_quality_floor_failed" in conf.gate_evidence["failures"]
 
 
 def test_dispersion_gate_skipped_when_unauthored_gates_when_authored(monkeypatch):
@@ -201,7 +201,7 @@ def test_dispersion_gate_skipped_when_unauthored_gates_when_authored(monkeypatch
     monkeypatch.setattr(OP, "get_trait", lambda name: strict)
     b_strict = resolve_operating_point("catkin", tiled=True, dataset_hash="h1", calibration_records=cal,
                                        holdout_records=hold, staged_conf_floor=0.01)
-    strict_sweep = b_strict.get("conf").sweep
+    strict_sweep = b_strict.get("conf").gate_evidence
     assert strict_sweep["holdout_bias"]["count_error_p90"] == pytest.approx(1.0)
     assert "count_error_dispersion_too_high" in strict_sweep["failures"]
 
@@ -210,7 +210,7 @@ def test_dispersion_gate_skipped_when_unauthored_gates_when_authored(monkeypatch
     monkeypatch.setattr(OP, "get_trait", lambda name: CATKIN)
     b_default = resolve_operating_point("catkin", tiled=True, dataset_hash="h1", calibration_records=cal,
                                         holdout_records=hold, staged_conf_floor=0.01)
-    default_sweep = b_default.get("conf").sweep
+    default_sweep = b_default.get("conf").gate_evidence
     assert default_sweep["count_error_tolerance"] is None
     assert "count_error_dispersion_too_high" not in default_sweep["failures"]
 
@@ -230,16 +230,16 @@ def test_count_bias_tolerance_frac_source_platform_default_vs_trait(monkeypatch)
     monkeypatch.setattr(OP, "get_trait", lambda name: CATKIN)
     b_default = resolve_operating_point("catkin", tiled=True, dataset_hash="h1", calibration_records=cal,
                                         holdout_records=hold, staged_conf_floor=0.01)
-    default_sweep = b_default.get("conf").sweep
+    default_sweep = b_default.get("conf").gate_evidence
     assert default_sweep["count_bias_tolerance_frac"] == pytest.approx(0.01)
-    assert default_sweep["count_bias_tolerance_frac_source"] == "platform_provisional_default"
+    assert default_sweep["count_bias_tolerance_frac_source"] == "default"
 
     authored = TraitSpec(name="catkin", count_objective=COUNT_UNBIASED,
                          count_bias_tolerance_frac=0.2, delivers=CATKIN.delivers)
     monkeypatch.setattr(OP, "get_trait", lambda name: authored)
     b_trait = resolve_operating_point("catkin", tiled=True, dataset_hash="h1", calibration_records=cal,
                                       holdout_records=hold, staged_conf_floor=0.01)
-    trait_sweep = b_trait.get("conf").sweep
+    trait_sweep = b_trait.get("conf").gate_evidence
     assert trait_sweep["count_bias_tolerance_frac"] == pytest.approx(0.2)
     assert trait_sweep["count_bias_tolerance_frac_source"] == "trait"
 
@@ -253,18 +253,18 @@ def test_all_negative_calibration_or_holdout_refused():
 
     b1 = resolve_operating_point("catkin", tiled=True, dataset_hash="h1", calibration_records=all_negative,
                                  holdout_records=real, staged_conf_floor=0.0)
-    assert "insufficient_calibration_gt" in b1.get("conf").sweep["failures"]
+    assert "insufficient_calibration_gt" in b1.get("conf").gate_evidence["failures"]
 
     b2 = resolve_operating_point("catkin", tiled=True, dataset_hash="h1", calibration_records=real,
                                  holdout_records=all_negative, staged_conf_floor=0.0)
-    assert "insufficient_holdout_gt" in b2.get("conf").sweep["failures"]
+    assert "insufficient_holdout_gt" in b2.get("conf").gate_evidence["failures"]
 
 
 def test_single_image_holdout_fails_the_non_degeneracy_floor_alone():
     hold_one = [_records("h", shift=3.0)[0]]
     b = resolve_operating_point("catkin", tiled=True, dataset_hash="h1", calibration_records=_records("c"),
                                 holdout_records=hold_one, staged_conf_floor=0.3)
-    sweep = b.get("conf").sweep
+    sweep = b.get("conf").gate_evidence
     assert sweep["holdout_bias"]["n_images"] == 1
     assert "insufficient_holdout_images" in sweep["failures"]
 
@@ -275,7 +275,7 @@ def test_n_equals_2_holdout_with_real_variance_fails_equivalence_not_just_degene
     # cancel exactly in the mean.
     b = resolve_operating_point("catkin", tiled=True, dataset_hash="h1", calibration_records=_records("c"),
                                 holdout_records=_records("h", shift=3.0), staged_conf_floor=0.3)
-    sweep = b.get("conf").sweep
+    sweep = b.get("conf").gate_evidence
     assert sweep["holdout_bias"]["count_bias_mean"] == pytest.approx(0.0)
     assert "insufficient_holdout_images" not in sweep["failures"]
     assert "count_bias_exceeds_tolerance" in sweep["failures"]
@@ -321,11 +321,11 @@ def test_zero_verdict_padding_cannot_dilute_the_gate_but_the_predicate_still_ref
                                        holdout_records=hold_real + padding, staged_conf_floor=0.3)
     b_bare = resolve_operating_point("catkin", tiled=True, dataset_hash="h1", calibration_records=_records("c"),
                                      holdout_records=hold_real, staged_conf_floor=0.3)
-    assert b_padded.get("conf").sweep["holdout_bias"]["n_images"] == 10
-    assert b_padded.get("conf").sweep["holdout_bias"]["n_present"] == 2
+    assert b_padded.get("conf").gate_evidence["holdout_bias"]["n_images"] == 10
+    assert b_padded.get("conf").gate_evidence["holdout_bias"]["n_present"] == 2
     assert b_padded.get("conf").validated_against == "false"
-    assert b_padded.get("conf").sweep["failures"] == b_bare.get("conf").sweep["failures"]
-    assert "count_bias_exceeds_tolerance" in b_padded.get("conf").sweep["failures"]
+    assert b_padded.get("conf").gate_evidence["failures"] == b_bare.get("conf").gate_evidence["failures"]
+    assert "count_bias_exceeds_tolerance" in b_padded.get("conf").gate_evidence["failures"]
 
     # With the seam wired to a predicate that flags the padding as uncovered, the whole reference is
     # refused: statistics are still computed over the full, unfiltered 10-image set (never a
@@ -335,7 +335,7 @@ def test_zero_verdict_padding_cannot_dilute_the_gate_but_the_predicate_still_ref
     b_covered = resolve_operating_point("catkin", tiled=True, dataset_hash="h1", calibration_records=_records("c"),
                                         holdout_records=hold_real + padding, staged_conf_floor=0.3,
                                         adjudication_covered=covered)
-    sweep = b_covered.get("conf").sweep
+    sweep = b_covered.get("conf").gate_evidence
     assert sweep["holdout_bias"]["n_images"] == 10  # unfiltered, a gate, not a filter
     assert sweep["adjudication_covered"] is False
     assert b_covered.get("conf").validated_against == "false"
@@ -353,7 +353,7 @@ def test_detection_f1_objective_picks_f1_max_and_labels_it_accordingly(monkeypat
     b = OP.resolve_operating_point("catkin", tiled=True, dataset_hash="h1", calibration_records=_records())
     conf = b.get("conf")
     assert conf._raw == pytest.approx(0.0)  # F1-max pick for this fixture (recall-max, low conf)
-    assert conf.derived_from == "F1-max center-match sweep"
+    assert conf.derived_from == "F1-max center-match curve"
 
 
 def test_presence_objective_deliberately_shares_the_f1_max_picker_and_label(monkeypatch):
@@ -365,7 +365,7 @@ def test_presence_objective_deliberately_shares_the_f1_max_picker_and_label(monk
     b = OP.resolve_operating_point("catkin", tiled=True, dataset_hash="h1", calibration_records=_records())
     conf = b.get("conf")
     assert conf._raw == pytest.approx(0.0)
-    assert conf.derived_from == "F1-max center-match sweep"  # same label as DETECTION_F1, deliberately
+    assert conf.derived_from == "F1-max center-match curve"  # same label as DETECTION_F1, deliberately
 
 
 def test_f1_max_label_gets_the_review_suffix_when_review_confirmed(monkeypatch):
@@ -376,7 +376,7 @@ def test_f1_max_label_gets_the_review_suffix_when_review_confirmed(monkeypatch):
 
     b = OP.resolve_operating_point("catkin", tiled=True, dataset_hash="h1", calibration_records=_records(),
                                    validated_reference=VALIDATED_REVIEW_CONFIRMED)
-    assert b.get("conf").derived_from == "F1-max center-match sweep over review verdicts"
+    assert b.get("conf").derived_from == "F1-max center-match curve over review verdicts"
 
 
 # ── Cap-saturation provenance (non-gating) ───────────────────────────────────
@@ -415,7 +415,7 @@ def test_cap_saturation_is_surfaced_but_never_gates():
     hold = _records("h", shift=3.0)
     b = resolve_operating_point("catkin", tiled=True, dataset_hash="h1", calibration_records=cal,
                                 holdout_records=hold, staged_conf_floor=0.3)
-    sweep = b.get("conf").sweep
+    sweep = b.get("conf").gate_evidence
     assert sweep["calibration_cap_saturated_frac"] == pytest.approx(1.0)
     assert not any("cap" in f for f in sweep["failures"])  # non-gating: never a named failure
 
@@ -425,7 +425,7 @@ def test_cap_saturation_is_surfaced_but_never_gates():
 def test_passed_holdout_is_exactly_the_absence_of_named_failures():
     b = resolve_operating_point("catkin", tiled=True, dataset_hash="h1", calibration_records=_records("c"),
                                 holdout_records=_records("h", shift=3.0), staged_conf_floor=0.3)
-    sweep = b.get("conf").sweep
+    sweep = b.get("conf").gate_evidence
     assert sweep["passed_holdout"] == (not sweep["failures"])
     assert sweep["failures"]  # this fixture is a known-failing one (see test_n_equals_2 above)
 
@@ -489,14 +489,14 @@ def test_realistic_dense_detector_with_genuine_per_image_dispersion_validates_at
     b = resolve_operating_point("catkin", dataset_hash="h1", calibration_records=cal,
                                 holdout_records=hold, tiled=False, staged_conf_floor=0.01)
     conf = b.get("conf")
-    hb = conf.sweep["holdout_bias"]
+    hb = conf.gate_evidence["holdout_bias"]
     assert hb["count_bias_mean"] == pytest.approx(0.0)
     assert hb["count_bias_std"] == pytest.approx(2.0254787341673333, abs=1e-6)  # genuine dispersion
     assert hb["recall"] == pytest.approx(0.97, abs=1e-6)   # a realistic ~97% recall detector
     assert hb["precision"] == pytest.approx(0.97, abs=1e-6)
     assert conf.validated_against == "held_out_annotations"
     assert b.is_shippable is True
-    assert conf.sweep["failures"] == []
+    assert conf.gate_evidence["failures"] == []
 
 
 def test_same_noisy_detector_at_a_smaller_reference_size_correctly_fails_equivalence():
@@ -517,9 +517,9 @@ def test_same_noisy_detector_at_a_smaller_reference_size_correctly_fails_equival
     b = resolve_operating_point("catkin", tiled=True, dataset_hash="h1", calibration_records=cal,
                                 holdout_records=hold, staged_conf_floor=0.01)
     conf = b.get("conf")
-    assert conf.sweep["holdout_bias"]["count_bias_mean"] == pytest.approx(0.0)  # same clean mean...
+    assert conf.gate_evidence["holdout_bias"]["count_bias_mean"] == pytest.approx(0.0)  # same clean mean...
     assert conf.validated_against == "false"  # ...but too few images to clear the equivalence criterion
-    assert "count_bias_exceeds_tolerance" in conf.sweep["failures"]
+    assert "count_bias_exceeds_tolerance" in conf.gate_evidence["failures"]
 
 
 def test_same_noisy_detector_reference_size_fixed_but_density_varied_crosses_admit_refuse():
@@ -548,13 +548,13 @@ def test_same_noisy_detector_reference_size_fixed_but_density_varied_crosses_adm
     sparse = _run(30)
     dense = _run(100)
     # Same noise, same n, same mean/std -- density is the only thing that differs.
-    assert sparse.get("conf").sweep["holdout_bias"]["count_bias_std"] == pytest.approx(
-        dense.get("conf").sweep["holdout_bias"]["count_bias_std"])
-    assert sparse.get("conf").sweep["holdout_bias"]["count_bias_mean"] == pytest.approx(0.0)
+    assert sparse.get("conf").gate_evidence["holdout_bias"]["count_bias_std"] == pytest.approx(
+        dense.get("conf").gate_evidence["holdout_bias"]["count_bias_std"])
+    assert sparse.get("conf").gate_evidence["holdout_bias"]["count_bias_mean"] == pytest.approx(0.0)
     assert sparse.get("conf").validated_against == "false"
-    assert "count_bias_exceeds_tolerance" in sparse.get("conf").sweep["failures"]
+    assert "count_bias_exceeds_tolerance" in sparse.get("conf").gate_evidence["failures"]
     assert dense.get("conf").validated_against == "held_out_annotations"
-    assert dense.get("conf").sweep["failures"] == []
+    assert dense.get("conf").gate_evidence["failures"] == []
 
 
 # ── Mandatory end-to-end integration fixture ────────────────────────────────
@@ -591,7 +591,7 @@ def test_integration_dense_realistic_reference_reaches_held_out_validation():
     conf = b.get("conf")
     assert conf.validated_against == "held_out_annotations"
     assert b.is_shippable is True
-    assert conf.sweep["failures"] == []
+    assert conf.gate_evidence["failures"] == []
 
 
 # ── The gate's population: images that carry the thing being counted ────────
@@ -633,12 +633,12 @@ def test_a_systematic_overcount_is_not_excused_by_the_negatives_beside_it():
     b = resolve_operating_point("catkin", dataset_hash="h1", calibration_records=cal,
                                 holdout_records=hold, tiled=False, staged_conf_floor=0.01)
     conf = b.get("conf")
-    hb = conf.sweep["holdout_bias"]
+    hb = conf.gate_evidence["holdout_bias"]
     assert hb["n_images"] == 50 and hb["n_present"] == 10
     assert hb["count_bias_mean_present"] == pytest.approx(2.0)
-    assert conf.sweep["pooled_typical_count"] == pytest.approx(100.0)
-    assert conf.sweep["pooled_count_bias_tolerance"] == pytest.approx(1.0)
-    assert "count_bias_exceeds_tolerance" in conf.sweep["failures"]
+    assert conf.gate_evidence["pooled_typical_count"] == pytest.approx(100.0)
+    assert conf.gate_evidence["pooled_count_bias_tolerance"] == pytest.approx(1.0)
+    assert "count_bias_exceeds_tolerance" in conf.gate_evidence["failures"]
     assert conf.validated_against == "false"
 
 
@@ -653,8 +653,8 @@ def test_the_same_overcount_without_the_negatives_fails_identically():
     conf = resolve_operating_point("catkin", dataset_hash="h1", calibration_records=cal,
                                    holdout_records=hold, tiled=False,
                                    staged_conf_floor=0.01).get("conf")
-    assert conf.sweep["holdout_bias"]["count_bias_mean_present"] == pytest.approx(2.0)
-    assert "count_bias_exceeds_tolerance" in conf.sweep["failures"]
+    assert conf.gate_evidence["holdout_bias"]["count_bias_mean_present"] == pytest.approx(2.0)
+    assert "count_bias_exceeds_tolerance" in conf.gate_evidence["failures"]
     assert conf.validated_against == "false"
 
 
@@ -669,8 +669,8 @@ def test_a_clean_detector_still_validates_on_a_reference_full_of_negatives():
     b = resolve_operating_point("catkin", dataset_hash="h1", calibration_records=cal,
                                 holdout_records=hold, tiled=False, staged_conf_floor=0.01)
     conf = b.get("conf")
-    assert conf.sweep["holdout_bias"]["n_present"] == 10
-    assert conf.sweep["failures"] == []
+    assert conf.gate_evidence["holdout_bias"]["n_present"] == 10
+    assert conf.gate_evidence["failures"] == []
     assert conf.validated_against == "held_out_annotations"
     assert b.is_shippable is True
 
@@ -692,10 +692,10 @@ def test_a_negative_the_detector_hallucinates_on_is_evidence_not_a_discard():
                                    calibration_records=_hallucinating("c"),
                                    holdout_records=_hallucinating("h", shift=5.0),
                                    tiled=False, staged_conf_floor=0.01).get("conf")
-    hb = conf.sweep["holdout_bias"]
+    hb = conf.gate_evidence["holdout_bias"]
     assert hb["n_present"] == 20  # the hallucinated-on negatives count as evidence
     assert hb["count_bias_mean_present"] == pytest.approx(1.5)  # (10 * 0 + 10 * 3) / 20
-    assert "count_bias_exceeds_tolerance" in conf.sweep["failures"]
+    assert "count_bias_exceeds_tolerance" in conf.gate_evidence["failures"]
 
 
 def test_a_holdout_carrying_one_loaded_image_is_not_enough_evidence():
@@ -709,6 +709,6 @@ def test_a_holdout_carrying_one_loaded_image_is_not_enough_evidence():
     conf = resolve_operating_point("catkin", dataset_hash="h1", calibration_records=cal,
                                    holdout_records=hold, tiled=False,
                                    staged_conf_floor=0.01).get("conf")
-    assert conf.sweep["holdout_bias"]["n_images"] == 100
-    assert "insufficient_holdout_images" in conf.sweep["failures"]
+    assert conf.gate_evidence["holdout_bias"]["n_images"] == 100
+    assert "insufficient_holdout_images" in conf.gate_evidence["failures"]
     assert conf.validated_against == "false"

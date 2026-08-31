@@ -151,7 +151,7 @@ def test_calibration_collection_pass_stages_below_the_shipping_conf(tmp_path):
     assert min(stub.returned_scores) == pytest.approx(SPURIOUS_SCORE)
 
     conf = bundle.get("conf")
-    sweep = conf.sweep
+    sweep = conf.gate_evidence
     assert sweep["conf_censored"] is False
     assert sweep["conf_floor_mismatch"] is False
     # Keeping every detection at or above the hesitant score reproduces the object count exactly,

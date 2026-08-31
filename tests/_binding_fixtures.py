@@ -100,6 +100,7 @@ def file_validation_record(
         create_experiment(experiment_id, {"derived_from": "a reference for a test whose subject is "
                                                           "not the binding itself"})
     body = {
+        "schema_version": 2,  # mirrors seal_validation's own row literal (resolution.py)
         "document": document,
         "trait": trait if trait is not None else stamp.get("trait"),
         "claim": claim_payload(stamp, document=document),
@@ -251,7 +252,7 @@ def calibrated_run_fields(
     A test standing in for the inference pass still has to leave behind what the door reopens the
     gate over, or the door has nothing to earn with and says so. This resolves a real held-out
     operating point over a dense synthetic reference, files the record under its own identity
-    (``confidence_sweep_identity``, the same key a real run's write and a delivery door's read
+    (``calibration_curve_identity``, the same key a real run's write and a delivery door's read
     agree on) exactly where a calibrated run files it, and hands back the result fields that carry
     it. The producing experiment is ``None``, the ordinary bespoke-checkpoint case, so the door
     earns through a created calibration experiment.
@@ -259,7 +260,7 @@ def calibrated_run_fields(
     from tcip_store import store
 
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
-    from tcip_mcp.tools.inference_tools import confidence_sweep_identity, confidence_sweep_key
+    from tcip_mcp.tools.inference_tools import calibration_curve_identity, calibration_curve_key
     from tests._dense_op_fixtures import dense_records
 
     n_images, objects = 20, 80
@@ -279,7 +280,9 @@ def calibrated_run_fields(
     bundle = resolve_operating_point(trait, experiment_id=None, **inputs)
     evidence = {"resolver": "resolve_operating_point", "inputs": inputs,
                 "reference_inputs": {"label_dirs": {"calibration": str(labels_dir)}}}
+    # Mirrors _run_inference_verified's own persisted body (inference_tools.py).
     body = {
+        "schema_version": 2,
         "trait": trait,
         "dataset_hash": "H",
         "checkpoint_sha256": checkpoint_sha256,
@@ -287,11 +290,11 @@ def calibrated_run_fields(
             "tile": tiled, "tile_size": tile_size, "overlap": None,
             "postprocess": "nms", "global_nms_iou": None, "max_dets": None,
         },
-        "sweep": bundle.get("conf").sweep,
+        "gate_evidence": bundle.get("conf").gate_evidence,
         "calibration_evidence": evidence,
     }
-    identity = confidence_sweep_identity(body)
-    store.replace(confidence_sweep_key(identity), body)
+    identity = calibration_curve_identity(body)
+    store.replace(calibration_curve_key(identity), body)
     return {
         "operating_point": bundle.to_provenance()["operating_point"],
         "validated": True,

@@ -1,7 +1,8 @@
 """View-coverage routes: the reference grid over a raster and the per-image record of
 two per-cell facts: which cells were served to the browser at native resolution (a
 delivery fact) and which cells were swept in the viewport at or above the breeder's own
-working scale (a sweep fact). Neither is an attention claim.
+working scale (a sweep fact). Neither is an attention claim. This "sweep" is the viewport-scan
+fact alone, distinct from both a persisted calibration curve and an HPO run's own sweep.
 
 The grid geometry has one implementation (``tcip_mcp.pipelines.reference_grid``): the
 grid route serves cells computed there and the frontend consumes them verbatim, never

@@ -688,7 +688,7 @@ derived. tests/test_provenance_honesty.py enforces that, so a data-sounding labe
 without an implementation behind it.
 """
 
-_SWEEP_IMPLEMENTATION = "tcip_mcp.pipelines.operating_point.sweep_operating_point"
+_CURVE_IMPLEMENTATION = "tcip_mcp.pipelines.operating_point.derive_operating_point_curve"
 
 
 def _derivation_implementations() -> dict[str, object]:
@@ -710,7 +710,7 @@ def _derivation_implementations() -> dict[str, object]:
 
     return {
         **{
-            label + suffix: _SWEEP_IMPLEMENTATION
+            label + suffix: _CURVE_IMPLEMENTATION
             for _picker, label in COUNT_OBJECTIVE_PICKERS.values()
             for suffix in ("", REVIEW_VERDICT_LABEL_SUFFIX)
         },

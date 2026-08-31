@@ -64,7 +64,7 @@ def test_a_holdout_of_smaller_objects_is_judged_at_its_own_object_scale():
 
     b = resolve_operating_point("catkin", tiled=True, dataset_hash="h", staged_conf_floor=0.05,
                                 calibration_records=cal, holdout_records=hold)
-    sweep = b.params["conf"].sweep
+    sweep = b.params["conf"].gate_evidence
     hb = sweep["holdout_bias"]
 
     # Calibration's own tolerance is twice the offset, so the same 30 px displacement is a hit there.
@@ -88,7 +88,7 @@ def test_the_same_displacement_validates_when_both_sides_carry_the_same_object_s
 
     b = resolve_operating_point("catkin", tiled=True, dataset_hash="h", staged_conf_floor=0.05,
                                 calibration_records=cal, holdout_records=hold)
-    sweep = b.params["conf"].sweep
+    sweep = b.params["conf"].gate_evidence
     hb = sweep["holdout_bias"]
 
     assert hb["tp"] == TOTAL_OBJECTS
@@ -113,7 +113,7 @@ def test_a_trait_with_no_authored_floor_refuses_to_validate(tmp_path):
     b = resolve_operating_point("no_floor_trait", tiled=True, dataset_hash="h",
                                 staged_conf_floor=0.05, calibration_records=cal,
                                 holdout_records=hold)
-    sweep = b.params["conf"].sweep
+    sweep = b.params["conf"].gate_evidence
 
     assert sweep["holdout_match_quality_floor"] is None
     assert "holdout_match_quality_floor_unauthored" in sweep["failures"]
@@ -128,7 +128,7 @@ def test_an_authored_floor_the_holdout_does_not_clear_refuses():
 
     b = resolve_operating_point("catkin", tiled=True, dataset_hash="h", staged_conf_floor=0.05,
                                 calibration_records=cal, holdout_records=hold)
-    sweep = b.params["conf"].sweep
+    sweep = b.params["conf"].gate_evidence
 
     assert sweep["holdout_match_quality_floor"] == 0.5
     assert "localization_quality_floor_failed" in sweep["failures"]

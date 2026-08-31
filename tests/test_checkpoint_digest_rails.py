@@ -719,7 +719,7 @@ def test_export_predictions_refuses_a_sweep_record_edited_after_the_run(tmp_path
     from tcip_store import store
 
     identity = captured["calibration_evidence_key"]
-    key = itools.confidence_sweep_key(identity)
+    key = itools.calibration_curve_key(identity)
     body = store.read(key)
     body["calibration_evidence"]["inputs"]["dataset_hash"] = "tampered"
     store.replace(key, body)
@@ -763,7 +763,7 @@ def test_export_predictions_refuses_a_sweep_record_edited_after_the_run_through_
 
     from tcip_store import store
 
-    key = itools.confidence_sweep_key(identity)
+    key = itools.calibration_curve_key(identity)
     body = store.read(key)
     body["calibration_evidence"]["inputs"]["dataset_hash"] = "tampered"
     store.replace(key, body)

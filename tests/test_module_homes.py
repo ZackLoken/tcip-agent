@@ -368,11 +368,12 @@ def test_checkpoint_marker_keys_have_one_home():
 
 def test_calibration_sweep_functions_have_one_home():
     """``calibrate_operating_point`` (de-underscored from ``_calibrate_operating_point``) and
-    ``sweep_summary`` (de-underscored from ``_sweep_summary``) moved out of
-    ``tools/inference_tools.py`` into ``pipelines/calibration.py``, their consumers being
-    cross-module (``_run_inference_verified`` and a dozen-plus test files)."""
+    ``gate_evidence_summary`` (de-underscored from ``_sweep_summary``, then renamed off the
+    calibration sense of "sweep") moved out of ``tools/inference_tools.py`` into
+    ``pipelines/calibration.py``, their consumers being cross-module (``_run_inference_verified``
+    and a dozen-plus test files)."""
     _assert_one_home(
-        {"calibrate_operating_point", "sweep_summary"},
+        {"calibrate_operating_point", "gate_evidence_summary"},
         _module_path("tools/inference_tools.py"),
         _module_path("pipelines/calibration.py"),
     )
@@ -517,3 +518,20 @@ def test_validate_reference_request_and_response_models_moved_to_validation_modu
         node_types=(ast.ClassDef,),
         roots=(_web_src_root(),),
     )
+
+
+def test_the_retired_sweep_vocabulary_is_absent_from_package_source():
+    """The calibration sense of "sweep" retired its ``sweep_data``/``has_sweep`` spellings for
+    ``gate_evidence``/``has_gate_evidence`` everywhere a producer or reader carries them. Text
+    search over every package's own source tree, not an AST identifier scan: a shim could as
+    easily be a string key as a def. ``tests/`` deliberately keeps the old spelling (fixtures for
+    the carried-subrecord contract, this file's own history) and is out of scope by construction.
+    """
+    import tcip_store
+
+    roots = (*_package_roots(), _tcip_web_root(), Path(tcip_store.__file__).resolve().parent)
+    for root in roots:
+        for py_file in root.rglob("*.py"):
+            text = py_file.read_text(encoding="utf-8")
+            assert "sweep_data" not in text, f"{py_file} still names sweep_data"
+            assert "has_sweep" not in text, f"{py_file} still names has_sweep"

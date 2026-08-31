@@ -58,12 +58,12 @@ def resolve_physical_scale(
     standard error at ``tolerance_frac / sqrt(holdout count)``, strictly tighter than
     ``tolerance_frac`` for any holdout of two or more, so a second floor derived from that same
     standard error would never bind once the dispersion check passes; the relative standard error is
-    still recorded in ``sweep_data`` as a diagnostic. Either half with fewer than two references
+    still recorded in ``gate_evidence`` as a diagnostic. Either half with fewer than two references
     refuses, naming which.
 
-    Returns ``{validated_against, passed, value, unit, failures, sweep_data}``, the same shape the
+    Returns ``{validated_against, passed, value, unit, failures, gate_evidence}``, the same shape the
     scalar-head resolvers return (never a ``ResolvedParam``, which cannot carry a ``failures``
-    list): ``value`` is the derived scale on a pass, ``None`` otherwise; ``sweep_data`` carries every
+    list): ``value`` is the derived scale on a pass, ``None`` otherwise; ``gate_evidence`` carries every
     implied scale by half, both means, the holdout dispersion, the relative standard error and the
     split identity, so a failed calibration is diagnosable from the returned dict alone. Never raises
     for an evidence-quality failure (too few references, a disagreeing reference set, an unauthored
@@ -91,14 +91,14 @@ def resolve_physical_scale(
         return {
             "validated_against": VALIDATED_FALSE, "passed": False, "value": None, "unit": unit,
             "failures": ["scale_tolerance_not_authored"],
-            "sweep_data": {"note": "TraitSpec.scale_tolerance_frac is not authored for this "
+            "gate_evidence": {"note": "TraitSpec.scale_tolerance_frac is not authored for this "
                                    "trait; a physical-scale gate has no platform default "
                                    "fallback, the domain expert must author it."},
         }
     if not references:
         return {
             "validated_against": VALIDATED_FALSE, "passed": False, "value": None, "unit": unit,
-            "failures": ["empty_reference_set"], "sweep_data": {},
+            "failures": ["empty_reference_set"], "gate_evidence": {},
         }
 
     malformed = sorted(
@@ -111,14 +111,14 @@ def resolve_physical_scale(
     if malformed:
         return {
             "validated_against": VALIDATED_FALSE, "passed": False, "value": None, "unit": unit,
-            "failures": ["malformed_reference_set"], "sweep_data": {"malformed_stems": malformed},
+            "failures": ["malformed_reference_set"], "gate_evidence": {"malformed_stems": malformed},
         }
 
     off_unit = sorted(stem for stem, r in references.items() if r["unit"] != unit)
     if off_unit:
         return {
             "validated_against": VALIDATED_FALSE, "passed": False, "value": None, "unit": unit,
-            "failures": ["unit_disagreement"], "sweep_data": {"off_unit_stems": off_unit},
+            "failures": ["unit_disagreement"], "gate_evidence": {"off_unit_stems": off_unit},
         }
 
     from tcip_mcp.pipelines.data.splits import (
@@ -139,7 +139,7 @@ def resolve_physical_scale(
 
     cal_implied = _implied(cal_stems)
     hold_implied = _implied(hold_stems)
-    sweep_data: dict[str, Any] = {
+    gate_evidence: dict[str, Any] = {
         "calibration_implied_scales": cal_implied, "holdout_implied_scales": hold_implied,
         "split_identity": identity_hash, "capture_id": capture_id,
     }
@@ -151,7 +151,7 @@ def resolve_physical_scale(
         failures.append("insufficient_holdout_references")
     if failures:
         return {"validated_against": VALIDATED_FALSE, "passed": False, "value": None, "unit": unit,
-                "failures": failures, "sweep_data": sweep_data}
+                "failures": failures, "gate_evidence": gate_evidence}
 
     candidate = statistics.mean(cal_implied.values())
     hold_values = list(hold_implied.values())
@@ -166,7 +166,7 @@ def resolve_physical_scale(
     if relative_deviation > tolerance_frac:
         failures.append("holdout_mean_outside_tolerance")
 
-    sweep_data.update({
+    gate_evidence.update({
         "calibration_mean": candidate,
         "holdout_mean": hold_mean,
         "holdout_relative_dispersion": hold_relative_dispersion,
@@ -178,6 +178,6 @@ def resolve_physical_scale(
     return {
         "validated_against": VALIDATED_PHYSICAL_MEASUREMENT if passed else VALIDATED_FALSE,
         "passed": passed, "value": candidate if passed else None, "unit": unit,
-        "failures": failures, "sweep_data": sweep_data,
+        "failures": failures, "gate_evidence": gate_evidence,
     }
 

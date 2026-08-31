@@ -65,14 +65,14 @@ def test_split_policy_provenance_carries_each_locked_field_under_its_own_name():
               "unlocked_stems": ["b_0_0"]}
     attach_split_policy_provenance(b, locked)
 
-    policy = conf.sweep["split_policy"]
+    policy = conf.gate_evidence["split_policy"]
     assert policy["group_by"] == "tile_prefix"
     assert policy["group_key_map"] == {"a_0_0": "a"}
     assert policy["seed"] == 7
     assert policy["holdout_ratio"] == 0.25
     assert policy["identity_hash"] == "abc123"
-    assert conf.sweep["split_policy_divergence"] == locked["policy_divergence"]
-    assert conf.sweep["split_unlocked_stems"] == ["b_0_0"]
+    assert conf.gate_evidence["split_policy_divergence"] == locked["policy_divergence"]
+    assert conf.gate_evidence["split_unlocked_stems"] == ["b_0_0"]
 
     assert conf._raw == value_before
     assert conf.validated_against == stamp_before
@@ -87,7 +87,7 @@ def test_spatial_split_kind_provenance_names_the_split_and_its_own_geometry():
     conf = b.params["conf"]
     attach_spatial_split_kind_provenance(b, {"seed": 3, "tile_size": 512, "overlap": 0.25})
 
-    assert conf.sweep["split_policy"] == {"group_by": "spatial_strip", "seed": 3,
+    assert conf.gate_evidence["split_policy"] == {"group_by": "spatial_strip", "seed": 3,
                                           "tile_size": 512, "overlap": 0.25}
 
 
@@ -157,7 +157,7 @@ def test_a_floor_mismatch_on_either_side_of_the_reference_is_surfaced():
 
     b = resolve_operating_point("catkin", tiled=True, dataset_hash="h", staged_conf_floor=0.05,
                                 calibration_records=cal, holdout_records=hold)
-    sweep = b.params["conf"].sweep
+    sweep = b.params["conf"].gate_evidence
 
     assert sweep["calibration_observed_min_score"] == pytest.approx(0.9)
     assert sweep["holdout_observed_min_score"] == pytest.approx(0.05)
@@ -181,7 +181,7 @@ def test_a_holdout_sharing_one_image_of_content_with_calibration_refuses():
 
     b = resolve_operating_point("catkin", tiled=True, dataset_hash="h", staged_conf_floor=0.05,
                                 calibration_records=cal, holdout_records=hold)
-    sweep = b.params["conf"].sweep
+    sweep = b.params["conf"].gate_evidence
 
     assert sweep["content_overlap_frac"] == pytest.approx(1.0 / 3.0)  # the overlap is real
     assert sweep["content_shared_with_calibration"] is True
@@ -228,12 +228,12 @@ def test_an_authored_ordinal_agreement_floor_governs_instead_of_the_platform_pla
         calibration_items=_ordinal_items("c", _RANKS, pred),
         holdout_items=_ordinal_items("h", _RANKS, pred), experiment_id=None)
 
-    score = res["sweep_data"]["score"]
+    score = res["gate_evidence"]["score"]
     # Real agreement, above the platform placeholder and below the authored bar: exactly the band
     # in which the two floors disagree about the verdict.
     assert 0.41 < score < 0.9
-    assert res["sweep_data"]["floor"] == pytest.approx(0.9)
-    assert res["sweep_data"]["floor_source"] == "trait"
+    assert res["gate_evidence"]["floor"] == pytest.approx(0.9)
+    assert res["gate_evidence"]["floor_source"] == "trait"
     assert res["failures"] == ["compensating_error_floor_failed"]
     assert res["passed"] is False
     assert res["validated_against"] == VALIDATED_FALSE
@@ -259,10 +259,10 @@ def test_an_authored_regression_skill_floor_governs_instead_of_the_platform_plac
         calibration_items=_regression_items("c", true_values, pred_values),
         holdout_items=_regression_items("h", true_values, pred_values), experiment_id=None)
 
-    score = res["sweep_data"]["score"]
+    score = res["gate_evidence"]["score"]
     assert 0.5 < score < 0.9
-    assert res["sweep_data"]["floor"] == pytest.approx(0.9)
-    assert res["sweep_data"]["floor_source"] == "trait"
+    assert res["gate_evidence"]["floor"] == pytest.approx(0.9)
+    assert res["gate_evidence"]["floor_source"] == "trait"
     assert res["failures"] == ["compensating_error_floor_failed"]
     assert res["passed"] is False
     assert res["validated_against"] == VALIDATED_FALSE
@@ -289,6 +289,6 @@ def test_a_trait_that_authors_no_scalar_floor_still_calibrates_against_the_place
         calibration_items=_ordinal_items("c", _RANKS, pred),
         holdout_items=_ordinal_items("h", _RANKS, pred), experiment_id=None)
 
-    assert res["sweep_data"]["floor_source"] == "provisional_default"
+    assert res["gate_evidence"]["floor_source"] == "default"
     assert res["failures"] == []
     assert res["passed"] is True

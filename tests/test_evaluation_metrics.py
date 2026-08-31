@@ -33,7 +33,7 @@ from tcip_mcp.pipelines.training.evaluation import (  # noqa: E402
     r_squared,
     regression_metrics,
     resolve_match_criterion,
-    sweep_operating_point,
+    derive_operating_point_curve,
 )
 from tcip_mcp.pipelines.training.eval_runners import (  # noqa: E402
     run_test_evaluation,
@@ -171,7 +171,7 @@ def test_golden_gt_class_avg_size():
 
 
 def test_golden_sweep_operating_point_curve():
-    sweep = sweep_operating_point(_sweep_records(), tolerance=10.0, class_id=0)
+    sweep = derive_operating_point_curve(_sweep_records(), tolerance=10.0, class_id=0)
     curve = sweep["curve"]
     assert [round(c["conf"], 2) for c in curve] == [0.0, 0.3, 0.6, 0.9]
 
@@ -186,7 +186,7 @@ def test_golden_sweep_operating_point_curve():
 
 
 def test_golden_operating_point_pickers():
-    sweep = sweep_operating_point(_sweep_records(), tolerance=10.0, class_id=0)
+    sweep = derive_operating_point_curve(_sweep_records(), tolerance=10.0, class_id=0)
     assert pick_count_unbiased(sweep) == pytest.approx(0.6)   # zero count bias
     assert pick_f1_max(sweep) == pytest.approx(0.0)           # recall-max point
     at06 = next(c for c in sweep["curve"] if c["conf"] == pytest.approx(0.6))

@@ -84,7 +84,7 @@ def test_script_and_mcp_path_share_the_same_cap_constant(monkeypatch, tmp_path):
     def _resolve_op(trait_name, **kw):
         from tcip_mcp.pipelines.resolution import ResolvedBundle, derived
         conf = derived("conf", 0.4, requires_validation=True, validation_kind="annotations", derived_from="x",
-                       validated_against="false", sweep={})
+                       validated_against="false", gate_evidence={})
         return ResolvedBundle(trait=trait_name, dataset_hash=kw.get("dataset_hash"), params={"conf": conf})
 
     monkeypatch.setattr("tcip_mcp.pipelines.operating_point.resolve_operating_point", _resolve_op)
@@ -152,7 +152,7 @@ def test_script_threads_applied_floor_and_shared_cap(monkeypatch, tmp_path):
         calls["resolve_operating_point_kwargs"] = kw
         from tcip_mcp.pipelines.resolution import ResolvedBundle, derived
         conf = derived("conf", 0.4, requires_validation=True, validation_kind="annotations", derived_from="x",
-                       validated_against="false", sweep={})
+                       validated_against="false", gate_evidence={})
         return ResolvedBundle(trait=trait_name, dataset_hash=kw.get("dataset_hash"), params={"conf": conf})
 
     monkeypatch.setattr("tcip_mcp.pipelines.operating_point.resolve_operating_point", _resolve_op)
@@ -217,7 +217,7 @@ def test_script_collection_cap_is_density_derived_not_the_flat_default(monkeypat
     def _resolve_op(trait_name, **kw):
         from tcip_mcp.pipelines.resolution import ResolvedBundle, derived
         conf = derived("conf", 0.4, requires_validation=True, validation_kind="annotations",
-                       derived_from="x", validated_against="false", sweep={})
+                       derived_from="x", validated_against="false", gate_evidence={})
         return ResolvedBundle(trait=trait_name, dataset_hash=kw.get("dataset_hash"), params={"conf": conf})
 
     monkeypatch.setattr("tcip_mcp.pipelines.operating_point.resolve_operating_point", _resolve_op)
@@ -266,7 +266,7 @@ def test_script_writes_nothing_into_the_experiment_record(monkeypatch, tmp_path,
     def _resolve_op(trait_name, **kw):
         from tcip_mcp.pipelines.resolution import ResolvedBundle, derived
         conf = derived("conf", 0.4, requires_validation=True, validation_kind="annotations",
-                       derived_from="x", validated_against="false", sweep={})
+                       derived_from="x", validated_against="false", gate_evidence={})
         return ResolvedBundle(trait=trait_name, dataset_hash=kw.get("dataset_hash"),
                               params={"conf": conf})
 

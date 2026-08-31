@@ -167,8 +167,8 @@ def _seal(
         split_manifest_sha256=split_manifest_sha256,
     )
     conf = bundle.get("conf")
-    assert conf is not None and conf.sweep is not None, bundle
-    return conf.sweep["selection_disjointness"], conf.is_shippable
+    assert conf is not None and conf.gate_evidence is not None, bundle
+    return conf.gate_evidence["selection_disjointness"], conf.is_shippable
 
 
 def _manifest(out: Path) -> dict:
@@ -373,7 +373,7 @@ def test_the_review_path_genuinely_runs_and_seals_null_second_window_when_nothin
         state, TRAIT, scope_root=root, bucket_identities=[_REVIEW_IDENTITY],
         staged_conf_floor=0.01, tiled=False, experiment_id="exp_review_untouched",
         calibration_date=DATES[0])
-    sd = bundle.get("conf").sweep["selection_disjointness"]
+    sd = bundle.get("conf").gate_evidence["selection_disjointness"]
 
     assert sd["applicable"] is True
     assert sd["labels_moved_draw_to_run"] == []
@@ -406,7 +406,7 @@ def test_the_review_path_names_a_calibration_side_label_moved_before_the_bind(
         state, TRAIT, scope_root=root, bucket_identities=[_REVIEW_IDENTITY],
         staged_conf_floor=0.01, tiled=False, experiment_id="exp_review_moved",
         calibration_date=DATES[0])
-    sd = bundle.get("conf").sweep["selection_disjointness"]
+    sd = bundle.get("conf").gate_evidence["selection_disjointness"]
 
     assert sd["applicable"] is True
     assert set(sd["labels_moved_draw_to_run"]) == set(_STEMS)

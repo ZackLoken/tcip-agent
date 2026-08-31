@@ -27,13 +27,13 @@ from tcip_mcp.project_paths import resolve_output_path
 
 logger = logging.getLogger(__name__)
 
-_SWEEP_DIR = (".tcip", "artifacts")
-_SWEEP_STEM = "operating_point_sweep_"
+_CALIBRATION_CURVE_DIR = (".tcip", "artifacts")
+_CALIBRATION_CURVE_STEM = "operating_point_sweep_"  # frozen on-disk prefix, the locator's own path contract
 
 
-class _SweepArtifactLocator:
-    """One conf sweep record per name, named for the digest of the record's own bytes
-    (:func:`confidence_sweep_identity`).
+class _CalibrationCurveLocator:
+    """One conf curve record per name, named for the digest of the record's own bytes
+    (:func:`calibration_curve_identity`).
 
     The digest is in the filename rather than in a directory of its own, the same convention
     the locked calibration/holdout split beside it uses. Under ``last_writer_wins``, only a
@@ -43,19 +43,20 @@ class _SweepArtifactLocator:
 
     def relative_path(self, scope: str, parts: tuple[str, ...]) -> PurePosixPath:
         (body_hash,) = parts
-        return PurePosixPath(*_SWEEP_DIR, f"{_SWEEP_STEM}{body_hash}.json")
+        return PurePosixPath(*_CALIBRATION_CURVE_DIR, f"{_CALIBRATION_CURVE_STEM}{body_hash}.json")
 
     def parts_from(self, relative_path: PurePosixPath) -> tuple[str, ...] | None:
         segments = relative_path.parts
-        if segments[:len(_SWEEP_DIR)] != _SWEEP_DIR or len(segments) != len(_SWEEP_DIR) + 1:
+        if (segments[:len(_CALIBRATION_CURVE_DIR)] != _CALIBRATION_CURVE_DIR
+                or len(segments) != len(_CALIBRATION_CURVE_DIR) + 1):
             return None
         name = segments[-1]
-        if not name.startswith(_SWEEP_STEM) or not name.endswith(".json"):
+        if not name.startswith(_CALIBRATION_CURVE_STEM) or not name.endswith(".json"):
             return None
-        return (name[len(_SWEEP_STEM):-len(".json")],)
+        return (name[len(_CALIBRATION_CURVE_STEM):-len(".json")],)
 
 
-CONFIDENCE_SWEEP_STORE = "confidence_sweep"
+CONFIDENCE_SWEEP_STORE = "confidence_sweep"  # frozen store name: the database backend keys existing rows by it
 register_store(
     StoreDescriptor(
         name=CONFIDENCE_SWEEP_STORE,
@@ -64,21 +65,22 @@ register_store(
         frozen=True,
         codec=RECORD_JSON,
         concurrency="last_writer_wins",
-        locator=_SweepArtifactLocator(),
+        locator=_CalibrationCurveLocator(),
+        schema_version=2,
     )
 )
 
 
-def confidence_sweep_key(record_digest: str) -> Key:
-    """The full confidence sweep one calibration produced.
+def calibration_curve_key(record_digest: str) -> Key:
+    """The full calibration curve one calibration produced.
 
-    ``record_digest`` is :func:`confidence_sweep_identity` over the record's own bytes, not a
+    ``record_digest`` is :func:`calibration_curve_identity` over the record's own bytes, not a
     digest of the run's inputs alone. ``last_writer_wins``: only a byte-identical rerun replaces
     the record already under this key; a differing calibration keys a new record.
     """
     if PurePosixPath(record_digest).name != record_digest or record_digest in ("", ".", ".."):
         raise BadKey(
-            f"sweep identity {record_digest!r} is not a single name: an identity carrying a path "
+            f"curve identity {record_digest!r} is not a single name: an identity carrying a path "
             "separator would address a record outside the artifact store"
         )
     from tcip_mcp.project_paths import platform_state_root
@@ -86,18 +88,18 @@ def confidence_sweep_key(record_digest: str) -> Key:
     return Key(CONFIDENCE_SWEEP_STORE, str(platform_state_root().resolve()), (record_digest,))
 
 
-def confidence_sweep_path(record_digest: str) -> Path:
-    """Where that sweep lands on disk, for the provenance that names the file it was kept in."""
+def calibration_curve_path(record_digest: str) -> Path:
+    """Where that curve lands on disk, for the provenance that names the file it was kept in."""
     from tcip_mcp.project_paths import platform_state_root
 
-    key = confidence_sweep_key(record_digest)
+    key = calibration_curve_key(record_digest)
     return platform_state_root().joinpath(
-        *_SweepArtifactLocator().relative_path(key.root, key.parts).parts
+        *_CalibrationCurveLocator().relative_path(key.root, key.parts).parts
     )
 
 
-def confidence_sweep_identity(body: dict) -> str:
-    """The sha256 identity of a confidence-sweep record's whole body, over the exact bytes the
+def calibration_curve_identity(body: dict) -> str:
+    """The sha256 identity of a confidence_sweep record's whole body, over the exact bytes the
     store writes for it (``RECORD_JSON.encode``, the codec's own check of what the body carries).
 
     The writer takes the key a record is written under from this function, and the reader
@@ -286,7 +288,7 @@ def run_inference(
         split_seed: Split seed for the locked calibration/holdout split, like
             ``group_by``, only takes effect on the first calibration call for a given
             calibration-labels identity; a later call's declared value is compared to the lock and
-            any divergence is reported in ``sweep_summary``/the resolved bundle rather than
+            any divergence is reported in ``gate_evidence_summary``/the resolved bundle rather than
             silently ignored.
         split_holdout_ratio: Calibration/holdout fraction for the locked split, same
             first-call-only semantics as ``split_seed``.
@@ -486,7 +488,7 @@ def _run_inference_verified(
     if trait and calibration_labels_dir:
         from tcip_annotation.json_io import UnreadableLabelDocument
 
-        from tcip_mcp.pipelines.calibration import calibrate_operating_point, sweep_summary
+        from tcip_mcp.pipelines.calibration import calibrate_operating_point, gate_evidence_summary
 
         cal_images = calibration_images_dir or images_dir
         try:
@@ -571,7 +573,7 @@ def _run_inference_verified(
                 issues = issues + validate_resolved_bundle(chan_bundle, probed_channels=probed)
         # validated only when held-out passed and nothing is un-shippable under the target actually used.
         validated = bool(bundle.is_shippable and not issues)
-        if (conf_param.sweep or {}).get("conf_floor_mismatch"):
+        if (conf_param.gate_evidence or {}).get("conf_floor_mismatch"):
             # Read after `validated`: this one travels to the delivery surface without gating there.
             issues = issues + [
                 "conf: the reference's own lowest detection score sits materially above the conf "
@@ -585,7 +587,7 @@ def _run_inference_verified(
             "cross_dataset_check": cross_dataset_check,
             "conf_source": "calibration",
             "dataset_hash": cal_hash,
-            "sweep_summary": sweep_summary(conf_param),
+            "gate_evidence_summary": gate_evidence_summary(conf_param),
             "n_excluded_incomplete_attribute": n_excluded_incomplete_attribute,
         }
         manifest_excluded = evidence.get("excluded")
@@ -594,9 +596,10 @@ def _run_inference_verified(
             extra["n_excluded_validation_stems"] = len(
                 manifest_excluded["excluded_validation_stems"])
             extra["n_excluded_unassigned_stems"] = len(manifest_excluded["excluded_unassigned_stems"])
-        # The full sweep can be large, persist it and return the path (provenance emits has_sweep).
+        # The full curve can be large, persist it and return the path (provenance emits has_gate_evidence).
         # The record's own body is its identity, so a curve differing from a prior one is never lost.
         sweep_body = {
+            "schema_version": 2,
             "trait": trait,
             "dataset_hash": cal_hash,
             "checkpoint_sha256": identity["sha256"],
@@ -605,23 +608,23 @@ def _run_inference_verified(
                 "overlap": resolved_overlap, "postprocess": postprocess,
                 "global_nms_iou": applied_nms_iou, "max_dets": applied_max_dets,
             },
-            "sweep": conf_param.sweep,
+            "gate_evidence": conf_param.gate_evidence,
             "calibration_evidence": evidence,
         }
         try:
-            sweep_identity = confidence_sweep_identity(sweep_body)
+            sweep_identity = calibration_curve_identity(sweep_body)
         except (TypeError, ValueError) as exc:
-            return {"error": f"the operating-point sweep for trait {trait!r} could not be kept "
+            return {"error": f"the operating-point curve for trait {trait!r} could not be kept "
                              f"(its body cannot be recorded): {exc}"}
-        # The evidence rides in the sweep artifact, read back by identity, never on this response.
+        # The evidence rides in the curve artifact, read back by identity, never on this response.
         from tcip_store import store
 
         try:
-            store.replace(confidence_sweep_key(sweep_identity), sweep_body)
+            store.replace(calibration_curve_key(sweep_identity), sweep_body)
         except Exception:
-            logger.warning("could not persist operating-point sweep", exc_info=True)
+            logger.warning("could not persist operating-point curve", exc_info=True)
         else:
-            extra["sweep_path"] = str(confidence_sweep_path(sweep_identity))
+            extra["calibration_curve_path"] = str(calibration_curve_path(sweep_identity))
             extra["calibration_evidence_key"] = sweep_identity
     else:
         # Raw inference has no per-dataset calibration: the model already carries score_threshold as
@@ -783,7 +786,7 @@ def _calibration_evidence(result: dict) -> dict | None:
     calibration produces, and only a door earning a validation record has any use for them.
 
     The record read back is re-encoded and its digest compared against ``identity`` (the run's
-    own carried key, which is also its identity, see :func:`confidence_sweep_identity`); a
+    own carried key, which is also its identity, see :func:`calibration_curve_identity`); a
     difference raises ``ValueError`` naming both, since the evidence the count gate would run
     over is then not what this run wrote. An absent record still returns ``None``.
     """
@@ -792,13 +795,13 @@ def _calibration_evidence(result: dict) -> dict | None:
         return None
     from tcip_store import store
 
-    body = store.read(confidence_sweep_key(identity), default=None)
+    body = store.read(calibration_curve_key(identity), default=None)
     if body is None:
         return None
-    recomputed = confidence_sweep_identity(body)
+    recomputed = calibration_curve_identity(body)
     if recomputed != identity:
         raise ValueError(
-            f"the confidence-sweep record under {identity!r} does not match the digest this "
+            f"the calibration-curve record under {identity!r} does not match the digest this "
             f"run's own response carried (recomputed {recomputed!r}): the evidence the count "
             "gate would run over is not what this run wrote."
         )
@@ -930,8 +933,8 @@ def _publish_image_predictions(out: Path, result: dict, *, checkpoint_path: str,
         images_dir=images_dir,
         raster_path=None,
         produced_at=result.get("produced_at"),
-        sweep_path=result.get("sweep_path"),
-        sweep_summary=result.get("sweep_summary"),
+        calibration_curve_path=result.get("calibration_curve_path"),
+        gate_evidence_summary=result.get("gate_evidence_summary"),
         image_filenames=image_filenames,
     )
     if has_masks:

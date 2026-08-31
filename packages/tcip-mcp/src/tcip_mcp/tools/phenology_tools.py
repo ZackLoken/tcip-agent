@@ -367,7 +367,7 @@ def _stated_root_disagreement(dataset_root: str, candidates: dict[str, str]) -> 
 
     Two other modules (``scale_tools.py``, ``calibration_tools.py``) import this beside its own
     caller here, the same cross-module-consumer shape that moved ``calibrate_operating_point``/
-    ``sweep_summary`` out of their donor module; it stays here deliberately, since it is this
+    ``gate_evidence_summary`` out of their donor module; it stays here deliberately, since it is this
     module's own refusal wording, not a shared primitive those callers each restate.
     """
     from tcip_mcp.dataset_layout import dataset_root_of
@@ -498,12 +498,13 @@ def calibrate_classifier_operating_point(
     out = resolve_output_path(output_dir)
     checkpoint_sha256 = _agreed_checkpoint_identity([calibration_pred_dir, holdout_pred_dir])
     stamp = {
+        "schema_version": 2,
         "operating_point": {"classifier": {"validated_against": result["validated_against"],
                                            "value": spec.positive_class_name}},
         "validated": result["passed"],
         "validated_by": None,
         "failures": result["failures"],
-        "sweep_data": result["sweep_data"],
+        "gate_evidence": result["gate_evidence"],
         "checkpoint_sha256": checkpoint_sha256,
         "experiment_id": experiment_id,
         "trait": trait_name,

@@ -314,6 +314,7 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
         update_sidecar,
     )
     from tcip_mcp.prediction_buckets import review_state_dir_of
+    from tcip_store.errors import StoreError
 
     op_prov = bundle.to_provenance()["operating_point"]
     ref_hash = review_reference_hash(
@@ -348,9 +349,15 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
 
         The trait is written only when a gate was cleared, so a bucket carries the trait its claim
         was earned for and an honest placeholder claims no scope at all.
+
+        ``schema_version`` marks the promotion's own writing vintage, not every value the merged
+        record carries: a member ``stored`` already held under an older provenance vocabulary
+        (unchanged by this merge) keeps reading under that older spelling, exactly as
+        ``operating_point_stamp`` documents for its own producers.
         """
         merged = dict(stored)
         merged.update({
+            "schema_version": 2,
             "operating_point": op_prov,
             "validated": result["validated"],
             "validated_reference": result["reference"],
@@ -406,7 +413,7 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
                     stamp_body=earned)
             if update_sidecar(d, _promotion_of(d, earned)):
                 stamped.append(d)
-    except ValueError as exc:
+    except (ValueError, StoreError) as exc:
         raise HTTPException(400, str(exc)) from None
 
     # The sidecar this stamps sits in the prediction bucket, which travels with the dataset.

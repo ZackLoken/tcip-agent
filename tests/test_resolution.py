@@ -27,7 +27,7 @@ pytestmark = pytest.mark.usefixtures("seed_catkin_trait_spec")
 
 def test_unvalidated_calibration_value_raises():
     p = derived("conf", 0.4, requires_validation=True, validation_kind="annotations", derived_from="sweep",
-                validated_against=VALIDATED_FALSE, sweep={"curve": []})
+                validated_against=VALIDATED_FALSE, gate_evidence={"curve": []})
     assert not p.is_shippable
     with pytest.raises(UnvalidatedOperatingPointError):
         _ = p.value
@@ -50,7 +50,7 @@ def test_param_that_needs_no_validation_always_ships():
 def test_review_confirmed_calibration_is_shippable():
     from tcip_mcp.pipelines.resolution import VALIDATED_REVIEW_CONFIRMED
     p = derived("conf", 0.4, requires_validation=True, validation_kind="annotations",
-                derived_from="count-unbiased center-match sweep over review verdicts",
+                derived_from="count-unbiased center-match curve over review verdicts",
                 validated_against=VALIDATED_REVIEW_CONFIRMED)
     assert p.is_shippable  # a review-confirmed reference ships (distinct flag, same gate)
     assert p.value == 0.4
@@ -545,14 +545,14 @@ def test_resolver_train_disjointness_refuses_an_undeclared_document():
     from tcip_mcp.pipelines.resolution import resolver_train_disjointness
 
     with pytest.raises(ValueError, match="not a document"):
-        resolver_train_disjointness({"sweep_data": {"train_disjointness": {"checked": True}}},
+        resolver_train_disjointness({"gate_evidence": {"train_disjointness": {"checked": True}}},
                                     "made_up_document")
 
 
 def test_resolver_train_disjointness_reads_a_declared_documents_result():
     from tcip_mcp.pipelines.resolution import resolver_train_disjointness
 
-    result = {"sweep_data": {"train_disjointness": {"checked": True, "group_check": None}}}
+    result = {"gate_evidence": {"train_disjointness": {"checked": True, "group_check": None}}}
     assert resolver_train_disjointness(result, "classifier_operating_point") == (
         {"checked": True, "group_check": None})
 
@@ -564,13 +564,13 @@ def test_resolver_selection_disjointness_refuses_an_undeclared_document():
 
     with pytest.raises(ValueError, match="not a document"):
         resolver_selection_disjointness(
-            {"sweep_data": {"selection_disjointness": {"applicable": False}}}, "made_up_document")
+            {"gate_evidence": {"selection_disjointness": {"applicable": False}}}, "made_up_document")
 
 
 def test_resolver_selection_disjointness_reads_a_declared_documents_result():
     from tcip_mcp.pipelines.resolution import resolver_selection_disjointness
 
-    result = {"sweep_data": {"selection_disjointness": {
+    result = {"gate_evidence": {"selection_disjointness": {
         "applicable": True, "reason": None, "checked": True, "unresolvable": False,
         "leaked_groups": [], "leaked_stems": [], "group_check": "performed"}}}
     assert resolver_selection_disjointness(result, "classifier_operating_point") == {
@@ -582,12 +582,12 @@ def test_resolver_selection_disjointness_reads_a_declared_documents_result():
 
 
 def test_resolver_selection_disjointness_carries_the_leak_fields():
-    """The row's field carries the same twelve keys the live sweep does, unresolvable/
+    """The row's field carries the same twelve keys the live gate evidence does, unresolvable/
     leaked_groups/leaked_stems and the label-movement keys included, not only the pass/fail
     booleans a caller cannot floor a leaking or a moved-label row from."""
     from tcip_mcp.pipelines.resolution import resolver_selection_disjointness
 
-    result = {"sweep_data": {"selection_disjointness": {
+    result = {"gate_evidence": {"selection_disjointness": {
         "applicable": True, "reason": None, "checked": True, "unresolvable": False,
         "leaked_groups": ["g1"], "leaked_stems": ["s1"], "group_check": "performed"}}}
     assert resolver_selection_disjointness(result, "classifier_operating_point") == {
@@ -601,4 +601,4 @@ def test_resolver_selection_disjointness_carries_the_leak_fields():
 def test_resolver_selection_disjointness_is_none_for_resolve_scale():
     from tcip_mcp.pipelines.resolution import resolver_selection_disjointness
 
-    assert resolver_selection_disjointness({"sweep_data": {}}, "resolve_scale") is None
+    assert resolver_selection_disjointness({"gate_evidence": {}}, "resolve_scale") is None

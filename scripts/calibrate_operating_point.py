@@ -4,12 +4,12 @@ The confidence operating point is the phenotype for a count trait, so it must be
 dataset and validated against held-out ground truth, never pinned. This script runs one
 low-threshold model pass over a disjoint calibration/holdout split of a labeled dir, resolves the
 count-unbiased operating point, checks its held-out count bias, and prints the full provenance and
-sweep for inspection. It writes nothing: a validated claim is minted only by the audited doors,
-and a script writing into the experiment record would route that mutation around the audit log.
+gate evidence for inspection. It writes nothing: a validated claim is minted only by the audited
+doors, and a script writing into the experiment record would route that mutation around the audit log.
 
 It is a script (not a new MCP tool) per CLAUDE.md: the audited count is produced at ``run_inference``
 (which now accepts ``trait`` + ``calibration_labels_dir`` to resolve the same operating point inline);
-this is the offline inspector for the sweep behind that resolution.
+this is the offline inspector for the gate evidence behind that resolution.
 
 Usage:
     python scripts/calibrate_operating_point.py \
@@ -223,7 +223,7 @@ def main(argv: list[str] | None = None) -> int:
     attach_split_policy_provenance(bundle, locked)
 
     provenance = bundle.to_provenance()
-    provenance["sweep"] = bundle.get("conf").sweep
+    provenance["gate_evidence"] = bundle.get("conf").gate_evidence
 
     conf = bundle.get("conf")
     print(f"trait={args.trait} dataset_hash={dh}")

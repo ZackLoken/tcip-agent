@@ -246,8 +246,9 @@ def calibrate_physical_scale(
 
     from tcip_mcp.pipelines.resolution import open_validation, seal_validation, write_sidecar
 
-    n_cal_stems = len(result["sweep_data"].get("calibration_implied_scales") or {})
+    n_cal_stems = len(result["gate_evidence"].get("calibration_implied_scales") or {})
     stamp = {
+        "schema_version": 2,
         "operating_point": {"scale": {
             "name": f"scale_{unit}_per_px", "value": result["value"], "unit": unit,
             "source": "derived",
@@ -258,7 +259,7 @@ def calibrate_physical_scale(
             "capture_scoped": capture_id is not None, "capture_id": capture_id,
         }},
         "validated": result["passed"], "validated_by": None,
-        "failures": result["failures"], "sweep_data": result["sweep_data"],
+        "failures": result["failures"], "gate_evidence": result["gate_evidence"],
         "trait": trait, "reference_subject": reference_subject,
         "reference_csv": _relative_to_root(reference_csv, dataset_root),
         "produced_at": _now_iso(),

@@ -1748,6 +1748,12 @@ def test_calibrate_physical_scale_whole_chain_delivers_a_validated_mm2_area(tmp_
     assert result["value"] == pytest.approx(0.1)  # 10 mm implied over a 100 px reference length
     assert result["validated_by"] is not None
 
+    from tcip_mcp.pipelines.resolution import read_scale_sidecar
+
+    sc = read_scale_sidecar(bucket)
+    assert sc["schema_version"] == 2
+    assert "gate_evidence" in sc
+
     from tcip_mcp.pipelines.resolution import VALIDATED_PHYSICAL_MEASUREMENT, reconcile_scale_validity
 
     recon = reconcile_scale_validity([bucket], unit="mm", trait="plant_surface_area",

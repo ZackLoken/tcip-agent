@@ -90,10 +90,10 @@ or a signed bias has no such direction and is left out rather than assigned an a
 non-finite value's state companion (``tcip_store.values.NOT_FINITE_SUFFIX``) is excluded by that
 suffix rule, not listed here.
 
-``map75`` and the operating-point sweep's ``abs_count_error_mean``/``count_error_p90``/
+``map75`` and the operating-point curve's ``abs_count_error_mean``/``count_error_p90``/
 ``count_bias_std`` are left out on purpose, not merely unnoticed: ``coco_detection_metrics``
-computes ``map75`` internally but ``evaluate()`` never surfaces it, and the three sweep
-statistics come only from ``_count_stats_at_conf`` inside ``sweep_operating_point``'s
+computes ``map75`` internally but ``evaluate()`` never surfaces it, and the three curve
+statistics come only from ``_count_stats_at_conf`` inside ``derive_operating_point_curve``'s
 calibration path, never from ``evaluate()``/``governing_counts``. None of the four ever reaches
 a checkpoint's ``metrics`` dict or a registry entry, so nothing here needs to rank them yet.
 ``count_bias_mean`` is signed (over- and under-counting are both present in the same value) and
@@ -644,7 +644,7 @@ def _class_ids_present(per_image: list[dict], class_id: int | None = None) -> li
     return sorted(ids)
 
 
-def sweep_operating_point(per_image: list[dict], *, tolerance: float, class_id: int | None = None,
+def derive_operating_point_curve(per_image: list[dict], *, tolerance: float, class_id: int | None = None,
                           conf_grid: list[float] | None = None, max_thresholds: int = 80) -> dict:
     """Sweep the confidence threshold over ``per_image`` records via center-matching.
 

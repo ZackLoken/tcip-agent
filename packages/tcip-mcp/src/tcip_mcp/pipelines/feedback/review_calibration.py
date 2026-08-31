@@ -8,15 +8,15 @@ principle, CLAUDE.md). Per record:
   - ``gt`` = the boxes the breeder affirmed exist: accepted/edited matches, confirmed misses (FN),
     and false-positives the breeder promoted to real (accepted FP). Rejected boxes never enter gt.
   - ``dt`` = the model's own predictions carried with their recorded confidence, regardless of
-    verdict, so the sweep re-derives TP/FP/FN by center-matching dt against the affirmed gt exactly
-    as the GT path does.
+    verdict, so the curve derivation re-derives TP/FP/FN by center-matching dt against the affirmed
+    gt exactly as the GT path does.
 
 The review-confirmed reference passes the identical disjoint-split + count-bias gate the held-out-GT
 path passes; ``resolve_operating_point`` stamps it ``VALIDATED_REVIEW_CONFIRMED`` (distinct from
 ``VALIDATED_HELD_OUT`` so provenance records which reference validated). The conf-censoring guard in
 ``resolve_operating_point`` still applies: verdicts whose predictions were staged above the display
 floor are truncated and cannot stamp a validated claim, the reviewed predictions must have been
-generated at a floored conf for the sweep to reach the low-conf tail.
+generated at a floored conf for the curve to reach the low-conf tail.
 
 Producer-identity scoping and FN-adjudication coverage both live here: every verdict (and
 confirmed-negative image record) is scoped to the producing bucket(s) it was actually recorded
@@ -38,7 +38,7 @@ from typing import Any
 from tcip_mcp.pipelines.feedback.verdicts import decode_verdict
 from tcip_mcp.pipelines.resolution import VALIDATED_REVIEW_CONFIRMED, ResolvedBundle
 
-# Every name resolve_operating_point can put in sweep["failures"] (cross-cutting named-failure
+# Every name resolve_operating_point can put in gate_evidence["failures"] (cross-cutting named-failure
 # architecture), paired with its breeder-facing message. describe_review_validation surfaces the
 # message for every name present in "failures", not just the first, in this list's order, so
 # order here is reading order for a breeder facing several at once, not a first-match-wins priority.
@@ -141,7 +141,7 @@ _FAILURE_MESSAGES: list[tuple[tuple[str, ...], str]] = [
      "of one kind, for instance) would be wrong. Correcting the mislabelled kinds in your review, "
      "or improving the model, can help."),
     # Raised by review_to_records before the gate ever runs (a verdict's class identity couldn't be
-    # resolved against its producing bucket), not one of resolve_operating_point's own sweep
+    # resolved against its producing bucket), not one of resolve_operating_point's own gate-evidence
     # failures, so it never appears in a bundle's "failures" list; still shares this vocabulary
     # rather than an independently-authored string, see review_to_records below.
     (("class_id_unresolvable",),
@@ -163,7 +163,7 @@ def _breeder_message(name: str) -> str:
     raise AssertionError(f"{name!r} is not a name in _FAILURE_MESSAGES")
 
 
-def _selection_movement_sentence(sweep: dict) -> str:
+def _selection_movement_sentence(gate_evidence: dict) -> str:
     """One sentence naming a calibration label that moved since the split was drawn, read from
     the sealed ``selection_disjointness``'s own ``calibration_labels_moved``; empty when that
     list is empty or absent (a run with no ``label_digests`` block, or nothing moved).
@@ -172,7 +172,7 @@ def _selection_movement_sentence(sweep: dict) -> str:
     names no manifest and holds no labels directory of its own, so ``manifest_redrawn`` and
     ``labels_moved_run_to_now`` are always ``null`` here and earn no sentence of their own.
     """
-    moved = (sweep.get("selection_disjointness") or {}).get("calibration_labels_moved")
+    moved = (gate_evidence.get("selection_disjointness") or {}).get("calibration_labels_moved")
     if not moved:
         return ""
     names = ", ".join(sorted(moved))
@@ -184,7 +184,7 @@ def _to_xywh(box_norm: Sequence[float], img_w: float, img_h: float) -> list[floa
     """Normalized center-form ``[cx, cy, w, h]`` -> top-left ``[x, y, w, h]`` scaled by image dims.
 
     With no image dimensions the unit square (1.0, 1.0) keeps every record on one consistent
-    normalized scale, valid for the count sweep, whose tolerance is derived from the same records.
+    normalized scale, valid for the count curve, whose tolerance is derived from the same records.
     """
     cx, cy, bw, bh = (float(v) for v in box_norm)
     return [(cx - bw / 2) * img_w, (cy - bh / 2) * img_h, bw * img_w, bh * img_h]
@@ -476,7 +476,7 @@ def resolve_operating_point_from_review(
     closed. Returns a bundle whose conf is stamped ``VALIDATED_REVIEW_CONFIRMED`` only if that gate passes,
     else ``false``. ``seed``/``holdout_ratio`` only govern the first (locking) draw for this
     reference's identity hash, a later call over the same verdicts returns the locked split
-    regardless, and any divergence is surfaced on the bundle's conf sweep, not just logged
+    regardless, and any divergence is surfaced on the bundle's conf gate evidence, not just logged
     (``attach_split_policy_provenance``).
 
     ``scope_root`` (required, no default): the root the locked split is stored under, the dataset
@@ -555,8 +555,8 @@ def resolve_operating_point_from_review(
     )
     attach_split_policy_provenance(bundle, locked)
     conf = bundle.params.get("conf")
-    if conf is not None and isinstance(conf.sweep, dict):
-        td = conf.sweep.get("train_disjointness")
+    if conf is not None and isinstance(conf.gate_evidence, dict):
+        td = conf.gate_evidence.get("train_disjointness")
         if isinstance(td, dict):
             td["experiment_id_ambiguous"] = experiment_id_ambiguous
     return bundle
@@ -565,7 +565,7 @@ def resolve_operating_point_from_review(
 def describe_review_validation(bundle: ResolvedBundle, *, reviewed_image_count: int) -> dict[str, Any]:
     """Translate a review-confirmed operating-point bundle into a breeder-legible validation result.
 
-    Reads the conf param's own sweep diagnostics (the same gate output ``resolve_operating_point``
+    Reads the conf param's own gate evidence (the same gate output ``resolve_operating_point``
     already produced, never a re-run) and maps them to plain language a non-CV breeder can act on.
     ``resolve_operating_point``'s named ``failures`` list (cross-cutting) is the single source of
     truth for which check(s) refused; this function's job is only to translate each name to a
@@ -577,7 +577,7 @@ def describe_review_validation(bundle: ResolvedBundle, *, reviewed_image_count: 
     re-derivation.
 
     The "Validated" message's miss-coverage claim is read directly off the exact-conf holdout
-    curve entry (``sweep['holdout_bias']``, already carrying ``tp``/``fn``/``recall``
+    curve entry (``gate_evidence['holdout_bias']``, already carrying ``tp``/``fn``/``recall``
     at precisely the shipped conf), never a second, independently-computed miss statistic that could
     drift from what the gate actually decided.
     """
@@ -587,8 +587,8 @@ def describe_review_validation(bundle: ResolvedBundle, *, reviewed_image_count: 
     # Report the derived number without shipping it, the honest raw-read accessor, not .value.
     conf_value = (float(conf.unvalidated_value(acknowledge_unvalidated=True))
                   if conf is not None else None)
-    sweep = (conf.sweep if conf is not None else None) or {}
-    failures = sweep.get("failures") or []
+    gate_evidence = (conf.gate_evidence if conf is not None else None) or {}
+    failures = gate_evidence.get("failures") or []
     # An elif chain that returns on the first recognized name would let an unmapped name riding
     # alongside a recognized one fall through silently instead of raising. Check exhaustiveness
     # unconditionally, over the whole list, before any branch runs.
@@ -599,13 +599,13 @@ def describe_review_validation(bundle: ResolvedBundle, *, reviewed_image_count: 
             f"(full list: {failures!r}), describe_review_validation has no breeder-facing message "
             "for one of these yet.")
     if validated:
-        hb = sweep.get("holdout_bias") or {}
+        hb = gate_evidence.get("holdout_bias") or {}
         tp, fn = hb.get("tp"), hb.get("fn")
         miss_note = ""
         if tp is not None and fn is not None and (tp + fn) > 0:
             miss_note = (f" On the held-back images, it found {tp} of {tp + fn} objects you "
                         f"confirmed ({100 * tp / (tp + fn):.0f}% recall).")
-        td = sweep.get("train_disjointness") or {}
+        td = gate_evidence.get("train_disjointness") or {}
         run_note = ""
         if not td.get("checked"):
             if td.get("experiment_id_ambiguous"):
@@ -616,10 +616,10 @@ def describe_review_validation(bundle: ResolvedBundle, *, reviewed_image_count: 
                             "checked against that run's training split.")
         reason = (f"Validated. Your review of {reviewed_image_count} reviewed image(s) confirms this "
                   f"model's counts closely enough to use as a validation reference for "
-                  f"results.{miss_note}{run_note}{_selection_movement_sentence(sweep)}")
-    elif "passed_holdout" not in sweep:
+                  f"results.{miss_note}{run_note}{_selection_movement_sentence(gate_evidence)}")
+    elif "passed_holdout" not in gate_evidence:
         # This branch must come before the _FAILURE_MESSAGES lookup. conf_censored is also present,
-        # often truthy, in the no-holdout branch's sweep_data, which has no "failures" list at all,
+        # often truthy, in the no-holdout branch's gate evidence, which has no "failures" list at all,
         # checking those raw keys here would misdirect a "too few images reviewed" session into
         # "re-run at a low confidence" every time.
         reason = ("Not yet. Too few images have been reviewed, the check needs at least two fully "
@@ -635,5 +635,5 @@ def describe_review_validation(bundle: ResolvedBundle, *, reviewed_image_count: 
                 f"resolve_operating_point set an unvalidated result with a completed holdout gate "
                 f"but no recognized failure name (failures={failures!r}), "
                 "describe_review_validation cannot explain this refusal.")
-        reason = "\n\n".join(matched) + _selection_movement_sentence(sweep)
+        reason = "\n\n".join(matched) + _selection_movement_sentence(gate_evidence)
     return {"validated": validated, "reference": reference, "conf": conf_value, "reason": reason}

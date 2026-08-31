@@ -90,7 +90,7 @@ def test_external_marker_not_permanently_blocked_when_disjoint(tmp_path, monkeyp
                                 staged_conf_floor=0.01, experiment_id="exp_ext")
     conf = b.get("conf")
     assert conf.validated_against == "held_out_annotations"  # not permanently blocked
-    td = conf.sweep["train_disjointness"]
+    td = conf.gate_evidence["train_disjointness"]
     assert td["unresolvable"] is False
     assert td["group_check"] == "not_performed"
     assert td["leaked_stems"] == []
@@ -113,7 +113,7 @@ def test_external_marker_still_catches_a_real_leak(tmp_path, monkeypatch):
                                 experiment_id="exp_ext2")
     conf = b.get("conf")
     assert conf.validated_against == "false"
-    td = conf.sweep["train_disjointness"]
+    td = conf.gate_evidence["train_disjointness"]
     assert td["unresolvable"] is False
     assert td["group_check"] == "not_performed"
     assert td["leaked_stems"] == ["c_a"]  # caught even with no group policy at all
@@ -433,7 +433,7 @@ def test_review_confirmed_leak_now_detected(tmp_path, monkeypatch):
     bundle = resolve_operating_point_from_review(
         review_state, "catkin", tiled=True, group_by="stem", experiment_id="exp_review",
         bucket_identities=[_IDENTITY], scope_root=tmp_path)
-    td = bundle.get("conf").sweep["train_disjointness"]
+    td = bundle.get("conf").gate_evidence["train_disjointness"]
     assert td["leaked_groups"] == ["srcA"]  # matched despite the .jpg extension on the review id
     assert bundle.get("conf").validated_against == "false"
 
@@ -442,13 +442,13 @@ def test_review_confirmed_leak_now_detected(tmp_path, monkeypatch):
 # unresolvable/leaked train-disjointness refusals are visible to the agent and honestly described.
 # ===========================================================================
 
-def _review_bundle(sweep: dict):
+def _review_bundle(gate_evidence: dict):
     from tcip_mcp.pipelines.resolution import VALIDATED_FALSE, ResolvedBundle, derived
 
     conf = derived("conf", 0.42, requires_validation=True, validation_kind="annotations",
-                   derived_from="count-unbiased center-match sweep over review verdicts",
+                   derived_from="count-unbiased center-match curve over review verdicts",
                    validated_against=VALIDATED_FALSE, dataset_scoped=True, dataset_hash="abc",
-                   sweep=sweep)
+                   gate_evidence=gate_evidence)
     return ResolvedBundle(trait="catkin", dataset_hash="abc", params={"conf": conf})
 
 
@@ -487,39 +487,39 @@ def test_describe_review_validation_content_shared_with_calibration_message():
 
 
 def test_sweep_summary_surfaces_disjointness_fields():
-    from tcip_mcp.pipelines.calibration import sweep_summary
+    from tcip_mcp.pipelines.calibration import gate_evidence_summary
     from tcip_mcp.pipelines.resolution import VALIDATED_FALSE, derived
 
     conf = derived("conf", 0.4, requires_validation=True, validation_kind="annotations", derived_from="x",
                    validated_against=VALIDATED_FALSE,
-                   sweep={"disjoint": True, "content_overlap_frac": 0.0,
+                   gate_evidence={"disjoint": True, "content_overlap_frac": 0.0,
                           "content_shared_with_calibration": False,
                           "train_disjointness": {"unresolvable": False, "leaked_groups": ["g1"]},
                           "passed_holdout": False, "conf_censored": False, "count_bias_tolerance_frac": 1.0,
                           "pooled_count_bias_tolerance": 4.0})
-    out = sweep_summary(conf)
+    out = gate_evidence_summary(conf)
     assert out["disjoint"] is True
     assert out["content_overlap_frac"] == 0.0
     assert out["train_disjointness"]["leaked_groups"] == ["g1"]  # visible, not silently dropped
-    # The renamed/new fields must actually reach sweep_summary's output, not just be present
+    # The renamed/new fields must actually reach gate_evidence_summary's output, not just be present
     # in the input sweep dict, catching a key-name drift in its own `.get(...)` calls.
     assert out["count_bias_tolerance_frac"] == 1.0
     assert out["pooled_count_bias_tolerance"] == 4.0
 
 
 def test_sweep_summary_surfaces_split_policy_divergence():
-    """attach_split_policy_provenance writes into conf.sweep; sweep_summary must forward those
+    """attach_split_policy_provenance writes into conf.gate_evidence; gate_evidence_summary must forward those
     keys too, or run_inference's actual response never shows a caller their declared seed/ratio
     didn't take effect against an existing lock -- only the persisted sweep artifact would."""
-    from tcip_mcp.pipelines.calibration import sweep_summary
+    from tcip_mcp.pipelines.calibration import gate_evidence_summary
     from tcip_mcp.pipelines.resolution import VALIDATED_FALSE, derived
 
     conf = derived("conf", 0.4, requires_validation=True, validation_kind="annotations", derived_from="x",
                    validated_against=VALIDATED_FALSE,
-                   sweep={"passed_holdout": False, "conf_censored": False, "count_bias_tolerance_frac": 1.0,
+                   gate_evidence={"passed_holdout": False, "conf_censored": False, "count_bias_tolerance_frac": 1.0,
                           "split_policy_divergence": {"requested": {"seed": 7}, "locked": {"seed": 0}},
                           "split_unlocked_stems": ["new_stem_0_0"]})
-    out = sweep_summary(conf)
+    out = gate_evidence_summary(conf)
     assert out["split_policy_divergence"] == {"requested": {"seed": 7}, "locked": {"seed": 0}}
     assert out["split_unlocked_stems"] == ["new_stem_0_0"]
 
@@ -691,7 +691,7 @@ def test_declared_seed_and_holdout_ratio_reach_the_first_draw(tmp_path):
         global_nms_iou=0.3, postprocess="nms", cross_tile_nms=None, max_dets=None,
         seed=7, holdout_ratio=0.75,
     )
-    policy = bundle.get("conf").sweep["split_policy"]
+    policy = bundle.get("conf").gate_evidence["split_policy"]
     assert policy["seed"] == 7
     assert policy["holdout_ratio"] == pytest.approx(0.75)  # not the 0/0.5 defaults
 
@@ -723,9 +723,9 @@ def test_the_calibration_door_keeps_its_lock_across_an_active_project_repin(tmp_
     second, _dh2, _n_excluded2, _evidence2 = calibration.calibrate_operating_point(
         _CalStub(), "catkin", str(labels_dir), str(images_dir), seed=2, **kwargs)
 
-    assert first.get("conf").sweep["split_policy"]["seed"] == 1
-    assert second.get("conf").sweep["split_policy"]["seed"] == 1
-    assert second.get("conf").sweep["split_policy_divergence"]["requested"]["seed"] == 2
+    assert first.get("conf").gate_evidence["split_policy"]["seed"] == 1
+    assert second.get("conf").gate_evidence["split_policy"]["seed"] == 1
+    assert second.get("conf").gate_evidence["split_policy_divergence"]["requested"]["seed"] == 2
 
 
 # ===========================================================================

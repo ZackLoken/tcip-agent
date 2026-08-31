@@ -46,7 +46,8 @@ HPO_ROOT = "hpo_root"
 """A root's ``.tcip/hpo`` directory, holding one study result and one manifest per sweep."""
 
 SWEEP = "sweep"
-"""One sweep's directory under the hpo root, holding a directory per trial."""
+"""One HPO sweep's directory under the hpo root, holding a directory per trial: the tuning sense
+of "sweep", distinct from the ``confidence_sweep`` store's calibration-curve claim below."""
 
 SPLITS = "splits"
 """A partition's output directory: one document per split plus the manifest describing them."""
@@ -300,6 +301,8 @@ PLATFORM_CLAIMS: Mapping[str, Claim] = {
     "learning_capture": Claim(ROOT, (_named(".tcip", name="learning_capture", suffix=".jsonl"),)),
     "friction_reports": Claim(ROOT, (_rooted(".tcip", "reports", suffix=".json"),)),
     "retrospectives": Claim(ROOT, (_rooted(".tcip", "retrospectives", suffix=".md"),)),
+    # The calibration-curve sense of "sweep", frozen in the store name and this on-disk prefix;
+    # unrelated to the HPO_ROOT/SWEEP tuning claim above.
     "confidence_sweep": Claim(
         ROOT,
         (

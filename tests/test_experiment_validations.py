@@ -28,6 +28,7 @@ TRAINING_CONFIG = {"model_source": {"builder": "my_models:catkin_det"}}
 def _row(**overrides: Any) -> dict[str, Any]:
     """One complete validation row, with the fields a case varies replaced."""
     body: dict[str, Any] = {
+        "schema_version": 2,
         "document": "operating_point",
         "trait": "catkin_50per_date",
         "claim": {"operating_point": {"conf": {"value": 0.42,
@@ -244,3 +245,68 @@ def test_the_append_and_the_calibration_creation_each_leave_one_platform_audit_r
     assert [r["arguments"]["record_digest"] for r in appended] == [digest]
     created = [r for r in rows if r.get("tool") == "calibration_experiment_created"]
     assert [r["arguments"]["experiment_id"] for r in created] == [calibration_id]
+
+
+@pytest.mark.usefixtures("seed_catkin_trait_spec")
+def test_a_version_2_row_earned_through_the_real_gate_round_trips(tmp_path):
+    """The producer-fed round trip: a row earned through open_validation/seal_validation (the
+    platform's own two-phase writer, not _append_validation directly) carries schema_version 2 and
+    reads back unchanged."""
+    pytest.importorskip("torch")
+    from tests._dense_op_fixtures import dense_records
+
+    from tcip_mcp.experiments import read_validations, validation_digest
+    from tcip_mcp.pipelines.resolution import (
+        open_validation, operating_point_stamp, seal_validation,
+    )
+
+    # producing_experiment_id=None (foreign checkpoint) skips train-disjointness; seal_validation
+    # mints the calibration experiment the row lands on.
+    common = dict(n_images=20, objects_per_image=80, miss_pattern=[0] * 20,
+                 fp_pattern=[1] * 20, score=0.9, fp_score=0.05)
+    cal = dense_records(id_prefix="c", **common)
+    hold = dense_records(id_prefix="h", shift=5.0, **common)
+    labels_dir = tmp_path / "annotations" / "2026-03-04"
+    labels_dir.mkdir(parents=True, exist_ok=True)
+
+    draft = open_validation(
+        document="operating_point",
+        evidence={"resolver": "resolve_operating_point",
+                  "inputs": {"dataset_hash": "H", "calibration_records": cal,
+                             "holdout_records": hold, "staged_conf_floor": 0.01, "tiled": False}},
+        trait="catkin", checkpoint_sha256="0" * 64, producing_experiment_id=None,
+        reference_inputs={"dataset_root": str(tmp_path), "label_dirs": {"calibration": labels_dir}},
+    )
+    stamp = operating_point_stamp(
+        draft.result.to_provenance()["operating_point"], validated=True, validated_by=None,
+        tile_size_validated=None, shippable_issues=draft.result.shippable_issues(), id_map=None,
+        trait="catkin", dataset_hash="H", checkpoint="best", checkpoint_sha256="0" * 64,
+        experiment_id=None, images_dir=None, raster_path=None,
+        produced_at="2026-03-04T12:00:00+00:00",
+    )
+    digest, stamped = seal_validation(draft, dataset_root=tmp_path, bucket_dirs=(), stamp_body=stamp)
+    experiment_id = stamped["validated_by"]["experiment_id"]
+
+    rows = read_validations(experiment_id)
+    assert len(rows) == 1
+    assert rows[0]["schema_version"] == 2
+    assert validation_digest(rows[0]) == digest
+
+
+def test_read_validations_admits_an_old_row_with_no_schema_version(tmp_path):
+    """Lazy absence: a row filed before schema_version existed carries no such key, and the store's
+    ceiling (declared schema_version 2 on the experiment_validations store) still reads it, the
+    absent key meaning the frozen version 1."""
+    from tcip_mcp.experiments import (
+        create_experiment, read_validations, validation_digest, validations_key,
+    )
+
+    experiment_id = "exp-028-quince-old-vintage-det"
+    create_experiment(experiment_id, TRAINING_CONFIG)
+    old_row = _row()
+    del old_row["schema_version"]
+    ts.append(validations_key(experiment_id), old_row)
+
+    rows = read_validations(experiment_id)
+    assert rows == [old_row]
+    assert validation_digest(old_row) == validation_digest(rows[0])
