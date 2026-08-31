@@ -145,7 +145,9 @@ def test_conform_classifies_a_digest_found_nowhere_as_external_or_missing(tmp_pa
 
     assert any("external-or-missing" in ln for ln in lines)
     entries = read_registry_index(root)
-    assert Path(entries[0]["checkpoint_path"]).is_absolute()
+    # Kept byte-for-byte: the stored value is the external claim, and a host-resolved
+    # respelling would fabricate a path the writer never stated (drive-anchored on Windows).
+    assert entries[0]["checkpoint_path"] == "/exporting/root/.tcip/models/gone.pt"
 
 
 def test_conform_is_idempotent(tmp_path: Path):
