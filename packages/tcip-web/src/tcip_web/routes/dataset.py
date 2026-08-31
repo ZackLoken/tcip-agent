@@ -16,6 +16,7 @@ Convention: the canonical layout (see :mod:`tcip_mcp.dataset_layout`):
 
 from __future__ import annotations
 
+import asyncio
 from collections import OrderedDict
 from datetime import datetime, timezone
 from pathlib import Path
@@ -233,10 +234,10 @@ async def select_dataset(req: SelectionRequest) -> dict:
     if not root.is_dir():
         raise HTTPException(404, f"dataset_root not found: {req.dataset_root}")
 
-    # Recorded before anything else so a busy binding store refuses the whole select rather
-    # than leaving the GUI's own state half-adopted with no canvas binding to match it.
+    # Recorded before anything else, off the event loop (a cross-process lock, a possible
+    # fsync), so a busy binding store refuses the whole select rather than half-adopting it.
     try:
-        generation = _write_canvas_binding(project_root)
+        generation = await asyncio.to_thread(_write_canvas_binding, project_root)
     except ts.StoreBusy as exc:
         raise HTTPException(
             503, f"could not record which project the GUI has open: {exc}"
@@ -245,9 +246,6 @@ async def select_dataset(req: SelectionRequest) -> dict:
     # Rehydrate any persisted GUI state for this project first (so backend state
     # survives a restart), then apply the fresh selection on top via mutate().
     store.open_project(project_root)
-    # Held beside project_root so the broadcast envelope and the connect-time replay can read
-    # it off the in-memory store rather than re-reading the binding store on every broadcast.
-    store.set_binding_generation(generation)
 
     image_list: list[str] = []
     if req.date:
@@ -294,6 +292,9 @@ async def select_dataset(req: SelectionRequest) -> dict:
         annotations_dir=annotations_dir,
         predictions_dir=predictions_dir,
     )
+    # Adopted here, immediately before the mutate it names and with no await between: an
+    # exception raised while gathering the selection above leaves both still naming the old root.
+    store.set_binding_generation(generation)
     await store.mutate({"dataset": selection})
 
     # Advisory only (never rejects): does the resolved (subject, date) actually have any labels /

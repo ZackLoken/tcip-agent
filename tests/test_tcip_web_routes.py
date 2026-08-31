@@ -371,6 +371,7 @@ def test_dataset_select_answers_service_unavailable_on_a_busy_binding(
     """The binding write states what it does on StoreBusy: 503, nothing else adopted."""
     import tcip_store as ts
     from tcip_web.routes import dataset as dataset_route
+    from tcip_web.state import store
 
     def _busy(*_a, **_kw):
         key = dataset_route.canvas_open_binding_key()
@@ -379,11 +380,53 @@ def test_dataset_select_answers_service_unavailable_on_a_busy_binding(
     monkeypatch.setattr(dataset_route.ts, "transaction", _busy)
     project = tmp_path / "proj"
     project.mkdir()
+    generation_before = store.binding_generation
+    dataset_root_before = store.state.dataset.dataset_root
     resp = client.post(
         "/api/dataset/select",
         json={"project_root": str(project), "dataset_root": str(dataset_root)},
     )
     assert resp.status_code == 503
+    assert store.project_root is None
+    assert store.binding_generation == generation_before  # nothing was adopted
+    assert store.state.dataset.dataset_root == dataset_root_before
+
+
+def test_dataset_select_never_pairs_the_old_dataset_with_the_new_generation_on_a_mid_select_failure(
+    client: TestClient, dataset_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The in-memory generation moves only immediately before the mutate it names: an
+    exception raised while gathering the new selection (after the binding record has already
+    moved to the new root) must leave the in-memory generation still naming whatever the
+    in-memory dataset names, never a mismatched pair a connect-time replay could deliver."""
+    from tcip_web.routes import dataset as dataset_route
+    from tcip_web.state import store
+
+    project = tmp_path / "proj"
+    project.mkdir()
+    first = client.post(
+        "/api/dataset/select",
+        json={"project_root": str(project), "dataset_root": str(dataset_root)},
+    ).json()
+
+    other_project = tmp_path / "other_proj"
+    other_project.mkdir()
+
+    def _boom(*_a, **_kw):
+        raise OSError("simulated directory listing failure")
+
+    monkeypatch.setattr(dataset_route, "list_logical_images", _boom)
+    with pytest.raises(OSError):
+        client.post(
+            "/api/dataset/select",
+            json={
+                "project_root": str(other_project), "dataset_root": str(dataset_root),
+                "date": "2-11-26",
+            },
+        )
+
+    assert store.binding_generation == first["generation"]
+    assert store.state.dataset.project_root == str(project)
 
 
 def test_dataset_nav_persists_current_index(
