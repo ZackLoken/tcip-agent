@@ -557,8 +557,8 @@ def compute_phenology(
     height. For a registered trait whose positive state is, say, ``<majority_label>`` this reports:
 
         <phenology_prefix>_<majority_label>_date   date most objects reached that state
-                                 (crops.yml) = the 95% crossing (provisional reading, pending
-                                 breeder confirmation)
+                                 (crops.yml) = the 95% crossing (crossing-unconfirmed reading,
+                                 pending breeder confirmation)
         <phenology_prefix>_05/50/95per_date  dates the positive-state fraction crosses 5/50/95%
 
     Column names and crossing fractions come from ``trait``'s ``TraitSpec``, a different registered
@@ -783,7 +783,7 @@ def compute_phenology(
     from tcip_mcp.project_paths import platform_state_root
 
     # write_phenology_csv re-runs the same gate over these flags, composes every provenance cell
-    # (including the majority-provisional marker) and records the delivery.
+    # (including the majority crossing-unconfirmed marker) and records the delivery.
     cells = phenology.write_phenology_csv(
         "compute_phenology", rows, Path(output_csv_path), spec,
         flags=flags, acknowledge_unvalidated=acknowledge_unvalidated, basis=still_stated.basis,

@@ -112,14 +112,14 @@ class TraitSpec:
     # Milestone crossing fractions and the quantity they cross.
     milestone_fractions: tuple[float, ...] = ()
     milestone_on: str = ""  # e.g. "positive_fraction"
-    # The "majority" milestone (a crops.yml date such as "most pistillate flowers have opened") maps
-    # to this crossing key (e.g. "95per"), flagged provisional until the breeders confirm the
-    # reading. Read-semantics, not a frozen literal buried in the phenology code.
+    # The "majority" milestone (a crops.yml date such as "most pistillate flowers have opened")
+    # maps to this crossing key (e.g. "95per"); read-semantics, not a frozen literal in phenology.py.
     majority_milestone: str = ""
+    # Marks the majority crossing mapping as not yet breeder-confirmed; the delivered column spells
+    # it crossing_unconfirmed, this stored field keeps the older word by a recorded scope ruling.
     majority_provisional: bool = False
-    # Phenology CSV column vocabulary, the milestone-column prefix and the label the majority
-    # alias/provisional columns carry, so the delivered schema derives its names from this spec rather
-    # than from literals in the phenology module (<trait> -> <trait>_<milestone>_date / <trait>_<NN>per_date).
+    # Phenology CSV column vocabulary: the milestone-column prefix and the label the majority
+    # alias/crossing-unconfirmed columns carry, so the delivered schema derives its own names.
     phenology_prefix: str = ""
     majority_label: str = ""
     # How the tile-seam sliver cutoff is derived (the policy string names the basis). Partial objects

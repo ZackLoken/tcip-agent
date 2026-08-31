@@ -39,7 +39,7 @@ export const STATEMENT_FIELD_LABELS: Record<string, string> = {
   milestone_fractions: "Milestone fractions",
   milestone_on: "Milestone read on",
   majority_milestone: "Majority milestone",
-  majority_provisional: "Majority milestone is provisional",
+  majority_provisional: "Majority milestone crossing pending breeder confirmation",
   phenology_prefix: "Phenology column prefix",
   majority_label: "Majority milestone label",
   count_objective: "Count objective",

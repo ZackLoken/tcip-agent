@@ -389,7 +389,7 @@ def delivered_golden(body: dict, produced_at: bytes) -> bytes:
         b"plant_id,accession,n_dates,n_observed_dates,n_dates_unclassified,n_dates_missing_images,"
         b"catkin_elongation_date,catkin_05per_date,catkin_50per_date,catkin_95per_date,"
         b"catkin_elongation_date_bound,catkin_05per_date_bound,catkin_50per_date_bound,"
-        b"catkin_95per_date_bound,catkin_elongation_provisional,operating_point_conf,"
+        b"catkin_95per_date_bound,catkin_elongation_crossing_unconfirmed,operating_point_conf,"
         b"operating_point_validated,positive_state_classifier_validated,producer_model_sha256,"
         b"producing_experiment_id,produced_at,validation_record,plant_mapping_sha256,"
         b"captures_unverified,plant_csvs_unverified\r\n"
@@ -719,7 +719,7 @@ def test_write_phenology_csv_with_a_basis_writes_the_delivered_schema(tmp_path: 
     assert header == phenology.phenology_csv_columns(CATKIN)
 
 
-def test_a_provisional_majority_reading_delivers_and_flipping_it_invalidates_nothing(
+def test_a_crossing_unconfirmed_majority_reading_delivers_and_flipping_it_invalidates_nothing(
     tmp_path: Path,
 ):
     """The majority alias marker qualifies one disclosure column, not the crossing measurement.

@@ -68,7 +68,7 @@ def author_trait_spec(
         milestone_on: The quantity the milestones cross, e.g. `positive_fraction`.
         majority_milestone: The crops.yml majority-date crossing key this trait's milestones map
             to, e.g. `95per`.
-        majority_provisional: Whether that mapping is provisional, pending breeder confirmation.
+        majority_provisional: Whether that mapping is not yet breeder-confirmed.
         phenology_prefix: The phenology CSV column prefix this trait's milestones use.
         majority_label: The label the majority-alias column carries.
         count_objective: What the delivered number needs to be reliable for

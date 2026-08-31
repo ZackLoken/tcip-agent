@@ -188,7 +188,7 @@ def test_golden_plant_milestones_shape_and_values():
     assert ms["catkin_05per_date"] == "2026-02-15"
     assert ms["catkin_50per_date"] == "2026-03-01"
     assert ms["catkin_95per_date"] == "2026-03-12"
-    # provisional (breeders to confirm): elongation == the 95% majority crossing
+    # crossing-unconfirmed (breeders to confirm): elongation == the 95% majority crossing
     assert ms["catkin_elongation_date"] == "2026-03-12"
 
 
