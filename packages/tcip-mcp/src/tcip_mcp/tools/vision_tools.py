@@ -798,7 +798,7 @@ def capture_live_canvas(
     for attempt in range(2):
         try:
             binding = _read_binding()
-        except ts.StoreError as exc:
+        except (ts.StoreError, OSError) as exc:
             return {"error": f"Could not read the canvas-open binding: {exc}"}
 
         if binding is None:
@@ -833,10 +833,16 @@ def capture_live_canvas(
 
         state = _read(meta_doc)
         if state is None:
-            return {"error": "No live canvas state found; is the GUI open with a project "
-                              "loaded? The frontend pushes its canvas state to the project the "
-                              f"GUI has open (looked under {root}; if the GUI has a different "
-                              "project open, set_active_project to it first)."}
+            if same_root:
+                return {"error": "No live canvas state found; is the GUI open with a project "
+                                  "loaded? The frontend pushes its canvas state to the project "
+                                  f"the GUI has open, and it already agrees this is {root}; "
+                                  "nothing has been pushed there yet."}
+            return {
+                "error": f"No live canvas state found under this project's own root ({root}); "
+                         "the GUI has a different project open.",
+                "divergence": _binding_divergence(binding, root),
+            }
 
         src_image = state.get("image_path") or ""
         if not Path(src_image).is_file():
@@ -860,20 +866,21 @@ def capture_live_canvas(
         out = render_canvas_state(read.pixels, shapes,
                                   origin=(read.rect.x0, read.rect.y0), scale=read.scale)
 
-        # The binding fence: a switch mid-call (the documents just read may already belong to
-        # another project) is caught by re-reading the binding after the render, not before it.
-        try:
-            binding_after = _read_binding()
-        except ts.StoreError as exc:
-            return {"error": f"Could not confirm the canvas binding after rendering: {exc}"}
-        if binding_after is None or binding_after.get("generation") != binding.get("generation"):
-            if attempt == 0:
-                continue
-            return {
-                "error": "The GUI's open project changed while this call was rendering; "
-                         "retry the call.",
-                "divergence": _binding_divergence(binding_after or binding, root),
-            }
+        # The binding fence, only when this attempt started same_root: render_last_known's own
+        # render reads only this project's documents, so a binding already elsewhere can't stale it.
+        if same_root:
+            try:
+                binding_after = _read_binding()
+            except (ts.StoreError, OSError) as exc:
+                return {"error": f"Could not confirm the canvas binding after rendering: {exc}"}
+            if binding_after is None or binding_after.get("generation") != binding.get("generation"):
+                if attempt == 0:
+                    continue
+                return {
+                    "error": "The GUI's open project changed while this call was rendering; "
+                             "retry the call.",
+                    "divergence": _binding_divergence(binding_after or binding, root),
+                }
         break
 
     # Every path that reaches here returned already unless the loop broke with both set.
