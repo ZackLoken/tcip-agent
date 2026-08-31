@@ -804,8 +804,8 @@ anything.
 | tool | line | audited | docstring first line |
 |---|---|---|---|
 | `visualize` | `vision_tools.py:214` | yes | Render annotations, predictions, a GT-vs-prediction comparison, or a sample grid. |
-| `capture_live_canvas` | `vision_tools.py:699` | yes | Render exactly what the human's GUI canvas shows right now: image, shapes, viewport. |
-| `overlay_reference_grid` | `vision_tools.py:834` | yes | Render image with a labeled reference-grid overlay for spatial referencing. |
+| `capture_live_canvas` | `vision_tools.py:730` | yes | Render exactly what the human's GUI canvas shows right now: image, shapes, viewport. |
+| `overlay_reference_grid` | `vision_tools.py:941` | yes | Render image with a labeled reference-grid overlay for spatial referencing. |
 
 ## 2. HTTP routes and WebSocket endpoints
 
@@ -839,13 +839,13 @@ registered at HEAD.
 
 | method | path | handler | line |
 |---|---|---|---|
-| GET | `/api/state` | `get_state` | `app.py:204` |
-| POST | `/api/state/tab` | `set_active_tab` | `app.py:213` |
-| WS | `/ws/state` | `state_ws` | `app.py:221` |
-| GET | `/health` | `health` | `app.py:315` |
-| GET | `/` | `index` | `app.py:323` |
-| POST | `/api/events/{panel}` | `post_panel_event` | `app.py:387` |
-| WS | `/ws/panel/{panel}` | `panel_ws` | `app.py:438` |
+| GET | `/api/state` | `get_state` | `app.py:220` |
+| POST | `/api/state/tab` | `set_active_tab` | `app.py:229` |
+| WS | `/ws/state` | `state_ws` | `app.py:237` |
+| GET | `/health` | `health` | `app.py:331` |
+| GET | `/` | `index` | `app.py:339` |
+| POST | `/api/events/{panel}` | `post_panel_event` | `app.py:403` |
+| WS | `/ws/panel/{panel}` | `panel_ws` | `app.py:454` |
 
 ### routes/annotate.py, prefix `/api/annotate` (2 routes)
 
@@ -858,7 +858,7 @@ registered at HEAD.
 
 | method | path | handler | line |
 |---|---|---|---|
-| POST | `/state` | `push_canvas_state` | `routes/canvas.py:70` |
+| POST | `/state` | `push_canvas_state` | `routes/canvas.py:79` |
 
 ### routes/classes.py, prefix `/api/classes` (6 routes)
 
@@ -885,9 +885,9 @@ registered at HEAD.
 
 | method | path | handler | line |
 |---|---|---|---|
-| GET | `/tree` | `get_dataset_tree` | `routes/dataset.py:145` |  <!-- queued: P5-83 unify -->
-| POST | `/select` | `select_dataset` | `routes/dataset.py:199` |
-| POST | `/nav` | `set_current_image` | `routes/dataset.py:300` |
+| GET | `/tree` | `get_dataset_tree` | `routes/dataset.py:149` |  <!-- queued: P5-83 unify -->
+| POST | `/select` | `select_dataset` | `routes/dataset.py:229` |
+| POST | `/nav` | `set_current_image` | `routes/dataset.py:345` |
 
 ### routes/fs.py, prefix `/api/fs` (1 route)
 
@@ -1103,7 +1103,7 @@ from `tcip_mcp.server` and calls it: `packages/tcip-mcp/src/tcip_mcp/server.py:6
 (line 72). The port write resolves under the workspace root, not the platform-state root, so
 it needs no pin first; the app pins the platform-state root at the lifespan's startup or,
 when a request is served before the lifespan has run, at that first request, never at import:
-`bind_startup_root` (`packages/tcip-web/src/tcip_web/app.py:91`) reads the workspace's
+`bind_startup_root` (`packages/tcip-web/src/tcip_web/app.py:92`) reads the workspace's
 active-project marker (`tcip_mcp.project_paths.pin_project_root(from_marker=True)`) the first
 time either the lifespan (`app.py:50`) or the startup middleware (`app.py:131`) calls it, so
 every way the app is served (this entry point, a bare `uvicorn tcip_web.app:app`,
@@ -1671,17 +1671,17 @@ every declared document (183).
 Path: `<project_root>/.tcip/state/gui.json`, addressed by `gui_snapshot_key`,
 `packages/tcip-web/src/tcip_web/state.py:18`.
 
-Writer: `StateStore._flush_sync`, `tcip_web/state.py:250`, debounced 0.5s after `mutate`/`replace`, which
+Writer: `StateStore._flush_sync`, `tcip_web/state.py:266`, debounced 0.5s after `mutate`/`replace`, which
 resolves the destination at flush time so a project switch during the debounce window cannot write
 one project's snapshot into another's. The store is declared `durable=False`: the snapshot is
 rewritten every debounce cycle and losing the last one costs a re-selection, not history.
 
-Reader: `StateStore.load_from_disk`, `tcip_web/state.py:263`.
+Reader: `StateStore.load_from_disk`, `tcip_web/state.py:279`.
 
 `StateStore.mutate`, `tcip_web/state.py:30`, validates the merged mutation through `GuiState`
 before holding it, raising `GuiMutationInvalid` (`tcip_web/state.py:29`) on a field that does not
 validate or a key `GuiState` does not declare; `app.py`'s `_gui_mutation_invalid_handler`,
-`packages/tcip-web/src/tcip_web/app.py:176`, answers a route that raises it with 400 and the
+`packages/tcip-web/src/tcip_web/app.py:177`, answers a route that raises it with 400 and the
 validation message rather than the 500 an unhandled `ValueError` would produce.
 
 Seam S10 ("Live GUI state .tcip/state/gui.json"), verdict `both-sides-restated`,
@@ -1762,7 +1762,7 @@ No seam id in `seam-coverage.json`'s 67-entry inventory names `.tcip/datasets.js
 
 Path: `<workspace_root>/.active`, a workspace-root sibling, not inside `.tcip/`.
 
-Writer: `set_active_project`, `packages/tcip-mcp/src/tcip_mcp/workspace.py:247`.
+Writer: `set_active_project`, `packages/tcip-mcp/src/tcip_mcp/workspace.py:278`.
 
 Readers: `read_active_project`, `workspace.py:158`; `resolve_project_path`, `workspace.py:239`.
 
@@ -1960,15 +1960,15 @@ Phase 3 verdict: single.
 ## S04. Panel-event panel vocabulary (VALID_PANELS)  <!-- queued: P5-324 unify -->
 
 Must agree: sender and receiver accept the same set of panel names.
-Side A: `packages/tcip-mcp/src/tcip_mcp/web_client.py:168` (`VALID_PANELS = frozenset(`).
-Side B: `packages/tcip-web/src/tcip_web/app.py:36` (`VALID_PANELS,`).
+Side A: `packages/tcip-mcp/src/tcip_mcp/web_client.py:203` (`VALID_PANELS = frozenset(`).
+Side B: `packages/tcip-web/src/tcip_web/app.py:37` (`VALID_PANELS,`).
 Phase 3 verdict: duplicated.
 
 ## S05. Panel event_type vocabulary  <!-- queued: P5-272 unify -->
 
 Must agree: the Python poster, the FastAPI hub, and the browser handler use the same event_type strings.
 Side A: `packages/tcip-mcp/src/tcip_mcp/tools/gui_tools.py:218` (`result = post_panel_event("app", "annotate_focus", payload)`).
-Side B: `packages/tcip-web/src/tcip_web/app.py:410` (`if event.event_type == PANEL_EVENT_REVIEW_FOCUS:`).
+Side B: `packages/tcip-web/src/tcip_web/app.py:426` (`if event.event_type == PANEL_EVENT_REVIEW_FOCUS:`).
 Phase 3 verdict: single. The posted payload carries `active_subject` beside `subject` (`packages/tcip-mcp/src/tcip_mcp/tools/gui_tools.py:216`), the key both readers take (`packages/tcip-web/src/tcip_web/app.py:296`, `frontend/src/lib/annotateFocus.ts:21,54`), held by `tests/test_event_integration.py`'s producer-driven test, which posts the focus tool's own event and asserts the advisory state's `active_subject`.
 
 ## S06. Append-only audit log .tcip/audit.jsonl
@@ -2007,12 +2007,12 @@ Side A: `packages/tcip-mcp/src/tcip_mcp/web_client.py:106` (`def gui_snapshot_ke
 Side B: `packages/tcip-mcp/src/tcip_mcp/tools/project_tools.py:414` (`gui = tcip_store.read(gui_snapshot_key(project_root), default=None)`, the MCP read through the same key).
 Phase 3 verdict: single.
 
-## S11. Live canvas state files canvas_live.json / canvas_shapes.json
+## S11. Live canvas state files canvas_live.json / canvas_shapes.json, bound to one root by canvas_open_binding
 
-Must agree: backend file writer and MCP reader agree on the two-file split, the (image_path, tab) identity check, and which root the pair lives under. The filename half is closed (both sides address through one locator pair); the root half is open: the writer anchors to the browser payload's own project_root while the reader anchors to its process's pinned `project_root()`, so a push under a root the reader is not pinned to writes files the reader never sees. A pinned-root refusal landed for this and was reverted after a three-family review refuted its anchor (docs/audit/remediation/batch8/xf-canvas-root/); the binding both processes share is open design work on the P5-274 row.
-Side A: `packages/tcip-mcp/src/tcip_mcp/web_client.py:142` (`def canvas_meta_key(`, the meta document's one address, with `canvas_geometry_key`, line 144, addressing the geometry document; the two stores are declared as `CANVAS_META_STORE` and `CANVAS_GEOMETRY_STORE`, lines 111 and 112; `packages/tcip-web/src/tcip_web/routes/canvas.py` writes meta and geometry through those keys under the guarded payload root).
-Side B: `packages/tcip-mcp/src/tcip_mcp/tools/vision_tools.py:730` (`meta_doc = canvas_meta_key(root)`, the MCP read through the same keys) and `packages/tcip-mcp/src/tcip_mcp/tools/vision_tools.py:731` (`shapes_doc = canvas_geometry_key(root)`, the geometry read one line after).
-Phase 3 verdict: single.
+Must agree: which root the GUI currently has open, so the push route writes canvas_live.json/canvas_shapes.json under it and capture_live_canvas reads them from that same root rather than trusting its own pinned one to still be live. The filename half is closed (both sides address through one locator pair); the root half used to be open (the writer took the browser payload's own project_root as authority, Part 20's own rejected shape), and is now resolved through the canvas_open_binding record P5-274 added (docs/audit/remediation/batch8/p5-274-canvas-binding-design.md): a pinned-root refusal landed for the old shape and was reverted after a three-family review refuted its anchor (docs/audit/remediation/batch8/xf-canvas-root/), and this binding is the settled replacement.
+Side A: `packages/tcip-mcp/src/tcip_mcp/web_client.py:178` (`def canvas_open_binding_key(`, the one workspace-scoped record `{generation, root, project_name, issued_at}`, declared alongside `canvas_meta_key`/`canvas_geometry_key` at lines 142/153 addressing the two per-project documents the binding's root names) and `packages/tcip-web/src/tcip_web/routes/dataset.py:202` (`def _write_canvas_binding(`, the one writer, called from `select_dataset`, line 229, before the selection is adopted; `generation` bumps only when `root` actually changes).
+Side B: `packages/tcip-web/src/tcip_web/routes/canvas.py:79` (`def push_canvas_state(`, reads the binding, verifies the payload's `binding_generation` against it, and writes both documents under the binding's own `root`, never a client-supplied one) and `packages/tcip-mcp/src/tcip_mcp/tools/vision_tools.py:730` (`def capture_live_canvas(`, reads the same binding beside its own pinned root, through the shared divergence-naming helper `_binding_divergence`, line 697, with a generation fence re-reading the binding after the documents so a switch mid-call cannot render a false live result).
+Phase 3 verdict: single. The current generation also rides the GuiState broadcast envelope (`packages/tcip-web/src/tcip_web/app.py:185` `SERVER_EPOCH`, read off `StateStore.binding_generation`, `packages/tcip-web/src/tcip_web/state.py:153`) and is adopted with the dataset in one client-side store update (`packages/tcip-web/frontend/src/store/slices/gui.ts:138` `applyRestoredDataset`, and `mergeSnapshot`), so the push's `binding_generation` and the reader's own comparison never straddle a stale identity.
 
 ## S12. Friction reports and retrospectives under .tcip/
 
@@ -2278,8 +2278,8 @@ Phase 3 verdict: duplicated.
 ## S48. State WebSocket snapshot protocol  <!-- queued: P5-288 unify -->
 
 Must agree: the browser knows which slices of a broadcast snapshot are backend-authoritative and orders them by version.
-Side A: `packages/tcip-web/src/tcip_web/app.py:220` (`@app.websocket("/ws/state")`).
-Side B: `packages/tcip-web/src/tcip_web/state.py:180` (`def version(self) -> int:`, "Monotonic version, bumped on every state change.").
+Side A: `packages/tcip-web/src/tcip_web/app.py:236` (`@app.websocket("/ws/state")`).
+Side B: `packages/tcip-web/src/tcip_web/state.py:195` (`def version(self) -> int:`, "Monotonic version, bumped on every state change.").
 Phase 3 verdict: duplicated.
 
 ## S49. Terminal PTY WebSocket protocol  <!-- queued: P5-289 unify -->
@@ -2314,27 +2314,27 @@ Phase 3 verdict: duplicated.
 
 Must agree: the token the browser echoes is the same token the backend minted for that label file.
 Side A: `packages/tcip-web/src/tcip_web/routes/annotate.py:189` (`"base_mtime": token,`, the token the load route mints; the save route compares the echoed one at `routes/annotate.py:200`).
-Side B: `packages/tcip-web/frontend/src/tabs/AnnotateTab.tsx:377` (`base_mtime: paths.mtime,`).
+Side B: `packages/tcip-web/frontend/src/tabs/AnnotateTab.tsx:381` (`base_mtime: paths.mtime,`).
 Phase 3 verdict: single.
 
 ## S54. Built frontend bundle location  <!-- queued: P5-305 unify -->
 
 Must agree: the directory Vite writes is one of the directories the backend looks in.
 Side A: `packages/tcip-web/frontend/vite.config.ts:25` (`outDir: "../static",`).
-Side B: `packages/tcip-web/src/tcip_web/app.py:279` (`def _find_static_dir() -> Path:`).
+Side B: `packages/tcip-web/src/tcip_web/app.py:295` (`def _find_static_dir() -> Path:`).
 Phase 3 verdict: duplicated.
 
 ## S55. Vite dev-server proxy prefixes  <!-- queued: P5-306 unify -->
 
 Must agree: every backend path the browser calls in dev falls under a proxied prefix.
 Side A: `packages/tcip-web/frontend/vite.config.ts:20` (`proxy: {`).
-Side B: `packages/tcip-web/src/tcip_web/app.py:220` (`@app.websocket("/ws/state")`, one of the endpoints not under the `/api` prefix).
+Side B: `packages/tcip-web/src/tcip_web/app.py:236` (`@app.websocket("/ws/state")`, one of the endpoints not under the `/api` prefix).
 Phase 3 verdict: duplicated. The prefix literals still stand on their own, but `tests/test_frontend_route_paths.py` now fails when a path the frontend references falls outside them, sockets under the API prefix included.
 
 ## S56. Tab-name vocabulary  <!-- queued: P5-290 unify -->
 
 Must agree: the tab a panel event targets, the tab the browser can restore, and the tab the backend persists are the same set of names.
-Side A: `packages/tcip-mcp/src/tcip_mcp/web_client.py:160` (`ActiveTab = Literal["annotate", "review", "training", "tuning", "inference", "results", "meta"]`, with `TAB_NAMES = get_args(ActiveTab)` beside it, `tcip_web.state` importing both).
+Side A: `packages/tcip-mcp/src/tcip_mcp/web_client.py:195` (`ActiveTab = Literal["annotate", "review", "training", "tuning", "inference", "results", "meta"]`, with `TAB_NAMES = get_args(ActiveTab)` beside it, `tcip_web.state` importing both).
 Side B: `packages/tcip-web/frontend/src/api/types.generated.ts:14` (`export const TAB_NAMES = [`, generated from the same declaration).
 Phase 3 verdict: duplicated.
 
@@ -2363,7 +2363,7 @@ Phase 3 verdict: single.
 
 Must agree: every WebSocket endpoint applies the same origin policy before accept().
 Side A: `packages/tcip-web/src/tcip_web/trust_boundary.py:256` (`def origin_allowed(origin: str | None, scope: Mapping[str, Any]) -> bool:`).
-Side B: `packages/tcip-web/src/tcip_web/app.py:223` (`if not origin_allowed(websocket.headers.get("origin"), websocket.scope):`).
+Side B: `packages/tcip-web/src/tcip_web/app.py:239` (`if not origin_allowed(websocket.headers.get("origin"), websocket.scope):`).
 Phase 3 verdict: single.
 
 ## S61. Bash guard and PowerShell guard protected-path sets
