@@ -44,7 +44,7 @@ def test_run_hpo_defaults_storage_to_platform_root_when_no_output_dir(
     monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search",
                         lambda **kw: (captured.update(kw), {"study_name": kw["study_name"]})[1])
     # Pin the platform root so the store lands under this tmp dir, not the real repo.
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
 
     tt.run_hpo(base_config=real_hpo_base_config, n_trials=1)  # no output_dir
     assert (tmp_path / ".tcip" / "hpo").as_posix() in captured["storage_path"].replace("\\", "/")

@@ -278,7 +278,7 @@ def test_list_route_reports_the_recorded_site(client, workspace_dir):
 
 def test_list_reports_the_current_platform_root_after_a_repin(client, workspace_dir):
     """platform_root/platform_root_source answer the root this backend just repinned to, not
-    whatever pin_project_root last decided at process startup."""
+    whatever pin_platform_root last decided at process startup."""
     from tcip_mcp import workspace
 
     proj = _make_project(workspace_dir, "hazelnut_catkin_valley", dates=["2026-02-11"])

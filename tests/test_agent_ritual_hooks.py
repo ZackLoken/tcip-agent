@@ -216,7 +216,7 @@ def test_session_start_notes_which_processes_bind_from_the_marker(
     proj = _workspace(tmp_path, monkeypatch)
     other = tmp_path / "elsewhere"
     other.mkdir()
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(other))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(other))
 
     out = _run(monkeypatch, capsys, '{"source":"startup"}')
     ctx = json.loads(out)["hookSpecificOutput"]["additionalContext"]

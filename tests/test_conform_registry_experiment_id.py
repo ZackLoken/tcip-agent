@@ -62,7 +62,7 @@ def test_a_tagged_entry_with_no_matching_run_resolves_to_null_and_drops_the_tag(
     that exists but recorded a different digest, both resolve to experiment_id=null with the
     tag dropped, the reason printed."""
     root = tmp_path / "proj"
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(root))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(root))
     from tcip_mcp.experiments import complete_run, create_experiment, update_status
 
     create_experiment("exp1", {"model_source": {"builder": "x:y"}})
@@ -91,7 +91,7 @@ def test_a_tagged_entry_with_no_matching_run_resolves_to_null_and_drops_the_tag(
 
 def test_a_tagged_entry_whose_run_recorded_the_same_digest_binds_and_drops_the_tag(tmp_path, monkeypatch):
     root = tmp_path / "proj"
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(root))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(root))
     from tcip_mcp.experiments import complete_run, create_experiment, update_status
     from tcip_mcp.model_registry import _sha256_of_bytes
 
@@ -173,7 +173,7 @@ def test_conformed_entry_admits_the_load_a_missing_key_would_have_refused(tmp_pa
     torch = pytest.importorskip("torch")
     root = tmp_path / "proj"
     root.mkdir()
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(root))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(root))
     ckpt = root / "m.pt"
     torch.save({"model_state_dict": {}}, ckpt)
     from tcip_mcp.model_registry import _sha256_of_bytes
@@ -194,7 +194,7 @@ def test_conform_then_register_model_walks_the_ordered_remedy_for_a_pre_field_en
     """The remedy best_model, scripts/doctor.py and ARCHITECTURE.md name for an entry predating
     both metrics_source and experiment_id: conform first, then re-register through
     register_model, landing a ranked entry the eviction rail no longer blocks."""
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     root = tmp_path / "proj"
     root.mkdir()
     ckpt = tmp_path / "m.pt"

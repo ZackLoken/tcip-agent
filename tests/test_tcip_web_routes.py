@@ -1353,7 +1353,7 @@ def _verdicted_launch_dataset(tmp_path: Path, monkeypatch) -> tuple[Path, Path, 
 
     platform_root = tmp_path / "platform"
     (platform_root / ".tcip" / "state").mkdir(parents=True)
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(platform_root))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(platform_root))
 
     dataset_root = tmp_path / "data"
     date = "2026-02-11"
@@ -1407,7 +1407,7 @@ def test_inference_launch_writes_an_unreviewed_bucket_in_place(
 
     platform_root = tmp_path / "platform"
     (platform_root / ".tcip" / "state").mkdir(parents=True)
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(platform_root))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(platform_root))
 
     dataset_root = tmp_path / "data"
     date = "2026-02-11"
@@ -1434,7 +1434,7 @@ def _launch_setup(tmp_path, monkeypatch):
     monkeypatch.setattr(inference_routes, "_worker", lambda job: None)
     platform_root = tmp_path / "platform"
     (platform_root / ".tcip" / "state").mkdir(parents=True)
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(platform_root))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(platform_root))
 
     dataset_root = tmp_path / "data"
     date = "2026-02-11"

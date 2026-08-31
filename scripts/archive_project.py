@@ -20,7 +20,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from _script_root import pin_project_root  # noqa: E402
+from _script_root import require_platform_root  # noqa: E402
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -34,7 +34,7 @@ def main(argv: list[str] | None = None) -> int:
                          help="Include registered model checkpoints (can be large).")
     args = parser.parse_args(argv)
 
-    pin_project_root(args.project_path)
+    require_platform_root(args.project_path)
 
     # Its own process entry point, so it binds the storage backend the seam has no default for.
     from tcip_store.binding import bind_default

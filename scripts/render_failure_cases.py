@@ -10,7 +10,7 @@ image-capable tool, then describes and recommends.
     python scripts/render_failure_cases.py <predictions_dir> <labels_dir> --project <project_root>
         [--images-dir DIR] [--task detect|segment] [--top-k N] [--class-names NAMES]
 
-``--project`` (or an already-set ``$TCIP_PROJECT_ROOT``) names where this run's audit line and
+``--project`` (or an already-set ``$TCIP_STATE_ROOT``) names where this run's audit line and
 the rendered grid's cache path land; ``predictions_dir``/``labels_dir`` stay what gets read.
 """
 
@@ -23,7 +23,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from _script_root import pin_project_root  # noqa: E402
+from _script_root import require_platform_root  # noqa: E402
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -32,7 +32,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("labels_dir", help="Directory with ground-truth label files.")
     parser.add_argument("--project", default="",
                          help="Project root this run's audit line is recorded under; falls "
-                              "back to $TCIP_PROJECT_ROOT.")
+                              "back to $TCIP_STATE_ROOT.")
     parser.add_argument("--images-dir", default="",
                          help="Directory with source images. Auto-detected if omitted.")
     parser.add_argument("--task", default="detect", choices=("detect", "segment"))
@@ -40,7 +40,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--class-names", default="", help="Comma-separated class names.")
     args = parser.parse_args(argv)
 
-    pin_project_root(args.project or None)
+    require_platform_root(args.project or None)
 
     # Its own process entry point, so it binds the storage backend the seam has no default for.
     from tcip_store.binding import bind_default

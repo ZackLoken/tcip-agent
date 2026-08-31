@@ -306,8 +306,8 @@ def calibrate_ordinal_regression_operating_point(
         task: ``"ordinal"`` or ``"regression"``, dispatches which criterion toolkit, item shape and
             sidecar file apply.
         checkpoint_path: The trained checkpoint to calibrate. Must be registered under this
-            process's project root (``register_model``, explicit mode for a foreign or bespoke
-            checkpoint) or this door refuses before loading it.
+            process's platform state root (``register_model``, explicit mode for a foreign or
+            bespoke checkpoint) or this door refuses before loading it.
         images_dir: Directory holding the CSV's images.
         csv_path: The ``(stem, value)`` CSV ``OrdinalDataset``/``RegressionDataset`` reads.
         criterion: Which registered criterion to calibrate against (``operating_point.

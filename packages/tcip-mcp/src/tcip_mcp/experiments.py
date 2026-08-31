@@ -41,12 +41,12 @@ from tcip_store import (
 )
 from tcip_store.file_backend import RootedFileLocator
 
-from tcip_mcp.project_paths import project_root, resolve_state
+from tcip_mcp.project_paths import platform_state_root, resolve_state
 
 logger = logging.getLogger(__name__)
 
 # Relative default (tests rebind this constant). Consumers must go through
-# ``experiments_dir()`` so the store anchors to ``$TCIP_PROJECT_ROOT`` when pinned (no
+# ``experiments_dir()`` so the store anchors to ``$TCIP_STATE_ROOT`` when pinned (no
 # subdir fragmentation) while a rebound absolute path / unpinned cwd still work.
 EXPERIMENTS_DIR = Path(".tcip/experiments")
 
@@ -1312,7 +1312,7 @@ def register_model_from_experiment(
 
     from tcip_mcp.pipelines.data.splits import same_directory
 
-    root = str(project_root())
+    root = str(platform_state_root())
     if project_path and not same_directory(project_path, root):
         return {"error": f"register_model_from_experiment: project_path {project_path!r} is not "
                          f"the root experiment {experiment_id!r}'s own keys hang off ({root!r})."}

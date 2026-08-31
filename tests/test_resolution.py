@@ -19,7 +19,7 @@ from tcip_mcp.traits import TraitUnknownError, get_trait, registered_traits
 from tests._trait_fixtures import CATKIN
 
 # No built-in traits: seed_catkin_trait_spec (conftest.py) writes a real catkin.yml into this
-# test's pinned project root so get_trait("catkin") keeps resolving by default.
+# test's pinned platform state root so get_trait("catkin") keeps resolving by default.
 pytestmark = pytest.mark.usefixtures("seed_catkin_trait_spec")
 
 

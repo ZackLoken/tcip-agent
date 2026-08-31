@@ -209,7 +209,7 @@ is bound, so run `pytest tests/` both ways when you touch the seam. A root with 
 refused by the database backend until `adopt_store.py` conforms it. The MCP server auto-launches
 from `.mcp.json` at the repo root; a stale tool index (an `InputValidationError` for a name you
 expect, or a renamed tool under its old name) means restart the client. Durable state resolves
-via `$TCIP_PROJECT_ROOT`, pinned at startup by the web backend and every MCP server.
+via `$TCIP_STATE_ROOT`, pinned at startup by the web backend and every MCP server.
 
 ## Conventions
 

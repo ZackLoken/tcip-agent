@@ -233,7 +233,7 @@ def test_inspect_project_reports_platform_root_divergence_from_marker(tmp_path: 
 
     stale_root = tmp_path / "stale"
     stale_root.mkdir()
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(stale_root))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(stale_root))
 
     status = inspect_project(str(proj))
     divergence = status["platform_root_diverges_from_marker"]
@@ -251,7 +251,7 @@ def test_inspect_project_reports_no_divergence_when_root_matches_the_marker(
     proj = ws / "hazelnut_catkin_valley"
     (proj / ".tcip").mkdir(parents=True)
     monkeypatch.setenv("TCIP_WORKSPACE", str(ws))
-    workspace.set_active_project("hazelnut_catkin_valley")  # also repins TCIP_PROJECT_ROOT
+    workspace.set_active_project("hazelnut_catkin_valley")  # also repins TCIP_STATE_ROOT
 
     status = inspect_project(str(proj))
     assert "platform_root_diverges_from_marker" not in status
@@ -261,7 +261,7 @@ def test_inspect_project_reports_the_current_platform_root_binding_after_a_repin
     tmp_path: Path, monkeypatch
 ):
     """platform_root_binding is the substitute for a log line no process here emits: it must
-    name the just-adopted root, not whatever pin_project_root last decided at process startup."""
+    name the just-adopted root, not whatever pin_platform_root last decided at process startup."""
     from tcip_mcp import workspace
 
     ws = tmp_path / "ws"
@@ -565,7 +565,7 @@ def test_archive_project_includes_a_registered_run_checkpoint_outside_tcip_model
 
     src = tmp_path / "src_project"
     init_project(str(src), site="north orchard")
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(src))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(src))
 
     exp_id = "exp_ckpt_bundle"
     create_experiment(exp_id, {"model_source": {"builder": "x:y"}})
@@ -607,7 +607,7 @@ def test_import_project_admits_a_bundle_holding_a_registered_run_checkpoint(
 
     src = tmp_path / "src_project"
     init_project(str(src), site="north orchard")
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(src))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(src))
 
     exp_id = "exp_roundtrip"
     create_experiment(exp_id, {"model_source": {"builder": "x:y"}})
@@ -651,7 +651,7 @@ def test_import_project_admits_a_registered_checkpoint_with_no_disclosure(
 
     src = tmp_path / "src_project"
     init_project(str(src), site="north orchard")
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(src))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(src))
 
     exp_id = "exp_disclosure"
     create_experiment(exp_id, {"model_source": {"builder": "x:y"}})
@@ -707,7 +707,7 @@ def test_import_project_keeps_a_relative_entry_relative_when_the_archive_carries
 
     src = tmp_path / "src_project"
     init_project(str(src), site="north orchard")
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(src))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(src))
 
     exp_id = "exp_no_checkpoint"
     create_experiment(exp_id, {"model_source": {"builder": "x:y"}})
@@ -1160,7 +1160,7 @@ def test_init_project_refuses_an_unadopted_root(tmp_path: Path, monkeypatch):
     previous = _backend()
     # init_project's own audit entry lands at the platform root, not dest; a throwaway root here
     # keeps it off tmp_path, which stage two's own audit write below needs to find pristine.
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path / "scratch_platform_root"))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path / "scratch_platform_root"))
     file_backend = FileBackend()
     tcip_store.bind(file_backend)
     try:
@@ -1169,7 +1169,7 @@ def test_init_project_refuses_an_unadopted_root(tmp_path: Path, monkeypatch):
         tcip_store.bind(previous)
         file_backend.close()
 
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     backend = SqliteBackend()
     tcip_store.bind(backend)
     try:

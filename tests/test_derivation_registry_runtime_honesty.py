@@ -25,7 +25,7 @@ def _resolve(label: str):
 
 
 def _write_bare_trait(name: str, **extra) -> None:
-    """A minimal trait spec in this test's pinned project root, written where the platform's own
+    """A minimal trait spec in this test's pinned platform state root, written where the platform's own
     resolver reads specs from rather than at a location this fixture states on its own."""
     import tcip_store as ts
 

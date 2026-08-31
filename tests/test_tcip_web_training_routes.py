@@ -180,7 +180,7 @@ def test_list_runs_reconstructs_from_experiments(tmp_path, monkeypatch) -> None:
     excluded.
     """
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     import tcip_store
     from tcip_mcp.experiments import create_experiment, status_key, update_status
     from tcip_web.routes import training
@@ -204,7 +204,7 @@ def test_list_runs_route_is_a_pure_pass_through_to_the_tool(tmp_path, monkeypatc
     """Post-unification the route adds nothing of its own: its rows equal the tool's rows,
     exactly. Before unification the route's own reconstruction added rows the tool lacked."""
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     from tcip_mcp.experiments import create_experiment, update_status
     from tcip_mcp.tools.training_tools import list_training_runs
     from tcip_web.routes.training import list_runs_route
@@ -219,7 +219,7 @@ def test_never_launched_experiment_is_absent_from_the_route(tmp_path, monkeypatc
     """A pre-created experiment (state 'created', no run_id stamp, no metrics logged) never
     launched and must not list as a run at all, interrupted or otherwise."""
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     from tcip_mcp.experiments import create_experiment
     from tcip_web.routes.training import list_runs_route
 

@@ -449,7 +449,7 @@ def test_golden_evaluate_model_resolves_max_dets_per_regime_when_unset(tmp_path,
         json_io.write_annotations(str(labels_dir / "a.json"),
                                   [Annotation(subject="catkin", geometry=BBox(5, 5, 20, 20))],
                                   64, 64)
-        monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp))
+        monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp))
         ckpt = registered_checkpoint(tmp, project_root=tmp)
 
         TT.evaluate_model(str(ckpt), str(images_dir), str(labels_dir), task="detection",

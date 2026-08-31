@@ -18,7 +18,7 @@ torch = pytest.importorskip("torch")
 pytest.importorskip("pycocotools")
 
 # No built-in traits: seed_catkin_trait_spec (conftest.py) writes a real catkin.yml into this
-# test's pinned project root so trait/subject="catkin" call sites keep resolving.
+# test's pinned platform state root so trait/subject="catkin" call sites keep resolving.
 pytestmark = pytest.mark.usefixtures("seed_catkin_trait_spec")
 
 
@@ -57,7 +57,7 @@ def test_gating_path_honors_explicit_max_dets_le_100(tmp_path, monkeypatch):
         return {"eval_regime": "full-frame-tiled-inference"}
 
     monkeypatch.setattr(runners, "run_full_frame_evaluation", _fake)
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     images_dir, labels_dir = _det_dataset(tmp_path)
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
@@ -80,7 +80,7 @@ def test_gating_path_defaults_max_dets_to_1000_when_unset(tmp_path, monkeypatch)
         return {"eval_regime": "full-frame-tiled-inference"}
 
     monkeypatch.setattr(runners, "run_full_frame_evaluation", _fake)
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     images_dir, labels_dir = _det_dataset(tmp_path)
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
@@ -105,7 +105,7 @@ def test_diagnostic_path_defaults_max_dets_to_100_when_unset(tmp_path, monkeypat
         return {"tiled": False, "eval_regime": "tile-level"}
 
     monkeypatch.setattr(runners, "run_test_evaluation", _fake)
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     images_dir, labels_dir = _det_dataset(tmp_path)
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
@@ -126,7 +126,7 @@ def test_diagnostic_path_honors_explicit_max_dets(tmp_path, monkeypatch):
         return {"tiled": False, "eval_regime": "tile-level"}
 
     monkeypatch.setattr(runners, "run_test_evaluation", _fake)
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     images_dir, labels_dir = _det_dataset(tmp_path)
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
@@ -151,7 +151,7 @@ def test_bare_checkpoint_path_reuses_its_own_stamped_tiling_and_subject(tmp_path
         return {"eval_regime": "full-frame-tiled-inference"}
 
     monkeypatch.setattr(runners, "run_full_frame_evaluation", _fake)
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     images_dir, labels_dir = _det_dataset(tmp_path)
     ckpt = tmp_path / "model.pt"
     torch.save({"config": {"data": {"tiling": {"tile_size": 384, "overlap": 0.15},
@@ -182,7 +182,7 @@ def test_gate_translates_geometry_refusal_to_error_dict(tmp_path, monkeypatch):
         raise ValueError("Cannot resolve a trustworthy tile_size for ckpt.pt: ... tiling=")
 
     monkeypatch.setattr(runners, "run_full_frame_evaluation", _refuse)
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     images_dir, labels_dir = _det_dataset(tmp_path)
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
@@ -205,7 +205,7 @@ def test_gate_translates_unreadable_label_to_error_dict(tmp_path, monkeypatch):
         raise UnreadableLabelDocument("labels/2026-03-02/IMG_0001.json does not decode as JSON")
 
     monkeypatch.setattr(runners, "run_full_frame_evaluation", _refuse)
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     images_dir, labels_dir = _det_dataset(tmp_path)
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 

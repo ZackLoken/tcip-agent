@@ -97,7 +97,7 @@ def test_stamp_untiled_mixed_frames_record_nothing(tmp_path):
 
 
 def _write_experiment_config(tmp_path, monkeypatch, data):
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     import tcip_store as ts
     from tcip_mcp.experiments import config_key
 

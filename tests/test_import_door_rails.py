@@ -69,7 +69,7 @@ def test_import_refuses_a_non_empty_destination_and_changes_nothing(tmp_path, mo
     dest.mkdir()
     (dest / "classes.json").write_bytes(b"already here")
     # A scratch platform root for import_project's own audit entry, off tmp_path.
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path / "scratch_platform_root"))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path / "scratch_platform_root"))
     with bound(SqliteBackend()):
         ts.replace(
             dataset_layout.image_status_key(dest),
@@ -128,7 +128,7 @@ def test_import_refuses_an_undecodable_claimed_member_on_both_backends(tmp_path,
     # import_project's own audit entry lands at the platform root; each stage gets its own so
     # one backend's write there never collides with the other's.
     dest = tmp_path / "dest_sqlite"
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path / "scratch_sqlite"))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path / "scratch_sqlite"))
     with bound(SqliteBackend()):
         result = import_project(str(zip_path), str(dest))
     assert "error" in result
@@ -136,7 +136,7 @@ def test_import_refuses_an_undecodable_claimed_member_on_both_backends(tmp_path,
     assert not dest.exists()
 
     dest2 = tmp_path / "dest_file"
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path / "scratch_file"))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path / "scratch_file"))
     with bound(FileBackend()):
         result2 = import_project(str(zip_path), str(dest2))
     assert "error" in result2
@@ -494,7 +494,7 @@ def test_the_full_round_trip_reads_back_at_once_with_no_hand_adoption(tmp_path, 
     from tests._operationalization_fixtures import COUNT_TRAIT, seed_confirmed_count
 
     root = tmp_path / "source"
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(root))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(root))
     _annotated_dataset(root, 4)
     assert "error" not in init_project(str(root), site="north orchard")
     assert "error" not in register_dataset(str(root), crop="hazelnut", project_root=str(root))
@@ -539,7 +539,7 @@ def test_the_full_round_trip_reads_back_at_once_with_no_hand_adoption(tmp_path, 
     dest = tmp_path / "restored"
     # A scratch platform root for import_project's own audit entry, off root (whose own
     # conform state depends on whichever backend the suite happens to run this file on).
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path / "scratch_platform_root"))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path / "scratch_platform_root"))
     with bound(SqliteBackend()):
         imported = import_project(str(zip_path), str(dest))
         assert "error" not in imported

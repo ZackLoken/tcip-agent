@@ -49,7 +49,7 @@ def allowed_roots() -> list[Path]:
     The workspace root, then each workspace project's registered dataset roots (a dataset
     registered from outside the project tree is platform-managed data and must stay reachable
     with no operator action), then ``TCIP_IMAGE_ROOTS``. The platform-state root
-    (``TCIP_PROJECT_ROOT``) is not a member on its own: it is the server's own state, and the
+    (``TCIP_STATE_ROOT``) is not a member on its own: it is the server's own state, and the
     routes that write under it derive it server-side rather than taking it from a client.
 
     A project whose dataset registry will not decode raises rather than contributing nothing: an

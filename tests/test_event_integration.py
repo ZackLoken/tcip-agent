@@ -203,7 +203,7 @@ class TestActiveProjectChangedRoute:
         self, client: TestClient, tmp_path: Path, monkeypatch
     ) -> None:
         from tcip_mcp import workspace
-        from tcip_mcp.project_paths import project_root
+        from tcip_mcp.project_paths import platform_state_root
 
         proj = workspace.project_path("chestnut_burr_valley")
         (proj / ".tcip").mkdir(parents=True)
@@ -211,8 +211,8 @@ class TestActiveProjectChangedRoute:
 
         stale = tmp_path / "stale"
         stale.mkdir()
-        monkeypatch.setenv("TCIP_PROJECT_ROOT", str(stale))
-        assert project_root() == stale
+        monkeypatch.setenv("TCIP_STATE_ROOT", str(stale))
+        assert platform_state_root() == stale
 
         resp = client.post(
             "/api/events/app",
@@ -221,7 +221,7 @@ class TestActiveProjectChangedRoute:
         )
         assert resp.status_code == 200
         assert resp.json()["platform_root"] == str(proj)
-        assert project_root() == proj
+        assert platform_state_root() == proj
 
     def test_reports_a_disagreement_but_never_acts_on_the_events_own_name(
         self, client: TestClient
@@ -272,9 +272,9 @@ class TestActiveProjectChangedRoute:
     def test_an_event_naming_no_project_leaves_the_root_alone(
         self, client: TestClient
     ) -> None:
-        from tcip_mcp.project_paths import project_root
+        from tcip_mcp.project_paths import platform_state_root
 
-        before = project_root()
+        before = platform_state_root()
         resp = client.post(
             "/api/events/app",
             json={"event_type": "active_project_changed", "data": {"name": "no_such_project"}},
@@ -282,7 +282,7 @@ class TestActiveProjectChangedRoute:
         body = resp.json()
         assert "platform_root" not in body
         assert "platform_root_problem" not in body
-        assert project_root() == before
+        assert platform_state_root() == before
 
 
 class TestPushPanelDataTool:
@@ -370,7 +370,7 @@ class TestPortDiscovery:
 
         ts.replace(web_client.backend_port_key(), "23456")
         monkeypatch.delenv("TCIP_WEB_PORT", raising=False)
-        monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path / "some_other_project"))
+        monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path / "some_other_project"))
         assert web_client.resolve_web_port() == 23456
 
     def test_default_when_neither_available(self, monkeypatch) -> None:

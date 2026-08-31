@@ -1,8 +1,8 @@
-"""Output artifacts anchor to the project root.
+"""Output artifacts anchor to the platform state root.
 
 Weights, prediction buckets, delivery CSVs and curated datasets are addressed by caller-supplied
-paths; a relative one resolves under the project root (the platform state root the adopted project
-pins), never the server process's cwd, and an absolute one stays the caller's own explicit choice.
+paths; a relative one resolves under the platform state root (the root the adopted project pins),
+never the server process's cwd, and an absolute one stays the caller's own explicit choice.
 The shared resolver is ``project_paths.resolve_output_path``; every output-writing tool delegates
 to it, so the per-tool checks here are representative, not exhaustive.
 """
@@ -23,14 +23,14 @@ def test_an_absolute_output_path_is_the_callers_own_choice(tmp_path: Path) -> No
     assert resolve_output_path(str(explicit)) == explicit
 
 
-def test_a_relative_output_path_resolves_under_the_project_root(tmp_path: Path) -> None:
+def test_a_relative_output_path_resolves_under_the_platform_state_root(tmp_path: Path) -> None:
     from tcip_mcp.project_paths import resolve_output_path
 
     assert resolve_output_path("exports/counts.csv") == tmp_path / "exports" / "counts.csv"
     assert resolve_output_path(Path("runs") / "exp1") == tmp_path / "runs" / "exp1"
 
 
-def test_hpo_root_anchors_a_relative_output_dir_to_the_project(tmp_path: Path) -> None:
+def test_hpo_root_anchors_a_relative_output_dir_to_the_platform_state_root(tmp_path: Path) -> None:
     from tcip_mcp.tools.training_tools import hpo_root
 
     assert hpo_root("sweeps/hpo_1") == tmp_path / "sweeps" / "hpo_1"
@@ -39,10 +39,11 @@ def test_hpo_root_anchors_a_relative_output_dir_to_the_project(tmp_path: Path) -
     assert hpo_root(str(explicit)) == explicit
 
 
-def test_launch_training_defaults_into_the_projects_experiment_store(tmp_path: Path,
-                                                                     monkeypatch) -> None:
-    """With no output_dir named, a run's weights and logs land in the project's own experiment
-    store, beside its experiment record, never in the launching process's cwd."""
+def test_launch_training_defaults_into_the_platform_state_roots_experiment_store(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """With no output_dir named, a run's weights and logs land in the platform state root's own
+    experiment store, beside its experiment record, never in the launching process's cwd."""
     pytest.importorskip("torchvision")
     monkeypatch.chdir(tmp_path)
 

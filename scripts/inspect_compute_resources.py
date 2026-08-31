@@ -9,7 +9,7 @@ it before ``launch_training``/``run_hpo`` when compute headroom is the open ques
 
     python scripts/inspect_compute_resources.py --project <project_root>
 
-``--project`` (or an already-set ``$TCIP_PROJECT_ROOT``) names the project this run's active-run
+``--project`` (or an already-set ``$TCIP_STATE_ROOT``) names the project this run's active-run
 count and audit line resolve against; without it the answer resolves against the process cwd,
 which is wrong for a run count and silent about it.
 """
@@ -23,17 +23,17 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from _script_root import pin_project_root  # noqa: E402
+from _script_root import require_platform_root  # noqa: E402
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--project", default="",
                          help="Project root this run resolves against; falls back to "
-                              "$TCIP_PROJECT_ROOT.")
+                              "$TCIP_STATE_ROOT.")
     args = parser.parse_args(argv)
 
-    pin_project_root(args.project or None)
+    require_platform_root(args.project or None)
 
     # Its own process entry point, so it binds the storage backend the seam has no default for.
     from tcip_store.binding import bind_default

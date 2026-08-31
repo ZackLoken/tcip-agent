@@ -359,7 +359,7 @@ def _root_divergence_report() -> dict[str, str] | None:
     """Whether this process's platform-state root disagrees with the workspace's
     active-project marker.
 
-    Adopting a project repins the *adopting process's own* ``TCIP_PROJECT_ROOT`` at once
+    Adopting a project repins the *adopting process's own* ``TCIP_STATE_ROOT`` at once
     (``workspace.set_active_project``); a separate process converges only when it itself binds
     from the marker, at its own startup or (the web backend) on the agent's adopt signal, so
     this process's root can keep naming a stale or different project until then.
@@ -373,7 +373,7 @@ def _root_divergence_report() -> dict[str, str] | None:
     bring the workspace directory into existence as a side effect.
     """
     from tcip_mcp import workspace
-    from tcip_mcp.project_paths import project_root
+    from tcip_mcp.project_paths import platform_state_root
 
     try:
         found = workspace.active_project_if_present(create=False)
@@ -383,7 +383,7 @@ def _root_divergence_report() -> dict[str, str] | None:
         problem = workspace.marker_problem(create=False)
         return {"marker_problem": problem} if problem else None
     _, marker_project = found
-    root = project_root()
+    root = platform_state_root()
     if root == marker_project:
         return None
     return {
@@ -446,11 +446,11 @@ def inspect_project(project_path: str = "") -> dict:
     """Get an overview of a TCIP project.
 
     Carries ``platform_root_diverges_from_marker`` when this process's platform-state root
-    (``$TCIP_PROJECT_ROOT``) names a different project than the workspace's active-project
+    (``$TCIP_STATE_ROOT``) names a different project than the workspace's active-project
     marker: adoption repins only the adopting process, so the GUI and this process can end
     up naming different projects until both explicitly adopt. Carries
     ``platform_root_binding``, this process's own :class:`tcip_mcp.project_paths.RootBinding`
-    as a dict, when either :func:`tcip_mcp.project_paths.pin_project_root` or
+    as a dict, when either :func:`tcip_mcp.project_paths.pin_platform_root` or
     :func:`tcip_mcp.project_paths.repin_platform_root` has run: absent under pytest until a
     ``set_active_project`` call repins, and absent for any other standalone use, since none of
     those call either.

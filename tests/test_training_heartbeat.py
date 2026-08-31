@@ -32,7 +32,7 @@ def test_heartbeat_fresh_helper():
 
 def test_reconstructed_run_running_vs_interrupted(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)  # EXPERIMENTS_DIR is .tcip/experiments (cwd-relative)
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     from tcip_mcp.experiments import create_experiment, log_metrics, status_key, update_status
     from tcip_mcp.tools.training_tools import list_training_runs
 
@@ -63,7 +63,7 @@ def test_configured_stale_window_agrees_across_run_list_compare_and_status(tmp_p
     heartbeat reads stale under a 30s window even though it would read fresh under the 600s
     default."""
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     from tcip_mcp.experiments import create_experiment, status_key, update_status
     from tcip_mcp.tools import training_tools
     from tcip_mcp.tools.experiment_tools import compare_experiments as compare_tool

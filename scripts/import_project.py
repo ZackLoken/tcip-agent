@@ -21,7 +21,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from _script_root import pin_project_root  # noqa: E402
+from _script_root import require_platform_root  # noqa: E402
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -32,7 +32,7 @@ def main(argv: list[str] | None = None) -> int:
                                              "run's audit line is recorded.")
     args = parser.parse_args(argv)
 
-    pin_project_root(args.destination)
+    require_platform_root(args.destination)
 
     # Its own process entry point, so it binds the storage backend the seam has no default for.
     from tcip_store.binding import bind_default

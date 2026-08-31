@@ -17,7 +17,7 @@ from pathlib import Path
 import pytest
 
 # no built-in traits, seed_catkin_trait_spec (conftest.py) writes a real catkin.yml into this
-# test's pinned project root so trait="catkin" call sites keep resolving.
+# test's pinned platform state root so trait="catkin" call sites keep resolving.
 pytestmark = pytest.mark.usefixtures("seed_catkin_trait_spec")
 
 torch = pytest.importorskip("torch")
@@ -81,7 +81,7 @@ def test_external_marker_not_permanently_blocked_when_disjoint(tmp_path, monkeyp
     from tcip_mcp.experiments import split_key
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
 
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     tcip_store.replace(split_key("exp_ext"), {"train": ["train_a", "train_b"], "group_by": "external"})
 
     cal, hold = _good_dense_op_records()
@@ -103,7 +103,7 @@ def test_external_marker_still_catches_a_real_leak(tmp_path, monkeypatch):
     from tcip_mcp.experiments import split_key
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
 
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     # Training trained on "c_a", the same stem the calibration reference uses below.
     tcip_store.replace(split_key("exp_ext2"), {"train": ["c_a", "other_stem"], "group_by": "external"})
 
@@ -175,7 +175,7 @@ def test_train_disjointness_named_group_by_output_unchanged(tmp_path, monkeypatc
     from tcip_mcp.experiments import split_key
     from tcip_mcp.pipelines.operating_point import _train_disjointness
 
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     tcip_store.replace(split_key("exp_named"),
                        {"train": ["srcA_0_0", "srcA_0_1", "srcB_0_0"], "group_by": "tile_prefix"})
     result = _train_disjointness("exp_named", {"srcB_0_0"}, set())
@@ -193,7 +193,7 @@ def test_train_disjointness_spatial_strip_detects_same_source_leak(tmp_path, mon
     from tcip_mcp.experiments import split_key
     from tcip_mcp.pipelines.operating_point import _train_disjointness
 
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     tcip_store.replace(split_key("exp_spatial"), {
         "train": ["mosaic::strip_x_1"],
         "val": ["mosaic::strip_x_0"], "group_by": "spatial_strip",
@@ -218,7 +218,7 @@ def test_train_disjointness_rects_kwargs_default_none_is_byte_identical(tmp_path
     from tcip_mcp.experiments import split_key
     from tcip_mcp.pipelines.operating_point import _train_disjointness
 
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     tcip_store.replace(split_key("exp_noop"),
                        {"train": ["mosaic::strip_x_1"], "group_by": "spatial_strip"})
 
@@ -242,7 +242,7 @@ def test_train_disjointness_spatial_strip_geometric_containment(tmp_path, monkey
     from tcip_mcp.experiments import split_key
     from tcip_mcp.pipelines.operating_point import _train_disjointness
 
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     tcip_store.replace(split_key("exp_geo"), {
         "train": ["mosaic::strip_x_1"], "group_by": "spatial_strip",
         "spatial": {
@@ -280,7 +280,7 @@ def test_train_disjointness_spatial_strip_geometric_admits_calibration_region(tm
     from tcip_mcp.experiments import split_key
     from tcip_mcp.pipelines.operating_point import _train_disjointness
 
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     tcip_store.replace(split_key("exp_geo4"), {
         "train": ["mosaic::strip_x_1"], "group_by": "spatial_strip",
         "spatial": {
@@ -411,7 +411,7 @@ def test_review_confirmed_leak_now_detected(tmp_path, monkeypatch):
     from tcip_mcp.experiments import split_key
     from tcip_mcp.pipelines.feedback.review_calibration import resolve_operating_point_from_review
 
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     # Trained on two tiles of source "srcA".
     tcip_store.replace(split_key("exp_review"),
                        {"train": ["srcA_0_0", "srcA_0_1"], "group_by": "tile_prefix"})
@@ -715,11 +715,11 @@ def test_the_calibration_door_keeps_its_lock_across_an_active_project_repin(tmp_
     for root in (tmp_path / "before_adoption", tmp_path / "adopted_project"):
         shutil.copytree(tmp_path / ".tcip", root / ".tcip")
 
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path / "before_adoption"))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path / "before_adoption"))
     first, _dh, _n_excluded, _evidence = calibration.calibrate_operating_point(
         _CalStub(), "catkin", str(labels_dir), str(images_dir), seed=1, **kwargs)
 
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path / "adopted_project"))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path / "adopted_project"))
     second, _dh2, _n_excluded2, _evidence2 = calibration.calibrate_operating_point(
         _CalStub(), "catkin", str(labels_dir), str(images_dir), seed=2, **kwargs)
 

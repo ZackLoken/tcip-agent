@@ -22,7 +22,7 @@ torch = pytest.importorskip("torch")
 pytest.importorskip("torchvision")
 
 # No built-in traits: seed_catkin_trait_spec (conftest.py) writes a real catkin.yml into this
-# test's pinned project root so resolve_operating_point("catkin", ...) keeps resolving by default.
+# test's pinned platform state root so resolve_operating_point("catkin", ...) keeps resolving by default.
 pytestmark = pytest.mark.usefixtures("seed_catkin_trait_spec")
 
 # Component registration side-effects (backbones/necks/heads used by build_dataset + eval).

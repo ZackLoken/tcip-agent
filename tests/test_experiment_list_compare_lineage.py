@@ -17,7 +17,7 @@ def test_a_created_experiment_is_listed_whichever_backend_holds_its_record(
     from tcip_store.binding import BACKEND_ENV, bind_default
 
     monkeypatch.setenv(BACKEND_ENV, backend_name)
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     backend = bind_default()
     try:
         from tcip_mcp.experiments import (
@@ -310,7 +310,7 @@ def test_compare_experiments_finds_a_refusal_under_the_pinned_root(tmp_path, mon
     experiment that resolves under it at all, and nothing about a second root ever gets read."""
     root = tmp_path / "root"
     root.mkdir()
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(root))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(root))
 
     from tcip_mcp.experiments import (
         compare_experiments, create_experiment, stamp_run_identity, update_status,

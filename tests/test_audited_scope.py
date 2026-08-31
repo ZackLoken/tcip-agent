@@ -198,7 +198,7 @@ def test_relative_output_dir_records_where_the_tool_anchors_it_not_where_the_pro
     (decoy / "classes.json").write_text("{}", encoding="utf-8")
 
     monkeypatch.chdir(process_cwd)
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(pinned_root))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(pinned_root))
 
     result = materialize_review_dataset(
         dataset_root=str(tmp_path / "no_review_state"),

@@ -5,12 +5,12 @@ from __future__ import annotations
 from tcip_mcp.server import mcp
 from tcip_mcp.audit import audited
 from tcip_mcp.model_registry import ModelRegistry
-from tcip_mcp.project_paths import project_root
+from tcip_mcp.project_paths import platform_state_root
 
 
 def _registry_root(project_path: str) -> str:
     """Explicit path wins; empty falls back to the platform root (the adopted project)."""
-    return project_path or str(project_root())
+    return project_path or str(platform_state_root())
 
 
 @mcp.tool()

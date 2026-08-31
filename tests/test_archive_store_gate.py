@@ -182,14 +182,14 @@ def test_a_restored_project_conformed_to_a_database_still_holds_its_confirmed_ne
     platform_database.mkdir()
     platform_files.mkdir()
 
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(platform_database))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(platform_database))
     with bound(SqliteBackend()):
         ts.replace(dataset_layout.image_status_key(root), _NEGATIVE, expect=ts.Version.ABSENT)
         export_files(root)
     archive_project(str(root), str(tmp_path / "bundle.zip"))
 
     restored = tmp_path / "restored"
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(platform_files))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(platform_files))
     with bound(FileBackend()):
         assert "error" not in import_project(str(tmp_path / "bundle.zip"), str(restored))
         assert ts.read(dataset_layout.image_status_key(restored)) == _NEGATIVE

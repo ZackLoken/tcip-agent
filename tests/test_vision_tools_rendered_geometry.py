@@ -46,7 +46,7 @@ def split_instance_dataset(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> P
     from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, Polygon
 
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     images = tmp_path / "images"
     images.mkdir()
     Image.new("RGB", (320, 180), BACKGROUND).save(images / "split.png")
@@ -133,7 +133,7 @@ def mislocalized_prediction_dataset(tmp_path: Path, monkeypatch: pytest.MonkeyPa
     from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
 
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     images = tmp_path / "images"
     images.mkdir()
     Image.new("RGB", (300, 200), BACKGROUND).save(images / "miss.png")

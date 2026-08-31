@@ -109,7 +109,7 @@ def test_a_platform_state_root_outside_any_workspace_is_not_admitted_on_its_own(
     tmp_path: Path, outside: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The development pin (the repo root) is the server's own state, not breeder data."""
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(outside))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(outside))
     (outside / ".tcip").mkdir()
     with pytest.raises(ValueError, match="outside the allowed roots"):
         assert_path_allowed(str(outside / ".tcip" / "audit.jsonl"))

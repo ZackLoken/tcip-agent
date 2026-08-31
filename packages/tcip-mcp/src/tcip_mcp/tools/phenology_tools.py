@@ -79,7 +79,7 @@ def build_plant_mapping(
     from tcip_mcp.pipelines.data.splits import same_directory
     from tcip_mcp.pipelines.image_utils import AmbiguousImageStem
     from tcip_mcp.pipelines.postprocessing import plant_mapping
-    from tcip_mcp.project_paths import project_root as platform_project_root
+    from tcip_mcp.project_paths import platform_state_root
     from tcip_mcp.project_record import ProjectRecordMissing, read_record
 
     if not NAME_SEGMENT.fullmatch(name):
@@ -87,9 +87,9 @@ def build_plant_mapping(
             f"name {name!r} is not lowercase letters, digits and single hyphens "
             f"({NAME_SEGMENT.pattern})")}
 
-    project_root = platform_project_root()
+    platform_root = platform_state_root()
     try:
-        read_record(project_root)
+        read_record(platform_root)
     except ProjectRecordMissing as exc:
         return {"error": str(exc)}
 
@@ -114,7 +114,7 @@ def build_plant_mapping(
         build = plant_mapping.build_mapping(
             resolved_images_root, [Path(p) for p in plant_csv_paths],
             name=name, dataset_root=candidate, dataset_id=identity["id"],
-            project_root=project_root, built_by="build_plant_mapping",
+            project_root=platform_root, built_by="build_plant_mapping",
             dates=dates, nn_tolerance_m=nn_tolerance_m,
         )
     except AmbiguousImageStem as exc:
@@ -123,7 +123,7 @@ def build_plant_mapping(
         return {"error": f"no date folders with images under {images_root}"}
 
     try:
-        plant_mapping.persist_mapping(build, project_root, name)
+        plant_mapping.persist_mapping(build, platform_root, name)
     except AuditEntryNotWritten as exc:
         return {"error": str(exc)}
 
@@ -144,7 +144,7 @@ def build_plant_mapping(
 
     return {
         "name": name,
-        "project_root": str(project_root),
+        "project_root": str(platform_root),
         "dataset_root": str(candidate),
         "unreadable": build.unreadable,
         "n_dates": len(build.dates),
@@ -639,12 +639,12 @@ def compute_phenology(
     pos = spec.positive_class_name
 
     from tcip_mcp.pipelines.postprocessing import plant_mapping
-    from tcip_mcp.project_paths import project_root as platform_project_root
+    from tcip_mcp.project_paths import platform_state_root
 
-    project_root = platform_project_root()
+    platform_root = platform_state_root()
     try:
         mapping_build, verified = plant_mapping.resolve_delivery_mapping(
-            project_root, mapping_name, predictions_by_date)
+            platform_root, mapping_name, predictions_by_date)
     except plant_mapping.MappingDeliveryRefusal as e:
         return {"error": str(e), "n_plants": 0}
 
@@ -780,7 +780,7 @@ def compute_phenology(
     if not still_stated.ok:
         return {"error": still_stated.message, "n_plants": len(rows)}
 
-    from tcip_mcp.project_paths import project_root as platform_project_root
+    from tcip_mcp.project_paths import platform_state_root
 
     # write_phenology_csv re-runs the same gate over these flags, composes every provenance cell
     # (including the majority-provisional marker) and records the delivery.
@@ -788,7 +788,7 @@ def compute_phenology(
         "compute_phenology", rows, Path(output_csv_path), spec,
         flags=flags, acknowledge_unvalidated=acknowledge_unvalidated, basis=still_stated.basis,
         operating_point_conf=operating_point_conf, producer=producer, bindings=recon["bindings"],
-        pred_dirs=list(predictions_by_date.values()), project_root=platform_project_root(),
+        pred_dirs=list(predictions_by_date.values()), project_root=platform_state_root(),
         plant_mapping=mapping_build.delivery_disclosure(verified))
     # Per-milestone summary: report reached-counts for each milestone the spec actually declares.
     n_reached: dict[str, int] = {}

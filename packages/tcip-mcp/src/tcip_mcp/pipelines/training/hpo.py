@@ -222,9 +222,9 @@ def ray_dashboard_key() -> Key:
     ``last_writer_wins``: the whole document is composed from what ``ray.init()`` just
     returned and written in one shot, never merged into.
     """
-    from tcip_mcp.project_paths import project_root
+    from tcip_mcp.project_paths import platform_state_root
 
-    return Key(RAY_DASHBOARD_STORE, str(project_root().resolve()), ("ray_dashboard",))
+    return Key(RAY_DASHBOARD_STORE, str(platform_state_root().resolve()), ("ray_dashboard",))
 
 
 def _publish_ray_dashboard(dashboard_url: str | None) -> None:

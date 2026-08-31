@@ -100,7 +100,7 @@ def test_resolve_run_id_map_none_for_attribute_scope_with_no_registry(tmp_path):
 def test_patch_experiment_config_id_map_merges_into_durable_config(tmp_path, monkeypatch):
     import tcip_store as ts
 
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     from tcip_mcp.experiments import config_key, create_experiment
     from tcip_mcp.pipelines.training.subprocess_worker import _patch_experiment_config_id_map
 
@@ -117,7 +117,7 @@ def test_patch_experiment_config_id_map_merges_into_durable_config(tmp_path, mon
 
 
 def test_patch_experiment_config_id_map_never_sinks_a_run_with_no_experiment_dir(tmp_path, monkeypatch):
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     from tcip_mcp.pipelines.training.subprocess_worker import _patch_experiment_config_id_map
 
     # No experiments/<id>/config.json exists at all: best-effort, must not raise.
@@ -147,7 +147,7 @@ def test_worker_leaves_a_spatial_runs_identities_out_of_the_durable_config(tmp_p
     from tcip_mcp.pipelines.data import split_construction as sc
     from tcip_mcp.pipelines.training import subprocess_worker as worker
 
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     out = tmp_path / "run"
     out.mkdir()
     config = {"model_source": {"builder": "x:y", "task": "detection"},
@@ -471,7 +471,7 @@ def test_list_training_runs_reconstructs_without_the_full_scan_resolver(tmp_path
     round-trip a custom-named (id != run_id) experiment through resolve_experiment_for_run's
     full-scan fallback the way the old per-run reconstruct_run_status call did."""
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     import tcip_mcp.experiments as exp_mod
     from tcip_mcp.experiments import create_experiment, update_status
     from tcip_mcp.tools.training_tools import list_training_runs
@@ -497,7 +497,7 @@ def test_list_training_runs_lists_a_launched_experiment_this_process_never_held(
     """A run another process launched (never in this process's _RUNS at all, not merely
     pid-bearing) still lists, reconstructed straight from its own disk record."""
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     from tcip_mcp.experiments import create_experiment, update_status
     from tcip_mcp.tools.training_tools import list_training_runs
 
@@ -516,7 +516,7 @@ def test_list_training_runs_overlays_a_pid_bearing_entry_from_disk(tmp_path, mon
     pre-existing coverage; the new assertion this test adds is external=False, unlike a run this
     process never held at all."""
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     from tcip_mcp.experiments import create_experiment, log_metrics, stamp_run_identity, update_status
     from tcip_mcp.pipelines.training.run_registry import attach_run
     from tcip_mcp.tools.training_tools import list_training_runs

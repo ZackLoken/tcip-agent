@@ -3,7 +3,7 @@ through both delivery doors (the JSON curve/milestone doors and export_csv), ass
 schema and that an unvalidated row is refused. ``registered_traits()`` returning only ``catkin``
 was the standing gap this closes.
 
-``currant_bloom`` is authored here, in this test file's own pinned project root, honestly
+``currant_bloom`` is authored here, in this test file's own pinned platform state root, honestly
 provisional: no domain expert has confirmed it, and it exists to prove the delivery mechanism
 generalizes to a real *second* trait, not to describe a validated measurement. It deliberately
 leaves ``majority_milestone``/``majority_label`` empty rather than copied from catkin, since
@@ -147,7 +147,7 @@ def _export(client: TestClient, body: dict, payload: str = "milestones", **extra
 
 
 def test_currant_bloom_is_registered_and_distinct_from_catkin(tmp_path: Path):
-    # $TCIP_PROJECT_ROOT is already pinned to tmp_path by conftest.py's autouse _pin_platform_root.
+    # $TCIP_STATE_ROOT is already pinned to tmp_path by conftest.py's autouse _pin_platform_root.
     from tcip_mcp.traits import get_trait, registered_traits
 
     _seed_currant_bloom_trait(tmp_path)

@@ -11,7 +11,7 @@ import pytest
 import tcip_store as ts
 
 # No built-in traits: seed_catkin_trait_spec (conftest.py) writes a real catkin.yml into this
-# test's pinned project root so trait="catkin" call sites keep resolving.
+# test's pinned platform state root so trait="catkin" call sites keep resolving.
 pytestmark = pytest.mark.usefixtures("seed_catkin_trait_spec")
 
 
@@ -1189,7 +1189,7 @@ def test_dataset_identity_propagates_a_version_refused_identity(tmp_path, monkey
     from tcip_mcp.dataset_layout import dataset_identity_key
     from tcip_mcp.pipelines.data.split_construction import dataset_identity
 
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     images_dir = tmp_path / "images"
     images_dir.mkdir()
     key = dataset_identity_key(tmp_path)
@@ -1205,7 +1205,7 @@ def test_dataset_identity_tolerates_a_genuinely_unregistered_dataset(tmp_path, m
     """The admitting half: no identity document at all still reads as (None, fp), not a refusal."""
     from tcip_mcp.pipelines.data.split_construction import dataset_identity
 
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     images_dir = tmp_path / "images"
     images_dir.mkdir()
 

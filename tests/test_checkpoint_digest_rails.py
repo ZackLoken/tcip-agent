@@ -59,7 +59,7 @@ def _register(tmp_path: Path, ckpt_path: str, *, name: str = "rail-model",
 # every door, writing nothing.
 
 def test_run_inference_refuses_an_unregistered_checkpoint(tmp_path, monkeypatch):
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     ckpt = _bespoke_checkpoint(tmp_path / "m.pt")
     images_dir, _ = _images(tmp_path)
 
@@ -72,7 +72,7 @@ def test_run_inference_refuses_an_unregistered_checkpoint(tmp_path, monkeypatch)
 
 
 def test_export_predictions_refuses_an_unregistered_checkpoint_and_writes_nothing(tmp_path, monkeypatch):
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     ckpt = _bespoke_checkpoint(tmp_path / "m.pt")
     images_dir, _ = _images(tmp_path)
     out = tmp_path / "preds"
@@ -88,7 +88,7 @@ def test_export_predictions_refuses_an_unregistered_checkpoint_and_writes_nothin
 def test_tabulate_counts_refuses_an_unregistered_checkpoint_and_writes_nothing(tmp_path, monkeypatch):
     from tests import _operationalization_fixtures as fx
 
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     fx.seed_confirmed_count(tmp_path)
     ckpt = _bespoke_checkpoint(tmp_path / "m.pt")
     images_dir, _ = _images(tmp_path)
@@ -103,7 +103,7 @@ def test_tabulate_counts_refuses_an_unregistered_checkpoint_and_writes_nothing(t
 
 
 def test_evaluate_model_refuses_an_unregistered_checkpoint_by_bare_path(tmp_path, monkeypatch):
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     ckpt = _bespoke_checkpoint(tmp_path / "m.pt")
     images_dir, _ = _images(tmp_path)
 
@@ -118,7 +118,7 @@ def test_web_inference_worker_refuses_an_unregistered_checkpoint(tmp_path, monke
     pytest.importorskip("fastapi")
     from tcip_web.routes.inference import InferenceJob, _worker
 
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     ckpt = _bespoke_checkpoint(tmp_path / "m.pt")
     images_dir, _ = _images(tmp_path)
     out_dir = tmp_path / "out"
@@ -134,7 +134,7 @@ def test_web_inference_worker_refuses_an_unregistered_checkpoint(tmp_path, monke
 
 
 def test_triage_predictions_refuses_an_unregistered_checkpoint(tmp_path, monkeypatch):
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     ckpt = _bespoke_checkpoint(tmp_path / "m.pt")
     images_dir, _ = _images(tmp_path)
 
@@ -215,7 +215,7 @@ def test_calibrate_ordinal_regression_operating_point_refuses_an_unregistered_ch
     leaves no lock record for the CSV's identity behind."""
     import tcip_store as ts
 
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     ckpt = _bespoke_checkpoint(tmp_path / "m.pt")
     images_dir, _ = _images(tmp_path, n=4)
     csv_path = tmp_path / "ranks.csv"
@@ -290,7 +290,7 @@ def test_review_priority_route_worker_completes_the_job_with_a_registered_checkp
 # registration is refused: the digest of the bytes actually loaded names no entry.
 
 def test_run_inference_refuses_a_checkpoint_overwritten_in_place_after_registration(tmp_path, monkeypatch):
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     ckpt = tmp_path / "m.pt"
     _bespoke_checkpoint(ckpt)
     _register(tmp_path, str(ckpt))
@@ -307,7 +307,7 @@ def test_run_inference_refuses_a_checkpoint_overwritten_in_place_after_registrat
 
 
 def test_run_inference_refuses_a_registered_checkpoint_replaced_by_rename(tmp_path, monkeypatch):
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     ckpt = tmp_path / "m.pt"
     _bespoke_checkpoint(ckpt)
     _register(tmp_path, str(ckpt))
@@ -329,7 +329,7 @@ def test_run_inference_refuses_a_registered_checkpoint_replaced_by_rename(tmp_pa
 # name; entries that agree, or one naming none beside one that does, admit it.
 
 def test_two_entries_naming_one_digest_with_disagreeing_producers_refuse(tmp_path, monkeypatch):
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     from tcip_mcp.experiments import complete_run, create_experiment, register_model_from_experiment
 
     ckpt = tmp_path / "m.pt"
@@ -354,7 +354,7 @@ def test_two_entries_naming_one_digest_with_disagreeing_producers_refuse(tmp_pat
 def test_two_entries_naming_one_digest_with_agreeing_producers_admit_it(tmp_path, monkeypatch):
     """Coverage: the admitting half of rail 4. The same run's weights registered under two
     distinct names both name the run's own experiment_id, agreeing by construction."""
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     from tcip_mcp.experiments import complete_run, create_experiment, register_model_from_experiment
 
     ckpt = tmp_path / "m.pt"
@@ -375,7 +375,7 @@ def test_two_entries_naming_one_digest_with_agreeing_producers_admit_it(tmp_path
 def test_one_entry_naming_none_beside_one_that_does_admits_the_named_producer(tmp_path, monkeypatch):
     """Coverage: an explicit-mode entry (experiment_id null) is not a vote for producer=None;
     it is simply ignored."""
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     from tcip_mcp.experiments import complete_run, create_experiment, register_model_from_experiment
 
     ckpt = tmp_path / "m.pt"
@@ -411,7 +411,7 @@ class _SideEffectOnUnpickle:
 
 
 def test_run_inference_refuses_without_unpickling_a_side_effect_payload(tmp_path, monkeypatch):
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     marker = tmp_path / "unpickled.marker"
     ckpt = tmp_path / "m.pt"
     torch.save({"model_state_dict": {},
@@ -430,7 +430,7 @@ def test_run_inference_refuses_without_unpickling_a_side_effect_payload(tmp_path
 # Rail 6: valid work the rail admits, through the doors that gate on measurement.
 
 def test_run_inference_admits_a_registered_checkpoint_and_carries_its_digest(tmp_path, monkeypatch):
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     ckpt = tmp_path / "m.pt"
     _bespoke_checkpoint(ckpt)
     reg = _register(tmp_path, str(ckpt))
@@ -444,7 +444,7 @@ def test_run_inference_admits_a_registered_checkpoint_and_carries_its_digest(tmp
 
 
 def test_run_inference_admits_the_same_checkpoint_copied_to_another_path(tmp_path, monkeypatch):
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     ckpt = tmp_path / "m.pt"
     _bespoke_checkpoint(ckpt)
     reg = _register(tmp_path, str(ckpt))
@@ -460,7 +460,7 @@ def test_run_inference_admits_the_same_checkpoint_copied_to_another_path(tmp_pat
 
 
 def test_run_inference_admits_a_raw_run_with_no_trait_and_stamps_unvalidated(tmp_path, monkeypatch):
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     ckpt = tmp_path / "m.pt"
     _bespoke_checkpoint(ckpt)
     _register(tmp_path, str(ckpt))
@@ -478,7 +478,7 @@ def test_run_inference_admits_a_second_checkpoint_of_a_run_registered_under_a_di
 ):
     """model_final beside model_best, registered explicit mode under a distinct name, is admitted:
     experiment mode would have replaced the run's own registered entry by name instead."""
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     best = tmp_path / "model_best.pt"
     _bespoke_checkpoint(best)
     _register(tmp_path, str(best), name="run-best")
@@ -503,7 +503,7 @@ def test_a_completed_runs_registered_weights_run_through_run_inference_with_no_f
         complete_run, create_experiment, register_model_from_experiment, update_status,
     )
 
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     exp_id = "exp-rail7"
     create_experiment(exp_id, {"model_source": {"builder": "x:y"}})
     update_status(exp_id, "running")
@@ -531,7 +531,7 @@ def test_registration_failure_after_completion_is_recorded_in_the_audit_log(tmp_
     from tcip_mcp.pipelines.training.envelope import TrainContext, _finalize_run
     from tcip_mcp.pipelines.training.run_registry import create_run
 
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     exp_id = "exp-rail11"
     create_experiment(exp_id, {"model_source": {"builder": "x:y"}})
     update_status(exp_id, "running")
@@ -562,7 +562,7 @@ def test_registration_failure_after_completion_is_recorded_in_the_audit_log(tmp_
 # Rail 10: register_model and load_registered_checkpoint agree on one file's digest.
 
 def test_registration_digest_and_load_digest_agree(tmp_path, monkeypatch):
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     ckpt = tmp_path / "m.pt"
     _bespoke_checkpoint(ckpt)
     reg = _register(tmp_path, str(ckpt))
@@ -583,7 +583,7 @@ def test_register_model_from_experiment_applies_the_same_version_check_as_load_r
     with no version check, so a payload above the ceiling would register with its real metrics.
     Routed through the shared _load_verified_payload, this payload's metrics are read no
     differently than any other payload this reader cannot act on: empty, never fabricated."""
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     from tcip_mcp.experiments import complete_run, create_experiment, register_model_from_experiment
 
     ckpt = tmp_path / "m.pt"
@@ -603,7 +603,7 @@ def test_register_model_from_experiment_reads_metrics_through_the_shared_verifie
     """The admitting half: an ordinary checkpoint (no schema_version key) still has its stamped
     metrics read and registered, through the platform's own producers (complete_run,
     register_model_from_experiment)."""
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     from tcip_mcp.experiments import complete_run, create_experiment, register_model_from_experiment
 
     ckpt = tmp_path / "m.pt"
@@ -620,7 +620,7 @@ def test_register_model_from_experiment_reads_metrics_through_the_shared_verifie
 def test_ctx_save_checkpoint_refuses_a_state_naming_the_reserved_schema_version_key(
     tmp_path, monkeypatch,
 ):
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     from tcip_mcp.pipelines.training.envelope import TrainContext
     from tcip_mcp.pipelines.training.run_registry import create_run
 
@@ -633,7 +633,7 @@ def test_ctx_save_checkpoint_refuses_a_state_naming_the_reserved_schema_version_
 
 def test_ctx_save_checkpoint_admits_a_state_naming_no_reserved_key(tmp_path, monkeypatch):
     """The admitting half: an ordinary bespoke state, through a real ctx.save_checkpoint call."""
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     from tcip_mcp.pipelines.training.envelope import TrainContext
     from tcip_mcp.pipelines.training.run_registry import create_run
 
@@ -647,7 +647,7 @@ def test_ctx_save_checkpoint_admits_a_state_naming_no_reserved_key(tmp_path, mon
 def test_load_registered_checkpoints_version_refusal_is_caught_by_a_door(tmp_path, monkeypatch):
     """The load-time version refusal is UnregisteredCheckpoint, the class every checkpoint door
     already catches, not a bare ValueError that would surface as an unhandled 500."""
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     ckpt = tmp_path / "m.pt"
     _bespoke_checkpoint(ckpt, stamp={"schema_version": 999})
     _register(tmp_path, str(ckpt))
@@ -693,7 +693,7 @@ def test_export_predictions_refuses_a_sweep_record_edited_after_the_run(tmp_path
     import tcip_mcp.pipelines.calibration as calibration_pipeline
     import tcip_mcp.tools.inference_tools as itools
 
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     ckpt = tmp_path / "m.pt"
     _bespoke_checkpoint(ckpt)
     _register(tmp_path, str(ckpt))
@@ -749,7 +749,7 @@ def test_export_predictions_refuses_a_sweep_record_edited_after_the_run_through_
     import tcip_mcp.pipelines.calibration as calibration_pipeline
     import tcip_mcp.tools.inference_tools as itools
 
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     ckpt = tmp_path / "m.pt"
     _bespoke_checkpoint(ckpt)
     _register(tmp_path, str(ckpt))
@@ -799,7 +799,7 @@ def test_export_predictions_refuses_a_sweep_whose_evidence_the_codec_cannot_carr
     from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
 
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     ckpt = _bespoke_checkpoint(tmp_path / "m.pt")
     _register(tmp_path, ckpt)
 
@@ -834,7 +834,7 @@ def test_export_predictions_refuses_a_sweep_whose_evidence_the_codec_cannot_carr
 # silent on one whose digest an entry names.
 
 def test_doctor_lists_a_prerail_bucket_and_stays_silent_on_a_registered_one(tmp_path, monkeypatch):
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     ckpt = tmp_path / "m.pt"
     _bespoke_checkpoint(ckpt)
     reg = _register(tmp_path, str(ckpt), name="good-model")

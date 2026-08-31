@@ -216,7 +216,7 @@ class TraitUnknownError(KeyError):
 # There are no built-in traits; every trait is authored the same way, as a
 # per-project spec file. This is the only registration path. Cross-checked against the crops.yml
 # controlled vocabulary, so an agent cannot fabricate a trait definition. Resolution is per-call
-# (not a module-load snapshot) so a repin of the project root is picked up.
+# (not a module-load snapshot) so a repin of the platform state root is picked up.
 
 _TRAIT_SPECS_RELPATH = Path(".tcip") / "state" / "trait_specs"
 _SPEC_FIELDS = {f.name for f in fields(TraitSpec)}
@@ -889,7 +889,7 @@ def get_trait_for(name: str, project_root: str | Path | None = None) -> TraitSpe
     """One trait's spec from an explicit project's registry, or from the pinned one.
 
     For a caller (the web backend, the operationalization resolver) that serves more than one
-    project per process and so cannot rely on ``resolve_state``'s single ``$TCIP_PROJECT_ROOT``
+    project per process and so cannot rely on ``resolve_state``'s single ``$TCIP_STATE_ROOT``
     pin. ``get_trait`` is the same lookup against that pin, so both surfaces refuse an unregistered
     trait in the same words.
     """
@@ -908,7 +908,7 @@ def registered_traits_for(project_root: str | Path) -> list[str]:
     """Registered trait names for an explicit project root.
 
     For a caller (the web backend) that serves more than one project per process and so cannot
-    rely on ``resolve_state``'s single ``$TCIP_PROJECT_ROOT`` pin; ``registered_traits()`` stays
+    rely on ``resolve_state``'s single ``$TCIP_STATE_ROOT`` pin; ``registered_traits()`` stays
     the MCP-server-side entry point for the one pinned project.
     """
     return sorted(spec.name for spec in load_trait_specs(project_root=project_root))

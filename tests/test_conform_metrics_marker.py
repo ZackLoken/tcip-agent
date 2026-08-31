@@ -41,7 +41,7 @@ def _strip_marker(experiment_id: str, root: Path) -> None:
 
 
 def test_conforms_an_experiment_whose_marker_predates_the_change(tmp_path):
-    root = Path(os.environ["TCIP_PROJECT_ROOT"])
+    root = Path(os.environ["TCIP_STATE_ROOT"])
     _experiment_with_a_logged_row("exp1")
     _strip_marker("exp1", root)
 
@@ -58,7 +58,7 @@ def test_conforms_an_experiment_whose_marker_predates_the_change(tmp_path):
 def test_an_already_conformed_experiment_is_left_alone(tmp_path):
     """A rail must admit valid work: an experiment log_metrics already marked is reported
     untouched, not re-stamped or refused."""
-    root = Path(os.environ["TCIP_PROJECT_ROOT"])
+    root = Path(os.environ["TCIP_STATE_ROOT"])
     _experiment_with_a_logged_row("exp2")
 
     result = _run(root)
@@ -70,7 +70,7 @@ def test_an_already_conformed_experiment_is_left_alone(tmp_path):
 def test_an_experiment_with_no_rows_is_never_stamped(tmp_path):
     """A created-but-not-yet-trained experiment (no rows, no marker) stays pristine; the conform
     script only stamps the marker where the log already proves it should not read that way."""
-    root = Path(os.environ["TCIP_PROJECT_ROOT"])
+    root = Path(os.environ["TCIP_STATE_ROOT"])
     from tcip_mcp.experiments import create_experiment, status_key
 
     create_experiment("exp3", {"model_source": {"builder": "tests.bespoke_models:x"}})

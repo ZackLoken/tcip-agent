@@ -334,7 +334,7 @@ def test_the_record_is_read_from_the_project_the_caller_names(project: Path, mon
     """The pinned platform root is somewhere else entirely, and the record still resolves."""
     record = fx.state_crossing(project)
     fx.confirm(project, fx.CROSSING_TRAIT, op.STATE_CROSSING_DATES, record)
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(project.parent / "unrelated"))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(project.parent / "unrelated"))
 
     spec, stored, specs_dir = fx.resolve(project, fx.CROSSING_TRAIT, op.STATE_CROSSING_DATES)
 

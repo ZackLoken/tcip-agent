@@ -661,7 +661,7 @@ def test_ingest_refuses_an_unadopted_root(tmp_path, monkeypatch):
     dest = tmp_path / "unadopted"
     # init_project's own audit entry lands at the platform root, not dest; a throwaway root here
     # keeps it off tmp_path, which ingest_images's own audit write below needs pristine.
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path / "scratch_platform_root"))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path / "scratch_platform_root"))
     file_backend = FileBackend()
     tcip_store.bind(file_backend)
     try:
@@ -670,7 +670,7 @@ def test_ingest_refuses_an_unadopted_root(tmp_path, monkeypatch):
         tcip_store.bind(previous)
         file_backend.close()
 
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     backend = SqliteBackend()
     tcip_store.bind(backend)
     try:

@@ -90,9 +90,9 @@ def _resolve_calibration_ids(
     experiment_id = checkpoint.producer
     if not experiment_id:
         return None, None
-    from tcip_mcp.project_paths import project_root
+    from tcip_mcp.project_paths import platform_state_root
 
-    root = project_path or str(project_root())
+    root = project_path or str(platform_state_root())
     from tcip_mcp.experiments import read_split_manifest_checked
 
     split, decode_error = read_split_manifest_checked(experiment_id, root=root)
@@ -190,7 +190,7 @@ def materialize_review_dataset(
             and it is what the experiment lineage records as the reviewed dataset.
         source_images_dir: Directory of the reviewed source images.
         output_dir: Destination for the curated dataset (distinct from the source). A relative
-            path resolves against the project root, never the server process's cwd.
+            path resolves against the platform state root, never the server process's cwd.
         experiment_id: Optional experiment to record the review-session lineage on.
         include_hard_negatives: Emit rejected-only images as empty-label backgrounds.
         only_completed: Restrict to fully-reviewed (``img_status=='completed'``) images.

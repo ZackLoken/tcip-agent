@@ -10,7 +10,7 @@ from __future__ import annotations
 
 
 def test_internal_log_metrics_still_functions(tmp_path, monkeypatch):
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     from tcip_mcp import experiments
 
     experiments.create_experiment("exp-dereg-log", {"backbone": "x"})
@@ -21,7 +21,7 @@ def test_internal_log_metrics_still_functions(tmp_path, monkeypatch):
 
 
 def test_internal_record_artifact_still_functions(tmp_path, monkeypatch):
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     from tcip_mcp import experiments
 
     experiments.create_experiment("exp-dereg-art", {"backbone": "x"})

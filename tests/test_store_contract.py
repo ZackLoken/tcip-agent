@@ -1353,7 +1353,7 @@ def _operationalizations_root(root: Path) -> Path:
 
 
 def _pin_platform_root(root: Path, monkeypatch) -> None:
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(root))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(root))
 
 
 def _pin_workspace(root: Path, monkeypatch) -> None:

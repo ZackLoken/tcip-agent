@@ -9,7 +9,7 @@ composes on the underlying function directly.
 
     python scripts/scan_dataset.py <folder_path> --project <project_root>
 
-``folder_path`` is what gets scanned; ``--project`` (or an already-set ``$TCIP_PROJECT_ROOT``)
+``folder_path`` is what gets scanned; ``--project`` (or an already-set ``$TCIP_STATE_ROOT``)
 names the project this run's audit line is recorded under.
 """
 
@@ -22,7 +22,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from _script_root import pin_project_root  # noqa: E402
+from _script_root import require_platform_root  # noqa: E402
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -30,10 +30,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("folder_path", help="Dataset root directory to scan.")
     parser.add_argument("--project", default="",
                          help="Project root this run's audit line is recorded under; falls "
-                              "back to $TCIP_PROJECT_ROOT.")
+                              "back to $TCIP_STATE_ROOT.")
     args = parser.parse_args(argv)
 
-    pin_project_root(args.project or None)
+    require_platform_root(args.project or None)
 
     # Its own process entry point, so it binds the storage backend the seam has no default for.
     from tcip_store.binding import bind_default

@@ -91,7 +91,7 @@ def pytest_collection_modifyitems(config, items):
 def _restore_platform_root_env():
     """Keep the process-global platform-state root hermetic across tests.
 
-    ``set_active_project`` repins ``TCIP_PROJECT_ROOT`` in-process (so a project's audit /
+    ``set_active_project`` repins ``TCIP_STATE_ROOT`` in-process (so a project's audit /
     experiments / registry co-locate under it). Since pytest runs in one process, a test
     that adopts a tmp project would otherwise leak that now-deleted root, and the
     :class:`~tcip_mcp.project_paths.RootBinding` naming it, into later tests. Snapshot and
@@ -99,13 +99,13 @@ def _restore_platform_root_env():
     """
     from tcip_mcp import project_paths
 
-    saved = os.environ.get("TCIP_PROJECT_ROOT")
+    saved = os.environ.get("TCIP_STATE_ROOT")
     saved_binding = project_paths.root_binding()
     yield
     if saved is None:
-        os.environ.pop("TCIP_PROJECT_ROOT", None)
+        os.environ.pop("TCIP_STATE_ROOT", None)
     else:
-        os.environ["TCIP_PROJECT_ROOT"] = saved
+        os.environ["TCIP_STATE_ROOT"] = saved
     # getattr, not a plain import: a fail-before run against a tree that predates
     # restore_binding must still collect every other test in this file.
     restore = getattr(project_paths, "restore_binding", None)
@@ -157,19 +157,19 @@ def _pin_platform_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     auto-restores; a test that manages the var itself (setenv/delenv in its body) overrides
     this and is unaffected.
     """
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
 
 
 @pytest.fixture
 def seed_catkin_trait_spec(tmp_path: Path, _pin_platform_root):
-    """Seed a real catkin trait-spec record into this test's pinned project root.
+    """Seed a real catkin trait-spec record into this test's pinned platform state root.
 
     There are no built-in traits anymore: ``get_trait("catkin")`` only resolves where a spec
     record actually exists (``traits.py``). Writing the same values ``tests/_trait_fixtures.CATKIN``
     holds keeps a test that calls ``get_trait("catkin")``/``registered_traits()`` without authoring
     its own spec working, the same as when a builtin was unconditionally present. Not autouse:
-    an unrelated test's project root should stay empty by default; request this explicitly in a
-    test that actually needs catkin registered.
+    an unrelated test's platform state root should stay empty by default; request this explicitly
+    in a test that actually needs catkin registered.
     """
     import dataclasses
 

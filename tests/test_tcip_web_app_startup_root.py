@@ -18,9 +18,9 @@ from tcip_web.app import app
 
 _IMPORT_ONLY = """\
 import os
-before = os.environ.get("TCIP_PROJECT_ROOT")
+before = os.environ.get("TCIP_STATE_ROOT")
 from tcip_web.app import app  # noqa: F401
-after = os.environ.get("TCIP_PROJECT_ROOT")
+after = os.environ.get("TCIP_STATE_ROOT")
 print(before)
 print(after)
 """
@@ -28,7 +28,7 @@ print(after)
 
 def test_importing_the_app_alone_pins_nothing(tmp_path, monkeypatch):
     """A repo script, or a test module at collection, that only imports tcip_web.app must not
-    silently repin TCIP_PROJECT_ROOT to whatever the machine's workspace marker names."""
+    silently repin TCIP_STATE_ROOT to whatever the machine's workspace marker names."""
     ws = tmp_path / "ws"
     proj = ws / "elderberry_cyme_bloom"
     (proj / ".tcip").mkdir(parents=True)
@@ -36,7 +36,7 @@ def test_importing_the_app_alone_pins_nothing(tmp_path, monkeypatch):
     workspace.set_active_project("elderberry_cyme_bloom")
 
     env = dict(os.environ)
-    env.pop("TCIP_PROJECT_ROOT", None)
+    env.pop("TCIP_STATE_ROOT", None)
     result = subprocess.run(
         [sys.executable, "-c", _IMPORT_ONLY],
         capture_output=True, text=True, cwd=str(tmp_path), env=env, timeout=60,
@@ -50,20 +50,20 @@ def test_importing_the_app_alone_pins_nothing(tmp_path, monkeypatch):
 def test_first_request_pins_from_the_marker(tmp_path, monkeypatch):
     import tcip_store
 
-    from tcip_mcp.project_paths import project_root
+    from tcip_mcp.project_paths import platform_state_root
 
     ws = tmp_path / "ws"
     proj = ws / "elderberry_cyme_bloom"
     (proj / ".tcip").mkdir(parents=True)
     monkeypatch.setenv("TCIP_WORKSPACE", str(ws))
-    monkeypatch.delenv("TCIP_PROJECT_ROOT", raising=False)
+    monkeypatch.delenv("TCIP_STATE_ROOT", raising=False)
     project_paths.restore_binding(None)
     tcip_store.replace(workspace.active_project_key(), "elderberry_cyme_bloom")
 
     resp = TestClient(app, base_url="http://127.0.0.1").get("/health")
 
     assert resp.status_code == 200
-    assert project_root().resolve() == proj.resolve()
+    assert platform_state_root().resolve() == proj.resolve()
 
 
 def test_a_binding_set_before_the_first_request_is_not_replaced(tmp_path, monkeypatch):
@@ -74,7 +74,7 @@ def test_a_binding_set_before_the_first_request_is_not_replaced(tmp_path, monkey
     proj = ws / "elderberry_cyme_bloom"
     (proj / ".tcip").mkdir(parents=True)
     monkeypatch.setenv("TCIP_WORKSPACE", str(ws))
-    monkeypatch.delenv("TCIP_PROJECT_ROOT", raising=False)
+    monkeypatch.delenv("TCIP_STATE_ROOT", raising=False)
     project_paths.restore_binding(None)
 
     workspace.set_active_project("elderberry_cyme_bloom")
@@ -97,7 +97,7 @@ def test_lifespan_binds_before_rehydrate_reads_a_registry(tmp_path, monkeypatch)
     proj = ws / "elderberry_cyme_bloom"
     (proj / ".tcip").mkdir(parents=True)
     monkeypatch.setenv("TCIP_WORKSPACE", str(ws))
-    monkeypatch.delenv("TCIP_PROJECT_ROOT", raising=False)
+    monkeypatch.delenv("TCIP_STATE_ROOT", raising=False)
     project_paths.restore_binding(None)
     tcip_store.replace(workspace.active_project_key(), "elderberry_cyme_bloom")
 
@@ -149,9 +149,9 @@ async def _largest_loop_gap(coro):
 def test_active_project_changed_event_does_not_stall_a_concurrent_request(monkeypatch):
     """The event branch's marker read runs off the event loop, so a slow one lengthens this
     request's own wall time but never blocks the loop from running its other turns."""
-    from tcip_mcp.project_paths import pin_project_root
+    from tcip_mcp.project_paths import pin_platform_root
 
-    pin_project_root(from_marker=False)
+    pin_platform_root(from_marker=False)
 
     def slow_read(*, create=False):
         time.sleep(1.0)
@@ -217,13 +217,13 @@ def test_concurrent_first_requests_on_separate_loops_bind_once(tmp_path, monkeyp
 
     import tcip_store
 
-    from tcip_mcp.project_paths import project_root
+    from tcip_mcp.project_paths import platform_state_root
 
     ws = tmp_path / "ws"
     proj = ws / "elderberry_cyme_bloom"
     (proj / ".tcip").mkdir(parents=True)
     monkeypatch.setenv("TCIP_WORKSPACE", str(ws))
-    monkeypatch.delenv("TCIP_PROJECT_ROOT", raising=False)
+    monkeypatch.delenv("TCIP_STATE_ROOT", raising=False)
     project_paths.restore_binding(None)
     tcip_store.replace(workspace.active_project_key(), "elderberry_cyme_bloom")
 
@@ -234,4 +234,4 @@ def test_concurrent_first_requests_on_separate_loops_bind_once(tmp_path, monkeyp
         statuses = list(ex.map(get, range(8)))
 
     assert statuses == [200] * 8
-    assert project_root().resolve() == proj.resolve()
+    assert platform_state_root().resolve() == proj.resolve()

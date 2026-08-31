@@ -71,11 +71,11 @@ def test_update_status_refusal_audits_the_launch_root_not_the_current_one(tmp_pa
     other_root.mkdir()
 
     eid = "exp-021-hazelnut-catkin-det"
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(launch_root))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(launch_root))
     create_experiment(eid, {"model_source": {"builder": "my_models:catkin_det"}})
     update_status(eid, "completed")
 
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(other_root))
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(other_root))
     result = update_status(
         eid, "failed", error="exceeded max_wall_clock_seconds (5)", root=launch_root
     )
