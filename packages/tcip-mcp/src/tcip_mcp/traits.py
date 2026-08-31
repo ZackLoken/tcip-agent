@@ -306,12 +306,18 @@ def _spec_from_config(data: dict, vocab: set[str]) -> tuple[TraitSpec | None, st
     outputs are all in the controlled vocabulary. ``reason`` is the same text logged as a warning,
     the one place that wording is authored, so a caller surfacing it (an API response, a
     write_trait_spec_fields refusal, doctor.py) never re-derives its own explanation.
+
+    A ``schema_version`` key is not a ``TraitSpec`` field; the store seam already enforces its
+    ceiling on every read (``tcip_store.schema_version.check_schema_version``, run inside
+    ``read_versioned`` before this function ever sees the document), so it is stripped here
+    rather than checked again.
     """
     name = data.get("name")
     if not isinstance(name, str) or not name:
         reason = f"missing/invalid 'name' ({name!r})"
         logger.warning("trait spec skipped: %s", reason)
         return None, reason
+    data = {k: v for k, v in data.items() if k != "schema_version"}
     unknown = set(data) - _SPEC_FIELDS
     if unknown:
         reason = f"unknown field(s) {sorted(unknown)}"
