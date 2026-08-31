@@ -273,6 +273,25 @@ def test_register_model_from_experiment_checkpoint_field_is_resolved_absolute(
     assert Path(registered["checkpoint"]) == weights.resolve()
 
 
+# ── resolved_registry_path's traversal refusal, both grammars ──────────────────────────────
+
+
+@pytest.mark.parametrize("stored", ["../outside/evil.pt", r"..\..\outside\evil.pt"])
+def test_resolved_registry_path_refuses_a_traversal_in_either_grammar(tmp_path: Path, stored: str):
+    from tcip_mcp.registry_paths import RegistryPathTraversal, resolved_registry_path
+
+    with pytest.raises(RegistryPathTraversal):
+        resolved_registry_path(tmp_path, stored)
+
+
+def test_resolved_registry_path_admits_a_legitimate_relative_value(tmp_path: Path):
+    from tcip_mcp.registry_paths import resolved_registry_path
+
+    result = resolved_registry_path(tmp_path, ".tcip/models/m.pt")
+
+    assert result == (tmp_path / ".tcip" / "models" / "m.pt").resolve()
+
+
 def test_a_relative_root_still_answers_an_absolute_response(tmp_path: Path, monkeypatch):
     """The relative-root case section 6 names: the resolver's own root argument, not just the
     entry's stored path, must still answer absolute. The registry key itself refuses a relative
