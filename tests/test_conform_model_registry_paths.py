@@ -67,8 +67,7 @@ def test_conform_respells_an_entry_whose_stored_path_already_resolves_under_root
 
     assert any("respelled" in ln for ln in lines)
     entries = read_registry_index(root)
-    assert entries[0]["checkpoint_path"] == "m.pt" or entries[0]["checkpoint_path"] == ".tcip/models/m.pt"
-    assert not Path(entries[0]["checkpoint_path"]).is_absolute()
+    assert entries[0]["checkpoint_path"] == ".tcip/models/m.pt"
 
 
 def test_conform_leaves_a_genuinely_external_entry_absolute(tmp_path: Path):
