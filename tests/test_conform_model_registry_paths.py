@@ -195,6 +195,36 @@ def test_conform_over_a_real_import_produced_registry(tmp_path: Path, monkeypatc
     assert lines == []
 
 
+def test_conform_hashes_each_candidate_at_most_once_per_run(tmp_path: Path, monkeypatch):
+    """The hash cache exists to bound the conform's cost by one hash per candidate file; a
+    ``dict.setdefault`` built with an eagerly-evaluated default would rehash every candidate on
+    every lookup instead, defeating the cache it appears to use."""
+    import tcip_mcp.model_registry as model_registry
+
+    root = tmp_path / "dest"
+    (root / ".tcip" / "models").mkdir(parents=True)
+    content = b"one candidate, two entries wanting to match it"
+    digest = hashlib.sha256(content).hexdigest()
+    candidate = root / ".tcip" / "models" / "shared.pt"
+    candidate.write_bytes(content)
+
+    _seed_v1(root, [
+        _entry("a", "/exporting/root/.tcip/models/a.pt", digest, len(content)),
+        _entry("b", "/exporting/root/.tcip/models/b.pt", digest, len(content)),
+    ])
+
+    calls: list[Path] = []
+    real_compute = model_registry._compute_sha256
+    monkeypatch.setattr(
+        model_registry, "_compute_sha256",
+        lambda p: (calls.append(Path(p)), real_compute(p))[1],
+    )
+
+    conform_registry_paths(root)
+
+    assert calls.count(candidate.resolve()) == 1
+
+
 def test_conform_refuses_a_malformed_mapping():
     from tcip_mcp.model_registry import _document_entries_for_conform
 

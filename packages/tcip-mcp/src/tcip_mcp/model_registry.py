@@ -573,6 +573,18 @@ def _candidate_checkpoint_paths(root: Path, raw: str) -> set[Path]:
     return {p.resolve() for p in found}
 
 
+def _cached_sha256(hash_cache: dict[Path, str], path: Path) -> str:
+    """``hash_cache``'s own digest for ``path``, computed once per run.
+
+    ``dict.setdefault(key, _compute_sha256(path))`` evaluates its default argument eagerly, so a
+    cache built that way rehashes every candidate on every lookup rather than only the first; this
+    is the one place the whole file's digest is actually cached.
+    """
+    if path not in hash_cache:
+        hash_cache[path] = _compute_sha256(path)
+    return hash_cache[path]
+
+
 def _pick_duplicate(candidates: list[Path], *, root: Path, original_basename: str) -> Path:
     """The deterministic choice among more than one byte-identical relocation candidate: a
     basename match to the entry's own original spelling first, then the sorted
@@ -603,7 +615,7 @@ def _conform_entries(
             _is_at_or_under(direct_resolved, root)
             and direct_resolved.is_file()
             and expected_sha is not None
-            and hash_cache.setdefault(direct_resolved, _compute_sha256(direct_resolved)) == expected_sha
+            and _cached_sha256(hash_cache, direct_resolved) == expected_sha
         ):
             respelled = checkpoint_registry_path_for(direct_resolved, root)
             if respelled != raw:
@@ -620,7 +632,7 @@ def _conform_entries(
                 size = entry.get("file_size_bytes")
                 if size is not None and candidate.stat().st_size != size:
                     continue
-                if hash_cache.setdefault(candidate, _compute_sha256(candidate)) == expected_sha:
+                if _cached_sha256(hash_cache, candidate) == expected_sha:
                     matches.append(candidate)
 
         if len(matches) == 1:
