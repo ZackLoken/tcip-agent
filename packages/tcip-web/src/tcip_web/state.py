@@ -15,7 +15,7 @@ from typing import Any, Literal, Optional
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from tcip_store import StoreError, read, replace
 
-from tcip_mcp.web_client import ActiveTab, gui_snapshot_key
+from tcip_mcp.web_client import ActiveTab, canvas_open_binding_key, gui_snapshot_key
 from tcip_mcp.web_client import TAB_NAMES as TAB_NAMES
 
 logger = logging.getLogger(__name__)
@@ -163,6 +163,25 @@ class StateStore:
 
     def set_binding_generation(self, generation: int) -> None:
         self._binding_generation = generation
+
+    def refresh_binding_generation_from_record(self) -> None:
+        """Re-read ``canvas_open_binding`` and adopt whatever generation it currently names.
+
+        The in-process value :meth:`set_binding_generation` writes is memory only, so nothing
+        moves it when the record changes for a reason outside this process's own select: a
+        deleted record, an export/adopt pass, or a second web process's own bump. Call this at
+        startup and before every WS connect-time replay (never per broadcast, which stays
+        memory-fed) so a rendezvous with a browser always answers from the durable record rather
+        than an in-memory value that a change like that would otherwise leave stale forever. A
+        read failure degrades to ``None``, the same answer an absent record gives, since either
+        way this process has nothing current to report.
+        """
+        try:
+            binding = read(canvas_open_binding_key(create=False), default=None)
+        except (OSError, StoreError):
+            logger.exception("Could not read the canvas-open binding record")
+            binding = None
+        self._binding_generation = binding.get("generation") if binding is not None else None
 
     def open_project(self, project_root: Path) -> bool:
         """Make ``project_root`` the open project and load its persisted snapshot.
