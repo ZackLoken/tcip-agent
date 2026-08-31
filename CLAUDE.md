@@ -94,7 +94,8 @@ silently corrupts results and compounds across sessions.
 - Never train or evaluate on an unconfirmed format: `read_annotations` refuses rather than guesses.
 - State changes go through `@audited` MCP tools, or an explicit `record_event`/
   `record_event_or_raise` emitter for code that is neither: the record is one store's three
-  logs (the platform's, a dataset's own, a project's own), never a single file. An entry the
+  logs (the platform's, a dataset's own, a project's own; an adopted project's log and the
+  platform's are one file at one key, by the repin). An entry the
   decorator cannot append raises `MutationCommittedWithoutAuditLine`; an explicit emitter's own
   unwritten entry raises `AuditEntryNotWritten` the same way, rather than either letting a
   caller blind-retry. Experiments are immutable: new run, never an overwritten record.

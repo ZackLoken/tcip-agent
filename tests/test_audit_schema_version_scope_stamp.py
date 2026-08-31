@@ -3,9 +3,11 @@
 A dataset-scoped write, a project-scoped write, and a platform-default write each go through a
 real production writer (a decorated tool, ``record_event_or_raise``, and ``record_event``), never
 a hand-built entry, so what these prove is the shared helper's actual contract: ``schema_version``
-is always ``2``, and ``scope`` is the resolved root exactly when the caller passed one. The two
-scoped cases pass a genuinely non-canonical spelling of the root (a ``..`` segment) so what is
-proven is resolution, not an already-canonical string surviving unchanged.
+is always ``2``, and ``scope`` is the resolved root exactly when the caller passed one. The
+project case passes a genuinely non-canonical spelling (a ``..`` segment) that reaches the
+helper unresolved, so it proves the helper's own resolution; the dataset case's spelling is
+canonicalized upstream by ``dataset_scope_of`` before the helper runs, so what it guards is the
+version stamp, and the resolution claim rests on the project case alone.
 """
 
 from __future__ import annotations

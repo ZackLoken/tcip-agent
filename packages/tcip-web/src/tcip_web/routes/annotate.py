@@ -64,7 +64,8 @@ class SavePayload(BaseModel):
     # than accepted as a no-op.
     label_path: str = Field(min_length=1)
     annotations: list[AnnotationPayload] = []
-    # Project root for the audit trail (optional; skipped if absent).
+    # Accepted for wire compatibility and read nowhere in this module; the save's audit line
+    # files under the label's own dataset root (_guarded_audit_root), never this field.
     project_root: Optional[str] = None
     # The label document's version token as the client loaded it: with one, the save is a
     # compare-and-set and a 409 says it changed underneath. Omit to skip the comparison.
