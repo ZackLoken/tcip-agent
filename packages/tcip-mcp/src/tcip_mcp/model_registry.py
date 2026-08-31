@@ -635,7 +635,7 @@ def _conform_entries(
                          f"among {len(matches)} byte-identical candidates {named}, picked by "
                          "basename match then sorted path")
             conformed.append({**entry, "checkpoint_path": respelled})
-        else:
+        elif is_external_form(str(raw)):
             fallback = str(direct_resolved)
             if fallback != raw:
                 lines.append(f"{entry.get('name')}: {verb} {raw!r} to {fallback!r} "
@@ -643,6 +643,11 @@ def _conform_entries(
                 conformed.append({**entry, "checkpoint_path": fallback})
             else:
                 conformed.append(entry)
+        else:
+            # A relative entry keeps its spelling: writing an absolute path here would fabricate a designed-external claim.
+            lines.append(f"{entry.get('name')}: {raw!r} stays unresolved, no matching digest "
+                         f"found under root (exists={direct_resolved.is_file()})")
+            conformed.append(entry)
     return conformed, lines
 
 
@@ -659,8 +664,10 @@ def conform_registry_paths(root: str | Path, *, plan: bool = False) -> list[str]
     prefiltered by the entry's recorded ``file_size_bytes``, is hashed once (each hash cached
     across every entry this run examines) and matched against the entry's own ``sha256``.
     Exactly one match respells to it; more than one (byte-identical files) picks
-    deterministically (:func:`_pick_duplicate`) and is disclosed as ambiguous; none leaves the
-    entry absolute, classified external-or-missing by existence in the outcome line.
+    deterministically (:func:`_pick_duplicate`) and is disclosed as ambiguous; none leaves an
+    already-external entry absolute, classified external-or-missing by existence in the outcome
+    line, and leaves an already-relative entry's spelling untouched (the truthful claim stays
+    internal-but-absent) rather than ever writing a path under the conform root.
 
     ``plan=True`` computes every outcome without writing. Idempotent: a second run changes
     nothing, since an already-correctly-spelled entry's respelled form always equals its stored
