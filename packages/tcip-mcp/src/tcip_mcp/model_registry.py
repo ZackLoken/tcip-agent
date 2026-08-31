@@ -642,13 +642,11 @@ def _conform_entries(
                          "basename match then sorted path")
             conformed.append({**entry, "checkpoint_path": respelled})
         elif is_external_form(str(raw)):
-            fallback = str(direct_resolved)
-            if fallback != raw:
-                lines.append(f"{entry.get('name')}: {verb} {raw!r} to {fallback!r} "
-                             f"(external-or-missing, exists={direct_resolved.is_file()})")
-                conformed.append({**entry, "checkpoint_path": fallback})
-            else:
-                conformed.append(entry)
+            # The stored value is itself the external claim; a host-resolved respelling of it
+            # fabricates a path this machine derived, not one the writer stated.
+            lines.append(f"{entry.get('name')}: {raw!r} kept as stored "
+                         f"(external-or-missing, exists={direct_resolved.is_file()})")
+            conformed.append(entry)
         else:
             # A relative entry keeps its spelling: writing an absolute path here would fabricate a designed-external claim.
             lines.append(f"{entry.get('name')}: {raw!r} stays unresolved, no matching digest "
