@@ -106,6 +106,23 @@ def test_config_spec_unknown_field_is_rejected(tmp_path: Path):
     assert load_trait_specs(specs_dir=specs_dir) == []
 
 
+def test_config_spec_stamped_with_schema_version_still_loads(tmp_path: Path):
+    # frozen-formats.json declares trait_specs able to carry schema_version; the stamp is a
+    # store concern (the seam's read path already enforces its ceiling), not an unknown field.
+    specs_dir = tmp_path / "trait_specs"
+    _write_spec(specs_dir, "leaf", {"delivers": ["leaf_length"], "schema_version": 1})
+    specs = load_trait_specs(specs_dir=specs_dir)
+    assert [s.name for s in specs] == ["leaf"]
+    assert specs[0].delivers == ("leaf_length",)
+
+
+def test_config_spec_unstamped_still_loads(tmp_path: Path):
+    specs_dir = tmp_path / "trait_specs"
+    _write_spec(specs_dir, "leaf", {"delivers": ["leaf_length"]})
+    specs = load_trait_specs(specs_dir=specs_dir)
+    assert [s.name for s in specs] == ["leaf"]
+
+
 # ── count_objective is validated against the registry, not a hardcoded whitelist ─
 
 def test_config_spec_arbitrary_count_objective_is_accepted_at_registration(tmp_path: Path):
