@@ -272,7 +272,7 @@ def derive_localization_kind(
 
     **``jitter_px``'s default (15.0px) is a provisional platform-chosen constant, not a value
     validated against this platform's real detector/annotation precision**, same shape and same
-    caveat as ``operating_point._PROVISIONAL_KAPPA_FLOOR``. It sets where the center-match/IoU-match
+    caveat as ``operating_point._DEFAULT_KAPPA_FLOOR``. It sets where the center-match/IoU-match
     crossover falls (currently ``s = 3 * jitter_px`` = ~45px characteristic size); a future pass
     with real per-trait localization-agreement data (repeated-annotation studies, or measured
     prediction-vs-GT offset on a validated model) could derive it properly instead of assuming it.

@@ -1053,7 +1053,7 @@ def test_resolve_classifier_operating_point_honors_trait_authored_agreement_floo
     tmp_path: Path, monkeypatch,
 ) -> None:
     """TraitSpec.classifier_agreement_floor, when a trait authors one,
-    must be the floor actually applied -- not the platform's provisional default."""
+    must be the floor actually applied -- not the platform's interim default."""
     from dataclasses import replace
 
     from tcip_mcp.pipelines import operating_point as op_mod
@@ -1062,7 +1062,7 @@ def test_resolve_classifier_operating_point_honors_trait_authored_agreement_floo
     strict_catkin = replace(CATKIN, classifier_agreement_floor=0.9)
     monkeypatch.setattr(op_mod, "get_trait", lambda name: strict_catkin)
 
-    # A holdout with kappa=0.8 -- clears the platform's provisional default (0.41) but not the
+    # A holdout with kappa=0.8 -- clears the platform's interim default (0.41) but not the
     # trait's own stricter authored floor (0.9).
     def make_items(n, flips):
         items = []
@@ -1087,7 +1087,7 @@ def test_resolve_classifier_operating_point_honors_trait_authored_agreement_floo
 
 def test_resolve_classifier_operating_point_count_bias_tolerance_frac_source(monkeypatch) -> None:
     """TraitSpec.count_bias_tolerance_frac mirrors classifier_agreement_floor's own provenance
-    stamp: unauthored (CATKIN's own state) resolves to the platform's provisional fraction and
+    stamp: unauthored (CATKIN's own state) resolves to the platform's interim default fraction and
     stamps that; a trait that authors its own value stamps ``"trait"`` instead."""
     from dataclasses import replace
 
@@ -1170,7 +1170,7 @@ def test_resolve_ordinal_operating_point_fails_closed_on_non_disjoint_split() ->
 
 
 def test_resolve_ordinal_operating_point_fails_closed_at_or_below_the_floor() -> None:
-    """A holdout with mostly-adjacent-rank disagreement scores well below the provisional
+    """A holdout with mostly-adjacent-rank disagreement scores well below the interim default
     kappa floor (0.41) and must refuse, not merely score low."""
     from tcip_mcp.pipelines.operating_point import resolve_ordinal_operating_point
 
@@ -1248,7 +1248,7 @@ def test_resolve_regression_operating_point_fails_closed_on_non_disjoint_split()
 
 def test_resolve_regression_operating_point_fails_closed_at_or_below_the_floor() -> None:
     """A holdout whose predictions carry no real relationship to the true values scores well below
-    the provisional skill floor (0.5) and must refuse."""
+    the interim default skill floor (0.5) and must refuse."""
     from tcip_mcp.pipelines.operating_point import resolve_regression_operating_point
 
     true_values = [float(i) for i in range(20)]
