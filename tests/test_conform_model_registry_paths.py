@@ -268,10 +268,12 @@ def test_conform_hashes_each_candidate_at_most_once_per_run(tmp_path: Path, monk
 
     calls: list[Path] = []
     real_compute = model_registry._compute_sha256
-    monkeypatch.setattr(
-        model_registry, "_compute_sha256",
-        lambda p: (calls.append(Path(p)), real_compute(p))[1],
-    )
+
+    def _counting_compute(p: Path) -> str:
+        calls.append(Path(p))
+        return real_compute(p)
+
+    monkeypatch.setattr(model_registry, "_compute_sha256", _counting_compute)
 
     conform_registry_paths(root)
 
