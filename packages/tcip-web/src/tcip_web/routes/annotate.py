@@ -148,7 +148,7 @@ def _ann_dict(a: Annotation) -> dict:
 
 
 def _audit_gui_write(payload: "SavePayload", label_path: str, root: str) -> None:
-    """Record a GUI label-write in the audit log of the dataset it wrote into.
+    """Record a GUI label-write in that dataset's own audit log.
 
     ``root`` is the dataset root :func:`_guarded_audit_root` admitted before the write.
     """

@@ -57,8 +57,10 @@ or comment, since it drifts.
   bloat, not tool shortage; add a tool only for an audit seam, long-running infrastructure, or
   domain knowledge the agent lacks that a script can't carry.
 - State mutations route through `@audited` doors only: the MCP tools and the script-invoked doors
-  demoted from them; the append-only audit log, addressed by `audit.audit_log_key` and held by
-  whichever backend the process bound, is the record other code (including scripts) must not write
-  around. `audit.py` decides where an entry goes and what a failed append means, both stated there;
-  a caller that is neither an MCP tool nor a demoted door emits through `record_event` rather than
-  composing an entry of its own.
+  demoted from them; the record is `audit_log`, one store addressed by `audit.audit_log_key` under
+  three kinds of root (the platform's own, a dataset's own, a project's own), held by whichever
+  backend the process bound, that other code (including scripts) must not write around. `audit.py`
+  decides where an entry goes and what a failed append means: the decorator raises
+  `MutationCommittedWithoutAuditLine`; a caller that is neither an MCP tool nor a demoted door
+  emits through `record_event` (best-effort) or `record_event_or_raise` (raises
+  `AuditEntryNotWritten` on a failed append) rather than composing an entry of its own.

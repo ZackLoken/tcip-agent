@@ -799,6 +799,13 @@ def persist_mapping(build: MappingBuild, project_root: Path | str, name: str) ->
     a receipt that cannot be written fails loudly (``AuditEntryNotWritten`` propagates, never
     swallowed) and leaves a record no receipt names, which :func:`load_mapping` refuses to read
     until a rebuild replaces it.
+
+    ``project_root`` names which log the receipt lands in, and this function's two production
+    callers pass two different roots for it: the ``build_plant_mapping`` MCP tool passes the
+    process's own pinned platform root, so the receipt lands in the platform log's own file (a
+    project's, once that root is an adopted project); the web build route passes its own guarded
+    project root instead, which can differ from the process's pin when the browser has a
+    different project open.
     """
     from tcip_mcp.audit import record_event_or_raise
 

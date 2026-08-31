@@ -45,8 +45,8 @@ def force_redraw_cal_holdout_split(
     ``redraw_history`` with its policy, seed, and the old and new split's content hashes, so a
     redraw-until-it-passes pattern is visible on review even though nothing here enforces that a
     reason differ from a prior one; the old and new split membership itself is recorded in the
-    audit log alongside the reason (and, when given, ``split_manifest_dir``), not in
-    ``redraw_history``; the defense is a reviewable audit trail, not an automatic block.
+    dataset's own audit log alongside the reason (and, when given, ``split_manifest_dir``), not
+    in ``redraw_history``; the defense is a reviewable audit trail, not an automatic block.
 
     Provide either ``labels_dir`` (the identity is derived as ``dataset_hash(labels_dir)``, and
     its stems are re-scanned) or ``identity_hash`` directly (e.g. a review-reference hash, in
@@ -79,8 +79,8 @@ def force_redraw_cal_holdout_split(
             ``group_by``. Conflicts with ``split_manifest_dir`` the same way ``group_by`` does.
         seed: New split seed.
         holdout_ratio: New calibration/holdout fraction.
-        reason: Required, non-empty justification for this redraw, recorded in the audit log
-            alongside the old and new split membership.
+        reason: Required, non-empty justification for this redraw, recorded in the dataset's own
+            audit log alongside the old and new split membership.
         split_manifest_dir: Restrict the redraw's universe to one capture date's ``calibration``
             side of a split manifest (``data_tools.read_split_manifest_dir``), the same
             restriction ``run_inference`` applies, instead of every labelled stem with an image.

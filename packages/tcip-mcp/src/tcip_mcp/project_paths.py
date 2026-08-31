@@ -1,6 +1,6 @@
 """Stable resolution of the platform state root, independent of a process's cwd.
 
-Durable *platform* state, the ``@audited`` log, the experiment store, and the model
+Durable *platform* state, the platform's own audit log, the experiment store, and the model
 registry, anchors here so a whole project is self-contained under one ``<root>/.tcip/``.
 
 Resolution order (``platform_state_root`` / ``resolve_state``, evaluated at use time):
@@ -19,8 +19,9 @@ line would otherwise reach nothing; ``inspect_project`` and the workspace projec
 report it.
 
 Adopting a project (``workspace.set_active_project``) *repins* the adopting process's own
-variable to ``<workspace>/<project>`` through :func:`repin_platform_root`, so the audit log,
-experiments, and registry all land under that project from then on; a training run in flight
+variable to ``<workspace>/<project>`` through :func:`repin_platform_root`, so the platform's own
+audit log (now this project's, one file at one key), experiments, and registry all land under
+that project from then on; a training run in flight
 keeps writing to the root it started under (the launch snapshots it once) until it is
 deliberately adopted. The repin is explicit, never a passive marker read: no operation other
 than an adopt itself changes a running process's root, so the window between one process

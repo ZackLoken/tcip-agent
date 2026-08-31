@@ -420,8 +420,9 @@ def resolve_match_criterion(trait_name: str | None, per_image: list[dict], *,
 
     ``localization`` is derived once, the first time real GT is available for a trait with no
     recorded kind (via ``derivations.derive_localization_kind``), persisted through
-    ``traits.write_trait_spec_fields`` and recorded in the audit log naming the trait, the field,
-    the value and the derivation basis, and read from the recorded value on every later call.
+    ``traits.write_trait_spec_fields`` and recorded in the platform audit log naming the trait,
+    the field, the value and the derivation basis, and read from the recorded value on every
+    later call.
     A recorded kind is also
     cheaply re-checked against what the current data would derive, every real call, divergence
     surfaces a warning (``kind_diverged`` in the returned dict) rather than silently switching,
