@@ -694,12 +694,44 @@ def _viz_dataset_sample(
     }
 
 
+def _binding_divergence(binding: dict, own_root: str) -> dict:
+    """Name both sides of a binding mismatch and the step that converges them.
+
+    ``set_active_project`` can only adopt a named workspace project, so a binding on a
+    non-workspace root (a registered dataset or a ``TCIP_IMAGE_ROOTS`` entry) has no name for
+    it to converge on; the GUI's own reselection is the only route back to agreement then.
+    """
+    from tcip_mcp import workspace
+
+    bound_root = binding.get("root")
+    bound_name = binding.get("project_name")
+    own_name = workspace.workspace_project_name(Path(own_root))
+    if bound_name:
+        converge = (
+            f"set_active_project({bound_name!r}) repins this process to the GUI's open project "
+            "and steers the GUI through the panel-event chain"
+        )
+    else:
+        converge = (
+            f"the GUI's open root ({bound_root}) has no workspace name for set_active_project "
+            "to adopt; reselect this project in the GUI instead"
+        )
+    return {
+        "bound_project": bound_name,
+        "bound_root": bound_root,
+        "pinned_project": own_name,
+        "pinned_root": own_root,
+        "converge": converge,
+    }
+
+
 @mcp.tool()
 @audited
 def capture_live_canvas(
     refresh: bool = True,
     crop_to_viewport: bool = True,
     max_edge: int = 1600,
+    render_last_known: bool = False,
 ) -> dict:
     """Render exactly what the human's GUI canvas shows right now: image, shapes, viewport.
 
@@ -715,16 +747,28 @@ def capture_live_canvas(
     the agent's own image-capable read tool, plus the classes schema, review legend,
     per-tag/per-creator counts, and the state's age.
 
+    The GUI's currently open project is named by the ``canvas_open_binding`` record, checked
+    against this process's own pinned project before rendering anything: a project the GUI has
+    moved away from is not the live canvas, so a mismatch refuses by default rather than render
+    another project's documents as if they were this one's. Pass ``render_last_known=True`` to
+    render this process's own pinned project's last pushed canvas anyway, labelled not-live.
+
     Args:
         refresh: Ping the GUI (via the panel-event hub) to push fresh state first, waiting
             briefly for it to land. Falls back to the last pushed state if no GUI responds.
+            No-op when the binding names another project: pinging would only make that other
+            project's GUI push under its own root, not this one.
         crop_to_viewport: Render only the region the human currently sees (their zoom/pan).
             Pass False for the full frame with the same overlays.
         max_edge: Downscale the rendered output to at most this edge (px).
+        render_last_known: When the GUI's open project differs from this process's own, render
+            this process's own pinned project's last pushed canvas anyway (labelled not-live)
+            instead of refusing. Ignored when the two agree.
     """
     import time as _time
 
-    from tcip_mcp.web_client import canvas_geometry_key, canvas_meta_key
+    from tcip_mcp import workspace
+    from tcip_mcp.web_client import canvas_geometry_key, canvas_meta_key, canvas_open_binding_key
 
     root = str(project_root())
     meta_doc = canvas_meta_key(root)
@@ -736,52 +780,104 @@ def capture_live_canvas(
         except (OSError, ts.DecodeError):
             return None
 
-    prev = _read(meta_doc)
-    prev_ts = (prev or {}).get("received_at", 0)
+    def _read_binding() -> dict | None:
+        return ts.read(canvas_open_binding_key(create=False), default=None)
+
+    binding: dict | None = None
+    same_root = False
+    state: dict | None = None
+    sdoc: dict = {}
+    shapes: list = []
+    shapes_valid = False
+    region = None
+    out = ""
+    src_image = ""
     refreshed = False
     ping_delivered = False
-    if refresh:
-        from tcip_mcp.web_client import PANEL_EVENT_CANVAS_STATE_REQUEST, post_panel_event
 
-        res = post_panel_event("app", PANEL_EVENT_CANVAS_STATE_REQUEST, {})
-        ping_delivered = bool(res.get("delivered"))
-        if ping_delivered:
-            for _ in range(12):  # ~2.4s for the GUI's flush to land
-                _time.sleep(0.2)
-                cur = _read(meta_doc)
-                if cur and cur.get("received_at", 0) > prev_ts:
-                    refreshed = True
-                    break
+    for attempt in range(2):
+        try:
+            binding = _read_binding()
+        except ts.StoreError as exc:
+            return {"error": f"Could not read the canvas-open binding: {exc}"}
 
-    state = _read(meta_doc)
-    if state is None:
-        return {"error": "No live canvas state found; is the GUI open with a project loaded? "
-                         "The frontend pushes its canvas state to the project the GUI has open "
-                         f"(looked under {root}; if the GUI has a different project open, "
-                         "set_active_project to it first)."}
+        if binding is None:
+            ws_root = str(workspace.workspace_root(create=False))
+            return {"error": f"No current canvas binding exists under the workspace root "
+                              f"{ws_root}; opening a project in the GUI creates one."}
 
-    src_image = state.get("image_path") or ""
-    if not Path(src_image).is_file():
-        return {"error": f"Canvas state references a missing image: {src_image}"}
+        same_root = ts.canonical_path(binding["root"]) == ts.canonical_path(root)
+        if not same_root and not render_last_known:
+            return {
+                "error": "The GUI's open project differs from this tool's own pinned project; "
+                         "its canvas is not this project's live view.",
+                "divergence": _binding_divergence(binding, root),
+            }
 
-    # Geometry is valid only when its identity matches the meta document: a heartbeat for a
-    # different image/tab means the stored shapes are stale and must not render.
-    sdoc = _read(shapes_doc) or {}
-    shapes_valid = (
-        sdoc.get("image_path") == state.get("image_path") and sdoc.get("tab") == state.get("tab")
-    )
-    shapes = (sdoc.get("shapes") or []) if shapes_valid else []
-    viewport = state.get("viewport")
-    # Read exactly the region being rendered: the human's viewport is a rectangle in the image's
-    # own grid, so a raster far too large to decode whole is still capturable.
-    region = None
-    if crop_to_viewport and viewport and viewport.get("w") and viewport.get("h"):
-        region = (float(viewport.get("x", 0)), float(viewport.get("y", 0)),
-                  float(viewport["w"]), float(viewport["h"]))
-    read = _display_for_path(src_image, max_edge=max_edge, region=region)
-    out = render_canvas_state(read.pixels, shapes,
-                              origin=(read.rect.x0, read.rect.y0), scale=read.scale)
+        prev = _read(meta_doc)
+        prev_ts = (prev or {}).get("received_at", 0)
+        refreshed = False
+        ping_delivered = False
+        if refresh and same_root:
+            from tcip_mcp.web_client import PANEL_EVENT_CANVAS_STATE_REQUEST, post_panel_event
 
+            res = post_panel_event("app", PANEL_EVENT_CANVAS_STATE_REQUEST, {})
+            ping_delivered = bool(res.get("delivered"))
+            if ping_delivered:
+                for _ in range(12):  # ~2.4s for the GUI's flush to land
+                    _time.sleep(0.2)
+                    cur = _read(meta_doc)
+                    if cur and cur.get("received_at", 0) > prev_ts:
+                        refreshed = True
+                        break
+
+        state = _read(meta_doc)
+        if state is None:
+            return {"error": "No live canvas state found; is the GUI open with a project "
+                              "loaded? The frontend pushes its canvas state to the project the "
+                              f"GUI has open (looked under {root}; if the GUI has a different "
+                              "project open, set_active_project to it first)."}
+
+        src_image = state.get("image_path") or ""
+        if not Path(src_image).is_file():
+            return {"error": f"Canvas state references a missing image: {src_image}"}
+
+        # Geometry is valid only when its identity matches the meta document: a heartbeat for a
+        # different image/tab means the stored shapes are stale and must not render.
+        sdoc = _read(shapes_doc) or {}
+        shapes_valid = (
+            sdoc.get("image_path") == state.get("image_path") and sdoc.get("tab") == state.get("tab")
+        )
+        shapes = (sdoc.get("shapes") or []) if shapes_valid else []
+        viewport = state.get("viewport")
+        # Read exactly the region being rendered: the human's viewport is a rectangle in the
+        # image's own grid, so a raster far too large to decode whole is still capturable.
+        region = None
+        if crop_to_viewport and viewport and viewport.get("w") and viewport.get("h"):
+            region = (float(viewport.get("x", 0)), float(viewport.get("y", 0)),
+                      float(viewport["w"]), float(viewport["h"]))
+        read = _display_for_path(src_image, max_edge=max_edge, region=region)
+        out = render_canvas_state(read.pixels, shapes,
+                                  origin=(read.rect.x0, read.rect.y0), scale=read.scale)
+
+        # The binding fence: a switch mid-call (the documents just read may already belong to
+        # another project) is caught by re-reading the binding after the render, not before it.
+        try:
+            binding_after = _read_binding()
+        except ts.StoreError as exc:
+            return {"error": f"Could not confirm the canvas binding after rendering: {exc}"}
+        if binding_after is None or binding_after.get("generation") != binding.get("generation"):
+            if attempt == 0:
+                continue
+            return {
+                "error": "The GUI's open project changed while this call was rendering; "
+                         "retry the call.",
+                "divergence": _binding_divergence(binding_after or binding, root),
+            }
+        break
+
+    # Every path that reaches here returned already unless the loop broke with both set.
+    assert binding is not None and state is not None
     now = _time.time()
     tag_counts: dict[str, int] = {}
     creator_counts: dict[str, int] = {}
@@ -793,15 +889,23 @@ def capture_live_canvas(
                 creator_counts[str(cb)] = creator_counts.get(str(cb), 0) + 1
 
     age = round(max(0.0, now - float(state.get("received_at") or now)), 1)
-    live = refreshed or age < 5.0
-    summary = (
-        f"Rendered the live {state.get('tab')} canvas for {state.get('image')} ({len(shapes)} shapes)."
-        if live else
-        f"Rendered the last known {state.get('tab')} canvas for {state.get('image')} "
-        f"({len(shapes)} shapes, {age}s old; the GUI did not answer the refresh ping; it may be "
-        "closed, on another tab, or on a different project)."
-    ) + " Read image_path with your own image-capable read tool to see it."
-    return {
+    live = same_root and (refreshed or age < 5.0)
+    if not same_root:
+        summary = (
+            f"Rendered this project's last known {state.get('tab')} canvas for "
+            f"{state.get('image')} ({len(shapes)} shapes, {age}s old; not live: the GUI has "
+            "another project open)."
+        )
+    elif live:
+        summary = f"Rendered the live {state.get('tab')} canvas for {state.get('image')} ({len(shapes)} shapes)."
+    else:
+        summary = (
+            f"Rendered the last known {state.get('tab')} canvas for {state.get('image')} "
+            f"({len(shapes)} shapes, {age}s old; the GUI did not answer the refresh ping; it may "
+            "be closed, on another tab, or on a different project)."
+        )
+    summary += " Read image_path with your own image-capable read tool to see it."
+    result = {
         "image_path": out,
         "source_image": src_image,
         "image": state.get("image"),
@@ -827,6 +931,9 @@ def capture_live_canvas(
         "refresh_ping_delivered": ping_delivered,
         "summary": summary,
     }
+    if not same_root:
+        result["divergence"] = _binding_divergence(binding, root)
+    return result
 
 
 @mcp.tool()
