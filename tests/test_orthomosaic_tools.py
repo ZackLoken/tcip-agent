@@ -413,14 +413,16 @@ def test_deliver_orthomosaic_plant_counts_refuses_unacknowledged_then_admits(tmp
     assert admitted["n_plants"] == 4  # every plant in the grid gets a row
     assert admitted["n_plants_zero_count"] == 2  # plant1, plant3
 
-    rows = {r["plant_id"]: r for r in csv.DictReader(out_csv.open(newline=""))}
+    reader = csv.DictReader(out_csv.open(newline=""))
+    rows = {r["plant_id"]: r for r in reader}
+    assert "trait_name" not in (reader.fieldnames or [])
     assert rows["plot0"]["value"] == "2"
     assert rows["plot2"]["value"] == "1"
     assert rows["plot1"]["value"] == "0"
     assert rows["plot3"]["value"] == "0"
     for r in rows.values():
         assert r["measurement_validated"] == "false"
-        assert r["trait_name"] == "stem_count"
+        assert r["delivered_phenotype"] == "stem_count"
 
 
 def test_deliver_orthomosaic_plant_counts_floors_a_stamp_earned_for_a_different_trait(

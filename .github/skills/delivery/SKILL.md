@@ -16,7 +16,7 @@ it in `pipelines/postprocessing/aggregation.py` if this table looks stale):
 |--------|------|-------------|
 | plant_id | string | Unique plant identifier |
 | crop | string | Crop species |
-| trait_name | string | Measured trait (from crop skill) |
+| delivered_phenotype | string | Delivered phenotype name (from crop skill) |
 | value | float/string | Measurement value |
 | units | string | Physical unit implied by the value's own `value_key`, blank for a count trait or a trait crops.yml declares no unit for. Under `operating_point`, a unit-declared trait's `value_key` must itself imply a unit; a px-space value refuses rather than shipping blank. Under a scalar head (`ordinal_operating_point`/`regression_operating_point`), a `value_key` implying no unit takes the trait's own declared unit from `crops.yml` instead of blank, since a calibrated head predicts in that unit by construction |
 | value_key | string | Which aggregated field `value` came from (e.g. `count`, `area_mm2`), so a reader can detect a px/mm mismatch independently |
@@ -89,9 +89,9 @@ uncharacterized, which is a claim about a quantity that has been defined.
   recorded one. A bucket-regime call also refuses a bucket whose own stamp names a different,
   non-`None` trait, validated or not.
 - `export_aggregated_csv` and `deliver_orthomosaic_plant_counts` take `delivered_phenotype`, a
-  crop-vocabulary delivered-phenotype name (the `trait_name` CSV column and the unit cross-check
-  read it), and resolve it to the registered trait whose spec `delivers` it: none or more than one
-  refuses. Which record applies follows from the records' own `measurement_document`
+  crop-vocabulary delivered-phenotype name (the `delivered_phenotype` CSV column and the unit
+  cross-check read it), and resolve it to the registered trait whose spec `delivers` it: none or
+  more than one refuses. Which record applies follows from the records' own `measurement_document`
   (`operating_point`, `ordinal_operating_point` or `regression_operating_point`), since a count, an
   ordinal and a regression aggregate rest on three different spec floors and are three separate
   confirmations. Every row carries a value key and every one has to be inside the confirmed set.
