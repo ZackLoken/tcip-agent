@@ -1825,7 +1825,7 @@ def delivered_provenance(
     and is empty unless every bucket read is bound, since one cell cannot name a record for buckets
     that have none. ``producer_model_sha256`` and ``producing_experiment_id`` are corroborated
     through :func:`corroborated_producer`, preferring the identity the verified records carry over
-    the identity the stamps assert. A ``measurement_validated`` named in ``columns`` passes
+    the identity the stamps assert. An ``operating_point_validated`` named in ``columns`` passes
     through whatever ``asserted`` carried for it, unchanged; :func:`delivered_tail` is what
     actually stamps that column from the gate.
     """
@@ -1848,7 +1848,6 @@ def delivered_provenance(
 _DIMENSION_TO_COLUMN: dict[str, str] = {
     "operating_point": "operating_point_validated",
     "classifier": "positive_state_classifier_validated",
-    "measurement": "measurement_validated",
 }
 """Which delivery-gate dimension owns which CSV validity column, wherever a delivered tail carries
 one. :func:`delivered_tail` reads this to derive a door's own ``own_column`` set structurally from
@@ -1872,11 +1871,13 @@ def delivered_tail(
     removes -- a ``None``-valued key (a caller that composed ``{"produced_at": x.get(...)}`` over
     something carrying none) is absence, not an assertion, the same convention
     :func:`corroborated_producer` uses; and every validity column ``columns`` actually carries
-    (``_DIMENSION_TO_COLUMN``'s owned columns present in ``columns``, ``measurement_validated``
+    (``_DIMENSION_TO_COLUMN``'s owned columns present in ``columns``, ``operating_point_validated``
     included) is stamped through ``gate.column_stamp`` here, never left to ``delivered_provenance``,
     with ``own_column`` derived from that same membership check, so a dimension without a column of
     its own floors every column that does exist and no door can drift into disagreeing about what a
-    validated column means.
+    validated column means. An ``unvalidated_dimensions`` named in ``columns`` carries the gate's
+    own ``unvalidated`` tuple joined for display (blank when every dimension cleared), so a reader
+    can always tell which dimension floored a validity column without a second spelling of it.
     """
     if asserted and asserted.get("produced_at") is not None:
         raise ValueError(
@@ -1889,6 +1890,8 @@ def delivered_tail(
     owned = tuple(dim for dim, col in _DIMENSION_TO_COLUMN.items() if col in columns)
     for dim in owned:
         values[_DIMENSION_TO_COLUMN[dim]] = gate.column_stamp(dim, own_column=owned)
+    if "unvalidated_dimensions" in columns:
+        values["unvalidated_dimensions"] = ", ".join(gate.unvalidated)
     return values
 
 
@@ -2535,23 +2538,22 @@ class DeliveryRefused(ValueError):
 
 _DIMENSION_REFERENCES: dict[str, tuple[str, ...]] = {
     "operating_point": _ACCEPTED_REFERENCES["annotations"],
-    "measurement": _ACCEPTED_REFERENCES["annotations"],
     "classifier": _ACCEPTED_REFERENCES["annotations"],
     "tile_size": _ACCEPTED_REFERENCES["geometry"],
     "scale": _ACCEPTED_REFERENCES["physical"],
     "claim_scope": CLAIM_SCOPE_REFERENCES,
 }
 """Which references clear which delivery-gate dimension, every row read from the kind's own
-acceptance table so no reference-to-kind pairing is stated a second time. The count, measurement
-and classifier dimensions are annotations-kind even for dimensional and ordinal/regression
-traits: every reconciler that feeds them resolves through a ``_DOCUMENT_PARAM`` entry declared
+acceptance table so no reference-to-kind pairing is stated a second time. The operating_point and
+classifier dimensions are annotations-kind even for dimensional and ordinal/regression traits:
+every reconciler that feeds them resolves through a ``_DOCUMENT_PARAM`` entry declared
 ``"annotations"``, and a physical scale is its own ``"scale"`` dimension, never folded into
-``"measurement"``. A dimension cleared by nothing (an empty tuple) states a missing prerequisite
-rather than a reference of any kind, see ``check_delivery_gate``'s cleared-by-nothing refusal arm;
-no production dimension reaches that arm today (``tabulate_counts``'s in-memory pass with no
-``predictions_dir`` now floors through ``export_detection_csv``'s own no-``pred_dirs`` measurement
-floor instead), so this stays documentation of a mechanism a future floor-only dimension can use,
-not a live assertion."""
+``"operating_point"``. A dimension cleared by nothing (an empty tuple) states a missing
+prerequisite rather than a reference of any kind, see ``check_delivery_gate``'s
+cleared-by-nothing refusal arm; no production dimension reaches that arm today
+(``tabulate_counts``'s in-memory pass with no ``predictions_dir`` now floors through
+``export_detection_csv``'s own no-``pred_dirs`` operating_point floor instead), so this stays
+documentation of a mechanism a future floor-only dimension can use, not a live assertion."""
 
 
 def check_delivery_gate(
@@ -2559,9 +2561,9 @@ def check_delivery_gate(
 ) -> DeliveryGateResult:
     """Refuse-or-stamp a phenotype delivery against the validity of each dimension it rests on.
 
-    ``flags`` maps each measurement dimension the deliverable depends on (e.g. ``"operating_point"``,
-    ``"classifier"``, or a single ``"measurement"`` for a continuous/ordinal trait with no conf
-    op-point) to its reconciled validity state. A dimension clears only on a reference
+    ``flags`` maps each dimension the deliverable depends on (e.g. ``"operating_point"``, the
+    sole dimension for a continuous/ordinal trait with no conf op-point, or ``"classifier"``) to
+    its reconciled validity state. A dimension clears only on a reference
     ``_DIMENSION_REFERENCES`` accepts for that dimension; any other value (a wrong-kind reference
     included: a raster-scope identity says nothing about a count) is treated as unvalidated. A
     dimension name the mapping does not know raises rather than judging it against a vocabulary
@@ -2595,7 +2597,7 @@ def check_delivery_gate(
         return DeliveryGateResult(
             ok=False, unvalidated=unvalidated, stamp=stamp,
             reason=(
-                f"delivery refused: unvalidated measurement dimension(s) {list(unvalidated)}. A "
+                f"delivery refused: unvalidated dimension(s) {list(unvalidated)}. A "
                 "phenotype deliverable requires each dimension validated against a reference of "
                 f"its own kind ({clears}); validate it, or pass "
                 "acknowledge_unvalidated=True to write a clearly-flagged provisional result stamped "

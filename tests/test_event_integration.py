@@ -630,7 +630,7 @@ class TestInferenceToolOutputSchema:
 
         import tcip_mcp.model_registry as model_registry_mod
         import tcip_mcp.tools.inference_tools as itools
-        from tcip_mcp.pipelines.resolution import VALIDATED_HELD_OUT
+        from tcip_mcp.pipelines.resolution import VALIDATED_FALSE, VALIDATED_HELD_OUT
         from tests._verified_checkpoint_fixtures import stub_verified_checkpoint
 
         counts = {"row3_plant07.jpg": 2, "row3_plant11.jpg": 0, "row9_plant02.jpg": 17}
@@ -659,7 +659,10 @@ class TestInferenceToolOutputSchema:
         assert res["csv_path"] == str(out_csv)
         assert res["image_count"] == len(counts)
         assert res["total_detections"] == sum(counts.values())
-        assert res["operating_point_validated"] == VALIDATED_HELD_OUT
+        # No bucket, so the CSV-facing column floors false regardless; the run's own narrowed
+        # reference travels honestly under its own name instead.
+        assert res["operating_point_validated"] == VALIDATED_FALSE
+        assert res["run_conf_validated_against"] == VALIDATED_HELD_OUT
         # The delivered image cell is the source basename with its extension, passed straight
         # through from this live, no-bucket call's own result: export_detection_csv's own spelling.
         rows = list(csv.DictReader(out_csv.read_text(encoding="utf-8").splitlines()))

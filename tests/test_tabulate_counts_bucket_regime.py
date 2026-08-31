@@ -730,14 +730,18 @@ def test_bucket_regime_re_delivers_the_provisional_floor_identically(tmp_path, m
                                   trait=fx.COUNT_TRAIT, predictions_dir=str(bucket),
                                   acknowledge_unvalidated=True)
     assert "error" not in live, live
-    assert live["measurement_validated"] == VALIDATED_FALSE
+    assert live["operating_point_validated"] == VALIDATED_FALSE
 
     csv_b = tmp_path / "b.csv"
     reread = itools.tabulate_counts(predictions_dir=str(bucket), output_path=str(csv_b),
                                     trait=fx.COUNT_TRAIT, acknowledge_unvalidated=True)
     assert "error" not in reread, reread
-    assert reread["measurement_validated"] == VALIDATED_FALSE
-    rows_a = list(csv.DictReader(csv_a.open()))
+    assert reread["operating_point_validated"] == VALIDATED_FALSE
+    with csv_a.open() as f:
+        reader_a = csv.DictReader(f)
+        rows_a = list(reader_a)
+        assert "operating_point_validated" in (reader_a.fieldnames or [])
+        assert "measurement_validated" not in (reader_a.fieldnames or [])
     rows_b = list(csv.DictReader(csv_b.open()))
     assert rows_a[0]["detection_count"] == rows_b[0]["detection_count"]
     assert rows_a[0]["avg_confidence"] == rows_b[0]["avg_confidence"]
@@ -768,7 +772,7 @@ def test_bucket_regime_delivers_validated_after_the_stamp_is_promoted(tmp_path):
     before = itools.tabulate_counts(predictions_dir=str(bucket), output_path=str(tmp_path / "before.csv"),
                                     trait=fx.COUNT_TRAIT, acknowledge_unvalidated=True)
     assert "error" not in before, before
-    assert before["measurement_validated"] == VALIDATED_FALSE
+    assert before["operating_point_validated"] == VALIDATED_FALSE
 
     earned_op_point = {"conf": {"value": 0.5, "validated_against": VALIDATED_HELD_OUT}}
     bound = file_validation_record(
@@ -790,7 +794,7 @@ def test_bucket_regime_delivers_validated_after_the_stamp_is_promoted(tmp_path):
     after = itools.tabulate_counts(predictions_dir=str(bucket), output_path=str(tmp_path / "after.csv"),
                                    trait=fx.COUNT_TRAIT)
     assert "error" not in after, after
-    assert after["measurement_validated"] == VALIDATED_HELD_OUT
+    assert after["operating_point_validated"] == VALIDATED_HELD_OUT
     pointer = bound["validated_by"]
     rows = list(csv.DictReader((tmp_path / "after.csv").open()))
     assert rows[0]["validation_record"] == f"{pointer['experiment_id']}:{pointer['record_digest']}"

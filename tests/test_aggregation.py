@@ -202,6 +202,16 @@ def test_export_aggregated_csv_signature_carries_delivered_phenotype_not_trait_n
     assert "trait_name" not in params
 
 
+def test_export_aggregated_csv_signature_carries_operating_point_validated_not_measurement_validated():
+    """The unified dimension key names its own parameter and column: measurement_validated is a
+    retired spelling of the same fact operating_point_validated already carries."""
+    import inspect
+
+    params = inspect.signature(export_aggregated_csv).parameters
+    assert "operating_point_validated" in params
+    assert "measurement_validated" not in params
+
+
 def test_export_aggregated_csv(tmp_path):
     results = [
         {"plant_id": "PLANT_001", "value": 7, "observations": 3, "value_key": "count",
@@ -224,6 +234,23 @@ def test_export_aggregated_csv(tmp_path):
     assert rows[0]["crop"] == "hazelnut"
     assert rows[0]["delivered_phenotype"] == "stem_count"
     assert rows[0]["n_images"] == "3"
+
+
+def test_export_aggregated_csv_header_carries_operating_point_validated_not_measurement_validated(
+    tmp_path,
+):
+    """The delivered per-plant CSV's validity column is operating_point_validated; the retired
+    spelling measurement_validated must not reappear in its header."""
+    results = [{"plant_id": "PLANT_001", "value": 7, "observations": 3, "value_key": "count",
+               "measurement_document": "operating_point"}]
+    out_path = tmp_path / "aggregated.csv"
+    export_aggregated_csv(results, str(out_path), delivered_phenotype="stem_count",
+                          acknowledge_unvalidated=True)
+
+    with open(out_path, newline="") as f:
+        fieldnames = csv.DictReader(f).fieldnames or []
+    assert "operating_point_validated" in fieldnames
+    assert "measurement_validated" not in fieldnames
 
 
 def test_export_aggregated_csv_units_derived_from_value_key(tmp_path):

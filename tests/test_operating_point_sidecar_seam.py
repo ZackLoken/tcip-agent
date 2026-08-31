@@ -302,12 +302,12 @@ def test_declared_stamp_filenames_cover_every_declared_document(tmp_path):
 # --- the delivery gate owns the floored column value ---
 
 def test_column_stamp_floors_on_a_dimension_with_no_column_of_its_own():
-    gate = check_delivery_gate({"measurement": VALIDATED_HELD_OUT, "tile_size": VALIDATED_FALSE},
+    gate = check_delivery_gate({"operating_point": VALIDATED_HELD_OUT, "tile_size": VALIDATED_FALSE},
                                acknowledge_unvalidated=True)
 
     assert gate.ok is True
-    assert gate.stamp["measurement"] == VALIDATED_HELD_OUT
-    assert gate.column_stamp("measurement") == VALIDATED_FALSE
+    assert gate.stamp["operating_point"] == VALIDATED_HELD_OUT
+    assert gate.column_stamp("operating_point") == VALIDATED_FALSE
 
 
 def test_column_stamp_is_not_floored_by_a_separately_stamped_dimension():
@@ -322,10 +322,10 @@ def test_column_stamp_is_not_floored_by_a_separately_stamped_dimension():
 
 
 def test_column_stamp_reports_the_cleared_reference_when_everything_cleared():
-    gate = check_delivery_gate({"measurement": VALIDATED_HELD_OUT,
+    gate = check_delivery_gate({"operating_point": VALIDATED_HELD_OUT,
                                 "tile_size": VALIDATED_PERSISTED_GEOMETRY})
 
-    assert gate.column_stamp("measurement") == VALIDATED_HELD_OUT
+    assert gate.column_stamp("operating_point") == VALIDATED_HELD_OUT
 
 
 # --- the geometry reference and its source are one mapping, in both directions ---

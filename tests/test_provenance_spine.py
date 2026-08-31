@@ -255,7 +255,7 @@ def test_export_aggregated_csv_carries_provenance(tmp_path):
           "measurement_document": "operating_point"}],
         str(out), delivered_phenotype="stem_count",
         provenance={"producer_model_sha256": sha, "producing_experiment_id": "expA"},
-        measurement_validated="held_out_annotations", acknowledge_unvalidated=True)
+        operating_point_validated="held_out_annotations", acknowledge_unvalidated=True)
     rows = list(__import__("csv").DictReader(out.open()))
     assert rows[0]["producer_model_sha256"] == sha
     assert rows[0]["producing_experiment_id"] == "expA"
@@ -322,8 +322,8 @@ def test_delivered_tail_treats_a_none_valued_produced_at_key_as_absent(tmp_path)
     absence convention two functions up."""
     from tcip_mcp.pipelines.resolution import VALIDATED_FALSE, check_delivery_gate, delivered_tail
 
-    gate = check_delivery_gate({"measurement": VALIDATED_FALSE}, acknowledge_unvalidated=True)
-    columns = ("produced_at", "measurement_validated")
+    gate = check_delivery_gate({"operating_point": VALIDATED_FALSE}, acknowledge_unvalidated=True)
+    columns = ("produced_at", "operating_point_validated")
 
     tail = delivered_tail({"produced_at": None}, {}, gate, columns=columns)
     assert tail["produced_at"]  # the write's own timestamp, not refused

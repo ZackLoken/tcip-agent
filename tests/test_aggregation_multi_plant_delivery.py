@@ -218,29 +218,29 @@ def test_an_ordinal_delivery_never_clears_the_gate_on_the_count_dimension(tmp_pa
     ordinal_only = _ordinal_bucket(tmp_path, "ordinal_preds")
     count_only = _count_bucket(tmp_path, "count_preds")
 
-    with pytest.raises(DeliveryRefused, match="unvalidated measurement"):
+    with pytest.raises(DeliveryRefused, match="unvalidated dimension"):
         export_aggregated_csv(
             [{"plant_id": "PLANT_A", "value": 2, "observations": 3, "value_key": "astringency",
              "measurement_document": "ordinal_operating_point", "scale_document": None}],
             str(tmp_path / "wrong_dimension.csv"), delivered_phenotype="astringency",
-            measurement_validated=VALIDATED_HELD_OUT, pred_dirs=[count_only])
+            operating_point_validated=VALIDATED_HELD_OUT, pred_dirs=[count_only])
 
     matched_ordinal = tmp_path / "matched_ordinal.csv"
     export_aggregated_csv(
         [{"plant_id": "PLANT_A", "value": 2, "observations": 3, "value_key": "astringency",
          "measurement_document": "ordinal_operating_point", "scale_document": None}],
         str(matched_ordinal), delivered_phenotype="astringency",
-        measurement_validated=VALIDATED_HELD_OUT, pred_dirs=[ordinal_only])
+        operating_point_validated=VALIDATED_HELD_OUT, pred_dirs=[ordinal_only])
     matched_count = tmp_path / "matched_count.csv"
     export_aggregated_csv(
         [{"plant_id": "PLANT_A", "value": 4, "observations": 3, "value_key": "count",
          "measurement_document": "operating_point", "scale_document": None}],
         str(matched_count), delivered_phenotype="stem_count",
-        measurement_validated=VALIDATED_HELD_OUT, pred_dirs=[count_only])
+        operating_point_validated=VALIDATED_HELD_OUT, pred_dirs=[count_only])
 
     for path in (matched_ordinal, matched_count):
         with open(path, newline="") as f:
-            assert next(csv.DictReader(f))["measurement_validated"] == VALIDATED_HELD_OUT
+            assert next(csv.DictReader(f))["operating_point_validated"] == VALIDATED_HELD_OUT
 
 
 def test_a_count_stamp_earned_for_one_trait_floors_a_delivery_of_another(tmp_path):
@@ -253,7 +253,7 @@ def test_a_count_stamp_earned_for_one_trait_floors_a_delivery_of_another(tmp_pat
             [{"plant_id": "PLANT_A", "value": 4, "observations": 3, "value_key": "astringency",
              "measurement_document": "operating_point", "scale_document": None}],
             str(tmp_path / "mismatched_trait.csv"), delivered_phenotype="astringency",
-            measurement_validated=VALIDATED_HELD_OUT, pred_dirs=[bucket])
+            operating_point_validated=VALIDATED_HELD_OUT, pred_dirs=[bucket])
     message = str(exc.value)
     assert bucket in message
     assert fx.COUNT_TRAIT in message and "astringency" in message
@@ -268,7 +268,7 @@ def test_a_delivery_naming_no_measurement_document_refuses(tmp_path):
 
     with pytest.raises(ValueError, match="measurement_document"):
         export_aggregated_csv(rows, str(tmp_path / "unstated.csv"), delivered_phenotype="astringency",
-                              measurement_validated=VALIDATED_HELD_OUT, pred_dirs=[ordinal_only])
+                              operating_point_validated=VALIDATED_HELD_OUT, pred_dirs=[ordinal_only])
 
 
 def test_a_caller_downgrade_floors_a_validated_ordinal_sidecar(tmp_path):
@@ -279,8 +279,8 @@ def test_a_caller_downgrade_floors_a_validated_ordinal_sidecar(tmp_path):
     rows = [{"plant_id": "PLANT_A", "value": 2, "observations": 3, "value_key": "astringency",
              "measurement_document": "ordinal_operating_point", "scale_document": None}]
 
-    with pytest.raises(DeliveryRefused, match="unvalidated measurement"):
+    with pytest.raises(DeliveryRefused, match="unvalidated dimension"):
         export_aggregated_csv(rows, str(tmp_path / "downgraded.csv"),
                               delivered_phenotype="astringency",
-                              measurement_validated=VALIDATED_FALSE,
+                              operating_point_validated=VALIDATED_FALSE,
                               pred_dirs=[bucket])

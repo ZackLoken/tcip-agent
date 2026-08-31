@@ -103,6 +103,7 @@ def test_a_caller_chosen_conf_never_reaches_a_written_count_csv(tmp_path, monkey
     assert r["operating_point"]["conf"]["value"] == pytest.approx(CALLER_PICKED_CONF)
     assert r["operating_point"]["conf"]["validated_against"] == VALIDATED_FALSE
     assert r["operating_point_validated"] == VALIDATED_FALSE
+    assert r["run_conf_validated_against"] == VALIDATED_FALSE
     assert r["validated"] is False
     assert not out_csv.exists()
 
@@ -124,6 +125,7 @@ def test_an_acknowledged_uncalibrated_count_is_written_flagged_rather_than_refus
 
     assert "error" not in r, r
     assert r["operating_point_validated"] == VALIDATED_FALSE
+    assert r["run_conf_validated_against"] == VALIDATED_FALSE
     rows = out_csv.read_text(encoding="utf-8").strip().splitlines()
     assert len(rows) == 1 + len(_CountStub._COUNTS)  # header plus one row per image
     assert all(VALIDATED_FALSE in row for row in rows[1:])

@@ -72,7 +72,7 @@ def deliver_orthomosaic_plant_counts(
     Delivery gate: the count is the phenotype, so this refuses a bare write of an unvalidated
     count operating point (read from the bucket's own ``operating_point.json``, never trusted
     from a caller string) unless ``acknowledge_unvalidated=True`` ships a clearly-flagged
-    provisional CSV stamped ``measurement_validated=false``. A tiled bucket's ``tile_size`` gates
+    provisional CSV stamped ``operating_point_validated=false``. A tiled bucket's ``tile_size`` gates
     the same way (the tile edge scales the per-image counts the per-plant value sums), reusing
     the identical ``export_aggregated_csv`` gate every other per-plant delivery goes through, not
     a second implementation of it.
@@ -249,12 +249,12 @@ def deliver_orthomosaic_plant_counts(
             acknowledge_unvalidated=acknowledge_unvalidated,
         )
     except DeliveryRefused as exc:
-        # operating_point_validated is the measurement dimension's own cleared reference;
+        # operating_point_validated is the operating_point dimension's own cleared reference;
         # unvalidated_dimensions names every refusing dimension (claim_scope and scale included).
         refusal = {
             "error": str(exc),
-            "operating_point_validated": exc.gate.stamp.get("measurement", VALIDATED_FALSE),
-            "unvalidated_dimensions": list(exc.gate.unvalidated),
+            "operating_point_validated": exc.gate.stamp.get("operating_point", VALIDATED_FALSE),
+            "unvalidated_dimensions": ", ".join(exc.gate.unvalidated),
             "n_detections": len(assignments), "n_mapped": len(mapped),
             "n_unmapped": n_unmapped,
         }
@@ -283,7 +283,8 @@ def deliver_orthomosaic_plant_counts(
         "n_detections": len(assignments),
         "n_mapped": len(mapped),
         "n_unmapped": n_unmapped,
-        "measurement_validated": tail["measurement_validated"],
+        "operating_point_validated": tail["operating_point_validated"],
+        "unvalidated_dimensions": tail["unvalidated_dimensions"],
         "checkpoint_sha256": tail["producer_model_sha256"],
         "producing_experiment_id": tail["producing_experiment_id"],
         "validation_record": tail["validation_record"],

@@ -803,6 +803,7 @@ def compute_phenology(
         "positive_class_assessed": True,
         "positive_state_classifier_validated": cells["positive_state_classifier_validated"],
         "operating_point_validated": cells["operating_point_validated"],
+        "unvalidated_dimensions": cells["unvalidated_dimensions"],
         "tile_size_validated": gate.stamp.get("tile_size"),
         "n_images_unmapped": result["n_images_unmapped"],
         "columns": phenology.phenology_csv_columns(spec),

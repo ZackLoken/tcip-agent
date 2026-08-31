@@ -138,6 +138,8 @@ PROVENANCE_COLUMNS = [
     "operating_point_conf",
     "operating_point_validated",
     "positive_state_classifier_validated",
+    # The gate's own unvalidated dimension names, joined, blank when every gated dimension cleared.
+    "unvalidated_dimensions",
     # Producing-model identity, the exact checkpoint (content hash) + run behind the counts.
     "producer_model_sha256",
     "producing_experiment_id",

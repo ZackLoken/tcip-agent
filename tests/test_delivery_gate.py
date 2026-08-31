@@ -96,7 +96,6 @@ def test_gate_acknowledge_ships_but_stamps_false():
 
 
 @pytest.mark.parametrize("dimension, reference", [
-    ("measurement", res.VALIDATED_SAME_MOSAIC_IDENTITY),
     ("operating_point", res.VALIDATED_PERSISTED_GEOMETRY),
     ("classifier", res.VALIDATED_PHYSICAL_MEASUREMENT),
     ("tile_size", res.VALIDATED_PHYSICAL_MEASUREMENT),
@@ -116,8 +115,6 @@ def test_a_wrong_kind_reference_floors_the_dimension_it_cannot_clear(dimension, 
 @pytest.mark.parametrize("dimension, reference", [
     ("operating_point", VALIDATED_HELD_OUT),
     ("operating_point", VALIDATED_REVIEW_CONFIRMED),
-    ("measurement", VALIDATED_HELD_OUT),
-    ("measurement", VALIDATED_REVIEW_CONFIRMED),
     ("classifier", VALIDATED_HELD_OUT),
     ("classifier", VALIDATED_REVIEW_CONFIRMED),
     ("tile_size", res.VALIDATED_PERSISTED_GEOMETRY),
@@ -136,10 +133,10 @@ def test_every_dimension_still_clears_with_its_own_kind(dimension, reference):
 
 
 def test_acknowledged_wrong_kind_reference_ships_stamped_false():
-    g = check_delivery_gate({"measurement": res.VALIDATED_SAME_MOSAIC_IDENTITY},
+    g = check_delivery_gate({"operating_point": res.VALIDATED_SAME_MOSAIC_IDENTITY},
                             acknowledge_unvalidated=True)
     assert g.ok is True
-    assert g.stamp == {"measurement": VALIDATED_FALSE}
+    assert g.stamp == {"operating_point": VALIDATED_FALSE}
 
 
 def test_an_unknown_dimension_name_refuses_loudly():
@@ -147,6 +144,14 @@ def test_an_unknown_dimension_name_refuses_loudly():
     a delivery to wave through under the any-shippable-reference union."""
     with pytest.raises(ValueError, match="provenance"):
         check_delivery_gate({"provenance": VALIDATED_HELD_OUT})
+
+
+def test_measurement_dimension_key_is_retired():
+    """The dimension key measurement is retired in favor of operating_point: a caller still
+    composing flags under the old key hits the same unknown-dimension refusal any other dead
+    vocabulary would, never a silently accepted alias."""
+    with pytest.raises(ValueError, match="measurement"):
+        check_delivery_gate({"measurement": VALIDATED_HELD_OUT})
 
 
 def test_the_refusal_names_the_failed_dimensions_own_references():
@@ -165,7 +170,7 @@ def test_the_refusal_names_the_failed_dimensions_own_references():
 def test_export_detection_csv_refuses_bare_write(tmp_path):
     from tcip_mcp.pipelines.postprocessing.export import export_detection_csv
 
-    with pytest.raises(ValueError, match="unvalidated measurement"):
+    with pytest.raises(ValueError, match="unvalidated dimension"):
         export_detection_csv([{"image": "a.jpg", "count": 3}], str(tmp_path / "o.csv"),
                              trait=fx.COUNT_TRAIT)
 
@@ -176,13 +181,13 @@ def test_export_detection_csv_gate_refusal_carries_the_gate_result(tmp_path):
     needs the gate itself (``.gate.stamp``), not a string to re-parse."""
     from tcip_mcp.pipelines.postprocessing.export import export_detection_csv
 
-    with pytest.raises(ValueError, match="unvalidated measurement") as exc_info:
+    with pytest.raises(ValueError, match="unvalidated dimension") as exc_info:
         export_detection_csv([{"image": "a.jpg", "count": 3}], str(tmp_path / "o.csv"),
                              trait=fx.COUNT_TRAIT)
     exc = exc_info.value
     assert hasattr(exc, "gate"), "the raise carries no .gate: it is a bare ValueError"
     assert exc.gate.ok is False
-    assert exc.gate.stamp == {"measurement": VALIDATED_FALSE}
+    assert exc.gate.stamp == {"operating_point": VALIDATED_FALSE}
     assert not (tmp_path / "o.csv").exists()
 
 
@@ -192,8 +197,24 @@ def test_export_detection_csv_acknowledge_stamps_false(tmp_path):
     out = tmp_path / "o.csv"
     export_detection_csv([{"image": "a.jpg", "count": 3}], str(out),
                          trait=fx.COUNT_TRAIT, acknowledge_unvalidated=True)
-    rows = list(csv.DictReader(out.open()))
-    assert rows[0]["measurement_validated"] == VALIDATED_FALSE
+    with open(out, newline="") as f:
+        reader = csv.DictReader(f)
+        rows = list(reader)
+        assert "operating_point_validated" in (reader.fieldnames or [])
+        assert "measurement_validated" not in (reader.fieldnames or [])
+    assert rows[0]["operating_point_validated"] == VALIDATED_FALSE
+
+
+def test_export_detection_csv_signature_carries_operating_point_validated_not_measurement_validated():
+    """The unified dimension key names its own parameter: measurement_validated is a retired
+    spelling of the same fact operating_point_validated already carries."""
+    import inspect
+
+    from tcip_mcp.pipelines.postprocessing.export import export_detection_csv
+
+    params = inspect.signature(export_detection_csv).parameters
+    assert "operating_point_validated" in params
+    assert "measurement_validated" not in params
 
 
 def test_export_detection_csv_and_the_persisted_document_agree_on_a_degenerate_box(tmp_path):
@@ -256,15 +277,15 @@ def _detection_bucket(tmp_path, name, *, validated, ref=VALIDATED_HELD_OUT, conf
 
 
 def test_export_detection_csv_reconciles_sidecar_floor(tmp_path):
-    # A caller-asserted measurement_validated cannot open the gate when the bucket it names has no
+    # A caller-asserted operating_point_validated cannot open the gate when the bucket it names has no
     # readable/validated sidecar backing it: pred_dirs reconciles from disk, never trusts the string.
     from tcip_mcp.pipelines.postprocessing.export import export_detection_csv
 
     bucket = _detection_bucket(tmp_path, "preds", validated=False)
-    with pytest.raises(ValueError, match="unvalidated measurement"):
+    with pytest.raises(ValueError, match="unvalidated dimension"):
         export_detection_csv([{"image": "a.jpg", "count": 3}], str(tmp_path / "o.csv"),
                              trait=fx.COUNT_TRAIT,
-                             measurement_validated=VALIDATED_HELD_OUT, pred_dirs=[bucket])
+                             operating_point_validated=VALIDATED_HELD_OUT, pred_dirs=[bucket])
 
 
 def test_export_detection_csv_pred_dirs_ships_when_bucket_validated(tmp_path):
@@ -274,9 +295,9 @@ def test_export_detection_csv_pred_dirs_ships_when_bucket_validated(tmp_path):
     out = tmp_path / "o.csv"
     export_detection_csv([{"image": "a.jpg", "count": 3, "scores": [0.9]}], str(out),
                          trait=fx.COUNT_TRAIT,
-                         measurement_validated=VALIDATED_HELD_OUT, pred_dirs=[bucket])
+                         operating_point_validated=VALIDATED_HELD_OUT, pred_dirs=[bucket])
     rows = list(csv.DictReader(out.open()))
-    assert rows[0]["measurement_validated"] == VALIDATED_HELD_OUT
+    assert rows[0]["operating_point_validated"] == VALIDATED_HELD_OUT
 
 
 def test_export_detection_csv_floors_a_stamp_earned_for_a_different_trait(tmp_path):
@@ -297,7 +318,7 @@ def test_export_detection_csv_floors_a_stamp_earned_for_a_different_trait(tmp_pa
     with pytest.raises(ValueError) as exc:
         export_detection_csv([{"image": "a.jpg", "count": 3}], str(tmp_path / "o.csv"),
                              trait=other_trait,
-                             measurement_validated=VALIDATED_HELD_OUT, pred_dirs=[bucket])
+                             operating_point_validated=VALIDATED_HELD_OUT, pred_dirs=[bucket])
     message = str(exc.value)
     assert bucket in message
     assert fx.COUNT_TRAIT in message and other_trait in message
@@ -313,10 +334,10 @@ def test_export_detection_csv_pred_dirs_gates_fabricated_tile_size(tmp_path):
         tile_size_prov={"value": 640, "requires_validation": True,
                         "validation_kind": "geometry", "validated_against": VALIDATED_FALSE},
     )
-    with pytest.raises(ValueError, match="unvalidated measurement"):
+    with pytest.raises(ValueError, match="unvalidated dimension"):
         export_detection_csv([{"image": "a.jpg", "count": 3}], str(tmp_path / "o.csv"),
                              trait=fx.COUNT_TRAIT,
-                             measurement_validated=VALIDATED_HELD_OUT, pred_dirs=[bucket])
+                             operating_point_validated=VALIDATED_HELD_OUT, pred_dirs=[bucket])
 
 
 def test_export_detection_csv_refusal_merges_the_tile_reconciler_binding_notes(tmp_path, monkeypatch):
@@ -351,10 +372,10 @@ def test_a_wrong_kind_assertion_floors_a_valid_bucket(tmp_path):
         [bucket], trait=fx.COUNT_TRAIT, asserted=res.VALIDATED_SAME_MOSAIC_IDENTITY)
     assert recon["validated"] == VALIDATED_FALSE
 
-    with pytest.raises(ValueError, match="unvalidated measurement"):
+    with pytest.raises(ValueError, match="unvalidated dimension"):
         export_detection_csv([{"image": "a.jpg", "count": 3}], str(tmp_path / "o.csv"),
                              trait=fx.COUNT_TRAIT,
-                             measurement_validated=res.VALIDATED_SAME_MOSAIC_IDENTITY,
+                             operating_point_validated=res.VALIDATED_SAME_MOSAIC_IDENTITY,
                              pred_dirs=[bucket])
 
 
@@ -365,16 +386,16 @@ def test_export_detection_csv_omitted_pred_dirs_floors_to_unvalidated(tmp_path):
     from tcip_mcp.pipelines.postprocessing.export import export_detection_csv
 
     out = tmp_path / "o.csv"
-    with pytest.raises(ValueError, match="unvalidated measurement"):
+    with pytest.raises(ValueError, match="unvalidated dimension"):
         export_detection_csv([{"image": "a.jpg", "count": 3, "scores": [0.9]}], str(out),
-                             trait=fx.COUNT_TRAIT, measurement_validated=VALIDATED_HELD_OUT)
+                             trait=fx.COUNT_TRAIT, operating_point_validated=VALIDATED_HELD_OUT)
     assert not out.exists()
 
     export_detection_csv([{"image": "a.jpg", "count": 3, "scores": [0.9]}], str(out),
-                         trait=fx.COUNT_TRAIT, measurement_validated=VALIDATED_HELD_OUT,
+                         trait=fx.COUNT_TRAIT, operating_point_validated=VALIDATED_HELD_OUT,
                          acknowledge_unvalidated=True)
     rows = list(csv.DictReader(out.open()))
-    assert rows[0]["measurement_validated"] == VALIDATED_FALSE
+    assert rows[0]["operating_point_validated"] == VALIDATED_FALSE
 
 
 # ── export_aggregated_csv (writer) refuses a bare write ────────────────────
@@ -382,7 +403,7 @@ def test_export_detection_csv_omitted_pred_dirs_floors_to_unvalidated(tmp_path):
 def test_export_aggregated_csv_refuses_bare_write(tmp_path):
     from tcip_mcp.pipelines.postprocessing.aggregation import export_aggregated_csv
 
-    with pytest.raises(ValueError, match="unvalidated measurement"):
+    with pytest.raises(ValueError, match="unvalidated dimension"):
         export_aggregated_csv(
             [{"plant_id": "p1", "value": 5, "observations": 2, "value_key": "count",
              "measurement_document": "operating_point"}],
@@ -396,17 +417,17 @@ def test_export_aggregated_csv_reconciles_sidecar_floor(tmp_path):
 
     bucket = tmp_path / "preds"
     bucket.mkdir()
-    with pytest.raises(ValueError, match="unvalidated measurement"):
+    with pytest.raises(ValueError, match="unvalidated dimension"):
         export_aggregated_csv(
             [{"plant_id": "p1", "value": 5, "observations": 2, "value_key": "count",
              "measurement_document": "operating_point"}],
             str(tmp_path / "o.csv"), delivered_phenotype="stem_count",
-            measurement_validated=VALIDATED_HELD_OUT, pred_dirs=[str(bucket)])
+            operating_point_validated=VALIDATED_HELD_OUT, pred_dirs=[str(bucket)])
 
 
 def test_export_aggregated_csv_continuous_trait_bare_string_never_trusted(tmp_path):
     # A continuous/ordinal trait has no on-disk measurement-validity producer, so a bare
-    # caller-asserted measurement_validated string, with no pred_dirs to reconcile against, is
+    # caller-asserted operating_point_validated string, with no pred_dirs to reconcile against, is
     # never trusted directly: it refuses without an explicit acknowledge.
     from tcip_mcp.pipelines.postprocessing.aggregation import export_aggregated_csv
 
@@ -415,7 +436,7 @@ def test_export_aggregated_csv_continuous_trait_bare_string_never_trusted(tmp_pa
         export_aggregated_csv(
             [{"plant_id": "p1", "value": 4.2, "observations": 3,
               "value_key": "fruit_diameter", "measurement_document": "regression_operating_point"}],
-            str(out), delivered_phenotype="fruit_diameter", measurement_validated=VALIDATED_HELD_OUT)
+            str(out), delivered_phenotype="fruit_diameter", operating_point_validated=VALIDATED_HELD_OUT)
 
 
 def test_export_aggregated_csv_continuous_trait_ships_provisional_when_acknowledged(tmp_path):
@@ -427,10 +448,10 @@ def test_export_aggregated_csv_continuous_trait_ships_provisional_when_acknowled
     export_aggregated_csv(
         [{"plant_id": "p1", "value": 4.2, "observations": 3, "value_key": "fruit_diameter",
          "measurement_document": "regression_operating_point"}],
-        str(out), delivered_phenotype="fruit_diameter", measurement_validated=VALIDATED_HELD_OUT,
+        str(out), delivered_phenotype="fruit_diameter", operating_point_validated=VALIDATED_HELD_OUT,
         acknowledge_unvalidated=True)
     rows = list(csv.DictReader(out.open()))
-    assert rows[0]["measurement_validated"] == VALIDATED_FALSE
+    assert rows[0]["operating_point_validated"] == VALIDATED_FALSE
 
 
 # ── export_aggregated_csv wired to the ordinal/regression sidecar producer ────
@@ -463,10 +484,10 @@ def test_export_aggregated_csv_ordinal_trait_ships_when_sidecar_validated(tmp_pa
     export_aggregated_csv(
         [{"plant_id": "p1", "value": 2, "observations": 3, "value_key": "astringency",
          "measurement_document": "ordinal_operating_point"}],
-        str(out), delivered_phenotype="astringency", measurement_validated=VALIDATED_HELD_OUT,
+        str(out), delivered_phenotype="astringency", operating_point_validated=VALIDATED_HELD_OUT,
         pred_dirs=[bucket])
     rows = list(csv.DictReader(out.open()))
-    assert rows[0]["measurement_validated"] == VALIDATED_HELD_OUT
+    assert rows[0]["operating_point_validated"] == VALIDATED_HELD_OUT
 
 
 def test_export_aggregated_csv_regression_trait_ships_when_sidecar_validated(tmp_path):
@@ -477,10 +498,10 @@ def test_export_aggregated_csv_regression_trait_ships_when_sidecar_validated(tmp
     export_aggregated_csv(
         [{"plant_id": "p1", "value": 4.2, "observations": 3, "value_key": "fruit_diameter",
          "measurement_document": "regression_operating_point"}],
-        str(out), delivered_phenotype="fruit_diameter", measurement_validated=VALIDATED_HELD_OUT,
+        str(out), delivered_phenotype="fruit_diameter", operating_point_validated=VALIDATED_HELD_OUT,
         pred_dirs=[bucket])
     rows = list(csv.DictReader(out.open()))
-    assert rows[0]["measurement_validated"] == VALIDATED_HELD_OUT
+    assert rows[0]["operating_point_validated"] == VALIDATED_HELD_OUT
     assert rows[0]["units"] == "mm"
 
 
@@ -491,12 +512,12 @@ def test_export_aggregated_csv_ordinal_trait_floors_on_missing_sidecar(tmp_path)
 
     bucket = tmp_path / "preds"
     bucket.mkdir()
-    with pytest.raises(ValueError, match="unvalidated measurement"):
+    with pytest.raises(ValueError, match="unvalidated dimension"):
         export_aggregated_csv(
             [{"plant_id": "p1", "value": 2, "observations": 3, "value_key": "astringency",
              "measurement_document": "ordinal_operating_point"}],
             str(tmp_path / "o.csv"), delivered_phenotype="astringency",
-            measurement_validated=VALIDATED_HELD_OUT, pred_dirs=[str(bucket)])
+            operating_point_validated=VALIDATED_HELD_OUT, pred_dirs=[str(bucket)])
 
 
 def test_export_aggregated_csv_regression_trait_floors_on_a_failed_sidecar(tmp_path):
@@ -505,12 +526,12 @@ def test_export_aggregated_csv_regression_trait_floors_on_a_failed_sidecar(tmp_p
     from tcip_mcp.pipelines.postprocessing.aggregation import export_aggregated_csv
 
     bucket = _scalar_bucket(tmp_path, "preds", "regression", validated=False)
-    with pytest.raises(ValueError, match="unvalidated measurement"):
+    with pytest.raises(ValueError, match="unvalidated dimension"):
         export_aggregated_csv(
             [{"plant_id": "p1", "value": 4.2, "observations": 3,
               "value_key": "fruit_diameter", "measurement_document": "regression_operating_point"}],
             str(tmp_path / "o.csv"), delivered_phenotype="fruit_diameter",
-            measurement_validated=VALIDATED_HELD_OUT, pred_dirs=[str(bucket)])
+            operating_point_validated=VALIDATED_HELD_OUT, pred_dirs=[str(bucket)])
 
 
 def test_export_aggregated_csv_rejects_an_unrecognized_measurement_document(tmp_path):
@@ -524,7 +545,7 @@ def test_export_aggregated_csv_rejects_an_unrecognized_measurement_document(tmp_
             [{"plant_id": "p1", "value": 2, "observations": 3, "value_key": "astringency",
              "measurement_document": "oridnal_operating_point"}],
             str(tmp_path / "o.csv"), delivered_phenotype="astringency",
-            measurement_validated=VALIDATED_HELD_OUT, pred_dirs=[str(bucket)])
+            operating_point_validated=VALIDATED_HELD_OUT, pred_dirs=[str(bucket)])
 
 
 # ── tabulate_counts reads the run's resolved validity, not a caller string ─
@@ -560,7 +581,7 @@ def test_tabulate_counts_acknowledge_writes_flagged(tmp_path, monkeypatch):
     assert "error" not in r
     assert r["operating_point_validated"] == VALIDATED_FALSE
     rows = list(csv.DictReader(out_csv.open()))
-    assert rows[0]["measurement_validated"] == VALIDATED_FALSE
+    assert rows[0]["operating_point_validated"] == VALIDATED_FALSE
 
 
 # ── tile_size gates the same way, closing the asymmetry with conf ─────
@@ -615,7 +636,7 @@ def test_tabulate_counts_ships_when_tile_size_has_a_real_basis(tmp_path, monkeyp
     assert "error" not in r, r
     assert r["tile_size_validated"] == VALIDATED_PERSISTED_GEOMETRY
     # The cell reflects the fully-cleared gate, reconciled from the bucket the door just wrote.
-    assert r["measurement_validated"] == VALIDATED_HELD_OUT
+    assert r["operating_point_validated"] == VALIDATED_HELD_OUT
     assert r["predictions_dir"] == str(bucket)
 
 
@@ -640,8 +661,9 @@ def test_tabulate_counts_without_a_persisted_bucket_cannot_deliver_a_validated_c
 ):
     """A count read off one in-memory pass rests on nothing a reviewer can re-read, so the CSV is
     refused unless it is acknowledged as provisional, and the acknowledged one is stamped false
-    however clean the operating point behind it was. The refusal still reports the live regime's
-    own narrowed reference honestly, never the writer's unconditional no-bucket floor."""
+    however clean the operating point behind it was. Both responses still report the live run's
+    own narrowed reference honestly under its own name, distinct from the CSV-facing column, which
+    floors false on this path regardless: the writer's unconditional no-bucket floor."""
     import tcip_mcp.tools.inference_tools as itools
 
     monkeypatch.setattr(itools, "_run_inference_verified",
@@ -651,7 +673,8 @@ def test_tabulate_counts_without_a_persisted_bucket_cannot_deliver_a_validated_c
                                      trait=fx.COUNT_TRAIT,
                                      calibration_labels_dir=str(tmp_path))
     assert "predictions_dir" in refused["error"]
-    assert refused["operating_point_validated"] == VALIDATED_HELD_OUT  # conf itself was fine
+    assert refused["operating_point_validated"] == VALIDATED_FALSE  # no bucket, nothing on disk
+    assert refused["run_conf_validated_against"] == VALIDATED_HELD_OUT  # conf itself was fine
 
     provisional = itools.tabulate_counts(_dummy_checkpoint(tmp_path), str(tmp_path), str(tmp_path / "o.csv"),
                                          trait=fx.COUNT_TRAIT,
@@ -659,18 +682,20 @@ def test_tabulate_counts_without_a_persisted_bucket_cannot_deliver_a_validated_c
                                          acknowledge_unvalidated=True)
     assert "error" not in provisional, provisional
     assert provisional["predictions_dir"] is None
-    assert provisional["measurement_validated"] == VALIDATED_FALSE
+    assert provisional["operating_point_validated"] == VALIDATED_FALSE
+    assert provisional["run_conf_validated_against"] == VALIDATED_HELD_OUT
 
 
 def test_tabulate_counts_acknowledge_unvalidated_tile_size_floors_csv_stamp_despite_valid_conf(
     tmp_path,
 ):
     """A CSV whose conf is genuinely validated but whose tile_size has no real basis must not
-    stamp measurement_validated as if the whole delivery were trustworthy: the single CSV column
-    must reflect the floor across every gated dimension, not just conf's own (possibly-real)
-    reference. Exercised through a real bucket, so the flooring is read off the writer's own
-    reconciled gate (column_stamp) rather than the no-pred_dirs floor a caller-asserted string
-    would hit with no bucket at all."""
+    stamp operating_point_validated as if the whole delivery were trustworthy: the single CSV
+    column must reflect the floor across every gated dimension, not just conf's own
+    (possibly-real) reference, and unvalidated_dimensions must name the actual floorer.
+    Exercised through a real bucket, so the flooring is read off the writer's own reconciled gate
+    (column_stamp) rather than the no-pred_dirs floor a caller-asserted string would hit with no
+    bucket at all."""
     import tcip_mcp.tools.inference_tools as itools
     from tcip_mcp.pipelines.postprocessing.export import write_predictions_json
 
@@ -692,9 +717,9 @@ def test_tabulate_counts_acknowledge_unvalidated_tile_size_floors_csv_stamp_desp
     r = itools.tabulate_counts(predictions_dir=str(bucket), output_path=str(tmp_path / "o.csv"),
                                trait=fx.COUNT_TRAIT, acknowledge_unvalidated=True)
     assert "error" not in r, r
-    assert r["operating_point_validated"] == VALIDATED_HELD_OUT  # conf itself is fine...
-    assert r["tile_size_validated"] == VALIDATED_FALSE           # ...tile_size is what floors
-    assert r["measurement_validated"] == VALIDATED_FALSE         # the column floors across the gate
+    assert r["operating_point_validated"] == VALIDATED_FALSE     # the column floors across the gate
+    assert r["tile_size_validated"] == VALIDATED_FALSE           # tile_size is what floors
+    assert r["unvalidated_dimensions"] == "tile_size"            # names the floorer
 
 
 # ── export_predictions gates tile_size too: it is the door that actually persists a bucket ──
@@ -1091,7 +1116,7 @@ def test_export_aggregated_csv_refuses_a_fabricated_tile_size_with_a_validated_c
 
     d = _write_bucket(tmp_path, "preds", conf_ref=VALIDATED_HELD_OUT,
                       tile_size_prov=_tile(VALIDATED_FALSE, 640))
-    with pytest.raises(ValueError, match="unvalidated measurement"):
+    with pytest.raises(ValueError, match="unvalidated dimension"):
         export_aggregated_csv(
             [{"plant_id": "p1", "value": 5, "observations": 2, "value_key": "count",
              "measurement_document": "operating_point"}],
@@ -1112,7 +1137,7 @@ def test_export_aggregated_csv_ships_when_the_tile_scale_has_a_real_basis(tmp_pa
          "measurement_document": "operating_point"}], str(out),
         delivered_phenotype="stem_count", pred_dirs=[d])
     rows = list(csv.DictReader(out.open()))
-    assert rows[0]["measurement_validated"] == VALIDATED_HELD_OUT
+    assert rows[0]["operating_point_validated"] == VALIDATED_HELD_OUT
 
 
 def test_export_aggregated_csv_never_gates_an_untiled_bucket_on_tile_size(tmp_path):
@@ -1129,13 +1154,13 @@ def test_export_aggregated_csv_never_gates_an_untiled_bucket_on_tile_size(tmp_pa
          "measurement_document": "operating_point"}], str(out),
         delivered_phenotype="stem_count", pred_dirs=[d])
     rows = list(csv.DictReader(out.open()))
-    assert rows[0]["measurement_validated"] == VALIDATED_HELD_OUT
+    assert rows[0]["operating_point_validated"] == VALIDATED_HELD_OUT
 
 
 def test_export_aggregated_csv_acknowledged_tile_size_floors_the_row_stamp(tmp_path):
     """A per-plant CSV whose conf is genuinely validated but whose tile scale only shipped through
     acknowledge_unvalidated must stamp its one measurement column false, not conf's clean
-    reference."""
+    reference, and must name tile_size, not operating_point, as the actual floorer."""
     from tcip_mcp.pipelines.postprocessing.aggregation import export_aggregated_csv
 
     d = _write_bucket(tmp_path, "preds", conf_ref=VALIDATED_HELD_OUT,
@@ -1146,7 +1171,8 @@ def test_export_aggregated_csv_acknowledged_tile_size_floors_the_row_stamp(tmp_p
          "measurement_document": "operating_point"}], str(out),
         delivered_phenotype="stem_count", pred_dirs=[d], acknowledge_unvalidated=True)
     rows = list(csv.DictReader(out.open()))
-    assert rows[0]["measurement_validated"] == VALIDATED_FALSE
+    assert rows[0]["operating_point_validated"] == VALIDATED_FALSE
+    assert rows[0]["unvalidated_dimensions"] == "tile_size"
 
 
 # ── export_aggregated_csv gates a dimensional value_key on its physical scale too ──
@@ -1196,7 +1222,7 @@ def test_export_aggregated_csv_ships_dimensional_value_with_a_validated_scale(tm
     export_aggregated_csv(_DIM_RESULTS, str(out), delivered_phenotype="plant_surface_area",
                           pred_dirs=[d], images_dir=str(tmp_path / "ds" / "images"))
     rows = list(csv.DictReader(out.open()))
-    assert rows[0]["measurement_validated"] == VALIDATED_HELD_OUT
+    assert rows[0]["operating_point_validated"] == VALIDATED_HELD_OUT
     assert rows[0]["units"] == "mm2"
     assert rows[0]["scale_document"] == "resolve_scale"
 
@@ -1208,7 +1234,7 @@ def test_export_aggregated_csv_refuses_a_dimensional_delivery_with_no_scale_side
     from tcip_mcp.pipelines.postprocessing.aggregation import export_aggregated_csv
 
     d = _write_bucket(tmp_path, "preds", conf_ref=VALIDATED_HELD_OUT, trait="plant_surface_area")
-    with pytest.raises(ValueError, match="unvalidated measurement"):
+    with pytest.raises(ValueError, match="unvalidated dimension"):
         export_aggregated_csv(_DIM_RESULTS, str(tmp_path / "o.csv"),
                               delivered_phenotype="plant_surface_area", pred_dirs=[d],
                               images_dir=str(tmp_path / "ds" / "images"))
@@ -1227,7 +1253,7 @@ def test_export_aggregated_csv_count_trait_never_gates_on_scale(tmp_path):
          "measurement_document": "operating_point"}],
         str(out), delivered_phenotype="stem_count", pred_dirs=[d])
     rows = list(csv.DictReader(out.open()))
-    assert rows[0]["measurement_validated"] == VALIDATED_HELD_OUT
+    assert rows[0]["operating_point_validated"] == VALIDATED_HELD_OUT
 
 
 def test_export_aggregated_csv_scale_capture_id_mismatch_floors(tmp_path):
@@ -1239,7 +1265,7 @@ def test_export_aggregated_csv_scale_capture_id_mismatch_floors(tmp_path):
     d = _write_bucket(tmp_path, "preds", conf_ref=VALIDATED_HELD_OUT, trait="plant_surface_area")
     _write_scale_sidecar(Path(d), validated_against=VALIDATED_PHYSICAL_MEASUREMENT,
                          capture_id="2026-02-10_plot7")
-    with pytest.raises(ValueError, match="unvalidated measurement"):
+    with pytest.raises(ValueError, match="unvalidated dimension"):
         export_aggregated_csv(_DIM_RESULTS, str(tmp_path / "o.csv"),
                               delivered_phenotype="plant_surface_area", pred_dirs=[d],
                               images_dir=str(tmp_path / "ds" / "images"),
@@ -1260,7 +1286,7 @@ def test_export_aggregated_csv_scale_capture_id_match_ships(tmp_path):
                           pred_dirs=[d], images_dir=str(tmp_path / "ds" / "images"),
                           scale_capture_id="2026-02-10_plot7")
     rows = list(csv.DictReader(out.open()))
-    assert rows[0]["measurement_validated"] == VALIDATED_HELD_OUT
+    assert rows[0]["operating_point_validated"] == VALIDATED_HELD_OUT
 
 
 def test_export_aggregated_csv_acknowledged_unvalidated_scale_floors_the_row_stamp(tmp_path):
@@ -1275,7 +1301,7 @@ def test_export_aggregated_csv_acknowledged_unvalidated_scale_floors_the_row_sta
                           pred_dirs=[d], images_dir=str(tmp_path / "ds" / "images"),
                           acknowledge_unvalidated=True)
     rows = list(csv.DictReader(out.open()))
-    assert rows[0]["measurement_validated"] == VALIDATED_FALSE
+    assert rows[0]["operating_point_validated"] == VALIDATED_FALSE
 
 
 def test_export_aggregated_csv_refuses_a_stated_scale_with_no_physical_unit(tmp_path):
@@ -1321,10 +1347,10 @@ def test_export_aggregated_csv_regression_head_delivers_a_dimensional_value_with
     export_aggregated_csv(
         [{"plant_id": "p1", "value": 4.2, "observations": 3, "value_key": "fruit_diameter_mm",
          "measurement_document": "regression_operating_point"}],
-        str(out), delivered_phenotype="fruit_diameter", measurement_validated=VALIDATED_HELD_OUT,
+        str(out), delivered_phenotype="fruit_diameter", operating_point_validated=VALIDATED_HELD_OUT,
         pred_dirs=[bucket])
     rows = list(csv.DictReader(out.open()))
-    assert rows[0]["measurement_validated"] == VALIDATED_HELD_OUT
+    assert rows[0]["operating_point_validated"] == VALIDATED_HELD_OUT
     assert rows[0]["units"] == "mm"
     assert rows[0]["scale_document"] == ""
 
@@ -1455,7 +1481,7 @@ def test_a_bespoke_producer_keeps_its_checkpoint_hash_in_a_provisional_delivery(
     assert row["producer_model_sha256"] == "a" * 64
     assert row["producing_experiment_id"] == ""
     assert row["validation_record"] == ""
-    assert row["measurement_validated"] == VALIDATED_FALSE
+    assert row["operating_point_validated"] == VALIDATED_FALSE
 
 
 def test_a_bucket_naming_an_experiment_that_never_ran_delivers_no_producer_identity(tmp_path):
@@ -1492,7 +1518,7 @@ def test_a_validated_delivery_names_the_record_its_numbers_rest_on(tmp_path):
 
     pointer = read_operating_point_sidecar(d)["validated_by"]
     row = _delivered_row(out)
-    assert row["measurement_validated"] == VALIDATED_HELD_OUT
+    assert row["operating_point_validated"] == VALIDATED_HELD_OUT
     assert row["validation_record"] == f"{pointer['experiment_id']}:{pointer['record_digest']}"
     assert row["producing_experiment_id"] == "exp-preds"
 
@@ -1768,7 +1794,7 @@ def test_calibrate_physical_scale_whole_chain_delivers_a_validated_mm2_area(tmp_
          "measurement_document": "operating_point", "scale_document": "resolve_scale"}],
         str(out), delivered_phenotype="plant_surface_area", pred_dirs=[bucket], images_dir=str(images_dir))
     out_rows = list(csv.DictReader(out.open()))
-    assert out_rows[0]["measurement_validated"] == VALIDATED_HELD_OUT
+    assert out_rows[0]["operating_point_validated"] == VALIDATED_HELD_OUT
     assert out_rows[0]["units"] == "mm2"
 
 

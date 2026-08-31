@@ -164,7 +164,7 @@ class TestFullClassificationPipeline:
                 "scores": confs if isinstance(confs, list) else [confs] if confs else [],
             })
         # Uncalibrated smoke export: acknowledge the count is unvalidated (the delivery gate refuses
-        # a bare write); it is stamped measurement_validated=false.
+        # a bare write); it is stamped operating_point_validated=false.
         from tests import _operationalization_fixtures as fx
 
         fx.seed_confirmed_count(tmp_path)
