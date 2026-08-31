@@ -281,7 +281,15 @@ def test_conform_hashes_each_candidate_at_most_once_per_run(tmp_path: Path, monk
 def test_conform_skips_a_directory_shaped_like_a_checkpoint_under_experiments(tmp_path: Path):
     """A directory named ``*.pt`` under ``.tcip/experiments`` (a run's own output directory can
     be named however a bespoke loop likes) must never reach ``stat``/hash as a relocation
-    candidate; the real checkpoint elsewhere is still found and the entry still relocates."""
+    candidate; the real checkpoint elsewhere is still found and the entry still relocates.
+
+    Exercises ``_conform_entries`` directly rather than through ``conform_registry_paths``: the
+    seam version holds the registry's own write transaction (and, under the file backend, its
+    on-disk lock file) open across the whole enumeration, which is a second, unrelated way a
+    non-checkpoint file can reach this same enumeration -- out of this fix's scope.
+    """
+    from tcip_mcp.model_registry import _conform_entries
+
     root = tmp_path / "dest"
     (root / ".tcip" / "experiments" / "weird_dir.pt").mkdir(parents=True)
     (root / ".tcip" / "models").mkdir(parents=True)
@@ -290,16 +298,15 @@ def test_conform_skips_a_directory_shaped_like_a_checkpoint_under_experiments(tm
     real = root / ".tcip" / "models" / "real.pt"
     real.write_bytes(content)
 
-    _seed_v1(root, [_entry(
+    entries = [_entry(
         "m", "/exporting/root/.tcip/models/real.pt", digest, len(content),
         file_size_bytes=None,
-    )])
+    )]
 
-    lines = conform_registry_paths(root)
+    conformed, lines = _conform_entries(entries, root, plan=False, hash_cache={})
 
     assert any("relocated" in ln for ln in lines)
-    entries = read_registry_index(root)
-    assert entries[0]["checkpoint_path"] == ".tcip/models/real.pt"
+    assert conformed[0]["checkpoint_path"] == ".tcip/models/real.pt"
 
 
 def test_candidate_checkpoint_paths_derives_the_suffix_from_the_last_tcip_segment(tmp_path: Path):
