@@ -691,6 +691,53 @@ def test_import_project_admits_a_registered_checkpoint_with_no_disclosure(
     assert Path(resolved).is_file()
 
 
+def test_import_project_keeps_a_relative_entry_relative_when_the_archive_carries_no_checkpoint(
+    tmp_path: Path, monkeypatch,
+):
+    """A relative registry entry whose weights the archive legitimately dropped
+    (``include_models=False``) must come back still relative and disclosed as unresolved: the
+    staging conform's no-match fallback used to write the entry's own staging directory's
+    absolute path over it, misfiling an internal-but-absent entry as designed-external and
+    leaving a path into a directory the door was about to delete permanently in the registry."""
+    from tcip_mcp.experiments import (
+        complete_run, create_experiment, experiment_dir, register_model_from_experiment,
+        update_status,
+    )
+    from tcip_mcp.model_registry import read_registry_index, registry_index_key
+
+    src = tmp_path / "src_project"
+    init_project(str(src), site="north orchard")
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(src))
+
+    exp_id = "exp_no_checkpoint"
+    create_experiment(exp_id, {"model_source": {"builder": "x:y"}})
+    update_status(exp_id, "running")
+    ckpt_dir = experiment_dir(exp_id)
+    ckpt_dir.mkdir(parents=True, exist_ok=True)
+    weights = ckpt_dir / "model_final.pt"
+    weights.write_bytes(b"weights the archive will legitimately drop")
+    completed = complete_run(exp_id, str(weights))
+    assert "error" not in completed, completed
+    registered = register_model_from_experiment(exp_id, str(weights), project_path=str(src))
+    assert "error" not in registered, registered
+
+    stored_before = read_registry_index(src)[0]["checkpoint_path"]
+    assert not Path(stored_before).is_absolute(), stored_before
+
+    zip_path = tmp_path / "export.zip"
+    exported = archive_project(str(src), str(zip_path), include_models=False)
+    assert "error" not in exported, exported
+
+    dest = tmp_path / "restored"
+    imported = import_project(str(zip_path), str(dest))
+
+    assert "error" not in imported, imported
+    stored_after = tcip_store.read(registry_index_key(dest))["entries"][0]["checkpoint_path"]
+    assert stored_after == stored_before
+    assert imported["checkpoint_paths_unresolved"] == [stored_before]
+    assert imported["external_checkpoints"] == []
+
+
 def test_archive_project_bundles_a_registered_tcip_models_checkpoint_once(tmp_path: Path):
     """A checkpoint sitting under .tcip/models/ that is also a registry entry is one file to
     _blob_files' two homes (the models glob and the registered-checkpoint reader); it must land
