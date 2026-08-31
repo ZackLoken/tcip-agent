@@ -304,6 +304,88 @@ def test_dataset_select_still_selects_over_an_unreadable_label(
     assert str(ann / "IMG_0000.json") in body["label_problem"]
 
 
+def test_dataset_select_rejects_a_project_root_outside_the_allowed_roots(
+    client: TestClient, dataset_root: Path, tmp_path_factory,
+) -> None:
+    outside = tmp_path_factory.mktemp("outside")
+    resp = client.post(
+        "/api/dataset/select",
+        json={"project_root": str(outside), "dataset_root": str(dataset_root)},
+    )
+    assert resp.status_code == 403
+
+
+def test_dataset_select_answers_the_binding_generation(
+    client: TestClient, dataset_root: Path, tmp_path: Path,
+) -> None:
+    project = tmp_path / "proj"
+    project.mkdir()
+    resp = client.post(
+        "/api/dataset/select",
+        json={"project_root": str(project), "dataset_root": str(dataset_root)},
+    )
+    assert resp.status_code == 200
+    assert isinstance(resp.json()["generation"], int)
+
+
+def test_dataset_select_generation_bumps_only_when_the_root_changes(
+    client: TestClient, dataset_root: Path, tmp_path: Path,
+) -> None:
+    """Generation stability: re-selecting the same root and navigating dates/subjects on it
+    bump nothing; a different root bumps."""
+    project = tmp_path / "proj"
+    project.mkdir()
+    other = tmp_path / "other"
+    other.mkdir()
+
+    g1 = client.post(
+        "/api/dataset/select",
+        json={"project_root": str(project), "dataset_root": str(dataset_root), "date": "2-11-26"},
+    ).json()["generation"]
+
+    same_root_navigated = client.post(
+        "/api/dataset/select",
+        json={
+            "project_root": str(project), "dataset_root": str(dataset_root),
+            "date": "3-2-26", "subject": "catkin",
+        },
+    ).json()["generation"]
+    assert same_root_navigated == g1
+
+    same_root_reselected = client.post(
+        "/api/dataset/select",
+        json={"project_root": str(project), "dataset_root": str(dataset_root), "date": "2-11-26"},
+    ).json()["generation"]
+    assert same_root_reselected == g1
+
+    different_root = client.post(
+        "/api/dataset/select",
+        json={"project_root": str(other), "dataset_root": str(dataset_root), "date": "2-11-26"},
+    ).json()["generation"]
+    assert different_root == g1 + 1
+
+
+def test_dataset_select_answers_service_unavailable_on_a_busy_binding(
+    client: TestClient, dataset_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The binding write states what it does on StoreBusy: 503, nothing else adopted."""
+    import tcip_store as ts
+    from tcip_web.routes import dataset as dataset_route
+
+    def _busy(*_a, **_kw):
+        key = dataset_route.canvas_open_binding_key()
+        raise ts.StoreBusy((key,), key, 5.0)
+
+    monkeypatch.setattr(dataset_route.ts, "transaction", _busy)
+    project = tmp_path / "proj"
+    project.mkdir()
+    resp = client.post(
+        "/api/dataset/select",
+        json={"project_root": str(project), "dataset_root": str(dataset_root)},
+    )
+    assert resp.status_code == 503
+
+
 def test_dataset_nav_persists_current_index(
     client: TestClient, dataset_root: Path, tmp_path: Path
 ) -> None:

@@ -42,6 +42,19 @@ def _canvas_image(tmp_path: Path) -> str:
     return str(path)
 
 
+def _mint_binding(tmp_path: Path) -> None:
+    """Bind ``tmp_path`` as the GUI's open root: the reader refuses to render with none."""
+    import tcip_store
+    from tcip_mcp.web_client import canvas_open_binding_key
+
+    key = canvas_open_binding_key()
+    stored = tcip_store.read_versioned(key, default=None)
+    tcip_store.replace(key, {
+        "generation": 1, "root": str(tmp_path), "project_name": None,
+        "issued_at": "2026-01-01T00:00:00+00:00",
+    }, expect=stored.version)
+
+
 def _push_state(tmp_path: Path, image: str, *, received_at: float,
                 shapes: list[dict] | None = None) -> None:
     """Write the two documents the GUI pushes: the meta heartbeat and the geometry blob."""
@@ -83,6 +96,7 @@ def test_canvas_shapes_are_drawn_at_the_resolution_the_pixels_were_served_at(
 
     image = _canvas_image(tmp_path)
     _push_state(tmp_path, image, received_at=time.time())
+    _mint_binding(tmp_path)
 
     result = capture_live_canvas(refresh=False, crop_to_viewport=False,
                                  max_edge=SERVED_MAX_EDGE)
@@ -113,6 +127,7 @@ def test_a_capture_no_gui_answered_reports_the_state_as_last_known(
 
     image = _canvas_image(tmp_path)
     _push_state(tmp_path, image, received_at=time.time() - 600)
+    _mint_binding(tmp_path)
 
     pings: list[tuple[str, str]] = []
 
@@ -142,6 +157,7 @@ def test_a_capture_the_gui_answered_reports_the_state_as_live(
 
     image = _canvas_image(tmp_path)
     _push_state(tmp_path, image, received_at=time.time() - 600)
+    _mint_binding(tmp_path)
 
     def answering_hub(panel: str, event_type: str, data: dict, **kwargs: object) -> dict:
         _push_state(tmp_path, image, received_at=time.time())
