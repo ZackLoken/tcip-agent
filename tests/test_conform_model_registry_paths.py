@@ -6,9 +6,12 @@ and respell every entry's ``checkpoint_path`` relative to the registry's own sco
 from __future__ import annotations
 
 import hashlib
+import json
 import subprocess
 import sys
 from pathlib import Path
+
+import pytest
 
 import tcip_store as ts
 
@@ -161,6 +164,57 @@ def test_conform_is_idempotent(tmp_path: Path):
     assert second == []
 
 
+# ── conform_registry_paths_on_disk: the import door's own bypass of the storage seam ───────
+
+
+def test_on_disk_conform_wraps_and_respells_directly_against_the_extracted_files(tmp_path: Path):
+    """The import door's own conform, exercised directly against loose files on disk rather
+    than through the storage seam (a staging tree is always loose files, whatever backend the
+    process is bound to): a bare version-1 array wraps to version 2 and a stored path that
+    resolves under root with a matching digest respells relative, the identical outcome
+    conform_registry_paths produces through the seam."""
+    from tcip_mcp.model_registry import conform_registry_paths_on_disk, registry_index_path
+
+    root = tmp_path / "proj"
+    ckpt_dir = root / ".tcip" / "models"
+    ckpt_dir.mkdir(parents=True)
+    content = b"on-disk conform weights"
+    ckpt = ckpt_dir / "m.pt"
+    ckpt.write_bytes(content)
+    digest = hashlib.sha256(content).hexdigest()
+    index_path = registry_index_path(root)
+    index_path.write_text(json.dumps([_entry("m", str(ckpt), digest, len(content))]))
+
+    lines = conform_registry_paths_on_disk(root)
+
+    assert any("schema_version 2" in ln for ln in lines)
+    assert any("respelled" in ln for ln in lines)
+    raw = json.loads(index_path.read_text())
+    assert raw["schema_version"] == 2
+    assert raw["entries"][0]["checkpoint_path"] == ".tcip/models/m.pt"
+
+
+def test_on_disk_conform_over_an_absent_registry_answers_nothing(tmp_path: Path):
+    from tcip_mcp.model_registry import conform_registry_paths_on_disk
+
+    root = tmp_path / "proj"
+    root.mkdir()
+
+    assert conform_registry_paths_on_disk(root) == []
+
+
+def test_on_disk_conform_refuses_a_registry_that_will_not_decode(tmp_path: Path):
+    from tcip_mcp.model_registry import RegistryVersionRefused, conform_registry_paths_on_disk, registry_index_path
+
+    root = tmp_path / "proj"
+    index_path = registry_index_path(root)
+    index_path.parent.mkdir(parents=True)
+    index_path.write_bytes(b"not json at all")
+
+    with pytest.raises(RegistryVersionRefused):
+        conform_registry_paths_on_disk(root)
+
+
 def test_conform_over_a_real_import_produced_registry(tmp_path: Path, monkeypatch):
     """Coverage: the conform script over a registry the real archive/import doors produced,
     naming the exporting root's absolute path for a checkpoint the import door's own on-disk
@@ -250,8 +304,6 @@ def test_conform_skips_a_directory_shaped_like_a_checkpoint_under_experiments(tm
 
 def test_conform_refuses_a_malformed_mapping():
     from tcip_mcp.model_registry import _document_entries_for_conform
-
-    import pytest
 
     with pytest.raises(RegistryVersionRefused):
         _document_entries_for_conform({"schema_version": 3, "entries": []})

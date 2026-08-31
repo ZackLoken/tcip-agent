@@ -738,6 +738,89 @@ def test_import_project_keeps_a_relative_entry_relative_when_the_archive_carries
     assert imported["external_checkpoints"] == []
 
 
+def test_import_project_conforms_a_genuinely_unconformed_registry_the_archive_carries(
+    tmp_path: Path,
+):
+    """An archive made before this family existed carries a bare version-1 registry array; the
+    import door's own on-disk conform (never exercised by a test whose registry the writer
+    already spelled version-2 relative) must wrap and respell it so the weights load at the new
+    location, not merely leave an already-conformed registry untouched."""
+    import zipfile
+
+    from tcip_mcp.model_registry import ModelRegistry, read_registry_index, registry_index_key
+
+    src = tmp_path / "src_project"
+    init_project(str(src), site="north orchard")
+    ckpt_dir = src / ".tcip" / "models"
+    ckpt_dir.mkdir(parents=True, exist_ok=True)
+    content = b"weights an archive made before the family carried"
+    ckpt = ckpt_dir / "m.pt"
+    ckpt.write_bytes(content)
+    ModelRegistry(str(src)).register_model("m", str(ckpt), {}, metrics_source=None)
+
+    zip_path = tmp_path / "export.zip"
+    exported = archive_project(str(src), str(zip_path), include_models=True)
+    assert "error" not in exported, exported
+
+    v1_entries = tcip_store.read(registry_index_key(src))["entries"]
+    downgraded = tmp_path / "downgraded.zip"
+    with zipfile.ZipFile(zip_path) as src_zip, zipfile.ZipFile(downgraded, "w") as dst_zip:
+        for item in src_zip.infolist():
+            data = src_zip.read(item.filename)
+            if item.filename.endswith(".tcip/models/registry.json"):
+                data = tcip_store.RECORD_JSON.encode(v1_entries)
+            dst_zip.writestr(item, data)
+
+    dest = tmp_path / "restored"
+    imported = import_project(str(downgraded), str(dest))
+
+    assert "error" not in imported, imported
+    assert imported["checkpoint_paths_unresolved"] == []
+    assert imported["external_checkpoints"] == []
+    entries = read_registry_index(dest)
+    assert entries[0]["checkpoint_path"] == ".tcip/models/m.pt"
+    resolved = ModelRegistry(str(dest)).get_model("m")["checkpoint_path"]
+    assert Path(resolved).is_file()
+
+
+def test_import_project_discloses_a_designed_external_checkpoint_separately_from_unresolved(
+    tmp_path: Path,
+):
+    """A registry entry that is a genuine designed-external claim (outside the project tree
+    entirely) must appear in ``external_checkpoints``, never counted toward
+    ``checkpoint_paths_unresolved``, which names only an entry expected to resolve under the
+    tree that does not."""
+    from tcip_mcp.model_registry import ModelRegistry
+
+    src = tmp_path / "src_project"
+    init_project(str(src), site="north orchard")
+    internal_dir = src / ".tcip" / "models"
+    internal_dir.mkdir(parents=True, exist_ok=True)
+    internal_ckpt = internal_dir / "internal.pt"
+    internal_ckpt.write_bytes(b"internal weights")
+    external_dir = tmp_path / "elsewhere"
+    external_dir.mkdir()
+    external_ckpt = external_dir / "external.pt"
+    external_ckpt.write_bytes(b"external weights")
+
+    reg = ModelRegistry(str(src))
+    reg.register_model("m_internal", str(internal_ckpt), {}, metrics_source=None)
+    reg.register_model("m_external", str(external_ckpt), {}, metrics_source=None)
+
+    zip_path = tmp_path / "export.zip"
+    exported = archive_project(str(src), str(zip_path), include_models=True)
+    assert "error" not in exported, exported
+
+    dest = tmp_path / "restored"
+    imported = import_project(str(zip_path), str(dest))
+
+    assert "error" not in imported, imported
+    assert imported["checkpoint_paths_unresolved"] == []
+    assert imported["external_checkpoints"] == [
+        {"checkpoint_path": str(external_ckpt), "exists": True},
+    ]
+
+
 def test_archive_project_bundles_a_registered_tcip_models_checkpoint_once(tmp_path: Path):
     """A checkpoint sitting under .tcip/models/ that is also a registry entry is one file to
     _blob_files' two homes (the models glob and the registered-checkpoint reader); it must land
