@@ -62,7 +62,7 @@ differs from phase0 record: the Phase 0 inventory (`docs/audit/phase0/module-inv
 | packages/tcip-mcp/src/tcip_mcp/pipelines/active_learning/selector.py | Active learning selector: pick next images to annotate. | 1 | 1 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/band_stats.py | Display band statistics, the 8-bit stretch every band render goes through, and the RGB composite it stacks into. | 2 | 3 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/block_calibration.py | Block-aware calibration/holdout: validate a detection operating point directly against a mosaic's own reserved calibration/test bands (see ``split_construction.spatial_single_source_split``'s four-way split, ``reserve_calibration_fraction``), for a raster training source too large or too singular to hold whole images out from. | 15 | 1 |
-| packages/tcip-mcp/src/tcip_mcp/pipelines/calibration.py | The calibration-sweep pair every inference entry point shares: resolve a per-dataset operating point from a labeled split, and its compact, response-safe summary. | 11 | 1 |
+| packages/tcip-mcp/src/tcip_mcp/pipelines/calibration.py | The calibrate/summarize pair every inference entry point shares: resolve a per-dataset operating point from a labeled split, and its compact, response-safe gate-evidence summary. | 11 | 1 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/components/__init__.py | Components sub-package: composable ML primitives. | 0 | 0 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/components/backbones.py | ``BackboneWrapper``: the interface a backbone must expose to the necks and detectors here. | 0 | 0 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/components/detectors.py | 2D object-detector builders: plain torchvision detector factories. | 0 | 0 |
@@ -2260,7 +2260,7 @@ Differs from phase0 record: phase0 cited a line inside the function's body rathe
 
 ## S45. Review verdicts promoted into a calibration reference
 
-Must agree: a breeder-confirmed sample reaches the operating-point sweep in the same record shape GT annotations do, and passes the same gate.
+Must agree: a breeder-confirmed sample reaches the operating-point gate evidence in the same record shape GT annotations do, and passes the same gate.
 Side A: `packages/tcip-annotation/src/tcip_annotation/review_engine.py:659` (`def record_detection_action(`, the one writer of a stored verdict entry).
 Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/feedback/verdicts.py:74` (`decode_verdict`, the one read of that entry, over the affirming actions declared at line 18), called by `pipelines/feedback/review_calibration.py:282` for the calibration reference and `pipelines/feedback/materialize.py:85` for the curated dataset. What each consumer then emits from the affirmed box (COCO xywh scaled by the image, pixel corners for a label file) stays its own.
 Phase 3 verdict: single.
