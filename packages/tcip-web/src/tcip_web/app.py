@@ -15,6 +15,7 @@ import asyncio
 import itertools
 import logging
 import threading
+import uuid
 from collections import defaultdict, deque
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -179,13 +180,28 @@ async def _gui_mutation_invalid_handler(_request: Request, exc: GuiMutationInval
     return JSONResponse(status_code=400, content={"detail": str(exc)})
 
 
+# This process's launch identity, minted once at import: rides every snapshot envelope so a
+# restarted backend's lower-numbered first snapshot is accepted across a client's wsVersion guard.
+SERVER_EPOCH = uuid.uuid4().hex
+
+
 def state_snapshot_message(state: dict[str, Any], version: int) -> dict[str, Any]:
-    """The one envelope shape both the broadcast and the connect-time replay send."""
-    return {"type": "state_snapshot", "state": state, "version": version}
+    """The one envelope shape both the broadcast and the connect-time replay send.
+
+    ``generation`` is read off ``StateStore`` rather than the binding store, so a broadcast
+    never costs a store read on the event loop.
+    """
+    return {
+        "type": "state_snapshot",
+        "state": state,
+        "version": version,
+        "generation": _gui_store.binding_generation,
+        "epoch": SERVER_EPOCH,
+    }
 
 
 async def _broadcast_state_snapshot(payload: dict[str, Any]) -> None:
-    """Push the new state (with its version) to every connected browser."""
+    """Push the new state, version and binding generation to every connected browser."""
     msg = state_snapshot_message(payload["state"], payload["version"])
     dead: list[WebSocket] = []
     for ws in list(_state_watchers):
