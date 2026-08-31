@@ -63,7 +63,7 @@ def test_a_reference_drawn_entirely_from_the_training_split_is_refused():
     _write_split("exp_leaky", CAL_STEMS + HOLD_STEMS)
 
     b = _resolve("exp_leaky")
-    sweep = b.params["conf"].sweep
+    sweep = b.params["conf"].gate_evidence
     td = sweep["train_disjointness"]
 
     assert sweep["disjoint"] is True  # the cal/holdout signal says nothing about the training leak
@@ -81,7 +81,7 @@ def test_the_same_reference_validates_against_a_training_split_it_never_touched(
     _write_split("exp_clean", [f"other_{i}" for i in range(6)])
 
     b = _resolve("exp_clean")
-    sweep = b.params["conf"].sweep
+    sweep = b.params["conf"].gate_evidence
     td = sweep["train_disjointness"]
 
     assert sweep["disjoint"] is True

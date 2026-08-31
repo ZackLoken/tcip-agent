@@ -24,7 +24,7 @@ from tcip_mcp.pipelines.training.evaluation import (  # noqa: E402
     build_coco_image_record,
     coco_detection_metrics,
     governing_counts,
-    sweep_operating_point,
+    derive_operating_point_curve,
 )
 
 CENTER_MATCH_TOLERANCE = 10.0
@@ -142,7 +142,7 @@ def test_sweep_records_a_doubly_detected_object_as_one_hit_and_one_false_alarm()
     plus a false alarm at every conf that keeps the cluster. The signed count bias is blind to this
     (it is detections minus objects however the pairing resolves), which is why the tp/fp/fn split
     is what the entry has to be read on."""
-    sweep = sweep_operating_point(_clustered_center_match_records(),
+    sweep = derive_operating_point_curve(_clustered_center_match_records(),
                                   tolerance=CENTER_MATCH_TOLERANCE)
     at = {round(c["conf"], 2): c for c in sweep["curve"]}
     assert set(at) == {0.0, 0.5, 0.7, 0.85, 0.9}

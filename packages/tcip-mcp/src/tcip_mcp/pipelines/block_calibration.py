@@ -99,7 +99,7 @@ def _select_gt_for_band(
 
     Mirrors the DT side's own inclusion rule exactly (:func:`_band_records`'s center-in-inner-rect
     keep test) rather than clipping GT to the rect: a straddling object must be included or
-    excluded consistently on both sides of the sweep, or the reference is biased at every band
+    excluded consistently on both sides of the curve derivation, or the reference is biased at every band
     boundary (a clipped-but-kept GT box paired against a dropped, off-center detection reads as a
     false negative that a real delivered pass would never report).
     """
@@ -480,7 +480,7 @@ def _band_records(
     predict_tiled` over a haloed :class:`~tcip_mcp.pipelines.raster_source._RegionView` of
     ``reader``, keeps only detections whose center lands in the un-haloed inner rect (kept at full
     extent, never clipped), and selects GT the same way (:func:`_select_gt_for_band`) so both
-    sides of the sweep apply one inclusion rule at every band boundary.
+    sides of the curve derivation apply one inclusion rule at every band boundary.
     """
     from tcip_mcp.pipelines.data.tiling import region_halo
     from tcip_mcp.pipelines.raster_source import Rect, _RegionView

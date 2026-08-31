@@ -256,15 +256,15 @@ def test_block_calibration_admits_valid_work_once_attested(tmp_path: Path):
         experiment_id=exp["experiment_id"], global_nms_iou=0.3, export_tile_size=TILE)
 
     conf = bundle.get("conf")
-    assert conf.sweep is not None
-    assert conf.sweep["calibration_image_ids"] or conf.sweep.get("note")
+    assert conf.gate_evidence is not None
+    assert conf.gate_evidence["calibration_image_ids"] or conf.gate_evidence.get("note")
     assert prov["experiment_id"] == exp["experiment_id"]
     assert prov["k_cal"] == 3 and prov["k_test"] == 3
     assert sum(prov["cal_gt_counts"].values()) > 0
     assert sum(prov["test_gt_counts"].values()) > 0
     # Pins the defect independent review found: calibration_region was once missing from the
     # geometric disjointness check's non-train set, flagging every real cal/holdout rect as a leak.
-    assert conf.sweep["train_disjointness"] == {
+    assert conf.gate_evidence["train_disjointness"] == {
         "checked": True, "unresolvable": False, "leaked_groups": [], "leaked_stems": [],
         "group_check": "spatial_strip_geometric",
     }
@@ -351,9 +351,9 @@ def test_a_saturated_band_cap_surfaces_as_cap_saturated_frac_provenance(
         experiment_id=exp["experiment_id"], global_nms_iou=0.3, export_tile_size=TILE)
 
     conf = bundle.get("conf")
-    assert conf.sweep is not None
-    cal_frac = conf.sweep.get("calibration_cap_saturated_frac")
-    hold_frac = conf.sweep.get("holdout_cap_saturated_frac")
+    assert conf.gate_evidence is not None
+    cal_frac = conf.gate_evidence.get("calibration_cap_saturated_frac")
+    hold_frac = conf.gate_evidence.get("holdout_cap_saturated_frac")
     assert cal_frac is not None and cal_frac > 0.0
     assert hold_frac is not None and hold_frac > 0.0
 
@@ -984,7 +984,7 @@ def test_the_recorded_staged_conf_floor_is_the_floor_the_band_passes_ran_under(
         predictor, trait_name="catkin",
         experiment_id=exp["experiment_id"], global_nms_iou=0.3, export_tile_size=TILE)
 
-    recorded_floor = bundle.get("conf").sweep["staged_conf_floor"]
+    recorded_floor = bundle.get("conf").gate_evidence["staged_conf_floor"]
     assert len(floors) == prov["k_cal"] + prov["k_test"]
     assert recorded_floor is not None and recorded_floor < constructed_threshold
     assert set(floors) == {recorded_floor}
@@ -1094,7 +1094,7 @@ def test_ground_truth_decodes_through_the_checkpoints_own_recorded_id_map(tmp_pa
         predictor, trait_name="catkin",
         experiment_id=exp["experiment_id"], global_nms_iou=0.3, export_tile_size=TILE)
 
-    per_class = bundle.get("conf").sweep["holdout_bias"]["per_class"]
+    per_class = bundle.get("conf").gate_evidence["holdout_bias"]["per_class"]
     recorded_entry = per_class.get(str(recorded_category))
     assert recorded_entry is not None
     assert recorded_entry["tp"] + recorded_entry["fn"] > 0
@@ -1167,7 +1167,7 @@ def test_block_calibration_runs_on_a_recorded_id_map_with_no_registry_on_disk(tm
         experiment_id=exp["experiment_id"], global_nms_iou=0.3, export_tile_size=TILE)
 
     assert sum(prov["cal_gt_counts"].values()) > 0
-    assert bundle.get("conf").sweep["calibration_image_ids"]
+    assert bundle.get("conf").gate_evidence["calibration_image_ids"]
 
 
 def _attest_regions_complete_through_the_coverage_route(
@@ -1234,4 +1234,4 @@ def test_regions_attested_through_the_coverage_route_admit_block_calibration(tmp
         experiment_id=exp["experiment_id"], global_nms_iou=0.3, export_tile_size=TILE)
 
     assert sum(prov["cal_gt_counts"].values()) > 0
-    assert bundle.get("conf").sweep["calibration_image_ids"]
+    assert bundle.get("conf").gate_evidence["calibration_image_ids"]

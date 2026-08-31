@@ -194,13 +194,13 @@ def test_attach_split_policy_provenance_copies_the_manifest_dir():
     from tcip_mcp.pipelines.resolution import ResolvedBundle, derived
 
     conf = derived("conf", 0.5, derived_from="test", requires_validation=True,
-                   validation_kind="annotations", validated_against=None, sweep={})
+                   validation_kind="annotations", validated_against=None, gate_evidence={})
     bundle = ResolvedBundle(trait="catkin", dataset_hash=None, params={"conf": conf})
 
     attach_split_policy_provenance(bundle, {"group_by": "stem", "seed": 0, "holdout_ratio": 0.5,
                                             "identity_hash": "abc", "split_manifest_dir": "m/dir"})
 
-    assert bundle.get("conf").sweep["split_policy"]["split_manifest_dir"] == "m/dir"
+    assert bundle.get("conf").gate_evidence["split_policy"]["split_manifest_dir"] == "m/dir"
 
 
 # -- _reference_identity's label_stems group ---------------------------------------
@@ -663,9 +663,9 @@ def test_count_door_round_trip_earns_a_checked_selection_disjointness(tmp_path, 
         "split_manifest_dir": str(out), "calibration_date": DATES[0],
     }
     bundle = resolve_operating_point(SUBJECT, experiment_id=experiment_id, **inputs)
-    assert bundle.get("conf").sweep["selection_disjointness"]["checked"] is True
-    assert not bundle.get("conf").sweep["selection_disjointness"]["leaked_groups"]
-    assert not bundle.get("conf").sweep["selection_disjointness"]["leaked_stems"]
+    assert bundle.get("conf").gate_evidence["selection_disjointness"]["checked"] is True
+    assert not bundle.get("conf").gate_evidence["selection_disjointness"]["leaked_groups"]
+    assert not bundle.get("conf").gate_evidence["selection_disjointness"]["leaked_stems"]
     evidence = {
         "resolver": "resolve_operating_point", "inputs": inputs,
         "reference_inputs": {

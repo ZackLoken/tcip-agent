@@ -35,7 +35,7 @@ from tcip_mcp.pipelines.training.evaluation import (  # noqa: E402
     gt_class_avg_size,
     pick_count_unbiased,
     pick_f1_max,
-    sweep_operating_point,
+    derive_operating_point_curve,
 )
 from tests._binding_fixtures import (  # noqa: E402
     producer_checkpoint_sha256,
@@ -94,7 +94,7 @@ def test_golden_sweep_curve_exact():
     tol = 0.5 * gt_class_avg_size(recs)
     assert tol == pytest.approx(10.0)
 
-    sweep = sweep_operating_point(recs, tolerance=tol)
+    sweep = derive_operating_point_curve(recs, tolerance=tol)
     assert sweep["tolerance"] == pytest.approx(10.0)
     assert sweep["class_id"] is None
 
@@ -120,7 +120,7 @@ def test_golden_sweep_curve_exact():
 
 def test_golden_pick_count_unbiased_and_f1_max():
     recs = _sweep_records()
-    sweep = sweep_operating_point(recs, tolerance=0.5 * gt_class_avg_size(recs))
+    sweep = derive_operating_point_curve(recs, tolerance=0.5 * gt_class_avg_size(recs))
     assert pick_count_unbiased(sweep) == pytest.approx(0.6)
     assert pick_f1_max(sweep) == pytest.approx(0.0)
     # count bias vanishes at the count-unbiased pick, over-counts (+0.5) at the F1-max pick
@@ -146,14 +146,14 @@ def test_golden_resolve_operating_point_validated_conf():
     conf = b.get("conf")
     assert conf._raw == pytest.approx(0.9)  # count-unbiased pick: bias vanishes once the low-conf FP drops
     assert conf.requires_validation is True and conf.validation_kind == "annotations"
-    assert conf.derived_from == "count-unbiased center-match sweep"
+    assert conf.derived_from == "count-unbiased center-match curve"
     assert conf.validated_against == "held_out_annotations"
     assert conf.dataset_scoped is True
     assert conf.dataset_hash == "h1"
     assert b.is_shippable is True
     assert b.get("max_dets")._raw == 120  # ~1.5x p99 GT/image (80/image here)
-    assert conf.sweep["content_overlap_frac"] == pytest.approx(0.0)  # genuinely distinct holdout
-    assert conf.sweep["failures"] == []
+    assert conf.gate_evidence["content_overlap_frac"] == pytest.approx(0.0)  # genuinely distinct holdout
+    assert conf.gate_evidence["failures"] == []
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -249,7 +249,7 @@ _RESOLVED_OP_PARAM_KEYS = _OP_PARAM_KEYS | {"localization_tolerance_frac", "coun
 _PARAM_PROVENANCE_KEYS = {
     "name", "value", "source", "derived_from",
     "requires_validation", "validation_kind", "validated_against",
-    "dataset_scoped", "dataset_hash", "capture_scoped", "capture_id", "has_sweep",
+    "dataset_scoped", "dataset_hash", "capture_scoped", "capture_id", "has_gate_evidence",
 }
 
 
@@ -284,7 +284,7 @@ def test_golden_stamp_shape_calibrated_validated():
     assert conf["requires_validation"] is True
     assert conf["validation_kind"] == "annotations"
     assert conf["validated_against"] == "held_out_annotations"
-    assert conf["has_sweep"] is True
+    assert conf["has_gate_evidence"] is True
 
 
 def test_golden_stamp_shape_raw_uncalibrated_is_false():
@@ -305,7 +305,7 @@ def test_golden_stamp_shape_raw_uncalibrated_is_false():
     assert conf["requires_validation"] is True
     assert conf["validation_kind"] == "annotations"
     assert conf["validated_against"] == "false"  # the firewall stamp on an uncalibrated conf
-    assert conf["has_sweep"] is False
+    assert conf["has_gate_evidence"] is False
 
 
 def test_golden_validated_flag_path_calibrated_no_holdout_is_false():
@@ -332,8 +332,8 @@ def test_golden_content_shared_holdout_is_false():
     conf = b.get("conf")
     assert conf.validated_against == "false"
     assert b.is_shippable is False
-    assert conf.sweep["content_overlap_frac"] == pytest.approx(1.0)
-    assert "content_shared_with_calibration" in conf.sweep["failures"]
+    assert conf.gate_evidence["content_overlap_frac"] == pytest.approx(1.0)
+    assert "content_shared_with_calibration" in conf.gate_evidence["failures"]
 
 
 # ══════════════════════════════════════════════════════════════════════════

@@ -415,12 +415,13 @@ def calibrate_ordinal_regression_operating_point(
     checkpoint_sha256 = resolve_model_identity(
         checkpoint, experiment_id=experiment_id)["sha256"]
     stamp = {
+        "schema_version": 2,
         "operating_point": {task: {"validated_against": result["validated_against"],
                                    "criterion": criterion}},
         "validated": result["passed"],
         "validated_by": None,
         "failures": result["failures"],
-        "sweep_data": result["sweep_data"],
+        "gate_evidence": result["gate_evidence"],
         "checkpoint_sha256": checkpoint_sha256,
         "experiment_id": experiment_id,
         "trait": trait_name,

@@ -1,5 +1,5 @@
-"""The calibration-sweep pair every inference entry point shares: resolve a per-dataset operating
-point from a labeled split, and its compact, response-safe summary.
+"""The calibrate/summarize pair every inference entry point shares: resolve a per-dataset operating
+point from a labeled split, and its compact, response-safe gate-evidence summary.
 
 Both moved out of ``tools/inference_tools.py``: their consumers are cross-module
 (``inference_tools._run_inference_verified`` calls both, and a dozen-plus test files exercise
@@ -40,7 +40,7 @@ def calibrate_operating_point(predictor, trait, labels_dir, images_dir, *,
     ``open_validation``'s own arguments, and a second spelling of either could disagree with the
     record it is written into.
 
-    The count-unbiased center-match sweep + held-out bias check run the same predictor path the
+    The count-unbiased center-match curve + held-out bias check run the same predictor path the
     delivery will use (same tile/tile_size/tile_resize/overlap/nms/postprocess) over a disjoint, locked
     cal/holdout split of the labeled dir (``resolve_locked_cal_holdout_split``: group-coherent,
     seeded, and stable across calls, not a fresh lexicographic cut every time), at a floor conf so
@@ -265,8 +265,8 @@ def calibrate_operating_point(predictor, trait, labels_dir, images_dir, *,
     return bundle, dh, n_excluded_incomplete_attribute, evidence
 
 
-def sweep_summary(conf_param) -> dict:
-    """Compact, response-safe view of a calibration sweep (the full curve is written to disk).
+def gate_evidence_summary(conf_param) -> dict:
+    """Compact, response-safe view of a calibration's gate evidence (the full curve is written to disk).
 
     Includes ``disjoint``/``content_overlap_frac``/``train_disjointness``/
     ``selection_disjointness`` so the calling agent sees the real reason a calibration refused
@@ -275,44 +275,44 @@ def sweep_summary(conf_param) -> dict:
     failure. Also includes ``split_policy_divergence``/``split_unlocked_stems`` (via
     ``attach_split_policy_provenance``) so a caller whose declared ``seed``/``holdout_ratio``/
     ``group_by`` didn't take effect against an existing lock sees that here, in the tool's own
-    response, rather than only in the persisted sweep artifact or a server log line.
+    response, rather than only in the persisted curve artifact or a server log line.
 
     ``failures`` is the same named-failure list ``describe_review_validation`` reads for the
     breeder-facing message, surfaced here too, plus the individual gate fields
     (``conf_floor_mismatch``, dispersion/localization terms), so an agent hitting a refusal
     condition on the GT path sees a real reason instead of every other field reading "fine".
     """
-    sweep = conf_param.sweep or {}
-    hb = sweep.get("holdout_bias") or {}
+    evidence = conf_param.gate_evidence or {}
+    hb = evidence.get("holdout_bias") or {}
     return {
         "count_unbiased_conf": conf_param.unvalidated_value(acknowledge_unvalidated=True),
-        "f1_max_conf": sweep.get("f1_max_conf"),
+        "f1_max_conf": evidence.get("f1_max_conf"),
         "holdout_bias": hb.get("count_bias_mean") if isinstance(hb, dict) else None,
         # The pooled bias above is the one number a class-compensating refusal reads "fine" on, so
         # the per-class biases the gate actually judged travel beside it.
         "per_class_holdout_bias": {cid: s["count_bias_mean"]
                                    for cid, s in (hb.get("per_class") or {}).items()},
-        "per_class_count_bias_failures": sweep.get("per_class_count_bias_failures"),
-        "per_class_insufficient_images": sweep.get("per_class_insufficient_images"),
-        "holdout_missing_classes": sweep.get("holdout_missing_classes"),
-        "passed_holdout": sweep.get("passed_holdout"),
-        "failures": sweep.get("failures"),
-        "conf_censored": sweep.get("conf_censored"),
-        "conf_floor_mismatch": sweep.get("conf_floor_mismatch"),
-        "count_bias_tolerance_frac": sweep.get("count_bias_tolerance_frac"),
-        "pooled_count_bias_tolerance": sweep.get("pooled_count_bias_tolerance"),
+        "per_class_count_bias_failures": evidence.get("per_class_count_bias_failures"),
+        "per_class_insufficient_images": evidence.get("per_class_insufficient_images"),
+        "holdout_missing_classes": evidence.get("holdout_missing_classes"),
+        "passed_holdout": evidence.get("passed_holdout"),
+        "failures": evidence.get("failures"),
+        "conf_censored": evidence.get("conf_censored"),
+        "conf_floor_mismatch": evidence.get("conf_floor_mismatch"),
+        "count_bias_tolerance_frac": evidence.get("count_bias_tolerance_frac"),
+        "pooled_count_bias_tolerance": evidence.get("pooled_count_bias_tolerance"),
         # The pooled tolerance alone doesn't explain a per-class refusal: each class scales
         # against its own typical count.
-        "per_class_count_bias_tolerance": sweep.get("per_class_count_bias_tolerance"),
-        "pooled_typical_count": sweep.get("pooled_typical_count"),
-        "per_class_typical_count": sweep.get("per_class_typical_count"),
-        "count_error_tolerance": sweep.get("count_error_tolerance"),
+        "per_class_count_bias_tolerance": evidence.get("per_class_count_bias_tolerance"),
+        "pooled_typical_count": evidence.get("pooled_typical_count"),
+        "per_class_typical_count": evidence.get("per_class_typical_count"),
+        "count_error_tolerance": evidence.get("count_error_tolerance"),
         "count_error_p90": hb.get("count_error_p90") if isinstance(hb, dict) else None,
-        "disjoint": sweep.get("disjoint"),
-        "content_overlap_frac": sweep.get("content_overlap_frac"),
-        "content_shared_with_calibration": sweep.get("content_shared_with_calibration"),
-        "train_disjointness": sweep.get("train_disjointness"),
-        "selection_disjointness": sweep.get("selection_disjointness"),
-        "split_policy_divergence": sweep.get("split_policy_divergence"),
-        "split_unlocked_stems": sweep.get("split_unlocked_stems"),
+        "disjoint": evidence.get("disjoint"),
+        "content_overlap_frac": evidence.get("content_overlap_frac"),
+        "content_shared_with_calibration": evidence.get("content_shared_with_calibration"),
+        "train_disjointness": evidence.get("train_disjointness"),
+        "selection_disjointness": evidence.get("selection_disjointness"),
+        "split_policy_divergence": evidence.get("split_policy_divergence"),
+        "split_unlocked_stems": evidence.get("split_unlocked_stems"),
     }

@@ -762,7 +762,7 @@ def test_default_path_unchanged(tmp_path, monkeypatch):
     assert r["validated"] is False
     assert r["operating_point"]["conf"]["value"] == pytest.approx(DEFAULT_CONF)
     assert r["operating_point"]["conf"]["validated_against"] == "false"
-    assert "sweep_summary" not in r  # provenance shape unchanged on the default path
+    assert "gate_evidence_summary" not in r  # provenance shape unchanged on the default path
 
 
 def _stand_in_calibration(monkeypatch, calibration_pipeline, labels_dir, **overrides):
@@ -805,8 +805,8 @@ def test_calibration_wires_resolved_conf(tmp_path, monkeypatch):
     assert r["dataset_hash"] == "H"
     assert r["operating_point"]["conf"]["value"] == pytest.approx(0.9)
     assert stub.applied_conf == pytest.approx(0.9)                  # resolved conf governs the model
-    assert r["sweep_summary"]["count_unbiased_conf"] == pytest.approx(0.9)
-    assert ts.exists(itools.confidence_sweep_key(r["calibration_evidence_key"]))
+    assert r["gate_evidence_summary"]["count_unbiased_conf"] == pytest.approx(0.9)
+    assert ts.exists(itools.calibration_curve_key(r["calibration_evidence_key"]))
 
 
 def test_sweep_artifact_is_content_addressed_not_label_hash_only(tmp_path, monkeypatch):
@@ -833,11 +833,11 @@ def test_sweep_artifact_is_content_addressed_not_label_hash_only(tmp_path, monke
                                    device="cpu", tile=True, tile_size=256, trait="catkin",
                                    calibration_labels_dir=str(tmp_path))
 
-    assert r_untiled["sweep_path"] != r_tiled["sweep_path"]  # distinct predictor paths, distinct files
-    assert ts.exists(itools.confidence_sweep_key(r_untiled["calibration_evidence_key"]))
-    assert ts.exists(itools.confidence_sweep_key(r_tiled["calibration_evidence_key"]))
+    assert r_untiled["calibration_curve_path"] != r_tiled["calibration_curve_path"]  # distinct predictor paths, distinct files
+    assert ts.exists(itools.calibration_curve_key(r_untiled["calibration_evidence_key"]))
+    assert ts.exists(itools.calibration_curve_key(r_tiled["calibration_evidence_key"]))
 
-    sweep_body = ts.read(itools.confidence_sweep_key(r_tiled["calibration_evidence_key"]))
+    sweep_body = ts.read(itools.calibration_curve_key(r_tiled["calibration_evidence_key"]))
     assert sweep_body["checkpoint_sha256"]  # identity threaded through, not omitted
     assert sweep_body["predictor_path"]["tile"] is True
     assert sweep_body["predictor_path"]["tile_size"] == 256
@@ -870,12 +870,12 @@ def test_export_predictions_sidecar_carries_sweep_pointer(tmp_path, monkeypatch)
         device="cpu", tile=False, trait="catkin", calibration_labels_dir=str(tmp_path))
     assert "error" not in out, out
     sidecar = read_operating_point_sidecar(out["output_dir"])
-    assert sidecar["sweep_path"]
-    sweep_name = Path(sidecar["sweep_path"]).name
+    assert sidecar["calibration_curve_path"]
+    sweep_name = Path(sidecar["calibration_curve_path"]).name
     relative = PurePosixPath(".tcip", "artifacts", sweep_name)
-    (inputs_hash,) = itools._SweepArtifactLocator().parts_from(relative)
-    assert ts.exists(itools.confidence_sweep_key(inputs_hash))
-    assert sidecar["sweep_summary"]["count_unbiased_conf"] == pytest.approx(0.9)
+    (inputs_hash,) = itools._CalibrationCurveLocator().parts_from(relative)
+    assert ts.exists(itools.calibration_curve_key(inputs_hash))
+    assert sidecar["gate_evidence_summary"]["count_unbiased_conf"] == pytest.approx(0.9)
 
 
 def test_cross_dataset_inheritance_flagged(tmp_path, monkeypatch):

@@ -835,6 +835,14 @@ def test_calibrate_classifier_operating_point_earns_a_record_a_later_bucket_bind
     assert binding.experiment_id == res["validated_by"]["experiment_id"]
     assert binding.producing_experiment_id is None  # the calibration hangs off its own experiment
 
+    from tcip_mcp.experiments import find_validation
+
+    row = find_validation(res["validated_by"]["experiment_id"], res["validated_by"]["record_digest"])
+    # Sealed-disjointness liveness through the real classifier resolver: gate_evidence is read
+    # correctly end to end, not silently lost to a stale key lookup that would leave these null.
+    assert row["train_disjointness"] is not None
+    assert row["selection_disjointness"] is not None
+
     later = _bucket(tmp_path, "2026-03-09")
     _write_preds(later, "P1_a", ["elongated"])
     _write_op_sidecar(later, dataset_root=root, validated=True, id_map=ID_MAP, experiment_id=None)
@@ -926,10 +934,11 @@ def test_calibrate_classifier_operating_point_partial_flip_fails_compensating_er
     from tcip_mcp.pipelines.resolution import read_classifier_operating_point_sidecar
 
     sidecar = read_classifier_operating_point_sidecar(tmp_path / "out")
-    sweep_data = sidecar["sweep_data"]
-    assert sweep_data["kappa"] is not None
-    assert sweep_data["kappa"] <= sweep_data["kappa_floor"]
-    assert sweep_data["kappa_floor_source"] == "platform_provisional_default"  # catkin sets none
+    assert sidecar["schema_version"] == 2
+    gate_evidence = sidecar["gate_evidence"]
+    assert gate_evidence["kappa"] is not None
+    assert gate_evidence["kappa"] <= gate_evidence["kappa_floor"]
+    assert gate_evidence["kappa_floor_source"] == "default"  # catkin sets none
 
 
 def test_resolve_classifier_operating_point_refuses_single_image_holdout() -> None:
@@ -991,9 +1000,9 @@ def test_resolve_classifier_operating_point_bias_is_scoped_to_present_images() -
     res = resolve_classifier_operating_point(
         "catkin", calibration_items=cal, holdout_items=hold, experiment_id=None)
 
-    assert res["sweep_data"]["typical_positive_count"] == pytest.approx(100.0)
-    assert res["sweep_data"]["count_bias_n_images"] == 10  # scoped to the 10 informative images only
-    assert res["sweep_data"]["count_bias"] == pytest.approx(2.0)  # not diluted toward 0.4 by the 40 empties
+    assert res["gate_evidence"]["typical_positive_count"] == pytest.approx(100.0)
+    assert res["gate_evidence"]["count_bias_n_images"] == 10  # scoped to the 10 informative images only
+    assert res["gate_evidence"]["count_bias"] == pytest.approx(2.0)  # not diluted toward 0.4 by the 40 empties
     assert res["passed"] is False
     assert "count_bias_exceeds_tolerance" in res["failures"], res["failures"]
 
@@ -1032,7 +1041,7 @@ def test_resolve_classifier_operating_point_relative_tolerance_refuses_a_sparse_
         "catkin", calibration_items=_classifier_items("c", 20, 1),
         holdout_items=_classifier_items("h", 20, 1, miscall_images=[0], image_offset=20),
         experiment_id=None)
-    assert sparse["sweep_data"]["typical_positive_count"] == pytest.approx(1.0)
+    assert sparse["gate_evidence"]["typical_positive_count"] == pytest.approx(1.0)
     assert sparse["passed"] is False
     assert "count_bias_exceeds_tolerance" in sparse["failures"]
 
@@ -1040,12 +1049,12 @@ def test_resolve_classifier_operating_point_relative_tolerance_refuses_a_sparse_
         "catkin", calibration_items=_classifier_items("c", 20, 150),
         holdout_items=_classifier_items("h", 20, 150, miscall_images=[0], image_offset=20),
         experiment_id=None)
-    assert dense["sweep_data"]["typical_positive_count"] == pytest.approx(150.0)
+    assert dense["gate_evidence"]["typical_positive_count"] == pytest.approx(150.0)
     # Same count_bias/count_bias_std as the sparse case (the miscall pattern is identical) -- only
     # the derived tolerance differs, proving density is what changed the outcome.
-    assert dense["sweep_data"]["count_bias"] == pytest.approx(sparse["sweep_data"]["count_bias"])
-    assert dense["sweep_data"]["count_bias_std"] == pytest.approx(sparse["sweep_data"]["count_bias_std"])
-    assert dense["sweep_data"]["count_bias_tolerance_absolute"] > sparse["sweep_data"]["count_bias_tolerance_absolute"]
+    assert dense["gate_evidence"]["count_bias"] == pytest.approx(sparse["gate_evidence"]["count_bias"])
+    assert dense["gate_evidence"]["count_bias_std"] == pytest.approx(sparse["gate_evidence"]["count_bias_std"])
+    assert dense["gate_evidence"]["count_bias_tolerance_absolute"] > sparse["gate_evidence"]["count_bias_tolerance_absolute"]
     assert "count_bias_exceeds_tolerance" not in dense["failures"]
 
 
@@ -1078,9 +1087,9 @@ def test_resolve_classifier_operating_point_honors_trait_authored_agreement_floo
     res = op_mod.resolve_classifier_operating_point(
         "catkin", calibration_items=cal, holdout_items=hold, experiment_id=None)
 
-    assert 0.75 < res["sweep_data"]["kappa"] < 0.85, res["sweep_data"]
-    assert res["sweep_data"]["kappa_floor"] == 0.9
-    assert res["sweep_data"]["kappa_floor_source"] == "trait"
+    assert 0.75 < res["gate_evidence"]["kappa"] < 0.85, res["gate_evidence"]
+    assert res["gate_evidence"]["kappa_floor"] == 0.9
+    assert res["gate_evidence"]["kappa_floor_source"] == "trait"
     assert res["passed"] is False
     assert "compensating_error_floor_failed" in res["failures"]
 
@@ -1109,15 +1118,15 @@ def test_resolve_classifier_operating_point_count_bias_tolerance_frac_source(mon
     monkeypatch.setattr(op_mod, "get_trait", lambda name: CATKIN)
     res_default = op_mod.resolve_classifier_operating_point(
         "catkin", calibration_items=cal, holdout_items=hold, experiment_id=None)
-    assert res_default["sweep_data"]["count_bias_tolerance_frac"] == pytest.approx(0.01)
-    assert res_default["sweep_data"]["count_bias_tolerance_frac_source"] == "platform_provisional_default"
+    assert res_default["gate_evidence"]["count_bias_tolerance_frac"] == pytest.approx(0.01)
+    assert res_default["gate_evidence"]["count_bias_tolerance_frac_source"] == "default"
 
     authored_catkin = replace(CATKIN, count_bias_tolerance_frac=0.2)
     monkeypatch.setattr(op_mod, "get_trait", lambda name: authored_catkin)
     res_trait = op_mod.resolve_classifier_operating_point(
         "catkin", calibration_items=cal, holdout_items=hold, experiment_id=None)
-    assert res_trait["sweep_data"]["count_bias_tolerance_frac"] == pytest.approx(0.2)
-    assert res_trait["sweep_data"]["count_bias_tolerance_frac_source"] == "trait"
+    assert res_trait["gate_evidence"]["count_bias_tolerance_frac"] == pytest.approx(0.2)
+    assert res_trait["gate_evidence"]["count_bias_tolerance_frac_source"] == "trait"
 
 
 # --------------------------------------------------------------------------
@@ -1148,9 +1157,9 @@ def test_resolve_ordinal_operating_point_passes_on_clean_disjoint_split() -> Non
 
     assert res["passed"] is True, res
     assert res["failures"] == []
-    assert res["sweep_data"]["criterion"] == "quadratic_weighted_kappa"
-    assert res["sweep_data"]["score"] == pytest.approx(1.0)
-    assert res["sweep_data"]["floor_source"] == "provisional_default"
+    assert res["gate_evidence"]["criterion"] == "quadratic_weighted_kappa"
+    assert res["gate_evidence"]["score"] == pytest.approx(1.0)
+    assert res["gate_evidence"]["floor_source"] == "default"
 
 
 def test_resolve_ordinal_operating_point_fails_closed_on_non_disjoint_split() -> None:
@@ -1183,8 +1192,8 @@ def test_resolve_ordinal_operating_point_fails_closed_at_or_below_the_floor() ->
         "catkin", criterion="quadratic_weighted_kappa", calibration_items=cal, holdout_items=hold,
         experiment_id=None)
 
-    assert res["sweep_data"]["score"] is not None
-    assert res["sweep_data"]["score"] <= res["sweep_data"]["floor"]
+    assert res["gate_evidence"]["score"] is not None
+    assert res["gate_evidence"]["score"] <= res["gate_evidence"]["floor"]
     assert res["passed"] is False
     assert "compensating_error_floor_failed" in res["failures"]
 
@@ -1225,9 +1234,9 @@ def test_resolve_regression_operating_point_passes_on_clean_disjoint_split() -> 
 
     assert res["passed"] is True, res
     assert res["failures"] == []
-    assert res["sweep_data"]["criterion"] == "r_squared"
-    assert res["sweep_data"]["score"] == pytest.approx(1.0)
-    assert res["sweep_data"]["floor_source"] == "provisional_default"
+    assert res["gate_evidence"]["criterion"] == "r_squared"
+    assert res["gate_evidence"]["score"] == pytest.approx(1.0)
+    assert res["gate_evidence"]["floor_source"] == "default"
 
 
 def test_resolve_regression_operating_point_fails_closed_on_non_disjoint_split() -> None:
@@ -1259,8 +1268,8 @@ def test_resolve_regression_operating_point_fails_closed_at_or_below_the_floor()
         "catkin", criterion="r_squared", calibration_items=cal, holdout_items=hold,
         experiment_id=None)
 
-    assert res["sweep_data"]["score"] is not None
-    assert res["sweep_data"]["score"] <= res["sweep_data"]["floor"]
+    assert res["gate_evidence"]["score"] is not None
+    assert res["gate_evidence"]["score"] <= res["gate_evidence"]["floor"]
     assert res["passed"] is False
     assert "compensating_error_floor_failed" in res["failures"]
 
@@ -1301,8 +1310,8 @@ def test_resolve_regression_operating_point_ccc_criterion_is_selectable() -> Non
         "catkin", criterion="concordance_correlation_coefficient", calibration_items=cal,
         holdout_items=hold, experiment_id=None)
 
-    assert res["sweep_data"]["criterion"] == "concordance_correlation_coefficient"
-    assert res["sweep_data"]["score"] == pytest.approx(1.0)
+    assert res["gate_evidence"]["criterion"] == "concordance_correlation_coefficient"
+    assert res["gate_evidence"]["score"] == pytest.approx(1.0)
     assert res["passed"] is True
 
 
@@ -1362,9 +1371,9 @@ def test_calibrate_classifier_operating_point_unassessed_gt_never_fabricates_a_n
     from tcip_mcp.pipelines.resolution import read_classifier_operating_point_sidecar
 
     sidecar = read_classifier_operating_point_sidecar(tmp_path / "out")
-    sweep_data = sidecar["sweep_data"]
-    assert sweep_data["kappa"] == 1.0, sweep_data  # a perfect classifier, not degraded by phantom errors
-    assert sweep_data["count_bias"] == 0.0, sweep_data
+    gate_evidence = sidecar["gate_evidence"]
+    assert gate_evidence["kappa"] == 1.0, gate_evidence  # a perfect classifier, not degraded by phantom errors
+    assert gate_evidence["count_bias"] == 0.0, gate_evidence
     assert res["n_holdout_items"] == 20 * 2  # only the 2 assessed instances/image counted, not 4
 
 
@@ -1520,11 +1529,12 @@ def test_calibrate_ordinal_regression_operating_point_ordinal_e2e(
     from tcip_mcp.pipelines.resolution import read_ordinal_operating_point_sidecar
 
     sidecar = read_ordinal_operating_point_sidecar(tmp_path / "calib")
+    assert sidecar["schema_version"] == 2
     assert sidecar["trait"] == "catkin"
     assert sidecar["operating_point"]["ordinal"]["criterion"] == "quadratic_weighted_kappa"
     assert sidecar["operating_point"]["ordinal"]["validated_against"] == result["validated_against"]
     assert sidecar["validated"] == result["passed"]
-    assert "sweep_data" in sidecar and sidecar["sweep_data"]["criterion"] == "quadratic_weighted_kappa"
+    assert "gate_evidence" in sidecar and sidecar["gate_evidence"]["criterion"] == "quadratic_weighted_kappa"
     import hashlib
 
     assert sidecar["checkpoint_sha256"] == hashlib.sha256(
@@ -1583,11 +1593,12 @@ def test_calibrate_ordinal_regression_operating_point_regression_e2e(
     from tcip_mcp.pipelines.resolution import read_regression_operating_point_sidecar
 
     sidecar = read_regression_operating_point_sidecar(tmp_path / "calib")
+    assert sidecar["schema_version"] == 2
     assert sidecar["trait"] == "catkin"
     assert sidecar["operating_point"]["regression"]["criterion"] == "r_squared"
     assert sidecar["operating_point"]["regression"]["validated_against"] == result["validated_against"]
     assert sidecar["validated"] == result["passed"]
-    assert "sweep_data" in sidecar and sidecar["sweep_data"]["criterion"] == "r_squared"
+    assert "gate_evidence" in sidecar and sidecar["gate_evidence"]["criterion"] == "r_squared"
 
 
 def test_calibrate_ordinal_regression_operating_point_unknown_task_returns_error(tmp_path: Path) -> None:
@@ -1676,6 +1687,10 @@ def test_calibrate_ordinal_regression_operating_point_admits_a_loose_images_dire
     row = find_validation(res["validated_by"]["experiment_id"], res["validated_by"]["record_digest"])
     assert row["checkpoint_sha256"] == sha
     assert binding.checkpoint_sha256 == sha
+    # Sealed-disjointness liveness: the resolver's gate_evidence key is read correctly end to end,
+    # not silently lost to a stale key lookup that would leave these null.
+    assert row["train_disjointness"] is not None
+    assert row["selection_disjointness"] is not None
 
 
 def test_calibrate_ordinal_regression_operating_point_refuses_a_dataset_root_its_images_contradict(

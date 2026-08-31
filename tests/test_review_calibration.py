@@ -147,10 +147,10 @@ def test_review_confirmed_stamps_when_the_same_gate_passes(tmp_path):
     # A disjoint, uncensored, count-bias-passing review reference earns review_confirmed (distinct
     # from VALIDATED_HELD_OUT so provenance records which reference validated) and is shippable.
     assert conf.validated_against == VALIDATED_REVIEW_CONFIRMED
-    assert conf.derived_from == "count-unbiased center-match sweep over review verdicts"
+    assert conf.derived_from == "count-unbiased center-match curve over review verdicts"
     assert conf.dataset_scoped is True
     assert b.is_shippable is True
-    assert conf.sweep["failures"] == []
+    assert conf.gate_evidence["failures"] == []
 
 
 def test_review_confirmed_fails_closed_without_a_staged_conf_floor(tmp_path):
@@ -161,8 +161,8 @@ def test_review_confirmed_fails_closed_without_a_staged_conf_floor(tmp_path):
     conf = b.get("conf")
     assert conf.validated_against == VALIDATED_FALSE
     assert b.is_shippable is False
-    assert "conf_floor_unstated" in conf.sweep["failures"]
-    assert "conf_censored" not in conf.sweep["failures"]
+    assert "conf_floor_unstated" in conf.gate_evidence["failures"]
+    assert "conf_censored" not in conf.gate_evidence["failures"]
 
 
 def test_conf_censored_review_reference_refused_when_picked_conf_at_or_below_the_staged_floor(tmp_path):
@@ -173,7 +173,7 @@ def test_conf_censored_review_reference_refused_when_picked_conf_at_or_below_the
     conf = b.get("conf")
     assert conf.validated_against == VALIDATED_FALSE
     assert b.is_shippable is False
-    assert "conf_censored" in conf.sweep["failures"]
+    assert "conf_censored" in conf.gate_evidence["failures"]
 
 
 def test_review_reference_hash_scopes_to_the_affirmed_reference():
@@ -392,7 +392,7 @@ def test_previously_unlabeled_session_with_marked_misses_can_still_validate(tmp_
                                             bucket_identities=[_IDENTITY_A], scope_root=tmp_path)
     conf = b.get("conf")
     assert conf.validated_against == VALIDATED_REVIEW_CONFIRMED
-    assert "insufficient_adjudication_coverage" not in conf.sweep["failures"]
+    assert "insufficient_adjudication_coverage" not in conf.gate_evidence["failures"]
 
 
 def test_previously_unlabeled_session_with_zero_adjudication_refuses_honestly(tmp_path):
@@ -404,7 +404,7 @@ def test_previously_unlabeled_session_with_zero_adjudication_refuses_honestly(tm
                                             bucket_identities=[_IDENTITY_A], scope_root=tmp_path)
     conf = b.get("conf")
     assert conf.validated_against == VALIDATED_FALSE
-    assert conf.sweep["failures"] == ["insufficient_adjudication_coverage"]
+    assert conf.gate_evidence["failures"] == ["insufficient_adjudication_coverage"]
 
 
 def test_gt_backed_session_passes_unaffected_by_the_coverage_gate(tmp_path):
@@ -414,7 +414,7 @@ def test_gt_backed_session_passes_unaffected_by_the_coverage_gate(tmp_path):
                                             bucket_identities=[_IDENTITY_A], scope_root=tmp_path)
     conf = b.get("conf")
     assert conf.validated_against == VALIDATED_REVIEW_CONFIRMED
-    assert "insufficient_adjudication_coverage" not in conf.sweep["failures"]
+    assert "insufficient_adjudication_coverage" not in conf.gate_evidence["failures"]
 
 
 def test_rejected_fn_geometry_is_not_mistaken_for_a_missed_object_attestation():

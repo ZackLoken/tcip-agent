@@ -39,6 +39,7 @@ from tcip_mcp.pipelines.resolution import (
 from tcip_mcp.pipelines.training.evaluation import (
     classes_with_evidence,
     concordance_correlation_coefficient,
+    derive_operating_point_curve,
     gt_class_avg_size,
     gt_class_typical_count,
     mean_of_present_counts,
@@ -46,7 +47,6 @@ from tcip_mcp.pipelines.training.evaluation import (
     pick_f1_max,
     quadratic_weighted_kappa,
     r_squared,
-    sweep_operating_point,
 )
 from tcip_mcp.traits import COUNT_OBJECTIVES, COUNT_UNBIASED, DETECTION_F1, PRESENCE, get_trait
 
@@ -64,9 +64,9 @@ from tcip_mcp.traits import COUNT_OBJECTIVES, COUNT_UNBIASED, DETECTION_F1, PRES
 # picker function) when a trait's breeder-stated need doesn't match either existing one, the
 # capability grows by registering a picker, not by widening a vocabulary check.
 COUNT_OBJECTIVE_PICKERS: dict[str, tuple[Callable[[dict], float | None], str]] = {
-    COUNT_UNBIASED: (pick_count_unbiased, "count-unbiased center-match sweep"),
-    DETECTION_F1: (pick_f1_max, "F1-max center-match sweep"),
-    PRESENCE: (pick_f1_max, "F1-max center-match sweep"),
+    COUNT_UNBIASED: (pick_count_unbiased, "count-unbiased center-match curve"),
+    DETECTION_F1: (pick_f1_max, "F1-max center-match curve"),
+    PRESENCE: (pick_f1_max, "F1-max center-match curve"),
 }
 assert set(COUNT_OBJECTIVE_PICKERS) == COUNT_OBJECTIVES, (
     "COUNT_OBJECTIVE_PICKERS and traits.COUNT_OBJECTIVES must name the same currently-implemented "
@@ -748,31 +748,31 @@ def _selection_disjointness(
 
 
 def attach_split_policy_provenance(bundle: ResolvedBundle, locked: dict) -> None:
-    """Copy the locked cal/holdout split's resolved policy + identity onto the conf param's sweep,
-    so the operating-point provenance bundle is self-contained, a caller can see why particular ids
-    ended up on which side without a separate lookup of the
+    """Copy the locked cal/holdout split's resolved policy + identity onto the conf param's gate
+    evidence, so the operating-point provenance bundle is self-contained, a caller can see why
+    particular ids ended up on which side without a separate lookup of the
     ``.tcip/artifacts/cal_holdout_split_<hash>.json`` lock file. Also carries any
     ``policy_divergence`` / ``unlocked_stems`` the lock resolution reported, so a declared-but-not-
     applied policy (a lock already existed with a different seed/ratio/grouping) is visible in the
     result, not only in a server log line.
 
-    In-place: ``ResolvedParam`` is a frozen dataclass, but the ``sweep`` dict it holds is an
+    In-place: ``ResolvedParam`` is a frozen dataclass, but the ``gate_evidence`` dict it holds is an
     ordinary mutable dict, so mutating its contents (never reassigning the attribute) is safe. A
-    no-op when the bundle has no calibrated ``conf`` sweep to attach to (e.g. no GT at all).
+    no-op when the bundle has no calibrated ``conf`` gate evidence to attach to (e.g. no GT at all).
     """
     conf = bundle.params.get("conf")
-    if conf is None or conf.sweep is None:
+    if conf is None or conf.gate_evidence is None:
         return
-    conf.sweep["split_policy"] = {
+    conf.gate_evidence["split_policy"] = {
         "group_by": locked.get("group_by"), "group_key_map": locked.get("group_key_map"),
         "seed": locked.get("seed"), "holdout_ratio": locked.get("holdout_ratio"),
         "identity_hash": locked.get("identity_hash"),
         "split_manifest_dir": locked.get("split_manifest_dir"),
     }
     if locked.get("policy_divergence"):
-        conf.sweep["split_policy_divergence"] = locked["policy_divergence"]
+        conf.gate_evidence["split_policy_divergence"] = locked["policy_divergence"]
     if locked.get("unlocked_stems"):
-        conf.sweep["split_unlocked_stems"] = locked["unlocked_stems"]
+        conf.gate_evidence["split_unlocked_stems"] = locked["unlocked_stems"]
 
 
 def attach_spatial_split_kind_provenance(bundle: ResolvedBundle, spatial: dict) -> None:
@@ -782,12 +782,12 @@ def attach_spatial_split_kind_provenance(bundle: ResolvedBundle, spatial: dict) 
     image set: there is no ``locked`` dict here to read a group policy off, only the split's own
     recorded geometry, so this writes the split-kind fact directly instead of reusing
     ``attach_split_policy_provenance``'s ``locked``-shaped signature. A no-op when the bundle has
-    no calibrated ``conf`` sweep to attach to, same as its sibling.
+    no calibrated ``conf`` gate evidence to attach to, same as its sibling.
     """
     conf = bundle.params.get("conf")
-    if conf is None or conf.sweep is None:
+    if conf is None or conf.gate_evidence is None:
         return
-    conf.sweep["split_policy"] = {
+    conf.gate_evidence["split_policy"] = {
         "group_by": "spatial_strip", "seed": spatial.get("seed"),
         "tile_size": spatial.get("tile_size"), "overlap": spatial.get("overlap"),
     }
@@ -964,7 +964,7 @@ def resolve_operating_point(
                 "localization_tolerance_frac", loc_frac,
                 derived_from="trait default (underivable: no same-class neighbor in this GT)")
         tol = loc_frac * gt_class_avg_size(calibration_records)
-        cal_sweep = sweep_operating_point(calibration_records, tolerance=tol)
+        cal_sweep = derive_operating_point_curve(calibration_records, tolerance=tol)
         conf = picker(cal_sweep)
         conf = DEFAULT_CONF if conf is None else conf
         # conf-censoring guard: a count-unbiased 'validated' claim is only honest if the picked conf
@@ -982,15 +982,15 @@ def resolve_operating_point(
             floor_mismatch = floor_mismatch or _floor_mismatch(holdout_records, staged_conf_floor)
             hold_tol = loc_frac * gt_class_avg_size(holdout_records)  # same frac as calibration, above
             # Exact-conf evaluation, not a nearest-grid-point snap, an explicit single-point
-            # conf_grid makes sweep_operating_point evaluate exactly the conf that will ship, never
+            # conf_grid makes derive_operating_point_curve evaluate exactly the conf that will ship, never
             # an approximation from the holdout's own independently-built grid (which need not
             # contain, or be anywhere near, the calibration-chosen conf).
-            hold_sweep = sweep_operating_point(holdout_records, tolerance=hold_tol, conf_grid=[conf])
+            hold_sweep = derive_operating_point_curve(holdout_records, tolerance=hold_tol, conf_grid=[conf])
             hb = hold_sweep["curve"][0]  # the exact-conf holdout bias entry
             # The calibration side re-measured at the shipped conf (not read off its own grid, which
             # need not contain it), the only comparable basis for asking which classes the holdout
             # was actually able to check, below.
-            cb = sweep_operating_point(calibration_records, tolerance=tol, conf_grid=[conf])["curve"][0]
+            cb = derive_operating_point_curve(calibration_records, tolerance=tol, conf_grid=[conf])["curve"][0]
             # content-overlap gate: a holdout whose GT content is fully cloned from calibration
             # (same boxes, different image_id) can't function as an independent check.
             content = _content_overlap(calibration_records, holdout_records)
@@ -1122,7 +1122,7 @@ def resolve_operating_point(
             # conf_floor_mismatch is also non-gating: its pinned +/-0.05 band is an ordinary property
             # of a model's score distribution as often as it is evidence of tampering, and gating on
             # it would re-create the kind of unsound pinned-constant refusal this design avoids. It
-            # is still computed and surfaced in sweep_data for a human/agent to notice, never
+            # is still computed and surfaced in gate_evidence for a human/agent to notice, never
             # blocking.
             failures: list[str] = []
             if not adjudication_ok:
@@ -1170,12 +1170,12 @@ def resolve_operating_point(
                 failures.append("count_error_dispersion_too_high")
             passed = not failures
 
-            sweep_data = {"calibration": cal_sweep, "f1_max_conf": pick_f1_max(cal_sweep),
+            gate_evidence = {"calibration": cal_sweep, "f1_max_conf": pick_f1_max(cal_sweep),
                           "holdout_bias": hb,
                           "count_bias_tolerance_frac": count_bias_tolerance_frac,
                           "count_bias_tolerance_frac_source": (
                               "trait" if trait.count_bias_tolerance_frac is not None
-                              else "platform_provisional_default"),
+                              else "default"),
                           "holdout_match_quality_floor": holdout_match_quality_floor,
                           # Reconstructibility: the fraction alone does not say what a pass/refusal
                           # actually compared against, the derived typical count and the resulting
@@ -1215,7 +1215,7 @@ def resolve_operating_point(
             # records which reference (GT vs review-confirmed) cleared the gate.
             validated = validated_reference if passed else VALIDATED_FALSE
         else:
-            sweep_data = {"calibration": cal_sweep, "conf_censored": censored,
+            gate_evidence = {"calibration": cal_sweep, "conf_censored": censored,
                           "conf_floor_mismatch": floor_mismatch, "staged_conf_floor": staged_conf_floor,
                           "staged_conf_floor_attribute_path": staged_conf_floor_attribute_path,
                           "calibration_observed_min_score": _min_dt_score(calibration_records),
@@ -1226,7 +1226,7 @@ def resolve_operating_point(
                                  derived_from=conf_derived_from,
                                  requires_validation=True, validation_kind="annotations",
                                  validated_against=validated, dataset_scoped=True,
-                                 dataset_hash=dataset_hash, sweep=sweep_data)
+                                 dataset_hash=dataset_hash, gate_evidence=gate_evidence)
         if max_dets is None:
             max_dets = _max_dets_from_density(calibration_records)
             max_dets_derived_from = "~1.5x p99 GT objects/image"
@@ -1340,7 +1340,7 @@ def resolve_classifier_operating_point(
     Returns a dict structurally distinct from a ``ResolvedParam``/``ResolvedBundle``, never a
     shape a generic writer could mistake for the count operating point's ``conf`` param and stamp
     into the wrong sidecar:
-    ``{"validated_against", "passed", "failures", "sweep_data"}``. Callers write this into a
+    ``{"validated_against", "passed", "failures", "gate_evidence"}``. Callers write this into a
     classifier-scoped sidecar (``classifier_operating_point.json``, never ``operating_point.json``'s
     own fields) via :func:`tcip_mcp.pipelines.resolution.reconcile_classifier_validity`.
 
@@ -1368,7 +1368,7 @@ def resolve_classifier_operating_point(
         return {
             "validated_against": VALIDATED_FALSE, "passed": False,
             "failures": ["no_calibration_or_holdout"],
-            "sweep_data": {"note": "classifier calibration requires both calibration and holdout items"},
+            "gate_evidence": {"note": "classifier calibration requires both calibration and holdout items"},
         }
 
     adjudication_ok = adjudication_covered is None or (
@@ -1483,7 +1483,7 @@ def resolve_classifier_operating_point(
         failures.append("compensating_error_floor_failed")
     passed = not failures
 
-    sweep_data = {
+    gate_evidence = {
         "content_overlap_frac": content["content_overlap_frac"],
         "content_shared_with_calibration": content["shared"],
         "train_disjointness": td, "selection_disjointness": sd, "disjoint": disjoint,
@@ -1491,7 +1491,7 @@ def resolve_classifier_operating_point(
         "count_bias": count_bias, "count_bias_std": count_bias_std, "count_bias_n_images": n_bias_images,
         "count_bias_tolerance_frac": count_bias_tolerance_frac,
         "count_bias_tolerance_frac_source": ("trait" if trait.count_bias_tolerance_frac is not None
-                                             else "platform_provisional_default"),
+                                             else "default"),
         "typical_positive_count": typical_positive_count,
         # Never the bare "count_bias_tolerance" name once used for the authored value here: reusing
         # that exact name for the derived effective value would silently swap what the same key
@@ -1503,12 +1503,12 @@ def resolve_classifier_operating_point(
             count_bias_tolerance_frac, typical_positive_count, n_bias_images),
         "kappa": kappa, "kappa_floor": agreement_floor,
         "kappa_floor_source": ("trait" if trait.classifier_agreement_floor is not None
-                               else "platform_provisional_default"),
+                               else "default"),
         "n_calibration": len(calibration_items), "n_holdout": len(holdout_items),
     }
     return {
         "validated_against": validated_reference if passed else VALIDATED_FALSE,
-        "passed": passed, "failures": failures, "sweep_data": sweep_data,
+        "passed": passed, "failures": failures, "gate_evidence": gate_evidence,
     }
 
 
@@ -1552,7 +1552,7 @@ def _resolve_scalar_operating_point(
         return {
             "validated_against": VALIDATED_FALSE, "passed": False,
             "failures": ["no_calibration_or_holdout"],
-            "sweep_data": {"criterion": criterion,
+            "gate_evidence": {"criterion": criterion,
                            "note": "calibration requires both calibration and holdout items"},
         }
 
@@ -1574,7 +1574,7 @@ def _resolve_scalar_operating_point(
 
     floor_authored = getattr(trait, floor_field)
     floor = floor_authored if floor_authored is not None else default_floor
-    floor_source = "trait" if floor_authored is not None else "provisional_default"
+    floor_source = "trait" if floor_authored is not None else "default"
     # A non-finite score compares false against every bound, so it is its own failure.
     score_state = non_finite_state(score) if isinstance(score, float) else None
     comparable = score is not None and score_state is None
@@ -1603,7 +1603,7 @@ def _resolve_scalar_operating_point(
         failures.append("compensating_error_floor_failed")
     passed = not failures
 
-    sweep_data = {
+    gate_evidence = {
         "criterion": criterion, **stored_number("score", score),
         "floor": floor, "floor_source": floor_source,
         "disjoint": disjoint, "train_disjointness": td, "selection_disjointness": sd,
@@ -1611,7 +1611,7 @@ def _resolve_scalar_operating_point(
     }
     return {
         "validated_against": validated_reference if passed else VALIDATED_FALSE,
-        "passed": passed, "failures": failures, "sweep_data": sweep_data,
+        "passed": passed, "failures": failures, "gate_evidence": gate_evidence,
     }
 
 
@@ -1638,7 +1638,7 @@ def resolve_ordinal_operating_point(
     ``{"image_id": str, "true_rank": int, "predicted_rank": int}`` (``OrdinalDataset`` is one CSV
     row per image stem, no bbox/geometry concept applies). Returns the same structurally-distinct
     shape :func:`resolve_classifier_operating_point` does: ``{"validated_against", "passed",
-    "failures", "sweep_data"}``, never a shape a generic writer could mistake for the count
+    "failures", "gate_evidence"}``, never a shape a generic writer could mistake for the count
     operating point's ``conf`` param. Callers write this into ``ordinal_operating_point.json`` via
     :func:`tcip_mcp.pipelines.resolution.reconcile_ordinal_validity`.
 
@@ -1692,7 +1692,7 @@ def resolve_regression_operating_point(
     ``{"image_id": str, "true_value": float, "predicted_value": float}`` (``RegressionDataset`` is
     one CSV row per image stem, no bbox/geometry concept applies). Returns the same structurally-
     distinct shape :func:`resolve_classifier_operating_point` does: ``{"validated_against", "passed",
-    "failures", "sweep_data"}``. Callers write this into ``regression_operating_point.json`` via
+    "failures", "gate_evidence"}``. Callers write this into ``regression_operating_point.json`` via
     :func:`tcip_mcp.pipelines.resolution.reconcile_regression_validity`.
 
     ``split_manifest_dir``/``calibration_date`` gate ``selection_disjointness`` the same way

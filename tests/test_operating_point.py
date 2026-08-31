@@ -13,7 +13,7 @@ from tcip_mcp.pipelines.training.evaluation import (  # noqa: E402
     gt_class_avg_size,
     pick_count_unbiased,
     pick_f1_max,
-    sweep_operating_point,
+    derive_operating_point_curve,
 )
 
 # No built-in traits: seed_catkin_trait_spec (conftest.py) writes a real catkin.yml into this
@@ -78,7 +78,7 @@ def test_gt_class_avg_size_derived_from_data():
 def test_count_unbiased_differs_from_f1_max():
     recs = _records()
     tol = 0.5 * gt_class_avg_size(recs)  # derived tolerance = half class avg size
-    sweep = sweep_operating_point(recs, tolerance=tol)
+    sweep = derive_operating_point_curve(recs, tolerance=tol)
 
     cu = pick_count_unbiased(sweep)
     f1m = pick_f1_max(sweep)
@@ -97,7 +97,7 @@ def test_center_match_respects_tolerance():
     # a correct detection just outside tolerance must not count as a hit
     recs = [{"width": 400, "height": 400, "gt": [_ann(100, 100)],
              "dt": [_ann(100 + 100, 100, score=0.9)]}]  # 100px off, tolerance ~10
-    sweep = sweep_operating_point(recs, tolerance=0.5 * gt_class_avg_size(recs))
+    sweep = derive_operating_point_curve(recs, tolerance=0.5 * gt_class_avg_size(recs))
     at0 = sweep["curve"][0]  # conf=0.0 is always the first (lowest) grid point
     assert at0["conf"] == pytest.approx(0.0)
     assert at0["tp"] == 0 and at0["fp"] == 1 and at0["fn"] == 1  # miss + false positive
@@ -108,7 +108,7 @@ def test_sweep_curve_carries_dispersion_and_reference_size_fields():
     # from the same per-image biases list, not a second pass over the data.
     recs = dense_records(n_images=4, objects_per_image=10,
                          miss_pattern=[0, 1, 0, 2], fp_pattern=[0, 0, 1, 0])
-    sweep = sweep_operating_point(recs, tolerance=0.5 * gt_class_avg_size(recs))
+    sweep = derive_operating_point_curve(recs, tolerance=0.5 * gt_class_avg_size(recs))
     at09 = next(c for c in sweep["curve"] if c["conf"] == pytest.approx(0.9))
     # biases = fp - fn per image = [0, -1, 1, -2]
     assert at09["n_images"] == 4
@@ -193,7 +193,7 @@ def test_resolve_operating_point_validated_with_holdout():
     assert b.is_shippable
     assert conf.value == pytest.approx(0.9)  # count-unbiased pick: bias vanishes once the low-conf FP drops
     assert b.get("max_dets").value >= 100  # derived from GT density
-    sweep = conf.sweep
+    sweep = conf.gate_evidence
     assert sweep["failures"] == []
     assert sweep["content_overlap_frac"] == pytest.approx(0.0)  # genuinely distinct holdout content
     assert sweep["train_disjointness"] == {"checked": False, "unresolvable": False,
@@ -239,7 +239,7 @@ def test_resolve_operating_point_biased_holdout_is_unshippable():
     # measured on the disjoint split but failed (bias > tolerance) -> not validated, firewall holds
     assert b.get("conf").validated_against == "false"
     assert not b.is_shippable
-    assert "count_bias_exceeds_tolerance" in b.get("conf").sweep["failures"]
+    assert "count_bias_exceeds_tolerance" in b.get("conf").gate_evidence["failures"]
 
 
 def test_resolve_operating_point_calibrated_but_no_holdout_is_unshippable():
@@ -260,8 +260,8 @@ def test_resolve_operating_point_content_shared_holdout_is_false():
     conf = b.get("conf")
     assert conf.validated_against == "false"
     assert not b.is_shippable
-    assert conf.sweep["content_overlap_frac"] == pytest.approx(1.0)
-    assert "content_shared_with_calibration" in conf.sweep["failures"]
+    assert conf.gate_evidence["content_overlap_frac"] == pytest.approx(1.0)
+    assert "content_shared_with_calibration" in conf.gate_evidence["failures"]
 
 
 def test_resolve_operating_point_train_disjointness_fires(tmp_path, monkeypatch):
@@ -282,7 +282,7 @@ def test_resolve_operating_point_train_disjointness_fires(tmp_path, monkeypatch)
                                 holdout_records=hold, experiment_id="exp1")
     conf = b.get("conf")
     assert conf.validated_against == "false"
-    assert conf.sweep["train_disjointness"]["leaked_groups"] == ["a"]
+    assert conf.gate_evidence["train_disjointness"]["leaked_groups"] == ["a"]
 
 
 def test_resolve_operating_point_train_disjointness_unresolvable_when_split_missing(tmp_path, monkeypatch):
@@ -297,10 +297,10 @@ def test_resolve_operating_point_train_disjointness_unresolvable_when_split_miss
                                 staged_conf_floor=0.01, experiment_id="does-not-exist")
     conf = b.get("conf")
     assert conf.validated_against == "false"
-    assert conf.sweep["train_disjointness"] == {"checked": False, "unresolvable": True,
+    assert conf.gate_evidence["train_disjointness"] == {"checked": False, "unresolvable": True,
                                                  "leaked_groups": [], "leaked_stems": [],
                                                  "group_check": None}
-    assert "train_disjointness_unresolvable" in conf.sweep["failures"]
+    assert "train_disjointness_unresolvable" in conf.gate_evidence["failures"]
 
 
 def test_resolve_operating_point_train_disjointness_resolvable_no_leak_still_validates(tmp_path, monkeypatch):
@@ -322,7 +322,7 @@ def test_resolve_operating_point_train_disjointness_resolvable_no_leak_still_val
     conf = b.get("conf")
     assert conf.validated_against == "held_out_annotations"
     assert b.is_shippable
-    assert conf.sweep["train_disjointness"] == {"checked": True, "unresolvable": False,
+    assert conf.gate_evidence["train_disjointness"] == {"checked": True, "unresolvable": False,
                                                  "leaked_groups": [], "leaked_stems": [],
                                                  "group_check": "performed"}
 
@@ -348,8 +348,8 @@ def test_resolve_operating_point_cal_rects_none_is_byte_identical(tmp_path, monk
                                             calibration_records=cal, holdout_records=hold,
                                             staged_conf_floor=0.01, experiment_id="exp_rects_noop",
                                             cal_rects=None, hold_rects=None)
-    assert (omitted.get("conf").sweep["train_disjointness"]
-           == explicit_none.get("conf").sweep["train_disjointness"]
+    assert (omitted.get("conf").gate_evidence["train_disjointness"]
+           == explicit_none.get("conf").gate_evidence["train_disjointness"]
            == {"checked": True, "unresolvable": False, "leaked_groups": [], "leaked_stems": [],
                "group_check": "spatial_strip"})
 
@@ -381,7 +381,7 @@ def test_resolve_operating_point_cal_rects_switches_to_geometric_check(tmp_path,
         staged_conf_floor=0.01, experiment_id="exp_rects_geo",
         cal_rects={cal_id: (400, 100, 600, 300)},  # straddles train/val: not fully contained
     )
-    td = leaked.get("conf").sweep["train_disjointness"]
+    td = leaked.get("conf").gate_evidence["train_disjointness"]
     assert td["group_check"] == "spatial_strip_geometric"
     assert td["leaked_groups"] == [cal_id]
 
@@ -433,10 +433,10 @@ def test_selection_disjointness_leaked_whole_directory_calibration_of_a_bound_ch
         "catkin", tiled=False, dataset_hash="h1", calibration_records=cal, holdout_records=hold,
         staged_conf_floor=0.01, experiment_id="exp_sel_leak_whole", calibration_date=date,
     )
-    sd = b.get("conf").sweep["selection_disjointness"]
+    sd = b.get("conf").gate_evidence["selection_disjointness"]
     assert sd["applicable"] is True
     assert sd["leaked_groups"] == ["c_0"]
-    assert "selection_disjointness_leaked" in b.get("conf").sweep["failures"]
+    assert "selection_disjointness_leaked" in b.get("conf").gate_evidence["failures"]
     assert b.get("conf").validated_against == "false"
 
 
@@ -461,10 +461,10 @@ def test_selection_disjointness_leaked_manifest_calibration_of_a_self_drawn_chec
         staged_conf_floor=0.01, experiment_id="exp_sel_leak_manifest",
         split_manifest_dir="some/manifest", calibration_date=date,
     )
-    sd = b.get("conf").sweep["selection_disjointness"]
+    sd = b.get("conf").gate_evidence["selection_disjointness"]
     assert sd["applicable"] is True
     assert sd["leaked_groups"] == ["c_0"]
-    assert "selection_disjointness_leaked" in b.get("conf").sweep["failures"]
+    assert "selection_disjointness_leaked" in b.get("conf").gate_evidence["failures"]
 
 
 def test_selection_disjointness_not_applicable_across_dates(tmp_path, monkeypatch):
@@ -482,7 +482,7 @@ def test_selection_disjointness_not_applicable_across_dates(tmp_path, monkeypatc
         staged_conf_floor=0.01, experiment_id="exp_sel_other_date",
         split_manifest_dir="some/manifest", calibration_date="2-12-01",
     )
-    sd = b.get("conf").sweep["selection_disjointness"]
+    sd = b.get("conf").gate_evidence["selection_disjointness"]
     assert sd["applicable"] is False and sd["reason"]
     assert b.get("conf").validated_against == "held_out_annotations"
 
@@ -503,7 +503,7 @@ def test_selection_disjointness_not_applicable_on_a_spatial_record(tmp_path, mon
         staged_conf_floor=0.01, experiment_id="exp_sel_spatial",
         split_manifest_dir="some/manifest", calibration_date=date,
     )
-    sd = b.get("conf").sweep["selection_disjointness"]
+    sd = b.get("conf").gate_evidence["selection_disjointness"]
     assert sd["applicable"] is False and sd["reason"]
     assert b.get("conf").validated_against == "held_out_annotations"
 
@@ -527,7 +527,7 @@ def test_selection_disjointness_not_applicable_on_an_external_val_record(tmp_pat
         staged_conf_floor=0.01, experiment_id="exp_sel_external",
         split_manifest_dir="some/manifest", calibration_date=date,
     )
-    sd = b.get("conf").sweep["selection_disjointness"]
+    sd = b.get("conf").gate_evidence["selection_disjointness"]
     assert sd["applicable"] is False and sd["reason"]
     assert b.get("conf").validated_against == "held_out_annotations"
 
@@ -548,7 +548,7 @@ def test_selection_disjointness_not_applicable_for_a_manifest_less_calibration(t
         "catkin", tiled=False, dataset_hash="h1", calibration_records=cal, holdout_records=hold,
         staged_conf_floor=0.01, experiment_id="exp_sel_no_manifest",
     )
-    sd = b.get("conf").sweep["selection_disjointness"]
+    sd = b.get("conf").gate_evidence["selection_disjointness"]
     assert sd["applicable"] is False and sd["reason"]
     assert b.get("conf").validated_against == "held_out_annotations"
 
@@ -583,7 +583,7 @@ def test_selection_disjointness_not_applicable_for_a_flat_run_with_no_calibratio
         "catkin", calibration_items=cal_items, holdout_items=hold_items,
         experiment_id="exp_sel_flat_no_date",
     )
-    sd = result["sweep_data"]["selection_disjointness"]
+    sd = result["gate_evidence"]["selection_disjointness"]
     assert sd["applicable"] is False and sd["reason"]
     assert "selection_disjointness_leaked" not in result["failures"]
 
@@ -619,7 +619,7 @@ def test_selection_disjointness_applicable_when_a_flat_calibration_matches_a_fla
         "catkin", calibration_items=cal_items, holdout_items=hold_items,
         experiment_id="exp_sel_flat_match", calibration_date=manifest_date_key(None),
     )
-    sd = result["sweep_data"]["selection_disjointness"]
+    sd = result["gate_evidence"]["selection_disjointness"]
     assert sd["applicable"] is True and sd["checked"] is True
     assert sd["leaked_groups"] == ["c_0"]  # c_0 is on this run's own val
 
@@ -637,9 +637,9 @@ def test_selection_disjointness_unresolvable_for_experiment_id_none_under_a_stat
         staged_conf_floor=0.01, experiment_id=None,
         split_manifest_dir="some/manifest", calibration_date="2-11-26",
     )
-    sd = b.get("conf").sweep["selection_disjointness"]
+    sd = b.get("conf").gate_evidence["selection_disjointness"]
     assert sd["applicable"] is True and sd["unresolvable"] is True
-    assert "selection_disjointness_unresolvable" in b.get("conf").sweep["failures"]
+    assert "selection_disjointness_unresolvable" in b.get("conf").gate_evidence["failures"]
     assert b.get("conf").validated_against == "false"
 
 

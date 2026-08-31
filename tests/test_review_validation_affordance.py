@@ -26,16 +26,17 @@ from tcip_mcp.pipelines.resolution import (
 pytestmark = pytest.mark.usefixtures("seed_catkin_trait_spec")
 
 
-def _bundle(*, validated: str, sweep: dict) -> ResolvedBundle:
+def _bundle(*, validated: str, gate_evidence: dict) -> ResolvedBundle:
     conf = derived("conf", 0.42, requires_validation=True, validation_kind="annotations",
-                   derived_from="count-unbiased center-match sweep over review verdicts",
-                   validated_against=validated, dataset_scoped=True, dataset_hash="abc", sweep=sweep)
+                   derived_from="count-unbiased center-match curve over review verdicts",
+                   validated_against=validated, dataset_scoped=True, dataset_hash="abc",
+                   gate_evidence=gate_evidence)
     return ResolvedBundle(trait="catkin", dataset_hash="abc", params={"conf": conf})
 
 
 def test_describe_validated():
     b = _bundle(validated=VALIDATED_REVIEW_CONFIRMED,
-                sweep={"conf_censored": False, "disjoint": True, "passed_holdout": True,
+                gate_evidence={"conf_censored": False, "disjoint": True, "passed_holdout": True,
                        "failures": [], "holdout_bias": {"tp": 8, "fn": 2}})
     out = describe_review_validation(b, reviewed_image_count=4)
     assert out["validated"] is True
@@ -48,7 +49,7 @@ def test_describe_validated():
 
 def test_describe_validated_names_no_producing_run_when_genuinely_none():
     b = _bundle(validated=VALIDATED_REVIEW_CONFIRMED,
-                sweep={"conf_censored": False, "disjoint": True, "passed_holdout": True,
+                gate_evidence={"conf_censored": False, "disjoint": True, "passed_holdout": True,
                        "failures": [], "holdout_bias": {"tp": 8, "fn": 2},
                        "train_disjointness": {"checked": False, "experiment_id_ambiguous": False}})
     out = describe_review_validation(b, reviewed_image_count=4)
@@ -58,7 +59,7 @@ def test_describe_validated_names_no_producing_run_when_genuinely_none():
 
 def test_describe_validated_names_more_than_one_run_when_buckets_disagree():
     b = _bundle(validated=VALIDATED_REVIEW_CONFIRMED,
-                sweep={"conf_censored": False, "disjoint": True, "passed_holdout": True,
+                gate_evidence={"conf_censored": False, "disjoint": True, "passed_holdout": True,
                        "failures": [], "holdout_bias": {"tp": 8, "fn": 2},
                        "train_disjointness": {"checked": False, "experiment_id_ambiguous": True}})
     out = describe_review_validation(b, reviewed_image_count=4)
@@ -70,18 +71,18 @@ def test_describe_conf_censored():
     # The named-failure list (not the raw "conf_censored" key alone) drives the branch, and
     # "passed_holdout" must be present or the "too few images" branch wins first.
     b = _bundle(validated=VALIDATED_FALSE,
-                sweep={"conf_censored": True, "passed_holdout": False, "failures": ["conf_censored"]})
+                gate_evidence={"conf_censored": True, "passed_holdout": False, "failures": ["conf_censored"]})
     out = describe_review_validation(b, reviewed_image_count=3)
     assert out["validated"] is False
     assert "confidence" in out["reason"].lower()
 
 
 def test_describe_conf_floor_mismatch_is_non_gating_provenance_only():
-    # conf_floor_mismatch is surfaced as provenance (sweep["conf_floor_mismatch"]) but never gates
+    # conf_floor_mismatch is surfaced as provenance (gate_evidence["conf_floor_mismatch"]) but never gates
     # on its own; it never appears in "failures", so a bundle with no other named failure stays
     # Validated even when the floor mismatch is flagged.
     b = _bundle(validated=VALIDATED_REVIEW_CONFIRMED,
-                sweep={"conf_censored": False, "conf_floor_mismatch": True, "passed_holdout": True,
+                gate_evidence={"conf_censored": False, "conf_floor_mismatch": True, "passed_holdout": True,
                        "failures": [], "holdout_bias": {"tp": 5, "fn": 0}})
     out = describe_review_validation(b, reviewed_image_count=4)
     assert out["validated"] is True
@@ -92,7 +93,7 @@ def test_conf_floor_mismatch_never_hijacks_a_real_failure_message():
     # failure must not divert the message; there is no conf_floor_mismatch-specific branch at all
     # (it is non-gating provenance only), so the real failure's own message must still surface.
     b = _bundle(validated=VALIDATED_FALSE,
-                sweep={"conf_censored": False, "disjoint": True, "conf_floor_mismatch": True,
+                gate_evidence={"conf_censored": False, "disjoint": True, "conf_floor_mismatch": True,
                        "passed_holdout": False,
                        "failures": ["count_bias_exceeds_tolerance"]})
     out = describe_review_validation(b, reviewed_image_count=4)
@@ -101,8 +102,8 @@ def test_conf_floor_mismatch_never_hijacks_a_real_failure_message():
 
 
 def test_describe_not_enough_images():
-    # One reviewed image -> no holdout was measured (sweep carries no passed_holdout key).
-    b = _bundle(validated=VALIDATED_FALSE, sweep={"conf_censored": False, "note": "not held-out"})
+    # One reviewed image -> no holdout was measured (gate_evidence carries no passed_holdout key).
+    b = _bundle(validated=VALIDATED_FALSE, gate_evidence={"conf_censored": False, "note": "not held-out"})
     out = describe_review_validation(b, reviewed_image_count=1)
     assert out["validated"] is False
     assert "at least two" in out["reason"]
@@ -110,7 +111,7 @@ def test_describe_not_enough_images():
 
 def test_describe_holdout_bias_failed():
     b = _bundle(validated=VALIDATED_FALSE,
-                sweep={"conf_censored": False, "disjoint": True, "passed_holdout": False,
+                gate_evidence={"conf_censored": False, "disjoint": True, "passed_holdout": False,
                        "holdout_bias": {"count_bias_mean": 3.0}, "count_bias_tolerance_frac": 1.0,
                        "failures": ["count_bias_exceeds_tolerance"]})
     out = describe_review_validation(b, reviewed_image_count=6)
@@ -122,7 +123,7 @@ def test_describe_no_adjudication_coverage():
     # "insufficient_adjudication_coverage" is a distinct, honest reason naming the affordance, not
     # a fallthrough to the generic "counts didn't agree" message.
     b = _bundle(validated=VALIDATED_FALSE,
-                sweep={"passed_holdout": False, "failures": ["insufficient_adjudication_coverage"]})
+                gate_evidence={"passed_holdout": False, "failures": ["insufficient_adjudication_coverage"]})
     out = describe_review_validation(b, reviewed_image_count=5)
     assert out["validated"] is False
     assert "mark missed object" in out["reason"].lower()
@@ -134,7 +135,7 @@ def test_describe_reports_every_applicable_failure_not_just_the_first():
     # the second. _FAILURE_MESSAGES lists insufficient_calibration_gt before
     # count_bias_exceeds_tolerance, so both messages must appear, in that order.
     b = _bundle(validated=VALIDATED_FALSE,
-                sweep={"conf_censored": False, "disjoint": True, "passed_holdout": False,
+                gate_evidence={"conf_censored": False, "disjoint": True, "passed_holdout": False,
                        "failures": ["count_bias_exceeds_tolerance", "insufficient_calibration_gt"]})
     out = describe_review_validation(b, reviewed_image_count=4)
     assert out["validated"] is False
@@ -156,7 +157,7 @@ def test_describe_never_asserts_the_counts_agree_when_the_pooled_bias_check_also
     for co_failure in ("localization_quality_floor_failed", "count_error_dispersion_too_high",
                        "count_bias_exceeds_tolerance_per_class"):
         b = _bundle(validated=VALIDATED_FALSE,
-                    sweep={"conf_censored": False, "disjoint": True, "passed_holdout": False,
+                    gate_evidence={"conf_censored": False, "disjoint": True, "passed_holdout": False,
                            "failures": ["count_bias_exceeds_tolerance", co_failure]})
         out = describe_review_validation(b, reviewed_image_count=6)
         reason = out["reason"]
@@ -170,7 +171,7 @@ def test_describe_unrecognized_failure_name_is_a_loud_error():
     # Named-failure architecture (cross-cutting): an unmapped failure name must never fall through
     # to the generic message silently: it's a defect in describe_review_validation itself.
     b = _bundle(validated=VALIDATED_FALSE,
-                sweep={"conf_censored": False, "disjoint": True, "passed_holdout": False,
+                gate_evidence={"conf_censored": False, "disjoint": True, "passed_holdout": False,
                        "failures": ["some_future_fix_g_or_h_failure_not_yet_mapped"]})
     with pytest.raises(AssertionError, match="unrecognized"):
         describe_review_validation(b, reviewed_image_count=2)
@@ -180,7 +181,7 @@ def test_describe_conf_floor_unstated_names_the_recognized_attribute_names():
     """A bespoke module holding an unrecognized attribute name (score_threshold, not score_thresh)
     learns why: the message names every attribute the holder looks for, and where."""
     b = _bundle(validated=VALIDATED_FALSE,
-                sweep={"conf_censored": False, "disjoint": True, "passed_holdout": False,
+                gate_evidence={"conf_censored": False, "disjoint": True, "passed_holdout": False,
                        "failures": ["conf_floor_unstated"]})
     reason = describe_review_validation(b, reviewed_image_count=4)["reason"]
     for attr in ("score_thresh", "nms_thresh", "detections_per_img"):
@@ -388,6 +389,43 @@ def test_route_validates_and_stamps_review_confirmed(client, tmp_path: Path):
     binding = verify_stamp_binding(sc, pred_dir, document="operating_point")
     assert binding.ok is True
     assert binding.train_disjointness == {"checked": False, "group_check": None}
+
+
+def test_route_promotion_stamps_schema_version_2_and_carries_an_old_vintage_member(
+    client, tmp_path: Path,
+):
+    """The carried-subrecord contract: promotion writes schema_version 2 for the fields it itself
+    touches, but a top-level member the producing run already wrote under an older provenance
+    vocabulary (here a hand-built ``mask_binarize`` payload spelled with the retired ``has_sweep``
+    key) is not rewritten, so it still reads under that older spelling after promotion. The
+    version-2 validation row's own claim carries that same mixed member, since ``mask_binarize``
+    is one of operating_point's declared claim keys.
+    """
+    import tcip_store
+    from tcip_mcp.pipelines.resolution import sidecar_key
+
+    proj, pred_dir = _make_dense_reviewed_project(tmp_path)
+    key = sidecar_key(pred_dir, "operating_point")
+    with tcip_store.transaction(key) as txn:
+        current = txn.read(key)
+        txn.write(key, {**current, "mask_binarize": {"has_sweep": True, "threshold": 0.5}})
+
+    resp = client.post("/api/review/validate_reference", json={
+        "dataset_root": proj, "trait": "catkin", "pred_dir": pred_dir, "subject": "catkin"})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["validated"] is True
+
+    sc = _read_sidecar(pred_dir)
+    assert sc["schema_version"] == 2
+    assert sc["mask_binarize"] == {"has_sweep": True, "threshold": 0.5}
+
+    from tcip_mcp.experiments import find_validation
+
+    pointer = sc["validated_by"]
+    row = find_validation(pointer["experiment_id"], pointer["record_digest"])
+    assert row is not None
+    assert row["schema_version"] == 2
+    assert row["claim"]["mask_binarize"] == {"has_sweep": True, "threshold": 0.5}
 
 
 def test_route_validates_a_review_that_includes_a_confirmed_negative(client, tmp_path: Path):

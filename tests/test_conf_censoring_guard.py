@@ -73,7 +73,7 @@ def test_reference_floored_at_the_real_calibration_floor_still_validates():
     assert conf._raw == pytest.approx(0.9)
     assert conf.validated_against == "held_out_annotations"
     assert b.is_shippable is True
-    sweep = conf.sweep
+    sweep = conf.gate_evidence
     assert sweep["conf_censored"] is False
     assert sweep["conf_floor_mismatch"] is False
     assert sweep["failures"] == []
@@ -88,9 +88,9 @@ def test_no_staged_conf_floor_asserted_fails_closed():
     conf = b.get("conf")
     assert conf.validated_against == "false"
     assert b.is_shippable is False
-    assert conf.sweep["conf_censored"] is False
-    assert "conf_floor_unstated" in conf.sweep["failures"]
-    assert "conf_censored" not in conf.sweep["failures"]
+    assert conf.gate_evidence["conf_censored"] is False
+    assert "conf_floor_unstated" in conf.gate_evidence["failures"]
+    assert "conf_censored" not in conf.gate_evidence["failures"]
 
 
 def test_reference_truncated_above_the_picked_conf_is_refused():
@@ -102,7 +102,7 @@ def test_reference_truncated_above_the_picked_conf_is_refused():
     conf = b.get("conf")
     assert conf.validated_against == "false"
     assert b.is_shippable is False
-    sweep = conf.sweep
+    sweep = conf.gate_evidence
     assert sweep["conf_censored"] is True
     assert sweep["conf_floor_mismatch"] is False   # isolates: this is the pick-vs-floor check, not the mismatch one
     assert "conf_censored" in sweep["failures"]
@@ -123,7 +123,7 @@ def test_asserted_vs_observed_floor_mismatch_is_surfaced_but_never_gates():
     conf = b.get("conf")
     assert conf.validated_against == "held_out_annotations"
     assert b.is_shippable is True
-    sweep = conf.sweep
+    sweep = conf.gate_evidence
     assert sweep["conf_censored"] is False          # isolates: pick (0.9) is genuinely above the floor
     assert sweep["conf_floor_mismatch"] is True      # surfaced...
     assert "conf_floor_mismatch" not in sweep["failures"]  # ...but never a named (gating) failure

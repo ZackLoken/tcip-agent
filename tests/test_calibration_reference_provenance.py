@@ -330,15 +330,15 @@ def test_a_conf_floor_mismatch_reaches_the_delivered_issues_without_changing_the
     """The mismatch is provenance about the reference, not a reason to refuse: it has to be
     readable at the delivery surface, and the run it describes still validates."""
     bundle, inputs = _floor_mismatched_bundle()
-    assert bundle.get("conf").sweep["conf_floor_mismatch"] is True
-    assert "conf_floor_mismatch" not in (bundle.get("conf").sweep["failures"] or [])
+    assert bundle.get("conf").gate_evidence["conf_floor_mismatch"] is True
+    assert "conf_floor_mismatch" not in (bundle.get("conf").gate_evidence["failures"] or [])
 
     r = _run_with_bundle(tmp_path, monkeypatch, (bundle, inputs))
 
     assert "error" not in r, r
     assert any("low-conf tail" in issue for issue in r["shippable_issues"]), r["shippable_issues"]
     assert r["validated"] is True  # surfaced, never gating
-    assert r["sweep_summary"]["conf_floor_mismatch"] is True
+    assert r["gate_evidence_summary"]["conf_floor_mismatch"] is True
 
 
 def test_a_reference_without_the_mismatch_carries_no_such_issue(tmp_path, monkeypatch):
@@ -359,7 +359,7 @@ def test_a_reference_without_the_mismatch_carries_no_such_issue(tmp_path, monkey
         "tiled": False, "staged_conf_floor": 0.01,
     }
     bundle = resolve_operating_point("catkin", experiment_id=None, **inputs)
-    assert bundle.get("conf").sweep["conf_floor_mismatch"] is False
+    assert bundle.get("conf").gate_evidence["conf_floor_mismatch"] is False
 
     r = _run_with_bundle(tmp_path, monkeypatch, (bundle, inputs))
 

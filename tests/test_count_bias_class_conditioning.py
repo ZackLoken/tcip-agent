@@ -9,7 +9,7 @@ operating point earns a ``VALIDATED_HELD_OUT``/``VALIDATED_REVIEW_CONFIRMED`` st
 Every gate test here drives a real door: ``resolve_operating_point_from_review`` (what
 ``routes/review.py`` calls) or ``resolve_operating_point`` (what ``run_inference``'s
 ``calibrate_operating_point`` calls). The two at the end are about the conf sweep itself, so they
-call ``sweep_operating_point`` (the thing under test) directly. None construct a sweep by hand.
+call ``derive_operating_point_curve`` (the thing under test) directly. None construct a sweep by hand.
 """
 
 from __future__ import annotations
@@ -35,7 +35,7 @@ from tcip_mcp.pipelines.resolution import (  # noqa: E402
 from tcip_mcp.pipelines.training.evaluation import (  # noqa: E402
     gt_class_avg_size,
     pick_count_unbiased,
-    sweep_operating_point,
+    derive_operating_point_curve,
 )
 
 _IDENTITY = {"checkpoint_sha256": "sha-model-a", "experiment_id": None}
@@ -119,7 +119,7 @@ def test_review_door_refuses_a_class_compensating_reference_the_pooled_bias_call
                                             tiled=True, staged_conf_floor=0.01,
                                             bucket_identities=[_IDENTITY], scope_root=tmp_path)
     conf = b.params["conf"]
-    sweep = conf.sweep
+    sweep = conf.gate_evidence
     hb = sweep["holdout_bias"]
     # The pooled term the gate used to judge on reads perfectly unbiased, on a reference where every
     # swapped object is counted under the wrong class.
@@ -152,9 +152,9 @@ def test_review_door_still_validates_a_multi_class_reference_that_is_honest_per_
                                             tiled=True, staged_conf_floor=0.01,
                                             bucket_identities=[_IDENTITY], scope_root=tmp_path)
     conf = b.params["conf"]
-    assert conf.sweep["failures"] == []
-    assert conf.sweep["per_class_count_bias_failures"] == []
-    assert set(conf.sweep["holdout_bias"]["per_class"]) == {"1", "2"}
+    assert conf.gate_evidence["failures"] == []
+    assert conf.gate_evidence["per_class_count_bias_failures"] == []
+    assert set(conf.gate_evidence["holdout_bias"]["per_class"]) == {"1", "2"}
     assert conf.validated_against == VALIDATED_REVIEW_CONFIRMED
 
 
@@ -165,7 +165,7 @@ def test_gt_door_refuses_a_class_compensating_reference():
         "catkin", tiled=True, dataset_hash="h", staged_conf_floor=0.05,
         calibration_records=_gt_records("cal", 4, swap_classes=True),
         holdout_records=_gt_records("hold", 4, swap_classes=True, offset=5000.0))
-    sweep = b.params["conf"].sweep
+    sweep = b.params["conf"].gate_evidence
     assert sweep["holdout_bias"]["count_bias_mean"] == pytest.approx(0.0)
     assert sweep["failures"] == ["count_bias_exceeds_tolerance_per_class"]
     assert b.params["conf"].validated_against == VALIDATED_FALSE
@@ -176,7 +176,7 @@ def test_gt_door_validates_the_same_geometry_called_correctly():
         "catkin", tiled=True, dataset_hash="h", staged_conf_floor=0.05,
         calibration_records=_gt_records("cal", 4, swap_classes=False),
         holdout_records=_gt_records("hold", 4, swap_classes=False, offset=5000.0))
-    assert b.params["conf"].sweep["failures"] == []
+    assert b.params["conf"].gate_evidence["failures"] == []
     assert b.params["conf"].validated_against == VALIDATED_HELD_OUT
 
 
@@ -188,7 +188,7 @@ def test_single_class_reference_is_unaffected_by_the_conditioning():
     hold = _gt_records("hold", 4, swap_classes=False, classes=(1, 1), offset=5000.0)
     b = resolve_operating_point("catkin", tiled=True, dataset_hash="h", staged_conf_floor=0.05,
                                 calibration_records=cal, holdout_records=hold)
-    sweep = b.params["conf"].sweep
+    sweep = b.params["conf"].gate_evidence
     hb = sweep["holdout_bias"]
     assert b.params["conf"].validated_against == VALIDATED_HELD_OUT
     assert sweep["per_class_count_bias_failures"] == []
@@ -198,7 +198,7 @@ def test_single_class_reference_is_unaffected_by_the_conditioning():
     assert hb["per_class"]["1"]["count_bias_std"] == hb["count_bias_std"]
     # ...and that reuse has to be worth trusting: an independently class-filtered sweep over the
     # same records must produce the same statistics the shortcut hands back.
-    explicit = sweep_operating_point(hold, tolerance=sweep["calibration"]["tolerance"],
+    explicit = derive_operating_point_curve(hold, tolerance=sweep["calibration"]["tolerance"],
                                      class_id=1, conf_grid=[hb["conf"]])["curve"][0]
     for key in ("tp", "fp", "fn", "count_bias_mean", "count_bias_std", "n_images", "n_present"):
         assert hb["per_class"]["1"][key] == pytest.approx(explicit[key])
@@ -212,7 +212,7 @@ def test_a_class_the_holdout_never_carries_cannot_be_validated_by_its_absence():
     hold = _gt_records("hold", 4, swap_classes=False, classes=(1, 1), offset=5000.0)
     b = resolve_operating_point("catkin", tiled=True, dataset_hash="h", staged_conf_floor=0.05,
                                 calibration_records=cal, holdout_records=hold)
-    sweep = b.params["conf"].sweep
+    sweep = b.params["conf"].gate_evidence
     assert sweep["per_class_count_bias_failures"] == []   # the holdout has nothing to fail on
     assert sweep["holdout_missing_classes"] == ["2"]
     assert "holdout_missing_class" in sweep["failures"]
@@ -261,7 +261,7 @@ def test_a_class_scarce_in_the_holdout_cannot_be_diluted_to_a_pass():
     hold = _sparse_class_records("hold", 20, offset=5000.0)
     b = resolve_operating_point("catkin", tiled=True, dataset_hash="h", staged_conf_floor=0.05,
                                 calibration_records=cal, holdout_records=hold)
-    sweep = b.params["conf"].sweep
+    sweep = b.params["conf"].gate_evidence
     c2 = sweep["holdout_bias"]["per_class"]["2"]
     assert c2["n_images"] == 20
     assert c2["n_present"] == 2
@@ -278,8 +278,8 @@ def test_holdout_class_coverage_admits_a_reference_that_evidences_every_class():
     hold = _gt_records("hold", 4, swap_classes=False, offset=5000.0)
     b = resolve_operating_point("catkin", tiled=True, dataset_hash="h", staged_conf_floor=0.05,
                                 calibration_records=cal, holdout_records=hold)
-    assert b.params["conf"].sweep["holdout_missing_classes"] == []
-    assert b.params["conf"].sweep["failures"] == []
+    assert b.params["conf"].gate_evidence["holdout_missing_classes"] == []
+    assert b.params["conf"].gate_evidence["failures"] == []
     assert b.params["conf"].validated_against == VALIDATED_HELD_OUT
 
 
@@ -298,7 +298,7 @@ def test_missing_class_failure_has_its_own_breeder_message():
 
 
 def test_per_class_keys_survive_the_sweep_artifact_round_trip():
-    # run_inference persists the whole sweep to .tcip/artifacts/operating_point_sweep_<hash>.json,
+    # run_inference persists the whole curve to .tcip/artifacts/operating_point_sweep_<hash>.json,
     # so the gate's per-class breakdown is only reconstructable later if its keys are JSON-stable:
     # int keys would come back as strings and silently stop matching an in-memory read.
     b = resolve_operating_point(
@@ -306,9 +306,9 @@ def test_per_class_keys_survive_the_sweep_artifact_round_trip():
         calibration_records=_gt_records("cal", 4, swap_classes=True),
         holdout_records=_gt_records("hold", 4, swap_classes=True, offset=5000.0))
     path = Path(os.environ["TCIP_STATE_ROOT"]) / "sweep.json"
-    path.write_text(json.dumps({"sweep": b.params["conf"].sweep}), encoding="utf-8")
-    reloaded = json.loads(path.read_text(encoding="utf-8"))["sweep"]
-    assert reloaded["holdout_bias"]["per_class"] == b.params["conf"].sweep["holdout_bias"]["per_class"]
+    path.write_text(json.dumps({"gate_evidence": b.params["conf"].gate_evidence}), encoding="utf-8")
+    reloaded = json.loads(path.read_text(encoding="utf-8"))["gate_evidence"]
+    assert reloaded["holdout_bias"]["per_class"] == b.params["conf"].gate_evidence["holdout_bias"]["per_class"]
     assert reloaded["per_class_count_bias_failures"] == ["1", "2"]
 
 
@@ -325,7 +325,7 @@ def test_no_conf_in_the_sweep_escapes_a_wholesale_class_swap():
     for i, r in enumerate(recs):                 # a real score spread, so confs actually filter
         for k, d in enumerate(r["dt"]):
             d["score"] = 0.15 + 0.1 * k
-    sweep = sweep_operating_point(recs, tolerance=0.5 * gt_class_avg_size(recs))
+    sweep = derive_operating_point_curve(recs, tolerance=0.5 * gt_class_avg_size(recs))
     assert len(sweep["curve"]) > 4
     filtered = [c for c in sweep["curve"] if c["fp"] + c["tp"] < 32]
     assert filtered, "fixture is vacuous: no conf on the curve filters any detection"
@@ -380,7 +380,7 @@ def test_pick_serves_the_worst_class_not_the_pooled_total():
 
     recs = build("w", 0.0)
 
-    sweep = sweep_operating_point(recs, tolerance=0.5 * gt_class_avg_size(recs))
+    sweep = derive_operating_point_curve(recs, tolerance=0.5 * gt_class_avg_size(recs))
     at = {round(c["conf"], 2): c for c in sweep["curve"]}
     assert at[0.95]["count_bias_mean"] == pytest.approx(0.0)       # the pooled trap
     assert at[0.95]["per_class"]["3"]["count_bias_mean"] == pytest.approx(-2.0)
@@ -398,9 +398,9 @@ def test_pick_serves_the_worst_class_not_the_pooled_total():
     b = resolve_operating_point("catkin", tiled=True, dataset_hash="h", staged_conf_floor=0.05,
                                 calibration_records=recs, holdout_records=build("h", 5000.0))
     assert b.params["conf"]._raw == pytest.approx(0.4)  # still the worst-class-aware pick
-    assert "count_bias_exceeds_tolerance" in b.params["conf"].sweep["failures"]        # pooled
-    assert "count_bias_exceeds_tolerance_per_class" in b.params["conf"].sweep["failures"]
-    assert set(b.params["conf"].sweep["per_class_count_bias_failures"]) == {"1", "2", "3"}
+    assert "count_bias_exceeds_tolerance" in b.params["conf"].gate_evidence["failures"]        # pooled
+    assert "count_bias_exceeds_tolerance_per_class" in b.params["conf"].gate_evidence["failures"]
+    assert set(b.params["conf"].gate_evidence["per_class_count_bias_failures"]) == {"1", "2", "3"}
     assert b.params["conf"].validated_against == VALIDATED_FALSE
 
 
@@ -452,7 +452,7 @@ def test_pick_serves_the_worst_class_not_the_pooled_total_admits_it_when_dense_e
         return recs
 
     recs = build("w", 0.0)
-    sweep = sweep_operating_point(recs, tolerance=0.5 * gt_class_avg_size(recs))
+    sweep = derive_operating_point_curve(recs, tolerance=0.5 * gt_class_avg_size(recs))
     at = {round(c["conf"], 2): c for c in sweep["curve"]}
     # The pinned arithmetic from the test above is unchanged by the background objects.
     assert at[0.95]["per_class"]["3"]["count_bias_mean"] == pytest.approx(-2.0)
@@ -462,7 +462,7 @@ def test_pick_serves_the_worst_class_not_the_pooled_total_admits_it_when_dense_e
     b = resolve_operating_point("catkin", tiled=True, dataset_hash="h", staged_conf_floor=0.05,
                                 calibration_records=recs, holdout_records=build("h", 5000.0))
     assert b.params["conf"].value == pytest.approx(0.4)
-    assert b.params["conf"].sweep["failures"] == []
+    assert b.params["conf"].gate_evidence["failures"] == []
     assert b.params["conf"].validated_against == VALIDATED_HELD_OUT
 
 
@@ -545,7 +545,7 @@ def test_per_class_stamped_tolerance_reflects_the_floor_not_just_the_fraction_te
         "catkin", tiled=True, dataset_hash="h", staged_conf_floor=0.05,
         calibration_records=_floor_matters_records("c", 0.0),
         holdout_records=_floor_matters_records("h", 5000.0))
-    sweep = b.params["conf"].sweep
+    sweep = b.params["conf"].gate_evidence
     assert sweep["per_class_typical_count"]["2"] == pytest.approx(2.0)
     # The floor (1/5 == 0.2), not the fraction term alone (0.01 * 2 == 0.02) -- an order of magnitude
     # apart, so this is not a rounding coincidence.
@@ -585,7 +585,7 @@ def test_a_class_present_on_exactly_one_holdout_image_cannot_be_validated_by_it_
 
     b = resolve_operating_point("catkin", tiled=True, dataset_hash="h", staged_conf_floor=0.05,
                                 calibration_records=build("c", 0.0), holdout_records=build("h", 5000.0))
-    sweep = b.params["conf"].sweep
+    sweep = b.params["conf"].gate_evidence
     assert sweep["holdout_bias"]["per_class"]["2"]["n_present"] == 1
     assert sweep["per_class_insufficient_images"] == ["2"]
     assert "insufficient_holdout_images_per_class" in sweep["failures"]
@@ -610,7 +610,7 @@ def test_a_class_missing_entirely_gets_the_missing_class_message_not_the_single_
     hold = _gt_records("hold", 4, swap_classes=False, classes=(1, 1), offset=5000.0)  # holdout: only 1
     b = resolve_operating_point("catkin", tiled=True, dataset_hash="h", staged_conf_floor=0.05,
                                 calibration_records=cal, holdout_records=hold)
-    sweep = b.params["conf"].sweep
+    sweep = b.params["conf"].gate_evidence
     assert "2" not in sweep["holdout_bias"]["per_class"]  # not present at all -- no n_present==0 key
     assert sweep["per_class_insufficient_images"] == []
     assert sweep["holdout_missing_classes"] == ["2"]
@@ -620,19 +620,19 @@ def test_a_class_missing_entirely_gets_the_missing_class_message_not_the_single_
 
 
 def test_sweep_summary_surfaces_per_class_tolerance_and_typical_count():
-    """Per-class provenance fields were added to `sweep_summary` (the agent-facing compact view)
+    """Per-class provenance fields were added to `gate_evidence_summary` (the agent-facing compact view)
     but nothing asserted they actually reach its output -- deleting them left the suite green.
     Drives a real refusal through the real door end to end, then checks the compact view a caller
     (e.g. run_inference's response) actually sees, not just the full sidecar.
     """
-    from tcip_mcp.pipelines.calibration import sweep_summary
+    from tcip_mcp.pipelines.calibration import gate_evidence_summary
 
     b = resolve_operating_point(
         "catkin", tiled=True, dataset_hash="h", staged_conf_floor=0.05,
         calibration_records=_gt_records("cal", 4, swap_classes=True),
         holdout_records=_gt_records("hold", 4, swap_classes=True, offset=5000.0))
-    sweep = b.params["conf"].sweep
-    out = sweep_summary(b.params["conf"])
+    sweep = b.params["conf"].gate_evidence
+    out = gate_evidence_summary(b.params["conf"])
     assert out["per_class_count_bias_tolerance"] == sweep["per_class_count_bias_tolerance"]
     assert out["pooled_typical_count"] == sweep["pooled_typical_count"]
     assert out["per_class_typical_count"] == sweep["per_class_typical_count"]

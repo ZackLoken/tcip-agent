@@ -69,7 +69,7 @@ def test_a_rare_class_is_not_granted_the_dense_class_density_as_its_tolerance():
     only the class's own density refuses this reference.
     """
     b = _resolve(spurious=True)
-    sweep = b.params["conf"].sweep
+    sweep = b.params["conf"].gate_evidence
     hb = sweep["holdout_bias"]
     rare = hb["per_class"]["2"]
 
@@ -100,7 +100,7 @@ def test_the_same_dense_and_rare_class_pairing_validates_when_every_class_is_hon
     would block every legitimate multi-class reference.
     """
     b = _resolve(spurious=False)
-    sweep = b.params["conf"].sweep
+    sweep = b.params["conf"].gate_evidence
 
     assert set(sweep["holdout_bias"]["per_class"]) == {"1", "2"}
     assert sweep["per_class_count_bias_failures"] == []

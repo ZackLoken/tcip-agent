@@ -203,7 +203,7 @@ class ResolvedParam:
     dataset_hash: str | None = None
     capture_scoped: bool = False  # True => only valid for the single capture named by capture_id
     capture_id: str | None = None
-    sweep: dict | None = None  # sensitivity data (e.g. count-vs-conf curve) for a validated param
+    gate_evidence: dict | None = None  # sensitivity data (e.g. count-vs-conf curve) for a validated param
 
     def __post_init__(self) -> None:
         if self.source not in SOURCES:
@@ -252,7 +252,7 @@ class ResolvedParam:
         """Escape hatch: read the raw value while explicitly acknowledging it is unvalidated.
 
         The caller must pass ``acknowledge_unvalidated=True`` and is responsible for stamping the
-        resulting output ``validated=false`` (carrying ``self.sweep``) so the uncertainty travels on.
+        resulting output ``validated=false`` (carrying ``self.gate_evidence``) so the uncertainty travels on.
         """
         if not acknowledge_unvalidated:
             raise UnvalidatedOperatingPointError(
@@ -274,8 +274,8 @@ class ResolvedParam:
             "dataset_hash": self.dataset_hash,
             "capture_scoped": self.capture_scoped,
             "capture_id": self.capture_id,
-            # the full sweep can be large; keep a marker, callers attach it separately if wanted
-            "has_sweep": self.sweep is not None,
+            # the full gate evidence can be large; keep a marker, callers attach it separately if wanted
+            "has_gate_evidence": self.gate_evidence is not None,
         }
 
 
@@ -283,13 +283,13 @@ def derived(name: str, value: Any, *, derived_from: str,
             requires_validation: bool = False, validation_kind: str | None = None,
             validated_against: str | None = None, dataset_scoped: bool = False,
             dataset_hash: str | None = None, capture_scoped: bool = False,
-            capture_id: str | None = None, sweep: dict | None = None) -> ResolvedParam:
+            capture_id: str | None = None, gate_evidence: dict | None = None) -> ResolvedParam:
     """Convenience constructor for a data/model-derived param (``source="derived"``)."""
     return ResolvedParam(
         name=name, _raw=value, source="derived", derived_from=derived_from,
         requires_validation=requires_validation, validation_kind=validation_kind,
         validated_against=validated_against, dataset_scoped=dataset_scoped, dataset_hash=dataset_hash,
-        capture_scoped=capture_scoped, capture_id=capture_id, sweep=sweep,
+        capture_scoped=capture_scoped, capture_id=capture_id, gate_evidence=gate_evidence,
     )
 
 
@@ -665,6 +665,7 @@ _SIDECAR_STORES: dict[str, str] = {
             codec=RECORD_JSON,
             concurrency="cas",
             locator=_SIDECAR_LOCATOR,
+            schema_version=2,
         )
     ).name
     for document in (filename[: -len(".json")] for filename in sorted(_SIDECAR_FILENAMES))
@@ -840,7 +841,7 @@ def operating_point_stamp(
     inference worker), so a provenance key one path needs exists on all of them and a reader can
     ask the same question of any bucket. Every field is required, with no default that would let a
     door quietly omit what stands behind its counts; the per-path additions a single producer has
-    (a persisted sweep, a mask-binarize threshold, a block calibration's own record) travel through
+    (persisted gate evidence, a mask-binarize threshold, a block calibration's own record) travel through
     ``fields``.
 
     ``validated`` is the producing door's own verdict over the dimensions it resolved. The tile
@@ -852,8 +853,16 @@ def operating_point_stamp(
     :func:`seal_validation` returns, and ``None`` for a stamp that claims nothing. It has no default
     on purpose: a producer that stamps a validated bucket must have earned a record to name, and a
     producer that stamps an unvalidated one says so at its own call site.
+
+    ``schema_version`` marks the writing vintage of this stamp, not of every value it carries: the
+    review-promotion path merges its own fields into a stamp a producing run already wrote, and a
+    promoted record's ``schema_version`` says the promotion wrote under the current vocabulary while
+    an untouched carried subrecord (a stored ``mask_binarize`` spelled under an older provenance
+    vocabulary, say) may still read under that older spelling. That carried-subrecord reading is
+    deliberate, not a gap to close.
     """
     return {
+        "schema_version": 2,
         "trait": trait,
         "dataset_hash": dataset_hash,
         "operating_point": operating_point,
@@ -892,13 +901,14 @@ def prediction_producer(checkpoint_path: str, sha256: str) -> str:
 
 
 STAMP_KEYS: frozenset[str] = frozenset((
-    "trait", "dataset_hash", "operating_point", "id_map", "validated", "validated_by",
-    "tile_size_validated", "shippable_issues", "checkpoint", "checkpoint_sha256", "experiment_id",
-    "images_dir", "raster_path", "produced_at",
+    "schema_version", "trait", "dataset_hash", "operating_point", "id_map", "validated",
+    "validated_by", "tile_size_validated", "shippable_issues", "checkpoint", "checkpoint_sha256",
+    "experiment_id", "images_dir", "raster_path", "produced_at",
 ))
-"""``operating_point_stamp``'s own fourteen keys: the ones it returns unconditionally, before a
+"""``operating_point_stamp``'s own fifteen keys: the ones it returns unconditionally, before a
 producer's own ``**fields``. Declared literally rather than derived from the signature, since a
-parameter name matching its returned key is this constructor's own convention, not a guarantee;
+parameter name matching its returned key is this constructor's own convention, not a guarantee (and
+``schema_version`` is a literal the function stamps, never a parameter at all);
 ``tests/test_operating_point_sidecar_seam.py`` pins the two against each other."""
 
 STAMP_EXTENSION_KEYS: dict[str, str] = {
@@ -914,10 +924,10 @@ STAMP_EXTENSION_KEYS: dict[str, str] = {
     "raster_content_identity": "the raster-export door, recorded for every run of that regime",
     "overlap": "the web inference worker",
     "overlap_source": "the web inference worker",
-    "sweep_path": "the shared per-image bucket publisher behind export_predictions and "
-                 "tabulate_counts's live path, for a calibrated run that persisted a sweep",
-    "sweep_summary": "the shared per-image bucket publisher behind export_predictions and "
-                     "tabulate_counts's live path, for a calibrated run that persisted a sweep",
+    "calibration_curve_path": "the shared per-image bucket publisher behind export_predictions and "
+                 "tabulate_counts's live path, for a calibrated run that persisted a curve",
+    "gate_evidence_summary": "the shared per-image bucket publisher behind export_predictions and "
+                     "tabulate_counts's live path, for a calibrated run that persisted a curve",
     "image_filenames": "the per-image bucket publishers (the shared image-bucket publisher behind "
                        "export_predictions and tabulate_counts's live path, and the web inference "
                        "worker): each prediction document stem mapped to its source image's "
@@ -1145,16 +1155,16 @@ def _resolver_value(result: Any, param_key: str) -> Any:
     return _UNCOMPARED
 
 
-def _disjointness_sweep(result: Any, document: str, caller: str) -> dict | None:
-    """The sweep dict a disjointness-reading resolver checks, for one declared document
-    (:data:`_DOCUMENT_PARAM`): the document guard and the live-result-to-sweep extraction
+def _disjointness_evidence(result: Any, document: str, caller: str) -> dict | None:
+    """The gate evidence dict a disjointness-reading resolver checks, for one declared document
+    (:data:`_DOCUMENT_PARAM`): the document guard and the live-result-to-evidence extraction
     :func:`resolver_train_disjointness` and :func:`resolver_selection_disjointness` both need,
-    in one place so declaring a fifth checked document, or changing how a sweep is pulled out of
+    in one place so declaring a fifth checked document, or changing how evidence is pulled out of
     a live result, edits one function rather than two that must agree.
 
     ``None`` for ``resolve_scale`` (no training run to check against) and for a result carrying
-    no sweep at all. A document neither resolver knows how to read from raises, naming ``caller``,
-    rather than silently sealing ``null`` for a check nobody ran.
+    no gate evidence at all. A document neither resolver knows how to read from raises, naming
+    ``caller``, rather than silently sealing ``null`` for a check nobody ran.
     """
     if document == "resolve_scale":
         return None
@@ -1168,9 +1178,9 @@ def _disjointness_sweep(result: Any, document: str, caller: str) -> dict | None:
         )
     param_key, _ = _DOCUMENT_PARAM[document]
     if isinstance(result, ResolvedBundle):
-        return result.get(param_key).sweep
+        return result.get(param_key).gate_evidence
     if isinstance(result, Mapping):
-        return result.get("sweep_data")
+        return result.get("gate_evidence")
     return None
 
 
@@ -1179,8 +1189,8 @@ def resolver_train_disjointness(result: Any, document: str) -> dict | None:
     gate itself records, ``{"checked": bool, "group_check": str | None}``, never a bare ``true``
     over a check the gate's own record says did not run.
     """
-    sweep = _disjointness_sweep(result, document, "resolver_train_disjointness")
-    td = (sweep or {}).get("train_disjointness")
+    evidence = _disjointness_evidence(result, document, "resolver_train_disjointness")
+    td = (evidence or {}).get("train_disjointness")
     if not isinstance(td, dict):
         return None
     return {"checked": bool(td.get("checked")), "group_check": td.get("group_check")}
@@ -1189,14 +1199,14 @@ def resolver_train_disjointness(result: Any, document: str) -> dict | None:
 def resolver_selection_disjointness(result: Any, document: str) -> dict | None:
     """Whether and how a resolver's own live result checked selection-disjointness (the
     checkpoint's own selection side, ``split.json``'s ``val``, disjoint from the reference): the
-    same shape a live sweep carries, ``applicable``, ``reason``, ``checked``, ``unresolvable``,
+    same shape live gate evidence carries, ``applicable``, ``reason``, ``checked``, ``unresolvable``,
     ``leaked_groups``, ``leaked_stems``, ``group_check`` and, when the calibration read a label
     directory, the four label-movement keys plus ``calibration_labels_dir`` beside them, so the
     row a delivery door reads carries the leak fields and the movement facts its floor and its
     breeder sentence read, not only the pass/fail booleans.
     """
-    sweep = _disjointness_sweep(result, document, "resolver_selection_disjointness")
-    sd = (sweep or {}).get("selection_disjointness")
+    evidence = _disjointness_evidence(result, document, "resolver_selection_disjointness")
+    sd = (evidence or {}).get("selection_disjointness")
     if not isinstance(sd, dict):
         return None
     return {
@@ -1533,6 +1543,7 @@ def seal_validation(
             draft.document, _CALIBRATION_EXPERIMENT_DERIVATION[None])},
     )
     body = {
+        "schema_version": 2,
         "document": draft.document,
         "trait": draft.trait,
         "claim": claim,

@@ -76,7 +76,8 @@ def test_stamp_floors_validated_when_the_tile_scale_has_no_basis():
 
 def test_stamp_admits_a_producer_specific_field():
     """The one shape is a floor, not a ceiling: a producer with an extra fact still records it."""
-    assert _stamp(sweep_path="/artifacts/sweep.json")["sweep_path"] == "/artifacts/sweep.json"
+    assert (_stamp(calibration_curve_path="/artifacts/curve.json")["calibration_curve_path"]
+            == "/artifacts/curve.json")
 
 
 # --- the declared key set: one union, checked at the two writers ---
@@ -101,8 +102,8 @@ def test_write_sidecar_refuses_an_undeclared_top_level_key(tmp_path):
 def test_write_sidecar_admits_every_declared_extension_key(tmp_path):
     """The rail must admit valid work: every real producer's own addition (the raster export's
     claim_scope_validated/block_calibration/raster_content_identity, the web worker's overlap/
-    overlap_source, the review promotion's five, the calibrated run's sweep_path/sweep_summary,
-    mask_binarize) writes cleanly through the declared union."""
+    overlap_source, the review promotion's five, the calibrated run's calibration_curve_path/
+    gate_evidence_summary, mask_binarize) writes cleanly through the declared union."""
     from tcip_mcp.pipelines.resolution import STAMP_EXTENSION_KEYS
 
     bucket = tmp_path / "bucket"
@@ -135,7 +136,7 @@ def test_update_sidecar_admits_a_promotion_over_a_stamp_carrying_a_pre_existing_
     with tcip_store.transaction(key) as txn:
         txn.write(key, stamp)
 
-    ok = update_sidecar(bucket, lambda stored: {**stored, "sweep_path": "/artifacts/sweep.json"})
+    ok = update_sidecar(bucket, lambda stored: {**stored, "calibration_curve_path": "/artifacts/curve.json"})
 
     assert ok is True
     assert read_operating_point_sidecar(bucket)["hand_authored_field"] == "legacy"
@@ -143,13 +144,28 @@ def test_update_sidecar_admits_a_promotion_over_a_stamp_carrying_a_pre_existing_
 
 def test_the_key_set_rail_is_scoped_to_the_operating_point_document_only(tmp_path):
     """Other sidecar documents (classifier/ordinal/regression) carry no declared shape and are not
-    checked here: their own producers already write fields (failures, sweep_data) this constructor
-    never declared."""
+    checked here: their own producers already write fields (failures, gate_evidence) this
+    constructor never declared."""
     bucket = tmp_path / "bucket"
     write_sidecar(
-        bucket, {"validated": False, "trait": "catkin", "failures": [], "sweep_data": {}},
+        bucket, {"validated": False, "trait": "catkin", "failures": [], "gate_evidence": {}},
         "ordinal_operating_point",
     )
+
+
+def test_an_old_vintage_sweep_data_keyed_sidecar_still_reads(tmp_path):
+    """Coverage, not a guard: a record an older producer wrote under the retired ``sweep_data``
+    key (never rewritten by this migration) reads through the real reader with nothing raising,
+    since these unshaped documents carry no key-set rail at all to reject it on."""
+    bucket = tmp_path / "bucket"
+    write_sidecar(
+        bucket, {"validated": False, "trait": "catkin", "failures": [], "sweep_data": {"kappa": 0.5}},
+        "classifier_operating_point",
+    )
+    from tcip_mcp.pipelines.resolution import read_classifier_operating_point_sidecar
+
+    stamp = read_classifier_operating_point_sidecar(bucket)
+    assert stamp["sweep_data"] == {"kappa": 0.5}
 
 
 # --- the store: locked, compare-and-set, byte-compatible with what readers expect ---
