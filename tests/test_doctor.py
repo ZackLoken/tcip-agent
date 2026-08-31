@@ -428,6 +428,23 @@ def test_a_missing_checkpoint_and_a_test_checkpoint_are_distinct_registry_findin
     assert "test/temp" in scratch_line and "checkpoint missing" not in scratch_line
 
 
+def test_a_checkpoint_under_a_temp_rooted_project_is_not_pollution(tmp_path):
+    """``tmp_path`` itself sits under a temp tree (pytest's own fixture), so a checkpoint
+    resolving inside the project is never pollution merely because the project's own location
+    carries a temp-tree marker: only a checkpoint the root does not contain is scanned."""
+    root = _layout_project(tmp_path, "2026-03-04")
+    ckpt_dir = root / ".tcip" / "models"
+    ckpt_dir.mkdir(parents=True)
+    (ckpt_dir / "m.pt").write_bytes(b"weights")
+    (ckpt_dir / "registry.json").write_text(json.dumps({"schema_version": 2, "entries": [
+        {"name": "m", "checkpoint_path": ".tcip/models/m.pt"}]}))
+
+    res = _run(root, file_layout=True)
+
+    assert "test/temp" not in res.stdout
+    assert "checkpoint missing" not in res.stdout
+
+
 def _dir_outside_any_temp_tree() -> Path:
     """A writable directory whose path carries none of the doctor's temp-tree markers.
 

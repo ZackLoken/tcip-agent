@@ -213,6 +213,12 @@ def check_registry(root: Path, findings: list) -> None:
     """Flag registered models whose checkpoint is missing or points into a test/temp tree, and
     every prediction bucket whose stamp names a checkpoint digest no registry entry carries.
 
+    A checkpoint resolving under the project root never triggers the temp-tree marker scan, even
+    when the root itself sits under one (a fixture, a sandboxed workspace): a marker anywhere in
+    that path is then a fact about the root's own location, not the checkpoint's, and the project
+    is legitimate work, not pollution. Only a checkpoint the root does not contain is scanned, the
+    genuinely stray case the marker exists to catch.
+
     Every way the registry index can refuse to be read comes out as a finding, not as a
     traceback: the doctor's contract is an exit code and a list, and a check that dies takes the
     whole run's findings and exit code with it. A store that will not decode and a database file
@@ -223,7 +229,9 @@ def check_registry(root: Path, findings: list) -> None:
     from tcip_mcp.dataset_layout import list_models, prediction_root
     from tcip_mcp.model_registry import RegistryVersionRefused, read_registry_index
     from tcip_mcp.pipelines.resolution import read_operating_point_sidecar
-    from tcip_mcp.registry_paths import RegistryPathEmpty, RegistryPathTraversal, resolved_registry_path
+    from tcip_mcp.registry_paths import (
+        RegistryPathEmpty, RegistryPathTraversal, is_at_or_under, resolved_registry_path,
+    )
 
     try:
         entries = read_registry_index(root)
@@ -232,6 +240,7 @@ def check_registry(root: Path, findings: list) -> None:
                         f"project's registered models could not be checked at all: {exc}"))
         return
     entry_list = entries if isinstance(entries, list) else []
+    root_resolved = Path(root).resolve()
     for m in entry_list:
         ckpt_raw = m.get("checkpoint_path", "")
         if "metrics_source" not in m:
@@ -247,12 +256,15 @@ def check_registry(root: Path, findings: list) -> None:
             continue
         # Existence resolves first; the temp-tree marker scan runs over the resolved string.
         try:
-            ckpt = str(resolved_registry_path(root, ckpt_raw))
+            resolved = resolved_registry_path(root, ckpt_raw)
         except (RegistryPathEmpty, RegistryPathTraversal) as exc:
             findings.append(("error", f"registry entry {m.get('name')!r} checkpoint_path "
                             f"could not be resolved: {exc}"))
             continue
-        if any(marker in ckpt for marker in TEMP_TREE_MARKERS):
+        ckpt = str(resolved)
+        stray = not is_at_or_under(resolved, root_resolved) and any(
+            marker in ckpt for marker in TEMP_TREE_MARKERS)
+        if stray:
             findings.append(("error", f"registry entry {m.get('name')!r} points at a test/temp "
                             f"checkpoint: {ckpt}"))
         elif not Path(ckpt).is_file():
