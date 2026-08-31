@@ -56,11 +56,11 @@ def _write_real_prediction(bucket, stem: str, *, score: float = 0.9) -> None:
                            id_map={fx.COUNT_SUBJECT: 0})
 
 
-def _unvalidated_run_result(*, experiment_id=None):
+def _unvalidated_run_result(*, experiment_id=None, stem="a"):
     """A stand-in live-run result honestly stamped unvalidated: bypasses the earned-evidence path
     (``_draft_count_claim`` returns nothing to open) so a test about the publish bracket's own
     tile/lineage checks is not entangled with the calibration-evidence machinery."""
-    return {"results": [{"image": "a.png", "width": 100, "height": 100,
+    return {"results": [{"image": f"{stem}.png", "width": 100, "height": 100,
                         "boxes": [[10.0, 10.0, 30.0, 30.0]], "scores": [0.9], "labels": [1],
                         "count": 1}],
            "image_count": 1, "total_detections": 1, "id_map": None,
@@ -70,11 +70,11 @@ def _unvalidated_run_result(*, experiment_id=None):
 
 
 def _earned_run_result(tmp_path, *, trait=fx.COUNT_TRAIT, tiled=False, tile_size=None,
-                       tile_size_source="default"):
+                       tile_size_source="default", stem="a"):
     """A stand-in live-run result that left behind real evidence, so a bucket published from it
     earns a genuine validation record (the same shape test_delivery_gate.py's own helper builds)."""
     return {
-        "results": [{"image": "a.png", "width": 100, "height": 100,
+        "results": [{"image": f"{stem}.png", "width": 100, "height": 100,
                     "boxes": [[10.0, 10.0, 30.0, 30.0]], "scores": [0.9], "labels": [1],
                     "count": 1}],
         "image_count": 1, "total_detections": 1, "id_map": None,
@@ -557,9 +557,122 @@ def test_bucket_regime_falls_back_to_the_stem_for_a_bucket_with_no_filename_map(
     r = itools.tabulate_counts(predictions_dir=str(bucket), output_path=str(out_csv),
                                trait=fx.COUNT_TRAIT, acknowledge_unvalidated=True)
     assert "error" not in r, r
-    assert "predates the image filename map" in r["image_note"]
+    assert "carries no image filename map" in r["image_note"]
     rows = list(csv.DictReader(out_csv.open()))
     assert rows[0]["image"] == "a"
+
+
+def test_bucket_regime_partial_map_delivers_filenames_for_mapped_rows_and_stems_for_the_rest(
+    tmp_path,
+):
+    """A stamp's image filename map naming some but not all of the bucket's documents' stems
+    delivers the mapped rows under their filename and the rest under the bare stem, disclosing
+    the unmapped stems through image_note: the fallback branch is per-row, not all-or-nothing."""
+    import tcip_mcp.tools.inference_tools as itools
+
+    bucket = tmp_path / "preds"
+    _write_real_prediction(bucket, "a")
+    _write_real_prediction(bucket, "b")
+    stamp = {"trait": fx.COUNT_TRAIT, "images_dir": str(tmp_path), "raster_path": None,
+             "image_filenames": {"a": "a.png"},
+             "operating_point": {"conf": {"value": 0.5, "validated_against": VALIDATED_FALSE}}}
+    write_bound_sidecar(bucket, stamp, dataset_root=tmp_path)
+
+    out_csv = tmp_path / "o.csv"
+    r = itools.tabulate_counts(predictions_dir=str(bucket), output_path=str(out_csv),
+                               trait=fx.COUNT_TRAIT, acknowledge_unvalidated=True)
+    assert "error" not in r, r
+    assert "['b']" in r["image_note"]
+    rows = {row["image"]: row for row in csv.DictReader(out_csv.open())}
+    assert "a.png" in rows
+    assert "b" in rows
+
+
+def test_bucket_regime_gate_refusal_on_a_mapless_bucket_carries_the_image_note(tmp_path):
+    """A gate refusal (unvalidated conf, unacknowledged) is counts-bearing already; it must not
+    drop the same fallback disclosure a successful delivery off the same bucket would carry."""
+    import tcip_mcp.tools.inference_tools as itools
+
+    bucket = tmp_path / "preds"
+    _write_real_prediction(bucket, "a")
+    stamp = {"trait": fx.COUNT_TRAIT, "images_dir": str(tmp_path), "raster_path": None,
+             "operating_point": {"conf": {"value": 0.5, "validated_against": VALIDATED_FALSE}}}
+    write_bound_sidecar(bucket, stamp, dataset_root=tmp_path)
+
+    r = itools.tabulate_counts(predictions_dir=str(bucket), output_path=str(tmp_path / "o.csv"),
+                               trait=fx.COUNT_TRAIT)
+    assert "error" in r
+    assert "carries no image filename map" in r["image_note"]
+
+
+def test_bucket_regime_refuses_a_non_dict_image_filenames_in_the_stamp(tmp_path):
+    """A stamp whose image_filenames is not a mapping (a corrupted or hand-edited stamp) refuses
+    by name before _bucket_csv_rows ever calls .get on it, rather than crashing with
+    AttributeError on a value that carries no .get method."""
+    import tcip_mcp.tools.inference_tools as itools
+
+    bucket = tmp_path / "preds"
+    _write_real_prediction(bucket, "a")
+    stamp = {"trait": fx.COUNT_TRAIT, "images_dir": str(tmp_path), "raster_path": None,
+             "image_filenames": ["a.png"],
+             "operating_point": {"conf": {"value": 0.5, "validated_against": VALIDATED_FALSE}}}
+    write_bound_sidecar(bucket, stamp, dataset_root=tmp_path)
+
+    r = itools.tabulate_counts(predictions_dir=str(bucket), output_path=str(tmp_path / "o.csv"),
+                               trait=fx.COUNT_TRAIT, acknowledge_unvalidated=True)
+    assert "error" in r
+    assert "image_filenames" in r["error"]
+
+
+def test_live_regime_success_response_discloses_stale_document_fallback(tmp_path, monkeypatch):
+    """A verdict-free bucket already holding a document from an earlier publish, whose stem this
+    run's fresh stamp map does not name, still gets counted (_bucket_csv_rows reads every document
+    on disk) but that row's image cell falls back to the bare stem; the success response discloses
+    the fallback through image_note rather than reading as a filename it is not."""
+    import tcip_mcp.tools.inference_tools as itools
+
+    bucket = tmp_path / "ds" / "predictions" / "baseline" / "2026-01-01"
+    monkeypatch.setattr(itools, "_run_inference_verified",
+                        lambda *a, **kw: _earned_run_result(tmp_path, stem="a"))
+    first = itools.tabulate_counts(_dummy_checkpoint(tmp_path), str(tmp_path),
+                                   str(tmp_path / "first.csv"), trait=fx.COUNT_TRAIT,
+                                   calibration_labels_dir=str(tmp_path), predictions_dir=str(bucket))
+    assert "error" not in first, first
+    assert "image_note" not in first
+
+    monkeypatch.setattr(itools, "_run_inference_verified",
+                        lambda *a, **kw: _earned_run_result(tmp_path, stem="b"))
+    second = itools.tabulate_counts(_dummy_checkpoint(tmp_path), str(tmp_path),
+                                    str(tmp_path / "second.csv"), trait=fx.COUNT_TRAIT,
+                                    calibration_labels_dir=str(tmp_path),
+                                    predictions_dir=str(bucket))
+    assert "error" not in second, second
+    assert "['a']" in second["image_note"]
+    rows = {row["image"] for row in csv.DictReader((tmp_path / "second.csv").open())}
+    assert "a" in rows          # the stale document's cell fell back to the bare stem
+    assert "b.png" in rows
+
+
+def test_live_regime_gate_refusal_discloses_stale_document_fallback(tmp_path, monkeypatch):
+    """The same stale-document fallback, but the second run's own CSV delivery gate refuses
+    (unvalidated, unacknowledged): the DeliveryRefused refusal dict still carries image_note."""
+    import tcip_mcp.tools.inference_tools as itools
+
+    bucket = tmp_path / "ds" / "predictions" / "baseline" / "2026-01-01"
+    monkeypatch.setattr(itools, "_run_inference_verified",
+                        lambda *a, **kw: _earned_run_result(tmp_path, stem="a"))
+    first = itools.tabulate_counts(_dummy_checkpoint(tmp_path), str(tmp_path),
+                                   str(tmp_path / "first.csv"), trait=fx.COUNT_TRAIT,
+                                   calibration_labels_dir=str(tmp_path), predictions_dir=str(bucket))
+    assert "error" not in first, first
+
+    monkeypatch.setattr(itools, "_run_inference_verified",
+                        lambda *a, **kw: _unvalidated_run_result(stem="b"))
+    r = itools.tabulate_counts(_dummy_checkpoint(tmp_path), str(tmp_path),
+                               str(tmp_path / "second.csv"), trait=fx.COUNT_TRAIT,
+                               predictions_dir=str(bucket))
+    assert "error" in r
+    assert "['a']" in r["image_note"]
 
 
 def test_bucket_regime_reads_a_real_published_bucket_with_no_torch_import(tmp_path):

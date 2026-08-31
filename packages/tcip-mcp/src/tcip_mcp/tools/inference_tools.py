@@ -1853,6 +1853,7 @@ def tabulate_counts(
     dropped_boxes = 0
     bucket_published = False
     lineage_linked = None
+    image_note = None
     csv_rows = result["results"]
     if bucket is not None:
         pub = _publish_bucket_bracket(
@@ -1863,8 +1864,11 @@ def tabulate_counts(
         dropped_boxes = pub["dropped_boxes"]
         lineage_linked = pub["lineage_linked"]
         bucket_published = True
-        # Counted off the just-published documents, filenames off the run's own just-written stamp.
-        csv_rows, _fallback_stems = _bucket_csv_rows(bucket, pub["op_stamp"].get("image_filenames"))
+        # Counted off the just-published documents, filenames off the run's own just-written stamp;
+        # a document from an earlier publish this run's map does not name falls back and discloses.
+        filename_map = pub["op_stamp"].get("image_filenames")
+        csv_rows, fallback_stems = _bucket_csv_rows(bucket, filename_map)
+        image_note = _image_filename_fallback_note(bucket, filename_map, fallback_stems)
 
     provenance = {
         "producer_model_sha256": result.get("checkpoint_sha256"),
@@ -1909,6 +1913,8 @@ def tabulate_counts(
             refusal["dropped_nonpositive_boxes"] = dropped_boxes
             if bucket_root is None:
                 refusal["note"] = _NO_DATASET_ROOT_NOTE.format(bucket=bucket)
+            if image_note is not None:
+                refusal["image_note"] = image_note
         return refusal
 
     # This response carries the counts too, so it needs the proof at the end that the write did.
@@ -1945,6 +1951,8 @@ def tabulate_counts(
         out["lineage_linked"] = lineage_linked
         if bucket_root is None:
             out["note"] = _NO_DATASET_ROOT_NOTE.format(bucket=bucket)
+        if image_note is not None:
+            out["image_note"] = image_note
     # run_inference's own warnings (a CPU-bound workload) are surfaced here too, so a count CSV
     # never ships with the regime it ran in disclosed only in the server log.
     if result.get("warning"):
@@ -1985,6 +1993,29 @@ def _bucket_csv_rows(
             fallback_stems.append(doc.stem)
         image_results.append({"image": filename, "count": len(annotations), "scores": scores})
     return image_results, fallback_stems
+
+
+def _image_filename_fallback_note(
+    bucket_path: Path, filename_map: dict[str, str] | None, fallback_stems: list[str],
+) -> str | None:
+    """The fallback disclosure ``_bucket_csv_rows`` earns, shared by every count-bearing response
+    that reads a bucket's image filename map, whether the call succeeds or a ``DeliveryRefused``
+    refuses it: names which rows' image cells carry a bare document stem instead of the source
+    filename, and why. ``None`` when every row resolved through the map.
+    """
+    if filename_map is None:
+        return (
+            f"{bucket_path}'s stamp carries no image filename map: every row derives from a "
+            "document the map does not name, so every row's image cell carries the bare document "
+            "stem, not the source image's filename."
+        )
+    if fallback_stems:
+        return (
+            f"{bucket_path}'s stamp's image filename map names no entry for stem(s) "
+            f"{sorted(fallback_stems)}: those rows derive from documents the map does not name, "
+            "and their image cells carry the bare stem."
+        )
+    return None
 
 
 def _tabulate_counts_from_bucket(predictions_dir: str, output_path: str, *, trait: str,
@@ -2031,6 +2062,13 @@ def _tabulate_counts_from_bucket(predictions_dir: str, output_path: str, *, trai
         )}
 
     filename_map = sidecar.get("image_filenames")
+    if filename_map is not None and not isinstance(filename_map, dict):
+        return {"error": (
+            f"{bucket_path}'s stamp's image_filenames is not a mapping (got "
+            f"{type(filename_map).__name__}): a bucket regime call expects the stem-to-filename "
+            "map export_predictions, tabulate_counts's live-with-predictions_dir path, or the web "
+            "inference worker writes there, or nothing at all."
+        )}
     image_results, fallback_stems = _bucket_csv_rows(bucket_path, filename_map)
     if not image_results:
         return {"error": (
@@ -2040,17 +2078,7 @@ def _tabulate_counts_from_bucket(predictions_dir: str, output_path: str, *, trai
     image_count = len(image_results)
     total_detections = sum(r["count"] for r in image_results)
 
-    image_note = None
-    if filename_map is None:
-        image_note = (
-            f"{bucket_path}'s stamp predates the image filename map: every image cell in this "
-            "CSV carries the bare document stem, not the source image's filename."
-        )
-    elif fallback_stems:
-        image_note = (
-            f"{bucket_path}'s stamp's image filename map names no entry for stem(s) "
-            f"{sorted(fallback_stems)}: those rows' image cells carry the bare stem."
-        )
+    image_note = _image_filename_fallback_note(bucket_path, filename_map, fallback_stems)
 
     op = sidecar.get("operating_point") or {}
     provenance = {
