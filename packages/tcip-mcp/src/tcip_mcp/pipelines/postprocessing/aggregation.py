@@ -396,10 +396,18 @@ def export_aggregated_csv(
         ``delivered_tail`` composed and wrote into every row, so a caller that needs one of those
         cells back reads the value actually written rather than re-deriving or re-asserting it a
         second time.
+
+    Raises:
+        DeliveryRefused: the gate refused (an unvalidated dimension with no acknowledgement);
+            carries the ``DeliveryGateResult`` and every operative reconciler's binding notes.
+        ValueError: any other refusal (a statement, unit, or meaning problem the results or the
+            trait's operationalization carry); never carries a gate result, so a caller must not
+            read a delivered count off this raise.
     """
     from tcip_mcp.pipelines.resolution import (
         MEASUREMENT_DOCUMENTS,
         VALIDATED_FALSE,
+        DeliveryRefused,
         binding_notes_text,
         check_delivery_gate,
         delivered_tail,
@@ -520,7 +528,7 @@ def export_aggregated_csv(
             binding_notes_text(scale_recon.get("binding_notes", {})),
             binding_notes_text(claim_scope_recon.get("binding_notes", {})),
         )))
-        raise ValueError(f"{gate.reason} {notes}".rstrip())
+        raise DeliveryRefused(gate, notes)
 
     # A confirmation withdrawn or a field moved since the first check refuses here, before anything.
     spec_now, record_now, _ = resolve_trait_and_record(trait, delivery_kind)

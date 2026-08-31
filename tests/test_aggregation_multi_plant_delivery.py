@@ -19,7 +19,7 @@ from tcip_mcp.pipelines.postprocessing.aggregation import (
     aggregate_per_plant,
     export_aggregated_csv,
 )
-from tcip_mcp.pipelines.resolution import VALIDATED_FALSE, VALIDATED_HELD_OUT
+from tcip_mcp.pipelines.resolution import DeliveryRefused, VALIDATED_FALSE, VALIDATED_HELD_OUT
 from tests import _operationalization_fixtures as fx
 from tests._binding_fixtures import write_bound_sidecar, write_prediction
 
@@ -218,7 +218,7 @@ def test_an_ordinal_delivery_never_clears_the_gate_on_the_count_dimension(tmp_pa
     ordinal_only = _ordinal_bucket(tmp_path, "ordinal_preds")
     count_only = _count_bucket(tmp_path, "count_preds")
 
-    with pytest.raises(ValueError, match="unvalidated measurement"):
+    with pytest.raises(DeliveryRefused, match="unvalidated measurement"):
         export_aggregated_csv(
             [{"plant_id": "PLANT_A", "value": 2, "observations": 3, "value_key": "astringency",
              "measurement_document": "ordinal_operating_point", "scale_document": None}],
@@ -248,7 +248,7 @@ def test_a_count_stamp_earned_for_one_trait_floors_a_delivery_of_another(tmp_pat
     trait: the refusal names the sidecar and both traits."""
     bucket = _count_bucket(tmp_path, "count_preds")  # stamped trait=fx.COUNT_TRAIT ("stem")
 
-    with pytest.raises(ValueError) as exc:
+    with pytest.raises(DeliveryRefused) as exc:
         export_aggregated_csv(
             [{"plant_id": "PLANT_A", "value": 4, "observations": 3, "value_key": "astringency",
              "measurement_document": "operating_point", "scale_document": None}],
@@ -279,7 +279,7 @@ def test_a_caller_downgrade_floors_a_validated_ordinal_sidecar(tmp_path):
     rows = [{"plant_id": "PLANT_A", "value": 2, "observations": 3, "value_key": "astringency",
              "measurement_document": "ordinal_operating_point", "scale_document": None}]
 
-    with pytest.raises(ValueError, match="unvalidated measurement"):
+    with pytest.raises(DeliveryRefused, match="unvalidated measurement"):
         export_aggregated_csv(rows, str(tmp_path / "downgraded.csv"),
                               delivered_phenotype="astringency",
                               measurement_validated=VALIDATED_FALSE,
