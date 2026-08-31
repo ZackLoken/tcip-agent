@@ -6,13 +6,23 @@ import importlib.util
 import pathlib
 import sys
 
-SCRIPT = pathlib.Path(__file__).resolve().parents[1] / "scripts" / "check_architecture_doc.py"
+REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
+SCRIPT = REPO_ROOT / "scripts" / "check_architecture_doc.py"
+INVENTORY_SCRIPT = REPO_ROOT / "scripts" / "build_module_inventory.py"
 
 
 def _load():
     spec = importlib.util.spec_from_file_location("check_architecture_doc", SCRIPT)
     mod = importlib.util.module_from_spec(spec)
     sys.modules["check_architecture_doc"] = mod
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _load_inventory_builder():
+    spec = importlib.util.spec_from_file_location("build_module_inventory", INVENTORY_SCRIPT)
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules["build_module_inventory"] = mod
     spec.loader.exec_module(mod)
     return mod
 
@@ -59,3 +69,20 @@ def test_build_artifacts_and_caches_are_outside_the_covered_set(tmp_path):
     (modules / "index.ts").write_text("", encoding="utf-8")
 
     assert checker.check_coverage([], tmp_path) == []
+
+
+def test_architecture_md_counts_match_a_fresh_inventory():
+    """The gate's own self-check: ARCHITECTURE.md's table counts must match what a freshly
+    generated module inventory finds, over the real tree, not a synthetic one. This is the
+    check CI runs; it fails whenever a count drifts, which is the point of running it here too."""
+    checker = _load()
+    builder = _load_inventory_builder()
+
+    inventory = builder.build_inventory()
+    md_text = (REPO_ROOT / "ARCHITECTURE.md").read_text(encoding="utf-8")
+    rows = checker.parse_module_rows(md_text)
+    parsed = [r for r in rows if not r.get("unparsed")]
+
+    findings = checker.check_counts(parsed, inventory)
+
+    assert findings == []
