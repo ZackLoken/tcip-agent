@@ -1,5 +1,5 @@
-"""The calibration-sweep pair every inference door shares: resolve a per-dataset operating point
-from a labeled split, and its compact, response-safe summary.
+"""The calibration-sweep pair every inference entry point shares: resolve a per-dataset operating
+point from a labeled split, and its compact, response-safe summary.
 
 Both moved out of ``tools/inference_tools.py``: their consumers are cross-module
 (``inference_tools._run_inference_verified`` calls both, and a dozen-plus test files exercise
