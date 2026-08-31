@@ -818,8 +818,9 @@ def import_project(zip_path: str, destination: str) -> dict:
     Not an MCP tool: run through ``scripts/import_project.py``, per the admission standard
     (packages/tcip-mcp/CLAUDE.md), while staying importable for its own tests.
 
-    Not a writer of any format: the door extracts into a private staging directory, classifies
-    every member through the shared bundle accounting
+    Not a writer of any format but one, the model registry index's own on-disk conform below:
+    the door extracts into a private staging directory, classifies every member through the
+    shared bundle accounting
     (:func:`tcip_mcp.tools.bundle.account_for`), refuses the whole import naming each bookkeeping,
     cross-root-collided, undecodable or unaccounted member, then adopts what is left into a
     database when this process is bound to the database backend (skipping any derived root whose

@@ -179,9 +179,9 @@ def _registered_checkpoint_paths(tree: Path) -> frozenset[Path]:
     ``register_model_from_experiment`` registers wherever a run's own ``output_dir`` wrote its
     weights (``.tcip/experiments/<experiment_id>/`` by ``launch_training``'s own default), so a
     registered checkpoint is not confined to the ``.tcip/models/`` convenience location
-    :func:`_blob_files`'s own glob covers. A registry the index will not decode is a concern for
-    the checks that already read it (``doctor.py``'s ``check_registry``), not a reason to refuse
-    a bundle: this reads best-effort and answers with no checkpoints found rather than raising.
+    :func:`_blob_files`'s own glob covers. Propagates
+    :class:`~tcip_mcp.model_registry.RegistryVersionRefused`: an unconformed registry is a
+    refusal for the caller to act on, never an empty answer.
     """
     from tcip_store import StoreError
 
@@ -345,12 +345,13 @@ def blob_home(
     ``registered_checkpoints`` (``BundleAccounting.registered_checkpoints``, computed once by
     :func:`account_for` while ``tree`` still holds its own registry index) names every checkpoint
     a registry entry points at outside ``.tcip/models``; pass it back in for a caller classifying
-    blobs after the tree has moved (``import_project``, past its own rename), when a fresh
-    registry read would otherwise find nothing there any more for a registry the move's own
-    conform step (:func:`~tcip_mcp.model_registry.conform_registry_paths`) has not yet respelled,
-    or for an entry whose designed-external path genuinely sits outside the tree either way. A
-    ``.pt`` file under ``.tcip/experiments/`` is
-    recognized as a checkpoint by shape alone, whether or not any registry names it, so the same
+    blobs after the tree has moved (``import_project``, past its own rename): the rename has
+    already carried the files this call's ``tree``/``path`` arguments still name away from where
+    they were accounted for, so a fresh registry read there would find nothing, whatever the
+    on-disk conform (:func:`~tcip_mcp.model_registry.conform_registry_paths_on_disk`, which runs
+    earlier, before accounting) already respelled it to. A ``.pt`` file under
+    ``.tcip/experiments/`` is recognized as a checkpoint by shape alone, whether or not any
+    registry names it, so the same
     file classifies the same way on both sides of that move. Omitted, this still recognizes every
     checkpoint physically under ``.tcip/models`` or shaped as one under ``.tcip/experiments/``.
 
