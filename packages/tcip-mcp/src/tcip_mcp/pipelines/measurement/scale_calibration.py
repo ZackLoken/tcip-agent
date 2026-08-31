@@ -46,7 +46,7 @@ def resolve_physical_scale(
     long side). Each reference implies a scale ``physical_extent / pixel_extent``.
 
     ``tolerance_frac`` is the trait-authored ``TraitSpec.scale_tolerance_frac``. ``None`` (not yet
-    authored) refuses: unlike the count gate's own tolerance, there is no platform-provisional
+    authored) refuses: unlike the count gate's own tolerance, there is no platform default
     fallback for how much reference disagreement a physical-scale claim may carry, that is a
     measurement decision only the domain expert can make.
 
@@ -92,7 +92,7 @@ def resolve_physical_scale(
             "validated_against": VALIDATED_FALSE, "passed": False, "value": None, "unit": unit,
             "failures": ["scale_tolerance_not_authored"],
             "sweep_data": {"note": "TraitSpec.scale_tolerance_frac is not authored for this "
-                                   "trait; a physical-scale gate has no platform-provisional "
+                                   "trait; a physical-scale gate has no platform default "
                                    "fallback, the domain expert must author it."},
         }
     if not references:

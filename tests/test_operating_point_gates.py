@@ -217,7 +217,7 @@ def test_dispersion_gate_skipped_when_unauthored_gates_when_authored(monkeypatch
 
 def test_count_bias_tolerance_frac_source_platform_default_vs_trait(monkeypatch):
     """TraitSpec.count_bias_tolerance_frac, when unauthored (None, CATKIN's own state), resolves to
-    the platform's provisional fraction and stamps that provenance; a trait that authors its own
+    the platform's interim default fraction and stamps that provenance; a trait that authors its own
     value stamps ``"trait"`` instead, mirroring classifier_agreement_floor's own kappa_floor_source."""
     import tcip_mcp.pipelines.operating_point as OP
 
@@ -453,7 +453,7 @@ def test_passed_holdout_is_exactly_the_absence_of_named_failures():
 # Verified empirically against the actual code: at n=40 images / 100 objects/image this reaches
 # count_bias_std ~= 2.03 and count_error_p90 = 4.0 (recall/precision ~0.97) against catkin's
 # count-bias tolerance of 1.0 (the derived value at this reference's density:
-# the platform's provisional 0.01 count_bias_tolerance_frac, catkin has not authored its own,
+# the platform's interim default 0.01 count_bias_tolerance_frac, catkin has not authored its own,
 # times this fixture's 100-objects/image typical count),
 # and correctly reaches VALIDATED_HELD_OUT. The identical per-image pattern at n=10 (fewer images,
 # nothing else different) is correctly refused: the SE term grows enough that the equivalence

@@ -137,7 +137,7 @@ class TraitSpec:
     # `count_error_tolerance`/`classifier_agreement_floor` above: `None` means "not yet authored for
     # this trait", it needs the domain expert, not a value picked by the agent. Unlike
     # `count_error_tolerance`'s dispersion term, an unauthored fraction here does not skip the check:
-    # `operating_point.py`'s `_PROVISIONAL_COUNT_BIAS_TOLERANCE_FRAC` (0.01, platform-chosen, not
+    # `operating_point.py`'s `_DEFAULT_COUNT_BIAS_TOLERANCE_FRAC` (0.01, platform-chosen, not
     # domain-authored) applies as the real operative fraction until a trait sets its own. Applied
     # identically wherever `operating_point._bias_equivalence_ok` is called, the pooled and
     # per-class detector gates and the classifier path's positive-class gate, one field, one unit,
@@ -170,7 +170,7 @@ class TraitSpec:
     # measurement semantics, the same shape as `count_error_tolerance` above: `None` means "not yet
     # authored for this trait", it needs the domain expert, not a value picked by the agent. Unlike
     # `count_error_tolerance`'s dispersion term, an unauthored floor here does not skip the check:
-    # `operating_point.py`'s `_PROVISIONAL_KAPPA_FLOOR` (0.41, platform-chosen, not domain-authored)
+    # `operating_point.py`'s `_DEFAULT_KAPPA_FLOOR` (0.41, platform-chosen, not domain-authored)
     # applies as the real operative floor until a trait sets its own, the gate is never satisfied by
     # the bare mathematical minimum `kappa > 0` alone once the platform default is in effect.
     classifier_agreement_floor: float | None = None
@@ -180,14 +180,14 @@ class TraitSpec:
     # toolkit may grow further criteria). Same shape as `classifier_agreement_floor` above: `None`
     # means "not yet authored for this trait", it needs the domain expert, not a value picked by the
     # agent. Unlike `count_error_tolerance`'s dispersion term, an unauthored floor here does not skip
-    # the check: `operating_point.py`'s `_PROVISIONAL_ORDINAL_AGREEMENT_FLOOR` applies as the real
+    # the check: `operating_point.py`'s `_DEFAULT_ORDINAL_AGREEMENT_FLOOR` applies as the real
     # operative floor until a trait sets its own.
     ordinal_agreement_floor: float | None = None
     # Min acceptable value for whichever regression skill/agreement criterion calibration actually
     # used (`r_squared` or `concordance_correlation_coefficient`, `operating_point.
     # REGRESSION_CRITERIA`), the regression counterpart to `ordinal_agreement_floor` above. `None`
     # means "not yet authored for this trait"; `operating_point.py`'s
-    # `_PROVISIONAL_REGRESSION_SKILL_FLOOR` applies until a trait sets its own. Unlike
+    # `_DEFAULT_REGRESSION_SKILL_FLOOR` applies until a trait sets its own. Unlike
     # `classifier_agreement_floor`'s single criterion (kappa), this platform offers more than one
     # regression criterion with genuinely different scales/conventions (R² is unbounded below and
     # measures skill relative to a trivial mean baseline; CCC is bounded in [-1, 1] and decomposes
@@ -197,7 +197,7 @@ class TraitSpec:
     # further here.
     regression_skill_floor: float | None = None
     # Max relative disagreement a physical-scale reference half may show (scale_calibration.
-    # resolve_physical_scale); None has no platform-provisional fallback, unlike count_bias_tolerance_frac.
+    # resolve_physical_scale); None has no platform default fallback, unlike count_bias_tolerance_frac.
     scale_tolerance_frac: float | None = None
     # Min held-out precision and recall the detection gate's governing localization criterion must
     # both clear at the shipped conf. No fallback: None refuses to validate rather than substitute one.

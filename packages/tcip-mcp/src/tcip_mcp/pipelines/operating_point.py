@@ -86,20 +86,24 @@ registering a picker registers its label, and its review-reference variant, with
 _EQUIVALENCE_Z = 1.645
 
 # The compensating-error floor here is an interim default, not a cited statistical convention like
-# _EQUIVALENCE_Z: Landis & Koch (1977)'s kappa scale is a descriptive label for a magnitude, not a
-# distributional fact entailed by a stated confidence level. "How much classifier agreement is
-# enough to trust this trait's phenotype" is measurement semantics, the domain expert's call, the
-# same as `TraitSpec.count_error_tolerance`. This value is a provisional, platform-chosen placeholder
-# used only when a trait hasn't authored `TraitSpec.classifier_agreement_floor` (None), see that
-# field's docstring. kappa==0 is exactly chance agreement; a floor there alone admits a classifier
-# whose errors are compensating (net count-bias ~0) but substantial.
-_PROVISIONAL_KAPPA_FLOOR = 0.41
+# _EQUIVALENCE_Z: Landis & Koch (1977)'s kappa scale describes a magnitude, not a distributional fact.
 
-# The same "not yet authored for this trait" shape as `_PROVISIONAL_KAPPA_FLOOR`: how much relative
-# per-image count error a trait's own phenotype can tolerate is measurement semantics, the domain
-# expert's call. This value is a provisional, platform-chosen placeholder used only when a trait
-# hasn't authored `TraitSpec.count_bias_tolerance_frac` (None), see that field's docstring.
-_PROVISIONAL_COUNT_BIAS_TOLERANCE_FRAC = 0.01
+# How much classifier agreement a trait's phenotype needs is measurement semantics, the domain
+# expert's call, the same as `TraitSpec.count_error_tolerance`.
+
+# This value is an interim, platform-chosen placeholder, never a validated or cited convention,
+# used only when a trait hasn't authored `TraitSpec.classifier_agreement_floor` (None).
+
+# kappa==0 is exactly chance agreement; a floor there alone admits a classifier whose errors are
+# compensating (net count-bias ~0) but substantial.
+_DEFAULT_KAPPA_FLOOR = 0.41
+
+# The same "not yet authored for this trait" shape as `_DEFAULT_KAPPA_FLOOR`: how much relative
+# per-image count error a trait's phenotype can tolerate is measurement semantics, the expert's call.
+
+# This value is an interim, platform-chosen placeholder, never a validated or cited convention,
+# used only when a trait hasn't authored `TraitSpec.count_bias_tolerance_frac` (None).
+_DEFAULT_COUNT_BIAS_TOLERANCE_FRAC = 0.01
 
 # The compensating-error criterion toolkits for the ordinal/regression calibration gates
 # (:func:`resolve_ordinal_operating_point`/:func:`resolve_regression_operating_point`), a small,
@@ -116,19 +120,22 @@ REGRESSION_CRITERIA: dict[str, Callable[[Any, Any], float | None]] = {
     "concordance_correlation_coefficient": concordance_correlation_coefficient,
 }
 
-# The same provisional-platform-default shape as `_PROVISIONAL_KAPPA_FLOOR`, and literally the same
+# The same interim-platform-default shape as `_DEFAULT_KAPPA_FLOOR`, and literally the same
 # statistic: ordinal's only currently-registered criterion (`quadratic_weighted_kappa`) is exactly
-# the classifier path's own kappa. Used only when a trait hasn't authored
-# `TraitSpec.ordinal_agreement_floor` (None), see that field's docstring.
-_PROVISIONAL_ORDINAL_AGREEMENT_FLOOR = 0.41
 
-# The same provisional-platform-default shape, for whichever regression criterion a calibration
+# the classifier path's own kappa, an interim, platform-chosen placeholder, never a validated or
+# cited convention, used only when a trait hasn't authored `TraitSpec.ordinal_agreement_floor` (None).
+_DEFAULT_ORDINAL_AGREEMENT_FLOOR = 0.41
+
+# The same interim-platform-default shape, for whichever regression criterion a calibration
 # actually used. A plain "explains meaningfully more than half the addressable skill/agreement"
+
 # default, not a cited statistical convention: R² and CCC have different scales/conventions (see
-# `TraitSpec.regression_skill_floor`'s docstring), so this single number is a rough placeholder for
-# either, until a trait authors its own floor paired with its own criterion choice. Used only when a
-# trait hasn't authored `TraitSpec.regression_skill_floor` (None).
-_PROVISIONAL_REGRESSION_SKILL_FLOOR = 0.5
+# `TraitSpec.regression_skill_floor`'s docstring), so this single number is an interim,
+
+# platform-chosen placeholder for either, never a validated or cited convention, until a trait
+# authors its own floor paired with its own criterion choice, used only when it hasn't (None).
+_DEFAULT_REGRESSION_SKILL_FLOOR = 0.5
 
 
 def _effective_count_bias_tolerance(tolerance_frac: float, typical_count: float, n: int) -> float:
@@ -899,11 +906,11 @@ def resolve_operating_point(
             "and pass that concrete bool here; never a silently-defaulted value."
         )
     trait = get_trait(trait_name)
-    # "not yet authored for this trait" falls back to the platform's provisional interim fraction,
+    # "not yet authored for this trait" falls back to the platform's interim default fraction,
     # the same shape resolve_classifier_operating_point resolves its own kappa floor with.
     count_bias_tolerance_frac = (
         trait.count_bias_tolerance_frac if trait.count_bias_tolerance_frac is not None
-        else _PROVISIONAL_COUNT_BIAS_TOLERANCE_FRAC)
+        else _DEFAULT_COUNT_BIAS_TOLERANCE_FRAC)
     review = validated_reference == VALIDATED_REVIEW_CONFIRMED
     # This is a gate, not a filter, see the docstring above for why a filter fails open: every
     # record must satisfy the predicate or the whole reference is refused, unfiltered, further down.
@@ -1400,11 +1407,11 @@ def resolve_classifier_operating_point(
     cal_pos = sum(1 for it in calibration_items if it["is_true_positive"])
     hold_pos = sum(1 for it in holdout_items if it["is_true_positive"])
     trait = get_trait(trait_name)
-    # "not yet authored for this trait" falls back to the platform's provisional interim fraction,
+    # "not yet authored for this trait" falls back to the platform's interim default fraction,
     # the same shape `agreement_floor` below resolves its own kappa floor with.
     count_bias_tolerance_frac = (
         trait.count_bias_tolerance_frac if trait.count_bias_tolerance_frac is not None
-        else _PROVISIONAL_COUNT_BIAS_TOLERANCE_FRAC)
+        else _DEFAULT_COUNT_BIAS_TOLERANCE_FRAC)
     # Per-image mean count-bias (mean+SE equivalence, as the detection path gates on), present-
     # scoped like typical_positive_count below: an all-negative image would dilute the measured bias.
     per_image_bias = []
@@ -1436,10 +1443,10 @@ def resolve_classifier_operating_point(
     # calls symmetrically, net count-bias ~0, clears this alone at kappa=0.2, exactly the
     # compensating-error case this check exists to catch); `agreement_floor` is the trait's own
     # authored bar (`TraitSpec.classifier_agreement_floor`), falling back to the platform's
-    # provisional interim default only when the trait hasn't set one.
+    # interim default only when the trait hasn't set one.
     agreement_floor = (
         trait.classifier_agreement_floor
-        if trait.classifier_agreement_floor is not None else _PROVISIONAL_KAPPA_FLOOR)
+        if trait.classifier_agreement_floor is not None else _DEFAULT_KAPPA_FLOOR)
     compensating_error_ok = kappa is not None and kappa > 0.0 and kappa > agreement_floor
 
     failures: list[str] = []
@@ -1513,7 +1520,7 @@ def _resolve_scalar_operating_point(
     true_key: str,
     pred_key: str,
     floor_field: str,
-    provisional_floor: float,
+    default_floor: float,
     calibration_items: list[dict] | None,
     holdout_items: list[dict] | None,
     experiment_id: str | None,
@@ -1566,13 +1573,14 @@ def _resolve_scalar_operating_point(
     score = criteria[criterion](holdout_pred, holdout_true)
 
     floor_authored = getattr(trait, floor_field)
-    floor = floor_authored if floor_authored is not None else provisional_floor
+    floor = floor_authored if floor_authored is not None else default_floor
     floor_source = "trait" if floor_authored is not None else "provisional_default"
     # A non-finite score compares false against every bound, so it is its own failure.
     score_state = non_finite_state(score) if isinstance(score, float) else None
     comparable = score is not None and score_state is None
     # score > 0.0 is the universal, domain-input-free minimum (better than the criterion's own
-    # trivial/chance baseline); floor is the trait's own authored bar, or the platform's provisional
+    # trivial/chance baseline); floor is the trait's own authored bar, or the platform's interim
+
     # default, the same two-floor shape resolve_classifier_operating_point's kappa check uses.
     compensating_error_ok = comparable and score > 0.0 and score > floor
 
@@ -1655,7 +1663,7 @@ def resolve_ordinal_operating_point(
     return _resolve_scalar_operating_point(
         trait_name, criterion=criterion, criteria=ORDINAL_CRITERIA,
         true_key="true_rank", pred_key="predicted_rank", floor_field="ordinal_agreement_floor",
-        provisional_floor=_PROVISIONAL_ORDINAL_AGREEMENT_FLOOR,
+        default_floor=_DEFAULT_ORDINAL_AGREEMENT_FLOOR,
         calibration_items=calibration_items, holdout_items=holdout_items,
         experiment_id=experiment_id, validated_reference=validated_reference,
         split_manifest_dir=split_manifest_dir, calibration_date=calibration_date,
@@ -1705,7 +1713,7 @@ def resolve_regression_operating_point(
     return _resolve_scalar_operating_point(
         trait_name, criterion=criterion, criteria=REGRESSION_CRITERIA,
         true_key="true_value", pred_key="predicted_value", floor_field="regression_skill_floor",
-        provisional_floor=_PROVISIONAL_REGRESSION_SKILL_FLOOR,
+        default_floor=_DEFAULT_REGRESSION_SKILL_FLOOR,
         calibration_items=calibration_items, holdout_items=holdout_items,
         experiment_id=experiment_id, validated_reference=validated_reference,
         split_manifest_dir=split_manifest_dir, calibration_date=calibration_date,
