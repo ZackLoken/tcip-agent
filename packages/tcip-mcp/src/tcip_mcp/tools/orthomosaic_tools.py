@@ -229,6 +229,8 @@ def deliver_orthomosaic_plant_counts(
                               value_key=_PER_PLANT_VALUE_KEY)
 
     from tcip_mcp.pipelines.resolution import (
+        VALIDATED_FALSE,
+        DeliveryRefused,
         record_delivery_binding_event,
         reconcile_operating_point_validity,
     )
@@ -246,6 +248,18 @@ def deliver_orthomosaic_plant_counts(
             pred_dirs=[predictions_dir],
             acknowledge_unvalidated=acknowledge_unvalidated,
         )
+    except DeliveryRefused as exc:
+        # A typed gate refusal: disclose the gate's own per-dimension stamp beside the counts this
+        # door had already resolved, the same disclosure shape tabulate_counts's bucket regime returns.
+        refusal = {
+            "error": str(exc),
+            "operating_point_validated": exc.gate.stamp.get("measurement", VALIDATED_FALSE),
+            "n_detections": len(assignments), "n_mapped": len(mapped),
+            "n_unmapped": n_unmapped,
+        }
+        if "tile_size" in exc.gate.stamp:
+            refusal["tile_size_validated"] = exc.gate.stamp["tile_size"]
+        return refusal
     except ValueError as exc:
         # aggregation.py's own refusal already names the failing bucket and why, through the same
         # binding_notes_text helper this door's own (identically-scoped) recon would just repeat.
