@@ -18,10 +18,12 @@ carrying the dataset or project location with ``@audited(scope_arg=...)``, and :
 An entry's ``scope`` field is a version-2 line's own convention, stamped by :func:`_stamp_scope`,
 the one implementation :func:`audited`, :func:`record_event` and :func:`record_event_or_raise` all
 resolve a caller's scope through. When present, ``scope`` names the resolved root the entry was
-filed under (a dataset's or a project's); its absence on a version-2 line means the writer took
-the platform default, never that the entry's category is unknown. A line written before this
-marker existed predates it and claims neither: its schema_version is absent (the frozen version 1)
-and it is read as neither confirming nor denying a scope. Three disclosures for a moved log: a
+filed under, which can be a dataset's, a project's, or the platform's own (a writer that resolved
+and passed the platform root stamps it; presence never means non-platform); its absence on a
+version-2 line means the writer took the platform default. A line written before the version
+marker carries no schema_version (the frozen version 1) and only claims what it carries: the old
+scoped decorator writes stamped a resolved dataset ``scope`` and those values stand, while an old
+line with no ``scope`` says nothing either way about its category. Three disclosures for a moved log: a
 stamped absolute scope travels in a shared or imported archive exactly as the log body's other
 absolute paths already do, unredacted; ``scope`` records a write-time fact, never a location claim,
 so a relocated import's lines still name the exporting machine's own root and nothing reconciles
@@ -125,32 +127,32 @@ def platform_audit_scope() -> Path:
 def audit_log_key(scope: str | Path | None = None) -> Key:
     """The audit log one event belongs in.
 
-    ``scope`` is the root the event's subject hangs off: a dataset root when the event
-    changed a record that travels with the data, so an audit trail moves with the dataset it
-    describes; the platform root (the default) for everything else.
+    ``scope`` is the root the event's subject hangs off: a dataset root when the event changed a
+    record that travels with the data, a project root when the event is the project's own outward
+    action, the platform root (the default) for everything else. One store under three kinds of
+    root; writers address it through :func:`_stamp_scope`, readers through this function
+    directly, and both are one resolution because the stamper calls this.
     """
     root = Path(scope) if scope is not None else platform_audit_scope()
     return Key(AUDIT_LOG_STORE, str(root.resolve()), _AUDIT_PARTS)
 
 
 def _stamp_scope(entry: dict[str, Any], scope: str | Path | None) -> Key:
-    """Resolve ``scope`` once, stamp ``entry`` with what that resolution found, and return the
-    same log's Key: the one implementation :func:`audited`, :func:`record_event` and
-    :func:`record_event_or_raise` all write an entry's scope through, so the root a line names
-    and the root its Key addresses can never drift apart into two separately-resolved answers.
+    """Stamp ``entry`` from the same Key :func:`audit_log_key` builds, and return that Key: the
+    stamped scope is the key's own root, so the root a line names and the root its Key addresses
+    are one resolved value by construction, never two separately-resolved answers.
 
     ``entry["schema_version"]`` is stamped ``2`` on every call. ``entry["scope"]`` is stamped
-    with the resolved root only when the caller passed one; a call that took the platform default
-    (``scope is None``) leaves the field unset, matching :func:`audited`'s own long-standing
-    convention of stamping whenever a declared scope argument resolved a root at all, dataset or
-    project, even one that happens to equal the platform root.
+    only when the caller passed a scope; the value may equal the platform root (a project door
+    after adoption, or a writer that resolved the platform root itself and passed it), so the
+    field means the writer named its root explicitly, and its absence means the writer took the
+    platform default, never that the line is non-platform.
     """
-    root = Path(scope) if scope is not None else platform_audit_scope()
-    resolved = str(root.resolve())
+    key = audit_log_key(scope)
     entry["schema_version"] = 2
     if scope is not None:
-        entry["scope"] = resolved
-    return Key(AUDIT_LOG_STORE, resolved, _AUDIT_PARTS)
+        entry["scope"] = key.root
+    return key
 
 
 def _redact(args: dict[str, Any]) -> dict[str, Any]:
@@ -286,11 +288,12 @@ def audited(
     """Decorator that logs MCP tool calls to the audit log their scope names.
 
     Bare (``@audited``), a call is a platform event and is recorded in the platform's log.
-    ``@audited(scope_arg="dataset_root")`` declares which of the tool's own arguments carries
-    the dataset the call mutates a record of: that argument's value is resolved at call time by
-    :func:`dataset_scope_of`, and the entry goes to that dataset's log instead, carrying a
-    ``scope`` field naming the root. An argument that is ``None``, absent, or resolves to no
-    dataset leaves the call a platform event. Exactly one log receives each entry.
+    ``@audited(scope_arg=...)`` declares which of the tool's own arguments carries the dataset
+    or project location the call mutates a record of: that argument's value is resolved at call
+    time (:func:`dataset_scope_of` for a dataset argument; a project argument resolves as the
+    root it names, which after adoption can equal the platform root), and the entry goes to that
+    root's log carrying a ``scope`` field naming it. An argument that is ``None``, absent, or
+    resolves to no root leaves the call a platform event. Exactly one log receives each entry.
 
     ``scope_via`` is for a tool whose body canonicalizes that argument before writing through it,
     such as a relative output path anchored to the platform state root rather than the process

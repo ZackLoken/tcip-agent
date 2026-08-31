@@ -870,8 +870,8 @@ registered at HEAD.
 
 | method | path | handler | line |
 |---|---|---|---|
-| GET | `/labels` | `load_labels` | `routes/annotate.py:170` |
-| POST | `/labels` | `save_labels` | `routes/annotate.py:194` |
+| GET | `/labels` | `load_labels` | `routes/annotate.py:171` |
+| POST | `/labels` | `save_labels` | `routes/annotate.py:195` |
 
 ### routes/canvas.py, prefix `/api/canvas` (1 route)
 
@@ -1401,7 +1401,7 @@ log are one file at one key. That path is what the file backend places the log a
 `scripts/export_store.py` writes back out; on the default database backend the rows live in that
 root's `.tcip/store.db` until they are exported.
 
-Writers: three write paths, `packages/tcip-mcp/src/tcip_mcp/audit.py:280` (`audited`), line 210
+Writers: three write paths, `packages/tcip-mcp/src/tcip_mcp/audit.py:282` (`audited`), line 210
 (`record_event`) and line 229 (`record_event_or_raise`), all resolving a caller's scope through
 one shared helper, line 136 (`_stamp_scope`), so the root a line's `scope` field names and the
 root its Key addresses are always the one resolution, never two independently taken. It stamps
@@ -1428,15 +1428,19 @@ refuses the call rather than filing it there.
 Platform-scoped, no `scope` of their own: the training envelope's open/close events
 (`pipelines/training/envelope.py`), the model registry's replace and write-refusal events
 (`model_registry.py:408,424`), `evaluation.py`'s derived-localization-kind record (`:478`),
-`experiments.py`'s post-terminal refusal (`_audit_refused`, `:368`) when its caller names no
-project root, and `routes/terminal.py`'s one line per agent-terminal launch (`:83`).
+`experiments.py`'s post-terminal refusal (`_audit_refused`, `:369`) when its caller names no
+project root (the training watchdog passes the launch's own pinned platform root, so its lines
+carry a `scope` equal to the platform root, the presence-never-means-non-platform case), and
+`routes/terminal.py`'s one line per agent-terminal launch (`:83`). The `@audited(scope_arg=...)`
+doors span every category by whatever root their declared argument resolves; this paragraph
+names the explicit-emitter files, not a closed census of the decorator's doors.
 Dataset-scoped: four GUI route writers passing the dataset root their own guard resolved
 (`routes/annotate.py`'s `_audit_gui_write`, `:150`; `routes/classes.py`'s `_audit_dataset_write`,
 `:63`; `routes/inference.py`'s `_audit_dataset_write`, `:142`; `routes/review.py`'s `_audit`,
-`:93`), `resolution.py`'s `record_delivery_binding_event` (`:1928`, dataset-scoped when a
+`:93`), `resolution.py`'s `record_delivery_binding_event` (`:1941`, dataset-scoped when a
 delivery's buckets share one dataset root, platform-scoped otherwise), and
 `calibration_tools.py`'s redraw event (`force_redraw_cal_holdout_split_result`, `:214`).
-Project-scoped: `routes/results.py`'s `_audit` (`:151`, every Results-tab route) and
+Project-scoped: `routes/results.py`'s `_audit` (`:151`, its delivery and confirmation routes) and
 `pipelines/postprocessing/plant_mapping.py`'s `persist_mapping` (`:795`), whose two callers file
 its receipt under two different categories: the MCP tool `build_plant_mapping` passes the
 process's own pinned platform root (so the receipt lands in the platform log's own file, a
@@ -1450,9 +1454,11 @@ mutation; `record_event_or_raise` raises `AuditEntryNotWritten`; the decorator r
 there invites a blind retry of a mutation already on disk.
 
 Version-2 line contract: `scope`, when present, names the resolved root the entry was filed
-under; its absence on a version-2 line means the writer took the platform default, never that the
-entry's category is unknown. A line written before this marker predates it (`schema_version`
-absent, the frozen version 1) and claims neither. Three disclosures for a moved log: a stamped
+under, which can be a dataset's, a project's, or the platform's own root passed explicitly
+(presence never means non-platform); its absence on a version-2 line means the writer took the
+platform default. A line written before this marker carries no `schema_version` (the frozen
+version 1) and claims only what it carries: the old scoped decorator writes stamped a resolved
+dataset `scope` that stands, while an old scopeless line says nothing about its category. Three disclosures for a moved log: a stamped
 absolute scope travels in a shared or imported archive exactly as the log body's other absolute
 paths already do, unredacted; `scope` is a write-time fact, never a location claim, so a
 relocated import's lines still name the exporting machine's own root and nothing reconciles them
@@ -1464,11 +1470,12 @@ decoding lines by hand, and both refusing (never scanning past) a page reporting
 unknown `schema_version`. `experiments._index_refused_mutations`,
 `packages/tcip-mcp/src/tcip_mcp/experiments.py:1493`, one scan of the platform audit log
 (`audit_log_key()`, no scope) indexing every `experiment_mutation_refused` entry by
-`arguments.experiment_id`, shared by `compare_experiments`, line 1532, across every experiment it
+`arguments.experiment_id`, shared by `compare_experiments`, line 1534, across every experiment it
 compares in one call; `page.corrupt`/`page.version_refused` both fail the whole call (`None`, not
 a partial index), so a caller who cannot see behind an unreadable entry never reports "no
-refusals" in its place. `plant_mapping._scan_receipts`/`_require_receipt`, same file, lines
-923/950, the hard receipt gate `load_mapping` runs before trusting a persisted mapping record:
+refusals" in its place. `plant_mapping._scan_receipts`/`_require_receipt`
+(`pipelines/postprocessing/plant_mapping.py`, lines 923/950), the hard receipt gate
+`load_mapping` runs before trusting a persisted mapping record:
 every `plant_mapping_built` entry in the record's own project log is scanned for a receipt naming
 the record's digest, and a page reporting `page.corrupt` or `page.version_refused` raises rather
 than reading past it, since an entry could be hiding behind either kind of unreadable line unread.
@@ -2047,7 +2054,7 @@ Must agree: mutations from any process land in the log the scope names, the plat
 default, a dataset's own for a record travelling with the data, a project's own for a record
 that is the project's, all with the same entry shape; and the project's own receipt gate
 (`plant_mapping.load_mapping`) trusts only what that project's own log actually recorded.
-Side A: `packages/tcip-mcp/src/tcip_mcp/audit.py:280` (`def audited(`, taking a declared
+Side A: `packages/tcip-mcp/src/tcip_mcp/audit.py:282` (`def audited(`, taking a declared
 `scope_arg` naming which tool argument carries the dataset or project a scoped tool mutates a
 record of) and `record_event`/`record_event_or_raise`, lines 210/229, the two emitters for code
 that is neither an MCP tool nor a script-invoked door demoted from one; all three resolve a
@@ -2060,9 +2067,10 @@ arguments: dict) -> None:`, which calls `record_event` with the dataset root its
 resolved; `routes/annotate.py:150` and `routes/inference.py:142` do the same for their own
 datasets, `routes/classes.py:63` likewise); `routes/results.py:151` does the same for a project
 root instead. Reader: `pipelines/postprocessing/plant_mapping.py:950` (`_require_receipt`)
-trusts only a `plant_mapping_built` entry it finds in the record's own project log, scanned by
-`_scan_receipts`, line 923, which refuses (never scans past) a page reporting corruption or an
-unknown `schema_version`.
+trusts only a `plant_mapping_built` entry it finds in the log under the root its caller holds
+(the MCP tool's pinned platform root, the platform log's own file until adoption makes it a
+project's; the web route's guarded project root), scanned by `_scan_receipts`, line 923, which
+refuses (never scans past) a page reporting corruption or an unknown `schema_version`.
 Phase 3 verdict: single. Each writer is exercised through a real append and checked for its own
 tool name landing in the log its own scope names: `tests/test_tcip_web_routes.py:766,1193,1229`
 (a dataset-scoped GUI write, checked against the same dataset's log, never the platform's);
@@ -2411,7 +2419,7 @@ Phase 3 verdict: duplicated.
 ## S53. Optimistic-concurrency token for label saves
 
 Must agree: the token the browser echoes is the same token the backend minted for that label file.
-Side A: `packages/tcip-web/src/tcip_web/routes/annotate.py:189` (`"base_mtime": token,`, the token the load route mints; the save route compares the echoed one at `routes/annotate.py:200`).
+Side A: `packages/tcip-web/src/tcip_web/routes/annotate.py:190` (`"base_mtime": token,`, the token the load route mints; the save route compares the echoed one at `routes/annotate.py:200`).
 Side B: `packages/tcip-web/frontend/src/tabs/AnnotateTab.tsx:381` (`base_mtime: paths.mtime,`).
 Phase 3 verdict: single.
 
@@ -2454,7 +2462,7 @@ Phase 3 verdict: single.
 
 Must agree: every route that accepts a client-supplied path confines it to the same allowed roots.
 Side A: `packages/tcip-web/src/tcip_web/paths.py:46` (`def allowed_roots() -> list[Path]:`).
-Side B: `packages/tcip-web/src/tcip_web/routes/annotate.py:79` (`p = assert_path_allowed(path)`).
+Side B: `packages/tcip-web/src/tcip_web/routes/annotate.py:80` (`p = assert_path_allowed(path)`).
 Phase 3 verdict: single.
 
 ## S60. WebSocket origin check
