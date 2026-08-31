@@ -1563,10 +1563,10 @@ unconformed index and respells every entry in one transaction, relocating a move
 checkpoint by content digest when its stored path no longer resolves; `import_project` runs the
 same conform on the staging tree before accounting for it and before the rename.
 
-Readers: `read_registry_index`, `model_registry.py:53`, the read path for anything outside the
-module (`scripts/doctor.py:125`, `"metrics_source"`), and the entry-by-entry accessors built on
-it: `ModelRegistry.list_models`, line 319; `get_model`, line 325; `best_model`, line 332;
-`verify_model`, line 293. `best_model` takes `metric_key` and `higher_is_better` as required
+Readers: `read_registry_index`, `model_registry.py:131`, the read path for anything outside the
+module (`scripts/doctor.py:237`, `"metrics_source"`), and the entry-by-entry accessors built on
+it: `ModelRegistry.list_models`, line 826; `get_model`, line 837; `best_model`, line 844;
+`verify_model`, line 800. `best_model` takes `metric_key` and `higher_is_better` as required
 keywords, no default and no name heuristic, and by default ranks only entries whose
 `metrics_source` is `"trainer"` (`include_unverified=True` also ranks the rest). The
 `select_best_model` tool (`tools/model_tools.py:123`) resolves `higher_is_better` from
@@ -2129,7 +2129,7 @@ Phase 3 verdict: single.
 ## S27. Trained-model registry .tcip/models/registry.json
 
 Must agree: the MCP registrar and the GUI model pickers read one registry entry shape.
-Side A: `packages/tcip-mcp/src/tcip_mcp/model_registry.py:131` (`def read_registry_index(`, the read path for everything outside the module; `register_model`, line 200, replaces one entry by name inside one `tcip_store.transaction` on the key `registry_index_key`, line 36, mints).
+Side A: `packages/tcip-mcp/src/tcip_mcp/model_registry.py:132` (`def read_registry_index(`, the read path for everything outside the module; `_register_entry`, line 429, replaces one entry by name inside one `tcip_store.transaction` on the key `registry_index_key`, line 116, mints).
 Side B: `packages/tcip-web/src/tcip_web/routes/results.py:1070` (`@router.get("/models/registered")`, serving `model_tools.list_registered_models`) and the browser's one entry declaration, `packages/tcip-web/frontend/src/api/inference.ts:16` (`export interface RegisteredModel {`), held field by field against an entry the real registrar wrote by `tests/test_registry_entry_shape_agreement.py`.
 Phase 3 verdict: single.
 
