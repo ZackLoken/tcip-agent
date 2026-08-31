@@ -6,6 +6,7 @@
 import type { ImageStatus } from "@/api/classes";
 import { asJson } from "@/api/http";
 import { ROUTES } from "@/api/routes";
+import { stateSocket } from "@/api/ws";
 import {
   RENDER_CACHE_VERSION,
   type ActionPayload,
@@ -185,6 +186,8 @@ export const api = {
       call<{
         status: string;
         selection: DatasetSelection;
+        // The canvas_open_binding generation this select recorded; adopt alongside `selection`.
+        generation: number;
         // Advisory: whether the resolved (subject,date) has labels / (model,date) has
         // predictions. False → the canvas will start empty (not an error).
         annotations_present?: boolean;
@@ -213,11 +216,22 @@ export const api = {
 
   canvas: {
     // Live canvas-state push (heartbeat or full geometry): fire-and-forget from the tabs.
-    pushState: (body: CanvasStateBody) =>
-      call<{ status: string; shapes_stored: boolean }>(ROUTES.postCanvasState, {
+    // Not routed through call(): a 409 (the GUI's open project moved) resolves by resync.
+    pushState: async (
+      body: CanvasStateBody,
+    ): Promise<{ status: string; shapes_written: boolean } | { status: "conflict" }> => {
+      const resp = await fetch(ROUTES.postCanvasState, {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
-      }),
+      });
+      if (resp.status === 409) {
+        // Never adopt the generation a 409 carries; resync re-delivers it instead.
+        stateSocket.resync();
+        return { status: "conflict" };
+      }
+      return asJson<{ status: string; shapes_written: boolean }>(resp);
+    },
   },
 
   images: {

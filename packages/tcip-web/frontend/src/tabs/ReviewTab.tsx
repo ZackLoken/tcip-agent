@@ -391,9 +391,13 @@ export function ReviewTab() {
     // otherwise the previous image's shapes would push under the new image_path (a false canvas).
     if (matchesImageRef.current !== imgName) return null;
     if (useStore.getState().review.loading) return null;
+    // Binding-presence gate: a dataset without an adopted generation must stop pushing.
+    const generation = useStore.getState().bindingGeneration;
+    useStore.getState().setCanvasBindingMissing(generation == null);
+    if (generation == null) return null;
     const host = measureCanvasHost();
     return {
-      project_root: dataset.project_root,
+      binding_generation: generation,
       tab: "review",
       image_path: imgPath,
       image: imgName ?? "",

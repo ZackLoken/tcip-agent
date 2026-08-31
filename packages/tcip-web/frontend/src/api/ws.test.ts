@@ -112,6 +112,51 @@ describe("StateSocket.connect", () => {
   });
 });
 
+describe("StateSocket state_snapshot dispatch", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    FakeWebSocket.instances = [];
+    vi.stubGlobal("WebSocket", FakeWebSocket);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it("carries the envelope's generation and epoch into one mergeSnapshot call", () => {
+    const mergeSnapshot = vi
+      .spyOn(useStore.getState(), "mergeSnapshot")
+      .mockImplementation(() => {});
+    const socket = new StateSocket();
+    socket.connect();
+    lastSocket().open();
+
+    const state = { active_tab: "annotate", dataset: { dataset_root: "/w/p" } };
+    lastSocket().message(
+      JSON.stringify({ type: "state_snapshot", state, version: 4, generation: 2, epoch: "e1" }),
+    );
+
+    expect(mergeSnapshot).toHaveBeenCalledWith(state, 4, 2, "e1");
+    socket.close();
+  });
+
+  it("resync stops and re-starts the socket, forcing a fresh connect-time replay", () => {
+    const socket = new StateSocket();
+    socket.connect();
+    const first = lastSocket();
+    first.open();
+
+    socket.resync();
+    expect(first.readyState).toBe(FakeWebSocket.CLOSED); // the old socket was closed
+    expect(FakeWebSocket.instances).toHaveLength(2); // a fresh connect happened synchronously
+    expect(lastSocket()).not.toBe(first);
+
+    socket.close();
+  });
+});
+
 describe("StateSocket wsStatus transitions", () => {
   beforeEach(() => {
     vi.useFakeTimers();

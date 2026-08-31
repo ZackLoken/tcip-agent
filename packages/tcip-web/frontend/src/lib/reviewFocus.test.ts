@@ -35,8 +35,12 @@ afterEach(() => vi.clearAllMocks());
 describe("applyReviewFocus", () => {
   it("switches the dataset with the model, then applies filters + index + review tab locally", async () => {
     seedDataset({ dataset_root: "/ws/proj", subject: "subject_a", date: "2026-01-01" });
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    vi.mocked(api.dataset.select).mockResolvedValue({ status: "ok", selection: SELECTION } as any);
+    vi.mocked(api.dataset.select).mockResolvedValue({
+      status: "ok",
+      generation: 1,
+      selection: SELECTION,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any);
 
     await applyReviewFocus({
       project_root: "/ws/proj",
@@ -101,8 +105,12 @@ describe("applyReviewFocus", () => {
       date: "2026-02-11",
       predictions_dir: "/ws/proj/predictions/OTHER/2026-02-11",
     });
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    vi.mocked(api.dataset.select).mockResolvedValue({ status: "ok", selection: SELECTION } as any);
+    vi.mocked(api.dataset.select).mockResolvedValue({
+      status: "ok",
+      generation: 1,
+      selection: SELECTION,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any);
 
     await applyReviewFocus({
       dataset_root: "/ws/proj",
@@ -124,8 +132,12 @@ describe("applyReviewFocus", () => {
         activeFilter: "all",
       },
     });
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    vi.mocked(api.dataset.select).mockResolvedValue({ status: "ok", selection: SELECTION } as any);
+    vi.mocked(api.dataset.select).mockResolvedValue({
+      status: "ok",
+      generation: 1,
+      selection: SELECTION,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any);
 
     await applyReviewFocus({
       dataset_root: "/ws/proj",
@@ -142,6 +154,7 @@ describe("applyReviewFocus", () => {
     const pushToast = vi.spyOn(useStore.getState(), "pushToast");
     vi.mocked(api.dataset.select).mockResolvedValue({
       status: "ok",
+      generation: 1,
       selection: SELECTION,
       label_problem: "/ws/proj/annotations/2026-02-11/IMG_0000.json does not decode as JSON",
       // eslint-disable-next-line @typescript-eslint/no-explicit-any

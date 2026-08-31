@@ -29,6 +29,7 @@ describe("applyAnnotateFocus", () => {
     seedDataset({ dataset_root: "/ws/proj", subject: "subject_a", date: "2026-02-11" });
     vi.mocked(api.dataset.select).mockResolvedValue({
       status: "ok",
+      generation: 1,
       selection: {
         project_root: "/ws/proj",
         dataset_root: "/ws/proj",
@@ -79,6 +80,7 @@ describe("applyAnnotateFocus", () => {
     };
     vi.mocked(api.dataset.select).mockResolvedValue({
       status: "ok",
+      generation: 1,
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       selection: newIdentity as any,
     });
@@ -93,10 +95,13 @@ describe("applyAnnotateFocus", () => {
 
     // Emulate the backend's /select broadcast landing after the local setters: same identity
     // now, so mergeSnapshot must keep the local (focus) index, not reset to 0.
-    useStore
-      .getState()
+    useStore.getState().mergeSnapshot(
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      .mergeSnapshot({ dataset: { ...newIdentity, current_image_index: 0 } } as any, 999);
+      { dataset: { ...newIdentity, current_image_index: 0 } } as any,
+      999,
+      null,
+      null,
+    );
     expect(useStore.getState().gui.dataset.current_image_index).toBe(47);
   });
 
@@ -135,6 +140,7 @@ describe("applyAnnotateFocus", () => {
     });
     vi.mocked(api.dataset.select).mockResolvedValue({
       status: "ok",
+      generation: 1,
       selection: {
         project_root: "/ws/proj",
         dataset_root: "/ws/proj",
@@ -162,6 +168,7 @@ describe("applyAnnotateFocus", () => {
     const pushToast = vi.spyOn(useStore.getState(), "pushToast");
     vi.mocked(api.dataset.select).mockResolvedValue({
       status: "ok",
+      generation: 1,
       selection: {
         project_root: "/ws/proj",
         dataset_root: "/ws/proj",

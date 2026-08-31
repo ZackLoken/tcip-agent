@@ -10,7 +10,13 @@ import type { GuiState } from "@/store/types";
 import { useStore } from "@/store";
 
 type IncomingMessage =
-  | { type: "state_snapshot"; state: GuiState; version?: number }
+  | {
+      type: "state_snapshot";
+      state: GuiState;
+      version?: number;
+      generation?: number | null;
+      epoch?: string | null;
+    }
   | { type: string; [k: string]: unknown };
 
 export class StateSocket {
@@ -43,10 +49,25 @@ export class StateSocket {
     this.socket.stop();
   }
 
+  /** Force a fresh connect-time replay: the read-only recovery path a canvas push's 409
+   *  triggers, re-delivering the authoritative dataset and binding generation in one update
+   *  rather than assuming a broadcast is still coming. */
+  resync() {
+    this.socket.stop();
+    this.socket.start();
+  }
+
   private handle(msg: IncomingMessage) {
     if (msg.type === "state_snapshot") {
-      const m = msg as { state: GuiState; version?: number };
-      useStore.getState().mergeSnapshot(m.state, m.version ?? null);
+      const m = msg as {
+        state: GuiState;
+        version?: number;
+        generation?: number | null;
+        epoch?: string | null;
+      };
+      useStore
+        .getState()
+        .mergeSnapshot(m.state, m.version ?? null, m.generation ?? null, m.epoch ?? null);
     }
   }
 

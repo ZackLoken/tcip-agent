@@ -176,6 +176,7 @@ describe("ProjectPicker", () => {
     });
     vi.mocked(api.dataset.select).mockResolvedValue({
       status: "ok",
+      generation: 1,
       selection: {
         project_root: "/ws/crop_a_subject_a_valley-farm",
         dataset_root: "/ws/crop_a_subject_a_valley-farm",
@@ -216,6 +217,7 @@ describe("ProjectPicker", () => {
     });
     vi.mocked(api.dataset.select).mockResolvedValue({
       status: "ok",
+      generation: 1,
       selection: {
         project_root: "/ws/crop_a_subject_a_valley-farm",
         dataset_root: "/ws/crop_a_subject_a_valley-farm",
@@ -279,6 +281,7 @@ describe("ProjectPicker", () => {
     });
     vi.mocked(freshApi.dataset.select).mockResolvedValue({
       status: "ok",
+      generation: 1,
       selection: {
         project_root: PROJECTS[0].path,
         dataset_root: PROJECTS[0].path,
