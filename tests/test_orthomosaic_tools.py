@@ -425,6 +425,45 @@ def test_deliver_orthomosaic_plant_counts_refuses_unacknowledged_then_admits(tmp
         assert r["delivered_phenotype"] == "stem_count"
 
 
+def test_deliver_orthomosaic_plant_counts_excludes_a_point_from_the_count(tmp_path, monkeypatch):
+    """A Point annotation in a reviewed bucket names no detection to georeference or count
+    (bbox_of has no box for one by design): the door must read the bucket through the same
+    real-detections predicate count_by_class already shares, excluding it, rather than crash on
+    the first Point it meets."""
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path / "proj"))
+    (tmp_path / "proj" / ".tcip" / "state").mkdir(parents=True, exist_ok=True)
+
+    raster_path = tmp_path / "mosaic.tif"
+    _write_geo_raster(raster_path)
+    bucket_dir, stem = _run_bucket(tmp_path, monkeypatch, raster_path)
+
+    from tcip_annotation import json_io
+    from tcip_annotation.state import Annotation, BBox, Point
+
+    pred_path = bucket_dir / f"{stem}.json"
+    data = json.loads(pred_path.read_text())
+    anns = [
+        Annotation(subject="0", geometry=BBox(8.0, 8.0, 12.0, 12.0), score=0.9),
+        Annotation(subject="0", geometry=Point(60.0, 60.0), score=0.8),
+    ]
+    json_io.write_annotations(str(pred_path), anns, data["width"], data["height"], keep_empty=True)
+
+    plant_csv = _plant_grid_csv(tmp_path, raster_path, _PLANT_PIXELS)
+
+    from tcip_mcp.tools.orthomosaic_tools import deliver_orthomosaic_plant_counts
+
+    out_csv = tmp_path / "counts.csv"
+    delivered = deliver_orthomosaic_plant_counts(
+        str(bucket_dir), str(raster_path), [str(plant_csv)], str(out_csv),
+        delivered_phenotype="stem_count", acknowledge_unvalidated=True)
+
+    assert "error" not in delivered, delivered
+    assert delivered["n_detections"] == 1  # the Point excluded, never read as a boxless detection
+    assert delivered["n_mapped"] == 1
+    rows = {r["plant_id"]: r for r in csv.DictReader(out_csv.open(newline=""))}
+    assert rows["plot0"]["value"] == "1"
+
+
 def test_deliver_orthomosaic_plant_counts_floors_a_stamp_earned_for_a_different_trait(
     tmp_path, monkeypatch,
 ):

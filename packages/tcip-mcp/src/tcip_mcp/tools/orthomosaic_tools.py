@@ -175,14 +175,13 @@ def deliver_orthomosaic_plant_counts(
             f"was produced on. {identity_mismatch}"
         )}
 
-    from tcip_annotation import json_io
-    from tcip_annotation.json_io import UnreadableLabelDocument
+    from tcip_annotation.json_io import UnreadableLabelDocument, detection_annotations
     from tcip_annotation.state import bbox_of
 
     boxes: list[list[float]] = []
     try:
         for f in pred_files:
-            for a in json_io.read_annotations(str(f)):
+            for a in detection_annotations(str(f)):
                 b = bbox_of(a.geometry)
                 boxes.append([b.x1, b.y1, b.x2, b.y2])
     except UnreadableLabelDocument as exc:
