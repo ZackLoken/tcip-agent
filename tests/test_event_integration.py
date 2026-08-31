@@ -660,8 +660,8 @@ class TestInferenceToolOutputSchema:
         assert res["image_count"] == len(counts)
         assert res["total_detections"] == sum(counts.values())
         assert res["operating_point_validated"] == VALIDATED_HELD_OUT
-        # The delivered image cell is the source basename with its extension; the bucket regime
-        # resolves it from the stamp's image_filenames map.
+        # The delivered image cell is the source basename with its extension, passed straight
+        # through from this live, no-bucket call's own result: export_detection_csv's own spelling.
         rows = list(csv.DictReader(out_csv.read_text(encoding="utf-8").splitlines()))
         assert {r["image"]: int(r["detection_count"]) for r in rows} == counts
 

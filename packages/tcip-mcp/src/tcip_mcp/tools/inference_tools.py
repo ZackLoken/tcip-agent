@@ -1673,6 +1673,17 @@ def tabulate_counts(
     ``export_predictions``' contract, and it survives a refused CSV so the review-promotion
     workflow above can proceed from it.
 
+    Every row's image cell holds the source image's basename with its extension, never the bare
+    document stem a prediction file is itself named for. The live regime without ``predictions_dir``
+    reads it straight off the pass's own per-image results; a bucket-reading regime (the bucket
+    regime proper, or the live regime with ``predictions_dir``, both reading documents by stem)
+    resolves it through the bucket's own stamp-recorded ``image_filenames`` map. A stem the map does
+    not name (a stamp written before the map existed, or a document left over in the bucket from an
+    earlier publish this run's fresh map does not cover) falls that row back to the bare stem
+    instead, and the response's ``image_note`` key discloses which stems fell back and why, carried
+    on both a delivered response and a ``DeliveryRefused`` refusal, in either bucket-reading regime;
+    absent when nothing fell back.
+
     Meaning door: ``trait``'s per-image-count operationalization must be recorded and
     breeder-confirmed, checked before the pass runs (live) or the bucket is read (bucket regime),
     not after. Only the CSV's own delivery-gate refusal, raised after the pass or the bucket read,
