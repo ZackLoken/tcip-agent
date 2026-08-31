@@ -304,6 +304,136 @@ def test_resolved_registry_path_admits_a_legitimate_relative_value(tmp_path: Pat
     assert result == (tmp_path / ".tcip" / "models" / "m.pt").resolve()
 
 
+# ── resolved_registry_path's empty-value refusal, and its admits-valid-work partner ────────
+
+
+def test_resolved_registry_path_refuses_an_empty_value(tmp_path: Path):
+    from tcip_mcp.registry_paths import RegistryPathEmpty, resolved_registry_path
+
+    with pytest.raises(RegistryPathEmpty):
+        resolved_registry_path(tmp_path, "")
+
+
+def test_resolved_registry_path_admits_a_non_empty_value(tmp_path: Path):
+    from tcip_mcp.registry_paths import resolved_registry_path
+
+    assert resolved_registry_path(tmp_path, "m.pt") == (tmp_path / "m.pt").resolve()
+
+
+# ── checkpoint_registry_path_for's root gate, and its admits-valid-work partner ────────────
+
+
+def test_checkpoint_registry_path_for_refuses_a_missing_root(tmp_path: Path):
+    from tcip_mcp.registry_paths import CheckpointRegistryRootUnusable, checkpoint_registry_path_for
+
+    ckpt = tmp_path / "m.pt"
+    ckpt.write_bytes(b"weights")
+    missing_root = tmp_path / "does_not_exist"
+
+    with pytest.raises(CheckpointRegistryRootUnusable):
+        checkpoint_registry_path_for(ckpt, missing_root)
+
+
+def test_checkpoint_registry_path_for_refuses_a_file_shaped_root(tmp_path: Path):
+    from tcip_mcp.registry_paths import CheckpointRegistryRootUnusable, checkpoint_registry_path_for
+
+    ckpt = tmp_path / "m.pt"
+    ckpt.write_bytes(b"weights")
+    file_root = tmp_path / "not_a_directory"
+    file_root.write_bytes(b"not a directory")
+
+    with pytest.raises(CheckpointRegistryRootUnusable):
+        checkpoint_registry_path_for(ckpt, file_root)
+
+
+def test_checkpoint_registry_path_for_admits_an_existing_directory_root(tmp_path: Path):
+    from tcip_mcp.registry_paths import checkpoint_registry_path_for
+
+    ckpt_dir = tmp_path / ".tcip" / "models"
+    ckpt_dir.mkdir(parents=True)
+    ckpt = ckpt_dir / "m.pt"
+    ckpt.write_bytes(b"weights")
+
+    assert checkpoint_registry_path_for(ckpt, tmp_path) == ".tcip/models/m.pt"
+
+
+# ── the malformed-entry response row: checkpoint_path_error, never hidden behind a raise ───
+
+
+def test_list_models_carries_a_malformed_entrys_error_rather_than_dropping_it(tmp_path: Path):
+    from tcip_mcp.model_registry import _write_registry_document
+
+    project = tmp_path / "proj"
+    ModelRegistry(str(project))  # creates the project's own .tcip/models directory
+    ts.replace(registry_index_key(project), _write_registry_document([
+        {"name": "malformed", "checkpoint_path": "../outside/evil.pt", "sha256": "a" * 64,
+         "file_size_bytes": None, "registered_at": "2026-01-01T00:00:00+00:00", "config": {},
+         "metrics": {}, "metrics_source": None, "tags": [], "experiment_id": None},
+    ]), expect=ts.Version.ABSENT)
+
+    listed = ModelRegistry(str(project)).list_models()
+
+    assert len(listed) == 1
+    assert listed[0]["checkpoint_path"] == "../outside/evil.pt"
+    assert "checkpoint_path_error" in listed[0]
+
+
+# ── the symlinked-checkpoint spelling rule: stores the resolved location, not the symlink ──
+
+
+def test_a_symlink_to_a_checkpoint_outside_root_stores_the_resolved_external_location(
+    tmp_path: Path,
+):
+    """Spelling is decided on the resolved target, never the name given: a symlink under the
+    project root pointing at a file genuinely outside it stores that external, resolved
+    location, not a relative spelling of the link's own in-tree name."""
+    project = tmp_path / "proj"
+    real_dir = tmp_path / "real_weights"
+    real_dir.mkdir()
+    real = real_dir / "m.pt"
+    real.write_bytes(b"the real bytes behind the symlink")
+    link_dir = project / ".tcip" / "models"
+    link_dir.mkdir(parents=True)
+    link = link_dir / "m_link.pt"
+    try:
+        link.symlink_to(real)
+    except OSError as exc:
+        pytest.skip(f"this environment cannot create a symlink: {exc}")
+
+    reg = ModelRegistry(str(project))
+    reg.register_model("m", str(link), {}, metrics_source=None)
+
+    stored = read_registry_index(project)[0]["checkpoint_path"]
+    assert stored == str(real.resolve())
+    assert is_external_form(stored)
+
+
+def test_a_symlink_to_a_checkpoint_under_root_stores_the_resolved_internal_location(
+    tmp_path: Path,
+):
+    """The same rule the other direction: a symlink whose resolved target sits under the
+    project root stores that target's own project-relative spelling, not the link's."""
+    project = tmp_path / "proj"
+    real_dir = project / "weights_home"
+    real_dir.mkdir(parents=True)
+    real = real_dir / "m.pt"
+    real.write_bytes(b"the real bytes behind an in-tree symlink")
+    link_dir = project / ".tcip" / "models"
+    link_dir.mkdir(parents=True)
+    link = link_dir / "m_link.pt"
+    try:
+        link.symlink_to(real)
+    except OSError as exc:
+        pytest.skip(f"this environment cannot create a symlink: {exc}")
+
+    reg = ModelRegistry(str(project))
+    reg.register_model("m", str(link), {}, metrics_source=None)
+
+    stored = read_registry_index(project)[0]["checkpoint_path"]
+    assert stored == "weights_home/m.pt"
+    assert not is_external_form(stored)
+
+
 def test_a_relative_root_still_answers_an_absolute_response(tmp_path: Path, monkeypatch):
     """The relative-root case section 6 names: the resolver's own root argument, not just the
     entry's stored path, must still answer absolute. The registry key itself refuses a relative
