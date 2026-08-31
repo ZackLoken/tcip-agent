@@ -428,6 +428,29 @@ def test_route_promotion_stamps_schema_version_2_and_carries_an_old_vintage_memb
     assert row["claim"]["mask_binarize"] == {"has_sweep": True, "threshold": 0.5}
 
 
+def test_route_promotion_reports_store_contention_as_retryable_not_a_bad_request(
+    client, tmp_path: Path, monkeypatch,
+):
+    """A lock timeout inside the promotion write is an infrastructure fault, so the route answers
+    503 with the store's own message, never a 400 that tells the breeder their request was
+    malformed (the dataset select route's StoreBusy handling is the platform's precedent). The
+    contention is injected because a real lock timeout is not constructible through one client."""
+    import tcip_mcp.pipelines.resolution as resolution_mod
+    from tcip_mcp.pipelines.resolution import sidecar_key
+    from tcip_store.errors import StoreBusy
+
+    proj, pred_dir = _make_dense_reviewed_project(tmp_path)
+    busy_key = sidecar_key(pred_dir, "operating_point")
+
+    def _busy(*args, **kwargs):
+        raise StoreBusy((busy_key,), busy_key, 5.0)
+
+    monkeypatch.setattr(resolution_mod, "update_sidecar", _busy)
+    resp = client.post("/api/review/validate_reference", json={
+        "dataset_root": proj, "trait": "catkin", "pred_dir": pred_dir, "subject": "catkin"})
+    assert resp.status_code == 503, resp.text
+
+
 def test_route_validates_a_review_that_includes_a_confirmed_negative(client, tmp_path: Path):
     """An image the bucket predicted nothing for is reviewed by marking it Complete. The verdict
     records the absence of a prediction document as the value it is, and the promotion compares that

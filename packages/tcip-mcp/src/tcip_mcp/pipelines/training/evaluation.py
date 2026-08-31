@@ -645,8 +645,10 @@ def _class_ids_present(per_image: list[dict], class_id: int | None = None) -> li
     return sorted(ids)
 
 
-def derive_operating_point_curve(per_image: list[dict], *, tolerance: float, class_id: int | None = None,
-                          conf_grid: list[float] | None = None, max_thresholds: int = 80) -> dict:
+def derive_operating_point_curve(per_image: list[dict], *, tolerance: float,
+                                 class_id: int | None = None,
+                                 conf_grid: list[float] | None = None,
+                                 max_thresholds: int = 80) -> dict:
     """Sweep the confidence threshold over ``per_image`` records via center-matching.
 
     One model pass produces ``per_image`` (unfiltered dt with scores); this sweeps conf cheaply in

@@ -170,7 +170,7 @@ def test_golden_gt_class_avg_size():
     assert gt_class_avg_size(_sweep_records(), class_id=0) == pytest.approx(20.0)
 
 
-def test_golden_sweep_operating_point_curve():
+def test_golden_derive_operating_point_curve():
     sweep = derive_operating_point_curve(_sweep_records(), tolerance=10.0, class_id=0)
     curve = sweep["curve"]
     assert [round(c["conf"], 2) for c in curve] == [0.0, 0.3, 0.6, 0.9]
