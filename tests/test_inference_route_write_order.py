@@ -120,6 +120,7 @@ def test_worker_writes_every_prediction_file_and_the_sidecar_on_a_full_pass(tmp_
     assert sidecar["checkpoint_sha256"] and sidecar["produced_at"]
     assert sidecar["images_dir"] == str(images_dir)
     assert sidecar["validated"] is False
+    assert sidecar["image_filenames"] == {"a": "a.jpg", "b": "b.jpg"}
 
     assert set(_summary(job)) == {"job_id", "status", "done", "total", "images_dir", "output_dir",
                                  "error", "warning", "dropped_nonpositive_boxes", "platform_root"}

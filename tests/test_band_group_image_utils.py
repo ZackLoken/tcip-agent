@@ -147,6 +147,21 @@ def test_stem_of_a_plain_path_and_a_band_group(grouped_dir):
     assert stem_of(resolve_image_source(grouped_dir, "cap")) == "cap"
 
 
+def test_logical_image_name_agrees_with_display_source_paths_basename(grouped_dir):
+    """A caller building a by-name filename map can reach for either the direct
+    ``logical_image_name`` call or ``Path(display_source_path(x)).name``; pin them to the same
+    value for a plain path and a band group, so a caller's choice between the two is cosmetic."""
+    from tcip_mcp.pipelines.image_utils import (
+        display_source_path, logical_image_name, resolve_image_source,
+    )
+
+    plain = grouped_dir / "plain.jpg"
+    assert Path(display_source_path(plain)).name == logical_image_name(plain) == "plain.jpg"
+
+    ref = resolve_image_source(grouped_dir, "cap")
+    assert Path(display_source_path(ref)).name == logical_image_name(ref)
+
+
 def test_probe_channels_of_a_plain_tif_does_not_decode_pixels(grouped_dir, monkeypatch):
     """probe_channels reads a TIFF's header-only series shape when it can, never paying for a
     full pixel decode just to learn the band count."""
