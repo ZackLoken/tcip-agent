@@ -121,11 +121,16 @@ def test_platform_state_root_ignores_the_old_env_var_name_and_scripts_refuse_it(
     $TCIP_STATE_ROOT, since the rename is a clean break with no silent fallback to the old
     name."""
     monkeypatch.delenv("TCIP_STATE_ROOT", raising=False)
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    # The retired variable names a directory the cwd is not, so a resolver honoring it
+    # returns a path this assertion can tell apart from the honest cwd fallback.
+    old_var_dir = tmp_path / "old-var-target"
+    old_var_dir.mkdir()
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(old_var_dir))
     monkeypatch.chdir(tmp_path)
 
     resolve = _resolve_platform_state_root()
     assert resolve() == Path.cwd()
+    assert resolve() != old_var_dir
 
     pin = _require_platform_root()
     try:

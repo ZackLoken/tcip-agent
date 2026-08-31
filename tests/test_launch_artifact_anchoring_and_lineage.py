@@ -76,7 +76,7 @@ def _detection_config(images_dir: Path, labels_dir: Path) -> dict:
     }
 
 
-def test_a_relative_output_dir_anchors_to_the_project_root_not_the_process_cwd(
+def test_a_relative_output_dir_anchors_to_the_platform_state_root_not_the_process_cwd(
         tmp_path: Path, monkeypatch, recorded_children) -> None:
     """A relative ``output_dir`` names a directory inside the project. The run directory handed to
     the child, the launch config written into it, and the path stamped into the experiment's
