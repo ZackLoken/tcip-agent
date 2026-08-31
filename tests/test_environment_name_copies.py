@@ -66,7 +66,7 @@ _ARCHITECTURE_SITES = _sites_in(REPO_ROOT / "ARCHITECTURE.md")
 _PROSE_COPY_SITES = [
     (REPO_ROOT / "README.md", 72),
     (REPO_ROOT / "README.md", 83),
-    (REPO_ROOT / "CLAUDE.md", 193),
+    (REPO_ROOT / "CLAUDE.md", 196),
     (REPO_ROOT / "environment.yml", 4),
     (REPO_ROOT / "packages" / "tcip-web" / "README.md", 44),
     (REPO_ROOT / "packages" / "tcip-web" / "README.md", 45),
