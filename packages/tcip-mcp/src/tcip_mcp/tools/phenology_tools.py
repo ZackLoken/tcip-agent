@@ -43,7 +43,7 @@ def build_plant_mapping(
     jumps, and assigns along the row, falling back to nearest-neighbour when the sequence
     signal is weak. Each assignment records its ``source`` and GPS ``distance_m`` (no
     fabricated "confidence"). The mapping is project state, persisted under the resolved
-    project root by ``name``; ``compute_phenology`` reads it back the same way. See the
+    platform state root by ``name``; ``compute_phenology`` reads it back the same way. See the
     ``phenology`` skill.
 
     Args:
@@ -61,7 +61,7 @@ def build_plant_mapping(
 
     Refuses (a plain ``{"error": ...}``) naming ``register_dataset`` when ``images_root`` is not
     a registered dataset's own ``images/`` directory, and naming ``init_project``/
-    ``set_active_project`` when the resolved project root carries no project record. A name
+    ``set_active_project`` when the resolved platform state root carries no project record. A name
     outside ``tcip_store.layout_claims.NAME_SEGMENT`` (lowercase letters, digits, single hyphens)
     refuses at the door. A receipt that cannot be written fails the call naming the receipt: the
     record it would have named is left on disk but :func:`~tcip_mcp.pipelines.postprocessing.
@@ -577,7 +577,7 @@ def compute_phenology(
             prediction files (``<stem>.json``) from the state classifier.
         output_csv_path: Where to write the delivered per-plant CSV (e.g.
             ``<phenology_prefix>_phenology.csv``). A relative path resolves against the
-            project root, never the server process's cwd.
+            platform state root, never the server process's cwd.
         classifier_pred_dirs: Bucket(s) carrying the trait's classifier-validity stamp
             (``classifier_operating_point.json``, written by ``calibrate_classifier_operating_point``)
 , reconciled from disk, never trusted from a caller-asserted string. ``None``

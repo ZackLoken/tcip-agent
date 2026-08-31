@@ -222,8 +222,8 @@ def run_inference(
 
     Args:
         checkpoint_path: Path to model .pt checkpoint. Must be registered under this process's
-            project root (``register_model``, explicit mode for a foreign or bespoke checkpoint)
-            or this door refuses before loading it.
+            platform state root (``register_model``, explicit mode for a foreign or bespoke
+            checkpoint) or this door refuses before loading it.
         image_paths: List of specific image paths.
         images_dir: Directory containing images to process.
         conf_threshold: Minimum confidence score. ``None`` (default) states nothing and runs at the
@@ -1712,7 +1712,7 @@ def tabulate_counts(
         images_dir: Directory containing input images (live regime; required with
             ``checkpoint_path``, absent for the bucket regime).
         output_path: Path for the output CSV file. Required; a relative path resolves against the
-            project root, never the server process's cwd.
+            platform state root, never the server process's cwd.
         trait: The registered trait whose confirmed per-image-count operationalization this
             delivery rests on. Required, in both regimes; a bucket regime call also refuses when
             the bucket's own stamp recorded a different, non-``None`` trait.
