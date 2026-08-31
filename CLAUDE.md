@@ -150,7 +150,10 @@ techniques only, never for a per-trait pipeline; the endpoint is a trained model
   (`claude-haiku-4-5-20251001`) for sweeps. Cross-family review runs `scripts/cross_family_ask.py`
   at its parity defaults (claude `opus` high, codex from `~/.codex/config.toml`, antigravity
   `gemini-3.1-pro-high`), and afterwards you quote each `meta.json`'s `model_resolved`,
-  `model_used`, `model_mismatch`, `effort_requested` and `response_source`.
+  `model_used`, `model_mismatch`, `effort_requested` and `response_source`. Cross-family
+  verdicts are democratic: when two families agree against the adjudicator's own position,
+  conform to them or take the split to the owner before landing; the outvoted side never
+  lands on the adjudicator's own authority, however grounded its reasoning reads.
 - Worktrees: create by hand at a named revision (`git worktree add .claude/worktrees/<name> -b
   worktree-<name> <rev>`), launch the implementer without isolation, have it confirm the
   revision; foreground pytest one file at a time; the full suite is the director's gate, never run
