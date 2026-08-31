@@ -291,6 +291,7 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | packages/tcip-web/frontend/src/components/TerminalRail.test.tsx | (none found) | 3 | 0 |
 | packages/tcip-web/frontend/src/components/TerminalRail.tsx | The agent rail: the real Claude Code CLI, embedded. | 4 | 2 |
 | packages/tcip-web/frontend/src/components/Toasts.tsx | (none found) | 1 | 1 |
+| packages/tcip-web/frontend/src/components/TopBar.test.tsx | (none found) | 2 | 0 |
 | packages/tcip-web/frontend/src/components/TopBar.tsx | (none found) | 3 | 1 |
 | packages/tcip-web/frontend/src/components/annotate/AnnotateLegend.tsx | Hover-triggered legend anchored lower-left of the Annotate canvas: one row per dataset subject plus the selected-shape colour, and in box mode an extra row explaining the dashed derived-box outline. | 2 | 1 |
 | packages/tcip-web/frontend/src/components/annotate/AnnotationShapes.tsx | Memoized content layer of committed boxes, read-only derived polygon boxes, polygons and points, filtered by drawing mode and the active subject; does not re-render on cursor movement alone. | 7 | 1 |
@@ -541,6 +542,7 @@ A module counts as zero-importer when no other module in its own scanned tree re
 | tcip-web-frontend | packages/tcip-web/frontend/src/components/StatusBar.test.tsx |
 | tcip-web-frontend | packages/tcip-web/frontend/src/components/TabBanner.test.tsx |
 | tcip-web-frontend | packages/tcip-web/frontend/src/components/TerminalRail.test.tsx |
+| tcip-web-frontend | packages/tcip-web/frontend/src/components/TopBar.test.tsx |
 | tcip-web-frontend | packages/tcip-web/frontend/src/hooks/useActiveTabSync.test.ts |
 | tcip-web-frontend | packages/tcip-web/frontend/src/hooks/useBandSelection.test.ts |
 | tcip-web-frontend | packages/tcip-web/frontend/src/hooks/useCoverageTracking.test.ts |
