@@ -85,19 +85,52 @@ describe("mergeSnapshot ownership model", () => {
     expect(s().gui.dataset.image_list).toHaveLength(3);
   });
 
-  it("carries the generation on the empty-dataset early return rather than stranding it", () => {
-    // A backend that has not yet run a select broadcasts an empty dataset with no binding
-    // either; the generation still has to land, or a later real dataset would adopt a stale one.
+  it("keeps the client's own generation on a same-epoch empty-dataset broadcast", () => {
+    // Same process, no restart: nothing in the backend can pair a real generation with an
+    // empty-dataset envelope here, so the client's still-good value survives instead.
+    useStore.setState({ bindingGeneration: 5 });
     s().mergeSnapshot(
       snapshot({
         dataset: dataset({ project_root: null, dataset_root: null, date: null, image_list: [] }),
       }),
       7,
-      9,
+      null,
       null,
     );
     expect(s().gui.dataset.dataset_root).toBe("/proj/ds"); // dataset still protected
-    expect(s().bindingGeneration).toBe(9); // generation still adopted
+    expect(s().bindingGeneration).toBe(5); // generation kept, not nulled
+  });
+
+  it("adopts the record-read generation on a restart's epoch-changed empty-dataset replay", () => {
+    // A restart's connect-time replay carries an empty dataset but a generation read fresh off
+    // the durable record: the surviving tab adopts that instead of nulling a valid value.
+    useStore.setState({ bindingGeneration: 5, wsEpoch: "epoch-1" });
+    s().mergeSnapshot(
+      snapshot({
+        dataset: dataset({ project_root: null, dataset_root: null, date: null, image_list: [] }),
+      }),
+      0,
+      9,
+      "epoch-2",
+    );
+    expect(s().gui.dataset.dataset_root).toBe("/proj/ds"); // dataset still protected
+    expect(s().bindingGeneration).toBe(9); // record-read value adopted
+    expect(s().canvasBindingMissing).toBe(false);
+  });
+
+  it("trips the presence gate when the epoch-changed replay's record read comes back empty", () => {
+    // The genuinely no-record case: the gate must trip, not silently keep a stale prior value.
+    useStore.setState({ bindingGeneration: 5, wsEpoch: "epoch-1" });
+    s().mergeSnapshot(
+      snapshot({
+        dataset: dataset({ project_root: null, dataset_root: null, date: null, image_list: [] }),
+      }),
+      0,
+      null,
+      "epoch-2",
+    );
+    expect(s().bindingGeneration).toBeNull();
+    expect(s().canvasBindingMissing).toBe(true);
   });
 
   it("adopts a new dataset identity and resets index + reviewStatus", () => {
@@ -259,6 +292,12 @@ describe("applyRestoredDataset", () => {
     s().applyRestoredDataset(dataset({ date: "3-2-26" }), 12);
     expect(s().gui.dataset.date).toBe("3-2-26");
     expect(s().bindingGeneration).toBe(12);
+  });
+
+  it("clears canvasBindingMissing on a binding adoption", () => {
+    useStore.setState({ canvasBindingMissing: true });
+    s().applyRestoredDataset(dataset({ date: "3-2-26" }), 12);
+    expect(s().canvasBindingMissing).toBe(false);
   });
 });
 

@@ -154,6 +154,7 @@ export const createGuiSlice: StateCreator<AppState, [], [], GuiSlice> = (set, ge
         // Adopted alongside the dataset in this one update: the pusher's next build reads a
         // generation that already names the same project as the dataset it fires against.
         bindingGeneration: generation,
+        canvasBindingMissing: false,
         imageStatus: {
           ...s.imageStatus,
           activeFilter: restored?.statusFilter ?? s.imageStatus.activeFilter,
@@ -188,10 +189,25 @@ export const createGuiSlice: StateCreator<AppState, [], [], GuiSlice> = (set, ge
 
       /** A null/empty backend dataset must never clobber a populated client one: this is what
        *  lets the browser survive a backend restart (the restarted backend broadcasts an empty
-       *  state before it knows the project). ``generation`` still lands here (never stranded on
-       *  this early return): a backend that has not yet run a select carries no binding either. */
+       *  state before it knows the project). An ordinary same-process broadcast (no epoch change)
+       *  keeps the client's own still-good generation rather than adopting whatever this one
+       *  empty envelope carries; a restart's replay (epoch changed) adopts the incoming value,
+       *  which by then is the record-read generation (see StateStore.refresh_binding_generation_
+       *  from_record), not a fresh process's stranding None. */
       if (!inDs || !inDs.dataset_root) {
-        return { wsVersion: nextVersion, wsEpoch: nextEpoch, bindingGeneration: generation };
+        if (!epochChanged) {
+          return {
+            wsVersion: nextVersion,
+            wsEpoch: nextEpoch,
+            bindingGeneration: s.bindingGeneration,
+          };
+        }
+        return {
+          wsVersion: nextVersion,
+          wsEpoch: nextEpoch,
+          bindingGeneration: generation,
+          canvasBindingMissing: generation == null,
+        };
       }
 
       const identityChanged = datasetIdentityChanged(inDs, local.dataset);
@@ -209,6 +225,7 @@ export const createGuiSlice: StateCreator<AppState, [], [], GuiSlice> = (set, ge
           wsVersion: nextVersion,
           wsEpoch: nextEpoch,
           bindingGeneration: generation,
+          canvasBindingMissing: generation == null,
         };
       }
 
@@ -221,6 +238,7 @@ export const createGuiSlice: StateCreator<AppState, [], [], GuiSlice> = (set, ge
           wsVersion: nextVersion,
           wsEpoch: nextEpoch,
           bindingGeneration: generation,
+          canvasBindingMissing: generation == null,
         };
       }
       /** Same dataset: accept backend-owned dataset fields (e.g. a changed model's prediction
@@ -240,6 +258,7 @@ export const createGuiSlice: StateCreator<AppState, [], [], GuiSlice> = (set, ge
         wsVersion: nextVersion,
         wsEpoch: nextEpoch,
         bindingGeneration: generation,
+        canvasBindingMissing: generation == null,
       };
     }),
 
