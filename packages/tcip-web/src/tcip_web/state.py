@@ -138,6 +138,7 @@ class StateStore:
         self._lock = asyncio.Lock()
         self._subscribers: list = []  # list[Callable[[dict], Awaitable[None]]]
         self._project_root: Optional[Path] = None
+        self._binding_generation: Optional[int] = None
 
     @property
     def project_root(self) -> Optional[Path]:
@@ -147,6 +148,21 @@ class StateStore:
         gui.json, so a snapshot edited on disk cannot redirect the next flush.
         """
         return self._project_root
+
+    @property
+    def binding_generation(self) -> Optional[int]:
+        """The ``canvas_open_binding`` generation the last ``/dataset/select`` recorded, or
+        ``None`` before any select has run this process.
+
+        Held here rather than re-read from the binding store on every broadcast: the envelope
+        (:func:`tcip_web.app.state_snapshot_message`) reads this in-process value on the event
+        loop, and :meth:`set_binding_generation` is the only writer, called by the same select
+        that wrote the binding record.
+        """
+        return self._binding_generation
+
+    def set_binding_generation(self, generation: int) -> None:
+        self._binding_generation = generation
 
     def open_project(self, project_root: Path) -> bool:
         """Make ``project_root`` the open project and load its persisted snapshot.
