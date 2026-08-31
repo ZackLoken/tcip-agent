@@ -312,6 +312,7 @@ def _worker(job: InferenceJob) -> None:
         except Exception:  # noqa: BLE001 (no run scope for the map; predictions decode by raw id)
             id_map = None
 
+        from tcip_mcp.pipelines.image_utils import display_source_path
         from tcip_mcp.pipelines.resolution import (
             operating_point_stamp, prediction_producer, write_sidecar,
         )
@@ -336,6 +337,7 @@ def _worker(job: InferenceJob) -> None:
             produced_at=datetime.now(timezone.utc).isoformat(),
             overlap=resolved_overlap,
             overlap_source=overlap_source,
+            image_filenames={img.stem: Path(display_source_path(img)).name for img in images},
         )
         if getattr(predictor, "task", None) == "instance_seg":
             # The unvalidated mask-binarize threshold write_predictions_json will use for every mask

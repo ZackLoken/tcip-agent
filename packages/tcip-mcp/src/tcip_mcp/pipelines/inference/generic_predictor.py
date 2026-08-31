@@ -26,7 +26,9 @@ from tcip_mcp.pipelines.model_build import (
     build_model,
     declared_in_chans,
 )
-from tcip_mcp.pipelines.image_utils import BandGroupRef, load_image, pad_tile, pil_to_tensor
+from tcip_mcp.pipelines.image_utils import (
+    BandGroupRef, display_source_path, load_image, pad_tile, pil_to_tensor,
+)
 from tcip_mcp.pipelines.inference.predictor import KIND_TCIP_MODULE
 from tcip_mcp.pipelines.resolution import DEFAULT_NMS_IOU
 
@@ -54,21 +56,6 @@ class WindowedRasterReader(Protocol):
     num_channels: int
 
     def read_window(self, y0: int, y1: int, x0: int, x1: int) -> "np.ndarray": ...
-
-
-def _display_path(source: str | Path | BandGroupRef) -> str:
-    """A JSON-safe, human-meaningful identity string for a predict result's ``image`` field.
-
-    A :class:`BandGroupRef` has no single sibling file that names the logical image, its own
-    ``.bandgroup`` manifest path is the closest thing (stable, on disk, unique per capture); a plain
-    path/string is returned as-is. Every ``load_image``/``load_multiband`` call in this module keeps
-    receiving the original source object (never this string), so a band-grouped capture still
-    decodes through the channel-aware loader instead of a stringified dataclass repr that no reader
-    can open.
-    """
-    if isinstance(source, BandGroupRef):
-        return str(source.manifest_path)
-    return str(source)
 
 
 class GenericPredictor:
@@ -149,7 +136,7 @@ class GenericPredictor:
         img = load_image(image_path, self.in_chans)
         w, h = img.size if isinstance(img, Image.Image) else (img.shape[1], img.shape[0])
         tensor = pil_to_tensor(img).to(self.device)
-        disp = _display_path(image_path)
+        disp = display_source_path(image_path)
 
         if self.task in _DETECTION_TASKS:
             outputs = self.model([tensor])
@@ -206,7 +193,7 @@ class GenericPredictor:
                 img = load_image(p, self.in_chans)
                 w, h = img.size if isinstance(img, Image.Image) else (img.shape[1], img.shape[0])
                 tensors.append(pil_to_tensor(img).to(self.device))
-                meta.append((_display_path(p), w, h))
+                meta.append((display_source_path(p), w, h))
             outputs = self.model(tensors)  # one forward over the whole chunk
             for (disp, w, h), out in zip(meta, outputs):
                 results.append(self._format_detection(out, disp, w, h))
@@ -522,7 +509,7 @@ class GenericPredictor:
         result = self._tiled_infer_core(
             h, w, _decoded_tile, edge, overlap, tile_batch_size, global_nms_iou, postprocess,
             require_masks=require_masks, tile_resize=tile_resize)
-        result["image"] = _display_path(source)
+        result["image"] = display_source_path(source)
         return result
 
     def export_onnx(self, output_path: str, opset: int = 17) -> str:

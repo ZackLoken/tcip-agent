@@ -916,6 +916,10 @@ STAMP_EXTENSION_KEYS: dict[str, str] = {
     "overlap_source": "the web inference worker",
     "sweep_path": "the image-export door, for a calibrated run that persisted a sweep",
     "sweep_summary": "the image-export door, for a calibrated run that persisted a sweep",
+    "image_filenames": "the per-image bucket publishers (the shared image-bucket publisher behind "
+                       "export_predictions and tabulate_counts's live path, and the web inference "
+                       "worker): each prediction document stem mapped to its source image's "
+                       "basename with extension",
 }
 """Every top-level key a producer adds beside ``operating_point_stamp``'s own fourteen, one entry
 per key naming which producer writes it. :func:`write_sidecar` refuses a fresh ``operating_point``
