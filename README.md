@@ -31,7 +31,7 @@ Status: the browser GUI is built out across all tabs (Annotate / Review / Traini
 └──────────────────────────────┘
 ```
 
-All three processes share `.tcip/` on disk (experiment state, model registry, audit log, GUI state).
+All three processes share `.tcip/` on disk (experiment state, model registry, audit logs, GUI state).
 
 Supporting libraries: `packages/tcip-annotation` (headless annotation engine: label I/O, IoU matching, SAM wrapper) and `packages/tcip-store` (the storage seam: one locked, atomic interface for the platform's records, append-only logs and blobs). `tcip-store` is the bottom of the stack, depending on nothing else here; `tcip-annotation` depends on it and on neither of the other two.
 

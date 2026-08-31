@@ -162,8 +162,10 @@ frames, so it lags a beat; treat it as "roughly where they are," not a frame-exa
 
 Adopt the project with `set_active_project` before doing project work. Adoption writes the
 active marker *and* repins the platform-state root to `<workspace>/<project>`, so from then on
-the `@audited` log, the experiment store, and the model registry all live under that one
-project's `.tcip/` alongside its data (self-contained and portable; `python
+the experiment store and the model registry live under that one project's `.tcip/` alongside its
+data, and the platform's own audit log is now this project's own, one file at one key
+(self-contained and portable; a dataset's own audit log stays beside that dataset, unaffected by
+adoption; `python
 scripts/archive_project.py` bundles everything; `python scripts/import_project.py` restores that
 ZIP into a destination dir, round-tripping back to a `inspect_project`-visible project). After
 adoption, `inspect_project`, `select_best_model`, `list_registered_models`,

@@ -140,7 +140,7 @@ the shared home review.py's priority queue and tuning.py's sweeps adopt too."""
 
 
 def _audit_dataset_write(dataset_root: str, tool: str, arguments: dict) -> None:
-    """Record a GUI inference mutation in the audit log of the dataset it wrote into.
+    """Record a GUI inference mutation in that dataset's own audit log.
 
     Predictions are dataset-native, not project-private (a dataset can be opened by more than one
     project, see ``dataset_layout.dataset_root_of``), so there is no single project's audit log a

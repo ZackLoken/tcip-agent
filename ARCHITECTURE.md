@@ -1374,44 +1374,95 @@ the calibration-gate side are `region_completeness_path` (`dataset_layout.py:566
 functions the route calls internally rather than via a POST to `/api/coverage/completeness`, so a
 bug confined to the route's own HTTP layer would not be caught by the calibration-gate tests.
 
-## 9. `.tcip/audit.jsonl`, append-only tool-call log
+## 9. `audit_log`, one append-only store under three kinds of root
 
-Path: `.tcip/audit.jsonl` under the root the entry's scope names: the pinned platform state
-root, via `resolve_state`, for a platform event, and the dataset root for an event that changed
-a record travelling with the data. That path is what the file backend places the log at and what
+Path: `.tcip/audit.jsonl` under the root an entry's scope names: the pinned platform state root
+(via `resolve_state`) for a platform event; a dataset root for an event that changed a record
+travelling with the data; a project root for an event that is the project's own (a delivery, a
+plant-mapping build). A caller serving more than one project (a web route) passes a project root
+of its own rather than relying on the process's own pin; adopting a project repins the process's
+own platform root to it (`project_paths.py`), so from then on a project's own log and the platform
+log are one file at one key. That path is what the file backend places the log at and what
 `scripts/export_store.py` writes back out; on the default database backend the rows live in that
 root's `.tcip/store.db` until they are exported.
 
-Writers: the `@audited` decorator, `packages/tcip-mcp/src/tcip_mcp/audit.py:174`, which records
-a call in the platform log unless the tool declares `@audited(scope_arg=...)` naming the
-argument that carries the dataset it mutates a record of, resolved by `dataset_scope_of`, line
-147 (through the same canonicalizer the tool body uses, when the declaration passes one as
-`scope_via`); `record_event`, same file, line 121, which is what code that is neither an MCP tool
-nor a script-invoked door demoted from one emits through (the training envelope's open/close
-events, and each GUI route's own `_audit` helper). Both address the log through `audit_log_key`,
-same file, line 84, and append
-through the storage seam. What a failed append means is where the two part: `record_event` warns
-and returns, through `_write_entry`, same file, line 103, because its callers bracket work rather
-than follow a mutation; the decorator raises `MutationCommittedWithoutAuditLine`, line 57,
-because its append runs after the tool body and a warning there invites a blind retry of a
-mutation already on disk. Dataset-scoped entries carry a `scope` field naming their root;
-platform entries keep the original shape.
+Writers: three write paths, `packages/tcip-mcp/src/tcip_mcp/audit.py:280` (`audited`), line 210
+(`record_event`) and line 229 (`record_event_or_raise`), all resolving a caller's scope through
+one shared helper, line 136 (`_stamp_scope`), so the root a line's `scope` field names and the
+root its Key addresses are always the one resolution, never two independently taken. It stamps
+`entry["schema_version"] = 2` on every line, and `entry["scope"]` with the resolved root only
+when the caller passed one; a call that took the platform default leaves `scope` unset.
 
-Reader: no production code parses the log's entries. The only production consumer is
-`archive_project` (`tools/project_tools.py`), which bundles the file as a claimed ROOT-layout
-record through the shared membership accounting (`tcip_mcp.tools.bundle.account_for`) without
-opening it. Rows are otherwise read only through the storage seam's `read_log`, which decodes
-each line into an opaque mapping, and by tests that access named keys, so a new per-entry field
-is additive for every existing consumer.
+`audited` covers the platform's doors (every MCP tool in `tools/`, plus the script-invoked doors
+demoted from them): bare, a platform event; `@audited(scope_arg=...)` names the argument carrying
+a dataset or project location, resolved via `dataset_scope_of`, line 253 (through the tool's own
+canonicalizer when the declaration passes one as `scope_via`). Eleven doors declare one: nine
+dataset-scoped (`save_annotations`, `tools/annotation_tools.py:132`; `write_class_map`, same
+file, line 470; `force_redraw_cal_holdout_split`, `tools/calibration_tools.py:24`;
+`materialize_review_dataset`, `tools/feedback_tools.py:168`; `export_predictions`,
+`tools/inference_tools.py:1323`; `register_dataset`, `tools/project_tools.py:165`;
+`propose_annotations`, `tools/proposal_tools.py:179`; `stage_accepted_proposals`, same file, line
+389; `stage_proposals`, same file, line 616) and two project-scoped
+(`state_trait_operationalization`, `tools/operationalization_tools.py:19`; `author_trait_spec`,
+`tools/trait_spec_authoring_tools.py:23`; `dataset_scope_of` admits a `project_root` argument the
+same way it admits a dataset root, since both are directories carrying their own `.tcip/`). A
+resolution that answers "no dataset" leaves the call a platform event; a resolver that raises
+refuses the call rather than filing it there.
 
-Seam S06 ("Append-only audit log .tcip/audit.jsonl"), verdict `one-side-only`,
-`phase0_implementation: mixed`: `tests/test_audit_experiments.py:25,57`,
-`tests/test_tcip_web_routes.py:480,813,845`, `tests/test_tcip_web_results_routes.py:534`,
-`tests/test_tcip_web_classes_routes.py:394,440`. Each writer is exercised through the real append
-and checked for its own tool name landing in the file. A GUI route's `_audit` helper composes no
-entry of its own: it calls `record_event` with a `source` of `"gui"` and the scope its event
-belongs to, and `tests/test_audit_row_core_field_agreement.py:26` runs a real route and a real
-platform write against one log and holds the two rows to the same core fields.
+`record_event`/`record_event_or_raise` cover code that is neither an MCP tool nor a demoted door.
+Platform-scoped, no `scope` of their own: the training envelope's open/close events
+(`pipelines/training/envelope.py`), the model registry's replace and write-refusal events
+(`model_registry.py:408,424`), `evaluation.py`'s derived-localization-kind record (`:478`),
+`experiments.py`'s post-terminal refusal (`_audit_refused`, `:368`) when its caller names no
+project root, and `routes/terminal.py`'s one line per agent-terminal launch (`:83`).
+Dataset-scoped: four GUI route writers passing the dataset root their own guard resolved
+(`routes/annotate.py`'s `_audit_gui_write`, `:150`; `routes/classes.py`'s `_audit_dataset_write`,
+`:63`; `routes/inference.py`'s `_audit_dataset_write`, `:142`; `routes/review.py`'s `_audit`,
+`:93`), `resolution.py`'s `record_delivery_binding_event` (`:1928`, dataset-scoped when a
+delivery's buckets share one dataset root, platform-scoped otherwise), and
+`calibration_tools.py`'s redraw event (`force_redraw_cal_holdout_split_result`, `:214`).
+Project-scoped: `routes/results.py`'s `_audit` (`:151`, every Results-tab route) and
+`pipelines/postprocessing/plant_mapping.py`'s `persist_mapping` (`:795`), whose two callers file
+its receipt under two different categories: the MCP tool `build_plant_mapping` passes the
+process's own pinned platform root (so the receipt lands in the platform log's own file, a
+project's once that root is an adopted project), while the web build route passes its own guarded
+project root, which can differ.
+
+What a failed append means is where the three write paths part: `record_event` warns and
+returns, through `_write_entry`, line 192, because its callers bracket work rather than follow a
+mutation; `record_event_or_raise` raises `AuditEntryNotWritten`; the decorator raises
+`MutationCommittedWithoutAuditLine`, because its append runs after the tool body and a warning
+there invites a blind retry of a mutation already on disk.
+
+Version-2 line contract: `scope`, when present, names the resolved root the entry was filed
+under; its absence on a version-2 line means the writer took the platform default, never that the
+entry's category is unknown. A line written before this marker predates it (`schema_version`
+absent, the frozen version 1) and claims neither. Three disclosures for a moved log: a stamped
+absolute scope travels in a shared or imported archive exactly as the log body's other absolute
+paths already do, unredacted; `scope` is a write-time fact, never a location claim, so a
+relocated import's lines still name the exporting machine's own root and nothing reconciles them
+against where the archive now sits; and a project archive is provenance-preserving, not
+path-sanitized, by the same standing choice.
+
+Readers: two production parsers, both reading through the storage seam's `read_log` rather than
+decoding lines by hand, and both refusing (never scanning past) a page reporting corruption or an
+unknown `schema_version`. `experiments._index_refused_mutations`,
+`packages/tcip-mcp/src/tcip_mcp/experiments.py:1491`, one scan of the platform audit log
+(`audit_log_key()`, no scope) indexing every `experiment_mutation_refused` entry by
+`arguments.experiment_id`, shared by `compare_experiments`, line 1532, across every experiment it
+compares in one call; `page.corrupt`/`page.version_refused` both fail the whole call (`None`, not
+a partial index), so a caller who cannot see behind an unreadable entry never reports "no
+refusals" in its place. `plant_mapping._scan_receipts`/`_require_receipt`, same file, lines
+923/950, the hard receipt gate `load_mapping` runs before trusting a persisted mapping record:
+every `plant_mapping_built` entry in the record's own project log is scanned for a receipt naming
+the record's digest, and a page reporting `page.corrupt` or `page.version_refused` raises rather
+than reading past it, since an entry could be hiding behind either kind of unreadable line unread.
+
+Beyond these two, `archive_project` (`tools/project_tools.py`) bundles the log file as a claimed
+ROOT-layout record through the shared membership accounting (`tcip_mcp.tools.bundle.account_for`)
+without opening it, and every other reader goes through the storage seam's own `read_log` or a
+test asserting named keys, so a new per-entry field (such as `schema_version` here) is additive
+for every consumer beside the two parsers above.
 
 ## 10-15. `.tcip/experiments/<experiment_id>/`, eight sub-formats
 
@@ -1975,12 +2026,40 @@ Side A: `packages/tcip-mcp/src/tcip_mcp/tools/gui_tools.py:218` (`result = post_
 Side B: `packages/tcip-web/src/tcip_web/app.py:429` (`if event.event_type == PANEL_EVENT_REVIEW_FOCUS:`).
 Phase 3 verdict: single. The posted payload carries `active_subject` beside `subject` (`packages/tcip-mcp/src/tcip_mcp/tools/gui_tools.py:216`), the key both readers take (`packages/tcip-web/src/tcip_web/app.py:296`, `frontend/src/lib/annotateFocus.ts:21,54`), held by `tests/test_event_integration.py`'s producer-driven test, which posts the focus tool's own event and asserts the advisory state's `active_subject`.
 
-## S06. Append-only audit log .tcip/audit.jsonl
+## S06. `audit_log`, one append-only store under three kinds of root
 
-Must agree: mutations from any process land in the log their scope names, a dataset's own for a record travelling with the data and the platform's otherwise, with the same entry shape.
-Side A: `packages/tcip-mcp/src/tcip_mcp/audit.py:243` (`def audited(`, taking a declared `scope_arg` naming which tool argument carries the dataset a scoped tool mutates a record of) and `record_event`, line 121, the one emitter for code that is neither an MCP tool nor a script-invoked door demoted from one; both address the log through `audit_log_key`, line 84, and differ only in what a failed append means: `record_event` warns through `_write_entry`, line 103, while the decorator refuses, since its append runs after the tool body.
-Side B: `packages/tcip-web/src/tcip_web/routes/review.py:93` (`def _audit(scope: str, tool: str, arguments: dict) -> None:`, which calls `record_event` with the scope its event belongs to; `routes/results.py:54` and `routes/inference.py:84` do the same for their own roots).
-Phase 3 verdict: single.
+Must agree: mutations from any process land in the log the scope names, the platform's own by
+default, a dataset's own for a record travelling with the data, a project's own for a record
+that is the project's, all with the same entry shape; and the project's own receipt gate
+(`plant_mapping.load_mapping`) trusts only what that project's own log actually recorded.
+Side A: `packages/tcip-mcp/src/tcip_mcp/audit.py:280` (`def audited(`, taking a declared
+`scope_arg` naming which tool argument carries the dataset or project a scoped tool mutates a
+record of) and `record_event`/`record_event_or_raise`, lines 210/229, the two emitters for code
+that is neither an MCP tool nor a script-invoked door demoted from one; all three resolve a
+caller's scope through the one shared `_stamp_scope`, line 136, and differ only in what a failed
+append means: `record_event` warns through `_write_entry`, line 192; `record_event_or_raise`
+raises `AuditEntryNotWritten`; the decorator refuses (`MutationCommittedWithoutAuditLine`), since
+its append runs after the tool body.
+Side B: `packages/tcip-web/src/tcip_web/routes/review.py:93` (`def _audit(scope: str, tool: str,
+arguments: dict) -> None:`, which calls `record_event` with the dataset root its own guard
+resolved; `routes/annotate.py:150` and `routes/inference.py:142` do the same for their own
+datasets, `routes/classes.py:63` likewise); `routes/results.py:151` does the same for a project
+root instead. Reader: `pipelines/postprocessing/plant_mapping.py:950` (`_require_receipt`)
+trusts only a `plant_mapping_built` entry it finds in the record's own project log, scanned by
+`_scan_receipts`, line 923, which refuses (never scans past) a page reporting corruption or an
+unknown `schema_version`.
+Phase 3 verdict: single. Each writer is exercised through a real append and checked for its own
+tool name landing in the log its own scope names: `tests/test_tcip_web_routes.py:766,1193,1229`
+(a dataset-scoped GUI write, checked against the same dataset's log, never the platform's);
+`tests/test_tcip_web_results_routes.py:680,701` (a dataset-scoped delivery-binding event beside a
+project-scoped export audit line, from the one route); `tests/test_tcip_web_classes_routes.py:724,770`
+(a dataset-scoped GUI write, checked against an empty project log for the same request); and
+`tests/test_audit_row_core_field_agreement.py:26`, which runs a real GUI route and a real
+platform write against one log and holds the two rows to the same core fields. The receipt
+gate's own agreement is held by `tests/test_plant_mapping.py:293,326` (a version-refused line
+still blocks the scan; a real receipt still admits) and
+`tests/test_plant_mapping_binding.py:661,709` (a receipt that cannot be written fails the build
+and the web route alike).
 
 ## S07. Experiment record .tcip/experiments/<id>/
 

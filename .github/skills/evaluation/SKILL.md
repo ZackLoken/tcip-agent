@@ -79,8 +79,8 @@ is a real, audited decision, never automatic:
 and `dataset_root` is that same root, so the redraw replaces the lock the calibration reads. `reason` is
 required and non-empty; every redraw is appended to the lock's `redraw_history` with its policy,
 seed and the old/new split's content hashes (not the stems themselves); the old and new split
-membership is recorded in the audit log alongside the reason, so a redraw-until-it-passes pattern
-stays visible on review.
+membership is recorded in a dataset's audit log alongside the reason, so a redraw-until-it-passes
+pattern stays visible on review.
 
 `run_inference`, `export_predictions` and `tabulate_counts` (the latter two forward it to
 `run_inference`), `force_redraw_cal_holdout_split` and `evaluate_model` all take

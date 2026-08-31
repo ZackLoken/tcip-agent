@@ -92,8 +92,11 @@ silently corrupts results and compounds across sessions.
   writer stated. An empty label file alone is never a negative. Never delete empty label files
   without asking.
 - Never train or evaluate on an unconfirmed format: `read_annotations` refuses rather than guesses.
-- State changes go through `@audited` MCP tools; the append-only audit log is the record, and an
-  entry the decorator cannot append raises `MutationCommittedWithoutAuditLine` rather than let a
+- State changes go through `@audited` MCP tools, or an explicit `record_event`/
+  `record_event_or_raise` emitter for code that is neither: the record is one store's three
+  logs (the platform's, a dataset's own, a project's own), never a single file. An entry the
+  decorator cannot append raises `MutationCommittedWithoutAuditLine`; an explicit emitter's own
+  unwritten entry raises `AuditEntryNotWritten` the same way, rather than either letting a
   caller blind-retry. Experiments are immutable: new run, never an overwritten record.
 - Confirm before destructive or outward actions (deleting labels, overwriting weights, exporting
   deliverables); approval for one does not extend to the next.

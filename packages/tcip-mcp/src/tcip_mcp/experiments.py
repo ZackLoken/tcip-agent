@@ -369,7 +369,7 @@ def refuse_if_terminal(experiment_id: str, op: str, state: str | None) -> None:
 def _audit_refused(
     experiment_id: str, op: str, detail: dict[str, Any], *, root: Path | str | None = None
 ) -> None:
-    """Record a refused post-terminal mutation on the append-only audit log.
+    """Record a refused post-terminal mutation in the log ``root`` names.
 
     Through :func:`record_event_or_raise`: the mutation this refusal reports already committed
     (or, for update_status/complete_run, decided not to), so a line that cannot be appended
