@@ -63,7 +63,7 @@ def read_split_manifest_dir(split_dir: str | Path) -> dict:
     :data:`~tcip_mcp.pipelines.data.splits.SPLIT_NAMES` states under ``splits``, or whose sides
     are not pairwise disjoint (a member on two sides would be trained on and selected on, or
     trained on and held out for calibration, at once). One reader, one refusal: the binder, the
-    calibration universe, preflight and every door read a manifest through here and never test
+    calibration universe, preflight and every entry point read a manifest through here and never test
     its shape themselves. Because ``seed`` is required here, a caller that reads it off the
     returned manifest (a run's bind, resolving its own seed from the manifest's) never sees it
     absent and falls through to a ``None`` in its place.

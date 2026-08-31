@@ -103,7 +103,7 @@ def project_path(name: str, *, create: bool = True) -> Path:
 
     ``name`` is a single path segment; path separators and traversal are rejected so a
     name can never escape the workspace. This does not check the ``crop_subject_phenotype``
-    shape (:func:`format_project_name`/:func:`parse_project_name`): every door that opens,
+    shape (:func:`format_project_name`/:func:`parse_project_name`): every entry point that opens,
     lists or adopts an existing project accepts any safely-named one, since a directory the
     platform did not create is opened by the name it already has. Only the doors that
     create a workspace directory (``ingest_images``, ``init_project``, ``import_project``)

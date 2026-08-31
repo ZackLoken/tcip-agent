@@ -1,6 +1,6 @@
 """Inference MCP tools: run_inference, export_predictions and tabulate_counts, sharing one
 verified body (``_run_inference_verified``) so the firewalled operating point (conf/NMS/tiling/
-max_dets) resolves identically for every door that runs a model over images."""
+max_dets) resolves identically for every entry point that runs a model over images."""
 
 from __future__ import annotations
 
@@ -668,7 +668,7 @@ def _run_inference_verified(
 
     # This run's name→id map, reused for both recording and decode, so export records it in
     # operating_point.json and decodes predictions to names through this one map, consistent
-    # within the run. The one resolution both entry points that write predictions to disk use (this tool
+    # within the run. The one resolution both writers that persist predictions to disk use (this tool
     # and the web GUI's own inference worker, routes/inference.py), never a second implementation.
     id_map = resolve_decode_id_map(predictor, images_dir)
     out = {
@@ -724,7 +724,7 @@ def _resolve_writable_bucket_for(output_dir: str, *, overwrite: bool):
 
     Returns ``(out, resolution, dataset_root, refusal)``. ``refusal`` is the door's own error dict
     when the requested bucket carries review verdicts and the caller asked to overwrite it, and
-    ``None`` otherwise. One resolution for both doors here that persist a bucket, so the canonical
+    ``None`` otherwise. One resolution for both writers here that persist a bucket, so the canonical
     ``predictions/<model>/<date>`` redirect (which varies the model segment, the one every
     date-keyed reader enumerates) and the bespoke last-segment redirect cannot drift apart.
     ``dataset_root`` is ``None`` for a bucket under no dataset, whose verdict guard is inoperative.

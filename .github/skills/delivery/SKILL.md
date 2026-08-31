@@ -171,9 +171,9 @@ only when every dimension it was handed clears, and otherwise refuses (or, with
 unvalidated predictions to *reach* a validated measurement, so it never refuses on conf; it does
 refuse (unconditionally, no `acknowledge_unvalidated`) when tiling is requested and the checkpoint's
 tile scale has no real basis at all, since there is no number to tile at. `export_predictions`, the
-entry point that actually persists a prediction bucket other doors treat as ground truth, applies the same
+door that actually persists a prediction bucket other doors treat as ground truth, applies the same
 tile_size gate on top, which any of the three bases clears. Conf itself is never gated at either
-entry point; the measurement gate lives at the final phenotype door.
+writer; the measurement gate lives at the final phenotype door.
 
 ## Quality Control
 

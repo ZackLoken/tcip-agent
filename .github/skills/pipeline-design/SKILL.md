@@ -200,7 +200,7 @@ image_results = [
 # The final CSV is a phenotype delivery door: without pred_dirs it floors to unvalidated
 # regardless of any asserted string. Pass pred_dirs, or acknowledge_unvalidated=True for provisional.
 summaries = aggregate_per_plant(image_results, plant_id_fn=plant_id_fn)
-export_aggregated_csv(summaries, "phenotype_csv", delivered_phenotype="<trait>", pred_dirs=["stage_b_preds"])
+export_aggregated_csv(summaries, "phenotype_csv", delivered_phenotype="<phenotype>", pred_dirs=["stage_b_preds"])
 ```
 
 How many stages there are, and what each one does, is your decomposition to derive; the chaining

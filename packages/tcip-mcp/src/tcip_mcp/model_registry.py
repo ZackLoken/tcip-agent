@@ -707,7 +707,7 @@ def conform_registry_paths_on_disk(root: str | Path) -> list[str]:
     transaction there either refuses outright (the database backend refuses a write to an
     unconformed root) or, once adopted, leaves a cached connection open on a directory the door
     is about to rename, which Windows refuses. Never used against a live, already-adopted
-    project; :func:`conform_registry_paths` is that door.
+    project; :func:`conform_registry_paths` is that entry point.
     """
     root_path = Path(root).resolve()
     path = registry_index_path(root_path)

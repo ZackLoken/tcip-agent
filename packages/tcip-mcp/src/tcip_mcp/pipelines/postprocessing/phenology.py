@@ -72,7 +72,7 @@ def milestone_date_columns(spec) -> list[str]:
     ``phenology_csv_columns`` (no ``plant_id``/provenance columns).
 
     Consumed by ``phenology_csv_columns``, which pairs each with its ``_bound``. Not an export gate:
-    the web entry point computes what it exports directly rather than checking for these names in a
+    the web door computes what it exports directly rather than checking for these names in a
     caller-supplied table.
     """
     return [f"{spec.phenology_prefix}_{sfx}_date" for sfx, _ in _milestone_columns(spec)]
