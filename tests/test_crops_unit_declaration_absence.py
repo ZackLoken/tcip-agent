@@ -94,7 +94,7 @@ def test_a_count_valued_delivery_ships_with_a_blank_units_column(tmp_path: Path)
          "measurement_document": "operating_point"},
     ]
     out_path = tmp_path / "counts.csv"
-    export_aggregated_csv(results, str(out_path), trait_name="stem_count",
+    export_aggregated_csv(results, str(out_path), delivered_phenotype="stem_count",
                           acknowledge_unvalidated=True)
     with open(out_path, newline="") as f:
         rows = list(csv.DictReader(f))
@@ -111,7 +111,7 @@ def test_a_dimensional_value_ships_for_a_trait_crops_yml_declares_no_unit_for(tm
     assert _resolve_units("plant_surface_area", results, "operating_point") == ("mm2", "mm")
 
     out_path = tmp_path / "area.csv"
-    export_aggregated_csv(results, str(out_path), trait_name="plant_surface_area",
+    export_aggregated_csv(results, str(out_path), delivered_phenotype="plant_surface_area",
                           acknowledge_unvalidated=True)
     with open(out_path, newline="") as f:
         rows = list(csv.DictReader(f))
@@ -126,4 +126,4 @@ def test_a_declared_unit_still_cross_checks_the_value_keys_own_unit(tmp_path: Pa
     assert crops_units()["bark_thickness"] == "mm"
     with pytest.raises(ValueError, match="declared units"):
         export_aggregated_csv(results, str(tmp_path / "mismatch.csv"),
-                              trait_name="bark_thickness", acknowledge_unvalidated=True)
+                              delivered_phenotype="bark_thickness", acknowledge_unvalidated=True)

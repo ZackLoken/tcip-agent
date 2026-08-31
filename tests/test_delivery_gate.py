@@ -386,7 +386,7 @@ def test_export_aggregated_csv_refuses_bare_write(tmp_path):
         export_aggregated_csv(
             [{"plant_id": "p1", "value": 5, "observations": 2, "value_key": "count",
              "measurement_document": "operating_point"}],
-            str(tmp_path / "o.csv"), trait_name="stem_count")
+            str(tmp_path / "o.csv"), delivered_phenotype="stem_count")
 
 
 def test_export_aggregated_csv_reconciles_sidecar_floor(tmp_path):
@@ -400,7 +400,7 @@ def test_export_aggregated_csv_reconciles_sidecar_floor(tmp_path):
         export_aggregated_csv(
             [{"plant_id": "p1", "value": 5, "observations": 2, "value_key": "count",
              "measurement_document": "operating_point"}],
-            str(tmp_path / "o.csv"), trait_name="stem_count",
+            str(tmp_path / "o.csv"), delivered_phenotype="stem_count",
             measurement_validated=VALIDATED_HELD_OUT, pred_dirs=[str(bucket)])
 
 
@@ -415,7 +415,7 @@ def test_export_aggregated_csv_continuous_trait_bare_string_never_trusted(tmp_pa
         export_aggregated_csv(
             [{"plant_id": "p1", "value": 4.2, "observations": 3,
               "value_key": "fruit_diameter", "measurement_document": "regression_operating_point"}],
-            str(out), trait_name="fruit_diameter", measurement_validated=VALIDATED_HELD_OUT)
+            str(out), delivered_phenotype="fruit_diameter", measurement_validated=VALIDATED_HELD_OUT)
 
 
 def test_export_aggregated_csv_continuous_trait_ships_provisional_when_acknowledged(tmp_path):
@@ -427,7 +427,7 @@ def test_export_aggregated_csv_continuous_trait_ships_provisional_when_acknowled
     export_aggregated_csv(
         [{"plant_id": "p1", "value": 4.2, "observations": 3, "value_key": "fruit_diameter",
          "measurement_document": "regression_operating_point"}],
-        str(out), trait_name="fruit_diameter", measurement_validated=VALIDATED_HELD_OUT,
+        str(out), delivered_phenotype="fruit_diameter", measurement_validated=VALIDATED_HELD_OUT,
         acknowledge_unvalidated=True)
     rows = list(csv.DictReader(out.open()))
     assert rows[0]["measurement_validated"] == VALIDATED_FALSE
@@ -463,7 +463,7 @@ def test_export_aggregated_csv_ordinal_trait_ships_when_sidecar_validated(tmp_pa
     export_aggregated_csv(
         [{"plant_id": "p1", "value": 2, "observations": 3, "value_key": "astringency",
          "measurement_document": "ordinal_operating_point"}],
-        str(out), trait_name="astringency", measurement_validated=VALIDATED_HELD_OUT,
+        str(out), delivered_phenotype="astringency", measurement_validated=VALIDATED_HELD_OUT,
         pred_dirs=[bucket])
     rows = list(csv.DictReader(out.open()))
     assert rows[0]["measurement_validated"] == VALIDATED_HELD_OUT
@@ -477,7 +477,7 @@ def test_export_aggregated_csv_regression_trait_ships_when_sidecar_validated(tmp
     export_aggregated_csv(
         [{"plant_id": "p1", "value": 4.2, "observations": 3, "value_key": "fruit_diameter",
          "measurement_document": "regression_operating_point"}],
-        str(out), trait_name="fruit_diameter", measurement_validated=VALIDATED_HELD_OUT,
+        str(out), delivered_phenotype="fruit_diameter", measurement_validated=VALIDATED_HELD_OUT,
         pred_dirs=[bucket])
     rows = list(csv.DictReader(out.open()))
     assert rows[0]["measurement_validated"] == VALIDATED_HELD_OUT
@@ -495,7 +495,7 @@ def test_export_aggregated_csv_ordinal_trait_floors_on_missing_sidecar(tmp_path)
         export_aggregated_csv(
             [{"plant_id": "p1", "value": 2, "observations": 3, "value_key": "astringency",
              "measurement_document": "ordinal_operating_point"}],
-            str(tmp_path / "o.csv"), trait_name="astringency",
+            str(tmp_path / "o.csv"), delivered_phenotype="astringency",
             measurement_validated=VALIDATED_HELD_OUT, pred_dirs=[str(bucket)])
 
 
@@ -509,7 +509,7 @@ def test_export_aggregated_csv_regression_trait_floors_on_a_failed_sidecar(tmp_p
         export_aggregated_csv(
             [{"plant_id": "p1", "value": 4.2, "observations": 3,
               "value_key": "fruit_diameter", "measurement_document": "regression_operating_point"}],
-            str(tmp_path / "o.csv"), trait_name="fruit_diameter",
+            str(tmp_path / "o.csv"), delivered_phenotype="fruit_diameter",
             measurement_validated=VALIDATED_HELD_OUT, pred_dirs=[str(bucket)])
 
 
@@ -523,7 +523,7 @@ def test_export_aggregated_csv_rejects_an_unrecognized_measurement_document(tmp_
         export_aggregated_csv(
             [{"plant_id": "p1", "value": 2, "observations": 3, "value_key": "astringency",
              "measurement_document": "oridnal_operating_point"}],
-            str(tmp_path / "o.csv"), trait_name="astringency",
+            str(tmp_path / "o.csv"), delivered_phenotype="astringency",
             measurement_validated=VALIDATED_HELD_OUT, pred_dirs=[str(bucket)])
 
 
@@ -1095,7 +1095,7 @@ def test_export_aggregated_csv_refuses_a_fabricated_tile_size_with_a_validated_c
         export_aggregated_csv(
             [{"plant_id": "p1", "value": 5, "observations": 2, "value_key": "count",
              "measurement_document": "operating_point"}],
-            str(tmp_path / "o.csv"), trait_name="stem_count", pred_dirs=[d])
+            str(tmp_path / "o.csv"), delivered_phenotype="stem_count", pred_dirs=[d])
 
 
 def test_export_aggregated_csv_ships_when_the_tile_scale_has_a_real_basis(tmp_path):
@@ -1110,7 +1110,7 @@ def test_export_aggregated_csv_ships_when_the_tile_scale_has_a_real_basis(tmp_pa
     export_aggregated_csv(
         [{"plant_id": "p1", "value": 5, "observations": 2, "value_key": "count",
          "measurement_document": "operating_point"}], str(out),
-        trait_name="stem_count", pred_dirs=[d])
+        delivered_phenotype="stem_count", pred_dirs=[d])
     rows = list(csv.DictReader(out.open()))
     assert rows[0]["measurement_validated"] == VALIDATED_HELD_OUT
 
@@ -1127,7 +1127,7 @@ def test_export_aggregated_csv_never_gates_an_untiled_bucket_on_tile_size(tmp_pa
     export_aggregated_csv(
         [{"plant_id": "p1", "value": 5, "observations": 2, "value_key": "count",
          "measurement_document": "operating_point"}], str(out),
-        trait_name="stem_count", pred_dirs=[d])
+        delivered_phenotype="stem_count", pred_dirs=[d])
     rows = list(csv.DictReader(out.open()))
     assert rows[0]["measurement_validated"] == VALIDATED_HELD_OUT
 
@@ -1144,7 +1144,7 @@ def test_export_aggregated_csv_acknowledged_tile_size_floors_the_row_stamp(tmp_p
     export_aggregated_csv(
         [{"plant_id": "p1", "value": 5, "observations": 2, "value_key": "count",
          "measurement_document": "operating_point"}], str(out),
-        trait_name="stem_count", pred_dirs=[d], acknowledge_unvalidated=True)
+        delivered_phenotype="stem_count", pred_dirs=[d], acknowledge_unvalidated=True)
     rows = list(csv.DictReader(out.open()))
     assert rows[0]["measurement_validated"] == VALIDATED_FALSE
 
@@ -1193,7 +1193,7 @@ def test_export_aggregated_csv_ships_dimensional_value_with_a_validated_scale(tm
     d = _write_bucket(tmp_path, "preds", conf_ref=VALIDATED_HELD_OUT, trait="plant_surface_area")
     _write_scale_sidecar(Path(d), validated_against=VALIDATED_PHYSICAL_MEASUREMENT)
     out = tmp_path / "o.csv"
-    export_aggregated_csv(_DIM_RESULTS, str(out), trait_name="plant_surface_area",
+    export_aggregated_csv(_DIM_RESULTS, str(out), delivered_phenotype="plant_surface_area",
                           pred_dirs=[d], images_dir=str(tmp_path / "ds" / "images"))
     rows = list(csv.DictReader(out.open()))
     assert rows[0]["measurement_validated"] == VALIDATED_HELD_OUT
@@ -1210,7 +1210,7 @@ def test_export_aggregated_csv_refuses_a_dimensional_delivery_with_no_scale_side
     d = _write_bucket(tmp_path, "preds", conf_ref=VALIDATED_HELD_OUT, trait="plant_surface_area")
     with pytest.raises(ValueError, match="unvalidated measurement"):
         export_aggregated_csv(_DIM_RESULTS, str(tmp_path / "o.csv"),
-                              trait_name="plant_surface_area", pred_dirs=[d],
+                              delivered_phenotype="plant_surface_area", pred_dirs=[d],
                               images_dir=str(tmp_path / "ds" / "images"))
 
 
@@ -1225,7 +1225,7 @@ def test_export_aggregated_csv_count_trait_never_gates_on_scale(tmp_path):
     export_aggregated_csv(
         [{"plant_id": "p1", "value": 5, "observations": 2, "value_key": "count",
          "measurement_document": "operating_point"}],
-        str(out), trait_name="stem_count", pred_dirs=[d])
+        str(out), delivered_phenotype="stem_count", pred_dirs=[d])
     rows = list(csv.DictReader(out.open()))
     assert rows[0]["measurement_validated"] == VALIDATED_HELD_OUT
 
@@ -1241,7 +1241,7 @@ def test_export_aggregated_csv_scale_capture_id_mismatch_floors(tmp_path):
                          capture_id="2026-02-10_plot7")
     with pytest.raises(ValueError, match="unvalidated measurement"):
         export_aggregated_csv(_DIM_RESULTS, str(tmp_path / "o.csv"),
-                              trait_name="plant_surface_area", pred_dirs=[d],
+                              delivered_phenotype="plant_surface_area", pred_dirs=[d],
                               images_dir=str(tmp_path / "ds" / "images"),
                               scale_capture_id="2026-02-10_plot9")
 
@@ -1256,7 +1256,7 @@ def test_export_aggregated_csv_scale_capture_id_match_ships(tmp_path):
     _write_scale_sidecar(Path(d), validated_against=VALIDATED_PHYSICAL_MEASUREMENT,
                          capture_id="2026-02-10_plot7")
     out = tmp_path / "o.csv"
-    export_aggregated_csv(_DIM_RESULTS, str(out), trait_name="plant_surface_area",
+    export_aggregated_csv(_DIM_RESULTS, str(out), delivered_phenotype="plant_surface_area",
                           pred_dirs=[d], images_dir=str(tmp_path / "ds" / "images"),
                           scale_capture_id="2026-02-10_plot7")
     rows = list(csv.DictReader(out.open()))
@@ -1271,7 +1271,7 @@ def test_export_aggregated_csv_acknowledged_unvalidated_scale_floors_the_row_sta
 
     d = _write_bucket(tmp_path, "preds", conf_ref=VALIDATED_HELD_OUT, trait="plant_surface_area")
     out = tmp_path / "o.csv"
-    export_aggregated_csv(_DIM_RESULTS, str(out), trait_name="plant_surface_area",
+    export_aggregated_csv(_DIM_RESULTS, str(out), delivered_phenotype="plant_surface_area",
                           pred_dirs=[d], images_dir=str(tmp_path / "ds" / "images"),
                           acknowledge_unvalidated=True)
     rows = list(csv.DictReader(out.open()))
@@ -1288,7 +1288,7 @@ def test_export_aggregated_csv_refuses_a_stated_scale_with_no_physical_unit(tmp_
         export_aggregated_csv(
             [{"plant_id": "p1", "value": 5, "observations": 2, "value_key": "count",
              "measurement_document": "operating_point", "scale_document": "resolve_scale"}],
-            str(tmp_path / "o.csv"), trait_name="stem_count", pred_dirs=[d])
+            str(tmp_path / "o.csv"), delivered_phenotype="stem_count", pred_dirs=[d])
 
 
 def test_export_aggregated_csv_refuses_a_dimensional_operating_point_delivery_with_no_stated_scale(
@@ -1305,7 +1305,7 @@ def test_export_aggregated_csv_refuses_a_dimensional_operating_point_delivery_wi
         export_aggregated_csv(
             [{"plant_id": "p1", "value": 12.5, "observations": 1, "value_key": "area_mm2",
              "measurement_document": "operating_point"}],
-            str(tmp_path / "o.csv"), trait_name="plant_surface_area", pred_dirs=[d])
+            str(tmp_path / "o.csv"), delivered_phenotype="plant_surface_area", pred_dirs=[d])
 
 
 def test_export_aggregated_csv_regression_head_delivers_a_dimensional_value_with_no_scale(tmp_path):
@@ -1321,7 +1321,7 @@ def test_export_aggregated_csv_regression_head_delivers_a_dimensional_value_with
     export_aggregated_csv(
         [{"plant_id": "p1", "value": 4.2, "observations": 3, "value_key": "fruit_diameter_mm",
          "measurement_document": "regression_operating_point"}],
-        str(out), trait_name="fruit_diameter", measurement_validated=VALIDATED_HELD_OUT,
+        str(out), delivered_phenotype="fruit_diameter", measurement_validated=VALIDATED_HELD_OUT,
         pred_dirs=[bucket])
     rows = list(csv.DictReader(out.open()))
     assert rows[0]["measurement_validated"] == VALIDATED_HELD_OUT
@@ -1343,7 +1343,7 @@ def test_export_aggregated_csv_refuses_a_declared_unit_trait_with_a_pixel_space_
         export_aggregated_csv(
             [{"plant_id": "p1", "value": 4.2, "observations": 1,
              "value_key": "fruit_diameter", "measurement_document": "operating_point"}],
-            str(tmp_path / "o.csv"), trait_name="fruit_diameter", pred_dirs=[d])
+            str(tmp_path / "o.csv"), delivered_phenotype="fruit_diameter", pred_dirs=[d])
 
 
 def test_export_aggregated_csv_refuses_classifier_operating_point_as_a_measurement_document(
@@ -1357,7 +1357,7 @@ def test_export_aggregated_csv_refuses_classifier_operating_point_as_a_measureme
         export_aggregated_csv(
             [{"plant_id": "p1", "value": 5, "observations": 2, "value_key": "count",
              "measurement_document": "classifier_operating_point"}],
-            str(tmp_path / "o.csv"), trait_name="stem_count", acknowledge_unvalidated=True)
+            str(tmp_path / "o.csv"), delivered_phenotype="stem_count", acknowledge_unvalidated=True)
 
 
 def test_export_aggregated_csv_refuses_resolve_scale_as_a_measurement_document(tmp_path):
@@ -1369,7 +1369,7 @@ def test_export_aggregated_csv_refuses_resolve_scale_as_a_measurement_document(t
         export_aggregated_csv(
             [{"plant_id": "p1", "value": 5, "observations": 2, "value_key": "count",
              "measurement_document": "resolve_scale"}],
-            str(tmp_path / "o.csv"), trait_name="stem_count", acknowledge_unvalidated=True)
+            str(tmp_path / "o.csv"), delivered_phenotype="stem_count", acknowledge_unvalidated=True)
 
 
 def test_aggregate_per_plant_refuses_a_plant_whose_images_disagree_on_the_statement(tmp_path):
@@ -1402,7 +1402,7 @@ def test_a_plant_with_no_value_at_all_refuses_naming_the_plant(tmp_path):
     ]
     summaries = aggregate_per_plant(records, strategy="count", value_key="count")
     with pytest.raises(ValueError, match="PLANT_B"):
-        export_aggregated_csv(summaries, str(tmp_path / "o.csv"), trait_name="stem_count",
+        export_aggregated_csv(summaries, str(tmp_path / "o.csv"), delivered_phenotype="stem_count",
                               acknowledge_unvalidated=True)
 
 
@@ -1422,7 +1422,7 @@ def test_a_plant_with_a_real_zero_ships_beside_one_with_a_value(tmp_path):
     ]
     summaries = aggregate_per_plant(records, strategy="count", value_key="count")
     out = tmp_path / "o.csv"
-    export_aggregated_csv(summaries, str(out), trait_name="stem_count",
+    export_aggregated_csv(summaries, str(out), delivered_phenotype="stem_count",
                           acknowledge_unvalidated=True)
     rows = {r["plant_id"]: r for r in csv.DictReader(out.open())}
     assert rows["PLANT_B"]["value"] == "0"
@@ -1447,7 +1447,7 @@ def test_a_bespoke_producer_keeps_its_checkpoint_hash_in_a_provisional_delivery(
     d = _write_bucket(tmp_path, "bespoke", conf_ref=VALIDATED_FALSE)
     out = tmp_path / "o.csv"
     export_aggregated_csv(
-        _COUNT_RESULTS, str(out), trait_name="stem_count", pred_dirs=[d],
+        _COUNT_RESULTS, str(out), delivered_phenotype="stem_count", pred_dirs=[d],
         provenance={"producer_model_sha256": "a" * 64, "producing_experiment_id": None},
         acknowledge_unvalidated=True)
 
@@ -1467,7 +1467,7 @@ def test_a_bucket_naming_an_experiment_that_never_ran_delivers_no_producer_ident
     d = _write_bucket(tmp_path, "forged", conf_ref=VALIDATED_FALSE)
     out = tmp_path / "o.csv"
     export_aggregated_csv(
-        _COUNT_RESULTS, str(out), trait_name="stem_count", pred_dirs=[d],
+        _COUNT_RESULTS, str(out), delivered_phenotype="stem_count", pred_dirs=[d],
         provenance={"producer_model_sha256": "0" * 64,
                     "producing_experiment_id": "exp_that_never_ran"},
         acknowledge_unvalidated=True)
@@ -1486,7 +1486,7 @@ def test_a_validated_delivery_names_the_record_its_numbers_rest_on(tmp_path):
 
     d = _write_bucket(tmp_path, "preds", conf_ref=VALIDATED_HELD_OUT)
     out = tmp_path / "o.csv"
-    export_aggregated_csv(_COUNT_RESULTS, str(out), trait_name="stem_count", pred_dirs=[d])
+    export_aggregated_csv(_COUNT_RESULTS, str(out), delivered_phenotype="stem_count", pred_dirs=[d])
 
     from tcip_mcp.pipelines.resolution import read_operating_point_sidecar
 
@@ -1506,7 +1506,7 @@ def test_export_aggregated_csv_refuses_a_caller_asserted_produced_at(tmp_path):
     d = _write_bucket(tmp_path, "preds", conf_ref=VALIDATED_HELD_OUT)
     out = tmp_path / "o.csv"
     with pytest.raises(ValueError, match="produced_at"):
-        export_aggregated_csv(_COUNT_RESULTS, str(out), trait_name="stem_count", pred_dirs=[d],
+        export_aggregated_csv(_COUNT_RESULTS, str(out), delivered_phenotype="stem_count", pred_dirs=[d],
                               provenance={"produced_at": "2026-03-04T12:00:00+00:00"})
 
 
@@ -1550,7 +1550,7 @@ def test_the_delivery_records_what_it_verified_in_the_dataset_own_log(tmp_path):
     from tcip_mcp.pipelines.postprocessing.aggregation import export_aggregated_csv
 
     d = _write_bucket(tmp_path, "preds", conf_ref=VALIDATED_HELD_OUT)
-    export_aggregated_csv(_COUNT_RESULTS, str(tmp_path / "o.csv"), trait_name="stem_count",
+    export_aggregated_csv(_COUNT_RESULTS, str(tmp_path / "o.csv"), delivered_phenotype="stem_count",
                           pred_dirs=[d])
 
     from tcip_mcp.pipelines.resolution import read_operating_point_sidecar
@@ -1581,7 +1581,7 @@ def test_an_unbound_bucket_records_why_it_was_not_verified(tmp_path):
         stamp = txn.read(key)
         txn.write(key, {**stamp, "validated": True})
 
-    export_aggregated_csv(_COUNT_RESULTS, str(tmp_path / "o.csv"), trait_name="stem_count",
+    export_aggregated_csv(_COUNT_RESULTS, str(tmp_path / "o.csv"), delivered_phenotype="stem_count",
                           pred_dirs=[d], acknowledge_unvalidated=True)
 
     rows = _audit_rows(tmp_path / "ds", "export_aggregated_csv")
@@ -1760,7 +1760,7 @@ def test_calibrate_physical_scale_whole_chain_delivers_a_validated_mm2_area(tmp_
     export_aggregated_csv(
         [{"plant_id": "p1", "value": 12.5, "observations": 1, "value_key": "area_mm2",
          "measurement_document": "operating_point", "scale_document": "resolve_scale"}],
-        str(out), trait_name="plant_surface_area", pred_dirs=[bucket], images_dir=str(images_dir))
+        str(out), delivered_phenotype="plant_surface_area", pred_dirs=[bucket], images_dir=str(images_dir))
     out_rows = list(csv.DictReader(out.open()))
     assert out_rows[0]["measurement_validated"] == VALIDATED_HELD_OUT
     assert out_rows[0]["units"] == "mm2"

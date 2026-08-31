@@ -917,7 +917,7 @@ def test_row_without_value_key_refuses(delivery_root: Path, tmp_path: Path):
     out_csv = tmp_path / "agg.csv"
 
     with pytest.raises(ValueError) as excinfo:
-        export_aggregated_csv(_aggregate_rows(None), str(out_csv), trait_name="stem_count",
+        export_aggregated_csv(_aggregate_rows(None), str(out_csv), delivered_phenotype="stem_count",
                               acknowledge_unvalidated=True)
 
     assert "1 of these rows carry no value key" in str(excinfo.value)
@@ -934,7 +934,7 @@ def test_value_key_outside_confirmed_set_refuses(delivery_root: Path, tmp_path: 
 
     with pytest.raises(ValueError) as excinfo:
         export_aggregated_csv(_aggregate_rows("leaf_length"), str(out_csv),
-                              trait_name="stem_count", acknowledge_unvalidated=True)
+                              delivered_phenotype="stem_count", acknowledge_unvalidated=True)
 
     assert "leaf_length" in str(excinfo.value)
     assert "never confirmed" in str(excinfo.value)
@@ -953,7 +953,7 @@ def test_a_phenotype_no_registered_trait_delivers_refuses_and_names_the_authorin
 
     out_csv = tmp_path / "agg.csv"
     with pytest.raises(ValueError) as excinfo:
-        export_aggregated_csv(_aggregate_rows(), str(out_csv), trait_name="cluster_nut_count",
+        export_aggregated_csv(_aggregate_rows(), str(out_csv), delivered_phenotype="cluster_nut_count",
                               acknowledge_unvalidated=True)
 
     assert "no trait registered for this project delivers" in str(excinfo.value)
@@ -970,7 +970,7 @@ def test_a_phenotype_two_registered_traits_deliver_refuses_as_ambiguous(
     out_csv = tmp_path / "agg.csv"
 
     with pytest.raises(ValueError) as excinfo:
-        export_aggregated_csv(_aggregate_rows(), str(out_csv), trait_name="stem_count",
+        export_aggregated_csv(_aggregate_rows(), str(out_csv), delivered_phenotype="stem_count",
                               acknowledge_unvalidated=True)
 
     assert "each deliver" in str(excinfo.value)
@@ -991,21 +991,21 @@ def test_ordinal_and_count_aggregates_need_their_own_records(delivery_root: Path
 
     ordinal_rows = _aggregate_rows("astringency", measurement_document="ordinal_operating_point")
     ordinal_csv = tmp_path / "ordinal.csv"
-    export_aggregated_csv(ordinal_rows, str(ordinal_csv), trait_name="astringency",
+    export_aggregated_csv(ordinal_rows, str(ordinal_csv), delivered_phenotype="astringency",
                           acknowledge_unvalidated=True)
     assert ordinal_csv.exists()
 
     count_rows = _aggregate_rows("astringency")
     count_csv = tmp_path / "count.csv"
     with pytest.raises(ValueError) as excinfo:
-        export_aggregated_csv(count_rows, str(count_csv), trait_name="astringency",
+        export_aggregated_csv(count_rows, str(count_csv), delivered_phenotype="astringency",
                               acknowledge_unvalidated=True)
     assert op.PER_PLANT_COUNT_AGGREGATE in str(excinfo.value)
     assert not count_csv.exists()
 
     fx.confirm_aggregate(tmp_path, "astringency", op.PER_PLANT_COUNT_AGGREGATE,
                          delivered_phenotype="astringency", value_keys=["astringency"])
-    export_aggregated_csv(count_rows, str(count_csv), trait_name="astringency",
+    export_aggregated_csv(count_rows, str(count_csv), delivered_phenotype="astringency",
                           acknowledge_unvalidated=True)
 
     assert count_csv.exists()
@@ -1049,7 +1049,7 @@ def test_the_count_tool_no_longer_tabulates_under_no_trait_at_all(
 def test_a_per_plant_csv_no_longer_ships_under_the_writers_own_default_name(
     delivery_root: Path, tmp_path: Path,
 ):
-    """The other permissive delivery: a per-plant CSV whose trait_name came from a default.
+    """The other permissive delivery: a per-plant CSV whose delivered_phenotype came from a default.
 
     That default shipped a trait_name column holding a word the crop vocabulary does not carry, so
     no record could be keyed by it. The argument is required now and nothing is written without it.
@@ -1057,7 +1057,7 @@ def test_a_per_plant_csv_no_longer_ships_under_the_writers_own_default_name(
     from tcip_mcp.pipelines.postprocessing.aggregation import export_aggregated_csv
 
     out_csv = tmp_path / "agg.csv"
-    with pytest.raises(TypeError, match="'trait_name'"):
-        export_aggregated_csv(_aggregate_rows(), str(out_csv), acknowledge_unvalidated=True)  # type: ignore[call-arg]  # the omission is the subject; the raises pins it to trait_name
+    with pytest.raises(TypeError, match="'delivered_phenotype'"):
+        export_aggregated_csv(_aggregate_rows(), str(out_csv), acknowledge_unvalidated=True)  # type: ignore[call-arg]  # the omission is the subject; the raises pins it to delivered_phenotype
 
     assert not out_csv.exists()

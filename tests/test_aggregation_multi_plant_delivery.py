@@ -113,7 +113,7 @@ def test_delivery_csv_carries_each_plants_own_value_and_image_count(tmp_path):
     summaries = aggregate_per_plant(results, strategy="count", value_key="count")
 
     out_path = tmp_path / "per_plant.csv"
-    export_aggregated_csv(summaries, str(out_path), trait_name="stem_count", crop="hazelnut",
+    export_aggregated_csv(summaries, str(out_path), delivered_phenotype="stem_count", crop="hazelnut",
                           acknowledge_unvalidated=True)
     with open(out_path, newline="") as f:
         rows = _by_plant(list(csv.DictReader(f)))
@@ -222,20 +222,20 @@ def test_an_ordinal_delivery_never_clears_the_gate_on_the_count_dimension(tmp_pa
         export_aggregated_csv(
             [{"plant_id": "PLANT_A", "value": 2, "observations": 3, "value_key": "astringency",
              "measurement_document": "ordinal_operating_point", "scale_document": None}],
-            str(tmp_path / "wrong_dimension.csv"), trait_name="astringency",
+            str(tmp_path / "wrong_dimension.csv"), delivered_phenotype="astringency",
             measurement_validated=VALIDATED_HELD_OUT, pred_dirs=[count_only])
 
     matched_ordinal = tmp_path / "matched_ordinal.csv"
     export_aggregated_csv(
         [{"plant_id": "PLANT_A", "value": 2, "observations": 3, "value_key": "astringency",
          "measurement_document": "ordinal_operating_point", "scale_document": None}],
-        str(matched_ordinal), trait_name="astringency",
+        str(matched_ordinal), delivered_phenotype="astringency",
         measurement_validated=VALIDATED_HELD_OUT, pred_dirs=[ordinal_only])
     matched_count = tmp_path / "matched_count.csv"
     export_aggregated_csv(
         [{"plant_id": "PLANT_A", "value": 4, "observations": 3, "value_key": "count",
          "measurement_document": "operating_point", "scale_document": None}],
-        str(matched_count), trait_name="stem_count",
+        str(matched_count), delivered_phenotype="stem_count",
         measurement_validated=VALIDATED_HELD_OUT, pred_dirs=[count_only])
 
     for path in (matched_ordinal, matched_count):
@@ -252,7 +252,7 @@ def test_a_count_stamp_earned_for_one_trait_floors_a_delivery_of_another(tmp_pat
         export_aggregated_csv(
             [{"plant_id": "PLANT_A", "value": 4, "observations": 3, "value_key": "astringency",
              "measurement_document": "operating_point", "scale_document": None}],
-            str(tmp_path / "mismatched_trait.csv"), trait_name="astringency",
+            str(tmp_path / "mismatched_trait.csv"), delivered_phenotype="astringency",
             measurement_validated=VALIDATED_HELD_OUT, pred_dirs=[bucket])
     message = str(exc.value)
     assert bucket in message
@@ -267,7 +267,7 @@ def test_a_delivery_naming_no_measurement_document_refuses(tmp_path):
     rows = [{"plant_id": "PLANT_A", "value": 2, "observations": 3, "value_key": "astringency"}]
 
     with pytest.raises(ValueError, match="measurement_document"):
-        export_aggregated_csv(rows, str(tmp_path / "unstated.csv"), trait_name="astringency",
+        export_aggregated_csv(rows, str(tmp_path / "unstated.csv"), delivered_phenotype="astringency",
                               measurement_validated=VALIDATED_HELD_OUT, pred_dirs=[ordinal_only])
 
 
@@ -281,6 +281,6 @@ def test_a_caller_downgrade_floors_a_validated_ordinal_sidecar(tmp_path):
 
     with pytest.raises(ValueError, match="unvalidated measurement"):
         export_aggregated_csv(rows, str(tmp_path / "downgraded.csv"),
-                              trait_name="astringency",
+                              delivered_phenotype="astringency",
                               measurement_validated=VALIDATED_FALSE,
                               pred_dirs=[bucket])
