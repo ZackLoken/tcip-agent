@@ -249,11 +249,12 @@ def deliver_orthomosaic_plant_counts(
             acknowledge_unvalidated=acknowledge_unvalidated,
         )
     except DeliveryRefused as exc:
-        # A typed gate refusal: disclose the gate's own per-dimension stamp beside the counts this
-        # door had already resolved, the same disclosure shape tabulate_counts's bucket regime returns.
+        # operating_point_validated is the measurement dimension's own cleared reference;
+        # unvalidated_dimensions names every refusing dimension (claim_scope and scale included).
         refusal = {
             "error": str(exc),
             "operating_point_validated": exc.gate.stamp.get("measurement", VALIDATED_FALSE),
+            "unvalidated_dimensions": list(exc.gate.unvalidated),
             "n_detections": len(assignments), "n_mapped": len(mapped),
             "n_unmapped": n_unmapped,
         }

@@ -400,6 +400,9 @@ def test_deliver_orthomosaic_plant_counts_refuses_unacknowledged_then_admits(tmp
     refused = deliver_orthomosaic_plant_counts(
         str(bucket_dir), str(raster_path), [str(plant_csv)], str(out_csv), delivered_phenotype="stem_count")
     assert "error" in refused
+    assert refused["unvalidated_dimensions"] == ["measurement"]
+    assert refused["operating_point_validated"] == "false"
+    assert refused["n_detections"] == 3 and refused["n_mapped"] == 3
     assert not out_csv.exists()
 
     admitted = deliver_orthomosaic_plant_counts(
