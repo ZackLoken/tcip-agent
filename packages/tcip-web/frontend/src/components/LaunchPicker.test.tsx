@@ -12,7 +12,11 @@ describe("LaunchPicker", () => {
   it("shows the empty message and only the composer row when there are no configs", () => {
     render(
       <LaunchPicker
-        list={{ title: "Configs in this project", emptyMessage: "No config exists in this project yet.", rows: [] }}
+        list={{
+          title: "Configs in this project",
+          emptyMessage: "No config exists in this project yet.",
+          rows: [],
+        }}
         composerLabel="Describe a new one to the agent"
         request=""
         onRequestChange={noop}
@@ -53,7 +57,12 @@ describe("LaunchPicker", () => {
 
   it("disables the send action until the composer holds text", () => {
     render(
-      <LaunchPicker composerLabel="Describe a new one" request="" onRequestChange={noop} onSend={noop} />,
+      <LaunchPicker
+        composerLabel="Describe a new one"
+        request=""
+        onRequestChange={noop}
+        onSend={noop}
+      />,
     );
     expect(screen.getByRole("button", { name: /send to agent/i })).toBeDisabled();
   });
@@ -87,7 +96,9 @@ describe("LaunchPicker", () => {
   it("shows a refused start's issues under the row, in the tool's own words", async () => {
     const onStart = vi
       .fn()
-      .mockRejectedValue(new StructuredRefusalError({ issues: ["batch_size must be positive"] }, 422, ""));
+      .mockRejectedValue(
+        new StructuredRefusalError({ issues: ["batch_size must be positive"] }, 422, ""),
+      );
     render(
       <LaunchPicker
         list={{ title: "Configs in this project", emptyMessage: "none", rows: [row({ onStart })] }}
@@ -99,7 +110,9 @@ describe("LaunchPicker", () => {
     );
     fireEvent.click(screen.getByText("exp-1"));
     fireEvent.click(screen.getByRole("button", { name: "Start" }));
-    await waitFor(() => expect(screen.getByText("batch_size must be positive")).toBeInTheDocument());
+    await waitFor(() =>
+      expect(screen.getByText("batch_size must be positive")).toBeInTheDocument(),
+    );
   });
 
   it("a start that succeeds closes the row's own action", async () => {
@@ -116,6 +129,8 @@ describe("LaunchPicker", () => {
     fireEvent.click(screen.getByText("exp-1"));
     fireEvent.click(screen.getByRole("button", { name: "Start" }));
     await waitFor(() => expect(onStart).toHaveBeenCalledTimes(1));
-    await waitFor(() => expect(screen.queryByRole("button", { name: "Start" })).not.toBeInTheDocument());
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: "Start" })).not.toBeInTheDocument(),
+    );
   });
 });
