@@ -619,6 +619,36 @@ def test_tabulate_counts_refuses_fabricated_tile_size_even_with_validated_conf(t
     assert not (tmp_path / "o.csv").exists()
 
 
+def test_tabulate_counts_live_with_bucket_reports_the_written_floored_cell(tmp_path, monkeypatch):
+    """The live regime, publishing into predictions_dir, must read its response's
+    operating_point_validated straight off the CSV cell export_detection_csv actually wrote, never
+    the run's own raw conf reference: a fabricated tile_size forecloses the count claim at publish
+    (a stamp's dimensions stand or fall together, verify_stamp_binding's own rule), so a run
+    reporting a real conf reference still delivers a floored, unvalidated cell, with
+    unvalidated_dimensions naming every gated dimension the writer actually floored."""
+    import tcip_mcp.tools.inference_tools as itools
+
+    def _fake(*a, **kw):
+        result = _fake_run_inference_with(
+            conf_ref=VALIDATED_HELD_OUT,
+            tile_size_prov={"value": 640, "requires_validation": True,
+                           "validation_kind": "geometry", "validated_against": VALIDATED_FALSE},
+        )(*a, **kw)
+        return {**result, "checkpoint_sha256": "stub-sha256"}
+
+    monkeypatch.setattr(itools, "_run_inference_verified", _fake)
+    bucket = tmp_path / "ds" / "predictions" / "baseline" / "2026-01-01"
+    r = itools.tabulate_counts(_dummy_checkpoint(tmp_path), str(tmp_path), str(tmp_path / "o.csv"),
+                               trait=fx.COUNT_TRAIT, calibration_labels_dir=str(tmp_path),
+                               predictions_dir=str(bucket), acknowledge_unvalidated=True)
+    assert "error" not in r, r
+    assert r["operating_point_validated"] == VALIDATED_FALSE  # never the run's raw conf reference
+    assert r["unvalidated_dimensions"] == "operating_point;tile_size"
+    rows = list(csv.DictReader((tmp_path / "o.csv").open()))
+    assert rows[0]["operating_point_validated"] == r["operating_point_validated"]
+    assert rows[0]["unvalidated_dimensions"] == r["unvalidated_dimensions"]
+
+
 def test_tabulate_counts_ships_when_tile_size_has_a_real_basis(tmp_path, monkeypatch):
     """The rail must admit valid work, not only reject invalid work: a tile_size genuinely derived
     from the checkpoint's persisted training geometry ships cleanly, same as a validated conf, and

@@ -126,6 +126,7 @@ def test_an_acknowledged_uncalibrated_count_is_written_flagged_rather_than_refus
     assert "error" not in r, r
     assert r["operating_point_validated"] == VALIDATED_FALSE
     assert r["run_conf_validated_against"] == VALIDATED_FALSE
+    assert r["unvalidated_dimensions"] == "operating_point"
     rows = out_csv.read_text(encoding="utf-8").strip().splitlines()
     assert len(rows) == 1 + len(_CountStub._COUNTS)  # header plus one row per image
     assert all(VALIDATED_FALSE in row for row in rows[1:])
