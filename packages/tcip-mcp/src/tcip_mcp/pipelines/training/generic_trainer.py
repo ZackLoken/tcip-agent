@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import functools
 import logging
+import math
 import random
 import time
 from dataclasses import dataclass, field
@@ -638,6 +639,10 @@ def train(
 
         global_step = 0
         stopped_early = False
+        diverged = False
+        nonfinite_streak = 0
+        # Never a frozen constant: this run's own batch count is the threshold.
+        divergence_threshold = max(1, len(train_loader))
 
         # Resume from a periodic checkpoint (model + optimizer + scheduler + scaler).
         resume_stage = -1
@@ -675,7 +680,7 @@ def train(
                         resume_from, resume_stage, resume_stage_epoch, run.current_epoch)
 
         for stage_idx, stage in enumerate(stages):
-            if stopped_early:
+            if stopped_early or diverged:
                 break
             run.current_stage = stage_idx
 
@@ -754,7 +759,7 @@ def train(
                 ckpt = None
 
             for epoch in range(start_epoch, stage_epochs):
-                if stopped_early or run.should_cancel():
+                if stopped_early or diverged or run.should_cancel():
                     break
                 run.current_epoch += 1
                 model.train()
@@ -803,12 +808,26 @@ def train(
                             optimizer.step()
                             optimizer.zero_grad()
 
-                    epoch_loss += loss.item()
+                    loss_value = loss.item()
+                    epoch_loss += loss_value
                     n_batches += 1
                     global_step += 1
 
                     if tb_writer and global_step % 10 == 0:
-                        tb_writer.add_scalar("train/loss_step", loss.item(), global_step)
+                        tb_writer.add_scalar("train/loss_step", loss_value, global_step)
+
+                    if math.isfinite(loss_value):
+                        nonfinite_streak = 0
+                    else:
+                        nonfinite_streak += 1
+                        if nonfinite_streak >= divergence_threshold:
+                            run.status = "failed"
+                            run.error = (
+                                f"Training loss was non-finite for {nonfinite_streak} "
+                                "consecutive batches; stopping the run as diverged."
+                            )
+                            diverged = True
+                            break
 
                 avg_loss = epoch_loss / max(n_batches, 1)
                 current_lr = optimizer.param_groups[0]["lr"]
@@ -915,11 +934,11 @@ def train(
             if stage_snapshot is not None:
                 pending_snapshot = stage_snapshot
 
-            if run.should_cancel():
+            if diverged or run.should_cancel():
                 break  # stop before starting the next stage
 
-        # Final checkpoint: saved even on cancellation, but a raised exception (caught below) skips
-        # this write, so a failed run leaves no model_final; metrics is the last completed epoch's dict, or {}.
+        # Final checkpoint: saved even on cancellation or divergence (a raised exception, caught
+        # below, skips this write); metrics is the last completed epoch's dict, or {}.
         last_epoch_metrics = run.metrics_history[-1] if run.metrics_history else {}
         write_checkpoint(stamp_model_ref({
             STATE_DICT_KEY: model.state_dict(),
@@ -927,7 +946,9 @@ def train(
             "metrics": _checkpoint_metrics(last_epoch_metrics),
         }, config), checkpoint_key(out_dir, "model_final"))
 
-        if run.should_cancel():
+        if diverged:
+            logger.info("Training run %s stopped: %s", run.run_id, run.error)
+        elif run.should_cancel():
             run.status = "cancelled"
             logger.info("Training run %s cancelled at epoch %d", run.run_id, run.current_epoch)
         else:

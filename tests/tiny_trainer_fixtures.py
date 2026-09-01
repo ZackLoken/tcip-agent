@@ -146,3 +146,35 @@ class AlwaysDivergedModel(nn.Module):
 def build_always_diverged_model() -> AlwaysDivergedModel:
     """``model_source`` builder for :class:`AlwaysDivergedModel`."""
     return AlwaysDivergedModel()
+
+
+class TransientlyDivergedModel(nn.Module):
+    """Reports a non-finite loss for its first ``bad_batches`` forward calls, then a normal
+    weight-fit loss for every call after, for proving a streak short of the trainer's own
+    divergence threshold does not kill a run."""
+
+    def __init__(self, bad_batches: int = 2, init_weight: float = 0.0) -> None:
+        super().__init__()
+        self.weight = nn.Parameter(torch.tensor([float(init_weight)]))
+        self.bad_batches = int(bad_batches)
+        self._calls = 0
+
+    def forward(self, images, targets=None):
+        if self.training and targets is not None:
+            self._calls += 1
+            if self._calls <= self.bad_batches:
+                # A leaf disconnected from `weight`'s graph, so a bad batch's optimizer step
+                # never poisons the weight the later recovery relies on.
+                phantom = torch.zeros((), requires_grad=True) + float("nan")
+                return {"nan_loss": phantom}
+            pred = self.weight * images.mean(dim=(1, 2, 3))
+            return {"mse": ((pred - targets["values"].float()) ** 2).mean()}
+        pred = self.weight * images.mean(dim=(1, 2, 3))
+        return {"head0_values": pred}
+
+
+def build_transiently_diverged_model(
+    *, bad_batches: int = 2, init_weight: float = 0.0,
+) -> TransientlyDivergedModel:
+    """``model_source`` builder for :class:`TransientlyDivergedModel`."""
+    return TransientlyDivergedModel(bad_batches=bad_batches, init_weight=init_weight)
