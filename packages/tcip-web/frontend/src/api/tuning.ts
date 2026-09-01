@@ -11,6 +11,15 @@ export interface Sweep {
   has_result: boolean;
   /** True for a sweep recovered from its on-disk manifest rather than launched here. */
   external?: boolean;
+  n_trials?: number | null;
+  search_alg?: string | null;
+  scheduler?: string | null;
+  param_space_keys?: string[];
+  /** Whether the manifest carries a base_config: the relaunchable marker. */
+  relaunchable?: boolean;
+  /** Why this sweep cannot be relaunched, in the platform's own words; null when it can be. */
+  reason?: string | null;
+  cancel_requested?: boolean;
 }
 
 export interface SweepDetail {
@@ -42,14 +51,14 @@ export const tuningApi = {
       ROUTES.getTuningSweepsBySweepIdTrialsByTrialIdMetrics(sweep_id, trial_id),
     ),
 
-  launch: (body: {
-    base_config: unknown;
-    param_space: unknown;
-    n_trials: number;
-    output_dir: string;
-    search_alg: string;
-    scheduler: string;
-  }) => postJson<{ sweep_id?: string; [k: string]: unknown }>(ROUTES.postTuningLaunch, body),
+  relaunch: (study_name: string) =>
+    postJson<{ sweep_id?: string; [k: string]: unknown }>(ROUTES.postTuningSweeps, { study_name }),
+
+  cancel: (sweep_id: string) =>
+    postJson<{ study_name: string; status: string; cancel_requested: boolean }>(
+      ROUTES.postTuningSweepsBySweepIdCancel(sweep_id),
+      {},
+    ),
 
   /** Ray runs one cluster per process, so its dashboard is not scoped to a sweep. */
   getRayDashboard: () => getJson<{ url: string | null }>(ROUTES.getTuningRayDashboard),

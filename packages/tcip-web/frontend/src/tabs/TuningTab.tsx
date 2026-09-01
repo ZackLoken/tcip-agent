@@ -4,6 +4,7 @@ import { tuningApi, type Sweep, type SweepDetail, type SweepTrial } from "@/api/
 import type { TensorboardLaunch } from "@/api/training";
 import { DisclosureChevron } from "@/components/CollapsibleSection";
 import { EmbeddedTool } from "@/components/EmbeddedTool";
+import { LaunchPicker } from "@/components/LaunchPicker";
 import { useEditableAgentRequest } from "@/hooks/useEditableAgentRequest";
 import { TERMINAL_STATUSES } from "@/lib/runStatus";
 import { useStore } from "@/store";
@@ -40,6 +41,7 @@ export function TuningTab() {
   const datasetRoot = useStore((s) => s.gui.dataset.dataset_root);
   const { request, setRequest } = useEditableAgentRequest(defaultSweepRequest(datasetRoot));
 
+  const [pickerOpen, setPickerOpen] = useState(false);
   const [sweeps, setSweeps] = useState<Sweep[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detail, setDetail] = useState<SweepDetail | null>(null);
@@ -211,17 +213,79 @@ export function TuningTab() {
     setSelectedId((current) => (current === sweepId ? null : sweepId));
   }
 
+  async function onCancelSweep(sweepId: string) {
+    try {
+      await tuningApi.cancel(sweepId);
+      void refresh();
+    } catch (e) {
+      useStore.getState().pushToast(`Cancel failed: ${messageOf(e)}`);
+    }
+  }
+
+  async function onRelaunchSweep(sweepId: string) {
+    try {
+      const result = await tuningApi.relaunch(sweepId);
+      void refresh();
+      if (typeof result.sweep_id === "string") setSelectedId(result.sweep_id);
+    } catch (e) {
+      useStore.getState().pushToast(`Relaunch failed: ${messageOf(e)}`);
+    }
+  }
+
+  function sendToAgent() {
+    useStore.getState().sendToAgentTerminal(request);
+    setPickerOpen(false);
+  }
+
+  // Cancel while running (disabled once "stop requested", except an external sweep).
+  // "Run again" once terminal and relaunchable; nothing otherwise.
+  function sweepAction(s: Sweep) {
+    const terminal = TERMINAL_STATUSES.has(s.status);
+    if (!terminal) {
+      const stopRequested = !!s.cancel_requested;
+      return (
+        <button
+          type="button"
+          className="tcip-btn text-[10px] shrink-0 mt-2"
+          disabled={stopRequested && !s.external}
+          onClick={(e) => {
+            e.stopPropagation();
+            void onCancelSweep(s.sweep_id);
+          }}
+        >
+          {stopRequested ? "stop requested" : "Cancel"}
+        </button>
+      );
+    }
+    if (s.relaunchable) {
+      return (
+        <button
+          type="button"
+          className="tcip-btn text-[10px] shrink-0 mt-2"
+          onClick={(e) => {
+            e.stopPropagation();
+            void onRelaunchSweep(s.sweep_id);
+          }}
+        >
+          Run again
+        </button>
+      );
+    }
+    return null;
+  }
+
   return (
     <RunMonitorLayout
       title="Sweeps"
       onRefresh={() => void refresh()}
       headerRight={
         <button
-          className="tcip-btn-primary text-[11px]"
-          onClick={() => useStore.getState().sendToAgentTerminal(request)}
-          disabled={!request.trim()}
+          type="button"
+          aria-expanded={pickerOpen}
+          className={pickerOpen ? "tcip-btn text-[11px]" : "tcip-btn-primary text-[11px]"}
+          onClick={() => setPickerOpen((open) => !open)}
         >
-          Start Tuning
+          Start a sweep
         </button>
       }
       detailHeader={
@@ -344,17 +408,16 @@ export function TuningTab() {
         )
       }
     >
-      <p className="text-[11px] text-tcip-muted mb-2">
-        The agent picks the training config, the search space, and the scheduler, then launches the
-        sweep with <span className="font-mono">run_hpo</span>: the same reasoning it uses to
-        configure a training run. Describe what you want swept, then send it.
-      </p>
-      <textarea
-        className="tcip-input w-full h-32 text-[11px] leading-4 resize-none mb-3"
-        value={request}
-        onChange={(e) => setRequest(e.target.value)}
-        spellCheck={true}
-      />
+      {pickerOpen && (
+        <div className="mb-3 pb-3 border-b border-tcip-border">
+          <LaunchPicker
+            composerLabel="Describe a new one to the agent"
+            request={request}
+            onRequestChange={setRequest}
+            onSend={sendToAgent}
+          />
+        </div>
+      )}
 
       {sweeps.length === 0 ? (
         <RunMonitorEmpty>
@@ -366,57 +429,67 @@ export function TuningTab() {
             const expanded = selectedId === s.sweep_id;
             return (
               <li key={s.sweep_id}>
-                <button
-                  type="button"
-                  aria-expanded={expanded}
-                  className={`w-full flex items-start gap-2 p-2 rounded border text-left transition-colors ${
+                <div
+                  className={`flex items-start gap-1 p-2 rounded border transition-colors ${
                     expanded && !selectedTrialId
                       ? "border-tcip-accent bg-tcip-accent/10"
                       : "border-tcip-border hover:border-tcip-border-hover hover:bg-tcip-hover"
                   }`}
-                  onClick={() => toggleSweep(s.sweep_id)}
                 >
-                  <span className="mt-[3px] text-tcip-muted">
-                    <DisclosureChevron open={expanded} />
-                  </span>
-                  <span className="flex-1">
-                    <span className="block font-mono text-[11px]">{s.sweep_id}</span>
-                    <span className="block text-[10px] text-tcip-muted">
-                      {s.status}
-                      {s.error ? `: ${s.error}` : ""}
+                  <button
+                    type="button"
+                    aria-expanded={expanded}
+                    className="flex-1 flex items-start gap-2 text-left"
+                    onClick={() => toggleSweep(s.sweep_id)}
+                  >
+                    <span className="mt-[3px] text-tcip-muted">
+                      <DisclosureChevron open={expanded} />
                     </span>
-                  </span>
-                </button>
+                    <span className="flex-1">
+                      <span className="block font-mono text-[11px]">{s.sweep_id}</span>
+                      <span className="block text-[10px] text-tcip-muted">{s.status}</span>
+                    </span>
+                  </button>
+                  {sweepAction(s)}
+                </div>
                 {expanded && (
-                  <ul className="mt-1 ml-5 space-y-1">
-                    {trials.length === 0 ? (
-                      <li className="text-[10px] text-tcip-muted">No trials on disk yet.</li>
-                    ) : (
-                      trials.map((t) => (
-                        <li key={t.trial_id}>
-                          <button
-                            type="button"
-                            className={`w-full p-2 rounded border text-left transition-colors ${
-                              selectedTrialId === t.trial_id
-                                ? "border-tcip-accent bg-tcip-accent/10"
-                                : "border-tcip-border hover:border-tcip-border-hover hover:bg-tcip-hover"
-                            }`}
-                            onClick={() => setSelectedTrialId(t.trial_id)}
-                          >
-                            <span className="block font-mono text-[11px]">{t.trial_id}</span>
-                            <span className="block text-[10px] text-tcip-muted">
-                              {t.has_metrics ? "metrics" : "no metrics yet"}
-                              {Object.keys(t.params).length > 0
-                                ? ` · ${Object.entries(t.params)
-                                    .map(([k, v]) => `${k}=${cellText(v)}`)
-                                    .join(", ")}`
-                                : ""}
-                            </span>
-                          </button>
-                        </li>
-                      ))
+                  <div className="mt-1 ml-5">
+                    {!s.relaunchable && s.reason && (
+                      <div className="text-[10px] text-tcip-muted mb-1">{s.reason}</div>
                     )}
-                  </ul>
+                    {s.status === "cancelled" && s.error && (
+                      <div className="text-[10px] text-tcip-muted mb-1">{s.error}</div>
+                    )}
+                    <ul className="space-y-1">
+                      {trials.length === 0 ? (
+                        <li className="text-[10px] text-tcip-muted">No trials on disk yet.</li>
+                      ) : (
+                        trials.map((t) => (
+                          <li key={t.trial_id}>
+                            <button
+                              type="button"
+                              className={`w-full p-2 rounded border text-left transition-colors ${
+                                selectedTrialId === t.trial_id
+                                  ? "border-tcip-accent bg-tcip-accent/10"
+                                  : "border-tcip-border hover:border-tcip-border-hover hover:bg-tcip-hover"
+                              }`}
+                              onClick={() => setSelectedTrialId(t.trial_id)}
+                            >
+                              <span className="block font-mono text-[11px]">{t.trial_id}</span>
+                              <span className="block text-[10px] text-tcip-muted">
+                                {t.has_metrics ? "metrics" : "no metrics yet"}
+                                {Object.keys(t.params).length > 0
+                                  ? ` · ${Object.entries(t.params)
+                                      .map(([k, v]) => `${k}=${cellText(v)}`)
+                                      .join(", ")}`
+                                  : ""}
+                              </span>
+                            </button>
+                          </li>
+                        ))
+                      )}
+                    </ul>
+                  </div>
                 )}
               </li>
             );

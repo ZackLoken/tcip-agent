@@ -11,8 +11,9 @@ import {
 } from "recharts";
 
 import { openTrainingStream, trainingApi } from "@/api/training";
-import type { MetricRow, TrainingRunSummary } from "@/api/training";
+import type { LaunchableConfig, MetricRow, TrainingRunSummary } from "@/api/training";
 import { EmbeddedTool } from "@/components/EmbeddedTool";
+import { LaunchPicker, type LaunchPickerRow } from "@/components/LaunchPicker";
 import { useEditableAgentRequest } from "@/hooks/useEditableAgentRequest";
 import { TERMINAL_STATUSES } from "@/lib/runStatus";
 import { useStore } from "@/store";
@@ -26,8 +27,35 @@ const TRAINING_CANCELLABLE: ReadonlySet<string> = new Set(["created", "running"]
 
 const TENSORBOARD_RETRY_MS = 3000;
 
-// Training is configured and launched by the agent (it writes the model + train loop). This tab
-// tracks those runs and their live metrics; the human does not hand-author a model here.
+function configRow(cfg: LaunchableConfig, onStart: () => Promise<void>): LaunchPickerRow {
+  const pristine = cfg.state === "created";
+  return {
+    key: cfg.experiment_id,
+    content: (
+      <>
+        <span className="block font-mono text-[11px]">{cfg.experiment_id}</span>
+        <span className="block text-[10px] text-tcip-muted">
+          {cfg.builder ?? "unknown builder"}
+          {cfg.task ? ` · ${cfg.task}` : ""}
+          {cfg.subject ? ` · ${cfg.subject}` : ""}
+        </span>
+        <span className="block text-[10px] text-tcip-muted">
+          {cfg.created ? new Date(cfg.created).toLocaleString() : "no creation date recorded"}
+          {" · "}
+          {cfg.state}
+          {cfg.parent_experiment ? ` · parent ${cfg.parent_experiment}` : ""}
+        </span>
+      </>
+    ),
+    branchLine: pristine
+      ? "Its first run, on the data paths it names"
+      : "A new run of this config on the data paths it names, as they are now, with the recorded seed",
+    onStart,
+  };
+}
+
+// Training is launched from a config already recorded in this project, or described fresh to
+// the agent; this tab tracks the runs those launches produce and their live metrics.
 export function TrainingTab() {
   const projectRoot = useStore((s) => s.gui.dataset.project_root);
   const datasetRoot = useStore((s) => s.gui.dataset.dataset_root);
@@ -37,6 +65,8 @@ export function TrainingTab() {
     defaultTrainingRequest(datasetRoot, subject),
   );
 
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [configs, setConfigs] = useState<LaunchableConfig[]>([]);
   const [runs, setRuns] = useState<TrainingRunSummary[]>([]);
   const [runsError, setRunsError] = useState<string | null>(null);
   const [selectedRun, setSelectedRun] = useState<string | null>(null);
@@ -56,11 +86,36 @@ export function TrainingTab() {
     }
   }, []);
 
+  const refreshConfigs = useCallback(async () => {
+    try {
+      const r = await trainingApi.listConfigs();
+      setConfigs(r.configs ?? []);
+    } catch {
+      setConfigs([]);
+    }
+  }, []);
+
   useEffect(() => {
     void refreshRuns();
     const t = setInterval(refreshRuns, 4000);
     return () => clearInterval(t);
   }, [refreshRuns]);
+
+  useEffect(() => {
+    if (pickerOpen) void refreshConfigs();
+  }, [pickerOpen, refreshConfigs]);
+
+  async function startFromConfig(experimentId: string) {
+    const result = await trainingApi.relaunch(experimentId);
+    setPickerOpen(false);
+    void refreshRuns();
+    if (typeof result.run_id === "string") setSelectedRun(result.run_id);
+  }
+
+  function sendToAgent() {
+    useStore.getState().sendToAgentTerminal(request);
+    setPickerOpen(false);
+  }
 
   useEffect(() => {
     if (!selectedRun || !projectRoot) return;
@@ -171,11 +226,12 @@ export function TrainingTab() {
       onRefresh={() => void refreshRuns()}
       headerRight={
         <button
-          className="tcip-btn-primary text-[11px]"
-          onClick={() => useStore.getState().sendToAgentTerminal(request)}
-          disabled={!request.trim()}
+          type="button"
+          aria-expanded={pickerOpen}
+          className={pickerOpen ? "tcip-btn text-[11px]" : "tcip-btn-primary text-[11px]"}
+          onClick={() => setPickerOpen((open) => !open)}
         >
-          Start Training
+          Start a run
         </button>
       }
       detailHeader={
@@ -250,16 +306,21 @@ export function TrainingTab() {
         </div>
       }
     >
-      <p className="text-[11px] text-tcip-muted mb-2">
-        The agent writes the model and the train loop, then launches the run. Describe what you want
-        trained, then send it.
-      </p>
-      <textarea
-        className="tcip-input w-full h-32 text-[11px] leading-4 resize-none mb-3"
-        value={request}
-        onChange={(e) => setRequest(e.target.value)}
-        spellCheck={true}
-      />
+      {pickerOpen && (
+        <div className="mb-3 pb-3 border-b border-tcip-border">
+          <LaunchPicker
+            list={{
+              title: "Configs in this project",
+              emptyMessage: "No config exists in this project yet.",
+              rows: configs.map((cfg) => configRow(cfg, () => startFromConfig(cfg.experiment_id))),
+            }}
+            composerLabel="Describe a new one to the agent"
+            request={request}
+            onRequestChange={setRequest}
+            onSend={sendToAgent}
+          />
+        </div>
+      )}
 
       {runsError && (
         <div className="text-[11px] text-tcip-fp mb-2">

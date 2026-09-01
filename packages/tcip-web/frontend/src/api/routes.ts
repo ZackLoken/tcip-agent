@@ -38,6 +38,7 @@ export const ROUTES = {
   getSessionsLoad: "/api/sessions/load",
   getState: "/api/state",
   getTerminalStatus: "/api/terminal/status",
+  getTrainingConfigs: "/api/training/configs",
   getTrainingRuns: "/api/training/runs",
   getTrainingRunsByRunId: (runId: string) => `/api/training/runs/${encodeURIComponent(runId)}`,
   getTuningRayDashboard: "/api/tuning/ray-dashboard",
@@ -84,13 +85,14 @@ export const ROUTES = {
   postTerminalSessionsBySessionIdRestart: (sessionId: string) =>
     `/api/terminal/sessions/${encodeURIComponent(sessionId)}/restart`,
   postTrainingCompare: "/api/training/compare",
-  postTrainingLaunch: "/api/training/launch",
+  postTrainingRuns: "/api/training/runs",
   postTrainingRunsByRunIdCancel: (runId: string) =>
     `/api/training/runs/${encodeURIComponent(runId)}/cancel`,
   postTrainingRunsByRunIdTensorboard: (runId: string) =>
     `/api/training/runs/${encodeURIComponent(runId)}/tensorboard`,
-  postTrainingValidate: "/api/training/validate",
-  postTuningLaunch: "/api/tuning/launch",
+  postTuningSweeps: "/api/tuning/sweeps",
+  postTuningSweepsBySweepIdCancel: (sweepId: string) =>
+    `/api/tuning/sweeps/${encodeURIComponent(sweepId)}/cancel`,
   postTuningSweepsBySweepIdTensorboard: (sweepId: string) =>
     `/api/tuning/sweeps/${encodeURIComponent(sweepId)}/tensorboard`,
   postTuningSweepsBySweepIdTrialsByTrialIdTensorboard: (sweepId: string, trialId: string) =>
