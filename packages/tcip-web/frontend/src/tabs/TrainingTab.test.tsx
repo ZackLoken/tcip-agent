@@ -94,7 +94,7 @@ describe("TrainingTab config picker", () => {
     fireEvent.click(screen.getByText("exp-pristine-1"));
     expect(screen.getByText("Its first run, on the data paths it names")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Start" }));
-    await waitFor(() => expect(relaunchSpy).toHaveBeenCalledWith("exp-pristine-1"));
+    await waitFor(() => expect(relaunchSpy).toHaveBeenCalledWith("exp-pristine-1", null));
   });
 
   it("shows a refused start's issues under the picked config's row", async () => {
