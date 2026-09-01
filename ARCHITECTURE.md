@@ -2313,8 +2313,8 @@ Phase 3 verdict: single.
 ## S38. Per-project trait spec records .tcip/state/trait_specs/*.json
 
 Must agree: the MCP writer, the loader, and the GUI trait list agree on the spec fields and the reason a spec was skipped.
-Side A: `packages/tcip-mcp/src/tcip_mcp/traits.py:353` (`def trait_specs_dir(`, the one placement, with `TRAIT_SPECS_STORE` at line 351 and `trait_spec_key` at line 365 addressing one spec).
-Side B: `packages/tcip-mcp/src/tcip_mcp/traits.py:428` (`load_trait_specs_with_errors`, the one scan and the one skip-reason list) and `:479` (`write_trait_spec_fields`, the one write, reading and merging compare-and-set against the version it read). `packages/tcip-web/src/tcip_web/routes/results.py:443` and `scripts/doctor.py:211` name the project and let the placement resolve here.
+Side A: `packages/tcip-mcp/src/tcip_mcp/traits.py:353` (`def trait_specs_dir(`, the one placement, with `TRAIT_SPECS_STORE`, `traits.py:394`, and `trait_spec_key`, `traits.py:410`, addressing one spec).
+Side B: `packages/tcip-mcp/src/tcip_mcp/traits.py:428` (`load_trait_specs_with_errors`, the one scan and the one skip-reason list) and `traits.py:481` (`write_trait_spec_fields`, the one write, reading and merging compare-and-set against the version it read). `packages/tcip-web/src/tcip_web/routes/results.py:443` and `scripts/doctor.py:211` name the project and let the placement resolve here.
 Phase 3 verdict: single.
 
 ## S39. Phenology CSV column vocabulary
