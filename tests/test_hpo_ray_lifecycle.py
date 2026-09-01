@@ -154,6 +154,8 @@ def _isolated_lifecycle_state(monkeypatch, tmp_path):
 
     monkeypatch.setattr(hpo, "_active_searches", 0, raising=False)
     monkeypatch.setattr(hpo, "_ray_started_here", False, raising=False)
+    monkeypatch.setattr(hpo, "_ray_runtime_pythonpath", None, raising=False)
+    monkeypatch.setattr(hpo, "_external_cluster_warned", False, raising=False)
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
 
 
@@ -279,6 +281,71 @@ def test_a_sweep_still_runs_when_the_dashboard_dependency_is_not_installed(monke
     assert ray.shutdown_calls == 1
     assert ray.init_kwargs["include_dashboard"] is False
     assert read_ray_dashboard() is None
+
+
+def test_a_concurrent_sweep_warns_when_the_running_cluster_s_import_path_has_gone_stale(
+    monkeypatch, caplog, tmp_path,
+):
+    """A cluster this module started keeps the ``PYTHONPATH`` it was handed at ``ray.init``;
+    a second sweep entering while that cluster is still up, after ``sys.path`` gained an entry
+    the first sweep never saw, must be told its trial workers will not see that entry either."""
+    import logging
+
+    entered = [threading.Event(), threading.Event()]
+    release = [threading.Event(), threading.Event()]
+    _install_fake_ray(monkeypatch, entered, release)
+
+    first = threading.Thread(target=_run_one_search)
+    first.start()
+    assert entered[0].wait(timeout=30)
+
+    monkeypatch.syspath_prepend(str(tmp_path / "bespoke_source"))
+
+    with caplog.at_level(logging.WARNING, logger="tcip_mcp.pipelines.training.hpo"):
+        second = threading.Thread(target=_run_one_search)
+        second.start()
+        assert entered[1].wait(timeout=30)
+        release[1].set()
+        second.join(timeout=30)
+
+    release[0].set()
+    first.join(timeout=30)
+
+    assert any(
+        "keep the import path captured at cluster start" in record.message
+        for record in caplog.records
+    )
+
+
+def test_a_concurrent_sweep_does_not_warn_when_the_import_path_is_unchanged(
+    monkeypatch, caplog,
+):
+    """The companion of the stale-path warning: entering a second sweep against a cluster
+    this module started, with the import path unchanged, raises no warning."""
+    import logging
+
+    entered = [threading.Event(), threading.Event()]
+    release = [threading.Event(), threading.Event()]
+    _install_fake_ray(monkeypatch, entered, release)
+
+    first = threading.Thread(target=_run_one_search)
+    first.start()
+    assert entered[0].wait(timeout=30)
+
+    with caplog.at_level(logging.WARNING, logger="tcip_mcp.pipelines.training.hpo"):
+        second = threading.Thread(target=_run_one_search)
+        second.start()
+        assert entered[1].wait(timeout=30)
+        release[1].set()
+        second.join(timeout=30)
+
+    release[0].set()
+    first.join(timeout=30)
+
+    assert not any(
+        "keep the import path captured at cluster start" in record.message
+        for record in caplog.records
+    )
 
 
 def test_sequential_sweeps_each_start_and_stop_their_own_cluster(monkeypatch):

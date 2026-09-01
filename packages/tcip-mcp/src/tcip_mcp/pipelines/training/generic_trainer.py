@@ -446,6 +446,13 @@ def _selection_value(task: str, val_metrics: dict, avg_loss: float, metric: str)
     )
 
 
+def _is_scalar_metric(value: Any) -> bool:
+    """Whether ``value`` is a real number TensorBoard's ``add_scalar`` (and the console line's
+    own summary) can log. A center-match trait's ``val_metrics`` carries non-scalar entries
+    (``governing_criterion``: dict, ``map50_role``: str) that both must skip alike."""
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
 def _improves(candidate: float, incumbent: float, *, higher_is_better: bool) -> bool:
     """Whether ``candidate`` beats ``incumbent`` as a selection value, in the direction the run's
     selection metric actually improves in. The one comparison ``model_best.pt``, the per-stage
@@ -846,19 +853,16 @@ def train(
                     tb_writer.add_scalar("train/loss", avg_loss, run.current_epoch)
                     tb_writer.add_scalar("train/lr", current_lr, run.current_epoch)
                     for k, v in val_metrics.items():
-                        # A center-match trait's val_metrics carries non-scalar entries
-                        # (governing_criterion: dict, map50_role: str) that add_scalar rejects.
-                        if isinstance(v, (int, float)) and not isinstance(v, bool):
+                        if _is_scalar_metric(v):
                             tb_writer.add_scalar(f"val/{k}", v, run.current_epoch)
                     tb_writer.flush()
 
                 if epoch_callback is not None:
                     epoch_callback(run.current_epoch, epoch_metrics)
 
-                # Same scalar filter the TensorBoard write above uses, minus val_loss (already on the line).
                 extra_val_metrics = " ".join(
                     f"{k}={v:.4f}" for k, v in val_metrics.items()
-                    if k != "val_loss" and isinstance(v, (int, float)) and not isinstance(v, bool))
+                    if k != "val_loss" and _is_scalar_metric(v))
                 logger.info("Epoch %d stage %d loss=%.4f val_loss=%.4f lr=%.2e%s",
                     run.current_epoch, stage_idx, avg_loss, val_metrics.get("val_loss", 0), current_lr,
                     f" {extra_val_metrics}" if extra_val_metrics else "")
