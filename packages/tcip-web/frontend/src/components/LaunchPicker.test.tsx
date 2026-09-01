@@ -305,4 +305,139 @@ describe("LaunchPicker", () => {
     fireEvent.click(screen.getByRole("button", { name: "Start" }));
     await waitFor(() => expect(onStart).toHaveBeenCalledWith(null));
   });
+
+  it("disables Start while the checked As recorded choice is disabled, with its reason beside it", () => {
+    render(
+      <LaunchPicker
+        list={{
+          title: "Configs in this project",
+          emptyMessage: "none",
+          rows: [
+            row({
+              data: {
+                asRecordedLine: "on the partition it bound",
+                asRecordedDisabled: true,
+                asRecordedReason: "Directory not found: data.images_dir = '/moved'",
+                absenceMessage: "unused",
+                choices: [],
+              },
+            }),
+          ],
+        }}
+        composerLabel="Describe a new one"
+        request=""
+        onRequestChange={noop}
+        onSend={noop}
+      />,
+    );
+    fireEvent.click(screen.getByText("exp-1"));
+    expect(screen.getByRole("button", { name: "Start" })).toBeDisabled();
+    expect(screen.getAllByText("Directory not found: data.images_dir = '/moved'")).toHaveLength(2);
+  });
+
+  it("re-enables Start once a checked choice that is itself enabled is selected", () => {
+    render(
+      <LaunchPicker
+        list={{
+          title: "Configs in this project",
+          emptyMessage: "none",
+          rows: [
+            row({
+              data: {
+                asRecordedLine: "on the partition it bound",
+                asRecordedDisabled: true,
+                asRecordedReason: "moved",
+                absenceMessage: "unused",
+                choices: [{ manifestDir: "/data/splits", label: <span>/data/splits</span> }],
+              },
+            }),
+          ],
+        }}
+        composerLabel="Describe a new one"
+        request=""
+        onRequestChange={noop}
+        onSend={noop}
+      />,
+    );
+    fireEvent.click(screen.getByText("exp-1"));
+    expect(screen.getByRole("button", { name: "Start" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("radio", { name: "/data/splits" }));
+    expect(screen.getByRole("button", { name: "Start" })).not.toBeDisabled();
+  });
+
+  it("shows the recorded split keys a candidate would replace beside its own row", () => {
+    render(
+      <LaunchPicker
+        list={{
+          title: "Configs in this project",
+          emptyMessage: "none",
+          rows: [
+            row({
+              data: {
+                asRecordedLine: "draws its split again with seed 7 over the labels as they are now",
+                absenceMessage: "unused",
+                choices: [
+                  {
+                    manifestDir: "/data/splits",
+                    label: <span>/data/splits</span>,
+                    replacedSplitKeys: ["group_by", "seed"],
+                  },
+                ],
+              },
+            }),
+          ],
+        }}
+        composerLabel="Describe a new one"
+        request=""
+        onRequestChange={noop}
+        onSend={noop}
+      />,
+    );
+    fireEvent.click(screen.getByText("exp-1"));
+    expect(
+      screen.getByText(/replaces the recorded split policy:\s*group_by, seed/),
+    ).toBeInTheDocument();
+  });
+
+  it("shows a per-row Data-choices fetch failure as text on the row", () => {
+    render(
+      <LaunchPicker
+        list={{
+          title: "Configs in this project",
+          emptyMessage: "none",
+          rows: [row({ dataError: "Could not load its data choices: network error" })],
+        }}
+        composerLabel="Describe a new one"
+        request=""
+        onRequestChange={noop}
+        onSend={noop}
+      />,
+    );
+    fireEvent.click(screen.getByText("exp-1"));
+    expect(screen.getByText("Could not load its data choices: network error")).toBeInTheDocument();
+  });
+
+  it("fetches a row's own Data choices only once it is selected", () => {
+    const onSelect = vi.fn();
+    render(
+      <LaunchPicker
+        list={{
+          title: "Configs in this project",
+          emptyMessage: "none",
+          rows: [row(), row({ key: "exp-2", content: <span>exp-2</span> })],
+        }}
+        composerLabel="Describe a new one"
+        request=""
+        onRequestChange={noop}
+        onSend={noop}
+        onSelect={onSelect}
+      />,
+    );
+    expect(onSelect).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByText("exp-1"));
+    expect(onSelect).toHaveBeenCalledTimes(1);
+    expect(onSelect).toHaveBeenCalledWith("exp-1");
+    fireEvent.click(screen.getByText("exp-1"));
+    expect(onSelect).toHaveBeenCalledTimes(1);
+  });
 });
