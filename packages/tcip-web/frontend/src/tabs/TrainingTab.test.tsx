@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
 import { StructuredRefusalError } from "@/api/http";
 import {
+  openTrainingStream,
   trainingApi,
   type LaunchableConfig,
   type SplitChoices,
@@ -277,5 +278,114 @@ describe("dataPickerFor", () => {
 
   it("answers undefined for a row with no choices fetched yet", () => {
     expect(dataPickerFor(undefined)).toBeUndefined();
+  });
+});
+
+describe("TrainingTab compare", () => {
+  function setProjectRoot(root: string | null) {
+    useStore.setState((s) => ({
+      gui: { ...s.gui, dataset: { ...s.gui.dataset, project_root: root } },
+    }));
+  }
+
+  // The comparison's own columns repeat a marked run's id in its detail region (table headers),
+  // and the single-run header repeats the selected one; the sidebar's own row is always first.
+  function rowFor(id: string): HTMLElement {
+    return screen.getAllByText(id)[0].closest("li") as HTMLElement;
+  }
+
+  it("marking two runs switches the detail region and closes the single-run stream", async () => {
+    setProjectRoot("/proj");
+    vi.spyOn(trainingApi, "listRuns").mockResolvedValue({
+      runs: [
+        run({ run_id: "run-a", status: "running", experiment_id: "exp-a" }),
+        run({ run_id: "run-b", status: "running", experiment_id: "exp-b" }),
+      ],
+    });
+    const stopSingle = vi.fn();
+    vi.mocked(openTrainingStream).mockReturnValueOnce(stopSingle);
+    vi.spyOn(trainingApi, "compare").mockResolvedValue({
+      experiments: [{ experiment_id: "exp-a" }, { experiment_id: "exp-b" }] as unknown as Awaited<
+        ReturnType<typeof trainingApi.compare>
+      >["experiments"],
+      count: 2,
+      same_dataset_fingerprint: null,
+    });
+
+    render(<TrainingTab />);
+    await screen.findByText("run-a");
+    fireEvent.click(within(rowFor("run-a")).getByText("run-a"));
+    await waitFor(() =>
+      expect(openTrainingStream).toHaveBeenCalledWith("/proj", "run-a", expect.any(Function)),
+    );
+
+    fireEvent.click(within(rowFor("run-a")).getByRole("button", { name: "Compare" }));
+    fireEvent.click(within(rowFor("run-b")).getByRole("button", { name: "Compare" }));
+
+    expect(await screen.findByText("Comparing")).toBeInTheDocument();
+    expect(stopSingle).toHaveBeenCalled();
+  });
+
+  it("caps the marked set and names the reason on a fifth toggle", async () => {
+    setProjectRoot("/proj");
+    const runs = ["run-1", "run-2", "run-3", "run-4", "run-5"].map((id) =>
+      run({ run_id: id, status: "running", experiment_id: `exp-${id}` }),
+    );
+    vi.spyOn(trainingApi, "listRuns").mockResolvedValue({ runs });
+    vi.spyOn(trainingApi, "compare").mockResolvedValue({
+      experiments: [],
+      count: 0,
+      same_dataset_fingerprint: null,
+    });
+    const pushToast = vi.spyOn(useStore.getState(), "pushToast");
+
+    render(<TrainingTab />);
+    await screen.findByText("run-1");
+    for (const id of ["run-1", "run-2", "run-3", "run-4"]) {
+      fireEvent.click(within(rowFor(id)).getByRole("button", { name: "Compare" }));
+    }
+    fireEvent.click(within(rowFor("run-5")).getByRole("button", { name: "Compare" }));
+
+    expect(pushToast).toHaveBeenCalledWith(expect.stringContaining("at most 4 runs"));
+    // The fifth toggle stayed off: the fourth (last accepted) row is still the marked one.
+    expect(within(rowFor("run-4")).getByRole("button", { name: "Compare" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(within(rowFor("run-5")).getByRole("button", { name: "Compare" })).toHaveAttribute(
+      "aria-pressed",
+      "false",
+    );
+  });
+
+  it("disables a row's Compare toggle and names the two reasons", async () => {
+    vi.spyOn(trainingApi, "listRuns").mockResolvedValue({
+      runs: [
+        run({ run_id: "run-unresolved", status: "running" }),
+        run({
+          run_id: "run-failed-tracking",
+          status: "running",
+          experiment_error: "dataset_identity failed: boom",
+        }),
+      ],
+    });
+
+    render(<TrainingTab />);
+    await screen.findByText("run-unresolved");
+
+    const unresolvedToggle = within(rowFor("run-unresolved")).getByRole("button", {
+      name: "Compare",
+    });
+    expect(unresolvedToggle).toBeDisabled();
+    expect(unresolvedToggle).toHaveAttribute("title", "experiment not resolved yet");
+
+    const failedToggle = within(rowFor("run-failed-tracking")).getByRole("button", {
+      name: "Compare",
+    });
+    expect(failedToggle).toBeDisabled();
+    expect(failedToggle).toHaveAttribute(
+      "title",
+      "experiment tracking failed: dataset_identity failed: boom",
+    );
   });
 });
