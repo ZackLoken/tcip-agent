@@ -710,7 +710,7 @@ Docstring is the function's docstring first line, verbatim.
 |---|---|---|---|
 | `run_inference` | `inference_tools.py:195` | yes | Run a trained model on images. |
 | `export_predictions` | `inference_tools.py:1326` | yes | Run inference and save predictions as COCO/JSON prediction file(s). |  <!-- queued: P5-36 unify -->
-| `tabulate_counts` | `inference_tools.py:1615` | yes | Export a CSV summary of detection counts per image, from a live run or a persisted bucket. |
+| `tabulate_counts` | `inference_tools.py:1618` | yes | Export a CSV summary of detection counts per image, from a live run or a persisted bucket. |
 
 ### calibration_tools.py (2 tools)
 
@@ -1180,7 +1180,7 @@ Writers: `tcip_annotation.json_io.write_annotations`,
 `tcip_annotation.review_engine.ReviewEngine.save_gt`,
 `packages/tcip-annotation/src/tcip_annotation/review_engine.py:842`;
 `tcip_mcp.prediction_buckets.stage_prediction_shapes`,
-`packages/tcip-mcp/src/tcip_mcp/prediction_buckets.py:254`.
+`packages/tcip-mcp/src/tcip_mcp/prediction_buckets.py:255`.
 
 Readers: `tcip_annotation.json_io.read_annotations`,
 `packages/tcip-annotation/src/tcip_annotation/json_io.py:523`;
@@ -1677,19 +1677,19 @@ every writer is redirected to a fresh variant rather than allowed to overwrite i
 Path: `<dataset_root>/predictions/<model_name>/[<date>/]`, via
 `tcip_mcp.dataset_layout.prediction_dir`.
 
-Writer: `stage_prediction_shapes`, `packages/tcip-mcp/src/tcip_mcp/prediction_buckets.py:254`, the
+Writer: `stage_prediction_shapes`, `packages/tcip-mcp/src/tcip_mcp/prediction_buckets.py:255`, the
 underlying per-image files written via `tcip_annotation.json_io.write_annotations`,
 `packages/tcip-annotation/src/tcip_annotation/json_io.py:722` (format 1's writer).
-`resolve_prediction_bucket`, `prediction_buckets.py:223`, resolves a `(dataset_root, model_name,
-date)` triple to a writable directory; `resolve_writable_bucket`, `prediction_buckets.py:191`,
+`resolve_prediction_bucket`, `prediction_buckets.py:224`, resolves a `(dataset_root, model_name,
+date)` triple to a writable directory; `resolve_writable_bucket`, `prediction_buckets.py:192`,
 redirects to the next free `<model_name>@r2`/`@r3` variant once any image in a bucket has a
-recorded review verdict; `BucketHasVerdicts`, `prediction_buckets.py:157`, is raised instead when
+recorded review verdict; `BucketHasVerdicts`, `prediction_buckets.py:158`, is raised instead when
 `overwrite=True` is requested against a verdicted bucket.
 
-Readers: `bucket_stems`, `prediction_buckets.py:22`, walks each dir through
+Readers: `bucket_stems`, `prediction_buckets.py:23`, walks each dir through
 `tcip_annotation.json_io.prediction_documents`, which excludes every provenance stamp named in
 that module's own `SIDECAR_FILENAMES`, so a stamp added for a new measurement dimension is
-excluded here too; `verdict_count`, `prediction_buckets.py:144`, delegates
+excluded here too; `verdict_count`, `prediction_buckets.py:145`, delegates
 to `tcip_annotation.review_engine.ReviewEngine.verdict_count_for_images` against the store
 `review_state_dir_of`, line 33, names.
 
@@ -1800,8 +1800,8 @@ its dataset root as `bucket_key_of` spells it (`prediction_buckets.py:71`), fold
 directory name by `bucket_dirname` (`review_engine.py:113`). A verdict recorded with no prediction
 bucket keeps its shard directly under `review/`.
 Real-world `state_dir` is `<dataset_root>/.tcip/state`, derived once by
-`review_state_dir_of`, `packages/tcip-mcp/src/tcip_mcp/prediction_buckets.py:110`;
-`verdict_count`, `prediction_buckets.py:144`, opens a `ReviewEngine` on that root rather than
+`review_state_dir_of`, `packages/tcip-mcp/src/tcip_mcp/prediction_buckets.py:111`;
+`verdict_count`, `prediction_buckets.py:145`, opens a `ReviewEngine` on that root rather than
 composing a state dir of its own.
 
 Writer: `ReviewEngine._save_image`, `review_engine.py:310`, called by `mark_image_reviewed`
@@ -2164,7 +2164,7 @@ Phase 3 verdict: single. The browser still joins directory plus filename client-
 
 Must agree: the verdict writer and the bucket-immutability reader look at the same review store
 (a bucket here is format 17's immutability-scoped prediction directory, not a score bin).
-Side A: `packages/tcip-mcp/src/tcip_mcp/prediction_buckets.py:110` (`def review_state_dir_of(`, the one derivation of the store root; `verdict_count`, line 105, counts one bucket's verdicts through the store the engine writes into).
+Side A: `packages/tcip-mcp/src/tcip_mcp/prediction_buckets.py:111` (`def review_state_dir_of(`, the one derivation of the store root; `verdict_count`, line 105, counts one bucket's verdicts through the store the engine writes into).
 Side B: `packages/tcip-annotation/src/tcip_annotation/review_engine.py:171` (`REVIEW_VERDICTS_STORE`, which owns the shard layout inside that root). `packages/tcip-web/src/tcip_web/routes/review.py:72`, `routes/inference.py:428` and `packages/tcip-mcp/src/tcip_mcp/tools/inference_tools.py:1285` open on the derived root instead of composing a state dir each.
 Phase 3 verdict: single.
 
@@ -2256,7 +2256,7 @@ Phase 3 verdict: single.
 ## S29. Prediction-bucket immutability
 
 Must agree: no writer overwrites a bucket whose predictions already carry human review verdicts.
-Side A: `packages/tcip-mcp/src/tcip_mcp/prediction_buckets.py:191` (`def resolve_writable_bucket(`, the one guard; `bucket_stems`, `prediction_buckets.py:22`, excludes every provenance stamp through `tcip_annotation.json_io.prediction_documents` rather than naming one filename).
+Side A: `packages/tcip-mcp/src/tcip_mcp/prediction_buckets.py:192` (`def resolve_writable_bucket(`, the one guard; `bucket_stems`, `prediction_buckets.py:23`, excludes every provenance stamp through `tcip_annotation.json_io.prediction_documents` rather than naming one filename).
 Side B: `packages/tcip-mcp/src/tcip_mcp/tools/proposal_tools.py:480` (`from tcip_mcp.prediction_buckets import BucketHasVerdicts, stage_prediction_shapes`) and `tools/proposal_tools.py:656` (`from tcip_mcp.prediction_buckets import BucketHasVerdicts, stage_prediction_shapes`), `tools/inference_tools.py:1287` and `packages/tcip-web/src/tcip_web/routes/inference.py:430` (every writer door resolves through it, against the verdict store `review_state_dir_of` names).
 Phase 3 verdict: single.
 
