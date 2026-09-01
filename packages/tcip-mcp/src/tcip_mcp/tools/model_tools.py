@@ -144,7 +144,9 @@ def select_best_model(
     ranks ``"training_source"``/``"caller"`` entries, whose numbers were asserted, not verified.
     Entries the ranking left out for being unverified are named in ``excluded_unverified`` when
     ``include_unverified`` is false; when true, nothing is left out on that basis, so the list is
-    always empty.
+    always empty. The undeclared-direction refusal carries ``needs_direction: True`` and the
+    every-carrier-unverified refusal carries ``all_unverified: True``, so a caller can branch on
+    a field rather than matching the error text.
 
     Args:
         project_path: Project root directory. Empty defaults to the platform state root.
@@ -165,7 +167,10 @@ def select_best_model(
     models = registry.list_models()
     if experiment_ids is not None:
         wanted = set(experiment_ids)
-        models = [m for m in models if m.get("experiment_id") in wanted]
+        filtered = [m for m in models if m.get("experiment_id") in wanted]
+        if not filtered and models:
+            return {"error": "none of the marked experiments registered a checkpoint"}
+        models = filtered
     if not models:
         return {"error": "No models registered"}
     if not metric:
@@ -196,6 +201,7 @@ def select_best_model(
             "error": f"'{metric}' has no declared ranking direction (evaluation."
                      "HIGHER_IS_BETTER_BY_METRIC names no entry for it). Pass higher_is_better "
                      "explicitly to rank by it anyway, or pick one of available_metrics.",
+            "needs_direction": True,
             "available_metrics": _labeled_available_metrics(models),
             "n_models": len(models),
         }
@@ -213,6 +219,7 @@ def select_best_model(
                 "error": f"every registered model carrying '{metric}' is unverified "
                          "(metrics_source is not 'trainer'); pass include_unverified=True to "
                          "rank them, or register a verified run.",
+                "all_unverified": True,
                 "excluded_unverified": excluded_unverified,
                 "n_models": len(models),
             }

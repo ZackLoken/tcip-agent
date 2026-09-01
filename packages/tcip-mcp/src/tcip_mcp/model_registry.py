@@ -362,6 +362,13 @@ class EntryOwnedByRun(ValueError):
     """A registry entry a run's completion bound cannot be superseded by anything but that run."""
 
 
+class RegistryEntryPredatesMetricsSource(ValueError):
+    """A registry entry carries no ``metrics_source`` key at all: a malformed record predating
+    the field, refused by :meth:`ModelRegistry.best_model` rather than ranked as just another
+    unverified entry. Typed distinctly from a bare ``ValueError`` so a caller (the comparison
+    route's 409 mapping) can catch this one refusal and let every other ``ValueError`` propagate."""
+
+
 def _refuse_if_owned_by_another_run(superseded: dict, *, name: str, new_experiment_id: str | None) -> None:
     """The eviction rail: a name a run bound is that run's for good.
 
@@ -880,7 +887,7 @@ class ModelRegistry:
         """
         malformed = [m.get("name") for m in self._index if "metrics_source" not in m]
         if malformed:
-            raise ValueError(
+            raise RegistryEntryPredatesMetricsSource(
                 f"registry entries {malformed} carry no metrics_source key (they predate the "
                 "field); conform each with scripts/conform_registry_experiment_id.py, then "
                 "re-register each through register_model, before ranking this registry."

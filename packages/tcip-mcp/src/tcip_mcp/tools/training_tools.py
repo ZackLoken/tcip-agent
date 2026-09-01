@@ -983,13 +983,14 @@ def _all_training_runs(*, read_progress: bool) -> list[dict[str, Any]]:
     reimplements the merge.
 
     A live in-memory entry (HPO trials excluded) wins by ``run_id`` over its own disk row: a
-    ``pid``-bearing one takes the disk overlay for ``status``/``current_epoch``/``error``/
-    ``experiment_id`` (a subprocess-delegated run mutates its own separate copy on disk, so the
-    parent-side in-memory record is a stale launch-time placeholder past that point); a
-    ``pid``-less one (every synchronous run) is reported from its own in-memory record,
-    untouched. Both carry ``external: False`` and an ``experiment_id`` (from the disk overlay
-    where there is one, else the run's own config, else ``None``). Rows: this process's own, in
-    registry order, then the disk-only rows, sorted by experiment id.
+    ``pid``-bearing one takes the disk overlay for ``status``/``current_epoch``/``error``
+    (a subprocess-delegated run mutates its own separate copy on disk, so the parent-side
+    in-memory record is a stale launch-time placeholder past that point); a ``pid``-less one
+    (every synchronous run) is reported from its own in-memory record, untouched. Both carry
+    ``external: False`` and an ``experiment_id``: the row's own resolved field
+    (``TrainRun.experiment_id``, set by ``launch_training`` once ``_ensure_experiment`` resolves
+    it) when it has one, the disk overlay's own id only as a fallback for a row that has none.
+    Rows: this process's own, in registry order, then the disk-only rows, sorted by experiment id.
     """
     from tcip_mcp.pipelines.training.run_registry import list_runs
 
@@ -1008,7 +1009,8 @@ def _all_training_runs(*, read_progress: bool) -> list[dict[str, Any]]:
                 row["current_epoch"] = overlay["current_epoch"]
             if overlay.get("error"):
                 row["error"] = overlay["error"]
-            row["experiment_id"] = overlay["experiment_id"]
+            if not row.get("experiment_id"):
+                row["experiment_id"] = overlay["experiment_id"]
         merged.append(row)
 
     live_run_ids = {r["run_id"] for r in live}
