@@ -1,9 +1,12 @@
 """Prediction-bucket immutability: never silently overwrite predictions a human reviewed.
 
 A *bucket* is a directory (or set of task directories) holding per-image ``<stem>.json``
-prediction files, its identity a model name plus an optional date rather than a score bin or a
-quota allocation. Once a reviewer has recorded verdicts (accept/reject/edit) against any of
-a bucket's images, re-running inference or re-staging into it would orphan those verdicts
+prediction files, its identity the bucket directory's own path (relative to the dataset root
+when it sits under one, its own resolved path otherwise, per :func:`bucket_key_of`) rather than
+a score bin or a quota allocation. The canonical ``predictions/<model>/<date>`` layout is one
+regime's convention for building that path, not the definition of a bucket's identity. Once a
+reviewer has recorded verdicts (accept/reject/edit) against any of a bucket's images,
+re-running inference or re-staging into it would orphan those verdicts
 (they reference the predictions by geometry). So the prediction writers resolve a run-scoped
 bucket through here: with verdicts present the default writes are redirected to the next free
 ``<name>@r2`` / ``@r3`` variant, and an explicit ``overwrite=True`` is refused with a count.

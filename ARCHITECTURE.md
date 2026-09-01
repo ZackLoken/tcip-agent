@@ -759,7 +759,7 @@ Docstring is the function's docstring first line, verbatim.
 
 | tool | line | audited | docstring first line |
 |---|---|---|---|
-| `deliver_orthomosaic_plant_counts` | `orthomosaic_tools.py:36` | yes | Per-plant detection counts from a persisted orthomosaic prediction bucket (a directory of prediction documents, not a score bin, held immutable once a human reviews it) + plant CSV(s). |
+| `deliver_orthomosaic_plant_counts` | `orthomosaic_tools.py:36` | yes | Per-plant detection counts from a persisted orthomosaic prediction bucket plus plant CSV(s). |
 
 ### phenology_tools.py (3 tools)
 
@@ -1672,7 +1672,9 @@ only two web-route tests check a 403-confinement case and an empty-registry case
 A prediction bucket is not a score bin or a quota allocation: it is one directory holding a
 single model run's per-image prediction documents, its identity a model name plus an optional
 date, mutable until a human records a review verdict against any image inside it, after which
-every writer is redirected to a fresh variant rather than allowed to overwrite it.
+the default write is redirected to a fresh variant and an `overwrite=True` write is refused
+(`BucketHasVerdicts`) rather than allowed to overwrite it in place; a bucket under no dataset
+root has no verdict store and so no guard for either behavior.
 
 Path: `<dataset_root>/predictions/<model_name>/[<date>/]`, via
 `tcip_mcp.dataset_layout.prediction_dir`.

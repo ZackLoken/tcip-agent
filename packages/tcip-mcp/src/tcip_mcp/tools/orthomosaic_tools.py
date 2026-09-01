@@ -44,8 +44,10 @@ def deliver_orthomosaic_plant_counts(
     nn_tolerance_m: float | None = None,
     acknowledge_unvalidated: bool = False,
 ) -> dict:
-    """Per-plant detection counts from a persisted orthomosaic prediction bucket (a directory of
-    prediction documents, not a score bin, held immutable once a human reviews it) + plant CSV(s).
+    """Per-plant detection counts from a persisted orthomosaic prediction bucket plus plant CSV(s).
+
+    A prediction bucket here is a directory of prediction documents, not a score bin, held
+    immutable once a human reviews it.
 
     Reads back the whole-mosaic predictions ``export_predictions``'s ``raster_path`` regime
     persisted (never re-runs the expensive tiled pass), resolves each detection's box centroid
