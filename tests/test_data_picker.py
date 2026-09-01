@@ -10,6 +10,9 @@ its dataset fixture rather than restating it.
 
 from __future__ import annotations
 
+import json
+import os
+import shutil
 from pathlib import Path
 
 import pytest
@@ -92,9 +95,91 @@ def test_manifest_compatibility_flags_a_members_block_with_no_images_root(tmp_pa
     config = _bespoke_config(root / "images" / DATES[0], root / "annotations" / DATES[0])
     config["data"]["split"] = {"manifest_dir": str(out)}
 
-    issues = manifest_compatibility(config, manifest)
+    issues = manifest_compatibility(config, manifest, str(out))
 
     assert any("images root" in i for i in issues)
+
+
+def test_preflight_names_the_manifest_directory_in_the_date_block_message(tmp_path: Path):
+    """The date-block refusal names the directory it read, restoring what the message carried
+    before the shared function existed, reached through preflight_config so the proof runs
+    against a signature the fix under test did not itself change."""
+    from tcip_mcp.tools.training_tools import preflight_config
+
+    root = _two_subject_two_date_dataset(tmp_path / "ds")
+    out = tmp_path / "m"
+    _draw(root, out)
+    config = _bespoke_config(root / "images" / DATES[0], root / "annotations" / "2099-01-01")
+    config["data"]["split"] = {"manifest_dir": str(out)}
+
+    result = preflight_config(config)
+
+    expected = f"split manifest at {str(out)!r} holds no members under date"
+    assert any(expected in i for i in result["issues"])
+
+
+def _manifest_empty_val_side(root: Path, out: Path, date: str) -> dict:
+    """A real ``make_splits`` draw, hand-mutated to drop one date's ``val`` members: the shape a
+    manifest binds to as leaving a run's own date with an empty side. Every other required field
+    stays exactly what ``make_splits`` wrote, so this exercises only the one refusal under test."""
+    from tcip_mcp.pipelines.data.splits import member_identity_parts
+    from tcip_mcp.tools.data_tools import split_manifest_key
+
+    manifest = _draw(root, out)
+    this_date_val = {i for i in manifest["splits"]["val"] if member_identity_parts(i)[0] == date}
+    manifest["splits"]["val"] = sorted(set(manifest["splits"]["val"]) - this_date_val)
+    ts.replace(split_manifest_key(out), manifest)
+    return manifest
+
+
+def test_manifest_compatibility_flags_an_empty_side_after_narrowing_to_the_runs_date(
+    tmp_path: Path,
+):
+    from tcip_mcp.tools.training_tools import manifest_compatibility
+
+    root = _two_subject_two_date_dataset(tmp_path / "ds")
+    out = tmp_path / "m"
+    manifest = _manifest_empty_val_side(root, out, DATES[0])
+    config = _bespoke_config(root / "images" / DATES[0], root / "annotations" / DATES[0])
+    config["data"]["split"] = {"manifest_dir": str(out)}
+
+    issues = manifest_compatibility(config, manifest, str(out))
+
+    assert any("empty side" in i for i in issues)
+
+
+def test_preflight_config_flags_a_manifest_that_leaves_an_empty_side_under_this_date(
+    tmp_path: Path,
+):
+    """The same refusal, reached through preflight_config: bind_manifest_stems would raise this
+    exact way at launch, so preflight names it before the child ever runs."""
+    from tcip_mcp.tools.training_tools import preflight_config
+
+    root = _two_subject_two_date_dataset(tmp_path / "ds")
+    out = tmp_path / "m"
+    _manifest_empty_val_side(root, out, DATES[0])
+    config = _bespoke_config(root / "images" / DATES[0], root / "annotations" / DATES[0])
+    config["data"]["split"] = {"manifest_dir": str(out)}
+
+    result = preflight_config(config)
+
+    assert any("empty side" in i for i in result["issues"])
+
+
+def test_manifest_compatibility_admits_a_make_splits_manifest_with_no_empty_side(
+    tmp_path: Path,
+):
+    """A manifest make_splits itself drew, never hand-mutated: valid work still passes once the
+    empty-side check lives in the shared function."""
+    from tcip_mcp.tools.training_tools import manifest_compatibility
+
+    root = _two_subject_two_date_dataset(tmp_path / "ds")
+    out = tmp_path / "m"
+    manifest = _draw(root, out)
+    config = _bespoke_config(root / "images" / DATES[0], root / "annotations" / DATES[0])
+    config["data"]["split"] = {"manifest_dir": str(out)}
+
+    assert manifest_compatibility(config, manifest, str(out)) == []
 
 
 def test_preflight_config_flags_a_manifest_with_no_images_root_recorded(tmp_path: Path):
@@ -111,6 +196,46 @@ def test_preflight_config_flags_a_manifest_with_no_images_root_recorded(tmp_path
     result = preflight_config(config)
 
     assert any("images root" in i for i in result["issues"])
+
+
+def test_preflight_reports_the_conflict_issues_even_when_the_manifest_is_unreadable(
+    tmp_path: Path,
+):
+    """The val_images_dir and drawn-key conflicts don't need the manifest to answer, so an
+    unreadable manifest_dir must never suppress them: preflight names both conflicts and the
+    read failure, not only the read failure."""
+    from tcip_mcp.tools.training_tools import preflight_config
+
+    root = _two_subject_two_date_dataset(tmp_path / "ds")
+    config = _bespoke_config(root / "images" / DATES[0], root / "annotations" / DATES[0])
+    config["data"]["val_images_dir"] = str(root / "images" / DATES[1])
+    config["data"]["split"] = {"manifest_dir": str(tmp_path / "nope"), "seed": 7}
+
+    result = preflight_config(config)
+
+    conflict_issues = [i for i in result["issues"] if "conflicts with" in i]
+    read_issues = [i for i in result["issues"] if "no split manifest recorded" in i]
+    assert len(conflict_issues) == 2
+    assert len(read_issues) == 1
+
+
+def test_preflight_reports_the_task_cannot_bind_explanation_without_reading_the_manifest(
+    tmp_path: Path,
+):
+    """The task check doesn't need the manifest either: a task outside detection/instance_seg
+    names why it cannot bind a split manifest even when the manifest_dir names nothing
+    readable."""
+    from tcip_mcp.tools.training_tools import preflight_config
+
+    root = _two_subject_two_date_dataset(tmp_path / "ds")
+    config = _bespoke_config(root / "images" / DATES[0], root / "annotations" / DATES[0])
+    config["model_source"]["task"] = "classification"
+    config["data"]["task"] = "classification"
+    config["data"]["split"] = {"manifest_dir": str(tmp_path / "nope")}
+
+    result = preflight_config(config)
+
+    assert any("cannot bind to one" in i for i in result["issues"])
 
 
 # -- read_split_manifest_dir_checked ---------------------------------------------
@@ -248,6 +373,116 @@ def test_list_split_choices_offers_every_recorded_partition_with_the_bindings_ow
     broken_entry = by_dir[str(broken_dir)]
     assert broken_entry["enabled"] is False
     assert broken_entry["reason"] is not None
+
+
+def test_list_split_choices_as_recorded_reports_moved_directories_like_preflight(
+    tmp_path: Path, monkeypatch,
+):
+    """The picker's own "As recorded" row checks the same directory presence preflight would
+    refuse a launch on, so a snapshot whose recorded images_dir no longer exists reads disabled
+    before Start rather than only failing after it."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
+    from tcip_mcp.experiments import create_experiment
+    from tcip_mcp.tools.training_tools import list_split_choices
+
+    root = _two_subject_two_date_dataset(tmp_path / "ds")
+    cfg = _bespoke_config(root / "images" / DATES[0], root / "annotations" / DATES[0])
+    create_experiment("exp-moved-dirs", cfg)
+    shutil.rmtree(root / "images" / DATES[0])
+
+    result = list_split_choices("exp-moved-dirs")
+
+    assert result["as_recorded"]["compatible"] is False
+    assert "Directory not found" in result["as_recorded"]["reason"]
+
+
+def test_list_split_choices_as_recorded_reports_a_version_refused_own_binding(
+    tmp_path: Path, monkeypatch,
+):
+    """A version-refused own binding reads as a disabled "As recorded" with the refusal text,
+    never propagates as an uncaught StoreError: the plain reader's ValueError-only except would
+    have let SchemaVersionRefused (a StoreError, not a ValueError) escape past it."""
+    monkeypatch.setenv("TCIP_STORE_BACKEND", "file")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
+    from tcip_store.binding import bind_default as _rebind
+
+    _rebind()  # the autouse fixture already bound before this env var was set
+    from tcip_mcp.experiments import create_experiment
+    from tcip_mcp.tools.training_tools import list_split_choices
+
+    root = _two_subject_two_date_dataset(tmp_path / "ds")
+    manifest_dir = tmp_path / "m"
+    manifest = _draw(root, manifest_dir)
+    manifest_path = manifest_dir / "split_manifest.json"
+    manifest_path.write_text(json.dumps({**manifest, "schema_version": 99}), encoding="utf-8")
+
+    cfg = _bespoke_config(root / "images" / DATES[0], root / "annotations" / DATES[0])
+    cfg["data"]["split"] = {"manifest_dir": str(manifest_dir)}
+    create_experiment("exp-version-refused", cfg)
+
+    result = list_split_choices("exp-version-refused")
+
+    assert result["as_recorded"]["compatible"] is False
+    assert "schema_version" in result["as_recorded"]["reason"]
+
+
+def test_list_split_choices_reports_the_recorded_split_keys_a_partition_replaces(
+    tmp_path: Path, monkeypatch,
+):
+    """Choosing a partition drops every recorded data.split key the manifest binding conflicts
+    with (:data:`_SPLIT_MANIFEST_CONFLICT_KEYS`); the listing discloses which ones a choice
+    would replace, per offered manifest."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
+    from tcip_mcp.experiments import create_experiment
+    from tcip_mcp.tools.training_tools import list_split_choices
+
+    root = _two_subject_two_date_dataset(tmp_path / "ds")
+    dataset_default = root / "splits"
+    _draw(root, dataset_default)
+
+    cfg = _bespoke_config(root / "images" / DATES[0], root / "annotations" / DATES[0])
+    cfg["data"]["split"] = {"seed": 7, "group_by": "tile_prefix"}
+    create_experiment("exp-drawn-policy", cfg)
+
+    result = list_split_choices("exp-drawn-policy")
+    entry = next(m for m in result["manifests"] if m["manifest_dir"] == str(dataset_default))
+
+    assert entry["replaced_split_keys"] == ["group_by", "seed"]
+
+
+def test_list_split_choices_does_not_offer_the_own_manifest_under_a_different_spelling(
+    tmp_path: Path, monkeypatch,
+):
+    """A differently spelled path to the config's own bound directory (a trailing separator,
+    dropped by ``Path(...).absolute()`` but not by a raw string compare) must not be offered as
+    if it were a second, alternative partition: both spellings normalize to the identical store
+    key, the same lexical normalization the listing now compares through."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
+    from tcip_mcp.experiments import create_experiment
+    from tcip_mcp.tools.training_tools import list_split_choices
+
+    root = _two_subject_two_date_dataset(tmp_path / "ds")
+    elsewhere = tmp_path / "elsewhere"
+    _draw(root, elsewhere, seed=2)
+
+    cfg = _bespoke_config(root / "images" / DATES[0], root / "annotations" / DATES[0])
+    cfg["data"]["split"] = {"manifest_dir": str(elsewhere)}
+    create_experiment("exp-own-spelling", cfg)
+
+    respelled = str(elsewhere) + os.sep
+    other_cfg = _bespoke_config(root / "images" / DATES[0], root / "annotations" / DATES[0])
+    other_cfg["data"]["split"] = {"manifest_dir": respelled}
+    create_experiment("exp-other-spelling", other_cfg)
+
+    result = list_split_choices("exp-own-spelling")
+
+    offered = {m["manifest_dir"] for m in result["manifests"]}
+    assert str(elsewhere) not in offered
+    assert respelled not in offered
 
 
 # -- POST /api/training/runs's split_manifest_dir --------------------------------

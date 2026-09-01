@@ -88,7 +88,9 @@ def relaunch_config_route(payload: RelaunchConfigPayload) -> dict:
     """
     from tcip_mcp.experiments import config_key, read_member, status_key
     from tcip_mcp.pipelines.model_build import MODEL_SOURCE_KEY
-    from tcip_mcp.tools.training_tools import launch_training, list_split_choices
+    from tcip_mcp.tools.training_tools import (
+        candidate_config_with_manifest, launch_training, list_split_choices,
+    )
 
     config = read_member(config_key(payload.experiment_id), None)
     if not isinstance(config, dict) or not config.get(MODEL_SOURCE_KEY):
@@ -108,10 +110,7 @@ def relaunch_config_route(payload: RelaunchConfigPayload) -> dict:
                 409, f"{payload.split_manifest_dir!r} is not an offered partition for "
                      f"{payload.experiment_id}",
             )
-        data_cfg = {**config.get("data", {})}
-        data_cfg.pop("val_images_dir", None)
-        data_cfg["split"] = {"manifest_dir": payload.split_manifest_dir}
-        config["data"] = data_cfg
+        config = candidate_config_with_manifest(config, payload.split_manifest_dir)
     try:
         result = launch_training(config)
     except Exception as exc:

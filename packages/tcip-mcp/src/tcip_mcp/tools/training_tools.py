@@ -64,24 +64,41 @@ def _split_manifest_drawn_conflicts(data_cfg: dict, split_cfg: dict) -> list[str
     return sorted(conflicts)
 
 
-def manifest_compatibility(config: dict, manifest: dict) -> list[str]:
-    """Every objection a launch binding ``config`` to ``manifest`` would raise, checked ahead of
-    that launch rather than only inside it.
+def _data_dir_issues(data_cfg: dict) -> list[str]:
+    """Every objection ``preflight_config``'s known-loader branch raises about
+    ``data.images_dir``/``data.labels_dir`` presence alone: missing, or naming a directory that
+    does not exist. The one implementation ``preflight_config`` and the data picker's "As
+    recorded" listing both call, so a relaunch whose recorded directories moved shows the same
+    words before Start that ``launch_training`` would refuse it with. A no-op for a bespoke
+    ``data.dataset_source`` config: the known-loader presence check does not apply when the
+    agent's own builder owns loading.
+    """
+    from tcip_mcp.pipelines.model_build import DATASET_SOURCE_KEY
 
-    Composes the checks already shared with every other manifest consumer,
-    :func:`~tcip_mcp.pipelines.data.splits.refuse_if_images_root_moved` (which the training
-    child, both inference entry points and calibration also call) and
-    :func:`_split_manifest_drawn_conflicts`, plus the subject, attribute and date comparisons
-    :func:`preflight_config` inlined until this function existed. ``preflight_config`` calls it
-    in place of that inline mirror, over a manifest it read itself; the data picker's
-    :func:`list_split_choices` calls it per candidate manifest, before Start, over a manifest it
-    also read itself. Never calls :func:`preflight_config`: that tool imports the config's
-    builder and scans its labels, a cost neither caller here means to pay for a compatibility
-    read.
+    if data_cfg.get(DATASET_SOURCE_KEY) is not None:
+        return []
+    issues: list[str] = []
+    for key in ("images_dir", "labels_dir"):
+        path = data_cfg.get(key)
+        if not path:
+            issues.append(f"Missing 'data.{key}'")
+        elif not Path(path).is_dir():
+            issues.append(f"Directory not found: data.{key} = '{path}'")
+    return issues
 
-    A ``members`` block that names no ``images_root`` for the run's own date is an issue here
-    (``make_splits`` always writes one, so a manifest missing it was hand-edited or predates the
-    field): a stated root must be positively carried, never merely not contradicted.
+
+def _manifest_dir_conflicts(config: dict) -> tuple[list[str], bool]:
+    """Every objection a ``data.split.manifest_dir`` binding raises from ``config``'s own
+    fields alone, computed without reading any manifest: the ``data.val_images_dir`` conflict,
+    the drawn-split key conflicts (:data:`_SPLIT_MANIFEST_CONFLICT_KEYS`), and the task check
+    (only detection and instance_seg admit through the ``trainable_stems`` draw a manifest is
+    drawn through). ``preflight_config`` and :func:`manifest_compatibility` both compute these
+    before attempting to read a manifest at all, so a moved or absent manifest never suppresses
+    an objection the config alone already carries.
+
+    Returns ``(issues, task_binds)``; when the task cannot bind a manifest at all, checking a
+    manifest's subject, date or images root against it would name nothing new, so the caller
+    stops there.
     """
     from tcip_mcp.pipelines.model_build import MODEL_SOURCE_KEY
 
@@ -112,11 +129,37 @@ def manifest_compatibility(config: dict, manifest: dict) -> list[str]:
             f"instance_seg admit through the trainable_stems draw a manifest is drawn "
             f"through; task={task_for_manifest!r} cannot bind to one."
         )
-        return issues
+        return issues, False
+    return issues, True
 
+
+def _manifest_dependent_issues(config: dict, manifest: dict, manifest_dir: str) -> list[str]:
+    """Every objection that needs the manifest itself, read at ``manifest_dir``, to answer: the
+    subject/attribute agreement, the run's own date having a members block, that block naming an
+    images root (positively carried, never merely not contradicted), the images root not having
+    moved, and the sides narrowed to that date not being empty. Called only once
+    :func:`_manifest_dir_conflicts`'s task check has passed and the manifest has been read
+    successfully; :func:`manifest_compatibility` composes both for a caller with one manifest in
+    hand, and ``preflight_config`` calls this directly so a failed read never hides the other
+    check's issues.
+
+    A ``members`` block that names no ``images_root`` for the run's own date is an issue here
+    (``make_splits`` always writes one, so a manifest missing it was hand-edited or predates the
+    field): a stated root must be positively carried, never merely not contradicted.
+    """
     from tcip_mcp.dataset_layout import annotation_date
-    from tcip_mcp.pipelines.data.splits import manifest_date_key, refuse_if_images_root_moved
+    from tcip_mcp.pipelines.data.splits import (
+        manifest_date_key, narrow_manifest_to_date, refuse_if_images_root_moved,
+    )
+    from tcip_mcp.pipelines.model_build import MODEL_SOURCE_KEY
 
+    model_source = config.get(MODEL_SOURCE_KEY)
+    data_cfg_raw = config.get("data")
+    data_cfg: dict = data_cfg_raw if isinstance(data_cfg_raw, dict) else {}
+    task_for_manifest = (model_source.get("task") if isinstance(model_source, dict) else None) \
+        or data_cfg.get("task", "detection")
+
+    issues: list[str] = []
     norm_src = _dataset_source_kwargs(task_for_manifest, data_cfg)
     subject, attribute = norm_src.get("subject"), norm_src.get("attribute")
     if (manifest.get("subject"), manifest.get("attribute")) != (subject, attribute):
@@ -142,8 +185,8 @@ def manifest_compatibility(config: dict, manifest: dict) -> list[str]:
     date_block = (manifest.get("members") or {}).get(manifest_date_key(run_date))
     if date_block is None:
         issues.append(
-            f"split manifest holds no members under date {run_date!r}; it holds members under "
-            f"{sorted(manifest.get('members') or {})}."
+            f"split manifest at {manifest_dir!r} holds no members under date {run_date!r}; it "
+            f"holds members under {sorted(manifest.get('members') or {})}."
         )
         return issues
 
@@ -158,7 +201,54 @@ def manifest_compatibility(config: dict, manifest: dict) -> list[str]:
         except ValueError as exc:
             issues.append(str(exc))
 
+    narrowing = narrow_manifest_to_date(manifest, run_date)
+    if not narrowing.train_ids or not narrowing.val_ids:
+        issues.append(
+            f"binding to this manifest under date {run_date!r} leaves an empty side "
+            f"(train={len(narrowing.train_ids)}, val={len(narrowing.val_ids)}); a run needs "
+            "both."
+        )
+
     return issues
+
+
+def manifest_compatibility(config: dict, manifest: dict, manifest_dir: str) -> list[str]:
+    """Every objection a launch binding ``config`` to ``manifest`` (read at ``manifest_dir``)
+    would raise, checked ahead of that launch rather than only inside it.
+
+    Composes :func:`_manifest_dir_conflicts` (config-only, computed before any manifest read)
+    with :func:`_manifest_dependent_issues` (needs the manifest in hand): between them, the
+    shared checks every other manifest consumer already carries,
+    :func:`~tcip_mcp.pipelines.data.splits.refuse_if_images_root_moved` (which the training
+    child, both inference entry points and calibration also call) and
+    :func:`_split_manifest_drawn_conflicts`, plus the subject, attribute, date and empty-side
+    comparisons ``preflight_config`` inlined until this pair existed. ``preflight_config`` calls
+    both directly, in the same order, so a manifest read failure never suppresses the
+    config-only issues; the data picker's :func:`list_split_choices` calls this one composed
+    function per candidate manifest, before Start, over a manifest it also read itself. Never
+    calls :func:`preflight_config`: that tool imports the config's builder and scans its
+    labels, a cost neither caller here means to pay for a compatibility read.
+    """
+    issues, task_binds = _manifest_dir_conflicts(config)
+    if not task_binds:
+        return issues
+    issues.extend(_manifest_dependent_issues(config, manifest, manifest_dir))
+    return issues
+
+
+def candidate_config_with_manifest(config: dict, manifest_dir: str) -> dict:
+    """The launch config choosing ``manifest_dir`` over ``config``'s own "As recorded" data
+    section would build: ``data.split`` replaced wholesale by ``{"manifest_dir": manifest_dir}``
+    with any ``data.val_images_dir`` dropped, since a chosen partition supplies its own
+    validation source. The one implementation the data picker's own compatibility check
+    (:func:`list_split_choices`) and the relaunch route's launch build both call, so an offer is
+    exactly what would launch.
+    """
+    data_cfg_raw = config.get("data")
+    data_cfg: dict = {**data_cfg_raw} if isinstance(data_cfg_raw, dict) else {}
+    data_cfg.pop("val_images_dir", None)
+    data_cfg["split"] = {"manifest_dir": manifest_dir}
+    return {**config, "data": data_cfg}
 
 # Lazy imports of heavy dependencies inside tool functions to keep server startup fast.
 
@@ -245,12 +335,7 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
             except Exception as exc:
                 issues.append(f"data.dataset_source.builder not importable: {exc}")
     else:
-        for key in ("images_dir", "labels_dir"):
-            path = data_cfg.get(key)
-            if not path:
-                issues.append(f"Missing 'data.{key}'")
-            elif not Path(path).is_dir():
-                issues.append(f"Directory not found: data.{key} = '{path}'")
+        issues.extend(_data_dir_issues(data_cfg))
 
     # Channel firewall: probe one sample raster and check its band count against the declared
     # in_chans, so a channel-wrong train is caught here rather than deep in the training subprocess.
@@ -346,18 +431,21 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
                 except ValueError as exc:
                     issues.append(f"data.split: {exc}")
 
-    # Only what manifest_compatibility can answer; bind_manifest_stems itself never runs here.
+    # Config-only issues fire before the read, so a moved or absent manifest never hides them;
+    # bind_manifest_stems itself never runs here, only what the two halves can answer without it.
     manifest_dir = split_cfg_dict.get("manifest_dir")
     if manifest_dir:
         from tcip_mcp.tools.data_tools import read_split_manifest_dir
 
-        try:
-            manifest = read_split_manifest_dir(manifest_dir)
-        except ValueError as exc:
-            issues.append(str(exc))
-            manifest = None
-        if manifest is not None:
-            issues.extend(manifest_compatibility(config, manifest))
+        conflict_issues, task_binds = _manifest_dir_conflicts(config)
+        issues.extend(conflict_issues)
+        if task_binds:
+            try:
+                manifest = read_split_manifest_dir(manifest_dir)
+            except ValueError as exc:
+                issues.append(str(exc))
+            else:
+                issues.extend(_manifest_dependent_issues(config, manifest, manifest_dir))
 
     # Four-way spatial split feasibility (reserve_calibration_fraction, opt-in): must refuse by
     # name when infeasible, not silently degrade to no validation (see the helper's own docstring).
@@ -998,29 +1086,39 @@ def list_split_choices(experiment_id: str) -> dict:
     ``preflight_config`` (an audited tool that imports the picked config's builder and scans its
     labels): every check here is :func:`manifest_compatibility` over a manifest this reader read
     itself, through :func:`~tcip_mcp.tools.data_tools.read_split_manifest_dir_checked`, no second
-    presence test anywhere. A candidate manifest is checked against the config as choosing it
-    would leave it (``data.split`` replaced wholesale, ``val_images_dir`` dropped), the identical
-    shape the launch route builds, so an offer is exactly what would launch; "As recorded" is
-    checked against the stored config unchanged, since it changes nothing.
+    presence test anywhere. A candidate manifest is checked against the config
+    :func:`candidate_config_with_manifest` builds (``data.split`` replaced wholesale,
+    ``val_images_dir`` dropped), the identical shape the launch route builds, so an offer is
+    exactly what would launch; "As recorded" is checked against the stored config unchanged
+    (plus the directory-presence issues :func:`preflight_config` would raise, so a snapshot
+    whose recorded directories moved shows the same words before Start that a launch would
+    refuse it with).
 
     The listing is thin: the manifest directories other enumerable experiment configs in this
     project bound to (the picked config's own excluded, since it is "As recorded"), plus, when
     ``dataset_root_of(data.images_dir)`` resolves, that root's ``splits`` directory, offered only
     when something is actually recorded there (the ``make_splits`` default materializes it, it
-    does not always exist).
+    does not always exist). The own-binding exclusion and the candidate dedupe compare each
+    directory through the same lexical normalization the store key uses
+    (``str(Path(p).absolute())``, no symlink resolution), so a differently spelled path to the
+    identical directory is never offered as if it were a second one.
 
     Returns ``{"error": ...}`` for an unknown ``experiment_id`` (the route's own 404). Otherwise:
     ``{"as_recorded": {"case": "bound"|"drawn", "line": str, "compatible": bool,
     "reason": str | None}, "manifests": [{"manifest_dir": str, "enabled": bool,
     "reason": str | None, "seed": int | None, "group_by": str | None, "train": int, "val": int,
-    "calibration": int, "other_dates": int}, ...]}``. A config naming no ``data.images_dir`` or
-    ``data.labels_dir`` answers only ``as_recorded`` (``manifests`` always empty; there is
-    nothing to narrow a candidate manifest's counts to).
+    "calibration": int, "other_dates": int, "replaced_split_keys": list[str]}, ...]}``.
+    ``replaced_split_keys`` names the recorded ``data.split`` keys
+    (:data:`_SPLIT_MANIFEST_CONFLICT_KEYS`) choosing any offered partition drops, read from the
+    stored config once and carried on every entry: the same set for every candidate, since it
+    describes what the config's own recorded policy holds, not what a given candidate carries.
+    A config naming no ``data.images_dir`` or ``data.labels_dir`` answers only ``as_recorded``
+    (``manifests`` always empty; there is nothing to narrow a candidate manifest's counts to).
     """
     from tcip_mcp.dataset_layout import annotation_date, dataset_root_of
     from tcip_mcp.experiments import config_key, experiment_exists, experiment_ids_with_status, read_member
     from tcip_mcp.pipelines.data.splits import narrow_manifest_to_date
-    from tcip_mcp.tools.data_tools import read_split_manifest_dir, read_split_manifest_dir_checked
+    from tcip_mcp.tools.data_tools import read_split_manifest_dir_checked
 
     if not experiment_exists(experiment_id):
         return {"error": f"Experiment not found: {experiment_id}"}
@@ -1031,17 +1129,20 @@ def list_split_choices(experiment_id: str) -> dict:
     split_cfg = data_cfg.get("split")
     split_cfg = split_cfg if isinstance(split_cfg, dict) else {}
     own_manifest_dir = split_cfg.get("manifest_dir")
+    replaced_split_keys = sorted(
+        k for k in _SPLIT_MANIFEST_CONFLICT_KEYS if split_cfg.get(k) is not None)
 
     if own_manifest_dir:
         as_recorded = {"case": "bound", "line": "on the partition it bound",
                        "compatible": True, "reason": None}
-        try:
-            own_manifest = read_split_manifest_dir(own_manifest_dir)
-        except ValueError as exc:
+        own_manifest, own_error = read_split_manifest_dir_checked(own_manifest_dir)
+        if own_manifest is None:
             as_recorded["compatible"] = False
-            as_recorded["reason"] = str(exc)
+            as_recorded["reason"] = own_error or (
+                f"no split manifest recorded under {own_manifest_dir}; run make_splits first."
+            )
         else:
-            own_issues = manifest_compatibility(config, own_manifest)
+            own_issues = manifest_compatibility(config, own_manifest, own_manifest_dir)
             if own_issues:
                 as_recorded["compatible"] = False
                 as_recorded["reason"] = "; ".join(own_issues)
@@ -1053,10 +1154,23 @@ def list_split_choices(experiment_id: str) -> dict:
             "compatible": True, "reason": None,
         }
 
+    dir_issues = _data_dir_issues(data_cfg)
+    if dir_issues:
+        as_recorded["compatible"] = False
+        combined_reason = list(dir_issues)
+        prior_reason = as_recorded["reason"]
+        if prior_reason:
+            combined_reason.insert(0, str(prior_reason))
+        as_recorded["reason"] = "; ".join(combined_reason)
+
     images_dir, labels_dir = data_cfg.get("images_dir"), data_cfg.get("labels_dir")
     if not images_dir or not labels_dir:
         return {"as_recorded": as_recorded, "manifests": []}
 
+    def _norm_dir(p: str) -> str:
+        return str(Path(p).absolute())
+
+    own_norm = _norm_dir(own_manifest_dir) if own_manifest_dir else None
     candidate_dirs: list[str] = []
     seen: set[str] = set()
     for other_id in experiment_ids_with_status():
@@ -1068,15 +1182,19 @@ def list_split_choices(experiment_id: str) -> dict:
         other_split = other_data.get("split")
         other_split = other_split if isinstance(other_split, dict) else {}
         candidate = other_split.get("manifest_dir")
-        if not candidate or candidate == own_manifest_dir or candidate in seen:
+        if not candidate:
             continue
-        seen.add(candidate)
+        candidate_norm = _norm_dir(candidate)
+        if candidate_norm == own_norm or candidate_norm in seen:
+            continue
+        seen.add(candidate_norm)
         candidate_dirs.append(candidate)
     dataset_root = dataset_root_of(images_dir)
     if dataset_root is not None:
         default_dir = str(dataset_root / "splits")
-        if default_dir != own_manifest_dir and default_dir not in seen:
-            seen.add(default_dir)
+        default_norm = _norm_dir(default_dir)
+        if default_norm != own_norm and default_norm not in seen:
+            seen.add(default_norm)
             candidate_dirs.append(default_dir)
 
     run_date = annotation_date(labels_dir)
@@ -1089,32 +1207,21 @@ def list_split_choices(experiment_id: str) -> dict:
             manifests.append({
                 "manifest_dir": candidate_dir, "enabled": False, "reason": error_text,
                 "seed": None, "group_by": None, "train": 0, "val": 0, "calibration": 0,
-                "other_dates": 0,
+                "other_dates": 0, "replaced_split_keys": replaced_split_keys,
             })
             continue
-        # Checked against the config as choosing this candidate would leave it, the identical
-        # shape the launch route builds: an offer is exactly what would launch.
-        candidate_data = {**data_cfg, "split": {"manifest_dir": candidate_dir}}
-        candidate_data.pop("val_images_dir", None)
-        candidate_config = {**config, "data": candidate_data}
-        issues = manifest_compatibility(candidate_config, manifest)
+        candidate_config = candidate_config_with_manifest(config, candidate_dir)
+        issues = manifest_compatibility(candidate_config, manifest, candidate_dir)
         narrowing = narrow_manifest_to_date(manifest, run_date)
         entry: dict = {
             "manifest_dir": candidate_dir, "seed": manifest.get("seed"),
             "group_by": manifest.get("group_by"), "train": len(narrowing.train_ids),
             "val": len(narrowing.val_ids), "calibration": len(narrowing.calibration_ids),
-            "other_dates": narrowing.other_dates,
+            "other_dates": narrowing.other_dates, "replaced_split_keys": replaced_split_keys,
         }
         if issues:
             entry["enabled"] = False
             entry["reason"] = "; ".join(issues)
-        elif not narrowing.train_ids or not narrowing.val_ids:
-            entry["enabled"] = False
-            entry["reason"] = (
-                f"binding to this manifest under date {run_date!r} leaves an empty side "
-                f"(train={len(narrowing.train_ids)}, val={len(narrowing.val_ids)}); a run "
-                "needs both."
-            )
         else:
             entry["enabled"] = True
             entry["reason"] = None
