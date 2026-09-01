@@ -42,15 +42,25 @@ export interface MetricRow {
   [metric: string]: number | string | undefined;
 }
 
-export const trainingApi = {
-  validate: (config: unknown) =>
-    postJson<{ valid: boolean; issues: string[] }>(ROUTES.postTrainingValidate, { config }),
+export interface LaunchableConfig {
+  experiment_id: string;
+  builder: string | null;
+  task: string | null;
+  images_dir: string | null;
+  subject: string | null;
+  created: string | null;
+  state: string;
+  parent_experiment: string | null;
+}
 
-  launch: (config: unknown, output_dir: string) =>
-    postJson<{ run_id?: string; [k: string]: unknown }>(ROUTES.postTrainingLaunch, {
-      config,
-      output_dir,
-    }),
+export const trainingApi = {
+  listConfigs: () => getJson<{ configs: LaunchableConfig[] }>(ROUTES.getTrainingConfigs),
+
+  relaunch: (experiment_id: string) =>
+    postJson<{ run_id?: string; experiment_id?: string; [k: string]: unknown }>(
+      ROUTES.postTrainingRuns,
+      { experiment_id },
+    ),
 
   listRuns: () => getJson<{ runs: TrainingRunSummary[] }>(ROUTES.getTrainingRuns),
 
