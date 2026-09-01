@@ -377,15 +377,32 @@ describe("TrainingTab compare", () => {
       name: "Compare",
     });
     expect(unresolvedToggle).toBeDisabled();
-    expect(unresolvedToggle).toHaveAttribute("title", "experiment not resolved yet");
+    expect(unresolvedToggle).not.toHaveAttribute("title");
+    expect(
+      within(rowFor("run-unresolved")).getByText("experiment not resolved yet"),
+    ).toBeInTheDocument();
 
     const failedToggle = within(rowFor("run-failed-tracking")).getByRole("button", {
       name: "Compare",
     });
     expect(failedToggle).toBeDisabled();
-    expect(failedToggle).toHaveAttribute(
-      "title",
-      "experiment tracking failed: dataset_identity failed: boom",
-    );
+    expect(
+      within(rowFor("run-failed-tracking")).getByText(
+        "experiment tracking failed: dataset_identity failed: boom",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("groups Compare and Cancel as one action group", async () => {
+    vi.spyOn(trainingApi, "listRuns").mockResolvedValue({
+      runs: [run({ run_id: "run-grouped", status: "running", experiment_id: "exp-grouped" })],
+    });
+
+    render(<TrainingTab />);
+    await screen.findByText("run-grouped");
+
+    const group = within(rowFor("run-grouped")).getByRole("group", { name: "Run actions" });
+    expect(within(group).getByRole("button", { name: "Compare" })).toBeInTheDocument();
+    expect(within(group).getByRole("button", { name: "Cancel" })).toBeInTheDocument();
   });
 });

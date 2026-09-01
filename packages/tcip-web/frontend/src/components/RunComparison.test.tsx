@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
+import { StructuredRefusalError } from "@/api/http";
 import type { CompareResult } from "@/api/training";
 import { trainingApi } from "@/api/training";
 import { RunComparison, type MarkedRun } from "@/components/RunComparison";
@@ -76,6 +77,38 @@ describe("RunComparison data lines", () => {
     expect(await screen.findByText(/bound to splits\/d1/)).toBeInTheDocument();
     expect(screen.getByText(/drawn again \(seed 42\)/)).toBeInTheDocument();
   });
+
+  it("renders the library's own registry_error text with no added prefix", async () => {
+    vi.spyOn(trainingApi, "compare").mockResolvedValue(
+      baseResult({
+        experiments: [
+          {
+            experiment_id: "exp-a",
+            registry_error: "registry unreadable: simulated decode failure",
+          },
+          { experiment_id: "exp-b" },
+        ],
+      }),
+    );
+    render(<RunComparison marked={MARKED} projectRoot={null} />);
+    expect(
+      await screen.findByText("registry unreadable: simulated decode failure"),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/registry unreadable: registry unreadable/)).not.toBeInTheDocument();
+  });
+});
+
+describe("RunComparison on a change of the marked set", () => {
+  it("reads as reading, never a stale absence claim, for a newly marked column", async () => {
+    const compare = vi.spyOn(trainingApi, "compare").mockResolvedValue(baseResult({}));
+    const { rerender } = render(<RunComparison marked={[MARKED[0]]} projectRoot={null} />);
+    await screen.findByText("exp-a");
+
+    compare.mockImplementation(() => new Promise(() => {})); // never resolves for the new set
+    rerender(<RunComparison marked={MARKED} projectRoot={null} />);
+
+    expect(await screen.findByText("Loading comparison...")).toBeInTheDocument();
+  });
 });
 
 describe("RunComparison rank control", () => {
@@ -101,7 +134,14 @@ describe("RunComparison rank control", () => {
   it("shows the direction toggle only after the tool refuses an undeclared metric", async () => {
     vi.spyOn(trainingApi, "compare").mockResolvedValue(registeredResult());
     vi.spyOn(trainingApi, "compareBest").mockRejectedValue(
-      new Error("'val_map99' has no declared ranking direction. Pass higher_is_better explicitly"),
+      new StructuredRefusalError(
+        {
+          error: "'val_map99' has no declared ranking direction. Pass higher_is_better explicitly",
+          needs_direction: true,
+        },
+        422,
+        "",
+      ),
     );
 
     render(<RunComparison marked={MARKED} projectRoot={null} />);
@@ -113,13 +153,20 @@ describe("RunComparison rank control", () => {
     fireEvent.click(screen.getByRole("button", { name: "Rank" }));
     expect(await screen.findByText("higher is better")).toBeInTheDocument();
     expect(screen.getByText("lower is better")).toBeInTheDocument();
+    expect(screen.getByText(/has no declared ranking direction/)).toBeInTheDocument();
   });
 
   it("shows the unverified switch only after the tool says every candidate was unverified", async () => {
     vi.spyOn(trainingApi, "compare").mockResolvedValue(registeredResult());
     vi.spyOn(trainingApi, "compareBest").mockRejectedValue(
-      new Error(
-        "every registered model carrying 'val_map99' is unverified (metrics_source is not 'trainer')",
+      new StructuredRefusalError(
+        {
+          error:
+            "every registered model carrying 'val_map99' is unverified (metrics_source is not 'trainer')",
+          all_unverified: true,
+        },
+        422,
+        "",
       ),
     );
 

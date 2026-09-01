@@ -2,6 +2,10 @@
 
 import type { MetricRow } from "@/api/training";
 
+/** The run list's own poll cadence, shared by TrainingTab's row refresh and RunComparison's
+ * comparison refresh so the two surfaces poll on one cadence rather than two literals. */
+export const RUN_REFRESH_MS = 4000;
+
 /** The row's identity for de-duplication: epoch if present, else step, else none. */
 export function metricKey(row: MetricRow): number | undefined {
   if (typeof row.epoch === "number") return row.epoch;

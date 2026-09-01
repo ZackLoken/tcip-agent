@@ -21,7 +21,7 @@ import { useStore } from "@/store";
 import { defaultTrainingRequest } from "@/tabs/agentPrompts";
 import { CHART, CHART_LINE_COLORS } from "@/tabs/chartTheme";
 import { RunMonitorEmpty, RunMonitorLayout } from "@/tabs/RunMonitorLayout";
-import { mergeMetric } from "@/tabs/trainingMetrics";
+import { mergeMetric, RUN_REFRESH_MS } from "@/tabs/trainingMetrics";
 
 // Runs can only be stopped while still active; terminal/historical runs show no button.
 const TRAINING_CANCELLABLE: ReadonlySet<string> = new Set(["created", "running"]);
@@ -157,8 +157,16 @@ export function TrainingTab() {
   const refreshRuns = useCallback(async () => {
     try {
       const r = await trainingApi.listRuns();
-      setRuns(r.runs ?? []);
+      const nextRuns = r.runs ?? [];
+      setRuns(nextRuns);
       setRunsError(null);
+      // A run that leaves the list must also leave the marked set, or the cap (which counts
+      // markedRunIds itself) can read full while the header (runs still present) shows fewer.
+      const stillPresent = new Set(nextRuns.map((run) => run.run_id));
+      setMarkedRunIds((prev) => {
+        const pruned = new Set(Array.from(prev).filter((id) => stillPresent.has(id)));
+        return pruned.size === prev.size ? prev : pruned;
+      });
     } catch (e) {
       setRunsError(`Could not load training runs: ${e instanceof Error ? e.message : String(e)}`);
     }
@@ -198,7 +206,7 @@ export function TrainingTab() {
 
   useEffect(() => {
     void refreshRuns();
-    const t = setInterval(refreshRuns, 4000);
+    const t = setInterval(refreshRuns, RUN_REFRESH_MS);
     return () => clearInterval(t);
   }, [refreshRuns]);
 
@@ -486,23 +494,36 @@ export function TrainingTab() {
                   </div>
                 </button>
                 <div className="flex flex-col items-end gap-1 shrink-0">
-                  <button
-                    type="button"
-                    aria-pressed={isMarked}
-                    disabled={!isMarked && !!reason}
-                    title={reason ?? undefined}
-                    className={isMarked ? "tcip-btn-primary text-[10px]" : "tcip-btn text-[10px]"}
-                    onClick={() => toggleMarked(r)}
+                  <div
+                    role="group"
+                    aria-label="Run actions"
+                    className="inline-flex rounded border border-tcip-border overflow-hidden"
                   >
-                    Compare
-                  </button>
-                  {TRAINING_CANCELLABLE.has(r.status) && (
                     <button
-                      className="tcip-btn text-[10px]"
-                      onClick={() => void onCancel(r.run_id)}
+                      type="button"
+                      aria-pressed={isMarked}
+                      disabled={!isMarked && !!reason}
+                      className={`px-2 py-1 text-[10px] transition-colors disabled:opacity-40 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-tcip-accent/70 ${
+                        isMarked ? "bg-tcip-accent text-white" : "hover:bg-tcip-hover"
+                      }`}
+                      onClick={() => toggleMarked(r)}
                     >
-                      Cancel
+                      Compare
                     </button>
+                    {TRAINING_CANCELLABLE.has(r.status) && (
+                      <button
+                        type="button"
+                        className="px-2 py-1 text-[10px] border-l border-tcip-border hover:bg-tcip-hover transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-tcip-accent/70"
+                        onClick={() => void onCancel(r.run_id)}
+                      >
+                        Cancel
+                      </button>
+                    )}
+                  </div>
+                  {reason && (
+                    <span className="text-[10px] text-tcip-muted text-right max-w-[150px]">
+                      {reason}
+                    </span>
                   )}
                 </div>
               </div>
