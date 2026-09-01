@@ -118,6 +118,7 @@ export function TrainingTab() {
 
   const [pickerOpen, setPickerOpen] = useState(false);
   const [configs, setConfigs] = useState<LaunchableConfig[]>([]);
+  const [configsError, setConfigsError] = useState<string | null>(null);
   const [splitChoicesById, setSplitChoicesById] = useState<Record<string, SplitChoices>>({});
   const [splitChoicesLoadingId, setSplitChoicesLoadingId] = useState<string | null>(null);
   const [splitChoiceErrors, setSplitChoiceErrors] = useState<Record<string, string>>({});
@@ -176,8 +177,10 @@ export function TrainingTab() {
     try {
       const r = await trainingApi.listConfigs();
       setConfigs(r.configs ?? []);
-    } catch {
+      setConfigsError(null);
+    } catch (e) {
       setConfigs([]);
+      setConfigsError(`Could not load configs: ${e instanceof Error ? e.message : String(e)}`);
     }
     setSplitChoicesById({});
     setSplitChoiceErrors({});
@@ -433,6 +436,8 @@ export function TrainingTab() {
             list={{
               title: "Configs in this project",
               emptyMessage: "No config exists in this project yet.",
+              error: configsError ?? undefined,
+              onRetry: () => void refreshConfigs(),
               rows: configs.map((cfg) =>
                 configRow(
                   cfg,
@@ -513,6 +518,7 @@ export function TrainingTab() {
                     {TRAINING_CANCELLABLE.has(r.status) && (
                       <button
                         type="button"
+                        aria-label={`Cancel ${r.run_id}`}
                         className="px-2 py-1 text-[10px] border-l border-tcip-border hover:bg-tcip-hover transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-tcip-accent/70"
                         onClick={() => void onCancel(r.run_id)}
                       >

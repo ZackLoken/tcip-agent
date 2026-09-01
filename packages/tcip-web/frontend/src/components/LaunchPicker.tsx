@@ -65,7 +65,15 @@ export interface LaunchPickerProps {
   /** Omitted entirely for a picker with no records surface: the panel then offers only the
    * agent row (Tuning's "Start a sweep" header, where a sweep from a never-swept config is
    * always the agent's own path). */
-  list?: { title: string; emptyMessage: string; rows: LaunchPickerRow[] };
+  list?: {
+    title: string;
+    emptyMessage: string;
+    rows: LaunchPickerRow[];
+    /** Set when the rows themselves failed to load: rendered in place of emptyMessage, with
+     * onRetry as its Retry control, the way the runs list reports its own load failure. */
+    error?: string;
+    onRetry?: () => void;
+  };
   composerLabel: string;
   request: string;
   onRequestChange: (text: string) => void;
@@ -125,7 +133,18 @@ export function LaunchPicker({
       {list && (
         <div>
           <div className="tcip-heading mb-1">{list.title}</div>
-          {list.rows.length === 0 ? (
+          {list.error ? (
+            <div className="text-[11px] text-tcip-fp">
+              {list.error}{" "}
+              <button
+                type="button"
+                className="tcip-btn text-[11px] ml-1"
+                onClick={() => list.onRetry?.()}
+              >
+                Retry
+              </button>
+            </div>
+          ) : list.rows.length === 0 ? (
             <div className="text-[11px] text-tcip-muted">{list.emptyMessage}</div>
           ) : (
             <ul className="space-y-1">
@@ -137,12 +156,12 @@ export function LaunchPicker({
                     : row.data.choices.find((c) => c.manifestDir === selectedDataDir)
                   : undefined;
                 const startBlocked = Boolean(selectedChoice?.disabled);
+                const dataStillLoading = Boolean(row.dataLoading);
                 return (
                   <li key={row.key}>
                     <button
                       type="button"
                       aria-expanded={selected}
-                      aria-pressed={selected}
                       className={`w-full p-2 rounded border text-left transition-colors ${
                         selected
                           ? "border-tcip-accent bg-tcip-accent/10"
@@ -186,11 +205,13 @@ export function LaunchPicker({
                                   />
                                   <span>
                                     As recorded: {row.data.asRecordedLine}
-                                    {row.data.asRecordedDisabled && row.data.asRecordedReason && (
-                                      <span className="block text-tcip-fp">
-                                        {row.data.asRecordedReason}
-                                      </span>
-                                    )}
+                                    {row.data.asRecordedDisabled &&
+                                      row.data.asRecordedReason &&
+                                      selectedDataDir !== null && (
+                                        <span className="block text-tcip-fp">
+                                          {row.data.asRecordedReason}
+                                        </span>
+                                      )}
                                   </span>
                                 </label>
                               </li>
@@ -224,11 +245,13 @@ export function LaunchPicker({
                                                 {choice.replacedSplitKeys.join(", ")}
                                               </span>
                                             )}
-                                          {choice.disabled && choice.reason && (
-                                            <span className="block text-tcip-fp">
-                                              {choice.reason}
-                                            </span>
-                                          )}
+                                          {choice.disabled &&
+                                            choice.reason &&
+                                            choice.manifestDir !== selectedDataDir && (
+                                              <span className="block text-tcip-fp">
+                                                {choice.reason}
+                                              </span>
+                                            )}
                                         </span>
                                       </label>
                                     </li>
@@ -241,17 +264,20 @@ export function LaunchPicker({
                         <button
                           type="button"
                           className="tcip-btn-primary text-[11px]"
-                          disabled={starting || startBlocked}
+                          disabled={starting || startBlocked || dataStillLoading}
                           onClick={() => void start(row)}
                         >
                           Start
                         </button>
-                        {startBlocked && selectedChoice?.reason && (
-                          <div className="mt-1 text-[10px] text-tcip-fp">
+                        {dataStillLoading ? (
+                          <div className="mt-1 text-[10px] text-tcip-muted" role="status">
+                            checking the data choice
+                          </div>
+                        ) : startBlocked && selectedChoice?.reason ? (
+                          <div className="mt-1 text-[10px] text-tcip-fp" role="status">
                             {selectedChoice.reason}
                           </div>
-                        )}
-                        {refusal?.key === row.key && (
+                        ) : refusal?.key === row.key ? (
                           <ul
                             role="status"
                             className="mt-1 text-[11px] text-tcip-fp list-disc pl-4"
@@ -260,7 +286,7 @@ export function LaunchPicker({
                               <li key={issue}>{issue}</li>
                             ))}
                           </ul>
-                        )}
+                        ) : null}
                       </div>
                     )}
                   </li>

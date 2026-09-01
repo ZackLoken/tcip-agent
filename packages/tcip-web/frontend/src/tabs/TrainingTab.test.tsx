@@ -64,7 +64,7 @@ describe("TrainingTab run list", () => {
     render(<TrainingTab />);
     expect(await screen.findByText("train-agent-1")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel train-agent-1" }));
     await waitFor(() => expect(cancelSpy).toHaveBeenCalledWith("train-agent-1"));
   });
 
@@ -89,6 +89,15 @@ describe("TrainingTab config picker", () => {
     vi.spyOn(trainingApi, "listConfigs").mockResolvedValue({
       configs: [config({ experiment_id: "exp-pristine-1" })],
     });
+    vi.spyOn(trainingApi, "listSplitChoices").mockResolvedValue({
+      as_recorded: {
+        case: "bound",
+        line: "on the partition it bound",
+        compatible: true,
+        reason: null,
+      },
+      manifests: [],
+    });
     const relaunchSpy = vi
       .spyOn(trainingApi, "relaunch")
       .mockResolvedValue({ run_id: "run-new-1", experiment_id: "exp-pristine-1" });
@@ -99,6 +108,7 @@ describe("TrainingTab config picker", () => {
 
     fireEvent.click(screen.getByText("exp-pristine-1"));
     expect(screen.getByText("Its first run, on the data paths it names")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Start" })).not.toBeDisabled());
     fireEvent.click(screen.getByRole("button", { name: "Start" }));
     await waitFor(() => expect(relaunchSpy).toHaveBeenCalledWith("exp-pristine-1", null));
   });
@@ -107,6 +117,15 @@ describe("TrainingTab config picker", () => {
     vi.spyOn(trainingApi, "listRuns").mockResolvedValue({ runs: [] });
     vi.spyOn(trainingApi, "listConfigs").mockResolvedValue({
       configs: [config({ experiment_id: "exp-refused-1" })],
+    });
+    vi.spyOn(trainingApi, "listSplitChoices").mockResolvedValue({
+      as_recorded: {
+        case: "bound",
+        line: "on the partition it bound",
+        compatible: true,
+        reason: null,
+      },
+      manifests: [],
     });
     vi.spyOn(trainingApi, "relaunch").mockRejectedValue(
       new StructuredRefusalError({ issues: ["batch_size must be positive"] }, 422, ""),
@@ -117,6 +136,7 @@ describe("TrainingTab config picker", () => {
     expect(await screen.findByText("exp-refused-1")).toBeInTheDocument();
 
     fireEvent.click(screen.getByText("exp-refused-1"));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Start" })).not.toBeDisabled());
     fireEvent.click(screen.getByRole("button", { name: "Start" }));
     await waitFor(() =>
       expect(screen.getByText("batch_size must be positive")).toBeInTheDocument(),
@@ -179,6 +199,42 @@ describe("TrainingTab config picker", () => {
     fireEvent.click(await screen.findByRole("radio", { name: /\/data\/splits/ }));
     fireEvent.click(screen.getByRole("button", { name: "Start" }));
     await waitFor(() => expect(relaunchSpy).toHaveBeenCalledWith("exp-1", "/data/splits"));
+  });
+
+  it("disables Start while a selected config's data choices are still loading", async () => {
+    vi.spyOn(trainingApi, "listRuns").mockResolvedValue({ runs: [] });
+    vi.spyOn(trainingApi, "listConfigs").mockResolvedValue({
+      configs: [
+        {
+          experiment_id: "exp-1",
+          builder: "m:build_detector",
+          task: "detection",
+          images_dir: "/data/images",
+          subject: "leaf",
+          created: null,
+          state: "created",
+          parent_experiment: null,
+        },
+      ],
+    });
+    let resolveChoices: (v: SplitChoices) => void = () => {};
+    vi.spyOn(trainingApi, "listSplitChoices").mockReturnValue(
+      new Promise<SplitChoices>((resolve) => {
+        resolveChoices = resolve;
+      }),
+    );
+
+    render(<TrainingTab />);
+    fireEvent.click(await screen.findByRole("button", { name: "Start a run" }));
+    fireEvent.click(await screen.findByText("exp-1"));
+
+    expect(await screen.findByRole("button", { name: "Start" })).toBeDisabled();
+
+    resolveChoices({
+      as_recorded: { case: "drawn", line: "draws its split again", compatible: true, reason: null },
+      manifests: [],
+    });
+    await waitFor(() => expect(screen.getByRole("button", { name: "Start" })).not.toBeDisabled());
   });
 
   it("shows a per-row split-choices fetch failure as text on the row", async () => {
@@ -403,6 +459,41 @@ describe("TrainingTab compare", () => {
 
     const group = within(rowFor("run-grouped")).getByRole("group", { name: "Run actions" });
     expect(within(group).getByRole("button", { name: "Compare" })).toBeInTheDocument();
-    expect(within(group).getByRole("button", { name: "Cancel" })).toBeInTheDocument();
+    expect(within(group).getByRole("button", { name: "Cancel run-grouped" })).toBeInTheDocument();
+  });
+
+  it("names each run's Cancel control with that run's own id", async () => {
+    vi.spyOn(trainingApi, "listRuns").mockResolvedValue({
+      runs: [
+        run({ run_id: "train-a", status: "running" }),
+        run({ run_id: "train-b", status: "running" }),
+      ],
+    });
+
+    render(<TrainingTab />);
+    await screen.findByText("train-a");
+
+    expect(screen.getByRole("button", { name: "Cancel train-a" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Cancel train-b" })).toBeInTheDocument();
+  });
+});
+
+describe("TrainingTab configs loader", () => {
+  it("keeps and shows a failed configs fetch, with a Retry control, in place of the empty line", async () => {
+    vi.spyOn(trainingApi, "listRuns").mockResolvedValue({ runs: [] });
+    const listConfigsSpy = vi
+      .spyOn(trainingApi, "listConfigs")
+      .mockRejectedValueOnce(new Error("network error"))
+      .mockResolvedValue({ configs: [] });
+
+    render(<TrainingTab />);
+    fireEvent.click(screen.getByRole("button", { name: "Start a run" }));
+
+    expect(await screen.findByText("Could not load configs: network error")).toBeInTheDocument();
+    expect(screen.queryByText("No config exists in this project yet.")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await waitFor(() => expect(listConfigsSpy).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText("No config exists in this project yet.")).toBeInTheDocument();
   });
 });
