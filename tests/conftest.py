@@ -71,6 +71,24 @@ def _bind_storage_backend():
     backend.close()
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _stop_leaked_tensorboards():
+    """Leave no TensorBoard process behind at the end of the test session.
+
+    A test that drives the real ``launch_training`` gets TensorBoard as a best-effort side
+    effect; a test that forgets to stub it out leaks the child process, its cwd pinned to the
+    test's own (soon-deleted) directory. The module is looked up in ``sys.modules`` rather than
+    imported, so a session that never touched it pays nothing; a session with nothing tracked
+    stops nothing.
+    """
+    yield
+    tb = sys.modules.get("tcip_mcp.pipelines.training.tensorboard_manager")
+    if tb is None:
+        return
+    for entry in tb.list_tensorboard():
+        tb.stop_tensorboard(run_id=entry["key"])
+
+
 def pytest_collection_modifyitems(config, items):
     """Guardrail: fail loudly when far fewer tests collect than expected.
 
