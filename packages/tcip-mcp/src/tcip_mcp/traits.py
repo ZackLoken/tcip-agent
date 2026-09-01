@@ -499,7 +499,17 @@ def write_trait_spec_fields(
     exists, this function is what the ``update_trait_spec_fields`` MCP tool calls, and what the
     derived localization kind and the recorded count-objective decision both use to persist
     themselves; neither gets its own write implementation.
+
+    Refuses (raises ``ValueError``) a caller-supplied ``schema_version`` in ``fields_``: it is
+    not a ``TraitSpec`` field, no caller sets it directly, and merging it in would let a config
+    editor stamp a version the store seam never validated. The stamp already on record, if any,
+    survives every field edit unchanged.
     """
+    if "schema_version" in fields_:
+        raise ValueError(
+            f"update to trait spec {trait_name!r} cannot carry 'schema_version' in fields: it "
+            "is not a TraitSpec field, and no caller writes it directly"
+        )
     directory = _resolve_specs_dir(specs_dir, project_root)
     key = trait_spec_key(directory, trait_name)
     # A conflict means another writer committed, so the loop only repeats while the spec is

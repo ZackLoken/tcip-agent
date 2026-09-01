@@ -161,6 +161,16 @@ def test_author_and_update_persist_through_the_same_shared_write(tmp_path: Path)
     assert reloaded.delivers == ("leaf_length",)
 
 
+def test_updating_a_trait_spec_with_a_caller_supplied_schema_version_refuses(tmp_path: Path) -> None:
+    """``schema_version`` is not a ``TraitSpec`` field and no caller sets it directly; a config
+    editor slipping it into ``fields`` must not be able to stamp a version the store seam never
+    validated."""
+    _author(tmp_path, trait="leaf", delivers=("leaf_length",))
+
+    with pytest.raises(ValueError, match="schema_version"):
+        traits.write_trait_spec_fields("leaf", {"schema_version": 2}, project_root=tmp_path)
+
+
 def test_a_restatement_over_an_existing_spec_carries_its_localization_and_sliver_fields_forward(
     tmp_path: Path,
 ) -> None:
