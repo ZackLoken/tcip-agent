@@ -17,7 +17,6 @@ if TYPE_CHECKING:
 from tcip_web.paths import assert_path_allowed, assert_project_root_allowed
 from tcip_web.trust_boundary import origin_allowed
 from tcip_web.routes._body_common import EmptyBodyPayload
-from tcip_web.routes._metrics_common import metrics_response
 
 logger = logging.getLogger(__name__)
 
@@ -137,25 +136,6 @@ def cancel_run_route(run_id: str, payload: EmptyBodyPayload) -> dict:
     if result.get("error"):
         raise HTTPException(404, result["error"])
     return result
-
-
-@router.get("/runs/{run_id}/metrics")
-def get_run_metrics(project_root: str, run_id: str) -> dict:
-    """Every metrics row a run has logged."""
-    from tcip_store import read_log
-
-    try:
-        assert_project_root_allowed(project_root)
-    except ValueError as exc:
-        raise HTTPException(403, str(exc)) from exc
-    try:
-        key = _metrics_key(project_root, run_id)
-    except BadKey as exc:
-        raise HTTPException(400, str(exc)) from exc
-    if key is None:
-        return metrics_response([], exists=False)
-    page = read_log(key)
-    return metrics_response([dict(row) for row in page.records], exists=True)
 
 
 class ExperimentComparePayload(BaseModel):

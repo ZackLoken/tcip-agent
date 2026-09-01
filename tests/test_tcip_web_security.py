@@ -110,8 +110,8 @@ def test_ws_training_stream_rejects_cross_site_origin(client: TestClient) -> Non
 def test_ws_training_stream_confines_project_root_to_allowed_roots(
     client: TestClient, tmp_path_factory: pytest.TempPathFactory
 ) -> None:
-    # training_stream_ws takes project_root as a query param and resolves the run's record
-    # under it; it must be confined the same way get_run_metrics' identical parameter is.
+    # training_stream_ws's project_root must be confined the same way meta.py's report
+    # routes confine their own project_root parameter.
     outside = tmp_path_factory.mktemp("outside")
     with pytest.raises(WebSocketDisconnect):
         with client.websocket_connect(

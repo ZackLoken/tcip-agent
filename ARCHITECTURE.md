@@ -812,11 +812,11 @@ anything.
 |---|---|---|---|
 | `preflight_config` | `training_tools.py:69` | yes | Validate a training configuration before launching. |
 | `launch_training` | `training_tools.py:522` | yes | Launch a training run in an isolated subprocess from a bespoke ``model_source`` builder. |
-| `check_training_status` | `training_tools.py:749` | yes | Check the status of a training run. |
-| `list_training_runs` | `training_tools.py:885` | yes | List every training run this platform can currently account for. |
-| `cancel_training` | `training_tools.py:899` | yes | Request graceful cancellation of a running training run. |
-| `run_hpo` | `training_tools.py:1326` | yes | Run hyperparameter optimization on Ray Tune, training each trial for real. |
-| `evaluate_model` | `training_tools.py:1838` | yes | Evaluate a trained checkpoint on a (held-out) dataset and write test_results.json. |
+| `check_training_status` | `training_tools.py:746` | yes | Check the status of a training run. |
+| `list_training_runs` | `training_tools.py:882` | yes | List every training run this platform can currently account for. |
+| `cancel_training` | `training_tools.py:896` | yes | Request graceful cancellation of a running training run. |
+| `run_hpo` | `training_tools.py:1323` | yes | Run hyperparameter optimization on Ray Tune, training each trial for real. |
+| `evaluate_model` | `training_tools.py:1835` | yes | Evaluate a trained checkpoint on a (held-out) dataset and write test_results.json. |
 
 ### vision_tools.py (3 tools)
 
@@ -838,12 +838,12 @@ the response shape `training.py` and `tuning.py` both answer in, and `_body_comm
 `EmptyBodyPayload`, the empty body model six path-parameter-only routes now declare so the
 browser must send a preflighted request rather than reaching the handler as a simple one.
 
-Total HTTP routes at HEAD: 81 (5 on `app.py` plus 76 across the 17 route modules, both counts
+Total HTTP routes at HEAD: 80 (5 on `app.py` plus 75 across the 17 route modules, both counts
 obtained this session by grepping `@app.get/post(` and `@router.get/post(` and summing);
 websocket routes are counted separately, below, and excluded from this total. Each per-router
-heading's own route count (and their sum, 79) includes any websocket route it lists, since
+heading's own route count (and their sum, 78) includes any websocket route it lists, since
 `routes/inference.py`, `routes/terminal.py` and `routes/training.py` each carry one; net of
-those three, the 17 modules hold the 76 HTTP routes counted here.
+those three, the 17 modules hold the 75 HTTP routes counted here.
 
 Total WebSocket routes at HEAD: 5 (`/ws/state`, `/ws/panel/{panel}` on `app.py`;
 `/api/terminal/ws/{session_id}` on `routes/terminal.py`; `/api/inference/jobs/{job_id}/stream`  <!-- queued: P5-124 unify -->
@@ -996,19 +996,18 @@ registered at HEAD.
 | POST | `/sessions/{session_id}/restart` | `restart_session` | `routes/terminal.py:305` |
 | WS | `/ws/{session_id}` (full path `/api/terminal/ws/{session_id}`) | `terminal_ws` | `routes/terminal.py:333` |
 
-### routes/training.py, prefix `/api/training` (8 HTTP + 1 WS)
+### routes/training.py, prefix `/api/training` (7 HTTP + 1 WS)
 
 | method | path | handler | line |
 |---|---|---|---|
-| POST | `/validate` | `preflight_config_route` | `routes/training.py:54` |  <!-- queued: P5-104 delete -->
-| POST | `/launch` | `launch_training_route` | `routes/training.py:68` |  <!-- queued: P5-105 delete -->
-| GET | `/runs` | `list_runs_route` | `routes/training.py:88` |
-| GET | `/runs/{run_id}` | `get_run` | `routes/training.py:101` |
-| POST | `/runs/{run_id}/tensorboard` | `launch_run_tensorboard` | `routes/training.py:108` |
-| POST | `/runs/{run_id}/cancel` | `cancel_run_route` | `routes/training.py:128` |
-| GET | `/runs/{run_id}/metrics` | `get_run_metrics` | `routes/training.py:143` |  <!-- queued: P5-110 delete -->
-| POST | `/compare` | `compare_runs_route` | `routes/training.py:166` |
-| WS | `/runs/{run_id}/stream` (full path `/api/training/runs/{run_id}/stream`) | `training_stream_ws` | `routes/training.py:245` |
+| POST | `/validate` | `preflight_config_route` | `routes/training.py:53` |  <!-- queued: P5-104 delete -->
+| POST | `/launch` | `launch_training_route` | `routes/training.py:67` |  <!-- queued: P5-105 delete -->
+| GET | `/runs` | `list_runs_route` | `routes/training.py:87` |
+| GET | `/runs/{run_id}` | `get_run` | `routes/training.py:100` |
+| POST | `/runs/{run_id}/tensorboard` | `launch_run_tensorboard` | `routes/training.py:107` |
+| POST | `/runs/{run_id}/cancel` | `cancel_run_route` | `routes/training.py:127` |
+| POST | `/compare` | `compare_runs_route` | `routes/training.py:146` |
+| WS | `/runs/{run_id}/stream` (full path `/api/training/runs/{run_id}/stream`) | `training_stream_ws` | `routes/training.py:225` |
 
 ### routes/tuning.py, prefix `/api/tuning` (9 routes)
 
@@ -2105,7 +2104,7 @@ Phase 3 verdict: single.
 
 Must agree: the writer's row shape is what the reader and the stream consumer expect.
 Side A: `packages/tcip-mcp/src/tcip_mcp/experiments.py:898` (`def log_metrics(`, the one writer; the trainer and the envelope hand rows to the context's epoch sink instead of opening the file).
-Side B: `packages/tcip-web/src/tcip_web/routes/training.py:259` and `routes/tuning.py:286` (each route reads its own log through the seam's `read_log` and answers in the one shape `_metrics_common.metrics_response` builds; the training route's incremental tail reads the same log from a cursor).
+Side B: `packages/tcip-web/src/tcip_web/routes/training.py:193` (`read_log(key, after=cursor)`, the training stream's incremental tail, pushed as a `TrainingMetricFrame` per row) and `routes/tuning.py:437` (`read_log(trial_metrics_key`, answered in the shape `_metrics_common.metrics_response` builds).
 Phase 3 verdict: single. An HPO trial with no experiment record still appends to its own trial log, one declared site in the epoch sink, pending the HPO store migration.
 
 ## S09. Web job registries persisted to .tcip/state/<name>.json  <!-- queued: P5-325 unify -->
@@ -2359,7 +2358,7 @@ Phase 3 verdict: duplicated.
 ## S43. dataset_source bespoke dataset seam
 
 Must agree: the builder the reader resolves off `data.dataset_source` returns a Dataset the trainer's loaders accept.
-Side A: `packages/tcip-mcp/src/tcip_mcp/pipelines/model_build.py:313` (`dataset_source = (config.get("data") or {}).get(DATASET_SOURCE_KEY)`).
+Side A: `packages/tcip-mcp/src/tcip_mcp/pipelines/model_build.py:337` (`dataset_source = (config.get("data") or {}).get(DATASET_SOURCE_KEY)`).
 Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/data/datasets.py:1047` (`def build_dataset(task: str, dataset_source: dict | None = None, **kwargs) -> Dataset:`).
 Phase 3 verdict: duplicated.
 
@@ -2416,7 +2415,7 @@ Phase 3 verdict: duplicated.
 ## S51. Training run stream WebSocket  <!-- queued: P5-297 unify -->
 
 Must agree: the status payload the MCP tool returns is renderable by the browser's training view.
-Side A: `packages/tcip-web/src/tcip_web/routes/training.py:244` (`@router.websocket("/runs/{run_id}/stream")`).
+Side A: `packages/tcip-web/src/tcip_web/routes/training.py:224` (`@router.websocket("/runs/{run_id}/stream")`).
 Side B: `packages/tcip-mcp/src/tcip_mcp/tools/training_tools.py` (`check_training_status` supplies the status payload).
 Phase 3 verdict: duplicated.
 

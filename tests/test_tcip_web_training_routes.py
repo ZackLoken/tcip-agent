@@ -58,33 +58,50 @@ def test_list_runs_returns_shape(client: TestClient) -> None:
     assert "runs" in body
 
 
-def test_metrics_route_handles_missing_file(client: TestClient, tmp_path: Path) -> None:
-    # When no metrics.jsonl exists yet, the route reports exists=False with empty rows.
+def test_training_metrics_route_no_longer_exists(client: TestClient, tmp_path: Path) -> None:
+    """The HTTP metrics route is gone; the WebSocket stream (below) is the single serving
+    surface a run's metrics rows reach the browser through."""
     resp = client.get(
         "/api/training/runs/foo-xxx/metrics",
         params={"project_root": str(tmp_path)},
     )
-    assert resp.status_code == 200
-    body = resp.json()
-    assert body["exists"] is False
-    assert body["metrics"] == []
+    assert resp.status_code in (404, 405)
 
 
-def test_metrics_route_reads_the_rows_the_run_logged(client: TestClient, tmp_path: Path) -> None:
-    from tcip_mcp.experiments import create_experiment, log_metrics
+def test_metrics_stream_reports_no_frames_for_a_run_no_record_claims(
+    client: TestClient, tmp_path: Path
+) -> None:
+    with client.websocket_connect(
+        f"ws://127.0.0.1/api/training/runs/foo-xxx/stream?project_root={tmp_path}",
+    ) as ws:
+        msg = ws.receive_json()
+    assert msg["type"] == "status"
+    assert msg["status"] is None
+    assert msg["error"]
+
+
+def test_metrics_stream_serves_the_rows_the_run_logged(client: TestClient, tmp_path: Path) -> None:
+    from tcip_mcp.experiments import create_experiment, log_metrics, update_status
 
     run_id = "exp-abc"
     create_experiment(run_id, {"model_source": {"builder": "m:f"}})
     log_metrics(run_id, 1, {"loss": 0.9})
     log_metrics(run_id, 2, {"loss": 0.4})
+    update_status(run_id, "completed")  # a terminal run ends the stream after one tick
 
-    resp = client.get(
-        f"/api/training/runs/{run_id}/metrics",
-        params={"project_root": str(tmp_path)},
-    )
-    body = resp.json()
-    assert body["exists"] is True
-    assert [(r["epoch"], r["loss"]) for r in body["metrics"]] == [(1, 0.9), (2, 0.4)]
+    frames = []
+    with client.websocket_connect(
+        f"ws://127.0.0.1/api/training/runs/{run_id}/stream?project_root={tmp_path}",
+    ) as ws:
+        while True:
+            msg = ws.receive_json()
+            frames.append(msg)
+            if msg["type"] == "status":
+                break
+
+    rows = [f["row"] for f in frames if f["type"] == "metric"]
+    assert [(r["epoch"], r["loss"]) for r in rows] == [(1, 0.9), (2, 0.4)]
+    assert frames[-1]["type"] == "status"
 
 
 def test_metrics_stream_pushes_complete_entries_and_defers_a_partial_one(tmp_path: Path) -> None:
