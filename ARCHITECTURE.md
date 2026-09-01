@@ -813,11 +813,11 @@ anything.
 |---|---|---|---|
 | `preflight_config` | `training_tools.py:69` | yes | Validate a training configuration before launching. |
 | `launch_training` | `training_tools.py:522` | yes | Launch a training run in an isolated subprocess from a bespoke ``model_source`` builder. |
-| `check_training_status` | `training_tools.py:746` | yes | Check the status of a training run. |
-| `list_training_runs` | `training_tools.py:882` | yes | List every training run this platform can currently account for. |
-| `cancel_training` | `training_tools.py:896` | yes | Request graceful cancellation of a running training run. |
-| `run_hpo` | `training_tools.py:1323` | yes | Run hyperparameter optimization on Ray Tune, training each trial for real. |
-| `evaluate_model` | `training_tools.py:1835` | yes | Evaluate a trained checkpoint on a (held-out) dataset and write test_results.json. |
+| `check_training_status` | `training_tools.py:751` | yes | Check the status of a training run. |
+| `list_training_runs` | `training_tools.py:887` | yes | List every training run this platform can currently account for. |
+| `cancel_training` | `training_tools.py:901` | yes | Request graceful cancellation of a running training run. |
+| `run_hpo` | `training_tools.py:1328` | yes | Run hyperparameter optimization on Ray Tune, training each trial for real. |
+| `evaluate_model` | `training_tools.py:1840` | yes | Evaluate a trained checkpoint on a (held-out) dataset and write test_results.json. |
 
 ### vision_tools.py (3 tools)
 
