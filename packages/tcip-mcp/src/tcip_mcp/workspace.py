@@ -65,7 +65,7 @@ def is_valid_name(name: str) -> bool:
 def format_project_name(crop: str, subject: str, phenotype: str) -> str:
     """Join a workspace project's three segments into its directory-name shape.
 
-    Provisional (owner's naming ruling): a project name encodes crop, subject and
+    Tentative (owner's naming ruling): a project name encodes crop, subject and
     phenotype, three lowercase segments joined by underscores with hyphens allowed inside
     a segment. No segment is checked against a vocabulary: the ruling forbids validating
     the phenotype against ``crops.yml``'s trait names, a subject is governed by the
@@ -82,7 +82,7 @@ def format_project_name(crop: str, subject: str, phenotype: str) -> str:
 def parse_project_name(name: str) -> tuple[str, str, str]:
     """Split a workspace project's directory name into ``(crop, subject, phenotype)``.
 
-    Provisional: the inverse of :func:`format_project_name`. Raises, naming which segment
+    Tentative: the inverse of :func:`format_project_name`. Raises, naming which segment
     is missing or malformed, when ``name`` does not fit the three-segment shape.
     """
     parts = name.split("_")

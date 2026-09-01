@@ -26,7 +26,7 @@ it (ambiguous goal, unconfirmed format).
 Projects live under the workspace (`TCIP_WORKSPACE`, default `~/tcip-projects/`), one
 folder per project. The shape is declared once, in `workspace.format_project_name`/
 `parse_project_name`: three lowercase segments joined by underscores, hyphens allowed
-within a segment. Neither function checks a segment against a vocabulary (provisional,
+within a segment. Neither function checks a segment against a vocabulary (tentative,
 per the owner's naming ruling); `ingest_images`, `init_project` and
 `scripts/import_project.py` refuse a non-conforming name when the directory they create lands
 under the workspace.

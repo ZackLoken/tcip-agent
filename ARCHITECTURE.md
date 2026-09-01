@@ -6,7 +6,7 @@ cross-layer seam inventory. Its factual sentences are written to be mechanically
 checkable: each states one fact a script can verify (a path exists, a symbol is defined
 in a file, a count equals N, X imports Y, a route is registered by a file).
 
-Status: provisional. A CI check over this document's factual sentences is planned and not
+Status: draft. A CI check over this document's factual sentences is planned and not
 yet wired; until it runs, treat any sentence that disagrees with the code as a defect in
 this document and correct the document.
 

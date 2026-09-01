@@ -101,14 +101,14 @@ def load_classes(
 ) -> dict:
     """Load the dataset's nested class registry.
 
-    Resolution: the dataset's saved ``classes.json`` -> else a provisional registry of the subjects
+    Resolution: the dataset's saved ``classes.json`` -> else a draft registry of the subjects
     actually present in the labels (detection-only, no attributes) -> else empty. Returns
     ``{"subjects": <nested registry mapping>, "version": <token> | None, "unreadable": [paths]}``:
     ``version`` is the stored registry's compare-and-set token when one was saved, else ``None`` (a
-    provisional or empty registry names nothing to assert against); ``unreadable`` names every
+    draft or empty registry names nothing to assert against); ``unreadable`` names every
     per-image label file under ``annotations_dir`` that would not read, scanned whether or not a
     registry is saved (a saved registry answers the subject list on its own, but a corrupt label
-    file is still worth surfacing to the breeder), and left out of a provisional subject scan
+    file is still worth surfacing to the breeder), and left out of a draft subject scan
     rather than aborting it. A save posting this ``version`` back is refused with 409 if the stored
     registry has moved on since; a save posting ``None`` is an unconditional write, since it names
     no version to assert against.

@@ -62,7 +62,7 @@ def test_subject_names_differing_only_by_case_stay_distinct(
 def test_registry_derived_from_labels_keeps_each_name_exactly_as_labelled(
     client: TestClient, tmp_path: Path
 ) -> None:
-    """With no saved registry, the provisional one lists the names a readable label document
+    """With no saved registry, the draft one lists the names a readable label document
     actually carries, each unchanged."""
     labels = tmp_path / "annotations" / "2026-03-02"
     labels.mkdir(parents=True)
@@ -87,7 +87,7 @@ def test_registry_derived_from_labels_keeps_each_name_exactly_as_labelled(
 def test_registry_derivation_reports_a_document_it_cannot_read(
     client: TestClient, tmp_path: Path
 ) -> None:
-    """A record whose subject name is empty makes its own document unreadable: the provisional
+    """A record whose subject name is empty makes its own document unreadable: the draft
     registry still derives from the readable documents, and names the unreadable one by path
     rather than silently deriving nothing from it."""
     labels = tmp_path / "annotations" / "2026-03-02"

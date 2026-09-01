@@ -71,7 +71,7 @@ silently corrupts results and compounds across sessions.
   stands in for finding the object or judging a biological state. Validate before any downstream
   result: GT annotations or a breeder-confirmed sample of the model's own outputs, either through
   the identical disjoint-split and count-bias gate, the provenance recording which. No validated
-  measurement, no result. Provisional domain logic is labelled provisional and validated or
+  measurement, no result. Domain logic not yet validated is labelled as such and validated or
   removed; it never becomes institutional truth by reuse.
 - Scientific defensibility: every phenotype reproducible and auditable end to end (data, model
   and environment, predictions, operating point, measurement). Parameters are derived from the
