@@ -1349,10 +1349,13 @@ def export_predictions(
     """Run inference and save predictions as COCO/JSON prediction file(s).
 
     A prediction bucket is the directory these writes persist into, not a score bin or a quota
-    allocation: its identity is a model name plus an optional date, and it turns immutable the
-    moment a human review verdict lands on any image inside it. Two source regimes, sharing one
-    bucket-resolution/immutability/gate/lineage contract so a breeder or agent has one door
-    regardless of capture shape:
+    allocation: its identity is that directory's own path (relative to the dataset root when it
+    sits under one, its own resolved path otherwise; see
+    :func:`~tcip_mcp.prediction_buckets.bucket_key_of`), and a bucket under a dataset root turns
+    immutable the moment a human review verdict lands on any image inside it (a bucket written
+    outside any dataset root has no verdict store to guard it; see below). Two source regimes,
+    sharing one bucket-resolution/immutability/gate/lineage contract so a breeder or agent has
+    one door regardless of capture shape:
 
     - ``images_dir`` (an ordinary directory of per-image captures, the common case): routes through
       ``run_inference`` so this door resolves the same firewalled operating point (conf/NMS/tiling/
