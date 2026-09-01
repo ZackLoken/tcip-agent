@@ -1590,8 +1590,12 @@ REGISTERED = {
         root_of=lambda root: training_tools.hpo_root()),
     "hpo_study_result": Registered(
         {"best_params": {"lr": 0.01}, "best_value": 0.25, "n_trials": 2,
-         "all_trials": [{"params": {"lr": 0.1}, "value": None,
-                         "value_state": "positive_infinity", "state": "ERROR"}]},
+         "all_trials": [
+             {"params": {"lr": 0.1}, "value": None,
+              "value_state": "positive_infinity", "state": "ERROR"},
+             {"params": None, "value": None, "iterations": None, "state": "ERROR",
+              "error": "the trial never reported: it was killed before its first report"},
+         ]},
         lambda root: training_tools.study_result_key(STUDY), f".tcip/hpo/{STUDY}.json",
         pin=_pin_platform_root, root_of=lambda root: training_tools.hpo_root()),
     "hpo_trial_config": Registered(

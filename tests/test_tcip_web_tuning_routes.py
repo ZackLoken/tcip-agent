@@ -204,6 +204,26 @@ def test_get_sweep_carries_the_study_results_own_fields_for_a_completed_disk_swe
     assert body["result"]["best_params"] == {"lr": 0.01}  # the manifest's own fields still serve
 
 
+def test_get_sweep_serves_a_never_reported_error_row_with_its_error_text_untouched(
+    client, hpo_root
+) -> None:
+    """The route layers ``all_trials`` on unmodified; a never-reported trial's row (no params,
+    no value, an error string) has to reach the client exactly as the study result recorded it,
+    the route holding no per-row knowledge of what a trial's state means."""
+    _write_sweep(hpo_root, "hpo_error0001", status="completed",
+                 result={"best_params": {"lr": 0.01}, "best_value": 0.2})
+    dead_row = {"params": None, "value": None, "iterations": None, "state": "ERROR",
+                "error": "the trial never reported: it was killed before its first report"}
+    _write_study_result(
+        "hpo_error0001",
+        best_params={"lr": 0.01}, best_value=0.2, n_trials=1, all_trials=[dead_row],
+        search_alg="random", scheduler="none", warm_start=False, baseline_params=None,
+    )
+
+    body = client.get("/api/tuning/sweeps/hpo_error0001").json()
+    assert body["result"]["all_trials"] == [dead_row]
+
+
 def test_get_sweep_serves_the_manifest_alone_when_the_study_result_is_absent(
     client, hpo_root
 ) -> None:
