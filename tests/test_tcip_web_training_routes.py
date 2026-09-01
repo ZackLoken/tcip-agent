@@ -60,12 +60,17 @@ def test_list_runs_returns_shape(client: TestClient) -> None:
 
 def test_training_metrics_route_no_longer_exists(client: TestClient, tmp_path: Path) -> None:
     """The HTTP metrics route is gone; the WebSocket stream (below) is the single serving
-    surface a run's metrics rows reach the browser through."""
+    surface a run's metrics rows reach the browser through. Pinning the router itself as
+    registered (the sibling GET below) is what makes the 404 discriminate the one deleted
+    route rather than a router that failed to mount at all."""
     resp = client.get(
         "/api/training/runs/foo-xxx/metrics",
         params={"project_root": str(tmp_path)},
     )
-    assert resp.status_code in (404, 405)
+    assert resp.status_code == 404
+
+    registered = client.get("/api/training/runs")
+    assert registered.status_code == 200
 
 
 def test_metrics_stream_reports_no_frames_for_a_run_no_record_claims(

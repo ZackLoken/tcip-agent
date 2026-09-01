@@ -43,8 +43,8 @@ def test_training_stream_closes_on_run_id_traversal(tmp_path):
     """A run_id carrying a path separator (BadKey) closes the stream rather than resolving to a
     path component; the WS surface is where this parameter is served now. A backslash, not a
     ``..`` segment, since a URL client normalizes dot segments before the request is even sent.
-    The check runs after accept (project_root is checked first, pre-accept), so the socket
-    connects cleanly and the disconnect only surfaces on the first read."""
+    The endpoint's own code checks project_root before accepting the socket and run_id only
+    after, so the socket connects cleanly here and the disconnect surfaces on the first read."""
     pytest.importorskip("fastapi")
     from fastapi.testclient import TestClient
     from starlette.websockets import WebSocketDisconnect
@@ -58,13 +58,15 @@ def test_training_stream_closes_on_run_id_traversal(tmp_path):
         ) as ws:
             ws.receive_json()
     assert ei.value.code == 1008
+    assert "is not a single name" in ei.value.reason
 
 
-def test_training_stream_closes_before_accept_for_a_project_root_outside_allowed_roots(
+def test_training_stream_refuses_a_project_root_outside_allowed_roots(
     tmp_path_factory: pytest.TempPathFactory
 ):
     """The stream must confine project_root the same way the identical parameter is confined
-    on meta.py's report routes, closing before accept rather than after replaying anything."""
+    on meta.py's report routes. The endpoint's own code checks project_root before accepting the
+    socket, so nothing is replayed before the refusal."""
     pytest.importorskip("fastapi")
     from fastapi.testclient import TestClient
     from starlette.websockets import WebSocketDisconnect
@@ -79,6 +81,7 @@ def test_training_stream_closes_before_accept_for_a_project_root_outside_allowed
         ):
             pass
     assert ei.value.code == 1008
+    assert "outside the allowed roots" in ei.value.reason
 
 
 def test_training_launch_confines_output_dir_to_allowed_roots(
