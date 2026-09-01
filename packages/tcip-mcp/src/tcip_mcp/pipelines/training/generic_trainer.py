@@ -715,7 +715,8 @@ def train(
                 logger.info("Stage %d: restored optimizer state for %d params", stage_idx, restored)
 
             target_lrs = [g["lr"] for g in optimizer.param_groups]
-            prev_end_lrs = pending_snapshot.get("end_lrs") if pending_snapshot else None
+            prev_end_lrs: list[float] | None = (
+                pending_snapshot.get("end_lrs") if pending_snapshot else None)
 
             stage_epochs = stage.get("epochs", 10)
             # Inter-stage LR warmup (boundaries only; default off).
@@ -774,7 +775,9 @@ def train(
                         images = images.to(device)
                         targets = {k: v.to(device) if isinstance(v, torch.Tensor) else v for k, v in targets.items()}
 
+                    loss: Any
                     if use_amp:
+                        assert scaler is not None  # use_amp implies scaler was built above
                         with torch.amp.autocast(device.type):
                             loss_dict = model(images, targets)
                             loss = sum(loss_dict.values()) if isinstance(loss_dict, dict) else loss_dict
@@ -852,8 +855,13 @@ def train(
                 if epoch_callback is not None:
                     epoch_callback(run.current_epoch, epoch_metrics)
 
-                logger.info("Epoch %d stage %d loss=%.4f val_loss=%.4f lr=%.2e",
-                    run.current_epoch, stage_idx, avg_loss, val_metrics.get("val_loss", 0), current_lr)
+                # Same scalar filter the TensorBoard write above uses, minus val_loss (already on the line).
+                extra_val_metrics = " ".join(
+                    f"{k}={v:.4f}" for k, v in val_metrics.items()
+                    if k != "val_loss" and isinstance(v, (int, float)) and not isinstance(v, bool))
+                logger.info("Epoch %d stage %d loss=%.4f val_loss=%.4f lr=%.2e%s",
+                    run.current_epoch, stage_idx, avg_loss, val_metrics.get("val_loss", 0), current_lr,
+                    f" {extra_val_metrics}" if extra_val_metrics else "")
 
                 # Best model checkpoint, selected by the selection objective.
                 if _improves(sel, run.best_metric, higher_is_better=higher_is_better):
