@@ -244,6 +244,23 @@ def test_a_dashboard_recorded_by_a_process_that_is_gone_is_not_served(monkeypatc
     assert read_ray_dashboard() == {**state, "pid": os.getpid()}
 
 
+def test_ray_init_propagates_this_process_s_import_search_path_to_trial_workers(monkeypatch):
+    """A trial worker Ray spawns starts from its own defaults, not this interpreter's
+    sys.path; a bespoke model_source/training_source/dataset_source importable here must stay
+    importable there, the same guarantee the launch subprocess gets."""
+    entered = [threading.Event()]
+    release = [threading.Event()]
+    release[0].set()
+    ray = _install_fake_ray(monkeypatch, entered, release)
+
+    _run_one_search()
+
+    env_vars = ray.init_kwargs["runtime_env"]["env_vars"]
+    pythonpath_entries = env_vars["PYTHONPATH"].split(os.pathsep)
+    for entry in (p for p in sys.path if p):
+        assert entry in pythonpath_entries
+
+
 def test_a_sweep_still_runs_when_the_dashboard_dependency_is_not_installed(monkeypatch):
     """A bare ray[tune] install (this package's own declared minimum) has no aiohttp; asking
     ray.init for a dashboard it can't serve raises there, which must not stop a sweep from
