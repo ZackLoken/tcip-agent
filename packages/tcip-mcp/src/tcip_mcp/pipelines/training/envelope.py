@@ -592,7 +592,8 @@ def _finalize_run(ctx: TrainContext) -> None:
                 _reconcile_unaudited_refusal(run, exp_id, exc)
         else:
             try:
-                _reconcile_on_refusal(run, update_status(exp_id, run.status or "failed"))
+                _reconcile_on_refusal(
+                    run, update_status(exp_id, run.status or "failed", error=run.error or None))
             except AuditEntryNotWritten as exc:
                 _reconcile_unaudited_refusal(run, exp_id, exc)
     except AuditEntryNotWritten:

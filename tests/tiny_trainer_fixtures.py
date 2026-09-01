@@ -131,27 +131,57 @@ def build_data_scaled_gradient_model() -> DataScaledGradientModel:
 
 
 class AlwaysDivergedModel(nn.Module):
-    """Reports a non-finite loss unconditionally, for exercising a diverged run end to end."""
+    """Reports a non-finite loss unconditionally, for exercising a diverged run end to end.
 
-    def __init__(self) -> None:
+    ``on_forward``, when given, is called with the one-based training-forward-call count after
+    each training-mode forward, so a caller can trigger a side effect (e.g. requesting
+    cancellation) at an exact point in the batch stream without threading a real clock through
+    the trainer.
+    """
+
+    def __init__(self, on_forward=None) -> None:
         super().__init__()
         self.weight = nn.Parameter(torch.zeros(1))
+        self.on_forward = on_forward
+        self._calls = 0
 
     def forward(self, images, targets=None):
         if self.training and targets is not None:
+            self._calls += 1
+            if self.on_forward is not None:
+                self.on_forward(self._calls)
             return {"nan_loss": self.weight * float("nan")}
         return {"head0_values": self.weight * images.mean(dim=(1, 2, 3))}
 
 
-def build_always_diverged_model() -> AlwaysDivergedModel:
+def build_always_diverged_model(*, on_forward=None) -> AlwaysDivergedModel:
     """``model_source`` builder for :class:`AlwaysDivergedModel`."""
-    return AlwaysDivergedModel()
+    return AlwaysDivergedModel(on_forward=on_forward)
+
+
+class CancelSentinelAtCall:
+    """An ``AlwaysDivergedModel``-style ``on_forward`` callback that touches the run's own
+    ``.cancel_requested`` sentinel (the same file ``TrainRun.should_cancel()`` polls) on one named
+    forward-call count. Holds only ``output_dir`` (a plain string) and the call count, never the
+    run object itself, so it stays picklable through a checkpoint write."""
+
+    def __init__(self, output_dir, at_call: int) -> None:
+        self.output_dir = str(output_dir)
+        self.at_call = int(at_call)
+
+    def __call__(self, call_count: int) -> None:
+        if call_count == self.at_call:
+            from pathlib import Path
+
+            path = Path(self.output_dir)
+            path.mkdir(parents=True, exist_ok=True)
+            (path / ".cancel_requested").touch()
 
 
 class TransientlyDivergedModel(nn.Module):
     """Reports a non-finite loss for its first ``bad_batches`` forward calls, then a normal
-    weight-fit loss for every call after, for proving a streak short of the trainer's own
-    divergence threshold does not kill a run."""
+    weight-fit loss for every call after, for proving one diverged epoch short of the trainer's
+    own two-pass divergence rule does not kill a run."""
 
     def __init__(self, bad_batches: int = 2, init_weight: float = 0.0) -> None:
         super().__init__()
@@ -178,3 +208,117 @@ def build_transiently_diverged_model(
 ) -> TransientlyDivergedModel:
     """``model_source`` builder for :class:`TransientlyDivergedModel`."""
     return TransientlyDivergedModel(bad_batches=bad_batches, init_weight=init_weight)
+
+
+class StepCountedDivergenceModel(nn.Module):
+    """Reports a normal weight-fit loss on the one-based training-forward calls named in
+    ``finite_at``, and a non-finite loss on every other call, for constructing an exact
+    call-by-call (and so, given a known batches-per-epoch count, epoch-by-epoch) divergence
+    pattern up front rather than inferring one from a bad-batch prefix."""
+
+    def __init__(self, finite_at=(), init_weight: float = 0.0) -> None:
+        super().__init__()
+        self.weight = nn.Parameter(torch.tensor([float(init_weight)]))
+        self.finite_at = set(finite_at)
+        self._calls = 0
+
+    def forward(self, images, targets=None):
+        if self.training and targets is not None:
+            self._calls += 1
+            if self._calls in self.finite_at:
+                pred = self.weight * images.mean(dim=(1, 2, 3))
+                return {"mse": ((pred - targets["values"].float()) ** 2).mean()}
+            # A leaf disconnected from `weight`'s graph, so a bad call's optimizer step never
+            # poisons the weight a later good call relies on.
+            phantom = torch.zeros((), requires_grad=True) + float("nan")
+            return {"nan_loss": phantom}
+        pred = self.weight * images.mean(dim=(1, 2, 3))
+        return {"head0_values": pred}
+
+
+def build_step_counted_divergence_model(
+    *, finite_at=(), init_weight: float = 0.0,
+) -> StepCountedDivergenceModel:
+    """``model_source`` builder for :class:`StepCountedDivergenceModel`."""
+    return StepCountedDivergenceModel(finite_at=finite_at, init_weight=init_weight)
+
+
+class DivergesAfterModel(nn.Module):
+    """Reports a normal weight-fit loss for its first ``good_calls`` forward calls, then a
+    non-finite loss for every call after: the reverse of :class:`TransientlyDivergedModel`, for
+    proving a run that trains one real epoch and then dies must not let that epoch's real score
+    win a comparison against a config that only ever scored worse."""
+
+    def __init__(self, good_calls: int, init_weight: float = 0.0) -> None:
+        super().__init__()
+        self.weight = nn.Parameter(torch.tensor([float(init_weight)]))
+        self.good_calls = int(good_calls)
+        self._calls = 0
+
+    def forward(self, images, targets=None):
+        if self.training and targets is not None:
+            self._calls += 1
+            if self._calls <= self.good_calls:
+                pred = self.weight * images.mean(dim=(1, 2, 3))
+                return {"mse": ((pred - targets["values"].float()) ** 2).mean()}
+            phantom = torch.zeros((), requires_grad=True) + float("nan")
+            return {"nan_loss": phantom}
+        pred = self.weight * images.mean(dim=(1, 2, 3))
+        return {"head0_values": pred}
+
+
+def build_diverges_after_model(*, good_calls: int, init_weight: float = 0.0) -> DivergesAfterModel:
+    """``model_source`` builder for :class:`DivergesAfterModel`."""
+    return DivergesAfterModel(good_calls=good_calls, init_weight=init_weight)
+
+
+class PixelSumDivideModel(nn.Module):
+    """Divides its prediction by the batch's own per-sample pixel sum: a real fp32
+    division-by-zero divergence on a batch of zero-intensity images, rather than a hand-authored
+    nan, while a random synthetic smoke batch (never exactly zero) passes the measurement-boundary
+    contract cleanly."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.weight = nn.Parameter(torch.zeros(1))
+
+    def forward(self, images, targets=None):
+        pixel_sum = images.sum(dim=(1, 2, 3))
+        pred = (self.weight + images.mean(dim=(1, 2, 3))) / pixel_sum
+        if self.training and targets is not None:
+            return {"mse": ((pred - targets["values"].float()) ** 2).mean()}
+        return {"head0_values": pred}
+
+
+def build_pixel_sum_divide_model() -> PixelSumDivideModel:
+    """``model_source`` builder for :class:`PixelSumDivideModel`."""
+    return PixelSumDivideModel()
+
+
+def write_regression_dataset(root, intensities, values, *, height: int = 6, width: int = 10):
+    """Write a small on-disk regression dataset (uint8 RGB PNGs + a CSV of ``stem,value`` rows),
+    the real-file counterpart to :class:`ConstantImageDataset` for a run that must go through the
+    known ``RegressionDataset`` loader (a real subprocess launch, or ``_run_hpo_trial``'s own
+    ``auto_train_val`` build) rather than a tensor dataset passed straight to ``train()``.
+
+    Every frame is filled with one uint8 intensity (``round(255 * fraction)``), so
+    ``intensities=[0.0, ...]`` decodes to exactly zero-valued pixels (``pil_to_tensor`` scales a
+    uint8 frame by 255). Returns ``(images_dir, csv_path)``.
+    """
+    from pathlib import Path
+
+    from PIL import Image
+
+    if len(intensities) != len(values):
+        raise ValueError("intensities and values must be the same length")
+    images_dir = Path(root) / "images"
+    images_dir.mkdir(parents=True, exist_ok=True)
+    csv_path = Path(root) / "values.csv"
+    rows = ["stem,value"]
+    for i, (frac, value) in enumerate(zip(intensities, values)):
+        stem = f"img{i}"
+        px = round(255 * float(frac))
+        Image.new("RGB", (width, height), (px, px, px)).save(images_dir / f"{stem}.png")
+        rows.append(f"{stem},{value}")
+    csv_path.write_text("\n".join(rows) + "\n", encoding="utf-8", newline="\n")
+    return images_dir, csv_path

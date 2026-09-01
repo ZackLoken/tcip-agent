@@ -128,7 +128,8 @@ def cancel_run_route(run_id: str, payload: EmptyBodyPayload) -> dict:
     """Request graceful cancellation of a running run (stops at the next batch boundary).
 
     Wraps the ``cancel_training`` MCP tool: the trainer still writes ``model_final.pt``
-    so partial progress is recoverable. Status flips to 'cancelled' asynchronously.
+    so partial progress is recoverable. Status flips to 'cancelled' asynchronously, unless the
+    run's divergence verdict lands first, in which case it ends 'failed' instead.
     """
     from tcip_mcp.tools.training_tools import cancel_training
 
