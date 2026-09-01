@@ -200,21 +200,27 @@ def compare_best_route(payload: CompareBestPayload) -> dict:
 
     Wraps the platform's one best-model derivation (``select_best_model``), narrowed to the
     marked experiments before anything is derived. Reads the registry index first so a project
-    with none never takes the tool's own directory-creating construction; the tool's own error
-    dicts (a required metric, an undeclared direction, no carrier) map to 422, and the pre-
-    ``metrics_source`` refusal (a registry entry predating the field) maps to 409 with the
-    registry's own message. The answer is projected to name, experiment id, stamped metrics,
-    source, the direction used and its source, and the exclusions; no checkpoint path, config or
-    file size leaves this route.
+    with none never takes the tool's own directory-creating construction: only the reader's own
+    empty answer (no index at all) is a 404; a document that exists but will not decode
+    (``DecodeError``) or that this reader does not recognize (``RegistryVersionRefused``) is not
+    a project with no models, and answers 409 naming why, the same wording
+    ``compare_experiments``'s own ``registry_error`` carries. The tool's own error dicts (a
+    required metric, an undeclared direction, no carrier) map to 422 with the whole dict as
+    ``detail``, and the pre-``metrics_source`` refusal (a registry entry predating the field)
+    maps to 409 with the registry's own message. The answer is projected to name, experiment id,
+    stamped metrics, source, the direction used and its source, and the exclusions; no checkpoint
+    path, config or file size leaves this route.
     """
-    from tcip_mcp.model_registry import read_registry_index
+    from tcip_store.errors import DecodeError
+
+    from tcip_mcp.model_registry import RegistryEntryPredatesMetricsSource, RegistryVersionRefused, read_registry_index
     from tcip_mcp.project_paths import platform_state_root
     from tcip_mcp.tools.model_tools import select_best_model
 
     try:
         entries = read_registry_index(platform_state_root())
-    except Exception:
-        entries = []
+    except (DecodeError, RegistryVersionRefused) as exc:
+        raise HTTPException(409, f"registry unreadable: {exc}") from exc
     if not entries:
         raise HTTPException(404, "no model registry in this project")
 
@@ -223,10 +229,10 @@ def compare_best_route(payload: CompareBestPayload) -> dict:
             metric=payload.metric, higher_is_better=payload.higher_is_better,
             include_unverified=payload.include_unverified, experiment_ids=payload.experiment_ids,
         )
-    except ValueError as exc:
+    except RegistryEntryPredatesMetricsSource as exc:
         raise HTTPException(409, str(exc)) from exc
     if "error" in result:
-        raise HTTPException(422, result["error"])
+        raise HTTPException(422, detail=result)
 
     return {
         "name": result["name"],

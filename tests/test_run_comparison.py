@@ -1,4 +1,4 @@
-"""Backend coverage for U3 (side-by-side run comparison): compare_experiments' new columns
+"""Backend coverage for side-by-side run comparison: compare_experiments' new columns
 (task/subject/status_error/split/registry), a no-longer-fabricated model builder, an honest
 same_dataset_fingerprint over an error column, the experiment_ids filter on best-model ranking,
 TrainRun's own experiment_id/experiment_error fields, and the /api/training/compare/best route.
@@ -274,6 +274,54 @@ def test_to_dict_reports_experiment_error_when_tracking_failed(tmp_path):
     assert d["experiment_error"] == "dataset_identity failed: boom"
 
 
+# ── _all_training_runs: the live row's own resolved id over a stale disk overlay ────────────
+
+
+def test_all_training_runs_keeps_the_live_rows_own_resolved_id_over_the_disk_overlay(
+    tmp_path, monkeypatch,
+):
+    """Before this change, the disk overlay's experiment_id overwrote the live row's own
+    unconditionally, whenever a pid-bearing row had any disk record at all keyed by its run_id
+    (the overlay lookup keys only by run_id, not by which experiment the live row itself
+    resolved). A live row that has already resolved its own experiment_id must keep it."""
+    monkeypatch.chdir(tmp_path)
+    from tcip_mcp.experiments import create_experiment, stamp_run_identity, update_status
+    from tcip_mcp.pipelines.training.run_registry import create_run
+    from tcip_mcp.tools.training_tools import _all_training_runs
+
+    run = create_run({"model_source": {"builder": "m:f"}}, str(tmp_path / "out"))
+    run.experiment_id = "exp-live"
+    run.pid = 4242  # subprocess-delegated, so the merge takes the disk overlay at all
+
+    create_experiment("exp-disk", {"model_source": {"builder": "m:f"}}, data_source="imgs")
+    update_status("exp-disk", "running")
+    stamp_run_identity("exp-disk", run.run_id, str(tmp_path / "out"))
+
+    rows = _all_training_runs(read_progress=False)
+    row = next(r for r in rows if r["run_id"] == run.run_id)
+    assert row["experiment_id"] == "exp-live"
+
+
+def test_all_training_runs_takes_the_disk_overlays_id_when_the_live_row_has_none(
+    tmp_path, monkeypatch,
+):
+    monkeypatch.chdir(tmp_path)
+    from tcip_mcp.experiments import create_experiment, stamp_run_identity, update_status
+    from tcip_mcp.pipelines.training.run_registry import create_run
+    from tcip_mcp.tools.training_tools import _all_training_runs
+
+    run = create_run({"model_source": {"builder": "m:f"}}, str(tmp_path / "out"))
+    run.pid = 4243  # experiment_id left unresolved (None)
+
+    create_experiment("exp-disk-2", {"model_source": {"builder": "m:f"}}, data_source="imgs")
+    update_status("exp-disk-2", "running")
+    stamp_run_identity("exp-disk-2", run.run_id, str(tmp_path / "out"))
+
+    rows = _all_training_runs(read_progress=False)
+    row = next(r for r in rows if r["run_id"] == run.run_id)
+    assert row["experiment_id"] == "exp-disk-2"
+
+
 # ── experiment_ids filter: select_best_model / ModelRegistry.best_model ────────────────────
 
 
@@ -322,6 +370,22 @@ def test_select_best_model_ranks_only_within_the_marked_set(tmp_path, monkeypatc
     assert res["experiment_id"] == "exp-low"
 
 
+def test_select_best_model_names_the_marked_set_when_the_filter_empties_a_non_empty_listing(
+    tmp_path, monkeypatch,
+):
+    """The registry is not empty (exp-other registered a checkpoint); the filter just names no
+    marked experiment in it. That is a distinct fact from an empty registry and needs its own
+    text: "No models registered" would mislead a breeder into thinking nothing was ever
+    trained, when the real gap is which experiments were marked."""
+    monkeypatch.chdir(tmp_path)
+    from tcip_mcp.tools.model_tools import select_best_model
+
+    _register(tmp_path, "exp-other", 0.7)
+
+    res = select_best_model(str(tmp_path), metric="val_map50", experiment_ids=["exp-marked"])
+    assert res["error"] == "none of the marked experiments registered a checkpoint"
+
+
 def test_best_model_experiment_ids_filter_excludes_a_better_unmarked_entry(tmp_path):
     """Admits valid work through the platform's own producer: _register_entry is the one write
     both register_model and register_model_from_experiment route through, and is the only path
@@ -354,6 +418,44 @@ def test_compare_best_route_404s_with_no_registry(client: TestClient, tmp_path, 
     assert resp.json()["detail"] == "no model registry in this project"
 
 
+def test_compare_best_route_404_leaves_the_registry_directory_uncreated(
+    client: TestClient, tmp_path, monkeypatch,
+):
+    """The route reads the index through read_registry_index before select_best_model's own
+    ModelRegistry construction ever runs, so a project with no registry never gets one just for
+    asking whether it has one."""
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
+    resp = client.post("/api/training/compare/best", json={
+        "experiment_ids": ["exp-a"], "metric": "val_map50",
+    })
+    assert resp.status_code == 404
+    assert not (tmp_path / ".tcip" / "models").exists()
+
+
+def test_compare_best_route_409s_when_the_index_will_not_decode(
+    client: TestClient, tmp_path, monkeypatch,
+):
+    """A corrupt or version-refused index is not a project with no models: before this fix, the
+    route's own except Exception swallowed RegistryVersionRefused/DecodeError into the same 404
+    an absent index answers."""
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
+    import tcip_mcp.model_registry as model_registry
+    from tcip_mcp.model_registry import RegistryVersionRefused
+
+    def _boom(project_path):
+        raise RegistryVersionRefused("simulated unreadable registry index")
+
+    # compare_best_route imports read_registry_index locally on each call, so patching the
+    # defining module (not the route module, which never binds the name at import time) reaches it.
+    monkeypatch.setattr(model_registry, "read_registry_index", _boom)
+
+    resp = client.post("/api/training/compare/best", json={
+        "experiment_ids": ["exp-a"], "metric": "val_map50",
+    })
+    assert resp.status_code == 409
+    assert "registry unreadable" in resp.json()["detail"]
+
+
 def test_compare_best_route_422s_on_the_tools_own_error(client: TestClient, tmp_path, monkeypatch):
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     _register(tmp_path, "exp-a", 0.7)
@@ -362,7 +464,25 @@ def test_compare_best_route_422s_on_the_tools_own_error(client: TestClient, tmp_
         "experiment_ids": ["exp-a"], "metric": "val_map99",
     })
     assert resp.status_code == 422
-    assert "no declared ranking direction" in resp.json()["detail"]
+    detail = resp.json()["detail"]
+    assert "no declared ranking direction" in detail["error"]
+    assert detail["needs_direction"] is True
+
+
+def test_compare_best_route_422s_when_the_marked_set_registered_nothing(
+    client: TestClient, tmp_path, monkeypatch,
+):
+    """select_best_model's own distinct text for an experiment_ids filter that empties a
+    non-empty listing, not the generic "No models registered" a project with an empty registry
+    would carry."""
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
+    _register(tmp_path, "exp-other", 0.7)
+
+    resp = client.post("/api/training/compare/best", json={
+        "experiment_ids": ["exp-marked"], "metric": "val_map50",
+    })
+    assert resp.status_code == 422
+    assert resp.json()["detail"]["error"] == "none of the marked experiments registered a checkpoint"
 
 
 def test_compare_best_route_409s_on_a_pre_metrics_source_entry(client: TestClient, tmp_path, monkeypatch):
@@ -397,3 +517,25 @@ def test_compare_best_route_projects_the_answer(client: TestClient, tmp_path, mo
         "metrics_source": "trainer", "higher_is_better": True, "direction_source": "declared",
         "excluded_unverified": [],
     }
+
+
+# ── NOT_FINITE_SUFFIX: a drift guard between the two definitions the wire format sits between ──
+
+
+def test_not_finite_suffix_matches_the_frontends_own_constant():
+    """Nothing on the wire enforces this pairing: RunComparison.tsx reads a metric's own
+    ``{key}{NOT_FINITE_SUFFIX}`` companion tcip_store.values writes, and the two definitions can
+    drift silently since no shared source spans the Python/TypeScript boundary."""
+    import re
+    from pathlib import Path
+
+    from tcip_store.values import NOT_FINITE_SUFFIX
+
+    ts_source = (
+        Path(__file__).resolve().parent.parent
+        / "packages" / "tcip-web" / "frontend" / "src" / "components" / "RunComparison.tsx"
+    )
+    text = ts_source.read_text(encoding="utf-8")
+    match = re.search(r'NOT_FINITE_SUFFIX = "([^"]+)"', text)
+    assert match is not None, f"NOT_FINITE_SUFFIX declaration not found in {ts_source}"
+    assert match.group(1) == NOT_FINITE_SUFFIX
