@@ -814,14 +814,14 @@ anything.
 
 | tool | line | audited | docstring first line |
 |---|---|---|---|
-| `preflight_config` | `training_tools.py:168` | yes | Validate a training configuration before launching. |
-| `launch_training` | `training_tools.py:562` | yes | Launch a training run in an isolated subprocess from a bespoke ``model_source`` builder. |
-| `check_training_status` | `training_tools.py:794` | yes | Check the status of a training run. |
-| `list_training_runs` | `training_tools.py:931` | yes | List every training run this platform can currently account for. |
-| `cancel_training` | `training_tools.py:1128` | yes | Request graceful cancellation of a running training run. |
-| `run_hpo` | `training_tools.py:1618` | yes | Run hyperparameter optimization on Ray Tune, training each trial for real. |
-| `cancel_hpo` | `training_tools.py:1859` | yes | Request cooperative cancellation of a running HPO sweep. |
-| `evaluate_model` | `training_tools.py:2253` | yes | Evaluate a trained checkpoint on a (held-out) dataset and write test_results.json. |
+| `preflight_config` | `training_tools.py:258` | yes | Validate a training configuration before launching. |
+| `launch_training` | `training_tools.py:650` | yes | Launch a training run in an isolated subprocess from a bespoke ``model_source`` builder. |
+| `check_training_status` | `training_tools.py:882` | yes | Check the status of a training run. |
+| `list_training_runs` | `training_tools.py:1019` | yes | List every training run this platform can currently account for. |
+| `cancel_training` | `training_tools.py:1235` | yes | Request graceful cancellation of a running training run. |
+| `run_hpo` | `training_tools.py:1725` | yes | Run hyperparameter optimization on Ray Tune, training each trial for real. |
+| `cancel_hpo` | `training_tools.py:1966` | yes | Request cooperative cancellation of a running HPO sweep. |
+| `evaluate_model` | `training_tools.py:2360` | yes | Evaluate a trained checkpoint on a (held-out) dataset and write test_results.json. |
 
 ### vision_tools.py (3 tools)
 
@@ -1001,18 +1001,19 @@ registered at HEAD.
 | POST | `/sessions/{session_id}/restart` | `restart_session` | `routes/terminal.py:305` |
 | WS | `/ws/{session_id}` (full path `/api/terminal/ws/{session_id}`) | `terminal_ws` | `routes/terminal.py:333` |
 
-### routes/training.py, prefix `/api/training` (7 HTTP + 1 WS)
+### routes/training.py, prefix `/api/training` (8 HTTP + 1 WS)
 
 | method | path | handler | line |
 |---|---|---|---|
 | GET | `/configs` | `list_configs_route` | `routes/training.py:49` |
+| GET | `/configs/{experiment_id}/splits` | `list_split_choices_route` | `routes/training.py:57` |
 | POST | `/runs` | `relaunch_config_route` | `routes/training.py:76` |
-| GET | `/runs` | `list_runs_route` | `routes/training.py:125` |
-| GET | `/runs/{run_id}` | `get_run` | `routes/training.py:138` |
-| POST | `/runs/{run_id}/tensorboard` | `launch_run_tensorboard` | `routes/training.py:145` |
-| POST | `/runs/{run_id}/cancel` | `cancel_run_route` | `routes/training.py:165` |
-| POST | `/compare` | `compare_runs_route` | `routes/training.py:185` |
-| WS | `/runs/{run_id}/stream` (full path `/api/training/runs/{run_id}/stream`) | `training_stream_ws` | `routes/training.py:272` |
+| GET | `/runs` | `list_runs_route` | `routes/training.py:124` |
+| GET | `/runs/{run_id}` | `get_run` | `routes/training.py:137` |
+| POST | `/runs/{run_id}/tensorboard` | `launch_run_tensorboard` | `routes/training.py:144` |
+| POST | `/runs/{run_id}/cancel` | `cancel_run_route` | `routes/training.py:164` |
+| POST | `/compare` | `compare_runs_route` | `routes/training.py:184` |
+| WS | `/runs/{run_id}/stream` (full path `/api/training/runs/{run_id}/stream`) | `training_stream_ws` | `routes/training.py:271` |
 
 ### routes/tuning.py, prefix `/api/tuning` (10 routes)
 
@@ -1945,7 +1946,7 @@ image/label scan found, plus a single
 `dataset_hash` only when that scan found exactly one such directory; over more than one,
 `dataset_hash` is `null` rather than one directory's hash blind to the rest.
 
-Readers: `data_tools.read_split_manifest_dir`, `data_tools.py:55`, the one reader a training or
+Readers: `data_tools.read_split_manifest_dir`, `data_tools.py:123`, the one reader a training or
 tuning run's `data.split.manifest_dir` resolves through (`split_construction.auto_train_val`) and a
 manifest-restricted calibration resolves through (`splits.resolve_manifest_calibration_universe`),
 which refuses by name when the record is absent, undecodable, not a mapping, lacks any of `seed`,
@@ -1956,10 +1957,29 @@ non-empty mapping (a manifest drawn before the platform recorded per-stem digest
 here), lacks any name in `splits.SPLIT_NAMES` under `splits`, or whose
 sides are not pairwise disjoint; `scripts/plant_aware_group_splits.py` reads no manifest back, it
 only writes one through `make_splits`. `bind_manifest_stems` (`splits.py:441`) reads all three
-sides for one capture date: a `calibration` member is placed on neither loader, whether or not the
+sides for one capture date, its own date-narrowing arithmetic extracted into
+`narrow_manifest_to_date` (`splits.py:420`), which the data picker's own counts (below) call over
+the identical manifest: a `calibration` member is placed on neither loader, whether or not the
 run currently admits it, recorded as `calibration_bound`/`calibration_unadmitted` rather than
 refused on; the `train`/`val` refusals (an admitted stem assigned to no side, a member the run no
 longer admits, an empty side) are unchanged in shape.
+
+`data_tools.read_split_manifest_dir_checked` (`data_tools.py:145`) is the checked variant a
+listing calls in place of the raising reader: absence answers `(None, None)`, a record that
+exists but will not decode, fails the required-key reading, or is version-refused answers
+`(None, text)`, catching `tcip_store.SchemaVersionRefused` beside the plain-shape `ValueError`
+for that purpose only, since a version refusal must never read as an ordinary absence.
+`training_tools.manifest_compatibility` (`training_tools.py:215`) is every objection a launch
+binding one config to one manifest would raise, checked ahead of that launch: composed from the
+config-only conflict and task checks (computed before any read, so an unreadable manifest never
+suppresses them) and the manifest-dependent checks (subject/attribute, date, images-root
+presence and movement, and an empty train/val side once narrowed to the run's own date).
+`preflight_config` calls both halves directly, in the same order, over a manifest it read
+itself; `training_tools.list_split_choices` (`training_tools.py:1078`), the relaunch data
+picker's own reader wrapped by `GET /api/training/configs/{experiment_id}/splits`, calls the
+composed function per candidate manifest it read through the checked variant above, and builds
+each candidate's launch config through `training_tools.candidate_config_with_manifest`
+(`training_tools.py:239`), the same function the relaunch route's own launch build calls.
 
 No seam id in `seam-coverage.json`'s inventory names this record: it is new, and
 `tests/test_split_manifest_binding.py` calls the real writer and the real consumer
@@ -2114,7 +2134,7 @@ Phase 3 verdict: single.
 
 Must agree: the writer's row shape is what the reader and the stream consumer expect.
 Side A: `packages/tcip-mcp/src/tcip_mcp/experiments.py:898` (`def log_metrics(`, the one writer; the trainer and the envelope hand rows to the context's epoch sink instead of opening the file).
-Side B: `packages/tcip-web/src/tcip_web/routes/training.py:232` (`read_log(key, after=cursor)`, the training stream's incremental tail, pushed as a `TrainingMetricFrame` per row) and `routes/tuning.py:549` (`read_log(trial_metrics_key`, answered in the shape `_metrics_common.metrics_response` builds).
+Side B: `packages/tcip-web/src/tcip_web/routes/training.py:231` (`read_log(key, after=cursor)`, the training stream's incremental tail, pushed as a `TrainingMetricFrame` per row) and `routes/tuning.py:549` (`read_log(trial_metrics_key`, answered in the shape `_metrics_common.metrics_response` builds).
 Phase 3 verdict: single. An HPO trial with no experiment record still appends to its own trial log, one declared site in the epoch sink, pending the HPO store migration.
 
 ## S09. Web job registries persisted to .tcip/state/<name>.json  <!-- queued: P5-325 unify -->
@@ -2362,7 +2382,7 @@ Phase 3 verdict: duplicated.
 
 Must agree: a bespoke train(ctx) callable is importable and accepts the TrainContext the envelope hands it.
 Side A: `packages/tcip-mcp/src/tcip_mcp/pipelines/training/envelope.py:424` (`training_source = run.config.get("training_source")`).
-Side B: `packages/tcip-mcp/src/tcip_mcp/tools/training_tools.py:218` (`training_source = config.get("training_source")`).
+Side B: `packages/tcip-mcp/src/tcip_mcp/tools/training_tools.py:308` (`training_source = config.get("training_source")`).
 Phase 3 verdict: duplicated.
 
 ## S43. dataset_source bespoke dataset seam
@@ -2425,7 +2445,7 @@ Phase 3 verdict: duplicated.
 ## S51. Training run stream WebSocket  <!-- queued: P5-297 unify -->
 
 Must agree: the status payload the MCP tool returns is renderable by the browser's training view.
-Side A: `packages/tcip-web/src/tcip_web/routes/training.py:271` (`@router.websocket("/runs/{run_id}/stream")`).
+Side A: `packages/tcip-web/src/tcip_web/routes/training.py:270` (`@router.websocket("/runs/{run_id}/stream")`).
 Side B: `packages/tcip-mcp/src/tcip_mcp/tools/training_tools.py` (`check_training_status` supplies the status payload).
 Phase 3 verdict: duplicated.
 
