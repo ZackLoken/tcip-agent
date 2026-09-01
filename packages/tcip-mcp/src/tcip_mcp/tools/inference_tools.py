@@ -1348,8 +1348,11 @@ def export_predictions(
 ) -> dict:
     """Run inference and save predictions as COCO/JSON prediction file(s).
 
-    Two source regimes, sharing one bucket-resolution/immutability/gate/lineage contract so a
-    breeder or agent has one door regardless of capture shape:
+    A prediction bucket is the directory these writes persist into, not a score bin or a quota
+    allocation: its identity is a model name plus an optional date, and it turns immutable the
+    moment a human review verdict lands on any image inside it. Two source regimes, sharing one
+    bucket-resolution/immutability/gate/lineage contract so a breeder or agent has one door
+    regardless of capture shape:
 
     - ``images_dir`` (an ordinary directory of per-image captures, the common case): routes through
       ``run_inference`` so this door resolves the same firewalled operating point (conf/NMS/tiling/
@@ -1635,6 +1638,9 @@ def tabulate_counts(
     predictions_dir: str | None = None,
 ) -> dict:
     """Export a CSV summary of detection counts per image, from a live run or a persisted bucket.
+
+    A bucket here is the directory a prediction run persists into, not a score bin: it turns
+    immutable once a review verdict lands on any image inside it.
 
     Two source regimes, exactly one stated:
 

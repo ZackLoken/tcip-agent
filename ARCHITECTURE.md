@@ -759,7 +759,7 @@ Docstring is the function's docstring first line, verbatim.
 
 | tool | line | audited | docstring first line |
 |---|---|---|---|
-| `deliver_orthomosaic_plant_counts` | `orthomosaic_tools.py:36` | yes | Per-plant detection counts from a persisted orthomosaic prediction bucket + plant CSV(s). |
+| `deliver_orthomosaic_plant_counts` | `orthomosaic_tools.py:36` | yes | Per-plant detection counts from a persisted orthomosaic prediction bucket (a directory of prediction documents, not a score bin, held immutable once a human reviews it) + plant CSV(s). |
 
 ### phenology_tools.py (3 tools)
 
@@ -1669,6 +1669,11 @@ only two web-route tests check a 403-confinement case and an empty-registry case
 
 ## 17. Prediction buckets, verdict-guarded prediction directories
 
+A prediction bucket is not a score bin or a quota allocation: it is one directory holding a
+single model run's per-image prediction documents, its identity a model name plus an optional
+date, mutable until a human records a review verdict against any image inside it, after which
+every writer is redirected to a fresh variant rather than allowed to overwrite it.
+
 Path: `<dataset_root>/predictions/<model_name>/[<date>/]`, via
 `tcip_mcp.dataset_layout.prediction_dir`.
 
@@ -1698,8 +1703,9 @@ into a fresh, verdict-free bucket.
 
 ## 18. `operating_point.json`, prediction-bucket provenance sidecar
 
-Path: `<prediction_bucket_dir>/operating_point.json`, sibling of the bucket's per-image files,
-one of the stamp filenames `tcip_annotation.json_io.SIDECAR_FILENAMES`
+Path: `<prediction_bucket_dir>/operating_point.json`, sibling of the bucket's per-image
+prediction files (format 17's immutability-scoped prediction directory, not a score bin), one
+of the stamp filenames `tcip_annotation.json_io.SIDECAR_FILENAMES`
 (`packages/tcip-annotation/src/tcip_annotation/json_io.py:242`) names and every bucket
 enumeration excludes (format 17).
 
@@ -2156,7 +2162,8 @@ Phase 3 verdict: single. The browser still joins directory plus filename client-
 
 ## S16. ReviewEngine shard-store directory
 
-Must agree: the verdict writer and the bucket-immutability reader look at the same review store.
+Must agree: the verdict writer and the bucket-immutability reader look at the same review store
+(a bucket here is format 17's immutability-scoped prediction directory, not a score bin).
 Side A: `packages/tcip-mcp/src/tcip_mcp/prediction_buckets.py:110` (`def review_state_dir_of(`, the one derivation of the store root; `verdict_count`, line 105, counts one bucket's verdicts through the store the engine writes into).
 Side B: `packages/tcip-annotation/src/tcip_annotation/review_engine.py:171` (`REVIEW_VERDICTS_STORE`, which owns the shard layout inside that root). `packages/tcip-web/src/tcip_web/routes/review.py:72`, `routes/inference.py:428` and `packages/tcip-mcp/src/tcip_mcp/tools/inference_tools.py:1285` open on the derived root instead of composing a state dir each.
 Phase 3 verdict: single.

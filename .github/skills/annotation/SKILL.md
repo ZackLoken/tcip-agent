@@ -185,7 +185,8 @@ The agent must never write ground truth the human hasn't seen. Stage proposals t
   predictions tree, not `annotations/`. They render on the Review canvas as predictions for
   the human to accept/reject/edit. `model_name` is stamped as each object's `created_by`, so name
   the real producer (`sam`, `claude`, `groundingdino`, `model:<run>`), not a generic placeholder.
-  A bucket that already carries review verdicts is immutable: a stage into it is redirected to a
+  A bucket (the model's own prediction directory just written to, not a score bin) that already
+  carries review verdicts is immutable: a stage into it is redirected to a
   fresh `<model>@r2` bucket (the response's `bucket` field is the one actually written), so a
   re-run never overwrites reviewed predictions. Pass `overwrite=True` to force in-place, which is
   still refused when verdicts exist.
