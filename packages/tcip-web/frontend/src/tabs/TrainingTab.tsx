@@ -14,6 +14,7 @@ import { openTrainingStream, trainingApi } from "@/api/training";
 import type { LaunchableConfig, MetricRow, SplitChoices, TrainingRunSummary } from "@/api/training";
 import { EmbeddedTool } from "@/components/EmbeddedTool";
 import { LaunchPicker, type DataPicker, type LaunchPickerRow } from "@/components/LaunchPicker";
+import { MAX_MARKED_RUNS, RunComparison, type MarkedRun } from "@/components/RunComparison";
 import { useEditableAgentRequest } from "@/hooks/useEditableAgentRequest";
 import { TERMINAL_STATUSES } from "@/lib/runStatus";
 import { useStore } from "@/store";
@@ -24,6 +25,15 @@ import { mergeMetric } from "@/tabs/trainingMetrics";
 
 // Runs can only be stopped while still active; terminal/historical runs show no button.
 const TRAINING_CANCELLABLE: ReadonlySet<string> = new Set(["created", "running"]);
+
+/** Why a row's Compare toggle is disabled, when it is: the two reasons a run's own
+ * experiment_id/experiment_error name, the one implementation both the row and the toggle's
+ * own click handler consult. Markable (neither reason) returns null. */
+function unmarkableReason(run: TrainingRunSummary): string | null {
+  if (run.experiment_error) return `experiment tracking failed: ${run.experiment_error}`;
+  if (!run.experiment_id) return "experiment not resolved yet";
+  return null;
+}
 
 const TENSORBOARD_RETRY_MS = 3000;
 
@@ -118,7 +128,31 @@ export function TrainingTab() {
   const [tbUrl, setTbUrl] = useState<string | null>(null);
   const [tbError, setTbError] = useState<string | null>(null);
   const [tbAttempt, setTbAttempt] = useState(0);
+  const [markedRunIds, setMarkedRunIds] = useState<Set<string>>(new Set());
   const streamRef = useRef<(() => void) | null>(null);
+
+  const marked: MarkedRun[] = runs
+    .filter((r) => markedRunIds.has(r.run_id) && r.experiment_id)
+    .map((r) => ({ runId: r.run_id, experimentId: r.experiment_id as string }));
+  const comparing = marked.length >= 2;
+
+  function toggleMarked(run: TrainingRunSummary) {
+    setMarkedRunIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(run.run_id)) {
+        next.delete(run.run_id);
+        return next;
+      }
+      if (next.size >= MAX_MARKED_RUNS) {
+        useStore
+          .getState()
+          .pushToast(`Compare fits at most ${MAX_MARKED_RUNS} runs at once; unmark one first.`);
+        return prev;
+      }
+      next.add(run.run_id);
+      return next;
+    });
+  }
 
   const refreshRuns = useCallback(async () => {
     try {
@@ -185,7 +219,8 @@ export function TrainingTab() {
   }
 
   useEffect(() => {
-    if (!selectedRun || !projectRoot) return;
+    // Comparing owns its own per-run streams; suspend this one so the stream count stays the marked count.
+    if (!selectedRun || !projectRoot || comparing) return;
     // Clear the previous run's curve; the stream replays this run from the start, so a
     // seed GET would just double-load the same rows. The WS is the single source now.
     setMetrics([]);
@@ -207,7 +242,7 @@ export function TrainingTab() {
       }
     });
     return () => streamRef.current?.();
-  }, [selectedRun, projectRoot, refreshRuns]);
+  }, [selectedRun, projectRoot, refreshRuns, comparing]);
 
   // Adopt the TensorBoard already serving this run, or start one. A run that has not written its
   // log directory yet has nothing to serve, so a failed start is retried while the run is live.
@@ -302,7 +337,14 @@ export function TrainingTab() {
         </button>
       }
       detailHeader={
-        selectedRun ? (
+        comparing ? (
+          <>
+            <span className="tcip-heading">Comparing</span>
+            <span className="text-[11px] text-tcip-muted">
+              {marked.length} of {MAX_MARKED_RUNS} runs
+            </span>
+          </>
+        ) : selectedRun ? (
           <>
             <span className="tcip-heading">Live metrics</span>
             <span className="font-mono text-[12px] text-tcip-fg">{selectedRun}</span>
@@ -312,65 +354,69 @@ export function TrainingTab() {
         )
       }
       detail={
-        <div className="flex flex-col gap-4">
-          <div className="h-[38vh] min-h-[220px] shrink-0">
-            {selectedRun && chartData.length > 0 ? (
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={chartData}>
-                  <CartesianGrid stroke={CHART.grid} strokeDasharray="3 3" />
-                  <XAxis
-                    dataKey="step"
-                    stroke={CHART.axis}
-                    style={{ fontSize: 11 }}
-                    label={{
-                      value: "epoch/step",
-                      position: "insideBottom",
-                      offset: -5,
-                      fill: CHART.axis,
-                    }}
-                  />
-                  <YAxis stroke={CHART.axis} style={{ fontSize: 11 }} />
-                  <Tooltip
-                    contentStyle={{
-                      background: CHART.tooltipBg,
-                      border: `1px solid ${CHART.tooltipBorder}`,
-                      borderRadius: 4,
-                      fontSize: 11,
-                    }}
-                  />
-                  <Legend wrapperStyle={{ fontSize: 11, color: CHART.legendText }} />
-                  {metricKeys.map((key, i) => (
-                    <Line
-                      key={key}
-                      type="monotone"
-                      dataKey={key}
-                      stroke={CHART_LINE_COLORS[i % CHART_LINE_COLORS.length]}
-                      dot={false}
-                      strokeWidth={1.5}
-                      isAnimationActive={false}
+        comparing ? (
+          <RunComparison marked={marked} projectRoot={projectRoot} />
+        ) : (
+          <div className="flex flex-col gap-4">
+            <div className="h-[38vh] min-h-[220px] shrink-0">
+              {selectedRun && chartData.length > 0 ? (
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={chartData}>
+                    <CartesianGrid stroke={CHART.grid} strokeDasharray="3 3" />
+                    <XAxis
+                      dataKey="step"
+                      stroke={CHART.axis}
+                      style={{ fontSize: 11 }}
+                      label={{
+                        value: "epoch/step",
+                        position: "insideBottom",
+                        offset: -5,
+                        fill: CHART.axis,
+                      }}
                     />
-                  ))}
-                </LineChart>
-              </ResponsiveContainer>
-            ) : (
-              <div className="flex items-center justify-center h-full text-tcip-muted text-[12px]">
-                {selectedRun ? "Waiting for metrics…" : "No run selected."}
+                    <YAxis stroke={CHART.axis} style={{ fontSize: 11 }} />
+                    <Tooltip
+                      contentStyle={{
+                        background: CHART.tooltipBg,
+                        border: `1px solid ${CHART.tooltipBorder}`,
+                        borderRadius: 4,
+                        fontSize: 11,
+                      }}
+                    />
+                    <Legend wrapperStyle={{ fontSize: 11, color: CHART.legendText }} />
+                    {metricKeys.map((key, i) => (
+                      <Line
+                        key={key}
+                        type="monotone"
+                        dataKey={key}
+                        stroke={CHART_LINE_COLORS[i % CHART_LINE_COLORS.length]}
+                        dot={false}
+                        strokeWidth={1.5}
+                        isAnimationActive={false}
+                      />
+                    ))}
+                  </LineChart>
+                </ResponsiveContainer>
+              ) : (
+                <div className="flex items-center justify-center h-full text-tcip-muted text-[12px]">
+                  {selectedRun ? "Waiting for metrics…" : "No run selected."}
+                </div>
+              )}
+            </div>
+
+            {selectedRun && (
+              <div className="h-[60vh] min-h-[360px] shrink-0">
+                <EmbeddedTool
+                  title="TensorBoard"
+                  url={tbUrl}
+                  loading={!tbUrl && !tbError}
+                  error={tbError}
+                  onRetry={() => setTbAttempt((n) => n + 1)}
+                />
               </div>
             )}
           </div>
-
-          {selectedRun && (
-            <div className="h-[60vh] min-h-[360px] shrink-0">
-              <EmbeddedTool
-                title="TensorBoard"
-                url={tbUrl}
-                loading={!tbUrl && !tbError}
-                error={tbError}
-                onRetry={() => setTbAttempt((n) => n + 1)}
-              />
-            </div>
-          )}
-        </div>
+        )
       }
     >
       {pickerOpen && (
@@ -410,43 +456,59 @@ export function TrainingTab() {
         <RunMonitorEmpty>No runs yet. Use "Start a run" above.</RunMonitorEmpty>
       )}
       <ul className="space-y-1">
-        {runs.map((r) => (
-          <li key={r.run_id}>
-            <div
-              className={`p-2 rounded border transition-colors ${
-                selectedRun === r.run_id
-                  ? "border-tcip-accent bg-tcip-accent/10"
-                  : "border-tcip-border hover:border-tcip-border-hover hover:bg-tcip-hover"
-              }`}
-            >
-              <button
-                type="button"
-                aria-pressed={selectedRun === r.run_id}
-                className="w-full text-left"
-                onClick={() => setSelectedRun(r.run_id)}
+        {runs.map((r) => {
+          const isMarked = markedRunIds.has(r.run_id);
+          const reason = unmarkableReason(r);
+          return (
+            <li key={r.run_id}>
+              <div
+                className={`flex items-start gap-1 p-2 rounded border transition-colors ${
+                  selectedRun === r.run_id && !isMarked
+                    ? "border-tcip-accent bg-tcip-accent/10"
+                    : "border-tcip-border hover:border-tcip-border-hover hover:bg-tcip-hover"
+                }`}
               >
-                <div className="font-mono text-[11px]">{r.run_id}</div>
-                <div className="text-[10px] text-tcip-muted flex justify-between">
-                  <span>
-                    {r.status}
-                    {r.external && r.status === "running" ? " · agent" : ""}
-                  </span>
-                  {r.best_metric !== undefined && r.best_metric !== null && (
-                    <span className="tabular-nums">best: {Number(r.best_metric).toFixed(3)}</span>
+                <button
+                  type="button"
+                  aria-pressed={selectedRun === r.run_id}
+                  className="flex-1 text-left"
+                  onClick={() => setSelectedRun(r.run_id)}
+                >
+                  <div className="font-mono text-[11px]">{r.run_id}</div>
+                  <div className="text-[10px] text-tcip-muted flex justify-between">
+                    <span>
+                      {r.status}
+                      {r.external && r.status === "running" ? " · agent" : ""}
+                    </span>
+                    {r.best_metric !== undefined && r.best_metric !== null && (
+                      <span className="tabular-nums">best: {Number(r.best_metric).toFixed(3)}</span>
+                    )}
+                  </div>
+                </button>
+                <div className="flex flex-col items-end gap-1 shrink-0">
+                  <button
+                    type="button"
+                    aria-pressed={isMarked}
+                    disabled={!isMarked && !!reason}
+                    title={reason ?? undefined}
+                    className={isMarked ? "tcip-btn-primary text-[10px]" : "tcip-btn text-[10px]"}
+                    onClick={() => toggleMarked(r)}
+                  >
+                    Compare
+                  </button>
+                  {TRAINING_CANCELLABLE.has(r.status) && (
+                    <button
+                      className="tcip-btn text-[10px]"
+                      onClick={() => void onCancel(r.run_id)}
+                    >
+                      Cancel
+                    </button>
                   )}
                 </div>
-              </button>
-              {TRAINING_CANCELLABLE.has(r.status) && (
-                <button
-                  className="tcip-btn text-[10px] mt-1"
-                  onClick={() => void onCancel(r.run_id)}
-                >
-                  Cancel
-                </button>
-              )}
-            </div>
-          </li>
-        ))}
+              </div>
+            </li>
+          );
+        })}
       </ul>
     </RunMonitorLayout>
   );

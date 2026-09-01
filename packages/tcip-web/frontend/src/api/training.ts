@@ -13,6 +13,10 @@ export interface TrainingRunSummary {
   output_dir?: string;
   config_summary?: Record<string, unknown>;
   external?: boolean; // reconstructed from experiment records: running in another process
+  /** Set once _ensure_experiment resolves this run's tracked experiment; null until then. */
+  experiment_id?: string | null;
+  /** Set when experiment tracking itself raised; null when it succeeded or never ran. */
+  experiment_error?: string | null;
 }
 
 export interface TrainingRunDetail {
@@ -79,6 +83,84 @@ export interface SplitChoices {
   manifests: SplitManifestChoice[];
 }
 
+/** One entry a comparison's own experiment registered, reduced to what leaves the backend. */
+export interface CompareRegistryEntry {
+  name: string;
+  metrics: Record<string, number | string | null> | null;
+  metrics_source: string | null;
+  registered_at: string | null;
+}
+
+/** The run's own partition, from its persisted split record (never the launch config's own
+ * pre-launch intent), reduced to the four states a comparison names. */
+export interface CompareSplit {
+  case: "bound" | "drawn" | "none" | "error";
+  manifest_dir?: string;
+  seed?: number | null;
+  error?: string;
+}
+
+/** One refused post-terminal mutation the platform audit log recorded against an experiment. */
+export interface CompareRefusedMutation {
+  timestamp: string | null;
+  arguments: Record<string, unknown>;
+}
+
+/** One marked experiment's own column in the comparison, every value labelled by which record
+ * it came from. `error` alone (no other field) marks an id compare_experiments could not even
+ * read; every other field is absent only on that entry. */
+export interface CompareExperiment {
+  experiment_id: string;
+  error?: string;
+  recorded_state?: string | null;
+  state?: string | null;
+  log_locked?: boolean;
+  n_epochs?: number;
+  n_rows?: number;
+  last_logged_metrics?: MetricRow;
+  rows_after_end?: number | null;
+  refused_mutations?: CompareRefusedMutation[];
+  /** The status record's own failure reason; null for a run that never failed. */
+  status_error?: string | null;
+  /** The config's builder; null when the config names none (never a fabricated "unknown"). */
+  model?: string | null;
+  task?: string | null;
+  subject?: string | null;
+  dataset_id?: string | null;
+  dataset_fingerprint?: string | null;
+  fingerprint_formula_unrecorded?: boolean;
+  split?: CompareSplit;
+  /** This experiment's own registered entries; absent, with registry_error naming why, when
+   * the project's registry index can't be read or matched at all. */
+  registry?: CompareRegistryEntry[];
+  registry_error?: string;
+}
+
+export interface CompareResult {
+  experiments: CompareExperiment[];
+  count: number;
+  /** null when any compared id is an error entry, or a fingerprint is missing/unrecorded/mixed. */
+  same_dataset_fingerprint: boolean | null;
+}
+
+/** One entry the rank excluded for being unverified (metrics_source is not "trainer"). */
+export interface CompareBestExcluded {
+  name: string;
+  metrics_source: string | null;
+}
+
+/** The marked comparison's own best-model answer, projected: no checkpoint path, config or
+ * file size ever leaves the backend. */
+export interface CompareBestResult {
+  name: string;
+  experiment_id: string | null;
+  metrics: Record<string, number | string | null>;
+  metrics_source: string | null;
+  higher_is_better: boolean;
+  direction_source: string;
+  excluded_unverified: CompareBestExcluded[];
+}
+
 export const trainingApi = {
   listConfigs: () => getJson<{ configs: LaunchableConfig[] }>(ROUTES.getTrainingConfigs),
 
@@ -103,6 +185,16 @@ export const trainingApi = {
       ROUTES.postTrainingRunsByRunIdCancel(run_id),
       {},
     ),
+
+  compare: (experiment_ids: string[]) =>
+    postJson<CompareResult>(ROUTES.postTrainingCompare, { experiment_ids }),
+
+  compareBest: (params: {
+    experiment_ids: string[];
+    metric: string;
+    higher_is_better?: boolean | null;
+    include_unverified?: boolean;
+  }) => postJson<CompareBestResult>(ROUTES.postTrainingCompareBest, params),
 };
 
 export type TrainingStreamMsg = TrainingMetricFrame | TrainingStatusFrame;
