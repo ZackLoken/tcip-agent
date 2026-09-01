@@ -41,8 +41,14 @@ describe("TuningTab sweep row actions", () => {
 
   it("shows no action on a finished, non-relaunchable sweep", async () => {
     vi.spyOn(tuningApi, "listSweeps").mockResolvedValue({
-      sweeps: [sweep({ sweep_id: "hpo-done-1", status: "completed", relaunchable: false,
-                       reason: "this sweep's record holds no base config" })],
+      sweeps: [
+        sweep({
+          sweep_id: "hpo-done-1",
+          status: "completed",
+          relaunchable: false,
+          reason: "this sweep's record holds no base config",
+        }),
+      ],
     });
 
     render(<TuningTab />);
@@ -67,11 +73,19 @@ describe("TuningTab sweep row actions", () => {
 
   it("renders the not-relaunchable reason only in the expanded region", async () => {
     vi.spyOn(tuningApi, "listSweeps").mockResolvedValue({
-      sweeps: [sweep({ sweep_id: "hpo-noreason", status: "completed", relaunchable: false,
-                       reason: "this sweep's record holds no base config" })],
+      sweeps: [
+        sweep({
+          sweep_id: "hpo-noreason",
+          status: "completed",
+          relaunchable: false,
+          reason: "this sweep's record holds no base config",
+        }),
+      ],
     });
     vi.spyOn(tuningApi, "getSweep").mockResolvedValue({
-      sweep_id: "hpo-noreason", status: "completed", result: {},
+      sweep_id: "hpo-noreason",
+      status: "completed",
+      result: {},
     });
     vi.spyOn(tuningApi, "listTrials").mockResolvedValue({ sweep_id: "hpo-noreason", trials: [] });
     vi.spyOn(tuningApi, "getRayDashboard").mockResolvedValue({ url: null });
