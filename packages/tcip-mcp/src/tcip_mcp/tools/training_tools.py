@@ -532,8 +532,11 @@ def launch_training(
 
     Watching a launched run's metrics and deciding to stop a poorly performing one is the
     launching agent's own judgment call, made through cancel_training; the platform itself only
-    stops a run objectively dead (a diverged, non-finite training loss) or stagnant against its
-    own validation metric (early stopping), never one merely performing worse than hoped.
+    stops a run objectively dead (two consecutive full training passes with no finite batch
+    loss) or stagnant against its own validation metric (early stopping), never one merely
+    performing worse than hoped. Early stopping needs a validation loader to have anything to
+    watch: a run launched with none gets divergence as its only automatic stop, and is worth
+    closer agent monitoring than a run early stopping can also catch.
 
     Args:
         config: Full training configuration dict with model_source, data, training sections.
@@ -785,6 +788,7 @@ def check_training_status(run_id: str) -> dict:
             "epoch": run.current_epoch,
             "best_metric": run.best_metric,
             "output_dir": run.output_dir,
+            "error": run.error or None,
         }
 
     # Check for running TensorBoard
@@ -904,7 +908,9 @@ def cancel_training(run_id: str) -> dict:
     The trainer stops at the next batch/epoch boundary, still saves ``model_final.pt``
     (so partial progress is recoverable), and sets the run + its experiment to
     'cancelled'. Status updates asynchronously, so the returned status may still read
-    'running' immediately after the request.
+    'running' immediately after the request. A run whose divergence verdict lands first (two
+    consecutive full training passes with no finite batch loss, checked ahead of cancellation
+    at the same boundary) ends 'failed' instead, with no ``model_final.pt``.
 
     Args:
         run_id: Training run identifier (from launch_training).
@@ -1194,9 +1200,11 @@ def _run_hpo_trial(config: dict, report, base_config: dict, trial_dir: str) -> N
     can prune) and once at the end with the best value this trial actually reached (Tune's default
     ``get_best_result`` scope reads only the last value each trial reported, so the run's best
     epoch would otherwise be lost behind a worse later one). A trial that never reports a real
-    value, before training starts or on any failure, reports the losing side of its own direction
-    as that final value instead of leaving Tune with nothing for it, so a trial with nothing real
-    to say can never win either a minimize or a maximize sweep. Trials train under the final run's
+    value, before training starts or on any failure, and a trial whose run diverged (``run.status
+    == "failed"``, even one that reported a real value from an epoch before it died), both report
+    the losing side of its own direction as that final value instead of a real number, so neither
+    a trial with nothing to say nor a config that killed its own run can outrank a config that
+    merely scored worse. Trials train under the final run's
     regime, same augmentation, imbalance handling, and dispatch: a ``training_source`` in
     ``base_config`` actually runs under that loop here too, not always the stock trainer, or the
     selected hyperparameters won't transfer.
@@ -1297,7 +1305,12 @@ def _run_hpo_trial(config: dict, report, base_config: dict, trial_dir: str) -> N
         ctx = TrainContext(run=run, train_loader=train_loader, val_loader=val_loader, task=task,
                            experiment_id=None, epoch_hook=epoch_cb, trial_report=call_report)
         dispatch_train_body(ctx)
-        report(best["value"])  # the trial's best reported value, or the losing side if it reported none
+        # A diverged run reports the losing side regardless of what it reported before dying:
+        # a config that killed its run can never outrank a config that merely scored worse.
+        if run.status == "failed":
+            report(losing_side)
+        else:
+            report(best["value"])  # the trial's best reported value, or the losing side if none
     except Exception as e:
         logger.warning("HPO trial failed: %s", e)
         report(losing_side)

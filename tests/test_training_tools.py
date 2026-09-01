@@ -939,6 +939,36 @@ def test_run_hpo_trial_bespoke_custom_key_not_falsely_flagged_unconsumed(monkeyp
     assert resolved["unconsumed_params"] == []
 
 
+def test_run_hpo_trial_diverged_run_never_outranks_a_worse_but_alive_config(tmp_path):
+    """A trial that trains one real epoch and then diverges must report the losing side as its
+    final value, not that epoch's real score, so it can never outrank a config that only scored
+    worse. Drives the real training body (nothing mocked)."""
+    pytest.importorskip("torch")
+    from tcip_mcp.tools.training_tools import _run_hpo_trial
+    from tests.tiny_trainer_fixtures import write_regression_dataset
+
+    images_dir, csv_path = write_regression_dataset(
+        tmp_path, intensities=[0.1, 0.3, 0.5, 0.7], values=[0.2, 0.6, 1.0, 1.4])
+
+    base_config = {
+        "model_source": {"builder": "tests.tiny_trainer_fixtures:build_diverges_after_model",
+                         "builder_kwargs": {"good_calls": 1}, "task": "regression", "in_chans": 3},
+        "data": {"images_dir": str(images_dir), "csv_path": str(csv_path), "task": "regression"},
+        "device": "cpu",
+        "mixed_precision": False,
+        "stages": [{"freeze_to": 0, "epochs": 5}],
+        "optimizer": {"name": "adamw", "backbone_lr": 0.05, "head_lr": 0.05, "weight_decay": 0.0},
+        "checkpoint_every_n_epochs": 0,
+        "early_stopping": {"enabled": False},
+    }
+    reported: list = []
+    _run_hpo_trial({}, reported.append, base_config, str(tmp_path / "trial_0"))
+
+    import math
+    assert math.isfinite(reported[0])  # epoch 1's real score, reported before the run died
+    assert reported[-1] == float("inf")  # the losing side of 'loss' (lower=better)
+
+
 # --------------------------------------------------------------------------
 # get_worst_predictions: confidence comes from the canonical prediction format
 # --------------------------------------------------------------------------
