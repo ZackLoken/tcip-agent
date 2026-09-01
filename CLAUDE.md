@@ -71,8 +71,8 @@ silently corrupts results and compounds across sessions.
   stands in for finding the object or judging a biological state. Validate before any downstream
   result: GT annotations or a breeder-confirmed sample of the model's own outputs, either through
   the identical disjoint-split and count-bias gate, the provenance recording which. No validated
-  measurement, no result. Domain logic not yet validated is labelled as such and validated or
-  removed; it never becomes institutional truth by reuse.
+  measurement, no result. Tentative domain logic, whatever made it tentative, is labelled
+  tentative and validated or removed; it never becomes institutional truth by reuse.
 - Scientific defensibility: every phenotype reproducible and auditable end to end (data, model
   and environment, predictions, operating point, measurement). Parameters are derived from the
   data at runtime, never frozen constants; when a threshold or operating point varies by dataset,
@@ -222,6 +222,9 @@ via `$TCIP_STATE_ROOT`, pinned at startup by the web backend and every MCP serve
   logged script in `scripts/` over a new MCP tool; add a tool only for an audit seam,
   long-running infrastructure, or domain knowledge the agent lacks.
 - Crop traits are controlled vocabulary in `.github/skills/crops/`; verify there before asserting.
+- The word provisional is reserved for the delivery gate's acknowledged-unvalidated sense
+  (the `majority_provisional` field, the provisional floor). A plain value says default, a
+  bound says cap or ceiling, an unsettled policy says tentative or draft.
 - Every piece of shipped prose (comments, docstrings, log and UI strings, test names, file names,
   scripts, README, skills, package `CLAUDE.md`s) is for whoever reads it next, never a changelog
   of the session that wrote it: no tracking labels (`K<n>`, `Fix <letter>`, `finding <n>`,
