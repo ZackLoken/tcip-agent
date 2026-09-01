@@ -205,6 +205,14 @@ async def _stream_metrics(
 
             status = check_training_status(run_id)
             if status.get("error") or status.get("status") in jobstore.TERMINAL_STATUSES:
+                # A row can land between the read above and this terminal observation; drain
+                # it now so the status frame never precedes the row it terminates on.
+                if key is not None:
+                    final_page = read_log(key, after=cursor)
+                    cursor = final_page.cursor
+                    for row in (dict(r) for r in final_page.records):
+                        frame = TrainingMetricFrame(type="metric", run_id=run_id, row=row)
+                        await ws.send_json(frame.model_dump())
                 if "status" in status:
                     status_frame = TrainingStatusFrame(
                         type="status", run_id=run_id, status=status, error=None

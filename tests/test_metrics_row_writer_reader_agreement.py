@@ -77,6 +77,42 @@ def test_training_stream_serves_a_relaunched_run_from_the_record_that_claims_it(
     assert [r.get("loss") for r in rows] == [1.2]
 
 
+def test_stream_drains_a_row_that_lands_between_the_read_and_the_terminal_check(
+    tmp_path, monkeypatch,
+):
+    """A row appended in the window between the stream's last log read and its terminal
+    status check must still reach the browser, ahead of the status frame that ends the
+    stream, rather than being dropped by it."""
+    from tcip_mcp.experiments import create_experiment, log_metrics, update_status
+    from tcip_mcp.tools import training_tools
+
+    run_id = "exp-023-walnut-shell-det"
+    create_experiment(run_id, {"model_source": {"builder": "my_models:shell_det"}})
+    log_metrics(run_id, 1, {"loss": 0.5})
+
+    real_check_training_status = training_tools.check_training_status
+    appended = {"done": False}
+
+    def fake_check_training_status(rid):
+        if not appended["done"]:
+            appended["done"] = True
+            log_metrics(run_id, 2, {"loss": 0.2})
+            update_status(run_id, "completed")
+        return real_check_training_status(rid)
+
+    monkeypatch.setattr(training_tools, "check_training_status", fake_check_training_status)
+
+    with _client().websocket_connect(
+        f"ws://127.0.0.1/api/training/runs/{run_id}/stream?project_root={tmp_path}",
+    ) as ws:
+        frames = _drain(ws)
+
+    rows = [f["row"] for f in frames if f["type"] == "metric"]
+    assert [r.get("epoch") for r in rows] == [1, 2]
+    assert frames[-1]["type"] == "status"
+    assert frames[-1]["status"]["status"] == "completed"
+
+
 def test_training_stream_serves_no_metric_frames_for_a_run_no_record_claims(tmp_path):
     """An experiment no run registry claims resolves to no metrics key: the stream replays
     nothing and sends only the terminal status frame naming the unresolved run."""
