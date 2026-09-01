@@ -11,9 +11,9 @@ import {
 } from "recharts";
 
 import { openTrainingStream, trainingApi } from "@/api/training";
-import type { LaunchableConfig, MetricRow, TrainingRunSummary } from "@/api/training";
+import type { LaunchableConfig, MetricRow, SplitChoices, TrainingRunSummary } from "@/api/training";
 import { EmbeddedTool } from "@/components/EmbeddedTool";
-import { LaunchPicker, type LaunchPickerRow } from "@/components/LaunchPicker";
+import { LaunchPicker, type DataPicker, type LaunchPickerRow } from "@/components/LaunchPicker";
 import { useEditableAgentRequest } from "@/hooks/useEditableAgentRequest";
 import { TERMINAL_STATUSES } from "@/lib/runStatus";
 import { useStore } from "@/store";
@@ -27,7 +27,39 @@ const TRAINING_CANCELLABLE: ReadonlySet<string> = new Set(["created", "running"]
 
 const TENSORBOARD_RETRY_MS = 3000;
 
-function configRow(cfg: LaunchableConfig, onStart: () => Promise<void>): LaunchPickerRow {
+const NO_OTHER_PARTITION =
+  "this listing found no other recorded partition the config can bind to; the agent can draw one.";
+
+function dataPickerFor(choices: SplitChoices | undefined): DataPicker | undefined {
+  if (!choices) return undefined;
+  return {
+    asRecordedLine: choices.as_recorded.line,
+    asRecordedDisabled: !choices.as_recorded.compatible,
+    asRecordedReason: choices.as_recorded.reason ?? undefined,
+    absenceMessage: NO_OTHER_PARTITION,
+    choices: choices.manifests.map((m) => ({
+      manifestDir: m.manifest_dir,
+      disabled: !m.enabled,
+      reason: m.reason ?? undefined,
+      label: (
+        <>
+          <span className="block font-mono">{m.manifest_dir}</span>
+          <span className="block text-tcip-muted">
+            seed {m.seed ?? "unrecorded"} · {m.group_by ?? "unrecorded grouping"} · train {m.train}{" "}
+            · val {m.val} · calibration {m.calibration}
+            {m.other_dates > 0 ? ` · ${m.other_dates} member(s) under other dates` : ""}
+          </span>
+        </>
+      ),
+    })),
+  };
+}
+
+function configRow(
+  cfg: LaunchableConfig,
+  choices: SplitChoices | undefined,
+  onStart: (splitManifestDir: string | null) => Promise<void>,
+): LaunchPickerRow {
   const pristine = cfg.state === "created";
   return {
     key: cfg.experiment_id,
@@ -50,6 +82,10 @@ function configRow(cfg: LaunchableConfig, onStart: () => Promise<void>): LaunchP
     branchLine: pristine
       ? "Its first run, on the data paths it names"
       : "A new run of this config on the data paths it names, as they are now, with the recorded seed",
+    branchLineForData: pristine
+      ? "Its first run, on the partition you chose"
+      : "A new run of this config on the partition you chose, with the recorded seed",
+    data: dataPickerFor(choices),
     onStart,
   };
 }
@@ -67,6 +103,7 @@ export function TrainingTab() {
 
   const [pickerOpen, setPickerOpen] = useState(false);
   const [configs, setConfigs] = useState<LaunchableConfig[]>([]);
+  const [splitChoicesById, setSplitChoicesById] = useState<Record<string, SplitChoices>>({});
   const [runs, setRuns] = useState<TrainingRunSummary[]>([]);
   const [runsError, setRunsError] = useState<string | null>(null);
   const [selectedRun, setSelectedRun] = useState<string | null>(null);
@@ -89,9 +126,23 @@ export function TrainingTab() {
   const refreshConfigs = useCallback(async () => {
     try {
       const r = await trainingApi.listConfigs();
-      setConfigs(r.configs ?? []);
+      const cfgs = r.configs ?? [];
+      setConfigs(cfgs);
+      const entries = await Promise.all(
+        cfgs.map(async (cfg): Promise<[string, SplitChoices] | null> => {
+          try {
+            return [cfg.experiment_id, await trainingApi.listSplitChoices(cfg.experiment_id)];
+          } catch {
+            return null;
+          }
+        }),
+      );
+      setSplitChoicesById(
+        Object.fromEntries(entries.filter((e): e is [string, SplitChoices] => e !== null)),
+      );
     } catch {
       setConfigs([]);
+      setSplitChoicesById({});
     }
   }, []);
 
@@ -105,8 +156,8 @@ export function TrainingTab() {
     if (pickerOpen) void refreshConfigs();
   }, [pickerOpen, refreshConfigs]);
 
-  async function startFromConfig(experimentId: string) {
-    const result = await trainingApi.relaunch(experimentId);
+  async function startFromConfig(experimentId: string, splitManifestDir: string | null) {
+    const result = await trainingApi.relaunch(experimentId, splitManifestDir);
     setPickerOpen(false);
     void refreshRuns();
     if (typeof result.run_id === "string") setSelectedRun(result.run_id);
@@ -312,7 +363,11 @@ export function TrainingTab() {
             list={{
               title: "Configs in this project",
               emptyMessage: "No config exists in this project yet.",
-              rows: configs.map((cfg) => configRow(cfg, () => startFromConfig(cfg.experiment_id))),
+              rows: configs.map((cfg) =>
+                configRow(cfg, splitChoicesById[cfg.experiment_id], (dir) =>
+                  startFromConfig(cfg.experiment_id, dir),
+                ),
+              ),
             }}
             composerLabel="Describe a new one to the agent"
             request={request}
