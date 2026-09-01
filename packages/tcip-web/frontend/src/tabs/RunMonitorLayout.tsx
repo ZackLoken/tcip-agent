@@ -34,7 +34,7 @@ export function RunMonitorLayout({
           <span className="tcip-heading">{title}</span>
           <span className="flex-1" />
           <button className="tcip-btn text-[11px]" onClick={onRefresh}>
-            ↻&nbsp;&nbsp;Refresh
+            <span aria-hidden="true">↻</span>&nbsp;&nbsp;Refresh
           </button>
           {headerRight}
         </div>

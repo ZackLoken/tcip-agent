@@ -386,40 +386,44 @@ export function TrainingTab() {
         </div>
       )}
       {runs.length === 0 && !runsError && (
-        <RunMonitorEmpty>No runs yet. The agent configures and launches training.</RunMonitorEmpty>
+        <RunMonitorEmpty>No runs yet. Use "Start a run" above.</RunMonitorEmpty>
       )}
       <ul className="space-y-1">
         {runs.map((r) => (
-          <li
-            key={r.run_id}
-            className={`p-2 rounded border cursor-pointer transition-colors ${
-              selectedRun === r.run_id
-                ? "border-tcip-accent bg-tcip-accent/10"
-                : "border-tcip-border hover:border-tcip-border-hover hover:bg-tcip-hover"
-            }`}
-            onClick={() => setSelectedRun(r.run_id)}
-          >
-            <div className="font-mono text-[11px]">{r.run_id}</div>
-            <div className="text-[10px] text-tcip-muted flex justify-between">
-              <span>
-                {r.status}
-                {r.external && r.status === "running" ? " · agent" : ""}
-              </span>
-              {r.best_metric !== undefined && r.best_metric !== null && (
-                <span className="tabular-nums">best: {Number(r.best_metric).toFixed(3)}</span>
+          <li key={r.run_id}>
+            <div
+              className={`p-2 rounded border transition-colors ${
+                selectedRun === r.run_id
+                  ? "border-tcip-accent bg-tcip-accent/10"
+                  : "border-tcip-border hover:border-tcip-border-hover hover:bg-tcip-hover"
+              }`}
+            >
+              <button
+                type="button"
+                aria-pressed={selectedRun === r.run_id}
+                className="w-full text-left"
+                onClick={() => setSelectedRun(r.run_id)}
+              >
+                <div className="font-mono text-[11px]">{r.run_id}</div>
+                <div className="text-[10px] text-tcip-muted flex justify-between">
+                  <span>
+                    {r.status}
+                    {r.external && r.status === "running" ? " · agent" : ""}
+                  </span>
+                  {r.best_metric !== undefined && r.best_metric !== null && (
+                    <span className="tabular-nums">best: {Number(r.best_metric).toFixed(3)}</span>
+                  )}
+                </div>
+              </button>
+              {TRAINING_CANCELLABLE.has(r.status) && (
+                <button
+                  className="tcip-btn text-[10px] mt-1"
+                  onClick={() => void onCancel(r.run_id)}
+                >
+                  Cancel
+                </button>
               )}
             </div>
-            {TRAINING_CANCELLABLE.has(r.status) && (
-              <button
-                className="tcip-btn text-[10px] mt-1"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  void onCancel(r.run_id);
-                }}
-              >
-                Cancel
-              </button>
-            )}
           </li>
         ))}
       </ul>

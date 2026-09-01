@@ -8,7 +8,7 @@
  * directory the server itself offered, never a path this component resolves.
  */
 
-import { useState, type ReactNode } from "react";
+import { useId, useState, type ReactNode } from "react";
 
 import { StructuredRefusalError } from "@/api/http";
 
@@ -83,6 +83,7 @@ export function LaunchPicker({
   const [selectedDataDir, setSelectedDataDir] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
   const [refusal, setRefusal] = useState<Refusal | null>(null);
+  const composerLabelId = useId();
 
   async function start(row: LaunchPickerRow) {
     setStarting(true);
@@ -119,6 +120,7 @@ export function LaunchPicker({
                     <button
                       type="button"
                       aria-expanded={selected}
+                      aria-pressed={selected}
                       className={`w-full p-2 rounded border text-left transition-colors ${
                         selected
                           ? "border-tcip-accent bg-tcip-accent/10"
@@ -208,7 +210,10 @@ export function LaunchPicker({
                           Start
                         </button>
                         {refusal?.key === row.key && (
-                          <ul className="mt-1 text-[11px] text-tcip-fp list-disc pl-4">
+                          <ul
+                            role="status"
+                            className="mt-1 text-[11px] text-tcip-fp list-disc pl-4"
+                          >
                             {refusal.issues.map((issue) => (
                               <li key={issue}>{issue}</li>
                             ))}
@@ -225,8 +230,11 @@ export function LaunchPicker({
       )}
 
       <div>
-        <div className="tcip-heading mb-1">{composerLabel}</div>
+        <label htmlFor={composerLabelId} className="tcip-heading mb-1 block">
+          {composerLabel}
+        </label>
         <textarea
+          id={composerLabelId}
           className="tcip-input w-full h-28 text-[11px] leading-4 resize-none mb-2"
           value={request}
           onChange={(e) => onRequestChange(e.target.value)}

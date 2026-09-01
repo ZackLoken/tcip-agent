@@ -237,23 +237,22 @@ export function TuningTab() {
     setPickerOpen(false);
   }
 
-  // Cancel while running (disabled once "stop requested", except an external sweep).
-  // "Run again" once terminal and relaunchable; nothing otherwise.
+  // Cancel while running, gone once "stop requested" (shown as status text) except for an
+  // external sweep; "Run again" once terminal and relaunchable; nothing otherwise.
   function sweepAction(s: Sweep) {
     const terminal = TERMINAL_STATUSES.has(s.status);
     if (!terminal) {
-      const stopRequested = !!s.cancel_requested;
+      if (s.cancel_requested && !s.external) return null;
       return (
         <button
           type="button"
           className="tcip-btn text-[10px] shrink-0 mt-2"
-          disabled={stopRequested && !s.external}
           onClick={(e) => {
             e.stopPropagation();
             void onCancelSweep(s.sweep_id);
           }}
         >
-          {stopRequested ? "stop requested" : "Cancel"}
+          Cancel
         </button>
       );
     }
@@ -389,16 +388,26 @@ export function TuningTab() {
                 onRetry={() => setSweepTbAttempt((n) => n + 1)}
               />
             </div>
-            {detail.error ? <div className="text-[11px] text-tcip-fp">{detail.error}</div> : null}
-            {hasContent(detail.result) ? (
-              <pre className="max-h-[24vh] text-[11px] font-mono p-3 tcip-panel overflow-auto">
-                {JSON.stringify(detail.result, null, 2)}
-              </pre>
-            ) : (
+            {detail.status === "cancelled" ? (
               <div className="text-[11px] text-tcip-muted">
-                The best config appears here once the sweep finishes. Pick one of its trials to
-                follow that trial while it runs.
+                Cancelled: {detail.error ?? "no reason recorded"}
               </div>
+            ) : (
+              <>
+                {detail.error ? (
+                  <div className="text-[11px] text-tcip-fp">{detail.error}</div>
+                ) : null}
+                {hasContent(detail.result) ? (
+                  <pre className="max-h-[24vh] text-[11px] font-mono p-3 tcip-panel overflow-auto">
+                    {JSON.stringify(detail.result, null, 2)}
+                  </pre>
+                ) : (
+                  <div className="text-[11px] text-tcip-muted">
+                    The best config appears here once the sweep finishes. Pick one of its trials to
+                    follow that trial while it runs.
+                  </div>
+                )}
+              </>
             )}
           </div>
         ) : (
@@ -420,13 +429,22 @@ export function TuningTab() {
       )}
 
       {sweeps.length === 0 ? (
-        <RunMonitorEmpty>
-          No sweeps yet. The agent launches a sweep from the request above.
-        </RunMonitorEmpty>
+        <RunMonitorEmpty>No sweeps yet. Use "Start a sweep" above.</RunMonitorEmpty>
       ) : (
         <ul className="space-y-1">
           {sweeps.map((s) => {
             const expanded = selectedId === s.sweep_id;
+            const running = !TERMINAL_STATUSES.has(s.status);
+            const searchLine = [
+              s.n_trials != null ? `${s.n_trials} trials` : null,
+              s.search_alg,
+              s.scheduler,
+              s.param_space_keys && s.param_space_keys.length > 0
+                ? s.param_space_keys.join(", ")
+                : null,
+            ]
+              .filter((part): part is string => !!part)
+              .join(" · ");
             return (
               <li key={s.sweep_id}>
                 <div
@@ -439,6 +457,7 @@ export function TuningTab() {
                   <button
                     type="button"
                     aria-expanded={expanded}
+                    aria-pressed={expanded}
                     className="flex-1 flex items-start gap-2 text-left"
                     onClick={() => toggleSweep(s.sweep_id)}
                   >
@@ -447,18 +466,22 @@ export function TuningTab() {
                     </span>
                     <span className="flex-1">
                       <span className="block font-mono text-[11px]">{s.sweep_id}</span>
-                      <span className="block text-[10px] text-tcip-muted">{s.status}</span>
+                      <span className="block text-[10px] text-tcip-muted">
+                        {s.status}
+                        {running && s.cancel_requested ? " · stop requested" : ""}
+                      </span>
+                      {s.error && <span className="block text-[10px] text-tcip-fp">{s.error}</span>}
+                      {!s.relaunchable && s.reason && (
+                        <span className="block text-[10px] text-tcip-muted">{s.reason}</span>
+                      )}
                     </span>
                   </button>
                   {sweepAction(s)}
                 </div>
                 {expanded && (
                   <div className="mt-1 ml-5">
-                    {!s.relaunchable && s.reason && (
-                      <div className="text-[10px] text-tcip-muted mb-1">{s.reason}</div>
-                    )}
-                    {s.status === "cancelled" && s.error && (
-                      <div className="text-[10px] text-tcip-muted mb-1">{s.error}</div>
+                    {searchLine && (
+                      <div className="text-[10px] text-tcip-muted mb-1">{searchLine}</div>
                     )}
                     <ul className="space-y-1">
                       {trials.length === 0 ? (
@@ -468,6 +491,7 @@ export function TuningTab() {
                           <li key={t.trial_id}>
                             <button
                               type="button"
+                              aria-pressed={selectedTrialId === t.trial_id}
                               className={`w-full p-2 rounded border text-left transition-colors ${
                                 selectedTrialId === t.trial_id
                                   ? "border-tcip-accent bg-tcip-accent/10"
