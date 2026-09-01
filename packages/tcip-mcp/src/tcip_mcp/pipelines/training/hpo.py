@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import threading
 from collections.abc import Generator
 from contextlib import contextmanager
@@ -350,6 +351,25 @@ def _ray_session(ray: Any) -> Generator[None]:
                 ray.shutdown()
 
 
+_TERMINAL_COLOUR_CODE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+
+
+def trial_error_text(error: BaseException) -> str:
+    """One line naming a failed trial's error, fit for a durable record and a panel.
+
+    Ray wraps a trial's exception in a ``RayTaskError`` whose text is the worker's whole
+    traceback, terminal colour codes and absolute paths included. The record keeps the cause's
+    own type and message on one line instead: the last non-empty line of the cause's text
+    (a traceback's own last line is its exception line), colour codes stripped.
+    """
+    cause = getattr(error, "cause", None)
+    source = cause if isinstance(cause, BaseException) else error
+    lines = [line.strip() for line in _TERMINAL_COLOUR_CODE.sub("", str(source)).splitlines()]
+    message = next((line for line in reversed(lines) if line), "")
+    name = type(source).__name__
+    return message if message.startswith(f"{name}:") else f"{name}: {message}"
+
+
 def tune_search(
     objective_fn: Callable[[dict, Callable[[float], None]], Any],
     param_space: dict | None = None,
@@ -395,12 +415,16 @@ def tune_search(
     Returns dict with ``best_params``, ``best_value``, ``n_trials``, ``all_trials``,
     ``search_alg``, ``scheduler``, ``study_name`` (+ ``warm_start``/``baseline_params``).
     Each ``all_trials`` row is ``{"params", "value", "iterations", "state"}``, ``state`` one
-    of ``"COMPLETE"``/``"ERROR"``, plus an ``"error"`` string on any ``ERROR`` row (absent on
-    ``COMPLETE``). A trial Ray's own machinery killed before its first report (OOM, node
-    death) never reached ``tune.report``, so Ray hands back a result with no ``config``; that
+    of ``"COMPLETE"``/``"ERROR"``, plus an ``"error"`` line on any ``ERROR`` row (absent on
+    ``COMPLETE``), the cause's own type and message as :func:`trial_error_text` renders it.
+    Ray fills a trial's config into its result the moment the trial's actor answers Ray's
+    first bookkeeping call, so a trial that died after that point, an OOM or a node death
+    included, still comes back with its params; only a trial whose actor never answered
+    (it died during actor start, or never received one) comes back with no ``config``. That
     row carries no params, value or iteration count of its own: ``params``, ``value`` and
     ``iterations`` are all ``None``, ``state`` is ``"ERROR"``, and ``error`` names the
-    never-reported death.
+    never-answered death. A sweep in which no trial reported the metric at all raises
+    ``RuntimeError`` out of ``get_best_result``, which ``run_hpo`` records as a failed sweep.
     """
     if not storage_path:
         raise ValueError(
@@ -486,16 +510,16 @@ def tune_search(
     for i in range(len(results)):
         r = results[i]
         if r.config is None:
-            # Ray's config reads the trial's last reported metrics; a trial killed before its
-            # first report (OOM, node death) never has one, so there is nothing to name.
+            # Ray's config reads the trial's result metrics, filled the moment its actor answers
+            # Ray's first bookkeeping call; a trial whose actor never answered has nothing to name.
             text = (
-                "the trial never reported: it was killed before its first report, so it "
-                "has no params, value or iteration count of its own"
+                "the trial never answered Ray: its actor died during start or never received "
+                "one, so it has no params, value or iteration count of its own"
             )
             if r.error:
-                text = f"{text} ({r.error})"
+                text = f"{text} ({trial_error_text(r.error)})"
             all_trials.append({
-                "params": None, "value": None, "iterations": None,
+                "params": None, **stored_number("value", None), "iterations": None,
                 "state": "ERROR", "error": text,
             })
             continue
@@ -506,7 +530,7 @@ def tune_search(
             "state": "ERROR" if r.error else "COMPLETE",
         }
         if r.error:
-            row["error"] = str(r.error)
+            row["error"] = trial_error_text(r.error)
         all_trials.append(row)
 
     best = results.get_best_result(metric=metric, mode=mode)

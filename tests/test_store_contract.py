@@ -1592,9 +1592,10 @@ REGISTERED = {
         {"best_params": {"lr": 0.01}, "best_value": 0.25, "n_trials": 2,
          "all_trials": [
              {"params": {"lr": 0.1}, "value": None,
-              "value_state": "positive_infinity", "state": "ERROR"},
+              "value_state": "positive_infinity", "state": "ERROR",
+              "error": "RuntimeError: worker exploded before reporting"},
              {"params": None, "value": None, "iterations": None, "state": "ERROR",
-              "error": "the trial never reported: it was killed before its first report"},
+              "error": "the trial never answered Ray: its actor died during start"},
          ]},
         lambda root: training_tools.study_result_key(STUDY), f".tcip/hpo/{STUDY}.json",
         pin=_pin_platform_root, root_of=lambda root: training_tools.hpo_root()),
