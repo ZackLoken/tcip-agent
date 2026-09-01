@@ -52,21 +52,13 @@ _SPLIT_MANIFEST_REQUIRED_KEYS = (
 writes: a manifest missing one of them is refused there, before any caller binds to it."""
 
 
-def read_split_manifest_dir(split_dir: str | Path) -> dict:
-    """The ``split_manifest`` record ``make_splits`` wrote under ``split_dir``, the one reader a
-    run names its ``data.split.manifest_dir`` through.
-
-    Refuses with ``ValueError`` naming ``split_dir`` when the record is absent, undecodable, not
-    a mapping, lacks any key of :data:`_SPLIT_MANIFEST_REQUIRED_KEYS`, holds a ``members`` block
-    whose ``label_digests`` is missing or not a non-empty mapping (a manifest drawn before the
-    platform recorded per-stem digests binds nothing here), lacks any name
-    :data:`~tcip_mcp.pipelines.data.splits.SPLIT_NAMES` states under ``splits``, or whose sides
-    are not pairwise disjoint (a member on two sides would be trained on and selected on, or
-    trained on and held out for calibration, at once). One reader, one refusal: the binder, the
-    calibration universe, preflight and every entry point read a manifest through here and never test
-    its shape themselves. Because ``seed`` is required here, a caller that reads it off the
-    returned manifest (a run's bind, resolving its own seed from the manifest's) never sees it
-    absent and falls through to a ``None`` in its place.
+def _read_split_manifest_dir_or_none(split_dir: str | Path) -> dict | None:
+    """The validated ``split_manifest`` record under ``split_dir``, or ``None`` when nothing is
+    recorded there. Raises ``ValueError`` for a record that exists but will not decode, is not a
+    mapping, or fails one of the required-key/shape checks; lets
+    :class:`tcip_store.SchemaVersionRefused` propagate uncaught. The one validation
+    :func:`read_split_manifest_dir` and :func:`read_split_manifest_dir_checked` both build on, so
+    neither restates the shape a manifest must carry.
     """
     from tcip_store import DecodeError
 
@@ -77,7 +69,7 @@ def read_split_manifest_dir(split_dir: str | Path) -> dict:
     except DecodeError as exc:
         raise ValueError(f"the split manifest at {split_dir} could not be read: {exc}") from exc
     if manifest is None:
-        raise ValueError(f"no split manifest recorded under {split_dir}; run make_splits first.")
+        return None
     if not isinstance(manifest, dict):
         raise ValueError(
             f"the split manifest at {split_dir} decodes to a {type(manifest).__name__}, not the "
@@ -126,6 +118,52 @@ def read_split_manifest_dir(split_dir: str | Path) -> dict:
             "recorded."
         )
     return manifest
+
+
+def read_split_manifest_dir(split_dir: str | Path) -> dict:
+    """The ``split_manifest`` record ``make_splits`` wrote under ``split_dir``, the one reader a
+    run names its ``data.split.manifest_dir`` through.
+
+    Refuses with ``ValueError`` naming ``split_dir`` when the record is absent, undecodable, not
+    a mapping, lacks any key of :data:`_SPLIT_MANIFEST_REQUIRED_KEYS`, holds a ``members`` block
+    whose ``label_digests`` is missing or not a non-empty mapping (a manifest drawn before the
+    platform recorded per-stem digests binds nothing here), lacks any name
+    :data:`~tcip_mcp.pipelines.data.splits.SPLIT_NAMES` states under ``splits``, or whose sides
+    are not pairwise disjoint (a member on two sides would be trained on and selected on, or
+    trained on and held out for calibration, at once). One reader, one refusal: the binder, the
+    calibration universe, preflight and every entry point read a manifest through here and never test
+    its shape themselves. Because ``seed`` is required here, a caller that reads it off the
+    returned manifest (a run's bind, resolving its own seed from the manifest's) never sees it
+    absent and falls through to a ``None`` in its place.
+    """
+    manifest = _read_split_manifest_dir_or_none(split_dir)
+    if manifest is None:
+        raise ValueError(f"no split manifest recorded under {split_dir}; run make_splits first.")
+    return manifest
+
+
+def read_split_manifest_dir_checked(split_dir: str | Path) -> tuple[dict | None, str | None]:
+    """The checked variant of :func:`read_split_manifest_dir`, for a caller (the data picker)
+    that lists a candidate directory rather than binds to it, and so must tell "nothing recorded
+    here" apart from "something is recorded here and it is wrong".
+
+    Returns ``(manifest, error)``. Absence answers ``(None, None)``: nothing to offer, and
+    nothing to explain either. A record that exists but will not decode, fails the required-key
+    reading, or names a ``schema_version`` this reader does not accept answers ``(None, text)``,
+    catching :class:`tcip_store.SchemaVersionRefused` beside the plain-shape ``ValueError``
+    :func:`_read_split_manifest_dir_or_none` raises, for this purpose only: a version refusal
+    must never read as an ordinary absence, the way :func:`read_split_manifest_dir` itself still
+    lets it propagate uncaught.
+    """
+    from tcip_store import SchemaVersionRefused
+
+    try:
+        manifest = _read_split_manifest_dir_or_none(split_dir)
+    except SchemaVersionRefused as exc:
+        return None, str(exc)
+    except ValueError as exc:
+        return None, str(exc)
+    return manifest, None
 
 
 ROOT_LABEL_CANDIDATES = ("annotations.json", "labels.json", "instances.json")

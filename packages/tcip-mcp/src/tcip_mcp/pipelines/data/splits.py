@@ -400,6 +400,44 @@ class ManifestBinding:
     other_dates: int
 
 
+@dataclass(frozen=True)
+class ManifestDateNarrowing:
+    """A split manifest's ``splits`` membership narrowed to one capture date: which identities
+    under that date landed on each side, and how many of the manifest's identities (any date)
+    belong to some other one. ``all_ids`` is the manifest-wide union across every date, kept
+    because a stem the run admits under ``date`` can only be checked against the whole manifest
+    for "assigned to no side at all" (:func:`bind_manifest_stems`'s own concern), never against
+    the narrowed-to-date sets alone.
+    """
+
+    train_ids: frozenset[str]
+    val_ids: frozenset[str]
+    calibration_ids: frozenset[str]
+    all_ids: frozenset[str]
+    other_dates: int
+
+
+def narrow_manifest_to_date(manifest: dict, date: str | None) -> ManifestDateNarrowing:
+    """Which of a split manifest's ``splits`` identities fall under one capture date, per side.
+
+    The one implementation of the narrowing :func:`bind_manifest_stems` performs on a run's own
+    admitted stems and the data picker performs on a candidate manifest before any admission
+    exists to bind against, so the counts shown to a breeder before Start are the identical
+    arithmetic the launch itself would apply.
+    """
+    splits = manifest.get("splits") or {}
+    train_ids = frozenset(splits.get("train") or [])
+    val_ids = frozenset(splits.get("val") or [])
+    calibration_ids = frozenset(splits.get("calibration") or [])
+    all_ids = train_ids | val_ids | calibration_ids
+    this_date_ids = frozenset(i for i in all_ids if member_identity_parts(i)[0] == date)
+    return ManifestDateNarrowing(
+        train_ids=this_date_ids & train_ids, val_ids=this_date_ids & val_ids,
+        calibration_ids=this_date_ids & calibration_ids, all_ids=all_ids,
+        other_dates=len(all_ids) - len(this_date_ids),
+    )
+
+
 def bind_manifest_stems(
     manifest: dict, date: str | None, subject: str, attribute: str | None,
     admitted: Sequence[str], *, admission_counts: dict[str, int] | None = None,
@@ -446,16 +484,10 @@ def bind_manifest_stems(
             "date the manifest was drawn for."
         )
 
-    splits = manifest.get("splits") or {}
-    train_ids = set(splits.get("train") or [])
-    val_ids = set(splits.get("val") or [])
-    calibration_ids = set(splits.get("calibration") or [])
-    all_ids = train_ids | val_ids | calibration_ids
-    this_date_ids = {i for i in all_ids if member_identity_parts(i)[0] == date}
-    other_dates = len(all_ids) - len(this_date_ids)
+    narrowing = narrow_manifest_to_date(manifest, date)
 
     admitted_ids = {member_identity(date, s) for s in admitted}
-    unassigned = sorted(admitted_ids - all_ids)
+    unassigned = sorted(admitted_ids - narrowing.all_ids)
     if unassigned:
         preview = [member_identity_parts(i)[1] for i in unassigned[:10]]
         more = f" (+{len(unassigned) - 10} more)" if len(unassigned) > 10 else ""
@@ -465,7 +497,7 @@ def bind_manifest_stems(
             "chose; regenerate the split over the current data (make_splits draws through the "
             "same admission this run does)."
         )
-    this_date_train_val = {i for i in this_date_ids if i in train_ids or i in val_ids}
+    this_date_train_val = narrowing.train_ids | narrowing.val_ids
     not_admitted = sorted(this_date_train_val - admitted_ids)
     if not_admitted:
         preview = [member_identity_parts(i)[1] for i in not_admitted[:10]]
@@ -479,21 +511,21 @@ def bind_manifest_stems(
             f"removed); regenerate the split over the current data.{counts_note}"
         )
 
-    train_bound = sorted(member_identity_parts(i)[1] for i in this_date_ids & train_ids)
-    val_bound = sorted(member_identity_parts(i)[1] for i in this_date_ids & val_ids)
+    train_bound = sorted(member_identity_parts(i)[1] for i in narrowing.train_ids)
+    val_bound = sorted(member_identity_parts(i)[1] for i in narrowing.val_ids)
     if not train_bound or not val_bound:
         raise ValueError(
             f"binding to the split manifest under date {date!r} leaves an empty side "
             f"(train={len(train_bound)}, val={len(val_bound)}); a run needs both."
         )
-    calibration_this_date = this_date_ids & calibration_ids
-    calibration_bound = sorted(member_identity_parts(i)[1] for i in calibration_this_date)
-    calibration_unadmitted = len(calibration_this_date - admitted_ids)
+    calibration_bound = sorted(member_identity_parts(i)[1] for i in narrowing.calibration_ids)
+    calibration_unadmitted = len(narrowing.calibration_ids - admitted_ids)
     return ManifestBinding(
         train=train_bound, val=val_bound, calibration=calibration_bound,
-        assigned=len(this_date_ids), train_bound=len(train_bound), val_bound=len(val_bound),
+        assigned=len(narrowing.train_ids | narrowing.val_ids | narrowing.calibration_ids),
+        train_bound=len(train_bound), val_bound=len(val_bound),
         calibration_bound=len(calibration_bound), calibration_unadmitted=calibration_unadmitted,
-        other_dates=other_dates,
+        other_dates=narrowing.other_dates,
     )
 
 
