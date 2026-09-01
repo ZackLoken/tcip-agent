@@ -821,11 +821,11 @@ anything.
 | `preflight_config` | `training_tools.py:258` | yes | Validate a training configuration before launching. |
 | `launch_training` | `training_tools.py:650` | yes | Launch a training run in an isolated subprocess from a bespoke ``model_source`` builder. |
 | `check_training_status` | `training_tools.py:884` | yes | Check the status of a training run. |
-| `list_training_runs` | `training_tools.py:1021` | yes | List every training run this platform can currently account for. |
-| `cancel_training` | `training_tools.py:1237` | yes | Request graceful cancellation of a running training run. |
-| `run_hpo` | `training_tools.py:1727` | yes | Run hyperparameter optimization on Ray Tune, training each trial for real. |
-| `cancel_hpo` | `training_tools.py:1968` | yes | Request cooperative cancellation of a running HPO sweep. |
-| `evaluate_model` | `training_tools.py:2362` | yes | Evaluate a trained checkpoint on a (held-out) dataset and write test_results.json. |
+| `list_training_runs` | `training_tools.py:1023` | yes | List every training run this platform can currently account for. |
+| `cancel_training` | `training_tools.py:1239` | yes | Request graceful cancellation of a running training run. |
+| `run_hpo` | `training_tools.py:1729` | yes | Run hyperparameter optimization on Ray Tune, training each trial for real. |
+| `cancel_hpo` | `training_tools.py:1970` | yes | Request cooperative cancellation of a running HPO sweep. |
+| `evaluate_model` | `training_tools.py:2364` | yes | Evaluate a trained checkpoint on a (held-out) dataset and write test_results.json. |
 
 ### vision_tools.py (3 tools)
 
@@ -1017,7 +1017,7 @@ registered at HEAD.
 | POST | `/runs/{run_id}/tensorboard` | `launch_run_tensorboard` | `routes/training.py:144` |
 | POST | `/runs/{run_id}/cancel` | `cancel_run_route` | `routes/training.py:164` |
 | POST | `/compare` | `compare_runs_route` | `routes/training.py:184` |
-| WS | `/runs/{run_id}/stream` (full path `/api/training/runs/{run_id}/stream`) | `training_stream_ws` | `routes/training.py:323` |
+| WS | `/runs/{run_id}/stream` (full path `/api/training/runs/{run_id}/stream`) | `training_stream_ws` | `routes/training.py:329` |
 
 ### routes/tuning.py, prefix `/api/tuning` (10 routes)
 
@@ -1979,7 +1979,7 @@ config-only conflict and task checks (computed before any read, so an unreadable
 suppresses them) and the manifest-dependent checks (subject/attribute, date, images-root
 presence and movement, and an empty train/val side once narrowed to the run's own date).
 `preflight_config` calls both halves directly, in the same order, over a manifest it read
-itself; `training_tools.list_split_choices` (`training_tools.py:1080`), the relaunch data
+itself; `training_tools.list_split_choices` (`training_tools.py:1082`), the relaunch data
 picker's own reader wrapped by `GET /api/training/configs/{experiment_id}/splits`, calls the
 composed function per candidate manifest it read through the checked variant above, and builds
 each candidate's launch config through `training_tools.candidate_config_with_manifest`
@@ -2138,7 +2138,7 @@ Phase 3 verdict: single.
 
 Must agree: the writer's row shape is what the reader and the stream consumer expect.
 Side A: `packages/tcip-mcp/src/tcip_mcp/experiments.py:898` (`def log_metrics(`, the one writer; the trainer and the envelope hand rows to the context's epoch sink instead of opening the file).
-Side B: `packages/tcip-web/src/tcip_web/routes/training.py:283` (`read_log(key, after=cursor)`, the training stream's incremental tail, pushed as a `TrainingMetricFrame` per row) and `routes/tuning.py:549` (`read_log(trial_metrics_key`, answered in the shape `_metrics_common.metrics_response` builds).
+Side B: `packages/tcip-web/src/tcip_web/routes/training.py:289` (`read_log(key, after=cursor)`, the training stream's incremental tail, pushed as a `TrainingMetricFrame` per row) and `routes/tuning.py:549` (`read_log(trial_metrics_key`, answered in the shape `_metrics_common.metrics_response` builds).
 Phase 3 verdict: single. An HPO trial with no experiment record still appends to its own trial log, one declared site in the epoch sink, pending the HPO store migration.
 
 ## S09. Web job registries persisted to .tcip/state/<name>.json  <!-- queued: P5-325 unify -->
@@ -2449,7 +2449,7 @@ Phase 3 verdict: duplicated.
 ## S51. Training run stream WebSocket  <!-- queued: P5-297 unify -->
 
 Must agree: the status payload the MCP tool returns is renderable by the browser's training view.
-Side A: `packages/tcip-web/src/tcip_web/routes/training.py:322` (`@router.websocket("/runs/{run_id}/stream")`).
+Side A: `packages/tcip-web/src/tcip_web/routes/training.py:328` (`@router.websocket("/runs/{run_id}/stream")`).
 Side B: `packages/tcip-mcp/src/tcip_mcp/tools/training_tools.py` (`check_training_status` supplies the status payload).
 Phase 3 verdict: duplicated.
 
