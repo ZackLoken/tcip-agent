@@ -95,7 +95,7 @@ The discipline:
    in a retrospective; a negative result is real knowledge and stops the next session re-trying it.
    If it wins, it becomes the new baseline; log the source and the delta in the experiment lineage.
 5. Never let a researched-but-unvalidated method harden into a definition. Until it clears step 3
-   it is provisional and labeled provisional; it must not become the default the next session reuses
+   it stays labeled not-yet-validated; it must not become the default the next session reuses
    without seeing the evidence.
 
 If validation is impossible because the phenotype itself can't yet be measured validly from pixels,

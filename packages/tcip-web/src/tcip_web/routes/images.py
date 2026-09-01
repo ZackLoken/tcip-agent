@@ -96,8 +96,8 @@ That ties what describing a raster costs to the same bound that caps what is ser
 
 _STATS_RESERVOIR_SIZE = 1 << 20
 """Pixels the percentile pass keeps, bounding what it holds to that many values per band in the
-raster's own dtype (8 MB for a 4-band uint16 raster). Provisional: a memory bound, not a measured
-precision."""
+raster's own dtype (8 MB for a 4-band uint16 raster). A documented default: a memory bound, not a
+measured precision."""
 
 _STATS_SAMPLE_BUDGET = _STATS_MAX_WINDOWS * _STATS_WINDOW_SIZE**2
 """Full-resolution pixels a raster may hold before its display stats are read from an overview

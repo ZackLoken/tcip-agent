@@ -270,7 +270,7 @@ def derive_localization_kind(
     (underivable; the caller stamps an honest default, never a derivation label on that number),
     same contract as every other function in this module.
 
-    **``jitter_px``'s default (15.0px) is a provisional platform-chosen constant, not a value
+    **``jitter_px``'s default (15.0px) is a plain, documented platform default, not a value
     validated against this platform's real detector/annotation precision**, same shape and same
     caveat as ``operating_point._DEFAULT_KAPPA_FLOOR``. It sets where the center-match/IoU-match
     crossover falls (currently ``s = 3 * jitter_px`` = ~45px characteristic size); a future pass
@@ -322,8 +322,8 @@ def derive_iou_match_threshold(
     ``derive_cross_tile_nms``), rather than gating on the exact boundary value. Clamped to a sane
     range around the conventional IoU@0.5 comparability convention.
 
-    **``jitter_px``'s default (15.0px) and ``margin``'s default (0.1) are provisional
-    platform-chosen constants**, same caveat as ``derive_localization_kind``'s own ``jitter_px``,
+    **``jitter_px``'s default (15.0px) and ``margin``'s default (0.1) are plain, documented
+    platform defaults**, same caveat as ``derive_localization_kind``'s own ``jitter_px``,
     not validated against this platform's real detector precision yet; the same
     ``data_derived_at_runtime`` recording and revisit-on-divergence discipline applies once this
     is wired into ``resolve_match_criterion``.

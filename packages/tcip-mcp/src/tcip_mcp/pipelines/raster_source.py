@@ -34,8 +34,8 @@ ARRAY_CONTAINER_EXTS = (".npy", ".npz", ".tif", ".tiff")
 
 _PIL_MODES = {1: "L", 3: "RGB", 4: "RGBA"}
 
-# Provisional platform budget, not derived from a measurement: the share of the host's physical RAM
-# the decoded-pixel caches here may hold, leaving the model, tile batch and OS the rest.
+# A plain, documented platform default, not derived from a measurement: the share of the host's
+# physical RAM the decoded-pixel caches here may hold, leaving the model, tile batch and OS the rest.
 _RAM_BUDGET_FRACTION = 0.25
 
 # GDAL's block cache's share of that budget; the pooled registry of open sources budgets against
@@ -46,7 +46,7 @@ _GDAL_CACHE_SHARE = 0.5
 # real memory can't be read is under-budgeted rather than over.
 _ASSUMED_TOTAL_RAM_BYTES = 8 * 1024 ** 3
 
-# raster_content_identity()'s default sampling budget, provisional and platform-chosen (not
+# raster_content_identity()'s default sampling budget, a plain, documented default (not
 # measured against a real false-match rate).
 CONTENT_IDENTITY_SEED = 0
 CONTENT_IDENTITY_WINDOW_SIZE = 1024
