@@ -854,6 +854,7 @@ class ModelRegistry:
 
     def best_model(
         self, metric_key: str, *, higher_is_better: bool, include_unverified: bool = False,
+        experiment_ids: list[str] | None = None,
     ) -> dict | None:
         """Get the registered model with the best value for ``metric_key``.
 
@@ -873,7 +874,9 @@ class ModelRegistry:
         through ``register_model`` to add ``metrics_source`` (its checkpoint on disk is unchanged;
         the call re-hashes and rewrites the entry with both fields present). A present
         ``metrics_source`` of ``None`` is not malformed, it is the honest pairing for an entry with
-        no metrics.
+        no metrics. ``experiment_ids``, when given, narrows ranking to entries whose own
+        ``experiment_id`` is in the set (an explicit-mode entry, whose ``experiment_id`` is
+        ``None``, is never in it); ``None`` (the default) ranks the whole registry, unchanged.
         """
         malformed = [m.get("name") for m in self._index if "metrics_source" not in m]
         if malformed:
@@ -885,6 +888,8 @@ class ModelRegistry:
         best = None
         best_val: float | None = None
         for m in self._index:
+            if experiment_ids is not None and m.get("experiment_id") not in experiment_ids:
+                continue
             source = m["metrics_source"]
             if source != "trainer" and not include_unverified:
                 continue

@@ -126,6 +126,7 @@ def _labeled_available_metrics(models: list[dict]) -> list[dict]:
 def select_best_model(
     project_path: str = "", metric: str = "",
     higher_is_better: bool | None = None, include_unverified: bool = False,
+    experiment_ids: list[str] | None = None,
 ) -> dict:
     """Get the best registered model by an explicit metric, no default is assumed.
 
@@ -151,6 +152,10 @@ def select_best_model(
         higher_is_better: Overrides the declared direction (``evaluation.HIGHER_IS_BETTER_BY_METRIC``,
             keyed by the ``val_``-stripped name) when given; required when ``metric`` is undeclared.
         include_unverified: Also rank entries whose ``metrics_source`` is not ``"trainer"``.
+        experiment_ids: Narrow ranking to entries produced by one of these experiments (the
+            comparison view's own marked set), applied before ``available_metrics`` or the
+            unverified exclusions are derived, so both describe only the marked set. ``None``
+            (the default) ranks the whole registry, unchanged.
     """
     from tcip_store.values import NOT_FINITE_SUFFIX
 
@@ -158,6 +163,9 @@ def select_best_model(
 
     registry = ModelRegistry(_registry_root(project_path))
     models = registry.list_models()
+    if experiment_ids is not None:
+        wanted = set(experiment_ids)
+        models = [m for m in models if m.get("experiment_id") in wanted]
     if not models:
         return {"error": "No models registered"}
     if not metric:
@@ -197,7 +205,7 @@ def select_best_model(
         {"name": m["name"], "metrics_source": m.get("metrics_source")} for m in unverified
     ]
     best = registry.best_model(metric, higher_is_better=resolved_direction,
-                               include_unverified=include_unverified)
+                               include_unverified=include_unverified, experiment_ids=experiment_ids)
     if best is None:
         carriers = [m for m in models if metric in m.get("metrics", {})]
         if carriers and not include_unverified and all(m in unverified for m in carriers):

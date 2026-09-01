@@ -47,6 +47,10 @@ class TrainRun:
     # None means the loop runs in-process (cancel_event alone is authoritative); set once the
     # parent spawns the subprocess a run's body executes in, when should_cancel polls the sentinel.
     pid: int | None = None
+    # Set by launch_training once _ensure_experiment resolves the tracked id; None while unresolved.
+    experiment_id: str | None = None
+    # Set by launch_training when experiment tracking itself raised; None when it succeeded or never ran.
+    experiment_error: str | None = None
 
     def should_cancel(self) -> bool:
         """True if cancellation was requested, in-process (``cancel_event``) or via the sentinel
@@ -74,7 +78,8 @@ class TrainRun:
             "origin": self.origin,
             "elapsed_seconds": (self.end_time or time.time()) - self.start_time if self.start_time else 0,
             "pid": self.pid,
-            "experiment_id": self.config.get("experiment_id") if isinstance(self.config, dict) else None,
+            "experiment_id": self.experiment_id,
+            "experiment_error": self.experiment_error,
         }
 
 

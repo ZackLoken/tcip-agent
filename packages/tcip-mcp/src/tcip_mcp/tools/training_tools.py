@@ -755,9 +755,11 @@ def launch_training(
         # Thread the resolved id into the live config so the child's checkpoints carry it (the
         # envelope's ctx.save_checkpoint stamps it explicitly).
         config["experiment_id"] = experiment_id
+        run.experiment_id = experiment_id
         update_status(experiment_id, "running")
     except Exception as exc:  # Experiment tracking is best-effort, but failures must be visible.
         logger.warning("Experiment tracking failed for %s: %s", experiment_id, exc)
+        run.experiment_error = str(exc)
 
     # The child reads its own bootstrap config from here, independent of whether experiment
     # tracking above succeeded, a filesystem hiccup in .tcip/experiments degrades tracking (as it

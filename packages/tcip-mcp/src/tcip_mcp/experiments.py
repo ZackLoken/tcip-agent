@@ -1531,6 +1531,65 @@ def _index_refused_mutations(experiment_ids: list[str]) -> dict[str, list[dict[s
     return index
 
 
+def _split_summary(experiment_id: str) -> dict[str, Any]:
+    """The partition column for one experiment: :func:`read_split_manifest_checked` reduced to
+    the four states a comparison names. ``{"case": "error", "error": ...}`` for a record that
+    exists but will not decode; ``{"case": "none"}`` for a run that never wrote one;
+    ``{"case": "bound", "manifest_dir": ..., "seed": ...}`` for a run bound to a named split
+    manifest (``split.json``'s own ``manifest_binding``); ``{"case": "drawn", "seed": ...}``
+    otherwise, so two runs of one config on different partitions never compare as the same data.
+    """
+    manifest, decode_error = read_split_manifest_checked(experiment_id)
+    if decode_error is not None:
+        return {"case": "error", "error": decode_error}
+    if not manifest:
+        return {"case": "none"}
+    binding = manifest.get("manifest_binding")
+    if isinstance(binding, dict) and binding.get("manifest_dir"):
+        return {"case": "bound", "manifest_dir": binding["manifest_dir"], "seed": manifest.get("seed")}
+    return {"case": "drawn", "seed": manifest.get("seed")}
+
+
+def _index_registry_entries(
+    experiment_ids: list[str],
+) -> tuple[dict[str, list[dict[str, Any]]] | None, str | None]:
+    """Every registered model entry naming one of ``experiment_ids`` as its producer, indexed by
+    experiment id, from one read of the platform root's registry index, the root every column
+    this comparison shows is read from. Returns ``(index, error)``: ``index`` is ``None`` and
+    ``error`` names why whenever the caller must not treat "no entries matched" as an answer:
+    the index document itself could not be read (an absent registry reads as a legitimate empty
+    index, not this case), or the registry carries an entry with no ``metrics_source`` key at
+    all (an entry predating the field, the same condition :meth:`ModelRegistry.best_model`
+    refuses ranking on), named rather than silently matching nothing. Otherwise ``index`` holds
+    every match, each entry reduced to ``name``, ``metrics``, ``metrics_source``,
+    ``registered_at``; an experiment with no registered entry is simply absent from the index.
+    """
+    from tcip_mcp.model_registry import read_registry_index
+    from tcip_mcp.project_paths import platform_state_root
+
+    try:
+        entries = read_registry_index(platform_state_root())
+    except Exception as exc:
+        return None, f"registry unreadable: {exc}"
+
+    stale = sorted(str(e.get("name")) for e in entries if "metrics_source" not in e)
+    if stale:
+        return None, (f"registry entries {stale} predate metrics_source and cannot be matched "
+                       "to a producing experiment or ranked until conformed")
+
+    wanted = set(experiment_ids)
+    index: dict[str, list[dict[str, Any]]] = {}
+    for e in entries:
+        eid = e.get("experiment_id")
+        if eid not in wanted:
+            continue
+        index.setdefault(eid, []).append({
+            "name": e.get("name"), "metrics": e.get("metrics"),
+            "metrics_source": e.get("metrics_source"), "registered_at": e.get("registered_at"),
+        })
+    return index, None
+
+
 def compare_experiments(experiment_ids: list[str], *, stale_seconds: float = 600.0) -> dict[str, Any]:
     """Side-by-side comparison of multiple experiments.
 
@@ -1556,13 +1615,29 @@ def compare_experiments(experiment_ids: list[str], *, stale_seconds: float = 600
     missing or unparseable never counted rather than raising; ``n_epochs``/``n_rows``, always
     present; and ``refused_mutations``, every refused write the platform audit log recorded
     against this experiment (see :func:`_index_refused_mutations`), absent rather than empty when
-    that log itself can't be read. Reading it costs one scan of the platform audit log for the
-    whole call, on top of one :func:`get_experiment` per experiment compared.
+    that log itself can't be read.
+
+    Also per experiment: ``task``/``subject`` from the config already read; ``status_error``, the
+    status record's own failure reason (``None`` for a run that never failed, distinct from a
+    comparison entry's own top-level ``error`` when :func:`get_experiment` could not read it at
+    all); ``model``, the config's
+    builder, ``None`` when the config names none (never a fabricated ``"unknown"``); ``split``
+    (see :func:`_split_summary`), so two runs of one config on different partitions never compare
+    as the same data; and ``registry``, this experiment's own registered entries (see
+    :func:`_index_registry_entries`), absent, with ``registry_error`` naming why, when the
+    project's registry index can't be read or matched at all (an experiment with no registered
+    entry still carries ``registry: []``). ``same_dataset_fingerprint`` is ``None``, never
+    ``True``, when any compared id is an error entry: a record this call could not even read must
+    never be silently dropped from the same-data judgment.
+
+    Reading refused mutations and the registry each cost one scan for the whole call, on top of
+    one :func:`get_experiment` and one :func:`_split_summary` per experiment compared.
     """
     from tcip_mcp.pipelines.model_build import MODEL_SOURCE_KEY
 
     comparisons: list[dict[str, Any]] = []
     refused_index = _index_refused_mutations(experiment_ids)
+    registry_index, registry_error = _index_registry_entries(experiment_ids)
 
     for eid in experiment_ids:
         exp = get_experiment(eid)
@@ -1596,14 +1671,29 @@ def compare_experiments(experiment_ids: list[str], *, stale_seconds: float = 600
                 and row_instant > ended_instant
             )
         summary["rows_after_end"] = rows_after_end
+        # status_error, not "error": that key already marks a comparison entry get_experiment
+        # could not even read (the sentinel with_fp/same_dataset_fingerprint filter on below).
+        summary["status_error"] = status_doc.get("error")
 
         if refused_index is not None:
             summary["refused_mutations"] = refused_index.get(eid, [])
 
+        if registry_index is not None:
+            summary["registry"] = registry_index.get(eid, [])
+        else:
+            summary["registry_error"] = registry_error
+
+        summary["split"] = _split_summary(eid)
+
         # Get config summary
         config = exp.get("config", {})
+        config = config if isinstance(config, dict) else {}
         model_source = config.get(MODEL_SOURCE_KEY, {})
-        summary["model"] = model_source.get("builder", "unknown")
+        model_source = model_source if isinstance(model_source, dict) else {}
+        summary["model"] = model_source.get("builder")
+        summary["task"] = model_source.get("task")
+        data_cfg = config.get("data", {})
+        summary["subject"] = data_cfg.get("subject") if isinstance(data_cfg, dict) else None
 
         # Dataset identity (the content end of the reproduce-a-number chain), from the immutable lineage.
         lin = exp.get("lineage")
@@ -1619,6 +1709,7 @@ def compare_experiments(experiment_ids: list[str], *, stale_seconds: float = 600
         FINGERPRINT_FORMULA_VERSION, fingerprint_formula_version,
     )
 
+    any_error = any("error" in c for c in comparisons)
     with_fp = [c for c in comparisons if "error" not in c]
     for c in with_fp:
         fp = c.get("dataset_fingerprint")
@@ -1626,7 +1717,9 @@ def compare_experiments(experiment_ids: list[str], *, stale_seconds: float = 600
             c["fingerprint_formula_unrecorded"] = True
     fps = {c.get("dataset_fingerprint") for c in with_fp}
     any_unrecorded = any(c.get("fingerprint_formula_unrecorded") for c in with_fp)
-    same_dataset = None if (not fps or None in fps or any_unrecorded) else len(fps) == 1
+    # A record this call could not even read (any_error) must never be silently dropped from the
+    # judgment: the remaining columns matching each other says nothing about the missing one.
+    same_dataset = None if (any_error or not fps or None in fps or any_unrecorded) else len(fps) == 1
     return {"experiments": comparisons, "count": len(comparisons), "same_dataset_fingerprint": same_dataset}
 
 

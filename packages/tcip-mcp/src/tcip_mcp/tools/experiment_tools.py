@@ -115,10 +115,15 @@ def compare_experiments(experiment_ids: list[str]) -> dict:
     entry's own ``metrics_source``, neither reads this row), ``rows_after_end`` (rows whose own
     timestamp is a later instant than the record's own ``ended``), ``n_epochs``/``n_rows``,
     ``refused_mutations`` (every refused write the platform audit log recorded against it,
-    absent when that log can't be read), the model builder, and dataset identity. Reads the
-    heartbeat freshness window from ``$TCIP_HEARTBEAT_STALE_SECONDS`` (600s by default), the same knob
-    ``check_training_status`` and the run enumeration use, so all three agree under a configured
-    window. Use this to compare different model architectures or hyperparameters.
+    absent when that log can't be read), the model builder (``None`` when the config names
+    none), ``task``/``subject``, ``status_error`` (the status record's own failure reason), the
+    run's own ``split`` partition, its ``registry`` entries (absent, with ``registry_error``
+    naming why, when the project's registry index can't be read or matched), and dataset
+    identity; ``same_dataset_fingerprint`` is ``None`` when any compared id is an error entry.
+    Reads the heartbeat freshness window from ``$TCIP_HEARTBEAT_STALE_SECONDS`` (600s by
+    default), the same knob ``check_training_status`` and the run enumeration use, so all three
+    agree under a configured window. Use this to compare different model architectures or
+    hyperparameters.
 
     Args:
         experiment_ids: List of experiment IDs to compare.
