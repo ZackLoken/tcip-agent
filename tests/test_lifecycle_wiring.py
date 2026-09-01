@@ -106,17 +106,10 @@ def test_a_stock_trainer_run_registers_with_trainer_source_and_the_best_epochs_m
     assert isinstance(final["metrics"], dict)  # not the old per-epoch list
 
 
-def test_a_diverged_stock_run_registers_with_trainer_source_and_a_null_loss(tmp_path, monkeypatch):
-    """A run whose loss never becomes a finite number never improves on the losing-side
-    sentinel, so it writes no model_best.pt; the last completed epoch's checkpoint metrics
-    (model_final.pt) still normalize the diverged loss to null plus a state companion, exactly
-    as the run's own metrics log does, and still register cleanly with metrics_source='trainer'."""
-    monkeypatch.chdir(tmp_path)
-    import torch
+def _lifecycle_run(tmp_path, builder: str, experiment_id: str):
     from torch.utils.data import DataLoader
 
     from tcip_mcp.experiments import create_experiment, update_status
-    from tcip_mcp.model_registry import ModelRegistry
     from tcip_mcp.pipelines.training.envelope import TrainContext, run_training_envelope
     from tcip_mcp.pipelines.training.collation import task_collate
     from tcip_mcp.pipelines.training.run_registry import create_run
@@ -129,31 +122,62 @@ def test_a_diverged_stock_run_registers_with_trainer_source_and_a_null_loss(tmp_
     val_loader = DataLoader(val_ds, batch_size=2, collate_fn=collate)
 
     config = {
-        "model_source": {"builder": "tests.tiny_trainer_fixtures:build_always_diverged_model",
-                         "task": "regression", "in_chans": 1},
+        "model_source": {"builder": builder, "task": "regression", "in_chans": 1},
         "device": "cpu", "mixed_precision": False,
-        "stages": [{"freeze_to": 0, "epochs": 2}],
+        "stages": [{"freeze_to": 0, "epochs": 3}],
         "optimizer": {"name": "adamw", "backbone_lr": 0.05, "head_lr": 0.05, "weight_decay": 0.0},
         "checkpoint_every_n_epochs": 0, "early_stopping": {"enabled": False},
     }
-    create_experiment("exp-diverged", config, data_source="imgs")
-    update_status("exp-diverged", "running")
+    create_experiment(experiment_id, config, data_source="imgs")
+    update_status(experiment_id, "running")
     run = create_run(config, str(tmp_path / "out"))
     ctx = TrainContext(run=run, train_loader=train_loader, val_loader=val_loader,
-                       task="regression", experiment_id="exp-diverged")
+                       task="regression", experiment_id=experiment_id)
     run_training_envelope(ctx)
+    return run
+
+
+def test_a_diverged_stock_run_ends_failed_and_registers_nothing(tmp_path, monkeypatch):
+    """Two full passes with no finite training loss end the run failed with the reason on its
+    record; the verdict leaves no checkpoint on disk and nothing reaches the model registry."""
+    monkeypatch.chdir(tmp_path)
+    from tcip_mcp.experiments import read_member, status_key
+    from tcip_mcp.model_registry import ModelRegistry
+
+    run = _lifecycle_run(
+        tmp_path, "tests.tiny_trainer_fixtures:build_always_diverged_model", "exp-diverged")
+
+    assert run.status == "failed"
+    assert "2 consecutive full training passes" in run.error
+    assert not (tmp_path / "out" / "model_best.pt").exists()
+    assert not (tmp_path / "out" / "model_final.pt").exists()
+    assert ModelRegistry(str(tmp_path)).get_model("exp-diverged") is None
+    status = read_member(status_key("exp-diverged"), {})
+    assert "2 consecutive full training passes" in status.get("error", "")
+
+
+def test_a_completed_run_with_a_diverged_val_metric_registers_it_as_null(tmp_path, monkeypatch):
+    """A healthy training loss completes the run even when a validation metric goes
+    non-finite; the final checkpoint and the registry entry carry that metric normalized to
+    null plus a state companion, exactly as the run's own metrics log does, with
+    metrics_source='trainer'."""
+    monkeypatch.chdir(tmp_path)
+    import torch
+
+    from tcip_mcp.model_registry import ModelRegistry
+
+    run = _lifecycle_run(
+        tmp_path, "tests.tiny_trainer_fixtures:build_nan_eval_regressor", "exp-nan-val")
 
     assert run.status == "completed", run.error
-    assert not (tmp_path / "out" / "model_best.pt").exists()
 
     final = torch.load(tmp_path / "out" / "model_final.pt", weights_only=False)
-    assert final["metrics"]["train_loss"] is None
-    assert final["metrics"]["train_loss_state"] == "nan"
-    assert final["metrics"]["selection"] is None
-    assert final["metrics"]["val_loss"] is None
+    assert final["metrics"]["train_loss"] is not None
+    assert final["metrics"]["val_mae"] is None
+    assert final["metrics"]["val_mae_state"] == "nan"
 
-    entry = ModelRegistry(str(tmp_path)).get_model("exp-diverged")
+    entry = ModelRegistry(str(tmp_path)).get_model("exp-nan-val")
     assert entry is not None
     assert entry["metrics_source"] == "trainer"
-    assert entry["metrics"]["train_loss"] is None
-    assert entry["checkpoint_path"].endswith("model_final.pt")
+    assert entry["metrics"]["val_mae"] is None
+    assert entry["checkpoint_path"].endswith("model_best.pt")

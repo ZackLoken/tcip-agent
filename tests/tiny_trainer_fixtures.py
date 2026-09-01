@@ -62,6 +62,26 @@ def build_mean_intensity_regressor(*, init_weight: float = 0.0) -> MeanIntensity
     return MeanIntensityRegressor(init_weight=init_weight)
 
 
+class NanEvalRegressor(MeanIntensityRegressor):
+    """Finite squared-error loss in train mode, all-nan predictions in eval mode.
+
+    The training loss stays healthy so the run completes; every prediction-derived
+    validation metric goes non-finite, for tests of how a completed run's non-finite
+    metrics are normalized downstream.
+    """
+
+    def forward(self, images, targets=None):
+        if self.training and targets is not None:
+            return super().forward(images, targets)
+        pred = self.weight * images.mean(dim=(1, 2, 3))
+        return {"head0_values": pred + float("nan")}
+
+
+def build_nan_eval_regressor(*, init_weight: float = 0.0) -> NanEvalRegressor:
+    """``model_source`` builder for :class:`NanEvalRegressor`."""
+    return NanEvalRegressor(init_weight=init_weight)
+
+
 class ConstantImageClassDataset(Dataset):
     """Non-square single-channel frames, one intensity per frame, paired with a class label."""
 
