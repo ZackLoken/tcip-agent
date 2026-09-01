@@ -131,7 +131,7 @@ def test_cancel_requested_during_the_second_diverged_epoch_still_ends_failed(tmp
     assert run.current_epoch == 2
 
 
-def test_launch_training_real_subprocess_reports_the_diverged_stop(tmp_path):
+def test_launch_training_real_subprocess_reports_the_diverged_stop(tmp_path, monkeypatch):
     """A model that passes the preflight contract on the synthetic (random, nonzero) batch, then
     divides by a real batch's zero pixel sum once real training starts, must be caught by a real
     launch_training subprocess: check_training_status names the diverged stop, not a silent hang
@@ -139,6 +139,9 @@ def test_launch_training_real_subprocess_reports_the_diverged_stop(tmp_path):
     pytest.importorskip("torchvision")
     from tcip_mcp.tools.training_tools import check_training_status, launch_training
     from tests.tiny_trainer_fixtures import write_regression_dataset
+
+    monkeypatch.setattr(
+        "tcip_mcp.pipelines.training.tensorboard_manager.launch_tensorboard", lambda *a, **k: {})
 
     images_dir, csv_path = write_regression_dataset(
         tmp_path, intensities=[0.0, 0.0, 0.0, 0.0], values=[0.1, 0.2, 0.3, 0.4])
