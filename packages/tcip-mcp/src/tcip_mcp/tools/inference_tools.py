@@ -1710,13 +1710,19 @@ def tabulate_counts(
     against what a record outside the stamp actually answers for, so the two can legitimately
     differ (or the tail can read unknown where the asserted identity does not). ``validated`` is
     live-only: the run's own verdict over the dimensions it resolved, absent from the bucket
-    regime's response since no run happens there; the gate's own outcome travels in
-    ``operating_point_validated``/``tile_size_validated`` in both regimes, with
-    ``unvalidated_dimensions`` naming every dimension that floored the row when the two can
-    diverge. The live regime with no ``predictions_dir`` carries one further fact nothing on disk
-    backs: ``run_conf_validated_against``, the run's own narrowed conf reference, distinct from
-    ``operating_point_validated`` (which floors false on that path, since nothing persisted answers
-    for it).
+    regime's response since no run happens there. The gate's own outcome travels in
+    ``operating_point_validated`` in both regimes, with ``unvalidated_dimensions`` naming every
+    gated dimension that did not validate, so a row where it and ``tile_size_validated`` disagree
+    is still explained; ``tile_size_validated`` only joins the gate's own outcome when a bucket
+    backs the delivery (live-with-``predictions_dir`` or the bucket regime), read off the same
+    writer summary rather than re-entering the gate. On the live regime
+    with no ``predictions_dir``, tile_size is never one of the gate's flags at all (nothing on disk
+    for a second gate call to reconcile it from), so the CSV's own ``unvalidated_dimensions`` cell
+    can only ever name ``operating_point`` on that path; ``tile_size_validated`` there is instead
+    the run's own in-memory tile-scale flag, which never passed the gate, and this response
+    carries one further fact nothing on disk backs: ``run_conf_validated_against``, the run's own
+    narrowed conf reference, distinct from ``operating_point_validated`` (which floors false on
+    that path, since nothing persisted answers for it).
 
     Args:
         checkpoint_path: Path to model .pt checkpoint (live regime; required with ``images_dir``,
@@ -1959,8 +1965,8 @@ def tabulate_counts(
         # count-bearing deliverable; the numbers are only as trustworthy as what stands behind them.
         "operating_point": result.get("operating_point"),
         "validated": bool(result.get("validated", False)),
-        # The CSV's own written cell, the gate stamp floored across every gated dimension
-        # without a column of its own; unvalidated_dimensions names the floorer.
+        # The CSV's own written cell (floored across every gated dimension without a column of
+        # its own); unvalidated_dimensions names every dimension that did not validate.
         "operating_point_validated": tail["operating_point_validated"],
         "tile_size_validated": (
             (summary["stamp"].get("tile_size") if summary["tile_size_operative"] else None)

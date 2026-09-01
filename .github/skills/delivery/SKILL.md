@@ -144,7 +144,10 @@ only when every dimension it was handed clears, and otherwise refuses (or, with
   without a bucket for a second gate call to reconcile against. With a bucket (either regime),
   `operating_point_validated`/`tile_size_validated` instead quote the writer's own returned
   gate-and-reconciliation summary, never a second gate call, and `unvalidated_dimensions` names
-  whichever dimension floored the row. The bucket regime (`predictions_dir` alone) reads an
+  every gated dimension that did not validate. Without a bucket, tile_size is never one of the
+  gate's flags at all, so the CSV's own `unvalidated_dimensions` cell can only ever name
+  `operating_point` on that path; `tile_size_validated` there is the run's own in-memory
+  tile-scale flag, which never passed the gate. The bucket regime (`predictions_dir` alone) reads an
   existing bucket's own stamp and hands the writer that same bucket, with no run at all standing
   behind it. `export_detection_csv` and `export_aggregated_csv` both gate at the writer the same
   way: pass `pred_dirs` so the validity is reconciled from each bucket's own sidecar rather than
