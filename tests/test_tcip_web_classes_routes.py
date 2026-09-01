@@ -249,7 +249,7 @@ def test_dataset_root_derived_from_annotation_dir(client: TestClient, tmp_path: 
 def test_load_derives_subjects_from_labels_when_registry_absent(
     client: TestClient, tmp_path: Path
 ) -> None:
-    # No saved registry, but labels exist → derive a provisional (detection-only) registry from the
+    # No saved registry, but labels exist -> derive a draft (detection-only) registry from the
     # subjects present, so the canvas never loads empty.
     ann = tmp_path / "annotations" / "d"
     ann.mkdir(parents=True)
@@ -269,7 +269,7 @@ def test_load_derives_subjects_from_labels_when_registry_absent(
 def test_load_reports_an_unreadable_label_and_still_derives_the_rest(
     client: TestClient, tmp_path: Path
 ) -> None:
-    """One corrupt label file costs its own name, never the whole provisional-registry scan."""
+    """One corrupt label file costs its own name, never the whole draft-registry scan."""
     ann = tmp_path / "annotations" / "d"
     ann.mkdir(parents=True)
     write_annotations(str(ann / "IMG_A.json"), [_catkin(50, 50, 60, 60)], 100, 100)
@@ -574,7 +574,7 @@ def test_derive_statuses_cache_invalidates_on_label_write(client: TestClient, tm
 def test_load_derives_subjects_excludes_a_bucket_sidecar(
     client: TestClient, tmp_path: Path
 ) -> None:
-    """A bucket's own provenance stamp is not a per-image label: it must not seed the provisional
+    """A bucket's own provenance stamp is not a per-image label: it must not seed the draft
     registry, and it is not reported under unreadable either, since it was never meant to be read
     as one."""
     from tcip_mcp.pipelines.resolution import write_sidecar

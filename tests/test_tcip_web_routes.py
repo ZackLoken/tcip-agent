@@ -169,7 +169,7 @@ def test_dataset_tree_per_date_reflects_actual_labels(client: TestClient, tmp_pa
 def test_the_label_memo_serves_the_tree_the_registry_and_the_review_scan_alike(
     client: TestClient, dataset_root: Path, monkeypatch,
 ) -> None:
-    """The dataset tree, the class registry's provisional scan and the review batch all parse the
+    """The dataset tree, the class registry's draft scan and the review batch all parse the
     same date's label files; each file's parse is paid once, not once per route."""
     import tcip_annotation.json_io as json_io
 

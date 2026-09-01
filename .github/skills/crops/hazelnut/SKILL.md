@@ -180,7 +180,7 @@ traps:
 - The exact "open" definition for catkins (start of elongation vs pollen shed) vs for pistillate
   flowers (style emergence vs full receptivity).
 - Whether `inshell_height/length/width` are intended from imagery vs calipers, and how the axes are
-  defined relative to nut orientation (provisionally placed as bench-imageable, but the split,
+  defined relative to nut orientation (tentatively placed as bench-imageable, but the split,
   dimensions imageable, `inshell_weight` not, needs confirmation).
 - The allometric equation for `plant_biomass` and whether it is validated for hybrid hazelnut.
 - `stem_vertical_angle`: exact definition (a paired pre/post crop-load branch-angle change) and the
