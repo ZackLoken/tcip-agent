@@ -34,8 +34,10 @@ export type Registry = Record<string, SubjectDef>;
 export type ImageStatus = "complete" | "partial" | "negative" | "unannotated";
 
 export const classesApi = {
-  // The registry lives in the dataset (not the project), so a shared image set carries its own subject names; pass the dataset_root.
-  // annotations dir lets the server derive a draft registry (detection-only, no attributes) from the labels when no classes.json is saved yet.
+  // The registry lives in the dataset (not the project), so a shared image set carries its own
+  // subject names; pass the dataset_root.
+  // The annotations dir lets the server derive a draft registry (detection-only, no attributes)
+  // from the labels when no classes.json is saved yet.
   load: (project_root: string, dataset_root?: string | null, annotations_dir?: string | null) => {
     const params = new URLSearchParams({ project_root });
     if (dataset_root) params.set("dataset_root", dataset_root);

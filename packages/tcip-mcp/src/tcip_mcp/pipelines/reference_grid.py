@@ -122,9 +122,8 @@ def derive_large_raster_grid_tile_size(width: int, height: int, divisions: int =
     far smaller cells than the annotation task needs (an estimated ~2,500 cells inside a real
     mosaic's reserved calibration/test regions alone). ``divisions=16`` is a plain, documented
     default (source: docs/superpowers/specs/2026-08-10-region-completeness-batch-attestation-design.md,
-    a fixed subdivision, not derived from object size or GT) -- a plain, documented default kept
-    deliberately open to revisit, once real large-orthomosaic annotation sessions exist to check the
-    grain against. At real
+    a fixed subdivision, not derived from object size or GT), kept deliberately open to revisit
+    once real large-orthomosaic annotation sessions exist to check the grain against. At real
     ValleyFarm dimensions (239921x141130) this derives a 16x10 lattice (160 cells), not the ~8,260
     the display-derived lattice would produce.
     """
