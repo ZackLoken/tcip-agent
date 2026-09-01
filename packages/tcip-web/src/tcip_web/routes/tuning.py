@@ -60,7 +60,18 @@ def _manifest_fields(manifest: dict) -> dict:
     whenever it creates a manifest); its absence is reported with a reason rather than a
     reconstructed config. ``cancel_requested`` is the manifest's own field, set by
     ``cancel_hpo`` and never derived from a side file this route cannot see across roots.
+
+    An empty ``manifest`` (no manifest exists yet, or one predating a caller's own launch) is
+    never relaunchable, but carries no reason either: the pre-manifest window and every refused
+    relaunch never mint one, and "this sweep's record holds no base config" would misname
+    absence itself as a recorded fact. A caller with words for that case has them in
+    ``job.error`` instead.
     """
+    if not manifest:
+        return {
+            "n_trials": None, "search_alg": None, "scheduler": None, "param_space_keys": [],
+            "relaunchable": False, "reason": None, "cancel_requested": False,
+        }
     relaunchable = "base_config" in manifest
     return {
         "n_trials": manifest.get("n_trials"),
@@ -73,12 +84,23 @@ def _manifest_fields(manifest: dict) -> dict:
     }
 
 
-def _summary(job: HPOJob) -> dict:
-    manifest = _read_manifest(job.sweep_id, root=job.platform_root) or {}
+def _persisted_summary(job: HPOJob) -> dict:
+    """The registry's own persisted fields for one job, with no manifest read: what
+    :class:`~tcip_web.jobstore.JobRegistry` writes to ``.tcip/state/hpo_sweeps.json`` under its
+    own lock, and reads back on rehydrate. The manifest projection belongs to a listing row
+    (:func:`_summary`), never to the persisted document: a frozen record must not gain fields
+    over time, and a store read has no business running while the registry's lock is held.
+    """
     return {"sweep_id": job.sweep_id, "status": job.status,
             "error": job.error, "has_result": bool(job.result),
-            "platform_root": job.platform_root,
-            **_manifest_fields(manifest)}
+            "platform_root": job.platform_root}
+
+
+def _summary(job: HPOJob) -> dict:
+    """One live sweep's listing row: the registry's own persisted fields plus the manifest
+    projection, read fresh (outside the registry's own lock) for whichever caller is listing."""
+    manifest = _read_manifest(job.sweep_id, root=job.platform_root) or {}
+    return {**_persisted_summary(job), **_manifest_fields(manifest)}
 
 
 def _from_summary(s: dict, root: str) -> HPOJob:
@@ -89,7 +111,7 @@ def _from_summary(s: dict, root: str) -> HPOJob:
 
 
 _registry = jobstore.JobRegistry(
-    HPO_REGISTRY, to_summary=_summary, from_summary=_from_summary, id_field="sweep_id",
+    HPO_REGISTRY, to_summary=_persisted_summary, from_summary=_from_summary, id_field="sweep_id",
 )
 """The dict-plus-lock live registry for this route's own sweeps (see ``jobstore.JobRegistry``),
 the shared home review.py's priority queue and inference.py's jobs adopt too. ``_lock`` below is
@@ -320,19 +342,37 @@ class _RelaunchSpec:
     resources_per_trial: Optional[dict[str, Any]]
 
 
+_RELAUNCH_FIELDS: tuple[str, ...] = (
+    "base_config", "param_space", "n_trials", "search_alg", "scheduler", "grace_period",
+    "reduction_factor", "max_concurrent", "warm_start", "baseline_params", "resources_per_trial",
+)
+"""Every ``run_hpo`` argument a relaunch replays. ``run_hpo`` writes every one of these as a
+key whenever it creates a manifest (a value of ``None`` is a recorded choice, not an absence),
+so only a manifest from before this family, or one truncated some other way, names anything as
+missing here."""
+
+
+def _missing_relaunch_fields(manifest: dict) -> list[str]:
+    """Every field in :data:`_RELAUNCH_FIELDS` that ``manifest`` does not carry as a key."""
+    return sorted(f for f in _RELAUNCH_FIELDS if f not in manifest)
+
+
 def _relaunch_spec(manifest: dict) -> _RelaunchSpec:
+    """``manifest``'s own ``run_hpo`` arguments, read directly rather than defaulted: a caller
+    checks :func:`_missing_relaunch_fields` first, so a key absent here would be a programming
+    error, never a silently substituted value that was never the sweep's own."""
     return _RelaunchSpec(
         base_config=manifest["base_config"],
-        param_space=manifest.get("param_space"),
-        n_trials=manifest.get("n_trials", 5),
-        search_alg=manifest.get("search_alg", "random"),
-        scheduler=manifest.get("scheduler", "asha"),
-        grace_period=manifest.get("grace_period", 5),
-        reduction_factor=manifest.get("reduction_factor", 3),
-        max_concurrent=manifest.get("max_concurrent", 1),
-        warm_start=bool(manifest.get("warm_start", False)),
-        baseline_params=manifest.get("baseline_params"),
-        resources_per_trial=manifest.get("resources_per_trial"),
+        param_space=manifest["param_space"],
+        n_trials=manifest["n_trials"],
+        search_alg=manifest["search_alg"],
+        scheduler=manifest["scheduler"],
+        grace_period=manifest["grace_period"],
+        reduction_factor=manifest["reduction_factor"],
+        max_concurrent=manifest["max_concurrent"],
+        warm_start=bool(manifest["warm_start"]),
+        baseline_params=manifest["baseline_params"],
+        resources_per_trial=manifest["resources_per_trial"],
     )
 
 
@@ -367,12 +407,15 @@ def _worker(job: HPOJob, spec: _RelaunchSpec, output_dir: str) -> None:
             study_name=job.sweep_id,
             auto_tensorboard=False,
         )
-        if isinstance(res, dict) and "error" in res:
+        if isinstance(res, dict) and res.get("status") == "cancelled":
+            # Checked before the "error" key below: a cancelled result carries its own reason
+            # under that same key, and must still read cancelled, not failed, because of it.
+            job.status = "cancelled"
+            job.error = res.get("error")
+            job.result = res
+        elif isinstance(res, dict) and "error" in res:
             job.status = "failed"
             job.error = res["error"]
-            job.result = res
-        elif isinstance(res, dict) and res.get("status") == "cancelled":
-            job.status = "cancelled"
             job.result = res
         else:
             job.result = res if isinstance(res, dict) else {"raw": res}
@@ -388,16 +431,21 @@ def _worker(job: HPOJob, spec: _RelaunchSpec, output_dir: str) -> None:
 @router.post("/sweeps")
 def relaunch_sweep(payload: RelaunchSweepPayload) -> dict:
     """Relaunch a sweep from its own recorded manifest: no config, param space or path is
-    ever submitted by the browser. ``output_dir`` is always this request thread's own
-    ``hpo_root()``, never a path the manifest carries (an absolute path in a file is not a
-    path this process should follow)."""
+    ever submitted by the browser. The source manifest is read under this sweep's own launch
+    root (:func:`_sweep_launch_root`, the same resolution the cancel route uses), so a sweep
+    launched under a root this process has since repinned away from is still relaunchable.
+    ``output_dir`` is always this request thread's own ``hpo_root()``, never a path the
+    manifest carries (an absolute path in a file is not a path this process should follow)."""
     from tcip_mcp.tools.training_tools import hpo_root
 
-    manifest = _read_manifest(payload.study_name)
+    manifest = _read_manifest(payload.study_name, root=_sweep_launch_root(payload.study_name))
     if manifest is None:
         raise HTTPException(404, f"sweep not found: {payload.study_name}")
     if "base_config" not in manifest:
         raise HTTPException(409, "this sweep's record holds no base config")
+    missing = _missing_relaunch_fields(manifest)
+    if missing:
+        raise HTTPException(409, f"this sweep's record is missing {missing}: cannot relaunch")
 
     output_dir = str(hpo_root())
     spec = _relaunch_spec(manifest)
@@ -451,7 +499,6 @@ def get_sweep(sweep_id: str) -> dict:
             _terminal_response(j) if j.status in jobstore.TERMINAL_STATUSES
             else {"sweep_id": j.sweep_id, "status": j.status, "error": j.error, "result": j.result}
         )
-        response["manifest"] = _read_manifest(sweep_id, root=j.platform_root) or {}
         return _enrich_with_study_result(response, sweep_id, root=j.platform_root)
     manifest = _read_manifest(sweep_id)
     if manifest is None:

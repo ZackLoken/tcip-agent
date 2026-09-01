@@ -15,9 +15,11 @@ from tcip_store import (
     LOG_JSON,
     RECORD_JSON,
     BadKey,
+    DecodeError,
     Key,
     StoreDescriptor,
     StoreError,
+    VersionConflict,
     check_json_value,
     register_store,
     store,
@@ -944,9 +946,11 @@ def list_launchable_configs() -> list[dict]:
     state and its parent when it has one.
 
     Not agent-facing (not an ``@mcp.tool()``): a GUI-picker-specific projection over records the
-    agent already has ``list_experiments``/``get_experiment`` for. Reads only each record's
-    config and lineage members, never ``get_experiment`` (which also reads the whole metrics
-    log), on top of ``list_experiments``' own single enumeration of every status record.
+    agent already has ``list_experiments``/``get_experiment`` for, never ``get_experiment``
+    (which also reads the whole metrics log). Cost: ``list_experiments()``'s own one status
+    read plus one config read per experiment record, and this function's own further read of
+    that same config, plus one status read and one lineage read per experiment that carries a
+    model source.
 
     State is ``derived_state``, gated by ``is_launched`` the identical way ``compare_experiments``
     and this platform's runs list already gate it, so a pristine never-launched config reads its
@@ -1274,6 +1278,9 @@ SWEEP_CANCEL_SENTINEL = ".sweep_cancel_requested"
 ``run_registry.CANCEL_SENTINEL`` (written per trial directory): one name per protocol, since a
 sweep-wide stop and one run's own stop answer different questions."""
 
+_CANCEL_BEFORE_START_REASON = "cancelled before the sweep's first trial started"
+_CANCEL_DURING_RUN_REASON = "the sweep was cancelled by request before it could finish"
+
 _TRIAL_DIR_PREFIX = "trial_"
 
 
@@ -1293,7 +1300,12 @@ def _running_trial_dirs(sweep_root: Path) -> list[Path]:
     for d in sorted(sweep_root.iterdir()):
         if not d.is_dir() or not d.name.startswith(_TRIAL_DIR_PREFIX):
             continue
-        if store.read(trial_config_key(sweep_root, d.name), default=None) is None:
+        try:
+            wrote_resolved_config = store.read(trial_config_key(sweep_root, d.name), default=None) is not None
+        except DecodeError:
+            # The record exists but will not decode: the trial wrote it, so it is not running.
+            wrote_resolved_config = True
+        if not wrote_resolved_config:
             running.append(d)
     return running
 
@@ -1372,8 +1384,17 @@ def sweep_manifest_key(
 
     Keyed off the HPO root, the scope every sweep-level record hangs off, and declared here
     because ``hpo_root``/``sweep_dir`` already answer where a sweep lives.
-    ``last_writer_wins``: ``run_hpo`` holds the manifest in memory for the whole sweep and
-    writes the whole document at each state change, so nothing merges into what is on disk.
+
+    Two writers share this record. ``run_hpo`` holds the manifest in memory for the whole sweep
+    and replaces the whole document at each state change; it re-derives ``cancel_requested`` from
+    the sweep's own stop file on every one of those writes, so it never overwrites a cancel
+    ``cancel_hpo`` recorded in between. ``cancel_hpo`` itself, reached from a different request
+    (a cancel this process is not running the sweep for), read-modify-writes only
+    ``cancel_requested`` through the store's compare-and-set (``read_versioned`` plus
+    ``replace(..., expect=version)``) and never over a manifest already in a terminal status, so a
+    ``run_hpo`` write racing ahead of it is never reverted back to a stale ``"running"``.
+    ``concurrency="last_writer_wins"`` names the store's own policy; the two writers avoid
+    clobbering each other by these rules, not by the store enforcing one.
     """
     return Key(SWEEP_MANIFEST_STORE, str(hpo_root(output_dir, root=root).resolve()),
                (_sweep_name(study_name), "manifest"))
@@ -1450,11 +1471,12 @@ def _run_hpo_trial(config: dict, report, base_config: dict, trial_dir: str) -> N
     can prune) and once at the end with the best value this trial actually reached (Tune's default
     ``get_best_result`` scope reads only the last value each trial reported, so the run's best
     epoch would otherwise be lost behind a worse later one). A trial that never reports a real
-    value, before training starts or on any failure, and a trial whose run diverged (``run.status
-    == "failed"``, even one that reported a real value from an epoch before it died), both report
-    the losing side of its own direction as that final value instead of a real number, so neither
-    a trial with nothing to say nor a config that killed its own run can outrank a config that
-    merely scored worse. Trials train under the final run's
+    value, before training starts or on any failure, and a trial whose run ended ``"failed"`` or
+    ``"cancelled"`` (even one that reported a real value from an epoch before it ended), both
+    report the losing side of its own direction as that final value instead of a real number, so
+    neither a trial with nothing to say, nor a config that killed its own run, nor a run a
+    sweep-wide cancel cut short mid-training, can outrank a config that merely scored worse.
+    Trials train under the final run's
     regime, same augmentation, imbalance handling, and dispatch: a ``training_source`` in
     ``base_config`` actually runs under that loop here too, not always the stock trainer, or the
     selected hyperparameters won't transfer.
@@ -1561,9 +1583,8 @@ def _run_hpo_trial(config: dict, report, base_config: dict, trial_dir: str) -> N
         ctx = TrainContext(run=run, train_loader=train_loader, val_loader=val_loader, task=task,
                            experiment_id=None, epoch_hook=epoch_cb, trial_report=call_report)
         dispatch_train_body(ctx)
-        # A diverged run reports the losing side regardless of what it reported before dying:
-        # a config that killed its run can never outrank a config that merely scored worse.
-        if run.status == "failed":
+        # A diverged or cancelled run reports the losing side, never what it reported before ending.
+        if run.status in ("failed", "cancelled"):
             report(losing_side)
         else:
             report(best["value"])  # the trial's best reported value, or the losing side if none
@@ -1734,15 +1755,21 @@ def run_hpo(
     }
     manifest_key = sweep_manifest_key(study_name, output_dir)
 
+    def _write_manifest() -> None:
+        # cancel_requested is re-derived from the sentinel file on every write, so this
+        # call's own writes never drop a cancel cancel_hpo already recorded elsewhere.
+        manifest["cancel_requested"] = cancel_path.exists()
+        store.replace(manifest_key, manifest)
+
     # A cancel already requested (the study_name was minted and registered before this call
     # reached the manifest write) records a cancelled manifest rather than being refused.
     if cancel_path.exists():
-        manifest.update(status="cancelled", error="cancelled before the sweep's first trial started",
+        manifest.update(status="cancelled", error=_CANCEL_BEFORE_START_REASON,
                         finished_at=datetime.now(timezone.utc).isoformat())
-        store.replace(manifest_key, manifest)
-        return {"status": "cancelled", "study_name": study_name}
+        _write_manifest()
+        return {"status": "cancelled", "study_name": study_name, "error": _CANCEL_BEFORE_START_REASON}
 
-    store.replace(manifest_key, manifest)
+    _write_manifest()
 
     def objective_fn(config: dict, report) -> None:
         try:
@@ -1773,20 +1800,20 @@ def run_hpo(
         )
     except Exception as exc:
         if cancel_path.exists():
-            manifest.update(status="cancelled", error="the sweep was cancelled by request before it could finish",
+            manifest.update(status="cancelled", error=_CANCEL_DURING_RUN_REASON,
                             finished_at=datetime.now(timezone.utc).isoformat())
-            store.replace(manifest_key, manifest)
-            return {"status": "cancelled", "study_name": study_name}
+            _write_manifest()
+            return {"status": "cancelled", "study_name": study_name, "error": _CANCEL_DURING_RUN_REASON}
         manifest.update(status="failed", error=str(exc),
                         finished_at=datetime.now(timezone.utc).isoformat())
-        store.replace(manifest_key, manifest)
+        _write_manifest()
         raise
 
     if cancel_path.exists():
-        manifest.update(status="cancelled", error="the sweep was cancelled by request before it could finish",
+        manifest.update(status="cancelled", error=_CANCEL_DURING_RUN_REASON,
                         finished_at=datetime.now(timezone.utc).isoformat())
-        store.replace(manifest_key, manifest)
-        return {"status": "cancelled", "study_name": study_name}
+        _write_manifest()
+        return {"status": "cancelled", "study_name": study_name, "error": _CANCEL_DURING_RUN_REASON}
 
     # Auto-launch TensorBoard on the sweep root: Ray's per-trial event files and each
     # trial's own tensorboard dir both sit under it.
@@ -1811,7 +1838,7 @@ def run_hpo(
     )
     # Durable result records (best-effort, a write hiccup must not sink a completed sweep).
     try:
-        store.replace(manifest_key, manifest)
+        _write_manifest()
         store.replace(study_result_key(study_name, output_dir), result)
     except (OSError, StoreError):
         logger.warning("could not persist the hpo result for %s", study_name, exc_info=True)
@@ -1845,6 +1872,13 @@ def cancel_hpo(study_name: str, output_dir: str = "", *, root: str | None = None
     root, and no live trial of this study registered in this process's own run registry (the
     narrow window between a caller minting the id and ``run_hpo`` writing its first manifest).
 
+    The manifest's own ``cancel_requested`` (read by the Tuning listing) is written through the
+    store's compare-and-set, and never over a manifest already in a terminal status: ``run_hpo``
+    is the other writer of this record, and a terminal write of its own must never be reverted
+    back to ``"running"`` by a cancel that read the manifest just before it (see
+    :func:`sweep_manifest_key`). The sentinel files below are the authoritative signal either
+    way; the manifest field is a best-effort mirror of them for the listing to read.
+
     Args:
         study_name: The sweep to cancel.
         output_dir: Where the sweep's own directory lives, as given to ``run_hpo``; empty
@@ -1855,7 +1889,9 @@ def cancel_hpo(study_name: str, output_dir: str = "", *, root: str | None = None
     from tcip_mcp.pipelines.training.run_registry import CANCEL_SENTINEL, _RUNS, _RUNS_LOCK
 
     sweep_root = sweep_dir(study_name, output_dir, root=root)
-    manifest = store.read(sweep_manifest_key(study_name, output_dir, root=root), default=None)
+    manifest_key = sweep_manifest_key(study_name, output_dir, root=root)
+    versioned = store.read_versioned(manifest_key, default=None)
+    manifest = versioned.value
     has_manifest = isinstance(manifest, dict)
 
     resolved_root = sweep_root.resolve()
@@ -1875,9 +1911,18 @@ def cancel_hpo(study_name: str, output_dir: str = "", *, root: str | None = None
 
     status = "running"
     if has_manifest:
-        manifest["cancel_requested"] = True
-        store.replace(sweep_manifest_key(study_name, output_dir, root=root), manifest)
         status = manifest.get("status", "running")
+        if status not in ("completed", "failed", "cancelled"):
+            working = {**manifest, "cancel_requested": True}
+            try:
+                store.replace(manifest_key, working, expect=versioned.version)
+            except VersionConflict:
+                # run_hpo's own terminal write landed first; nothing to add on top of it, and
+                # writing this stale copy back would revert that write to "running".
+                refreshed = store.read(manifest_key, default=manifest)
+                status = refreshed.get("status", status) if isinstance(refreshed, dict) else status
+            else:
+                status = working["status"]
     return {"study_name": study_name, "status": status, "cancel_requested": True}
 
 

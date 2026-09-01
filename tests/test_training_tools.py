@@ -1272,18 +1272,21 @@ def test_list_launchable_configs_state_agrees_with_the_runs_list_for_a_crashed_r
 def test_cancel_end_to_end_through_the_real_trainer_ends_cancelled_with_records_and_losing_side(
     tmp_path
 ) -> None:
-    """A trial whose run-level cancel sentinel is already set when it starts ends cancelled
-    (generic_trainer's own should_cancel check, the identical one a standalone run polls),
-    still writes its resolved-config record, and reports the losing side, not a real score, so
-    a cancelled trial can never outrank one that merely scored worse."""
+    """A trial that trains one real epoch and is then cancelled mid-training (the run-level
+    sentinel written only once a genuine score is already on record) ends cancelled, still
+    writes its resolved-config record, and reports the losing side as its final value, not
+    that epoch's real score, so a cancelled trial can never outrank one that merely scored
+    worse."""
     pytest.importorskip("torch")
+    import math
+
     import tcip_store
     from tcip_mcp.pipelines.training.run_registry import CANCEL_SENTINEL
     from tcip_mcp.tools.training_tools import _run_hpo_trial, trial_config_key
     from tests.tiny_trainer_fixtures import write_regression_dataset
 
     images_dir, csv_path = write_regression_dataset(
-        tmp_path, intensities=[0.0, 1.0], values=[0.1, 0.9])
+        tmp_path, intensities=[0.1, 0.3, 0.5, 0.7], values=[0.2, 0.6, 1.0, 1.4])
     labels_dir = tmp_path / "unused_labels"
     labels_dir.mkdir()
     base_config = {
@@ -1296,11 +1299,19 @@ def test_cancel_end_to_end_through_the_real_trainer_ends_cancelled_with_records_
     }
     trial_dir = tmp_path / "sweep" / "trial_cancel01"
     trial_dir.mkdir(parents=True)
-    (trial_dir / CANCEL_SENTINEL).touch()  # already requested before the trial ever starts
 
     reported: list = []
-    _run_hpo_trial({}, reported.append, base_config, str(trial_dir))
 
-    assert reported == [float("inf")]  # regression: min-mode losing side
+    def report(value: float) -> None:
+        # The sentinel is written only after the first real report, so a genuine score is
+        # already on record by the time the run-level cancel takes effect mid-training.
+        reported.append(value)
+        if len(reported) == 1:
+            (trial_dir / CANCEL_SENTINEL).touch()
+
+    _run_hpo_trial({}, report, base_config, str(trial_dir))
+
+    assert math.isfinite(reported[0])  # epoch 1's real score, reported before the cancel
+    assert reported[-1] == float("inf")  # the losing side, not that real score
     resolved = tcip_store.read(trial_config_key(trial_dir.parent, trial_dir.name))
     assert resolved["trial_params"] == {}

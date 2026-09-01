@@ -50,7 +50,7 @@ class TrainRun:
 
     def should_cancel(self) -> bool:
         """True if cancellation was requested, in-process (``cancel_event``) or via the sentinel
-        file a (possibly different) process may have written at ``<output_dir>/.cancel_requested``.
+        file a (possibly different) process may have written at ``<output_dir>/<CANCEL_SENTINEL>``.
         Checked unconditionally, not gated on ``pid`` being set: the object checking this is
         typically the child's own attached ``TrainRun`` (which has no reason to know its own OS
         pid), while ``pid`` is meaningful on the parent's copy for a different purpose (deciding

@@ -50,13 +50,25 @@ def hpo_root(tmp_path, monkeypatch) -> Path:
     return root
 
 
+_RELAUNCH_FIELD_DEFAULTS = {
+    "search_alg": "random", "scheduler": "asha", "grace_period": 5, "reduction_factor": 3,
+    "max_concurrent": 1, "warm_start": False, "baseline_params": None, "resources_per_trial": None,
+    "param_space": {},
+}
+"""Every ``run_hpo`` argument beside ``n_trials``/``base_config`` a manifest carries by the time
+this family lands, at the values ``run_hpo`` itself defaults to; :func:`_write_sweep` folds
+these in so a hand-written test manifest is complete (as a real one always is) unless a test
+overrides a field, or omits ``base_config`` itself, to exercise a genuinely incomplete one."""
+
+
 def _write_sweep(root: Path, study: str, **manifest_fields) -> Path:
     import tcip_store
     from tcip_mcp.tools.training_tools import sweep_manifest_key
 
     sweep = root / study
     sweep.mkdir(parents=True, exist_ok=True)
-    manifest = {"study_name": study, "status": "running", "n_trials": 2, **manifest_fields}
+    manifest = {"study_name": study, "status": "running", "n_trials": 2,
+                **_RELAUNCH_FIELD_DEFAULTS, **manifest_fields}
     tcip_store.replace(sweep_manifest_key(study), manifest)
     return sweep
 
@@ -601,6 +613,73 @@ def test_relaunch_route_409s_when_the_manifest_holds_no_base_config(client: Test
     assert resp.status_code == 409
 
 
+def test_relaunch_route_409s_naming_a_field_missing_from_the_manifest_rather_than_defaulting_it(
+    client: TestClient, hpo_root
+) -> None:
+    """A manifest carrying base_config but missing another run_hpo argument (an old manifest
+    from before this field existed) refuses by name, rather than silently substituting a
+    default that was never the sweep's own choice."""
+    import tcip_store
+    from tcip_mcp.tools.training_tools import sweep_manifest_key
+
+    manifest = {
+        "study_name": "hpo_partial001", "status": "running", "n_trials": 2,
+        "base_config": {"model_source": {"builder": "x:y"}, "data": {}, "training": {}},
+        "param_space": {}, "search_alg": "random", "grace_period": 5, "reduction_factor": 3,
+        "max_concurrent": 1, "warm_start": False, "baseline_params": None,
+        "resources_per_trial": None,
+        # scheduler deliberately omitted: an old manifest from before run_hpo recorded it.
+    }
+    (hpo_root / "hpo_partial001").mkdir(parents=True)
+    tcip_store.replace(sweep_manifest_key("hpo_partial001"), manifest)
+
+    resp = client.post("/api/tuning/sweeps", json={"study_name": "hpo_partial001"})
+    assert resp.status_code == 409
+    assert "scheduler" in resp.json()["detail"]
+
+
+def test_relaunch_reads_the_source_manifest_under_the_sweeps_own_launch_root(
+    client, hpo_root, tmp_path, monkeypatch
+) -> None:
+    """A relaunch resolves the source manifest under the sweep's own launch root
+    (``_sweep_launch_root``), the same resolution the cancel route uses, so a live sweep stays
+    relaunchable after this process repins away from the root it launched under."""
+    from tcip_mcp import workspace
+    from tcip_web.routes import tuning
+
+    launch_root = tmp_path
+
+    def fake_run_hpo(*, study_name, **kwargs):
+        import tcip_store
+        from tcip_mcp.tools.training_tools import sweep_manifest_key
+
+        tcip_store.replace(
+            sweep_manifest_key(study_name),
+            {"study_name": study_name, "status": "completed", "n_trials": 1,
+             **_RELAUNCH_FIELD_DEFAULTS,
+             "base_config": {"model_source": {"builder": "x:y"}, "data": {}, "training": {}}},
+        )
+        return {"study_name": study_name}
+
+    monkeypatch.setattr("tcip_mcp.tools.training_tools.run_hpo", fake_run_hpo)
+    _write_sweep(hpo_root, "hpo_launchroot1",
+                 base_config={"model_source": {"builder": "x:y"}, "data": {}, "training": {}})
+
+    resp = client.post("/api/tuning/sweeps", json={"study_name": "hpo_launchroot1"})
+    assert resp.status_code == 200
+    sweep_id = resp.json()["sweep_id"]
+    assert tuning.wait_for_workers(timeout_s=_worker_join_bound()) == ()
+    assert tuning._registry.jobs[sweep_id].platform_root == str(launch_root)
+
+    other_proj = workspace.project_path("chestnut_burr_other_relaunch")
+    (other_proj / ".tcip").mkdir(parents=True)
+    workspace.set_active_project("chestnut_burr_other_relaunch")
+
+    resp2 = client.post("/api/tuning/sweeps", json={"study_name": sweep_id})
+    assert resp2.status_code == 200
+    assert tuning.wait_for_workers(timeout_s=_worker_join_bound()) == ()
+
+
 def test_relaunch_ignores_any_path_the_manifest_itself_carries(
     client: TestClient, hpo_root, monkeypatch, tmp_path
 ) -> None:
@@ -709,12 +788,15 @@ def test_worker_marks_an_error_dict_failed_not_completed(hpo_root, monkeypatch) 
     assert job.error == "the sweep's base config fails preflight"
 
 
-def test_worker_marks_a_cancelled_result_cancelled(hpo_root, monkeypatch) -> None:
+def test_worker_marks_a_cancelled_result_cancelled_with_its_reason(hpo_root, monkeypatch) -> None:
+    """A cancelled sweep's row must carry a reason a breeder can read, the same way a failed
+    sweep's row does, not job.error left unset while the disk manifest alone holds it."""
     from tcip_web.routes.tuning import HPOJob, _RelaunchSpec, _worker
 
     monkeypatch.setattr(
         "tcip_mcp.tools.training_tools.run_hpo",
-        lambda **kwargs: {"status": "cancelled", "study_name": kwargs.get("study_name")},
+        lambda **kwargs: {"status": "cancelled", "study_name": kwargs.get("study_name"),
+                          "error": "the sweep was cancelled by request before it could finish"},
     )
     job = HPOJob(sweep_id="hpo-worker-cxl")
     spec = _RelaunchSpec(base_config={}, param_space=None, n_trials=1, search_alg="random",
@@ -722,6 +804,7 @@ def test_worker_marks_a_cancelled_result_cancelled(hpo_root, monkeypatch) -> Non
                          warm_start=False, baseline_params=None, resources_per_trial=None)
     _worker(job, spec, str(hpo_root))
     assert job.status == "cancelled"
+    assert job.error == "the sweep was cancelled by request before it could finish"
 
 
 def test_manifest_fields_agree_between_a_live_and_a_disk_row(
@@ -759,3 +842,81 @@ def test_manifest_fields_agree_between_a_live_and_a_disk_row(
     live_row, disk_row = by_id[live_id], by_id["hpo_agree001"]
     fields = ("n_trials", "search_alg", "scheduler", "param_space_keys", "relaunchable", "reason")
     assert {k: live_row[k] for k in fields} == {k: disk_row[k] for k in fields}
+
+
+def test_manifest_fields_of_an_absent_manifest_is_not_relaunchable_with_no_reason() -> None:
+    """A caller with no manifest at all (the pre-manifest window, or a refused relaunch that
+    never minted one) reads as not relaunchable but with no reason: the reason is reserved for
+    a manifest that actually exists and actually lacks base_config."""
+    from tcip_web.routes.tuning import _manifest_fields
+
+    fields = _manifest_fields({})
+    assert fields["relaunchable"] is False
+    assert fields["reason"] is None
+    assert fields["cancel_requested"] is False
+
+
+def test_persisted_summary_carries_no_manifest_field(
+    client: TestClient, hpo_root, monkeypatch
+) -> None:
+    """The registry's own persisted document (what ``JobRegistry.persist`` writes under
+    ``.tcip/state/hpo_sweeps.json``) carries only the pre-existing fields: a frozen record must
+    not gain new fields over time, and the manifest projection belongs to a listing row only."""
+    from tcip_web import jobstore
+    from tcip_web.routes import tuning
+
+    def fake_run_hpo(*, study_name, **kwargs):
+        import tcip_store
+        from tcip_mcp.tools.training_tools import sweep_manifest_key
+
+        tcip_store.replace(
+            sweep_manifest_key(study_name),
+            {"study_name": study_name, "status": "completed", "n_trials": 1,
+             **_RELAUNCH_FIELD_DEFAULTS,
+             "base_config": {"model_source": {"builder": "x:y"}, "data": {}, "training": {}}},
+        )
+        return {"study_name": study_name}
+
+    monkeypatch.setattr("tcip_mcp.tools.training_tools.run_hpo", fake_run_hpo)
+    _write_sweep(hpo_root, "hpo_persist001",
+                 base_config={"model_source": {"builder": "x:y"}, "data": {}, "training": {}})
+
+    resp = client.post("/api/tuning/sweeps", json={"study_name": "hpo_persist001"})
+    assert resp.status_code == 200
+    sweep_id = resp.json()["sweep_id"]
+    assert tuning.wait_for_workers(timeout_s=_worker_join_bound()) == ()
+
+    persisted = jobstore.load(tuning.HPO_REGISTRY)
+    entry = next(s for s in persisted if s["sweep_id"] == sweep_id)
+    assert set(entry) == {"sweep_id", "status", "error", "has_result", "platform_root"}
+
+
+def test_get_sweep_live_branch_carries_no_manifest_field(
+    client: TestClient, hpo_root, monkeypatch
+) -> None:
+    """No frontend code reads a manifest field on the live ``get_sweep`` response; it must not
+    be added to the response body."""
+    from tcip_web.routes import tuning
+
+    def fake_run_hpo(*, study_name, **kwargs):
+        import tcip_store
+        from tcip_mcp.tools.training_tools import sweep_manifest_key
+
+        tcip_store.replace(
+            sweep_manifest_key(study_name),
+            {"study_name": study_name, "status": "completed", "n_trials": 1,
+             **_RELAUNCH_FIELD_DEFAULTS,
+             "base_config": {"model_source": {"builder": "x:y"}, "data": {}, "training": {}}},
+        )
+        return {"study_name": study_name}
+
+    monkeypatch.setattr("tcip_mcp.tools.training_tools.run_hpo", fake_run_hpo)
+    _write_sweep(hpo_root, "hpo_nomanifest1",
+                 base_config={"model_source": {"builder": "x:y"}, "data": {}, "training": {}})
+
+    resp = client.post("/api/tuning/sweeps", json={"study_name": "hpo_nomanifest1"})
+    sweep_id = resp.json()["sweep_id"]
+    assert tuning.wait_for_workers(timeout_s=_worker_join_bound()) == ()
+
+    body = client.get(f"/api/tuning/sweeps/{sweep_id}").json()
+    assert "manifest" not in body
