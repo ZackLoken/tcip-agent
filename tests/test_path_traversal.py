@@ -84,31 +84,6 @@ def test_training_stream_refuses_a_project_root_outside_allowed_roots(
     assert "outside the allowed roots" in ei.value.reason
 
 
-def test_training_launch_confines_output_dir_to_allowed_roots(
-    tmp_path_factory: pytest.TempPathFactory
-):
-    # launch_training_route must guard output_dir the same way the sibling tuning.py launch route
-    # does, not pass it straight to launch_training unguarded.
-    pytest.importorskip("fastapi")
-    from fastapi import HTTPException
-
-    from tcip_web.routes.training import LaunchPayload, launch_training_route
-
-    outside = tmp_path_factory.mktemp("outside")
-    with pytest.raises(HTTPException) as ei:
-        launch_training_route(LaunchPayload(config={}, output_dir=str(outside)))
-    assert ei.value.status_code == 403
-
-
-def test_training_launch_output_dir_guard_is_a_no_op_when_unrestricted(tmp_path):
-    """The rail must admit valid work: an output_dir under the workspace clears the guard and
-    reaches launch_training as before, which then reports an invalid (model_source-less) config
-    as a normal {"error": ...} result, not an exception raised by the guard itself."""
-    from tcip_web.routes.training import LaunchPayload, launch_training_route
-
-    result = launch_training_route(LaunchPayload(config={}, output_dir=str(tmp_path)))
-    assert result["error"] == "Invalid config"
-
 
 def test_annotate_labels_route_blocks_outside_allowed_root(
     tmp_path, tmp_path_factory: pytest.TempPathFactory

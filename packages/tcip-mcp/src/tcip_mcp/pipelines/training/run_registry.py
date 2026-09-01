@@ -14,6 +14,12 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
+CANCEL_SENTINEL = ".cancel_requested"
+"""The run-level cooperative-cancel sentinel's filename, written under a run's own
+``output_dir`` and polled by :meth:`TrainRun.should_cancel`. A sweep's own stop file is a
+separate protocol (``training_tools.SWEEP_CANCEL_SENTINEL``, at the sweep root rather than a
+run's own directory); the two never share a name."""
+
 
 @dataclass
 class TrainRun:
@@ -54,7 +60,7 @@ class TrainRun:
         if self.cancel_event.is_set():
             return True
         if self.output_dir:
-            return (Path(self.output_dir) / ".cancel_requested").exists()
+            return (Path(self.output_dir) / CANCEL_SENTINEL).exists()
         return False
 
     def to_dict(self) -> dict:
@@ -132,7 +138,7 @@ def cancel_run(run_id: str) -> bool:
 
     A run whose training body executes in a subprocess (``run.pid is not None``) can't be
     stopped by setting an in-memory ``Event``, that memory lives in a different process. Writes a
-    sentinel file at ``<output_dir>/.cancel_requested`` instead, which ``TrainRun.should_cancel()``
+    sentinel file at ``<output_dir>/<CANCEL_SENTINEL>`` instead, which ``TrainRun.should_cancel()``
     polls in the child. When this process has no local record of the run at all (it was launched by
     a *different* process, e.g. the web backend cancelling a run the agent's MCP server's
     subprocess is running), falls back to the run's own status record for the real output directory
@@ -147,7 +153,7 @@ def cancel_run(run_id: str) -> bool:
             run.cancel_event.set()
         else:
             Path(run.output_dir).mkdir(parents=True, exist_ok=True)
-            (Path(run.output_dir) / ".cancel_requested").touch()
+            (Path(run.output_dir) / CANCEL_SENTINEL).touch()
         return True
 
     from tcip_mcp.experiments import read_member, resolve_experiment_for_run, status_key
@@ -160,5 +166,5 @@ def cancel_run(run_id: str) -> bool:
     if not output_dir:
         return False
     Path(output_dir).mkdir(parents=True, exist_ok=True)
-    (Path(output_dir) / ".cancel_requested").touch()
+    (Path(output_dir) / CANCEL_SENTINEL).touch()
     return True

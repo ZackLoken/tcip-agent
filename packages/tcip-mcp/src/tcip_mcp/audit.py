@@ -314,8 +314,8 @@ def audited(
       leaves the call a platform event as documented above.
 
     Binds positional args to their parameter names so a caller that invokes the
-    tool positionally, e.g. the web routes, which call ``launch_training(payload.config,
-    payload.output_dir)`` rather than by keyword, is recorded with the same fidelity as a keyword
+    tool positionally, e.g. the training relaunch route, which calls ``launch_training(config)``
+    rather than by keyword, is recorded with the same fidelity as a keyword
     call, instead of writing an empty ``arguments`` dict. Binding failures never abort the call this
     decorator only observes; they fall back to the kwargs-only record, and to the platform log,
     since the scope argument's value is not recoverable from a failed binding.

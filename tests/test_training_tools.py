@@ -1241,3 +1241,66 @@ def test_dataset_identity_tolerates_a_genuinely_unregistered_dataset(tmp_path, m
 
     ds_id, fp = dataset_identity({"images_dir": str(images_dir)})
     assert ds_id is None
+
+
+def test_list_launchable_configs_state_agrees_with_the_runs_list_for_a_crashed_record(
+    tmp_path, monkeypatch
+) -> None:
+    """A launched-but-heartbeat-stale record reads 'interrupted' here the identical way
+    list_training_runs's own derivation reads it (the runs list beside this picker); a
+    never-launched pristine record reads its recorded 'created', not a heartbeat-derived
+    guess implying a crash that never happened."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
+    import tcip_store
+    from tcip_mcp.experiments import create_experiment, status_key
+    from tcip_mcp.tools.training_tools import list_launchable_configs
+
+    create_experiment("exp-crashed", {"model_source": {"builder": "m:f", "task": "detection"},
+                                      "data": {"images_dir": "/d", "subject": "catkin"}})
+    with tcip_store.transaction(status_key("exp-crashed")) as txn:
+        txn.write(status_key("exp-crashed"), {"state": "running", "started": None, "ended": None})
+
+    create_experiment("exp-pristine", {"model_source": {"builder": "m:f", "task": "detection"},
+                                       "data": {"images_dir": "/d"}})
+
+    rows = {r["experiment_id"]: r for r in list_launchable_configs()}
+    assert rows["exp-crashed"]["state"] == "interrupted"
+    assert rows["exp-pristine"]["state"] == "created"
+
+
+def test_cancel_end_to_end_through_the_real_trainer_ends_cancelled_with_records_and_losing_side(
+    tmp_path
+) -> None:
+    """A trial whose run-level cancel sentinel is already set when it starts ends cancelled
+    (generic_trainer's own should_cancel check, the identical one a standalone run polls),
+    still writes its resolved-config record, and reports the losing side, not a real score, so
+    a cancelled trial can never outrank one that merely scored worse."""
+    pytest.importorskip("torch")
+    import tcip_store
+    from tcip_mcp.pipelines.training.run_registry import CANCEL_SENTINEL
+    from tcip_mcp.tools.training_tools import _run_hpo_trial, trial_config_key
+    from tests.tiny_trainer_fixtures import write_regression_dataset
+
+    images_dir, csv_path = write_regression_dataset(
+        tmp_path, intensities=[0.0, 1.0], values=[0.1, 0.9])
+    labels_dir = tmp_path / "unused_labels"
+    labels_dir.mkdir()
+    base_config = {
+        "model_source": {"builder": "tests.tiny_trainer_fixtures:build_mean_intensity_regressor",
+                         "task": "regression", "in_chans": 3},
+        "data": {"images_dir": str(images_dir), "csv_path": str(csv_path), "labels_dir": str(labels_dir)},
+        "training": {"batch_size": 2, "stages": [{"freeze_to": 0, "epochs": 5}],
+                     "mixed_precision": False, "device": "cpu",
+                     "checkpoint_every_n_epochs": 0, "early_stopping": {"enabled": False}},
+    }
+    trial_dir = tmp_path / "sweep" / "trial_cancel01"
+    trial_dir.mkdir(parents=True)
+    (trial_dir / CANCEL_SENTINEL).touch()  # already requested before the trial ever starts
+
+    reported: list = []
+    _run_hpo_trial({}, reported.append, base_config, str(trial_dir))
+
+    assert reported == [float("inf")]  # regression: min-mode losing side
+    resolved = tcip_store.read(trial_config_key(trial_dir.parent, trial_dir.name))
+    assert resolved["trial_params"] == {}

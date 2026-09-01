@@ -1584,7 +1584,11 @@ REGISTERED = {
         f".tcip/artifacts/cal_holdout_split_{LOCK_IDENTITY}.json"),
     "hpo_sweep_manifest": Registered(
         {"study_name": STUDY, "status": "running", "n_trials": 2,
-         "param_space": {"lr": [0.1, 0.01]}},
+         "param_space": {"lr": [0.1, 0.01]},
+         "base_config": {"model_source": {"builder": "x:y"}, "data": {}, "training": {}},
+         "grace_period": 5, "reduction_factor": 3, "max_concurrent": 1,
+         "warm_start": False, "baseline_params": None, "resources_per_trial": None,
+         "cancel_requested": False},
         lambda root: training_tools.sweep_manifest_key(STUDY),
         f".tcip/hpo/{STUDY}/manifest.json", pin=_pin_platform_root,
         root_of=lambda root: training_tools.hpo_root()),

@@ -900,6 +900,51 @@ def list_training_runs() -> dict:
     return {"runs": _all_training_runs(read_progress=True)}
 
 
+def list_launchable_configs() -> list[dict]:
+    """Every experiment in this project with a model source, as a row the config picker can
+    start a run from: the id, the builder and task, the data it names, the subject, its derived
+    state and its parent when it has one.
+
+    Not agent-facing (not an ``@mcp.tool()``): a GUI-picker-specific projection over records the
+    agent already has ``list_experiments``/``get_experiment`` for. Reads only each record's
+    config and lineage members, never ``get_experiment`` (which also reads the whole metrics
+    log), on top of ``list_experiments``' own single enumeration of every status record.
+
+    State is ``derived_state``, gated by ``is_launched`` the identical way ``compare_experiments``
+    and this platform's runs list already gate it, so a pristine never-launched config reads its
+    recorded ``"created"`` rather than a heartbeat-derived ``"interrupted"`` implying a crash
+    that never happened, and a crashed run reads the same way here as it does in the runs list.
+    """
+    from tcip_mcp.experiments import (
+        config_key, derived_state, is_launched, lineage_key, list_experiments, read_member,
+        status_key,
+    )
+    from tcip_mcp.pipelines.model_build import MODEL_SOURCE_KEY
+
+    rows = []
+    for exp in list_experiments():
+        if not exp["has_model_source"]:
+            continue
+        experiment_id = exp["experiment_id"]
+        config = read_member(config_key(experiment_id), {})
+        lineage = read_member(lineage_key(experiment_id), {})
+        status = read_member(status_key(experiment_id), {})
+        model_source = config.get(MODEL_SOURCE_KEY) if isinstance(config, dict) else None
+        data_cfg = config.get("data") if isinstance(config, dict) else None
+        rows.append({
+            "experiment_id": experiment_id,
+            "builder": (model_source or {}).get("builder"),
+            "task": (model_source or {}).get("task"),
+            "images_dir": (data_cfg or {}).get("images_dir"),
+            "subject": (data_cfg or {}).get("subject"),
+            "created": exp["created"],
+            "state": derived_state(status, TCIP_HEARTBEAT_STALE_SECONDS) if is_launched(status)
+                     else status.get("state", exp["state"]),
+            "parent_experiment": (lineage or {}).get("parent_experiment"),
+        })
+    return rows
+
+
 @mcp.tool()
 @audited
 def cancel_training(run_id: str) -> dict:
@@ -1046,6 +1091,37 @@ def sweep_dir(study_name: str, output_dir: str = "", *, root: Path | str | None 
     """One sweep's own directory: its manifest, its ``trial_<id>`` dirs, and (because Ray
     is handed ``storage_path=hpo_root`` and ``name=study_name``) Ray's experiment store."""
     return hpo_root(output_dir, root=root) / study_name
+
+
+SWEEP_CANCEL_SENTINEL = ".sweep_cancel_requested"
+"""The sweep-level cooperative-cancel stop file's name, written at a sweep's own root by
+:func:`cancel_hpo` and polled by ``run_hpo``, ``_run_hpo_trial`` and the sweep
+:class:`~tcip_mcp.pipelines.training.hpo.Stopper`. Distinct from the run-level
+``run_registry.CANCEL_SENTINEL`` (written per trial directory): one name per protocol, since a
+sweep-wide stop and one run's own stop answer different questions."""
+
+_TRIAL_DIR_PREFIX = "trial_"
+
+
+def _running_trial_dirs(sweep_root: Path) -> list[Path]:
+    """Every ``trial_<id>`` directory under ``sweep_root`` that has not yet written its
+    resolved-config record, the one on-disk signal that a trial is still training:
+    ``_run_hpo_trial``'s own ``finally`` block writes that record exactly once, at the very
+    end of the trial, success or failure, so its absence is the trial still running.
+
+    Shared by :func:`cancel_hpo` (which trial directories still need the run-level cancel
+    sentinel) and the sweep :class:`~tcip_mcp.pipelines.training.hpo.Stopper` (whether Ray's
+    own hard stop is still needed), so the two never disagree about what "still running" means.
+    """
+    if not sweep_root.is_dir():
+        return []
+    running = []
+    for d in sorted(sweep_root.iterdir()):
+        if not d.is_dir() or not d.name.startswith(_TRIAL_DIR_PREFIX):
+            continue
+        if store.read(trial_config_key(sweep_root, d.name), default=None) is None:
+            running.append(d)
+    return running
 
 
 SWEEP_MANIFEST_STORE = "hpo_sweep_manifest"
@@ -1240,6 +1316,12 @@ def _run_hpo_trial(config: dict, report, base_config: dict, trial_dir: str) -> N
         higher_is_better = False
     losing_side = float("-inf") if higher_is_better else float("inf")
 
+    # A sweep-wide cancel already requested: report the losing side without training, so every
+    # trial Ray still schedules after the request ends at once.
+    if (Path(trial_dir).parent / SWEEP_CANCEL_SENTINEL).exists():
+        report(losing_side)
+        return
+
     if not model_source:
         report(losing_side)
         return
@@ -1375,12 +1457,16 @@ def run_hpo(
     ``manifest.json`` stamped ``running`` before the first trial starts (so a sweep is
     visible while it runs, not only once it ends) and updated when the sweep ends, one
     ``trial_<id>/`` directory per trial, and Ray's own experiment store (also the
-    TensorBoard logdir). The full result is written alongside as ``<study_name>.json``.
+    TensorBoard logdir). The full result is written alongside as ``<study_name>.json``. The
+    manifest also carries every argument this call resolved (``base_config`` and the resolved
+    ``param_space`` included), so a relaunch can replay it exactly from the manifest alone.
 
     Refuses (``{"error": ..., "issues": [...]}``, nothing minted) an unimportable builder or
     training source, or a config with no ``data`` section, at the config a trial would actually
     train under (``base_config`` with the search space's first sampled point applied), rather
-    than reporting as the losing side in every trial.
+    than reporting as the losing side in every trial. ``cancel_hpo`` requested against this
+    study before or during the run instead ends the sweep ``{"status": "cancelled", ...}``, the
+    manifest recording the same, rather than a completed result.
 
     Args:
         base_config: Base training config each trial modifies.
@@ -1453,6 +1539,7 @@ def run_hpo(
     study_name = study_name or f"hpo_{uuid.uuid4().hex[:8]}"
     sweep_root = sweep_dir(study_name, output_dir)
     sweep_root.mkdir(parents=True, exist_ok=True)
+    cancel_path = sweep_root / SWEEP_CANCEL_SENTINEL
 
     manifest = {
         "study_name": study_name,
@@ -1461,10 +1548,26 @@ def run_hpo(
         "n_trials": n_trials,
         "search_alg": search_alg,
         "scheduler": scheduler,
+        "grace_period": grace_period,
+        "reduction_factor": reduction_factor,
+        "max_concurrent": max_concurrent,
+        "warm_start": warm_start,
+        "baseline_params": baseline_params,
+        "resources_per_trial": resources_per_trial,
         "param_space": param_space,
+        "base_config": base_config,
         "sweep_dir": str(sweep_root),
     }
     manifest_key = sweep_manifest_key(study_name, output_dir)
+
+    # A cancel already requested (the study_name was minted and registered before this call
+    # reached the manifest write) records a cancelled manifest rather than being refused.
+    if cancel_path.exists():
+        manifest.update(status="cancelled", error="cancelled before the sweep's first trial started",
+                        finished_at=datetime.now(timezone.utc).isoformat())
+        store.replace(manifest_key, manifest)
+        return {"status": "cancelled", "study_name": study_name}
+
     store.replace(manifest_key, manifest)
 
     def objective_fn(config: dict, report) -> None:
@@ -1473,7 +1576,7 @@ def run_hpo(
             tid = _tune.get_context().get_trial_id()
         except Exception:
             tid = uuid.uuid4().hex[:8]
-        _run_hpo_trial(config, report, base_config, str(sweep_root / f"trial_{tid}"))
+        _run_hpo_trial(config, report, base_config, str(sweep_root / f"{_TRIAL_DIR_PREFIX}{tid}"))
 
     try:
         result = tune_search(
@@ -1492,12 +1595,24 @@ def run_hpo(
             storage_path=str(hpo_dir),
             study_name=study_name,
             resources_per_trial=resources_per_trial,
+            stop_all_when=lambda: cancel_path.exists(),
         )
     except Exception as exc:
+        if cancel_path.exists():
+            manifest.update(status="cancelled", error="the sweep was cancelled by request before it could finish",
+                            finished_at=datetime.now(timezone.utc).isoformat())
+            store.replace(manifest_key, manifest)
+            return {"status": "cancelled", "study_name": study_name}
         manifest.update(status="failed", error=str(exc),
                         finished_at=datetime.now(timezone.utc).isoformat())
         store.replace(manifest_key, manifest)
         raise
+
+    if cancel_path.exists():
+        manifest.update(status="cancelled", error="the sweep was cancelled by request before it could finish",
+                        finished_at=datetime.now(timezone.utc).isoformat())
+        store.replace(manifest_key, manifest)
+        return {"status": "cancelled", "study_name": study_name}
 
     # Auto-launch TensorBoard on the sweep root: Ray's per-trial event files and each
     # trial's own tensorboard dir both sit under it.
@@ -1527,6 +1642,69 @@ def run_hpo(
     except (OSError, StoreError):
         logger.warning("could not persist the hpo result for %s", study_name, exc_info=True)
     return result
+
+
+def _path_under(path: Path, root: Path) -> bool:
+    """Whether ``path`` (resolved) is ``root`` itself or somewhere beneath it (also resolved)."""
+    try:
+        path.resolve().relative_to(root)
+        return True
+    except ValueError:
+        return False
+
+
+@mcp.tool()
+@audited
+def cancel_hpo(study_name: str, output_dir: str = "", *, root: str | None = None) -> dict:
+    """Request cooperative cancellation of a running HPO sweep.
+
+    Writes the sweep's own stop file (``SWEEP_CANCEL_SENTINEL``) at the sweep's root: ``run_hpo``
+    checks it after preflight and before minting the manifest, ``_run_hpo_trial`` checks it at
+    the start of every trial, and the sweep's own Tune ``Stopper`` polls it to end each trial's
+    report and, once no trial directory still looks unfinished (or the heartbeat stale window has
+    passed since the file was written), the whole experiment. Also writes the run-level sentinel
+    (``run_registry.CANCEL_SENTINEL``) into every trial directory that has not yet written its
+    resolved config, so a trial mid-epoch sees the request at its very next batch boundary the
+    same way a standalone training run does, without waiting on the driver's own poll.
+
+    Refuses when the study names no sweep this process can find: no manifest under the resolved
+    root, and no live trial of this study registered in this process's own run registry (the
+    narrow window between a caller minting the id and ``run_hpo`` writing its first manifest).
+
+    Args:
+        study_name: The sweep to cancel.
+        output_dir: Where the sweep's own directory lives, as given to ``run_hpo``; empty
+            resolves the same ``.tcip/hpo`` default, under ``root``.
+        root: The platform root this sweep launched under, for a caller (the Tuning cancel
+            route) that already knows it; omitted resolves under this process's own root.
+    """
+    from tcip_mcp.pipelines.training.run_registry import CANCEL_SENTINEL, _RUNS, _RUNS_LOCK
+
+    sweep_root = sweep_dir(study_name, output_dir, root=root)
+    manifest = store.read(sweep_manifest_key(study_name, output_dir, root=root), default=None)
+    has_manifest = isinstance(manifest, dict)
+
+    resolved_root = sweep_root.resolve()
+    with _RUNS_LOCK:
+        live_trial = any(
+            r.origin == "hpo_trial" and r.output_dir and _path_under(Path(r.output_dir), resolved_root)
+            for r in _RUNS.values()
+        )
+    if not has_manifest and not live_trial:
+        return {"error": f"no sweep named {study_name!r}: no manifest and no live trial "
+                          "registered for it"}
+
+    sweep_root.mkdir(parents=True, exist_ok=True)
+    (sweep_root / SWEEP_CANCEL_SENTINEL).touch()
+    for trial_dir in _running_trial_dirs(sweep_root):
+        (trial_dir / CANCEL_SENTINEL).touch()
+
+    status = "running"
+    if has_manifest:
+        manifest["cancel_requested"] = True
+        store.replace(sweep_manifest_key(study_name, output_dir, root=root), manifest)
+        status = manifest.get("status", "running")
+    return {"study_name": study_name, "status": status, "cancel_requested": True}
 
 
 def _apply_hpo_params(base_config: dict, params: dict) -> dict:
@@ -1703,7 +1881,10 @@ def _ensure_experiment(
         "experiment_id %s already has a run; experiments are immutable, tracking "
         "this run as %s instead.", experiment_id, fresh_id,
     )
-    create_experiment(fresh_id, config, parent_experiment=experiment_id, data_source=data_source,
+    # The snapshot must name itself, not whatever id the caller's own config carried in (its
+    # parent, for a relaunch that set config["experiment_id"] to the picked id before this call).
+    forked_config = {**config, "experiment_id": fresh_id}
+    create_experiment(fresh_id, forked_config, parent_experiment=experiment_id, data_source=data_source,
                       dataset_id=dataset_id, dataset_fingerprint=dataset_fingerprint)
     stamp_run_identity(fresh_id, run_id, output_dir)
     return fresh_id

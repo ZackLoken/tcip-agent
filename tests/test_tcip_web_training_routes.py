@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from pathlib import Path
 
 import pytest
@@ -15,40 +16,101 @@ def client() -> TestClient:
     return TestClient(app, base_url="http://127.0.0.1")
 
 
-def test_validate_flags_missing_sections(client: TestClient) -> None:
+def _wait_terminal(run_id: str, deadline_s: float = 60) -> dict:
+    from tcip_mcp.tools.training_tools import check_training_status
+
+    deadline = time.monotonic() + deadline_s
+    status: dict = {}
+    while time.monotonic() < deadline:
+        status = check_training_status(run_id)
+        if status.get("status") in ("failed", "completed", "cancelled"):
+            return status
+        time.sleep(0.2)
+    return status
+
+
+def test_validate_route_no_longer_exists(client: TestClient) -> None:
+    """The raw validate door retired with the config picker: the browser never submits a typed
+    config again, so nothing serves ``/validate`` any more. ``preflight_config`` itself keeps
+    its own coverage (tests/test_training_tools.py); this is only the route's absence."""
     resp = client.post("/api/training/validate", json={"config": {}})
-    body = resp.json()
-    assert body["valid"] is False
-    assert any("model_source" in s for s in body["issues"])
+    assert resp.status_code == 404
 
 
-def test_validates_verdict_tracks_the_issues_the_config_actually_raises(
-    client: TestClient, tmp_path: Path,
+def test_launch_route_no_longer_exists(client: TestClient) -> None:
+    """The raw launch door retired with the config picker: a run starts only from a recorded
+    config, through ``/api/training/runs``, never from a client-submitted config again."""
+    resp = client.post("/api/training/launch", json={"config": {}, "output_dir": ""})
+    assert resp.status_code == 404
+
+
+def test_list_configs_route_reports_a_launchable_config(tmp_path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
+    from tcip_mcp.experiments import create_experiment
+    from tcip_web.routes.training import list_configs_route
+
+    create_experiment("exp-picker-1", {
+        "model_source": {"builder": "my_models:chestnut_burr_det", "task": "detection"},
+        "data": {"images_dir": "/data/images", "subject": "catkin"},
+    })
+
+    rows = list_configs_route()["configs"]
+    by_id = {r["experiment_id"]: r for r in rows}
+    assert by_id["exp-picker-1"]["builder"] == "my_models:chestnut_burr_det"
+    assert by_id["exp-picker-1"]["task"] == "detection"
+    assert by_id["exp-picker-1"]["subject"] == "catkin"
+    assert by_id["exp-picker-1"]["state"] == "created"
+    assert by_id["exp-picker-1"]["parent_experiment"] is None
+
+
+def test_relaunch_route_404s_for_an_unknown_experiment(client: TestClient) -> None:
+    resp = client.post("/api/training/runs", json={"experiment_id": "nope"})
+    assert resp.status_code == 404
+
+
+def test_relaunch_route_404s_for_a_config_without_model_source(tmp_path, monkeypatch,
+                                                                client: TestClient) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
+    from tcip_mcp.experiments import create_experiment
+
+    create_experiment("exp-not-training", {"source": "review_feedback"})
+
+    resp = client.post("/api/training/runs", json={"experiment_id": "exp-not-training"})
+    assert resp.status_code == 404
+
+
+def test_relaunch_route_409s_for_a_pristine_config_with_an_attached_run(
+    tmp_path, monkeypatch, client: TestClient
 ) -> None:
-    """The verdict the route reports is the accumulated issue list's own answer, in both
-    directions: a buildable config is accepted with nothing against it, and a single defect in an
-    otherwise identical config refuses it and says which field."""
-    import copy
+    """A 'created' experiment whose status already carries a run identity is a launch already
+    attached to it; relaunching would silently clobber that stamp rather than forking."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
+    from tcip_mcp.experiments import create_experiment, stamp_run_identity
 
-    images = tmp_path / "images"
-    labels = tmp_path / "labels"
-    images.mkdir()
-    labels.mkdir()
-    cfg = {
-        "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
-                         "builder_kwargs": {"num_classes": 1}, "task": "detection"},
-        "data": {"images_dir": str(images), "labels_dir": str(labels), "task": "detection"},
-        "training": {"batch_size": 2, "stages": [{"lr": 1e-3, "epochs": 1}]},
-    }
-    body = client.post("/api/training/validate", json={"config": cfg}).json()
-    assert body["issues"] == [], body
-    assert body["valid"] is True
+    create_experiment("exp-attached", {"model_source": {"builder": "m:f"}, "data": {}})
+    stamp_run_identity("exp-attached", "run_123", str(tmp_path / "out"))
 
-    defective = copy.deepcopy(cfg)
-    defective["training"]["batch_size"] = 0
-    refused = client.post("/api/training/validate", json={"config": defective}).json()
-    assert refused["valid"] is False
-    assert any("batch_size" in issue for issue in refused["issues"]), refused["issues"]
+    resp = client.post("/api/training/runs", json={"experiment_id": "exp-attached"})
+    assert resp.status_code == 409
+
+
+def test_relaunch_route_422s_with_preflight_issues_for_a_refused_config(
+    tmp_path, monkeypatch, client: TestClient
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
+    from tcip_mcp.experiments import create_experiment
+
+    create_experiment("exp-refused", {
+        "model_source": {"builder": "not.a:module", "task": "detection"}, "data": {},
+    })
+
+    resp = client.post("/api/training/runs", json={"experiment_id": "exp-refused"})
+    assert resp.status_code == 422
+    assert resp.json()["detail"]["issues"]
 
 
 def test_list_runs_returns_shape(client: TestClient) -> None:
@@ -249,6 +311,88 @@ def test_never_launched_experiment_is_absent_from_the_route(tmp_path, monkeypatc
 
     by_id = {r["run_id"]: r for r in list_runs_route()["runs"]}
     assert "exp-never-launched" not in by_id
+
+
+def test_relaunch_route_launches_a_pristine_config_as_its_own_first_run(
+    tmp_path, monkeypatch, client: TestClient
+) -> None:
+    """Relaunching a pristine (never-launched) config reuses its own id: no fork."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
+    monkeypatch.setattr(
+        "tcip_mcp.pipelines.training.tensorboard_manager.launch_tensorboard", lambda *a, **k: {})
+    from tcip_mcp.experiments import create_experiment
+    from tests.tiny_trainer_fixtures import write_regression_dataset
+
+    images_dir, csv_path = write_regression_dataset(
+        tmp_path, intensities=[0.0, 1.0], values=[0.1, 0.9])
+    labels_dir = tmp_path / "unused_labels"
+    labels_dir.mkdir()
+    cfg = {
+        "model_source": {"builder": "tests.tiny_trainer_fixtures:build_mean_intensity_regressor",
+                         "task": "regression", "in_chans": 3},
+        "data": {"images_dir": str(images_dir), "csv_path": str(csv_path), "labels_dir": str(labels_dir)},
+        "training": {"batch_size": 2, "stages": [{"freeze_to": 0, "epochs": 1}],
+                     "mixed_precision": False, "device": "cpu",
+                     "checkpoint_every_n_epochs": 0, "early_stopping": {"enabled": False}},
+    }
+    create_experiment("exp-pristine-relaunch", cfg)
+
+    resp = client.post("/api/training/runs", json={"experiment_id": "exp-pristine-relaunch"})
+    assert resp.status_code == 200, resp.json()
+    run_id = resp.json()["run_id"]
+    _wait_terminal(run_id)
+
+    from tcip_mcp.experiments import config_key, lineage_key, read_member
+
+    snapshot = read_member(config_key("exp-pristine-relaunch"))
+    assert snapshot["experiment_id"] == "exp-pristine-relaunch"
+    lineage = read_member(lineage_key("exp-pristine-relaunch"))
+    assert lineage["parent_experiment"] is None
+
+
+def test_relaunch_route_forks_a_run_s_config_and_names_the_parent(
+    tmp_path, monkeypatch, client: TestClient
+) -> None:
+    """Relaunching a config that already has a run attached mints a fresh id, its own snapshot
+    naming itself and its lineage naming the picked config as parent."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
+    monkeypatch.setattr(
+        "tcip_mcp.pipelines.training.tensorboard_manager.launch_tensorboard", lambda *a, **k: {})
+    from tests.tiny_trainer_fixtures import write_regression_dataset
+
+    images_dir, csv_path = write_regression_dataset(
+        tmp_path, intensities=[0.0, 1.0], values=[0.1, 0.9])
+    labels_dir = tmp_path / "unused_labels"
+    labels_dir.mkdir()
+    cfg = {
+        "model_source": {"builder": "tests.tiny_trainer_fixtures:build_mean_intensity_regressor",
+                         "task": "regression", "in_chans": 3},
+        "data": {"images_dir": str(images_dir), "csv_path": str(csv_path), "labels_dir": str(labels_dir)},
+        "training": {"batch_size": 2, "stages": [{"freeze_to": 0, "epochs": 1}],
+                     "mixed_precision": False, "device": "cpu",
+                     "checkpoint_every_n_epochs": 0, "early_stopping": {"enabled": False}},
+    }
+    from tcip_mcp.tools.training_tools import launch_training
+
+    first = launch_training(dict(cfg), str(tmp_path / "out1"))
+    assert "error" not in first, first
+    parent_id = first["experiment_id"]
+    _wait_terminal(first["run_id"])
+
+    resp = client.post("/api/training/runs", json={"experiment_id": parent_id})
+    assert resp.status_code == 200, resp.json()
+    forked_id = resp.json()["experiment_id"]
+    assert forked_id != parent_id
+    _wait_terminal(resp.json()["run_id"])
+
+    from tcip_mcp.experiments import config_key, lineage_key, read_member
+
+    snapshot = read_member(config_key(forked_id))
+    assert snapshot["experiment_id"] == forked_id
+    lineage = read_member(lineage_key(forked_id))
+    assert lineage["parent_experiment"] == parent_id
 
 
 def test_list_runs_excludes_hpo_trials(monkeypatch) -> None:
