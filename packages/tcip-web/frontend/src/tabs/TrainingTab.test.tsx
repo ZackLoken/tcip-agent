@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
-import { trainingApi, type TrainingRunSummary } from "@/api/training";
+import { StructuredRefusalError } from "@/api/http";
+import { trainingApi, type LaunchableConfig, type TrainingRunSummary } from "@/api/training";
 import { useStore } from "@/store";
 import { TrainingTab } from "@/tabs/TrainingTab";
 
@@ -17,6 +18,21 @@ const initialStoreState = useStore.getState();
 function run(overrides: Partial<TrainingRunSummary> & { run_id: string }): TrainingRunSummary {
   return {
     status: "running",
+    ...overrides,
+  };
+}
+
+function config(
+  overrides: Partial<LaunchableConfig> & { experiment_id: string },
+): LaunchableConfig {
+  return {
+    builder: "tests.tiny_trainer_fixtures:build_mean_intensity_regressor",
+    task: "regression",
+    images_dir: "/data/images",
+    subject: "burr",
+    created: "2026-08-01T00:00:00Z",
+    state: "created",
+    parent_experiment: null,
     ...overrides,
   };
 }
@@ -58,5 +74,46 @@ describe("TrainingTab run list", () => {
     expect(await screen.findByText("train-done")).toBeInTheDocument();
     expect(screen.getByText("train-done-agent")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Cancel" })).not.toBeInTheDocument();
+  });
+});
+
+describe("TrainingTab config picker", () => {
+  it("opens the picker, selects a config, and starts it through the relaunch door", async () => {
+    vi.spyOn(trainingApi, "listRuns").mockResolvedValue({ runs: [] });
+    vi.spyOn(trainingApi, "listConfigs").mockResolvedValue({
+      configs: [config({ experiment_id: "exp-pristine-1" })],
+    });
+    const relaunchSpy = vi
+      .spyOn(trainingApi, "relaunch")
+      .mockResolvedValue({ run_id: "run-new-1", experiment_id: "exp-pristine-1" });
+
+    render(<TrainingTab />);
+    fireEvent.click(screen.getByRole("button", { name: "Start a run" }));
+    expect(await screen.findByText("exp-pristine-1")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText("exp-pristine-1"));
+    expect(screen.getByText("Its first run, on the data paths it names")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Start" }));
+    await waitFor(() => expect(relaunchSpy).toHaveBeenCalledWith("exp-pristine-1"));
+  });
+
+  it("shows a refused start's issues under the picked config's row", async () => {
+    vi.spyOn(trainingApi, "listRuns").mockResolvedValue({ runs: [] });
+    vi.spyOn(trainingApi, "listConfigs").mockResolvedValue({
+      configs: [config({ experiment_id: "exp-refused-1" })],
+    });
+    vi.spyOn(trainingApi, "relaunch").mockRejectedValue(
+      new StructuredRefusalError({ issues: ["batch_size must be positive"] }, 422, ""),
+    );
+
+    render(<TrainingTab />);
+    fireEvent.click(screen.getByRole("button", { name: "Start a run" }));
+    expect(await screen.findByText("exp-refused-1")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText("exp-refused-1"));
+    fireEvent.click(screen.getByRole("button", { name: "Start" }));
+    await waitFor(() =>
+      expect(screen.getByText("batch_size must be positive")).toBeInTheDocument(),
+    );
   });
 });
