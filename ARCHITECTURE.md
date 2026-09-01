@@ -681,8 +681,8 @@ Docstring is the function's docstring first line, verbatim.
 
 | tool | line | audited | docstring first line |
 |---|---|---|---|
-| `validate_data_quality` | `data_tools.py:301` | yes | Run quality checks on a dataset (any supported annotation format). |  <!-- queued: P5-18 unify -->
-| `make_splits` | `data_tools.py:452` | yes | Compute a leakage-free, annotation-stratified train/val/calibration split. |
+| `validate_data_quality` | `data_tools.py:339` | yes | Run quality checks on a dataset (any supported annotation format). |  <!-- queued: P5-18 unify -->
+| `make_splits` | `data_tools.py:490` | yes | Compute a leakage-free, annotation-stratified train/val/calibration split. |
 
 ### experiment_tools.py (4 tools)
 
@@ -814,13 +814,13 @@ anything.
 
 | tool | line | audited | docstring first line |
 |---|---|---|---|
-| `preflight_config` | `training_tools.py:69` | yes | Validate a training configuration before launching. |
-| `launch_training` | `training_tools.py:522` | yes | Launch a training run in an isolated subprocess from a bespoke ``model_source`` builder. |
-| `check_training_status` | `training_tools.py:754` | yes | Check the status of a training run. |
-| `list_training_runs` | `training_tools.py:891` | yes | List every training run this platform can currently account for. |
-| `cancel_training` | `training_tools.py:950` | yes | Request graceful cancellation of a running training run. |
-| `run_hpo` | `training_tools.py:1423` | yes | Run hyperparameter optimization on Ray Tune, training each trial for real. |
-| `evaluate_model` | `training_tools.py:2034` | yes | Evaluate a trained checkpoint on a (held-out) dataset and write test_results.json. |
+| `preflight_config` | `training_tools.py:166` | yes | Validate a training configuration before launching. |
+| `launch_training` | `training_tools.py:560` | yes | Launch a training run in an isolated subprocess from a bespoke ``model_source`` builder. |
+| `check_training_status` | `training_tools.py:792` | yes | Check the status of a training run. |
+| `list_training_runs` | `training_tools.py:929` | yes | List every training run this platform can currently account for. |
+| `cancel_training` | `training_tools.py:1124` | yes | Request graceful cancellation of a running training run. |
+| `run_hpo` | `training_tools.py:1597` | yes | Run hyperparameter optimization on Ray Tune, training each trial for real. |
+| `evaluate_model` | `training_tools.py:2208` | yes | Evaluate a trained checkpoint on a (held-out) dataset and write test_results.json. |
 
 ### vision_tools.py (3 tools)
 
@@ -1005,13 +1005,13 @@ registered at HEAD.
 | method | path | handler | line |
 |---|---|---|---|
 | GET | `/configs` | `list_configs_route` | `routes/training.py:49` |
-| POST | `/runs` | `relaunch_config_route` | `routes/training.py:61` |
-| GET | `/runs` | `list_runs_route` | `routes/training.py:89` |
-| GET | `/runs/{run_id}` | `get_run` | `routes/training.py:102` |
-| POST | `/runs/{run_id}/tensorboard` | `launch_run_tensorboard` | `routes/training.py:109` |
-| POST | `/runs/{run_id}/cancel` | `cancel_run_route` | `routes/training.py:129` |
-| POST | `/compare` | `compare_runs_route` | `routes/training.py:149` |
-| WS | `/runs/{run_id}/stream` (full path `/api/training/runs/{run_id}/stream`) | `training_stream_ws` | `routes/training.py:236` |
+| POST | `/runs` | `relaunch_config_route` | `routes/training.py:76` |
+| GET | `/runs` | `list_runs_route` | `routes/training.py:125` |
+| GET | `/runs/{run_id}` | `get_run` | `routes/training.py:138` |
+| POST | `/runs/{run_id}/tensorboard` | `launch_run_tensorboard` | `routes/training.py:145` |
+| POST | `/runs/{run_id}/cancel` | `cancel_run_route` | `routes/training.py:165` |
+| POST | `/compare` | `compare_runs_route` | `routes/training.py:185` |
+| WS | `/runs/{run_id}/stream` (full path `/api/training/runs/{run_id}/stream`) | `training_stream_ws` | `routes/training.py:272` |
 
 ### routes/tuning.py, prefix `/api/tuning` (10 routes)
 
@@ -1282,9 +1282,9 @@ Writers: `set_image_status`,
 (`trainable_stems`) before the split's manifest or file tree is written, then
 attributed to a split by
 `negative_carry = _compute_negative_carry(label_map, bare_parts, image_map, subject, only_date)`
-`packages/tcip-mcp/src/tcip_mcp/tools/data_tools.py:695`, then applied by
+`packages/tcip-mcp/src/tcip_mcp/tools/data_tools.py:733`, then applied by
 `_apply_negative_carry(negative_carry, out_dir, subject)`
-`packages/tcip-mcp/src/tcip_mcp/tools/data_tools.py:892`).
+`packages/tcip-mcp/src/tcip_mcp/tools/data_tools.py:930`).
 
 Readers: `tcip_mcp.pipelines.data.label_queries.confirmed_negative_names`,
 `packages/tcip-mcp/src/tcip_mcp/pipelines/data/label_queries.py:424`; `_status_bucket_for`,
@@ -1910,7 +1910,7 @@ Path: `<output_path>/split_manifest.json`, addressed by `split_manifest_key`,
 `packages/tcip-mcp/src/tcip_mcp/tools/data_tools.py:37`, under whatever directory the caller
 asked the partition to be written to; no dataset resolver owns this layout.
 
-Writer: `make_splits`, `data_tools.py:452`, when `output_path` is given or `materialize=True`.
+Writer: `make_splits`, `data_tools.py:490`, when `output_path` is given or `materialize=True`.
 The three sides are `splits.SPLIT_NAMES` (`train`, `val`, `calibration`); a manifest write states
 all three ratios (`train_ratio`, `val_ratio`, `calibration_ratio`) non-zero, refusing whichever is
 zero by name, since a manifest always draws all three sides. The draw refuses, before any write,
@@ -1954,7 +1954,7 @@ dict so the two cannot drift), holds a `members` block whose `label_digests` is 
 non-empty mapping (a manifest drawn before the platform recorded per-stem digests binds nothing
 here), lacks any name in `splits.SPLIT_NAMES` under `splits`, or whose
 sides are not pairwise disjoint; `scripts/plant_aware_group_splits.py` reads no manifest back, it
-only writes one through `make_splits`. `bind_manifest_stems` (`splits.py:403`) reads all three
+only writes one through `make_splits`. `bind_manifest_stems` (`splits.py:441`) reads all three
 sides for one capture date: a `calibration` member is placed on neither loader, whether or not the
 run currently admits it, recorded as `calibration_bound`/`calibration_unadmitted` rather than
 refused on; the `train`/`val` refusals (an admitted stem assigned to no side, a member the run no
@@ -1967,10 +1967,10 @@ No seam id in `seam-coverage.json`'s inventory names this record: it is new, and
 ## 27. `cal_holdout_split_lock`, `.tcip/artifacts/cal_holdout_split_<hash>.json`
 
 Path: named for the identity hash it locks rather than a directory of its own, addressed by
-`cal_holdout_lock_key`, `packages/tcip-mcp/src/tcip_mcp/pipelines/data/splits.py:934`, under the
+`cal_holdout_lock_key`, `packages/tcip-mcp/src/tcip_mcp/pipelines/data/splits.py:966`, under the
 scope root the split was drawn over (`cal_holdout_scope_root`).
 
-Writer: `resolve_locked_cal_holdout_split`, `splits.py:1173`, locking on first draw for a given
+Writer: `resolve_locked_cal_holdout_split`, `splits.py:1205`, locking on first draw for a given
 identity hash; every later call for the same identity answers from the lock unchanged unless
 `force_redraw=True`. The record carries `identity_hash`, `calibration`, `holdout`, `group_by`,
 `group_key_map`, `seed`, `holdout_ratio`, `split_manifest_dir` (`null` for a whole-directory draw,
@@ -2113,7 +2113,7 @@ Phase 3 verdict: single.
 
 Must agree: the writer's row shape is what the reader and the stream consumer expect.
 Side A: `packages/tcip-mcp/src/tcip_mcp/experiments.py:898` (`def log_metrics(`, the one writer; the trainer and the envelope hand rows to the context's epoch sink instead of opening the file).
-Side B: `packages/tcip-web/src/tcip_web/routes/training.py:196` (`read_log(key, after=cursor)`, the training stream's incremental tail, pushed as a `TrainingMetricFrame` per row) and `routes/tuning.py:502` (`read_log(trial_metrics_key`, answered in the shape `_metrics_common.metrics_response` builds).
+Side B: `packages/tcip-web/src/tcip_web/routes/training.py:232` (`read_log(key, after=cursor)`, the training stream's incremental tail, pushed as a `TrainingMetricFrame` per row) and `routes/tuning.py:502` (`read_log(trial_metrics_key`, answered in the shape `_metrics_common.metrics_response` builds).
 Phase 3 verdict: single. An HPO trial with no experiment record still appends to its own trial log, one declared site in the epoch sink, pending the HPO store migration.
 
 ## S09. Web job registries persisted to .tcip/state/<name>.json  <!-- queued: P5-325 unify -->
@@ -2361,7 +2361,7 @@ Phase 3 verdict: duplicated.
 
 Must agree: a bespoke train(ctx) callable is importable and accepts the TrainContext the envelope hands it.
 Side A: `packages/tcip-mcp/src/tcip_mcp/pipelines/training/envelope.py:424` (`training_source = run.config.get("training_source")`).
-Side B: `packages/tcip-mcp/src/tcip_mcp/tools/training_tools.py:121` (`training_source = config.get("training_source")`).
+Side B: `packages/tcip-mcp/src/tcip_mcp/tools/training_tools.py:218` (`training_source = config.get("training_source")`).
 Phase 3 verdict: duplicated.
 
 ## S43. dataset_source bespoke dataset seam
@@ -2424,7 +2424,7 @@ Phase 3 verdict: duplicated.
 ## S51. Training run stream WebSocket  <!-- queued: P5-297 unify -->
 
 Must agree: the status payload the MCP tool returns is renderable by the browser's training view.
-Side A: `packages/tcip-web/src/tcip_web/routes/training.py:235` (`@router.websocket("/runs/{run_id}/stream")`).
+Side A: `packages/tcip-web/src/tcip_web/routes/training.py:271` (`@router.websocket("/runs/{run_id}/stream")`).
 Side B: `packages/tcip-mcp/src/tcip_mcp/tools/training_tools.py` (`check_training_status` supplies the status payload).
 Phase 3 verdict: duplicated.
 
