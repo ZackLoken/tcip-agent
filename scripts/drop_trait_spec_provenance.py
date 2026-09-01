@@ -82,7 +82,9 @@ def drop_provenance_from_records(root: Path, *, plan: bool) -> list[str]:
         if plan:
             outcomes.append(f"{trait}: would drop provenance")
             continue
-        traits._write_spec_record(key, spec, expect=stored.version)
+        traits._write_spec_record(
+            key, spec, expect=stored.version, schema_version=data.get("schema_version"),
+        )
         outcomes.append(f"{trait}: dropped provenance")
     return outcomes
 

@@ -171,6 +171,26 @@ def test_updating_a_trait_spec_with_a_caller_supplied_schema_version_refuses(tmp
         traits.write_trait_spec_fields("leaf", {"schema_version": 2}, project_root=tmp_path)
 
 
+def test_a_stamped_trait_specs_schema_version_survives_a_field_edit(tmp_path: Path) -> None:
+    """A record already carrying a ``schema_version`` stamp (seeded directly here, the way an
+    adopted or hand-conformed record would carry one) must keep that stamp through an ordinary
+    field-edit rewrite: ``_encode_spec`` has no such dataclass field, so nothing but a deliberate
+    re-attach in the write path keeps it from falling out on every edit."""
+    _author(tmp_path, trait="leaf", delivers=("leaf_length",), holdout_match_quality_floor=0.4)
+    directory = traits.trait_specs_dir(str(tmp_path))
+    key = traits.trait_spec_key(directory, "leaf")
+    stored = ts.read_versioned(key)
+    ts.replace(key, {**stored.value, "schema_version": 1}, expect=stored.version)
+
+    traits.write_trait_spec_fields(
+        "leaf", {"holdout_match_quality_floor": 0.6}, project_root=tmp_path,
+    )
+
+    rewritten = ts.read_versioned(key).value
+    assert rewritten["schema_version"] == 1
+    assert rewritten["holdout_match_quality_floor"] == 0.6
+
+
 def test_a_restatement_over_an_existing_spec_carries_its_localization_and_sliver_fields_forward(
     tmp_path: Path,
 ) -> None:
