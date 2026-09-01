@@ -339,10 +339,11 @@ def describe_fault(meta: dict) -> str:
 
     Computed once, at the point ``meta.json`` is written, and carried in the record itself under
     ``fault`` rather than re-derived later from ``response_source``/``exit_code`` at the aggregate
-    table: a run with zero captured response characters is never a successful answer, whatever
-    code path emptied it out (a harness that writes nothing at all, an answer field present but
-    blank, a stream whose extraction gave up), so the check is on the character count itself
-    rather than a list of the response-source names known to produce one today.
+    table: a run whose captured response is empty once stripped of whitespace is never a
+    successful answer, whatever code path emptied it out (a harness that writes nothing at all,
+    an answer field present but blank, a stream whose only agent message is whitespace), so the
+    check is on the stripped character count itself rather than a list of the response-source
+    names known to produce one today.
     """
     if meta["exit_code"] != 0:
         return f"the harness exited {meta['exit_code']}"
@@ -561,7 +562,9 @@ def run_one(family: str, question_id: str, condition_name: str, prompt: str,
         "duration_s": round(duration, 1),
         "exit_code": code,
         "timed_out": timed_out,
-        "response_chars": len(response),
+        # A whitespace-only capture is not an answer: strip before counting, though response.md
+        # keeps the raw captured text.
+        "response_chars": len(response.strip()),
         "response_source": response_source,
     }
     meta["fault"] = describe_fault(meta)

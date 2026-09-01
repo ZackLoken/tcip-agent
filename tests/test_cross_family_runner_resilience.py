@@ -267,6 +267,39 @@ def test_completely_empty_stdout_does_not_read_as_a_clean_run(runner, tmp_path, 
     assert meta["fault"]
 
 
+def test_a_whitespace_only_agent_message_stream_is_a_failed_run_not_a_clean_one(
+    runner, tmp_path, monkeypatch
+):
+    """A codex stream whose only captured agent message is whitespace is not an answer:
+    response_chars counts the stripped text, so this run must classify as a fault, not a clean
+    zero-content success."""
+    lines = [
+        json.dumps({"type": "item.completed",
+                    "item": {"id": "item_0", "type": "agent_message", "text": "   \n  "}}),
+        json.dumps({"type": "turn.completed"}),
+    ]
+    monkeypatch.setattr(runner.subprocess, "run", _stub_run("\n".join(lines)))
+    monkeypatch.setattr(runner, "harness_version", lambda *a, **k: "stub-version")
+    monkeypatch.setattr(runner.shutil, "which", lambda *a, **k: "/stub/harness")
+    monkeypatch.setitem(runner.BUILDERS, "codex", lambda *a, **k: (["stub", "argv"], None))
+    (tmp_path / "q.txt").write_text("question", encoding="utf-8")
+
+    monkeypatch.setattr(sys, "argv", [
+        "cross_family_ask.py", "--question-id", "qid",
+        "--prompt-file", str(tmp_path / "q.txt"), "--families", "codex",
+        "--model", "stub-model", "--cwd", str(tmp_path),
+        "--out", str(tmp_path / "out"), "--timeout", "5",
+    ])
+
+    assert runner.main() != 0
+
+    meta = json.loads(
+        (tmp_path / "out" / "qid" / "as-shipped" / "codex" / "meta.json").read_text(encoding="utf-8"))
+    assert meta["response_source"] == "stream_agent_message"
+    assert meta["response_chars"] == 0
+    assert meta["fault"]
+
+
 def test_a_runs_own_fault_verdict_is_recorded_in_its_meta_json(runner, tmp_path, monkeypatch):
     """The record a later reader inspects on its own must already carry why a run failed, not
     only the aggregate table printed at the end of this process's own stdout."""
