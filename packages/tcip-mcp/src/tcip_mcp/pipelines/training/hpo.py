@@ -32,6 +32,9 @@ logger = logging.getLogger(__name__)
 _ray_lifecycle = threading.Lock()
 _active_searches = 0
 _ray_started_here = False
+# The PYTHONPATH this module handed ray.init() for the still-running cluster; None until it starts one.
+_ray_runtime_pythonpath: str | None = None
+_external_cluster_warned = False
 
 # Ray Tune raises on these deprecated variables' mere presence; storage_path alone decides
 # where trial results land, so a sweep drops them for its duration and restores them after.
@@ -57,7 +60,7 @@ _SCHEDULER_ALIASES = {
     "hyperband": "hyperband", "pbt": "pbt",
     "median": "median_stopping_rule", "median_stopping_rule": "median_stopping_rule",
 }
-_NO_SCHEDULER = {"none", "fifo", "", None}
+_NO_SCHEDULER = {"none", "fifo", ""}
 # Schedulers that consume the grace-period / reduction-factor early-stopping knobs.
 _HALVING_SCHEDULERS = {"async_hyperband", "hyperband"}
 
@@ -302,23 +305,38 @@ def _ray_session(ray: Any) -> Generator[None]:
     application) from tearing that cluster down. The lock covers both, so the
     check-then-init and the decrement-then-shutdown sequences cannot interleave.
     """
-    global _active_searches, _ray_started_here
+    global _active_searches, _ray_started_here, _ray_runtime_pythonpath, _external_cluster_warned
+
+    from tcip_mcp.pipelines.model_build import child_pythonpath
 
     with _ray_lifecycle:
         if not ray.is_initialized():
-            from tcip_mcp.pipelines.model_build import child_pythonpath
-
             # A bare ray[tune] install has no aiohttp; probe rather than assume, so a sweep still runs without it.
             include_dashboard = find_spec("aiohttp") is not None
-            # Only this branch configures Ray: an already-initialized cluster (a notebook, an
-            # embedding application) owns its own runtime_env, left untouched below.
+            # Only this branch configures Ray; the not-taken branch below leaves an
+            # already-initialized cluster's runtime_env alone, whoever started it.
+            pythonpath = child_pythonpath()
             context = ray.init(include_dashboard=include_dashboard, dashboard_host="127.0.0.1",
                                log_to_driver=False, ignore_reinit_error=True,
                                configure_logging=False,
-                               runtime_env={"env_vars": {"PYTHONPATH": child_pythonpath()}})
+                               runtime_env={"env_vars": {"PYTHONPATH": pythonpath}})
             _ray_started_here = True
+            _ray_runtime_pythonpath = pythonpath
             if include_dashboard:
                 _publish_ray_dashboard(context.dashboard_url)
+        elif _ray_started_here:
+            if child_pythonpath() != _ray_runtime_pythonpath:
+                logger.warning(
+                    "the running Ray cluster's workers keep the import path captured at "
+                    "cluster start; a bespoke source directory added since will not import "
+                    "in trial workers until the cluster is restarted"
+                )
+        elif not _external_cluster_warned:
+            _external_cluster_warned = True
+            logger.warning(
+                "Ray was already initialized outside this module; no import-path "
+                "propagation was applied to its workers"
+            )
         _active_searches += 1
     try:
         yield
@@ -327,6 +345,7 @@ def _ray_session(ray: Any) -> Generator[None]:
             _active_searches -= 1
             if _active_searches == 0 and _ray_started_here:
                 _ray_started_here = False
+                _ray_runtime_pythonpath = None
                 _clear_ray_dashboard()
                 ray.shutdown()
 
@@ -457,7 +476,11 @@ def tune_search(
         os.environ.update(removed_env)
 
     all_trials = []
-    for r in results:  # type: ignore[attr-defined]  # ResultGrid supports iteration at runtime; its stub omits __iter__
+    for i in range(len(results)):
+        r = results[i]
+        # Every trial that reaches result assembly reported at least once, so its last_result
+        # carries config; a Ray-killed never-reporting trial is a known separate defect on record.
+        assert r.config is not None
         all_trials.append({
             "params": {k: r.config.get(k) for k in space},
             **stored_number("value", (r.metrics or {}).get(metric)),
@@ -466,8 +489,9 @@ def tune_search(
         })
 
     best = results.get_best_result(metric=metric, mode=mode)
+    assert best.config is not None
     result: dict[str, Any] = {
-        "best_params": {k: (best.config or {}).get(k) for k in space},
+        "best_params": {k: best.config.get(k) for k in space},
         **stored_number("best_value", (best.metrics or {}).get(metric)),
         "n_trials": len(results),
         "study_name": study_name,

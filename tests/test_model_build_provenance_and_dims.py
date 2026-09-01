@@ -196,6 +196,15 @@ def test_a_model_source_the_caller_placed_in_the_payload_is_not_replaced_by_the_
     assert payload["kind"] == KIND_TCIP_MODULE
 
 
+def test_a_missing_or_empty_builder_refuses_through_the_one_callee_message():
+    """``builder`` of ``None`` and of ``""`` both reach ``build_model`` -> ``_import_dotted``,
+    the one refusal site for a non-string or empty builder, and refuse with its one message
+    rather than two different messages from a duplicated caller-side check."""
+    for builder in (None, ""):
+        with pytest.raises(ValueError, match="non-empty 'module:function' string"):
+            build_model({"model_source": {"builder": builder}})
+
+
 def _probe_config() -> dict:
     return {
         "model_source": {"builder": f"{__name__}:build_probe_net",

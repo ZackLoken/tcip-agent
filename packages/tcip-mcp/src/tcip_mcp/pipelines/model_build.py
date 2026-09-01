@@ -47,8 +47,12 @@ def _split_dotted(target: str) -> tuple[str, str]:
     return mod_name, attr
 
 
-def _import_dotted(target: str) -> Any:
-    """Resolve a ``'module.path:function'`` (or ``'module.path.function'``) string to the callable."""
+def _import_dotted(target: object) -> Any:
+    """Resolve a ``'module.path:function'`` (or ``'module.path.function'``) string to the callable.
+
+    The one refusal site for a non-string or empty ``builder``; callers pass whatever they hold
+    (typed or not) and let this guard narrow it.
+    """
     if not isinstance(target, str) or not target:
         raise ValueError(f"builder must be a non-empty 'module:function' string, got {target!r}")
     mod_name, attr = _split_dotted(target)
@@ -65,9 +69,11 @@ def _import_dotted(target: str) -> Any:
 
 
 def child_pythonpath() -> str:
-    """The ``PYTHONPATH`` string that reproduces this process's own import search path in
-    another process: every non-empty ``sys.path`` entry, then the existing ``PYTHONPATH`` env
-    value appended if set, joined with ``os.pathsep``.
+    """The ``PYTHONPATH`` string that makes this process's extra import path entries importable
+    in a child process: every non-empty ``sys.path`` entry, then the existing ``PYTHONPATH`` env
+    value appended if set, joined with ``os.pathsep``. A child process appends its own leading
+    ``sys.path`` entries first, so this string lands after them rather than reproducing this
+    process's search order.
 
     A bespoke ``model_source``/``training_source``/``dataset_source`` importable to this
     process (an editable install's extra path entries, a test runner's rootdir insertion, an
@@ -75,6 +81,11 @@ def child_pythonpath() -> str:
     platform spawns, or a Ray worker: neither inherits this interpreter's ``sys.path``, only its
     own defaults plus whatever ``PYTHONPATH`` it is handed. Every caller that needs a bespoke
     source importable across that boundary composes its child/worker environment from this.
+
+    Ray workers apply environment-variable expansion to ``env_vars`` values (a ``${NAME}`` or
+    ``%NAME%`` pattern inside an entry is substituted or stripped), while the subprocess launch
+    path passes the string literally, so the two consumers agree on the composed string, not on
+    every byte reaching the interpreter.
     """
     import os
     import sys
@@ -116,8 +127,6 @@ def build_from_model_source(model_source: dict) -> Any:
     if not isinstance(model_source, dict):
         raise ValueError("model_source must be a dict")
     builder = model_source.get("builder")
-    if not isinstance(builder, str):
-        raise ValueError(f"model_source.builder must be a 'module:function' string, got {builder!r}")
     fn = _import_dotted(builder)
     kwargs = model_source.get("builder_kwargs") or {}
     if not isinstance(kwargs, dict):
