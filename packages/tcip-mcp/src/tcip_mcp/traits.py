@@ -527,7 +527,9 @@ def write_trait_spec_fields(
         merged.update(fields_)
 
         try:
-            spec, reason = _validate_and_write_spec(key, merged, expect=stored.version)
+            spec, reason = _validate_and_write_spec(
+                key, merged, expect=stored.version, schema_version=data.get("schema_version"),
+            )
         except VersionConflict:
             continue
         if spec is None:
@@ -538,23 +540,35 @@ def write_trait_spec_fields(
         return spec
 
 
-def _encode_spec(spec: TraitSpec) -> dict[str, Any]:
+def _encode_spec(spec: TraitSpec, *, schema_version: Any = None) -> dict[str, Any]:
     """An already-valid ``TraitSpec`` as the JSON-safe mapping the store's codec accepts: every
-    tuple field becomes a list. The one encoding every trait-spec writer and reader shares."""
-    return {
+    tuple field becomes a list. The one encoding every trait-spec writer and reader shares.
+
+    ``TraitSpec`` carries no ``schema_version`` field: the store seam's ceiling check runs on
+    the raw document, not the dataclass. Passing ``schema_version`` re-attaches a stamp a caller
+    read off the prior record, so a rewrite through this encoding cannot silently drop it; the
+    default of ``None`` omits the key, which is what a fresh, never-stamped spec writes.
+    """
+    encoded = {
         k: (list(v) if isinstance(v, tuple) else v) for k, v in dataclasses.asdict(spec).items()
     }
+    if schema_version is not None:
+        encoded["schema_version"] = schema_version
+    return encoded
 
 
-def _write_spec_record(key: Key, spec: TraitSpec, *, expect: ts.Version | None) -> None:
+def _write_spec_record(
+    key: Key, spec: TraitSpec, *, expect: ts.Version | None, schema_version: Any = None,
+) -> None:
     """Encode an already-valid ``TraitSpec`` and write it to ``key`` under compare-and-set at
     ``expect``. Never validates: the caller either built ``spec`` through ``_spec_from_config``
-    already or otherwise guarantees it is legal."""
-    ts.replace(key, _encode_spec(spec), expect=expect)
+    already or otherwise guarantees it is legal. ``schema_version``, when given, is re-attached
+    to the encoded record rather than left to fall out of the rewrite."""
+    ts.replace(key, _encode_spec(spec, schema_version=schema_version), expect=expect)
 
 
 def _validate_and_write_spec(
-    key: Key, data: dict, *, expect: ts.Version | None,
+    key: Key, data: dict, *, expect: ts.Version | None, schema_version: Any = None,
 ) -> tuple[TraitSpec | None, str | None]:
     """Validate ``data`` as a trait spec against the crops.yml vocabulary and, if legal, encode
     and write it to ``key`` under compare-and-set at ``expect``.
@@ -564,6 +578,9 @@ def _validate_and_write_spec(
     function picking one wording for all of them. Raises ``VersionConflict`` if another writer
     landed at ``key`` since ``expect`` was read.
 
+    ``schema_version``, when given, rides through to the write unchanged; omitting it (the
+    default) writes an unstamped record, which is what a fresh authoring means to do.
+
     The one write every trait-spec writer shares: ``write_trait_spec_fields``'s retry loop,
     ``author_trait_spec``'s single cas attempt, the phenology smoke script's seed and the
     provenance-drop operator script all call this rather than repeating the
@@ -572,7 +589,7 @@ def _validate_and_write_spec(
     spec, reason = _spec_from_config(data, _crops_vocab())
     if spec is None:
         return None, reason
-    _write_spec_record(key, spec, expect=expect)
+    _write_spec_record(key, spec, expect=expect, schema_version=schema_version)
     return spec, None
 
 
