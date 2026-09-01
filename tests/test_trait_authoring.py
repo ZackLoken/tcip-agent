@@ -1,6 +1,6 @@
 """Config-driven multi-trait TraitSpec authoring + derived class-id + read-semantics.
 
-Pins the softened scope-provisional behavior: registering trait #2 is a breeder-authored config
+Pins the softened scope-tentative behavior: registering trait #2 is a breeder-authored config
 edit (cross-checked against the crops.yml controlled vocab, never agent-invented), the elongated
 class id is a mapping fact derived from classes.json by name (never a pinned default), and the
 crossing-unconfirmed 95%-mapping marker travels with the delivery. There are no built-in traits: catkin is

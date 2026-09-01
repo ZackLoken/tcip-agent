@@ -4,7 +4,7 @@ schema and that an unvalidated row is refused. ``registered_traits()`` returning
 was the standing gap this closes.
 
 ``currant_bloom`` is authored here, in this test file's own pinned platform state root, honestly
-provisional: no domain expert has confirmed it, and it exists to prove the delivery mechanism
+tentative: no domain expert has confirmed it, and it exists to prove the delivery mechanism
 generalizes to a real *second* trait, not to describe a validated measurement. It deliberately
 leaves ``majority_milestone``/``majority_label`` empty rather than copied from catkin, since
 crops.yml names no "majority" bloom date for currant, proving ``_milestone_columns`` produces the

@@ -4,7 +4,7 @@ One module so the serving route, the visualization tools, and any validator agre
 numbers instead of each pinning its own copy of them.
 
 ``DISPLAY_MAX_EDGE`` bounds the longest output edge of a display-bound read. Source: the 4096
-width cap the frontend previously hardcoded; a documented default pending a real derivation.
+width cap the frontend previously hardcoded; a documented cap pending a real derivation.
 
 ``DISPLAY_MAX_PIXELS`` caps the output-pixel area of an explicit region request. Source: the edge
 bound squared.

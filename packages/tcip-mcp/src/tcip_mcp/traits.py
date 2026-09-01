@@ -161,7 +161,7 @@ class TraitSpec:
     # here would be platform-picked measurement semantics masquerading as a domain-expert one. `None`
     # means "not yet authored for this trait" and the dispersion term is skipped, not gated on a
     # guessed value, it needs the domain expert (or a derivation from real dense-imagery detector
-    # statistics), not a value picked by the agent. Provisional until authored.
+    # statistics), not a value picked by the agent. Not yet authored.
     count_error_tolerance: float | None = None
     # Min acceptable Cohen's kappa (chance-corrected classifier/GT agreement) on the held-out split
     # for the classifier operating point to count as validated, catches a compensating-error
