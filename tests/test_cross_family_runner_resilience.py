@@ -485,3 +485,76 @@ def test_a_run_whose_families_all_answered_says_so_rather_than_staying_silent(
     assert "RUN OK: 1 of 1 families answered." in captured.out
     assert "RUN FAILED" not in captured.out
     assert "RUN FAILED" not in captured.err
+
+
+def test_an_attached_image_reaches_codex_as_a_flag_and_the_other_families_in_the_prompt(
+        runner, tmp_path):
+    """Every family is vision-capable and takes an image its own way: codex through exec -i, each
+    flag closed by the next option so the trailing stdin marker survives the variadic option;
+    antigravity through an @path in the prompt; Claude Code through a named path its own file
+    reader opens. A run with no image builds exactly as before."""
+    image = tmp_path / "render.png"
+    image.write_bytes(b"png")
+    condition = runner.CONDITIONS["no-tools"]
+    prompt_file = tmp_path / "p.txt"
+
+    argv, _ = runner.build_codex(prompt_file, tmp_path, tmp_path, condition, "gpt-5", "high", 5,
+                                 images=(image,))
+    at = argv.index("-i")
+    assert argv[at + 1] == str(image)
+    assert argv[at + 2].startswith("--")
+    assert argv[-1] == "-"
+    bare, _ = runner.build_codex(prompt_file, tmp_path, tmp_path, condition, "gpt-5", "high", 5)
+    assert "-i" not in bare
+
+    assert f"@{image}" in runner.image_preface("antigravity", (image,))
+    assert str(image) in runner.image_preface("claude", (image,))
+    assert str(image) in runner.image_preface("codex", (image,))
+    assert runner.image_preface("claude", ()) == ""
+
+
+def test_an_attached_image_prefaces_the_prompt_and_is_recorded_in_the_runs_meta(
+        runner, tmp_path, monkeypatch):
+    """The preface sits ahead of the byte-identical question, the builder receives the resolved
+    paths, and meta.json names the images so a later reader knows what the family saw."""
+    monkeypatch.setattr(runner.subprocess, "run", _stub_run("an answer"))
+    monkeypatch.setattr(runner, "harness_version", lambda *a, **k: "stub-version")
+    seen = {}
+
+    def builder(prompt_file, run_dir, cwd, condition, model, effort, timeout, images=()):
+        seen["images"] = images
+        return ["stub", "argv"], None
+
+    monkeypatch.setitem(runner.BUILDERS, "codex", builder)
+    image = tmp_path / "render.png"
+    image.write_bytes(b"png")
+
+    meta = runner.run_one("codex", "qid", "as-shipped", "question",
+                          tmp_path, tmp_path / "out", 5, "stub-model", None, images=[image])
+
+    assert meta["images"] == [str(image.resolve())]
+    assert seen["images"] == (image.resolve(),)
+    prompt = (tmp_path / "out" / "qid" / "as-shipped" / "codex" / "prompt.txt").read_text(
+        encoding="utf-8")
+    assert prompt.startswith("The image(s) attached to this prompt are ")
+    assert prompt.endswith("question")
+
+
+def test_a_missing_image_is_refused_before_any_family_launches(runner, tmp_path, monkeypatch):
+    """A family told to review an image that is not there would answer about nothing; the
+    runner refuses by name instead of launching."""
+    launched = []
+    monkeypatch.setattr(runner, "run_one", lambda *a, **k: launched.append(a))
+    monkeypatch.setattr(runner.shutil, "which", lambda *a, **k: "/stub/harness")
+    (tmp_path / "q.txt").write_text("question", encoding="utf-8")
+    monkeypatch.setattr(sys, "argv", [
+        "cross_family_ask.py", "--question-id", "qid",
+        "--prompt-file", str(tmp_path / "q.txt"), "--families", "codex",
+        "--image", str(tmp_path / "absent.png"),
+        "--cwd", str(tmp_path), "--out", str(tmp_path / "out"),
+    ])
+
+    with pytest.raises(SystemExit) as refused:
+        runner.main()
+    assert refused.value.code != 0
+    assert launched == []
