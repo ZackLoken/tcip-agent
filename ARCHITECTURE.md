@@ -813,11 +813,11 @@ anything.
 |---|---|---|---|
 | `preflight_config` | `training_tools.py:69` | yes | Validate a training configuration before launching. |
 | `launch_training` | `training_tools.py:522` | yes | Launch a training run in an isolated subprocess from a bespoke ``model_source`` builder. |
-| `check_training_status` | `training_tools.py:751` | yes | Check the status of a training run. |
-| `list_training_runs` | `training_tools.py:887` | yes | List every training run this platform can currently account for. |
-| `cancel_training` | `training_tools.py:901` | yes | Request graceful cancellation of a running training run. |
-| `run_hpo` | `training_tools.py:1328` | yes | Run hyperparameter optimization on Ray Tune, training each trial for real. |
-| `evaluate_model` | `training_tools.py:1840` | yes | Evaluate a trained checkpoint on a (held-out) dataset and write test_results.json. |
+| `check_training_status` | `training_tools.py:754` | yes | Check the status of a training run. |
+| `list_training_runs` | `training_tools.py:891` | yes | List every training run this platform can currently account for. |
+| `cancel_training` | `training_tools.py:905` | yes | Request graceful cancellation of a running training run. |
+| `run_hpo` | `training_tools.py:1341` | yes | Run hyperparameter optimization on Ray Tune, training each trial for real. |
+| `evaluate_model` | `training_tools.py:1853` | yes | Evaluate a trained checkpoint on a (held-out) dataset and write test_results.json. |
 
 ### vision_tools.py (3 tools)
 
@@ -1007,8 +1007,8 @@ registered at HEAD.
 | GET | `/runs/{run_id}` | `get_run` | `routes/training.py:100` |
 | POST | `/runs/{run_id}/tensorboard` | `launch_run_tensorboard` | `routes/training.py:107` |
 | POST | `/runs/{run_id}/cancel` | `cancel_run_route` | `routes/training.py:127` |
-| POST | `/compare` | `compare_runs_route` | `routes/training.py:146` |
-| WS | `/runs/{run_id}/stream` (full path `/api/training/runs/{run_id}/stream`) | `training_stream_ws` | `routes/training.py:233` |
+| POST | `/compare` | `compare_runs_route` | `routes/training.py:147` |
+| WS | `/runs/{run_id}/stream` (full path `/api/training/runs/{run_id}/stream`) | `training_stream_ws` | `routes/training.py:234` |
 
 ### routes/tuning.py, prefix `/api/tuning` (9 routes)
 
@@ -2109,7 +2109,7 @@ Phase 3 verdict: single.
 
 Must agree: the writer's row shape is what the reader and the stream consumer expect.
 Side A: `packages/tcip-mcp/src/tcip_mcp/experiments.py:898` (`def log_metrics(`, the one writer; the trainer and the envelope hand rows to the context's epoch sink instead of opening the file).
-Side B: `packages/tcip-web/src/tcip_web/routes/training.py:193` (`read_log(key, after=cursor)`, the training stream's incremental tail, pushed as a `TrainingMetricFrame` per row) and `routes/tuning.py:437` (`read_log(trial_metrics_key`, answered in the shape `_metrics_common.metrics_response` builds).
+Side B: `packages/tcip-web/src/tcip_web/routes/training.py:194` (`read_log(key, after=cursor)`, the training stream's incremental tail, pushed as a `TrainingMetricFrame` per row) and `routes/tuning.py:437` (`read_log(trial_metrics_key`, answered in the shape `_metrics_common.metrics_response` builds).
 Phase 3 verdict: single. An HPO trial with no experiment record still appends to its own trial log, one declared site in the epoch sink, pending the HPO store migration.
 
 ## S09. Web job registries persisted to .tcip/state/<name>.json  <!-- queued: P5-325 unify -->
@@ -2420,7 +2420,7 @@ Phase 3 verdict: duplicated.
 ## S51. Training run stream WebSocket  <!-- queued: P5-297 unify -->
 
 Must agree: the status payload the MCP tool returns is renderable by the browser's training view.
-Side A: `packages/tcip-web/src/tcip_web/routes/training.py:232` (`@router.websocket("/runs/{run_id}/stream")`).
+Side A: `packages/tcip-web/src/tcip_web/routes/training.py:233` (`@router.websocket("/runs/{run_id}/stream")`).
 Side B: `packages/tcip-mcp/src/tcip_mcp/tools/training_tools.py` (`check_training_status` supplies the status payload).
 Phase 3 verdict: duplicated.
 
