@@ -37,12 +37,17 @@ function cellText(value: unknown): string {
   return JSON.stringify(value);
 }
 
+/** A cancelled sweep whose record carries no reason: shown identically in the row and the
+ * detail pane, from this one wording. */
+const NO_CANCEL_REASON = "no reason recorded";
+
 export function TuningTab() {
   const datasetRoot = useStore((s) => s.gui.dataset.dataset_root);
   const { request, setRequest } = useEditableAgentRequest(defaultSweepRequest(datasetRoot));
 
   const [pickerOpen, setPickerOpen] = useState(false);
   const [sweeps, setSweeps] = useState<Sweep[]>([]);
+  const [sweepsError, setSweepsError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detail, setDetail] = useState<SweepDetail | null>(null);
   const [trials, setTrials] = useState<SweepTrial[]>([]);
@@ -66,8 +71,9 @@ export function TuningTab() {
     try {
       const r = await tuningApi.listSweeps();
       setSweeps(r.sweeps ?? []);
-    } catch {
-      /* ignore */
+      setSweepsError(null);
+    } catch (e) {
+      setSweepsError(`Could not load sweeps: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
 
@@ -246,6 +252,7 @@ export function TuningTab() {
       return (
         <button
           type="button"
+          aria-label={`Cancel ${s.sweep_id}`}
           className="tcip-btn text-[10px] shrink-0 mt-2"
           onClick={(e) => {
             e.stopPropagation();
@@ -260,6 +267,7 @@ export function TuningTab() {
       return (
         <button
           type="button"
+          aria-label={`Run again ${s.sweep_id}`}
           className="tcip-btn text-[10px] shrink-0 mt-2"
           onClick={(e) => {
             e.stopPropagation();
@@ -390,7 +398,7 @@ export function TuningTab() {
             </div>
             {detail.status === "cancelled" ? (
               <div className="text-[11px] text-tcip-muted">
-                Cancelled: {detail.error ?? "no reason recorded"}
+                Cancelled: {detail.error ?? NO_CANCEL_REASON}
               </div>
             ) : (
               <>
@@ -428,15 +436,24 @@ export function TuningTab() {
         </div>
       )}
 
-      {sweeps.length === 0 ? (
+      {sweepsError && (
+        <div className="text-[11px] text-tcip-fp mb-2">
+          {sweepsError}{" "}
+          <button className="tcip-btn text-[11px] ml-1" onClick={() => void refresh()}>
+            Retry
+          </button>
+        </div>
+      )}
+      {sweeps.length === 0 && !sweepsError && (
         <RunMonitorEmpty>No sweeps yet. Use "Start a sweep" above.</RunMonitorEmpty>
-      ) : (
+      )}
+      {sweeps.length > 0 && (
         <ul className="space-y-1">
           {sweeps.map((s) => {
             const expanded = selectedId === s.sweep_id;
             const running = !TERMINAL_STATUSES.has(s.status);
             const searchLine = [
-              s.n_trials != null ? `${s.n_trials} trials` : null,
+              s.n_trials != null ? `${s.n_trials} trials planned` : null,
               s.search_alg,
               s.scheduler,
               s.param_space_keys && s.param_space_keys.length > 0
@@ -457,7 +474,6 @@ export function TuningTab() {
                   <button
                     type="button"
                     aria-expanded={expanded}
-                    aria-pressed={expanded}
                     className="flex-1 flex items-start gap-2 text-left"
                     onClick={() => toggleSweep(s.sweep_id)}
                   >
@@ -470,7 +486,15 @@ export function TuningTab() {
                         {s.status}
                         {running && s.cancel_requested ? " · stop requested" : ""}
                       </span>
-                      {s.error && <span className="block text-[10px] text-tcip-fp">{s.error}</span>}
+                      {s.error ? (
+                        <span className="block text-[10px] text-tcip-fp">{s.error}</span>
+                      ) : (
+                        s.status === "cancelled" && (
+                          <span className="block text-[10px] text-tcip-muted">
+                            {NO_CANCEL_REASON}
+                          </span>
+                        )
+                      )}
                       {!s.relaunchable && s.reason && (
                         <span className="block text-[10px] text-tcip-muted">{s.reason}</span>
                       )}

@@ -306,7 +306,7 @@ describe("LaunchPicker", () => {
     await waitFor(() => expect(onStart).toHaveBeenCalledWith(null));
   });
 
-  it("disables Start while the checked As recorded choice is disabled, with its reason beside it", () => {
+  it("disables Start while the checked As recorded choice is disabled, showing its reason once, in the status region", () => {
     render(
       <LaunchPicker
         list={{
@@ -332,7 +332,141 @@ describe("LaunchPicker", () => {
     );
     fireEvent.click(screen.getByText("exp-1"));
     expect(screen.getByRole("button", { name: "Start" })).toBeDisabled();
-    expect(screen.getAllByText("Directory not found: data.images_dir = '/moved'")).toHaveLength(2);
+    expect(screen.getAllByText("Directory not found: data.images_dir = '/moved'")).toHaveLength(1);
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Directory not found: data.images_dir = '/moved'",
+    );
+  });
+
+  it("shows a disabled candidate's own inline reason once it is no longer the checked choice, not duplicated into the status region", () => {
+    render(
+      <LaunchPicker
+        list={{
+          title: "Configs in this project",
+          emptyMessage: "none",
+          rows: [
+            row({
+              data: {
+                asRecordedLine: "on the partition it bound",
+                absenceMessage: "unused",
+                choices: [
+                  {
+                    manifestDir: "/data/other-subject-splits",
+                    label: <span>/data/other-subject-splits</span>,
+                    disabled: true,
+                    reason: "split manifest was drawn for subject='bud'",
+                  },
+                ],
+              },
+            }),
+          ],
+        }}
+        composerLabel="Describe a new one"
+        request=""
+        onRequestChange={noop}
+        onSend={noop}
+      />,
+    );
+    fireEvent.click(screen.getByText("exp-1"));
+    // As recorded (the default checked choice) is enabled, so Start is not blocked and no
+    // status region renders; the untouched, disabled candidate still names its own reason once.
+    expect(screen.getByRole("button", { name: "Start" })).not.toBeDisabled();
+    expect(screen.getAllByText(/drawn for subject='bud'/)).toHaveLength(1);
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  });
+
+  it("renders a refused start's issues once, in the status region under Start, not the row's disabled-choice text", async () => {
+    const onStart = vi
+      .fn()
+      .mockRejectedValue(
+        new StructuredRefusalError({ issues: ["batch_size must be positive"] }, 422, ""),
+      );
+    render(
+      <LaunchPicker
+        list={{
+          title: "Configs in this project",
+          emptyMessage: "none",
+          rows: [
+            row({
+              onStart,
+              data: {
+                asRecordedLine: "on the partition it bound",
+                absenceMessage: "unused",
+                choices: [{ manifestDir: "/data/splits", label: <span>/data/splits</span> }],
+              },
+            }),
+          ],
+        }}
+        composerLabel="Describe a new one"
+        request=""
+        onRequestChange={noop}
+        onSend={noop}
+      />,
+    );
+    fireEvent.click(screen.getByText("exp-1"));
+    fireEvent.click(screen.getByRole("button", { name: "Start" }));
+    await waitFor(() =>
+      expect(screen.getByText("batch_size must be positive")).toBeInTheDocument(),
+    );
+    expect(screen.getAllByText("batch_size must be positive")).toHaveLength(1);
+    expect(screen.getByRole("status")).toHaveTextContent("batch_size must be positive");
+  });
+
+  it("disables Start and reports checking the data choice while a row's Data choices are still loading", () => {
+    render(
+      <LaunchPicker
+        list={{
+          title: "Configs in this project",
+          emptyMessage: "none",
+          rows: [row({ data: undefined, dataLoading: true })],
+        }}
+        composerLabel="Describe a new one"
+        request=""
+        onRequestChange={noop}
+        onSend={noop}
+      />,
+    );
+    fireEvent.click(screen.getByText("exp-1"));
+    expect(screen.getByRole("button", { name: "Start" })).toBeDisabled();
+    expect(screen.getByRole("status")).toHaveTextContent("checking the data choice");
+  });
+
+  it("shows a list's own load failure in place of the empty line, with a Retry control", () => {
+    const onRetry = vi.fn();
+    render(
+      <LaunchPicker
+        list={{
+          title: "Configs in this project",
+          emptyMessage: "No config exists in this project yet.",
+          rows: [],
+          error: "Could not load configs: network error",
+          onRetry,
+        }}
+        composerLabel="Describe a new one"
+        request=""
+        onRequestChange={noop}
+        onSend={noop}
+      />,
+    );
+    expect(screen.getByText("Could not load configs: network error")).toBeInTheDocument();
+    expect(screen.queryByText("No config exists in this project yet.")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(onRetry).toHaveBeenCalledTimes(1);
+  });
+
+  it("carries aria-expanded, not aria-pressed, on a row's own disclosure toggle", () => {
+    render(
+      <LaunchPicker
+        list={{ title: "Configs in this project", emptyMessage: "none", rows: [row()] }}
+        composerLabel="Describe a new one"
+        request=""
+        onRequestChange={noop}
+        onSend={noop}
+      />,
+    );
+    const toggle = screen.getByText("exp-1").closest("button") as HTMLElement;
+    expect(toggle).toHaveAttribute("aria-expanded");
+    expect(toggle).not.toHaveAttribute("aria-pressed");
   });
 
   it("re-enables Start once a checked choice that is itself enabled is selected", () => {

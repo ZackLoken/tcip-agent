@@ -36,7 +36,22 @@ describe("TuningTab sweep row actions", () => {
 
     render(<TuningTab />);
     expect(await screen.findByText("hpo-running-1")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Cancel" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Cancel hpo-running-1" })).toBeInTheDocument();
+  });
+
+  it("names each sweep's Cancel and Run again controls with that sweep's own id", async () => {
+    vi.spyOn(tuningApi, "listSweeps").mockResolvedValue({
+      sweeps: [
+        sweep({ sweep_id: "hpo-a", status: "running" }),
+        sweep({ sweep_id: "hpo-b", status: "completed", relaunchable: true }),
+      ],
+    });
+
+    render(<TuningTab />);
+    await screen.findByText("hpo-a");
+
+    expect(screen.getByRole("button", { name: "Cancel hpo-a" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Run again hpo-b" })).toBeInTheDocument();
   });
 
   it("shows no action on a finished, non-relaunchable sweep", async () => {
@@ -67,7 +82,7 @@ describe("TuningTab sweep row actions", () => {
 
     render(<TuningTab />);
     expect(await screen.findByText("hpo-done-2")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Run again" }));
+    fireEvent.click(screen.getByRole("button", { name: "Run again hpo-done-2" }));
     await waitFor(() => expect(relaunchSpy).toHaveBeenCalledWith("hpo-done-2"));
   });
 
@@ -118,11 +133,11 @@ describe("TuningTab sweep row actions", () => {
 
     render(<TuningTab />);
     expect(await screen.findByText("hpo-cancelme")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel hpo-cancelme" }));
     await waitFor(() => expect(cancelSpy).toHaveBeenCalledWith("hpo-cancelme"));
 
     expect(await screen.findByText(/stop requested/)).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Cancel" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Cancel hpo-cancelme" })).not.toBeInTheDocument();
   });
 
   it("keeps offering Cancel on an external sweep even after stop requested", async () => {
@@ -139,7 +154,7 @@ describe("TuningTab sweep row actions", () => {
 
     render(<TuningTab />);
     expect(await screen.findByText("hpo-external-1")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Cancel" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Cancel hpo-external-1" })).toBeInTheDocument();
   });
 
   it("shows the sweep's search shape in the expanded region", async () => {
@@ -169,6 +184,7 @@ describe("TuningTab sweep row actions", () => {
     expect(await screen.findByText(/bayesopt/)).toBeInTheDocument();
     expect(screen.getByText(/median/)).toBeInTheDocument();
     expect(screen.getByText(/lr, batch_size/)).toBeInTheDocument();
+    expect(screen.getByText(/5 trials planned/)).toBeInTheDocument();
   });
 
   it("shows one cancelled line, not the manifest stub, for a cancelled sweep's detail", async () => {
@@ -193,5 +209,60 @@ describe("TuningTab sweep row actions", () => {
       ),
     ).toBeInTheDocument();
     expect(screen.queryByText(/"status": "cancelled"/)).not.toBeInTheDocument();
+  });
+
+  it("names a cancelled sweep's own missing reason the same way in the row and the detail", async () => {
+    vi.spyOn(tuningApi, "listSweeps").mockResolvedValue({
+      sweeps: [sweep({ sweep_id: "hpo-cxl-noreason", status: "cancelled", error: null })],
+    });
+    vi.spyOn(tuningApi, "getSweep").mockResolvedValue({
+      sweep_id: "hpo-cxl-noreason",
+      status: "cancelled",
+      error: null,
+      result: {},
+    });
+    vi.spyOn(tuningApi, "listTrials").mockResolvedValue({
+      sweep_id: "hpo-cxl-noreason",
+      trials: [],
+    });
+    vi.spyOn(tuningApi, "getRayDashboard").mockResolvedValue({ url: null });
+    vi.spyOn(tuningApi, "launchSweepTensorboard").mockResolvedValue({ error: "no cluster" });
+
+    render(<TuningTab />);
+    expect(await screen.findByText("hpo-cxl-noreason")).toBeInTheDocument();
+    expect(screen.getByText("no reason recorded")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText("hpo-cxl-noreason"));
+    expect(await screen.findByText("Cancelled: no reason recorded")).toBeInTheDocument();
+  });
+
+  it("carries aria-expanded, not aria-pressed, on a sweep row's own disclosure toggle", async () => {
+    vi.spyOn(tuningApi, "listSweeps").mockResolvedValue({
+      sweeps: [sweep({ sweep_id: "hpo-toggle-1", status: "running" })],
+    });
+
+    render(<TuningTab />);
+    const toggle = (await screen.findByText("hpo-toggle-1")).closest("button") as HTMLElement;
+    expect(toggle).toHaveAttribute("aria-expanded");
+    expect(toggle).not.toHaveAttribute("aria-pressed");
+  });
+});
+
+describe("TuningTab sweeps loader", () => {
+  it("keeps and shows a failed sweeps fetch, with a Retry control, in place of the empty line", async () => {
+    const listSweepsSpy = vi
+      .spyOn(tuningApi, "listSweeps")
+      .mockRejectedValueOnce(new Error("network error"))
+      .mockResolvedValue({ sweeps: [] });
+
+    render(<TuningTab />);
+    expect(await screen.findByText("Could not load sweeps: network error")).toBeInTheDocument();
+    expect(screen.queryByText('No sweeps yet. Use "Start a sweep" above.')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await waitFor(() => expect(listSweepsSpy).toHaveBeenCalledTimes(2));
+    expect(
+      await screen.findByText('No sweeps yet. Use "Start a sweep" above.'),
+    ).toBeInTheDocument();
   });
 });
