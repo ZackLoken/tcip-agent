@@ -530,6 +530,11 @@ def launch_training(
     process or any other concurrent run's process. Use check_training_status to monitor progress;
     it reads the run's own status/metrics from disk, not shared memory.
 
+    Watching a launched run's metrics and deciding to stop a poorly performing one is the
+    launching agent's own judgment call, made through cancel_training; the platform itself only
+    stops a run objectively dead (a diverged, non-finite training loss) or stagnant against its
+    own validation metric (early stopping), never one merely performing worse than hoped.
+
     Args:
         config: Full training configuration dict with model_source, data, training sections.
         output_dir: Directory for checkpoints and logs. Empty defaults to the experiment store
