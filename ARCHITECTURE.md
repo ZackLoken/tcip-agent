@@ -834,7 +834,7 @@ and 2 WebSocket routes directly, then calls `register_all(app)` from
 modules under `routes/`, each with a fixed prefix. Verified: `routes/__init__.py`,
 `routes/_metrics_common.py`, and `routes/_body_common.py` define no routes of their own (0
 `@router.*` decorator sites in any of the three); `_metrics_common.py` holds `metrics_response`,
-the response shape `training.py` and `tuning.py` both answer in, and `_body_common.py` holds
+the response shape `tuning.py`'s trial-metrics route answers in, and `_body_common.py` holds
 `EmptyBodyPayload`, the empty body model six path-parameter-only routes now declare so the
 browser must send a preflighted request rather than reaching the handler as a simple one.
 
@@ -1584,12 +1584,16 @@ subprocess worker's best-effort config patches respect the terminal-state immuta
 `overwrite_config_if_pristine` enforces on its own writers.
 
 Seam S08 ("metrics.jsonl row format"), verdict `both-sides-restated`,
-`phase0_implementation: mixed`: `tests/test_tcip_web_training_routes.py:63,65`,
-`tests/test_provenance_spine.py:143`, `tests/test_model_registry_metrics.py:70`. Gap: no test
-writes `metrics.jsonl` through the real `log_metrics` writer and reads it back through the real
-metrics route or the training-stream websocket in the same test; the reader-side tests hand-write
-rows directly. The route reads the log through the seam and shapes the answer with
-`_metrics_common.metrics_response`, so there is no second parse of a row to disagree with.
+`phase0_implementation: mixed`: `tests/test_metrics_row_writer_reader_agreement.py:36,47`,
+`tests/test_provenance_spine.py:143`, `tests/test_model_registry_metrics.py:70`. Gap: closed for
+the training stream, which `test_metrics_row_writer_reader_agreement.py` writes through the real
+`log_metrics` writer and reads back through the real websocket route in the same test; still open
+for the tuning trial-metrics route, whose own tests (`test_tcip_web_tuning_routes.py`) hand-append
+rows through `tcip_store.append` rather than driving the real epoch-sink writer
+(`trial_metrics_key_for_dir`, `envelope.py`) a trial actually appends through. The training stream
+reads the log through the seam and emits typed frames; the tuning trial route is the one surface
+that still answers in the shape `_metrics_common.metrics_response` builds, so there is no second
+parse of a row to disagree with there.
 
 Seam S30 ("split.json train/val manifest"), verdict `both-sides-one-implementation`,
 `phase0_implementation: written twice`: `tests/test_calibration_holdout_disjointness.py:124,305,357`,
@@ -2358,7 +2362,7 @@ Phase 3 verdict: duplicated.
 ## S43. dataset_source bespoke dataset seam
 
 Must agree: the builder the reader resolves off `data.dataset_source` returns a Dataset the trainer's loaders accept.
-Side A: `packages/tcip-mcp/src/tcip_mcp/pipelines/model_build.py:337` (`dataset_source = (config.get("data") or {}).get(DATASET_SOURCE_KEY)`).
+Side A: `packages/tcip-mcp/src/tcip_mcp/pipelines/model_build.py:346` (`dataset_source = (config.get("data") or {}).get(DATASET_SOURCE_KEY)`).
 Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/data/datasets.py:1047` (`def build_dataset(task: str, dataset_source: dict | None = None, **kwargs) -> Dataset:`).
 Phase 3 verdict: duplicated.
 
