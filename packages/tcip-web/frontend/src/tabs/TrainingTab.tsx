@@ -293,7 +293,7 @@ export function TrainingTab() {
                 <span className="tabular-nums">best: {Number(r.best_metric).toFixed(3)}</span>
               )}
             </div>
-            {TRAINING_CANCELLABLE.has(r.status) && !r.external && (
+            {TRAINING_CANCELLABLE.has(r.status) && (
               <button
                 className="tcip-btn text-[10px] mt-1"
                 onClick={(e) => {
