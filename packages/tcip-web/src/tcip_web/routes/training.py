@@ -1,10 +1,10 @@
-"""Training routes: validate config, launch, list runs, live metrics stream."""
+"""Training routes: launchable configs, launch/relaunch, list runs, live metrics stream."""
 
 from __future__ import annotations
 
 import asyncio
 import logging
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Literal
 
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
@@ -14,7 +14,7 @@ from tcip_store.errors import BadKey
 if TYPE_CHECKING:
     from tcip_store import Key
 
-from tcip_web.paths import assert_path_allowed, assert_project_root_allowed
+from tcip_web.paths import assert_project_root_allowed
 from tcip_web.trust_boundary import origin_allowed
 from tcip_web.routes._body_common import EmptyBodyPayload
 
@@ -45,42 +45,44 @@ def _metrics_key(project_root: str, run_id: str) -> "Key | None":
     return metrics_key(experiment_id, root=project_root)
 
 
-class ConfigPayload(BaseModel):
-    config: dict[str, Any]
+@router.get("/configs")
+def list_configs_route() -> dict:
+    """Every experiment in this project a run can be started or relaunched from."""
+    from tcip_mcp.tools.training_tools import list_launchable_configs
+
+    return {"configs": list_launchable_configs()}
 
 
-@router.post("/validate")
-def preflight_config_route(payload: ConfigPayload) -> dict:
-    from tcip_mcp.tools.training_tools import preflight_config
-
-    return preflight_config(payload.config)
+class RelaunchConfigPayload(BaseModel):
+    experiment_id: str
 
 
-class LaunchPayload(BaseModel):
-    config: dict[str, Any]
-    # Empty defers to launch_training's own default (the project's experiment store), so a
-    # client that names no directory can never land a run in the server process's cwd.
-    output_dir: str = ""
-
-
-@router.post("/launch")
-def launch_training_route(payload: LaunchPayload) -> dict:
+@router.post("/runs")
+def relaunch_config_route(payload: RelaunchConfigPayload) -> dict:
+    """Start a run from a config already recorded in this project: no config, param space or
+    path is ever submitted by the browser. A pristine config launches as its own first run; a
+    run's config launches as a new experiment id with the picked one as parent."""
+    from tcip_mcp.experiments import config_key, read_member, status_key
+    from tcip_mcp.pipelines.model_build import MODEL_SOURCE_KEY
     from tcip_mcp.tools.training_tools import launch_training
 
-    # Confine the client-supplied output dir when the server is locked down (no-op otherwise):
-    # mirrors tuning.py's launch_hpo. This does not confine config.model_source.builder, which this
-    # same route importlib-imports and calls (model_build.py): that is a separate code-execution
-    # trust boundary path confinement can't close; don't read this guard as closing it.
-    if payload.output_dir:
-        try:
-            assert_path_allowed(payload.output_dir)
-        except ValueError as exc:
-            raise HTTPException(403, str(exc)) from exc
+    config = read_member(config_key(payload.experiment_id), None)
+    if not isinstance(config, dict) or not config.get(MODEL_SOURCE_KEY):
+        raise HTTPException(404, f"no launchable config named {payload.experiment_id}")
 
+    status = read_member(status_key(payload.experiment_id), {})
+    if status.get("state") == "created" and status.get("run_id"):
+        raise HTTPException(409, f"experiment {payload.experiment_id} already has a run "
+                                 "attached to it")
+
+    config = {**config, "experiment_id": payload.experiment_id}
     try:
-        return launch_training(payload.config, payload.output_dir)
+        result = launch_training(config)
     except Exception as exc:
         raise HTTPException(500, str(exc)) from exc
+    if result.get("error"):
+        raise HTTPException(422, detail=result)
+    return result
 
 
 @router.get("/runs")

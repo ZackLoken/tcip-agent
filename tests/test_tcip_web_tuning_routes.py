@@ -89,28 +89,22 @@ def test_get_sweep_404(client: TestClient) -> None:
     assert resp.status_code == 404
 
 
-def test_launch_creates_sweep_then_listed(client: TestClient) -> None:
-    resp = client.post(
-        "/api/tuning/launch",
-        json={
-            "base_config": {"model_source": {"builder": "x:y"}, "data": {}, "training": {}},
-            "param_space": {"training.batch_size": [2, 4]},
-            "n_trials": 1,
-            "output_dir": "",
-            "search_alg": "random",
-            "scheduler": "asha",
-        },
-    )
+def test_relaunch_creates_sweep_then_listed(client: TestClient, hpo_root) -> None:
+    _write_sweep(hpo_root, "hpo_seed00001",
+                 base_config={"model_source": {"builder": "x:y"}, "data": {}, "training": {}},
+                 param_space={"training.batch_size": [2, 4]})
+
+    resp = client.post("/api/tuning/sweeps", json={"study_name": "hpo_seed00001"})
     assert resp.status_code == 200
     sweep_id = resp.json()["sweep_id"]
     assert sweep_id.startswith("hpo-")
-    # The background thread will fail fast because config is bogus; we only
-    # assert the registry got the entry.
+    # The background thread will fail fast because the seeded config names no real model; we
+    # only assert the registry got the entry.
     listing = client.get("/api/tuning/sweeps").json()
     assert any(s["sweep_id"] == sweep_id for s in listing["sweeps"])
 
 
-def test_no_sweep_worker_outlives_the_wait_seam(client: TestClient) -> None:
+def test_no_sweep_worker_outlives_the_wait_seam(client: TestClient, hpo_root) -> None:
     """A launch is joinable: the module hands a caller a real wait rather than a sleep.
 
     The sweep itself fails fast on a config that names no model, which is the point: what is
@@ -120,17 +114,11 @@ def test_no_sweep_worker_outlives_the_wait_seam(client: TestClient) -> None:
     from tcip_web import jobstore
     from tcip_web.routes import tuning
 
-    resp = client.post(
-        "/api/tuning/launch",
-        json={
-            "base_config": {"model_source": {"builder": "x:y"}, "data": {}, "training": {}},
-            "param_space": {"training.batch_size": [2, 4]},
-            "n_trials": 1,
-            "output_dir": "",
-            "search_alg": "random",
-            "scheduler": "asha",
-        },
-    )
+    _write_sweep(hpo_root, "hpo_seed00002",
+                 base_config={"model_source": {"builder": "x:y"}, "data": {}, "training": {}},
+                 param_space={"training.batch_size": [2, 4]})
+
+    resp = client.post("/api/tuning/sweeps", json={"study_name": "hpo_seed00002"})
     assert resp.status_code == 200
     sweep_id = resp.json()["sweep_id"]
 
@@ -524,18 +512,11 @@ def test_a_launched_sweep_stays_reachable_after_the_backend_repins(
         return {"study_name": study_name}
 
     monkeypatch.setattr("tcip_mcp.tools.training_tools.run_hpo", fake_run_hpo)
+    _write_sweep(hpo_root, "hpo_seed00003",
+                 base_config={"model_source": {"builder": "x:y"}, "data": {}, "training": {}},
+                 param_space={"training.batch_size": [2, 4]})
 
-    resp = client.post(
-        "/api/tuning/launch",
-        json={
-            "base_config": {"model_source": {"builder": "x:y"}, "data": {}, "training": {}},
-            "param_space": {"training.batch_size": [2, 4]},
-            "n_trials": 1,
-            "output_dir": "",
-            "search_alg": "random",
-            "scheduler": "asha",
-        },
-    )
+    resp = client.post("/api/tuning/sweeps", json={"study_name": "hpo_seed00003"})
     assert resp.status_code == 200
     sweep_id = resp.json()["sweep_id"]
     assert tuning.wait_for_workers(timeout_s=_worker_join_bound()) == ()
@@ -579,18 +560,10 @@ def test_a_web_launched_sweep_runs_only_the_routes_own_tensorboard(
         }
 
     monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", fake_search)
+    _write_sweep(hpo_root, "hpo_seed00004", base_config=real_hpo_base_config,
+                 param_space={"training.batch_size": [2, 4]})
 
-    resp = client.post(
-        "/api/tuning/launch",
-        json={
-            "base_config": real_hpo_base_config,
-            "param_space": {"training.batch_size": [2, 4]},
-            "n_trials": 1,
-            "output_dir": "",
-            "search_alg": "random",
-            "scheduler": "asha",
-        },
-    )
+    resp = client.post("/api/tuning/sweeps", json={"study_name": "hpo_seed00004"})
     assert resp.status_code == 200
     sweep_id = resp.json()["sweep_id"]
     assert tuning.wait_for_workers(timeout_s=_worker_join_bound()) == ()
@@ -602,3 +575,187 @@ def test_a_web_launched_sweep_runs_only_the_routes_own_tensorboard(
     assert len(tb_launches) == 1
     (_, run_id), = tb_launches
     assert run_id == f"sweep_{sweep_id}"
+
+
+def test_launch_route_no_longer_exists(client: TestClient, hpo_root) -> None:
+    """The raw launch door retired with the config picker: a sweep starts only from a
+    recorded manifest, through ``/api/tuning/sweeps``, never from a client-submitted
+    base_config/param_space again."""
+    resp = client.post(
+        "/api/tuning/launch",
+        json={"base_config": {"model_source": {"builder": "x:y"}, "data": {}, "training": {}},
+              "param_space": {}, "n_trials": 1, "output_dir": "",
+              "search_alg": "random", "scheduler": "asha"},
+    )
+    assert resp.status_code == 404
+
+
+def test_relaunch_route_404s_for_an_unknown_sweep(client: TestClient, hpo_root) -> None:
+    resp = client.post("/api/tuning/sweeps", json={"study_name": "nope"})
+    assert resp.status_code == 404
+
+
+def test_relaunch_route_409s_when_the_manifest_holds_no_base_config(client: TestClient, hpo_root) -> None:
+    _write_sweep(hpo_root, "hpo_nobase01")  # a manifest predating this family: no base_config
+    resp = client.post("/api/tuning/sweeps", json={"study_name": "hpo_nobase01"})
+    assert resp.status_code == 409
+
+
+def test_relaunch_ignores_any_path_the_manifest_itself_carries(
+    client: TestClient, hpo_root, monkeypatch, tmp_path
+) -> None:
+    """``output_dir`` is always this request thread's own ``hpo_root()``, never a path read
+    from the manifest: an absolute path in a file is not a path this process should follow."""
+    from tcip_web.routes import tuning
+
+    captured: dict = {}
+
+    def fake_run_hpo(*, output_dir, **kwargs):
+        captured["output_dir"] = output_dir
+        return {"study_name": kwargs["study_name"]}
+
+    monkeypatch.setattr("tcip_mcp.tools.training_tools.run_hpo", fake_run_hpo)
+    elsewhere = tmp_path / "elsewhere"
+    _write_sweep(hpo_root, "hpo_path0001",
+                 base_config={"model_source": {"builder": "x:y"}, "data": {}, "training": {}},
+                 sweep_dir=str(elsewhere))
+
+    resp = client.post("/api/tuning/sweeps", json={"study_name": "hpo_path0001"})
+    assert resp.status_code == 200
+    assert tuning.wait_for_workers(timeout_s=_worker_join_bound()) == ()
+    assert captured["output_dir"] == str(hpo_root)
+
+
+def test_relaunch_replays_every_manifest_field_run_hpo_was_given(
+    client: TestClient, hpo_root, monkeypatch
+) -> None:
+    """A relaunch reads every run_hpo argument the manifest holds, not only base_config, so a
+    sweep started with a non-default search shape replays that shape exactly."""
+    from tcip_web.routes import tuning
+
+    captured: dict = {}
+
+    def fake_run_hpo(**kwargs):
+        captured.update(kwargs)
+        return {"study_name": kwargs["study_name"]}
+
+    monkeypatch.setattr("tcip_mcp.tools.training_tools.run_hpo", fake_run_hpo)
+    base_config = {"model_source": {"builder": "x:y"}, "data": {}, "training": {}}
+    _write_sweep(hpo_root, "hpo_fields001", base_config=base_config,
+                 param_space={"lr": {"type": "loguniform", "low": 1e-6, "high": 1e-1}},
+                 n_trials=7, search_alg="bayesopt", scheduler="median",
+                 grace_period=3, reduction_factor=4, max_concurrent=2,
+                 warm_start=True, baseline_params={"lr": 0.05},
+                 resources_per_trial={"cpu": 2.0, "gpu": 0.5})
+
+    resp = client.post("/api/tuning/sweeps", json={"study_name": "hpo_fields001"})
+    assert resp.status_code == 200
+    assert tuning.wait_for_workers(timeout_s=_worker_join_bound()) == ()
+
+    assert captured["base_config"] == base_config
+    assert captured["param_space"] == {"lr": {"type": "loguniform", "low": 1e-6, "high": 1e-1}}
+    assert captured["n_trials"] == 7
+    assert captured["search_alg"] == "bayesopt"
+    assert captured["scheduler"] == "median"
+    assert captured["grace_period"] == 3
+    assert captured["reduction_factor"] == 4
+    assert captured["max_concurrent"] == 2
+    assert captured["warm_start"] is True
+    assert captured["baseline_params"] == {"lr": 0.05}
+    assert captured["resources_per_trial"] == {"cpu": 2.0, "gpu": 0.5}
+    assert captured["auto_tensorboard"] is False
+
+
+def test_cancel_route_404s_for_an_unknown_sweep(client: TestClient, hpo_root) -> None:
+    resp = client.post("/api/tuning/sweeps/nope/cancel", json={})
+    assert resp.status_code == 404
+
+
+def test_cancel_route_writes_the_sweep_and_run_level_sentinels(client: TestClient, hpo_root) -> None:
+    from tcip_mcp.pipelines.training.run_registry import CANCEL_SENTINEL
+    from tcip_mcp.tools.training_tools import SWEEP_CANCEL_SENTINEL
+
+    sweep = _write_sweep(hpo_root, "hpo_cancel01",
+                         base_config={"model_source": {"builder": "x:y"}, "data": {}, "training": {}})
+    trial = _write_trial(sweep, "aaa_00000")  # no resolved config written: still "running"
+
+    resp = client.post("/api/tuning/sweeps/hpo_cancel01/cancel", json={})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["cancel_requested"] is True
+    assert (sweep / SWEEP_CANCEL_SENTINEL).exists()
+    assert (trial / CANCEL_SENTINEL).exists()
+
+    listing = client.get("/api/tuning/sweeps").json()["sweeps"]
+    entry = next(s for s in listing if s["sweep_id"] == "hpo_cancel01")
+    assert entry["cancel_requested"] is True
+
+
+def test_worker_marks_an_error_dict_failed_not_completed(hpo_root, monkeypatch) -> None:
+    """A relaunch whose data paths moved must read failed with preflight's own words, not
+    completed with no useful result (the defect the relaunch door's own worker fixes)."""
+    from tcip_web.routes.tuning import HPOJob, _RelaunchSpec, _worker
+
+    monkeypatch.setattr(
+        "tcip_mcp.tools.training_tools.run_hpo",
+        lambda **kwargs: {"error": "the sweep's base config fails preflight", "issues": ["bad"]},
+    )
+    job = HPOJob(sweep_id="hpo-worker-err")
+    spec = _RelaunchSpec(base_config={}, param_space=None, n_trials=1, search_alg="random",
+                         scheduler="asha", grace_period=5, reduction_factor=3, max_concurrent=1,
+                         warm_start=False, baseline_params=None, resources_per_trial=None)
+    _worker(job, spec, str(hpo_root))
+    assert job.status == "failed"
+    assert job.error == "the sweep's base config fails preflight"
+
+
+def test_worker_marks_a_cancelled_result_cancelled(hpo_root, monkeypatch) -> None:
+    from tcip_web.routes.tuning import HPOJob, _RelaunchSpec, _worker
+
+    monkeypatch.setattr(
+        "tcip_mcp.tools.training_tools.run_hpo",
+        lambda **kwargs: {"status": "cancelled", "study_name": kwargs.get("study_name")},
+    )
+    job = HPOJob(sweep_id="hpo-worker-cxl")
+    spec = _RelaunchSpec(base_config={}, param_space=None, n_trials=1, search_alg="random",
+                         scheduler="asha", grace_period=5, reduction_factor=3, max_concurrent=1,
+                         warm_start=False, baseline_params=None, resources_per_trial=None)
+    _worker(job, spec, str(hpo_root))
+    assert job.status == "cancelled"
+
+
+def test_manifest_fields_agree_between_a_live_and_a_disk_row(
+    client: TestClient, hpo_root, monkeypatch
+) -> None:
+    """A sweep this process is running (its row built by ``_summary``) and one only found on
+    disk (built by ``_manifest_summary``) report the identical projection for the identical
+    manifest shape."""
+    from tcip_web.routes import tuning
+
+    def fake_run_hpo(*, study_name, **kwargs):
+        import tcip_store
+        from tcip_mcp.tools.training_tools import sweep_manifest_key
+
+        manifest = {"study_name": study_name, "status": "completed", "n_trials": 3,
+                    "search_alg": "random", "scheduler": "asha",
+                    "param_space": {"lr": {"type": "loguniform", "low": 1e-5, "high": 1e-2}},
+                    "base_config": {"model_source": {"builder": "x:y"}, "data": {}, "training": {}}}
+        tcip_store.replace(sweep_manifest_key(study_name), manifest)
+        return {"study_name": study_name}
+
+    monkeypatch.setattr("tcip_mcp.tools.training_tools.run_hpo", fake_run_hpo)
+    _write_sweep(hpo_root, "hpo_agree001", n_trials=3,
+                 base_config={"model_source": {"builder": "x:y"}, "data": {}, "training": {}},
+                 search_alg="random", scheduler="asha",
+                 param_space={"lr": {"type": "loguniform", "low": 1e-5, "high": 1e-2}})
+
+    resp = client.post("/api/tuning/sweeps", json={"study_name": "hpo_agree001"})
+    assert resp.status_code == 200
+    live_id = resp.json()["sweep_id"]
+    assert tuning.wait_for_workers(timeout_s=_worker_join_bound()) == ()
+
+    listing = client.get("/api/tuning/sweeps").json()["sweeps"]
+    by_id = {s["sweep_id"]: s for s in listing}
+    live_row, disk_row = by_id[live_id], by_id["hpo_agree001"]
+    fields = ("n_trials", "search_alg", "scheduler", "param_space_keys", "relaunchable", "reason")
+    assert {k: live_row[k] for k in fields} == {k: disk_row[k] for k in fields}

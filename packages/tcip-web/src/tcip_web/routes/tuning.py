@@ -1,4 +1,4 @@
-"""HPO / Tuning routes: launch + list + per-trial visibility.
+"""HPO / Tuning routes: relaunch + cancel + list + per-trial visibility.
 
 Sweeps reach this surface two ways: launched here over HTTP (tracked in memory for as long
 as this process lives), or launched by the agent straight through the ``run_hpo`` MCP tool,
@@ -50,10 +50,35 @@ class HPOJob:
     platform_root: str = field(default_factory=_current_root)
 
 
+def _manifest_fields(manifest: dict) -> dict:
+    """The config-picker projection of a sweep manifest: search shape, relaunchability, and
+    whether a cancel has been requested. Shared by :func:`_manifest_summary` (a disk-only
+    sweep's own manifest) and :func:`_summary` (a live sweep's row, read from the manifest
+    under its own launch root), so a sweep reads the same fields whichever way it is listed.
+
+    ``base_config`` is the relaunchable marker (:func:`training_tools.run_hpo` writes it
+    whenever it creates a manifest); its absence is reported with a reason rather than a
+    reconstructed config. ``cancel_requested`` is the manifest's own field, set by
+    ``cancel_hpo`` and never derived from a side file this route cannot see across roots.
+    """
+    relaunchable = "base_config" in manifest
+    return {
+        "n_trials": manifest.get("n_trials"),
+        "search_alg": manifest.get("search_alg"),
+        "scheduler": manifest.get("scheduler"),
+        "param_space_keys": sorted((manifest.get("param_space") or {}).keys()),
+        "relaunchable": relaunchable,
+        "reason": None if relaunchable else "this sweep's record holds no base config",
+        "cancel_requested": bool(manifest.get("cancel_requested")),
+    }
+
+
 def _summary(job: HPOJob) -> dict:
+    manifest = _read_manifest(job.sweep_id, root=job.platform_root) or {}
     return {"sweep_id": job.sweep_id, "status": job.status,
             "error": job.error, "has_result": bool(job.result),
-            "platform_root": job.platform_root}
+            "platform_root": job.platform_root,
+            **_manifest_fields(manifest)}
 
 
 def _from_summary(s: dict, root: str) -> HPOJob:
@@ -104,7 +129,8 @@ def _manifest_summary(manifest: dict) -> dict:
             "status": manifest.get("status", "unknown"),
             "error": manifest.get("error"),
             "has_result": bool(manifest.get("result")),
-            "external": True}
+            "external": True,
+            **_manifest_fields(manifest)}
 
 
 def _sweeps_dir() -> Path:
@@ -271,21 +297,54 @@ def rehydrate_for_current_root() -> None:
     _registry.rehydrate()
 
 
-class LaunchHPOPayload(BaseModel):
+class RelaunchSweepPayload(BaseModel):
+    study_name: str
+
+
+@dataclass
+class _RelaunchSpec:
+    """Every ``run_hpo`` argument a relaunchable manifest holds, read once so the worker
+    replays exactly what the manifest recorded rather than trusting untyped dict access at
+    the call site."""
+
     base_config: dict[str, Any]
-    param_space: Optional[dict[str, Any]] = None
-    n_trials: int = 5
-    output_dir: str = ""
-    search_alg: str = "random"
-    scheduler: str = "asha"
+    param_space: Optional[dict[str, Any]]
+    n_trials: int
+    search_alg: str
+    scheduler: str
+    grace_period: int
+    reduction_factor: int
+    max_concurrent: int
+    warm_start: bool
+    baseline_params: Optional[dict[str, Any]]
+    resources_per_trial: Optional[dict[str, Any]]
 
 
-def _worker(job: HPOJob, payload: LaunchHPOPayload, output_dir: str) -> None:
-    """Run one sweep to completion off the request thread.
+def _relaunch_spec(manifest: dict) -> _RelaunchSpec:
+    return _RelaunchSpec(
+        base_config=manifest["base_config"],
+        param_space=manifest.get("param_space"),
+        n_trials=manifest.get("n_trials", 5),
+        search_alg=manifest.get("search_alg", "random"),
+        scheduler=manifest.get("scheduler", "asha"),
+        grace_period=manifest.get("grace_period", 5),
+        reduction_factor=manifest.get("reduction_factor", 3),
+        max_concurrent=manifest.get("max_concurrent", 1),
+        warm_start=bool(manifest.get("warm_start", False)),
+        baseline_params=manifest.get("baseline_params"),
+        resources_per_trial=manifest.get("resources_per_trial"),
+    )
+
+
+def _worker(job: HPOJob, spec: _RelaunchSpec, output_dir: str) -> None:
+    """Run one relaunched sweep to completion off the request thread.
 
     ``job.platform_root``, resolved on the request thread at launch, is what
     :func:`_persist` groups this sweep's summary under, so this thread's writes land under
-    the root that launch named rather than under whatever the environment names later.
+    the root that launch named rather than under whatever the environment names later. A
+    returned ``{"error", "issues"}`` (a relaunch whose data paths moved, say) is a failed job
+    carrying the issues, and a returned ``{"status": "cancelled", ...}`` a cancelled one,
+    rather than either reading as a completed job with no useful result.
     """
     try:
         job.status = "running"
@@ -293,17 +352,31 @@ def _worker(job: HPOJob, payload: LaunchHPOPayload, output_dir: str) -> None:
         from tcip_mcp.tools.training_tools import run_hpo
 
         res = run_hpo(
-            base_config=payload.base_config,
-            param_space=payload.param_space,
-            n_trials=payload.n_trials,
+            base_config=spec.base_config,
+            param_space=spec.param_space,
+            n_trials=spec.n_trials,
             output_dir=output_dir,
-            search_alg=payload.search_alg,
-            scheduler=payload.scheduler,
+            search_alg=spec.search_alg,
+            scheduler=spec.scheduler,
+            grace_period=spec.grace_period,
+            reduction_factor=spec.reduction_factor,
+            warm_start=spec.warm_start,
+            baseline_params=spec.baseline_params,
+            max_concurrent=spec.max_concurrent,
+            resources_per_trial=spec.resources_per_trial,
             study_name=job.sweep_id,
             auto_tensorboard=False,
         )
-        job.result = res if isinstance(res, dict) else {"raw": res}
-        job.status = "completed"
+        if isinstance(res, dict) and "error" in res:
+            job.status = "failed"
+            job.error = res["error"]
+            job.result = res
+        elif isinstance(res, dict) and res.get("status") == "cancelled":
+            job.status = "cancelled"
+            job.result = res
+        else:
+            job.result = res if isinstance(res, dict) else {"raw": res}
+            job.status = "completed"
     except Exception as exc:
         logger.exception("HPO sweep %s failed", job.sweep_id)
         job.status = "failed"
@@ -312,31 +385,43 @@ def _worker(job: HPOJob, payload: LaunchHPOPayload, output_dir: str) -> None:
         _persist()
 
 
-@router.post("/launch")
-def launch_hpo(payload: LaunchHPOPayload) -> dict:
+@router.post("/sweeps")
+def relaunch_sweep(payload: RelaunchSweepPayload) -> dict:
+    """Relaunch a sweep from its own recorded manifest: no config, param space or path is
+    ever submitted by the browser. ``output_dir`` is always this request thread's own
+    ``hpo_root()``, never a path the manifest carries (an absolute path in a file is not a
+    path this process should follow)."""
     from tcip_mcp.tools.training_tools import hpo_root
 
-    from tcip_web.paths import assert_path_allowed
+    manifest = _read_manifest(payload.study_name)
+    if manifest is None:
+        raise HTTPException(404, f"sweep not found: {payload.study_name}")
+    if "base_config" not in manifest:
+        raise HTTPException(409, "this sweep's record holds no base config")
 
-    # Confine the client-supplied output dir when the server is locked down (no-op otherwise).
-    # Data paths nested inside base_config are a documented follow-up (not top-level here).
-    if payload.output_dir:
-        try:
-            assert_path_allowed(payload.output_dir)
-        except ValueError as exc:
-            raise HTTPException(403, str(exc)) from exc
-
-    output_dir = payload.output_dir or str(hpo_root())
+    output_dir = str(hpo_root())
+    spec = _relaunch_spec(manifest)
 
     job = HPOJob(sweep_id=f"hpo-{uuid.uuid4().hex[:8]}")
     _registry.register(job.sweep_id, job, job_root=job.platform_root)
-    t = threading.Thread(target=_worker, args=(job, payload, output_dir), daemon=True)
+    t = threading.Thread(target=_worker, args=(job, spec, output_dir), daemon=True)
     with _lock:
         for sweep_id in [sid for sid, done in _workers.items() if not done.is_alive()]:
             _workers.pop(sweep_id, None)
         _workers[job.sweep_id] = t
     t.start()
     return {"status": "launched", "sweep_id": job.sweep_id}
+
+
+@router.post("/sweeps/{sweep_id}/cancel")
+def cancel_sweep_route(sweep_id: str, payload: EmptyBodyPayload) -> dict:
+    """Request cooperative cancellation of a running sweep, wrapping ``cancel_hpo``."""
+    from tcip_mcp.tools.training_tools import cancel_hpo
+
+    result = cancel_hpo(sweep_id, root=_sweep_launch_root(sweep_id))
+    if result.get("error"):
+        raise HTTPException(404, result["error"])
+    return result
 
 
 @router.get("/sweeps")
@@ -366,6 +451,7 @@ def get_sweep(sweep_id: str) -> dict:
             _terminal_response(j) if j.status in jobstore.TERMINAL_STATUSES
             else {"sweep_id": j.sweep_id, "status": j.status, "error": j.error, "result": j.result}
         )
+        response["manifest"] = _read_manifest(sweep_id, root=j.platform_root) or {}
         return _enrich_with_study_result(response, sweep_id, root=j.platform_root)
     manifest = _read_manifest(sweep_id)
     if manifest is None:

@@ -370,6 +370,47 @@ def trial_error_text(error: BaseException) -> str:
     return message if message.startswith(f"{name}:") else f"{name}: {message}"
 
 
+def _build_sweep_stopper(stop_all_when: Callable[[], bool], sweep_root: Path) -> Any:
+    """A ``ray.tune.Stopper`` for cooperative-first, Ray-hard-stop-as-fallback sweep cancel,
+    wired onto the Tuner as ``run_config.stop``. A local subclass of Ray's own ``Stopper``
+    (Ray checks ``isinstance``, so a bare callable is not enough), built here rather than at
+    module scope, so importing ``ray`` for it stays inside this call like every other Ray use
+    in this module.
+
+    Per-trial (``__call__``): True whenever ``stop_all_when()`` says the cancel file exists, so
+    Tune ends that trial after the report it just made. Whole-experiment (``stop_all``): True
+    once the cancel file exists and either no ``trial_<id>`` directory under the sweep root
+    still lacks its resolved-config record (the on-disk "still running" signal
+    ``training_tools._running_trial_dirs`` and ``cancel_hpo`` also use), or the heartbeat stale
+    window has passed since the file was written, the bounded fallback at which point Ray's own
+    stop kills whatever actor a trial that never polls ``should_cancel`` left running.
+    """
+    from ray.tune import Stopper
+
+    class _SweepStopper(Stopper):
+        def __call__(self, trial_id: str, result: dict) -> bool:
+            return bool(stop_all_when())
+
+        def stop_all(self) -> bool:
+            if not stop_all_when():
+                return False
+            from tcip_mcp.tools.training_tools import (
+                SWEEP_CANCEL_SENTINEL, TCIP_HEARTBEAT_STALE_SECONDS, _running_trial_dirs,
+            )
+
+            sentinel = sweep_root / SWEEP_CANCEL_SENTINEL
+            try:
+                written_at = sentinel.stat().st_mtime
+            except OSError:
+                return False
+            import time as _time
+            if _time.time() - written_at > TCIP_HEARTBEAT_STALE_SECONDS:
+                return True
+            return not _running_trial_dirs(sweep_root)
+
+    return _SweepStopper()
+
+
 def tune_search(
     objective_fn: Callable[[dict, Callable[[float], None]], Any],
     param_space: dict | None = None,
@@ -388,6 +429,7 @@ def tune_search(
     storage_path: str | None = None,
     study_name: str = "tcip_hpo",
     resources_per_trial: dict | None = None,
+    stop_all_when: Callable[[], bool] | None = None,
 ) -> dict:
     """Run an HPO sweep on Ray Tune.
 
@@ -411,6 +453,11 @@ def tune_search(
         resources_per_trial: Ray resource request per trial (``{"cpu": ..., "gpu": ...}``, GPU as
             a fraction for sharing). Omit to derive one from the host's real GPU count and
             ``max_concurrent``, an explicit value always wins over the derivation.
+        stop_all_when: Cooperative-cancel signal, ``None`` (the default) runs the sweep to
+            completion with no stopper wired in. Given, a trial ends after the report it just
+            made while this returns True; the whole experiment stops once it does and no trial
+            still looks unfinished, or (the bounded fallback, for a trial that never polls) once
+            a configured staleness window has passed. See :func:`_build_sweep_stopper`.
 
     Returns dict with ``best_params``, ``best_value``, ``n_trials``, ``all_trials``,
     ``search_alg``, ``scheduler``, ``study_name`` (+ ``warm_start``/``baseline_params``).
@@ -479,6 +526,8 @@ def tune_search(
         "storage_path": Path(storage_path).resolve().as_posix(),
         "name": study_name,
     }
+    if stop_all_when is not None:
+        run_kwargs["stop"] = _build_sweep_stopper(stop_all_when, Path(storage_path) / study_name)
 
     removed_env: dict[str, str] = {}
     for var in _ENV_VARS_RAY_TUNE_REFUSES:
