@@ -689,14 +689,11 @@ def _child_env_for_launch(config: dict) -> dict[str, str]:
     not just a convenience.
     """
     import os
-    import sys
+
+    from tcip_mcp.pipelines.model_build import child_pythonpath
 
     env = dict(os.environ)
-    existing_pythonpath = env.get("PYTHONPATH", "")
-    path_entries = [p for p in sys.path if p]
-    if existing_pythonpath:
-        path_entries = path_entries + [existing_pythonpath]
-    env["PYTHONPATH"] = os.pathsep.join(path_entries)
+    env["PYTHONPATH"] = child_pythonpath()
 
     if config.get("device") or config.get("training", {}).get("device"):
         return env

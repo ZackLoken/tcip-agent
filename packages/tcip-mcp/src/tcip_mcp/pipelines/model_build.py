@@ -64,6 +64,28 @@ def _import_dotted(target: str) -> Any:
         raise ValueError(f"Builder {attr!r} not found in module {mod_name!r}.") from exc
 
 
+def child_pythonpath() -> str:
+    """The ``PYTHONPATH`` string that reproduces this process's own import search path in
+    another process: every non-empty ``sys.path`` entry, then the existing ``PYTHONPATH`` env
+    value appended if set, joined with ``os.pathsep``.
+
+    A bespoke ``model_source``/``training_source``/``dataset_source`` importable to this
+    process (an editable install's extra path entries, a test runner's rootdir insertion, an
+    agent's own working-directory convention) is not automatically importable to a process this
+    platform spawns, or a Ray worker: neither inherits this interpreter's ``sys.path``, only its
+    own defaults plus whatever ``PYTHONPATH`` it is handed. Every caller that needs a bespoke
+    source importable across that boundary composes its child/worker environment from this.
+    """
+    import os
+    import sys
+
+    existing_pythonpath = os.environ.get("PYTHONPATH", "")
+    path_entries = [p for p in sys.path if p]
+    if existing_pythonpath:
+        path_entries = path_entries + [existing_pythonpath]
+    return os.pathsep.join(path_entries)
+
+
 def declared_in_chans(model_source: dict | None) -> int | None:
     """The channel count ``model_source`` declares: its own ``in_chans``, falling back to
     ``builder_kwargs.in_chans``. ``None`` when neither declares it (the caller's own default,
@@ -94,6 +116,8 @@ def build_from_model_source(model_source: dict) -> Any:
     if not isinstance(model_source, dict):
         raise ValueError("model_source must be a dict")
     builder = model_source.get("builder")
+    if not isinstance(builder, str):
+        raise ValueError(f"model_source.builder must be a 'module:function' string, got {builder!r}")
     fn = _import_dotted(builder)
     kwargs = model_source.get("builder_kwargs") or {}
     if not isinstance(kwargs, dict):

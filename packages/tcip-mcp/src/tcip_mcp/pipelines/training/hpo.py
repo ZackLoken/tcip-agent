@@ -170,7 +170,7 @@ def build_scheduler(
     hyperparameters mid-training, so it needs ``hyperparam_mutations`` (the search space).
     """
     key = (str(name).lower() if name is not None else None)
-    if key in _NO_SCHEDULER:
+    if key is None or key in _NO_SCHEDULER:
         return None
     ray_name = _SCHEDULER_ALIASES.get(key, key)
 
@@ -306,11 +306,16 @@ def _ray_session(ray: Any) -> Generator[None]:
 
     with _ray_lifecycle:
         if not ray.is_initialized():
+            from tcip_mcp.pipelines.model_build import child_pythonpath
+
             # A bare ray[tune] install has no aiohttp; probe rather than assume, so a sweep still runs without it.
             include_dashboard = find_spec("aiohttp") is not None
+            # Only this branch configures Ray: an already-initialized cluster (a notebook, an
+            # embedding application) owns its own runtime_env, left untouched below.
             context = ray.init(include_dashboard=include_dashboard, dashboard_host="127.0.0.1",
                                log_to_driver=False, ignore_reinit_error=True,
-                               configure_logging=False)
+                               configure_logging=False,
+                               runtime_env={"env_vars": {"PYTHONPATH": child_pythonpath()}})
             _ray_started_here = True
             if include_dashboard:
                 _publish_ray_dashboard(context.dashboard_url)
@@ -452,7 +457,7 @@ def tune_search(
         os.environ.update(removed_env)
 
     all_trials = []
-    for r in results:
+    for r in results:  # type: ignore[attr-defined]  # ResultGrid supports iteration at runtime; its stub omits __iter__
         all_trials.append({
             "params": {k: r.config.get(k) for k in space},
             **stored_number("value", (r.metrics or {}).get(metric)),
@@ -462,7 +467,7 @@ def tune_search(
 
     best = results.get_best_result(metric=metric, mode=mode)
     result: dict[str, Any] = {
-        "best_params": {k: best.config.get(k) for k in space},
+        "best_params": {k: (best.config or {}).get(k) for k in space},
         **stored_number("best_value", (best.metrics or {}).get(metric)),
         "n_trials": len(results),
         "study_name": study_name,

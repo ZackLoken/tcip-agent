@@ -237,3 +237,22 @@ def test_a_saved_checkpoint_is_recognized_after_its_kind_stamp_is_dropped(tmp_pa
     torch.save(payload, unstamped)
 
     assert detect_kind(str(unstamped)) == KIND_TCIP_MODULE
+
+
+def test_child_pythonpath_carries_sys_path_and_the_existing_env_value(tmp_path, monkeypatch):
+    """The string a spawned process or Ray worker gets must reproduce this interpreter's own
+    import search path, with any existing PYTHONPATH the caller already set preserved at the end
+    rather than displaced by it."""
+    import os
+
+    from tcip_mcp.pipelines.model_build import child_pythonpath
+
+    extra_dir = str(tmp_path / "bespoke_src")
+    monkeypatch.syspath_prepend(extra_dir)
+    monkeypatch.setenv("PYTHONPATH", "/already/set/path")
+
+    result = child_pythonpath()
+    entries = result.split(os.pathsep)
+
+    assert extra_dir in entries
+    assert entries[-1] == "/already/set/path"
