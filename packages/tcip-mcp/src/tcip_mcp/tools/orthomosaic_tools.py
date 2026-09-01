@@ -255,7 +255,7 @@ def deliver_orthomosaic_plant_counts(
         refusal = {
             "error": str(exc),
             "operating_point_validated": exc.gate.stamp.get("operating_point", VALIDATED_FALSE),
-            "unvalidated_dimensions": ", ".join(exc.gate.unvalidated),
+            "unvalidated_dimensions": exc.gate.unvalidated_cell(),
             "n_detections": len(assignments), "n_mapped": len(mapped),
             "n_unmapped": n_unmapped,
         }

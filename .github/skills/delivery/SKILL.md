@@ -31,7 +31,7 @@ it in `pipelines/postprocessing/aggregation.py` if this table looks stale):
 | producing_experiment_id | string | The run that produced the predictions, blank when there was none or nothing corroborates it; never the calibration a claim was earned under |
 | produced_at | string | Timestamp this CSV was written, stamped by the shared tail composition; never the producing run's own timestamp |
 | operating_point_validated | string | The named dimension's cleared reference (paired with `measurement_document`, e.g. `measurement_document=ordinal_operating_point` beside this column naming which document it answers for), floored false whenever any other gated dimension with no column of its own (tile_size, scale, claim_scope) is unvalidated |
-| unvalidated_dimensions | string | Every gated dimension that floored the row above, comma-joined; blank when everything cleared |
+| unvalidated_dimensions | string | Every gated dimension that did not validate, `;`-joined; blank when everything cleared |
 | validation_record | string | `experiment:digest` of the validation record the delivered claim was verified against; blank when the numbers rest on no record |
 
 ## Aggregation Rules
