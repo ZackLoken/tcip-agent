@@ -54,13 +54,15 @@ def test_run_hpo_records_a_cancelled_manifest_when_the_file_exists_before_prefli
 
     result = run_hpo(base_config=real_hpo_base_config, n_trials=1, output_dir=str(tmp_path),
                      study_name=study_name)
-    assert result == {"status": "cancelled", "study_name": study_name}
+    assert result["status"] == "cancelled"
+    assert result["error"]  # the reason travels with the result, not only the manifest
     assert called == []  # the search never started
 
     import tcip_store
     from tcip_mcp.tools.training_tools import sweep_manifest_key
     manifest = tcip_store.read(sweep_manifest_key(study_name, str(tmp_path)))
     assert manifest["status"] == "cancelled"
+    assert manifest["error"] == result["error"]
 
 
 def test_run_hpo_records_a_cancelled_manifest_when_tune_search_returns_after_a_cancel(
@@ -85,11 +87,13 @@ def test_run_hpo_records_a_cancelled_manifest_when_tune_search_returns_after_a_c
 
     result = run_hpo(base_config=real_hpo_base_config, n_trials=1, output_dir=str(tmp_path),
                      study_name=study_name)
-    assert result == {"status": "cancelled", "study_name": study_name}
+    assert result["status"] == "cancelled"
+    assert result["error"]
 
     import tcip_store
     manifest = tcip_store.read(sweep_manifest_key(study_name, str(tmp_path)))
     assert manifest["status"] == "cancelled"
+    assert manifest["error"] == result["error"]
     assert not tcip_store.exists(study_result_key(study_name, str(tmp_path)))
 
 
@@ -109,12 +113,68 @@ def test_run_hpo_records_a_cancelled_manifest_when_tune_search_raises_after_a_ca
 
     result = run_hpo(base_config=real_hpo_base_config, n_trials=1, output_dir=str(tmp_path),
                      study_name=study_name)
-    assert result == {"status": "cancelled", "study_name": study_name}
+    assert result["status"] == "cancelled"
+    assert result["error"]
 
     import tcip_store
     from tcip_mcp.tools.training_tools import sweep_manifest_key
     manifest = tcip_store.read(sweep_manifest_key(study_name, str(tmp_path)))
     assert manifest["status"] == "cancelled"
+    assert manifest["error"] == result["error"]
+
+
+def test_a_terminal_cancelled_manifest_keeps_cancel_requested(
+    tmp_path, real_hpo_base_config, monkeypatch
+) -> None:
+    """run_hpo re-derives cancel_requested from the sweep's own stop file on every manifest
+    write, including its terminal one, rather than writing its stale in-memory copy (which
+    never carries a field cancel_hpo set on disk out of band) back over it."""
+    from tcip_mcp.tools.training_tools import (
+        SWEEP_CANCEL_SENTINEL, run_hpo, sweep_dir, sweep_manifest_key,
+    )
+
+    study_name = "hpo_keepflag1"
+    sweep_root = sweep_dir(study_name, str(tmp_path))
+
+    def fake_search(**kw):
+        (sweep_root / SWEEP_CANCEL_SENTINEL).touch()
+        return {"best_params": {}, "best_value": 0.0, "n_trials": 1, "study_name": study_name}
+
+    monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", fake_search)
+    run_hpo(base_config=real_hpo_base_config, n_trials=1, output_dir=str(tmp_path),
+           study_name=study_name)
+
+    import tcip_store
+    manifest = tcip_store.read(sweep_manifest_key(study_name, str(tmp_path)))
+    assert manifest["status"] == "cancelled"
+    assert manifest["cancel_requested"] is True
+
+
+def test_cancel_hpo_leaves_a_terminal_manifest_terminal(tmp_path) -> None:
+    """cancel_hpo never writes over a manifest already in a terminal status: the sentinel
+    files still get written (a stray straggler process still stops), but the manifest's own
+    status and content are not disturbed by a cancel arriving after the sweep already ended."""
+    import tcip_store
+    from tcip_mcp.tools.training_tools import (
+        SWEEP_CANCEL_SENTINEL, cancel_hpo, sweep_dir, sweep_manifest_key,
+    )
+
+    study_name = "hpo_alreadydone1"
+    sweep_root = sweep_dir(study_name, root=tmp_path)
+    sweep_root.mkdir(parents=True)
+    tcip_store.replace(
+        sweep_manifest_key(study_name, root=tmp_path),
+        {"study_name": study_name, "status": "completed", "n_trials": 1,
+         "result": {"best_value": 0.1}},
+    )
+
+    result = cancel_hpo(study_name, root=str(tmp_path))
+    assert result["status"] == "completed"
+    assert (sweep_root / SWEEP_CANCEL_SENTINEL).exists()  # the sentinel is still written
+
+    manifest = tcip_store.read(sweep_manifest_key(study_name, root=tmp_path))
+    assert manifest["status"] == "completed"
+    assert "cancel_requested" not in manifest  # untouched: never written over a terminal manifest
 
 
 def test_run_hpo_trial_reports_the_losing_side_without_training_when_the_sweep_is_cancelled(
@@ -136,6 +196,50 @@ def test_run_hpo_trial_reports_the_losing_side_without_training_when_the_sweep_i
     assert reported[0] == float("inf") or reported[0] == float("-inf")
     import tcip_store
     assert not tcip_store.exists(trial_config_key(sweep_root, trial_dir.name))
+
+
+def test_cancel_hpo_writes_every_sentinel_beside_a_trial_whose_record_will_not_decode(
+    tmp_path
+) -> None:
+    """A trial whose resolved-config record exists but will not decode means the trial wrote
+    it, so it reads as not-running (the same call ``cancel_hpo`` and the Tune ``Stopper`` share)
+    rather than raising and half-applying the cancel to every other trial."""
+    import tcip_store
+    from tcip_mcp.pipelines.training.hpo import _build_sweep_stopper
+    from tcip_mcp.pipelines.training.run_registry import CANCEL_SENTINEL
+    from tcip_mcp.tools.training_tools import (
+        SWEEP_CANCEL_SENTINEL, cancel_hpo, sweep_dir, sweep_manifest_key, trial_config_key,
+    )
+    from tests._record_damage_fixtures import damage_record
+
+    study_name = "hpo_undecodable1"
+    sweep_root = sweep_dir(study_name, root=tmp_path)
+    sweep_root.mkdir(parents=True)
+    good_trial = sweep_root / "trial_good00000"
+    good_trial.mkdir()
+    corrupt_trial = sweep_root / "trial_corrupt00"
+    corrupt_trial.mkdir()
+    running_trial = sweep_root / "trial_running00"
+    running_trial.mkdir()
+
+    tcip_store.replace(trial_config_key(sweep_root, good_trial.name), {"trial_params": {}})
+    corrupt_key = trial_config_key(sweep_root, corrupt_trial.name)
+    tcip_store.replace(corrupt_key, {"trial_params": {}})
+    damage_record(corrupt_key, b"{not json at all")
+    tcip_store.replace(
+        sweep_manifest_key(study_name, root=tmp_path),
+        {"study_name": study_name, "status": "running", "n_trials": 3},
+    )
+
+    result = cancel_hpo(study_name, root=str(tmp_path))
+    assert result["cancel_requested"] is True
+    assert (sweep_root / SWEEP_CANCEL_SENTINEL).exists()
+    assert (running_trial / CANCEL_SENTINEL).exists()
+    assert not (good_trial / CANCEL_SENTINEL).exists()  # already finished before the cancel
+    assert not (corrupt_trial / CANCEL_SENTINEL).exists()  # undecodable means finished too
+
+    stopper = _build_sweep_stopper(lambda: (sweep_root / SWEEP_CANCEL_SENTINEL).exists(), sweep_root)
+    stopper.stop_all()  # must not raise walking the corrupt trial's record
 
 
 def test_sweep_stopper_stop_all_true_once_no_trial_still_looks_unfinished(tmp_path) -> None:

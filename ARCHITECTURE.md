@@ -810,17 +810,18 @@ anything.
 |---|---|---|---|
 | `calibrate_physical_scale` | `scale_tools.py:84` | yes | Derive and validate a physical per-pixel scale, and stamp it into ``pred_dir``'s |
 
-### training_tools.py (7 tools)
+### training_tools.py (8 tools)
 
 | tool | line | audited | docstring first line |
 |---|---|---|---|
-| `preflight_config` | `training_tools.py:166` | yes | Validate a training configuration before launching. |
-| `launch_training` | `training_tools.py:560` | yes | Launch a training run in an isolated subprocess from a bespoke ``model_source`` builder. |
-| `check_training_status` | `training_tools.py:792` | yes | Check the status of a training run. |
-| `list_training_runs` | `training_tools.py:929` | yes | List every training run this platform can currently account for. |
-| `cancel_training` | `training_tools.py:1124` | yes | Request graceful cancellation of a running training run. |
-| `run_hpo` | `training_tools.py:1597` | yes | Run hyperparameter optimization on Ray Tune, training each trial for real. |
-| `evaluate_model` | `training_tools.py:2208` | yes | Evaluate a trained checkpoint on a (held-out) dataset and write test_results.json. |
+| `preflight_config` | `training_tools.py:168` | yes | Validate a training configuration before launching. |
+| `launch_training` | `training_tools.py:562` | yes | Launch a training run in an isolated subprocess from a bespoke ``model_source`` builder. |
+| `check_training_status` | `training_tools.py:794` | yes | Check the status of a training run. |
+| `list_training_runs` | `training_tools.py:931` | yes | List every training run this platform can currently account for. |
+| `cancel_training` | `training_tools.py:1128` | yes | Request graceful cancellation of a running training run. |
+| `run_hpo` | `training_tools.py:1618` | yes | Run hyperparameter optimization on Ray Tune, training each trial for real. |
+| `cancel_hpo` | `training_tools.py:1859` | yes | Request cooperative cancellation of a running HPO sweep. |
+| `evaluate_model` | `training_tools.py:2253` | yes | Evaluate a trained checkpoint on a (held-out) dataset and write test_results.json. |
 
 ### vision_tools.py (3 tools)
 
@@ -1017,16 +1018,16 @@ registered at HEAD.
 
 | method | path | handler | line |
 |---|---|---|---|
-| POST | `/sweeps` | `relaunch_sweep` | `routes/tuning.py:389` |
-| POST | `/sweeps/{sweep_id}/cancel` | `cancel_sweep_route` | `routes/tuning.py:417` |
-| GET | `/sweeps` | `list_sweeps` | `routes/tuning.py:428` |
-| GET | `/sweeps/{sweep_id}` | `get_sweep` | `routes/tuning.py:444` |
-| GET | `/sweeps/{sweep_id}/trials` | `list_trials` | `routes/tuning.py:477` |
-| GET | `/sweeps/{sweep_id}/trials/{trial_id}/metrics` | `get_trial_metrics` | `routes/tuning.py:510` |
-| GET | `/ray-dashboard` | `get_ray_dashboard` | `routes/tuning.py:537` |
-| POST | `/sweeps/{sweep_id}/tensorboard` | `launch_sweep_tensorboard` | `routes/tuning.py:623` |
-| POST | `/sweeps/{sweep_id}/trials/{trial_id}/tensorboard` | `launch_trial_tensorboard` | `routes/tuning.py:640` |
-| POST | `/sweeps/{sweep_id}/trials/{trial_id}/tensorboard/stop` | `stop_trial_tensorboard` | `routes/tuning.py:654` |
+| POST | `/sweeps` | `relaunch_sweep` | `routes/tuning.py:432` |
+| POST | `/sweeps/{sweep_id}/cancel` | `cancel_sweep_route` | `routes/tuning.py:465` |
+| GET | `/sweeps` | `list_sweeps` | `routes/tuning.py:476` |
+| GET | `/sweeps/{sweep_id}` | `get_sweep` | `routes/tuning.py:492` |
+| GET | `/sweeps/{sweep_id}/trials` | `list_trials` | `routes/tuning.py:524` |
+| GET | `/sweeps/{sweep_id}/trials/{trial_id}/metrics` | `get_trial_metrics` | `routes/tuning.py:557` |
+| GET | `/ray-dashboard` | `get_ray_dashboard` | `routes/tuning.py:584` |
+| POST | `/sweeps/{sweep_id}/tensorboard` | `launch_sweep_tensorboard` | `routes/tuning.py:670` |
+| POST | `/sweeps/{sweep_id}/trials/{trial_id}/tensorboard` | `launch_trial_tensorboard` | `routes/tuning.py:687` |
+| POST | `/sweeps/{sweep_id}/trials/{trial_id}/tensorboard/stop` | `stop_trial_tensorboard` | `routes/tuning.py:701` |
 
 ### routes/validation.py, prefix `/api/review` (1 route)
 
@@ -2113,7 +2114,7 @@ Phase 3 verdict: single.
 
 Must agree: the writer's row shape is what the reader and the stream consumer expect.
 Side A: `packages/tcip-mcp/src/tcip_mcp/experiments.py:898` (`def log_metrics(`, the one writer; the trainer and the envelope hand rows to the context's epoch sink instead of opening the file).
-Side B: `packages/tcip-web/src/tcip_web/routes/training.py:232` (`read_log(key, after=cursor)`, the training stream's incremental tail, pushed as a `TrainingMetricFrame` per row) and `routes/tuning.py:502` (`read_log(trial_metrics_key`, answered in the shape `_metrics_common.metrics_response` builds).
+Side B: `packages/tcip-web/src/tcip_web/routes/training.py:232` (`read_log(key, after=cursor)`, the training stream's incremental tail, pushed as a `TrainingMetricFrame` per row) and `routes/tuning.py:549` (`read_log(trial_metrics_key`, answered in the shape `_metrics_common.metrics_response` builds).
 Phase 3 verdict: single. An HPO trial with no experiment record still appends to its own trial log, one declared site in the epoch sink, pending the HPO store migration.
 
 ## S09. Web job registries persisted to .tcip/state/<name>.json  <!-- queued: P5-325 unify -->

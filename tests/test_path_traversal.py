@@ -84,7 +84,6 @@ def test_training_stream_refuses_a_project_root_outside_allowed_roots(
     assert "outside the allowed roots" in ei.value.reason
 
 
-
 def test_annotate_labels_route_blocks_outside_allowed_root(
     tmp_path, tmp_path_factory: pytest.TempPathFactory
 ):
