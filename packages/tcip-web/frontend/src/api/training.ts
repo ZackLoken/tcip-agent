@@ -53,13 +53,40 @@ export interface LaunchableConfig {
   parent_experiment: string | null;
 }
 
+export interface AsRecordedChoice {
+  case: "bound" | "drawn";
+  line: string;
+  compatible: boolean;
+  reason: string | null;
+}
+
+export interface SplitManifestChoice {
+  manifest_dir: string;
+  enabled: boolean;
+  reason: string | null;
+  seed: number | null;
+  group_by: string | null;
+  train: number;
+  val: number;
+  calibration: number;
+  other_dates: number;
+}
+
+export interface SplitChoices {
+  as_recorded: AsRecordedChoice;
+  manifests: SplitManifestChoice[];
+}
+
 export const trainingApi = {
   listConfigs: () => getJson<{ configs: LaunchableConfig[] }>(ROUTES.getTrainingConfigs),
 
-  relaunch: (experiment_id: string) =>
+  listSplitChoices: (experiment_id: string) =>
+    getJson<SplitChoices>(ROUTES.getTrainingConfigsByExperimentIdSplits(experiment_id)),
+
+  relaunch: (experiment_id: string, split_manifest_dir?: string | null) =>
     postJson<{ run_id?: string; experiment_id?: string; [k: string]: unknown }>(
       ROUTES.postTrainingRuns,
-      { experiment_id },
+      split_manifest_dir ? { experiment_id, split_manifest_dir } : { experiment_id },
     ),
 
   listRuns: () => getJson<{ runs: TrainingRunSummary[] }>(ROUTES.getTrainingRuns),

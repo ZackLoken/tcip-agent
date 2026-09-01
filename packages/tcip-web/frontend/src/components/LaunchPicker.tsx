@@ -3,12 +3,35 @@
  * rows read from records (never typed by the breeder) plus the agent request composer that
  * remains reachable from both. Training passes real rows (its configs) and Tuning passes none
  * (a sweep from a config that has never been swept is the agent's own path); the composer row
- * is always present and always last.
+ * is always present and always last. A training-config row also carries its own nested "Data"
+ * choice ("As recorded" or a listed partition), submitted with Start as the split manifest
+ * directory the server itself offered, never a path this component resolves.
  */
 
 import { useState, type ReactNode } from "react";
 
 import { StructuredRefusalError } from "@/api/http";
+
+export interface DataChoice {
+  /** The split manifest directory this choice binds to; the string Start submits unchanged. */
+  manifestDir: string;
+  /** Draw seed, grouping and per-side member counts under the config's own date. */
+  label: ReactNode;
+  disabled?: boolean;
+  /** Shown under a disabled choice: the compatibility reason, or an unreadable record's text. */
+  reason?: string;
+}
+
+export interface DataPicker {
+  /** "As recorded"'s own case line, read from the snapshot: bound to a manifest, or drawn. */
+  asRecordedLine: string;
+  asRecordedDisabled?: boolean;
+  asRecordedReason?: string;
+  /** One entry per offered or refused candidate manifest; empty when none was found. */
+  choices: DataChoice[];
+  /** Shown in place of the choices when none were found. */
+  absenceMessage: string;
+}
 
 export interface LaunchPickerRow {
   key: string;
@@ -16,8 +39,13 @@ export interface LaunchPickerRow {
   content: ReactNode;
   /** The branch line shown once this row is selected, describing what Start will do. */
   branchLine: string;
-  /** Starts the run/sweep this row names. Rejects with the backend's refusal on failure. */
-  onStart: () => Promise<void>;
+  /** Replaces branchLine once a partition (rather than "As recorded") is the current choice. */
+  branchLineForData?: string;
+  /** Present only for a training-config row: the nested "Data" choice under the branch line. */
+  data?: DataPicker;
+  /** Starts the run/sweep this row names, with the chosen manifest directory or null for "As
+   * recorded". Rejects with the backend's refusal on failure. */
+  onStart: (splitManifestDir: string | null) => Promise<void>;
 }
 
 interface Refusal {
@@ -52,6 +80,7 @@ export function LaunchPicker({
   onSend,
 }: LaunchPickerProps) {
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const [selectedDataDir, setSelectedDataDir] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
   const [refusal, setRefusal] = useState<Refusal | null>(null);
 
@@ -59,7 +88,7 @@ export function LaunchPicker({
     setStarting(true);
     setRefusal(null);
     try {
-      await row.onStart();
+      await row.onStart(row.data ? selectedDataDir : null);
       setSelectedKey(null);
     } catch (e) {
       setRefusal({ key: row.key, issues: refusalIssues(e) });
@@ -70,6 +99,7 @@ export function LaunchPicker({
 
   function select(key: string) {
     setRefusal(null);
+    setSelectedDataDir(null);
     setSelectedKey((current) => (current === key ? null : key));
   }
 
@@ -100,7 +130,75 @@ export function LaunchPicker({
                     </button>
                     {selected && (
                       <div className="mt-1 pl-2">
-                        <div className="text-[10px] text-tcip-muted mb-1">{row.branchLine}</div>
+                        <div className="text-[10px] text-tcip-muted mb-1">
+                          {selectedDataDir && row.branchLineForData
+                            ? row.branchLineForData
+                            : row.branchLine}
+                        </div>
+                        {row.data && (
+                          <div className="mb-2">
+                            <div className="tcip-heading mb-1">Data</div>
+                            <div className="text-[10px] text-tcip-muted mb-1">
+                              Members are checked against the labels at launch; an unadmitted member
+                              refuses the run.
+                            </div>
+                            <ul className="space-y-1">
+                              <li>
+                                <label className="flex items-start gap-1 text-[10px]">
+                                  <input
+                                    type="radio"
+                                    name={`data-${row.key}`}
+                                    checked={selectedDataDir === null}
+                                    disabled={row.data.asRecordedDisabled}
+                                    onChange={() => setSelectedDataDir(null)}
+                                  />
+                                  <span>
+                                    As recorded: {row.data.asRecordedLine}
+                                    {row.data.asRecordedDisabled && row.data.asRecordedReason && (
+                                      <span className="block text-tcip-fp">
+                                        {row.data.asRecordedReason}
+                                      </span>
+                                    )}
+                                  </span>
+                                </label>
+                              </li>
+                              {row.data.choices.length === 0 ? (
+                                <li className="text-[10px] text-tcip-muted pl-4">
+                                  {row.data.absenceMessage}
+                                </li>
+                              ) : (
+                                <>
+                                  <li className="text-[10px] text-tcip-muted pl-4">
+                                    Choosing a partition replaces any recorded explicit validation
+                                    source with its own val side; admission then reads confirmed
+                                    negatives under the labels&apos; date.
+                                  </li>
+                                  {row.data.choices.map((choice) => (
+                                    <li key={choice.manifestDir}>
+                                      <label className="flex items-start gap-1 text-[10px]">
+                                        <input
+                                          type="radio"
+                                          name={`data-${row.key}`}
+                                          checked={selectedDataDir === choice.manifestDir}
+                                          disabled={choice.disabled}
+                                          onChange={() => setSelectedDataDir(choice.manifestDir)}
+                                        />
+                                        <span>
+                                          {choice.label}
+                                          {choice.disabled && choice.reason && (
+                                            <span className="block text-tcip-fp">
+                                              {choice.reason}
+                                            </span>
+                                          )}
+                                        </span>
+                                      </label>
+                                    </li>
+                                  ))}
+                                </>
+                              )}
+                            </ul>
+                          </div>
+                        )}
                         <button
                           type="button"
                           className="tcip-btn-primary text-[11px]"
