@@ -2,9 +2,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 import { StructuredRefusalError } from "@/api/http";
-import { trainingApi, type LaunchableConfig, type TrainingRunSummary } from "@/api/training";
+import {
+  trainingApi,
+  type LaunchableConfig,
+  type SplitChoices,
+  type TrainingRunSummary,
+} from "@/api/training";
 import { useStore } from "@/store";
-import { TrainingTab } from "@/tabs/TrainingTab";
+import { TrainingTab, dataPickerFor } from "@/tabs/TrainingTab";
 
 // The live metrics stream owns a real WebSocket; only the run list and its controls are under
 // test here, so the transport is replaced while the rest of the module stays real.
@@ -115,5 +120,162 @@ describe("TrainingTab config picker", () => {
     await waitFor(() =>
       expect(screen.getByText("batch_size must be positive")).toBeInTheDocument(),
     );
+  });
+
+  it("opens a config row's Data choices only once selected, and starts with the chosen manifest", async () => {
+    vi.spyOn(trainingApi, "listRuns").mockResolvedValue({ runs: [] });
+    vi.spyOn(trainingApi, "listConfigs").mockResolvedValue({
+      configs: [
+        {
+          experiment_id: "exp-1",
+          builder: "m:build_detector",
+          task: "detection",
+          images_dir: "/data/images",
+          subject: "leaf",
+          created: null,
+          state: "created",
+          parent_experiment: null,
+        },
+      ],
+    });
+    const listSplitChoicesSpy = vi.spyOn(trainingApi, "listSplitChoices").mockResolvedValue({
+      as_recorded: {
+        case: "drawn",
+        line: "draws its split again with seed 42 over the labels as they are now",
+        compatible: true,
+        reason: null,
+      },
+      manifests: [
+        {
+          manifest_dir: "/data/splits",
+          enabled: true,
+          reason: null,
+          seed: 7,
+          group_by: "tile_prefix",
+          train: 4,
+          val: 2,
+          calibration: 1,
+          other_dates: 0,
+          replaced_split_keys: [],
+        },
+      ],
+    });
+    const relaunchSpy = vi
+      .spyOn(trainingApi, "relaunch")
+      .mockResolvedValue({ run_id: "r1", experiment_id: "exp-1" });
+
+    render(<TrainingTab />);
+    fireEvent.click(await screen.findByRole("button", { name: "Start a run" }));
+    await screen.findByText("exp-1");
+    expect(listSplitChoicesSpy).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByText("exp-1"));
+    expect(
+      await screen.findByText(/draws its split again with seed 42 over the labels as they are now/),
+    ).toBeInTheDocument();
+    expect(listSplitChoicesSpy).toHaveBeenCalledWith("exp-1");
+
+    fireEvent.click(await screen.findByRole("radio", { name: /\/data\/splits/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Start" }));
+    await waitFor(() => expect(relaunchSpy).toHaveBeenCalledWith("exp-1", "/data/splits"));
+  });
+
+  it("shows a per-row split-choices fetch failure as text on the row", async () => {
+    vi.spyOn(trainingApi, "listRuns").mockResolvedValue({ runs: [] });
+    vi.spyOn(trainingApi, "listConfigs").mockResolvedValue({
+      configs: [
+        {
+          experiment_id: "exp-1",
+          builder: "m:f",
+          task: "detection",
+          images_dir: "/data/images",
+          subject: "leaf",
+          created: null,
+          state: "created",
+          parent_experiment: null,
+        },
+      ],
+    });
+    vi.spyOn(trainingApi, "listSplitChoices").mockRejectedValue(new Error("network error"));
+
+    render(<TrainingTab />);
+    fireEvent.click(await screen.findByRole("button", { name: "Start a run" }));
+    fireEvent.click(await screen.findByText("exp-1"));
+
+    expect(
+      await screen.findByText(/Could not load its data choices: network error/),
+    ).toBeInTheDocument();
+  });
+});
+
+describe("dataPickerFor", () => {
+  const choices: SplitChoices = {
+    as_recorded: {
+      case: "bound",
+      line: "on the partition it bound",
+      compatible: false,
+      reason: "Directory not found: data.images_dir = '/moved'",
+    },
+    manifests: [
+      {
+        manifest_dir: "/data/splits",
+        enabled: true,
+        reason: null,
+        seed: 7,
+        group_by: "tile_prefix",
+        train: 4,
+        val: 2,
+        calibration: 1,
+        other_dates: 3,
+        replaced_split_keys: ["seed"],
+      },
+      {
+        manifest_dir: "/data/other",
+        enabled: false,
+        reason: "split manifest was drawn for subject='bud'",
+        seed: null,
+        group_by: null,
+        train: 0,
+        val: 0,
+        calibration: 0,
+        other_dates: 0,
+        replaced_split_keys: [],
+      },
+    ],
+  };
+
+  it("maps the snapshot's own compatibility into the disabled/reason pair the picker renders", () => {
+    const picker = dataPickerFor(choices);
+    expect(picker?.asRecordedLine).toBe("on the partition it bound");
+    expect(picker?.asRecordedDisabled).toBe(true);
+    expect(picker?.asRecordedReason).toBe("Directory not found: data.images_dir = '/moved'");
+    expect(picker?.absenceMessage).toMatch(/this listing found no other recorded partition/);
+  });
+
+  it("maps each manifest's own enabled flag and reason onto the choice the picker renders", () => {
+    const picker = dataPickerFor(choices);
+    expect(picker?.choices[0]).toMatchObject({
+      manifestDir: "/data/splits",
+      disabled: false,
+      replacedSplitKeys: ["seed"],
+    });
+    expect(picker?.choices[1]).toMatchObject({
+      manifestDir: "/data/other",
+      disabled: true,
+      reason: "split manifest was drawn for subject='bud'",
+    });
+  });
+
+  it("renders the seed/group_by/counts line from the manifest's own recorded fields", () => {
+    const picker = dataPickerFor(choices);
+    render(<div>{picker?.choices[0].label}</div>);
+    expect(
+      screen.getByText(/seed 7 · tile_prefix · train 4 · val 2 · calibration 1/),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/3 member\(s\) under other dates/)).toBeInTheDocument();
+  });
+
+  it("answers undefined for a row with no choices fetched yet", () => {
+    expect(dataPickerFor(undefined)).toBeUndefined();
   });
 });

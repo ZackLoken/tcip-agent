@@ -20,6 +20,9 @@ export interface DataChoice {
   disabled?: boolean;
   /** Shown under a disabled choice: the compatibility reason, or an unreadable record's text. */
   reason?: string;
+  /** The recorded data.split keys choosing this partition drops (seed, group_by, ...), shown
+   * beside the two standing disclosures; empty or absent when the config recorded none. */
+  replacedSplitKeys?: string[];
 }
 
 export interface DataPicker {
@@ -43,6 +46,11 @@ export interface LaunchPickerRow {
   branchLineForData?: string;
   /** Present only for a training-config row: the nested "Data" choice under the branch line. */
   data?: DataPicker;
+  /** Set only while this row's own Data choices are still being fetched, after selection. */
+  dataLoading?: boolean;
+  /** Set only when the per-row Data-choices fetch itself failed: shown as text on the row
+   * rather than swallowed into a Data section with no control. */
+  dataError?: string;
   /** Starts the run/sweep this row names, with the chosen manifest directory or null for "As
    * recorded". Rejects with the backend's refusal on failure. */
   onStart: (splitManifestDir: string | null) => Promise<void>;
@@ -62,6 +70,9 @@ export interface LaunchPickerProps {
   request: string;
   onRequestChange: (text: string) => void;
   onSend: () => void;
+  /** Called once a row transitions into the selected state (never on deselection), so a caller
+   * can fetch that row's own Data choices lazily instead of prefetching every row's on open. */
+  onSelect?: (key: string) => void;
 }
 
 function refusalIssues(e: unknown): string[] {
@@ -78,6 +89,7 @@ export function LaunchPicker({
   request,
   onRequestChange,
   onSend,
+  onSelect,
 }: LaunchPickerProps) {
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [selectedDataDir, setSelectedDataDir] = useState<string | null>(null);
@@ -101,7 +113,11 @@ export function LaunchPicker({
   function select(key: string) {
     setRefusal(null);
     setSelectedDataDir(null);
-    setSelectedKey((current) => (current === key ? null : key));
+    setSelectedKey((current) => {
+      const next = current === key ? null : key;
+      if (next !== null) onSelect?.(next);
+      return next;
+    });
   }
 
   return (
@@ -115,6 +131,12 @@ export function LaunchPicker({
             <ul className="space-y-1">
               {list.rows.map((row) => {
                 const selected = selectedKey === row.key;
+                const selectedChoice = row.data
+                  ? selectedDataDir === null
+                    ? { disabled: row.data.asRecordedDisabled, reason: row.data.asRecordedReason }
+                    : row.data.choices.find((c) => c.manifestDir === selectedDataDir)
+                  : undefined;
+                const startBlocked = Boolean(selectedChoice?.disabled);
                 return (
                   <li key={row.key}>
                     <button
@@ -137,6 +159,14 @@ export function LaunchPicker({
                             ? row.branchLineForData
                             : row.branchLine}
                         </div>
+                        {row.dataLoading && (
+                          <div className="mb-2 text-[10px] text-tcip-muted">
+                            Loading data choices…
+                          </div>
+                        )}
+                        {row.dataError && (
+                          <div className="mb-2 text-[10px] text-tcip-fp">{row.dataError}</div>
+                        )}
                         {row.data && (
                           <div className="mb-2">
                             <div className="tcip-heading mb-1">Data</div>
@@ -187,6 +217,13 @@ export function LaunchPicker({
                                         />
                                         <span>
                                           {choice.label}
+                                          {choice.replacedSplitKeys &&
+                                            choice.replacedSplitKeys.length > 0 && (
+                                              <span className="block text-tcip-muted">
+                                                replaces the recorded split policy:{" "}
+                                                {choice.replacedSplitKeys.join(", ")}
+                                              </span>
+                                            )}
                                           {choice.disabled && choice.reason && (
                                             <span className="block text-tcip-fp">
                                               {choice.reason}
@@ -204,11 +241,16 @@ export function LaunchPicker({
                         <button
                           type="button"
                           className="tcip-btn-primary text-[11px]"
-                          disabled={starting}
+                          disabled={starting || startBlocked}
                           onClick={() => void start(row)}
                         >
                           Start
                         </button>
+                        {startBlocked && selectedChoice?.reason && (
+                          <div className="mt-1 text-[10px] text-tcip-fp">
+                            {selectedChoice.reason}
+                          </div>
+                        )}
                         {refusal?.key === row.key && (
                           <ul
                             role="status"

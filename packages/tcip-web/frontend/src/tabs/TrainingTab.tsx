@@ -30,7 +30,7 @@ const TENSORBOARD_RETRY_MS = 3000;
 const NO_OTHER_PARTITION =
   "this listing found no other recorded partition the config can bind to; the agent can draw one.";
 
-function dataPickerFor(choices: SplitChoices | undefined): DataPicker | undefined {
+export function dataPickerFor(choices: SplitChoices | undefined): DataPicker | undefined {
   if (!choices) return undefined;
   return {
     asRecordedLine: choices.as_recorded.line,
@@ -41,6 +41,7 @@ function dataPickerFor(choices: SplitChoices | undefined): DataPicker | undefine
       manifestDir: m.manifest_dir,
       disabled: !m.enabled,
       reason: m.reason ?? undefined,
+      replacedSplitKeys: m.replaced_split_keys,
       label: (
         <>
           <span className="block font-mono">{m.manifest_dir}</span>
@@ -58,6 +59,8 @@ function dataPickerFor(choices: SplitChoices | undefined): DataPicker | undefine
 function configRow(
   cfg: LaunchableConfig,
   choices: SplitChoices | undefined,
+  dataLoading: boolean,
+  dataError: string | undefined,
   onStart: (splitManifestDir: string | null) => Promise<void>,
 ): LaunchPickerRow {
   const pristine = cfg.state === "created";
@@ -86,6 +89,8 @@ function configRow(
       ? "Its first run, on the partition you chose"
       : "A new run of this config on the partition you chose, with the recorded seed",
     data: dataPickerFor(choices),
+    dataLoading,
+    dataError,
     onStart,
   };
 }
@@ -104,6 +109,8 @@ export function TrainingTab() {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [configs, setConfigs] = useState<LaunchableConfig[]>([]);
   const [splitChoicesById, setSplitChoicesById] = useState<Record<string, SplitChoices>>({});
+  const [splitChoicesLoadingId, setSplitChoicesLoadingId] = useState<string | null>(null);
+  const [splitChoiceErrors, setSplitChoiceErrors] = useState<Record<string, string>>({});
   const [runs, setRuns] = useState<TrainingRunSummary[]>([]);
   const [runsError, setRunsError] = useState<string | null>(null);
   const [selectedRun, setSelectedRun] = useState<string | null>(null);
@@ -126,23 +133,32 @@ export function TrainingTab() {
   const refreshConfigs = useCallback(async () => {
     try {
       const r = await trainingApi.listConfigs();
-      const cfgs = r.configs ?? [];
-      setConfigs(cfgs);
-      const entries = await Promise.all(
-        cfgs.map(async (cfg): Promise<[string, SplitChoices] | null> => {
-          try {
-            return [cfg.experiment_id, await trainingApi.listSplitChoices(cfg.experiment_id)];
-          } catch {
-            return null;
-          }
-        }),
-      );
-      setSplitChoicesById(
-        Object.fromEntries(entries.filter((e): e is [string, SplitChoices] => e !== null)),
-      );
+      setConfigs(r.configs ?? []);
     } catch {
       setConfigs([]);
-      setSplitChoicesById({});
+    }
+    setSplitChoicesById({});
+    setSplitChoiceErrors({});
+  }, []);
+
+  // Fetched only for the row the breeder actually opens: list_split_choices re-enumerates
+  // every experiment in the project, so fetching it for every row on open would cost O(n^2).
+  const loadSplitChoices = useCallback(async (experimentId: string) => {
+    setSplitChoicesLoadingId(experimentId);
+    try {
+      const choices = await trainingApi.listSplitChoices(experimentId);
+      setSplitChoicesById((prev) => ({ ...prev, [experimentId]: choices }));
+      setSplitChoiceErrors((prev) => {
+        const { [experimentId]: _drop, ...rest } = prev;
+        return rest;
+      });
+    } catch (e) {
+      setSplitChoiceErrors((prev) => ({
+        ...prev,
+        [experimentId]: `Could not load its data choices: ${e instanceof Error ? e.message : String(e)}`,
+      }));
+    } finally {
+      setSplitChoicesLoadingId((current) => (current === experimentId ? null : current));
     }
   }, []);
 
@@ -364,8 +380,12 @@ export function TrainingTab() {
               title: "Configs in this project",
               emptyMessage: "No config exists in this project yet.",
               rows: configs.map((cfg) =>
-                configRow(cfg, splitChoicesById[cfg.experiment_id], (dir) =>
-                  startFromConfig(cfg.experiment_id, dir),
+                configRow(
+                  cfg,
+                  splitChoicesById[cfg.experiment_id],
+                  splitChoicesLoadingId === cfg.experiment_id,
+                  splitChoiceErrors[cfg.experiment_id],
+                  (dir) => startFromConfig(cfg.experiment_id, dir),
                 ),
               ),
             }}
@@ -373,6 +393,7 @@ export function TrainingTab() {
             request={request}
             onRequestChange={setRequest}
             onSend={sendToAgent}
+            onSelect={(key) => void loadSplitChoices(key)}
           />
         </div>
       )}

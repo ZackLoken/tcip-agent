@@ -70,6 +70,8 @@ export interface SplitManifestChoice {
   val: number;
   calibration: number;
   other_dates: number;
+  /** The recorded data.split keys choosing this partition drops (seed, group_by, ...). */
+  replaced_split_keys: string[];
 }
 
 export interface SplitChoices {
