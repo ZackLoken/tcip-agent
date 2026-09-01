@@ -394,6 +394,13 @@ def tune_search(
 
     Returns dict with ``best_params``, ``best_value``, ``n_trials``, ``all_trials``,
     ``search_alg``, ``scheduler``, ``study_name`` (+ ``warm_start``/``baseline_params``).
+    Each ``all_trials`` row is ``{"params", "value", "iterations", "state"}``, ``state`` one
+    of ``"COMPLETE"``/``"ERROR"``, plus an ``"error"`` string on any ``ERROR`` row (absent on
+    ``COMPLETE``). A trial Ray's own machinery killed before its first report (OOM, node
+    death) never reached ``tune.report``, so Ray hands back a result with no ``config``; that
+    row carries no params, value or iteration count of its own: ``params``, ``value`` and
+    ``iterations`` are all ``None``, ``state`` is ``"ERROR"``, and ``error`` names the
+    never-reported death.
     """
     if not storage_path:
         raise ValueError(
@@ -478,15 +485,29 @@ def tune_search(
     all_trials = []
     for i in range(len(results)):
         r = results[i]
-        # Every trial that reaches result assembly reported at least once, so its last_result
-        # carries config; a Ray-killed never-reporting trial is a known separate defect on record.
-        assert r.config is not None
-        all_trials.append({
+        if r.config is None:
+            # Ray's config reads the trial's last reported metrics; a trial killed before its
+            # first report (OOM, node death) never has one, so there is nothing to name.
+            text = (
+                "the trial never reported: it was killed before its first report, so it "
+                "has no params, value or iteration count of its own"
+            )
+            if r.error:
+                text = f"{text} ({r.error})"
+            all_trials.append({
+                "params": None, "value": None, "iterations": None,
+                "state": "ERROR", "error": text,
+            })
+            continue
+        row = {
             "params": {k: r.config.get(k) for k in space},
             **stored_number("value", (r.metrics or {}).get(metric)),
             "iterations": (r.metrics or {}).get("training_iteration"),
             "state": "ERROR" if r.error else "COMPLETE",
-        })
+        }
+        if r.error:
+            row["error"] = str(r.error)
+        all_trials.append(row)
 
     best = results.get_best_result(metric=metric, mode=mode)
     assert best.config is not None
