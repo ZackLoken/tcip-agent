@@ -6,7 +6,8 @@ harness was and how long it took. Answers are only comparable when the condition
 they ran under are recorded alongside them, so nothing here is optional.
 
 Conditions control what the harness could reach, not what it was asked. The question
-text is byte-identical across families in every condition.
+text is byte-identical across families in every condition; an attached image adds one
+family-specific preface line ahead of it, since each harness takes an image differently.
 
 Antigravity in headless mode auto-denies shell commands, so a prompt sent to it must be
 answerable by file reads alone, with any material to review given as files inside the
@@ -245,9 +246,28 @@ def harness_version(exe: str | pathlib.Path, flag: str = "--version") -> str:
         return "unknown"
 
 
+def image_preface(family: str, images: tuple[pathlib.Path, ...]) -> str:
+    """The line that hands attached images to one family, placed ahead of the question.
+
+    Every family is vision-capable, and each takes an image its own way: codex attaches files
+    through ``exec -i`` and is told their names, antigravity reads a file the prompt names as
+    ``@path``, and Claude Code reads a named path with its own image-capable file reader. The
+    question text after this preface stays byte-identical across families.
+    """
+    if not images:
+        return ""
+    names = [str(path) for path in images]
+    if family == "antigravity":
+        return "Review the attached image(s) " + " ".join(f"@{n}" for n in names) + " before answering.\n\n"
+    if family == "codex":
+        return "The image(s) attached to this prompt are " + ", ".join(names) + ". Review them before answering.\n\n"
+    return ("Read the image(s) at " + ", ".join(names)
+            + " with your image-capable file reader before answering.\n\n")
+
+
 def build_claude(prompt_file: pathlib.Path, run_dir: pathlib.Path, cwd: pathlib.Path,
                  condition: dict, model: str | None, effort: str | None,
-                 timeout: int) -> tuple[list[str], pathlib.Path | None]:
+                 timeout: int, images: tuple[pathlib.Path, ...] = ()) -> tuple[list[str], pathlib.Path | None]:
     argv = [
         CLAUDE,
         "--print",
@@ -273,7 +293,7 @@ def build_claude(prompt_file: pathlib.Path, run_dir: pathlib.Path, cwd: pathlib.
 
 def build_codex(prompt_file: pathlib.Path, run_dir: pathlib.Path, cwd: pathlib.Path,
                 condition: dict, model: str | None, effort: str | None,
-                timeout: int) -> tuple[list[str], pathlib.Path | None]:
+                timeout: int, images: tuple[pathlib.Path, ...] = ()) -> tuple[list[str], pathlib.Path | None]:
     """Build a headless Codex invocation.
 
     Headless `codex exec` does not load locally spawned stdio MCP servers, verified
@@ -281,10 +301,16 @@ def build_codex(prompt_file: pathlib.Path, run_dir: pathlib.Path, cwd: pathlib.P
     when launched directly. Hosted servers do load. A `tcip` condition therefore yields
     a run with repository access and no TCIP tools, which is a real result to record
     rather than a failure to hide, but it is not a like-for-like MCP comparison.
+
+    Images attach through ``-i``, one flag per file and each followed by another flag: the
+    option is variadic, so a bare ``-i a b`` would also swallow the trailing ``-`` that names
+    stdin as the prompt.
     """
     last = run_dir / "final_message.txt"
-    argv = [
-        str(CODEX), "exec",
+    argv = [str(CODEX), "exec"]
+    for image in images:
+        argv += ["-i", str(image)]
+    argv += [
         "--sandbox", "read-only",
         "--cd", str(cwd),
         "--ephemeral",
@@ -303,7 +329,7 @@ def build_codex(prompt_file: pathlib.Path, run_dir: pathlib.Path, cwd: pathlib.P
 
 def build_agy(prompt_file: pathlib.Path, run_dir: pathlib.Path, cwd: pathlib.Path,
               condition: dict, model: str | None, effort: str | None,
-              timeout: int) -> tuple[list[str], pathlib.Path | None]:
+              timeout: int, images: tuple[pathlib.Path, ...] = ()) -> tuple[list[str], pathlib.Path | None]:
     """Build a headless Antigravity invocation.
 
     MCP servers come from `~/.gemini/config/mcp_config.json` and are global, so the
@@ -478,12 +504,15 @@ def extract_response(family: str, stdout: str, last_message: pathlib.Path | None
 
 def run_one(family: str, question_id: str, condition_name: str, prompt: str,
             cwd: pathlib.Path, out_root: pathlib.Path, timeout: int,
-            model: str | None, effort: str | None) -> dict:
+            model: str | None, effort: str | None,
+            images: list[pathlib.Path] | None = None) -> dict:
     condition = CONDITIONS[condition_name]
     run_dir = out_root / question_id / condition_name / family
     run_dir.mkdir(parents=True, exist_ok=True)
 
-    body = (GUIDANCE_PREFIX + prompt) if condition["guidance"] else prompt
+    images = tuple(image.resolve() for image in images or [])
+    body = image_preface(family, images) + (
+        (GUIDANCE_PREFIX + prompt) if condition["guidance"] else prompt)
     prompt_file = run_dir / "prompt.txt"
     prompt_file.write_text(body, encoding="utf-8")
 
@@ -493,7 +522,7 @@ def run_one(family: str, question_id: str, condition_name: str, prompt: str,
         resolved_model, model_source = resolve_codex_model(resolved_model)
     resolved_effort = effective_effort(family, resolved_model, effort or PARITY[family]["effort"])
     argv, last = BUILDERS[family](prompt_file, run_dir, cwd, condition,
-                                  resolved_model, resolved_effort, timeout)
+                                  resolved_model, resolved_effort, timeout, images=images)
 
     (run_dir / "argv.txt").write_text("\n".join(argv), encoding="utf-8")
 
@@ -558,6 +587,7 @@ def run_one(family: str, question_id: str, condition_name: str, prompt: str,
         "guidance_injected": condition["guidance"],
         "prompt_sha256": hashlib.sha256(body.encode("utf-8")).hexdigest(),
         "prompt_chars": len(body),
+        "images": [str(image) for image in images],
         "started": started,
         "duration_s": round(duration, 1),
         "exit_code": code,
@@ -586,7 +616,14 @@ def main() -> int:
     parser.add_argument("--effort", default=None,
                         help="Override the per-family parity reasoning effort.")
     parser.add_argument("--serial", action="store_true", help="Run families one at a time.")
+    parser.add_argument("--image", action="append", type=pathlib.Path, default=[],
+                        help="An image file to attach to the question; repeatable. Each family "
+                             "receives it the way that harness takes an image.")
     args = parser.parse_args()
+
+    missing_images = [str(image) for image in args.image if not image.is_file()]
+    if missing_images:
+        parser.error("image not found: " + "; ".join(missing_images))
 
     families = [f.strip() for f in args.families.split(",") if f.strip()]
     unknown = [f for f in families if f not in BUILDERS]
@@ -620,13 +657,13 @@ def main() -> int:
         for family in families:
             results.append(run_one(family, args.question_id, args.condition, prompt,
                                    args.cwd, args.out, args.timeout, args.model,
-                                   args.effort))
+                                   args.effort, images=args.image))
     else:
         with concurrent.futures.ThreadPoolExecutor(max_workers=len(families)) as pool:
             futures = {
                 pool.submit(run_one, family, args.question_id, args.condition, prompt,
                             args.cwd, args.out, args.timeout, args.model,
-                            args.effort): family
+                            args.effort, images=args.image): family
                 for family in families
             }
             for future in concurrent.futures.as_completed(futures):
