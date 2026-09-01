@@ -1875,9 +1875,10 @@ def delivered_tail(
     included) is stamped through ``gate.column_stamp`` here, never left to ``delivered_provenance``,
     with ``own_column`` derived from that same membership check, so a dimension without a column of
     its own floors every column that does exist and no door can drift into disagreeing about what a
-    validated column means. An ``unvalidated_dimensions`` named in ``columns`` carries the gate's
-    own ``unvalidated`` tuple joined for display (blank when every dimension cleared), so a reader
-    can always tell which dimension floored a validity column without a second spelling of it.
+    validated column means. An ``unvalidated_dimensions`` named in ``columns`` carries
+    :meth:`DeliveryGateResult.unvalidated_cell`, every gated dimension that did not validate (blank
+    when none), so a reader can always recover the gate's full outcome behind a floored validity
+    column without a second spelling of it.
     """
     if asserted and asserted.get("produced_at") is not None:
         raise ValueError(
@@ -1891,7 +1892,7 @@ def delivered_tail(
     for dim in owned:
         values[_DIMENSION_TO_COLUMN[dim]] = gate.column_stamp(dim, own_column=owned)
     if "unvalidated_dimensions" in columns:
-        values["unvalidated_dimensions"] = ", ".join(gate.unvalidated)
+        values["unvalidated_dimensions"] = gate.unvalidated_cell()
     return values
 
 
@@ -2517,6 +2518,13 @@ class DeliveryGateResult:
         if any(name not in own_column for name in self.unvalidated):
             return VALIDATED_FALSE
         return self.stamp[dimension]
+
+    def unvalidated_cell(self) -> str:
+        """Every gated dimension that did not validate, in the platform's delivered-list-cell
+        convention (``;``-joined, blank when none): the one rendering a delivered tail's own
+        ``unvalidated_dimensions`` column and a door's refusal response share, so the two never
+        spell the same join two different ways."""
+        return ";".join(self.unvalidated)
 
 
 class DeliveryRefused(ValueError):
