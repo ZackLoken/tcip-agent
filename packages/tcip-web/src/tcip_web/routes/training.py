@@ -187,6 +187,58 @@ def compare_runs_route(payload: ExperimentComparePayload) -> dict:
     return compare_experiments(payload.experiment_ids)
 
 
+class CompareBestPayload(BaseModel):
+    experiment_ids: list[str]
+    metric: str
+    higher_is_better: bool | None = None
+    include_unverified: bool = False
+
+
+@router.post("/compare/best")
+def compare_best_route(payload: CompareBestPayload) -> dict:
+    """Rank the marked comparison's own registered checkpoints by one metric.
+
+    Wraps the platform's one best-model derivation (``select_best_model``), narrowed to the
+    marked experiments before anything is derived. Reads the registry index first so a project
+    with none never takes the tool's own directory-creating construction; the tool's own error
+    dicts (a required metric, an undeclared direction, no carrier) map to 422, and the pre-
+    ``metrics_source`` refusal (a registry entry predating the field) maps to 409 with the
+    registry's own message. The answer is projected to name, experiment id, stamped metrics,
+    source, the direction used and its source, and the exclusions; no checkpoint path, config or
+    file size leaves this route.
+    """
+    from tcip_mcp.model_registry import read_registry_index
+    from tcip_mcp.project_paths import platform_state_root
+    from tcip_mcp.tools.model_tools import select_best_model
+
+    try:
+        entries = read_registry_index(platform_state_root())
+    except Exception:
+        entries = []
+    if not entries:
+        raise HTTPException(404, "no model registry in this project")
+
+    try:
+        result = select_best_model(
+            metric=payload.metric, higher_is_better=payload.higher_is_better,
+            include_unverified=payload.include_unverified, experiment_ids=payload.experiment_ids,
+        )
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    if "error" in result:
+        raise HTTPException(422, result["error"])
+
+    return {
+        "name": result["name"],
+        "experiment_id": result.get("experiment_id"),
+        "metrics": result["metrics"],
+        "metrics_source": result["metrics_source"],
+        "higher_is_better": result["higher_is_better"],
+        "direction_source": result["direction_source"],
+        "excluded_unverified": result["excluded_unverified"],
+    }
+
+
 # ── WebSocket live metrics ──────────────────────────────────────────────
 
 
