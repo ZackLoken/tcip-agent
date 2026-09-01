@@ -213,7 +213,7 @@ def test_get_sweep_serves_a_never_reported_error_row_with_its_error_text_untouch
     _write_sweep(hpo_root, "hpo_error0001", status="completed",
                  result={"best_params": {"lr": 0.01}, "best_value": 0.2})
     dead_row = {"params": None, "value": None, "iterations": None, "state": "ERROR",
-                "error": "the trial never reported: it was killed before its first report"}
+                "error": "the trial never answered Ray: its actor died during start"}
     _write_study_result(
         "hpo_error0001",
         best_params={"lr": 0.01}, best_value=0.2, n_trials=1, all_trials=[dead_row],
