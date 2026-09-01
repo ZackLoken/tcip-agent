@@ -39,30 +39,46 @@ def test_assert_project_root_allowed_matches_assert_path_allowed(
         assert_path_allowed(str(outside))  # same policy as the generic guard
 
 
-def test_training_metrics_rejects_run_id_traversal(tmp_path):
+def test_training_stream_closes_on_run_id_traversal(tmp_path):
+    """A run_id carrying a path separator (BadKey) closes the stream rather than resolving to a
+    path component; the WS surface is where this parameter is served now. A backslash, not a
+    ``..`` segment, since a URL client normalizes dot segments before the request is even sent.
+    The check runs after accept (project_root is checked first, pre-accept), so the socket
+    connects cleanly and the disconnect only surfaces on the first read."""
     pytest.importorskip("fastapi")
-    from fastapi import HTTPException
+    from fastapi.testclient import TestClient
+    from starlette.websockets import WebSocketDisconnect
 
-    from tcip_web.routes.training import get_run_metrics
-    with pytest.raises(HTTPException) as ei:
-        get_run_metrics(project_root=str(tmp_path), run_id="../../../../etc")
-    assert ei.value.status_code == 400
+    from tcip_web.app import app
+
+    client = TestClient(app, base_url="http://127.0.0.1")
+    with pytest.raises(WebSocketDisconnect) as ei:
+        with client.websocket_connect(
+            f"ws://127.0.0.1/api/training/runs/a\\b/stream?project_root={tmp_path}",
+        ) as ws:
+            ws.receive_json()
+    assert ei.value.code == 1008
 
 
-def test_training_metrics_confines_project_root_to_allowed_roots(
+def test_training_stream_closes_before_accept_for_a_project_root_outside_allowed_roots(
     tmp_path_factory: pytest.TempPathFactory
 ):
-    # get_run_metrics must confine project_root the same way the identical parameter is confined
-    # on meta.py's report routes.
+    """The stream must confine project_root the same way the identical parameter is confined
+    on meta.py's report routes, closing before accept rather than after replaying anything."""
     pytest.importorskip("fastapi")
-    from fastapi import HTTPException
+    from fastapi.testclient import TestClient
+    from starlette.websockets import WebSocketDisconnect
 
-    from tcip_web.routes.training import get_run_metrics
+    from tcip_web.app import app
 
+    client = TestClient(app, base_url="http://127.0.0.1")
     outside = tmp_path_factory.mktemp("outside")
-    with pytest.raises(HTTPException) as ei:
-        get_run_metrics(project_root=str(outside), run_id="run-1")
-    assert ei.value.status_code == 403
+    with pytest.raises(WebSocketDisconnect) as ei:
+        with client.websocket_connect(
+            f"ws://127.0.0.1/api/training/runs/run-1/stream?project_root={outside}",
+        ):
+            pass
+    assert ei.value.code == 1008
 
 
 def test_training_launch_confines_output_dir_to_allowed_roots(

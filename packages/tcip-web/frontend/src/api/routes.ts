@@ -40,8 +40,6 @@ export const ROUTES = {
   getTerminalStatus: "/api/terminal/status",
   getTrainingRuns: "/api/training/runs",
   getTrainingRunsByRunId: (runId: string) => `/api/training/runs/${encodeURIComponent(runId)}`,
-  getTrainingRunsByRunIdMetrics: (runId: string) =>
-    `/api/training/runs/${encodeURIComponent(runId)}/metrics`,
   getTuningRayDashboard: "/api/tuning/ray-dashboard",
   getTuningSweeps: "/api/tuning/sweeps",
   getTuningSweepsBySweepId: (sweepId: string) =>

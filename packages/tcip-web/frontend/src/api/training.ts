@@ -59,11 +59,6 @@ export const trainingApi = {
   launchTensorboard: (run_id: string) =>
     postJson<TensorboardLaunch>(ROUTES.postTrainingRunsByRunIdTensorboard(run_id), {}),
 
-  getMetrics: (project_root: string, run_id: string) =>
-    getJson<{ metrics: MetricRow[]; exists: boolean }>(
-      `${ROUTES.getTrainingRunsByRunIdMetrics(run_id)}?project_root=${encodeURIComponent(project_root)}`,
-    ),
-
   cancel: (run_id: string) =>
     postJson<{ run_id: string; status: string; cancel_requested: boolean }>(
       ROUTES.postTrainingRunsByRunIdCancel(run_id),
