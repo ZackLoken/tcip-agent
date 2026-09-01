@@ -1670,8 +1670,10 @@ only two web-route tests check a 403-confinement case and an empty-registry case
 ## 17. Prediction buckets, verdict-guarded prediction directories
 
 A prediction bucket is not a score bin or a quota allocation: it is one directory holding a
-single model run's per-image prediction documents, its identity a model name plus an optional
-date, mutable until a human records a review verdict against any image inside it, after which
+single model run's per-image prediction documents, its identity the directory's own path
+(relative to the dataset root under one, its own resolved path otherwise, `bucket_key_of`; the
+canonical `predictions/<model>/<date>` layout is one regime's convention for building that
+path), mutable until a human records a review verdict against any image inside it, after which
 the default write is redirected to a fresh variant and an `overwrite=True` write is refused
 (`BucketHasVerdicts`) rather than allowed to overwrite it in place; a bucket under no dataset
 root has no verdict store and so no guard for either behavior.
