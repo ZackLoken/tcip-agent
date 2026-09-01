@@ -539,10 +539,12 @@ def test_exported_milestone_csv_carries_the_canonical_schema_and_its_provenance(
     assert cells["producing_experiment_id"] == "exp-1"
     assert cells["producer_model_sha256"] == producer_checkpoint_sha256("exp-1")
     assert cells["validation_record"] == _expected_validation_record(body)
-    # plant_csvs_unverified is legitimately empty: the fixture's mapping names no plant CSV to
-    # check. captures_unverified is not: the fixture's dataset carries no images/ tree at all.
-    assert [c for c, v in cells.items() if v == "" and c != "plant_csvs_unverified"] == []
+    # plant_csvs_unverified and unvalidated_dimensions are legitimately empty here (no plant CSV
+    # to check, nothing floored); captures_unverified is not: no images/ tree at all in this fixture.
+    exempt = {"plant_csvs_unverified", "unvalidated_dimensions"}
+    assert [c for c, v in cells.items() if v == "" and c not in exempt] == []
     assert cells["plant_csvs_unverified"] == ""
+    assert cells["unvalidated_dimensions"] == ""
     assert cells["captures_unverified"] != ""
 
 
@@ -744,9 +746,10 @@ def test_the_curves_csv_carries_the_same_provenance_as_the_milestone_csv(
     # The expected names are spelled out rather than imported from the module under test, so this
     # fails on the delivered BYTES when the stamp is absent, not on a missing symbol.
     provenance = ["operating_point_conf", "operating_point_validated",
-                  "positive_state_classifier_validated", "producer_model_sha256",
-                  "producing_experiment_id", "produced_at", "validation_record",
-                  "plant_mapping_sha256", "captures_unverified", "plant_csvs_unverified"]
+                  "positive_state_classifier_validated", "unvalidated_dimensions",
+                  "producer_model_sha256", "producing_experiment_id", "produced_at",
+                  "validation_record", "plant_mapping_sha256", "captures_unverified",
+                  "plant_csvs_unverified"]
     body = _phenology_fixture(tmp_path, validated=True)
     resp = client.post("/api/results/export_csv",
                        json={**body, "payload": "curves", "filename": "c.csv"})
@@ -755,8 +758,8 @@ def test_the_curves_csv_carries_the_same_provenance_as_the_milestone_csv(
     assert header[-len(provenance):] == provenance
     cells = dict(zip(header, resp.text.splitlines()[1].split(",")))
     for col in provenance:
-        if col == "plant_csvs_unverified":
-            continue  # legitimately empty: the fixture's mapping names no plant CSV to check
+        if col in ("plant_csvs_unverified", "unvalidated_dimensions"):
+            continue  # legitimately empty: no plant CSV to check, and nothing floored
         assert cells[col] != "", col
     assert cells["operating_point_validated"] == "held_out_annotations"
     assert cells["producing_experiment_id"] == "exp-1"

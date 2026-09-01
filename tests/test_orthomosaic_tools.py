@@ -516,6 +516,69 @@ def test_deliver_orthomosaic_plant_counts_floors_a_stamp_earned_for_a_different_
     assert "astringency" in refused["error"] and fx.COUNT_TRAIT in refused["error"]
 
 
+def test_deliver_orthomosaic_plant_counts_sibling_tile_floor_despite_valid_conf(tmp_path, monkeypatch):
+    """A per-plant delivery whose count operating point genuinely validated must not read
+    operating_point_validated as trustworthy when a sibling gated dimension (tile_size here) has
+    no real basis: the column floors across the whole gate, unvalidated_dimensions names the
+    actual floorer rather than the operating_point dimension itself, and the refusal and the
+    acknowledged success arm agree on both through the one shared rendering."""
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path / "proj"))
+    (tmp_path / "proj" / ".tcip" / "state").mkdir(parents=True, exist_ok=True)
+
+    raster_path = tmp_path / "mosaic.tif"
+    _write_geo_raster(raster_path)
+
+    from tcip_mcp.tools.inference_tools import export_predictions
+
+    ckpt = _bespoke_detection_checkpoint(tmp_path)
+    dataset_root = tmp_path / "ds"
+    bucket_dir = dataset_root / "predictions" / "run1"
+    result = export_predictions(
+        ckpt, output_dir=str(bucket_dir), raster_path=str(raster_path), conf_threshold=0.0,
+        tile_size=TILE)
+    assert "error" not in result
+    stem = Path(result["files"][0]).stem
+    _replace_boxes(bucket_dir / f"{stem}.json", [(8.0, 8.0, 12.0, 12.0)])
+    plant_csv = _plant_grid_csv(tmp_path, raster_path, _PLANT_PIXELS)
+
+    from tcip_mcp.pipelines.resolution import VALIDATED_FALSE, VALIDATED_HELD_OUT, read_operating_point_sidecar
+    from tests._binding_fixtures import write_bound_sidecar
+
+    stamped = read_operating_point_sidecar(bucket_dir)
+    assert stamped is not None
+    op = dict(stamped["operating_point"])
+    op["conf"] = {**op["conf"], "validated_against": VALIDATED_HELD_OUT}
+    # Patched here rather than published this way: export_predictions's own persist-time gate
+    # refuses an unfounded tile_size unconditionally, so no real bucket can carry one directly.
+    op["tile_size"] = {**op["tile_size"], "validated_against": VALIDATED_FALSE}
+    validated_stamp = {**stamped, "operating_point": op, "trait": fx.COUNT_TRAIT, "validated": True}
+    write_bound_sidecar(bucket_dir, validated_stamp, dataset_root=dataset_root,
+                        experiment_id="exp-sibling-tile-floor")
+
+    from tcip_mcp.tools.orthomosaic_tools import deliver_orthomosaic_plant_counts
+
+    out_csv = tmp_path / "counts.csv"
+    delivered = deliver_orthomosaic_plant_counts(
+        str(bucket_dir), str(raster_path), [str(plant_csv)], str(out_csv),
+        delivered_phenotype="stem_count", acknowledge_unvalidated=True)
+    assert "error" not in delivered, delivered
+    assert delivered["operating_point_validated"] == VALIDATED_FALSE
+    assert delivered["unvalidated_dimensions"] == "tile_size"
+
+    rows = list(csv.DictReader(out_csv.open(newline="")))
+    assert rows[0]["operating_point_validated"] == VALIDATED_FALSE
+    assert rows[0]["unvalidated_dimensions"] == "tile_size"
+
+    refused = deliver_orthomosaic_plant_counts(
+        str(bucket_dir), str(raster_path), [str(plant_csv)], str(tmp_path / "refused.csv"),
+        delivered_phenotype="stem_count")
+    assert "error" in refused
+    # The refusal arm's own recorded semantics: the operating_point dimension's own cleared
+    # reference, not the floored cell the acknowledged success arm above carries.
+    assert refused["operating_point_validated"] == VALIDATED_HELD_OUT
+    assert refused["unvalidated_dimensions"] == "tile_size"
+
+
 def test_deliver_orthomosaic_plant_counts_far_detection_is_unmapped(tmp_path, monkeypatch):
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path / "proj"))
     (tmp_path / "proj" / ".tcip" / "state").mkdir(parents=True, exist_ok=True)

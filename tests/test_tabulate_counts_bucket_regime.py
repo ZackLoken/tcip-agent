@@ -477,6 +477,7 @@ def test_a_gate_refusal_is_counts_bearing_in_the_bucket_regime(tmp_path):
     assert "error" in r
     assert r["image_count"] == 1
     assert r["total_detections"] == 1
+    assert r["unvalidated_dimensions"] == "operating_point"
 
 
 def test_a_gate_refusal_names_every_disclosure_field_in_the_live_regime(tmp_path, monkeypatch):
@@ -500,6 +501,7 @@ def test_a_gate_refusal_names_every_disclosure_field_in_the_live_regime(tmp_path
     assert r["bucket_redirected"] is False
     assert r["lineage_linked"] is None
     assert r["csv_delivered"] is False
+    assert r["unvalidated_dimensions"] == "operating_point"
     assert bucket.exists()
     assert not out_csv.exists()
 
