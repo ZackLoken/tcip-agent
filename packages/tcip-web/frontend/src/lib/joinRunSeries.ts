@@ -15,20 +15,33 @@ export interface JoinedPoint {
   [runId: string]: number | undefined;
 }
 
+export interface JoinedSeries {
+  points: JoinedPoint[];
+  /** Rows dropped for carrying neither epoch nor step (metricKey undefined), per run id: the
+   * one place that decides a row's identity, so a caller never re-implements the same rule. */
+  droppedByRun: Record<string, number>;
+}
+
 /**
  * One row per distinct epoch/step present in any run's own rows, sorted ascending, each carrying
  * every run's own finite value for `metric` under that run's id (absent, not zero, for a run
  * with no row at that key or a non-finite value there), so a chart line for one run ends where
  * its own finite values end rather than dropping to zero or connecting across the gap. A row
- * with neither epoch nor step (metricKey undefined) contributes nothing here; the caller counts
- * how many were dropped per run itself, from the same rows this was given.
+ * with neither epoch nor step (metricKey undefined) contributes nothing to `points` and is
+ * counted in `droppedByRun`, independent of `metric`: the row has no identity to plot under at
+ * all, whichever metric a caller is currently charting.
  */
-export function joinRunSeries(series: RunSeries[], metric: string): JoinedPoint[] {
+export function joinRunSeries(series: RunSeries[], metric: string): JoinedSeries {
   const byX = new Map<number, JoinedPoint>();
+  const droppedByRun: Record<string, number> = {};
   for (const { runId, rows } of series) {
+    let dropped = 0;
     for (const row of rows) {
       const x = metricKey(row);
-      if (x === undefined) continue;
+      if (x === undefined) {
+        dropped += 1;
+        continue;
+      }
       const value = row[metric];
       if (typeof value !== "number" || !Number.isFinite(value)) continue;
       let point = byX.get(x);
@@ -38,8 +51,9 @@ export function joinRunSeries(series: RunSeries[], metric: string): JoinedPoint[
       }
       point[runId] = value;
     }
+    droppedByRun[runId] = dropped;
   }
-  return Array.from(byX.values()).sort((a, b) => a.x - b.x);
+  return { points: Array.from(byX.values()).sort((a, b) => a.x - b.x), droppedByRun };
 }
 
 /** Every metric key present in any of the given rows, excluding the epoch/step identity fields

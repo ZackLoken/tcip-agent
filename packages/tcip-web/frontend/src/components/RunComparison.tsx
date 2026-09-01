@@ -1,3 +1,4 @@
+/** The Training tab's side-by-side run comparison: RunComparison and its cell helpers. */
 import { useEffect, useMemo, useState } from "react";
 import {
   CartesianGrid,
@@ -10,10 +11,12 @@ import {
   YAxis,
 } from "recharts";
 
+import { StructuredRefusalError } from "@/api/http";
 import type { CompareExperiment, CompareResult, CompareSplit, MetricRow } from "@/api/training";
 import { openTrainingStream, trainingApi } from "@/api/training";
 import { joinRunSeries, metricKeysAcross, type RunSeries } from "@/lib/joinRunSeries";
 import { CHART, CHART_LINE_COLORS } from "@/tabs/chartTheme";
+import { mergeMetric, RUN_REFRESH_MS } from "@/tabs/trainingMetrics";
 
 /** One marked run: the id the tab tracks it by, and the experiment id compare_experiments
  * and select_best_model take. Only a run with a resolved experiment_id is ever marked. */
@@ -22,14 +25,13 @@ export interface MarkedRun {
   experimentId: string;
 }
 
-/** The columns the detail region fits at 1440px, at the tokens' minimum column width: the
- * layout-derived default the marked set is capped at, stated here so the cap and the layout
- * that motivates it live beside each other. */
+/** Columns the detail region fits at 1440px, the tokens' minimum column width; the design
+ * record's own layout-derived default (docs/audit/remediation/batch9/u3-comparison-design.md). */
 export const MAX_MARKED_RUNS = 4;
 
-const REFRESH_MS = 4000;
 const NOT_FINITE_SUFFIX = "_state";
 const UNRECORDED = "unrecorded";
+const READING = "reading";
 
 function cellText(value: unknown): string {
   if (value === null || value === undefined) return UNRECORDED;
@@ -113,13 +115,18 @@ export function RunComparison({
   const [compareError, setCompareError] = useState<string | null>(null);
   const [seriesByRun, setSeriesByRun] = useState<Record<string, MetricRow[]>>({});
 
-  const experimentIds = useMemo(() => marked.map((m) => m.experimentId), [marked]);
+  const markedKey = marked.map((m) => m.experimentId).join(",");
 
   useEffect(() => {
     let cancelled = false;
+    const ids = marked.map((m) => m.experimentId);
+    // The marked set just changed identity: the previous answer describes a different set of
+    // columns and must not linger as if it already described the new one.
+    setResult(null);
+    setCompareError(null);
     async function refresh() {
       try {
-        const r = await trainingApi.compare(experimentIds);
+        const r = await trainingApi.compare(ids);
         if (!cancelled) {
           setResult(r);
           setCompareError(null);
@@ -129,12 +136,13 @@ export function RunComparison({
       }
     }
     void refresh();
-    const t = setInterval(() => void refresh(), REFRESH_MS);
+    const t = setInterval(() => void refresh(), RUN_REFRESH_MS);
     return () => {
       cancelled = true;
       clearInterval(t);
     };
-  }, [experimentIds]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [markedKey]);
 
   useEffect(() => {
     setSeriesByRun({});
@@ -142,10 +150,10 @@ export function RunComparison({
     const stops = marked.map(({ runId }) =>
       openTrainingStream(projectRoot, runId, (msg) => {
         if (msg.type !== "metric" || !msg.row) return;
-        setSeriesByRun((prev) => {
-          const merged = [...(prev[runId] ?? []), msg.row as MetricRow];
-          return { ...prev, [runId]: merged };
-        });
+        setSeriesByRun((prev) => ({
+          ...prev,
+          [runId]: mergeMetric(prev[runId] ?? [], msg.row as MetricRow),
+        }));
       }),
     );
     return () => stops.forEach((stop) => stop());
@@ -159,7 +167,11 @@ export function RunComparison({
     return map;
   }, [result]);
 
-  const columns = marked.map((m) => ({ ...m, exp: byExperimentId.get(m.experimentId) }));
+  const columns = marked.map((m) => ({
+    ...m,
+    exp: byExperimentId.get(m.experimentId),
+    hasEntry: byExperimentId.has(m.experimentId),
+  }));
 
   const metricRows = loggedMetricKeys(result?.experiments ?? []);
   const rankMetricOptions = registryMetricKeys(result?.experiments ?? []);
@@ -176,14 +188,9 @@ export function RunComparison({
     // Re-pick only when the option set itself changes, not on every streamed row.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [overlayMetricOptions.join(",")]);
-  const chartData = overlayMetric ? joinRunSeries(runSeries, overlayMetric) : [];
-  const droppedByRun = Object.fromEntries(
-    marked.map((m) => [
-      m.runId,
-      (seriesByRun[m.runId] ?? []).filter((r) => r.epoch === undefined && r.step === undefined)
-        .length,
-    ]),
-  );
+  // droppedByRun counts a keyless row regardless of which metric is currently charted, so this
+  // is called even before a metric is picked (an empty metric key then just plots nothing).
+  const { points: chartData, droppedByRun } = joinRunSeries(runSeries, overlayMetric);
 
   const [rankMetric, setRankMetric] = useState("");
   const [rankDirection, setRankDirection] = useState<boolean | null>(null);
@@ -209,18 +216,23 @@ export function RunComparison({
     setRankError(null);
     try {
       const res = await trainingApi.compareBest({
-        experiment_ids: experimentIds,
+        experiment_ids: marked.map((m) => m.experimentId),
         metric: rankMetric,
         higher_is_better: needsDirection ? (rankDirection ?? undefined) : undefined,
         include_unverified: includeUnverified,
       });
       setRankResult(res);
     } catch (e) {
-      const message = e instanceof Error ? e.message : String(e);
       setRankResult(null);
-      setRankError(message);
-      if (message.includes("no declared ranking direction")) setNeedsDirection(true);
-      if (message.includes("unverified")) setNeedsUnverifiedOption(true);
+      // Branches on the tool's own refusal fields, never on matching the error text: the route
+      // now carries select_best_model's whole error dict as the refusal's structured detail.
+      if (e instanceof StructuredRefusalError) {
+        setRankError(typeof e.detail.error === "string" ? e.detail.error : e.message);
+        if (e.detail.needs_direction === true) setNeedsDirection(true);
+        if (e.detail.all_unverified === true) setNeedsUnverifiedOption(true);
+      } else {
+        setRankError(e instanceof Error ? e.message : String(e));
+      }
     }
   }
 
@@ -270,7 +282,7 @@ export function RunComparison({
               <th className="tcip-th">Builder</th>
               {columns.map((c) => (
                 <td key={c.runId} className="px-2 py-1">
-                  {c.exp?.model ?? "no builder recorded"}
+                  {c.hasEntry ? (c.exp?.model ?? "no builder recorded") : READING}
                 </td>
               ))}
             </tr>
@@ -278,7 +290,9 @@ export function RunComparison({
               <th className="tcip-th">Task / subject</th>
               {columns.map((c) => (
                 <td key={c.runId} className="px-2 py-1">
-                  {c.exp?.task ?? UNRECORDED} / {c.exp?.subject ?? UNRECORDED}
+                  {c.hasEntry
+                    ? `${c.exp?.task ?? UNRECORDED} / ${c.exp?.subject ?? UNRECORDED}`
+                    : READING}
                 </td>
               ))}
             </tr>
@@ -286,7 +300,7 @@ export function RunComparison({
               <th className="tcip-th">State</th>
               {columns.map((c) => (
                 <td key={c.runId} className="px-2 py-1">
-                  {c.exp?.state ?? UNRECORDED}
+                  {c.hasEntry ? (c.exp?.state ?? UNRECORDED) : READING}
                   {c.exp?.status_error ? (
                     <span className="block text-tcip-fp">{c.exp.status_error}</span>
                   ) : null}
@@ -297,7 +311,7 @@ export function RunComparison({
               <th className="tcip-th">Epochs logged</th>
               {columns.map((c) => (
                 <td key={c.runId} className="px-2 py-1 tabular-nums">
-                  {c.exp?.n_epochs ?? UNRECORDED}
+                  {c.hasEntry ? (c.exp?.n_epochs ?? UNRECORDED) : READING}
                 </td>
               ))}
             </tr>
@@ -319,7 +333,7 @@ export function RunComparison({
               <th className="tcip-th">Partition</th>
               {columns.map((c) => (
                 <td key={c.runId} className="px-2 py-1">
-                  {splitLine(c.exp?.split)}
+                  {c.hasEntry ? splitLine(c.exp?.split) : READING}
                 </td>
               ))}
             </tr>
@@ -355,7 +369,7 @@ export function RunComparison({
                   <th className="tcip-th">{key}</th>
                   {columns.map((c) => (
                     <td key={c.runId} className="px-2 py-1 tabular-nums">
-                      {loggedMetricCell(c.exp?.last_logged_metrics, key)}
+                      {c.hasEntry ? loggedMetricCell(c.exp?.last_logged_metrics, key) : READING}
                     </td>
                   ))}
                 </tr>
@@ -383,10 +397,10 @@ export function RunComparison({
               <th className="tcip-th">Entries</th>
               {columns.map((c) => (
                 <td key={c.runId} className="px-2 py-1 align-top">
-                  {c.exp?.registry_error ? (
-                    <span className="text-tcip-fp">
-                      registry unreadable: {c.exp.registry_error}
-                    </span>
+                  {!c.hasEntry ? (
+                    <span className="text-tcip-muted">{READING}</span>
+                  ) : c.exp?.registry_error ? (
+                    <span className="text-tcip-fp">{c.exp.registry_error}</span>
                   ) : c.exp?.registry && c.exp.registry.length > 0 ? (
                     <ul className="space-y-1">
                       {c.exp.registry.map((entry) => (
