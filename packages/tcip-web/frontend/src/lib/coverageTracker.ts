@@ -41,8 +41,8 @@ export type CoverageViewingInput = Omit<CoverageViewing, "working_scale_bar">;
  * 128px is not a fresh guess: it is display_bounds.DISPLAY_MAX_EDGE=4096 divided by the sub-cell
  * count (32) the ordinary display-derived lattice already shipped with and nobody has flagged as
  * too coarse, now applied as an absolute size to every lattice instead of a division count that
- * only happened to produce it for one of them. Still provisional pending a real GUI annotation
- * session to check the target against, the same "ship a plain, documented, revisit-later
+ * only happened to produce it for one of them. Still a documented default pending a real GUI
+ * annotation session to check the target against, the same "ship a plain, documented, revisit-later
  * default" idiom as reference_grid.derive_large_raster_grid_tile_size's own divisions=16 -- but
  * no longer structurally guaranteed to fail on a large-raster lattice at real zoom the way a
  * fixed division count was.

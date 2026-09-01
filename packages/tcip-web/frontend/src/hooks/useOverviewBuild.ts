@@ -10,8 +10,8 @@ const POLL_MS = 700;
 /** How long the reported progress may sit at one value before the build is called stalled.
  *
  *  A build that is working reports a rising fraction; one whose worker died reports the same
- *  number forever, and without this the viewer waits on it forever. Provisional: no measurement of
- *  how far apart a real build's progress reports fall on a large raster, so it is set well past
+ *  number forever, and without this the viewer waits on it forever. A documented default: no
+ *  measurement of how far apart a real build's progress reports fall on a large raster, so it is set well past
  *  what a single pyramid level should take to show any movement at all. */
 export const STALL_MS = 180_000;
 

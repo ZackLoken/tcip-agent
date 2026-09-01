@@ -49,8 +49,8 @@ register_store(
 
 _MAX_SITE_LENGTH = 200
 """A rendering bound, not an identity bound: the site is shown on one picker line and in one-line
-doctor findings and audit arguments, and no source states a longer identity. Provisional, from
-those three rendering surfaces rather than from any stated site vocabulary."""
+doctor findings and audit arguments, and no source states a longer identity. A documented
+default, from those three rendering surfaces rather than from any stated site vocabulary."""
 
 
 class ProjectRecordMissing(Exception):

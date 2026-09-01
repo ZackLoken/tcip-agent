@@ -129,8 +129,8 @@ _EMBEDDED_METADATA_STRATEGIES: list[_MetadataStrategy] = [
             # Verified against the real 16-capture DJI sample: same-capture siblings are exposed
             # within ~1ms of each other and agree on GPS to sub-meter precision (max observed
             # intra-capture spread ~0.0007s / ~3e-7 degrees), while the closest two different
-            # captures in that flight are ~109s apart. These tolerances are provisional platform
-            # constants (same shape as derivations.py's jitter_px), generous relative to the real
+            # captures in that flight are ~109s apart. These tolerances are plain, documented
+            # platform defaults (same shape as derivations.py's jitter_px), generous relative to the real
             # intra-capture jitter measured, tight relative to any realistic inter-capture gap, not
             # validated against every DJI multispectral rig or flight speed.
             ("drone-dji:UTCAtExposure", "timestamp", 1.0),
