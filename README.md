@@ -76,6 +76,15 @@ cd packages/tcip-web/frontend
 npm install
 ```
 
+### Developer tooling
+
+`.mcp.json` (repo root) declares only the platform's own `tcip` MCP server; that is what an
+agent driving TCIP needs. Some maintainers additionally run a semantic code-search server
+(claude-context, backed by an Ollama embedding model and a Milvus instance) as their own
+development tooling, configured outside this tracked file and per machine. It is not part of
+the platform, not required to run or contribute to it, and its presence or absence changes
+nothing about what the platform does.
+
 ## Running
 
 ```bash
@@ -102,6 +111,51 @@ python scripts/smoke_fence_e2e.py       # agent permission fence (costs one mode
 ```
 
 The MCP server starts automatically when an MCP client connects (see `.mcp.json`).
+
+## From images to a first delivered number
+
+The sample hazelnut dataset under `data/` is gitignored and not shipped with the repository; a
+stranger starts from their own imagery. What follows is the real path an agent walks with the
+platform's own tools, in the order a first run actually needs them.
+
+| Tool | Purpose |
+|------|---------|
+| `init_project(project_path, site)` | Scaffolds `.tcip/` under the project directory and records the breeder-stated `site` (the orchard or station the plants stand in, asked of the breeder, never guessed from a path). `site` is a required argument; there is no default. |
+| `ingest_images(source, name, site)` | Copies a raw folder of photos into the canonical `images/<YYYY-MM-DD>/` layout under a workspace project. |
+| `register_dataset(dataset_root, crop)` | Records the dataset's identity (crop, id, content fingerprint) so a later delivered number can be traced back to the exact data behind it. |
+| `write_class_map(dataset_root, subjects)` | Authors the dataset's class registry: the subjects (object classes to isolate) and their attributes, the expert's own vocabulary, never inferred from labels. |
+
+Annotation itself happens in the GUI's Annotate tab: a human labels a sample of images, and an
+image with nothing to label is marked done as a negative there, never inferred from an empty
+label file alone.
+
+For a first training run, `make_splits(folder_path)` draws a fresh leakage-free train/val split
+over the labeled data; `freeze_split_manifest` is for afterward, binding a later run to a
+partition an earlier run already drew, not for drawing the first one.
+
+| Tool | Purpose |
+|------|---------|
+| `create_experiment(experiment_id, config)` | Registers a new experiment to track a training run's config, metrics, artifacts, and lineage before it starts. |
+| `launch_training(config)` | Launches training in an isolated subprocess from an agent-written `model_source` builder; the Training tab's config picker drives the same launch from the GUI side. |
+| `evaluate_model(run_id_or_ckpt, images_dir)` | Evaluates a trained checkpoint on a held-out dataset and writes `test_results.json`. |
+
+Before any number can ship, its confidence operating point needs validating against held-out
+ground truth, never left at a frozen default: `scripts/calibrate_operating_point.py` runs one
+model pass over a disjoint calibration/holdout split, derives a count-unbiased detection
+operating point, and checks its held-out count bias (a trait whose delivery reads a classified
+positive state, such as a phenology milestone, instead calibrates through the
+`calibrate_classifier_operating_point` MCP tool; see the `evaluation` and `phenology` skills).
+
+| Tool | Purpose |
+|------|---------|
+| `state_trait_operationalization(project_root, trait, delivery_kind, statement, mechanism, measured_subject, delivered_phenotypes)` | Records what the trait's delivered number means, in the breeder's own terms, for one delivery kind. Writing this does not itself clear the delivery gate; the breeder confirms it in the Results tab, and only that confirmation lets a delivery door proceed. |
+| `tabulate_counts` | Delivers a per-image `image, detection_count, avg_confidence` CSV, gated on the confirmed operationalization and the validated operating point. |
+| `export_predictions` | Persists a prediction bucket other doors (including a per-plant CSV built from it) treat as ground truth. |
+
+Read the `delivery` skill before choosing between `tabulate_counts` and `export_predictions`
+(and the per-plant aggregation tools built on top of a prediction bucket): they answer different
+questions and carry different CSV schemas, and neither ships a bare unvalidated number without
+`acknowledge_unvalidated=True` making the provisional shipment explicit.
 
 ## Conventions
 
@@ -202,6 +256,10 @@ Not built yet (contributions/experiments welcome):
   example is hazelnut catkin bloom, per-plant elongated-fraction 05/50/95-per-date milestones);
   broader phenology-sequence and relational patterns beyond the per-image case remain future work.
 - Fully automated active learning loop without human-in-the-loop.
+- Plant-tag identity (a QR or barcode physically tied to the plant) for capture with no
+  georeferencing. Today per-plant identity rests on geolocated capture (`build_plant_mapping`,
+  GPS EXIF plus a plant-locations CSV) or a georeferenced orthomosaic; an ungeoreferenced
+  dataset has no per-plant path today.
 - Provider/LLM-agnostic support. The platform is built against Claude specifically today (the MCP
   server plus Claude Code as the driving agent); supporting other providers/agents (Gemini, Codex,
   open models) alongside it is future work, not a config flag.
