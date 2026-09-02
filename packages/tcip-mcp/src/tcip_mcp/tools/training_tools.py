@@ -1931,17 +1931,25 @@ def run_hpo(
             seed, a blocked comparison of the split's own sensitivity. Refused, before minting
             the sweep, when ``base_config`` is bound to a split manifest or names
             ``data.val_images_dir`` (nothing to redraw), ``data.auto_val`` is off or ``task``
-            sits outside the drawn path's own tasks, ``search_alg`` is not ``random``/``grid``
-            (only the native generator pairs a grid axis), ``scheduler`` is not ``none`` (a
-            pruned draw is not comparable with a completed one), ``split_draw_seeds`` is given
-            at a length other than ``split_draws``, or ``param_space`` already sweeps
-            ``data.split.seed`` itself. The result groups trials by point (params minus the
+            sits outside the drawn path's own tasks, ``search_alg`` is not a native one
+            (``random``/``grid``/``variant_generator``: only the native generator pairs a grid
+            axis), ``scheduler`` is not ``none`` (a pruned draw is not comparable with a
+            completed one), ``split_draw_seeds`` is given at a length other than
+            ``split_draws``, ``warm_start``'s ``baseline_params`` names ``data.split.seed``
+            (Ray's preset-variant pinning would pin every draw to one seed instead of pairing
+            the grid), ``param_space`` already sweeps ``data.split.seed`` itself, or
+            ``param_space`` sweeps any other ``data.*`` axis (a second data axis would change
+            what a point admits or how it draws, so draw ``k`` would no longer be the same
+            partition for every point). The result groups trials by point (params minus the
             seed) and chooses the best by mean over each point's draws; see
-            ``result["best_value_spread"]``. 1 (the default) changes nothing.
+            ``result["best_value_spread"]``, and every point's own block at
+            ``result["split_sensitivity"]`` beside ``result["n_points"]`` (planned points) and
+            ``result["split_draws"]``, both mirrored onto the sweep manifest's own ``result``.
+            1 (the default) changes nothing.
         split_draw_seeds: The seeds ``split_draws`` pairs with every sampled point, one per
             draw; omit for the derived default (see ``split_draws``).
     """
-    from tcip_mcp.pipelines.training.hpo import tune_search, get_default_space
+    from tcip_mcp.pipelines.training.hpo import SPLIT_DRAW_SEED_KEY, tune_search, get_default_space
 
     if param_space is None:
         param_space = get_default_space()
@@ -1972,7 +1980,7 @@ def run_hpo(
             or (base_config.get("data") or {}).get("task", "detection")
         draws_refusal = _split_draws_refusal(
             base_config, param_space, hpo_task, search_alg, scheduler,
-            split_draws, split_draw_seeds)
+            split_draws, split_draw_seeds, warm_start, baseline_params)
         if draws_refusal is not None:
             return {"error": draws_refusal, "issues": []}
 
@@ -2010,7 +2018,7 @@ def run_hpo(
             )
             search_param_space = {
                 **param_space,
-                "data.split.seed": {"type": "categorical", "choices": resolved_draw_seeds},
+                SPLIT_DRAW_SEED_KEY: {"type": "categorical", "choices": resolved_draw_seeds},
             }
 
         import uuid
@@ -2146,11 +2154,14 @@ def run_hpo(
     result["tensorboard"] = tb_info
 
     if split_draws > 1:
-        # The best is run_hpo's own choice by mean over each point's draws, over Ray's own
-        # trial values (all_trials), never Ray's get_best_result.
-        groups = group_split_draws(result.get("all_trials") or [], split_draws)
+        # The best is run_hpo's own choice by mean over each point's draws (all_trials),
+        # never Ray's get_best_result; split_sensitivity keeps every point's own block.
+        groups = group_split_draws(result.get("all_trials") or [], resolved_draw_seeds or [])
         eligible = [g for g in groups if g["eligible"]]
         result.pop("best_value_state", None)
+        result["split_sensitivity"] = groups
+        result["n_points"] = n_trials
+        result["split_draws"] = split_draws
         if eligible:
             pick = (max if hpo_mode == "max" else min)(eligible, key=lambda g: g["block"]["mean"])
             result["best_params"] = pick["point"]
@@ -2168,8 +2179,9 @@ def run_hpo(
     manifest_result = {k: result.get(k) for k in ("best_params", "best_value", "n_trials")}
     if "best_value_state" in result:
         manifest_result["best_value_state"] = result["best_value_state"]
-    if "best_value_spread" in result:
-        manifest_result["best_value_spread"] = result["best_value_spread"]
+    for key in ("best_value_spread", "split_sensitivity", "n_points", "split_draws"):
+        if key in result:
+            manifest_result[key] = result[key]
     manifest.update(
         status="completed",
         finished_at=datetime.now(timezone.utc).isoformat(),
@@ -2342,22 +2354,18 @@ def _apply_hpo_params(base_config: dict, params: dict) -> dict:
     return cfg
 
 
-_SPLIT_DRAW_SEED_KEY = "data.split.seed"
-"""The dotted param key ``run_hpo``'s ``split_draws`` axis sweeps, the same key
-``_apply_hpo_params``'s dotted-path branch lands at ``base_config['data']['split']['seed']``."""
-
-
 def _split_draws_refusal(
     base_config: dict, param_space: dict | None, task: str, search_alg: str, scheduler: str,
-    split_draws: int, split_draw_seeds: list[int] | None,
+    split_draws: int, split_draw_seeds: list[int] | None, warm_start: bool,
+    baseline_params: dict | None,
 ) -> str | None:
     """Every reason ``run_hpo`` refuses ``split_draws`` above 1, checked before minting the
-    sweep. ``None`` when nothing here objects, including every call at ``split_draws=1``: that
-    default asks for nothing this family governs."""
+    sweep. ``None`` when nothing here objects; every call at ``split_draws=1`` is one of them,
+    since split_draws itself governs nothing at its default."""
     if split_draws <= 1:
         return None
     from tcip_mcp.pipelines.data.split_construction import STEM_TASKS
-    from tcip_mcp.pipelines.training.hpo import _NO_SCHEDULER
+    from tcip_mcp.pipelines.training.hpo import SPLIT_DRAW_SEED_KEY, _NATIVE_SEARCH, _NO_SCHEDULER
 
     data_cfg = base_config.get("data") or {}
     split_cfg = data_cfg.get("split") or {}
@@ -2372,10 +2380,10 @@ def _split_draws_refusal(
     if task not in STEM_TASKS:
         return (f"split_draws needs a drawn validation split, and task={task!r} sits outside "
                 f"the drawn path's own tasks ({sorted(STEM_TASKS)}).")
-    if (search_alg or "random").lower() not in ("random", "grid"):
+    if (search_alg or "").lower() not in _NATIVE_SEARCH:
+        native = sorted(x for x in _NATIVE_SEARCH if isinstance(x, str) and x)
         return (f"split_draws pairs a grid axis through Ray's own BasicVariantGenerator, which "
-                f"only the native search_alg values (random, grid) build; search_alg={search_alg!r} "
-                "does not.")
+                f"only a native search_alg ({native}) builds; search_alg={search_alg!r} does not.")
     if (scheduler or "none").lower() not in _NO_SCHEDULER:
         return (f"split_draws makes each draw a blocked comparison, and a pruning scheduler "
                 f"({scheduler!r}) could end one draw before another completes; pass "
@@ -2383,29 +2391,51 @@ def _split_draws_refusal(
     if split_draw_seeds is not None and len(split_draw_seeds) != split_draws:
         return (f"split_draw_seeds has {len(split_draw_seeds)} seed(s) but split_draws="
                 f"{split_draws}: one seed per draw.")
-    if _SPLIT_DRAW_SEED_KEY in (param_space or {}):
-        return (f"param_space already sweeps {_SPLIT_DRAW_SEED_KEY}, the same axis split_draws "
+    if warm_start and baseline_params and SPLIT_DRAW_SEED_KEY in baseline_params:
+        return (f"warm_start's baseline_params names {SPLIT_DRAW_SEED_KEY!r}: Ray's own "
+                "preset-variant pinning would pin every draw to that one seed instead of "
+                f"pairing the grid; drop {SPLIT_DRAW_SEED_KEY!r} from baseline_params.")
+    if SPLIT_DRAW_SEED_KEY in (param_space or {}):
+        return (f"param_space already sweeps {SPLIT_DRAW_SEED_KEY}, the same axis split_draws "
                 "adds as a paired grid; state the crossing through split_draws/"
                 "split_draw_seeds, not a second data.split.seed axis.")
+    other_data_axes = sorted(
+        k for k in (param_space or {}) if k.startswith("data.") and k != SPLIT_DRAW_SEED_KEY)
+    if other_data_axes:
+        return (f"split_draws pairs the identical partition with every sampled point at each "
+                f"draw, and param_space sweeps {other_data_axes} beside it: a data.* axis other "
+                f"than {SPLIT_DRAW_SEED_KEY} changes what a point admits or how it draws, so "
+                "draw k would no longer be the same partition for every point.")
     return None
 
 
-def group_split_draws(all_trials: list[dict], split_draws: int) -> list[dict]:
+def group_split_draws(all_trials: list[dict], planned_seeds: list[int]) -> list[dict]:
     """Group ``tune_search``'s own ``all_trials`` rows by the point each draw shares (every
-    param but :data:`_SPLIT_DRAW_SEED_KEY`), each group carrying the ``split_draws`` block this
-    family's result and manifest both record.
+    param but ``hpo.SPLIT_DRAW_SEED_KEY``), each group carrying the ``split_draws`` block the
+    sweep result and its manifest both record.
 
-    A group's block (``seeds``, ``values``, ``mean``, ``std``, ``min``, ``max``, ``n``) covers
-    only the group's ``COMPLETE`` rows with a real value; ``std`` is the sample standard
-    deviation, ``None`` under two values. ``n`` is every draw seen for the point (``COMPLETE``
-    and ``ERROR`` alike); a group short of ``split_draws`` complete draws also carries
-    ``n_complete`` and is not ``eligible`` for best. A row with no ``params`` at all (Ray's own
-    never-answered case) forms its own singleton, ineligible group, ``point`` ``None``: it names
-    no point to group under. Called with ``split_draws=1`` (a sweep that never asked for draws,
-    or an older result read back) still returns one trivially-complete block per point.
+    ``planned_seeds`` names every seed the sweep asked for; a group is ``eligible`` for best
+    only when every one of them completed for that point and the group holds no errored or
+    never-answered row, never merely a count of complete rows: a point Ray repeated (grid
+    search repeats every point per sample; a categorical-only random space collides) can land
+    two complete values under the same seed while its other planned seed never completes, and
+    counting complete values alone would call that eligible on a mean over one seed twice. Pass
+    an empty list to accept any single complete row per point regardless of seed identity (a
+    sweep that never asked for draws, or an older result read back).
+
+    A group's block always carries ``n`` (every row seen for the point, ``COMPLETE`` and
+    ``ERROR`` alike), ``n_complete`` (rows among them that completed with a real value) and
+    ``seeds_complete`` (the distinct seeds among those complete rows, sorted), plus ``seeds``
+    (one entry per complete row, not deduplicated), ``values``, ``mean``, ``std`` (the sample
+    standard deviation, ``None`` under two values), ``min`` and ``max`` over ``values``. A row
+    with no ``params`` at all (Ray's own never-answered case) forms its own singleton,
+    ineligible group, ``point`` ``None``: it names no point to group under.
     """
     import statistics
 
+    from tcip_mcp.pipelines.training.hpo import SPLIT_DRAW_SEED_KEY
+
+    planned = set(planned_seeds)
     groups: dict[str, dict] = {}
     order: list[str] = []
     for i, row in enumerate(all_trials):
@@ -2413,7 +2443,7 @@ def group_split_draws(all_trials: list[dict], split_draws: int) -> list[dict]:
         if params is None:
             key, point = f"__unanswered_{i}__", None
         else:
-            point = {k: v for k, v in params.items() if k != _SPLIT_DRAW_SEED_KEY}
+            point = {k: v for k, v in params.items() if k != SPLIT_DRAW_SEED_KEY}
             key = json.dumps(point, sort_keys=True, default=str)
         entry = groups.setdefault(key, {"point": point, "rows": []})
         if key not in order:
@@ -2425,8 +2455,11 @@ def group_split_draws(all_trials: list[dict], split_draws: int) -> list[dict]:
         entry = groups[key]
         rows = entry["rows"]
         complete = [r for r in rows if r.get("state") == "COMPLETE" and r.get("value") is not None]
+        complete_ids = {id(r) for r in complete}
+        incomplete = [r for r in rows if id(r) not in complete_ids]
         values = [float(r["value"]) for r in complete]
-        seeds = [(r.get("params") or {}).get(_SPLIT_DRAW_SEED_KEY) for r in complete]
+        seeds = [(r.get("params") or {}).get(SPLIT_DRAW_SEED_KEY) for r in complete]
+        seeds_complete = sorted({s for s in seeds}, key=lambda s: (s is None, s))
         block = {
             "seeds": seeds,
             "values": values,
@@ -2435,13 +2468,14 @@ def group_split_draws(all_trials: list[dict], split_draws: int) -> list[dict]:
             "min": min(values) if values else None,
             "max": max(values) if values else None,
             "n": len(rows),
+            "n_complete": len(values),
+            "seeds_complete": seeds_complete,
         }
-        if len(values) < split_draws:
-            block["n_complete"] = len(values)
-        out.append({
-            "point": entry["point"], "block": block,
-            "eligible": entry["point"] is not None and len(values) >= split_draws,
-        })
+        eligible = (
+            entry["point"] is not None and not incomplete
+            and planned <= set(seeds_complete)
+        )
+        out.append({"point": entry["point"], "block": block, "eligible": eligible})
     return out
 
 

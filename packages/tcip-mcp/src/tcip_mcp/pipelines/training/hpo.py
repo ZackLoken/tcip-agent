@@ -67,6 +67,12 @@ _NO_SCHEDULER = {"none", "fifo", ""}
 # Schedulers that consume the grace-period / reduction-factor early-stopping knobs.
 _HALVING_SCHEDULERS = {"async_hyperband", "hyperband"}
 
+SPLIT_DRAW_SEED_KEY = "data.split.seed"
+"""The dotted param-space key ``run_hpo``'s ``split_draws`` axis sweeps and ``tune_search``
+pairs with every sampled point via ``grid_keys``; the one definition every site that names the
+axis (``run_hpo``, ``_split_draws_refusal``, ``group_split_draws``, ``tune_search`` itself)
+reads, rather than a literal repeated at each site."""
+
 
 def get_default_space() -> dict:
     """A small, safe starting space the agent overrides per dataset (never a fixed recipe).
@@ -583,8 +589,9 @@ def tune_search(
             made while this returns True; the whole experiment stops once it does and no trial
             still looks unfinished, or (the bounded fallback, for a trial that never polls) once
             a configured staleness window has passed. See :func:`_build_sweep_stopper`.
-        split_draws: Above 1, ``param_space`` already carries a ``data.split.seed`` grid axis
-            (``run_hpo``'s own addition) and the search is built as
+        split_draws: Above 1, ``param_space`` must already carry a ``SPLIT_DRAW_SEED_KEY`` grid
+            axis (``run_hpo``'s own addition; raises ``ValueError`` naming the axis when it is
+            missing, rather than pairing nothing silently) and the search is built as
             ``BasicVariantGenerator(constant_grid_search=True, random_state=seed)`` instead of
             through ``build_search_alg``, so every sampled point is trained once per seed
             (Ray's own pairing, ``ray.tune.search.basic_variant``) whether ``search_alg`` is
@@ -612,10 +619,17 @@ def tune_search(
             "search names its own directory."
         )
 
+    if split_draws > 1 and SPLIT_DRAW_SEED_KEY not in (param_space or {}):
+        raise ValueError(
+            f"tune_search: split_draws={split_draws} pairs {SPLIT_DRAW_SEED_KEY!r} as a grid "
+            "axis with every sampled point, and param_space carries no such axis: pass it "
+            "explicitly, or call through run_hpo's own split_draws, which adds it for you."
+        )
+
     import ray
     from ray import tune
 
-    grid_keys = frozenset({"data.split.seed"}) if split_draws > 1 else frozenset()
+    grid_keys = frozenset({SPLIT_DRAW_SEED_KEY}) if split_draws > 1 else frozenset()
     space = _to_tune_space(param_space or get_default_space(), grid=(search_alg == "grid"),
                            grid_keys=grid_keys)
     resources = resources_per_trial or _default_trial_resources(max_concurrent)
