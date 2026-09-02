@@ -20,6 +20,8 @@ export interface Sweep {
   /** Why this sweep cannot be relaunched, in the platform's own words; null when it can be. */
   reason?: string | null;
   cancel_requested?: boolean;
+  /** The sweep this one was relaunched from, or null when it was not a relaunch. */
+  relaunched_from?: string | null;
 }
 
 export interface SweepDetail {

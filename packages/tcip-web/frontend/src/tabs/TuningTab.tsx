@@ -489,6 +489,7 @@ export function TuningTab() {
                       <span className="block text-[10px] text-tcip-muted">
                         {s.status}
                         {running && s.cancel_requested ? " · stop requested" : ""}
+                        {s.relaunched_from ? ` · relaunched from ${s.relaunched_from}` : ""}
                       </span>
                       {s.error ? (
                         <span className="block text-[10px] text-tcip-fp">{s.error}</span>

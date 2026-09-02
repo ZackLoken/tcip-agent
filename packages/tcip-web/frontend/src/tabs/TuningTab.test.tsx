@@ -171,6 +171,32 @@ describe("TuningTab sweep row actions", () => {
     expect(screen.getByRole("button", { name: "Cancel hpo-external-1" })).toBeInTheDocument();
   });
 
+  it("shows which sweep a relaunched row was relaunched from", async () => {
+    vi.spyOn(tuningApi, "listSweeps").mockResolvedValue({
+      sweeps: [
+        sweep({
+          sweep_id: "hpo-relaunched-1",
+          status: "running",
+          relaunched_from: "hpo-source-1",
+        }),
+      ],
+    });
+
+    render(<TuningTab />);
+    expect(await screen.findByText("hpo-relaunched-1")).toBeInTheDocument();
+    expect(screen.getByText(/relaunched from hpo-source-1/)).toBeInTheDocument();
+  });
+
+  it("shows no relaunched-from line for a sweep that was not a relaunch", async () => {
+    vi.spyOn(tuningApi, "listSweeps").mockResolvedValue({
+      sweeps: [sweep({ sweep_id: "hpo-not-relaunched-1", status: "running" })],
+    });
+
+    render(<TuningTab />);
+    expect(await screen.findByText("hpo-not-relaunched-1")).toBeInTheDocument();
+    expect(screen.queryByText(/relaunched from/)).not.toBeInTheDocument();
+  });
+
   it("shows the sweep's search shape in the expanded region", async () => {
     vi.spyOn(tuningApi, "listSweeps").mockResolvedValue({
       sweeps: [

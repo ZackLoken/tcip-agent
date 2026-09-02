@@ -51,15 +51,19 @@ class HPOJob:
 
 
 def _manifest_fields(manifest: dict) -> dict:
-    """The config-picker projection of a sweep manifest: search shape, relaunchability, and
-    whether a cancel has been requested. Shared by :func:`_manifest_summary` (a disk-only
-    sweep's own manifest) and :func:`_summary` (a live sweep's row, read from the manifest
-    under its own launch root), so a sweep reads the same fields whichever way it is listed.
+    """The config-picker projection of a sweep manifest: search shape, relaunchability,
+    whether a cancel has been requested, and which sweep (if any) it was relaunched from.
+    Shared by :func:`_manifest_summary` (a disk-only sweep's own manifest) and :func:`_summary`
+    (a live sweep's row, read from the manifest under its own launch root), so a sweep reads
+    the same fields whichever way it is listed.
 
     ``base_config`` is the relaunchable marker (:func:`training_tools.run_hpo` writes it
     whenever it creates a manifest); its absence is reported with a reason rather than a
     reconstructed config. ``cancel_requested`` is the manifest's own field, set by
     ``cancel_hpo`` and never derived from a side file this route cannot see across roots.
+    ``relaunched_from`` projects as ``None`` for a manifest predating the field, the same as
+    for one that genuinely was not a relaunch: a relaunch of an older sweep must still work
+    (see :func:`_missing_relaunch_fields`, which does not require this key).
 
     An empty ``manifest`` (no manifest exists yet, or one predating a caller's own launch) is
     never relaunchable, but carries no reason either: the pre-manifest window and every refused
@@ -71,6 +75,7 @@ def _manifest_fields(manifest: dict) -> dict:
         return {
             "n_trials": None, "search_alg": None, "scheduler": None, "param_space_keys": [],
             "relaunchable": False, "reason": None, "cancel_requested": False,
+            "relaunched_from": None,
         }
     relaunchable = "base_config" in manifest
     return {
@@ -81,6 +86,7 @@ def _manifest_fields(manifest: dict) -> dict:
         "relaunchable": relaunchable,
         "reason": None if relaunchable else "this sweep's record holds no base config",
         "cancel_requested": bool(manifest.get("cancel_requested")),
+        "relaunched_from": manifest.get("relaunched_from"),
     }
 
 
@@ -407,7 +413,7 @@ def _relaunch_spec(manifest: dict) -> _RelaunchSpec:
     )
 
 
-def _worker(job: HPOJob, spec: _RelaunchSpec, output_dir: str) -> None:
+def _worker(job: HPOJob, spec: _RelaunchSpec, output_dir: str, relaunched_from: str) -> None:
     """Run one relaunched sweep to completion off the request thread.
 
     ``job.platform_root``, resolved on the request thread at launch, is what
@@ -415,7 +421,8 @@ def _worker(job: HPOJob, spec: _RelaunchSpec, output_dir: str) -> None:
     the root that launch named rather than under whatever the environment names later. A
     returned ``{"error", "issues"}`` (a relaunch whose data paths moved, say) is a failed job
     carrying the issues, and a returned ``{"status": "cancelled", ...}`` a cancelled one,
-    rather than either reading as a completed job with no useful result.
+    rather than either reading as a completed job with no useful result. ``relaunched_from``
+    is the source study's own name, recorded on this sweep's manifest so a listing can show it.
     """
     try:
         job.status = "running"
@@ -437,6 +444,7 @@ def _worker(job: HPOJob, spec: _RelaunchSpec, output_dir: str) -> None:
             resources_per_trial=spec.resources_per_trial,
             study_name=job.sweep_id,
             auto_tensorboard=False,
+            relaunched_from=relaunched_from,
         )
         if isinstance(res, dict) and res.get("status") == "cancelled":
             # Checked before the "error" key below: a cancelled result carries its own reason
@@ -486,7 +494,8 @@ def relaunch_sweep(payload: RelaunchSweepPayload) -> dict:
     job = HPOJob(sweep_id=f"hpo-{uuid.uuid4().hex[:8]}")
     _registry.register(job.sweep_id, job, job_root=job.platform_root)
     mark_sweep_launching(job.sweep_id, output_dir)
-    t = threading.Thread(target=_worker, args=(job, spec, output_dir), daemon=True)
+    t = threading.Thread(
+        target=_worker, args=(job, spec, output_dir, payload.study_name), daemon=True)
     with _lock:
         for sweep_id in [sid for sid, done in _workers.items() if not done.is_alive()]:
             _workers.pop(sweep_id, None)

@@ -781,6 +781,74 @@ def test_relaunch_replays_every_manifest_field_run_hpo_was_given(
     assert captured["baseline_params"] == {"lr": 0.05}
     assert captured["resources_per_trial"] == {"cpu": 2.0, "gpu": 0.5}
     assert captured["auto_tensorboard"] is False
+    assert captured["relaunched_from"] == "hpo_fields001"
+
+
+def test_relaunch_records_the_source_study_as_relaunched_from_on_the_new_manifest(
+    client: TestClient, hpo_root, real_hpo_base_config, monkeypatch
+) -> None:
+    """A relaunch through the route, driving the platform's own run_hpo (only the Ray Tune
+    search itself faked, run_hpo unstubbed), leaves a manifest whose relaunched_from names the
+    sweep it replayed."""
+    monkeypatch.setattr(
+        "tcip_mcp.pipelines.training.hpo.tune_search",
+        lambda **kw: {"best_params": {}, "best_value": 0.1, "n_trials": 1,
+                     "study_name": kw["study_name"]},
+    )
+    _write_sweep(hpo_root, "hpo_relsrc001", base_config=real_hpo_base_config,
+                param_space={"training.batch_size": [2, 4]})
+
+    resp = client.post("/api/tuning/sweeps", json={"study_name": "hpo_relsrc001"})
+    assert resp.status_code == 200
+    sweep_id = resp.json()["sweep_id"]
+
+    from tcip_web.routes import tuning
+
+    assert tuning.wait_for_workers(timeout_s=_worker_join_bound()) == ()
+
+    import tcip_store
+    from tcip_mcp.tools.training_tools import sweep_manifest_key
+
+    manifest = tcip_store.read(sweep_manifest_key(sweep_id))
+    assert manifest["relaunched_from"] == "hpo_relsrc001"
+
+
+def test_manifest_fields_projects_relaunched_from_none_when_the_manifest_lacks_the_key() -> None:
+    """An older manifest, from before this field existed, projects relaunched_from as None the
+    same as a manifest that genuinely was not a relaunch, rather than being treated as missing
+    something a caller must supply."""
+    from tcip_web.routes.tuning import _manifest_fields
+
+    manifest = {"study_name": "hpo_old1", "status": "completed", "base_config": {}}
+    assert "relaunched_from" not in manifest
+    assert _manifest_fields(manifest)["relaunched_from"] is None
+
+
+def test_relaunch_of_an_older_manifest_missing_relaunched_from_still_succeeds(
+    client: TestClient, hpo_root
+) -> None:
+    """_missing_relaunch_fields does not require relaunched_from: a manifest from before the
+    field existed (_write_sweep's own default, the same shape a real pre-family manifest has)
+    relaunches exactly as any other manifest does."""
+    from tcip_web.routes.tuning import _RELAUNCH_FIELDS, _missing_relaunch_fields
+
+    assert "relaunched_from" not in _RELAUNCH_FIELDS
+    _write_sweep(hpo_root, "hpo_old_relaunch1",
+                base_config={"model_source": {"builder": "x:y"}, "data": {}, "training": {}})
+
+    import tcip_store
+    from tcip_mcp.tools.training_tools import sweep_manifest_key
+
+    manifest = tcip_store.read(sweep_manifest_key("hpo_old_relaunch1"))
+    assert "relaunched_from" not in manifest
+    assert _missing_relaunch_fields(manifest) == []
+
+    resp = client.post("/api/tuning/sweeps", json={"study_name": "hpo_old_relaunch1"})
+    assert resp.status_code == 200
+
+    from tcip_web.routes import tuning
+
+    assert tuning.wait_for_workers(timeout_s=_worker_join_bound()) == ()
 
 
 def test_cancel_route_404s_for_an_unknown_sweep(client: TestClient, hpo_root) -> None:
@@ -854,7 +922,7 @@ def test_worker_marks_an_error_dict_failed_not_completed(hpo_root, monkeypatch) 
     spec = _RelaunchSpec(base_config={}, param_space=None, n_trials=1, search_alg="random",
                          scheduler="asha", grace_period=5, reduction_factor=3, max_concurrent=1,
                          warm_start=False, baseline_params=None, resources_per_trial=None)
-    _worker(job, spec, str(hpo_root))
+    _worker(job, spec, str(hpo_root), "hpo-source-1")
     assert job.status == "failed"
     assert job.error == "the sweep's base config fails preflight"
 
@@ -873,7 +941,7 @@ def test_worker_marks_a_cancelled_result_cancelled_with_its_reason(hpo_root, mon
     spec = _RelaunchSpec(base_config={}, param_space=None, n_trials=1, search_alg="random",
                          scheduler="asha", grace_period=5, reduction_factor=3, max_concurrent=1,
                          warm_start=False, baseline_params=None, resources_per_trial=None)
-    _worker(job, spec, str(hpo_root))
+    _worker(job, spec, str(hpo_root), "hpo-source-2")
     assert job.status == "cancelled"
     assert job.error == "the sweep was cancelled by request before it could finish"
 
