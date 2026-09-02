@@ -801,8 +801,8 @@ Docstring is the function's docstring first line, verbatim.
 | tool | line | audited | docstring first line |
 |---|---|---|---|
 | `build_plant_mapping` | `phenology_tools.py:31` | yes | Assign each geolocated image to a plant, then persist the mapping under this project. |
-| `calibrate_classifier_operating_point` | `phenology_tools.py:404` | yes | Calibrate and validate the trait's positive-class classifier against held-out GT. |
-| `compute_phenology` | `phenology_tools.py:545` | yes | Per-plant phenology milestones from classified predictions + a plant mapping. |  <!-- queued: P5-43 unify -->
+| `calibrate_classifier_operating_point` | `phenology_tools.py:408` | yes | Calibrate and validate the trait's positive-class classifier against held-out GT. |
+| `compute_phenology` | `phenology_tools.py:549` | yes | Per-plant phenology milestones from classified predictions + a plant mapping. |  <!-- queued: P5-43 unify -->
 
 ### project_tools.py (5 tools)
 
@@ -986,20 +986,20 @@ registered at HEAD.
 
 | method | path | handler | line |
 |---|---|---|---|
-| POST | `/plant_mapping/build` | `build_plant_mapping` | `routes/results.py:178` |
-| POST | `/plant_mapping/load` | `load_plant_mapping` | `routes/results.py:274` |
-| GET | `/plant_mapping/list` | `list_plant_mappings` | `routes/results.py:293` |
-| POST | `/phenology_measurement` | `phenology_measurement` | `routes/results.py:565` |
-| POST | `/export_csv` | `export_csv` | `routes/results.py:621` |
-| GET | `/traits` | `list_traits` | `routes/results.py:1046` |
-| GET | `/operationalization` | `get_operationalization` | `routes/results.py:745` |
-| GET | `/operationalizations` | `list_operationalizations` | `routes/results.py:761` |
-| POST | `/operationalization/confirm` | `confirm_operationalization` | `routes/results.py:799` |
-| GET | `/trait-spec-statement` | `get_trait_spec_statement` | `routes/results.py:901` |
-| GET | `/trait-spec-statements` | `list_trait_spec_statements` | `routes/results.py:917` |
-| POST | `/trait-spec-statement/confirm` | `confirm_trait_spec_statement` | `routes/results.py:959` |
-| GET | `/delivery-events` | `list_delivery_events` | `routes/results.py:1025` |
-| GET | `/models/registered` | `registered_models` | `routes/results.py:1075` |
+| POST | `/plant_mapping/build` | `build_plant_mapping` | `routes/results.py:177` |
+| POST | `/plant_mapping/load` | `load_plant_mapping` | `routes/results.py:277` |
+| GET | `/plant_mapping/list` | `list_plant_mappings` | `routes/results.py:309` |
+| POST | `/phenology_measurement` | `phenology_measurement` | `routes/results.py:581` |
+| POST | `/export_csv` | `export_csv` | `routes/results.py:637` |
+| GET | `/traits` | `list_traits` | `routes/results.py:1062` |
+| GET | `/operationalization` | `get_operationalization` | `routes/results.py:761` |
+| GET | `/operationalizations` | `list_operationalizations` | `routes/results.py:777` |
+| POST | `/operationalization/confirm` | `confirm_operationalization` | `routes/results.py:815` |
+| GET | `/trait-spec-statement` | `get_trait_spec_statement` | `routes/results.py:917` |
+| GET | `/trait-spec-statements` | `list_trait_spec_statements` | `routes/results.py:933` |
+| POST | `/trait-spec-statement/confirm` | `confirm_trait_spec_statement` | `routes/results.py:975` |
+| GET | `/delivery-events` | `list_delivery_events` | `routes/results.py:1041` |
+| GET | `/models/registered` | `registered_models` | `routes/results.py:1091` |
 
 ### routes/review.py, prefix `/api/review` (8 routes)
 
@@ -2154,7 +2154,7 @@ Side B: `packages/tcip-web/src/tcip_web/routes/review.py:93` (`def _audit(scope:
 arguments: dict) -> None:`, which calls `record_event` with the dataset root its own guard
 resolved; `routes/annotate.py:150` and `routes/inference.py:142` do the same for their own
 datasets, `routes/classes.py:63` likewise); `routes/results.py:151` does the same for a project
-root instead. Reader: `pipelines/postprocessing/plant_mapping.py:950` (`_require_receipt`)
+root instead. Reader: `pipelines/postprocessing/plant_mapping.py:973` (`_require_receipt`)
 trusts only a `plant_mapping_built` entry it finds in the log under the root its caller holds
 (the MCP tool's pinned platform root, the platform log's own file until adoption makes it a
 project's; the web route's guarded project root), scanned by `_scan_receipts`, line 923, which
@@ -2325,7 +2325,7 @@ Phase 3 verdict: single.
 
 Must agree: the MCP registrar and the GUI model pickers read one registry entry shape.
 Side A: `packages/tcip-mcp/src/tcip_mcp/model_registry.py:132` (`def read_registry_index(`, the read path for everything outside the module; `_register_entry`, line 429, replaces one entry by name inside one `tcip_store.transaction` on the key `registry_index_key`, line 116, mints).
-Side B: `packages/tcip-web/src/tcip_web/routes/results.py:1074` (`@router.get("/models/registered")`, serving `model_tools.list_registered_models`) and the browser's one entry declaration, `packages/tcip-web/frontend/src/api/inference.ts:16` (`export interface RegisteredModel {`), held field by field against an entry the real registrar wrote by `tests/test_registry_entry_shape_agreement.py`.
+Side B: `packages/tcip-web/src/tcip_web/routes/results.py:1090` (`@router.get("/models/registered")`, serving `model_tools.list_registered_models`) and the browser's one entry declaration, `packages/tcip-web/frontend/src/api/inference.ts:16` (`export interface RegisteredModel {`), held field by field against an entry the real registrar wrote by `tests/test_registry_entry_shape_agreement.py`.
 Phase 3 verdict: single.
 
 ## S28. operating_point.json prediction-bucket sidecar
