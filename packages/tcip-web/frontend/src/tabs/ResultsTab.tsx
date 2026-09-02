@@ -27,6 +27,7 @@ import {
 } from "@/api/inference";
 import { DeliveryEventsPanel } from "@/components/DeliveryEventsPanel";
 import { flatStatementFields, StatementPanel } from "@/components/StatementPanel";
+import { TabHeading } from "@/components/TabHeading";
 import { useStore } from "@/store";
 import { fieldValueText, STATEMENT_FIELD_LABELS } from "@/lib/statementFields";
 import { CHART, CHART_LINE_COLORS } from "@/tabs/chartTheme";
@@ -830,6 +831,7 @@ export function ResultsTab() {
 
   return (
     <div className="flex-1 overflow-auto p-4 flex flex-col gap-4">
+      <TabHeading tab="results" />
       {traitError && <div className="tcip-panel p-3 text-[11px] text-tcip-fp">{traitError}</div>}
       {invalidSpecs.length > 0 && (
         <div className="tcip-panel p-3 text-[11px] text-tcip-fp">

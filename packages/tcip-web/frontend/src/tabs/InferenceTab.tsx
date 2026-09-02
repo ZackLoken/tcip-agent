@@ -9,6 +9,7 @@ import {
   type InferenceStatus,
   type RegisteredModel,
 } from "@/api/inference";
+import { TabHeading } from "@/components/TabHeading";
 import { useStore } from "@/store";
 
 // A job can still be stopped only while it is pending/running.
@@ -210,6 +211,7 @@ export function InferenceTab() {
 
   return (
     <div className="flex-1 grid grid-cols-[440px_1fr] overflow-hidden">
+      <TabHeading tab="inference" />
       <div className="border-r border-tcip-border p-4 overflow-auto">
         <div className="tcip-heading mb-3">Inference config</div>
 

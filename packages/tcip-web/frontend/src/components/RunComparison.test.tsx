@@ -713,3 +713,29 @@ describe("RunComparison unrecorded-field wording", () => {
     expect(within(row).getAllByText("unrecorded").length).toBeGreaterThan(0);
   });
 });
+
+describe("RunComparison experiment row", () => {
+  it("hides the experiment row when every column's experiment id equals its run id", async () => {
+    const marked: MarkedRun[] = [
+      { runId: "run-a", experimentId: "run-a" },
+      { runId: "run-b", experimentId: "run-b" },
+    ];
+    vi.spyOn(trainingApi, "compare").mockResolvedValue(
+      baseResult({
+        experiments: [{ experiment_id: "run-a" }, { experiment_id: "run-b" }],
+      }),
+    );
+    render(<RunComparison marked={marked} projectRoot={null} />);
+    await screen.findByText("Builder");
+    expect(screen.queryByText("Experiment")).not.toBeInTheDocument();
+  });
+
+  it("shows the experiment row when at least one column's experiment id differs from its run id", async () => {
+    vi.spyOn(trainingApi, "compare").mockResolvedValue(oneRegisteredResult());
+    render(<RunComparison marked={MARKED} projectRoot={null} />);
+    const label = await screen.findByText("Experiment");
+    const row = label.closest("tr") as HTMLElement;
+    expect(within(row).getByText("exp-a")).toBeInTheDocument();
+    expect(within(row).getByText("exp-b")).toBeInTheDocument();
+  });
+});

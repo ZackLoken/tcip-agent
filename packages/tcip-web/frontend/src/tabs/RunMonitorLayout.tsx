@@ -12,14 +12,12 @@ export function RunMonitorEmpty({ children }: { children: ReactNode }) {
 
 export function RunMonitorLayout({
   title,
-  onRefresh,
   headerRight,
   children,
   detailHeader,
   detail,
 }: {
   title: string;
-  onRefresh: () => void;
   /** The action that hands this tab's request to the agent. */
   headerRight?: ReactNode;
   /** Sidebar body: the request composer and the tab's own list. */
@@ -33,9 +31,6 @@ export function RunMonitorLayout({
         <div className="px-4 pt-4 pb-2 flex items-center gap-2">
           <span className="tcip-heading">{title}</span>
           <span className="flex-1" />
-          <button className="tcip-btn text-[11px]" onClick={onRefresh}>
-            <span aria-hidden="true">↻</span>&nbsp;&nbsp;Refresh
-          </button>
           {headerRight}
         </div>
         <div className="flex-1 overflow-auto px-4 pb-4">{children}</div>

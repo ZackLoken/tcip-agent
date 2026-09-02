@@ -39,3 +39,18 @@ describe("defaultSweepRequest", () => {
     expect(defaultSweepRequest("/data/valley")).toContain("sweep for the dataset at /data/valley.");
   });
 });
+
+describe("both composer defaults", () => {
+  // A tool, script or function name reads as snake_case, a dotted module path, or a
+  // scripts/ path; none of those shapes belongs in a request meant for a breeder to read.
+  const IDENTIFIER_SHAPED = /[a-zA-Z]+_[a-zA-Z_]+|scripts\/|\.py\b/;
+
+  it("names no tool, script or function the agent should call", () => {
+    // "leaf", not "subject_a": an underscored subject name would trip the identifier check
+    // on the breeder's own data, not on wording this function chose.
+    expect(defaultTrainingRequest(null, null)).not.toMatch(IDENTIFIER_SHAPED);
+    expect(defaultTrainingRequest("/data/valley", "leaf")).not.toMatch(IDENTIFIER_SHAPED);
+    expect(defaultSweepRequest(null)).not.toMatch(IDENTIFIER_SHAPED);
+    expect(defaultSweepRequest("/data/valley")).not.toMatch(IDENTIFIER_SHAPED);
+  });
+});

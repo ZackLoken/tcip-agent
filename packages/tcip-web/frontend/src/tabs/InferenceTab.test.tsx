@@ -253,3 +253,12 @@ describe("InferenceTab job table", () => {
     }
   });
 });
+
+describe("InferenceTab heading", () => {
+  it("renders exactly one top-level heading naming the tab", () => {
+    render(<InferenceTab />);
+    const headings = screen.getAllByRole("heading", { level: 1 });
+    expect(headings).toHaveLength(1);
+    expect(headings[0]).toHaveTextContent("Inference");
+  });
+});

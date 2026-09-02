@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
+import { StructuredRefusalError } from "@/api/http";
 import { tuningApi, type Sweep } from "@/api/tuning";
 import { useStore } from "@/store";
 import { TuningTab } from "@/tabs/TuningTab";
@@ -303,6 +304,78 @@ describe("TuningTab sweeps loader", () => {
     await waitFor(() => expect(listSweepsSpy).toHaveBeenCalledTimes(2));
     expect(
       await screen.findByText('No sweeps yet. Use "Start a sweep" above.'),
+    ).toBeInTheDocument();
+  });
+});
+
+describe("TuningTab sweep detail before a manifest exists", () => {
+  it("says the sweep has no record yet, then loads on its own once the manifest appears", async () => {
+    vi.spyOn(tuningApi, "listSweeps").mockResolvedValue({
+      sweeps: [sweep({ sweep_id: "hpo-pending", status: "running" })],
+    });
+    const notFound = new StructuredRefusalError(
+      { error: "sweep not found: hpo-pending" },
+      404,
+      "sweep not found: hpo-pending",
+    );
+    const getSweepSpy = vi
+      .spyOn(tuningApi, "getSweep")
+      .mockRejectedValueOnce(notFound)
+      .mockResolvedValue({ sweep_id: "hpo-pending", status: "running", result: {} });
+    vi.spyOn(tuningApi, "listTrials").mockResolvedValue({ sweep_id: "hpo-pending", trials: [] });
+    vi.spyOn(tuningApi, "getRayDashboard").mockResolvedValue({ url: null });
+    const launchTbSpy = vi
+      .spyOn(tuningApi, "launchSweepTensorboard")
+      .mockResolvedValue({ url: "http://localhost:6006" });
+
+    vi.useFakeTimers();
+    try {
+      render(<TuningTab />);
+      await vi.waitFor(() => expect(screen.getByText("hpo-pending")).toBeInTheDocument());
+      fireEvent.click(screen.getByText("hpo-pending"));
+
+      // The mock's call count updates before its rejection is caught and state is set, so wait
+      // on the state's own visible effect rather than the call count.
+      await vi.waitFor(() =>
+        expect(screen.getAllByText("This sweep has no record yet.").length).toBeGreaterThan(0),
+      );
+      expect(getSweepSpy).toHaveBeenCalledTimes(1);
+      expect(launchTbSpy).not.toHaveBeenCalled();
+
+      // The poll retries on its own; no Try again for the breeder to press.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(3000);
+      });
+
+      expect(screen.queryByText("This sweep has no record yet.")).not.toBeInTheDocument();
+      expect(launchTbSpy).toHaveBeenCalledWith("hpo-pending");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe("TuningTab heading", () => {
+  it("renders exactly one top-level heading naming the tab", async () => {
+    vi.spyOn(tuningApi, "listSweeps").mockResolvedValue({ sweeps: [] });
+    render(<TuningTab />);
+    await waitFor(() => expect(tuningApi.listSweeps).toHaveBeenCalled());
+    const headings = screen.getAllByRole("heading", { level: 1 });
+    expect(headings).toHaveLength(1);
+    expect(headings[0]).toHaveTextContent("Tuning");
+  });
+});
+
+describe("TuningTab list order", () => {
+  it("states how the sweep list is ordered", async () => {
+    vi.spyOn(tuningApi, "listSweeps").mockResolvedValue({
+      sweeps: [sweep({ sweep_id: "hpo-a", status: "running" })],
+    });
+
+    render(<TuningTab />);
+    expect(await screen.findByText("hpo-a")).toBeInTheDocument();
+    expect(
+      screen.getByText(/Live sweeps first, in launch order; other recorded sweeps follow/),
     ).toBeInTheDocument();
   });
 });

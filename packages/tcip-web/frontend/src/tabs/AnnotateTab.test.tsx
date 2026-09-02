@@ -1146,3 +1146,13 @@ describe("AnnotateTab Map tool", () => {
     expect(useStore.getState().canvas.points).toHaveLength(0);
   });
 });
+
+describe("AnnotateTab heading", () => {
+  it("renders exactly one top-level heading naming the tab", async () => {
+    render(<AnnotateTab />);
+    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
+    const headings = screen.getAllByRole("heading", { level: 1 });
+    expect(headings).toHaveLength(1);
+    expect(headings[0]).toHaveTextContent("Annotate");
+  });
+});

@@ -1,18 +1,8 @@
 import { useEffect, useState } from "react";
 
 import { TAB_NAMES } from "@/api/types.generated";
+import { TAB_LABELS } from "@/lib/tabLabels";
 import { useStore } from "@/store";
-import type { TabName } from "@/store/types";
-
-const TAB_LABELS: Record<TabName, string> = {
-  annotate: "Annotate",
-  review: "Review",
-  training: "Training",
-  tuning: "Tuning",
-  inference: "Inference",
-  results: "Results",
-  meta: "Meta",
-};
 
 /**
  * Global app bar: logo, centered tab navigation, agent-rail toggle, and a connection

@@ -9,6 +9,7 @@ import { BandPicker } from "@/components/BandPicker";
 import { CanvasStage } from "@/components/Canvas/CanvasStage";
 import { DisclosureChevron } from "@/components/CollapsibleSection";
 import { ColorPickerModal } from "@/components/ColorPickerModal";
+import { TabHeading } from "@/components/TabHeading";
 import { EditShapeOverlay } from "@/components/review/EditShapeOverlay";
 import { FilterChip } from "@/components/review/FilterChip";
 import { ReviewLegend } from "@/components/review/ReviewLegend";
@@ -1150,6 +1151,7 @@ export function ReviewTab() {
 
   return (
     <div className="flex-1 flex flex-col relative min-h-0">
+      <TabHeading tab="review" />
       <div className="relative border-b border-tcip-border bg-tcip-panel">
         {/* Row 1: filter shelf toggle + live summary + legend, then image / detection navigation */}
         <div className="flex items-center gap-2 px-3 py-1.5 text-[11px]">

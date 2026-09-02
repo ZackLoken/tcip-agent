@@ -21,6 +21,7 @@ import {
   METRIC_STATE_SUFFIX,
   numericMetricKeys,
   RUN_REFRESH_MS,
+  VAL_METRIC_PREFIX,
 } from "@/tabs/trainingMetrics";
 
 /** One marked run: the id the tab tracks it by, and the experiment id compare_experiments
@@ -113,10 +114,6 @@ function loggedMetricCell(row: MetricRow | undefined, key: string): string {
 function notRankedNoMetricStamped(metric: string): string {
   return `not ranked: no ${metric} stamped`;
 }
-
-// evaluation.HIGHER_IS_BETTER_BY_METRIC's own keys are bare (val_-stripped); a stamped metric
-// key carries this same prefix the tool strips before its own lookup.
-const VAL_METRIC_PREFIX = "val_";
 
 /** Side-by-side detail for two to four marked runs: one column per run labelled by the record it
  * came from, an overlay chart, and one rank control over the platform's best-model derivation. */
@@ -345,14 +342,16 @@ export function RunComparison({
             </tr>
           </thead>
           <tbody>
-            <tr className="border-b border-tcip-border">
-              <th className="tcip-th">Experiment</th>
-              {columns.map((c) => (
-                <td key={c.runId} className="px-2 py-1 font-mono">
-                  {c.experimentId}
-                </td>
-              ))}
-            </tr>
+            {columns.some((c) => c.experimentId !== c.runId) && (
+              <tr className="border-b border-tcip-border">
+                <th className="tcip-th">Experiment</th>
+                {columns.map((c) => (
+                  <td key={c.runId} className="px-2 py-1 font-mono">
+                    {c.experimentId}
+                  </td>
+                ))}
+              </tr>
+            )}
             {columns.some((c) => c.exp?.error) && (
               <tr className="border-b border-tcip-border">
                 <th className="tcip-th">Read error</th>
