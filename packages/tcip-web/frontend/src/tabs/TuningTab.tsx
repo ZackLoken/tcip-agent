@@ -1,6 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { StructuredRefusalError } from "@/api/http";
 import { tuningApi, type Sweep, type SweepDetail, type SweepTrial } from "@/api/tuning";
 import type { TensorboardLaunch } from "@/api/training";
 import { DisclosureChevron } from "@/components/CollapsibleSection";
@@ -8,6 +7,7 @@ import { EmbeddedTool } from "@/components/EmbeddedTool";
 import { LaunchPicker } from "@/components/LaunchPicker";
 import { TabHeading } from "@/components/TabHeading";
 import { useEditableAgentRequest } from "@/hooks/useEditableAgentRequest";
+import { useEmbeddedToolRetry, type EmbeddedToolStepResult } from "@/hooks/useEmbeddedToolRetry";
 import { TERMINAL_STATUSES } from "@/lib/runStatus";
 import { useStore } from "@/store";
 import { defaultSweepRequest } from "@/tabs/agentPrompts";
@@ -44,11 +44,12 @@ function cellText(value: unknown): string {
  * detail pane, from this one wording. */
 const NO_CANCEL_REASON = "no reason recorded";
 
-/** Shown when the selected sweep's own detail request 404s: the pre-manifest window before
- * ``run_hpo`` writes a sweep's first manifest, or a listed sweep whose record vanished before
- * the detail request landed. A sweep refused before it ever wrote one is served by the
+/** Shown while the selected sweep's own detail answers with ``has_manifest: false``: the
+ * pre-manifest window before ``run_hpo`` writes a sweep's first manifest. The relaunch route
+ * registers the job before it answers, so this is never a 404; it is the detail itself saying
+ * the record is not written yet. A sweep refused before it ever wrote one is served by the
  * listing's own terminal status instead, and never reaches this. */
-const SWEEP_NO_RECORD_YET = "This sweep has no record yet.";
+const SWEEP_NO_RECORD_YET = "This sweep's record is not written yet.";
 
 /** The one sweep status Cancel is offered on, the same explicit-allowlist shape
  * TrainingTab's TRAINING_CANCELLABLE uses rather than inferring it from TERMINAL_STATUSES:
@@ -64,11 +65,8 @@ export function TuningTab() {
   const [sweepsError, setSweepsError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detail, setDetail] = useState<SweepDetail | null>(null);
-  // null: not yet heard from the manifest; true: confirmed absent; false: confirmed present.
-  // TensorBoard below waits for false, never the stale value the prior selection left behind.
-  const [sweepMissing, setSweepMissing] = useState<boolean | null>(null);
-  // A non-404 failure reading the selected sweep's own detail: recorded, not swallowed, so a
-  // retry in progress is visible instead of a silent stall on whatever was last on screen.
+  // A failure reading the selected sweep's own detail: shown, not swallowed, so a retry in
+  // progress is visible instead of a silent stall on whatever was last on screen.
   const [detailError, setDetailError] = useState<string | null>(null);
   const [trials, setTrials] = useState<SweepTrial[]>([]);
   const [selectedTrialId, setSelectedTrialId] = useState<string | null>(null);
@@ -76,86 +74,78 @@ export function TuningTab() {
   const [rayUrl, setRayUrl] = useState<string | null>(null);
   const [rayError, setRayError] = useState<string | null>(null);
   const [rayAttempt, setRayAttempt] = useState(0);
-  const [sweepTb, setSweepTb] = useState<{ url: string | null; error: string | null }>({
-    url: null,
-    error: null,
-  });
   const [sweepTbAttempt, setSweepTbAttempt] = useState(0);
   const [trialTb, setTrialTb] = useState<{ url: string | null; error: string | null }>({
     url: null,
     error: null,
   });
   const [trialTbAttempt, setTrialTbAttempt] = useState(0);
+  // Cancel/Run again in flight, by sweep id: disables that row's own button with a pending
+  // label. A failure lands in actionErrors too, not only a toast.
+  const [pendingActions, setPendingActions] = useState<
+    Readonly<Record<string, "cancel" | "relaunch">>
+  >({});
+  const [actionErrors, setActionErrors] = useState<Record<string, string>>({});
 
-  async function refresh() {
+  // Read fresh inside the interval tick below, so one function can refresh whichever sweep is
+  // selected without recreating the interval on every selection.
+  const selectedIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    selectedIdRef.current = selectedId;
+  }, [selectedId]);
+
+  const refreshSweeps = useCallback(async () => {
     try {
       const r = await tuningApi.listSweeps();
       setSweeps(r.sweeps ?? []);
       setSweepsError(null);
     } catch (e) {
-      setSweepsError(`Could not load sweeps: ${e instanceof Error ? e.message : String(e)}`);
+      setSweepsError(`Could not load sweeps: ${messageOf(e)}`);
     }
-  }
+  }, []);
+
+  // The selected sweep's own detail and its trials, read for the expanded sweep only: a
+  // listing per sweep per tick would walk the whole HPO root every few seconds.
+  const refreshDetail = useCallback(async (id: string) => {
+    try {
+      const d = await tuningApi.getSweep(id);
+      if (selectedIdRef.current !== id) return;
+      setDetail(d);
+      setDetailError(null);
+      try {
+        const t = await tuningApi.listTrials(id);
+        if (selectedIdRef.current === id) setTrials(t.trials ?? []);
+      } catch {
+        // A sweep launched here has no trial directory until its first trial writes one.
+        if (selectedIdRef.current === id) setTrials([]);
+      }
+    } catch (e) {
+      if (selectedIdRef.current === id) setDetailError(messageOf(e));
+    }
+  }, []);
+
+  // One poll drives the listing and the selected sweep's own detail together, on the same
+  // tick, so the row and the detail never read two different moments of the same sweep.
+  const refresh = useCallback(async () => {
+    await refreshSweeps();
+    if (selectedIdRef.current) await refreshDetail(selectedIdRef.current);
+  }, [refreshSweeps, refreshDetail]);
 
   useEffect(() => {
     void refresh();
     const t = setInterval(refresh, RUN_REFRESH_MS);
     return () => clearInterval(t);
-  }, []);
+  }, [refresh]);
 
-  // Load the selected sweep's detail and its trials, then poll while it's still running. Trials
-  // are read for the expanded sweep only: a listing per sweep per tick would walk the whole HPO
-  // root every few seconds. Keyed on the id so re-selecting the same sweep keeps what it loaded.
+  // On a fresh selection, drop the previous sweep's detail/trials/error and fetch this one
+  // right away rather than waiting for the shared interval's next tick.
   useEffect(() => {
-    // Reset on every selection change, a fresh one included: a previous sweep's header,
-    // trials and error must never show under a new selection while its own records load.
     setDetail(null);
-    setSweepMissing(null);
     setDetailError(null);
     setTrials([]);
     if (!selectedId) return;
-    let cancelled = false;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const poll = async () => {
-      let d: SweepDetail;
-      try {
-        d = await tuningApi.getSweep(selectedId);
-      } catch (e) {
-        if (cancelled) return;
-        // Pre-manifest 404: keep polling so the detail loads on its own once run_hpo writes
-        // one, with no "Try again" for the breeder to press.
-        if (e instanceof StructuredRefusalError && e.status === 404) {
-          setDetail(null);
-          setSweepMissing(true);
-          setDetailError(null);
-          setTrials([]);
-        } else {
-          // Any other failure (a 500, a decode failure, a dropped connection) is shown
-          // rather than swallowed, and the poll keeps retrying rather than stalling silently.
-          setDetailError(messageOf(e));
-        }
-        timer = setTimeout(poll, 3000);
-        return;
-      }
-      if (cancelled) return;
-      setDetail(d);
-      setSweepMissing(false);
-      setDetailError(null);
-      try {
-        const t = await tuningApi.listTrials(selectedId);
-        if (!cancelled) setTrials(t.trials ?? []);
-      } catch {
-        // A sweep launched here has no trial directory until its first trial writes one.
-        if (!cancelled) setTrials([]);
-      }
-      if (!cancelled && !TERMINAL_STATUSES.has(d.status)) timer = setTimeout(poll, 3000);
-    };
-    void poll();
-    return () => {
-      cancelled = true;
-      if (timer) clearTimeout(timer);
-    };
-  }, [selectedId]);
+    void refreshDetail(selectedId);
+  }, [selectedId, refreshDetail]);
 
   useEffect(() => {
     if (!selectedId || !selectedTrialId) {
@@ -198,26 +188,27 @@ export function TuningTab() {
     };
   }, [selectedId, rayAttempt]);
 
-  // One TensorBoard over the whole sweep directory: the launch is idempotent, so there is
-  // nothing to wait for beyond a manifest existing to serve; held off until one does.
-  useEffect(() => {
-    setSweepTb({ url: null, error: null });
-    // sweepMissing !== false: hold off on both the unknown state and a confirmed absence,
-    // never only the latter.
-    if (!selectedId || sweepMissing !== false) return;
-    let cancelled = false;
-    void tuningApi.launchSweepTensorboard(selectedId).then(
-      (launched) => {
-        if (!cancelled) setSweepTb(launchOutcome(launched));
-      },
-      (e) => {
-        if (!cancelled) setSweepTb({ url: null, error: messageOf(e) });
-      },
-    );
-    return () => {
-      cancelled = true;
-    };
-  }, [selectedId, sweepTbAttempt, sweepMissing]);
+  // Both three-valued: null while the detail hasn't answered for this selection yet, else the
+  // detail's own reading. The trial list below keys its own text on hasManifest the same way.
+  const detailForSelection = detail && detail.sweep_id === selectedId ? detail : null;
+  const hasManifest = detailForSelection ? detailForSelection.has_manifest : null;
+  const sweepNonTerminal =
+    detailForSelection === null || !TERMINAL_STATUSES.has(detailForSelection.status);
+
+  // One TensorBoard over the whole sweep directory: a pre-manifest attempt's 404 is not held
+  // off, only retried (useEmbeddedToolRetry) until the manifest and a launch land.
+  const sweepTbStep = useCallback(async (): Promise<EmbeddedToolStepResult> => {
+    if (!selectedId) return { url: null, error: null, done: true };
+    try {
+      const launched = await tuningApi.launchSweepTensorboard(selectedId);
+      const outcome = launchOutcome(launched);
+      return { ...outcome, done: outcome.url != null || !sweepNonTerminal };
+    } catch (e) {
+      return { url: null, error: messageOf(e), done: !sweepNonTerminal };
+    }
+  }, [selectedId, sweepNonTerminal]);
+
+  const sweepTb = useEmbeddedToolRetry(!!selectedId, sweepTbAttempt, sweepTbStep);
 
   // Every trial's TensorBoard costs a port out of a bounded range, so moving off a trial stops
   // the one it was showing.
@@ -257,28 +248,49 @@ export function TuningTab() {
 
   function toggleSweep(sweepId: string) {
     setSelectedTrialId(null);
-    // Batched with the id change, so the TensorBoard effect never runs against the previous
-    // selection's sweepMissing before the detail poll has had a chance to say anything at all.
-    setSweepMissing(null);
     setSelectedId((current) => (current === sweepId ? null : sweepId));
   }
 
   async function onCancelSweep(sweepId: string) {
+    setPendingActions((prev) => ({ ...prev, [sweepId]: "cancel" }));
+    setActionErrors((prev) => {
+      const { [sweepId]: _drop, ...rest } = prev;
+      return rest;
+    });
     try {
       await tuningApi.cancel(sweepId);
       void refresh();
     } catch (e) {
-      useStore.getState().pushToast(`Cancel failed: ${messageOf(e)}`);
+      const message = `Cancel failed: ${messageOf(e)}`;
+      useStore.getState().pushToast(message);
+      setActionErrors((prev) => ({ ...prev, [sweepId]: message }));
+    } finally {
+      setPendingActions((prev) => {
+        const { [sweepId]: _drop, ...rest } = prev;
+        return rest;
+      });
     }
   }
 
   async function onRelaunchSweep(sweepId: string) {
+    setPendingActions((prev) => ({ ...prev, [sweepId]: "relaunch" }));
+    setActionErrors((prev) => {
+      const { [sweepId]: _drop, ...rest } = prev;
+      return rest;
+    });
     try {
       const result = await tuningApi.relaunch(sweepId);
       void refresh();
       if (typeof result.sweep_id === "string") setSelectedId(result.sweep_id);
     } catch (e) {
-      useStore.getState().pushToast(`Relaunch failed: ${messageOf(e)}`);
+      const message = `Relaunch failed: ${messageOf(e)}`;
+      useStore.getState().pushToast(message);
+      setActionErrors((prev) => ({ ...prev, [sweepId]: message }));
+    } finally {
+      setPendingActions((prev) => {
+        const { [sweepId]: _drop, ...rest } = prev;
+        return rest;
+      });
     }
   }
 
@@ -287,22 +299,27 @@ export function TuningTab() {
     setPickerOpen(false);
   }
 
-  // Cancel while running, gone once "stop requested" (shown as status text) except for an
-  // external sweep; "Run again" once terminal and relaunchable; nothing otherwise.
+  // Cancel while running, gone once "stop requested" except for an external sweep; "Run again"
+  // once terminal and relaunchable. Either disables with a pending label while in flight.
   function sweepAction(s: Sweep) {
+    const pending = pendingActions[s.sweep_id];
+    const actionError = actionErrors[s.sweep_id];
+    const describedBy = actionError ? `sweep-action-error-${s.sweep_id}` : undefined;
     if (SWEEP_CANCELLABLE.has(s.status)) {
       if (s.cancel_requested && !s.external) return null;
       return (
         <button
           type="button"
           aria-label={`Cancel ${s.sweep_id}`}
-          className="tcip-btn text-[10px] shrink-0 mt-2"
+          aria-describedby={describedBy}
+          disabled={pending === "cancel"}
+          className="tcip-btn text-[10px] shrink-0 mt-2 disabled:opacity-60"
           onClick={(e) => {
             e.stopPropagation();
             void onCancelSweep(s.sweep_id);
           }}
         >
-          Cancel
+          {pending === "cancel" ? "Cancelling…" : "Cancel"}
         </button>
       );
     }
@@ -311,13 +328,15 @@ export function TuningTab() {
         <button
           type="button"
           aria-label={`Run again ${s.sweep_id}`}
-          className="tcip-btn text-[10px] shrink-0 mt-2"
+          aria-describedby={describedBy}
+          disabled={pending === "relaunch"}
+          className="tcip-btn text-[10px] shrink-0 mt-2 disabled:opacity-60"
           onClick={(e) => {
             e.stopPropagation();
             void onRelaunchSweep(s.sweep_id);
           }}
         >
-          Run again
+          {pending === "relaunch" ? "Starting…" : "Run again"}
         </button>
       );
     }
@@ -351,12 +370,6 @@ export function TuningTab() {
               <span className="tcip-heading">Sweep</span>
               <span className="font-mono text-[12px] text-tcip-fg">{detail.sweep_id}</span>
               <span className="text-[11px] text-tcip-muted">({detail.status})</span>
-            </>
-          ) : sweepMissing === true ? (
-            <>
-              <span className="tcip-heading">Sweep</span>
-              <span className="font-mono text-[12px] text-tcip-fg">{selectedId}</span>
-              <span className="text-[11px] text-tcip-muted">(no record yet)</span>
             </>
           ) : selectedId ? (
             <>
@@ -456,7 +469,9 @@ export function TuningTab() {
                   onRetry={() => setSweepTbAttempt((n) => n + 1)}
                 />
               </div>
-              {detail.status === "cancelled" ? (
+              {!detail.has_manifest ? (
+                <div className="text-[11px] text-tcip-muted">{SWEEP_NO_RECORD_YET}</div>
+              ) : detail.status === "cancelled" ? (
                 <div className="text-[11px] text-tcip-muted">
                   Cancelled: {detail.error ?? NO_CANCEL_REASON}
                 </div>
@@ -469,19 +484,17 @@ export function TuningTab() {
                     <pre className="max-h-[24vh] text-[11px] font-mono p-3 tcip-panel overflow-auto">
                       {JSON.stringify(detail.result, null, 2)}
                     </pre>
-                  ) : (
+                  ) : !TERMINAL_STATUSES.has(detail.status) ? (
                     <div className="text-[11px] text-tcip-muted">
                       The best config appears here once the sweep finishes. Pick one of its trials
                       to follow that trial while it runs.
                     </div>
-                  )}
+                  ) : null}
                 </>
               )}
             </div>
           ) : detailError ? (
             <div className="text-[11px] text-tcip-fp">{detailError}</div>
-          ) : sweepMissing === true ? (
-            <div className="text-[11px] text-tcip-muted">{SWEEP_NO_RECORD_YET}</div>
           ) : selectedId ? (
             <div className="text-[11px] text-tcip-muted">Reading this sweep's record…</div>
           ) : (
@@ -526,14 +539,22 @@ export function TuningTab() {
               const running = SWEEP_CANCELLABLE.has(s.status);
               const searchLine = [
                 s.n_trials != null ? `${s.n_trials} trials planned` : null,
-                s.search_alg,
-                s.scheduler,
+                s.search_alg ? `search ${s.search_alg}` : null,
+                s.scheduler
+                  ? `scheduler ${s.scheduler === "none" ? "no scheduler" : s.scheduler}`
+                  : null,
                 s.param_space_keys && s.param_space_keys.length > 0
-                  ? s.param_space_keys.join(", ")
+                  ? `axes ${s.param_space_keys.join(", ")}`
                   : null,
               ]
                 .filter((part): part is string => !!part)
                 .join(" · ");
+              const describedBy = [
+                s.relaunched_from ? `sweep-relaunch-${s.sweep_id}` : null,
+                s.error ? `sweep-error-${s.sweep_id}` : null,
+              ]
+                .filter((part): part is string => !!part)
+                .join(" ");
               return (
                 <li key={s.sweep_id}>
                   <div
@@ -546,6 +567,8 @@ export function TuningTab() {
                     <button
                       type="button"
                       aria-expanded={expanded}
+                      aria-label={`${s.sweep_id} ${s.status}`}
+                      aria-describedby={describedBy || undefined}
                       className="flex-1 flex items-start gap-2 text-left"
                       onClick={() => toggleSweep(s.sweep_id)}
                     >
@@ -557,10 +580,22 @@ export function TuningTab() {
                         <span className="block text-[10px] text-tcip-muted">
                           {s.status}
                           {running && s.cancel_requested ? " · stop requested" : ""}
-                          {s.relaunched_from ? ` · relaunched from ${s.relaunched_from}` : ""}
                         </span>
+                        {s.relaunched_from && (
+                          <span
+                            id={`sweep-relaunch-${s.sweep_id}`}
+                            className="block text-[10px] text-tcip-muted"
+                          >
+                            relaunched from {s.relaunched_from}
+                          </span>
+                        )}
                         {s.error ? (
-                          <span className="block text-[10px] text-tcip-fp">{s.error}</span>
+                          <span
+                            id={`sweep-error-${s.sweep_id}`}
+                            className="block text-[10px] text-tcip-fp"
+                          >
+                            {s.error}
+                          </span>
                         ) : (
                           s.status === "cancelled" && (
                             <span className="block text-[10px] text-tcip-muted">
@@ -575,6 +610,14 @@ export function TuningTab() {
                     </button>
                     {sweepAction(s)}
                   </div>
+                  {actionErrors[s.sweep_id] && (
+                    <div
+                      id={`sweep-action-error-${s.sweep_id}`}
+                      className="mt-1 ml-5 text-[10px] text-tcip-fp"
+                    >
+                      {actionErrors[s.sweep_id]}
+                    </div>
+                  )}
                   {expanded && (
                     <div className="mt-1 ml-5">
                       {searchLine && (
@@ -583,9 +626,9 @@ export function TuningTab() {
                       <ul className="space-y-1">
                         {trials.length === 0 ? (
                           <li className="text-[10px] text-tcip-muted">
-                            {sweepMissing === true
+                            {hasManifest === false
                               ? SWEEP_NO_RECORD_YET
-                              : sweepMissing === false
+                              : hasManifest === true
                                 ? "No trials on disk yet."
                                 : "Reading this sweep's record…"}
                           </li>
@@ -605,11 +648,20 @@ export function TuningTab() {
                                 <span className="block font-mono text-[11px]">{t.trial_id}</span>
                                 <span className="block text-[10px] text-tcip-muted">
                                   {t.has_metrics ? "metrics" : "no metrics yet"}
-                                  {Object.keys(t.params).length > 0
-                                    ? ` · ${Object.entries(t.params)
-                                        .map(([k, v]) => `${k}=${cellText(v)}`)
-                                        .join(", ")}`
-                                    : ""}
+                                  {Object.keys(t.params).length > 0 && (
+                                    <>
+                                      {" · "}
+                                      {Object.entries(t.params).map(([k, v], i) => (
+                                        <span
+                                          key={k}
+                                          title={typeof v === "number" ? String(v) : undefined}
+                                        >
+                                          {i > 0 ? ", " : ""}
+                                          {k}={cellText(v)}
+                                        </span>
+                                      ))}
+                                    </>
+                                  )}
                                 </span>
                               </button>
                             </li>

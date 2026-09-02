@@ -33,6 +33,7 @@ export function EmbeddedTool({
             href={url}
             target="_blank"
             rel="noopener noreferrer"
+            aria-label={`Open in a new tab: ${title}`}
           >
             Open in a new tab
           </a>
@@ -49,7 +50,12 @@ export function EmbeddedTool({
           <div className="flex h-full flex-col items-center justify-center gap-2 px-3 text-center">
             <span className="text-[11px] text-tcip-fp">{error}</span>
             {onRetry && (
-              <button type="button" className="tcip-btn text-[11px]" onClick={onRetry}>
+              <button
+                type="button"
+                className="tcip-btn text-[11px]"
+                onClick={onRetry}
+                aria-label={`Try again: ${title}`}
+              >
                 Try again
               </button>
             )}

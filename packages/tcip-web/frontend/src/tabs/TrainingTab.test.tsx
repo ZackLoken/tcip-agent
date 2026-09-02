@@ -142,9 +142,77 @@ describe("TrainingTab run list", () => {
     expect(await screen.findByText("train-a")).toBeInTheDocument();
     expect(
       screen.getByText(
-        /Runs this window launched first, in launch order; every other recorded run follows/,
+        /Runs this app's own launches first, in launch order; every other recorded run follows/,
       ),
     ).toBeInTheDocument();
+  });
+
+  it("names the row's own select control with the id and status alone", async () => {
+    vi.spyOn(trainingApi, "listRuns").mockResolvedValue({
+      runs: [run({ run_id: "train-named-row", status: "running", experiment_id: "exp-other" })],
+    });
+
+    render(<TrainingTab />);
+    expect(
+      await screen.findByRole("button", { name: "train-named-row running" }),
+    ).toBeInTheDocument();
+  });
+
+  it("carries the row's rounded best value as a title", async () => {
+    vi.spyOn(trainingApi, "listRuns").mockResolvedValue({
+      runs: [
+        run({
+          run_id: "train-titled",
+          status: "completed",
+          best_metric: 0.41285,
+          best_metric_name: "loss",
+        }),
+      ],
+    });
+
+    render(<TrainingTab />);
+    const value = await screen.findByText("best loss 0.413");
+    expect(value).toHaveAttribute("title", "0.41285");
+  });
+
+  it("shows an in-flight Cancel as a disabled, pending row control, and a failure in the row", async () => {
+    vi.spyOn(trainingApi, "listRuns").mockResolvedValue({
+      runs: [run({ run_id: "train-cancel-flight", status: "running" })],
+    });
+    let resolveCancel: (v: {
+      run_id: string;
+      status: string;
+      cancel_requested: boolean;
+    }) => void = () => {};
+    vi.spyOn(trainingApi, "cancel").mockReturnValue(
+      new Promise((resolve) => {
+        resolveCancel = resolve;
+      }),
+    );
+
+    render(<TrainingTab />);
+    const button = await screen.findByRole("button", { name: "Cancel train-cancel-flight" });
+    fireEvent.click(button);
+
+    expect(await screen.findByText("Cancelling…")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Cancel train-cancel-flight" })).toBeDisabled();
+
+    resolveCancel({ run_id: "train-cancel-flight", status: "running", cancel_requested: true });
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Cancel train-cancel-flight" })).not.toBeDisabled(),
+    );
+  });
+
+  it("shows a failed Cancel in the row, not only as a toast", async () => {
+    vi.spyOn(trainingApi, "listRuns").mockResolvedValue({
+      runs: [run({ run_id: "train-cancel-fail", status: "running" })],
+    });
+    vi.spyOn(trainingApi, "cancel").mockRejectedValue(new Error("network error"));
+
+    render(<TrainingTab />);
+    fireEvent.click(await screen.findByRole("button", { name: "Cancel train-cancel-fail" }));
+
+    expect(await screen.findByText("Cancel failed: network error")).toBeInTheDocument();
   });
 });
 
@@ -199,7 +267,7 @@ describe("TrainingTab tensorboard panel", () => {
     fireEvent.click(await screen.findByText("train-broken"));
 
     expect(await screen.findByText("connection refused")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Try again: TensorBoard" })).toBeInTheDocument();
   });
 });
 

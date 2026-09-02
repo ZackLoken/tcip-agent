@@ -18,6 +18,7 @@ import { LaunchPicker, type DataPicker, type LaunchPickerRow } from "@/component
 import { MAX_MARKED_RUNS, RunComparison, type MarkedRun } from "@/components/RunComparison";
 import { TabHeading } from "@/components/TabHeading";
 import { useEditableAgentRequest } from "@/hooks/useEditableAgentRequest";
+import { useEmbeddedToolRetry, type EmbeddedToolStepResult } from "@/hooks/useEmbeddedToolRetry";
 import { TERMINAL_STATUSES } from "@/lib/runStatus";
 import { useStore } from "@/store";
 import { defaultTrainingRequest } from "@/tabs/agentPrompts";
@@ -37,7 +38,9 @@ function unmarkableReason(run: TrainingRunSummary): string | null {
   return null;
 }
 
-const TENSORBOARD_RETRY_MS = 3000;
+function messageOf(e: unknown): string {
+  return e instanceof Error ? e.message : String(e);
+}
 
 const NO_OTHER_PARTITION =
   "this listing found no other recorded partition the config can bind to; the agent can draw one.";
@@ -128,11 +131,13 @@ export function TrainingTab() {
   const [runsError, setRunsError] = useState<string | null>(null);
   const [selectedRun, setSelectedRun] = useState<string | null>(null);
   const [metrics, setMetrics] = useState<MetricRow[]>([]);
-  const [tbUrl, setTbUrl] = useState<string | null>(null);
-  const [tbError, setTbError] = useState<string | null>(null);
   const [tbNoLogs, setTbNoLogs] = useState(false);
   const [tbAttempt, setTbAttempt] = useState(0);
   const [markedRunIds, setMarkedRunIds] = useState<Set<string>>(new Set());
+  // Cancel in flight, by run id: disables that row's own Cancel button with a pending label,
+  // and a failure lands in cancelErrors rather than only a toast.
+  const [pendingCancel, setPendingCancel] = useState<ReadonlySet<string>>(new Set());
+  const [cancelErrors, setCancelErrors] = useState<Record<string, string>>({});
   const streamRef = useRef<(() => void) | null>(null);
 
   const marked: MarkedRun[] = runs
@@ -269,79 +274,77 @@ export function TrainingTab() {
     return () => streamRef.current?.();
   }, [selectedRun, projectRoot, refreshRuns, comparing]);
 
-  // Adopt the TensorBoard already serving this run, or start one. A run that has not written its
-  // log directory yet has nothing to serve, so a failed start is retried while the run is live.
+  // tbNoLogs is a step side effect below, not part of the hook's own outcome, since its text
+  // overrides tbError's; reset it on the same triggers the hook itself resets url/error on.
   useEffect(() => {
-    setTbUrl(null);
-    setTbError(null);
     setTbNoLogs(false);
-    if (!selectedRun) return;
-    const runId = selectedRun;
-    let cancelled = false;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-
-    const attach = async () => {
-      let detail;
-      try {
-        detail = await trainingApi.getRun(runId);
-      } catch (e) {
-        if (!cancelled) setTbError(e instanceof Error ? e.message : String(e));
-        return;
-      }
-      if (cancelled) return;
-
-      let url = detail.tensorboard_url ?? null;
-      let failure: string | null = null;
-      let noLogs = false;
-      if (!url) {
-        try {
-          const launched = await trainingApi.launchTensorboard(runId);
-          url = launched.url ?? null;
-          if (launched.error) {
-            failure = launched.output ? `${launched.error}: ${launched.output}` : launched.error;
-          }
-        } catch (e) {
-          if (e instanceof StructuredRefusalError && e.detail.no_logs === true) {
-            noLogs = true;
-          } else {
-            failure = e instanceof Error ? e.message : String(e);
-          }
-        }
-      }
-      if (cancelled) return;
-
-      if (url) {
-        setTbUrl(url);
-        setTbError(null);
-        setTbNoLogs(false);
-        return;
-      }
-      if (TERMINAL_STATUSES.has(detail.status ?? "")) {
-        if (noLogs) {
-          setTbNoLogs(true);
-          setTbError(null);
-        } else {
-          setTbError(failure ?? "No TensorBoard is serving this run.");
-        }
-        return;
-      }
-      setTbError(null);
-      timer = setTimeout(() => void attach(), TENSORBOARD_RETRY_MS);
-    };
-
-    void attach();
-    return () => {
-      cancelled = true;
-      if (timer) clearTimeout(timer);
-    };
   }, [selectedRun, tbAttempt]);
 
+  // Adopt the TensorBoard already serving this run, or start one, retrying on a timer while
+  // the run is live: useEmbeddedToolRetry, the loop the Tuning tab's own panel shares.
+  const tbStep = useCallback(async (): Promise<EmbeddedToolStepResult> => {
+    if (!selectedRun) return { url: null, error: null, done: true };
+    const runId = selectedRun;
+    let detail;
+    try {
+      detail = await trainingApi.getRun(runId);
+    } catch (e) {
+      return { url: null, error: messageOf(e), done: true };
+    }
+
+    let url = detail.tensorboard_url ?? null;
+    let failure: string | null = null;
+    let noLogs = false;
+    if (!url) {
+      try {
+        const launched = await trainingApi.launchTensorboard(runId);
+        url = launched.url ?? null;
+        if (launched.error) {
+          failure = launched.output ? `${launched.error}: ${launched.output}` : launched.error;
+        }
+      } catch (e) {
+        if (e instanceof StructuredRefusalError && e.detail.no_logs === true) {
+          noLogs = true;
+        } else {
+          failure = messageOf(e);
+        }
+      }
+    }
+
+    if (url) {
+      setTbNoLogs(false);
+      return { url, error: null, done: true };
+    }
+    const terminal = TERMINAL_STATUSES.has(detail.status ?? "");
+    if (!terminal) return { url: null, error: null, done: false };
+    if (noLogs) {
+      setTbNoLogs(true);
+      return { url: null, error: null, done: true };
+    }
+    return { url: null, error: failure ?? "No TensorBoard is serving this run.", done: true };
+  }, [selectedRun]);
+
+  const { url: tbUrl, error: tbError } = useEmbeddedToolRetry(!!selectedRun, tbAttempt, tbStep);
+
   async function onCancel(runId: string) {
+    setPendingCancel((prev) => new Set(prev).add(runId));
+    setCancelErrors((prev) => {
+      const { [runId]: _drop, ...rest } = prev;
+      return rest;
+    });
     try {
       await trainingApi.cancel(runId);
       void refreshRuns();
     } catch (e) {
-      useStore.getState().pushToast(`Cancel failed: ${e instanceof Error ? e.message : String(e)}`);
+      const message = `Cancel failed: ${messageOf(e)}`;
+      useStore.getState().pushToast(message);
+      setCancelErrors((prev) => ({ ...prev, [runId]: message }));
+    } finally {
+      setPendingCancel((prev) => {
+        const next = new Set(prev);
+        next.delete(runId);
+        return next;
+      });
     }
   }
 
@@ -497,7 +500,7 @@ export function TrainingTab() {
         )}
         {runs.length > 0 && (
           <div className="text-[10px] text-tcip-muted mb-1">
-            Runs this window launched first, in launch order; every other recorded run follows,
+            Runs this app's own launches first, in launch order; every other recorded run follows,
             sorted by experiment id.
           </div>
         )}
@@ -505,6 +508,8 @@ export function TrainingTab() {
           {runs.map((r) => {
             const isMarked = markedRunIds.has(r.run_id);
             const reason = unmarkableReason(r);
+            const cancelling = pendingCancel.has(r.run_id);
+            const cancelError = cancelErrors[r.run_id];
             return (
               <li key={r.run_id}>
                 <div
@@ -517,6 +522,7 @@ export function TrainingTab() {
                   <button
                     type="button"
                     aria-pressed={selectedRun === r.run_id}
+                    aria-label={`${r.run_id} ${r.status}`}
                     className="flex-1 text-left"
                     onClick={() => setSelectedRun(r.run_id)}
                   >
@@ -534,7 +540,7 @@ export function TrainingTab() {
                       {r.best_metric !== undefined &&
                         r.best_metric !== null &&
                         r.best_metric_name && (
-                          <span className="tabular-nums">
+                          <span className="tabular-nums" title={String(r.best_metric)}>
                             best {r.best_metric_name} {Number(r.best_metric).toFixed(3)}
                           </span>
                         )}
@@ -563,10 +569,12 @@ export function TrainingTab() {
                         <button
                           type="button"
                           aria-label={`Cancel ${r.run_id}`}
-                          className="px-2 py-1 text-[10px] border-l border-tcip-border hover:bg-tcip-hover transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-tcip-accent/70"
+                          aria-describedby={cancelError ? `cancel-error-${r.run_id}` : undefined}
+                          disabled={cancelling}
+                          className="px-2 py-1 text-[10px] border-l border-tcip-border hover:bg-tcip-hover transition-colors disabled:opacity-40 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-tcip-accent/70"
                           onClick={() => void onCancel(r.run_id)}
                         >
-                          Cancel
+                          {cancelling ? "Cancelling…" : "Cancel"}
                         </button>
                       )}
                     </div>
@@ -576,6 +584,14 @@ export function TrainingTab() {
                         className="text-[10px] text-tcip-muted text-right max-w-[150px]"
                       >
                         {reason}
+                      </span>
+                    )}
+                    {cancelError && (
+                      <span
+                        id={`cancel-error-${r.run_id}`}
+                        className="text-[10px] text-tcip-fp text-right max-w-[150px]"
+                      >
+                        {cancelError}
                       </span>
                     )}
                   </div>

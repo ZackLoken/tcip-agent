@@ -15,12 +15,17 @@ function ToastItem({ toast, onDismiss }: { toast: Toast; onDismiss: (id: number)
     return () => window.clearTimeout(id);
   }, [toast.id, onDismiss]);
 
+  const isError = toast.level === "error";
   return (
     <div
-      role="alert"
+      role={isError ? "alert" : "status"}
+      aria-live={isError ? "assertive" : "polite"}
       className={`flex items-start gap-2 rounded-md border bg-tcip-panel/95 px-3 py-2 text-[12px] shadow-lg ${LEVEL_CLASS[toast.level]}`}
     >
-      <span className="flex-1 break-words">{toast.message}</span>
+      <span className="flex-1 break-words">
+        {toast.message}
+        {toast.count && toast.count > 1 ? ` (×${toast.count})` : ""}
+      </span>
       <button
         className="text-tcip-muted hover:text-tcip-fg"
         onClick={() => onDismiss(toast.id)}

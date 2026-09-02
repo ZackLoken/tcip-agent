@@ -22,6 +22,10 @@ export interface Sweep {
   cancel_requested?: boolean;
   /** The sweep this one was relaunched from, or null when it was not a relaunch. */
   relaunched_from?: string | null;
+  /** Whether run_hpo has written this sweep's first manifest yet. False in the pre-manifest
+   * window a relaunch opens (the route registers the job before it answers), so a caller keys
+   * its not-yet-recorded state on this rather than on a 404 that window never produces. */
+  has_manifest: boolean;
 }
 
 export interface SweepDetail {
@@ -29,6 +33,8 @@ export interface SweepDetail {
   status: string;
   error?: string | null;
   result: unknown;
+  /** Whether run_hpo has written this sweep's first manifest yet; see Sweep.has_manifest. */
+  has_manifest: boolean;
 }
 
 export interface SweepTrial {
