@@ -467,6 +467,71 @@ def test_preflight_config_precedence_also_refuses_on_the_top_level_block(tmp_pat
                 for i in r["issues"])
 
 
+def test_preflight_config_refuses_a_top_level_stages_entry_missing_epochs(tmp_path):
+    """A top-level ``stages`` entry wins over ``training.stages``, the same precedence
+    ``train()`` reads under; a top-level stage missing 'epochs' must be refused here, not only
+    mid-run, even beside an otherwise-valid nested ``training.stages``."""
+    pytest.importorskip("torch")
+    from tcip_mcp.tools.training_tools import preflight_config
+
+    imgs = tmp_path / "images"
+    lbls = tmp_path / "labels"
+    imgs.mkdir()
+    lbls.mkdir()
+    cfg: dict[str, object] = {
+        "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
+                         "builder_kwargs": {"num_classes": 1}, "task": "detection"},
+        "data": {"images_dir": str(imgs), "labels_dir": str(lbls)},
+        "training": {"batch_size": 2, "stages": [{"epochs": 5}]},
+        "stages": [{"freeze_to": 0}],
+    }
+    r = preflight_config(cfg)
+    assert any("Stage 0 missing 'epochs'" in i for i in r["issues"])
+
+
+def test_preflight_config_accepts_a_nested_only_stages_config(tmp_path):
+    """Coverage of the precedence's other side: no top-level ``stages`` entry, so the
+    normalized config falls back to ``training.stages``, and a valid nested schedule still
+    passes."""
+    pytest.importorskip("torch")
+    from tcip_mcp.tools.training_tools import preflight_config
+
+    imgs = tmp_path / "images"
+    lbls = tmp_path / "labels"
+    imgs.mkdir()
+    lbls.mkdir()
+    cfg: dict[str, object] = {
+        "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
+                         "builder_kwargs": {"num_classes": 1}, "task": "detection"},
+        "data": {"images_dir": str(imgs), "labels_dir": str(lbls)},
+        "training": {"batch_size": 2, "stages": [{"freeze_to": 0, "epochs": 5}]},
+    }
+    r = preflight_config(cfg)
+    assert r["valid"] is True
+
+
+def test_preflight_config_names_a_non_mapping_evaluation_block_as_an_issue(tmp_path):
+    """``TrainingSection``/``TrainConfigSchema`` both allow extra keys of any type, so a
+    non-mapping ``evaluation`` block reaches ``eval_cfg.get(...)`` unchecked; it must become a
+    named issue, not an ``AttributeError`` that crashes the whole preflight call."""
+    pytest.importorskip("torch")
+    from tcip_mcp.tools.training_tools import preflight_config
+
+    imgs = tmp_path / "images"
+    lbls = tmp_path / "labels"
+    imgs.mkdir()
+    lbls.mkdir()
+    cfg: dict[str, object] = {
+        "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
+                         "builder_kwargs": {"num_classes": 1}, "task": "detection"},
+        "data": {"images_dir": str(imgs), "labels_dir": str(lbls)},
+        "training": {"batch_size": 2},
+        "evaluation": "not_a_mapping",
+    }
+    r = preflight_config(cfg)
+    assert any("evaluation" in i and "mapping" in i for i in r["issues"])
+
+
 def test_a_config_naming_an_unregistered_trait_still_lists(tmp_path, monkeypatch):
     """A run's own row never touches the trait registry: naming a trait this platform's
     registry does not carry (an evaluation.trait config field with no matching spec) must not
@@ -1002,6 +1067,31 @@ def test_run_hpo_trial_bespoke_custom_key_not_falsely_flagged_unconsumed(monkeyp
 
     resolved = ts.read(trial_config_key(trial_dir.parent, trial_dir.name))
     assert resolved["unconsumed_params"] == []
+
+
+def test_run_hpo_trial_swept_top_level_evaluation_is_not_reported_unconsumed(monkeypatch, tmp_path):
+    """A swept top-level ``evaluation`` axis must be seen as read: the fake training body reads
+    it the same way ``generic_trainer.train()`` does, through ``evaluation_section``, which must
+    read ``run.config`` (the access-tracking wrapper) directly rather than through a
+    ``dict(config)`` copy that would bypass the wrapper's own ``get`` override."""
+    pytest.importorskip("torch")
+    from tcip_mcp.tools.training_tools import _run_hpo_trial, trial_config_key
+    from tcip_mcp.pipelines.schemas import evaluation_section
+
+    def fake_train(run, train_loader, val_loader, task="detection",
+                   epoch_callback=None, resume_from=""):
+        evaluation_section(run.config)  # the same read generic_trainer.train() performs
+        run.best_metric = 1.0
+        run.status = "completed"
+        return run
+
+    _patch_hpo_trial_machinery(monkeypatch, fake_train)
+    trial_dir = tmp_path / "trial_0"
+    _run_hpo_trial({"lr": 3e-4, "evaluation": {"selection_metric": "f1"}}, [].append,
+                   _detection_base(), str(trial_dir))
+
+    resolved = ts.read(trial_config_key(trial_dir.parent, trial_dir.name))
+    assert "evaluation" not in resolved["unconsumed_params"]
 
 
 def test_run_hpo_trial_diverged_run_never_outranks_a_worse_but_alive_config(tmp_path):
