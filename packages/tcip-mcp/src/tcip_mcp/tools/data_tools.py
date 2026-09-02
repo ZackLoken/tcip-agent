@@ -232,14 +232,19 @@ def freeze_split_manifest(experiment_id: str, output_path: str | None = None) ->
     stems never lived under the training roots); the run's val side is empty (it trained without
     validation, a partition no bind can use); the task is not ``detection``/``instance_seg``; the
     config's ``data`` section carries no ``subject``, ``labels_dir``, ``images_dir`` or
-    ``id_map``; the labels changed since the run (``dataset_hash(labels_dir)`` now differs from
-    the one ``split.json`` recorded, both named); or a manifest already exists at the output
-    directory.
+    ``id_map``; the record carries no ``group_by`` at all (no grouping policy recorded; never
+    defaulted to ``"stem"``); the record's ``dataset_hash`` is ``None`` (the
+    run recorded no labels hash, so staleness cannot be checked); the labels changed since the
+    run (``dataset_hash(labels_dir)`` now differs from the one ``split.json`` recorded, both
+    named; the comparison is over the whole labels directory, since a drawn run's ``split.json``
+    records no per-stem digests, so any change anywhere under the labels directory refuses
+    freezing, not only a change to the run's own stems: draw a fresh split over the current
+    data instead); or a manifest already exists at the output directory.
 
     The frozen manifest's ``calibration`` side is always empty: freezing a training run's own
     train/val draw records no calibration draw, so the calibration doors' own floor refuses any
-    calibration measurement against it by name, and this tool's own answer says so instead of
-    quietly minting a manifest that looks whole but cannot calibrate.
+    calibration measurement against it by name, and this tool's own answer carries a ``note``
+    saying so instead of quietly minting a manifest that looks whole but cannot calibrate.
 
     Args:
         experiment_id: The finished run to freeze the drawn partition of.
@@ -301,14 +306,27 @@ def freeze_split_manifest(experiment_id: str, output_path: str | None = None) ->
     if missing:
         return {"error": f"{experiment_id!r}'s durable config carries no {missing}: "
                          "freeze_split_manifest needs every one of them to compose a manifest."}
+    if resolved_group_by is None:
+        return {"error": f"{experiment_id!r}'s split record carries no group_by at all (no "
+                         "grouping policy recorded): freeze_split_manifest never defaults one, "
+                         "since guessing 'stem' could silently misstate the policy the run "
+                         "actually drew under."}
 
     labels_hash_at_split = split.get("dataset_hash")
+    if labels_hash_at_split is None:
+        return {"error": f"{experiment_id!r}'s split record carries no dataset_hash (the run "
+                         "recorded no labels hash at draw time): freeze_split_manifest cannot "
+                         "check the labels have not moved since, so it refuses rather than "
+                         "freezing a partition it cannot vouch for."}
     labels_hash_now = _dataset_hash(labels_dir)
-    if labels_hash_at_split is not None and labels_hash_now != labels_hash_at_split:
+    if labels_hash_now != labels_hash_at_split:
         return {"error": f"the labels under {labels_dir!r} changed since {experiment_id!r} "
                          f"trained (dataset_hash was {labels_hash_at_split!r}, is now "
-                         f"{labels_hash_now!r}): freeze a run whose labels have not moved, or "
-                         "draw a fresh split over the current data."}
+                         f"{labels_hash_now!r}): the comparison is over the whole labels "
+                         "directory, since a drawn run's split.json records no per-stem "
+                         "digests, so any change anywhere under it refuses freezing, not only "
+                         "a change to the run's own stems; freeze a run whose labels have not "
+                         "moved, or draw a fresh split over the current data."}
 
     date = split.get("date") or None
     date_key = manifest_date_key(date)
@@ -355,7 +373,7 @@ def freeze_split_manifest(experiment_id: str, output_path: str | None = None) ->
     from datetime import datetime, timezone
 
     manifest = compose_split_manifest(
-        out_dir, seed=int(split.get("seed", 42)), group_by=resolved_group_by or "stem",
+        out_dir, seed=int(split.get("seed", 42)), group_by=resolved_group_by,
         dataset_fingerprint=fingerprint, subject=subject, attribute=data_cfg.get("attribute"),
         id_map=id_map, members=members, splits=splits, admission_counts={},
         calibration_foreground_groups_by_date={date_key: 0}, realized_ratios=realized_ratios,
@@ -366,6 +384,9 @@ def freeze_split_manifest(experiment_id: str, output_path: str | None = None) ->
     return {
         "manifest_dir": str(out_dir), "train": len(train_stems), "val": len(val_stems),
         "calibration": 0, "date": date, "origin": manifest["origin"],
+        "note": "the calibration side is empty (a training run's own drawn partition records "
+               "no calibration draw): the calibration doors' own floor refuses any calibration "
+               "measurement against this manifest by name.",
     }
 
 
