@@ -265,9 +265,12 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
         training: {batch_size, ...}  # the full key list generic_trainer.train() reads
               # (device/seed/deterministic/mixed_precision/stages/optimizer/scheduler/
               # lr_scaling/stage_warmup_epochs/enforce_monotonic_unfreeze/
-              # gradient_accumulation_steps/checkpoint_every_n_epochs/early_stopping/evaluation)
+              # gradient_accumulation_steps/checkpoint_every_n_epochs/early_stopping)
               # is documented on train()'s own docstring, not repeated here, read that for the
-              # canonical, always-current list. training_source: optional custom train(ctx) loop.
+              # canonical, always-current list.
+        evaluation: {trait, selection_metric, ...}  # top level or training.evaluation, top
+              # level wins; read consistently through schemas.evaluation_section.
+        training_source: optional custom train(ctx) loop.
 
     Args:
         config: Full training configuration dict.
@@ -285,7 +288,9 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
             diverging model's raw losses may hold ``nan``/``inf``, which this JSON-RPC tool cannot
             answer with directly.
     """
-    from tcip_mcp.pipelines.schemas import validate_train_config_schema
+    from tcip_mcp.pipelines.schemas import (
+        evaluation_section, normalize_train_config, validate_train_config_schema,
+    )
     from tcip_mcp.pipelines.model_build import DATASET_SOURCE_KEY, MODEL_SOURCE_KEY, TRAINING_SOURCE_KEY
 
     # Pydantic schema: type/structure of data/training.
@@ -512,16 +517,17 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
                     except _ULD as exc:
                         issues.append(f"data.val_labels_dir: {exc}")
 
-    # Training config validation
-    train_cfg = config.get("training", {})
-    batch_size = train_cfg.get("batch_size", 2)
+    # Training config validation, read through the same top-level hoist train() reads under
+    # (a top-level batch_size/stages entry wins over training.batch_size/training.stages).
+    normalized = normalize_train_config(config)
+    batch_size = normalized.get("batch_size", 2)
     if not isinstance(batch_size, int) or batch_size < 1:
         issues.append("'training.batch_size' must be a positive integer")
 
     # Per-stage 'epochs' is required; 'lr' is optional (StageSpec) and the trainer
     # reads learning rates from config['optimizer'], never from a stage. Absent
     # stages are fine, launch_training supplies its own default schedule.
-    for i, stage in enumerate(train_cfg.get("stages") or []):
+    for i, stage in enumerate(normalized.get("stages") or []):
         if "epochs" not in stage:
             issues.append(f"Stage {i} missing 'epochs'")
         if "lr" in stage:
@@ -534,8 +540,13 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
 
     # Fail fast on an explicit selection_metric that is undeclared or, with a center-match trait,
     # comparability-only, at validation time rather than mid-run.
-    from tcip_mcp.pipelines.schemas import evaluation_section
     eval_cfg = evaluation_section(config)
+    if not isinstance(eval_cfg, dict):
+        issues.append(
+            f"'evaluation' must be a mapping (trait/selection_metric/... keys), got "
+            f"{type(eval_cfg).__name__}"
+        )
+        eval_cfg = {}
     sel_metric = eval_cfg.get("selection_metric")
     trait_name = eval_cfg.get("trait")
     if sel_metric:
