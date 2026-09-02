@@ -17,7 +17,7 @@ import { HelpOverlay } from "@/components/HelpOverlay";
 import { StatusBar } from "@/components/StatusBar";
 import { TabBanner } from "@/components/TabBanner";
 import { Toasts } from "@/components/Toasts";
-import { TopBar } from "@/components/TopBar";
+import { TopBar, tabButtonId, tabPanelId } from "@/components/TopBar";
 import { stateSocket } from "@/api/ws";
 import { useActiveTabSync } from "@/hooks/useActiveTabSync";
 import { useImageStatusHydrate } from "@/hooks/useImageStatusHydrate";
@@ -287,9 +287,16 @@ function App() {
       <div className="flex-1 flex min-h-0">
         <div className="flex-1 flex flex-col min-w-0 min-h-0">
           <TabBanner />
-          <ErrorBoundary resetKey={activeTab}>
-            <Suspense fallback={<TabFallback />}>{tabPanels[activeTab]}</Suspense>
-          </ErrorBoundary>
+          <div
+            id={tabPanelId(activeTab)}
+            role="tabpanel"
+            aria-labelledby={tabButtonId(activeTab)}
+            className="flex-1 flex flex-col min-w-0 min-h-0"
+          >
+            <ErrorBoundary resetKey={activeTab}>
+              <Suspense fallback={<TabFallback />}>{tabPanels[activeTab]}</Suspense>
+            </ErrorBoundary>
+          </div>
         </div>
         <TerminalRail />
       </div>
