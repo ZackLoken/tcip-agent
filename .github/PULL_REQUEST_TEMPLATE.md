@@ -21,4 +21,5 @@
       (`python scripts/generate_frozen_manifest.py`) and `tests/test_frozen_manifest.py` passes
 - [ ] Commits are one concern each, in dependency order, with LF line endings, and each message
       states the standing constraint the change installs
-- [ ] No new or renamed crop trait vocabulary outside `crops.yml` and `.github/skills/crops/`
+- [ ] No new or renamed crop trait vocabulary outside `crops.yml` and
+      `packages/tcip-mcp/src/tcip_mcp/knowledge/crops/`

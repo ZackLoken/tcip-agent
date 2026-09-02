@@ -58,8 +58,8 @@ option below does. The real design choice is who runs the model loop.
 tcip-web gains an `agent_host` module that, per chat session, drives the Claude Agent
 SDK (the Python `claude-agent-sdk` package, which wraps the locally installed Claude
 Code runtime in headless mode). The SDK process is pointed at the repo root so it
-picks up `.mcp.json` (spawning its own `tcip-mcp` stdio subprocess), `CLAUDE.md`, and
-`.github/skills/` exactly like an interactive Claude Code session.
+picks up `.mcp.json` (spawning its own `tcip-mcp` stdio subprocess), `CLAUDE.md`, and the
+generated skills under `.claude/skills/` exactly like an interactive Claude Code session.
 
 - Pros
   - Reuses the operator's existing Claude Code auth (subscription or `ANTHROPIC_API_KEY`);

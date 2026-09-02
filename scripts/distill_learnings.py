@@ -229,9 +229,10 @@ def build_worksheet(project_root: Path) -> str:
             lines.append(f"- {c.get('ts', '?')}  session {c.get('session_id', '?')}")
 
     lines.append(
-        "\n---\nNow (per the self-improvement skill) draft the concrete artifacts, new/updated "
-        "`.github/skills/<name>/SKILL.md`, a proposed CLAUDE.md diff, or a tool proposal, for the "
-        "owner to approve. This script gathers; the judgment is yours. Nothing here is applied."
+        "\n---\nNow (per the self-improvement skill) draft the concrete artifacts, a new/updated "
+        "`packages/tcip-mcp/src/tcip_mcp/knowledge/<name>.md`, a proposed CLAUDE.md diff, or a "
+        "tool proposal, for the owner to approve. This script gathers; the judgment is yours. "
+        "Nothing here is applied."
     )
     return "\n".join(lines) + "\n"
 

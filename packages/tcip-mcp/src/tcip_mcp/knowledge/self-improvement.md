@@ -16,6 +16,10 @@ derives its own answer from its own data rather than inheriting one measured som
 something is genuinely general, the owner is the transport: they read these records and decide what
 becomes a platform change.
 
+This document is itself one of the platform's domain knowledge documents. Claude Code reaches it
+as a generated skill; a client without generated skills reaches the identical text through the
+`domain_knowledge` tool.
+
 The loop is three live, audited tools, no separate journal file:
 
 | When | Tool | Lands |

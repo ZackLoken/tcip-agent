@@ -451,7 +451,7 @@ def test_delivery_skill_documents_the_real_csv_schema(tmp_path):
     the columns for a while) teaches a schema the breeder's file does not have. Compared against the
     real written header, not against a second copy of the list.
     """
-    from pathlib import Path as _Path
+    from tcip_mcp.knowledge import document_path
 
     out_path = tmp_path / "schema.csv"
     export_aggregated_csv(
@@ -461,7 +461,7 @@ def test_delivery_skill_documents_the_real_csv_schema(tmp_path):
     with open(out_path, newline="") as f:
         written = next(csv.reader(f))
 
-    skill = _Path(__file__).resolve().parents[1] / ".github" / "skills" / "delivery" / "SKILL.md"
+    skill = document_path("delivery")
     lines = skill.read_text(encoding="utf-8").splitlines()
     start = next(i for i, ln in enumerate(lines) if ln.startswith("## Per-Plant CSV Schema"))
     documented = []

@@ -4,7 +4,7 @@ The in-app agent surface is the *actual* ``claude`` interactive TUI, not a chat
 re-implementation: we spawn the fenced CLI inside an interactive shell (PowerShell on
 Windows, bash on POSIX) in a pseudo-terminal (ConPTY via ``pywinpty`` on Windows, the
 stdlib ``pty`` on POSIX) with cwd = the repo root, so it loads ``CLAUDE.md`` /
-``.github/skills/`` / ``.mcp.json`` and inherits the machine's existing Claude Code auth
+``.claude/skills/`` / ``.mcp.json`` and inherits the machine's existing Claude Code auth
 exactly like a terminal session. The shell (not claude) is the PTY's top process, so an
 in-TUI ``/exit`` drops back to a live prompt where the ``claude --resume <id>`` hint stays
 usable. Raw PTY bytes stream to xterm.js in the browser over a WebSocket; keystrokes

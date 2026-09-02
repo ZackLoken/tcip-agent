@@ -18,7 +18,7 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
 THIS_FILE = Path(__file__).resolve()
-LIVE_SKILL_REFERENCE = ".github/skills/annotation"
+LIVE_SKILL_REFERENCE = "tcip_mcp/knowledge/annotation.md"
 # Both spellings a reference could plausibly use (the spaced "visual analysis" is excluded: it
 # is also an ordinary description elsewhere, e.g. vision_tools.py's own module docstring).
 DELETED_SKILL_NEEDLES = ("visual-analysis", "visual_analysis")

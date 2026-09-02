@@ -7,8 +7,8 @@ description: "Cross-cutting domain context for TCIP's six perennial tree-crop br
 
 General ground for phenotyping the Savanna Institute's six perennial tree crops. This is
 the shared context; per-crop detail lives in the per-crop skills, the trait vocabulary in
-`.github/skills/crops/crops.yml` (the authority), and bloom-milestone math in the
-`phenology` skill. This skill exists to answer one recurring question honestly: given the
+`packages/tcip-mcp/src/tcip_mcp/knowledge/crops/crops.yml` (the authority), and bloom-milestone
+math in the `phenology` skill. This skill exists to answer one recurring question honestly: given the
 physics of the sensor, can this trait even be observed, and if so, at what perspective?
 
 ## The six crops at a glance
@@ -20,12 +20,12 @@ identity, phenology detail, and the field-imageable-versus-lab partition.
 
 | Crop | Latin / growth form | crops.yml traits | Per-crop skill |
 |------|---------------------|------------------|----------------|
-| Hazelnut | *Corylus americana* × *C. avellana* hybrids, multi-stemmed, clump/thicket-forming shrub (~2–5 m), grown as hedgerow rows | 58 | `.github/skills/crops/hazelnut/SKILL.md` |
-| Chestnut | *Castanea* spp., Chinese chestnut *C. mollissima* and American/hybrid (*C. dentata*) material; single-stem deciduous nut tree, rounded spreading crown | 21 | `.github/skills/crops/chestnut/SKILL.md` |
-| Currant | *Ribes* spp. (currants, black currant *R. nigrum* and others), multi-stem deciduous shrub/bush (~1–2 m) | 86 | `.github/skills/crops/currant/SKILL.md` |
-| Elderberry | *Sambucus nigra* subsp. *canadensis*, suckering, multi-stemmed deciduous shrub (~2–4 m, to ~6 m), hedgerow rows | 69 | `.github/skills/crops/elderberry/SKILL.md` |
-| Persimmon | *Diospyros virginiana*, single-trunked, dioecious (occasionally polygamous) deciduous orchard tree | 20 | `.github/skills/crops/persimmon/SKILL.md` |
-| Black locust | *Robinia pseudoacacia* (Fabaceae), fast-growing, clonal, N-fixing deciduous hardwood; thorns, suckers | 10 | `.github/skills/crops/black-locust/SKILL.md` |
+| Hazelnut | *Corylus americana* × *C. avellana* hybrids, multi-stemmed, clump/thicket-forming shrub (~2–5 m), grown as hedgerow rows | 58 | `packages/tcip-mcp/src/tcip_mcp/knowledge/crops/hazelnut.md` |
+| Chestnut | *Castanea* spp., Chinese chestnut *C. mollissima* and American/hybrid (*C. dentata*) material; single-stem deciduous nut tree, rounded spreading crown | 21 | `packages/tcip-mcp/src/tcip_mcp/knowledge/crops/chestnut.md` |
+| Currant | *Ribes* spp. (currants, black currant *R. nigrum* and others), multi-stem deciduous shrub/bush (~1–2 m) | 86 | `packages/tcip-mcp/src/tcip_mcp/knowledge/crops/currant.md` |
+| Elderberry | *Sambucus nigra* subsp. *canadensis*, suckering, multi-stemmed deciduous shrub (~2–4 m, to ~6 m), hedgerow rows | 69 | `packages/tcip-mcp/src/tcip_mcp/knowledge/crops/elderberry.md` |
+| Persimmon | *Diospyros virginiana*, single-trunked, dioecious (occasionally polygamous) deciduous orchard tree | 20 | `packages/tcip-mcp/src/tcip_mcp/knowledge/crops/persimmon.md` |
+| Black locust | *Robinia pseudoacacia* (Fabaceae), fast-growing, clonal, N-fixing deciduous hardwood; thorns, suckers | 10 | `packages/tcip-mcp/src/tcip_mcp/knowledge/crops/black-locust.md` |
 
 The per-crop counts sum above the file's 180 unique trait names because many traits (for
 example `plant_height`, `flavor_rating`, `bloom_50per_date`) are shared across crops and

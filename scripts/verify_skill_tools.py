@@ -56,7 +56,9 @@ def prose_surfaces() -> list[Path]:
     A tool module's own docstrings and runtime return strings (`vision_tools.py`, `viz.py`) are
     not among these surfaces: a retired tool name surviving there is invisible to this checker.
     """
-    surfaces = sorted((REPO_ROOT / ".github" / "skills").rglob("SKILL.md"))
+    from tcip_mcp.knowledge import document_paths
+
+    surfaces = list(document_paths())
     surfaces += sorted((REPO_ROOT / "packages").glob("*/CLAUDE.md"))
     surfaces.append(REPO_ROOT / "CLAUDE.md")
     surfaces.append(REPO_ROOT / "README.md")

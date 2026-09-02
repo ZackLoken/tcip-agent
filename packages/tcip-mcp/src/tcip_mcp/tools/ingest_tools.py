@@ -4,8 +4,9 @@
 images into the canonical layout (``images/<YYYY-MM-DD>/<stem><ext>``) under a
 workspace project, bucketing by the capture date each file states. It does not annotate, split,
 choose a task, or write ``classes.json``; those are later steps in the project-setup
-arc (see ``.github/skills/project-setup``). Keeping it thin is deliberate: one
-auditable primitive the agent composes, instead of improvising file ops per project.
+arc (see ``packages/tcip-mcp/src/tcip_mcp/knowledge/project-setup.md``). Keeping it thin is
+deliberate: one auditable primitive the agent composes, instead of improvising file ops per
+project.
 """
 
 from __future__ import annotations
