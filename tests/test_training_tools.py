@@ -421,6 +421,52 @@ def test_preflight_config_rejects_incoherent_selection_metric(tmp_path):
     assert any("no declared ranking direction" in i for i in r["issues"])
 
 
+def test_preflight_config_reads_the_top_level_evaluation_block(tmp_path):
+    """A config carrying both a top-level and a nested ``training.evaluation`` block with
+    different ``selection_metric`` values must validate against the top-level one, since that
+    is the block ``normalize_train_config`` hoists to the top and the trainer actually trains
+    on."""
+    pytest.importorskip("torch")
+    from tcip_mcp.tools.training_tools import preflight_config
+
+    imgs = tmp_path / "images"
+    lbls = tmp_path / "labels"
+    imgs.mkdir()
+    lbls.mkdir()
+    cfg: dict[str, object] = {
+        "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
+                         "builder_kwargs": {"num_classes": 1}, "task": "detection"},
+        "data": {"images_dir": str(imgs), "labels_dir": str(lbls)},
+        "training": {"batch_size": 2, "evaluation": {"selection_metric": "not_a_real_metric"}},
+        "evaluation": {"selection_metric": "f1"},
+    }
+    r = preflight_config(cfg)
+    assert r["valid"] is True
+    assert not any("no declared ranking direction" in i for i in r["issues"])
+
+
+def test_preflight_config_precedence_also_refuses_on_the_top_level_block(tmp_path):
+    """Coverage of the chosen precedence's other side: with the placements swapped, the
+    top-level block's undeclared metric is what preflight refuses on, not the nested one."""
+    pytest.importorskip("torch")
+    from tcip_mcp.tools.training_tools import preflight_config
+
+    imgs = tmp_path / "images"
+    lbls = tmp_path / "labels"
+    imgs.mkdir()
+    lbls.mkdir()
+    cfg: dict[str, object] = {
+        "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
+                         "builder_kwargs": {"num_classes": 1}, "task": "detection"},
+        "data": {"images_dir": str(imgs), "labels_dir": str(lbls)},
+        "training": {"batch_size": 2, "evaluation": {"selection_metric": "f1"}},
+        "evaluation": {"selection_metric": "not_a_real_metric"},
+    }
+    r = preflight_config(cfg)
+    assert any("not_a_real_metric" in i and "no declared ranking direction" in i
+                for i in r["issues"])
+
+
 def test_a_config_naming_an_unregistered_trait_still_lists(tmp_path, monkeypatch):
     """A run's own row never touches the trait registry: naming a trait this platform's
     registry does not carry (an evaluation.trait config field with no matching spec) must not

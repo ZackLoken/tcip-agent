@@ -35,6 +35,32 @@ def test_run_hpo_threads_storage_path_and_writes_result(tmp_path, real_hpo_base_
     assert result["best_params"] == {"lr": 0.01}
 
 
+def test_run_hpo_resolves_direction_from_the_top_level_evaluation_block(
+    tmp_path, real_hpo_base_config, monkeypatch
+):
+    """A base config carrying both placements must resolve the sweep's mode from the
+    top-level ``evaluation`` block, the same one the trainer actually trains on."""
+    import tcip_mcp.tools.training_tools as tt
+
+    cfg = dict(real_hpo_base_config)
+    cfg["evaluation"] = {"selection_metric": "f1"}  # higher-is-better -> mode "max"
+    cfg["training"] = {"evaluation": {"selection_metric": "loss"}}  # would resolve "min"
+
+    captured: dict = {}
+
+    def fake_search(**kw):
+        captured.update(kw)
+        return {"best_params": {}, "best_value": 0.5, "n_trials": 1,
+                "study_name": kw.get("study_name")}
+
+    monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", fake_search)
+    tt.run_hpo(base_config=cfg, n_trials=1, output_dir=str(tmp_path))
+
+    # metric is always the fixed composite name; mode alone carries the resolved direction.
+    assert captured["metric"] == "objective"
+    assert captured["mode"] == "max"
+
+
 def test_run_hpo_defaults_storage_to_platform_root_when_no_output_dir(
     tmp_path, real_hpo_base_config, monkeypatch
 ):

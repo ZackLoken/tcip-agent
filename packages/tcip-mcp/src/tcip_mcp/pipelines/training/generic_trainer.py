@@ -627,7 +627,8 @@ def train(
         physical_batch = getattr(train_loader, "batch_size", None) or config.get("batch_size") or 1
         pending_snapshot = None   # best optimizer state from the previous stage
         prev_trainable = None     # trainable param count of the previous stage
-        eval_cfg = config.get("evaluation", {})  # metric / selection params
+        from tcip_mcp.pipelines.schemas import evaluation_section
+        eval_cfg = evaluation_section(config)  # metric / selection params, top level wins
         trait = eval_cfg.get("trait")
         selection_metric = resolve_selection_metric(
             task, trait, eval_cfg.get("selection_metric"), has_val_loader=val_loader is not None)
