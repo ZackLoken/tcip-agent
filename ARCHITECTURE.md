@@ -844,13 +844,13 @@ anything.
 | tool | line | audited | docstring first line |
 |---|---|---|---|
 | `preflight_config` | `training_tools.py:258` | yes | Validate a training configuration before launching. |
-| `launch_training` | `training_tools.py:651` | yes | Launch a training run in an isolated subprocess from a bespoke ``model_source`` builder. |
-| `check_training_status` | `training_tools.py:885` | yes | Check the status of a training run. |
-| `list_training_runs` | `training_tools.py:1028` | yes | List every training run this platform can currently account for. |
-| `cancel_training` | `training_tools.py:1244` | yes | Request graceful cancellation of a running training run. |
-| `run_hpo` | `training_tools.py:1812` | yes | Run hyperparameter optimization on Ray Tune, training each trial for real. |
-| `cancel_hpo` | `training_tools.py:2107` | yes | Request cooperative cancellation of a running HPO sweep. |
-| `evaluate_model` | `training_tools.py:2510` | yes | Evaluate a trained checkpoint on a (held-out) dataset and write test_results.json. |
+| `launch_training` | `training_tools.py:662` | yes | Launch a training run in an isolated subprocess from a bespoke ``model_source`` builder. |
+| `check_training_status` | `training_tools.py:896` | yes | Check the status of a training run. |
+| `list_training_runs` | `training_tools.py:1039` | yes | List every training run this platform can currently account for. |
+| `cancel_training` | `training_tools.py:1255` | yes | Request graceful cancellation of a running training run. |
+| `run_hpo` | `training_tools.py:1823` | yes | Run hyperparameter optimization on Ray Tune, training each trial for real. |
+| `cancel_hpo` | `training_tools.py:2118` | yes | Request cooperative cancellation of a running HPO sweep. |
+| `evaluate_model` | `training_tools.py:2521` | yes | Evaluate a trained checkpoint on a (held-out) dataset and write test_results.json. |
 
 ### vision_tools.py (3 tools)
 
@@ -2014,7 +2014,7 @@ config-only conflict and task checks (computed before any read, so an unreadable
 suppresses them) and the manifest-dependent checks (subject/attribute, date, images-root
 presence and movement, and an empty train/val side once narrowed to the run's own date).
 `preflight_config` calls both halves directly, in the same order, over a manifest it read
-itself; `training_tools.list_split_choices` (`training_tools.py:1087`), the relaunch data
+itself; `training_tools.list_split_choices` (`training_tools.py:1098`), the relaunch data
 picker's own reader wrapped by `GET /api/training/configs/{experiment_id}/splits`, calls the
 composed function per candidate manifest it read through the checked variant above, and builds
 each candidate's launch config through `training_tools.candidate_config_with_manifest`
@@ -2420,8 +2420,8 @@ Phase 3 verdict: duplicated.
 ## S42. training_source bespoke train(ctx) seam  <!-- queued: P5-321 unify -->
 
 Must agree: a bespoke train(ctx) callable is importable and accepts the TrainContext the envelope hands it.
-Side A: `packages/tcip-mcp/src/tcip_mcp/pipelines/training/envelope.py:424` (`training_source = run.config.get("training_source")`).
-Side B: `packages/tcip-mcp/src/tcip_mcp/tools/training_tools.py:308` (`training_source = config.get("training_source")`).
+Side A: `packages/tcip-mcp/src/tcip_mcp/pipelines/training/envelope.py:434` (`training_source = run.config.get("training_source")`).
+Side B: `packages/tcip-mcp/src/tcip_mcp/tools/training_tools.py:315` (`training_source = config.get("training_source")`).
 Phase 3 verdict: duplicated.
 
 ## S43. dataset_source bespoke dataset seam
