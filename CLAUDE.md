@@ -187,11 +187,12 @@ techniques only, never for a per-trait pipeline; the endpoint is a trained model
 - mypy suppressions are enabled per module as a family touches it, never one global flip.
 - Commits: one concern each, in dependency order, LF endings, messages stating the standing
   constraint the change installs (no session narrative, report ids, batch numbers or dates).
-- Every session ends with `project_retrospective`, both claude-context indexes rebuilt and
-  confirmed settled by two `get_indexing_status` readings minutes apart with identical counts
-  (the status string alone is not a signal; chunks equal to files means in flight), and the
-  handoff rewritten: `docs/recent-summary.md`, the open material in `docs/current-task.md`, and
-  the next-session prompt, for a session with none of your context.
+- Every session ends with `project_retrospective`; when a claude-context server is configured for
+  the session, both its indexes rebuilt and confirmed settled by two `get_indexing_status`
+  readings minutes apart with identical counts (the status string alone is not a signal; chunks
+  equal to files means in flight); and the handoff rewritten: `docs/recent-summary.md`, the open
+  material in `docs/current-task.md`, and the next-session prompt, for a session with none of
+  your context.
 
 ## Commands
 
@@ -208,10 +209,11 @@ python scripts/export_store.py <root>   # a root's database-held records back ou
 python scripts/adopt_store.py <root>    # a root's loose record files into its database
 ```
 
-Every process binds one storage backend at its entry point; an unset environment binds the
-database (`<root>/.tcip/store.db`), `TCIP_STORE_BACKEND=file` the loose-file layout, any other
-value refuses. `tests/test_store_contract.py` runs on both in one run; the rest runs on whichever
-is bound, so run `pytest tests/` both ways when you touch the seam. A root with loose records is
+Every process binds one storage backend at its entry point; an unset environment or
+`TCIP_STORE_BACKEND=sqlite` binds the database (`<root>/.tcip/store.db`),
+`TCIP_STORE_BACKEND=file` the loose-file layout, any other value refuses.
+`tests/test_store_contract.py` runs on both in one run; the rest runs on whichever is bound, so
+run `pytest tests/` both ways when you touch the seam. A root with loose records is
 refused by the database backend until `adopt_store.py` conforms it. The MCP server auto-launches
 from `.mcp.json` at the repo root; a stale tool index (an `InputValidationError` for a name you
 expect, or a renamed tool under its old name) means restart the client. Durable state resolves

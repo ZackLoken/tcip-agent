@@ -64,7 +64,7 @@ data/                          # sample hazelnut dataset (gitignored)
 ## Setup
 
 ```bash
-# Python: creates the env and installs the three packages (editable). Run from
+# Python: creates the env and installs the four packages (editable). Run from
 # the repo root. Installs a CPU/-or-platform torch wheel; see environment.yml for
 # the CUDA option.
 conda env create -f environment.yml
@@ -130,9 +130,14 @@ Annotation itself happens in the GUI's Annotate tab: a human labels a sample of 
 image with nothing to label is marked done as a negative there, never inferred from an empty
 label file alone.
 
-For a first training run, `make_splits(folder_path)` draws a fresh leakage-free train/val split
-over the labeled data; `freeze_split_manifest` is for afterward, binding a later run to a
-partition an earlier run already drew, not for drawing the first one.
+For a first training run, `make_splits(folder_path, subject=subject, train_ratio=0.7,
+val_ratio=0.15, calibration_ratio=0.15, output_path=<path>)` draws a fresh leakage-free
+train/val/calibration split over the labeled data and writes its manifest, binding a later run
+that reads it to the same partition; `output_path` (or `materialize=True`) and `subject` are both
+required to write one, and all three ratios must be non-zero, since a manifest always draws all
+three sides. A call with only `folder_path` answers with split stats over the whole tree instead,
+no manifest written and no subject needed. `freeze_split_manifest` is for afterward, binding a
+later run to a partition an earlier run already drew, not for drawing the first one.
 
 | Tool | Purpose |
 |------|---------|
@@ -149,6 +154,7 @@ positive state, such as a phenology milestone, instead calibrates through the
 
 | Tool | Purpose |
 |------|---------|
+| `author_trait_spec(project_root, trait, delivers, rationale)` | Registers a trait that does not yet exist, recording the agent's account of why, in the breeder's own terms; the breeder confirms it from the web GUI before it can back a delivery. |
 | `state_trait_operationalization(project_root, trait, delivery_kind, statement, mechanism, measured_subject, delivered_phenotypes)` | Records what the trait's delivered number means, in the breeder's own terms, for one delivery kind. Writing this does not itself clear the delivery gate; the breeder confirms it in the Results tab, and only that confirmation lets a delivery door proceed. |
 | `tabulate_counts` | Delivers a per-image `image, detection_count, avg_confidence` CSV, gated on the confirmed operationalization and the validated operating point. |
 | `export_predictions` | Persists a prediction bucket other doors (including a per-plant CSV built from it) treat as ground truth. |
@@ -280,6 +286,13 @@ the same as pasting it into a chat, and the platform does not bound or redact it
 [SECURITY.md](SECURITY.md) before using TCIP on commercially sensitive breeding data: it inventories
 every channel that leaves the machine, the one phone-home you can disable, and the trust boundary the
 loopback bind rests on.
+
+Contributing a change: [CONTRIBUTING.md](CONTRIBUTING.md) has the gates it must pass, and
+[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) the standards the project holds contributors to. What an
+adopter can build against today, independent of the 0.x version number, is
+[STABILITY.md](STABILITY.md)'s; [VERSIONING.md](VERSIONING.md) explains what that version number
+does and doesn't promise. Adopter-visible changes are recorded in
+[CHANGELOG.md](CHANGELOG.md).
 
 ## License
 

@@ -1,9 +1,8 @@
 # Changelog
 
 Git history is the authority for what changed and when; this file does not restate it. It
-records adopter-visible changes starting from the first tagged release, in [Keep a
-Changelog](https://keepachangelog.com/en/1.1.0/) form. No release has been tagged yet (see
-VERSIONING.md), so everything below is unreleased.
+records adopter-visible changes, in [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
+form. No release has been tagged yet (see VERSIONING.md), so everything below is unreleased.
 
 ## Unreleased
 
@@ -36,9 +35,22 @@ VERSIONING.md), so everything below is unreleased.
 - A coverage test in `tests/test_resolution.py` asserting every constant in
   `pipelines/resolution.py`'s `VALIDATED_SHIPPABLE` appears in some `_DIMENSION_REFERENCES`
   tuple, the invariant the delivery gate's dimension table depends on.
+- The `domain_knowledge` MCP tool, composing its client-visible description from the knowledge
+  corpus at import time, and generated `.claude/skills/<name>/SKILL.md` files rendered from that
+  same corpus by `scripts/generate_claude_skills.py`, so Claude Code and any other MCP client
+  read the same domain knowledge through the surface each can reach.
+- README's roadmap now names plant-tag identity (a QR or barcode physically tied to the plant)
+  as future work for capture with no georeferencing, distinct from the geolocated-capture and
+  orthomosaic paths already built.
 
 ### Changed
 
 - `.mcp.json` now declares only the platform's own `tcip` MCP server; the maintainer's optional
   semantic-search server is configured per machine outside this tracked file.
 - `scripts/README.md` now indexes every tracked file under `scripts/`.
+
+### Removed
+
+- `archive_project`, `import_project`, `scan_dataset`, `inspect_compute_resources`, and
+  `render_failure_cases` are no longer registered MCP tools; each is now reached through its own
+  `scripts/<name>.py` entry point instead.
