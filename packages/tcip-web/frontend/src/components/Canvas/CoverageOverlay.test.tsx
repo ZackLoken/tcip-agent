@@ -31,7 +31,9 @@ vi.mock("react-konva", () => ({
     />
   ),
   Line: (props: { stroke?: string }) => <div data-testid="k-line" data-stroke={props.stroke} />,
-  Text: (props: { text: string }) => <div data-testid="k-text" data-text={props.text} />,
+  Text: (props: { text: string; fill?: string }) => (
+    <div data-testid="k-text" data-text={props.text} data-fill={props.fill} />
+  ),
 }));
 
 function cell(name: string, x0: number, y0: number, x1: number, y1: number): GridCell {
@@ -78,7 +80,7 @@ describe("CoverageOverlay", () => {
     expect(container.querySelectorAll("[data-testid=k-group]")).toHaveLength(1);
   });
 
-  it("draws a cell's name only once its on-screen edge reaches the label floor", () => {
+  it("draws a cell's name only once its on-screen edge reaches the label floor, with a halo behind it", () => {
     const bigCell = cell("A1", 0, 0, CELL_LABEL_FLOOR_PX, CELL_LABEL_FLOOR_PX);
     const smallCell = cell("B1", 200, 0, 200 + CELL_LABEL_FLOOR_PX - 1, CELL_LABEL_FLOOR_PX - 1);
     const { container } = render(
@@ -96,7 +98,8 @@ describe("CoverageOverlay", () => {
     const labels = Array.from(container.querySelectorAll("[data-testid=k-text]")).map((el) =>
       el.getAttribute("data-text"),
     );
-    expect(labels).toEqual(["A1"]);
+    // The halo pattern draws two Text nodes per label (a dark one behind, the light one on top).
+    expect(labels).toEqual(["A1", "A1"]);
   });
 
   it("shows the saved-annotation count beside a labeled cell's name", () => {
@@ -129,12 +132,12 @@ describe("CoverageOverlay", () => {
       />,
     );
     const fills = Array.from(container.querySelectorAll("[data-testid=k-rect]")).filter((el) =>
-      (el.getAttribute("data-fill") ?? "").includes("80, 119, 84"),
+      (el.getAttribute("data-fill") ?? "").includes("201, 162, 75"),
     );
     expect(fills).toHaveLength(1);
   });
 
-  it("a swept cell also carries a dashed stroke, never colour alone", () => {
+  it("a swept cell's dashed stroke is two-tone: a dark halo rect under the coloured one, never colour alone", () => {
     const { container } = render(
       <CoverageOverlay
         cells={[cell("A1", 0, 0, 100, 100), cell("B1", 100, 0, 200, 100)]}
@@ -148,8 +151,35 @@ describe("CoverageOverlay", () => {
       />,
     );
     const dashed = Array.from(container.querySelectorAll("[data-testid=k-rect][data-dash=true]"));
-    expect(dashed).toHaveLength(1);
-    expect(dashed[0].getAttribute("data-stroke") ?? "").toContain("80, 119, 84");
+    expect(dashed).toHaveLength(2);
+    expect(
+      dashed.some((el) => (el.getAttribute("data-stroke") ?? "").includes("201, 162, 75")),
+    ).toBe(true);
+    expect(dashed.some((el) => (el.getAttribute("data-stroke") ?? "").includes("30, 30, 30"))).toBe(
+      true,
+    );
+  });
+
+  it("every cell border is two-tone: a dark halo rect under the light one", () => {
+    const { container } = render(
+      <CoverageOverlay
+        cells={[cell("A1", 0, 0, 100, 100)]}
+        viewport={{ x0: 0, y0: 0, x1: 100, y1: 100 }}
+        scale={1}
+        swept={new Set()}
+        activeComplete={new Set()}
+        activeStale={new Set()}
+        otherComplete={new Set()}
+        annotationCounts={{}}
+      />,
+    );
+    const borders = Array.from(container.querySelectorAll("[data-testid=k-rect]"));
+    expect(
+      borders.some((el) => (el.getAttribute("data-stroke") ?? "").includes("30, 30, 30")),
+    ).toBe(true);
+    expect(
+      borders.some((el) => (el.getAttribute("data-stroke") ?? "").includes("231, 229, 220")),
+    ).toBe(true);
   });
 
   it("a stale attested cell draws the strike-through line the active-complete one does not", () => {
@@ -166,5 +196,27 @@ describe("CoverageOverlay", () => {
       />,
     );
     expect(container.querySelectorAll("[data-testid=k-line]")).toHaveLength(1);
+  });
+
+  it("another subject's attestation carries a dotted (dashed) stroke the active subject's own does not", () => {
+    const { container } = render(
+      <CoverageOverlay
+        cells={[cell("A1", 0, 0, 100, 100), cell("B1", 100, 0, 200, 100)]}
+        viewport={{ x0: 0, y0: 0, x1: 200, y1: 100 }}
+        scale={1}
+        swept={new Set()}
+        activeComplete={new Set(["A1"])}
+        activeStale={new Set()}
+        otherComplete={new Set(["B1"])}
+        annotationCounts={{}}
+      />,
+    );
+    const rects = Array.from(container.querySelectorAll("[data-testid=k-rect]"));
+    const attestMarks = rects.filter((el) =>
+      (el.getAttribute("data-stroke") ?? "").includes("230, 151, 107"),
+    );
+    // Both attested marks share the ATTEST_RGB stroke; only the other-subject one carries dash.
+    expect(attestMarks).toHaveLength(2);
+    expect(attestMarks.filter((el) => el.getAttribute("data-dash") === "true")).toHaveLength(1);
   });
 });

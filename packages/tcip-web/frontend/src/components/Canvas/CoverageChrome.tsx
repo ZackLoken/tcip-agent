@@ -1,48 +1,108 @@
 /**
- * Coverage grid chrome for a multi-cell raster: the overlay toggle, a key naming what each
- * overlay mark means, the grid's own derivation line, the attestation control for the cell under
- * the viewport center, and the errors and previous-lattice fact a breeder needs before trusting
- * or acting on any of it. Floats bottom-right, completing the canvas' floating-chrome grammar
- * (legend bottom-left, attributes top-right, Overview top-left).
+ * Coverage grid chrome for the open raster: the overlay toggle, a key naming what each overlay
+ * mark means, the grid's own derivation line, the attestation control for the cell under the
+ * viewport center (or the cell a Map click just opened, while it stays in view), and the errors
+ * and previous-lattice facts a breeder needs before trusting or acting on any of it. Shown for
+ * every raster the grid route serves a lattice for, single-cell rasters included, so a one-cell
+ * image's own attestation is reachable from the GUI; only the Map tool itself stays withdrawn on
+ * a single-cell raster (AnnotateToolbar). Floats bottom-right, completing the canvas' floating-
+ * chrome grammar (legend bottom-left, attributes top-right, Overview top-left), and collapses
+ * like the app's other disclosure panels, remembered per session the way the overlay toggle
+ * already is.
  *
- * The attestation control's label always states the write it performs, read from the raw stored
- * set: "Attest" when the cell has never been attested, "Unattest" when it is attested and fresh,
- * "Re-attest ... (changed since attested)" when it is stale. When the current grid differs from
- * an existing record's grid, the first press only arms a confirmation (the write would discard
- * every attestation made on the previous lattice); a second press performs it.
+ * The attestation control's label always states the write it performs and the subject it writes
+ * for, read from the raw stored set: "Attest <cell> complete for <subject>" when the cell has
+ * never been attested, "Unattest <cell> for <subject>" when it is attested and fresh, "Re-attest
+ * <cell> for <subject> (changed since attested)" when it is stale. It is offered only while the
+ * overlay is on, since attesting a cell the breeder cannot see is acting on an unseen state; with
+ * the overlay off the chrome says so in one line instead. When the current grid differs from an
+ * existing record's grid, the first press only arms a confirmation (the write would discard every
+ * attestation made on the previous lattice) with an explicit Cancel beside it; a second press on
+ * the same control performs it. The armed state, its cancellation and every error are announced
+ * (role="status") for a screen-reader user who is not looking at the panel.
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 
+import { CollapsibleSection } from "@/components/CollapsibleSection";
 import type { OtherLatticeAttestation } from "@/hooks/useRegionCompleteness";
+import { useDisclosure } from "@/hooks/useDisclosure";
 
-/** Hover-triggered key for the overlay's marks, the AnnotateLegend pattern: nothing on the
- *  overlay itself names a mark, so this is the one place a breeder can look it up. */
+/** Keyboard-operable disclosure for the overlay's marks, the pattern CollapsibleSection already
+ *  uses elsewhere: a real button toggles a named region, no hover required. The overlay itself
+ *  names none of these; this is the one place a breeder can look one up. */
 function CoverageKey() {
+  const [open, setOpen] = useState(false);
+  const regionId = useId();
   return (
-    <div className="group relative">
+    <div className="relative">
       <button
         type="button"
+        aria-expanded={open}
+        aria-controls={regionId}
+        onClick={() => setOpen((o) => !o)}
         className="rounded border border-tcip-border bg-tcip-bg px-1.5 py-0.5 text-[10px] font-semibold text-tcip-muted hover:text-tcip-fg"
       >
         Key
       </button>
-      <div className="pointer-events-none absolute right-0 top-full z-30 mt-1 w-52 translate-y-1 rounded-md border border-tcip-border-hover bg-tcip-panel p-2.5 text-[10px] text-tcip-fg opacity-0 shadow-lg transition-all group-hover:pointer-events-auto group-hover:translate-y-0 group-hover:opacity-100">
-        <ul className="space-y-1">
-          <li>
-            Green tint, dashed border: swept (viewed at working scale, this or an earlier session)
-          </li>
-          <li>(n) beside a cell name: saved annotations of the active subject</li>
-          <li>Bright border: attested complete, active subject</li>
-          <li>Dim border: attested complete, another subject</li>
-          <li>Struck through: attested but changed since attested</li>
-        </ul>
-      </div>
+      {open && (
+        <div
+          id={regionId}
+          role="region"
+          aria-label="Coverage overlay key"
+          className="absolute right-0 top-full z-30 mt-1 w-56 rounded-md border border-tcip-border-hover bg-tcip-panel p-2.5 text-[10px] text-tcip-fg shadow-lg"
+        >
+          <ul className="space-y-1">
+            <li>swept: the recorded sweep history, any session</li>
+            <li>count in parentheses: saved annotations of the active subject</li>
+            <li>solid border: attested complete, active subject</li>
+            <li>dotted border: attested complete, another subject</li>
+            <li>struck through: attested but changed since attested</li>
+          </ul>
+        </div>
+      )}
     </div>
   );
 }
 
+function attestLabel(subject: string, cell: string, complete: boolean, stale: boolean): string {
+  if (!complete) return `Attest ${cell} complete for ${subject}`;
+  if (stale) return `Re-attest ${cell} for ${subject} (changed since attested)`;
+  return `Unattest ${cell} for ${subject}`;
+}
+
+/** The lattice states that hold at least one cell, one line each, for a screen-reader user who
+ *  cannot see the overlay's canvas pixels ("swept: B1, B2", "saved for fruit: A1 (2)",
+ *  "attested: B2", "changed since attested: B2"). Cell names sorted for a stable reading order. */
+function stateLines(props: {
+  subject: string | null;
+  swept: ReadonlySet<string>;
+  activeComplete: ReadonlySet<string>;
+  activeStale: ReadonlySet<string>;
+  annotationCounts: Record<string, number>;
+}): string[] {
+  const lines: string[] = [];
+  const swept = Array.from(props.swept).sort();
+  if (swept.length) lines.push(`swept: ${swept.join(", ")}`);
+  if (props.subject) {
+    const saved = Object.entries(props.annotationCounts)
+      .filter(([, n]) => n > 0)
+      .sort(([a], [b]) => a.localeCompare(b));
+    if (saved.length) {
+      lines.push(
+        `saved for ${props.subject}: ${saved.map(([name, n]) => `${name} (${n})`).join(", ")}`,
+      );
+    }
+  }
+  const attested = Array.from(props.activeComplete).sort();
+  if (attested.length) lines.push(`attested: ${attested.join(", ")}`);
+  const stale = Array.from(props.activeStale).sort();
+  if (stale.length) lines.push(`changed since attested: ${stale.join(", ")}`);
+  return lines;
+}
+
 export function CoverageChrome(props: {
+  subject: string | null;
   derivation: string;
   gridFetchError: string | null;
   readError: string | null;
@@ -53,43 +113,71 @@ export function CoverageChrome(props: {
   currentCellComplete: boolean;
   currentCellStale: boolean;
   otherLattice: OtherLatticeAttestation | null;
+  /** A view-coverage sweep record for this image/subject on a grid other than the current one,
+   *  or null: the sweep-history equivalent of `otherLattice`, read the same way. */
+  sweptOtherLattice: OtherLatticeAttestation | null;
+  swept: ReadonlySet<string>;
+  activeComplete: ReadonlySet<string>;
+  activeStale: ReadonlySet<string>;
+  annotationCounts: Record<string, number>;
   onAttest: (complete: boolean) => void;
 }) {
   const [confirmPending, setConfirmPending] = useState(false);
+  const [announcement, setAnnouncement] = useState("");
+  const { open: panelOpen, toggle: togglePanel } = useDisclosure(
+    "tcip.annotate.coverageChromeOpen",
+    true,
+  );
+
+  const cell = props.currentCellName;
+  const destructive = !!props.otherLattice;
 
   useEffect(() => {
     setConfirmPending(false);
   }, [props.currentCellName, props.otherLattice]);
 
-  const cell = props.currentCellName;
-  const destructive = !!props.otherLattice;
-
   function press() {
     if (destructive && !confirmPending) {
       setConfirmPending(true);
+      const n = props.otherLattice!.count;
+      setAnnouncement(
+        `Confirmation armed: press Confirm to discard ${n} previous attestation${n === 1 ? "" : "s"}, or Cancel.`,
+      );
       return;
     }
     setConfirmPending(false);
+    setAnnouncement("");
     props.onAttest(!props.currentCellComplete || props.currentCellStale);
   }
 
-  let label: string;
-  if (destructive && confirmPending) {
-    label = `Confirm: attest ${cell} (discards ${props.otherLattice!.count} previous attestation${props.otherLattice!.count === 1 ? "" : "s"})`;
-  } else if (!props.currentCellComplete) {
-    label = `Attest ${cell} complete`;
-  } else if (props.currentCellStale) {
-    label = `Re-attest ${cell} (changed since attested)`;
-  } else {
-    label = `Unattest ${cell}`;
+  function cancel() {
+    setConfirmPending(false);
+    setAnnouncement("Attestation cancelled.");
   }
 
+  let label = "";
+  if (cell && props.subject) {
+    if (destructive && confirmPending) {
+      const n = props.otherLattice!.count;
+      label = `Confirm: attest ${cell} for ${props.subject} (discards ${n} previous attestation${n === 1 ? "" : "s"})`;
+    } else {
+      label = attestLabel(props.subject, cell, props.currentCellComplete, props.currentCellStale);
+    }
+  }
+
+  const lines = stateLines({
+    subject: props.subject,
+    swept: props.swept,
+    activeComplete: props.activeComplete,
+    activeStale: props.activeStale,
+    annotationCounts: props.annotationCounts,
+  });
+
   return (
-    <div className="absolute bottom-3 right-3 z-20 flex w-64 flex-col gap-2 rounded-md border border-tcip-border bg-tcip-panel/95 px-3 py-2 text-[11px] text-tcip-fg shadow-lg backdrop-blur">
-      <div className="flex items-center justify-between">
-        <span className="text-[10px] font-semibold uppercase tracking-wide text-tcip-muted">
-          Coverage grid
-        </span>
+    <CollapsibleSection
+      className="absolute bottom-3 right-3 z-20 w-64 rounded-md border border-tcip-border bg-tcip-panel/95 px-3 py-2 text-[11px] text-tcip-fg shadow-lg backdrop-blur"
+      title={props.subject ? `Coverage for ${props.subject}` : "Coverage grid"}
+      right={
         <div className="flex items-center gap-1.5">
           <CoverageKey />
           <button
@@ -105,41 +193,84 @@ export function CoverageChrome(props: {
             {props.overlayOn ? "Overlay on" : "Overlay off"}
           </button>
         </div>
-      </div>
-
-      {props.gridFetchError ? (
-        <p className="text-tcip-fp">coverage grid unavailable: {props.gridFetchError}</p>
-      ) : props.derivation ? (
-        <p className="text-tcip-muted">{props.derivation}. A cell is not a training tile.</p>
-      ) : null}
-
-      {props.readError && (
-        <p className="text-tcip-fp">completeness unavailable: {props.readError}</p>
-      )}
-      {props.countsError && !props.readError && (
-        <p className="text-tcip-warn">saved-annotation counts unavailable: {props.countsError}</p>
-      )}
-
-      {props.otherLattice && (
-        <p className="text-tcip-warn">
-          {props.otherLattice.count} cell{props.otherLattice.count === 1 ? "" : "s"} attested on a
-          previous lattice ({props.otherLattice.cols}x{props.otherLattice.rows}).
+      }
+      open={panelOpen}
+      onToggle={togglePanel}
+    >
+      <div className="flex flex-col gap-2">
+        <p role="status" className="sr-only">
+          {announcement}
         </p>
-      )}
 
-      {cell && !props.readError && (
-        <button
-          type="button"
-          onClick={press}
-          className={`rounded border px-2 py-1 text-left text-[11px] font-semibold transition-colors ${
-            destructive && confirmPending
-              ? "border-tcip-fp/60 bg-tcip-fp/15 text-tcip-fp"
-              : "border-tcip-border bg-tcip-bg text-tcip-fg hover:border-tcip-border-hover"
-          }`}
-        >
-          {label}
-        </button>
-      )}
-    </div>
+        {props.gridFetchError ? (
+          <p className="text-tcip-fp">coverage grid unavailable: {props.gridFetchError}</p>
+        ) : props.derivation ? (
+          <p className="text-tcip-muted">{props.derivation}. A cell is not a training tile.</p>
+        ) : null}
+
+        {props.readError && (
+          <p role="status" className="text-tcip-fp">
+            this image&apos;s labels could not be read, so nothing can be attested until they are
+            fixed: {props.readError}
+          </p>
+        )}
+        {props.countsError && !props.readError && (
+          <p className="text-tcip-warn">saved-annotation counts unavailable: {props.countsError}</p>
+        )}
+
+        {props.otherLattice && (
+          <p className="text-tcip-warn">
+            {props.otherLattice.count} cell{props.otherLattice.count === 1 ? "" : "s"} attested on a
+            previous lattice ({props.otherLattice.cols}x{props.otherLattice.rows}).
+          </p>
+        )}
+        {props.sweptOtherLattice && (
+          <p className="text-tcip-muted">
+            {props.sweptOtherLattice.count} cell{props.sweptOtherLattice.count === 1 ? "" : "s"}{" "}
+            swept on a previous lattice ({props.sweptOtherLattice.cols}x
+            {props.sweptOtherLattice.rows}).
+          </p>
+        )}
+
+        {lines.length > 0 && (
+          <ul className="sr-only">
+            {lines.map((line) => (
+              <li key={line}>{line}</li>
+            ))}
+          </ul>
+        )}
+
+        {cell &&
+          !props.readError &&
+          (props.overlayOn ? (
+            props.subject && (
+              <div className="flex gap-1.5">
+                <button
+                  type="button"
+                  onClick={press}
+                  className={`flex-1 rounded border px-2 py-1 text-left text-[11px] font-semibold transition-colors ${
+                    destructive && confirmPending
+                      ? "border-tcip-fp/60 bg-tcip-fp/15 text-tcip-fp"
+                      : "border-tcip-border bg-tcip-bg text-tcip-fg hover:border-tcip-border-hover"
+                  }`}
+                >
+                  {label}
+                </button>
+                {destructive && confirmPending && (
+                  <button
+                    type="button"
+                    onClick={cancel}
+                    className="rounded border border-tcip-border bg-tcip-bg px-2 py-1 text-[11px] font-semibold text-tcip-muted hover:text-tcip-fg"
+                  >
+                    Cancel
+                  </button>
+                )}
+              </div>
+            )
+          ) : (
+            <p className="text-tcip-muted">Turn the overlay on to attest {cell}.</p>
+          ))}
+      </div>
+    </CollapsibleSection>
   );
 }

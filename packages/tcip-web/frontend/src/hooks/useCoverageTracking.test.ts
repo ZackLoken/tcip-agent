@@ -104,3 +104,80 @@ describe("useCoverageTracking subject gating", () => {
     expect(useStore.getState().toasts.length).toBe(toastsBefore);
   });
 });
+
+describe("useCoverageTracking sweep on another lattice", () => {
+  const OTHER_GRID: GridGeometry = {
+    width: 600,
+    height: 400,
+    tile_size: 200,
+    overlap: 0,
+    cols: 3,
+    rows: 2,
+  };
+
+  it("states a record's sweep count and dims when its grid differs from the current one", async () => {
+    vi.spyOn(api.coverage, "get").mockResolvedValue({
+      grid: OTHER_GRID,
+      cells_swept: ["A1", "B1"],
+      cells_served_at_native: [],
+      viewing: {
+        bands: null,
+        stretch: null,
+        stats_source: null,
+        display_bounds: null,
+        base_served_size: null,
+        working_scale_bar: null,
+      },
+      updated_at: "2026-01-01T00:00:00+00:00",
+    });
+    vi.spyOn(api.coverage, "push").mockResolvedValue({ status: "ok" });
+    const { result } = renderHook(() => useCoverageTracking(trackingArgs("tip")));
+
+    await waitFor(() => expect(result.current.sweptOtherLattice).not.toBeNull());
+    expect(result.current.sweptOtherLattice).toEqual({ count: 2, cols: 3, rows: 2 });
+    // Never hydrated onto the current lattice's swept set: a different lattice's cell names
+    // cannot be trusted to mean the same cells here.
+    expect(result.current.swept.size).toBe(0);
+  });
+
+  it("null when the record's grid matches the current one, the ordinary case", async () => {
+    vi.spyOn(api.coverage, "get").mockResolvedValue({
+      grid: GRID,
+      cells_swept: ["A1"],
+      cells_served_at_native: [],
+      viewing: {
+        bands: null,
+        stretch: null,
+        stats_source: null,
+        display_bounds: null,
+        base_served_size: null,
+        working_scale_bar: null,
+      },
+      updated_at: "2026-01-01T00:00:00+00:00",
+    });
+    vi.spyOn(api.coverage, "push").mockResolvedValue({ status: "ok" });
+    const { result } = renderHook(() => useCoverageTracking(trackingArgs("tip")));
+
+    await waitFor(() => expect(result.current.swept.has("A1")).toBe(true));
+    expect(result.current.sweptOtherLattice).toBeNull();
+  });
+});
+
+describe("useCoverageTracking failed push", () => {
+  it("a failed coverage push toasts through the tab's own toast path, not silently", async () => {
+    vi.spyOn(api.coverage, "get").mockResolvedValue(null);
+    vi.spyOn(api.coverage, "push").mockRejectedValue(new Error("connection refused"));
+    const { result } = renderHook(() => useCoverageTracking(trackingArgs("tip")));
+
+    result.current.noteServedAtNative("A1");
+    await waitFor(() =>
+      expect(
+        useStore
+          .getState()
+          .toasts.some(
+            (t) => t.message.includes("coverage") && t.message.includes("connection refused"),
+          ),
+      ).toBe(true),
+    );
+  });
+});

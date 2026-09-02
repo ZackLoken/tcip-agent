@@ -1,15 +1,14 @@
 /**
- * The coverage lattice for the open raster, fetched once the base serve shows the raster is
- * larger than one display-bounded serve (Served-Size below the native dims). An ordinary image
- * inside the display bound never fetches a grid: its single serve is the whole image, so there
- * is nothing to track. Cells always come from the route; nothing is derived client-side.
+ * The coverage lattice for the open raster, fetched for every raster once its path is known: an
+ * ordinary image inside the display bound derives a trivial one-cell lattice, which still names
+ * its own derivation and carries the one cell the chrome names and attests. Cells always come
+ * from the route; nothing is derived client-side.
  */
 
 import { useEffect, useRef, useState } from "react";
 
 import { api } from "@/api/client";
 import type { GridCell, GridGeometry } from "@/lib/coverage";
-import type { LoadedImage } from "@/lib/imageLoader";
 
 export interface CoverageGridState {
   grid: GridGeometry | null;
@@ -19,10 +18,8 @@ export interface CoverageGridState {
   /** The grid fetch's own refusal, or null; a failure must read as an error, never as "no
    *  grid needed here". */
   error: string | null;
-  /** True while whether this image needs a grid at all is still unknown (the base serve has not
-   *  reported back yet) or a needed fetch is genuinely in flight (the base serve already shows
-   *  the raster below native, and neither a grid nor an error has landed yet). Tells "still
-   *  unknown" apart from "settled, and there is no multi-cell grid". */
+  /** True while the fetch for the open image has not yet settled (neither a grid nor an error
+   *  has landed). Tells "still unknown" apart from "settled, and there is no multi-cell grid". */
   pending: boolean;
 }
 
@@ -42,20 +39,12 @@ const EMPTY_FETCHED: FetchedState = {
   error: null,
 };
 
-export function useCoverageGrid(
-  imagePath: string | null,
-  baseFacts: LoadedImage | null,
-  imgW: number,
-  imgH: number,
-): CoverageGridState {
+export function useCoverageGrid(imagePath: string | null): CoverageGridState {
   const [state, setState] = useState<FetchedState>(EMPTY_FETCHED);
   const fetchingRef = useRef<string | null>(null);
 
-  const served = baseFacts?.ok ? baseFacts.servedSize : null;
-  const belowNative = !!served && imgW > 0 && imgH > 0 && (served.w < imgW || served.h < imgH);
-
   useEffect(() => {
-    if (!imagePath || !belowNative) return;
+    if (!imagePath) return;
     if (fetchingRef.current === imagePath) return;
     fetchingRef.current = imagePath;
     let cancelled = false;
@@ -75,12 +64,10 @@ export function useCoverageGrid(
     return () => {
       cancelled = true;
     };
-  }, [imagePath, belowNative]);
+  }, [imagePath]);
 
   const current = state.path === imagePath && imagePath ? state : EMPTY_FETCHED;
-  // Derived directly rather than from the effect above: whether a fetch is coming (or even
-  // whether one is needed) is knowable a render earlier than that effect settles it.
-  const pending = !!imagePath && (!baseFacts || (belowNative && !current.grid && !current.error));
+  const pending = !!imagePath && !current.grid && !current.error;
   return {
     grid: current.grid,
     cells: current.cells,

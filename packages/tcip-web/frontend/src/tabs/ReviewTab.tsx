@@ -356,12 +356,16 @@ export function ReviewTab() {
   // Region serves for large rasters: when zoom passes the base bitmap's resolution, the
   // viewport's coverage cells stream in above it (display only; no accumulation on this tab).
   const [baseFacts, setBaseFacts] = useState<LoadedImage | null>(null);
-  const regionGrid = useCoverageGrid(
-    imgPath,
-    baseFacts,
-    matches?.img_width ?? 0,
-    matches?.img_height ?? 0,
-  );
+  const reviewImgW = matches?.img_width ?? 0;
+  const reviewImgH = matches?.img_height ?? 0;
+  const reviewServed = baseFacts?.ok ? baseFacts.servedSize : null;
+  // No chrome on this tab, so the grid is worth fetching only once genuinely below native.
+  const reviewBelowNative =
+    !!reviewServed &&
+    reviewImgW > 0 &&
+    reviewImgH > 0 &&
+    (reviewServed.w < reviewImgW || reviewServed.h < reviewImgH);
+  const regionGrid = useCoverageGrid(reviewBelowNative ? imgPath : null);
   const regions = useRegionServes({
     imagePath: imgPath,
     imgW: matches?.img_width ?? 0,

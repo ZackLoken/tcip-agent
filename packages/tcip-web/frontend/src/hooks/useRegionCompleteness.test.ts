@@ -131,7 +131,7 @@ describe("useRegionCompleteness", () => {
       .mockResolvedValueOnce(response({ bush: record("bush", ["A1"]) }));
     const post = vi
       .spyOn(api.coverage, "setCompleteness")
-      .mockResolvedValue({ status: "ok", complete: true, cells_complete: ["A1"] });
+      .mockResolvedValue({ status: "ok", complete: true, cells_complete: ["A1"], replaced: null });
     const { result } = renderHook(() =>
       useRegionCompleteness({
         imagePath: "C:/data/images/2026-01-01/mosaic.tif",
@@ -163,7 +163,7 @@ describe("useRegionCompleteness", () => {
       .mockResolvedValueOnce(response({ bush: record("bush", ["A1"]) }));
     const post = vi
       .spyOn(api.coverage, "setCompleteness")
-      .mockResolvedValue({ status: "ok", complete: true, cells_complete: ["A1"] });
+      .mockResolvedValue({ status: "ok", complete: true, cells_complete: ["A1"], replaced: null });
     const { result } = renderHook(() =>
       useRegionCompleteness({
         imagePath: "C:/data/images/2026-01-01/mosaic.tif",

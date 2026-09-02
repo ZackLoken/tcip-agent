@@ -144,6 +144,21 @@ describe("AnnotateToolbar draw mode", () => {
     expect(useStore.getState().gui.mode).toBe("map");
     expect(mapButton).toHaveAttribute("aria-pressed", "true");
   });
+
+  it("the Map tooltip says the cell opens, never calling it a tile", () => {
+    render(
+      <AnnotateToolbar onSave={() => {}} saveDisabled={false} dirty={false} coverageMultiCell />,
+    );
+    expect(screen.getByRole("button", { name: /^Map$/ })).toHaveAttribute(
+      "title",
+      "Map: click a coverage cell to open it; no annotation is authored",
+    );
+  });
+
+  it("the image-position textbox has an accessible name, not just a visible counter beside it", () => {
+    renderToolbar();
+    expect(screen.getByRole("textbox", { name: "Image position" })).toBeInTheDocument();
+  });
 });
 
 describe("AnnotateToolbar status filter", () => {
