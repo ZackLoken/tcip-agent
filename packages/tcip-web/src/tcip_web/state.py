@@ -22,8 +22,9 @@ logger = logging.getLogger(__name__)
 
 PERSIST_DEBOUNCE_SECONDS = 0.5
 
-AnnotateMode = Literal["box", "polygon", "point"]
-"""The Annotate canvas's drawing modes: the vocabulary ``GuiState.mode`` holds."""
+AnnotateMode = Literal["box", "polygon", "point", "map"]
+"""The Annotate canvas's tool modes: the vocabulary ``GuiState.mode`` holds. The first three
+draw; ``map`` navigates the coverage lattice (a click opens a cell's tile) and authors nothing."""
 
 
 class GuiMutationInvalid(ValueError):

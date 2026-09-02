@@ -47,9 +47,11 @@ def _audit_entries(root: Path, tool: str) -> list[dict]:
 
 
 def _grid_only(grid: dict) -> dict:
-    """The six ``GridGeometry`` keys, stripped of ``cells``: what ``useCoverageGrid.ts`` posts
-    (it destructures ``cells`` off the grid route's response before storing the rest)."""
-    return {k: v for k, v in grid.items() if k != "cells"}
+    """The six ``GridGeometry`` keys, stripped of ``cells`` and ``derivation``: what
+    ``useCoverageGrid.ts`` posts (it destructures both off the grid route's response before
+    storing the rest, since neither is one of the six fields ``GridGeometry`` forbids extras
+    beyond)."""
+    return {k: v for k, v in grid.items() if k not in ("cells", "derivation")}
 
 
 def _post_body(image_path: str, cells: list[str], grid: dict, **overrides) -> dict:
@@ -235,6 +237,116 @@ class TestGridRoute:
                                   native_size=(100, 80),
                                   output_path=str(tmp_path / "overlay.png"))
         assert Path(out).is_file()
+
+
+class TestGridDerivation:
+    """The /grid route's ``derivation`` line: one of the three values naming how the tile size
+    was chosen, so the panel can state it rather than leave a cell's origin unexplained."""
+
+    def test_display_bounded_derivation_for_an_ordinary_source(self, client, dated_dataset):
+        _root, path = dated_dataset
+        got = _grid(client, path)
+        assert got["derivation"] == "one display-bounded serve per cell"
+
+    def test_large_raster_derivation_for_a_georeferenced_source(self, client, tmp_path):
+        width, height = 4200, 2100
+        path = TestGridRoute._write_georeferenced_tiff(tmp_path, width, height)
+        got = _grid(client, path)
+        assert got["derivation"] == "16 divisions of the long edge"
+
+    def test_chosen_derivation_for_an_explicit_tile_size(self, client, dated_dataset):
+        _root, path = dated_dataset
+        got = _grid(client, path, tile_size=40)
+        assert got["derivation"] == "chosen: 40 px"
+
+
+class TestAnnotationCounts:
+    """The completeness read's ``annotation_counts`` field: one implementation
+    (``annotation_counts_by_cell``/``_grid_for_raster``) shared with the digest and the grid
+    route, so a saved-annotation count is always binned against the grid the breeder sees."""
+
+    @staticmethod
+    def _cell_center(cell: dict) -> tuple[float, float]:
+        return (cell["x0"] + cell["x1"]) / 2, (cell["y0"] + cell["y1"]) / 2
+
+    def test_counts_are_served_for_an_unattested_raster(self, client, tmp_path):
+        """A raster with no attestation at all still reports per-cell saved-annotation counts:
+        the field is read off the grid and the label file, never folded into an attestation
+        record. A multi-cell large-raster fixture is used since the small ``dated_dataset``
+        fixture derives a single whole-image cell, leaving no second cell to prove binning
+        against."""
+        from tcip_annotation import json_io
+        from tcip_annotation.state import Annotation, BBox
+
+        width, height = 4200, 2100
+        path = TestGridRoute._write_georeferenced_tiff(tmp_path, width, height)
+        root = tmp_path / "ds"
+        served = _grid(client, path)
+        cell_a, cell_b = served["cells"][0], served["cells"][1]
+        ax, ay = self._cell_center(cell_a)
+        bx, by = self._cell_center(cell_b)
+        json_io.write_annotations(
+            root / "annotations" / "2026-03-01" / "mosaic.json",
+            [Annotation(subject="catkin", geometry=BBox(ax - 1, ay - 1, ax + 1, ay + 1)),
+             Annotation(subject="catkin", geometry=BBox(bx - 1, by - 1, bx + 1, by + 1))],
+            width, height)
+
+        got = client.get("/api/coverage/completeness", params={
+            "path": path, "dataset_root": str(root)})
+        assert got.status_code == 200, got.text
+        body = got.json()
+        assert body["by_subject"] == {}
+        assert body["annotation_counts"] == {"catkin": {cell_a["name"]: 1, cell_b["name"]: 1}}
+        assert body["grid_error"] is None
+
+    def test_counts_use_the_same_grid_the_grid_route_serves(self, client, tmp_path):
+        """``_grid_for_raster`` is the one implementation both routes call: the completeness
+        read's grid-derived cell names must match the /grid route's own, not a second
+        derivation that could drift."""
+        from tcip_annotation import json_io
+        from tcip_annotation.state import Annotation, BBox
+
+        width, height = 4200, 2100
+        path = TestGridRoute._write_georeferenced_tiff(tmp_path, width, height)
+        root = tmp_path / "ds"
+        served = _grid(client, path)
+        one_cell = served["cells"][0]
+        cx, cy = self._cell_center(one_cell)
+        json_io.write_annotations(
+            root / "annotations" / "2026-03-01" / "mosaic.json",
+            [Annotation(subject="catkin", geometry=BBox(cx - 1, cy - 1, cx + 1, cy + 1))],
+            width, height)
+
+        counts = client.get("/api/coverage/completeness", params={
+            "path": path, "dataset_root": str(root)}).json()["annotation_counts"]
+        assert counts == {"catkin": {one_cell["name"]: 1}}
+
+    def test_incomplete_band_group_reports_grid_error_and_serves_by_subject_without_counts(
+        self, client, tmp_path,
+    ):
+        """A band group missing a member cannot derive a grid at all; the read still serves
+        ``by_subject`` (empty here) with the refusal named in ``grid_error``, never blanked."""
+        import numpy as np
+        import tifffile
+
+        from tcip_mcp.pipelines.data.band_groups import write_band_group_manifest
+
+        img_dir = tmp_path / "ds" / "images" / "2026-03-01"
+        img_dir.mkdir(parents=True)
+        band_a = img_dir / "cap_G.tif"
+        band_b = img_dir / "cap_R.tif"
+        tifffile.imwrite(str(band_a), np.full((16, 16), 1, dtype=np.uint16))
+        tifffile.imwrite(str(band_b), np.full((16, 16), 2, dtype=np.uint16))
+        write_band_group_manifest(img_dir, "cap", {"Green": band_a, "Red": band_b})
+        band_b.unlink()
+
+        resp = client.get("/api/coverage/completeness", params={"path": str(img_dir / "cap.tif")})
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["by_subject"] == {}
+        assert body["annotation_counts"] == {}
+        assert body["grid_error"]
+        assert "cap" in body["grid_error"]
 
 
 class TestCoverageRecord:
@@ -555,21 +667,78 @@ def test_view_coverage_path_locator(tmp_path):
 
 
 class TestCompletenessRoute:
-    def _toggle(self, client, path, grid, cell, subject="catkin", **overrides):
+    def _toggle(self, client, path, grid, cell, subject="catkin", complete=True, **overrides):
         body = {"image_path": path, "subject": subject, "grid": _grid_only(grid), "cell": cell,
-               "user": "breeder"}
+               "complete": complete, "user": "breeder"}
         body.update(overrides)
         return client.post("/api/coverage/completeness", json=body)
 
-    def test_toggle_on_then_off(self, client, dated_dataset):
+    def test_attest_then_unattest(self, client, dated_dataset):
         _root, path = dated_dataset
         grid = _grid(client, path, tile_size=64)
-        resp = self._toggle(client, path, grid, "A1")
+        resp = self._toggle(client, path, grid, "A1", complete=True)
         assert resp.status_code == 200, resp.text
         assert resp.json() == {"status": "ok", "complete": True, "cells_complete": ["A1"]}
 
-        resp = self._toggle(client, path, grid, "A1")
+        resp = self._toggle(client, path, grid, "A1", complete=False)
         assert resp.json() == {"status": "ok", "complete": False, "cells_complete": []}
+
+    def test_re_attesting_a_stale_cell_keeps_it_complete_with_a_fresh_digest(
+        self, client, dated_dataset,
+    ):
+        """Explicit direction distinguishes a re-attest from a toggle: attest a cell, edit its
+        annotation content so it reads stale, then post complete=True again. The cell must stay
+        complete with a fresh (non-stale) digest, never flip to not-complete the way a toggle
+        reading the stored state (rather than the posted direction) would."""
+        from tcip_annotation import json_io
+        from tcip_annotation.state import Annotation, BBox
+
+        root, path = dated_dataset
+        grid = _grid(client, path, tile_size=64)
+        assert self._toggle(client, path, grid, "A1", complete=True).status_code == 200
+
+        label_path = root / "annotations" / "2026-03-01" / "plot.json"
+        json_io.write_annotations(
+            label_path, [Annotation(subject="catkin", geometry=BBox(1, 1, 9, 9))], 100, 80)
+        stale_before = client.get(
+            "/api/coverage/completeness", params={"path": path}).json()["by_subject"]["catkin"]
+        assert stale_before["stale_cells"] == ["A1"]
+
+        resp = self._toggle(client, path, grid, "A1", complete=True)
+        assert resp.status_code == 200, resp.text
+        assert resp.json() == {"status": "ok", "complete": True, "cells_complete": ["A1"]}
+
+        record = client.get(
+            "/api/coverage/completeness", params={"path": path}).json()["by_subject"]["catkin"]
+        assert record["cells_complete"] == ["A1"]
+        assert record["stale_cells"] == []
+
+    def test_attest_unattest_reattest_each_succeed_through_the_route(self, client, dated_dataset):
+        """Admits valid work: every explicit direction the control can post succeeds, in the
+        order a breeder would actually use them."""
+        _root, path = dated_dataset
+        grid = _grid(client, path, tile_size=64)
+
+        attest = self._toggle(client, path, grid, "A1", complete=True)
+        assert attest.status_code == 200, attest.text
+        assert attest.json()["complete"] is True
+
+        unattest = self._toggle(client, path, grid, "A1", complete=False)
+        assert unattest.status_code == 200, unattest.text
+        assert unattest.json()["complete"] is False
+
+        reattest = self._toggle(client, path, grid, "A1", complete=True)
+        assert reattest.status_code == 200, reattest.text
+        assert reattest.json()["complete"] is True
+        assert reattest.json()["cells_complete"] == ["A1"]
+
+    def test_complete_direction_is_required(self, client, dated_dataset):
+        _root, path = dated_dataset
+        grid = _grid(client, path, tile_size=64)
+        body = {"image_path": path, "subject": "catkin", "grid": _grid_only(grid), "cell": "A1",
+               "user": "breeder"}
+        resp = client.post("/api/coverage/completeness", json=body)
+        assert resp.status_code == 422
 
     def test_subject_is_required(self, client, dated_dataset):
         _root, path = dated_dataset
