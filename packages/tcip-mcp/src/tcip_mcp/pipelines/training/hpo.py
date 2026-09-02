@@ -301,12 +301,10 @@ def _has_attached_console() -> bool:
     """True when this process should use Ray's plain, console-signal shutdown path.
 
     Only Windows distinguishes an attached console from a detached one, so every other
-    platform always answers True. On Windows, ``GetConsoleCP`` is documented to return 0
-    when the calling process has no console; probed both ways against ``GetConsoleWindow``
-    (this interpreter attached to its shell, and the same probe launched with
-    ``DETACHED_PROCESS``): ``GetConsoleCP`` read 437 attached and 0 detached, while
-    ``GetConsoleWindow`` read 0 in both cases, so ``GetConsoleCP`` is the one that
-    distinguishes them.
+    platform always answers True. Ray's console-signal shutdown calls
+    ``GenerateConsoleCtrlEvent``, which fails unless the calling process, this one, is itself
+    attached to a console; ``GetConsoleCP`` is the primitive here because it answers exactly
+    that question, reading 0 when this process has none.
     """
     if sys.platform != "win32":
         return True
@@ -316,24 +314,41 @@ def _has_attached_console() -> bool:
 
 
 def _kill_ray_daemons_before_shutdown(ray: Any) -> None:
-    """Kill every daemon this process's Ray cluster started, ahead of ``ray.shutdown()``.
+    """Kill every daemon and descendant this process's Ray cluster started, ahead of
+    ``ray.shutdown()``.
 
     On Windows, ``ray.shutdown()`` ends each daemon through ``Node.kill_all_processes``,
     which signals a graceful stop via ``ConsolePopen.terminate``'s ``CTRL_BREAK_EVENT``; that
-    raises ``OSError: [WinError 6] The handle is invalid`` on a daemon started without a
-    console (a server launched under ``DETACHED_PROCESS``, as the GUI capture harness does),
+    raises ``OSError: [WinError 6] The handle is invalid`` when this process, the caller, has
+    no console (a server launched under ``DETACHED_PROCESS``, as the GUI capture harness does),
     aborting the shutdown at the first daemon and leaving the rest of the cluster running.
-    Killing every daemon here first, in the same order ``kill_all_processes`` uses (raylet,
-    gcs server, the rest, the reaper last; the type names are Ray's own stable process-type
-    strings, not imported so a test double need not also fake ``ray._private.ray_constants``),
-    means ``ray.shutdown()`` then finds each one already dead (``poll()`` is not ``None``) and
-    never signals it.
+    ``ConsolePopen.terminate`` only takes that signalling path when fate-sharing job creation
+    succeeded and ``_use_signals`` is set (``ray/_private/services.py``); otherwise it is a
+    plain ``TerminateProcess`` call that never raises. The pre-kill below is taken whenever
+    this process has no console, whether or not ``ray.shutdown()`` would actually have
+    signalled or plain-terminated a given daemon. Killing every daemon here first, in the same
+    order ``kill_all_processes`` uses (raylet, gcs server, the rest, the reaper last; the type
+    names are Ray's own stable process-type strings, not imported), means ``ray.shutdown()``
+    then finds each one already dead (``poll()`` is not ``None``) and never signals it.
+
+    The trial workers, the dashboard agent and the runtime-env agent are spawned by the
+    raylet itself (``ray/_private/services.py``) and never appear in ``node.all_processes``,
+    so killing the table alone leaves them running until this process exits. Each table
+    process's descendants (``psutil.Process(pid).children(recursive=True)``)
+    are killed before the table process itself, all of them, then waited on together through
+    ``psutil.wait_procs`` bounded to one second, the same bound
+    ``Node._kill_process_type`` uses for its own daemons; a terminated process signals its
+    handle at once, so a longer wait only delays a lock held for the whole cluster's shutdown.
+    A process already gone (``psutil.NoSuchProcess``) or unreachable
+    (``psutil.AccessDenied``) is skipped rather than failing the sweep.
 
     A Ray whose ``_private`` module, worker, node or process table is absent is an externally
-    started cluster (or a test double with no process table): this module never shuts down a
-    cluster it did not start (``_ray_started_here`` already guards that), so there is nothing
-    to kill and the caller's plain ``ray.shutdown()`` runs unchanged.
+    started cluster: this module never shuts down a cluster it did not start
+    (``_ray_started_here`` already guards that), so there is nothing to kill and the caller's
+    plain ``ray.shutdown()`` runs unchanged.
     """
+    import psutil
+
     private = getattr(ray, "_private", None)
     worker = getattr(private, "worker", None) if private is not None else None
     global_worker = getattr(worker, "global_worker", None) if worker is not None else None
@@ -352,12 +367,25 @@ def _kill_ray_daemons_before_shutdown(ray: Any) -> None:
             process = process_info.process
             if process.poll() is not None:
                 continue
+
+            try:
+                descendants = psutil.Process(process.pid).children(recursive=True)
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                descendants = []
+            for descendant in descendants:
+                try:
+                    descendant.kill()
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    pass
+            if descendants:
+                psutil.wait_procs(descendants, timeout=1)
+
             process.kill()
             try:
-                process.wait(timeout=10)
+                process.wait(timeout=1)
             except subprocess.TimeoutExpired:
                 logger.warning(
-                    "Ray daemon %s (pid %s) did not exit within 10s of being killed; "
+                    "Ray daemon %s (pid %s) did not exit within 1s of being killed; "
                     "ray.shutdown() will still try to signal it", process_type, process.pid,
                 )
 
