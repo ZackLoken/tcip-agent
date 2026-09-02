@@ -33,8 +33,10 @@ hpo = ["ray[default,tune]>=2.9", "optuna>=3.0", "hyperopt", "bayesian-optimizati
        "nevergrad", "ax-platform"]
 # fiona is the vector reader scripts/shp_to_plant_csv.py and its tests use; no shipped module
 # imports it, so it belongs here rather than in the runtime dependencies.
+
+# scipy and matplotlib back the hull/path geometry scripts/foreground_fn_candidates.py imports; no shipped module imports either.
 dev = ["pytest>=7.0", "pytest-asyncio>=0.21", "pytest-timeout>=2.0", "pytest-xdist>=3.0",
-       "fiona>=1.9"]
+       "fiona>=1.9", "scipy", "matplotlib"]
 
 [build-system]
 requires = ["hatchling"]
