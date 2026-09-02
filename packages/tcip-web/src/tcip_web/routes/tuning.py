@@ -412,7 +412,7 @@ _RELAUNCH_FIELDS: tuple[str, ...] = (
 )
 """Every ``run_hpo`` argument a relaunch replays. ``run_hpo`` writes every one of these as a
 key whenever it creates a manifest (a value of ``None`` is a recorded choice, not an absence),
-so only a manifest from before this family, or one truncated some other way, names anything as
+so only a manifest without the field, or one truncated some other way, names anything as
 missing here."""
 
 
@@ -427,8 +427,8 @@ def _relaunch_spec(manifest: dict) -> _RelaunchSpec:
     error, never a silently substituted value that was never the sweep's own.
 
     ``split_draws``/``split_draw_seeds`` are the one exception, read with ``run_hpo``'s own
-    defaults (1, ``None``) rather than required: a manifest from before this family carries
-    neither key, and must still relaunch."""
+    defaults (1, ``None``) rather than required: a manifest without the field carries neither
+    key, and must still relaunch."""
     return _RelaunchSpec(
         base_config=manifest["base_config"],
         param_space=manifest["param_space"],
