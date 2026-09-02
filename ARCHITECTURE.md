@@ -801,8 +801,8 @@ Docstring is the function's docstring first line, verbatim.
 | tool | line | audited | docstring first line |
 |---|---|---|---|
 | `build_plant_mapping` | `phenology_tools.py:31` | yes | Assign each geolocated image to a plant, then persist the mapping under this project. |
-| `calibrate_classifier_operating_point` | `phenology_tools.py:402` | yes | Calibrate and validate the trait's positive-class classifier against held-out GT. |
-| `compute_phenology` | `phenology_tools.py:543` | yes | Per-plant phenology milestones from classified predictions + a plant mapping. |  <!-- queued: P5-43 unify -->
+| `calibrate_classifier_operating_point` | `phenology_tools.py:404` | yes | Calibrate and validate the trait's positive-class classifier against held-out GT. |
+| `compute_phenology` | `phenology_tools.py:545` | yes | Per-plant phenology milestones from classified predictions + a plant mapping. |  <!-- queued: P5-43 unify -->
 
 ### project_tools.py (5 tools)
 
@@ -987,19 +987,19 @@ registered at HEAD.
 | method | path | handler | line |
 |---|---|---|---|
 | POST | `/plant_mapping/build` | `build_plant_mapping` | `routes/results.py:178` |
-| POST | `/plant_mapping/load` | `load_plant_mapping` | `routes/results.py:270` |
-| GET | `/plant_mapping/list` | `list_plant_mappings` | `routes/results.py:289` |
-| POST | `/phenology_measurement` | `phenology_measurement` | `routes/results.py:561` |
-| POST | `/export_csv` | `export_csv` | `routes/results.py:617` |
-| GET | `/traits` | `list_traits` | `routes/results.py:1042` |
-| GET | `/operationalization` | `get_operationalization` | `routes/results.py:741` |
-| GET | `/operationalizations` | `list_operationalizations` | `routes/results.py:757` |
-| POST | `/operationalization/confirm` | `confirm_operationalization` | `routes/results.py:795` |
-| GET | `/trait-spec-statement` | `get_trait_spec_statement` | `routes/results.py:897` |
-| GET | `/trait-spec-statements` | `list_trait_spec_statements` | `routes/results.py:913` |
-| POST | `/trait-spec-statement/confirm` | `confirm_trait_spec_statement` | `routes/results.py:955` |
-| GET | `/delivery-events` | `list_delivery_events` | `routes/results.py:1021` |
-| GET | `/models/registered` | `registered_models` | `routes/results.py:1071` |
+| POST | `/plant_mapping/load` | `load_plant_mapping` | `routes/results.py:274` |
+| GET | `/plant_mapping/list` | `list_plant_mappings` | `routes/results.py:293` |
+| POST | `/phenology_measurement` | `phenology_measurement` | `routes/results.py:565` |
+| POST | `/export_csv` | `export_csv` | `routes/results.py:621` |
+| GET | `/traits` | `list_traits` | `routes/results.py:1046` |
+| GET | `/operationalization` | `get_operationalization` | `routes/results.py:745` |
+| GET | `/operationalizations` | `list_operationalizations` | `routes/results.py:761` |
+| POST | `/operationalization/confirm` | `confirm_operationalization` | `routes/results.py:799` |
+| GET | `/trait-spec-statement` | `get_trait_spec_statement` | `routes/results.py:901` |
+| GET | `/trait-spec-statements` | `list_trait_spec_statements` | `routes/results.py:917` |
+| POST | `/trait-spec-statement/confirm` | `confirm_trait_spec_statement` | `routes/results.py:959` |
+| GET | `/delivery-events` | `list_delivery_events` | `routes/results.py:1025` |
+| GET | `/models/registered` | `registered_models` | `routes/results.py:1075` |
 
 ### routes/review.py, prefix `/api/review` (8 routes)
 
@@ -2325,7 +2325,7 @@ Phase 3 verdict: single.
 
 Must agree: the MCP registrar and the GUI model pickers read one registry entry shape.
 Side A: `packages/tcip-mcp/src/tcip_mcp/model_registry.py:132` (`def read_registry_index(`, the read path for everything outside the module; `_register_entry`, line 429, replaces one entry by name inside one `tcip_store.transaction` on the key `registry_index_key`, line 116, mints).
-Side B: `packages/tcip-web/src/tcip_web/routes/results.py:1070` (`@router.get("/models/registered")`, serving `model_tools.list_registered_models`) and the browser's one entry declaration, `packages/tcip-web/frontend/src/api/inference.ts:16` (`export interface RegisteredModel {`), held field by field against an entry the real registrar wrote by `tests/test_registry_entry_shape_agreement.py`.
+Side B: `packages/tcip-web/src/tcip_web/routes/results.py:1074` (`@router.get("/models/registered")`, serving `model_tools.list_registered_models`) and the browser's one entry declaration, `packages/tcip-web/frontend/src/api/inference.ts:16` (`export interface RegisteredModel {`), held field by field against an entry the real registrar wrote by `tests/test_registry_entry_shape_agreement.py`.
 Phase 3 verdict: single.
 
 ## S28. operating_point.json prediction-bucket sidecar
