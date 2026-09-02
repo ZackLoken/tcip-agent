@@ -41,6 +41,11 @@ function cellText(value: unknown): string {
  * detail pane, from this one wording. */
 const NO_CANCEL_REASON = "no reason recorded";
 
+/** The one sweep status Cancel is offered on, the same explicit-allowlist shape
+ * TrainingTab's TRAINING_CANCELLABLE uses rather than inferring it from TERMINAL_STATUSES:
+ * a sweep the backend derives as "interrupted" is done, not merely non-terminal. */
+const SWEEP_CANCELLABLE: ReadonlySet<string> = new Set(["running"]);
+
 export function TuningTab() {
   const datasetRoot = useStore((s) => s.gui.dataset.dataset_root);
   const { request, setRequest } = useEditableAgentRequest(defaultSweepRequest(datasetRoot));
@@ -246,8 +251,7 @@ export function TuningTab() {
   // Cancel while running, gone once "stop requested" (shown as status text) except for an
   // external sweep; "Run again" once terminal and relaunchable; nothing otherwise.
   function sweepAction(s: Sweep) {
-    const terminal = TERMINAL_STATUSES.has(s.status);
-    if (!terminal) {
+    if (SWEEP_CANCELLABLE.has(s.status)) {
       if (s.cancel_requested && !s.external) return null;
       return (
         <button
@@ -451,7 +455,7 @@ export function TuningTab() {
         <ul className="space-y-1">
           {sweeps.map((s) => {
             const expanded = selectedId === s.sweep_id;
-            const running = !TERMINAL_STATUSES.has(s.status);
+            const running = SWEEP_CANCELLABLE.has(s.status);
             const searchLine = [
               s.n_trials != null ? `${s.n_trials} trials planned` : null,
               s.search_alg,

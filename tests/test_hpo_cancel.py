@@ -14,8 +14,89 @@ def test_cancel_hpo_refuses_a_study_neither_manifest_nor_registry_names(tmp_path
     assert "error" in result
 
 
+def test_mark_sweep_launching_lets_cancel_hpo_find_a_study_with_no_manifest_yet(tmp_path) -> None:
+    """The pre-manifest window: a study a caller has marked as launching, but ``run_hpo`` has
+    not yet reached its first manifest write, is a sweep ``cancel_hpo`` can find, not a study
+    it refuses as unknown."""
+    from tcip_mcp.tools.training_tools import (
+        SWEEP_CANCEL_SENTINEL, cancel_hpo, mark_sweep_launching, sweep_dir,
+    )
+
+    study_name = "hpo_marked001"
+    mark_sweep_launching(study_name, str(tmp_path))
+
+    result = cancel_hpo(study_name, str(tmp_path))
+    assert "error" not in result
+    assert result == {"study_name": study_name, "status": "running", "cancel_requested": True}
+    assert (sweep_dir(study_name, str(tmp_path)) / SWEEP_CANCEL_SENTINEL).exists()
+
+
+def test_run_hpo_records_a_cancelled_manifest_for_a_cancel_that_landed_before_it_was_called(
+    tmp_path, real_hpo_base_config
+) -> None:
+    """A cancel that reaches the sweep in the window the web relaunch route marks before
+    starting its worker (mark, then a cancel, then ``run_hpo`` itself) records the same
+    before-start cancellation ``run_hpo``'s own pre-existing sentinel check already handles;
+    today's refusal is at ``cancel_hpo``, proven separately, above."""
+    from tcip_mcp.tools.training_tools import (
+        _CANCEL_BEFORE_START_REASON, cancel_hpo, mark_sweep_launching, run_hpo, sweep_manifest_key,
+    )
+
+    study_name = "hpo_racedcancel1"
+    mark_sweep_launching(study_name, str(tmp_path))
+    cancelled = cancel_hpo(study_name, str(tmp_path))
+    assert "error" not in cancelled
+
+    result = run_hpo(base_config=real_hpo_base_config, n_trials=1, output_dir=str(tmp_path),
+                     study_name=study_name)
+    assert result["status"] == "cancelled"
+    assert result["error"] == _CANCEL_BEFORE_START_REASON
+
+    import tcip_store
+    manifest = tcip_store.read(sweep_manifest_key(study_name, str(tmp_path)))
+    assert manifest["status"] == "cancelled"
+
+
+def test_mark_sweep_launching_is_discarded_once_run_hpo_reaches_its_first_manifest_write(
+    tmp_path, real_hpo_base_config, monkeypatch
+) -> None:
+    from tcip_mcp.tools.training_tools import (
+        _sweep_launching, mark_sweep_launching, run_hpo,
+    )
+
+    study_name = "hpo_markclear1"
+    mark_sweep_launching(study_name, str(tmp_path))
+    assert _sweep_launching(study_name) is True
+
+    monkeypatch.setattr(
+        "tcip_mcp.pipelines.training.hpo.tune_search",
+        lambda **kw: {"best_params": {}, "best_value": 0.1, "n_trials": 1,
+                     "study_name": kw["study_name"]},
+    )
+    run_hpo(base_config=real_hpo_base_config, n_trials=1, output_dir=str(tmp_path),
+           study_name=study_name)
+
+    assert _sweep_launching(study_name) is False
+
+
+def test_mark_sweep_launching_is_discarded_even_when_preflight_refuses(tmp_path) -> None:
+    """The mark is scoped to the window before run_hpo's first manifest write, refusal
+    included: a caller's mark for a study whose config fails preflight must not linger forever
+    once run_hpo has already answered for it."""
+    from tcip_mcp.tools.training_tools import _sweep_launching, mark_sweep_launching, run_hpo
+
+    study_name = "hpo_markrefuse1"
+    mark_sweep_launching(study_name, str(tmp_path))
+
+    result = run_hpo(base_config={"model_source": {"builder": "not.a:real_builder"}},
+                     n_trials=1, output_dir=str(tmp_path), study_name=study_name)
+    assert "error" in result
+    assert _sweep_launching(study_name) is False
+
+
 def test_cancel_hpo_under_a_non_default_root(tmp_path) -> None:
     import tcip_store
+    from datetime import datetime, timezone
 
     from tcip_mcp.tools.training_tools import (
         SWEEP_CANCEL_SENTINEL, cancel_hpo, sweep_dir, sweep_manifest_key,
@@ -25,7 +106,8 @@ def test_cancel_hpo_under_a_non_default_root(tmp_path) -> None:
     sweep_root = sweep_dir("hpo_other01", root=other_root)
     sweep_root.mkdir(parents=True)
     tcip_store.replace(sweep_manifest_key("hpo_other01", root=other_root),
-                       {"study_name": "hpo_other01", "status": "running", "n_trials": 1})
+                       {"study_name": "hpo_other01", "status": "running", "n_trials": 1,
+                        "heartbeat": datetime.now(timezone.utc).isoformat()})
 
     result = cancel_hpo("hpo_other01", root=str(other_root))
     assert result == {"study_name": "hpo_other01", "status": "running", "cancel_requested": True}
@@ -238,36 +320,80 @@ def test_cancel_hpo_writes_every_sentinel_beside_a_trial_whose_record_will_not_d
     assert not (good_trial / CANCEL_SENTINEL).exists()  # already finished before the cancel
     assert not (corrupt_trial / CANCEL_SENTINEL).exists()  # undecodable means finished too
 
-    stopper = _build_sweep_stopper(lambda: (sweep_root / SWEEP_CANCEL_SENTINEL).exists(), sweep_root)
-    stopper.stop_all()  # must not raise walking the corrupt trial's record
+    stopper, callback = _build_sweep_stopper(
+        lambda: (sweep_root / SWEEP_CANCEL_SENTINEL).exists(), sweep_root)
+    assert stopper.stop_all() is True  # Ray never reported any trial live: the set is empty
 
 
-def test_sweep_stopper_stop_all_true_once_no_trial_still_looks_unfinished(tmp_path) -> None:
+class _FakeTrial:
+    """Stands in for a ``ray.tune.experiment.Trial`` in the callback: only ``trial_id`` is read."""
+
+    def __init__(self, trial_id: str) -> None:
+        self.trial_id = trial_id
+
+
+def test_sweep_stopper_stop_all_true_once_ray_no_longer_holds_any_trial_live(tmp_path) -> None:
     from tcip_mcp.pipelines.training.hpo import _build_sweep_stopper
-    from tcip_mcp.tools.training_tools import SWEEP_CANCEL_SENTINEL, trial_config_key
+    from tcip_mcp.tools.training_tools import SWEEP_CANCEL_SENTINEL
 
     sweep_root = tmp_path / "sweep"
     sweep_root.mkdir()
-    running_trial = sweep_root / "trial_running0"
-    running_trial.mkdir()
-    finished_trial = sweep_root / "trial_done0000"
-    finished_trial.mkdir()
+    sentinel = sweep_root / SWEEP_CANCEL_SENTINEL
 
-    import tcip_store
-    tcip_store.replace(trial_config_key(sweep_root, finished_trial.name), {"trial_params": {}})
-
-    stopper = _build_sweep_stopper(lambda: (sweep_root / SWEEP_CANCEL_SENTINEL).exists(), sweep_root)
+    stopper, callback = _build_sweep_stopper(lambda: sentinel.exists(), sweep_root)
     assert stopper.stop_all() is False  # the file does not exist yet
 
-    (sweep_root / SWEEP_CANCEL_SENTINEL).touch()
-    assert stopper.stop_all() is False  # running_trial has no resolved config yet
+    trial = _FakeTrial("running_trial")
+    callback.on_trial_start(0, [], trial)
+    sentinel.touch()
+    assert stopper.stop_all() is False  # Ray still holds the trial live
     assert stopper("running_trial", {}) is True  # per-trial call always follows the file
 
-    tcip_store.replace(trial_config_key(sweep_root, running_trial.name), {"trial_params": {}})
-    assert stopper.stop_all() is True  # every trial directory now looks finished
+    callback.on_trial_complete(0, [], trial)
+    assert stopper.stop_all() is True  # Ray no longer holds any trial live
 
 
-def test_sweep_stopper_stop_all_true_after_the_stale_window_elapses_regardless_of_running_trials(
+def test_sweep_stopper_stop_all_true_at_once_for_a_trial_ray_killed_outright(tmp_path) -> None:
+    """A trial Ray kills outright may never reach ``_run_hpo_trial``'s own ``finally``, so its
+    resolved-config record never gets written; the old disk-based check read that trial as
+    still running until the heartbeat stale window passed regardless. The callback's own live
+    set, fed by Ray's own ``on_trial_error`` report, says otherwise at once."""
+    from tcip_mcp.pipelines.training.hpo import _build_sweep_stopper
+    from tcip_mcp.tools.training_tools import SWEEP_CANCEL_SENTINEL
+
+    sweep_root = tmp_path / "sweep"
+    killed_trial = sweep_root / "trial_killed00"
+    killed_trial.mkdir(parents=True)  # never writes its resolved config
+    sentinel = sweep_root / SWEEP_CANCEL_SENTINEL
+    sentinel.touch()
+
+    stopper, callback = _build_sweep_stopper(lambda: sentinel.exists(), sweep_root)
+    trial = _FakeTrial("killed_trial")
+    callback.on_trial_start(0, [], trial)
+    callback.on_trial_error(0, [], trial)
+
+    assert stopper.stop_all() is True  # Ray reported it gone; the disk record never has to exist
+
+
+def test_sweep_stopper_stop_all_treats_an_errored_trial_as_no_longer_live(tmp_path) -> None:
+    from tcip_mcp.pipelines.training.hpo import _build_sweep_stopper
+    from tcip_mcp.tools.training_tools import SWEEP_CANCEL_SENTINEL
+
+    sweep_root = tmp_path / "sweep"
+    sweep_root.mkdir()
+    sentinel = sweep_root / SWEEP_CANCEL_SENTINEL
+    sentinel.touch()
+
+    stopper, callback = _build_sweep_stopper(lambda: sentinel.exists(), sweep_root)
+    trial = _FakeTrial("errored_trial")
+    callback.on_trial_start(0, [], trial)
+    assert stopper.stop_all() is False
+
+    callback.on_trial_error(0, [], trial)
+    assert stopper.stop_all() is True
+
+
+def test_sweep_stopper_stop_all_true_after_the_stale_window_elapses_regardless_of_a_live_trial(
     tmp_path, monkeypatch
 ) -> None:
     from tcip_mcp.pipelines.training import hpo as hpo_module
@@ -276,11 +402,12 @@ def test_sweep_stopper_stop_all_true_after_the_stale_window_elapses_regardless_o
     monkeypatch.setattr("tcip_mcp.tools.training_tools.TCIP_HEARTBEAT_STALE_SECONDS", 0.05)
     sweep_root = tmp_path / "sweep"
     sweep_root.mkdir()
-    (sweep_root / "trial_stuck0000").mkdir()  # never writes its resolved config: stuck
 
     sentinel = sweep_root / SWEEP_CANCEL_SENTINEL
+    stopper, callback = hpo_module._build_sweep_stopper(lambda: sentinel.exists(), sweep_root)
+    callback.on_trial_start(0, [], _FakeTrial("stuck_trial"))  # Ray never reports it finished
+
     sentinel.touch()
-    stopper = hpo_module._build_sweep_stopper(lambda: sentinel.exists(), sweep_root)
     assert stopper.stop_all() is False  # freshly written: still inside the window
 
     import os
