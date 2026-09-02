@@ -68,7 +68,7 @@ _PROSE_COPY_SITES = [
     (REPO_ROOT / "README.md", 93),
     (REPO_ROOT / "CONTRIBUTING.md", 14),
     (REPO_ROOT / "CONTRIBUTING.md", 26),
-    (REPO_ROOT / "CLAUDE.md", 199),
+    (REPO_ROOT / "CLAUDE.md", 200),
     (REPO_ROOT / "environment.yml", 4),
     (REPO_ROOT / "environment.yml", 15),
     (REPO_ROOT / "environment.linux.lock.yml", 3),

@@ -615,6 +615,7 @@ def test_every_validated_shippable_reference_clears_some_gate_dimension():
     """
     from tcip_mcp.pipelines.resolution import VALIDATED_SHIPPABLE, _DIMENSION_REFERENCES
 
+    assert VALIDATED_SHIPPABLE
     reachable = {reference for refs in _DIMENSION_REFERENCES.values() for reference in refs}
     missing = [name for name in VALIDATED_SHIPPABLE if name not in reachable]
     assert not missing, (
