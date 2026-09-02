@@ -61,4 +61,47 @@ describe("TopBar tab strip accessibility", () => {
     fireEvent.click(tuningTab);
     expect(tuningTab).toHaveAttribute("aria-selected", "true");
   });
+
+  it("points each tab's aria-controls at that tab's own panel id", () => {
+    render(<TopBar />);
+    const tuningTab = screen.getByRole("tab", { name: /tuning/i });
+    expect(tuningTab).toHaveAttribute("id", "tab-tuning");
+    expect(tuningTab).toHaveAttribute("aria-controls", "tabpanel-tuning");
+  });
+
+  it("keeps only the active tab in the Tab order, a roving tabindex", () => {
+    render(<TopBar />);
+    const tabs = screen.getAllByRole("tab");
+    const active = tabs.filter((t) => t.getAttribute("aria-selected") === "true");
+    const inactive = tabs.filter((t) => t.getAttribute("aria-selected") !== "true");
+    expect(active).toHaveLength(1);
+    expect(active[0]).toHaveAttribute("tabindex", "0");
+    inactive.forEach((t) => expect(t).toHaveAttribute("tabindex", "-1"));
+
+    fireEvent.click(screen.getByRole("tab", { name: /tuning/i }));
+    expect(screen.getByRole("tab", { name: /tuning/i })).toHaveAttribute("tabindex", "0");
+    expect(screen.getByRole("tab", { name: /training/i })).toHaveAttribute("tabindex", "-1");
+  });
+
+  it("moves selection and focus with the arrow keys, wrapping at either end", () => {
+    render(<TopBar />);
+    const training = screen.getByRole("tab", { name: /training/i });
+    fireEvent.click(training);
+    training.focus();
+
+    fireEvent.keyDown(training, { key: "ArrowRight" });
+    const tuning = screen.getByRole("tab", { name: /tuning/i });
+    expect(tuning).toHaveAttribute("aria-selected", "true");
+    expect(tuning).toHaveFocus();
+
+    fireEvent.keyDown(tuning, { key: "ArrowLeft" });
+    expect(screen.getByRole("tab", { name: /training/i })).toHaveAttribute("aria-selected", "true");
+
+    const annotate = screen.getByRole("tab", { name: /annotate/i });
+    fireEvent.click(annotate);
+    annotate.focus();
+    fireEvent.keyDown(annotate, { key: "ArrowLeft" });
+    const last = screen.getAllByRole("tab").at(-1) as HTMLElement;
+    expect(last).toHaveAttribute("aria-selected", "true");
+  });
 });
