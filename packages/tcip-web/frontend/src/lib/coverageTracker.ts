@@ -81,9 +81,25 @@ function sameWorkingScaleBar(a: WorkingScaleBar | null, b: WorkingScaleBar | nul
     a.median_extent_native_px === b.median_extent_native_px &&
     a.annotation_count === b.annotation_count &&
     a.judged_span_px === b.judged_span_px &&
-    a.source === b.source
+    a.source === b.source &&
+    (a.from_this_image ?? null) === (b.from_this_image ?? null)
   );
 }
+
+/** The tracker's own hold: a stored coverage record on a lattice other than the current one,
+ *  seen at least once (`cellsSeen` > 0). Set by `hydrate`'s grid-mismatch disjunct and by a
+ *  push's own 409 carrying `COVERAGE_LATTICE_MISMATCH`; cleared by `reset` and by a successful
+ *  `armReplace` push. While it stands, no push leaves the tracker (`postNow`/`flush`) until the
+ *  breeder confirms the discard through `armReplace`. */
+export interface ReplaceRequired {
+  cols: number;
+  rows: number;
+  cellsSeen: number;
+}
+
+/** The stable marker `post_coverage`'s 409 body carries for a grid mismatch with no replace
+ *  flag (`routes/coverage.py`'s `COVERAGE_LATTICE_MISMATCH`). */
+const COVERAGE_LATTICE_MISMATCH = "coverage_lattice_mismatch";
 
 /** How long a failed push stays queued before the outbox retries it. */
 const OUTBOX_RETRY_MS = 5000;
@@ -109,11 +125,36 @@ function isAuditEntryNotWritten(err: unknown): boolean {
   );
 }
 
+/** The stored grid and sweep count a coverage-lattice-mismatch 409 names, or null when `err` is
+ *  not one (a different refusal, a network failure, or a malformed body): the one place that
+ *  reads the marker's payload, so a live tracker's hold and a future reader of the same body
+ *  parse it identically. */
+function coverageLatticeMismatchDetail(err: unknown): ReplaceRequired | null {
+  if (!(err instanceof StructuredRefusalError)) return null;
+  if (err.status !== 409 || err.detail.error !== COVERAGE_LATTICE_MISMATCH) return null;
+  const storedGrid = err.detail.stored_grid as { cols?: unknown; rows?: unknown } | undefined;
+  const cellsSeen = err.detail.cells_seen;
+  if (
+    typeof storedGrid?.cols !== "number" ||
+    typeof storedGrid?.rows !== "number" ||
+    typeof cellsSeen !== "number"
+  ) {
+    return null;
+  }
+  return { cols: storedGrid.cols, rows: storedGrid.rows, cellsSeen };
+}
+
+function isCoverageLatticeMismatch(err: unknown): boolean {
+  return coverageLatticeMismatchDetail(err) !== null;
+}
+
 /** Whether a failed push can never succeed by retrying the identical payload: any 4xx (an
- *  unknown cell, an unconformed stored record, a refused subject), or the audit-gap 500 by its
- *  own marker. A network failure or an ordinary 5xx is not terminal and stays queued. */
+ *  unknown cell, an unconformed stored record, a refused subject), the audit-gap 500, or the
+ *  lattice-mismatch 409, each by its own marker. A network failure or an ordinary 5xx is not
+ *  terminal and stays queued. A live tracker checks `isCoverageLatticeMismatch` ahead of this
+ *  one, since that case sets its own hold rather than either dropping or rescheduling. */
 function isTerminalPushFailure(err: unknown): boolean {
-  if (isAuditEntryNotWritten(err)) return true;
+  if (isAuditEntryNotWritten(err) || isCoverageLatticeMismatch(err)) return true;
   const status = pushErrorStatus(err);
   return status !== null && status >= 400 && status < 500;
 }
@@ -254,6 +295,10 @@ export class CoverageTracker {
   private viewing: CoverageViewingInput | null = null;
   private dirty = false;
   private timer: ReturnType<typeof setTimeout> | null = null;
+  // The lattice-mismatch hold (see ReplaceRequired) and whether the next payload is armed to
+  // confirm discarding it; armed is consumed on a successful push, never on send.
+  private replaceRequiredState: ReplaceRequired | null = null;
+  private armed = false;
 
   constructor(
     private postFn: (body: CoveragePayload) => Promise<CoveragePushResponse>,
@@ -335,6 +380,27 @@ export class CoverageTracker {
     return this.bar;
   }
 
+  /** A stored coverage record on a lattice other than the current one, seen at least once, or
+   *  null: the chrome's own replace control reads this to render the notice and its Replace
+   *  button, and `App.tsx`'s unload guard fires on the tracker staying dirty while it stands. */
+  get replaceRequired(): ReplaceRequired | null {
+    return this.replaceRequiredState;
+  }
+
+  /**
+   * Confirm discarding the previous lattice's sweeps: arms the next payload with `replace: true`
+   * and posts immediately. The arming is consumed only on a successful push (`adoptRecorded`),
+   * never on send, so an ordinary 5xx or network failure between here and a settled response
+   * keeps it armed and the retry (through the tracker's own `markDirty` reschedule) still
+   * carries the flag.
+   */
+  armReplace(): void {
+    if (!this.replaceRequiredState) return;
+    this.armed = true;
+    this.dirty = true;
+    this.postNow();
+  }
+
   /**
    * Point the tracker at a new (image, subject, date, dataset, grid) identity. Any fact still
    * owed for the previous identity is flushed first; a push that fails there is handed to the
@@ -355,15 +421,29 @@ export class CoverageTracker {
     this.bar = null;
     this.viewing = null;
     this.dirty = false;
+    this.replaceRequiredState = null;
+    this.armed = false;
     this.opts.onChange?.();
   }
 
   /** Adopt a stored record's cell facts, only when its grid matches the current one: every
    *  recorded value seeds every one of that cell's sub-cells as a floor (so a lower local
    *  observation this session never reads as a regression) and both `seenAtScale` and
-   *  `recorded` start from it, so a hydrated cell reads acknowledged, not pending. */
+   *  `recorded` start from it, so a hydrated cell reads acknowledged, not pending. A record on
+   *  another lattice adopts nothing and sets the replace hold instead, recording how many cells
+   *  it saw; the other early returns here (no record, no current grid, a record with no grid of
+   *  its own) set nothing, since there is no lattice to compare against. */
   hydrate(record: CoverageRecord | null): void {
-    if (!record || !this.grid || !record.grid || !sameGrid(record.grid, this.grid)) return;
+    if (!record || !this.grid || !record.grid) return;
+    if (!sameGrid(record.grid, this.grid)) {
+      this.replaceRequiredState = {
+        cols: record.grid.cols,
+        rows: record.grid.rows,
+        cellsSeen: Object.keys(record.cells_seen_at_scale).length,
+      };
+      this.opts.onChange?.();
+      return;
+    }
     for (const name of record.cells_served_at_native) this.servedAtNativeSet.add(name);
     for (const [name, atScale] of Object.entries(record.cells_seen_at_scale)) {
       this.seenAtScaleMap.set(name, Math.max(this.seenAtScaleMap.get(name) ?? -Infinity, atScale));
@@ -469,7 +549,11 @@ export class CoverageTracker {
    *  retry cadence, so this posts immediately under the outgoing image's own key and only hands
    *  the payload to the module outbox when that post itself fails -- the tracker is about to
    *  move on (or vanish) and can no longer retry it itself, but a fresh failure there starts the
-   *  outbox's own retry timer from the failure, never from this call. */
+   *  outbox's own retry timer from the failure, never from this call. While the replace hold
+   *  stands and is not armed, nothing is sent and `dirty` stays set: a payload built under the
+   *  hold must never reach the outbox, where its own retry would draw the identical 409 and be
+   *  dropped as terminal (the outbox's accepted residual for a payload already queued before the
+   *  hold existed, never one this method itself hands it under a live hold). */
   flush(): void {
     if (this.timer !== null) {
       clearTimeout(this.timer);
@@ -479,12 +563,28 @@ export class CoverageTracker {
       this.dirty = false;
       return;
     }
+    if (this.replaceRequiredState && !this.armed) return;
     const body = this.buildPayload(this.keyParts, this.grid, this.viewing);
     this.dirty = false;
     void this.postFn(body).then(
       () => {},
-      () => coverageOutbox.enqueue(body),
+      (err: unknown) => {
+        if (this.setHoldFromError(err)) return;
+        coverageOutbox.enqueue(body);
+      },
     );
+  }
+
+  /** Set the replace hold from a coverage-lattice-mismatch push failure, marking the tracker
+   *  dirty again since the payload never landed; returns whether `err` was one, so a caller
+   *  branches on it without parsing the marker twice. */
+  private setHoldFromError(err: unknown): boolean {
+    const detail = coverageLatticeMismatchDetail(err);
+    if (!detail) return false;
+    this.dirty = true;
+    this.replaceRequiredState = detail;
+    this.opts.onChange?.();
+    return true;
   }
 
   dispose(): void {
@@ -517,19 +617,25 @@ export class CoverageTracker {
       cells_served_at_native: Array.from(this.servedAtNativeSet).sort(),
       cells_seen_at_scale: cellsSeenAtScale,
       viewing,
+      replace: this.armed,
     };
   }
 
+  /** While the replace hold stands and is not armed, nothing is sent (see `flush`'s own note);
+   *  `dirty` stays set so the next armed attempt or an eventual `flush` still carries it. */
   private postNow(): void {
     if (!this.dirty || !this.keyParts || !this.grid || !this.viewing) return;
+    if (this.replaceRequiredState && !this.armed) return;
     this.dirty = false;
     const body = this.buildPayload(this.keyParts, this.grid, this.viewing);
     void this.postFn(body).then(
       (res) => this.adoptRecorded(res.record.cells_seen_at_scale),
       (err: unknown) => {
         this.dirty = true;
+        if (this.setHoldFromError(err)) return;
         this.opts.onPushError?.(err instanceof Error ? err.message : String(err));
-        // A failed push must not go quiet: rescheduling here is the retry.
+        // A failed push must not go quiet: rescheduling here is the retry, and it still
+        // carries `replace: true` (through buildPayload) while `armed` stays set.
         this.markDirty();
       },
     );
@@ -539,11 +645,17 @@ export class CoverageTracker {
    *  merge `hydrate` applies to a fresh read), never the posted body: the response is the
    *  server's authoritative merge, which can hold a cell another tab or session contributed that
    *  never rode in this payload at all, and can hold a value higher than this payload's own on a
-   *  concurrent write. Reading the body instead would credit only what this tab itself sent. */
+   *  concurrent write. Reading the body instead would credit only what this tab itself sent. A
+   *  successful push under an armed hold releases it: the arming is consumed here, never on
+   *  send, so ordinary pushes resume from the next fact this tracker owes. */
   private adoptRecorded(recorded: Record<string, number>): void {
     for (const [name, atScale] of Object.entries(recorded)) {
       this.seenAtScaleMap.set(name, Math.max(this.seenAtScaleMap.get(name) ?? -Infinity, atScale));
       this.recordedMap.set(name, Math.max(this.recordedMap.get(name) ?? -Infinity, atScale));
+    }
+    if (this.armed) {
+      this.armed = false;
+      this.replaceRequiredState = null;
     }
     this.opts.onChange?.();
   }

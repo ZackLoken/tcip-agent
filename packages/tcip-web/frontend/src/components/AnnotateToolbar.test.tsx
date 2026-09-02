@@ -45,6 +45,7 @@ function renderToolbar(
     workingScaleReason?: string | null;
     workingScaleSubject?: string | null;
     coverageMultiCell?: boolean;
+    replaceRequired?: { cols: number; rows: number; cellsSeen: number } | null;
   },
 ) {
   render(
@@ -59,6 +60,7 @@ function renderToolbar(
       workingScaleReason={extra?.workingScaleReason ?? null}
       workingScaleSubject={extra?.workingScaleSubject ?? null}
       coverageMultiCell={extra?.coverageMultiCell}
+      replaceRequired={extra?.replaceRequired ?? null}
     />,
   );
 }
@@ -602,6 +604,49 @@ describe("AnnotateToolbar Complete toggle coverage warning", () => {
     });
 
     expect(useStore.getState().toasts.length).toBe(toastsBefore);
+  });
+
+  it("adds the replace hold's sentence beside the completeWarning wording", async () => {
+    seedImageDataset({ subject: "subject_a" });
+    setCanvasBoxSubjects(["subject_a"]);
+    vi.spyOn(classesApi, "setImageStatus").mockResolvedValue({});
+    renderToolbar(undefined, undefined, {
+      completeWarning: () => "Complete: 2 of 6 grid cells have not had every part on screen",
+      workingScaleReason: null,
+      coverageMultiCell: true,
+      replaceRequired: { cols: 4, rows: 4, cellsSeen: 3 },
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByLabelText("Complete"));
+    });
+
+    const toast = useStore
+      .getState()
+      .toasts.find((t) => t.message.includes("2 of 6 grid cells have not had every part"));
+    expect(toast).toBeTruthy();
+    expect(toast!.message).toContain("3 cells seen on a previous lattice");
+  });
+
+  it("toasts the replace hold's sentence alone when nothing else would have fired", async () => {
+    seedImageDataset({ subject: "subject_a" });
+    setCanvasBoxSubjects(["subject_a"]);
+    vi.spyOn(classesApi, "setImageStatus").mockResolvedValue({});
+    renderToolbar(undefined, undefined, {
+      completeWarning: () => null,
+      workingScaleReason: null,
+      coverageMultiCell: true,
+      replaceRequired: { cols: 2, rows: 2, cellsSeen: 1 },
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByLabelText("Complete"));
+    });
+
+    const toast = useStore
+      .getState()
+      .toasts.find((t) => t.message.includes("1 cell seen on a previous lattice"));
+    expect(toast).toBeTruthy();
   });
 });
 

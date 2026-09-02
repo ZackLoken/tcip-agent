@@ -38,6 +38,7 @@ function response(
     counts_error: null,
     working_scale: {},
     working_scale_error: null,
+    working_scale_reason: {},
     ...overrides,
   };
 }
@@ -368,6 +369,36 @@ describe("useRegionCompleteness", () => {
     );
     await waitFor(() =>
       expect(result.current.workingScaleReason).toBe("no saved box or polygon annotation of bush"),
+    );
+  });
+
+  it("prefers the served per-subject reason over its own composed clause", async () => {
+    vi.spyOn(api.coverage, "completeness").mockResolvedValue(
+      response(
+        {},
+        {
+          working_scale: { bush: null },
+          working_scale_reason: {
+            bush:
+              "no saved box or polygon annotation of bush on this image and no known " +
+              "pixel size (it is not a raster)",
+          },
+        },
+      ),
+    );
+    const { result } = renderHook(() =>
+      useRegionCompleteness({
+        imagePath: "C:/data/images/2026-01-01/mosaic.tif",
+        datasetRoot: "C:/data",
+        subject: "bush",
+        grid: GRID,
+      }),
+    );
+    await waitFor(() =>
+      expect(result.current.workingScaleReason).toBe(
+        "no saved box or polygon annotation of bush on this image and no known pixel size " +
+          "(it is not a raster)",
+      ),
     );
   });
 

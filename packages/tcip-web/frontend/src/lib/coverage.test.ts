@@ -10,6 +10,7 @@ import {
   meetsBar,
   noWorkingScaleToast,
   planRegionFetches,
+  replaceRequiredToastSentence,
   rectFullyInside,
   servedCellAtNative,
   stepUnsweptCell,
@@ -355,6 +356,13 @@ describe("noWorkingScaleToast", () => {
     expect(noWorkingScaleToast(null, "no active subject")).toBe(
       "Complete: no active subject, so coverage was not checked",
     );
+  });
+});
+
+describe("replaceRequiredToastSentence", () => {
+  it("pluralizes by count", () => {
+    expect(replaceRequiredToastSentence(1)).toContain("1 cell seen on a previous lattice");
+    expect(replaceRequiredToastSentence(3)).toContain("3 cells seen on a previous lattice");
   });
 });
 

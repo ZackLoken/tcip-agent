@@ -39,6 +39,7 @@ import {
   type CellAttestedView,
   type WorkingScaleBar,
 } from "@/lib/coverage";
+import type { ReplaceRequired } from "@/lib/coverageTracker";
 
 /** The sr-only line naming an attestation's own scale provenance: the view scale it was pressed
  *  at, and whether this image's own coverage record showed the cell already seen at that write
@@ -57,7 +58,9 @@ function attestedViewLine(cell: string, entry: CellAttestedView | undefined): st
     return `${cell} attested at ${n} zoom, seen on record at ${s}, no working scale recorded at attestation`;
   }
   const met = meetsBar(atScale, bar);
-  const against = ` against a working scale of ${(bar.value * 100).toFixed(1)}%`;
+  const provenance =
+    bar.from_this_image === false ? ", derived from the dataset's georeferenced images" : "";
+  const against = ` against a working scale of ${(bar.value * 100).toFixed(1)}%${provenance}`;
   return `${cell} attested at ${n} zoom, seen on record at ${s}${against}${met ? "" : " (below it)"}`;
 }
 
@@ -175,9 +178,11 @@ export function CoverageChrome(props: {
   currentCellComplete: boolean;
   currentCellStale: boolean;
   otherLattice: OtherLatticeAttestation | null;
-  /** A view-coverage sweep record for this image/subject on a grid other than the current one,
-   *  or null: the sweep-history equivalent of `otherLattice`, read the same way. */
-  sweptOtherLattice: OtherLatticeAttestation | null;
+  /** The tracker's own replace hold: a view-coverage sweep record for this image/subject on a
+   *  grid other than the current one, seen at least once, or null. While it stands no further
+   *  sweep is posted until `onArmReplace` confirms discarding it. */
+  replaceRequired: ReplaceRequired | null;
+  onArmReplace: () => void;
   swept: ReadonlySet<string>;
   /** Cells seen locally, not yet acknowledged by the server (see coverageTracker.ts). */
   pending: ReadonlySet<string>;
@@ -201,6 +206,7 @@ export function CoverageChrome(props: {
 }) {
   const [confirmPending, setConfirmPending] = useState(false);
   const [announcement, setAnnouncement] = useState("");
+  const [replaceArmed, setReplaceArmed] = useState(false);
   const { open: panelOpen, toggle: togglePanel } = useDisclosure(
     "tcip.annotate.coverageChromeOpen",
     true,
@@ -212,6 +218,12 @@ export function CoverageChrome(props: {
   useEffect(() => {
     setConfirmPending(false);
   }, [props.currentCellName, props.otherLattice]);
+
+  // Tied to the hold alone, never to the current cell: a breeder deciding whether to replace
+  // must not lose that decision by panning to another cell first.
+  useEffect(() => {
+    setReplaceArmed(false);
+  }, [props.replaceRequired]);
 
   function press() {
     if (destructive && !confirmPending) {
@@ -230,6 +242,25 @@ export function CoverageChrome(props: {
   function cancel() {
     setConfirmPending(false);
     setAnnouncement("Attestation cancelled.");
+  }
+
+  function pressReplace() {
+    if (!replaceArmed) {
+      setReplaceArmed(true);
+      const n = props.replaceRequired!.cellsSeen;
+      setAnnouncement(
+        `Replace armed: press Confirm to discard ${n} cell${n === 1 ? "" : "s"} seen on the previous lattice, or Cancel.`,
+      );
+      return;
+    }
+    setReplaceArmed(false);
+    setAnnouncement("");
+    props.onArmReplace();
+  }
+
+  function cancelReplace() {
+    setReplaceArmed(false);
+    setAnnouncement("Replace cancelled.");
   }
 
   let label = "";
@@ -297,11 +328,41 @@ export function CoverageChrome(props: {
           previous lattice ({props.otherLattice.cols}x{props.otherLattice.rows}).
         </p>
       )}
-      {props.sweptOtherLattice && (
-        <p className={`${noticeClass} border-tcip-border text-tcip-muted`}>
-          {props.sweptOtherLattice.count} cell{props.sweptOtherLattice.count === 1 ? "" : "s"} swept
-          on a previous lattice ({props.sweptOtherLattice.cols}x{props.sweptOtherLattice.rows}).
-        </p>
+      {props.replaceRequired && (
+        <div className={`${noticeClass} flex flex-col gap-1.5 border-tcip-border text-tcip-warn`}>
+          <p>
+            {props.replaceRequired.cellsSeen} cell
+            {props.replaceRequired.cellsSeen === 1 ? "" : "s"} seen on a previous lattice (
+            {props.replaceRequired.cols}x{props.replaceRequired.rows}); progress on this lattice is
+            not saved until you replace it.
+          </p>
+          <div className="flex gap-1.5">
+            <button
+              type="button"
+              onClick={pressReplace}
+              className={`flex-1 rounded border px-2 py-1 text-left text-[11px] font-semibold transition-colors ${
+                replaceArmed
+                  ? "border-tcip-fp/60 bg-tcip-fp/15 text-tcip-fp"
+                  : "border-tcip-border bg-tcip-bg text-tcip-fg hover:border-tcip-border-hover"
+              }`}
+            >
+              {replaceArmed
+                ? `Confirm: discard ${props.replaceRequired.cellsSeen} cell${
+                    props.replaceRequired.cellsSeen === 1 ? "" : "s"
+                  } seen on the previous lattice`
+                : "Replace"}
+            </button>
+            {replaceArmed && (
+              <button
+                type="button"
+                onClick={cancelReplace}
+                className="rounded border border-tcip-border bg-tcip-bg px-2 py-1 text-[11px] font-semibold text-tcip-muted hover:text-tcip-fg"
+              >
+                Cancel
+              </button>
+            )}
+          </div>
+        </div>
       )}
       {belowFitScale && (
         <p className={`${noticeClass} border-tcip-border text-tcip-muted`}>

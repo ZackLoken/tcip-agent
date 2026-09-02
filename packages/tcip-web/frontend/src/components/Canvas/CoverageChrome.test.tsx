@@ -29,7 +29,8 @@ function baseProps() {
     currentCellComplete: false,
     currentCellStale: false,
     otherLattice: null,
-    sweptOtherLattice: null,
+    replaceRequired: null,
+    onArmReplace: vi.fn(),
     swept: new Set<string>(),
     pending: new Set<string>(),
     coarserCount: 0,
@@ -272,9 +273,89 @@ describe("CoverageChrome", () => {
     expect(screen.queryByText(/A cell is not a training tile/)).not.toBeInTheDocument();
   });
 
-  it("states a sweep record on a previous lattice, the way the attestation equivalent does", () => {
-    render(<CoverageChrome {...baseProps()} sweptOtherLattice={{ count: 2, cols: 6, rows: 6 }} />);
-    expect(screen.getByText(/2 cells swept on a previous lattice \(6x6\)/)).toBeInTheDocument();
+  it("states a replace hold, the way the attestation equivalent states its own", () => {
+    render(
+      <CoverageChrome {...baseProps()} replaceRequired={{ cellsSeen: 2, cols: 6, rows: 6 }} />,
+    );
+    expect(
+      screen.getByText(
+        /2 cells seen on a previous lattice \(6x6\); progress on this lattice is not saved/,
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("renders the replace control with the panel collapsed, the overlay off and no current cell", () => {
+    render(
+      <CoverageChrome
+        {...baseProps()}
+        replaceRequired={{ cellsSeen: 3, cols: 4, rows: 4 }}
+        overlayOn={false}
+        currentCellName={null}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Coverage for fruit/ })); // collapse
+    expect(screen.getByRole("button", { name: "Replace" })).toBeInTheDocument();
+  });
+
+  it("a Replace press arms a confirmation, a second press confirms it", () => {
+    const onArmReplace = vi.fn();
+    render(
+      <CoverageChrome
+        {...baseProps()}
+        replaceRequired={{ cellsSeen: 3, cols: 4, rows: 4 }}
+        onArmReplace={onArmReplace}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Replace" }));
+    expect(onArmReplace).not.toHaveBeenCalled();
+    const confirm = screen.getByRole("button", {
+      name: "Confirm: discard 3 cells seen on the previous lattice",
+    });
+    fireEvent.click(confirm);
+    expect(onArmReplace).toHaveBeenCalledTimes(1);
+  });
+
+  it("Cancel leaves the hold: no call, and the control returns to its unarmed label", () => {
+    const onArmReplace = vi.fn();
+    render(
+      <CoverageChrome
+        {...baseProps()}
+        replaceRequired={{ cellsSeen: 1, cols: 2, rows: 2 }}
+        onArmReplace={onArmReplace}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Replace" }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(onArmReplace).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Replace" })).toBeInTheDocument();
+    expect(screen.getByText(/1 cell seen on a previous lattice \(2x2\)/)).toBeInTheDocument();
+  });
+
+  it("the replace control's armed state is tied to the hold, not the current cell", () => {
+    const replaceRequired = { cellsSeen: 1, cols: 2, rows: 2 };
+    const { rerender } = render(
+      <CoverageChrome {...baseProps()} replaceRequired={replaceRequired} />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Replace" }));
+    expect(screen.getByText(/Confirm: discard/)).toBeInTheDocument();
+
+    rerender(
+      <CoverageChrome {...baseProps()} currentCellName="B2" replaceRequired={replaceRequired} />,
+    );
+    expect(screen.getByText(/Confirm: discard/)).toBeInTheDocument();
+  });
+
+  it("the attest control's confirmation is unaffected by a standing replace hold", () => {
+    const onAttest = vi.fn();
+    render(
+      <CoverageChrome
+        {...baseProps()}
+        replaceRequired={{ cellsSeen: 1, cols: 2, rows: 2 }}
+        onAttest={onAttest}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Attest A1 complete for fruit" }));
+    expect(onAttest).toHaveBeenCalledWith(true);
   });
 
   it("carries a visually hidden list of the lattice's own held states, for the accessibility tree", () => {
@@ -342,12 +423,12 @@ describe("CoverageChrome", () => {
       <CoverageChrome
         {...baseProps()}
         otherLattice={{ count: 2, cols: 4, rows: 4 }}
-        sweptOtherLattice={{ count: 1, cols: 6, rows: 6 }}
+        replaceRequired={{ cellsSeen: 1, cols: 6, rows: 6 }}
       />,
     );
     fireEvent.click(screen.getByRole("button", { name: /Coverage for fruit/ }));
     expect(screen.getByText(/2 cells attested on a previous lattice \(4x4\)/)).toBeInTheDocument();
-    expect(screen.getByText(/1 cell swept on a previous lattice \(6x6\)/)).toBeInTheDocument();
+    expect(screen.getByText(/1 cell seen on a previous lattice \(6x6\)/)).toBeInTheDocument();
   });
 
   it("the read-error text strips the record's dictionary, keeping the reader's own sentence", () => {
@@ -495,6 +576,26 @@ describe("CoverageChrome", () => {
       ),
     ).toBeInTheDocument();
     expect(screen.queryByText(/below it/)).not.toBeInTheDocument();
+  });
+
+  it("names the dataset-derived provenance when the stamped bar's from_this_image is false", () => {
+    render(
+      <CoverageChrome
+        {...baseProps()}
+        activeCellsAttestedView={{
+          A1: {
+            view_scale: 0.5,
+            working_scale_bar_at_write: { ...bar(0.4), from_this_image: false },
+            seen_on_record: { at_scale: 0.6, grid_matched: true },
+          },
+        }}
+      />,
+    );
+    expect(
+      screen.getByText(
+        /against a working scale of 40\.0%, derived from the dataset's georeferenced images/,
+      ),
+    ).toBeInTheDocument();
   });
 
   it("states not seen on record when the coverage record never showed the cell", () => {

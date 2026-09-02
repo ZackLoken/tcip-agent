@@ -149,8 +149,8 @@ describe("useCoverageTracking sweep on another lattice", () => {
     });
     const { result } = renderHook(() => useCoverageTracking(trackingArgs("tip", bar(0.5))));
 
-    await waitFor(() => expect(result.current.sweptOtherLattice).not.toBeNull());
-    expect(result.current.sweptOtherLattice).toEqual({ count: 2, cols: 3, rows: 2 });
+    await waitFor(() => expect(result.current.replaceRequired).not.toBeNull());
+    expect(result.current.replaceRequired).toEqual({ cols: 3, rows: 2, cellsSeen: 2 });
     // Never hydrated onto the current lattice's swept set: a different lattice's cell names
     // cannot be trusted to mean the same cells here.
     expect(result.current.swept.size).toBe(0);
@@ -170,7 +170,27 @@ describe("useCoverageTracking sweep on another lattice", () => {
     const { result } = renderHook(() => useCoverageTracking(trackingArgs("tip", bar(0.5))));
 
     await waitFor(() => expect(result.current.swept.has("A1")).toBe(true));
-    expect(result.current.sweptOtherLattice).toBeNull();
+    expect(result.current.replaceRequired).toBeNull();
+  });
+
+  it("armReplace posts the next payload with replace: true", async () => {
+    vi.spyOn(api.coverage, "get").mockResolvedValue({
+      grid: OTHER_GRID,
+      cells_seen_at_scale: { A1: 1 },
+      cells_served_at_native: [],
+      viewing: NULL_VIEWING,
+      updated_at: "2026-01-01T00:00:00+00:00",
+    });
+    const push = vi
+      .spyOn(api.coverage, "push")
+      .mockResolvedValue({ record: { cells_seen_at_scale: {} } });
+    const { result } = renderHook(() => useCoverageTracking(trackingArgs("tip", bar(0.5))));
+
+    await waitFor(() => expect(result.current.replaceRequired).not.toBeNull());
+    result.current.armReplace();
+    await waitFor(() => expect(push).toHaveBeenCalled());
+    expect(push.mock.calls[0][0].replace).toBe(true);
+    await waitFor(() => expect(result.current.replaceRequired).toBeNull());
   });
 });
 

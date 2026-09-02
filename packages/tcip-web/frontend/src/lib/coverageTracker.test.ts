@@ -521,3 +521,123 @@ describe("CoverageTracker complete warning", () => {
     expect(tracker.completeWarning()).toBeNull();
   });
 });
+
+function mismatchRefusal(cols: number, rows: number, cellsSeen: number): StructuredRefusalError {
+  return new StructuredRefusalError(
+    {
+      error: "coverage_lattice_mismatch",
+      message: "grid mismatch",
+      stored_grid: { cols, rows, tile_size: 100 },
+      cells_seen: cellsSeen,
+    },
+    409,
+    "grid mismatch",
+  );
+}
+
+describe("CoverageTracker replace hold", () => {
+  it("hydrate on another lattice sets the hold and adopts no cells", () => {
+    tracker.reset(KEY, GRID, CELLS);
+    tracker.hydrate({
+      grid: { ...GRID, tile_size: 50, cols: 6, rows: 4 },
+      cells_seen_at_scale: { A1: 1, B1: 0.5 },
+      cells_served_at_native: ["B1"],
+      viewing: NULL_VIEWING,
+      updated_at: "2026-01-01T00:00:00+00:00",
+    });
+    expect(tracker.seenAtScale.size).toBe(0);
+    expect(tracker.servedAtNative.size).toBe(0);
+    expect(tracker.replaceRequired).toEqual({ cols: 6, rows: 4, cellsSeen: 2 });
+  });
+
+  it("a 409 with the marker sets the hold and neither drops nor retries", async () => {
+    post.mockRejectedValue(mismatchRefusal(6, 4, 3));
+    tracker.reset(KEY, GRID, CELLS);
+    tracker.setViewing(NULL_VIEWING);
+    tracker.noteServedAtNative("A1");
+    await vi.advanceTimersByTimeAsync(400);
+    expect(post).toHaveBeenCalledTimes(1);
+    expect(tracker.replaceRequired).toEqual({ cols: 6, rows: 4, cellsSeen: 3 });
+    expect(tracker.isDirty).toBe(true);
+    // No reschedule and no outbox hand-off: the hold is the only consequence.
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(post).toHaveBeenCalledTimes(1);
+    expect(coverageOutbox.size).toBe(0);
+  });
+
+  it("while the hold stands, a sweep or a flush posts nothing", async () => {
+    post.mockRejectedValue(mismatchRefusal(6, 4, 1));
+    tracker.reset(KEY, GRID, CELLS);
+    tracker.setViewing(NULL_VIEWING);
+    tracker.noteServedAtNative("A1");
+    await vi.advanceTimersByTimeAsync(400);
+    expect(tracker.replaceRequired).not.toBeNull();
+    post.mockClear();
+
+    tracker.noteViewport(FULL_VIEW, 1); // a fresh sweep under the hold
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(post).not.toHaveBeenCalled();
+    expect(tracker.isDirty).toBe(true);
+
+    tracker.flush();
+    expect(post).not.toHaveBeenCalled();
+    expect(tracker.isDirty).toBe(true);
+  });
+
+  it("armReplace posts immediately with replace: true and survives a failed push", async () => {
+    post
+      .mockRejectedValueOnce(mismatchRefusal(6, 4, 1))
+      .mockRejectedValueOnce(new Error("network down"))
+      .mockResolvedValue({ record: { cells_seen_at_scale: {} } });
+    tracker.reset(KEY, GRID, CELLS);
+    tracker.setViewing(NULL_VIEWING);
+    tracker.noteServedAtNative("A1");
+    await vi.advanceTimersByTimeAsync(400);
+    expect(tracker.replaceRequired).not.toBeNull();
+    post.mockClear();
+
+    tracker.armReplace();
+    expect(post).toHaveBeenCalledTimes(1);
+    expect(post.mock.calls[0][0].replace).toBe(true);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(tracker.replaceRequired).not.toBeNull(); // the ordinary failure keeps it armed
+
+    await vi.advanceTimersByTimeAsync(400); // the tracker's own retry
+    expect(post).toHaveBeenCalledTimes(2);
+    expect(post.mock.calls[1][0].replace).toBe(true); // still carries the flag
+  });
+
+  it("a successful armed push clears the hold and ordinary pushes resume", async () => {
+    post
+      .mockRejectedValueOnce(mismatchRefusal(6, 4, 1))
+      .mockResolvedValue({ record: { cells_seen_at_scale: {} } });
+    tracker.reset(KEY, GRID, CELLS);
+    tracker.setViewing(NULL_VIEWING);
+    tracker.noteServedAtNative("A1");
+    await vi.advanceTimersByTimeAsync(400);
+    expect(tracker.replaceRequired).not.toBeNull();
+
+    tracker.armReplace();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(tracker.replaceRequired).toBeNull();
+    expect(tracker.isDirty).toBe(false);
+
+    post.mockClear();
+    tracker.noteServedAtNative("B1");
+    await vi.advanceTimersByTimeAsync(400);
+    expect(post).toHaveBeenCalledTimes(1);
+    expect(post.mock.calls[0][0].replace).toBe(false); // arming was consumed, not sticky
+  });
+
+  it("reset clears the hold", async () => {
+    post.mockRejectedValue(mismatchRefusal(6, 4, 1));
+    tracker.reset(KEY, GRID, CELLS);
+    tracker.setViewing(NULL_VIEWING);
+    tracker.noteServedAtNative("A1");
+    await vi.advanceTimersByTimeAsync(400);
+    expect(tracker.replaceRequired).not.toBeNull();
+
+    tracker.reset(null, null, []);
+    expect(tracker.replaceRequired).toBeNull();
+  });
+});

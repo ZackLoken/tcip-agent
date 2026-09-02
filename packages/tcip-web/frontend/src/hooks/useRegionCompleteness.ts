@@ -87,6 +87,9 @@ export function useRegionCompleteness(args: {
     Record<string, WorkingScaleBar | null>
   >({});
   const [workingScaleError, setWorkingScaleError] = useState<string | null>(null);
+  const [workingScaleReasonBySubject, setWorkingScaleReasonBySubject] = useState<
+    Record<string, string>
+  >({});
   const [error, setError] = useState<string | null>(null);
   const [readCountsError, setReadCountsError] = useState<string | null>(null);
   const { imagePath, datasetRoot, subject, grid } = args;
@@ -98,6 +101,7 @@ export function useRegionCompleteness(args: {
       setCountsGrid(null);
       setWorkingScaleBySubject({});
       setWorkingScaleError(null);
+      setWorkingScaleReasonBySubject({});
       setError(null);
       setReadCountsError(null);
       return;
@@ -109,6 +113,7 @@ export function useRegionCompleteness(args: {
         setCountsGrid(res.counts_grid);
         setWorkingScaleBySubject(res.working_scale);
         setWorkingScaleError(res.working_scale_error);
+        setWorkingScaleReasonBySubject(res.working_scale_reason);
         setError(null);
         setReadCountsError(res.counts_error);
       },
@@ -118,6 +123,7 @@ export function useRegionCompleteness(args: {
         setCountsGrid(null);
         setWorkingScaleBySubject({});
         setWorkingScaleError(null);
+        setWorkingScaleReasonBySubject({});
         setError(err instanceof Error ? err.message : String(err));
         setReadCountsError(null);
       },
@@ -196,8 +202,16 @@ export function useRegionCompleteness(args: {
     if (workingScaleError) return workingScaleError;
     if (!subject) return "no active subject";
     if (!(subject in workingScaleBySubject)) return "the read has not answered yet";
-    return `no saved box or polygon annotation of ${subject}`;
-  }, [workingScale, workingScaleError, subject, workingScaleBySubject]);
+    return (
+      workingScaleReasonBySubject[subject] ?? `no saved box or polygon annotation of ${subject}`
+    );
+  }, [
+    workingScale,
+    workingScaleError,
+    subject,
+    workingScaleBySubject,
+    workingScaleReasonBySubject,
+  ]);
 
   const write = useCallback(
     (cell: string, writeGrid: GridGeometry, complete: boolean, viewScale: number | null) => {
