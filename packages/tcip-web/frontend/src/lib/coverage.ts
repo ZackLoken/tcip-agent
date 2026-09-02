@@ -19,10 +19,10 @@ export interface GridCell {
 
 export interface CoverageGridResponse extends GridGeometry {
   cells: GridCell[];
-  /** How the tile size was chosen: "16 divisions of the long edge", "one display-bounded serve
-   *  per cell", or "chosen: <n> px" for an explicit tile_size. Not part of GridGeometry; stripped
-   *  back off (see useCoverageGrid) before a grid round-trips into a coverage or completeness
-   *  payload, which forbids extra keys. */
+  /** How the tile size was chosen: "the long edge in 16 equal divisions", "cells sized to one
+   *  full-resolution screenful", or "a chosen cell edge of <n> px" for an explicit tile_size. Not
+   *  part of GridGeometry; stripped back off (see useCoverageGrid) before a grid round-trips into
+   *  a coverage or completeness payload, which forbids extra keys. */
   derivation: string;
 }
 
@@ -108,6 +108,20 @@ export function cellsIntersecting(cells: GridCell[], rect: PixelRect): GridCell[
  *  shared by the Map tool's click and the chrome's "current cell" (viewport center). */
 export function cellAt(cells: GridCell[], x: number, y: number): GridCell | null {
   return cells.find((c) => x >= c.x0 && x < c.x1 && y >= c.y0 && y < c.y1) ?? null;
+}
+
+/** The cell the coverage chrome names: the cell a Map click just opened, while any part of it
+ *  remains inside the viewport (a padded, edge-clamped jump can leave the viewport centered away
+ *  from the clicked cell); otherwise the cell under the viewport center, the rule a pan or
+ *  Overview reverts to once the clicked cell scrolls out of view. */
+export function currentCoverageCell(
+  cells: GridCell[],
+  viewport: PixelRect | null,
+  mapSelected: GridCell | null,
+): GridCell | null {
+  if (mapSelected && viewport && rectsOverlap(mapSelected, viewport)) return mapSelected;
+  if (!viewport) return null;
+  return cellAt(cells, (viewport.x0 + viewport.x1) / 2, (viewport.y0 + viewport.y1) / 2);
 }
 
 /**

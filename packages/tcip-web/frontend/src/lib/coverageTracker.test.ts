@@ -220,6 +220,21 @@ describe("CoverageTracker posting", () => {
     });
   });
 
+  it("a failed push reports itself and retries on the next debounce tick, never silently", async () => {
+    const onPushError = vi.fn();
+    const failingTracker = new CoverageTracker(post, { onPushError });
+    post.mockRejectedValueOnce(new Error("network down")).mockResolvedValue({});
+    failingTracker.reset(KEY, GRID, CELLS);
+    failingTracker.noteServedAtNative("B1");
+
+    await vi.advanceTimersByTimeAsync(400);
+    expect(post).toHaveBeenCalledTimes(1);
+    expect(onPushError).toHaveBeenCalledWith("network down");
+
+    await vi.advanceTimersByTimeAsync(400);
+    expect(post).toHaveBeenCalledTimes(2);
+  });
+
   it("a switch to another identity flushes owed facts under the old key first, then clears", () => {
     tracker.reset(KEY, GRID, CELLS);
     tracker.noteServedAtNative("B1");

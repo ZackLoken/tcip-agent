@@ -4,6 +4,7 @@ import {
   cellAt,
   cellsIntersecting,
   completeWarningMessage,
+  currentCoverageCell,
   effectiveComplete,
   planRegionFetches,
   rectFullyInside,
@@ -69,6 +70,35 @@ describe("cellAt", () => {
   it("returns null outside every cell", () => {
     expect(cellAt(CELLS, 1000, 1000)).toBeNull();
     expect(cellAt([], 1, 1)).toBeNull();
+  });
+});
+
+describe("currentCoverageCell", () => {
+  it("names the clicked cell while any part of it is still in the viewport, even off-center", () => {
+    // A corner-cell jump whose padded, edge-clamped view centers on the lattice's middle row:
+    // the viewport's own centre falls in B1, but A1 (the clicked cell) still overlaps it.
+    const a1 = CELLS.find((c) => c.name === "A1")!;
+    const viewport = { x0: -50, y0: -20, x1: 250, y1: 180 };
+    expect(
+      cellAt(CELLS, (viewport.x0 + viewport.x1) / 2, (viewport.y0 + viewport.y1) / 2)?.name,
+    ).toBe("B1");
+    expect(currentCoverageCell(CELLS, viewport, a1)?.name).toBe("A1");
+  });
+
+  it("reverts to the viewport-centre cell once a pan or Overview leaves the clicked cell", () => {
+    const a1 = CELLS.find((c) => c.name === "A1")!;
+    const viewport = { x0: 150, y0: 100, x1: 300, y1: 200 }; // A1 no longer overlaps
+    expect(currentCoverageCell(CELLS, viewport, a1)?.name).toBe("C2");
+  });
+
+  it("falls back to the viewport centre with no Map selection at all", () => {
+    const viewport = { x0: 0, y0: 0, x1: 100, y1: 100 };
+    expect(currentCoverageCell(CELLS, viewport, null)?.name).toBe("A1");
+  });
+
+  it("null with no viewport measured yet, whether or not a cell was clicked", () => {
+    const a1 = CELLS.find((c) => c.name === "A1")!;
+    expect(currentCoverageCell(CELLS, null, a1)).toBeNull();
   });
 });
 

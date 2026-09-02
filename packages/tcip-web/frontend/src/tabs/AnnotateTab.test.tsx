@@ -17,6 +17,7 @@ import { AnnotateTab } from "@/tabs/AnnotateTab";
 // and CanvasStage as a passthrough so AnnotationShapes' memo behavior is intact.
 vi.mock("konva", () => ({ default: {} }));
 vi.mock("react-konva", () => ({
+  Group: (props: { children?: React.ReactNode }) => <>{props.children}</>,
   Rect: (props: { stroke?: string; dash?: number[]; fill?: string }) => (
     <div
       data-testid="k-rect"
@@ -1156,7 +1157,7 @@ function mockMultiCellGrid() {
   vi.spyOn(api.coverage, "push").mockResolvedValue({ status: "ok" });
   return vi.spyOn(api.coverage, "grid").mockResolvedValue({
     ...MULTI_CELL_GRID,
-    derivation: "one display-bounded serve per cell",
+    derivation: "cells sized to one full-resolution screenful",
     cells: MULTI_CELL_CELLS,
   });
 }
@@ -1220,6 +1221,25 @@ describe("AnnotateTab Map tool", () => {
   });
 
   it("falls back to a drawing tool when the Map tool is withdrawn (no multi-cell grid)", async () => {
+    vi.spyOn(api.coverage, "get").mockResolvedValue(null);
+    vi.spyOn(api.coverage, "push").mockResolvedValue({ status: "ok" });
+    // An ordinary raster's own lattice is one cell: settled, never pending, and offers no Map.
+    vi.spyOn(api.coverage, "grid").mockResolvedValue({
+      width: 1000,
+      height: 800,
+      tile_size: 1000,
+      overlap: 0,
+      cols: 1,
+      rows: 1,
+      derivation: "cells sized to one full-resolution screenful",
+      cells: [{ name: "A1", x0: 0, y0: 0, x1: 1000, y1: 800 }],
+    });
+    vi.spyOn(api.coverage, "completeness").mockResolvedValue({
+      by_subject: {},
+      annotation_counts: {},
+      counts_grid: null,
+      counts_error: null,
+    });
     useStore.getState().setRegistry({ tip: {} });
     useStore.setState((s) => ({
       gui: { ...s.gui, mode: "map" as const, active_subject: "tip" },
@@ -1227,9 +1247,8 @@ describe("AnnotateTab Map tool", () => {
     render(<AnnotateTab />);
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
     await flush();
-    // A base serve at native resolution settles "no grid needed" (never pending), the state
-    // an ordinary single-cell raster reaches once its own serve reports back.
     act(() => triggerBaseFacts({ ...BELOW_NATIVE_BASE_FACTS, servedSize: { w: 1000, h: 800 } }));
+    await waitFor(() => expect(api.coverage.grid).toHaveBeenCalled());
     await flush();
 
     expect(useStore.getState().gui.mode).toBe("box");
@@ -1263,10 +1282,13 @@ describe("AnnotateTab completeness refresh and attestation control", () => {
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
     await flush();
 
-    expect(screen.getByText(/completeness unavailable: network down/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/labels could not be read, so nothing can be attested.*network down/),
+    ).toBeInTheDocument();
   });
 
   async function mountWithCoverageChrome(bySubject: Record<string, CompletenessRecord>) {
+    localStorage.removeItem("tcip.annotate.coverageGridOverlayOpen");
     mockMultiCellGrid();
     vi.spyOn(api.coverage, "completeness").mockResolvedValue({
       by_subject: bySubject,
@@ -1291,14 +1313,19 @@ describe("AnnotateTab completeness refresh and attestation control", () => {
     triggerBelowNativeBaseFacts();
     await waitFor(() => expect(api.coverage.grid).toHaveBeenCalled());
     await flush();
+    // The attest control is offered only while the overlay is on (ruling: no writing about an
+    // unseen cell); these tests exercise the control itself, so switch it on first.
+    fireEvent.click(screen.getByRole("button", { name: /Overlay off/ }));
   }
 
-  it("labels the control Attest when the raw stored set never held the cell", async () => {
+  it("labels the control Attest, naming the active subject, when the raw stored set never held the cell", async () => {
     await mountWithCoverageChrome({});
-    expect(screen.getByRole("button", { name: "Attest A1 complete" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Attest A1 complete for subject_a" }),
+    ).toBeInTheDocument();
   });
 
-  it("labels the control Unattest when the raw stored set holds the cell and it is fresh", async () => {
+  it("labels the control Unattest, naming the active subject, when the raw stored set holds the cell and it is fresh", async () => {
     await mountWithCoverageChrome({
       subject_a: {
         grid: MULTI_CELL_GRID,
@@ -1311,7 +1338,7 @@ describe("AnnotateTab completeness refresh and attestation control", () => {
         stale_cells: [],
       },
     });
-    expect(screen.getByRole("button", { name: "Unattest A1" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Unattest A1 for subject_a" })).toBeInTheDocument();
   });
 
   it("labels the control Re-attest when the raw stored set holds the cell and it is stale", async () => {
@@ -1328,8 +1355,55 @@ describe("AnnotateTab completeness refresh and attestation control", () => {
       },
     });
     expect(
-      screen.getByRole("button", { name: "Re-attest A1 (changed since attested)" }),
+      screen.getByRole("button", {
+        name: "Re-attest A1 for subject_a (changed since attested)",
+      }),
     ).toBeInTheDocument();
+  });
+
+  it("a single-cell raster renders the chrome with its attest control", async () => {
+    localStorage.removeItem("tcip.annotate.coverageGridOverlayOpen");
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
+      width: 200,
+      height: 200,
+      top: 0,
+      left: 0,
+      right: 200,
+      bottom: 200,
+      x: 0,
+      y: 0,
+      toJSON: () => "",
+    } as DOMRect);
+    vi.spyOn(api.coverage, "get").mockResolvedValue(null);
+    vi.spyOn(api.coverage, "push").mockResolvedValue({ status: "ok" });
+    vi.spyOn(api.coverage, "grid").mockResolvedValue({
+      width: 800,
+      height: 600,
+      tile_size: 800,
+      overlap: 0,
+      cols: 1,
+      rows: 1,
+      derivation: "cells sized to one full-resolution screenful",
+      cells: [{ name: "A1", x0: 0, y0: 0, x1: 800, y1: 600 }],
+    });
+    vi.spyOn(api.coverage, "completeness").mockResolvedValue({
+      by_subject: {},
+      annotation_counts: {},
+      counts_grid: null,
+      counts_error: null,
+    });
+    render(<AnnotateTab />);
+    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
+    await flush();
+    await waitFor(() => expect(api.coverage.grid).toHaveBeenCalled());
+    await flush();
+    fireEvent.click(screen.getByRole("button", { name: /Overlay off/ }));
+
+    expect(
+      screen.getByRole("button", { name: "Attest A1 complete for subject_a" }),
+    ).toBeInTheDocument();
+    // The Map tool stays withdrawn: a single-cell raster has nowhere else to jump to.
+    expect(screen.queryByRole("button", { name: /^Map$/ })).not.toBeInTheDocument();
   });
 });
 

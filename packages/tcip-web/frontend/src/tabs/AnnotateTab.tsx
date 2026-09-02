@@ -26,7 +26,7 @@ import { usePrefetchAdjacentImages } from "@/hooks/usePrefetchAdjacentImages";
 import { useRegionCompleteness } from "@/hooks/useRegionCompleteness";
 import { useRegionServes } from "@/hooks/useRegionServes";
 import { compositeParams } from "@/lib/bandSelection";
-import { cellAt, stepUnsweptCell, type GridCell } from "@/lib/coverage";
+import { cellAt, currentCoverageCell, stepUnsweptCell, type GridCell } from "@/lib/coverage";
 import type { LoadedImage } from "@/lib/imageLoader";
 import { canvasHoldsSubject } from "@/lib/imageStatus";
 import { currentImage, labelPath } from "@/lib/paths";
@@ -156,9 +156,8 @@ export function AnnotateTab() {
   usePrefetchAdjacentImages(composite.bands, composite.stretch);
 
   // ── Coverage: lattice, region serves, session accumulation ────────────────
-  // Gated on the base serve's read facts: a base already at native needs none of it.
   const [baseFacts, setBaseFacts] = useState<LoadedImage | null>(null);
-  const coverageGrid = useCoverageGrid(imgPath, baseFacts, canvas.imgWidth, canvas.imgHeight);
+  const coverageGrid = useCoverageGrid(imgPath);
   const coverageViewing = useMemo(
     () => ({
       bands: composite.bands,
@@ -202,6 +201,12 @@ export function AnnotateTab() {
   const { open: coverageOverlayOn, toggle: toggleCoverageOverlay } = useDisclosure(
     "tcip.annotate.coverageGridOverlayOpen",
   );
+  // The cell a Map click just opened (currentCoverageCell names it while it stays in view);
+  // cleared on an image change so a stale selection cannot outlive its own raster.
+  const [mapSelectedCell, setMapSelectedCell] = useState<GridCell | null>(null);
+  useEffect(() => {
+    setMapSelectedCell(null);
+  }, [imgPath]);
 
   // A tool must always be shown active: when the Map tool is withdrawn and settled (not merely
   // a grid still loading), fall back to a drawing tool rather than leaving the canvas inert.
@@ -231,14 +236,10 @@ export function AnnotateTab() {
     return vp ? { x0: vp.x, y0: vp.y, x1: vp.x + vp.w, y1: vp.y + vp.h } : null;
   }
 
-  function cellForRect(rect: ReturnType<typeof coverageViewportRect>): GridCell | null {
-    if (!rect) return null;
-    return cellAt(coverageGrid.cells, (rect.x0 + rect.x1) / 2, (rect.y0 + rect.y1) / 2);
-  }
-
   function overview() {
     const host = measureCanvasHost();
     if (!host || canvas.imgWidth <= 0 || canvas.imgHeight <= 0) return;
+    setMapSelectedCell(null);
     setView(fitView(host, canvas.imgWidth, canvas.imgHeight));
   }
 
@@ -1126,7 +1127,10 @@ export function AnnotateTab() {
       // Navigation only: a click opens the cell's tile, no annotation handler runs, and this
       // is offered even while the image is locked (viewing coverage is not an edit).
       const cell = cellAt(coverageGrid.cells, ix, iy);
-      if (cell) jumpToCell(cell);
+      if (cell) {
+        jumpToCell(cell);
+        setMapSelectedCell(cell);
+      }
       return;
     }
     if (isLocked) return;
@@ -1352,8 +1356,14 @@ export function AnnotateTab() {
   const hoveredIdx = annotateUi.hoveredPolygonIdx;
   const draggingIdx = annotateUi.draggingVertex?.[0];
   const coverageViewport = coverageViewportRect();
-  const activeCoverageCell = cellForRect(coverageViewport);
-  const showCoverageChrome = coverageMultiCell || !!coverageGrid.error || !!completeness.error;
+  const activeCoverageCell = currentCoverageCell(
+    coverageGrid.cells,
+    coverageViewport,
+    mapSelectedCell,
+  );
+  // Every raster the grid route serves a lattice for, single-cell rasters included, so a
+  // one-cell image's own attestation stays reachable; only the Map tool stays multi-cell only.
+  const showCoverageChrome = !!coverageGrid.grid || !!coverageGrid.error || !!completeness.error;
 
   return (
     <div className="flex-1 flex flex-col min-h-0">
@@ -1464,7 +1474,7 @@ export function AnnotateTab() {
         </CanvasStage>
 
         {ioError && (
-          <div className="absolute top-3 left-3 right-3 flex items-center gap-2 rounded-md border border-tcip-fp/50 bg-tcip-panel/95 px-3 py-1.5 text-[11px] text-tcip-fp">
+          <div className="absolute top-3 left-3 right-3 z-30 flex items-center gap-2 rounded-md border border-tcip-fp/50 bg-tcip-panel/95 px-3 py-1.5 text-[11px] text-tcip-fp">
             <span className="flex-1">{ioError}</span>
             {conflict && (
               <button className="tcip-btn text-[11px]" onClick={() => void reloadCurrent()}>
@@ -1486,10 +1496,8 @@ export function AnnotateTab() {
           </div>
         )}
 
-        {!isLocked && <AttributePanel selectedBoxIdx={mode === "box" ? selectedBoxIdx : null} />}
-
-        <AnnotateLegend />
-
+        {/* Floating canvas chrome, DOM order following the reading order (top-left, top-right,
+            bottom-left, bottom-right) so tab order matches what a sighted user reads first. */}
         <button
           type="button"
           onClick={overview}
@@ -1499,8 +1507,13 @@ export function AnnotateTab() {
           Overview
         </button>
 
+        {!isLocked && <AttributePanel selectedBoxIdx={mode === "box" ? selectedBoxIdx : null} />}
+
+        <AnnotateLegend />
+
         {showCoverageChrome && (
           <CoverageChrome
+            subject={dataset.subject}
             derivation={coverageGrid.derivation ?? ""}
             gridFetchError={coverageGrid.error}
             readError={completeness.error}
@@ -1517,6 +1530,11 @@ export function AnnotateTab() {
               !!activeCoverageCell && completeness.activeStale.has(activeCoverageCell.name)
             }
             otherLattice={completeness.otherLattice}
+            sweptOtherLattice={coverage.sweptOtherLattice}
+            swept={coverage.swept}
+            activeComplete={completeness.activeComplete}
+            activeStale={completeness.activeStale}
+            annotationCounts={completeness.annotationCounts}
             onAttest={(complete) => {
               if (activeCoverageCell && coverageGrid.grid) {
                 completeness.write(activeCoverageCell.name, coverageGrid.grid, complete);

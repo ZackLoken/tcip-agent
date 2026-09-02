@@ -18,6 +18,7 @@ import type {
   CompletenessResponse,
   CompletenessSetPostBody,
   CoverageGridResponse,
+  GridGeometry,
 } from "@/lib/coverage";
 import { annotationsToCanvas } from "@/lib/labelSerde";
 import type {
@@ -292,10 +293,14 @@ export const api = {
 
     // Sets one cell's completeness in the direction the caller states, never a toggle.
     setCompleteness: (body: CompletenessSetPostBody) =>
-      call<{ status: string; complete: boolean; cells_complete: string[] }>(
-        ROUTES.postCoverageCompleteness,
-        { method: "POST", body: JSON.stringify(body) },
-      ),
+      call<{
+        status: string;
+        complete: boolean;
+        cells_complete: string[];
+        // The previous record's grid and cells, when a lattice mismatch replaced it wholesale;
+        // null on an ordinary write that merged into (or read) the current lattice's own record.
+        replaced: { grid: GridGeometry; cells_complete: string[] } | null;
+      }>(ROUTES.postCoverageCompleteness, { method: "POST", body: JSON.stringify(body) }),
   },
 
   state: {

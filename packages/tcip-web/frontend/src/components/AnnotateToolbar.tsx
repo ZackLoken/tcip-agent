@@ -333,7 +333,7 @@ export function AnnotateToolbar({
             <button
               aria-pressed={mode === "map"}
               onClick={() => setMode("map")}
-              title="Map: click a coverage cell to open its tile; no annotation is authored"
+              title="Map: click a coverage cell to open it; no annotation is authored"
               className={`flex h-6 items-center gap-1.5 rounded-[4px] px-2.5 text-[12px] font-semibold transition-colors ${
                 mode === "map" ? "bg-tcip-accent text-white" : "text-tcip-muted hover:text-tcip-fg"
               }`}
@@ -499,6 +499,8 @@ export function AnnotateToolbar({
           </button>
           <input
             ref={counterRef}
+            aria-label="Image position"
+            title="Image position: type a number and press Enter to jump"
             className="tcip-input w-10 text-center font-mono text-[11px]"
             value={counterDraft ?? (nav.position > 0 ? String(nav.position) : "")}
             onChange={(e) => setCounterDraft(e.target.value.replace(/[^0-9]/g, ""))}

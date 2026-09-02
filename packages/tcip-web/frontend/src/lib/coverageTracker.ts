@@ -9,8 +9,10 @@
  * judged. No authoring commits means no bar and no sweep accumulation.
  *
  * Facts are pushed with a trailing debounce; union-merging with the stored record is the
- * server's job. Tracking activates only for multi-cell grids (an image inside the display bound
- * derives a single trivially-covered cell and gets no tracking).
+ * server's job. A failed push is never silent: it stays dirty, reports itself through
+ * `onPushError`, and reschedules the same debounce, so the next tick retries. Tracking activates
+ * only for multi-cell grids (an image inside the display bound derives a single trivially-covered
+ * cell and gets no tracking).
  */
 
 import type { CoveragePayload, CoverageRecord, CoverageViewing } from "@/api/types.generated";
@@ -84,7 +86,13 @@ export class CoverageTracker {
 
   constructor(
     private postFn: (body: CoveragePayload) => Promise<unknown>,
-    private opts: { debounceMs?: number; onChange?: () => void } = {},
+    private opts: {
+      debounceMs?: number;
+      onChange?: () => void;
+      /** A push failed; the detail is the caller's to surface (a toast), never silent. The
+       *  tracker itself already stays dirty and schedules a retry. */
+      onPushError?: (detail: string) => void;
+    } = {},
   ) {}
 
   /** Multi-cell grids only: single-cell grids (image within the display bound) get no tracking. */
@@ -259,8 +267,12 @@ export class CoverageTracker {
           this.barValue === null ? null : { value: this.barValue, source: BAR_SOURCE },
       },
     };
-    void this.postFn(body).catch(() => {
+    void this.postFn(body).catch((err: unknown) => {
       this.dirty = true;
+      this.opts.onPushError?.(err instanceof Error ? err.message : String(err));
+      // A failed push must not go quiet: rescheduling here (rather than waiting for the next
+      // unrelated fact to arrive and call markDirty itself) is the retry.
+      this.markDirty();
     });
   }
 }
