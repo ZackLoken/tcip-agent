@@ -855,6 +855,61 @@ def test_relaunch_replays_every_manifest_field_run_hpo_was_given(
     assert captured["relaunched_from"] == "hpo_fields001"
 
 
+def test_relaunch_of_a_manifest_predating_split_draws_still_relaunches(
+    client: TestClient, hpo_root, monkeypatch
+) -> None:
+    """A manifest from before this family carries neither split_draws nor split_draw_seeds;
+    the relaunch route reads them as run_hpo's own defaults (1, None) rather than refusing."""
+    from tcip_web.routes import tuning
+
+    captured: dict = {}
+
+    def fake_run_hpo(**kwargs):
+        captured.update(kwargs)
+        return {"study_name": kwargs["study_name"]}
+
+    monkeypatch.setattr("tcip_mcp.tools.training_tools.run_hpo", fake_run_hpo)
+    base_config = {"model_source": {"builder": "x:y"}, "data": {}, "training": {}}
+    _write_sweep(hpo_root, "hpo_predraws01", base_config=base_config)
+
+    import tcip_store
+    from tcip_mcp.tools.training_tools import sweep_manifest_key
+
+    manifest = tcip_store.read(sweep_manifest_key("hpo_predraws01", str(hpo_root)))
+    assert "split_draws" not in manifest and "split_draw_seeds" not in manifest
+
+    resp = client.post("/api/tuning/sweeps", json={"study_name": "hpo_predraws01"})
+    assert resp.status_code == 200
+    assert tuning.wait_for_workers(timeout_s=_worker_join_bound()) == ()
+
+    assert captured["split_draws"] == 1
+    assert captured["split_draw_seeds"] is None
+
+
+def test_relaunch_passes_through_a_manifests_own_split_draws(
+    client: TestClient, hpo_root, monkeypatch
+) -> None:
+    from tcip_web.routes import tuning
+
+    captured: dict = {}
+
+    def fake_run_hpo(**kwargs):
+        captured.update(kwargs)
+        return {"study_name": kwargs["study_name"]}
+
+    monkeypatch.setattr("tcip_mcp.tools.training_tools.run_hpo", fake_run_hpo)
+    base_config = {"model_source": {"builder": "x:y"}, "data": {}, "training": {}}
+    _write_sweep(hpo_root, "hpo_draws001", base_config=base_config,
+                 split_draws=3, split_draw_seeds=[1, 2, 3])
+
+    resp = client.post("/api/tuning/sweeps", json={"study_name": "hpo_draws001"})
+    assert resp.status_code == 200
+    assert tuning.wait_for_workers(timeout_s=_worker_join_bound()) == ()
+
+    assert captured["split_draws"] == 3
+    assert captured["split_draw_seeds"] == [1, 2, 3]
+
+
 def test_relaunch_records_the_source_study_as_relaunched_from_on_the_new_manifest(
     client: TestClient, hpo_root, real_hpo_base_config, monkeypatch
 ) -> None:

@@ -22,6 +22,8 @@ export interface Sweep {
   cancel_requested?: boolean;
   /** The sweep this one was relaunched from, or null when it was not a relaunch. */
   relaunched_from?: string | null;
+  /** Draws per sampled point (run_hpo's own data.split.seed grid axis); null/1 for no draws. */
+  split_draws?: number | null;
   /** Whether run_hpo has written this sweep's first manifest yet. False in the pre-manifest
    * window a relaunch opens (the route registers the job before it answers), so a caller keys
    * its not-yet-recorded state on this rather than on a 404 that window never produces. */
