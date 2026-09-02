@@ -100,7 +100,7 @@ describe("TrainingTab run list", () => {
     expect(screen.queryByText("null")).not.toBeInTheDocument();
   });
 
-  it("names the best value's own metric, and shows nothing when the row carries no name", async () => {
+  it("names the best value's own metric exactly as the record carries it, and shows nothing when the row carries no name", async () => {
     vi.spyOn(trainingApi, "listRuns").mockResolvedValue({
       runs: [
         run({
@@ -108,6 +108,12 @@ describe("TrainingTab run list", () => {
           status: "completed",
           best_metric: 0.812,
           best_metric_name: "map50",
+        }),
+        run({
+          run_id: "train-loss-only",
+          status: "completed",
+          best_metric: 0.907,
+          best_metric_name: "loss",
         }),
         run({
           run_id: "train-unnamed",
@@ -119,7 +125,11 @@ describe("TrainingTab run list", () => {
     });
 
     render(<TrainingTab />);
-    expect(await screen.findByText("best val_map50 0.812")).toBeInTheDocument();
+    // The record names the metric bare; the row never adds a val_ qualifier the record
+    // itself never stated (a no-validation run's best can be the training loss).
+    expect(await screen.findByText("best map50 0.812")).toBeInTheDocument();
+    expect(await screen.findByText("best loss 0.907")).toBeInTheDocument();
+    expect(screen.queryByText(/val_/)).not.toBeInTheDocument();
     expect(screen.queryByText(/best.*0\.500/)).not.toBeInTheDocument();
   });
 
@@ -131,7 +141,9 @@ describe("TrainingTab run list", () => {
     render(<TrainingTab />);
     expect(await screen.findByText("train-a")).toBeInTheDocument();
     expect(
-      screen.getByText(/Live runs first, in launch order; other recorded runs follow/),
+      screen.getByText(
+        /Runs this window launched first, in launch order; every other recorded run follows/,
+      ),
     ).toBeInTheDocument();
   });
 });
@@ -610,7 +622,7 @@ describe("TrainingTab compare", () => {
           }),
         ],
       });
-      // Both tabs now poll rather than offer a manual Refresh; advance one tick of it.
+      // Advance one tick of the runs poll.
       await act(async () => {
         await vi.advanceTimersByTimeAsync(RUN_REFRESH_MS);
       });
@@ -706,7 +718,7 @@ describe("TrainingTab compare", () => {
           ...allRuns.slice(1),
         ],
       });
-      // Both tabs now poll rather than offer a manual Refresh; advance one tick of it.
+      // Advance one tick of the runs poll.
       await act(async () => {
         await vi.advanceTimersByTimeAsync(RUN_REFRESH_MS);
       });

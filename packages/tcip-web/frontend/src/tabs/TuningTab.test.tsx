@@ -355,6 +355,102 @@ describe("TuningTab sweep detail before a manifest exists", () => {
   });
 });
 
+describe("TuningTab selection change", () => {
+  it("clears the previous sweep's detail and trials rather than showing them under a new selection", async () => {
+    vi.spyOn(tuningApi, "listSweeps").mockResolvedValue({
+      sweeps: [
+        sweep({ sweep_id: "hpo-a", status: "completed" }),
+        sweep({ sweep_id: "hpo-b", status: "running" }),
+      ],
+    });
+    // hpo-b's own getSweep never resolves in this test.
+    const pendingB = new Promise<never>(() => {});
+    vi.spyOn(tuningApi, "getSweep").mockImplementation((id: string) =>
+      id === "hpo-a"
+        ? Promise.resolve({ sweep_id: "hpo-a", status: "completed", result: {} })
+        : pendingB,
+    );
+    vi.spyOn(tuningApi, "listTrials").mockImplementation((id: string) =>
+      id === "hpo-a"
+        ? Promise.resolve({
+            sweep_id: "hpo-a",
+            trials: [
+              { trial_id: "trial_a1", has_metrics: false, params: {}, unconsumed_params: [] },
+            ],
+          })
+        : new Promise(() => {}),
+    );
+    vi.spyOn(tuningApi, "getRayDashboard").mockResolvedValue({ url: null });
+    vi.spyOn(tuningApi, "launchSweepTensorboard").mockResolvedValue({ error: "no cluster" });
+
+    render(<TuningTab />);
+    fireEvent.click(await screen.findByText("hpo-a"));
+    expect(await screen.findByText("trial_a1")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText("hpo-b"));
+    // hpo-b's own getSweep never resolves, so this proves the clear happens on selection,
+    // not merely once hpo-b's own records eventually arrive.
+    await waitFor(() => expect(screen.queryByText("trial_a1")).not.toBeInTheDocument());
+    expect(screen.queryByText("(completed)")).not.toBeInTheDocument();
+  });
+});
+
+describe("TuningTab trial list pending state", () => {
+  it("says nothing about disk while the sweep's own manifest is still unknown", async () => {
+    vi.spyOn(tuningApi, "listSweeps").mockResolvedValue({
+      sweeps: [sweep({ sweep_id: "hpo-x", status: "running" })],
+    });
+    vi.spyOn(tuningApi, "getSweep").mockImplementation(() => new Promise(() => {}));
+    vi.spyOn(tuningApi, "listTrials").mockResolvedValue({ sweep_id: "hpo-x", trials: [] });
+    vi.spyOn(tuningApi, "getRayDashboard").mockResolvedValue({ url: null });
+    vi.spyOn(tuningApi, "launchSweepTensorboard").mockResolvedValue({ error: "no cluster" });
+
+    render(<TuningTab />);
+    fireEvent.click(await screen.findByText("hpo-x"));
+
+    await waitFor(() =>
+      expect(screen.getAllByText("Reading this sweep's record…").length).toBeGreaterThan(0),
+    );
+    expect(screen.queryByText("No trials on disk yet.")).not.toBeInTheDocument();
+    expect(screen.queryByText("This sweep has no record yet.")).not.toBeInTheDocument();
+  });
+});
+
+describe("TuningTab sweep detail failures", () => {
+  it("shows a non-404 failure as an error and keeps polling instead of swallowing it", async () => {
+    vi.spyOn(tuningApi, "listSweeps").mockResolvedValue({
+      sweeps: [sweep({ sweep_id: "hpo-flaky", status: "running" })],
+    });
+    const serverError = new StructuredRefusalError(
+      { error: "internal error" },
+      500,
+      "internal error",
+    );
+    const getSweepSpy = vi.spyOn(tuningApi, "getSweep").mockRejectedValue(serverError);
+    vi.spyOn(tuningApi, "listTrials").mockResolvedValue({ sweep_id: "hpo-flaky", trials: [] });
+    vi.spyOn(tuningApi, "getRayDashboard").mockResolvedValue({ url: null });
+    vi.spyOn(tuningApi, "launchSweepTensorboard").mockResolvedValue({ error: "no cluster" });
+
+    vi.useFakeTimers();
+    try {
+      render(<TuningTab />);
+      await vi.waitFor(() => expect(screen.getByText("hpo-flaky")).toBeInTheDocument());
+      fireEvent.click(screen.getByText("hpo-flaky"));
+
+      await vi.waitFor(() => expect(getSweepSpy).toHaveBeenCalledTimes(1));
+      await vi.waitFor(() => expect(screen.getByText("internal error")).toBeInTheDocument());
+      expect(screen.queryByText("This sweep has no record yet.")).not.toBeInTheDocument();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(3000);
+      });
+      expect(getSweepSpy).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
 describe("TuningTab heading", () => {
   it("renders exactly one top-level heading naming the tab", async () => {
     vi.spyOn(tuningApi, "listSweeps").mockResolvedValue({ sweeps: [] });
@@ -375,7 +471,9 @@ describe("TuningTab list order", () => {
     render(<TuningTab />);
     expect(await screen.findByText("hpo-a")).toBeInTheDocument();
     expect(
-      screen.getByText(/Live sweeps first, in launch order; other recorded sweeps follow/),
+      screen.getByText(
+        /Sweeps this window launched first, in launch order; every other recorded sweep follows/,
+      ),
     ).toBeInTheDocument();
   });
 });

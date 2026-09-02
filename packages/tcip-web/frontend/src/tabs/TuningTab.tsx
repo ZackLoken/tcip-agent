@@ -12,6 +12,7 @@ import { TERMINAL_STATUSES } from "@/lib/runStatus";
 import { useStore } from "@/store";
 import { defaultSweepRequest } from "@/tabs/agentPrompts";
 import { RunMonitorEmpty, RunMonitorLayout } from "@/tabs/RunMonitorLayout";
+import { RUN_REFRESH_MS } from "@/tabs/trainingMetrics";
 
 function hasContent(value: unknown): boolean {
   return typeof value === "object" && value !== null && Object.keys(value).length > 0;
@@ -43,8 +44,10 @@ function cellText(value: unknown): string {
  * detail pane, from this one wording. */
 const NO_CANCEL_REASON = "no reason recorded";
 
-/** Shown in place of a 404 or an empty trial list during the window before ``run_hpo`` writes
- * a sweep's first manifest, or for a sweep that was refused before it wrote one. */
+/** Shown when the selected sweep's own detail request 404s: the pre-manifest window before
+ * ``run_hpo`` writes a sweep's first manifest, or a listed sweep whose record vanished before
+ * the detail request landed. A sweep refused before it ever wrote one is served by the
+ * listing's own terminal status instead, and never reaches this. */
 const SWEEP_NO_RECORD_YET = "This sweep has no record yet.";
 
 /** The one sweep status Cancel is offered on, the same explicit-allowlist shape
@@ -64,6 +67,9 @@ export function TuningTab() {
   // null: not yet heard from the manifest; true: confirmed absent; false: confirmed present.
   // TensorBoard below waits for false, never the stale value the prior selection left behind.
   const [sweepMissing, setSweepMissing] = useState<boolean | null>(null);
+  // A non-404 failure reading the selected sweep's own detail: recorded, not swallowed, so a
+  // retry in progress is visible instead of a silent stall on whatever was last on screen.
+  const [detailError, setDetailError] = useState<string | null>(null);
   const [trials, setTrials] = useState<SweepTrial[]>([]);
   const [selectedTrialId, setSelectedTrialId] = useState<string | null>(null);
   const [trialMetrics, setTrialMetrics] = useState<Record<string, unknown>[]>([]);
@@ -93,7 +99,7 @@ export function TuningTab() {
 
   useEffect(() => {
     void refresh();
-    const t = setInterval(refresh, 4000);
+    const t = setInterval(refresh, RUN_REFRESH_MS);
     return () => clearInterval(t);
   }, []);
 
@@ -101,12 +107,13 @@ export function TuningTab() {
   // are read for the expanded sweep only: a listing per sweep per tick would walk the whole HPO
   // root every few seconds. Keyed on the id so re-selecting the same sweep keeps what it loaded.
   useEffect(() => {
-    if (!selectedId) {
-      setDetail(null);
-      setSweepMissing(null);
-      setTrials([]);
-      return;
-    }
+    // Reset on every selection change, a fresh one included: a previous sweep's header,
+    // trials and error must never show under a new selection while its own records load.
+    setDetail(null);
+    setSweepMissing(null);
+    setDetailError(null);
+    setTrials([]);
+    if (!selectedId) return;
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const poll = async () => {
@@ -120,14 +127,20 @@ export function TuningTab() {
         if (e instanceof StructuredRefusalError && e.status === 404) {
           setDetail(null);
           setSweepMissing(true);
+          setDetailError(null);
           setTrials([]);
-          timer = setTimeout(poll, 3000);
+        } else {
+          // Any other failure (a 500, a decode failure, a dropped connection) is shown
+          // rather than swallowed, and the poll keeps retrying rather than stalling silently.
+          setDetailError(messageOf(e));
         }
+        timer = setTimeout(poll, 3000);
         return;
       }
       if (cancelled) return;
       setDetail(d);
       setSweepMissing(false);
+      setDetailError(null);
       try {
         const t = await tuningApi.listTrials(selectedId);
         if (!cancelled) setTrials(t.trials ?? []);
@@ -339,11 +352,16 @@ export function TuningTab() {
               <span className="font-mono text-[12px] text-tcip-fg">{detail.sweep_id}</span>
               <span className="text-[11px] text-tcip-muted">({detail.status})</span>
             </>
-          ) : sweepMissing ? (
+          ) : sweepMissing === true ? (
             <>
               <span className="tcip-heading">Sweep</span>
               <span className="font-mono text-[12px] text-tcip-fg">{selectedId}</span>
               <span className="text-[11px] text-tcip-muted">(no record yet)</span>
+            </>
+          ) : selectedId ? (
+            <>
+              <span className="tcip-heading">Sweep</span>
+              <span className="font-mono text-[12px] text-tcip-fg">{selectedId}</span>
             </>
           ) : (
             <span className="tcip-heading">Select a sweep</span>
@@ -415,6 +433,11 @@ export function TuningTab() {
             </div>
           ) : detail ? (
             <div className="flex flex-col gap-3">
+              {detailError && (
+                <div className="text-[11px] text-tcip-fp">
+                  Could not refresh this sweep's record: {detailError}
+                </div>
+              )}
               <div className="h-[46vh] min-h-[300px] shrink-0">
                 <EmbeddedTool
                   title="Ray dashboard"
@@ -455,8 +478,12 @@ export function TuningTab() {
                 </>
               )}
             </div>
-          ) : sweepMissing ? (
+          ) : detailError ? (
+            <div className="text-[11px] text-tcip-fp">{detailError}</div>
+          ) : sweepMissing === true ? (
             <div className="text-[11px] text-tcip-muted">{SWEEP_NO_RECORD_YET}</div>
+          ) : selectedId ? (
+            <div className="text-[11px] text-tcip-muted">Reading this sweep's record…</div>
           ) : (
             <div className="text-[11px] text-tcip-muted">
               Select a sweep to see its trials and its result.
@@ -488,7 +515,8 @@ export function TuningTab() {
         )}
         {sweeps.length > 0 && (
           <div className="text-[10px] text-tcip-muted mb-1">
-            Live sweeps first, in launch order; other recorded sweeps follow, sorted by sweep id.
+            Sweeps this window launched first, in launch order; every other recorded sweep follows,
+            sorted by sweep id.
           </div>
         )}
         {sweeps.length > 0 && (
@@ -555,7 +583,11 @@ export function TuningTab() {
                       <ul className="space-y-1">
                         {trials.length === 0 ? (
                           <li className="text-[10px] text-tcip-muted">
-                            {sweepMissing ? SWEEP_NO_RECORD_YET : "No trials on disk yet."}
+                            {sweepMissing === true
+                              ? SWEEP_NO_RECORD_YET
+                              : sweepMissing === false
+                                ? "No trials on disk yet."
+                                : "Reading this sweep's record…"}
                           </li>
                         ) : (
                           trials.map((t) => (

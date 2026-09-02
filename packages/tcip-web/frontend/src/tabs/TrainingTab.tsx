@@ -23,7 +23,7 @@ import { useStore } from "@/store";
 import { defaultTrainingRequest } from "@/tabs/agentPrompts";
 import { CHART, CHART_LINE_COLORS } from "@/tabs/chartTheme";
 import { RunMonitorEmpty, RunMonitorLayout } from "@/tabs/RunMonitorLayout";
-import { mergeMetric, RUN_REFRESH_MS, VAL_METRIC_PREFIX } from "@/tabs/trainingMetrics";
+import { mergeMetric, RUN_REFRESH_MS } from "@/tabs/trainingMetrics";
 
 // Runs can only be stopped while still active; terminal/historical runs show no button.
 const TRAINING_CANCELLABLE: ReadonlySet<string> = new Set(["created", "running"]);
@@ -497,7 +497,8 @@ export function TrainingTab() {
         )}
         {runs.length > 0 && (
           <div className="text-[10px] text-tcip-muted mb-1">
-            Live runs first, in launch order; other recorded runs follow, sorted by experiment id.
+            Runs this window launched first, in launch order; every other recorded run follows,
+            sorted by experiment id.
           </div>
         )}
         <ul className="space-y-1">
@@ -534,8 +535,7 @@ export function TrainingTab() {
                         r.best_metric !== null &&
                         r.best_metric_name && (
                           <span className="tabular-nums">
-                            best {VAL_METRIC_PREFIX}
-                            {r.best_metric_name} {Number(r.best_metric).toFixed(3)}
+                            best {r.best_metric_name} {Number(r.best_metric).toFixed(3)}
                           </span>
                         )}
                     </div>
