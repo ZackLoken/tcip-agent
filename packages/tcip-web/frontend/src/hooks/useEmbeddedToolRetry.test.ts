@@ -17,7 +17,7 @@ describe("useEmbeddedToolRetry", () => {
         .mockResolvedValueOnce({ url: null, error: "not found", done: false })
         .mockResolvedValueOnce({ url: "http://localhost:6006", error: null, done: true });
 
-      const { result } = renderHook(() => useEmbeddedToolRetry(true, 0, step, 1000));
+      const { result } = renderHook(() => useEmbeddedToolRetry("a", true, 0, step, 1000));
       await act(async () => {
         await Promise.resolve();
         await Promise.resolve();
@@ -38,7 +38,7 @@ describe("useEmbeddedToolRetry", () => {
 
   it("never calls the step while inactive", async () => {
     const step = vi.fn().mockResolvedValue({ url: null, error: null, done: true });
-    renderHook(() => useEmbeddedToolRetry(false, 0, step));
+    renderHook(() => useEmbeddedToolRetry("a", false, 0, step));
     await Promise.resolve();
     expect(step).not.toHaveBeenCalled();
   });
@@ -50,12 +50,30 @@ describe("useEmbeddedToolRetry", () => {
       .mockResolvedValueOnce({ url: "http://localhost:6007", error: null, done: true });
 
     const { result, rerender } = renderHook(
-      ({ attempt }) => useEmbeddedToolRetry(true, attempt, step),
+      ({ attempt }) => useEmbeddedToolRetry("a", true, attempt, step),
       { initialProps: { attempt: 0 } },
     );
     await vi.waitFor(() => expect(result.current.error).toBe("first failure"));
 
     rerender({ attempt: 1 });
+    await vi.waitFor(() => expect(result.current.url).toBe("http://localhost:6007"));
+    expect(step).toHaveBeenCalledTimes(2);
+  });
+
+  it("resets the outcome and restarts the step when the key changes with active held true throughout", async () => {
+    // Switching directly between two selected runs/sweeps: active stays true across the switch.
+    const step = vi
+      .fn()
+      .mockResolvedValueOnce({ url: "http://localhost:6006", error: null, done: true })
+      .mockResolvedValueOnce({ url: "http://localhost:6007", error: null, done: true });
+
+    const { result, rerender } = renderHook(({ key }) => useEmbeddedToolRetry(key, true, 0, step), {
+      initialProps: { key: "run-a" },
+    });
+    await vi.waitFor(() => expect(result.current.url).toBe("http://localhost:6006"));
+
+    rerender({ key: "run-b" });
+    expect(result.current).toEqual({ url: null, error: null });
     await vi.waitFor(() => expect(result.current.url).toBe("http://localhost:6007"));
     expect(step).toHaveBeenCalledTimes(2);
   });
