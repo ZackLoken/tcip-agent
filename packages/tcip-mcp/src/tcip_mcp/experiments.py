@@ -1585,9 +1585,11 @@ def _split_summary(experiment_id: str) -> dict[str, Any]:
     """The partition column for one experiment: :func:`read_split_manifest_checked` reduced to
     the four states a comparison names. ``{"case": "error", "error": ...}`` for a record that
     exists but will not decode; ``{"case": "none"}`` for a run that never wrote one;
-    ``{"case": "bound", "manifest_dir": ..., "seed": ...}`` for a run bound to a named split
-    manifest (``split.json``'s own ``manifest_binding``); ``{"case": "drawn", "seed": ...}``
-    otherwise, so two runs of one config on different partitions never compare as the same data.
+    ``{"case": "bound", "manifest_dir": ..., "seed": ..., "redrawn_within_manifest": bool}`` for
+    a run bound to a named split manifest (``split.json``'s own ``manifest_binding``), the flag
+    read from ``split.json``'s own top-level ``redrawn_within_manifest`` so a manifest bound at
+    seed 42 and a redraw inside that same manifest at seed 42 never compare as the same data;
+    ``{"case": "drawn", "seed": ...}`` otherwise.
     """
     manifest, decode_error = read_split_manifest_checked(experiment_id)
     if decode_error is not None:
@@ -1596,7 +1598,10 @@ def _split_summary(experiment_id: str) -> dict[str, Any]:
         return {"case": "none"}
     binding = manifest.get("manifest_binding")
     if isinstance(binding, dict) and binding.get("manifest_dir"):
-        return {"case": "bound", "manifest_dir": binding["manifest_dir"], "seed": manifest.get("seed")}
+        return {
+            "case": "bound", "manifest_dir": binding["manifest_dir"], "seed": manifest.get("seed"),
+            "redrawn_within_manifest": bool(manifest.get("redrawn_within_manifest")),
+        }
     return {"case": "drawn", "seed": manifest.get("seed")}
 
 

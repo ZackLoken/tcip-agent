@@ -537,9 +537,9 @@ def test_list_split_choices_as_recorded_reports_a_version_refused_own_binding(
 def test_list_split_choices_reports_the_recorded_split_keys_a_partition_replaces(
     tmp_path: Path, monkeypatch,
 ):
-    """Choosing a partition drops every recorded data.split key the manifest binding conflicts
-    with (:data:`_SPLIT_MANIFEST_CONFLICT_KEYS`); the listing discloses which ones a choice
-    would replace, per offered manifest."""
+    """Choosing a partition replaces ``data.split`` wholesale
+    (:func:`candidate_config_with_manifest`); the listing discloses every recorded key other
+    than ``manifest_dir`` that drops, per offered manifest."""
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     from tcip_mcp.experiments import create_experiment
@@ -557,6 +557,36 @@ def test_list_split_choices_reports_the_recorded_split_keys_a_partition_replaces
     entry = next(m for m in result["manifests"] if m["manifest_dir"] == str(dataset_default))
 
     assert entry["replaced_split_keys"] == ["group_by", "seed"]
+
+
+def test_list_split_choices_reports_the_redraw_flag_among_the_keys_a_partition_replaces(
+    tmp_path: Path, monkeypatch,
+):
+    """A config's own recorded ``data.split`` names ``redraw_within_manifest`` (bound and
+    redrawing) as well as ``manifest_dir`` and ``seed``: offering a different partition drops
+    all of them but ``manifest_dir`` itself, and the listing names every one dropped, the
+    redraw flag included."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
+    from tcip_mcp.experiments import create_experiment
+    from tcip_mcp.tools.training_tools import list_split_choices
+
+    root = _two_subject_two_date_dataset(tmp_path / "ds")
+    dataset_default = root / "splits"
+    _draw(root, dataset_default)
+    own_manifest_dir = tmp_path / "own"
+    _draw(root, own_manifest_dir, seed=3)
+
+    cfg = _bespoke_config(root / "images" / DATES[0], root / "annotations" / DATES[0])
+    cfg["data"]["split"] = {
+        "manifest_dir": str(own_manifest_dir), "seed": 11, "redraw_within_manifest": True,
+    }
+    create_experiment("exp-redrawn-policy", cfg)
+
+    result = list_split_choices("exp-redrawn-policy")
+    entry = next(m for m in result["manifests"] if m["manifest_dir"] == str(dataset_default))
+
+    assert entry["replaced_split_keys"] == ["redraw_within_manifest", "seed"]
 
 
 def test_list_split_choices_does_not_offer_the_own_manifest_under_a_different_spelling(

@@ -154,7 +154,45 @@ def test_split_reports_a_bound_manifest_directory(tmp_path, monkeypatch):
     persist_split_manifest("exp-bound-split", train_ds, val_ds, data_cfg)
 
     c = compare_experiments(["exp-bound-split"])["experiments"][0]
-    assert c["split"] == {"case": "bound", "manifest_dir": "splits/2024-01-01", "seed": 7}
+    assert c["split"] == {
+        "case": "bound", "manifest_dir": "splits/2024-01-01", "seed": 7,
+        "redrawn_within_manifest": False,
+    }
+
+
+def test_split_reports_a_redrawn_bound_manifest_distinctly(tmp_path, monkeypatch):
+    """A run bound to a manifest and one that redrew inside that same manifest at the same seed
+    must never compare as the same data."""
+    monkeypatch.chdir(tmp_path)
+    from types import SimpleNamespace
+
+    from tcip_mcp.experiments import compare_experiments, create_experiment
+    from tcip_mcp.pipelines.data.split_construction import persist_split_manifest
+
+    train_ds = SimpleNamespace(stems=["a", "b"])
+    val_ds = SimpleNamespace(stems=["c"])
+
+    create_experiment("exp-bound-plain", {"model_source": {"builder": "m:f"}})
+    persist_split_manifest("exp-bound-plain", train_ds, val_ds, {"split": {
+        "manifest_binding": {"manifest_dir": "splits/2024-01-01"}, "resolved_seed": 7,
+    }})
+
+    create_experiment("exp-bound-redrawn", {"model_source": {"builder": "m:f"}})
+    persist_split_manifest("exp-bound-redrawn", train_ds, val_ds, {"split": {
+        "manifest_binding": {
+            "manifest_dir": "splits/2024-01-01",
+            "redrawn_within_manifest": {
+                "seed": 7, "val_ratio": 0.25, "stratify_foreground": True,
+            },
+        },
+        "resolved_seed": 7,
+    }})
+
+    c = compare_experiments(["exp-bound-plain", "exp-bound-redrawn"])["experiments"]
+    plain, redrawn = c[0]["split"], c[1]["split"]
+    assert plain["redrawn_within_manifest"] is False
+    assert redrawn["redrawn_within_manifest"] is True
+    assert plain != redrawn
 
 
 def test_split_reports_a_drawn_seed_with_no_binding(tmp_path, monkeypatch):

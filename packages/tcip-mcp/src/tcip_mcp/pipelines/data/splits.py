@@ -353,6 +353,25 @@ def resolve_group_key_fn(
     return GROUP_KEY_FNS[group_by]
 
 
+def draw_train_val(
+    stems: Sequence[str], *, annotation_counts: dict[str, int] | None,
+    group_key_fn: Callable[[str], str], val_ratio: float, seed: int,
+) -> tuple[list[str], list[str]]:
+    """``(train, val)`` for ``stems``: one call to :func:`group_balanced_split` at
+    ``(1 - val_ratio, val_ratio, 0.0)``, the assembly the drawn path (``auto_train_val``'s
+    group-aware split) and a bound run's redraw (``data.split.redraw_within_manifest``) both
+    wrap, so the two agree on how a train/val split is actually drawn from a group-keyed stem
+    list. Neither retries nor degrades on a starved side here; each caller decides what a
+    starved side means for it (the drawn path's own stem-level retry and its degrade to no
+    validation, the redraw's own refusal).
+    """
+    parts = group_balanced_split(
+        list(stems), annotation_counts=annotation_counts, group_key_fn=group_key_fn,
+        splits=(1.0 - val_ratio, val_ratio, 0.0), seed=seed,
+    )
+    return parts["train"], parts["val"]
+
+
 def member_identity(date: str | None, stem: str) -> str:
     """A split manifest's member identity for one image: ``<date>/<stem>``, or the bare ``stem``
     under a flat, dateless tree.
@@ -442,6 +461,74 @@ def narrow_manifest_to_date(manifest: dict, date: str | None) -> ManifestDateNar
         train_ids=this_date_ids & train_ids, val_ids=this_date_ids & val_ids,
         calibration_ids=this_date_ids & calibration_ids, all_ids=all_ids,
         other_dates=len(all_ids) - len(this_date_ids),
+    )
+
+
+def manifest_redraw_universe(
+    manifest: dict, date: str | None,
+) -> tuple[list[str], Callable[[str], str]]:
+    """The stems and resolved grouping a bound run's ``data.split.redraw_within_manifest``
+    redraws over: the manifest's own ``train`` and ``val`` identities narrowed to ``date``
+    (never ``calibration``, which a redraw never touches), and its ``group_by`` policy resolved
+    (:func:`resolve_group_key_fn`) with its ``group_key_map`` re-keyed from full identities to
+    bare stems under this one date (the map spans every date the manifest holds; a redraw reads
+    only its own, the same narrowing ``auto_train_val`` performs on the same map for its own
+    ``manifest_binding`` write-back).
+
+    Raises ``ValueError`` (:func:`resolve_group_key_fn`'s own) for an unrecognized ``group_by``
+    or a ``group_key_map`` missing coverage: the redraw refuses by name rather than falling back
+    to a policy the manifest never recorded. Shared by ``preflight_config`` and ``run_hpo``'s
+    pre-mint check, both of which answer this before any admission exists to bind against, so
+    the two see the identical universe and grouping a real redraw would.
+    """
+    narrowing = narrow_manifest_to_date(manifest, date)
+    stems = sorted(member_identity_parts(i)[1] for i in (narrowing.train_ids | narrowing.val_ids))
+    group_by = manifest.get("group_by")
+    if not isinstance(group_by, str):
+        raise ValueError(
+            f"the split manifest carries no usable group_by ({group_by!r}): the redraw needs "
+            "one to resolve its own grouping."
+        )
+    group_key_map = manifest.get("group_key_map")
+    keyed_map = None
+    if group_by == "explicit_map" and group_key_map:
+        keyed_map = {
+            member_identity_parts(identity)[1]: group_key
+            for identity, group_key in group_key_map.items()
+            if member_identity_parts(identity)[0] == date
+        }
+    return stems, resolve_group_key_fn(group_by, stems, group_key_map=keyed_map)
+
+
+def redraw_starved_issue(
+    stems: Sequence[str], group_key_fn: Callable[[str], str], *, manifest_dir: str | None,
+    date: str | None, seed: int | None, group_by: str | None,
+) -> str | None:
+    """Whether ``stems`` (a bound run's train-plus-val universe for one date) resolves to too
+    few distinct groups under ``group_key_fn`` for a redraw to populate both a train and a val
+    side: fewer than two makes a starved side certain, since :func:`group_balanced_split`'s own
+    per-side minimum needs one foreground group for each active side. Checked before any run
+    starts (:func:`~tcip_mcp.tools.training_tools.preflight_config`, and ``run_hpo``'s own
+    pre-mint check for ``split_draws``), ahead of the redraw's own refusal once it has actually
+    drawn a starved side for real.
+
+    ``None`` when at least two groups are available; the refusal otherwise, naming the manifest,
+    the date, the seed, the resolved grouping policy, the distinct group count, and the two
+    remedies: drop ``redraw_within_manifest`` and ``seed`` to bind the manifest's recorded
+    partition instead, or regenerate the manifest with a grouping that separates the members.
+    """
+    groups = {group_key_fn(s) for s in stems}
+    if len(groups) >= 2:
+        return None
+    name = f"the split manifest at {manifest_dir!r}" if manifest_dir else "the split manifest"
+    return (
+        f"redrawing train and val inside {name}'s own members under date {date!r} at seed "
+        f"{seed} would starve a side: its {len(stems)} member(s) resolve to only "
+        f"{len(groups)} distinct group(s) under group_by={group_by!r}, short of the two a "
+        "train side and a val side each need at least one of. Drop "
+        "data.split.redraw_within_manifest and data.split.seed to bind the manifest's recorded "
+        "partition instead, or regenerate the manifest with a grouping that separates its "
+        "members."
     )
 
 

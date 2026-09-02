@@ -138,9 +138,12 @@ def persist_split_manifest(experiment_id: str, train_ds, val_ds, data_cfg: dict,
             manifest["group_key_map"] = resolved_group_key_map
         if spatial:
             manifest["spatial"] = spatial
-        if split.get("manifest_binding"):
+        binding_block = split.get("manifest_binding")
+        if binding_block:
             # A run bound to a named split manifest: its counts and hashes ride here too.
-            manifest["manifest_binding"] = split["manifest_binding"]
+            manifest["manifest_binding"] = binding_block
+            if binding_block.get("redrawn_within_manifest"):
+                manifest["redrawn_within_manifest"] = True
         if label_digests:
             manifest["label_digests"] = label_digests
         if experiment_exists(experiment_id):
@@ -431,6 +434,10 @@ def auto_train_val(task: str, data_cfg: dict, transforms):
          loader; its own bound count and unadmitted count ride into ``manifest_binding`` beside
          ``labels_hash_now`` (over all three bound sides) and ``labels_hash_at_split``, a pair
          nothing currently reads back, kept for a reviewer to compare by eye.
+         ``data.split.redraw_within_manifest: true`` (beside ``manifest_dir`` and ``seed``)
+         redraws train and val fresh inside this date's bound train-plus-val members instead of
+         binding them as recorded, calibration still untouched; a starved side refuses rather
+         than retrying or degrading.
       2. ``data.auto_val`` (default True) and a stem-capable task
          (detection / instance_seg / semantic_seg / classification) -> derive a
          group-aware train/val split (no held-out test) so the trainer receives
@@ -452,10 +459,10 @@ def auto_train_val(task: str, data_cfg: dict, transforms):
     from tcip_annotation.json_io import UnreadableLabelDocument
     from tcip_mcp.pipelines.data.datasets import build_dataset
     from tcip_mcp.pipelines.data.splits import (
-        group_balanced_split, count_label_lines, resolve_group_key_fn,
+        draw_train_val, count_label_lines, resolve_group_key_fn,
     )
     from tcip_mcp.tools.training_tools import (
-        _dataset_source_kwargs, _split_manifest_drawn_conflicts,
+        _dataset_source_kwargs, _redraw_flag_issue, _split_manifest_drawn_conflicts,
     )
 
     src = _dataset_source_kwargs(task, data_cfg)
@@ -518,6 +525,9 @@ def auto_train_val(task: str, data_cfg: dict, transforms):
                 f"data.split.manifest_dir conflicts with {sorted(conflicts)}: a recorded "
                 "partition and a drawn split's own parameters/source cannot both govern one run."
             )
+        flag_issue = _redraw_flag_issue(split_cfg_raw)
+        if flag_issue:
+            raise ValueError(flag_issue)
         if task not in ("detection", "instance_seg"):
             raise ValueError(
                 f"data.split.manifest_dir names a split manifest, and only detection and "
@@ -600,12 +610,49 @@ def auto_train_val(task: str, data_cfg: dict, transforms):
             "at_run": compute_label_digests(labels_dir, bound_stems),
             "manifest_sha256": manifest_digest(manifest),
         }
+
+        # A redraw draws train/val fresh inside this date's bound members, calibration untouched.
+        train_stems, val_stems = binding.train, binding.val
+        if split_cfg_raw.get("redraw_within_manifest"):
+            redraw_seed = int(split_cfg_raw["seed"])
+            universe = binding.train + binding.val
+            group_key_fn = resolve_group_key_fn(
+                split_cfg["resolved_group_by"], universe,
+                group_key_map=split_cfg.get("resolved_group_key_map"),
+            )
+            val_ratio = len(binding.val) / (len(binding.train) + len(binding.val))
+            redraw_annotation_counts = {
+                s: count_label_lines(labels_dir, s, subject=subject, attribute=attribute)
+                for s in universe
+            }
+            train_stems, val_stems = draw_train_val(
+                universe, annotation_counts=redraw_annotation_counts, group_key_fn=group_key_fn,
+                val_ratio=val_ratio, seed=redraw_seed,
+            )
+            if not train_stems or not val_stems:
+                starved_side = "train" if not train_stems else "val"
+                distinct = len({group_key_fn(s) for s in universe})
+                raise ValueError(
+                    f"redrawing train and val inside the split manifest at {manifest_dir!r}'s "
+                    f"own members under date {date!r} at seed {redraw_seed} starved "
+                    f"{starved_side} (train={len(train_stems)}, val={len(val_stems)}) over "
+                    f"{len(universe)} member(s) resolving to {distinct} distinct group(s) under "
+                    f"group_by={split_cfg['resolved_group_by']!r}. Drop "
+                    "data.split.redraw_within_manifest and data.split.seed to bind the "
+                    "manifest's recorded partition instead, or regenerate the manifest with a "
+                    "grouping that separates the members."
+                )
+            split_cfg["resolved_seed"] = redraw_seed
+            split_cfg["manifest_binding"]["redrawn_within_manifest"] = {
+                "seed": redraw_seed, "val_ratio": val_ratio, "stratify_foreground": True,
+            }
+
         # Only detection/instance_seg reach here (checked above), so the build is the plain
         # stems=-narrowed geometry path, never the classification CSV/folder branch below.
         train_ds = build_dataset(
-            task, **build_src, transforms=transforms, stems=binding.train, tiling=tiling)
+            task, **build_src, transforms=transforms, stems=train_stems, tiling=tiling)
         val_ds = build_dataset(
-            task, **build_src, transforms=None, stems=binding.val, tiling=tiling)
+            task, **build_src, transforms=None, stems=val_stems, tiling=tiling)
         return train_ds, val_ds, label_digests_block
 
     if not data_cfg.get("auto_val", True) or task not in STEM_TASKS:
@@ -652,26 +699,24 @@ def auto_train_val(task: str, data_cfg: dict, transforms):
             labels_dir = data_cfg.get("labels_dir", "")
             annotation_counts = {s: count_label_lines(labels_dir, s) for s in stems}
 
-        parts = group_balanced_split(
+        train_stems, val_stems = draw_train_val(
             stems, annotation_counts=annotation_counts, group_key_fn=group_key_fn,
-            splits=(1.0 - val_ratio, val_ratio, 0.0), seed=seed,
+            val_ratio=val_ratio, seed=seed,
         )
-        train_stems, val_stems = parts["train"], parts["val"]
         if (not val_stems or not train_stems) and group_by != "stem" and not group_key_map:
             # Too few *groups* under the requested policy starved val (e.g. two sources whose
             # tile-prefix collapses to one group); retry at stem-level grouping before giving up.
             stem_key_fn = resolve_group_key_fn("stem", stems)
-            retry_parts = group_balanced_split(
+            retry_train, retry_val = draw_train_val(
                 stems, annotation_counts=annotation_counts, group_key_fn=stem_key_fn,
-                splits=(1.0 - val_ratio, val_ratio, 0.0), seed=seed,
+                val_ratio=val_ratio, seed=seed,
             )
-            if retry_parts["train"] and retry_parts["val"]:
+            if retry_train and retry_val:
                 logger.info(
                     "Auto train/val split for %s: group_by=%r left val empty (too few groups); "
                     "retried at stem-level grouping.", task, group_by,
                 )
-                parts = retry_parts
-                train_stems, val_stems = parts["train"], parts["val"]
+                train_stems, val_stems = retry_train, retry_val
                 split_cfg["resolved_group_by"] = "stem"
         if not val_stems or not train_stems:
             logger.warning(

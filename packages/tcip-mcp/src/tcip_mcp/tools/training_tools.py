@@ -54,16 +54,37 @@ def _split_manifest_drawn_conflicts(data_cfg: dict, split_cfg: dict) -> list[str
     """Every top-level key ``data.split.manifest_dir`` conflicts with beside
     ``data.val_images_dir`` (checked separately, its own refusal): a document a manifest never
     read (``coco_json``/``label_format='coco'``), or a drawn split's own parameters
-    (:data:`_SPLIT_MANIFEST_CONFLICT_KEYS`). Shared by ``preflight_config`` and
-    :func:`~tcip_mcp.pipelines.data.split_construction.auto_train_val`'s manifest branch, so the
-    two report the identical set for one config.
+    (:data:`_SPLIT_MANIFEST_CONFLICT_KEYS`). ``seed`` is admitted, not a conflict, only when
+    ``data.split.redraw_within_manifest`` is true (:func:`_redraw_flag_issue` covers the flag's
+    own remaining requirement, that a redraw states a seed at all): a seed left over from a
+    forked or drawn config still conflicts by name otherwise, as it always has. Shared by
+    ``preflight_config`` and :func:`~tcip_mcp.pipelines.data.split_construction.auto_train_val`'s
+    manifest branch, so the two report the identical set for one config.
     """
-    conflicts = [k for k in _SPLIT_MANIFEST_CONFLICT_KEYS if split_cfg.get(k) is not None]
+    keys: tuple[str, ...] = _SPLIT_MANIFEST_CONFLICT_KEYS
+    if split_cfg.get("redraw_within_manifest"):
+        keys = tuple(k for k in keys if k != "seed")
+    conflicts = [k for k in keys if split_cfg.get(k) is not None]
     if data_cfg.get("coco_json"):
         conflicts.append("coco_json")
     if (data_cfg.get("label_format") or "").lower() == "coco":
         conflicts.append("label_format")
     return sorted(conflicts)
+
+
+def _redraw_flag_issue(split_cfg: dict) -> str | None:
+    """The one objection ``data.split.redraw_within_manifest`` raises that
+    :func:`_split_manifest_drawn_conflicts` cannot: the flag set true with no ``seed`` beside
+    it, the redraw's own required pairing (a seed states which partition inside the manifest's
+    train-plus-val members the redraw draws; there is no default to fall back to). ``None`` when
+    the flag is unset, false, or paired with a seed.
+    """
+    if split_cfg.get("redraw_within_manifest") and split_cfg.get("seed") is None:
+        return (
+            "data.split.redraw_within_manifest=true requires data.split.seed: the seed the "
+            "redraw draws train and val at."
+        )
+    return None
 
 
 def _data_dir_issues(data_cfg: dict) -> list[str]:
@@ -92,11 +113,12 @@ def _data_dir_issues(data_cfg: dict) -> list[str]:
 def _manifest_dir_conflicts(config: dict) -> tuple[list[str], bool]:
     """Every objection a ``data.split.manifest_dir`` binding raises from ``config``'s own
     fields alone, computed without reading any manifest: the ``data.val_images_dir`` conflict,
-    the drawn-split key conflicts (:data:`_SPLIT_MANIFEST_CONFLICT_KEYS`), and the task check
-    (only detection and instance_seg admit through the ``trainable_stems`` draw a manifest is
-    drawn through). ``preflight_config`` and :func:`manifest_compatibility` both compute these
-    before attempting to read a manifest at all, so a moved or absent manifest never suppresses
-    an objection the config alone already carries.
+    the drawn-split key conflicts (:data:`_SPLIT_MANIFEST_CONFLICT_KEYS`), a
+    ``redraw_within_manifest`` flag with no seed beside it (:func:`_redraw_flag_issue`), and the
+    task check (only detection and instance_seg admit through the ``trainable_stems`` draw a
+    manifest is drawn through). ``preflight_config`` and :func:`manifest_compatibility` both
+    compute these before attempting to read a manifest at all, so a moved or absent manifest
+    never suppresses an objection the config alone already carries.
 
     Returns ``(issues, task_binds)``; when the task cannot bind a manifest at all, checking a
     manifest's subject, date or images root against it would name nothing new, so the caller
@@ -122,6 +144,9 @@ def _manifest_dir_conflicts(config: dict) -> tuple[list[str], bool]:
             f"data.split.manifest_dir conflicts with {conflicts}: a recorded partition and "
             "a drawn split's own parameters/source cannot both govern one run."
         )
+    flag_issue = _redraw_flag_issue(split_cfg)
+    if flag_issue:
+        issues.append(flag_issue)
 
     task_for_manifest = (model_source.get("task") if isinstance(model_source, dict) else None) \
         or data_cfg.get("task", "detection")
@@ -181,6 +206,33 @@ def _manifest_dependent_issues(config: dict, manifest: dict, manifest_dir: str) 
             "manifest must be read under the same one."
         )
     return issues
+
+
+def _redraw_starvation_issues(config: dict, manifest: dict, manifest_dir: str) -> list[str]:
+    """Whether ``data.split.redraw_within_manifest`` on ``config`` would starve a side, checked
+    over ``manifest`` before any run starts: the manifest's own train-plus-val identities for
+    this run's date, resolved through its recorded grouping
+    (:func:`~tcip_mcp.pipelines.data.splits.manifest_redraw_universe`), named by
+    :func:`~tcip_mcp.pipelines.data.splits.redraw_starved_issue` when fewer than two groups
+    result. An unrecognized ``group_by`` or an incomplete ``group_key_map`` surfaces here too,
+    the redraw's own by-name refusal for that case, phrased under ``data.split`` like the drawn
+    path's own group-policy check above.
+    """
+    from tcip_mcp.dataset_layout import annotation_date
+    from tcip_mcp.pipelines.data.splits import manifest_redraw_universe, redraw_starved_issue
+
+    data_cfg = config.get("data") or {}
+    split_cfg = data_cfg.get("split") or {}
+    run_date = annotation_date(data_cfg.get("labels_dir", ""))
+    try:
+        stems, group_key_fn = manifest_redraw_universe(manifest, run_date)
+    except ValueError as exc:
+        return [f"data.split.redraw_within_manifest: {exc}"]
+    starved = redraw_starved_issue(
+        stems, group_key_fn, manifest_dir=manifest_dir, date=run_date,
+        seed=split_cfg.get("seed"), group_by=manifest.get("group_by"),
+    )
+    return [starved] if starved else []
 
 
 def manifest_compatibility(config: dict, manifest: dict, manifest_dir: str) -> list[str]:
@@ -422,6 +474,13 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
                 issues.append(str(exc))
             else:
                 issues.extend(_manifest_dependent_issues(config, manifest, manifest_dir))
+                if split_cfg_dict.get("redraw_within_manifest"):
+                    warnings.append(
+                        "data.split.redraw_within_manifest=true: this run redraws train and "
+                        "val inside the split manifest's own members for this date and seed; "
+                        "the manifest's calibration side stays untouched."
+                    )
+                    issues.extend(_redraw_starvation_issues(config, manifest, manifest_dir))
 
     # Four-way spatial split feasibility (reserve_calibration_fraction, opt-in): must refuse by
     # name when infeasible, not silently degrade to no validation (see the helper's own docstring).
@@ -1103,10 +1162,13 @@ def list_split_choices(experiment_id: str) -> dict:
     "calibration": int, "other_dates": int, "replaced_split_keys": list[str],
     "origin": dict | None}, ...]}``. ``origin`` is the manifest's own ``{"experiment_id",
     "frozen_at"}`` for a frozen manifest, ``None`` for a drawn one.
-    ``replaced_split_keys`` names the recorded ``data.split`` keys
-    (:data:`_SPLIT_MANIFEST_CONFLICT_KEYS`) choosing any offered partition drops, read from the
-    stored config once and carried on every entry: the same set for every candidate, since it
-    describes what the config's own recorded policy holds, not what a given candidate carries.
+    ``replaced_split_keys`` names every recorded ``data.split`` key other than ``manifest_dir``
+    choosing any offered partition drops, exactly what :func:`candidate_config_with_manifest`
+    replaces wholesale, read from the stored config once and carried on every entry: the same
+    set for every candidate, since it describes what the config's own recorded policy holds, not
+    what a given candidate carries. The config a candidate launches never carries a seed
+    (:func:`candidate_config_with_manifest` replaces ``data.split`` outright), so this listing
+    says nothing about a redraw either; that is the launched config's own concern.
     A config naming no ``data.images_dir`` or ``data.labels_dir`` answers only ``as_recorded``
     (``manifests`` always empty; there is nothing to narrow a candidate manifest's counts to).
     """
@@ -1124,8 +1186,7 @@ def list_split_choices(experiment_id: str) -> dict:
     split_cfg = data_cfg.get("split")
     split_cfg = split_cfg if isinstance(split_cfg, dict) else {}
     own_manifest_dir = split_cfg.get("manifest_dir")
-    replaced_split_keys = sorted(
-        k for k in _SPLIT_MANIFEST_CONFLICT_KEYS if split_cfg.get(k) is not None)
+    replaced_split_keys = sorted(k for k in split_cfg if k != "manifest_dir")
 
     if own_manifest_dir:
         as_recorded = {"case": "bound", "line": "on the partition it bound",
@@ -1897,13 +1958,19 @@ def run_hpo(
             ``split_draw_seeds`` (default: the base config's own ``data.split.seed``, else 42,
             plus the draw index), paired with every sampled point through Ray's own
             ``BasicVariantGenerator(constant_grid_search=True)`` so each point trains once per
-            seed, a blocked comparison of the split's own sensitivity. Refused, before minting
-            the sweep, when ``base_config`` is bound to a split manifest or names
-            ``data.val_images_dir`` (nothing to redraw), ``data.auto_val`` is off or ``task``
-            sits outside the drawn path's own tasks, ``search_alg`` is not a native one
-            (``random``/``grid``/``variant_generator``: only the native generator pairs a grid
-            axis), ``scheduler`` is not ``none`` (a pruned draw is not comparable with a
-            completed one), ``split_draw_seeds`` is given at a length other than
+            seed, a blocked comparison of the split's own sensitivity. ``base_config`` bound to
+            a split manifest is admitted, not refused: its own copy gains
+            ``data.split.redraw_within_manifest: true``, so every trial redraws train and val
+            inside the manifest's own train-plus-val members at its own seed, calibration
+            untouched, rather than training every trial on the manifest's one recorded
+            partition; refused before minting when the manifest's own train-plus-val members
+            for the base config's date resolve to fewer than two distinct groups (a redraw could
+            only starve a side). Otherwise refused, before minting the sweep, when
+            ``base_config`` names ``data.val_images_dir`` (nothing to redraw), ``data.auto_val``
+            is off or ``task`` sits outside the drawn path's own tasks, ``search_alg`` is not a
+            native one (``random``/``grid``/``variant_generator``: only the native generator
+            pairs a grid axis), ``scheduler`` is not ``none`` (a pruned draw is not comparable
+            with a completed one), ``split_draw_seeds`` is given at a length other than
             ``split_draws``, ``warm_start``'s ``baseline_params`` names ``data.split.seed``
             (Ray's preset-variant pinning would pin every draw to one seed instead of pairing
             the grid), ``param_space`` already sweeps ``data.split.seed`` itself, or
@@ -1942,6 +2009,9 @@ def run_hpo(
                                   f"{relaunched_from!r}", "issues": []}
 
         from tcip_mcp.pipelines.model_build import MODEL_SOURCE_KEY
+
+        # A bound base_config admitted to split_draws redraws inside its manifest from here on.
+        base_config = _base_config_for_split_draws(base_config, split_draws)
 
         # Checked ahead of preflight, so its own reason is what a bound/val_images_dir/task
         # refusal reads as, not whatever preflight would have hit first.
@@ -2323,6 +2393,26 @@ def _apply_hpo_params(base_config: dict, params: dict) -> dict:
     return cfg
 
 
+def _base_config_for_split_draws(base_config: dict, split_draws: int) -> dict:
+    """``base_config`` as ``run_hpo`` mints the sweep from: unchanged unless ``split_draws`` is
+    above 1 and the config is bound to a split manifest, in which case a copy carries
+    ``data.split.redraw_within_manifest: true`` (defaulting ``data.split.seed`` to 42 when
+    absent, the same default every unset-seed config draws from), so every trial redraws train
+    and val inside the manifest's own members instead of running on its one recorded partition.
+    A caller who already set the flag (and a seed) by hand gets the same copy back in
+    substance: an already-true flag or an already-set seed is left as it is.
+    """
+    if split_draws <= 1:
+        return base_config
+    data_cfg = base_config.get("data") or {}
+    split_cfg = data_cfg.get("split") or {}
+    if not split_cfg.get("manifest_dir"):
+        return base_config
+    new_split = {**split_cfg, "redraw_within_manifest": True}
+    new_split.setdefault("seed", 42)
+    return {**base_config, "data": {**data_cfg, "split": new_split}}
+
+
 def _split_draws_refusal(
     base_config: dict, param_space: dict | None, task: str, search_alg: str, scheduler: str,
     split_draws: int, split_draw_seeds: list[int] | None, warm_start: bool,
@@ -2330,7 +2420,17 @@ def _split_draws_refusal(
 ) -> str | None:
     """Every reason ``run_hpo`` refuses ``split_draws`` above 1, checked before minting the
     sweep. ``None`` when nothing here objects; every call at ``split_draws=1`` is one of them,
-    since split_draws itself governs nothing at its default."""
+    since split_draws itself governs nothing at its default.
+
+    ``base_config`` bound to a split manifest is admitted rather than refused: ``run_hpo`` has
+    already set ``data.split.redraw_within_manifest`` on its own copy
+    (:func:`_base_config_for_split_draws`) before this call, so every trial redraws train and
+    val inside the manifest's own train-plus-val members instead of running on its one recorded
+    partition. A bound config reads neither ``val_images_dir`` nor ``auto_val`` (the manifest
+    branch binds ahead of both), so those two legs are skipped for it; in their place, the
+    manifest's own distinct-groups check runs once here so a sweep whose every trial would
+    starve a side is refused before minting rather than after every trial fails the same way.
+    """
     if split_draws <= 1:
         return None
     from tcip_mcp.pipelines.data.split_construction import STEM_TASKS
@@ -2338,14 +2438,14 @@ def _split_draws_refusal(
 
     data_cfg = base_config.get("data") or {}
     split_cfg = data_cfg.get("split") or {}
-    if split_cfg.get("manifest_dir"):
-        return (f"split_draws redraws the split, and base_config is bound to a split manifest "
-                f"({split_cfg['manifest_dir']!r}): a recorded partition is not redrawn.")
-    if data_cfg.get("val_images_dir"):
-        return ("split_draws redraws the split, and base_config names data.val_images_dir: an "
-                "explicit validation source draws nothing.")
-    if not data_cfg.get("auto_val", True):
-        return "split_draws needs a drawn validation split, and base_config sets data.auto_val=False."
+    bound = bool(split_cfg.get("manifest_dir"))
+    if not bound:
+        if data_cfg.get("val_images_dir"):
+            return ("split_draws redraws the split, and base_config names data.val_images_dir: "
+                    "an explicit validation source draws nothing.")
+        if not data_cfg.get("auto_val", True):
+            return ("split_draws needs a drawn validation split, and base_config sets "
+                     "data.auto_val=False.")
     if task not in STEM_TASKS:
         return (f"split_draws needs a drawn validation split, and task={task!r} sits outside "
                 f"the drawn path's own tasks ({sorted(STEM_TASKS)}).")
@@ -2375,7 +2475,37 @@ def _split_draws_refusal(
                 f"draw, and param_space sweeps {other_data_axes} beside it: a data.* axis other "
                 f"than {SPLIT_DRAW_SEED_KEY} changes what a point admits or how it draws, so "
                 "draw k would no longer be the same partition for every point.")
+    if bound:
+        return _bound_redraw_starvation_issue(data_cfg, split_cfg)
     return None
+
+
+def _bound_redraw_starvation_issue(data_cfg: dict, split_cfg: dict) -> str | None:
+    """Whether ``run_hpo``'s ``split_draws`` minting a redraw sweep over a bound
+    ``base_config``'s manifest would starve every trial the identical way: the manifest's own
+    distinct-groups check (:func:`~tcip_mcp.pipelines.data.splits.manifest_redraw_universe`,
+    :func:`~tcip_mcp.pipelines.data.splits.redraw_starved_issue`), the same one
+    ``preflight_config`` runs for one config, run once here over the sweep's shared manifest and
+    date. ``None`` when the manifest reads and holds enough distinct groups.
+    """
+    from tcip_mcp.dataset_layout import annotation_date
+    from tcip_mcp.pipelines.data.splits import manifest_redraw_universe, redraw_starved_issue
+    from tcip_mcp.tools.data_tools import read_split_manifest_dir
+
+    manifest_dir = split_cfg["manifest_dir"]
+    try:
+        manifest = read_split_manifest_dir(manifest_dir)
+    except ValueError as exc:
+        return f"split_draws: {exc}"
+    date = annotation_date(data_cfg.get("labels_dir", ""))
+    try:
+        stems, group_key_fn = manifest_redraw_universe(manifest, date)
+    except ValueError as exc:
+        return f"split_draws: {exc}"
+    return redraw_starved_issue(
+        stems, group_key_fn, manifest_dir=manifest_dir, date=date,
+        seed=split_cfg.get("seed"), group_by=manifest.get("group_by"),
+    )
 
 
 def group_split_draws(all_trials: list[dict], planned_seeds: list[int]) -> list[dict]:
