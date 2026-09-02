@@ -527,6 +527,77 @@ describe("TrainingTab compare", () => {
     expect(screen.getByRole("button", { name: "Cancel train-a" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Cancel train-b" })).toBeInTheDocument();
   });
+
+  it("selects the sole remaining run when unmarking drops the marked set to one, instead of stranding it unselected", async () => {
+    setProjectRoot("/proj");
+    vi.spyOn(trainingApi, "listRuns").mockResolvedValue({
+      runs: [
+        run({ run_id: "run-a", status: "running", experiment_id: "exp-a" }),
+        run({ run_id: "run-b", status: "running", experiment_id: "exp-b" }),
+      ],
+    });
+    vi.spyOn(trainingApi, "compare").mockResolvedValue({
+      experiments: [{ experiment_id: "exp-a" }, { experiment_id: "exp-b" }] as unknown as Awaited<
+        ReturnType<typeof trainingApi.compare>
+      >["experiments"],
+      count: 2,
+      same_dataset_fingerprint: null,
+    });
+
+    render(<TrainingTab />);
+    await screen.findByText("run-a");
+    fireEvent.click(within(rowFor("run-a")).getByRole("button", { name: "Compare run-a" }));
+    fireEvent.click(within(rowFor("run-b")).getByRole("button", { name: "Compare run-b" }));
+    expect(await screen.findByText("Comparing")).toBeInTheDocument();
+
+    fireEvent.click(within(rowFor("run-a")).getByRole("button", { name: "Compare run-a" }));
+
+    expect(screen.queryByText("Comparing")).not.toBeInTheDocument();
+    expect(await screen.findByText("Waiting for metrics…")).toBeInTheDocument();
+    expect(screen.queryByText("No run selected.")).not.toBeInTheDocument();
+  });
+
+  it("counts the cap against the same markable set the header prints, not a stale unmarkable id", async () => {
+    setProjectRoot("/proj");
+    const allRuns = ["run-1", "run-2", "run-3", "run-4", "run-5"].map((id) =>
+      run({ run_id: id, status: "running", experiment_id: `exp-${id}` }),
+    );
+    const listRuns = vi.spyOn(trainingApi, "listRuns").mockResolvedValue({ runs: allRuns });
+    vi.spyOn(trainingApi, "compare").mockResolvedValue({
+      experiments: [],
+      count: 0,
+      same_dataset_fingerprint: null,
+    });
+    const pushToast = vi.spyOn(useStore.getState(), "pushToast");
+
+    render(<TrainingTab />);
+    await screen.findByText("run-1");
+    for (const id of ["run-1", "run-2", "run-3", "run-4"]) {
+      fireEvent.click(within(rowFor(id)).getByRole("button", { name: `Compare ${id}` }));
+    }
+    expect(await screen.findByText("4 of 4 runs")).toBeInTheDocument();
+
+    // run-1 turns unmarkable without ever leaving markedRunIds: the header's own count (the
+    // markable set, marked.length) drops to 3 while the raw id set still holds four.
+    listRuns.mockResolvedValueOnce({
+      runs: [
+        run({
+          run_id: "run-1",
+          status: "running",
+          experiment_id: "exp-run-1",
+          experiment_error: "dataset_identity failed: boom",
+        }),
+        ...allRuns.slice(1),
+      ],
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    await waitFor(() => expect(screen.getByText("3 of 4 runs")).toBeInTheDocument());
+
+    fireEvent.click(within(rowFor("run-5")).getByRole("button", { name: "Compare run-5" }));
+
+    expect(pushToast).not.toHaveBeenCalledWith(expect.stringContaining("at most 4 runs"));
+    expect(await screen.findByText("4 of 4 runs")).toBeInTheDocument();
+  });
 });
 
 describe("TrainingTab configs loader", () => {

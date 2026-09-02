@@ -157,13 +157,29 @@ describe("RunComparison rank control", () => {
     });
   }
 
-  it("shows the direction toggle only after the tool refuses an undeclared metric", async () => {
+  it("shows the direction toggle as soon as an undeclared metric is chosen, before any Rank press", async () => {
+    vi.spyOn(trainingApi, "compare").mockResolvedValue(registeredResult());
+    const compareBest = vi.spyOn(trainingApi, "compareBest");
+
+    render(<RunComparison marked={MARKED} projectRoot={null} />);
+    expect(screen.queryByText("higher is better")).not.toBeInTheDocument();
+
+    fireEvent.change(await screen.findByRole("combobox"), {
+      target: { value: "val_map99" },
+    });
+    expect(await screen.findByText("higher is better")).toBeInTheDocument();
+    expect(screen.getByText("lower is better")).toBeInTheDocument();
+    expect(compareBest).not.toHaveBeenCalled();
+  });
+
+  it("clears a pending rank refusal when a direction is chosen, since it answers what the refusal asked for", async () => {
     vi.spyOn(trainingApi, "compare").mockResolvedValue(registeredResult());
     vi.spyOn(trainingApi, "compareBest").mockRejectedValue(
       new StructuredRefusalError(
         {
-          error: "'val_map99' has no declared ranking direction. Pass higher_is_better explicitly",
-          needs_direction: true,
+          error:
+            "every registered model carrying 'val_map99' is unverified (metrics_source is not 'trainer')",
+          all_unverified: true,
         },
         422,
         "",
@@ -174,16 +190,21 @@ describe("RunComparison rank control", () => {
     fireEvent.change(await screen.findByRole("combobox"), {
       target: { value: "val_map99" },
     });
-    expect(screen.queryByText("higher is better")).not.toBeInTheDocument();
-
+    fireEvent.click(await screen.findByRole("button", { name: "higher is better" }));
     fireEvent.click(screen.getByRole("button", { name: "Rank" }));
-    expect(await screen.findByText("higher is better")).toBeInTheDocument();
-    expect(screen.getByText("lower is better")).toBeInTheDocument();
-    expect(screen.getByText(/has no declared ranking direction/)).toBeInTheDocument();
+    expect(await screen.findByRole("status")).toHaveTextContent(/every registered model/);
+
+    fireEvent.click(screen.getByRole("button", { name: "lower is better" }));
+    expect(screen.queryByText(/every registered model/)).not.toBeInTheDocument();
   });
 
   it("shows the unverified switch only after the tool says every candidate was unverified", async () => {
     vi.spyOn(trainingApi, "compare").mockResolvedValue(registeredResult());
+    // The direction is already declared for this metric so Rank is reachable without first
+    // picking a direction, keeping this test scoped to the unverified switch alone.
+    vi.spyOn(trainingApi, "metricDirections").mockResolvedValue({
+      higher_is_better: { map99: true },
+    });
     vi.spyOn(trainingApi, "compareBest").mockRejectedValue(
       new StructuredRefusalError(
         {
@@ -211,6 +232,9 @@ describe("RunComparison rank control", () => {
 
   it("renders the projected best-model answer once ranking succeeds", async () => {
     vi.spyOn(trainingApi, "compare").mockResolvedValue(registeredResult());
+    vi.spyOn(trainingApi, "metricDirections").mockResolvedValue({
+      higher_is_better: { map99: true },
+    });
     vi.spyOn(trainingApi, "compareBest").mockResolvedValue({
       name: "exp-a",
       experiment_id: "exp-a",
@@ -226,10 +250,9 @@ describe("RunComparison rank control", () => {
     fireEvent.change(select, { target: { value: "val_map99" } });
     fireEvent.click(screen.getByRole("button", { name: "Rank" }));
 
-    await waitFor(() =>
-      expect(screen.getByText("exp-a", { selector: "span.font-mono" })).toBeInTheDocument(),
-    );
-    expect(screen.getByText(/trainer \/ stated direction/)).toBeInTheDocument();
+    const status = await screen.findByRole("status");
+    expect(within(status).getByText("exp-a", { selector: "span.font-mono" })).toBeInTheDocument();
+    expect(within(status).getByText(/trainer \/ stated direction/)).toBeInTheDocument();
   });
 });
 
@@ -253,6 +276,9 @@ describe("RunComparison rank exclusions", () => {
 
   it("lists a marked run left out for having no registered checkpoint, beside excluded_unverified", async () => {
     vi.spyOn(trainingApi, "compare").mockResolvedValue(oneRegisteredResult());
+    vi.spyOn(trainingApi, "metricDirections").mockResolvedValue({
+      higher_is_better: { map99: true },
+    });
     vi.spyOn(trainingApi, "compareBest").mockResolvedValue({
       name: "exp-a",
       experiment_id: "exp-a",
@@ -278,6 +304,9 @@ describe("RunComparison rank exclusions", () => {
 describe("RunComparison rank answer", () => {
   it("shows the winner's own value for the ranked metric, and its name once when it equals the experiment id", async () => {
     vi.spyOn(trainingApi, "compare").mockResolvedValue(oneRegisteredResult());
+    vi.spyOn(trainingApi, "metricDirections").mockResolvedValue({
+      higher_is_better: { map99: true },
+    });
     vi.spyOn(trainingApi, "compareBest").mockResolvedValue({
       name: "exp-a",
       experiment_id: "exp-a",
@@ -298,23 +327,22 @@ describe("RunComparison rank answer", () => {
     expect(screen.queryByText("(exp-a)")).not.toBeInTheDocument();
   });
 
-  it("resets rankResult, rankError, needsDirection, needsUnverifiedOption and rankMetric when the marked set changes", async () => {
+  it("resets rankResult, rankError, the direction choice, needsUnverifiedOption and rankMetric when the marked set changes", async () => {
     const compare = vi.spyOn(trainingApi, "compare").mockResolvedValue(oneRegisteredResult());
     vi.spyOn(trainingApi, "compareBest").mockRejectedValue(
-      new StructuredRefusalError(
-        { error: "'val_map99' has no declared ranking direction", needs_direction: true },
-        422,
-        "",
-      ),
+      new StructuredRefusalError({ error: "boom" }, 422, ""),
     );
 
     const { rerender } = render(<RunComparison marked={MARKED} projectRoot={null} />);
     fireEvent.change(await screen.findByRole("combobox", { name: "Rank by metric" }), {
       target: { value: "val_map99" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Rank" }));
+    // val_map99 has no declared direction (the default beforeEach table): the toggle appears
+    // immediately, and a direction must be picked before Rank is reachable at all.
     expect(await screen.findByText("higher is better")).toBeInTheDocument();
-    expect(screen.getByText(/has no declared ranking direction/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "higher is better" }));
+    fireEvent.click(screen.getByRole("button", { name: "Rank" }));
+    expect(await screen.findByText("boom")).toBeInTheDocument();
 
     compare.mockResolvedValue(
       baseResult({
@@ -346,7 +374,7 @@ describe("RunComparison rank answer", () => {
 
     await waitFor(() => {
       expect(screen.queryByText("higher is better")).not.toBeInTheDocument();
-      expect(screen.queryByText(/has no declared ranking direction/)).not.toBeInTheDocument();
+      expect(screen.queryByText("boom")).not.toBeInTheDocument();
     });
     expect(await screen.findByRole("combobox", { name: "Rank by metric" })).toHaveValue("");
   });
@@ -469,19 +497,11 @@ describe("RunComparison rank metric chooser", () => {
 describe("RunComparison ranking direction control", () => {
   it("gives the direction choice the row group's own role, aria-pressed and focus-visible styling", async () => {
     vi.spyOn(trainingApi, "compare").mockResolvedValue(oneRegisteredResult());
-    vi.spyOn(trainingApi, "compareBest").mockRejectedValue(
-      new StructuredRefusalError(
-        { error: "'val_map99' has no declared ranking direction", needs_direction: true },
-        422,
-        "",
-      ),
-    );
 
     render(<RunComparison marked={MARKED} projectRoot={null} />);
     fireEvent.change(await screen.findByRole("combobox", { name: "Rank by metric" }), {
       target: { value: "val_map99" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Rank" }));
 
     const group = await screen.findByRole("group", { name: "Ranking direction" });
     const higher = within(group).getByRole("button", { name: "higher is better" });
@@ -493,8 +513,13 @@ describe("RunComparison ranking direction control", () => {
 
   it("renders a rank refusal in a status region without moving focus off the Rank control", async () => {
     vi.spyOn(trainingApi, "compare").mockResolvedValue(oneRegisteredResult());
+    // The direction is already declared for this metric, so Rank is reachable right after
+    // choosing it; the refusal under test here is unrelated to direction.
+    vi.spyOn(trainingApi, "metricDirections").mockResolvedValue({
+      higher_is_better: { map99: true },
+    });
     vi.spyOn(trainingApi, "compareBest").mockRejectedValue(
-      new StructuredRefusalError({ error: "boom", needs_direction: true }, 422, ""),
+      new StructuredRefusalError({ error: "boom" }, 422, ""),
     );
 
     render(<RunComparison marked={MARKED} projectRoot={null} />);
@@ -508,5 +533,183 @@ describe("RunComparison ranking direction control", () => {
     const status = await screen.findByRole("status");
     expect(status).toHaveTextContent("boom");
     expect(document.activeElement).toBe(rankButton);
+  });
+});
+
+describe("RunComparison overlay x axis", () => {
+  it("labels the overlay's x axis the same as the single-run chart", async () => {
+    const rect = { width: 600, height: 300, top: 0, left: 0, bottom: 300, right: 600 } as DOMRect;
+    const original = HTMLElement.prototype.getBoundingClientRect;
+    HTMLElement.prototype.getBoundingClientRect = () => rect;
+    try {
+      vi.spyOn(trainingApi, "compare").mockResolvedValue(oneRegisteredResult());
+      vi.mocked(openTrainingStream).mockImplementation((_root, _runId, onMessage) => {
+        onMessage({ type: "metric", row: { epoch: 1, loss: 0.3 } } as never);
+        return () => {};
+      });
+      render(<RunComparison marked={MARKED} projectRoot="/proj" />);
+      expect(await screen.findByText("epoch/step")).toBeInTheDocument();
+    } finally {
+      HTMLElement.prototype.getBoundingClientRect = original;
+    }
+  });
+});
+
+describe("RunComparison rank chooser's numeric-only filter", () => {
+  it("never offers a key whose stamped value is a string, such as a selection label", async () => {
+    vi.spyOn(trainingApi, "compare").mockResolvedValue(
+      baseResult({
+        experiments: [
+          {
+            experiment_id: "exp-a",
+            registry: [
+              {
+                name: "exp-a",
+                metrics: { val_map99: 0.7, val_selection: "held-out" },
+                metrics_source: "trainer",
+                registered_at: null,
+              },
+            ],
+          },
+          { experiment_id: "exp-b", registry: [] },
+        ],
+      }),
+    );
+    render(<RunComparison marked={MARKED} projectRoot={null} />);
+    const rankSelect = await screen.findByRole("combobox", { name: "Rank by metric" });
+    const optionTexts = within(rankSelect)
+      .getAllByRole("option")
+      .map((o) => o.textContent);
+    expect(optionTexts).toContain("val_map99");
+    expect(optionTexts).not.toContain("val_selection");
+  });
+});
+
+describe("RunComparison rank answer, a stamped-value exclusion", () => {
+  it("names a marked run as not ranked when its checkpoint never stamped the ranked metric", async () => {
+    vi.spyOn(trainingApi, "compare").mockResolvedValue(
+      baseResult({
+        experiments: [
+          {
+            experiment_id: "exp-a",
+            registry: [
+              {
+                name: "exp-a",
+                metrics: { val_loss: 0.2 },
+                metrics_source: "trainer",
+                registered_at: null,
+              },
+            ],
+          },
+          {
+            experiment_id: "exp-b",
+            registry: [
+              {
+                name: "exp-b",
+                metrics: { val_map99: 0.6 },
+                metrics_source: "trainer",
+                registered_at: null,
+              },
+            ],
+          },
+        ],
+      }),
+    );
+    vi.spyOn(trainingApi, "metricDirections").mockResolvedValue({
+      higher_is_better: { map99: true },
+    });
+    vi.spyOn(trainingApi, "compareBest").mockResolvedValue({
+      name: "exp-b",
+      experiment_id: "exp-b",
+      metrics: { val_map99: 0.6 },
+      metrics_source: "trainer",
+      higher_is_better: true,
+      direction_source: "declared",
+      excluded_unverified: [],
+    });
+
+    render(<RunComparison marked={MARKED} projectRoot={null} />);
+    fireEvent.change(await screen.findByRole("combobox", { name: "Rank by metric" }), {
+      target: { value: "val_map99" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Rank" }));
+
+    expect(await screen.findByText(/exp-a: not ranked: no val_map99 stamped/)).toBeInTheDocument();
+  });
+});
+
+describe("RunComparison disabled Rank's reason", () => {
+  function registeredResult(): CompareResult {
+    return baseResult({
+      experiments: [
+        {
+          experiment_id: "exp-a",
+          registry: [
+            {
+              name: "exp-a",
+              metrics: { val_map99: 0.7 },
+              metrics_source: "trainer",
+              registered_at: "2026-01-01T00:00:00Z",
+            },
+          ],
+        },
+        { experiment_id: "exp-b", registry: [] },
+      ],
+    });
+  }
+
+  it("links the metric-not-chosen reason to the Rank control with aria-describedby", async () => {
+    vi.spyOn(trainingApi, "compare").mockResolvedValue(registeredResult());
+    render(<RunComparison marked={MARKED} projectRoot={null} />);
+    await screen.findByRole("combobox", { name: "Rank by metric" });
+
+    const rankButton = screen.getByRole("button", { name: "Rank" });
+    expect(rankButton).toBeDisabled();
+    const describedBy = rankButton.getAttribute("aria-describedby");
+    expect(describedBy).toBeTruthy();
+    expect(document.getElementById(describedBy as string)).toHaveTextContent(
+      "choose a metric before ranking",
+    );
+  });
+
+  it("says the registry is unreadable for a marked run beside a disabled Rank, instead of an empty chooser", async () => {
+    vi.spyOn(trainingApi, "compare").mockResolvedValue(
+      baseResult({
+        experiments: [
+          {
+            experiment_id: "exp-a",
+            registry_error: "registry unreadable: simulated decode failure",
+          },
+          { experiment_id: "exp-b", registry: [] },
+        ],
+      }),
+    );
+    render(<RunComparison marked={MARKED} projectRoot={null} />);
+
+    const reason = await screen.findByText(
+      "registry unreadable for a marked run; see the checkpoints above",
+    );
+    expect(screen.queryByRole("combobox", { name: "Rank by metric" })).not.toBeInTheDocument();
+    const rankButton = screen.getByRole("button", { name: "Rank" });
+    expect(rankButton).toBeDisabled();
+    expect(rankButton).toHaveAttribute("aria-describedby", reason.id);
+  });
+});
+
+describe("RunComparison unrecorded-field wording", () => {
+  it("reads the builder cell as unrecorded, not a third wording, when the config names none", async () => {
+    vi.spyOn(trainingApi, "compare").mockResolvedValue(
+      baseResult({
+        experiments: [
+          { experiment_id: "exp-a", model: null },
+          { experiment_id: "exp-b", model: null },
+        ],
+      }),
+    );
+    render(<RunComparison marked={MARKED} projectRoot={null} />);
+    const label = await screen.findByText("Builder");
+    const row = label.closest("tr") as HTMLElement;
+    expect(within(row).queryByText("no builder recorded")).not.toBeInTheDocument();
+    expect(within(row).getAllByText("unrecorded").length).toBeGreaterThan(0);
   });
 });

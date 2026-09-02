@@ -13,6 +13,27 @@ export function metricKey(row: MetricRow): number | undefined {
   return undefined;
 }
 
+/** Bookkeeping fields a metrics record carries that are never themselves a metric. */
+const NON_METRIC_KEYS = new Set(["epoch", "step", "timestamp"]);
+
+/** The suffix a stamped metric's own non-finite state companion carries (e.g. `train_loss_state`
+ * beside `train_loss`); a companion key, never itself offered as a metric. */
+export const METRIC_STATE_SUFFIX = "_state";
+
+/**
+ * Keys eligible to plot or rank as a metric: present with a numeric value, not one of a row's
+ * own bookkeeping fields, and not another key's `_state` companion. The one filter the
+ * logged-metrics table and the rank chooser both apply, so a string-valued key (a selection
+ * label, say) is never offered as something to rank by.
+ */
+export function numericMetricKeys(metrics: Record<string, unknown> | null | undefined): string[] {
+  if (!metrics) return [];
+  return Object.keys(metrics).filter(
+    (k) =>
+      !NON_METRIC_KEYS.has(k) && !k.endsWith(METRIC_STATE_SUFFIX) && typeof metrics[k] === "number",
+  );
+}
+
 /**
  * Upsert a streamed metric row by epoch/step instead of appending. The training WS
  * replays every row from the start on each (re)connect, so a plain append would

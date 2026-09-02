@@ -145,7 +145,10 @@ export function TrainingTab() {
         return next;
       }
       if (unmarkableReason(run)) return prev;
-      if (next.size >= MAX_MARKED_RUNS) {
+      // The same markable count the header prints, not the raw id set: a lingering id for a
+      // run that turned unmarkable since must not count toward the cap.
+      const markableCount = runs.filter((r) => next.has(r.run_id) && !unmarkableReason(r)).length;
+      if (markableCount >= MAX_MARKED_RUNS) {
         useStore
           .getState()
           .pushToast(`Compare fits at most ${MAX_MARKED_RUNS} runs at once; unmark one first.`);
@@ -155,6 +158,13 @@ export function TrainingTab() {
       return next;
     });
   }
+
+  // A run's own marked state, never "No run selected" left over: once the marked set settles
+  // at exactly one, that run becomes the one the detail region shows.
+  const soleMarkedRunId = marked.length === 1 ? marked[0].runId : null;
+  useEffect(() => {
+    if (soleMarkedRunId) setSelectedRun(soleMarkedRunId);
+  }, [soleMarkedRunId]);
 
   const refreshRuns = useCallback(async () => {
     try {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { mergeMetric, metricKey } from "@/tabs/trainingMetrics";
+import { mergeMetric, metricKey, numericMetricKeys } from "@/tabs/trainingMetrics";
 
 describe("mergeMetric (training stream de-dup)", () => {
   it("appends rows with distinct epochs", () => {
@@ -29,5 +29,28 @@ describe("mergeMetric (training stream de-dup)", () => {
     let rows = mergeMetric([], { train_loss: 1 });
     rows = mergeMetric(rows, { train_loss: 1 });
     expect(rows).toHaveLength(2); // no epoch/step -> can't dedupe
+  });
+});
+
+describe("numericMetricKeys (the rank chooser and the logged table's shared filter)", () => {
+  it("drops epoch, step and timestamp alongside a numeric metric", () => {
+    expect(numericMetricKeys({ epoch: 3, step: 9, timestamp: 123, train_loss: 0.5 })).toEqual([
+      "train_loss",
+    ]);
+  });
+
+  it("drops a key whose stamped value is not a number, such as a selection label", () => {
+    expect(numericMetricKeys({ val_map50: 0.7, selection_label: "held-out" })).toEqual([
+      "val_map50",
+    ]);
+  });
+
+  it("drops a metric's own _state companion key", () => {
+    expect(numericMetricKeys({ train_loss: 0.5, train_loss_state: "nan" })).toEqual(["train_loss"]);
+  });
+
+  it("answers no keys for a record that is absent", () => {
+    expect(numericMetricKeys(undefined)).toEqual([]);
+    expect(numericMetricKeys(null)).toEqual([]);
   });
 });
