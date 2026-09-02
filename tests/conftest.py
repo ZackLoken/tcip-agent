@@ -89,6 +89,24 @@ def _stop_leaked_tensorboards():
         tb.stop_tensorboard(run_id=entry["key"])
 
 
+@pytest.fixture(autouse=True)
+def _discard_leftover_launch_marks():
+    """Leave no pre-manifest sweep-launch mark behind for the next test.
+
+    A test that calls ``mark_sweep_launching`` directly, or drives a relaunch whose worker
+    never reaches ``run_hpo``, can leave a study name in the process-global mark set; the next
+    test's ``cancel_hpo`` call must not find it. Discarded through the same call ``run_hpo``
+    and the relaunch worker use, not by reaching into the dict directly. The module is looked
+    up in ``sys.modules`` rather than imported, so a session that never touched it pays nothing.
+    """
+    yield
+    tt = sys.modules.get("tcip_mcp.tools.training_tools")
+    if tt is None:
+        return
+    for study_name in list(tt._LAUNCHING_SWEEPS):
+        tt.discard_sweep_launching(study_name)
+
+
 def pytest_collection_modifyitems(config, items):
     """Guardrail: fail loudly when far fewer tests collect than expected.
 

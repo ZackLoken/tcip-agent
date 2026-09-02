@@ -112,15 +112,22 @@ def _driver_live(sweep_id: str) -> bool:
 
 
 def _job_sweep_state(job: HPOJob, manifest: dict) -> str:
-    """A live-registry job's derived liveness: manifest-derived when a manifest exists, else
-    the registry's own record (``job.status``), the only source of truth for a job that never
-    got as far as writing one (a relaunch ``run_hpo`` refused at preflight, or any job that
-    failed before its first manifest write). Either way the rule is
-    :func:`~tcip_mcp.tools.training_tools.sweep_state`'s own: a recorded done state is trusted,
-    a live worker thread reads ``running``, anything else reads ``interrupted``."""
+    """A live-registry job's derived liveness. The registry's own record wins once ``job.status``
+    is itself a recorded done state, so a job the registry knows completed never reads
+    ``interrupted`` off a manifest whose terminal write ``run_hpo`` tolerates failing;
+    otherwise the manifest is the source when one exists, else the registry's own record, the
+    only source of truth for a job that never got as far as writing a manifest (a relaunch
+    ``run_hpo`` refused at preflight, or any job that failed before its first manifest write).
+    Either way the rule is :func:`~tcip_mcp.tools.training_tools.sweep_state`'s own: a recorded
+    done state is trusted, a live worker thread reads ``running``, anything else reads
+    ``interrupted``."""
+    from tcip_mcp.experiments import _RECORDED_AS_DONE
     from tcip_mcp.tools.training_tools import TCIP_HEARTBEAT_STALE_SECONDS, sweep_state
 
-    source = manifest if manifest else {"status": job.status}
+    if job.status in _RECORDED_AS_DONE:
+        source = {"status": job.status}
+    else:
+        source = manifest if manifest else {"status": job.status}
     return sweep_state(source, stale_seconds=TCIP_HEARTBEAT_STALE_SECONDS,
                        driver_live=_driver_live(job.sweep_id))
 
@@ -423,7 +430,11 @@ def _worker(job: HPOJob, spec: _RelaunchSpec, output_dir: str, relaunched_from: 
     carrying the issues, and a returned ``{"status": "cancelled", ...}`` a cancelled one,
     rather than either reading as a completed job with no useful result. ``relaunched_from``
     is the source study's own name, recorded on this sweep's manifest so a listing can show it.
+    Discards ``job.sweep_id``'s own pre-manifest launch mark on every exit, ``run_hpo`` never
+    reached included, so a caller that failed before or inside that call leaves no mark behind.
     """
+    from tcip_mcp.tools.training_tools import discard_sweep_launching
+
     try:
         job.status = "running"
         _persist()
@@ -464,6 +475,7 @@ def _worker(job: HPOJob, spec: _RelaunchSpec, output_dir: str, relaunched_from: 
         job.status = "failed"
         job.error = str(exc)
     finally:
+        discard_sweep_launching(job.sweep_id)
         _persist()
 
 

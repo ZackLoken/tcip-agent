@@ -184,6 +184,32 @@ def test_disk_sweep_with_a_fresh_heartbeat_lists_running(client, hpo_root) -> No
     assert body["status"] == "running"
 
 
+def test_a_job_the_registry_recorded_done_lists_that_state_despite_a_stale_manifest(
+    client, hpo_root, monkeypatch
+) -> None:
+    """A job the registry itself recorded completed (``run_hpo`` tolerates its own terminal
+    manifest write failing) must not read interrupted off a manifest still saying running with
+    a stale heartbeat: the registry's own recorded done state wins over the manifest's."""
+    from datetime import datetime, timedelta, timezone
+
+    from tcip_mcp.tools.training_tools import TCIP_HEARTBEAT_STALE_SECONDS
+    from tcip_web.routes import tuning
+
+    stale = (datetime.now(timezone.utc)
+             - timedelta(seconds=TCIP_HEARTBEAT_STALE_SECONDS + 60)).isoformat()
+    _write_sweep(hpo_root, "hpo_donestale1", heartbeat=stale)  # manifest still says "running"
+    monkeypatch.setitem(tuning._registry.jobs, "hpo_donestale1",
+                        tuning.HPOJob(sweep_id="hpo_donestale1", status="completed",
+                                     result={"best_value": 0.1}))
+
+    sweeps = client.get("/api/tuning/sweeps").json()["sweeps"]
+    entry = next(s for s in sweeps if s["sweep_id"] == "hpo_donestale1")
+    assert entry["status"] == "completed"
+
+    body = client.get("/api/tuning/sweeps/hpo_donestale1").json()
+    assert body["status"] == "completed"
+
+
 def test_a_live_sweep_is_not_listed_twice_by_its_own_manifest(client, hpo_root, monkeypatch) -> None:
     """A sweep id with both a live registry entry and an on-disk manifest is listed once, from
     the live entry (``_summary``, which carries ``platform_root``) rather than the disk-only
@@ -944,6 +970,37 @@ def test_worker_marks_a_cancelled_result_cancelled_with_its_reason(hpo_root, mon
     _worker(job, spec, str(hpo_root), "hpo-source-2")
     assert job.status == "cancelled"
     assert job.error == "the sweep was cancelled by request before it could finish"
+
+
+def test_worker_discards_the_launch_mark_when_it_fails_before_reaching_run_hpo(
+    hpo_root, monkeypatch
+) -> None:
+    """A worker that fails before it ever calls ``run_hpo`` must still discard the launch mark
+    the route recorded for it, so ``cancel_hpo`` does not keep finding a study that will never
+    exist."""
+    from tcip_mcp.tools.training_tools import _LAUNCHING_SWEEPS, mark_sweep_launching
+    from tcip_web.routes.tuning import HPOJob, _RelaunchSpec, _persist, _worker
+
+    calls = {"n": 0}
+    real_persist = _persist
+
+    def flaky_persist():
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("the registry write failed before the worker reached run_hpo")
+        real_persist()
+
+    monkeypatch.setattr("tcip_web.routes.tuning._persist", flaky_persist)
+
+    job = HPOJob(sweep_id="hpo-worker-markleak1")
+    mark_sweep_launching(job.sweep_id, str(hpo_root))
+    spec = _RelaunchSpec(base_config={}, param_space=None, n_trials=1, search_alg="random",
+                         scheduler="asha", grace_period=5, reduction_factor=3, max_concurrent=1,
+                         warm_start=False, baseline_params=None, resources_per_trial=None)
+
+    _worker(job, spec, str(hpo_root), "hpo-source-markleak")
+
+    assert job.sweep_id not in _LAUNCHING_SWEEPS
 
 
 def test_relaunch_refused_at_preflight_reads_failed_not_interrupted(

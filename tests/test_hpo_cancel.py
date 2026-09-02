@@ -4,8 +4,7 @@
 
 from __future__ import annotations
 
-
-
+import pytest
 
 def test_cancel_hpo_refuses_a_study_neither_manifest_nor_registry_names(tmp_path) -> None:
     from tcip_mcp.tools.training_tools import cancel_hpo
@@ -61,12 +60,13 @@ def test_mark_sweep_launching_is_discarded_once_run_hpo_reaches_its_first_manife
     tmp_path, real_hpo_base_config, monkeypatch
 ) -> None:
     from tcip_mcp.tools.training_tools import (
-        _sweep_launching, mark_sweep_launching, run_hpo,
+        _sweep_launching, mark_sweep_launching, run_hpo, sweep_dir,
     )
 
     study_name = "hpo_markclear1"
+    resolved_root = sweep_dir(study_name, str(tmp_path)).resolve()
     mark_sweep_launching(study_name, str(tmp_path))
-    assert _sweep_launching(study_name) is True
+    assert _sweep_launching(study_name, resolved_root) is True
 
     monkeypatch.setattr(
         "tcip_mcp.pipelines.training.hpo.tune_search",
@@ -76,22 +76,55 @@ def test_mark_sweep_launching_is_discarded_once_run_hpo_reaches_its_first_manife
     run_hpo(base_config=real_hpo_base_config, n_trials=1, output_dir=str(tmp_path),
            study_name=study_name)
 
-    assert _sweep_launching(study_name) is False
+    assert _sweep_launching(study_name, resolved_root) is False
 
 
 def test_mark_sweep_launching_is_discarded_even_when_preflight_refuses(tmp_path) -> None:
     """The mark is scoped to the window before run_hpo's first manifest write, refusal
     included: a caller's mark for a study whose config fails preflight must not linger forever
     once run_hpo has already answered for it."""
-    from tcip_mcp.tools.training_tools import _sweep_launching, mark_sweep_launching, run_hpo
+    from tcip_mcp.tools.training_tools import _sweep_launching, mark_sweep_launching, run_hpo, sweep_dir
 
     study_name = "hpo_markrefuse1"
+    resolved_root = sweep_dir(study_name, str(tmp_path)).resolve()
     mark_sweep_launching(study_name, str(tmp_path))
 
     result = run_hpo(base_config={"model_source": {"builder": "not.a:real_builder"}},
                      n_trials=1, output_dir=str(tmp_path), study_name=study_name)
     assert "error" in result
-    assert _sweep_launching(study_name) is False
+    assert _sweep_launching(study_name, resolved_root) is False
+
+
+def test_mark_sweep_launching_is_discarded_when_check_json_value_refuses(tmp_path) -> None:
+    """The two ``check_json_value`` refusals sit inside ``run_hpo``'s own try/finally now, not
+    ahead of it, so a caller's launch mark is discarded on that exit too."""
+    from tcip_mcp.tools.training_tools import _sweep_launching, mark_sweep_launching, run_hpo, sweep_dir
+
+    study_name = "hpo_badjson1"
+    resolved_root = sweep_dir(study_name, str(tmp_path)).resolve()
+    mark_sweep_launching(study_name, str(tmp_path))
+
+    with pytest.raises(TypeError):
+        run_hpo(base_config={"data": {"not_json": {1, 2, 3}}}, n_trials=1,
+               output_dir=str(tmp_path), study_name=study_name)
+
+    assert _sweep_launching(study_name, resolved_root) is False
+
+
+def test_cancel_hpo_under_a_mismatched_root_is_refused_despite_the_launch_mark(tmp_path) -> None:
+    """A mark recorded under one resolved root does not let a cancel under another root count
+    the study as found: a cancel that lands where run_hpo will never look is refused, not
+    honoured with a sentinel nothing will ever poll."""
+    from tcip_mcp.tools.training_tools import cancel_hpo, mark_sweep_launching, sweep_dir
+
+    study_name = "hpo_wrongroot1"
+    root_a = tmp_path / "root_a"
+    root_b = tmp_path / "root_b"
+    mark_sweep_launching(study_name, root=root_a)
+
+    result = cancel_hpo(study_name, root=str(root_b))
+    assert "error" in result
+    assert not sweep_dir(study_name, root=root_b).exists()
 
 
 def test_cancel_hpo_under_a_non_default_root(tmp_path) -> None:

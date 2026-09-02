@@ -1394,10 +1394,13 @@ _CANCEL_DURING_RUN_REASON = "the sweep was cancelled by request before it could 
 
 _TRIAL_DIR_PREFIX = "trial_"
 
-SWEEP_HEARTBEAT_SECONDS = TCIP_HEARTBEAT_STALE_SECONDS / 10
-"""How often ``run_hpo``'s driver thread restamps the sweep manifest's ``heartbeat`` while
-``tune_search`` runs, derived from :data:`TCIP_HEARTBEAT_STALE_SECONDS` so a live driver
-stamps ten times within one staleness window."""
+def sweep_heartbeat_seconds() -> float:
+    """How often ``run_hpo``'s driver thread restamps the sweep manifest's ``heartbeat`` while
+    ``tune_search`` runs: :data:`TCIP_HEARTBEAT_STALE_SECONDS` read fresh on every call (not
+    frozen at import) and divided by ten, so a live driver stamps ten times within one
+    staleness window whatever that window is set to while the heartbeat loop is running.
+    """
+    return TCIP_HEARTBEAT_STALE_SECONDS / 10
 
 _LAUNCHING_SWEEPS: dict[str, Path] = {}
 _LAUNCHING_SWEEPS_LOCK = threading.Lock()
@@ -1407,22 +1410,22 @@ would otherwise find nothing on disk and nothing in ``run_registry._RUNS`` to ac
 
 
 def mark_sweep_launching(study_name: str, output_dir: str = "", *, root: Path | str | None = None) -> None:
-    """Record that ``study_name`` is about to become a sweep, closing the window between a
-    caller minting the id and ``run_hpo`` writing its first manifest.
+    """Record that ``study_name`` is about to become a sweep at this resolved root, closing
+    the window between a caller minting the id and ``run_hpo`` writing its first manifest.
 
     ``run_hpo`` itself discards the mark, in a ``finally`` around everything from its own
     entry through its first manifest write, so the mark is live for exactly that window; a
     caller that marks a study and never actually calls ``run_hpo`` for it (a request that
     errored before starting the worker) leaves an entry this module cannot itself clean up,
-    which is why only the web relaunch route, immediately before starting the worker thread
-    that runs ``run_hpo``, calls this.
+    which is why the web relaunch route's worker also discards it, in its own ``finally``, on
+    every exit that never reached ``run_hpo`` (see :func:`discard_sweep_launching`).
     """
-    resolved = sweep_dir(study_name, output_dir, root=root)
+    resolved = sweep_dir(study_name, output_dir, root=root).resolve()
     with _LAUNCHING_SWEEPS_LOCK:
         _LAUNCHING_SWEEPS[study_name] = resolved
 
 
-def _discard_sweep_launching(study_name: str | None) -> None:
+def discard_sweep_launching(study_name: str | None) -> None:
     """Drop ``study_name``'s pre-manifest mark, if it holds one. A no-op for ``None`` (no
     caller-supplied name) or a name nothing marked (an agent-launched sweep)."""
     if study_name is None:
@@ -1431,10 +1434,16 @@ def _discard_sweep_launching(study_name: str | None) -> None:
         _LAUNCHING_SWEEPS.pop(study_name, None)
 
 
-def _sweep_launching(study_name: str) -> bool:
-    """Whether ``study_name`` is in its pre-manifest window right now."""
+def _sweep_launching(study_name: str, resolved_root: Path) -> bool:
+    """Whether ``study_name`` is in its pre-manifest window right now, at ``resolved_root``.
+
+    A mark recorded under a different resolved root names a study ``run_hpo`` will never look
+    for at this location, so it does not count as found here: the caller's own resolved sweep
+    root is what must match the mark's, not the study name alone.
+    """
     with _LAUNCHING_SWEEPS_LOCK:
-        return study_name in _LAUNCHING_SWEEPS
+        marked = _LAUNCHING_SWEEPS.get(study_name)
+    return marked is not None and marked == resolved_root
 
 
 def sweep_state(manifest: dict, *, stale_seconds: float, driver_live: bool = False) -> str:
@@ -1836,10 +1845,11 @@ def run_hpo(
     TensorBoard logdir). The full result is written alongside as ``<study_name>.json``. The
     manifest also carries every argument this call resolved (``base_config`` and the resolved
     ``param_space`` included), so a relaunch can replay it exactly from the manifest alone.
-    The manifest's ``heartbeat`` is restamped every :data:`SWEEP_HEARTBEAT_SECONDS` from a
+    The manifest's ``heartbeat`` is restamped every :func:`sweep_heartbeat_seconds` from a
     daemon thread for as long as the search runs, stopped and joined before any terminal
     write, so a listing reading the manifest mid-sweep can tell a live driver from a dead one
-    (see ``sweep_state``). A caller that calls :func:`mark_sweep_launching` for ``study_name``
+    (see ``sweep_state``); a restamp a store or OS error interrupts costs one beat, not the
+    rest of the sweep. A caller that calls :func:`mark_sweep_launching` for ``study_name``
     before this call keeps a cancel reachable in the window before the first manifest write
     (see :func:`cancel_hpo`); this call discards that mark itself once it no longer needs it.
 
@@ -1884,14 +1894,15 @@ def run_hpo(
 
     if param_space is None:
         param_space = get_default_space()
-    # Both reach a stored record: the space into the sweep manifest, the base config into
-    # every trial's resolved config once a sampled point is applied to it.
-    check_json_value(param_space, path="param_space")
-    check_json_value(base_config, path="base_config")
 
     # Everything through the first manifest write sits in this try/finally, so a caller's
     # mark_sweep_launching entry for study_name is discarded on every exit, refusal included.
     try:
+        # Both reach a stored record: the space into the sweep manifest, the base config into
+        # every trial's resolved config once a sampled point is applied to it.
+        check_json_value(param_space, path="param_space")
+        check_json_value(base_config, path="base_config")
+
         # Structural preflight over every point the search space could resolve a trial's
         # builder or data section to, not only the first sampled corner.
         for label, point in _preflight_points(param_space):
@@ -1969,13 +1980,18 @@ def run_hpo(
 
         _write_manifest()
     finally:
-        _discard_sweep_launching(study_name)
+        discard_sweep_launching(study_name)
 
     heartbeat_stop = threading.Event()
 
     def _heartbeat_loop() -> None:
-        while not heartbeat_stop.wait(SWEEP_HEARTBEAT_SECONDS):
-            _write_manifest()
+        while not heartbeat_stop.wait(sweep_heartbeat_seconds()):
+            try:
+                _write_manifest()
+            except (OSError, StoreError):
+                logger.warning(
+                    "could not restamp the heartbeat for the sweep %s; will retry at the "
+                    "next interval", study_name, exc_info=True)
 
     heartbeat_thread = threading.Thread(target=_heartbeat_loop, daemon=True)
     heartbeat_thread.start()
@@ -2086,9 +2102,11 @@ def cancel_hpo(study_name: str, output_dir: str = "", *, root: str | None = None
 
     Refuses when the study names no sweep this process can find: no manifest under the resolved
     root, no live trial of this study registered in this process's own run registry, and no
-    ``mark_sweep_launching`` entry for it either (the last covers the narrow window between a
-    caller minting the id and ``run_hpo`` writing its first manifest; a marked study with no
-    manifest yet answers ``"running"`` with ``cancel_requested`` set).
+    ``mark_sweep_launching`` entry for it at this same resolved root either (the last covers
+    the narrow window between a caller minting the id and ``run_hpo`` writing its first
+    manifest; a marked study with no manifest yet answers ``"running"`` with
+    ``cancel_requested`` set. A mark recorded under a different root does not count: that study
+    is one ``run_hpo`` will never look for here).
 
     The manifest's own ``cancel_requested`` (read by the Tuning listing) is written through the
     store's compare-and-set, and never over a manifest already in a terminal status: ``run_hpo``
@@ -2118,7 +2136,7 @@ def cancel_hpo(study_name: str, output_dir: str = "", *, root: str | None = None
             r.origin == "hpo_trial" and r.output_dir and _path_under(Path(r.output_dir), resolved_root)
             for r in _RUNS.values()
         )
-    if not has_manifest and not live_trial and not _sweep_launching(study_name):
+    if not has_manifest and not live_trial and not _sweep_launching(study_name, resolved_root):
         return {"error": f"no sweep named {study_name!r}: no manifest, no live trial and no "
                           "pre-manifest launch mark for it"}
 
@@ -2139,8 +2157,8 @@ def cancel_hpo(study_name: str, output_dir: str = "", *, root: str | None = None
         try:
             store.replace(manifest_key, working, expect=versioned.version)
         except VersionConflict:
-            # run_hpo's own terminal write landed first; nothing to add on top of it, and
-            # writing this stale copy back would revert that write to "running".
+            # Another of run_hpo's own writes (start, a heartbeat restamp, or terminal)
+            # landed first; losing this costs nothing, since each re-derives cancel_requested.
             refreshed = store.read(manifest_key, default=manifest)
             state_manifest = refreshed if isinstance(refreshed, dict) else manifest
         else:

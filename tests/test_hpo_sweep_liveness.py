@@ -82,7 +82,7 @@ def test_run_hpo_heartbeat_thread_stops_before_the_terminal_write(
 
     import tcip_mcp.tools.training_tools as tt
 
-    monkeypatch.setattr(tt, "SWEEP_HEARTBEAT_SECONDS", 0.02)
+    monkeypatch.setattr(tt, "sweep_heartbeat_seconds", lambda: 0.02)
 
     writes: list[dict] = []
     real_replace = tt.store.replace
@@ -108,3 +108,51 @@ def test_run_hpo_heartbeat_thread_stops_before_the_terminal_write(
 
     time.sleep(0.06)  # well past the heartbeat interval
     assert len(writes) == count_at_return  # nothing wrote again after run_hpo returned
+
+
+def test_heartbeat_loop_survives_a_store_error_and_keeps_restamping(
+    tmp_path, real_hpo_base_config, monkeypatch, caplog
+):
+    """A store error on one heartbeat restamp costs one beat, not the rest of the sweep: the
+    loop keeps stamping afterward, and ``run_hpo`` still returns its normal result rather than
+    a live sweep silently losing its heartbeat for good."""
+    import threading
+
+    import tcip_mcp.tools.training_tools as tt
+    from tcip_store import StoreError
+
+    monkeypatch.setattr(tt, "sweep_heartbeat_seconds", lambda: 0.01)
+
+    writes: list[dict] = []
+    raised_once = False
+    recovered = threading.Event()
+    real_replace = tt.store.replace
+
+    def flaky_replace(key, value, **kw):
+        nonlocal raised_once
+        if key.store == tt.SWEEP_MANIFEST_STORE:
+            writes.append(dict(value))
+            if len(writes) == 2 and not raised_once:
+                raised_once = True
+                raise StoreError("simulated lock timeout")
+            if raised_once and len(writes) >= 4:
+                recovered.set()
+        return real_replace(key, value, **kw)
+
+    monkeypatch.setattr(tt.store, "replace", flaky_replace)
+
+    def fake_search(**kw):
+        assert recovered.wait(timeout=5), \
+            "the heartbeat loop never restamped again after the store error"
+        return {"best_params": {"lr": 0.1}, "best_value": 0.25, "n_trials": 1,
+                "study_name": kw["study_name"]}
+
+    monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", fake_search)
+
+    with caplog.at_level("WARNING", logger=tt.logger.name):
+        result = tt.run_hpo(base_config=real_hpo_base_config, n_trials=1, output_dir=str(tmp_path))
+
+    assert result["best_value"] == 0.25  # run_hpo returned normally past the failed restamp
+    manifest = tt.store.read(tt.sweep_manifest_key(result["study_name"], str(tmp_path)))
+    assert manifest["status"] == "completed"
+    assert any("could not restamp the heartbeat" in r.getMessage() for r in caplog.records)
