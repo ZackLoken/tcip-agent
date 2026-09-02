@@ -2607,7 +2607,7 @@ Phase 3 verdict: single.
 
 Must agree: the checks a contributor runs locally are the checks CI runs.
 Side A: `CLAUDE.md` (documents `pytest -n 4`, `ruff`, `mypy`, and the frontend command chain).
-Side B: `.github/workflows/ci.yml` (mypy job, python job with `pytest -n auto` and `TCIP_MIN_TESTS`, typescript job with format:check/lint/typecheck/test/build).
+Side B: `.github/workflows/ci.yml` (mypy job, python job with `pytest -n auto` and `TCIP_MIN_TESTS`, typescript job with format:check/lint/typecheck/test/build, docker job building `packages/tcip-web/Dockerfile` and polling the served GUI).
 Phase 3 verdict: duplicated.
 
 ## Totals
