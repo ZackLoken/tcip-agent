@@ -16,6 +16,8 @@ from __future__ import annotations
 import logging
 import os
 import re
+import subprocess
+import sys
 import threading
 from collections.abc import Generator
 from contextlib import contextmanager
@@ -295,6 +297,71 @@ def read_ray_dashboard() -> dict | None:
     return state
 
 
+def _has_attached_console() -> bool:
+    """True when this process should use Ray's plain, console-signal shutdown path.
+
+    Only Windows distinguishes an attached console from a detached one, so every other
+    platform always answers True. On Windows, ``GetConsoleCP`` is documented to return 0
+    when the calling process has no console; probed both ways against ``GetConsoleWindow``
+    (this interpreter attached to its shell, and the same probe launched with
+    ``DETACHED_PROCESS``): ``GetConsoleCP`` read 437 attached and 0 detached, while
+    ``GetConsoleWindow`` read 0 in both cases, so ``GetConsoleCP`` is the one that
+    distinguishes them.
+    """
+    if sys.platform != "win32":
+        return True
+    import ctypes
+
+    return ctypes.windll.kernel32.GetConsoleCP() != 0
+
+
+def _kill_ray_daemons_before_shutdown(ray: Any) -> None:
+    """Kill every daemon this process's Ray cluster started, ahead of ``ray.shutdown()``.
+
+    On Windows, ``ray.shutdown()`` ends each daemon through ``Node.kill_all_processes``,
+    which signals a graceful stop via ``ConsolePopen.terminate``'s ``CTRL_BREAK_EVENT``; that
+    raises ``OSError: [WinError 6] The handle is invalid`` on a daemon started without a
+    console (a server launched under ``DETACHED_PROCESS``, as the GUI capture harness does),
+    aborting the shutdown at the first daemon and leaving the rest of the cluster running.
+    Killing every daemon here first, in the same order ``kill_all_processes`` uses (raylet,
+    gcs server, the rest, the reaper last; the type names are Ray's own stable process-type
+    strings, not imported so a test double need not also fake ``ray._private.ray_constants``),
+    means ``ray.shutdown()`` then finds each one already dead (``poll()`` is not ``None``) and
+    never signals it.
+
+    A Ray whose ``_private`` module, worker, node or process table is absent is an externally
+    started cluster (or a test double with no process table): this module never shuts down a
+    cluster it did not start (``_ray_started_here`` already guards that), so there is nothing
+    to kill and the caller's plain ``ray.shutdown()`` runs unchanged.
+    """
+    private = getattr(ray, "_private", None)
+    worker = getattr(private, "worker", None) if private is not None else None
+    global_worker = getattr(worker, "global_worker", None) if worker is not None else None
+    node = getattr(global_worker, "node", None) if global_worker is not None else None
+    all_processes = getattr(node, "all_processes", None) if node is not None else None
+    if not all_processes:
+        return
+
+    order = ["raylet", "gcs_server"]
+    order += [process_type for process_type in all_processes if process_type not in order
+              and process_type != "reaper"]
+    order.append("reaper")
+
+    for process_type in order:
+        for process_info in all_processes.get(process_type, []):
+            process = process_info.process
+            if process.poll() is not None:
+                continue
+            process.kill()
+            try:
+                process.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                logger.warning(
+                    "Ray daemon %s (pid %s) did not exit within 10s of being killed; "
+                    "ray.shutdown() will still try to signal it", process_type, process.pid,
+                )
+
+
 @contextmanager
 def _ray_session(ray: Any) -> Generator[None]:
     """Keep Ray up for the duration of one sweep, shutting it down only when the last
@@ -348,6 +415,8 @@ def _ray_session(ray: Any) -> Generator[None]:
                 _ray_started_here = False
                 _ray_runtime_pythonpath = None
                 _clear_ray_dashboard()
+                if not _has_attached_console():
+                    _kill_ray_daemons_before_shutdown(ray)
                 ray.shutdown()
 
 

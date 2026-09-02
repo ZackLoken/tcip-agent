@@ -38,11 +38,50 @@ class _Results(list):
         return self[0]
 
 
+class _FakeDaemonProcess:
+    """Stands in for a Ray daemon's ``Popen``, as ``Node.all_processes`` holds it.
+
+    ``terminate`` mirrors ``ConsolePopen``'s Windows console-signal path: it raises the
+    ``OSError`` that path raises on a daemon started without a console (``ray.no_console``
+    True on the fake module), and otherwise succeeds like a daemon that has a console to
+    signal.
+    """
+
+    def __init__(self, ray: ModuleType, pid: int) -> None:
+        self._ray = ray
+        self.pid = pid
+        self._alive = True
+        self.kill_calls = 0
+        self.wait_calls = 0
+        self.terminate_calls = 0
+
+    def poll(self):
+        return None if self._alive else 0
+
+    def kill(self) -> None:
+        self.kill_calls += 1
+        self._alive = False
+
+    def wait(self, timeout=None) -> None:
+        self.wait_calls += 1
+
+    def terminate(self) -> None:
+        self.terminate_calls += 1
+        if self._ray.no_console:
+            raise OSError(22, "The handle is invalid")
+        self._alive = False
+
+
 def _install_fake_ray(monkeypatch, entered: list, release: list) -> ModuleType:
     """Put a counting, blocking stand-in for Ray on ``sys.modules``.
 
     The nth ``Tuner`` built sets ``entered[n]`` when its ``fit`` starts and returns only
     once ``release[n]`` is set, so a test can hold a sweep open across another's exit.
+
+    ``ray._private.worker.global_worker.node.all_processes`` mirrors the real attribute path
+    ``_kill_ray_daemons_before_shutdown`` reads, holding one fake daemon per Ray process type;
+    ``shutdown`` mirrors ``Node.kill_all_processes``, terminating whichever of those daemons
+    are still alive (``ray.no_console`` decides whether that terminate call raises).
     """
     ray = ModuleType("ray")
     ray.init_calls = 0
@@ -50,6 +89,17 @@ def _install_fake_ray(monkeypatch, entered: list, release: list) -> ModuleType:
     ray.live = False
     ray.init_kwargs = {}
     ray.dashboard_url = DASHBOARD_HOST_PORT
+    ray.no_console = False
+
+    daemon_process_infos = {
+        process_type: [SimpleNamespace(process=_FakeDaemonProcess(ray, pid=10_000 + i))]
+        for i, process_type in enumerate(("raylet", "gcs_server", "log_monitor", "reaper"))
+    }
+    ray._private = SimpleNamespace(
+        worker=SimpleNamespace(
+            global_worker=SimpleNamespace(node=SimpleNamespace(all_processes=daemon_process_infos))
+        )
+    )
 
     def is_initialized() -> bool:
         return ray.live
@@ -62,6 +112,11 @@ def _install_fake_ray(monkeypatch, entered: list, release: list) -> ModuleType:
 
     def shutdown() -> None:
         ray.shutdown_calls += 1
+        node = ray._private.worker.global_worker.node
+        for process_infos in node.all_processes.values():
+            for process_info in process_infos:
+                if process_info.process.poll() is None:
+                    process_info.process.terminate()
         ray.live = False
 
     ray.is_initialized = is_initialized
@@ -360,3 +415,59 @@ def test_sequential_sweeps_each_start_and_stop_their_own_cluster(monkeypatch):
 
     assert ray.init_calls == 2
     assert ray.shutdown_calls == 2
+
+
+def test_a_console_free_exit_kills_ray_daemons_before_shutdown_signals_them(monkeypatch):
+    """Windows' console-signal shutdown path raises ``OSError: [WinError 6] The handle is
+    invalid`` on a daemon started without a console; a console-free process must kill every
+    daemon itself first so ``ray.shutdown()`` finds each one already dead and never signals
+    it, and the sweep's exit raises nothing. ``raising=False`` lets this monkeypatch land even
+    before ``_has_attached_console`` exists, so a baseline lacking it still reaches the
+    assertion below rather than failing on the patch itself: without the fix nothing is killed
+    ahead of ``ray.shutdown()``, so the still-alive daemon's terminate call raises and that
+    exception is what the assertion below catches.
+    """
+    import tcip_mcp.pipelines.training.hpo as hpo
+
+    entered = [threading.Event()]
+    release = [threading.Event()]
+    release[0].set()
+    ray = _install_fake_ray(monkeypatch, entered, release)
+    ray.no_console = True
+    monkeypatch.setattr(hpo, "_has_attached_console", lambda: False, raising=False)
+
+    escaped: BaseException | None = None
+    try:
+        _run_one_search()
+    except BaseException as exc:  # the assertion below is the guard, not this except
+        escaped = exc
+
+    assert escaped is None, f"the sweep's exit raised {escaped!r} instead of completing"
+    for process_infos in ray._private.worker.global_worker.node.all_processes.values():
+        for process_info in process_infos:
+            assert process_info.process.kill_calls == 1
+            assert process_info.process.terminate_calls == 0
+    assert ray.shutdown_calls == 1
+
+
+def test_a_process_with_a_console_lets_ray_shutdown_signal_its_daemons_directly(monkeypatch):
+    """Coverage for the companion path: with a console attached, nothing is killed ahead of
+    ``ray.shutdown()``, which signals each daemon through the terminate path exactly as it did
+    before this module gained a console-free path; this holds both before and after the fix,
+    since a console-attached exit never takes the new branch."""
+    import tcip_mcp.pipelines.training.hpo as hpo
+
+    entered = [threading.Event()]
+    release = [threading.Event()]
+    release[0].set()
+    ray = _install_fake_ray(monkeypatch, entered, release)
+    ray.no_console = False
+    monkeypatch.setattr(hpo, "_has_attached_console", lambda: True, raising=False)
+
+    _run_one_search()
+
+    for process_infos in ray._private.worker.global_worker.node.all_processes.values():
+        for process_info in process_infos:
+            assert process_info.process.kill_calls == 0
+            assert process_info.process.terminate_calls == 1
+    assert ray.shutdown_calls == 1
