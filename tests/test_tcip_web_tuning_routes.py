@@ -63,11 +63,13 @@ overrides a field, or omits ``base_config`` itself, to exercise a genuinely inco
 
 def _write_sweep(root: Path, study: str, **manifest_fields) -> Path:
     import tcip_store
+    from datetime import datetime, timezone
     from tcip_mcp.tools.training_tools import sweep_manifest_key
 
     sweep = root / study
     sweep.mkdir(parents=True, exist_ok=True)
-    manifest = {"study_name": study, "status": "running", "n_trials": 2,
+    manifest = {"study_name": study, "status": "running",
+                "heartbeat": datetime.now(timezone.utc).isoformat(), "n_trials": 2,
                 **_RELAUNCH_FIELD_DEFAULTS, **manifest_fields}
     tcip_store.replace(sweep_manifest_key(study), manifest)
     return sweep
@@ -149,7 +151,43 @@ def test_list_sweeps_finds_a_sweep_that_only_exists_on_disk(client, hpo_root) ->
     assert entry["external"] is True
 
 
+def test_disk_sweep_with_a_stale_heartbeat_lists_interrupted_not_running(client, hpo_root) -> None:
+    """A manifest still saying "running" with no process left to restamp its heartbeat is a
+    dead sweep, not a live one: the listing (and get_sweep) must say so rather than trusting
+    the manifest's own recorded status verbatim."""
+    from datetime import datetime, timedelta, timezone
+
+    from tcip_mcp.tools.training_tools import TCIP_HEARTBEAT_STALE_SECONDS
+
+    stale = (datetime.now(timezone.utc)
+             - timedelta(seconds=TCIP_HEARTBEAT_STALE_SECONDS + 60)).isoformat()
+    _write_sweep(hpo_root, "hpo_stale0001", heartbeat=stale)
+
+    sweeps = client.get("/api/tuning/sweeps").json()["sweeps"]
+    entry = next(s for s in sweeps if s["sweep_id"] == "hpo_stale0001")
+    assert entry["status"] == "interrupted"
+
+    body = client.get("/api/tuning/sweeps/hpo_stale0001").json()
+    assert body["status"] == "interrupted"
+
+
+def test_disk_sweep_with_a_fresh_heartbeat_lists_running(client, hpo_root) -> None:
+    """Admits valid work: a manifest whose heartbeat a live driver just restamped still lists
+    (and reads back through get_sweep) as running."""
+    _write_sweep(hpo_root, "hpo_fresh0001")  # _write_sweep's own default heartbeat is fresh
+
+    sweeps = client.get("/api/tuning/sweeps").json()["sweeps"]
+    entry = next(s for s in sweeps if s["sweep_id"] == "hpo_fresh0001")
+    assert entry["status"] == "running"
+
+    body = client.get("/api/tuning/sweeps/hpo_fresh0001").json()
+    assert body["status"] == "running"
+
+
 def test_a_live_sweep_is_not_listed_twice_by_its_own_manifest(client, hpo_root, monkeypatch) -> None:
+    """A sweep id with both a live registry entry and an on-disk manifest is listed once, from
+    the live entry (``_summary``, which carries ``platform_root``) rather than the disk-only
+    scan (``_manifest_summary``, which does not)."""
     from tcip_web.routes import tuning
 
     _write_sweep(hpo_root, "hpo_dup00001", status="completed")
@@ -159,7 +197,7 @@ def test_a_live_sweep_is_not_listed_twice_by_its_own_manifest(client, hpo_root, 
     sweeps = client.get("/api/tuning/sweeps").json()["sweeps"]
     matching = [s for s in sweeps if s["sweep_id"] == "hpo_dup00001"]
     assert len(matching) == 1
-    assert matching[0]["status"] == "running"  # the live job wins over its manifest
+    assert "platform_root" in matching[0]  # the live row won, not the disk-only one
 
 
 def test_get_sweep_reads_the_manifest_when_the_sweep_is_not_in_memory(client, hpo_root) -> None:
@@ -770,6 +808,39 @@ def test_cancel_route_writes_the_sweep_and_run_level_sentinels(client: TestClien
     assert entry["cancel_requested"] is True
 
 
+def test_cancel_reaches_a_relaunch_before_run_hpo_writes_its_own_manifest(
+    client: TestClient, hpo_root, monkeypatch
+) -> None:
+    """The relaunch route marks the new sweep id as launching, on the request thread, before
+    starting the worker: a cancel that arrives once the route has answered but before run_hpo's
+    own worker call has written a manifest still reaches the sweep, rather than the 404
+    ``cancel_hpo`` used to answer in that window."""
+    import threading
+
+    from tcip_web.routes import tuning
+
+    release = threading.Event()
+
+    def fake_run_hpo(*, study_name, **kwargs):
+        release.wait(timeout=5)
+        return {"status": "cancelled", "study_name": study_name, "error": "stood down for the test"}
+
+    monkeypatch.setattr("tcip_mcp.tools.training_tools.run_hpo", fake_run_hpo)
+    _write_sweep(hpo_root, "hpo_precancel1",
+                base_config={"model_source": {"builder": "x:y"}, "data": {}, "training": {}})
+
+    resp = client.post("/api/tuning/sweeps", json={"study_name": "hpo_precancel1"})
+    assert resp.status_code == 200
+    sweep_id = resp.json()["sweep_id"]
+
+    cancel_resp = client.post(f"/api/tuning/sweeps/{sweep_id}/cancel", json={})
+    assert cancel_resp.status_code == 200
+    assert cancel_resp.json()["cancel_requested"] is True
+
+    release.set()
+    assert tuning.wait_for_workers(timeout_s=_worker_join_bound()) == ()
+
+
 def test_worker_marks_an_error_dict_failed_not_completed(hpo_root, monkeypatch) -> None:
     """A relaunch whose data paths moved must read failed with preflight's own words, not
     completed with no useful result (the defect the relaunch door's own worker fixes)."""
@@ -805,6 +876,34 @@ def test_worker_marks_a_cancelled_result_cancelled_with_its_reason(hpo_root, mon
     _worker(job, spec, str(hpo_root))
     assert job.status == "cancelled"
     assert job.error == "the sweep was cancelled by request before it could finish"
+
+
+def test_relaunch_refused_at_preflight_reads_failed_not_interrupted(
+    client: TestClient, hpo_root
+) -> None:
+    """A relaunch run_hpo refuses at preflight (an unimportable builder) never mints a
+    manifest; the registry's own record is the only account of it, so both the listing row
+    and the sweep detail must read failed with the refusal's own words, not the interrupted an
+    empty, heartbeat-less manifest would otherwise derive to."""
+    _write_sweep(hpo_root, "hpo_refused001",
+                base_config={"model_source": {"builder": "x:y"}, "data": {}, "training": {}})
+
+    resp = client.post("/api/tuning/sweeps", json={"study_name": "hpo_refused001"})
+    assert resp.status_code == 200
+    sweep_id = resp.json()["sweep_id"]
+
+    from tcip_web.routes import tuning
+
+    assert tuning.wait_for_workers(timeout_s=_worker_join_bound()) == ()
+
+    listing = client.get("/api/tuning/sweeps").json()["sweeps"]
+    entry = next(s for s in listing if s["sweep_id"] == sweep_id)
+    assert entry["status"] == "failed"
+    assert entry["error"]
+
+    body = client.get(f"/api/tuning/sweeps/{sweep_id}").json()
+    assert body["status"] == "failed"
+    assert body["error"]
 
 
 def test_manifest_fields_agree_between_a_live_and_a_disk_row(

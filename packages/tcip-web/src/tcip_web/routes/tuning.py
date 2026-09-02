@@ -96,11 +96,38 @@ def _persisted_summary(job: HPOJob) -> dict:
             "platform_root": job.platform_root}
 
 
+def _driver_live(sweep_id: str) -> bool:
+    """Whether this process's own worker thread for ``sweep_id`` is still running: the one
+    signal :func:`~tcip_mcp.tools.training_tools.sweep_state` trusts over the manifest's own
+    heartbeat, since a live thread proves the driver is running this instant."""
+    with _lock:
+        thread = _workers.get(sweep_id)
+        return thread is not None and thread.is_alive()
+
+
+def _job_sweep_state(job: HPOJob, manifest: dict) -> str:
+    """A live-registry job's derived liveness: manifest-derived when a manifest exists, else
+    the registry's own record (``job.status``), the only source of truth for a job that never
+    got as far as writing one (a relaunch ``run_hpo`` refused at preflight, or any job that
+    failed before its first manifest write). Either way the rule is
+    :func:`~tcip_mcp.tools.training_tools.sweep_state`'s own: a recorded done state is trusted,
+    a live worker thread reads ``running``, anything else reads ``interrupted``."""
+    from tcip_mcp.tools.training_tools import TCIP_HEARTBEAT_STALE_SECONDS, sweep_state
+
+    source = manifest if manifest else {"status": job.status}
+    return sweep_state(source, stale_seconds=TCIP_HEARTBEAT_STALE_SECONDS,
+                       driver_live=_driver_live(job.sweep_id))
+
+
 def _summary(job: HPOJob) -> dict:
     """One live sweep's listing row: the registry's own persisted fields plus the manifest
-    projection, read fresh (outside the registry's own lock) for whichever caller is listing."""
+    projection, read fresh (outside the registry's own lock) for whichever caller is listing.
+    ``status`` is the derived liveness (:func:`_job_sweep_state`), never the registry's own
+    persisted ``job.status`` verbatim: the persisted document keeps that (see
+    :func:`_persisted_summary`), and gains nothing from this derivation."""
     manifest = _read_manifest(job.sweep_id, root=job.platform_root) or {}
-    return {**_persisted_summary(job), **_manifest_fields(manifest)}
+    status = _job_sweep_state(job, manifest)
+    return {**_persisted_summary(job), **_manifest_fields(manifest), "status": status}
 
 
 def _from_summary(s: dict, root: str) -> HPOJob:
@@ -146,9 +173,13 @@ def wait_for_workers(*, timeout_s: float) -> tuple[str, ...]:
 
 
 def _manifest_summary(manifest: dict) -> dict:
-    """A sweep read off disk, in the same shape as an in-memory job's summary."""
+    """A sweep read off disk, in the same shape as an in-memory job's summary. No process here
+    can vouch for its driver, so ``status`` derives with ``driver_live=False``: a manifest whose
+    heartbeat has gone stale reads ``interrupted`` rather than the ``running`` it still says."""
+    from tcip_mcp.tools.training_tools import TCIP_HEARTBEAT_STALE_SECONDS, sweep_state
+
     return {"sweep_id": manifest.get("study_name", ""),
-            "status": manifest.get("status", "unknown"),
+            "status": sweep_state(manifest, stale_seconds=TCIP_HEARTBEAT_STALE_SECONDS, driver_live=False),
             "error": manifest.get("error"),
             "has_result": bool(manifest.get("result")),
             "external": True,
@@ -435,8 +466,10 @@ def relaunch_sweep(payload: RelaunchSweepPayload) -> dict:
     root (:func:`_sweep_launch_root`, the same resolution the cancel route uses), so a sweep
     launched under a root this process has since repinned away from is still relaunchable.
     ``output_dir`` is always this request thread's own ``hpo_root()``, never a path the
-    manifest carries (an absolute path in a file is not a path this process should follow)."""
-    from tcip_mcp.tools.training_tools import hpo_root
+    manifest carries (an absolute path in a file is not a path this process should follow).
+    Marks the new sweep id as launching, on this request thread, before the worker starts, so
+    a cancel that arrives before ``run_hpo`` writes its own first manifest still reaches it."""
+    from tcip_mcp.tools.training_tools import hpo_root, mark_sweep_launching
 
     manifest = _read_manifest(payload.study_name, root=_sweep_launch_root(payload.study_name))
     if manifest is None:
@@ -452,6 +485,7 @@ def relaunch_sweep(payload: RelaunchSweepPayload) -> dict:
 
     job = HPOJob(sweep_id=f"hpo-{uuid.uuid4().hex[:8]}")
     _registry.register(job.sweep_id, job, job_root=job.platform_root)
+    mark_sweep_launching(job.sweep_id, output_dir)
     t = threading.Thread(target=_worker, args=(job, spec, output_dir), daemon=True)
     with _lock:
         for sweep_id in [sid for sid, done in _workers.items() if not done.is_alive()]:
@@ -491,24 +525,31 @@ def list_sweeps() -> dict:
 @router.get("/sweeps/{sweep_id}")
 def get_sweep(sweep_id: str) -> dict:
     """One sweep by id: a live entry (whichever root it launched under) wins, else its
-    manifest under the current root."""
+    manifest under the current root. ``status`` is the derived liveness in both branches (see
+    :func:`_job_sweep_state`/:func:`_manifest_summary`), not either source's own recorded value."""
     from tcip_web import jobstore
+    from tcip_mcp.tools.training_tools import TCIP_HEARTBEAT_STALE_SECONDS, sweep_state
+
     j = _registry.get(sweep_id)
     if j is not None:
+        manifest = _read_manifest(j.sweep_id, root=j.platform_root) or {}
+        status = _job_sweep_state(j, manifest)
         response = (
             _terminal_response(j) if j.status in jobstore.TERMINAL_STATUSES
             else {"sweep_id": j.sweep_id, "status": j.status, "error": j.error, "result": j.result}
         )
+        response["status"] = status
         return _enrich_with_study_result(response, sweep_id, root=j.platform_root)
-    manifest = _read_manifest(sweep_id)
-    if manifest is None:
+    disk_manifest = _read_manifest(sweep_id)
+    if disk_manifest is None:
         raise HTTPException(404, f"sweep not found: {sweep_id}")
     response = {
-        "sweep_id": manifest.get("study_name", sweep_id),
-        "status": manifest.get("status", "unknown"),
-        "error": manifest.get("error"),
-        "result": manifest.get("result") or {},
-        "manifest": manifest,
+        "sweep_id": disk_manifest.get("study_name", sweep_id),
+        "status": sweep_state(disk_manifest, stale_seconds=TCIP_HEARTBEAT_STALE_SECONDS,
+                              driver_live=False),
+        "error": disk_manifest.get("error"),
+        "result": disk_manifest.get("result") or {},
+        "manifest": disk_manifest,
         "external": True,
     }
     return _enrich_with_study_result(response, sweep_id, root=None)

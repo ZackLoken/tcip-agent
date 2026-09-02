@@ -86,6 +86,20 @@ describe("TuningTab sweep row actions", () => {
     await waitFor(() => expect(relaunchSpy).toHaveBeenCalledWith("hpo-done-2"));
   });
 
+  it("shows no Cancel control on an interrupted sweep row, only Run again when relaunchable", async () => {
+    vi.spyOn(tuningApi, "listSweeps").mockResolvedValue({
+      sweeps: [sweep({ sweep_id: "hpo-interrupted-1", status: "interrupted", relaunchable: true })],
+    });
+
+    render(<TuningTab />);
+    expect(await screen.findByText("hpo-interrupted-1")).toBeInTheDocument();
+    expect(screen.getByText("interrupted")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Cancel hpo-interrupted-1" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Run again hpo-interrupted-1" })).toBeInTheDocument();
+  });
+
   it("renders the not-relaunchable reason in the collapsed row header, without expanding", async () => {
     vi.spyOn(tuningApi, "listSweeps").mockResolvedValue({
       sweeps: [

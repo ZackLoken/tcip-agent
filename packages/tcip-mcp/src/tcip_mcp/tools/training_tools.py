@@ -1394,16 +1394,84 @@ _CANCEL_DURING_RUN_REASON = "the sweep was cancelled by request before it could 
 
 _TRIAL_DIR_PREFIX = "trial_"
 
+SWEEP_HEARTBEAT_SECONDS = TCIP_HEARTBEAT_STALE_SECONDS / 10
+"""How often ``run_hpo``'s driver thread restamps the sweep manifest's ``heartbeat`` while
+``tune_search`` runs, derived from :data:`TCIP_HEARTBEAT_STALE_SECONDS` so a live driver
+stamps ten times within one staleness window."""
+
+_LAUNCHING_SWEEPS: dict[str, Path] = {}
+_LAUNCHING_SWEEPS_LOCK = threading.Lock()
+"""Every sweep a caller has minted a ``study_name`` for and is about to hand to ``run_hpo``,
+before that call's own manifest exists: the pre-manifest window in which a cancel request
+would otherwise find nothing on disk and nothing in ``run_registry._RUNS`` to act on."""
+
+
+def mark_sweep_launching(study_name: str, output_dir: str = "", *, root: Path | str | None = None) -> None:
+    """Record that ``study_name`` is about to become a sweep, closing the window between a
+    caller minting the id and ``run_hpo`` writing its first manifest.
+
+    ``run_hpo`` itself discards the mark, in a ``finally`` around everything from its own
+    entry through its first manifest write, so the mark is live for exactly that window; a
+    caller that marks a study and never actually calls ``run_hpo`` for it (a request that
+    errored before starting the worker) leaves an entry this module cannot itself clean up,
+    which is why only the web relaunch route, immediately before starting the worker thread
+    that runs ``run_hpo``, calls this.
+    """
+    resolved = sweep_dir(study_name, output_dir, root=root)
+    with _LAUNCHING_SWEEPS_LOCK:
+        _LAUNCHING_SWEEPS[study_name] = resolved
+
+
+def _discard_sweep_launching(study_name: str | None) -> None:
+    """Drop ``study_name``'s pre-manifest mark, if it holds one. A no-op for ``None`` (no
+    caller-supplied name) or a name nothing marked (an agent-launched sweep)."""
+    if study_name is None:
+        return
+    with _LAUNCHING_SWEEPS_LOCK:
+        _LAUNCHING_SWEEPS.pop(study_name, None)
+
+
+def _sweep_launching(study_name: str) -> bool:
+    """Whether ``study_name`` is in its pre-manifest window right now."""
+    with _LAUNCHING_SWEEPS_LOCK:
+        return study_name in _LAUNCHING_SWEEPS
+
+
+def sweep_state(manifest: dict, *, stale_seconds: float, driver_live: bool = False) -> str:
+    """The sweep's derived liveness, the one rule every Tuning listing row reports as its
+    ``status`` instead of a manifest's own recorded value verbatim.
+
+    ``driver_live`` is true only where a process can vouch for the driver directly (the
+    Tuning route's own worker thread, still alive, for a sweep it launched): that beats the
+    manifest's heartbeat outright, since a live thread proves the driver is running even in
+    the instant before its next heartbeat write lands. Every other case reads through
+    :func:`tcip_mcp.experiments.derived_state`, the training run's own heartbeat-freshness
+    rule, over ``{"state": manifest["status"], "heartbeat": manifest["heartbeat"]}``: a
+    sweep's four statuses (``running``/``completed``/``failed``/``cancelled``) are the same
+    words a training run uses, so the one rule applies unchanged rather than a second,
+    silently-drifting copy of it living here.
+    """
+    from tcip_mcp.experiments import _RECORDED_AS_DONE, derived_state
+
+    status = manifest.get("status", "unknown") if isinstance(manifest, dict) else "unknown"
+    if driver_live and status not in _RECORDED_AS_DONE:
+        return "running"
+    heartbeat = manifest.get("heartbeat") if isinstance(manifest, dict) else None
+    return derived_state({"state": status, "heartbeat": heartbeat}, stale_seconds)
+
 
 def _running_trial_dirs(sweep_root: Path) -> list[Path]:
     """Every ``trial_<id>`` directory under ``sweep_root`` that has not yet written its
-    resolved-config record, the one on-disk signal that a trial is still training:
-    ``_run_hpo_trial``'s own ``finally`` block writes that record exactly once, at the very
-    end of the trial, success or failure, so its absence is the trial still running.
+    resolved-config record: ``_run_hpo_trial``'s own ``finally`` block writes that record
+    exactly once, at the very end of the trial, success or failure, so its absence means the
+    trial has not reached that point yet.
 
-    Shared by :func:`cancel_hpo` (which trial directories still need the run-level cancel
-    sentinel) and the sweep :class:`~tcip_mcp.pipelines.training.hpo.Stopper` (whether Ray's
-    own hard stop is still needed), so the two never disagree about what "still running" means.
+    Used by :func:`cancel_hpo` to decide which trial directories still need the run-level
+    cancel sentinel written into them; a sentinel dropped into a trial that already wrote its
+    resolved config is inert. The sweep :class:`~tcip_mcp.pipelines.training.hpo.Stopper`'s own
+    ``stop_all`` no longer reads this: a trial Ray killed outright may never reach its own
+    ``finally``, so the stopper tracks Ray's own live-trial reports instead (see
+    ``_build_sweep_stopper``).
     """
     if not sweep_root.is_dir():
         return []
@@ -1766,6 +1834,12 @@ def run_hpo(
     TensorBoard logdir). The full result is written alongside as ``<study_name>.json``. The
     manifest also carries every argument this call resolved (``base_config`` and the resolved
     ``param_space`` included), so a relaunch can replay it exactly from the manifest alone.
+    The manifest's ``heartbeat`` is restamped every :data:`SWEEP_HEARTBEAT_SECONDS` from a
+    daemon thread for as long as the search runs, stopped and joined before any terminal
+    write, so a listing reading the manifest mid-sweep can tell a live driver from a dead one
+    (see ``sweep_state``). A caller that calls :func:`mark_sweep_launching` for ``study_name``
+    before this call keeps a cancel reachable in the window before the first manifest write
+    (see :func:`cancel_hpo`); this call discards that mark itself once it no longer needs it.
 
     Refuses (``{"error": ..., "issues": [...]}``, nothing minted) an unimportable builder or
     training source, or a config with no ``data`` section, at the config a trial would actually
@@ -1809,78 +1883,95 @@ def run_hpo(
     check_json_value(param_space, path="param_space")
     check_json_value(base_config, path="base_config")
 
-    # Structural preflight over every point the search space could resolve a trial's builder or
-    # data section to, not only the first sampled corner, before anything is minted.
-    for label, point in _preflight_points(param_space):
-        try:
-            preflight_cfg = _apply_hpo_params(base_config, point)
-        except ValueError as exc:
-            return {"error": f"the sweep's base config fails preflight at {label}: {exc}",
-                    "issues": []}
-        preflight = preflight_config(preflight_cfg)
-        if not preflight["valid"]:
-            return {"error": f"the sweep's base config fails preflight at {label}",
-                    "issues": preflight["issues"]}
+    # Everything through the first manifest write sits in this try/finally, so a caller's
+    # mark_sweep_launching entry for study_name is discarded on every exit, refusal included.
+    try:
+        # Structural preflight over every point the search space could resolve a trial's
+        # builder or data section to, not only the first sampled corner.
+        for label, point in _preflight_points(param_space):
+            try:
+                preflight_cfg = _apply_hpo_params(base_config, point)
+            except ValueError as exc:
+                return {"error": f"the sweep's base config fails preflight at {label}: {exc}",
+                        "issues": []}
+            preflight = preflight_config(preflight_cfg)
+            if not preflight["valid"]:
+                return {"error": f"the sweep's base config fails preflight at {label}",
+                        "issues": preflight["issues"]}
 
-    from tcip_mcp.pipelines.training.evaluation import HIGHER_IS_BETTER_BY_METRIC
-    from tcip_mcp.pipelines.training.generic_trainer import resolve_selection_metric
-    from tcip_mcp.pipelines.model_build import MODEL_SOURCE_KEY
+        from tcip_mcp.pipelines.training.evaluation import HIGHER_IS_BETTER_BY_METRIC
+        from tcip_mcp.pipelines.training.generic_trainer import resolve_selection_metric
+        from tcip_mcp.pipelines.model_build import MODEL_SOURCE_KEY
 
-    # Ray forbids setting metric/mode anywhere but the Tuner, so the direction is resolved once
-    # here, from base_config, and every trial's own resolution (_run_hpo_trial) must agree with it.
-    hpo_model_source = base_config.get(MODEL_SOURCE_KEY) or {}
-    hpo_eval_cfg = (base_config.get("training") or {}).get("evaluation") \
-        or base_config.get("evaluation") or {}
-    hpo_task = hpo_model_source.get("task") \
-        or (base_config.get("data") or {}).get("task", "detection")
-    hpo_metric = resolve_selection_metric(
-        hpo_task, hpo_eval_cfg.get("trait"), hpo_eval_cfg.get("selection_metric"))
-    hpo_mode = "max" if HIGHER_IS_BETTER_BY_METRIC[hpo_metric] else "min"
+        # Ray forbids setting metric/mode anywhere but the Tuner, so the direction is resolved
+        # once here, from base_config; every trial's own resolution must agree with it.
+        hpo_model_source = base_config.get(MODEL_SOURCE_KEY) or {}
+        hpo_eval_cfg = (base_config.get("training") or {}).get("evaluation") \
+            or base_config.get("evaluation") or {}
+        hpo_task = hpo_model_source.get("task") \
+            or (base_config.get("data") or {}).get("task", "detection")
+        hpo_metric = resolve_selection_metric(
+            hpo_task, hpo_eval_cfg.get("trait"), hpo_eval_cfg.get("selection_metric"))
+        hpo_mode = "max" if HIGHER_IS_BETTER_BY_METRIC[hpo_metric] else "min"
 
-    import uuid
-    from datetime import datetime, timezone
+        import uuid
+        from datetime import datetime, timezone
 
-    hpo_dir = hpo_root(output_dir)
-    hpo_dir.mkdir(parents=True, exist_ok=True)
-    study_name = study_name or f"hpo_{uuid.uuid4().hex[:8]}"
-    sweep_root = sweep_dir(study_name, output_dir)
-    sweep_root.mkdir(parents=True, exist_ok=True)
-    cancel_path = sweep_root / SWEEP_CANCEL_SENTINEL
+        hpo_dir = hpo_root(output_dir)
+        hpo_dir.mkdir(parents=True, exist_ok=True)
+        study_name = study_name or f"hpo_{uuid.uuid4().hex[:8]}"
+        sweep_root = sweep_dir(study_name, output_dir)
+        sweep_root.mkdir(parents=True, exist_ok=True)
+        cancel_path = sweep_root / SWEEP_CANCEL_SENTINEL
 
-    manifest = {
-        "study_name": study_name,
-        "started_at": datetime.now(timezone.utc).isoformat(),
-        "status": "running",
-        "n_trials": n_trials,
-        "search_alg": search_alg,
-        "scheduler": scheduler,
-        "grace_period": grace_period,
-        "reduction_factor": reduction_factor,
-        "max_concurrent": max_concurrent,
-        "warm_start": warm_start,
-        "baseline_params": baseline_params,
-        "resources_per_trial": resources_per_trial,
-        "param_space": param_space,
-        "base_config": base_config,
-        "sweep_dir": str(sweep_root),
-    }
-    manifest_key = sweep_manifest_key(study_name, output_dir)
+        manifest = {
+            "study_name": study_name,
+            "started_at": datetime.now(timezone.utc).isoformat(),
+            "status": "running",
+            "n_trials": n_trials,
+            "search_alg": search_alg,
+            "scheduler": scheduler,
+            "grace_period": grace_period,
+            "reduction_factor": reduction_factor,
+            "max_concurrent": max_concurrent,
+            "warm_start": warm_start,
+            "baseline_params": baseline_params,
+            "resources_per_trial": resources_per_trial,
+            "param_space": param_space,
+            "base_config": base_config,
+            "sweep_dir": str(sweep_root),
+        }
+        manifest_key = sweep_manifest_key(study_name, output_dir)
+        manifest_lock = threading.Lock()
 
-    def _write_manifest() -> None:
-        # cancel_requested is re-derived from the sentinel file on every write, so this
-        # call's own writes never drop a cancel cancel_hpo already recorded elsewhere.
-        manifest["cancel_requested"] = cancel_path.exists()
-        store.replace(manifest_key, manifest)
+        def _write_manifest() -> None:
+            # Every write, the heartbeat thread's included, goes through this call under one
+            # lock, restamping cancel_requested and heartbeat fresh so no write lands on another's back.
+            with manifest_lock:
+                manifest["cancel_requested"] = cancel_path.exists()
+                manifest["heartbeat"] = datetime.now(timezone.utc).isoformat()
+                store.replace(manifest_key, manifest)
 
-    # A cancel already requested (the study_name was minted and registered before this call
-    # reached the manifest write) records a cancelled manifest rather than being refused.
-    if cancel_path.exists():
-        manifest.update(status="cancelled", error=_CANCEL_BEFORE_START_REASON,
-                        finished_at=datetime.now(timezone.utc).isoformat())
+        # A cancel already requested (the study_name was minted and registered before this
+        # call reached the manifest write) records a cancelled manifest rather than refusing.
+        if cancel_path.exists():
+            manifest.update(status="cancelled", error=_CANCEL_BEFORE_START_REASON,
+                            finished_at=datetime.now(timezone.utc).isoformat())
+            _write_manifest()
+            return {"status": "cancelled", "study_name": study_name, "error": _CANCEL_BEFORE_START_REASON}
+
         _write_manifest()
-        return {"status": "cancelled", "study_name": study_name, "error": _CANCEL_BEFORE_START_REASON}
+    finally:
+        _discard_sweep_launching(study_name)
 
-    _write_manifest()
+    heartbeat_stop = threading.Event()
+
+    def _heartbeat_loop() -> None:
+        while not heartbeat_stop.wait(SWEEP_HEARTBEAT_SECONDS):
+            _write_manifest()
+
+    heartbeat_thread = threading.Thread(target=_heartbeat_loop, daemon=True)
+    heartbeat_thread.start()
 
     def objective_fn(config: dict, report) -> None:
         try:
@@ -1910,6 +2001,10 @@ def run_hpo(
             stop_all_when=lambda: cancel_path.exists(),
         )
     except Exception as exc:
+        # Stopped and joined before any terminal write, so the write below is always the
+        # last word, never raced by one more heartbeat restamp landing after it.
+        heartbeat_stop.set()
+        heartbeat_thread.join()
         if cancel_path.exists():
             manifest.update(status="cancelled", error=_CANCEL_DURING_RUN_REASON,
                             finished_at=datetime.now(timezone.utc).isoformat())
@@ -1919,6 +2014,9 @@ def run_hpo(
                         finished_at=datetime.now(timezone.utc).isoformat())
         _write_manifest()
         raise
+
+    heartbeat_stop.set()
+    heartbeat_thread.join()
 
     if cancel_path.exists():
         manifest.update(status="cancelled", error=_CANCEL_DURING_RUN_REASON,
@@ -1980,8 +2078,10 @@ def cancel_hpo(study_name: str, output_dir: str = "", *, root: str | None = None
     same way a standalone training run does, without waiting on the driver's own poll.
 
     Refuses when the study names no sweep this process can find: no manifest under the resolved
-    root, and no live trial of this study registered in this process's own run registry (the
-    narrow window between a caller minting the id and ``run_hpo`` writing its first manifest).
+    root, no live trial of this study registered in this process's own run registry, and no
+    ``mark_sweep_launching`` entry for it either (the last covers the narrow window between a
+    caller minting the id and ``run_hpo`` writing its first manifest; a marked study with no
+    manifest yet answers ``"running"`` with ``cancel_requested`` set).
 
     The manifest's own ``cancel_requested`` (read by the Tuning listing) is written through the
     store's compare-and-set, and never over a manifest already in a terminal status: ``run_hpo``
@@ -2011,30 +2111,35 @@ def cancel_hpo(study_name: str, output_dir: str = "", *, root: str | None = None
             r.origin == "hpo_trial" and r.output_dir and _path_under(Path(r.output_dir), resolved_root)
             for r in _RUNS.values()
         )
-    if not has_manifest and not live_trial:
-        return {"error": f"no sweep named {study_name!r}: no manifest and no live trial "
-                          "registered for it"}
+    if not has_manifest and not live_trial and not _sweep_launching(study_name):
+        return {"error": f"no sweep named {study_name!r}: no manifest, no live trial and no "
+                          "pre-manifest launch mark for it"}
 
     sweep_root.mkdir(parents=True, exist_ok=True)
     (sweep_root / SWEEP_CANCEL_SENTINEL).touch()
     for trial_dir in _running_trial_dirs(sweep_root):
         (trial_dir / CANCEL_SENTINEL).touch()
 
-    status = "running"
-    if has_manifest:
-        status = manifest.get("status", "running")
-        if status not in ("completed", "failed", "cancelled"):
-            working = {**manifest, "cancel_requested": True}
-            try:
-                store.replace(manifest_key, working, expect=versioned.version)
-            except VersionConflict:
-                # run_hpo's own terminal write landed first; nothing to add on top of it, and
-                # writing this stale copy back would revert that write to "running".
-                refreshed = store.read(manifest_key, default=manifest)
-                status = refreshed.get("status", status) if isinstance(refreshed, dict) else status
-            else:
-                status = working["status"]
-    return {"study_name": study_name, "status": status, "cancel_requested": True}
+    if not has_manifest:
+        # A live trial or a pre-manifest launch mark, either way nothing on disk yet to judge
+        # a heartbeat against: this is a sweep actively starting, not a stale disk record.
+        return {"study_name": study_name, "status": "running", "cancel_requested": True}
+
+    state_manifest = manifest
+    status = manifest.get("status", "running")
+    if status not in ("completed", "failed", "cancelled"):
+        working = {**manifest, "cancel_requested": True}
+        try:
+            store.replace(manifest_key, working, expect=versioned.version)
+        except VersionConflict:
+            # run_hpo's own terminal write landed first; nothing to add on top of it, and
+            # writing this stale copy back would revert that write to "running".
+            refreshed = store.read(manifest_key, default=manifest)
+            state_manifest = refreshed if isinstance(refreshed, dict) else manifest
+        else:
+            state_manifest = working
+    derived = sweep_state(state_manifest, stale_seconds=TCIP_HEARTBEAT_STALE_SECONDS, driver_live=False)
+    return {"study_name": study_name, "status": derived, "cancel_requested": True}
 
 
 def _apply_hpo_params(base_config: dict, params: dict) -> dict:

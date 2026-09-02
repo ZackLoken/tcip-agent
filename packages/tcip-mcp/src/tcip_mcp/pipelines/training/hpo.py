@@ -370,22 +370,44 @@ def trial_error_text(error: BaseException) -> str:
     return message if message.startswith(f"{name}:") else f"{name}: {message}"
 
 
-def _build_sweep_stopper(stop_all_when: Callable[[], bool], sweep_root: Path) -> Any:
+def _build_sweep_stopper(stop_all_when: Callable[[], bool], sweep_root: Path) -> tuple[Any, Any]:
     """A ``ray.tune.Stopper`` for cooperative-first, Ray-hard-stop-as-fallback sweep cancel,
-    wired onto the Tuner as ``run_config.stop``. A local subclass of Ray's own ``Stopper``
-    (Ray checks ``isinstance``, so a bare callable is not enough), built here rather than at
-    module scope, so importing ``ray`` for it stays inside this call like every other Ray use
-    in this module.
+    paired with the ``ray.tune.Callback`` that feeds its whole-experiment decision, both built
+    here rather than at module scope so importing ``ray`` for them stays inside this call like
+    every other Ray use in this module (Ray checks ``isinstance Stopper``/``Callback``, so a
+    bare callable is not enough for either).
 
-    Per-trial (``__call__``): True whenever ``stop_all_when()`` says the cancel file exists, so
-    Tune ends that trial after the report it just made. Whole-experiment (``stop_all``): True
-    once the cancel file exists and either no ``trial_<id>`` directory under the sweep root
-    still lacks its resolved-config record (the on-disk "still running" signal
-    ``training_tools._running_trial_dirs`` and ``cancel_hpo`` also use), or the heartbeat stale
+    Per-trial (``Stopper.__call__``): True whenever ``stop_all_when()`` says the cancel file
+    exists, so Tune ends that trial after the report it just made. Whole-experiment
+    (``Stopper.stop_all``): True once the cancel file exists and either the callback's own live
+    set (every trial id Ray has started and not yet completed or errored, kept current from
+    ``on_trial_start``/``on_trial_complete``/``on_trial_error``) is empty, or the heartbeat stale
     window has passed since the file was written, the bounded fallback at which point Ray's own
-    stop kills whatever actor a trial that never polls ``should_cancel`` left running.
+    stop kills whatever actor a trial that never polls ``should_cancel`` left running: a trial
+    Ray kills outright may never reach ``_run_hpo_trial``'s own ``finally``, so the driver's own
+    resolved-config record is not a signal the stopper can trust for this decision.
+
+    Returns ``(stopper, callback)``; the caller wires the stopper onto ``run_config.stop`` and
+    the callback into ``run_config.callbacks``.
     """
-    from ray.tune import Stopper
+    from ray.tune import Callback, Stopper
+
+    class _LiveTrialsCallback(Callback):
+        """Tracks the trial ids Ray currently holds live, for :class:`_SweepStopper.stop_all`."""
+
+        def __init__(self) -> None:
+            self.live_trial_ids: set[str] = set()
+
+        def on_trial_start(self, iteration: int, trials: list, trial: Any, **info: Any) -> None:
+            self.live_trial_ids.add(trial.trial_id)
+
+        def on_trial_complete(self, iteration: int, trials: list, trial: Any, **info: Any) -> None:
+            self.live_trial_ids.discard(trial.trial_id)
+
+        def on_trial_error(self, iteration: int, trials: list, trial: Any, **info: Any) -> None:
+            self.live_trial_ids.discard(trial.trial_id)
+
+    live_trials = _LiveTrialsCallback()
 
     class _SweepStopper(Stopper):
         def __call__(self, trial_id: str, result: dict) -> bool:
@@ -394,9 +416,7 @@ def _build_sweep_stopper(stop_all_when: Callable[[], bool], sweep_root: Path) ->
         def stop_all(self) -> bool:
             if not stop_all_when():
                 return False
-            from tcip_mcp.tools.training_tools import (
-                SWEEP_CANCEL_SENTINEL, TCIP_HEARTBEAT_STALE_SECONDS, _running_trial_dirs,
-            )
+            from tcip_mcp.tools.training_tools import SWEEP_CANCEL_SENTINEL, TCIP_HEARTBEAT_STALE_SECONDS
 
             sentinel = sweep_root / SWEEP_CANCEL_SENTINEL
             try:
@@ -406,9 +426,9 @@ def _build_sweep_stopper(stop_all_when: Callable[[], bool], sweep_root: Path) ->
             import time as _time
             if _time.time() - written_at > TCIP_HEARTBEAT_STALE_SECONDS:
                 return True
-            return not _running_trial_dirs(sweep_root)
+            return not live_trials.live_trial_ids
 
-    return _SweepStopper()
+    return _SweepStopper(), live_trials
 
 
 def tune_search(
@@ -527,7 +547,10 @@ def tune_search(
         "name": study_name,
     }
     if stop_all_when is not None:
-        run_kwargs["stop"] = _build_sweep_stopper(stop_all_when, Path(storage_path) / study_name)
+        stopper, live_trials_callback = _build_sweep_stopper(
+            stop_all_when, Path(storage_path) / study_name)
+        run_kwargs["stop"] = stopper
+        run_kwargs["callbacks"] = [live_trials_callback]
 
     removed_env: dict[str, str] = {}
     for var in _ENV_VARS_RAY_TUNE_REFUSES:
