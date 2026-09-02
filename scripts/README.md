@@ -89,6 +89,87 @@ reaching for again versus one built narrowly for a specific past investigation.
 - `smoke_fence_e2e.py` - live smoke confirming the fenced `claude` CLI actually refuses to
   edit platform internals when run through the in-app terminal's own settings. Costs one
   model turn.
+- `_script_root.py` - shared platform-state-root pinning for an operator script that calls an
+  `@audited` tool function directly, outside the MCP server or web backend, so its resolution
+  and its audit line land under the intended project root rather than the process cwd. Not a
+  standalone script.
+- `archive_project.py` - exports an annotation project (images, ground truth, class registry,
+  `.tcip` state, experiments and their claimed manifests, every recognized blob home) as a
+  portable ZIP an `import_project.py` run can restore from elsewhere. Wraps
+  `tcip_mcp.tools.project_tools.archive_project` with no MCP tool registration.
+- `import_project.py` - imports an annotation project from a ZIP `archive_project.py` bundled:
+  extracts into private staging, refuses on any bookkeeping, collided, undecodable, or
+  unaccounted member, adopts into a database when this process is bound to that backend, then
+  moves the staged tree onto the destination. Wraps `tcip_mcp.tools.project_tools.import_project`
+  with no MCP tool registration.
+- `build_module_inventory.py` - builds a module inventory and real import graph for the repo's
+  Python and TypeScript source trees, so `check_architecture_doc.py` can cross-check
+  ARCHITECTURE.md's module-ownership tables against the tree it actually describes.
+- `check_architecture_doc.py` - verifies ARCHITECTURE.md's module-ownership tables against the
+  tree, for CI: every named path exists, and, given a module-inventory JSON, the in-repo-import
+  and imported-by counts per row are cross-checked for drift.
+- `check_architecture_citations.py` - verifies ARCHITECTURE.md's `file:line` citations against
+  the code they quote, for CI; `--fix` rewrites a re-anchorable citation's stale line number in
+  place, leaving a genuinely failed citation for a human.
+- `verify_citations.py` - checks that literature citations point at real code, real papers, and
+  real sentences: each reference is retrievable, each anchor resolves to a real symbol, every
+  `# cite:` marker resolves to a reference and vice versa, and every quote appears verbatim in
+  the fetched PDF's text.
+- `verify_skill_tools.py` - guardrail holding every tool name in agent-facing prose to the MCP
+  tool registry: a fabrication check over every table whose header's first column is "Tool", and
+  an orphan check for a registered tool no surface names anywhere.
+- `gate_baseline.py` - runs the quality gate CI actually declares, parsed from
+  `.github/workflows/ci.yml` rather than restated by hand, so a local pass predicts a CI pass.
+- `generate_frozen_manifest.py` - generates `frozen-formats.json`, the shipped freeze
+  commitment, from the store registry; `tests/test_frozen_manifest.py` regenerates it in
+  process and refuses any drift from the committed file.
+- `generate_frontend_routes.py` - generates the browser's route-path module and the dev
+  server's proxy config from the backend's registered FastAPI routes, so the frontend
+  references a path by name instead of restating the string a second time.
+- `generate_favicon.ps1` - renders the browser-tab favicon from the source logo: crops its
+  transparent margins, resizes the result to 512x512, and writes it plus a 32x32 copy to the
+  frontend's public assets.
+- `conform_cal_holdout_locks.py` - conforms every pre-existing `cal_holdout_split_lock` record
+  under a root to carry `split_manifest_dir`, the key every lock this family writes now
+  declares. A one-off operator fix for a record written before this family, never a runtime
+  migration.
+- `conform_dataset_registry_paths.py` - conforms a project's dataset registry entries onto the
+  relative-path row `register_dataset` now writes, for a project registered before that change.
+- `conform_metrics_marker.py` - stamps the `metrics_logged` marker onto every experiment a
+  root's status record predates, so `is_pristine` reads the marker instead of scanning the
+  metrics log.
+- `conform_model_registry_paths.py` - conforms a project's model registry index to
+  `schema_version` 2 and respells every entry's `checkpoint_path` relative to the project root,
+  per the version-2 convention.
+- `conform_project_site.py` - writes or corrects one project's authored site record: the same
+  create-only write `record_site` always is, or, with `--replace`, an unconditional overwrite
+  for a site typed wrong once or a record damaged by hand.
+- `drop_trait_spec_provenance.py` - conforms a project's trait-spec records to drop the retired
+  free-text `provenance` field, and removes stale YAML copies an earlier YAML-to-record conform
+  step left behind.
+- `restamp_dataset_fingerprint.py` - restamps a bare legacy dataset fingerprint onto the
+  formula-version-prefixed form `dataset_fingerprint` now returns, refusing rather than papering
+  over a fingerprint mismatch it cannot explain.
+- `scan_dataset.py` - read-only census of a dataset folder before splitting, validating, or
+  training on it: image/label/prediction counts, the detected label format, and which files are
+  excluded from every bucket walk because they collide with a prediction bucket's provenance
+  stamp. Wraps `tcip_mcp.tools.data_tools.scan_dataset` with no MCP tool registration.
+- `render_failure_cases.py` - finds and renders the worst predictions for failure analysis,
+  ranked by a count-mismatch-plus-low-confidence heuristic; not a substitute for
+  `score_predictions(detail=True)`'s IoU-matched TP/FP/FN when mislocalization is the question.
+- `plant_aware_group_splits.py` - derives a plant-aware group key for `make_splits` over
+  per-stem georeferenced raster datasets, so every capture of one physical plant across every
+  date lands in the same split side instead of only grouping by tile prefix.
+- `shp_to_plant_csv.py` - converts a plant-locations shapefile into `read_plant_csvs`' CSV
+  schema, handling both point and polygon source geometry and validating its own output by
+  reading it back through the same reader before reporting success.
+- `inspect_compute_resources.py` - reports the host's current compute headroom (CPU, memory,
+  GPU free bytes, active training run count) to reason with before launching another concurrent
+  training/HPO run; not an enforced cap. Wraps
+  `tcip_mcp.tools.training_tools.inspect_compute_resources` with no MCP tool registration.
+- `cross_family_ask.py` - poses one identical question to several agent harnesses (claude,
+  codex, antigravity) and records comparable answers: the exact prompt, argv, stdout/stderr, the
+  extracted response, and run metadata describing what the harness was and how long it took.
 
 ## Pilot/incident-bound
 
@@ -107,9 +188,3 @@ Written for one past investigation against one sample project (`Valley_Farm`, vi
   `weights.pt` checkpoint.
 - `inspect_gps_exif.py` - prints GPS EXIF for a sample of that project's images, to check
   whether capture used RTK or phone-internal GPS.
-
-## Dead
-
-- `review_evidence.py` - evidence loader for a `.review-corpus/` review journal that is
-  gitignored and does not exist on this (or any fresh) clone; every code path in it is
-  unreachable without that corpus.
