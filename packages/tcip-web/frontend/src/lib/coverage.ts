@@ -43,13 +43,18 @@ export interface CompletenessRecord {
 /** GET /api/coverage/completeness's full response: every subject's record, plus every subject's
  *  saved-annotation count per cell over the raster's current grid. `annotation_counts` sits
  *  beside `by_subject`, never inside it: a count belongs to the grid, not to any one attestation
- *  record, so it is served even for a subject with no record yet. `grid_error` is set (and
- *  `annotation_counts` empty) when the current grid could not be derived (an incomplete band
- *  group); `by_subject` still serves in that case. */
+ *  record, so it is served even for a subject with no record yet. `counts_grid` is the lattice
+ *  the counts were binned against, served so a caller can refuse to render them against a
+ *  different current grid the way it already does for a record on another lattice. The whole
+ *  counts computation is best-effort beside `by_subject`, which needs no raster at all:
+ *  `counts_error` is set (with `annotation_counts` empty and `counts_grid` null) when the grid
+ *  could not be derived or the raster could not be read; `by_subject` still serves in that
+ *  case. */
 export interface CompletenessResponse {
   by_subject: Record<string, CompletenessRecord>;
   annotation_counts: Record<string, Record<string, number>>;
-  grid_error: string | null;
+  counts_grid: GridGeometry | null;
+  counts_error: string | null;
 }
 
 /** Cells genuinely complete right now: attested, minus any that have since gone stale. A stale
@@ -254,71 +259,6 @@ export function stepUnsweptCell(
     if (!swept.has(cell.name)) return cell;
   }
   return null;
-}
-
-/** Column/row lookup over served cells, indexed from the distinct cell origins (no re-derivation). */
-export interface CellIndex {
-  cols: number;
-  rows: number;
-  /** [x0, x1] extents per column and [y0, y1] per row, from the cells themselves. */
-  colX: [number, number][];
-  rowY: [number, number][];
-  at(col: number, row: number): GridCell | undefined;
-}
-
-export function indexCells(cells: GridCell[]): CellIndex {
-  const xs = Array.from(new Set(cells.map((c) => c.x0))).sort((a, b) => a - b);
-  const ys = Array.from(new Set(cells.map((c) => c.y0))).sort((a, b) => a - b);
-  const colOf = new Map(xs.map((x, i) => [x, i]));
-  const rowOf = new Map(ys.map((y, i) => [y, i]));
-  const byPos = new Map<number, GridCell>();
-  const colX: [number, number][] = xs.map((x) => [x, x]);
-  const rowY: [number, number][] = ys.map((y) => [y, y]);
-  for (const c of cells) {
-    const col = colOf.get(c.x0)!;
-    const row = rowOf.get(c.y0)!;
-    byPos.set(row * xs.length + col, c);
-    colX[col] = [c.x0, Math.max(colX[col][1], c.x1)];
-    rowY[row] = [c.y0, Math.max(rowY[row][1], c.y1)];
-  }
-  return {
-    cols: xs.length,
-    rows: ys.length,
-    colX,
-    rowY,
-    at: (col, row) => byPos.get(row * xs.length + col),
-  };
-}
-
-/**
- * Swept fractions over k x k blocks of the cell lattice, for display-time aggregation when
- * individual cells fall below the minimap's visibility floor. Block (bc, br) covers cell columns
- * [bc*k, (bc+1)*k) and rows likewise, clipped at the lattice edge; its fraction is swept cells
- * over cells in the block.
- */
-export function sweptFractionBlocks(
-  cols: number,
-  rows: number,
-  k: number,
-  isSwept: (col: number, row: number) => boolean,
-): { cols: number; rows: number; fractions: number[] } {
-  const blockCols = Math.max(1, Math.ceil(cols / k));
-  const blockRows = Math.max(1, Math.ceil(rows / k));
-  const fractions: number[] = [];
-  for (let by = 0; by < blockRows; by++) {
-    for (let bx = 0; bx < blockCols; bx++) {
-      let total = 0;
-      let sweptCount = 0;
-      for (let row = by * k; row < Math.min(rows, (by + 1) * k); row++) {
-        for (let col = bx * k; col < Math.min(cols, (bx + 1) * k); col++) {
-          total++;
-          if (isSwept(col, row)) sweptCount++;
-        }
-      }
-      fractions.push(total ? sweptCount / total : 0);
-    }
-  }
-  return { cols: blockCols, rows: blockRows, fractions };
 }
 
 /**

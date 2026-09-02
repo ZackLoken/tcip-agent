@@ -19,9 +19,28 @@ export interface CoverageGridState {
   /** The grid fetch's own refusal, or null; a failure must read as an error, never as "no
    *  grid needed here". */
   error: string | null;
+  /** True while whether this image needs a grid at all is still unknown (the base serve has not
+   *  reported back yet) or a needed fetch is genuinely in flight (the base serve already shows
+   *  the raster below native, and neither a grid nor an error has landed yet). Tells "still
+   *  unknown" apart from "settled, and there is no multi-cell grid". */
+  pending: boolean;
 }
 
-const EMPTY: CoverageGridState = { grid: null, cells: [], derivation: null, error: null };
+interface FetchedState {
+  path: string;
+  grid: GridGeometry | null;
+  cells: GridCell[];
+  derivation: string | null;
+  error: string | null;
+}
+
+const EMPTY_FETCHED: FetchedState = {
+  path: "",
+  grid: null,
+  cells: [],
+  derivation: null,
+  error: null,
+};
 
 export function useCoverageGrid(
   imagePath: string | null,
@@ -29,7 +48,7 @@ export function useCoverageGrid(
   imgW: number,
   imgH: number,
 ): CoverageGridState {
-  const [state, setState] = useState<{ path: string } & CoverageGridState>({ path: "", ...EMPTY });
+  const [state, setState] = useState<FetchedState>(EMPTY_FETCHED);
   const fetchingRef = useRef<string | null>(null);
 
   const served = baseFacts?.ok ? baseFacts.servedSize : null;
@@ -50,7 +69,7 @@ export function useCoverageGrid(
         if (cancelled) return;
         if (fetchingRef.current === imagePath) fetchingRef.current = null;
         const detail = e instanceof Error ? e.message : String(e);
-        setState({ path: imagePath, ...EMPTY, error: detail });
+        setState({ path: imagePath, grid: null, cells: [], derivation: null, error: detail });
       },
     );
     return () => {
@@ -58,5 +77,15 @@ export function useCoverageGrid(
     };
   }, [imagePath, belowNative]);
 
-  return state.path === imagePath && imagePath ? state : EMPTY;
+  const current = state.path === imagePath && imagePath ? state : EMPTY_FETCHED;
+  // Derived directly rather than from the effect above: whether a fetch is coming (or even
+  // whether one is needed) is knowable a render earlier than that effect settles it.
+  const pending = !!imagePath && (!baseFacts || (belowNative && !current.grid && !current.error));
+  return {
+    grid: current.grid,
+    cells: current.cells,
+    derivation: current.derivation,
+    error: current.error,
+    pending,
+  };
 }

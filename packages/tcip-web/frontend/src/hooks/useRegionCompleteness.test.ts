@@ -31,7 +31,7 @@ function response(
   by_subject: Record<string, CompletenessRecord>,
   overrides: Partial<CompletenessResponse> = {},
 ): CompletenessResponse {
-  return { by_subject, annotation_counts: {}, grid_error: null, ...overrides };
+  return { by_subject, annotation_counts: {}, counts_grid: null, counts_error: null, ...overrides };
 }
 
 afterEach(() => {
@@ -220,9 +220,9 @@ describe("useRegionCompleteness", () => {
     expect(result.current.activeComplete.size).toBe(0);
   });
 
-  it("a grid_error on an otherwise successful read surfaces as countsError, records still served", async () => {
+  it("a counts_error on an otherwise successful read surfaces as countsError, records still served", async () => {
     vi.spyOn(api.coverage, "completeness").mockResolvedValue(
-      response({ bush: record("bush", ["A1"]) }, { grid_error: "band group incomplete" }),
+      response({ bush: record("bush", ["A1"]) }, { counts_error: "band group incomplete" }),
     );
     const { result } = renderHook(() =>
       useRegionCompleteness({
@@ -234,5 +234,58 @@ describe("useRegionCompleteness", () => {
     );
     await waitFor(() => expect(result.current.countsError).toBe("band group incomplete"));
     expect(result.current.activeComplete).toEqual(new Set(["A1"]));
+  });
+
+  it("otherLattice is null while the current grid is unknown, never a stated fact it cannot see", async () => {
+    vi.spyOn(api.coverage, "completeness").mockResolvedValue(
+      response({ bush: record("bush", ["A1", "B1"], [], OTHER_GRID) }),
+    );
+    const { result } = renderHook(() =>
+      useRegionCompleteness({
+        imagePath: "C:/data/images/2026-01-01/mosaic.tif",
+        datasetRoot: "C:/data",
+        subject: "bush",
+        grid: null,
+      }),
+    );
+    await waitFor(() =>
+      expect(api.coverage.completeness).toHaveBeenCalledWith(
+        "C:/data/images/2026-01-01/mosaic.tif",
+        "C:/data",
+      ),
+    );
+    expect(result.current.otherLattice).toBeNull();
+  });
+
+  it("annotation counts render only when they were binned on the current grid", async () => {
+    vi.spyOn(api.coverage, "completeness").mockResolvedValue(
+      response({}, { annotation_counts: { bush: { A1: 3 } }, counts_grid: OTHER_GRID }),
+    );
+    const { result } = renderHook(() =>
+      useRegionCompleteness({
+        imagePath: "C:/data/images/2026-01-01/mosaic.tif",
+        datasetRoot: "C:/data",
+        subject: "bush",
+        grid: GRID,
+      }),
+    );
+    await waitFor(() => expect(result.current.countsError).not.toBeNull());
+    expect(result.current.annotationCounts).toEqual({});
+  });
+
+  it("annotation counts render when the served counts grid matches the current grid", async () => {
+    vi.spyOn(api.coverage, "completeness").mockResolvedValue(
+      response({}, { annotation_counts: { bush: { A1: 3 } }, counts_grid: GRID }),
+    );
+    const { result } = renderHook(() =>
+      useRegionCompleteness({
+        imagePath: "C:/data/images/2026-01-01/mosaic.tif",
+        datasetRoot: "C:/data",
+        subject: "bush",
+        grid: GRID,
+      }),
+    );
+    await waitFor(() => expect(result.current.annotationCounts).toEqual({ A1: 3 }));
+    expect(result.current.countsError).toBeNull();
   });
 });

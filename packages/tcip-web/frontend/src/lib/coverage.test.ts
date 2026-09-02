@@ -5,14 +5,12 @@ import {
   cellsIntersecting,
   completeWarningMessage,
   effectiveComplete,
-  indexCells,
   planRegionFetches,
   rectFullyInside,
   servedCellAtNative,
   stepUnsweptCell,
   subCellDivisionsFor,
   subdivideCell,
-  sweptFractionBlocks,
   type CompletenessRecord,
   type GridCell,
 } from "@/lib/coverage";
@@ -237,40 +235,6 @@ describe("servedCellAtNative", () => {
     expect(servedCellAtNative(cell, { w: 100, h: 100 })).toBe(true);
     expect(servedCellAtNative(cell, { w: 50, h: 50 })).toBe(false);
     expect(servedCellAtNative(cell, null)).toBe(false);
-  });
-});
-
-describe("sweptFractionBlocks", () => {
-  it("aggregates k x k cell blocks by swept fraction", () => {
-    const swept = new Set(["0,0", "1,0", "0,1"]);
-    const blocks = sweptFractionBlocks(4, 4, 2, (col, row) => swept.has(`${col},${row}`));
-    expect(blocks.cols).toBe(2);
-    expect(blocks.rows).toBe(2);
-    expect(blocks.fractions[0]).toBe(3 / 4);
-    expect(blocks.fractions[1]).toBe(0);
-    expect(blocks.fractions[2]).toBe(0);
-    expect(blocks.fractions[3]).toBe(0);
-  });
-
-  it("clips edge blocks to the lattice, keeping fractions over real cells only", () => {
-    const blocks = sweptFractionBlocks(3, 2, 2, (col) => col === 2);
-    // The right edge block covers a single column (2 cells), both swept.
-    expect(blocks.cols).toBe(2);
-    expect(blocks.rows).toBe(1);
-    expect(blocks.fractions[1]).toBe(1);
-    expect(blocks.fractions[0]).toBe(0);
-  });
-});
-
-describe("indexCells", () => {
-  it("indexes served cells by column/row from their own origins", () => {
-    const index = indexCells(CELLS);
-    expect(index.cols).toBe(3);
-    expect(index.rows).toBe(2);
-    expect(index.at(1, 0)?.name).toBe("B1");
-    expect(index.at(2, 1)?.name).toBe("C2");
-    expect(index.colX[1]).toEqual([100, 200]);
-    expect(index.rowY[1]).toEqual([100, 200]);
   });
 });
 

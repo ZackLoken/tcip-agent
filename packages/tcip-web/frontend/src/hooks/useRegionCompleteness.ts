@@ -35,15 +35,22 @@ export interface RegionCompleteness {
   activeStale: ReadonlySet<string>;
   /** Cells attested complete for another subject on the current grid, stale ones excluded. */
   otherComplete: ReadonlySet<string>;
-  /** The active subject's attestation on a grid other than the current one, or null. */
+  /** The active subject's attestation on a grid other than the current one, or null: also null
+   *  while the current grid itself is unknown, since "on a previous lattice" is a comparison
+   *  this hook cannot make without one. */
   otherLattice: OtherLatticeAttestation | null;
-  /** The active subject's saved-annotation count per cell, from the current grid. */
+  /** The active subject's saved-annotation count per cell, from the current grid; empty when the
+   *  counts were binned on a different lattice than the one now showing (see `countsError`). */
   annotationCounts: Record<string, number>;
   /** The completeness read's own failure, surfaced rather than read as "nothing attested". */
   error: string | null;
-  /** The read's grid_error: annotation_counts unavailable (an incomplete band group); by_subject
-   *  still served. */
+  /** Why `annotationCounts` is empty: the read's own `counts_error` (a raster the grid could not
+   *  be derived for), or a stated lattice mismatch when the counts were served for a grid other
+   *  than the one now showing; null while the counts are current. */
   countsError: string | null;
+  /** Re-fetch the current image's record and counts, discarding nothing local: the store is the
+   *  only source of truth, so a save that may have changed staleness or counts calls this. */
+  reload: () => void;
   /** Attest, unattest or re-attest one cell in the direction ``complete`` states. */
   write: (cell: string, grid: GridGeometry, complete: boolean) => void;
 }
@@ -58,30 +65,34 @@ export function useRegionCompleteness(args: {
   const [countsBySubject, setCountsBySubject] = useState<Record<string, Record<string, number>>>(
     {},
   );
+  const [countsGrid, setCountsGrid] = useState<GridGeometry | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [countsError, setCountsError] = useState<string | null>(null);
+  const [readCountsError, setReadCountsError] = useState<string | null>(null);
   const { imagePath, datasetRoot, subject, grid } = args;
 
   const reload = useCallback(() => {
     if (!imagePath) {
       setBySubject({});
       setCountsBySubject({});
+      setCountsGrid(null);
       setError(null);
-      setCountsError(null);
+      setReadCountsError(null);
       return;
     }
     void api.coverage.completeness(imagePath, datasetRoot).then(
       (res) => {
         setBySubject(res.by_subject);
         setCountsBySubject(res.annotation_counts);
+        setCountsGrid(res.counts_grid);
         setError(null);
-        setCountsError(res.grid_error);
+        setReadCountsError(res.counts_error);
       },
       (err: unknown) => {
         setBySubject({});
         setCountsBySubject({});
+        setCountsGrid(null);
         setError(err instanceof Error ? err.message : String(err));
-        setCountsError(null);
+        setReadCountsError(null);
       },
     );
   }, [imagePath, datasetRoot]);
@@ -104,13 +115,15 @@ export function useRegionCompleteness(args: {
   );
 
   const otherLattice = useMemo<OtherLatticeAttestation | null>(() => {
-    if (!activeRecord || activeOnGrid) return null;
+    // With no current grid to compare against, "on a previous lattice" is a claim this hook
+    // cannot make: stating it anyway would assert a fact the data does not carry.
+    if (!activeRecord || !grid || activeOnGrid) return null;
     return {
       count: activeRecord.cells_complete.length,
       cols: activeRecord.grid.cols,
       rows: activeRecord.grid.rows,
     };
-  }, [activeRecord, activeOnGrid]);
+  }, [activeRecord, grid, activeOnGrid]);
 
   const otherComplete = useMemo(() => {
     const out = new Set<string>();
@@ -121,10 +134,20 @@ export function useRegionCompleteness(args: {
     return out;
   }, [bySubject, subject, grid]);
 
+  const countsOnGrid = !!grid && !!countsGrid && sameGrid(countsGrid, grid);
+
   const annotationCounts = useMemo(
-    () => (subject ? (countsBySubject[subject] ?? {}) : {}),
-    [countsBySubject, subject],
+    () => (subject && countsOnGrid ? (countsBySubject[subject] ?? {}) : {}),
+    [countsBySubject, subject, countsOnGrid],
   );
+
+  const countsError = useMemo(() => {
+    if (readCountsError) return readCountsError;
+    if (grid && countsGrid && !countsOnGrid) {
+      return "saved-annotation counts were binned on a lattice other than the one now showing";
+    }
+    return null;
+  }, [readCountsError, grid, countsGrid, countsOnGrid]);
 
   const write = useCallback(
     (cell: string, writeGrid: GridGeometry, complete: boolean) => {
@@ -160,6 +183,7 @@ export function useRegionCompleteness(args: {
     annotationCounts,
     error,
     countsError,
+    reload,
     write,
   };
 }

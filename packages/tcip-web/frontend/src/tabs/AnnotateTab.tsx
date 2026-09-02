@@ -203,6 +203,14 @@ export function AnnotateTab() {
     "tcip.annotate.coverageGridOverlayOpen",
   );
 
+  // A tool must always be shown active: when the Map tool is withdrawn and settled (not merely
+  // a grid still loading), fall back to a drawing tool rather than leaving the canvas inert.
+  useEffect(() => {
+    if (mode === "map" && !coverageMultiCell && !coverageGrid.pending) {
+      useStore.getState().setMode("box");
+    }
+  }, [mode, coverageMultiCell, coverageGrid.pending]);
+
   function jumpToCell(cell: GridCell) {
     const host = measureCanvasHost();
     if (!host || !coverageGrid.grid) return;
@@ -488,6 +496,9 @@ export function AnnotateTab() {
     markClean();
     setIoError(null);
     setConflict(false);
+    // The saved content may have made an attested cell stale or changed a saved count; the
+    // store is the only source of truth, so the open image's completeness read runs again.
+    completeness.reload();
   }
 
   // Re-fetch the current image's labels from disk, discarding local edits. Used to
@@ -1342,7 +1353,7 @@ export function AnnotateTab() {
   const draggingIdx = annotateUi.draggingVertex?.[0];
   const coverageViewport = coverageViewportRect();
   const activeCoverageCell = cellForRect(coverageViewport);
-  const showCoverageChrome = coverageMultiCell || !!coverageGrid.error;
+  const showCoverageChrome = coverageMultiCell || !!coverageGrid.error || !!completeness.error;
 
   return (
     <div className="flex-1 flex flex-col min-h-0">
