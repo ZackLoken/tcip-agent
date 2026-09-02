@@ -42,8 +42,11 @@ packages/tcip-web/static/assets/*.css
 packages/tcip-vscode/out/
 
 # ── Claude Code config (dev tooling for working on TCIP; not something the shipped ──
-# ── platform uses at runtime, so none of it is tracked) ─────────────────────
-.claude/
+# ── platform uses at runtime) ────────────────────────────────────────────────
+.claude/*
+# The generated skills are a build product of the knowledge documents (see
+# scripts/generate_claude_skills.py) and are tracked, unlike the rest of .claude/.
+!.claude/skills/
 
 # ── Refactor process docs (current-task/recent-summary/decisions/grounding: dev-process ──
 # ── tracking, not something the shipped platform needs) ─────────────────────
