@@ -134,7 +134,10 @@ its members are drawn through the same admission a training run uses, and a run 
 `data.split.manifest_dir` to train against that exact partition instead of drawing its own; the
 manifest's `calibration` side is never bound to a loader, so a run's own selection (`val`) side is
 never what the checkpoint is later validated against (see the `evaluation` skill's
-Calibration/Holdout Split section).
+Calibration/Holdout Split section). A run that drew its own split can have that exact
+partition frozen into a manifest afterwards with `freeze_split_manifest(experiment_id)`, so a
+later run binds to it from the data picker; a frozen manifest records an empty `calibration`
+side and an `origin` naming the run, and the calibration doors refuse it by their own floor.
 
 ## 6. Build a model, train, infer
 
