@@ -105,6 +105,20 @@ the egress above is safe to treat as private-by-default once the platform moves 
 once the roadmap's centralized or cloud-backed storage lands: the local-first claim that carries the
 trust argument stops being true the day data leaves the disk.
 
+## Reporting a vulnerability
+
+Report a vulnerability through GitHub's private vulnerability reporting for this repository (the
+Security tab's Report a vulnerability button). If that is not enabled on this repository, open an
+issue titled "security" with no details in the issue body; the maintainer will open a private
+channel with you from there rather than have the details discussed in public.
+
+Include what you would for any bug report plus what makes this one security-relevant: the
+affected component or file, the egress channel or trust boundary involved if one of the above,
+reproduction steps, and what you were able to observe or access as a result.
+
+There is no bug bounty; this is a small, single-maintainer project. Expect acknowledgement within
+7 days of the report landing.
+
 ## In one paragraph
 
 When you let the agent drive TCIP, the breeding data it reads is sent to your model provider, the same
