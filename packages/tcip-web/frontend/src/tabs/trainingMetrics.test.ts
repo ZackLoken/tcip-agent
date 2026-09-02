@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { mergeMetric, metricKey, numericMetricKeys } from "@/tabs/trainingMetrics";
+import { mergeMetric, metricKey, numericMetricKeys, runOrderLine } from "@/tabs/trainingMetrics";
 
 describe("mergeMetric (training stream de-dup)", () => {
   it("appends rows with distinct epochs", () => {
@@ -52,5 +52,16 @@ describe("numericMetricKeys (the rank chooser and the logged table's shared filt
   it("answers no keys for a record that is absent", () => {
     expect(numericMetricKeys(undefined)).toEqual([]);
     expect(numericMetricKeys(null)).toEqual([]);
+  });
+});
+
+describe("runOrderLine (the Training/Tuning tabs' shared order sentence)", () => {
+  it("names the app, not a browser window, for both a run and a sweep noun", () => {
+    expect(runOrderLine("run", "experiment id")).toBe(
+      "Runs this app's own launches first, in launch order; every other recorded run follows, sorted by experiment id.",
+    );
+    expect(runOrderLine("sweep", "sweep id")).toBe(
+      "Sweeps this app's own launches first, in launch order; every other recorded sweep follows, sorted by sweep id.",
+    );
   });
 });

@@ -158,21 +158,41 @@ describe("TrainingTab run list", () => {
     ).toBeInTheDocument();
   });
 
-  it("carries the row's rounded best value as a title", async () => {
+  it("shows the row's best value exactly as the record carries it, with no rounding or title", async () => {
     vi.spyOn(trainingApi, "listRuns").mockResolvedValue({
       runs: [
         run({
-          run_id: "train-titled",
+          run_id: "train-exact",
           status: "completed",
-          best_metric: 0.41285,
+          best_metric: 0.4130041,
           best_metric_name: "loss",
         }),
       ],
     });
 
     render(<TrainingTab />);
-    const value = await screen.findByText("best loss 0.413");
-    expect(value).toHaveAttribute("title", "0.41285");
+    const value = await screen.findByText("best loss 0.4130041");
+    expect(value).not.toHaveAttribute("title");
+  });
+
+  it("names the row's accessible name with its best value and metric when the record carries one", async () => {
+    vi.spyOn(trainingApi, "listRuns").mockResolvedValue({
+      runs: [
+        run({
+          run_id: "train-named-value",
+          status: "completed",
+          best_metric: 0.4130041,
+          best_metric_name: "loss",
+        }),
+      ],
+    });
+
+    render(<TrainingTab />);
+    expect(
+      await screen.findByRole("button", {
+        name: "train-named-value completed, best loss 0.4130041",
+      }),
+    ).toBeInTheDocument();
   });
 
   it("shows an in-flight Cancel as a disabled, pending row control, and a failure in the row", async () => {
@@ -225,6 +245,25 @@ describe("TrainingTab heading", () => {
     expect(headings).toHaveLength(1);
     expect(headings[0]).toHaveTextContent("Training");
   });
+
+  it("carries the section titles as level-2 headings under that h1", async () => {
+    vi.spyOn(trainingApi, "listRuns").mockResolvedValue({
+      runs: [run({ run_id: "train-heading", status: "completed" })],
+    });
+    vi.spyOn(trainingApi, "getRun").mockResolvedValue({
+      run_id: "train-heading",
+      status: "completed",
+      tensorboard_url: "http://localhost:6006",
+    });
+
+    render(<TrainingTab />);
+    expect(await screen.findByRole("heading", { level: 2, name: "Runs" })).toBeInTheDocument();
+    fireEvent.click(screen.getByText("train-heading"));
+    expect(
+      await screen.findByRole("heading", { level: 2, name: "TensorBoard" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 2, name: "Live metrics" })).toBeInTheDocument();
+  });
 });
 
 describe("TrainingTab tensorboard panel", () => {
@@ -268,6 +307,113 @@ describe("TrainingTab tensorboard panel", () => {
 
     expect(await screen.findByText("connection refused")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Try again: TensorBoard" })).toBeInTheDocument();
+  });
+
+  it("keeps the run's own recorded crash reason for a no-logs run that failed with one", async () => {
+    vi.spyOn(trainingApi, "listRuns").mockResolvedValue({
+      runs: [run({ run_id: "train-nologs-crashed", status: "failed" })],
+    });
+    vi.spyOn(trainingApi, "getRun").mockResolvedValue({
+      run_id: "train-nologs-crashed",
+      status: "failed",
+      tensorboard_url: null,
+      error: "[WinError 183] Cannot create a file when that file already exists: 'tensorboard'",
+    });
+    vi.spyOn(trainingApi, "launchTensorboard").mockRejectedValue(
+      new StructuredRefusalError(
+        {
+          error: "[WinError 183] Cannot create a file when that file already exists: 'tensorboard'",
+          no_logs: true,
+        },
+        404,
+        "run produced no logs",
+      ),
+    );
+
+    render(<TrainingTab />);
+    fireEvent.click(await screen.findByText("train-nologs-crashed"));
+
+    expect(
+      await screen.findByText(
+        "This run failed: [WinError 183] Cannot create a file when that file already exists: 'tensorboard'. It produced no logs.",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Try again: TensorBoard" }),
+    ).not.toBeInTheDocument();
+  });
+});
+
+describe("TrainingTab chart placeholder", () => {
+  it("says a terminal run recorded no metrics, rather than waiting on one that will never arrive", async () => {
+    vi.spyOn(trainingApi, "listRuns").mockResolvedValue({
+      runs: [run({ run_id: "train-terminal-empty", status: "interrupted" })],
+    });
+    vi.spyOn(trainingApi, "getRun").mockResolvedValue({
+      run_id: "train-terminal-empty",
+      status: "interrupted",
+      tensorboard_url: null,
+    });
+    vi.spyOn(trainingApi, "launchTensorboard").mockRejectedValue(
+      new StructuredRefusalError(
+        { error: "run produced no logs: train-terminal-empty", no_logs: true },
+        404,
+        "run produced no logs",
+      ),
+    );
+
+    render(<TrainingTab />);
+    fireEvent.click(await screen.findByText("train-terminal-empty"));
+
+    expect(await screen.findByText("This run recorded no metrics.")).toBeInTheDocument();
+    expect(screen.queryByText("Waiting for metrics…")).not.toBeInTheDocument();
+  });
+
+  it("keeps waiting for metrics on a non-terminal run with none yet", async () => {
+    vi.spyOn(trainingApi, "listRuns").mockResolvedValue({
+      runs: [run({ run_id: "train-live-empty", status: "running" })],
+    });
+    vi.spyOn(trainingApi, "getRun").mockResolvedValue({
+      run_id: "train-live-empty",
+      status: "running",
+      tensorboard_url: null,
+    });
+    vi.spyOn(trainingApi, "launchTensorboard").mockResolvedValue({ error: "not ready" });
+
+    render(<TrainingTab />);
+    fireEvent.click(await screen.findByText("train-live-empty"));
+
+    expect(await screen.findByText("Waiting for metrics…")).toBeInTheDocument();
+  });
+});
+
+describe("TrainingTab switching between runs directly", () => {
+  it("launches a fresh TensorBoard for the newly selected run, not the previous one's", async () => {
+    vi.spyOn(trainingApi, "listRuns").mockResolvedValue({
+      runs: [
+        run({ run_id: "train-x", status: "completed" }),
+        run({ run_id: "train-y", status: "completed" }),
+      ],
+    });
+    vi.spyOn(trainingApi, "getRun").mockImplementation((runId: string) =>
+      Promise.resolve({ run_id: runId, status: "completed", tensorboard_url: null }),
+    );
+    const launchSpy = vi
+      .spyOn(trainingApi, "launchTensorboard")
+      .mockImplementation((runId: string) =>
+        Promise.resolve({ url: `http://localhost:6006/${runId}` }),
+      );
+
+    render(<TrainingTab />);
+    fireEvent.click(await screen.findByText("train-x"));
+    await waitFor(() => expect(launchSpy).toHaveBeenCalledWith("train-x"));
+
+    fireEvent.click(screen.getByText("train-y"));
+    await waitFor(() => expect(launchSpy).toHaveBeenCalledWith("train-y"));
+    expect(screen.getByTitle("TensorBoard")).toHaveAttribute(
+      "src",
+      "http://localhost:6006/train-y",
+    );
   });
 });
 
