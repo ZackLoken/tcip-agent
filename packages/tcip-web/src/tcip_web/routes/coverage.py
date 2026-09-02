@@ -115,13 +115,13 @@ def _grid_for_raster(src: Path, tile_size: int | None) -> tuple[dict, str]:
     # capture (any pixel size) carries at most a single EXIF GPS point, never that.
     if tile_size is not None:
         edge = tile_size
-        derivation = f"chosen: {tile_size} px"
+        derivation = f"a chosen cell edge of {tile_size} px"
     elif opens_windowed(source, 3) and is_georeferenced(source):
         edge = derive_large_raster_grid_tile_size(width, height)
-        derivation = "16 divisions of the long edge"
+        derivation = "the long edge in 16 equal divisions"
     else:
         edge = derive_coverage_tile_size(width, height)
-        derivation = "one display-bounded serve per cell"
+        derivation = "cells sized to one full-resolution screenful"
     return grid_geometry(width, height, edge, 0.0), derivation
 
 
@@ -133,10 +133,10 @@ def get_grid(
     overlap: float = Query(0.0),
 ) -> dict:
     """The reference grid over ``path``'s native frame: geometry plus the full cell list and the
-    ``derivation`` line naming how the tile size was chosen ("16 divisions of the long edge",
-    "one display-bounded serve per cell", or "chosen: <n> px" for an explicit ``tile_size``); a
-    cell is never a training tile, a different lattice with a different origin and (by default)
-    a training overlap.
+    ``derivation`` line naming how the tile size was chosen ("the long edge in 16 equal
+    divisions", "cells sized to one full-resolution screenful", or "a chosen cell edge of <n>
+    px" for an explicit ``tile_size``); a cell is never a training tile, a different lattice with
+    a different origin and (by default) a training overlap.
 
     ``overlap`` other than 0 is refused: the coverage record's exact-partition contract
     puts every native pixel in exactly one cell, which overlapping cells break. The
@@ -405,7 +405,9 @@ def post_completeness(payload: CompletenessSetPayload) -> dict:
 
     Cell names are validated against the posted grid's own cells, same as ``post_coverage``. A
     stored record whose grid disagrees with the posted one replaces wholesale (cells and digest
-    stamps alike), rather than trusting a same-named cell across two different lattices.
+    stamps alike), rather than trusting a same-named cell across two different lattices; the
+    response and the audit line both carry the discarded record's grid and cells (``replaced``,
+    null when nothing was discarded), the way ``post_coverage`` states its own replacement.
     """
     from tcip_annotation.json_io import UnreadableLabelDocument, read_annotations
 
@@ -468,9 +470,14 @@ def post_completeness(payload: CompletenessSetPayload) -> dict:
         if not complete and payload.cell not in cells_complete:
             # Nothing to unattest here, whether from no record, a different lattice, or a
             # same-lattice record that never held this cell: an idempotent no-op, not a write.
-            return {"status": "ok", "complete": False, "cells_complete": sorted(cells_complete)}
+            return {"status": "ok", "complete": False, "cells_complete": sorted(cells_complete),
+                    "replaced": None}
 
         replaced = existing is not None and not grid_matches
+        replaced_info = None
+        if replaced and isinstance(existing, dict):
+            replaced_info = {"grid": existing.get("grid"),
+                              "cells_complete": sorted(existing.get("cells_complete") or [])}
         if complete:
             cells_complete.add(payload.cell)
         else:
@@ -509,6 +516,7 @@ def post_completeness(payload: CompletenessSetPayload) -> dict:
     _audit_dataset_write(
         root, "gui_set_region_completeness",
         {"image_name": Path(payload.image_path).name, "subject": subject, "cell": payload.cell,
-         "complete": complete, "stem": stem, "date": date},
+         "complete": complete, "stem": stem, "date": date, "replaced": replaced_info},
     )
-    return {"status": "ok", "complete": complete, "cells_complete": sorted(cells_complete)}
+    return {"status": "ok", "complete": complete, "cells_complete": sorted(cells_complete),
+            "replaced": replaced_info}
