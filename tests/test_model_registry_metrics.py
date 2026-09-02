@@ -74,6 +74,46 @@ def test_select_best_model_excludes_unverified_entries_by_default(tmp_path):
     assert res["excluded_unverified"] == []
 
 
+def test_select_best_model_refusals_name_no_argument_a_breeder_would_not_pass(tmp_path):
+    """The three refusals a breeder can reach through the GUI (no metric, an undeclared
+    direction, every carrier unverified) read as plain sentences: none of them names this
+    tool's own parameters, since a breeder using the rank control never calls it directly."""
+    from tcip_mcp.model_registry import ModelRegistry
+    from tcip_mcp.tools.model_tools import select_best_model
+
+    project = str(tmp_path)
+    reg = ModelRegistry(project)
+    ckpt = tmp_path / "m.pt"
+    ckpt.write_bytes(b"x")
+    reg.register_model("asserted", str(ckpt), {}, metrics={"val_map50": 0.99}, tags=[],
+                       metrics_source="caller")
+
+    no_metric = select_best_model(project)["error"]
+    no_direction = select_best_model(project, metric="val_map99")["error"]
+    all_unverified = select_best_model(project, metric="val_map50")["error"]
+
+    assert no_metric == (
+        "metric is required: there is no default (a labeled comparability metric like "
+        "val_map50 doesn't necessarily govern a trait's phenotype). Pick one of the "
+        "available metrics."
+    )
+    assert no_direction == (
+        "'val_map99' has no declared ranking direction (evaluation.HIGHER_IS_BETTER_BY_METRIC "
+        "names no entry for it). State a direction to rank by it anyway, or pick one of the "
+        "available metrics."
+    )
+    assert all_unverified == (
+        "every registered model carrying 'val_map50' is unverified (metrics_source is not "
+        "'trainer'); include unverified models to rank them, or register a verified run."
+    )
+
+    for text in (no_metric, no_direction, all_unverified):
+        assert "higher_is_better" not in text
+        assert "include_unverified" not in text
+        assert "available_metrics" not in text
+        assert "select_best_model" not in text
+
+
 def test_register_model_refuses_nonexistent_checkpoint(tmp_path):
     """register_model must refuse a phantom deliverable, not silently store a null-checksum
     entry: the shared chokepoint both register_model_from_experiment and

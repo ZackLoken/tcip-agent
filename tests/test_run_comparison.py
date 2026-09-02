@@ -539,3 +539,23 @@ def test_not_finite_suffix_matches_the_frontends_own_constant():
     match = re.search(r'METRIC_STATE_SUFFIX = "([^"]+)"', text)
     assert match is not None, f"METRIC_STATE_SUFFIX declaration not found in {ts_source}"
     assert match.group(1) == NOT_FINITE_SUFFIX
+
+
+def test_val_metric_prefix_matches_the_frontends_own_constant():
+    """The same drift guard as above, for the other constant this file shares with the
+    frontend: a run row's best-value label and RunComparison's direction lookup both strip
+    this prefix before looking a bare metric name up, and nothing on the wire enforces that
+    the two definitions agree."""
+    import re
+    from pathlib import Path
+
+    from tcip_mcp.pipelines.training.evaluation import VAL_METRIC_PREFIX
+
+    ts_source = (
+        Path(__file__).resolve().parent.parent
+        / "packages" / "tcip-web" / "frontend" / "src" / "tabs" / "trainingMetrics.ts"
+    )
+    text = ts_source.read_text(encoding="utf-8")
+    match = re.search(r'VAL_METRIC_PREFIX = "([^"]+)"', text)
+    assert match is not None, f"VAL_METRIC_PREFIX declaration not found in {ts_source}"
+    assert match.group(1) == VAL_METRIC_PREFIX
