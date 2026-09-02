@@ -523,9 +523,9 @@ def test_compare_best_route_projects_the_answer(client: TestClient, tmp_path, mo
 
 
 def test_not_finite_suffix_matches_the_frontends_own_constant():
-    """Nothing on the wire enforces this pairing: RunComparison.tsx reads a metric's own
-    ``{key}{NOT_FINITE_SUFFIX}`` companion tcip_store.values writes, and the two definitions can
-    drift silently since no shared source spans the Python/TypeScript boundary."""
+    """Nothing on the wire enforces this pairing: the frontend's metric helpers read a metric's
+    own ``{key}{NOT_FINITE_SUFFIX}`` companion tcip_store.values writes, and the two definitions
+    can drift silently since no shared source spans the Python/TypeScript boundary."""
     import re
     from pathlib import Path
 
@@ -533,9 +533,9 @@ def test_not_finite_suffix_matches_the_frontends_own_constant():
 
     ts_source = (
         Path(__file__).resolve().parent.parent
-        / "packages" / "tcip-web" / "frontend" / "src" / "components" / "RunComparison.tsx"
+        / "packages" / "tcip-web" / "frontend" / "src" / "tabs" / "trainingMetrics.ts"
     )
     text = ts_source.read_text(encoding="utf-8")
-    match = re.search(r'NOT_FINITE_SUFFIX = "([^"]+)"', text)
-    assert match is not None, f"NOT_FINITE_SUFFIX declaration not found in {ts_source}"
+    match = re.search(r'METRIC_STATE_SUFFIX = "([^"]+)"', text)
+    assert match is not None, f"METRIC_STATE_SUFFIX declaration not found in {ts_source}"
     assert match.group(1) == NOT_FINITE_SUFFIX
