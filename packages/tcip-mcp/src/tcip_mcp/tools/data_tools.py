@@ -256,7 +256,7 @@ def freeze_split_manifest(experiment_id: str, output_path: str | None = None) ->
     from tcip_mcp.dataset_layout import dataset_root_of
     from tcip_mcp.experiments import config_key, read_member, read_split_manifest_checked
     from tcip_mcp.pipelines.data.dataset_fingerprint import dataset_fingerprint
-    from tcip_mcp.pipelines.data.splits import manifest_date_key, member_identity
+    from tcip_mcp.pipelines.data.splits import manifest_date_key, member_identity, normalize_scope
     from tcip_mcp.pipelines.model_build import MODEL_SOURCE_KEY
     from tcip_mcp.pipelines.resolution import dataset_hash as _dataset_hash
     from tcip_mcp.pipelines.resolution import dataset_hash_and_label_digests
@@ -374,9 +374,10 @@ def freeze_split_manifest(experiment_id: str, output_path: str | None = None) ->
 
     from datetime import datetime, timezone
 
+    _, normalized_attribute = normalize_scope(subject, data_cfg.get("attribute"))
     manifest = compose_split_manifest(
         out_dir, seed=int(split.get("seed", 42)), group_by=resolved_group_by,
-        dataset_fingerprint=fingerprint, subject=subject, attribute=data_cfg.get("attribute"),
+        dataset_fingerprint=fingerprint, subject=subject, attribute=normalized_attribute,
         id_map=id_map, members=members, splits=splits, admission_counts={},
         calibration_foreground_groups_by_date={date_key: 0}, realized_ratios=realized_ratios,
         group_key_map=group_key_map,

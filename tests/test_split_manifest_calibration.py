@@ -151,9 +151,8 @@ def test_calibration_universe_from_manifest_floor_is_foreground_aware(tmp_path: 
 def test_resolve_manifest_calibration_universe_refuses_a_members_block_with_no_images_root(
     tmp_path: Path,
 ):
-    """A manifest whose members block under this date names no images root now refuses at the
-    calibration door too (it drew a universe today, since the deleted no-op comparison never
-    caught an absent recorded root)."""
+    """A manifest whose members block under this date names no images root refuses at the
+    calibration door."""
     import tcip_store as ts
     from tcip_mcp.pipelines.data.splits import (
         manifest_date_key, resolve_manifest_calibration_universe,
@@ -178,15 +177,14 @@ def test_resolve_manifest_calibration_universe_refuses_a_members_block_with_no_i
 def test_resolve_manifest_calibration_universe_refuses_a_door_with_no_images_dir(
     tmp_path: Path,
 ):
-    """A door naming no images_dir at all now refuses at the calibration door too (it drew a
-    universe today, since the deleted no-op comparison never caught an empty caller-side root)."""
+    """A door naming no images_dir at all refuses at the calibration door."""
     from tcip_mcp.pipelines.data.splits import resolve_manifest_calibration_universe
 
     root = _two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
     manifest = _draw(root, out)
 
-    with pytest.raises(ValueError, match="images_dir"):
+    with pytest.raises(ValueError, match="states no images_dir"):
         resolve_manifest_calibration_universe(
             manifest, str(out), str(root / "annotations" / DATES[0]), None, SUBJECT, None,
             list(_STEMS))
@@ -343,12 +341,45 @@ def test_resolve_manifest_calibration_universe_admits_a_doors_empty_string_attri
     out = tmp_path / "m"
     manifest = _draw(root, out)
 
-    stems, _group_by, _group_key_map, _excluded, cal_date = resolve_manifest_calibration_universe(
-        manifest, str(out), str(root / "annotations" / DATES[0]),
-        str(root / "images" / DATES[0]), SUBJECT, "", list(_STEMS))
+    stems, _group_by, _group_key_map, _excluded, cal_date, subject, attribute = \
+        resolve_manifest_calibration_universe(
+            manifest, str(out), str(root / "annotations" / DATES[0]),
+            str(root / "images" / DATES[0]), SUBJECT, "", list(_STEMS))
 
     assert stems
     assert cal_date == DATES[0]
+    assert (subject, attribute) == (SUBJECT, None)
+
+
+def test_resolve_manifest_calibration_universe_empty_string_attribute_counts_real_foreground(
+    tmp_path: Path,
+):
+    """The measurement this door's normalization protects: a checkpoint's stamped
+    ``attribute=""`` must still count a subject-matching stem's instances as foreground, through
+    :func:`~tcip_mcp.pipelines.data.splits.count_label_lines` called with the same raw ``""`` a
+    caller that never normalizes its own copy would pass. Before ``count_label_lines`` normalized
+    it itself, ``a.attributes.get("")`` matched no record (no annotation carries the key ``""``)
+    and every stem counted zero, even though the manifest itself is unscoped by attribute. Indexed
+    into the door's return rather than unpacked, so this stays a measurement proof rather than a
+    return-arity one."""
+    from tcip_mcp.pipelines.data.splits import (
+        count_label_lines, resolve_manifest_calibration_universe,
+    )
+
+    root = _two_date_dataset(tmp_path / "ds")
+    out = tmp_path / "m"
+    manifest = _draw(root, out)
+    labels_dir = root / "annotations" / DATES[0]
+
+    result = resolve_manifest_calibration_universe(
+        manifest, str(out), str(labels_dir), str(root / "images" / DATES[0]), SUBJECT, "",
+        list(_STEMS))
+    stems, cal_date = result[0], result[4]
+
+    assert stems
+    assert cal_date == DATES[0]
+    counts = {s: count_label_lines(labels_dir, s, subject=SUBJECT, attribute="") for s in stems}
+    assert any(c > 0 for c in counts.values())
 
 
 def test_resolve_manifest_calibration_universe_scope_check_reaches_the_calibration_door(

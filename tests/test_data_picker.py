@@ -101,6 +101,29 @@ def test_manifest_compatibility_flags_a_members_block_with_no_images_root(tmp_pa
     assert any("images root" in i for i in issues)
 
 
+def test_manifest_compatibility_reports_a_subject_mismatch_and_a_date_disagreement_together(
+    tmp_path: Path,
+):
+    """A config wrong on two independent fronts (its subject disagrees with the manifest's own,
+    and its own ``data.date`` disagrees with the date its ``data.labels_dir`` is under) reports
+    both, not only the date one: the accumulator runs before the date check is appended, so
+    neither issue hides the other."""
+    from tcip_mcp.tools.training_tools import manifest_compatibility
+
+    root = _two_subject_two_date_dataset(tmp_path / "ds")
+    out = tmp_path / "m"
+    manifest = _draw(root, out)
+    config = _bespoke_config(root / "images" / DATES[0], root / "annotations" / DATES[0],
+                             subject=OTHER_SUBJECT)
+    config["data"]["split"] = {"manifest_dir": str(out)}
+    config["data"]["date"] = "2099-01-01"
+
+    issues = manifest_compatibility(config, manifest, str(out))
+
+    assert any("subject" in i for i in issues)
+    assert any("data.date" in i for i in issues)
+
+
 def test_preflight_names_the_manifest_directory_in_the_date_block_message(tmp_path: Path):
     """The date-block refusal names the directory it read, restoring what the message carried
     before the shared function existed, reached through preflight_config so the proof runs

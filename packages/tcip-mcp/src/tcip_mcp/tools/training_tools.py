@@ -137,15 +137,16 @@ def _manifest_dir_conflicts(config: dict) -> tuple[list[str], bool]:
 
 def _manifest_dependent_issues(config: dict, manifest: dict, manifest_dir: str) -> list[str]:
     """Every objection that needs the manifest itself, read at ``manifest_dir``, to answer: the
-    run's own date having a members block (config-only, ahead of the rest), then the shared scope
-    check every manifest consumer shares (:func:`~tcip_mcp.pipelines.data.splits.
-    manifest_scope_issues`: subject/attribute agreement, the members block under that date, its
-    images root, the images root not having moved) plus the sides narrowed to that date not being
-    empty (:func:`~tcip_mcp.pipelines.data.splits.empty_side_issue`). Called only once
-    :func:`_manifest_dir_conflicts`'s task check has passed and the manifest has been read
-    successfully; :func:`manifest_compatibility` composes both for a caller with one manifest in
-    hand, and ``preflight_config`` calls this directly so a failed read never hides the other
-    check's issues.
+    shared scope check every manifest consumer shares (:func:`~tcip_mcp.pipelines.data.splits.
+    manifest_scope_issues`: subject/attribute agreement, the members block under the run's own
+    date, its images root, the images root not having moved) plus the sides narrowed to that date
+    not being empty (:func:`~tcip_mcp.pipelines.data.splits.empty_side_issue`), run first, then
+    the run's own ``data.date`` disagreeing with its ``data.labels_dir``'s date, appended after
+    rather than returned alone: a config wrong on both never hides the scope issue behind the
+    date one. Called only once :func:`_manifest_dir_conflicts`'s task check has passed and the
+    manifest has been read successfully; :func:`manifest_compatibility` composes both for a
+    caller with one manifest in hand, and ``preflight_config`` calls this directly so a failed
+    read never hides the other check's issues.
     """
     from tcip_mcp.dataset_layout import annotation_date
     from tcip_mcp.pipelines.data.splits import empty_side_issue, manifest_scope_issues
@@ -162,14 +163,6 @@ def _manifest_dependent_issues(config: dict, manifest: dict, manifest_dir: str) 
 
     labels_dir = data_cfg.get("labels_dir", "")
     run_date = annotation_date(labels_dir)
-    declared_date = data_cfg.get("date")
-    if declared_date is not None and declared_date != run_date:
-        return [
-            f"data.date={declared_date!r} disagrees with the date "
-            f"data.labels_dir={labels_dir!r} is under ({run_date!r}); a split "
-            "manifest binds under one date, so the negative confirmations and the "
-            "manifest must be read under the same one."
-        ]
 
     issues, narrowing = manifest_scope_issues(
         manifest, subject=subject, attribute=attribute, date=run_date,
@@ -178,6 +171,15 @@ def _manifest_dependent_issues(config: dict, manifest: dict, manifest_dir: str) 
     )
     if narrowing is not None:
         issues.extend(empty_side_issue(narrowing, run_date))
+
+    declared_date = data_cfg.get("date")
+    if declared_date is not None and declared_date != run_date:
+        issues.append(
+            f"data.date={declared_date!r} disagrees with the date "
+            f"data.labels_dir={labels_dir!r} is under ({run_date!r}); a split "
+            "manifest binds under one date, so the negative confirmations and the "
+            "manifest must be read under the same one."
+        )
     return issues
 
 
@@ -2856,7 +2858,7 @@ def evaluate_model(
         manifest = read_split_manifest_dir(split_manifest_dir)
         present, _ = label_image_stems(labels_dir, images_dir)
         try:
-            manifest_stems, _group_by, _group_key_map, _excluded, cal_date = \
+            manifest_stems, _group_by, _group_key_map, _excluded, cal_date, subject, attribute = \
                 resolve_manifest_calibration_universe(
                     manifest, split_manifest_dir, labels_dir, images_dir, subject, attribute,
                     present, min_foreground_groups={"calibration": 1})

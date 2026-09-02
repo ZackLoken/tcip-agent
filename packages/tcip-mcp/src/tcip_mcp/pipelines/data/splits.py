@@ -95,7 +95,11 @@ def count_label_lines(
     already assessed for ``attribute`` when one is given (an instance never assessed for it is
     not yet a foreground fact for this scope). A manifest draw is subject-scoped, so it always
     states its own ``subject`` here: an unscoped count would read a group's annotations of some
-    other subject sharing the file as this draw's own foreground.
+    other subject sharing the file as this draw's own foreground. ``subject``/``attribute`` are
+    normalized through :func:`normalize_scope` before either is read, the same rule every other
+    manifest-scope consumer applies, so a caller passing a checkpoint's stamped ``attribute=""``
+    counts against every record assessed or not (its real meaning, "no attribute") rather than
+    scoring zero against a key no record ever carries.
 
     A missing file scores 0 foreground; a present, unreadable one raises
     :class:`~tcip_annotation.json_io.UnreadableLabelDocument` rather than scoring 0, since a
@@ -104,6 +108,7 @@ def count_label_lines(
     from tcip_annotation import json_io
     from tcip_mcp.dataset_layout import label_filename
 
+    subject, attribute = normalize_scope(subject, attribute)
     jp = Path(labels_dir) / label_filename(stem)
     if not jp.is_file():
         return 0
@@ -475,10 +480,10 @@ def manifest_scope_issues(
     images_dir: str | Path | None, label: str, manifest_dir: str | None = None,
 ) -> tuple[list[str], ManifestDateNarrowing | None]:
     """Every objection a caller's scope raises against ``manifest`` for one capture ``date``,
-    from the manifest's own recorded facts: the ``subject``/``attribute`` agreement (normalized
-    through :func:`normalize_scope` on the caller's side, so an empty-string attribute compares
-    equal to an unset one), the date's members block being positively present (a missing key or
-    an explicit ``null`` value both read as absent: the stricter of the two readings, since a
+    from the manifest's own recorded facts: the ``subject``/``attribute`` agreement (both sides
+    normalized through :func:`normalize_scope`, so an empty-string attribute compares equal to an
+    unset one whichever side carries it), the date's members block being positively present (a
+    missing key or an explicit ``null`` value both read as absent: the stricter of the two, since a
     ``null`` block names nothing), that block naming an images root (a stated root must be
     positively carried, never merely not contradicted), the caller's own ``images_dir`` being
     stated, and the two roots not having moved apart
@@ -497,7 +502,8 @@ def manifest_scope_issues(
     issues: list[str] = []
     name = f"split manifest at {manifest_dir!r}" if manifest_dir else "the split manifest"
     norm_subject, norm_attribute = normalize_scope(subject, attribute)
-    manifest_subject, manifest_attribute = manifest.get("subject"), manifest.get("attribute")
+    manifest_subject, manifest_attribute = normalize_scope(
+        manifest.get("subject"), manifest.get("attribute"))
     if (manifest_subject, manifest_attribute) != (norm_subject, norm_attribute):
         issues.append(
             f"{name} was drawn for subject={manifest_subject!r}, attribute="
@@ -512,7 +518,8 @@ def manifest_scope_issues(
     if date_key not in members or date_block is None:
         issues.append(
             f"{name} holds no members under date {date!r}; it holds members under "
-            f"{sorted(members)}."
+            f"{sorted(members)}. Regenerate the split over this date, or launch against the "
+            "date the manifest was drawn for."
         )
         return issues, None
 
@@ -1200,9 +1207,6 @@ def calibration_universe_from_manifest(
     train_ids, val_ids, calibration_ids = (
         narrowing.train_ids, narrowing.val_ids, narrowing.calibration_ids,
     )
-    # narrow_manifest_to_date's own all_ids is manifest-wide by design (bind_manifest_stems'
-    # own concern); this door's excluded_unassigned_stems needs the date-scoped union instead.
-    all_ids = train_ids | val_ids | calibration_ids
 
     stems = sorted(member_identity_parts(i)[1] for i in calibration_ids
                   if member_identity_parts(i)[1] in present_set)
@@ -1213,8 +1217,10 @@ def calibration_universe_from_manifest(
         "excluded_validation_stems": sorted(
             member_identity_parts(i)[1] for i in val_ids
             if member_identity_parts(i)[1] in present_set),
+        # A date-prefixed identity's membership in narrowing.all_ids (manifest-wide) is provably
+        # equal to its membership in the date-narrowed union, since it names its own date.
         "excluded_unassigned_stems": sorted(
-            s for s in present_set if member_identity(date, s) not in all_ids),
+            s for s in present_set if member_identity(date, s) not in narrowing.all_ids),
     }
 
     group_by = manifest.get("group_by")
@@ -1249,7 +1255,8 @@ def resolve_manifest_calibration_universe(
     manifest: dict, split_manifest_dir: str | Path, labels_dir: str | Path,
     images_dir: str | Path | None, subject: str | None, attribute: str | None,
     present: Iterable[str], *, min_foreground_groups: dict[str, int] | None = None,
-) -> tuple[list[str], str | None, dict[str, str] | None, dict[str, list[str]], str | None]:
+) -> tuple[list[str], str | None, dict[str, str] | None, dict[str, list[str]], str | None,
+           str | None, str | None]:
     """The checks every door restricting a read to a split manifest shares, ahead of
     :func:`calibration_universe_from_manifest`'s own draw, through :func:`require_manifest_scope`:
     the manifest's ``subject``/``attribute`` must equal the door's, the labels directory's date
@@ -1263,12 +1270,17 @@ def resolve_manifest_calibration_universe(
     unchanged: the caller's own floor, ``{"calibration": 2}`` when omitted (a locked draw's
     halving), the shape a caller that halves nothing states for itself.
 
-    Returns ``(stems, group_by, group_key_map, excluded, date)``, the universe plus the date it
-    was drawn for.
+    Returns ``(stems, group_by, group_key_map, excluded, date, subject, attribute)``: the
+    universe, the date it was drawn for, and the normalized ``(subject, attribute)``
+    (:func:`normalize_scope`) this door checked the manifest against and counted foreground with.
+    A caller that goes on to count foreground itself (e.g. for ``annotation_counts`` over the
+    returned universe) uses these two rather than re-deriving the same normalization from its own
+    raw, possibly ``""``-carrying config.
     """
     from tcip_mcp.dataset_layout import annotation_date
 
-    # Normalized once here, so the scope check and the foreground read below agree on "".
+    # Normalized once here, so the scope check, the foreground read below, and any caller's own
+    # count afterward (through the returned pair) all agree on "".
     subject, attribute = normalize_scope(subject, attribute)
     date = annotation_date(labels_dir)
     require_manifest_scope(
@@ -1283,7 +1295,7 @@ def resolve_manifest_calibration_universe(
     stems, group_by, group_key_map, excluded = calibration_universe_from_manifest(
         manifest, date, present_stems, foreground_stems=foreground_stems,
         min_foreground_groups=min_foreground_groups)
-    return stems, group_by, group_key_map, excluded, date
+    return stems, group_by, group_key_map, excluded, date, subject, attribute
 
 
 def _split_content_hash(parts: dict[str, list[str]] | None) -> str | None:

@@ -556,7 +556,8 @@ def auto_train_val(task: str, data_cfg: dict, transforms):
                 "data.split.manifest_dir requires data.subject: a manifest binds by subject, "
                 "and this run's own admission has none to compare against it."
             )
-        # Config-only, ahead of a build that would fail for an unrelated reason on a bad root.
+        # Checked against the manifest already read above, ahead of a build that would fail for
+        # an unrelated reason on a bad root.
         require_manifest_scope(
             manifest, manifest_dir=manifest_dir, subject=subject, attribute=attribute, date=date,
             images_dir=images_dir, label="data.images_dir",

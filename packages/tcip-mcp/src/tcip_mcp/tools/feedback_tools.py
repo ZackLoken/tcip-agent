@@ -83,9 +83,7 @@ def _resolve_calibration_ids(
     require_manifest_scope`), the one :func:`~tcip_mcp.pipelines.data.splits.bind_manifest_stems`
     also calls when it computes ``calibration_bound``. Membership then turns on whether
     ``images_dir`` is the exact directory the manifest recorded as that date's ``images_root``; an
-    absent recorded root refuses here the same way it refuses everywhere else this check runs,
-    rather than the opposite polarity a bare :func:`~tcip_mcp.pipelines.data.
-    splits.same_directory` comparison against a possibly-empty recorded root once read here.
+    absent recorded root refuses here the same way it refuses everywhere else this check runs.
     """
     experiment_id = checkpoint.producer
     if not experiment_id:

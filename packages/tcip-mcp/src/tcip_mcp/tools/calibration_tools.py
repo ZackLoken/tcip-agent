@@ -137,7 +137,7 @@ def force_redraw_cal_holdout_split(
         manifest = read_split_manifest_dir(split_manifest_dir)
         present, _ = label_image_stems(labels_dir, images_dir)
         try:
-            manifest_stems, group_by, group_key_map, _excluded, cal_date = \
+            manifest_stems, group_by, group_key_map, _excluded, cal_date, subject, attribute = \
                 resolve_manifest_calibration_universe(
                     manifest, split_manifest_dir, labels_dir, images_dir, subject, attribute,
                     present)
