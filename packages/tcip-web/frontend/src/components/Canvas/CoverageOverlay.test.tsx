@@ -55,6 +55,7 @@ describe("CoverageOverlay", () => {
         viewport={null}
         scale={1}
         swept={new Set()}
+        pending={new Set()}
         activeComplete={new Set()}
         activeStale={new Set()}
         otherComplete={new Set()}
@@ -71,6 +72,7 @@ describe("CoverageOverlay", () => {
         viewport={{ x0: 0, y0: 0, x1: 200, y1: 200 }}
         scale={1}
         swept={new Set()}
+        pending={new Set()}
         activeComplete={new Set()}
         activeStale={new Set()}
         otherComplete={new Set()}
@@ -89,6 +91,7 @@ describe("CoverageOverlay", () => {
         viewport={{ x0: 0, y0: 0, x1: 400, y1: 400 }}
         scale={1}
         swept={new Set()}
+        pending={new Set()}
         activeComplete={new Set()}
         activeStale={new Set()}
         otherComplete={new Set()}
@@ -109,6 +112,7 @@ describe("CoverageOverlay", () => {
         viewport={{ x0: 0, y0: 0, x1: 200, y1: 200 }}
         scale={1}
         swept={new Set()}
+        pending={new Set()}
         activeComplete={new Set()}
         activeStale={new Set()}
         otherComplete={new Set()}
@@ -125,6 +129,7 @@ describe("CoverageOverlay", () => {
         viewport={{ x0: 0, y0: 0, x1: 200, y1: 100 }}
         scale={1}
         swept={new Set(["A1"])}
+        pending={new Set()}
         activeComplete={new Set()}
         activeStale={new Set()}
         otherComplete={new Set()}
@@ -144,6 +149,7 @@ describe("CoverageOverlay", () => {
         viewport={{ x0: 0, y0: 0, x1: 200, y1: 100 }}
         scale={1}
         swept={new Set(["A1"])}
+        pending={new Set()}
         activeComplete={new Set()}
         activeStale={new Set()}
         otherComplete={new Set()}
@@ -160,6 +166,29 @@ describe("CoverageOverlay", () => {
     );
   });
 
+  it("a pending swept cell draws with no fill, distinct by stroke and not by fill alone", () => {
+    const { container } = render(
+      <CoverageOverlay
+        cells={[cell("A1", 0, 0, 100, 100), cell("B1", 100, 0, 200, 100)]}
+        viewport={{ x0: 0, y0: 0, x1: 200, y1: 100 }}
+        scale={1}
+        swept={new Set(["A1", "B1"])}
+        pending={new Set(["A1"])}
+        activeComplete={new Set()}
+        activeStale={new Set()}
+        otherComplete={new Set()}
+        annotationCounts={{}}
+      />,
+    );
+    const groups = Array.from(container.querySelectorAll("[data-testid=k-group]"));
+    const fills = Array.from(container.querySelectorAll("[data-testid=k-rect]")).filter((el) =>
+      (el.getAttribute("data-fill") ?? "").includes("201, 162, 75"),
+    );
+    // Only B1 (recorded, not pending) fills; A1 (pending) carries the swept stroke with no fill.
+    expect(fills).toHaveLength(1);
+    expect(groups).toHaveLength(2);
+  });
+
   it("every cell border is two-tone: a dark halo rect under the light one", () => {
     const { container } = render(
       <CoverageOverlay
@@ -167,6 +196,7 @@ describe("CoverageOverlay", () => {
         viewport={{ x0: 0, y0: 0, x1: 100, y1: 100 }}
         scale={1}
         swept={new Set()}
+        pending={new Set()}
         activeComplete={new Set()}
         activeStale={new Set()}
         otherComplete={new Set()}
@@ -189,6 +219,7 @@ describe("CoverageOverlay", () => {
         viewport={{ x0: 0, y0: 0, x1: 200, y1: 100 }}
         scale={1}
         swept={new Set()}
+        pending={new Set()}
         activeComplete={new Set(["B1"])}
         activeStale={new Set(["A1"])}
         otherComplete={new Set()}
@@ -205,6 +236,7 @@ describe("CoverageOverlay", () => {
         viewport={{ x0: 0, y0: 0, x1: 200, y1: 100 }}
         scale={1}
         swept={new Set()}
+        pending={new Set()}
         activeComplete={new Set(["A1"])}
         activeStale={new Set()}
         otherComplete={new Set(["B1"])}

@@ -24,6 +24,7 @@ import { useImageStatusHydrate } from "@/hooks/useImageStatusHydrate";
 import { applyAnnotateFocus, type AnnotateFocusData } from "@/lib/annotateFocus";
 import { notifyCanvasStateRequest } from "@/lib/canvasSync";
 import { attachCtrlWheelGuard } from "@/lib/ctrlWheelGuard";
+import { coverageOutbox } from "@/lib/coverageTracker";
 import { applyReviewFocus, type ReviewFocusData } from "@/lib/reviewFocus";
 import { openProjectByName } from "@/lib/openProject";
 import { useStore } from "@/store";
@@ -216,11 +217,11 @@ function App() {
     };
   }, [projectRoot]);
 
-  // A refresh/close with unsaved canvas edits gets the browser's leave-page prompt;
-  // React never unmounts on unload, so AnnotateTab's flush-on-unmount can't cover this.
+  // A refresh/close with unsaved canvas edits gets the browser's leave-page prompt; a non-empty
+  // coverage outbox (a push the tracker could not deliver before moving on) gets it too.
   useEffect(() => {
     function guardUnload(e: BeforeUnloadEvent) {
-      if (useStore.getState().canvas.dirty) e.preventDefault();
+      if (useStore.getState().canvas.dirty || coverageOutbox.size > 0) e.preventDefault();
     }
     window.addEventListener("beforeunload", guardUnload);
     return () => window.removeEventListener("beforeunload", guardUnload);

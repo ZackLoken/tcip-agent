@@ -168,6 +168,12 @@ export function AnnotateTab() {
     }),
     [composite.bands, composite.stretch, baseFacts],
   );
+  const completeness = useRegionCompleteness({
+    imagePath: imgPath,
+    datasetRoot: dataset.dataset_root,
+    subject: activeSubject,
+    grid: coverageGrid.grid,
+  });
   const coverage = useCoverageTracking({
     imagePath: imgPath,
     datasetRoot: dataset.dataset_root,
@@ -179,6 +185,7 @@ export function AnnotateTab() {
     imgW: canvas.imgWidth,
     imgH: canvas.imgHeight,
     viewing: coverageViewing,
+    workingScale: completeness.workingScale,
   });
   const regions = useRegionServes({
     imagePath: imgPath,
@@ -190,12 +197,6 @@ export function AnnotateTab() {
     baseFacts,
     composite,
     onCellServedAtNative: coverage.noteServedAtNative,
-  });
-  const completeness = useRegionCompleteness({
-    imagePath: imgPath,
-    datasetRoot: dataset.dataset_root,
-    subject: activeSubject,
-    grid: coverageGrid.grid,
   });
   const coverageMultiCell = coverageGrid.cells.length > 1;
   const { open: coverageOverlayOn, toggle: toggleCoverageOverlay } = useDisclosure(
@@ -234,6 +235,12 @@ export function AnnotateTab() {
     if (!host) return null;
     const vp = computeViewport(view, host, canvas.imgWidth, canvas.imgHeight);
     return vp ? { x0: vp.x, y0: vp.y, x1: vp.x + vp.w, y1: vp.y + vp.h } : null;
+  }
+
+  function imageFitScale(): number | null {
+    const host = measureCanvasHost();
+    if (!host || canvas.imgWidth <= 0 || canvas.imgHeight <= 0) return null;
+    return fitView(host, canvas.imgWidth, canvas.imgHeight).scale;
   }
 
   function overview() {
@@ -654,7 +661,6 @@ export function AnnotateTab() {
     streamingRef.current = false;
     if (commitCurrentPolygon()) {
       incrementAnnotationsAdded(1);
-      coverage.noteAuthoringCommit();
     }
   }
 
@@ -1112,7 +1118,6 @@ export function AnnotateTab() {
       } else {
         addBox(box);
         incrementAnnotationsAdded(1);
-        coverage.noteAuthoringCommit();
       }
       setDrawing(null);
     }
@@ -1152,7 +1157,6 @@ export function AnnotateTab() {
         attributes: {},
       });
       incrementAnnotationsAdded(1);
-      coverage.noteAuthoringCommit();
       return;
     }
     if (mode !== "polygon") return;
@@ -1375,6 +1379,7 @@ export function AnnotateTab() {
         bandSelection={bandSelection}
         onBandSelectionChange={setBandSelection}
         completeWarning={coverage.completeWarning}
+        workingScaleReason={completeness.workingScaleReason}
         coverageMultiCell={coverageMultiCell}
       />
       <div className="relative flex-1 flex flex-col min-h-0">
@@ -1436,6 +1441,7 @@ export function AnnotateTab() {
               viewport={coverageViewport}
               scale={s}
               swept={coverage.swept}
+              pending={coverage.pending}
               activeComplete={completeness.activeComplete}
               activeStale={completeness.activeStale}
               otherComplete={completeness.otherComplete}
@@ -1531,13 +1537,24 @@ export function AnnotateTab() {
             otherLattice={completeness.otherLattice}
             sweptOtherLattice={coverage.sweptOtherLattice}
             swept={coverage.swept}
+            pending={coverage.pending}
+            coarserCount={coverage.coarserCount}
+            workingScale={completeness.workingScale}
+            workingScaleReason={completeness.workingScaleReason}
+            fitScale={imageFitScale()}
             activeComplete={completeness.activeComplete}
             activeStale={completeness.activeStale}
+            activeCellsAttestedView={completeness.activeCellsAttestedView}
             otherComplete={completeness.otherCompleteBySubject}
             annotationCounts={completeness.annotationCounts}
             onAttest={(complete) => {
               if (activeCoverageCell && coverageGrid.grid) {
-                completeness.write(activeCoverageCell.name, coverageGrid.grid, complete);
+                completeness.write(
+                  activeCoverageCell.name,
+                  coverageGrid.grid,
+                  complete,
+                  view.scale,
+                );
               }
             }}
           />

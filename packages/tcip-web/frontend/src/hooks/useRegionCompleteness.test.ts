@@ -31,7 +31,15 @@ function response(
   by_subject: Record<string, CompletenessRecord>,
   overrides: Partial<CompletenessResponse> = {},
 ): CompletenessResponse {
-  return { by_subject, annotation_counts: {}, counts_grid: null, counts_error: null, ...overrides };
+  return {
+    by_subject,
+    annotation_counts: {},
+    counts_grid: null,
+    counts_error: null,
+    working_scale: {},
+    working_scale_error: null,
+    ...overrides,
+  };
 }
 
 afterEach(() => {
@@ -120,7 +128,7 @@ describe("useRegionCompleteness", () => {
         grid: GRID,
       }),
     );
-    result.current.write("A1", GRID, true);
+    result.current.write("A1", GRID, true, 0.5);
     await new Promise((r) => setTimeout(r, 50));
     expect(post).not.toHaveBeenCalled();
   });
@@ -143,7 +151,7 @@ describe("useRegionCompleteness", () => {
     );
     await waitFor(() => expect(get).toHaveBeenCalledTimes(1));
 
-    result.current.write("A1", GRID, true);
+    result.current.write("A1", GRID, true, 0.5);
     await waitFor(() =>
       expect(post).toHaveBeenCalledWith({
         image_path: "C:/data/images/2026-01-01/mosaic.tif",
@@ -152,6 +160,7 @@ describe("useRegionCompleteness", () => {
         grid: GRID,
         cell: "A1",
         complete: true,
+        view_scale: 0.5,
         user: "",
       }),
     );
@@ -175,7 +184,7 @@ describe("useRegionCompleteness", () => {
     );
     await waitFor(() => expect(result.current.activeStale).toEqual(new Set(["A1"])));
 
-    result.current.write("A1", GRID, true);
+    result.current.write("A1", GRID, true, 0.5);
     await waitFor(() =>
       expect(post).toHaveBeenCalledWith(expect.objectContaining({ cell: "A1", complete: true })),
     );
@@ -195,7 +204,7 @@ describe("useRegionCompleteness", () => {
     );
     await waitFor(() => expect(get).toHaveBeenCalledTimes(1));
 
-    result.current.write("A1", GRID, true);
+    result.current.write("A1", GRID, true, 0.5);
     await waitFor(() =>
       expect(
         useStore
@@ -253,6 +262,7 @@ describe("useRegionCompleteness", () => {
       expect(api.coverage.completeness).toHaveBeenCalledWith(
         "C:/data/images/2026-01-01/mosaic.tif",
         "C:/data",
+        "bush",
       ),
     );
     expect(result.current.otherLattice).toBeNull();
@@ -288,5 +298,99 @@ describe("useRegionCompleteness", () => {
     );
     await waitFor(() => expect(result.current.annotationCounts).toEqual({ A1: 3 }));
     expect(result.current.countsError).toBeNull();
+  });
+
+  it("exposes the active subject's served working-scale bar", async () => {
+    const scaleBar = {
+      value: 0.5,
+      median_extent_native_px: 92,
+      annotation_count: 2,
+      judged_span_px: 46,
+      source: "s",
+    };
+    vi.spyOn(api.coverage, "completeness").mockResolvedValue(
+      response({}, { working_scale: { bush: scaleBar } }),
+    );
+    const { result } = renderHook(() =>
+      useRegionCompleteness({
+        imagePath: "C:/data/images/2026-01-01/mosaic.tif",
+        datasetRoot: "C:/data",
+        subject: "bush",
+        grid: GRID,
+      }),
+    );
+    await waitFor(() => expect(result.current.workingScale).toEqual(scaleBar));
+    expect(result.current.workingScaleReason).toBeNull();
+  });
+
+  it("states the served working_scale_error as the reason when the label read failed", async () => {
+    vi.spyOn(api.coverage, "completeness").mockResolvedValue(
+      response({}, { working_scale: {}, working_scale_error: "plot.json: not valid JSON" }),
+    );
+    const { result } = renderHook(() =>
+      useRegionCompleteness({
+        imagePath: "C:/data/images/2026-01-01/mosaic.tif",
+        datasetRoot: "C:/data",
+        subject: "bush",
+        grid: GRID,
+      }),
+    );
+    await waitFor(() =>
+      expect(result.current.workingScaleReason).toBe("plot.json: not valid JSON"),
+    );
+    expect(result.current.workingScale).toBeNull();
+  });
+
+  it("names the absent-annotation reason when the subject is served explicitly null", async () => {
+    vi.spyOn(api.coverage, "completeness").mockResolvedValue(
+      response({}, { working_scale: { bush: null } }),
+    );
+    const { result } = renderHook(() =>
+      useRegionCompleteness({
+        imagePath: "C:/data/images/2026-01-01/mosaic.tif",
+        datasetRoot: "C:/data",
+        subject: "bush",
+        grid: GRID,
+      }),
+    );
+    await waitFor(() =>
+      expect(result.current.workingScaleReason).toBe("no saved box or polygon annotation of bush"),
+    );
+  });
+
+  it("exposes the active subject's cells_attested_view on the current grid, empty off it", async () => {
+    const entry = {
+      view_scale: 0.5,
+      working_scale_bar_at_write: null,
+      seen_on_record: { at_scale: null, grid_matched: false },
+    };
+    vi.spyOn(api.coverage, "completeness").mockResolvedValue(
+      response({ bush: { ...record("bush", ["A1"]), cells_attested_view: { A1: entry } } }),
+    );
+    const { result } = renderHook(() =>
+      useRegionCompleteness({
+        imagePath: "C:/data/images/2026-01-01/mosaic.tif",
+        datasetRoot: "C:/data",
+        subject: "bush",
+        grid: GRID,
+      }),
+    );
+    await waitFor(() => expect(result.current.activeCellsAttestedView).toEqual({ A1: entry }));
+  });
+
+  it("an absent cells_attested_view on an old-shape record reads as empty, not an error", async () => {
+    vi.spyOn(api.coverage, "completeness").mockResolvedValue(
+      response({ bush: record("bush", ["A1"]) }),
+    );
+    const { result } = renderHook(() =>
+      useRegionCompleteness({
+        imagePath: "C:/data/images/2026-01-01/mosaic.tif",
+        datasetRoot: "C:/data",
+        subject: "bush",
+        grid: GRID,
+      }),
+    );
+    await waitFor(() => expect(result.current.activeComplete).toEqual(new Set(["A1"])));
+    expect(result.current.activeCellsAttestedView).toEqual({});
   });
 });

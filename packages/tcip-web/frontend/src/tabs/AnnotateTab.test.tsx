@@ -1199,6 +1199,8 @@ describe("AnnotateTab Map tool", () => {
       annotation_counts: {},
       counts_grid: null,
       counts_error: null,
+      working_scale: {},
+      working_scale_error: null,
     });
     useStore.getState().setRegistry({ tip: {} });
     useStore.setState((s) => ({
@@ -1255,6 +1257,8 @@ describe("AnnotateTab Map tool", () => {
       annotation_counts: {},
       counts_grid: null,
       counts_error: null,
+      working_scale: {},
+      working_scale_error: null,
     });
     useStore.getState().setRegistry({ tip: {} });
     useStore.setState((s) => ({
@@ -1278,6 +1282,8 @@ describe("AnnotateTab completeness refresh and attestation control", () => {
       annotation_counts: {},
       counts_grid: null,
       counts_error: null,
+      working_scale: {},
+      working_scale_error: null,
     });
     render(<AnnotateTab />);
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
@@ -1311,6 +1317,8 @@ describe("AnnotateTab completeness refresh and attestation control", () => {
       annotation_counts: {},
       counts_grid: null,
       counts_error: null,
+      working_scale: {},
+      working_scale_error: null,
     });
     vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
       width: 200,
@@ -1396,6 +1404,8 @@ describe("AnnotateTab completeness refresh and attestation control", () => {
       annotation_counts: { subject_a: { A1: 2 }, subject_b: { A1: 5 } },
       counts_grid: MULTI_CELL_GRID,
       counts_error: null,
+      working_scale: {},
+      working_scale_error: null,
     });
     vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
       width: 200,
@@ -1460,6 +1470,8 @@ describe("AnnotateTab completeness refresh and attestation control", () => {
       annotation_counts: {},
       counts_grid: null,
       counts_error: null,
+      working_scale: {},
+      working_scale_error: null,
     });
     render(<AnnotateTab />);
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));

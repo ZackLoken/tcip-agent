@@ -5,8 +5,8 @@
 
 import type { HostSize, PixelRect } from "@/lib/viewGeometry";
 
-export type { GridGeometry } from "@/api/types.generated";
-import type { GridGeometry } from "@/api/types.generated";
+export type { GridGeometry, WorkingScaleBar } from "@/api/types.generated";
+import type { GridGeometry, WorkingScaleBar } from "@/api/types.generated";
 
 /** One served cell: a name plus its half-open native-pixel rect, clipped to the image extent. */
 export interface GridCell {
@@ -26,9 +26,22 @@ export interface CoverageGridResponse extends GridGeometry {
   derivation: string;
 }
 
+/** One cell's attestation-time scale provenance, stamped by POST /api/coverage/completeness:
+ *  the view scale the breeder pressed at (null for a non-GUI caller), the working-scale bar
+ *  derived from the label file at write time (which can differ from the bar read on screen if
+ *  the label file changed between the read and the press), and whether this image's own
+ *  view-coverage record shows the cell already seen -- facts only, no verdict; `at_scale` is
+ *  null and `grid_matched` false when no coverage record existed yet or its grid disagreed. */
+export interface CellAttestedView {
+  view_scale: number | null;
+  working_scale_bar_at_write: WorkingScaleBar | null;
+  seen_on_record: { at_scale: number | null; grid_matched: boolean };
+}
+
 /** One subject's region-completeness record, as GET /api/coverage/completeness returns it
  *  (per subject, in `by_subject`). `stale_cells` is recomputed server-side on every read: an
- *  attested cell whose annotation content has since been edited or deleted. */
+ *  attested cell whose annotation content has since been edited or deleted. `cells_attested_view`
+ *  is absent on a record from before this field existed; read a missing key as `{}`. */
 export interface CompletenessRecord {
   grid: GridGeometry;
   cells_complete: string[];
@@ -38,6 +51,7 @@ export interface CompletenessRecord {
   date: string | null;
   subject: string;
   stale_cells: string[];
+  cells_attested_view?: Record<string, CellAttestedView>;
 }
 
 /** GET /api/coverage/completeness's full response: every subject's record, plus every subject's
@@ -50,11 +64,17 @@ export interface CompletenessRecord {
  *  `counts_error` is set (with `annotation_counts` empty and `counts_grid` null) when the grid
  *  could not be derived or the raster could not be read; `by_subject` still serves in that
  *  case. */
+/** `working_scale` (subject -> bar or null) is derived fresh from the label file on every read,
+ *  never a value the browser echoes back; `working_scale_error` names why it is empty (a
+ *  label-read failure), distinct from `counts_error` (a raster-read failure costs only the
+ *  counts, never the bar). */
 export interface CompletenessResponse {
   by_subject: Record<string, CompletenessRecord>;
   annotation_counts: Record<string, Record<string, number>>;
   counts_grid: GridGeometry | null;
   counts_error: string | null;
+  working_scale: Record<string, WorkingScaleBar | null>;
+  working_scale_error: string | null;
 }
 
 /** Cells genuinely complete right now: attested, minus any that have since gone stale. A stale
@@ -74,6 +94,9 @@ export interface CompletenessSetPostBody {
   grid: GridGeometry;
   cell: string;
   complete: boolean;
+  /** The view scale at the press; null for a non-GUI caller, stated explicitly rather than
+   *  omitted, the `CoveragePayload.date` precedent. */
+  view_scale: number | null;
   user?: string | null;
 }
 
@@ -84,6 +107,14 @@ export function breederReadErrorReason(raw: string): string {
   const idx = raw.indexOf("{");
   if (idx === -1) return raw;
   return raw.slice(0, idx).replace(/[:\s]+$/, "");
+}
+
+/** Whether a cell's recorded scale meets a subject's working-scale bar: the one comparison the
+ *  tracker, the overlay's derivation and the chrome's attested-view line all call, so "does this
+ *  cell meet the bar" is never answered twice. `null` on either side (no recorded scale, or no
+ *  bar to judge against) never meets it. */
+export function meetsBar(atScale: number | null, bar: WorkingScaleBar | null): boolean {
+  return atScale !== null && bar !== null && atScale >= bar.value;
 }
 
 export function sameGrid(a: GridGeometry, b: GridGeometry): boolean {
@@ -286,15 +317,18 @@ export function stepUnsweptCell(
 
 /**
  * The Complete warning's wording. States screen facts only, cells and scale, never a claim about
- * what the person looked at. Says nothing about the swept cells: a swept cell can have been
- * covered piecewise across several separate views (see subdivideCell), never claimed to have
- * sat on screen whole at once, so the wording must not imply that either.
+ * what the person looked at, and never scoped to "this session": a cell's recorded scale can
+ * come from an earlier session's hydrate as easily as this one's own viewport passes. Says
+ * nothing about the swept cells: a swept cell can have been covered piecewise across several
+ * separate views (see subdivideCell), never claimed to have sat on screen whole at once, so the
+ * wording must not imply that either. `bar` is the unrounded value the comparison used, shown to
+ * one decimal place as a percentage.
  */
 export function completeWarningMessage(w: {
   unsweptCount: number;
   total: number;
   bar: number;
 }): string {
-  const pct = Math.round(w.bar * 100);
-  return `Complete: ${w.unsweptCount} of ${w.total} grid cells were never fully seen, in any combination of views, at ${pct}% zoom or closer this session.`;
+  const pct = (w.bar * 100).toFixed(1);
+  return `Complete: ${w.unsweptCount} of ${w.total} grid cells have not had every part on screen at ${pct}% zoom or closer, in any combination of views.`;
 }

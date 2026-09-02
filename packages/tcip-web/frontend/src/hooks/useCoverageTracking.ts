@@ -1,11 +1,13 @@
 /**
  * Wires the CoverageTracker into the Annotate tab: resets on the (image, subject, date,
- * dataset, grid) identity, hydrates from the stored record, feeds it viewport passes and the
- * viewing context, and exposes the swept set for the coverage grid overlay plus the Complete
- * warning facts. No active subject means no accumulation and no POST. A stored record on a grid
- * other than the current one hydrates nothing (the tracker's own rule) but is stated in
- * `sweptOtherLattice` rather than silently vanishing; a failed push surfaces through the tab's
- * toast path and is retried by the tracker itself.
+ * dataset, grid) identity, hydrates from the stored record, feeds it viewport passes, the
+ * viewing context and the subject's working-scale bar (derived server-side, never accumulated
+ * from an authoring commit), and exposes the seen/swept/pending sets for the coverage grid
+ * overlay plus the Complete warning facts. No active subject means no accumulation and no POST.
+ * A stored record on a grid other than the current one hydrates nothing (the tracker's own
+ * rule) but is stated in `sweptOtherLattice` rather than silently vanishing; a failed push
+ * surfaces through the tab's toast path while the tracker is still live, and is handed to the
+ * module-level outbox (see `coverageTracker.ts`) once it moves on.
  *
  * Only the Annotate tab calls this hook, but the band selection its `viewing.bands`/`stretch`
  * carries is held per band-set signature across both tabs (`useBandSelection`), so a composite
@@ -16,6 +18,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { api } from "@/api/client";
+import type { WorkingScaleBar } from "@/api/types.generated";
 import { completeWarningMessage, sameGrid, type GridCell, type GridGeometry } from "@/lib/coverage";
 import { CoverageTracker, type CoverageViewingInput } from "@/lib/coverageTracker";
 import { computeViewport, measureCanvasHost } from "@/lib/canvasSync";
@@ -31,8 +34,13 @@ export interface SweptOtherLattice {
 }
 
 export interface CoverageTracking {
+  /** Cells whose recorded scale meets the subject's working-scale bar: the derived "swept" set. */
   swept: ReadonlySet<string>;
-  noteAuthoringCommit: () => void;
+  /** Cells fully seen locally whose facts have not yet been acknowledged by the server. */
+  pending: ReadonlySet<string>;
+  /** Cells recorded seen (this session or hydrated) but not meeting the current bar, or every
+   *  recorded cell while there is no bar to judge them against: the chrome's "coarser" count. */
+  coarserCount: number;
   noteServedAtNative: (cellName: string) => void;
   /** The Complete warning's wording, or null when the warning does not apply. */
   completeWarning: () => string | null;
@@ -52,6 +60,7 @@ export function useCoverageTracking(args: {
   imgW: number;
   imgH: number;
   viewing: CoverageViewingInput;
+  workingScale: WorkingScaleBar | null;
 }): CoverageTracking {
   // Bumped whenever the tracker's own facts change, purely to give the memo below a dependency
   // to recompute on: nothing reads the count itself.
@@ -81,8 +90,15 @@ export function useCoverageTracking(args: {
         if (cancelled) return;
         tracker.hydrate(record);
         setSweptOtherLattice(
-          record && record.grid && !sameGrid(record.grid, grid) && record.cells_swept.length > 0
-            ? { count: record.cells_swept.length, cols: record.grid.cols, rows: record.grid.rows }
+          record &&
+            record.grid &&
+            !sameGrid(record.grid, grid) &&
+            Object.keys(record.cells_seen_at_scale).length > 0
+            ? {
+                count: Object.keys(record.cells_seen_at_scale).length,
+                cols: record.grid.cols,
+                rows: record.grid.rows,
+              }
             : null,
         );
       },
@@ -122,12 +138,18 @@ export function useCoverageTracking(args: {
     tracker.setViewing(viewing);
   }, [tracker, viewing]);
 
+  const { workingScale } = args;
+  useEffect(() => {
+    tracker.setWorkingScaleBar(workingScale);
+  }, [tracker, workingScale]);
+
   useEffect(() => () => tracker.dispose(), [tracker]);
 
   return useMemo(
     () => ({
       swept: tracker.swept,
-      noteAuthoringCommit: () => tracker.noteAuthoringScale(useStore.getState().gui.view.scale),
+      pending: tracker.pending,
+      coarserCount: tracker.seenAtScale.size - tracker.swept.size,
       noteServedAtNative: (cellName: string) => tracker.noteServedAtNative(cellName),
       completeWarning: () => {
         const facts = tracker.completeWarning();

@@ -7,6 +7,7 @@ import {
   completeWarningMessage,
   currentCoverageCell,
   effectiveComplete,
+  meetsBar,
   planRegionFetches,
   rectFullyInside,
   servedCellAtNative,
@@ -303,12 +304,40 @@ describe("effectiveComplete", () => {
   });
 });
 
+describe("meetsBar", () => {
+  const bar = {
+    value: 0.5,
+    median_extent_native_px: 92,
+    annotation_count: 2,
+    judged_span_px: 46,
+    source: "s",
+  };
+
+  it("is exactly the equality boundary: a scale equal to the bar meets it", () => {
+    expect(meetsBar(0.5, bar)).toBe(true);
+  });
+
+  it("a scale just below the bar does not meet it", () => {
+    expect(meetsBar(0.499, bar)).toBe(false);
+  });
+
+  it("a scale above the bar meets it", () => {
+    expect(meetsBar(0.9, bar)).toBe(true);
+  });
+
+  it("null on either side never meets it", () => {
+    expect(meetsBar(null, bar)).toBe(false);
+    expect(meetsBar(0.9, null)).toBe(false);
+    expect(meetsBar(null, null)).toBe(false);
+  });
+});
+
 describe("completeWarningMessage", () => {
   it("states cells and scale, no attention claim", () => {
     const msg = completeWarningMessage({ unsweptCount: 14, total: 35, bar: 0.35 });
     expect(msg).toBe(
-      "Complete: 14 of 35 grid cells were never fully seen, in any combination of views, " +
-        "at 35% zoom or closer this session.",
+      "Complete: 14 of 35 grid cells have not had every part on screen at 35.0% zoom or " +
+        "closer, in any combination of views.",
     );
   });
 });

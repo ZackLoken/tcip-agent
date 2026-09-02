@@ -27,11 +27,27 @@ function baseProps() {
     otherLattice: null,
     sweptOtherLattice: null,
     swept: new Set<string>(),
+    pending: new Set<string>(),
+    coarserCount: 0,
+    workingScale: null,
+    workingScaleReason: null,
+    fitScale: null,
     activeComplete: new Set<string>(),
     activeStale: new Set<string>(),
+    activeCellsAttestedView: {},
     otherComplete: {},
     annotationCounts: {},
     onAttest: vi.fn(),
+  };
+}
+
+function bar(value: number) {
+  return {
+    value,
+    median_extent_native_px: 46 / value,
+    annotation_count: 3,
+    judged_span_px: 46,
+    source: "a documented default: not a measurement",
   };
 }
 
@@ -201,16 +217,26 @@ describe("CoverageChrome", () => {
     render(<CoverageChrome {...baseProps()} />);
     const key = screen.getByRole("button", { name: "Key" });
     expect(key).toHaveAttribute("aria-expanded", "false");
-    expect(screen.queryByText(/swept: the recorded sweep history/)).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(/swept: every part of the cell has been on screen at the working scale/),
+    ).not.toBeInTheDocument();
     fireEvent.click(key);
     expect(key).toHaveAttribute("aria-expanded", "true");
-    expect(screen.getByText(/swept: the recorded sweep history, any session/)).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        /swept: every part of the cell has been on screen at the working scale, any session/,
+      ),
+    ).toBeInTheDocument();
   });
 
   it("the Key names every lattice mark, since the overlay itself names none", () => {
     render(<CoverageChrome {...baseProps()} />);
     openKey();
-    expect(screen.getByText(/swept: the recorded sweep history, any session/)).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        /swept: every part of the cell has been on screen at the working scale, any session/,
+      ),
+    ).toBeInTheDocument();
     expect(screen.getByText(/saved annotations/i)).toBeInTheDocument();
     expect(screen.getAllByText(/attested complete/i).length).toBeGreaterThan(0);
     expect(screen.getByText(/changed since attested/i)).toBeInTheDocument();
@@ -283,11 +309,17 @@ describe("CoverageChrome", () => {
   it("collapsing the chrome closes an already-open Key", () => {
     render(<CoverageChrome {...baseProps()} />);
     openKey();
-    expect(screen.getByText(/swept: the recorded sweep history, any session/)).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        /swept: every part of the cell has been on screen at the working scale, any session/,
+      ),
+    ).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: /Coverage for fruit/ }));
     expect(
-      screen.queryByText(/swept: the recorded sweep history, any session/),
+      screen.queryByText(
+        /swept: every part of the cell has been on screen at the working scale, any session/,
+      ),
     ).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Key" })).toHaveAttribute("aria-expanded", "false");
   });
@@ -337,5 +369,97 @@ describe("CoverageChrome", () => {
       screen.getByRole("button", { name: "Attest A1 complete for fruit" }),
     ).toBeInTheDocument();
     expect(screen.queryByText(/Turn the overlay on/)).not.toBeInTheDocument();
+  });
+
+  it("states the served working-scale bar from the served fields, never a literal", () => {
+    render(<CoverageChrome {...baseProps()} workingScale={bar(0.25)} />);
+    expect(screen.getByText(/Working scale 25\.0%/)).toBeInTheDocument();
+    expect(screen.getByText(/the median saved fruit annotation/)).toBeInTheDocument();
+    expect(screen.getByText(/184 px across, from 3/)).toBeInTheDocument();
+    expect(screen.getByText(/spans 46 px on screen, a default span/)).toBeInTheDocument();
+  });
+
+  it("states the reason sentence instead when there is no bar", () => {
+    render(
+      <CoverageChrome
+        {...baseProps()}
+        workingScaleReason="no saved box or polygon annotation of fruit"
+      />,
+    );
+    expect(screen.getByText("no saved box or polygon annotation of fruit")).toBeInTheDocument();
+  });
+
+  it("notes when the bar sits coarser than the whole-image view", () => {
+    render(<CoverageChrome {...baseProps()} workingScale={bar(0.02)} fitScale={0.1} />);
+    expect(
+      screen.getByText(/fruit's working scale \(2\.0%\) is coarser than the whole-image view/),
+    ).toBeInTheDocument();
+  });
+
+  it("says nothing about the fit scale when the bar sits within it", () => {
+    render(<CoverageChrome {...baseProps()} workingScale={bar(0.5)} fitScale={0.1} />);
+    expect(screen.queryByText(/coarser than the whole-image view/)).not.toBeInTheDocument();
+  });
+
+  it("notes when the bar sits beyond the viewer's zoom ceiling", () => {
+    render(<CoverageChrome {...baseProps()} workingScale={bar(12)} />);
+    expect(
+      screen.getByText(/fruit's working scale \(1200\.0%\) is beyond the viewer's 1000% zoom/),
+    ).toBeInTheDocument();
+  });
+
+  it("states the coarser-cells remainder against the bar, and the no-bar wording without one", () => {
+    const { rerender } = render(
+      <CoverageChrome {...baseProps()} workingScale={bar(0.5)} coarserCount={2} />,
+    );
+    expect(
+      screen.getByText(/2 cells on record were seen at a coarser scale than fruit's working scale/),
+    ).toBeInTheDocument();
+
+    rerender(<CoverageChrome {...baseProps()} workingScale={null} coarserCount={2} />);
+    expect(
+      screen.getByText(
+        /2 cells on record were fully on screen; no working scale to judge them against/,
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("carries a not-yet-saved line for pending cells in the hidden state list", () => {
+    render(<CoverageChrome {...baseProps()} pending={new Set(["A1", "B2"])} />);
+    expect(screen.getByText("not yet saved: A1, B2")).toBeInTheDocument();
+  });
+
+  it("states the current cell's attestation scale provenance for a screen-reader user", () => {
+    render(
+      <CoverageChrome
+        {...baseProps()}
+        activeCellsAttestedView={{
+          A1: {
+            view_scale: 0.5,
+            working_scale_bar_at_write: bar(0.4),
+            seen_on_record: { at_scale: 0.6, grid_matched: true },
+          },
+        }}
+      />,
+    );
+    expect(
+      screen.getByText(/A1 attested at 50\.0% zoom, seen on record at 60\.0%/),
+    ).toBeInTheDocument();
+  });
+
+  it("states not seen on record when the coverage record never showed the cell", () => {
+    render(
+      <CoverageChrome
+        {...baseProps()}
+        activeCellsAttestedView={{
+          A1: {
+            view_scale: 0.5,
+            working_scale_bar_at_write: null,
+            seen_on_record: { at_scale: null, grid_matched: false },
+          },
+        }}
+      />,
+    );
+    expect(screen.getByText(/A1 attested at 50\.0% zoom, not seen on record/)).toBeInTheDocument();
   });
 });

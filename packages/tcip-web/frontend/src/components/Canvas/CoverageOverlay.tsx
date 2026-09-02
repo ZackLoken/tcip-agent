@@ -3,9 +3,11 @@
  * coordinates, culled to the viewport, listening={false} like every other canvas layer. Cell
  * fills and markers read from records the caller (AnnotateTab) already resolved through
  * useCoverageGrid/useRegionCompleteness; nothing here derives a cell state on its own. State is
- * never conveyed by fill color alone: swept also carries a dashed border, attested a solid one
- * (the active subject's a dotted stroke never marks the other), stale a strike-through, and a
- * saved count is a label rather than a third fill. Every border, dashed stroke and label draws
+ * never conveyed by fill color alone: a recorded swept cell carries a fill plus a dashed border,
+ * a pending one (seen locally, not yet acknowledged by the server, see coverageTracker.ts's
+ * `pending`) carries a short-dash border and no fill, attested carries a solid border (the
+ * active subject's a dotted stroke never marks the other), stale a strike-through, and a saved
+ * count is a label rather than a third fill. Every border, dashed stroke and label draws
  * with a two-tone halo (a dark line under the light one, the HaloLabel pattern already used for
  * shape names elsewhere on this canvas) so a mark reads on ground bright or dark, orchard mosaics
  * included. The overlay itself names none of these; the canvas chrome carries the key (see
@@ -79,6 +81,9 @@ export function CoverageOverlay(props: {
   /** Screen px per image px, so strokes and labels hold a constant screen size. */
   scale: number;
   swept: ReadonlySet<string>;
+  /** Swept cells not yet acknowledged by the server: drawn with a short-dash stroke and no
+   *  fill instead of the recorded fill, so pending and recorded never differ by fill alone. */
+  pending: ReadonlySet<string>;
   activeComplete: ReadonlySet<string>;
   activeStale: ReadonlySet<string>;
   otherComplete: ReadonlySet<string>;
@@ -102,21 +107,26 @@ export function CoverageOverlay(props: {
         const count = props.annotationCounts[cell.name] ?? 0;
         const labelFits = w * s >= CELL_LABEL_FLOOR_PX && h * s >= CELL_LABEL_FLOOR_PX;
         const dash: [number, number] = [4 * strokeW, 3 * strokeW];
+        const pendingDash: [number, number] = [1.5 * strokeW, 1.5 * strokeW];
+        const swept = props.swept.has(cell.name);
+        const pending = swept && props.pending.has(cell.name);
         const labelX = cell.x0 + 2 / s;
         const labelY = cell.y0 + 2 / s;
         const labelText = count > 0 ? `${cell.name} (${count})` : cell.name;
         const labelSize = LABEL_FONT_PX / s;
         return (
           <Group key={cell.name}>
-            {props.swept.has(cell.name) && (
+            {swept && (
               <>
-                <Rect
-                  x={cell.x0}
-                  y={cell.y0}
-                  width={w}
-                  height={h}
-                  fill={`rgba(${SWEPT_RGB}, 0.18)`}
-                />
+                {!pending && (
+                  <Rect
+                    x={cell.x0}
+                    y={cell.y0}
+                    width={w}
+                    height={h}
+                    fill={`rgba(${SWEPT_RGB}, 0.18)`}
+                  />
+                )}
                 <Rect
                   x={cell.x0 + strokeW}
                   y={cell.y0 + strokeW}
@@ -124,7 +134,7 @@ export function CoverageOverlay(props: {
                   height={Math.max(0, h - 2 * strokeW)}
                   stroke={`rgba(${HALO_RGB}, 0.85)`}
                   strokeWidth={strokeW * 2.2}
-                  dash={dash}
+                  dash={pending ? pendingDash : dash}
                 />
                 <Rect
                   x={cell.x0 + strokeW}
@@ -133,7 +143,7 @@ export function CoverageOverlay(props: {
                   height={Math.max(0, h - 2 * strokeW)}
                   stroke={`rgba(${SWEPT_RGB}, 0.95)`}
                   strokeWidth={strokeW}
-                  dash={dash}
+                  dash={pending ? pendingDash : dash}
                 />
               </>
             )}
