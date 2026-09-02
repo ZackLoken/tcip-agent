@@ -120,6 +120,57 @@ def _read_split_manifest_dir_or_none(split_dir: str | Path) -> dict | None:
     return manifest
 
 
+def compose_split_manifest(
+    out_dir: Path,
+    *,
+    seed: int,
+    group_by: str,
+    dataset_fingerprint: str | None,
+    subject: str | None,
+    attribute: str | None,
+    id_map: dict,
+    members: dict,
+    splits: dict[str, list[str]],
+    admission_counts: dict,
+    calibration_foreground_groups_by_date: dict,
+    realized_ratios: dict,
+    group_key_map: dict[str, str] | None = None,
+    origin: dict | None = None,
+) -> dict:
+    """The one place a ``split_manifest`` record is built and written under ``out_dir``.
+
+    ``make_splits``' own draw and ``freeze_split_manifest``'s frozen partition each compose
+    their own fields into this shape and call this to write it, so the two writers can never
+    disagree on what a ``split_manifest`` record carries. ``origin`` is present only for a
+    frozen manifest (``{"experiment_id", "frozen_at"}``), absent on a drawn one, so
+    :func:`read_split_manifest_dir` (and every reader through it) can tell the two apart.
+
+    Returns the manifest dict as written, the same one the caller's own result payload reads
+    fields off.
+    """
+    manifest: dict[str, Any] = {
+        "seed": seed,
+        "group_by": group_by,
+        "dataset_fingerprint": dataset_fingerprint,
+        "subject": subject,
+        "attribute": attribute,
+        "id_map": id_map,
+        "members": members,
+        "splits": splits,
+        "admission_counts": admission_counts,
+        "calibration_foreground_groups_by_date": calibration_foreground_groups_by_date,
+        "realized_ratios": realized_ratios,
+    }
+    if group_key_map:
+        manifest["group_key_map"] = group_key_map
+    if origin:
+        manifest["origin"] = origin
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    tcip_store.replace(split_manifest_key(out_dir), manifest)
+    return manifest
+
+
 def read_split_manifest_dir(split_dir: str | Path) -> dict:
     """The ``split_manifest`` record ``make_splits`` wrote under ``split_dir``, the one reader a
     run names its ``data.split.manifest_dir`` through.
@@ -164,6 +215,158 @@ def read_split_manifest_dir_checked(split_dir: str | Path) -> tuple[dict | None,
     except ValueError as exc:
         return None, str(exc)
     return manifest, None
+
+
+@mcp.tool()
+@audited
+def freeze_split_manifest(experiment_id: str, output_path: str | None = None) -> dict:
+    """Freeze a finished run's own drawn train/val partition into a ``split_manifest`` record,
+    so a later run can bind to the identical partition instead of drawing its own.
+
+    Reads the run's ``split.json`` (through ``read_split_manifest_checked``: a record that will
+    not decode refuses rather than reading as absent) and its durable config, and refuses,
+    naming the primitive, when: no split record exists for ``experiment_id`` or it does not
+    decode; the run was bound to a named manifest already (``manifest_binding``: bind to that
+    manifest directly instead); the split is spatial (region identities, not stems); the
+    validation came from ``data.val_images_dir`` (``resolved_group_by == "external"``: those
+    stems never lived under the training roots); the run's val side is empty (it trained without
+    validation, a partition no bind can use); the task is not ``detection``/``instance_seg``; the
+    config's ``data`` section carries no ``subject``, ``labels_dir``, ``images_dir`` or
+    ``id_map``; the labels changed since the run (``dataset_hash(labels_dir)`` now differs from
+    the one ``split.json`` recorded, both named); or a manifest already exists at the output
+    directory.
+
+    The frozen manifest's ``calibration`` side is always empty: freezing a training run's own
+    train/val draw records no calibration draw, so the calibration doors' own floor refuses any
+    calibration measurement against it by name, and this tool's own answer says so instead of
+    quietly minting a manifest that looks whole but cannot calibrate.
+
+    Args:
+        experiment_id: The finished run to freeze the drawn partition of.
+        output_path: Where to write the manifest. Defaults to
+            ``<dataset_root>/splits/frozen-<experiment_id>``, resolved from ``data.images_dir``
+            through ``dataset_root_of``; refused when that does not resolve (an images directory
+            outside the canonical ``<dataset_root>/images/...`` layout).
+    """
+    from tcip_mcp.dataset_layout import dataset_root_of
+    from tcip_mcp.experiments import config_key, read_member, read_split_manifest_checked
+    from tcip_mcp.pipelines.data.dataset_fingerprint import dataset_fingerprint
+    from tcip_mcp.pipelines.data.splits import manifest_date_key, member_identity
+    from tcip_mcp.pipelines.model_build import MODEL_SOURCE_KEY
+    from tcip_mcp.pipelines.resolution import dataset_hash as _dataset_hash
+    from tcip_mcp.pipelines.resolution import dataset_hash_and_label_digests
+
+    split, decode_error = read_split_manifest_checked(experiment_id)
+    if decode_error is not None:
+        return {"error": f"the split record for {experiment_id!r} could not be read: {decode_error}"}
+    if not split:
+        return {"error": f"no split record for {experiment_id!r}: this run wrote no split.json "
+                         "(it never reached a real dataset build), so there is no drawn "
+                         "partition to freeze."}
+    if split.get("manifest_binding"):
+        return {"error": f"{experiment_id!r} was bound to a split manifest already "
+                         f"({split['manifest_binding'].get('manifest_dir')!r}): bind a later run "
+                         "to that manifest directly instead of freezing this one's."}
+    resolved_group_by = split.get("group_by")
+    if resolved_group_by == "spatial_strip":
+        return {"error": f"{experiment_id!r}'s split is spatial (region identities, not stems): "
+                         "freeze_split_manifest binds a stem-keyed partition, which a spatial "
+                         "split never draws."}
+    if resolved_group_by == "external":
+        return {"error": f"{experiment_id!r}'s validation came from data.val_images_dir "
+                         "(resolved_group_by='external'): those stems never lived under the "
+                         "training roots, so there is no partition of this dataset to freeze."}
+    train_stems, val_stems = split.get("train") or [], split.get("val") or []
+    if not val_stems:
+        return {"error": f"{experiment_id!r} trained without validation (an empty val side): "
+                         "a partition no bind can use."}
+
+    config = read_member(config_key(experiment_id), {})
+    config = config if isinstance(config, dict) else {}
+    model_source = config.get(MODEL_SOURCE_KEY) or {}
+    data_cfg = config.get("data") or {}
+    task = model_source.get("task") or data_cfg.get("task", "detection")
+    if task not in ("detection", "instance_seg"):
+        return {"error": f"{experiment_id!r} trained task={task!r}; freeze_split_manifest binds "
+                         "only detection and instance_seg runs, the tasks a split manifest "
+                         "admits through."}
+    subject, labels_dir, images_dir, id_map = (
+        data_cfg.get("subject"), data_cfg.get("labels_dir"), data_cfg.get("images_dir"),
+        data_cfg.get("id_map"),
+    )
+    missing = [name for name, value in (
+        ("subject", subject), ("labels_dir", labels_dir), ("images_dir", images_dir),
+        ("id_map", id_map),
+    ) if not value]
+    if missing:
+        return {"error": f"{experiment_id!r}'s durable config carries no {missing}: "
+                         "freeze_split_manifest needs every one of them to compose a manifest."}
+
+    labels_hash_at_split = split.get("dataset_hash")
+    labels_hash_now = _dataset_hash(labels_dir)
+    if labels_hash_at_split is not None and labels_hash_now != labels_hash_at_split:
+        return {"error": f"the labels under {labels_dir!r} changed since {experiment_id!r} "
+                         f"trained (dataset_hash was {labels_hash_at_split!r}, is now "
+                         f"{labels_hash_now!r}): freeze a run whose labels have not moved, or "
+                         "draw a fresh split over the current data."}
+
+    date = split.get("date") or None
+    date_key = manifest_date_key(date)
+
+    dataset_root = dataset_root_of(images_dir)
+    if dataset_root is None:
+        return {"error": f"data.images_dir={images_dir!r} does not resolve under a dataset "
+                         "root (dataset_root_of)."}
+    if output_path is None:
+        output_path = str(dataset_root / "splits" / f"frozen-{experiment_id}")
+    out_dir = Path(output_path)
+    existing, existing_error = read_split_manifest_dir_checked(out_dir)
+    if existing is not None or existing_error is not None:
+        return {"error": f"a split manifest already exists at {output_path!r}: "
+                         f"{existing_error or 'freeze_split_manifest never overwrites one.'}"}
+
+    all_stems = sorted(set(train_stems) | set(val_stems))
+    date_hash, date_label_digests = dataset_hash_and_label_digests(labels_dir, all_stems)
+    members = {date_key: {
+        "labels_root": str(labels_dir), "images_root": str(images_dir),
+        "dataset_hash": date_hash, "label_digests": date_label_digests,
+    }}
+    splits = {
+        "train": sorted(member_identity(date, s) for s in train_stems),
+        "val": sorted(member_identity(date, s) for s in val_stems),
+        "calibration": [],
+    }
+    total = len(train_stems) + len(val_stems)
+    realized_ratios = {
+        "train": len(train_stems) / total if total else 0.0,
+        "val": len(val_stems) / total if total else 0.0,
+        "calibration": 0.0,
+    }
+    raw_group_key_map = split.get("group_key_map")
+    group_key_map = (
+        {member_identity(date, stem): key for stem, key in raw_group_key_map.items()}
+        if raw_group_key_map else None
+    )
+    try:
+        fingerprint = dataset_fingerprint(dataset_root)
+    except tcip_store.SchemaVersionRefused as exc:
+        return {"error": f"cannot fingerprint the dataset for the frozen manifest: {exc}"}
+
+    from datetime import datetime, timezone
+
+    manifest = compose_split_manifest(
+        out_dir, seed=int(split.get("seed", 42)), group_by=resolved_group_by or "stem",
+        dataset_fingerprint=fingerprint, subject=subject, attribute=data_cfg.get("attribute"),
+        id_map=id_map, members=members, splits=splits, admission_counts={},
+        calibration_foreground_groups_by_date={date_key: 0}, realized_ratios=realized_ratios,
+        group_key_map=group_key_map,
+        origin={"experiment_id": experiment_id,
+               "frozen_at": datetime.now(timezone.utc).isoformat()},
+    )
+    return {
+        "manifest_dir": str(out_dir), "train": len(train_stems), "val": len(val_stems),
+        "calibration": 0, "date": date, "origin": manifest["origin"],
+    }
 
 
 ROOT_LABEL_CANDIDATES = ("annotations.json", "labels.json", "instances.json")
@@ -862,24 +1065,13 @@ def make_splits(
         fingerprint = dataset_fingerprint(folder_path)
     except tcip_store.SchemaVersionRefused as exc:
         return {"error": f"cannot fingerprint the dataset for the split manifest: {exc}"}
-    manifest: dict[str, Any] = {
-        "seed": seed,
-        "group_by": resolved_group_by,
-        "dataset_fingerprint": fingerprint,
-        "subject": subject,
-        "attribute": attribute,
-        "id_map": id_map,
-        "members": members,
-        "splits": {k: sorted(parts[k]) for k in kept_splits},
-        "admission_counts": admission_counts,
-        "calibration_foreground_groups_by_date": calibration_foreground_groups_by_date,
-        "realized_ratios": realized_ratios,
-    }
-    if group_key_map:
-        manifest["group_key_map"] = group_key_map
-
-    out_dir.mkdir(parents=True, exist_ok=True)
-    tcip_store.replace(split_manifest_key(out_dir), manifest)
+    compose_split_manifest(
+        out_dir, seed=seed, group_by=resolved_group_by, dataset_fingerprint=fingerprint,
+        subject=subject, attribute=attribute, id_map=id_map, members=members,
+        splits={k: sorted(parts[k]) for k in kept_splits}, admission_counts=admission_counts,
+        calibration_foreground_groups_by_date=calibration_foreground_groups_by_date,
+        realized_ratios=realized_ratios, group_key_map=group_key_map,
+    )
 
     counts = annotation_counts or {}
     result = {
