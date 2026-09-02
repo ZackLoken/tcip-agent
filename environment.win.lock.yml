@@ -1,4 +1,5 @@
-﻿name: tcip-agent
+﻿# Frozen pip/conda export from one Windows machine, predating environment.yml's Node and OpenCV corrections; kept only for the mypy pin CI cites, never as a path to create an environment.
+name: tcip-agent
 channels:
   - conda-forge
   - defaults

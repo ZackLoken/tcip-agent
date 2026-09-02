@@ -15,7 +15,8 @@ from pathlib import Path
 
 import numpy as np
 from scipy.spatial import ConvexHull
-from matplotlib.path import Path as MplPath
+
+from tcip_annotation import Polygon, point_in_polygon
 
 from _paths import CATKIN_DATE, repo_root, vf_root
 
@@ -70,8 +71,9 @@ def foreground_mask(centers: np.ndarray, gt_centers: np.ndarray, dilate: float) 
     hull_pts = gt_centers[hull.vertices]
     centroid = hull_pts.mean(axis=0)
     dilated = hull_pts + (hull_pts - centroid) * (dilate / np.linalg.norm(hull_pts - centroid, axis=1, keepdims=True).clip(min=1e-6))
-    path = MplPath(dilated)
-    return path.contains_points(centers)
+    ring = [(float(x), float(y)) for x, y in dilated]
+    polygon = Polygon(rings=[ring])
+    return np.array([point_in_polygon(float(cx), float(cy), polygon) for cx, cy in centers], dtype=bool)
 
 
 def main() -> None:
