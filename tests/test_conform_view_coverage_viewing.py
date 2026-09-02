@@ -144,6 +144,24 @@ def test_an_old_swept_list_is_dropped_and_its_count_reported(tmp_path: Path):
     assert "cells_swept" not in record
 
 
+def test_a_half_migrated_records_seen_at_scale_carries_through_unblanked(tmp_path: Path):
+    """A record already carrying ``cells_seen_at_scale`` (written under the new shape, only its
+    ``viewing`` still old) keeps those values rather than being reset to empty."""
+    _bind_sqlite()
+    module = _load_script()
+    record = _old_shape_record()
+    del record["cells_swept"]
+    record["cells_seen_at_scale"] = {"A1": 0.6, "B1": 0.3}
+    _seed_fresh(tmp_path, "bush/2026-03-01", "plot.tif", record)
+
+    outcomes, refused = module.conform_root(tmp_path, plan=False)
+
+    assert refused is False
+    assert outcomes == ["bush/2026-03-01/plot.tif: conformed viewing"]
+    stored = ts.read(view_coverage_key(tmp_path))["bush/2026-03-01"]["plot.tif"]
+    assert stored["cells_seen_at_scale"] == {"A1": 0.6, "B1": 0.3}
+
+
 def test_an_empty_viewing_conforms_to_all_nulls_and_the_route_serves_it(tmp_path: Path):
     _bind_sqlite()
     module = _load_script()

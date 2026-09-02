@@ -392,6 +392,35 @@ class TestCompletenessCountsAreBestEffort:
         assert body["counts_error"]
         assert str(label_path) in body["counts_error"]
 
+    def test_a_raced_or_unreadable_label_read_degrades_rather_than_500ing(
+        self, client, dated_dataset, monkeypatch,
+    ):
+        """A raw FileNotFoundError/OSError out of the label read (the file removed between the
+        is_file() check and the read, say) degrades the bar and counts the same way an
+        UnreadableLabelDocument already does, rather than propagating into a 500. Neither
+        pathlib's is_file() nor tcip_annotation's own reader lets a plain directory reach this
+        exact exception, so the raw error is induced directly at its own call site."""
+        root, path = dated_dataset
+        label_path = root / "annotations" / "2026-03-01" / "plot.json"
+        label_path.parent.mkdir(parents=True, exist_ok=True)
+        label_path.write_text("{}", encoding="utf-8")
+
+        import tcip_annotation.json_io as json_io_module
+
+        def _raise(*args, **kwargs):
+            raise FileNotFoundError("plot.json vanished mid-read")
+
+        monkeypatch.setattr(json_io_module, "read_annotations", _raise)
+
+        unraising = TestClient(app, base_url="http://127.0.0.1", raise_server_exceptions=False)
+        got = unraising.get(
+            "/api/coverage/completeness", params={"path": path, "subject": "catkin"})
+        assert got.status_code == 200, got.text
+        body = got.json()
+        assert body["working_scale"] == {}
+        assert body["working_scale_error"]
+        assert body["counts_error"]
+
     def test_an_unreadable_label_still_refuses_when_a_record_depends_on_it(
         self, client, dated_dataset,
     ):
@@ -597,6 +626,27 @@ class TestCoverageRecord:
         assert resp.status_code == 200, resp.text
         store = ts.read(view_coverage_key(tmp_path / "flat"))
         assert list(store) == ["bush"]
+
+    def test_an_explicit_null_date_against_a_dated_path_is_refused(self, client, dated_dataset):
+        _root, path = dated_dataset
+        grid = _grid(client, path, tile_size=64)
+        resp = client.post("/api/coverage", json=_post_body(path, ["A1"], grid, date=None))
+        assert resp.status_code == 400
+        assert "2026-03-01" in resp.json()["detail"]
+        assert "None" in resp.json()["detail"]
+
+    def test_a_date_against_a_dateless_path_is_refused(self, client, tmp_path):
+        img_dir = tmp_path / "flat" / "images"
+        img_dir.mkdir(parents=True)
+        path = img_dir / "frame.tif"
+        Image.fromarray(np.zeros((80, 100, 3), dtype=np.uint8)).save(path)
+        c = TestClient(app, base_url="http://127.0.0.1")
+        grid = _grid(c, str(path), tile_size=64)
+        resp = c.post("/api/coverage",
+                      json=_post_body(str(path), ["A1"], grid, date="2026-03-01"))
+        assert resp.status_code == 400
+        assert "2026-03-01" in resp.json()["detail"]
+        assert "None" in resp.json()["detail"]
 
     def test_cells_outside_the_grid_are_refused(self, client, dated_dataset):
         _root, path = dated_dataset
@@ -876,10 +926,37 @@ class TestCoverageRecord:
         unraising = TestClient(app, base_url="http://127.0.0.1", raise_server_exceptions=False)
         resp = unraising.post("/api/coverage", json=_post_body(path, ["A1"], grid))
         assert resp.status_code == 500
+        detail = resp.json()["detail"]
+        assert detail["error"] == "audit_entry_not_written"
+        assert "disk full" in detail["message"]
 
         got = client.get("/api/coverage", params={
             "path": path, "subject": "bush", "date": "2026-03-01"})
         assert got.json()["coverage"]["cells_served_at_native"] == ["A1"]
+        assert _audit_entries(root, "gui_view_coverage") == []
+
+    def test_a_retry_of_the_same_payload_after_the_audit_gap_writes_and_audits_nothing(
+        self, client, dated_dataset, monkeypatch,
+    ):
+        """The 500's own guarantee, proven: the record already committed on the first post, so
+        an identical retry merges to no change and neither writes nor audits -- the caller's own
+        retry can never be what recovers the missing line."""
+        from tcip_mcp.audit import AuditEntryNotWritten
+
+        root, path = dated_dataset
+        grid = _grid(client, path, tile_size=64)
+
+        def _raise(*args, **kwargs):
+            raise AuditEntryNotWritten("gui_view_coverage", RuntimeError("disk full"))
+
+        import tcip_mcp.audit as audit_module
+
+        monkeypatch.setattr(audit_module, "record_event_or_raise", _raise)
+        unraising = TestClient(app, base_url="http://127.0.0.1", raise_server_exceptions=False)
+        unraising.post("/api/coverage", json=_post_body(path, ["A1"], grid))
+
+        resp = unraising.post("/api/coverage", json=_post_body(path, ["A1"], grid))
+        assert resp.status_code == 200, resp.text
         assert _audit_entries(root, "gui_view_coverage") == []
 
 

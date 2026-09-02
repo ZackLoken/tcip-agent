@@ -18,8 +18,10 @@ numbers) and of ``display_bounds`` (``lo,hi;lo,hi`` to pairs) to the new values,
 key from ``viewing`` outright (the stored bar was always the latest session's, never a bound any
 particular cell was actually swept under), and drops a stored ``cells_swept`` name list from the
 record, reporting its count: no scale can be anchored to a cell swept under a bar the record no
-longer holds, so those names carry to ``cells_seen_at_scale`` (which starts empty, not
-back-filled) rather than being fabricated a scale they were never recorded against.
+longer holds, so those names are never fabricated a scale they were never recorded against. A
+record that already carries a ``cells_seen_at_scale`` mapping (a half-migrated write already
+under the new shape, needing only its ``viewing`` conformed) carries that mapping through
+unchanged rather than being blanked back to empty.
 
     python scripts/conform_view_coverage_viewing.py <dataset_root> [<dataset_root> ...]
     python scripts/conform_view_coverage_viewing.py --plan <dataset_root>
@@ -144,10 +146,13 @@ def _conform_record(record: dict, *, plan: bool) -> tuple[str, dict | None]:
     if old_swept is not None and not isinstance(old_swept, list):
         raise ValueError(f"cells_swept is not a list: {old_swept!r}")
     dropped_count = len(old_swept) if isinstance(old_swept, list) else 0
+    existing_seen = record.get("cells_seen_at_scale")
+    if existing_seen is not None and not isinstance(existing_seen, dict):
+        raise ValueError(f"cells_seen_at_scale is not a mapping: {existing_seen!r}")
     reshaped = {
         "grid": record.get("grid"),
         "cells_served_at_native": record.get("cells_served_at_native") or [],
-        "cells_seen_at_scale": {},
+        "cells_seen_at_scale": existing_seen or {},
         "viewing": reshaped_viewing,
         "updated_at": record.get("updated_at"),
     }

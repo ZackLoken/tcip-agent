@@ -243,9 +243,9 @@ def saved_extents(annotations: list[Annotation], subject: str) -> list[float]:
 
     A :class:`Point` and a geometry-less annotation contribute nothing: neither has a bounding
     box, and a point's tiny nominal extent would pull the median toward a scale no box or polygon
-    on the image was actually judged at. The longer side is the ruling's own word for it,
-    "spans": the box or polygon's longer edge is what a breeder's eye has to take in to judge the
-    object legible, not its narrower one.
+    on the image was actually judged at. The longer side is what "spans" names: the box or
+    polygon's longer edge is what a breeder's eye has to take in to judge the object legible, not
+    its narrower one.
     """
     extents: list[float] = []
     for a in annotations:
@@ -265,14 +265,13 @@ def working_scale_bar(
     """The view scale at which the median of ``extents`` spans ``judged_span_px`` screen pixels,
     or ``None`` for no extents at all.
 
-    One median over every extent handed in (the ruling's own measure, per image and per
-    subject): a per-cell bar would be a different measure over too few annotations per cell to
-    be a real median, and is not computed here. The value is not clamped to the viewer's zoom
-    ladder or to the image's own fit scale; a caller that wants to state what an out-of-range bar
-    means does so on the served value, not by silently bending it back into range. A single
-    whole-frame annotation on an otherwise unannotated image yields a bar every ordinary view
-    meets, the ruling's own consequence for a large object: the median moves as more annotations
-    are saved, never adjusted here to soften that.
+    One median over every extent handed in, per image and per subject: a per-cell bar would be a
+    different measure over too few annotations per cell to be a real median, and is not computed
+    here. The value is not clamped to the viewer's zoom ladder or to the image's own fit scale; a
+    caller that wants to state what an out-of-range bar means does so on the served value, not by
+    silently bending it back into range. A single whole-frame annotation on an otherwise
+    unannotated image yields a bar every ordinary view meets, an accepted consequence for a large
+    object: the median moves as more annotations are saved, never adjusted here to soften that.
     """
     if not extents:
         return None

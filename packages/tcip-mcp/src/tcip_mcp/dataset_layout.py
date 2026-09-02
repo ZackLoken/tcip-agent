@@ -482,19 +482,21 @@ def read_image_status_store(dataset_root: str | Path) -> dict:
 
 def view_coverage_path(dataset_root: str | Path) -> Path:
     """``<dataset_root>/.tcip/state/view_coverage.json``: per-image record of two per-cell facts,
-    the reference-grid cells the GUI has served at native resolution (a delivery fact) and the
-    cells swept in the viewport at or above the breeder's own working scale (a sweep fact).
-    Neither is a claim about what the breeder examined.
+    the reference-grid cells the GUI has served at native resolution (a delivery fact) and, per
+    cell, the tightest scale bound at which every one of its sub-cells has sat fully on screen
+    (``cells_seen_at_scale``). Neither is a claim about what the breeder examined; whether a seen
+    cell counts as swept is derived in the browser against a subject's working-scale bar, never
+    stored here.
 
     Shape: ``{bucket: {image_name: record}}``, bucket via :func:`status_bucket`; the record's own
     shape is declared once, by the web layer's coverage models (``CoverageRecord``: ``grid``,
-    ``cells_served_at_native``, ``cells_swept``, ``viewing``, ``updated_at``), with ``viewing`` the
-    display context that layer's own ``CoverageViewing`` declares (bands, stretch, stats_source,
-    display_bounds, base_served_size, and working_scale_bar as ``{value, source}``). Each record
-    carries the grid geometry it was accumulated against, so a derivation change can never silently
-    misread an old cell list. Advisory only: training never reads this store, and a Complete with
-    unswept cells warns in the GUI rather than blocks. The negative definition
-    (:func:`image_status_path`) is untouched by anything recorded here.
+    ``cells_served_at_native``, ``cells_seen_at_scale``, ``viewing``, ``updated_at``), with
+    ``viewing`` the display context that layer's own ``CoverageViewing`` declares (bands, stretch,
+    stats_source, display_bounds, base_served_size). Each record carries the grid geometry it was
+    accumulated against, so a derivation change can never silently misread an old cell list.
+    Advisory only: training never reads this store, and a Complete with unswept cells warns in the
+    GUI rather than blocks. The negative definition (:func:`image_status_path`) is untouched by
+    anything recorded here.
     """
     return _entry_path(_STATE_DOC, dataset_root, _VIEW_COVERAGE_PARTS)
 
