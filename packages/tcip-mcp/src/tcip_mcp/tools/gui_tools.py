@@ -161,12 +161,13 @@ def _focus_annotate(
     instead (by image file name, not by document path) in the result's ``unreadable``, so one bad
     file elsewhere on the date never closes the agent's own navigation surface for it.
 
-    The ``mode`` vocabulary this validates against restates ``tcip_web.state.AnnotateMode``: this
-    package cannot import ``tcip_web`` (the dependency runs the other way), so the check is
-    restated here rather than shared.
+    The ``mode`` vocabulary this validates against is ``tcip_mcp.web_client.AnnotateMode``, the
+    same Literal ``tcip_web.state.GuiState.mode`` holds: this package cannot import ``tcip_web``
+    (the dependency runs the other way), so the vocabulary is declared here and both sides read
+    the one Literal rather than restating it.
     """
     from tcip_mcp.dataset_layout import annotation_dir, image_dir, label_filename
-    from tcip_mcp.web_client import PANEL_EVENT_ANNOTATE_FOCUS, post_panel_event
+    from tcip_mcp.web_client import ANNOTATE_MODES, PANEL_EVENT_ANNOTATE_FOCUS, post_panel_event
 
     idir = Path(image_dir(dataset_root, date))
     if not idir.is_dir():
@@ -207,8 +208,9 @@ def _focus_annotate(
     resolved_task = tasks[target_name]
     if mode is None:
         mode = _TASK_MODE.get(resolved_task or "", "box")
-    if mode not in ("box", "polygon", "point"):
-        return {"error": f"mode must be 'box', 'polygon' or 'point', got {mode!r}"}
+    if mode not in ANNOTATE_MODES:
+        vocabulary = ", ".join(repr(m) for m in ANNOTATE_MODES)
+        return {"error": f"mode must be one of {vocabulary}, got {mode!r}"}
 
     payload = {
         "project_root": project_root, "dataset_root": dataset_root,

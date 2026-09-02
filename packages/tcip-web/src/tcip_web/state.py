@@ -10,21 +10,17 @@ from __future__ import annotations
 import asyncio
 import logging
 from pathlib import Path
-from typing import Any, Literal, Optional
+from typing import Any, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from tcip_store import StoreError, read, replace
 
-from tcip_mcp.web_client import ActiveTab, canvas_open_binding_key, gui_snapshot_key
+from tcip_mcp.web_client import ActiveTab, AnnotateMode, canvas_open_binding_key, gui_snapshot_key
 from tcip_mcp.web_client import TAB_NAMES as TAB_NAMES
 
 logger = logging.getLogger(__name__)
 
 PERSIST_DEBOUNCE_SECONDS = 0.5
-
-AnnotateMode = Literal["box", "polygon", "point", "map"]
-"""The Annotate canvas's tool modes: the vocabulary ``GuiState.mode`` holds. The first three
-draw; ``map`` navigates the coverage lattice (a click opens a cell's tile) and authors nothing."""
 
 
 class GuiMutationInvalid(ValueError):
