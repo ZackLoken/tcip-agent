@@ -602,3 +602,22 @@ def test_resolver_selection_disjointness_is_none_for_resolve_scale():
     from tcip_mcp.pipelines.resolution import resolver_selection_disjointness
 
     assert resolver_selection_disjointness({"gate_evidence": {}}, "resolve_scale") is None
+
+
+# --- every real reference is reachable through the delivery gate's own dimension table ---
+
+def test_every_validated_shippable_reference_clears_some_gate_dimension():
+    """Coverage of an invariant that already holds at HEAD: VALIDATED_SHIPPABLE is "every real
+    (non-false) reference across every kind", and _DIMENSION_REFERENCES is what check_delivery_gate
+    actually reads to decide whether a caller-recorded reference clears a dimension. A reference
+    could be added to one table and not the other by mistake; this pins them to agreeing, so a
+    real, accepted reference is never invisible to the gate that is supposed to recognize it.
+    """
+    from tcip_mcp.pipelines.resolution import VALIDATED_SHIPPABLE, _DIMENSION_REFERENCES
+
+    reachable = {reference for refs in _DIMENSION_REFERENCES.values() for reference in refs}
+    missing = [name for name in VALIDATED_SHIPPABLE if name not in reachable]
+    assert not missing, (
+        f"{missing} are in VALIDATED_SHIPPABLE but no _DIMENSION_REFERENCES dimension accepts "
+        "them, so check_delivery_gate can never clear a dimension with this reference"
+    )
