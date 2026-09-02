@@ -73,6 +73,9 @@ human approval prompt, and a `cd`-then-relative write is an accepted residual of
   not a bug to route around. The Results doors go further: they serve only the project the GUI has
   open (`StateStore.project_root`, set by the guarded `/dataset/select`) and refuse evidence that
   does not belong to it.
+- A path a route reads out of the platform's own records (a manifest directory an experiment
+  config names, say) is trusted for reading and never for writing; `assert_path_allowed` is for
+  a client-supplied path, not this kind.
 - Under pytest or a starlette `TestClient` the app refuses to start unless `TCIP_WORKSPACE` is
   set (`app.WorkspaceUnsetUnderTest`); set it and `TCIP_STATE_ROOT` to scratch directories
   before starting one.
