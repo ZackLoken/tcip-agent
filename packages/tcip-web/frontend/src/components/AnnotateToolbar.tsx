@@ -293,6 +293,7 @@ export function AnnotateToolbar({
           <button
             aria-pressed={mode === "box"}
             onClick={() => setMode("box")}
+            title="Box: drag a rectangle, release to draw"
             className={`flex h-6 items-center gap-1.5 rounded-[4px] px-2.5 text-[12px] font-semibold transition-colors ${
               mode === "box" ? "bg-tcip-accent text-white" : "text-tcip-muted hover:text-tcip-fg"
             }`}
@@ -313,6 +314,7 @@ export function AnnotateToolbar({
           <button
             aria-pressed={mode === "polygon"}
             onClick={() => setMode("polygon")}
+            title="Polygon: click to lay vertices, double-click to close"
             className={`flex h-6 items-center gap-1.5 rounded-[4px] px-2.5 text-[12px] font-semibold transition-colors ${
               mode === "polygon"
                 ? "bg-tcip-accent text-white"

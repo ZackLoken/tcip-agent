@@ -10,16 +10,21 @@
  * like the app's other disclosure panels, remembered per session the way the overlay toggle
  * already is.
  *
+ * The status announcement, the read-error notice and the previous-lattice notices render as their
+ * own blocks above the collapsible panel, never inside its body: a remembered collapse must never
+ * hide a refusal or an announcement from a breeder who reopens the image later in the session.
+ *
  * The attestation control's label always states the write it performs and the subject it writes
  * for, read from the raw stored set: "Attest <cell> complete for <subject>" when the cell has
  * never been attested, "Unattest <cell> for <subject>" when it is attested and fresh, "Re-attest
  * <cell> for <subject> (changed since attested)" when it is stale. It is offered only while the
- * overlay is on, since attesting a cell the breeder cannot see is acting on an unseen state; with
- * the overlay off the chrome says so in one line instead. When the current grid differs from an
- * existing record's grid, the first press only arms a confirmation (the write would discard every
- * attestation made on the previous lattice) with an explicit Cancel beside it; a second press on
- * the same control performs it. The armed state, its cancellation and every error are announced
- * (role="status") for a screen-reader user who is not looking at the panel.
+ * overlay is on and can draw, since attesting a cell the breeder cannot see is acting on an unseen
+ * state; on a raster with no drawable overlay (a single cell, or no grid at all) the control is
+ * offered directly, since there is nothing to hide it behind. When the current grid differs from
+ * an existing record's grid, the first press only arms a confirmation (the write would discard
+ * every attestation made on the previous lattice) with an explicit Cancel beside it; a second
+ * press on the same control performs it. The armed state, its cancellation and every error are
+ * announced (role="status") for a screen-reader user who is not looking at the panel.
  */
 
 import { useEffect, useId, useState } from "react";
@@ -27,13 +32,21 @@ import { useEffect, useId, useState } from "react";
 import { CollapsibleSection } from "@/components/CollapsibleSection";
 import type { OtherLatticeAttestation } from "@/hooks/useRegionCompleteness";
 import { useDisclosure } from "@/hooks/useDisclosure";
+import { breederReadErrorReason } from "@/lib/coverage";
 
 /** Keyboard-operable disclosure for the overlay's marks, the pattern CollapsibleSection already
- *  uses elsewhere: a real button toggles a named region, no hover required. The overlay itself
- *  names none of these; this is the one place a breeder can look one up. */
-function CoverageKey() {
+ *  uses elsewhere: a real button toggles a named region, no hover required. Opens upward from the
+ *  panel's own header, since the panel floats near the bottom of the canvas and a downward-opening
+ *  panel runs past the window edge; closes whenever the surrounding chrome collapses, since a
+ *  reader who collapsed the chrome did not ask to keep this dropdown up. */
+function CoverageKey(props: { panelOpen: boolean }) {
   const [open, setOpen] = useState(false);
   const regionId = useId();
+
+  useEffect(() => {
+    if (!props.panelOpen) setOpen(false);
+  }, [props.panelOpen]);
+
   return (
     <div className="relative">
       <button
@@ -50,7 +63,7 @@ function CoverageKey() {
           id={regionId}
           role="region"
           aria-label="Coverage overlay key"
-          className="absolute right-0 top-full z-30 mt-1 w-56 rounded-md border border-tcip-border-hover bg-tcip-panel p-2.5 text-[10px] text-tcip-fg shadow-lg"
+          className="absolute bottom-full right-0 z-30 mb-1 w-56 rounded-md border border-tcip-border-hover bg-tcip-panel p-2.5 text-[10px] text-tcip-fg shadow-lg"
         >
           <ul className="space-y-1">
             <li>swept: the recorded sweep history, any session</li>
@@ -73,12 +86,14 @@ function attestLabel(subject: string, cell: string, complete: boolean, stale: bo
 
 /** The lattice states that hold at least one cell, one line each, for a screen-reader user who
  *  cannot see the overlay's canvas pixels ("swept: B1, B2", "saved for fruit: A1 (2)",
- *  "attested: B2", "changed since attested: B2"). Cell names sorted for a stable reading order. */
+ *  "attested: B2", "attested for leaf: B1", "changed since attested: B2"). Cell names sorted for
+ *  a stable reading order, other-subject lines sorted by subject name. */
 function stateLines(props: {
   subject: string | null;
   swept: ReadonlySet<string>;
   activeComplete: ReadonlySet<string>;
   activeStale: ReadonlySet<string>;
+  otherComplete: Readonly<Record<string, readonly string[]>>;
   annotationCounts: Record<string, number>;
 }): string[] {
   const lines: string[] = [];
@@ -96,6 +111,9 @@ function stateLines(props: {
   }
   const attested = Array.from(props.activeComplete).sort();
   if (attested.length) lines.push(`attested: ${attested.join(", ")}`);
+  for (const subj of Object.keys(props.otherComplete).sort()) {
+    lines.push(`attested for ${subj}: ${props.otherComplete[subj].join(", ")}`);
+  }
   const stale = Array.from(props.activeStale).sort();
   if (stale.length) lines.push(`changed since attested: ${stale.join(", ")}`);
   return lines;
@@ -107,6 +125,10 @@ export function CoverageChrome(props: {
   gridFetchError: string | null;
   readError: string | null;
   countsError: string | null;
+  /** Whether this raster's grid can actually draw an overlay (more than one cell, grid loaded):
+   *  the overlay toggle is offered only then, and the attest control skips the overlay-on gate
+   *  when it is false, since there is no overlay for it to hide the cell behind. */
+  canOverlay: boolean;
   overlayOn: boolean;
   onToggleOverlay: () => void;
   currentCellName: string | null;
@@ -119,6 +141,8 @@ export function CoverageChrome(props: {
   swept: ReadonlySet<string>;
   activeComplete: ReadonlySet<string>;
   activeStale: ReadonlySet<string>;
+  /** Another subject's complete cells on the current grid, keyed by that subject's name. */
+  otherComplete: Readonly<Record<string, readonly string[]>>;
   annotationCounts: Record<string, number>;
   onAttest: (complete: boolean) => void;
 }) {
@@ -170,107 +194,115 @@ export function CoverageChrome(props: {
     swept: props.swept,
     activeComplete: props.activeComplete,
     activeStale: props.activeStale,
+    otherComplete: props.otherComplete,
     annotationCounts: props.annotationCounts,
   });
 
+  const readErrorReason = props.readError ? breederReadErrorReason(props.readError) : null;
+  const noticeClass =
+    "rounded-md border bg-tcip-panel/95 px-3 py-1.5 text-[11px] shadow-lg backdrop-blur";
+
   return (
-    <CollapsibleSection
-      className="absolute bottom-3 right-3 z-20 w-64 rounded-md border border-tcip-border bg-tcip-panel/95 px-3 py-2 text-[11px] text-tcip-fg shadow-lg backdrop-blur"
-      title={props.subject ? `Coverage for ${props.subject}` : "Coverage grid"}
-      right={
-        <div className="flex items-center gap-1.5">
-          <CoverageKey />
-          <button
-            type="button"
-            aria-pressed={props.overlayOn}
-            onClick={props.onToggleOverlay}
-            className={`rounded border px-2 py-0.5 text-[10px] font-semibold transition-colors ${
-              props.overlayOn
-                ? "border-tcip-accent/55 bg-tcip-accent/20 text-tcip-fg"
-                : "border-tcip-border bg-tcip-bg text-tcip-muted hover:text-tcip-fg"
-            }`}
-          >
-            {props.overlayOn ? "Overlay on" : "Overlay off"}
-          </button>
-        </div>
-      }
-      open={panelOpen}
-      onToggle={togglePanel}
-    >
-      <div className="flex flex-col gap-2">
-        <p role="status" className="sr-only">
-          {announcement}
+    <div className="absolute bottom-3 right-3 z-20 flex w-64 flex-col items-stretch gap-1.5">
+      <p role="status" className="sr-only">
+        {announcement}
+      </p>
+      {readErrorReason && (
+        <p role="status" className={`${noticeClass} border-tcip-fp/40 text-tcip-fp`}>
+          this image&apos;s labels could not be read, so nothing can be attested until they are
+          fixed: {readErrorReason}
         </p>
+      )}
+      {props.otherLattice && (
+        <p className={`${noticeClass} border-tcip-border text-tcip-warn`}>
+          {props.otherLattice.count} cell{props.otherLattice.count === 1 ? "" : "s"} attested on a
+          previous lattice ({props.otherLattice.cols}x{props.otherLattice.rows}).
+        </p>
+      )}
+      {props.sweptOtherLattice && (
+        <p className={`${noticeClass} border-tcip-border text-tcip-muted`}>
+          {props.sweptOtherLattice.count} cell{props.sweptOtherLattice.count === 1 ? "" : "s"} swept
+          on a previous lattice ({props.sweptOtherLattice.cols}x{props.sweptOtherLattice.rows}).
+        </p>
+      )}
+      <CollapsibleSection
+        className="w-64 rounded-md border border-tcip-border bg-tcip-panel/95 px-3 py-2 text-[11px] text-tcip-fg shadow-lg backdrop-blur"
+        title={props.subject ? `Coverage for ${props.subject}` : "Coverage grid"}
+        right={
+          <div className="flex items-center gap-1.5">
+            <CoverageKey panelOpen={panelOpen} />
+            {props.canOverlay && (
+              <button
+                type="button"
+                aria-pressed={props.overlayOn}
+                onClick={props.onToggleOverlay}
+                className={`rounded border px-2 py-0.5 text-[10px] font-semibold transition-colors ${
+                  props.overlayOn
+                    ? "border-tcip-accent/55 bg-tcip-accent/20 text-tcip-fg"
+                    : "border-tcip-border bg-tcip-bg text-tcip-muted hover:text-tcip-fg"
+                }`}
+              >
+                {props.overlayOn ? "Overlay on" : "Overlay off"}
+              </button>
+            )}
+          </div>
+        }
+        open={panelOpen}
+        onToggle={togglePanel}
+      >
+        <div className="flex flex-col gap-2">
+          {props.gridFetchError ? (
+            <p className="text-tcip-fp">coverage grid unavailable: {props.gridFetchError}</p>
+          ) : props.derivation ? (
+            <p className="text-tcip-muted">{props.derivation}. A cell is not a training tile.</p>
+          ) : null}
 
-        {props.gridFetchError ? (
-          <p className="text-tcip-fp">coverage grid unavailable: {props.gridFetchError}</p>
-        ) : props.derivation ? (
-          <p className="text-tcip-muted">{props.derivation}. A cell is not a training tile.</p>
-        ) : null}
+          {props.countsError && !readErrorReason && (
+            <p className="text-tcip-warn">
+              saved-annotation counts unavailable: {props.countsError}
+            </p>
+          )}
 
-        {props.readError && (
-          <p role="status" className="text-tcip-fp">
-            this image&apos;s labels could not be read, so nothing can be attested until they are
-            fixed: {props.readError}
-          </p>
-        )}
-        {props.countsError && !props.readError && (
-          <p className="text-tcip-warn">saved-annotation counts unavailable: {props.countsError}</p>
-        )}
+          {lines.length > 0 && (
+            <ul className="sr-only">
+              {lines.map((line) => (
+                <li key={line}>{line}</li>
+              ))}
+            </ul>
+          )}
 
-        {props.otherLattice && (
-          <p className="text-tcip-warn">
-            {props.otherLattice.count} cell{props.otherLattice.count === 1 ? "" : "s"} attested on a
-            previous lattice ({props.otherLattice.cols}x{props.otherLattice.rows}).
-          </p>
-        )}
-        {props.sweptOtherLattice && (
-          <p className="text-tcip-muted">
-            {props.sweptOtherLattice.count} cell{props.sweptOtherLattice.count === 1 ? "" : "s"}{" "}
-            swept on a previous lattice ({props.sweptOtherLattice.cols}x
-            {props.sweptOtherLattice.rows}).
-          </p>
-        )}
-
-        {lines.length > 0 && (
-          <ul className="sr-only">
-            {lines.map((line) => (
-              <li key={line}>{line}</li>
-            ))}
-          </ul>
-        )}
-
-        {cell &&
-          !props.readError &&
-          (props.overlayOn ? (
-            props.subject && (
-              <div className="flex gap-1.5">
-                <button
-                  type="button"
-                  onClick={press}
-                  className={`flex-1 rounded border px-2 py-1 text-left text-[11px] font-semibold transition-colors ${
-                    destructive && confirmPending
-                      ? "border-tcip-fp/60 bg-tcip-fp/15 text-tcip-fp"
-                      : "border-tcip-border bg-tcip-bg text-tcip-fg hover:border-tcip-border-hover"
-                  }`}
-                >
-                  {label}
-                </button>
-                {destructive && confirmPending && (
+          {cell &&
+            !readErrorReason &&
+            (!props.canOverlay || props.overlayOn ? (
+              props.subject && (
+                <div className="flex gap-1.5">
                   <button
                     type="button"
-                    onClick={cancel}
-                    className="rounded border border-tcip-border bg-tcip-bg px-2 py-1 text-[11px] font-semibold text-tcip-muted hover:text-tcip-fg"
+                    onClick={press}
+                    className={`flex-1 rounded border px-2 py-1 text-left text-[11px] font-semibold transition-colors ${
+                      destructive && confirmPending
+                        ? "border-tcip-fp/60 bg-tcip-fp/15 text-tcip-fp"
+                        : "border-tcip-border bg-tcip-bg text-tcip-fg hover:border-tcip-border-hover"
+                    }`}
                   >
-                    Cancel
+                    {label}
                   </button>
-                )}
-              </div>
-            )
-          ) : (
-            <p className="text-tcip-muted">Turn the overlay on to attest {cell}.</p>
-          ))}
-      </div>
-    </CollapsibleSection>
+                  {destructive && confirmPending && (
+                    <button
+                      type="button"
+                      onClick={cancel}
+                      className="rounded border border-tcip-border bg-tcip-bg px-2 py-1 text-[11px] font-semibold text-tcip-muted hover:text-tcip-fg"
+                    >
+                      Cancel
+                    </button>
+                  )}
+                </div>
+              )
+            ) : (
+              <p className="text-tcip-muted">Turn the overlay on to attest {cell}.</p>
+            ))}
+        </div>
+      </CollapsibleSection>
+    </div>
   );
 }

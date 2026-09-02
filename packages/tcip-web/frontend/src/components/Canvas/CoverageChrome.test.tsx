@@ -18,6 +18,7 @@ function baseProps() {
     gridFetchError: null,
     readError: null,
     countsError: null,
+    canOverlay: true,
     overlayOn: true,
     onToggleOverlay: vi.fn(),
     currentCellName: "A1",
@@ -28,6 +29,7 @@ function baseProps() {
     swept: new Set<string>(),
     activeComplete: new Set<string>(),
     activeStale: new Set<string>(),
+    otherComplete: {},
     annotationCounts: {},
     onAttest: vi.fn(),
   };
@@ -276,5 +278,64 @@ describe("CoverageChrome", () => {
 
     render(<CoverageChrome {...baseProps()} />);
     expect(screen.queryByText(/A cell is not a training tile/)).not.toBeInTheDocument();
+  });
+
+  it("collapsing the chrome closes an already-open Key", () => {
+    render(<CoverageChrome {...baseProps()} />);
+    openKey();
+    expect(screen.getByText(/swept: the recorded sweep history, any session/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /Coverage for fruit/ }));
+    expect(
+      screen.queryByText(/swept: the recorded sweep history, any session/),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Key" })).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("a collapsed panel still shows the read-error notice and the status region", () => {
+    render(<CoverageChrome {...baseProps()} readError="plot.json: not valid JSON" />);
+    fireEvent.click(screen.getByRole("button", { name: /Coverage for fruit/ }));
+    expect(screen.getByText(/this image's labels could not be read/)).toBeInTheDocument();
+    expect(screen.getAllByRole("status").length).toBeGreaterThan(0);
+    // The body's own content is gone, proof the notice lives outside it.
+    expect(screen.queryByText(/A cell is not a training tile/)).not.toBeInTheDocument();
+  });
+
+  it("a collapsed panel still shows a previous-lattice notice", () => {
+    render(
+      <CoverageChrome
+        {...baseProps()}
+        otherLattice={{ count: 2, cols: 4, rows: 4 }}
+        sweptOtherLattice={{ count: 1, cols: 6, rows: 6 }}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Coverage for fruit/ }));
+    expect(screen.getByText(/2 cells attested on a previous lattice \(4x4\)/)).toBeInTheDocument();
+    expect(screen.getByText(/1 cell swept on a previous lattice \(6x6\)/)).toBeInTheDocument();
+  });
+
+  it("the read-error text strips the record's dictionary, keeping the reader's own sentence", () => {
+    render(
+      <CoverageChrome
+        {...baseProps()}
+        readError="record 0 carries no string subject: {'id': 1, 'category_id': 0}"
+      />,
+    );
+    expect(screen.getByText(/record 0 carries no string subject$/)).toBeInTheDocument();
+    expect(screen.queryByText(/'id': 1/)).not.toBeInTheDocument();
+  });
+
+  it("another subject's attestation reaches the hidden state list", () => {
+    render(<CoverageChrome {...baseProps()} otherComplete={{ leaf: ["B1"] }} />);
+    expect(screen.getByText("attested for leaf: B1")).toBeInTheDocument();
+  });
+
+  it("the overlay toggle is withdrawn, and the attest control offered directly, when the raster cannot draw an overlay", () => {
+    render(<CoverageChrome {...baseProps()} canOverlay={false} overlayOn={false} />);
+    expect(screen.queryByRole("button", { name: /Overlay/ })).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Attest A1 complete for fruit" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/Turn the overlay on/)).not.toBeInTheDocument();
   });
 });

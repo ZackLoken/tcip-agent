@@ -77,6 +77,15 @@ export interface CompletenessSetPostBody {
   user?: string | null;
 }
 
+/** The label reader's own reason, stripped of the record it dumps after a colon and a brace
+ *  (`tcip_annotation`'s `UnreadableLabelDocument` messages end "...: {'id': 1, ...}"): a breeder
+ *  reads the reader's own sentence, never a Python dict. Text with no brace passes through. */
+export function breederReadErrorReason(raw: string): string {
+  const idx = raw.indexOf("{");
+  if (idx === -1) return raw;
+  return raw.slice(0, idx).replace(/[:\s]+$/, "");
+}
+
 export function sameGrid(a: GridGeometry, b: GridGeometry): boolean {
   return (
     a.width === b.width &&

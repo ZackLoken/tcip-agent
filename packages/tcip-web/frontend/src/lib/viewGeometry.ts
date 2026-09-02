@@ -52,15 +52,23 @@ export function fitView(host: HostSize, imgW: number, imgH: number): ViewState {
 
 /**
  * The view that centers `rect`, padded by `padX`/`padY` (absolute pads in image pixels, per
- * axis), at the largest scale that fits the padded rect. The scale is clamped to the zoom
+ * axis), at the largest scale that fits the padded rect. The pad is clamped to the raster's own
+ * bounds before it drives the fit: a rect near an edge or corner cannot claim padding that would
+ * fall off the raster, so the fit uses whatever pad actually exists there rather than treating
+ * the full, unclamped pad as real content to make room for (which would fit a wider view than
+ * the rect needs, zooming out well past the rect itself). The scale is clamped to the zoom
  * ladder's range and the offsets are pan-clamped against the image.
  */
 export function zoomToRect(
   rect: PixelRect,
   args: { host: HostSize; imgW: number; imgH: number; padX: number; padY: number },
 ): ViewState {
-  const w = Math.max(1, rect.x1 - rect.x0) + 2 * args.padX;
-  const h = Math.max(1, rect.y1 - rect.y0) + 2 * args.padY;
+  const paddedX0 = Math.max(0, rect.x0 - args.padX);
+  const paddedX1 = Math.min(args.imgW, rect.x1 + args.padX);
+  const paddedY0 = Math.max(0, rect.y0 - args.padY);
+  const paddedY1 = Math.min(args.imgH, rect.y1 + args.padY);
+  const w = Math.max(1, paddedX1 - paddedX0);
+  const h = Math.max(1, paddedY1 - paddedY0);
   const scale = Math.max(
     MIN_SCALE,
     Math.min(MAX_SCALE, Math.min(args.host.w / w, args.host.h / h)),

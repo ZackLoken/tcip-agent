@@ -63,6 +63,7 @@ describe("useRegionCompleteness", () => {
     );
     await waitFor(() => expect(result.current.activeComplete).toEqual(new Set(["A1"])));
     expect(result.current.otherComplete).toEqual(new Set(["B2", "C1"]));
+    expect(result.current.otherCompleteBySubject).toEqual({ leaf: ["B2", "C1"] });
   });
 
   it("a stale cell is excluded from the effective sets but named in activeStale", async () => {

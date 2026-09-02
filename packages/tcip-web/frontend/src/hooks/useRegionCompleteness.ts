@@ -35,6 +35,9 @@ export interface RegionCompleteness {
   activeStale: ReadonlySet<string>;
   /** Cells attested complete for another subject on the current grid, stale ones excluded. */
   otherComplete: ReadonlySet<string>;
+  /** The same cells as `otherComplete`, kept per owning subject so a state list can name which
+   *  subject each attestation belongs to ("attested for leaf: B1"). */
+  otherCompleteBySubject: Readonly<Record<string, readonly string[]>>;
   /** The active subject's attestation on a grid other than the current one, or null: also null
    *  while the current grid itself is unknown, since "on a previous lattice" is a comparison
    *  this hook cannot make without one. */
@@ -125,14 +128,23 @@ export function useRegionCompleteness(args: {
     };
   }, [activeRecord, grid, activeOnGrid]);
 
-  const otherComplete = useMemo(() => {
-    const out = new Set<string>();
+  const otherCompleteBySubject = useMemo(() => {
+    const out: Record<string, string[]> = {};
     for (const [subj, record] of Object.entries(bySubject)) {
       if (subj === subject || !grid || !sameGrid(record.grid, grid)) continue;
-      for (const cell of effectiveComplete(record)) out.add(cell);
+      const cells = Array.from(effectiveComplete(record)).sort();
+      if (cells.length) out[subj] = cells;
     }
     return out;
   }, [bySubject, subject, grid]);
+
+  const otherComplete = useMemo(() => {
+    const out = new Set<string>();
+    for (const cells of Object.values(otherCompleteBySubject)) {
+      for (const cell of cells) out.add(cell);
+    }
+    return out;
+  }, [otherCompleteBySubject]);
 
   const countsOnGrid = !!grid && !!countsGrid && sameGrid(countsGrid, grid);
 
@@ -179,6 +191,7 @@ export function useRegionCompleteness(args: {
     activeComplete,
     activeStale,
     otherComplete,
+    otherCompleteBySubject,
     otherLattice,
     annotationCounts,
     error,
