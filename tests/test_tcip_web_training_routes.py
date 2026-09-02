@@ -266,6 +266,22 @@ def test_tensorboard_route_launches_under_the_run_output_dir(client: TestClient,
     assert calls == [(f"{tmp_path}/tensorboard", "run-42")]
 
 
+def test_tensorboard_route_404s_with_no_logs_for_a_run_with_no_output_dir(
+    client: TestClient, monkeypatch,
+) -> None:
+    """A run that failed before writing an output directory has nothing a TensorBoard could
+    ever serve; the refusal names that so the GUI never offers a retry against it."""
+
+    def fake_status(run_id: str) -> dict:
+        return {"run_id": run_id, "status": "failed", "output_dir": "", "error": None}
+
+    monkeypatch.setattr("tcip_mcp.tools.training_tools.check_training_status", fake_status)
+
+    resp = client.post("/api/training/runs/run-nologs/tensorboard", json={})
+    assert resp.status_code == 404
+    assert resp.json()["detail"]["no_logs"] is True
+
+
 def test_list_runs_reconstructs_from_experiments(tmp_path, monkeypatch) -> None:
     """No live entry for either experiment (this process never held them in ``_RUNS``): the
     route's own rows now come from ``list_training_runs``'s unified disk enumeration with no
@@ -403,6 +419,43 @@ def test_relaunch_route_forks_a_run_s_config_and_names_the_parent(
     assert snapshot["experiment_id"] == forked_id
     lineage = read_member(lineage_key(forked_id))
     assert lineage["parent_experiment"] == parent_id
+
+
+def test_list_runs_route_names_the_run_s_selection_metric(
+    tmp_path, monkeypatch, client: TestClient
+) -> None:
+    """A launched run's row carries the metric its config resolves ``model_best.pt``/early
+    stopping by, so the Training tab can label its best value instead of showing a bare
+    number."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
+    monkeypatch.setattr(
+        "tcip_mcp.pipelines.training.tensorboard_manager.launch_tensorboard", lambda *a, **k: {})
+    from tcip_mcp.tools.training_tools import launch_training
+    from tests.tiny_trainer_fixtures import write_regression_dataset
+
+    images_dir, csv_path = write_regression_dataset(
+        tmp_path, intensities=[0.0, 1.0], values=[0.1, 0.9])
+    labels_dir = tmp_path / "unused_labels"
+    labels_dir.mkdir()
+    cfg = {
+        "model_source": {"builder": "tests.tiny_trainer_fixtures:build_mean_intensity_regressor",
+                         "task": "regression", "in_chans": 3},
+        "data": {"images_dir": str(images_dir), "csv_path": str(csv_path), "labels_dir": str(labels_dir)},
+        "training": {"batch_size": 2, "stages": [{"freeze_to": 0, "epochs": 1}],
+                     "mixed_precision": False, "device": "cpu",
+                     "checkpoint_every_n_epochs": 0, "early_stopping": {"enabled": False}},
+    }
+    result = launch_training(cfg, str(tmp_path / "out"))
+    assert "error" not in result, result
+    _wait_terminal(result["run_id"])
+
+    from tcip_web.routes.training import list_runs_route
+
+    by_id = {r["run_id"]: r for r in list_runs_route()["runs"]}
+    # Regression selects on the training loss by default; there is no evaluation.selection_metric
+    # override in this config.
+    assert by_id[result["run_id"]]["best_metric_name"] == "loss"
 
 
 def test_list_runs_excludes_hpo_trials(monkeypatch) -> None:

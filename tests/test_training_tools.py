@@ -421,6 +421,32 @@ def test_preflight_config_rejects_incoherent_selection_metric(tmp_path):
     assert any("no declared ranking direction" in i for i in r["issues"])
 
 
+def test_selection_metric_for_config_names_or_withholds_the_derived_metric():
+    """The runs listing's own metric-name helper: the same resolution
+    ``preflight_config``'s coherence gate runs above, read back as a name instead of an
+    issue list, ``None`` rather than a raise when the config cannot resolve one."""
+    pytest.importorskip("torch")
+    from tcip_mcp.pipelines.training.generic_trainer import selection_metric_for_config
+
+    # Detection with no evaluation block resolves to the composite objective, the same
+    # default resolve_selection_metric derives with no explicit selection_metric.
+    assert selection_metric_for_config(
+        {"model_source": {"task": "detection"}, "data": {}},
+    ) == "objective"
+
+    # An undeclared metric resolves to nothing rather than raising.
+    assert selection_metric_for_config(
+        {"model_source": {"task": "detection"}, "data": {},
+         "training": {"evaluation": {"selection_metric": "not_a_real_metric"}}},
+    ) is None
+
+    # A comparability-only metric for a center-match trait resolves to nothing either.
+    assert selection_metric_for_config(
+        {"model_source": {"task": "detection"}, "data": {},
+         "training": {"evaluation": {"trait": "catkin", "selection_metric": "map50"}}},
+    ) is None
+
+
 # preflight_config's reserve_calibration_fraction feasibility check (N7): a training-launch-time
 # refusal through this module's own validation surface, never review_calibration._FAILURE_MESSAGES.
 

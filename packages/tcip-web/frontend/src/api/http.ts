@@ -36,7 +36,12 @@ export async function decodeRefusal(r: Response, fallback = ""): Promise<Error> 
     const message = typeof parsed.message === "string" ? parsed.message : "";
     return new StructuredRefusalError(parsed, r.status, message || status);
   }
-  return new Error((typeof detail === "string" ? detail : "") || status);
+  // A string detail still carries a status a caller may branch on; a body with no detail at
+  // all has nothing structured to carry and stays a plain Error.
+  if (typeof detail === "string") {
+    return new StructuredRefusalError({ message: detail }, r.status, detail);
+  }
+  return new Error(status);
 }
 
 export async function asJson<T>(r: Response): Promise<T> {

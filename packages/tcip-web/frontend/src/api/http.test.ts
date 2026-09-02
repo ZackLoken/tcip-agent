@@ -56,4 +56,14 @@ describe("http helpers", () => {
     expect(thrown).not.toBeInstanceOf(StructuredRefusalError);
     expect(thrown.message).toBe("export_csv failed: 500");
   });
+
+  it("a plain string detail still carries its status, so a caller can branch on it", async () => {
+    const thrown = await asJson(res(404, { detail: "sweep not found: hpo-1" })).catch(
+      (e: unknown) => e,
+    );
+    expect(thrown).toBeInstanceOf(StructuredRefusalError);
+    const refusal = thrown as StructuredRefusalError;
+    expect(refusal.status).toBe(404);
+    expect(refusal.message).toBe("sweep not found: hpo-1");
+  });
 });

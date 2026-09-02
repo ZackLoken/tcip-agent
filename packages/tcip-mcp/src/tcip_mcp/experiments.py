@@ -789,8 +789,9 @@ def reconstruct_from_status(
     shape :func:`reconstruct_run_status` returns for the one record it resolved a ``run_id`` to,
     and the shape the run enumeration in ``training_tools.py`` builds per record without a
     separate resolver round-trip. ``current_epoch`` costs one metrics-log read and is included
-    only when ``read_progress`` is true; ``best_metric`` is left ``None``, a running best isn't
-    recoverable from the metrics log alone without re-deriving the selection policy.
+    only when ``read_progress`` is true; ``best_metric`` (and so ``best_metric_name`` beside it)
+    is left ``None``, a running best isn't recoverable from the metrics log alone without
+    re-deriving the selection policy.
     """
     current_epoch = None
     if read_progress:
@@ -802,6 +803,7 @@ def reconstruct_from_status(
         "status": derived_state(status, stale_seconds),
         "current_epoch": current_epoch,
         "best_metric": None,
+        "best_metric_name": None,
         "output_dir": status.get("output_dir"),
         "error": status.get("error"),
     }
