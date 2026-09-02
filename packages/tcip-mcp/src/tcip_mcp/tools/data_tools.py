@@ -306,6 +306,8 @@ def freeze_split_manifest(experiment_id: str, output_path: str | None = None) ->
     if missing:
         return {"error": f"{experiment_id!r}'s durable config carries no {missing}: "
                          "freeze_split_manifest needs every one of them to compose a manifest."}
+    assert labels_dir is not None and images_dir is not None and id_map is not None, \
+        "checked non-empty above"
     if resolved_group_by is None:
         return {"error": f"{experiment_id!r}'s split record carries no group_by at all (no "
                          "grouping policy recorded): freeze_split_manifest never defaults one, "
@@ -658,6 +660,7 @@ def validate_data_quality(folder_path: str) -> dict:
             except Exception as e:
                 issues.append({"level": "error", "file": label_path, "message": f"COCO parse error: {e}"})
 
+    report_format: str | list[str] | None
     if not shapes_found:
         report_format = None
     elif len(shapes_found) == 1:
@@ -702,7 +705,9 @@ def _split_date_dirs(folder_path: str | Path) -> list[tuple[str | None, Path, Pa
     if not ann_root.is_dir():
         return []
     subdirs = sorted(d.name for d in ann_root.iterdir() if d.is_dir() and is_bucket_name(d.name))
-    entries = [(d, annotation_dir(root, d), resolve_images_dir(root, d)) for d in subdirs]
+    entries: list[tuple[str | None, Path, Path]] = [
+        (d, annotation_dir(root, d), resolve_images_dir(root, d)) for d in subdirs
+    ]
     loose_labels = bool(prediction_documents(ann_root))
     if loose_labels or not subdirs:
         entries.append((None, ann_root, resolve_images_dir(root, None)))
