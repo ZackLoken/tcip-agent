@@ -8,6 +8,7 @@ import {
   currentCoverageCell,
   effectiveComplete,
   meetsBar,
+  noWorkingScaleToast,
   planRegionFetches,
   rectFullyInside,
   servedCellAtNative,
@@ -338,6 +339,21 @@ describe("completeWarningMessage", () => {
     expect(msg).toBe(
       "Complete: 14 of 35 grid cells have not had every part on screen at 35.0% zoom or " +
         "closer, in any combination of views.",
+    );
+  });
+});
+
+describe("noWorkingScaleToast", () => {
+  it("names the subject and the reason, both from the same read", () => {
+    expect(noWorkingScaleToast("fruit", "no saved box or polygon annotation of fruit")).toBe(
+      "Complete: no working scale for fruit on this image (no saved box or polygon " +
+        "annotation of fruit), so coverage was not checked",
+    );
+  });
+
+  it("states the reason alone with no active subject, never a literal null", () => {
+    expect(noWorkingScaleToast(null, "no active subject")).toBe(
+      "Complete: no active subject, so coverage was not checked",
     );
   });
 });

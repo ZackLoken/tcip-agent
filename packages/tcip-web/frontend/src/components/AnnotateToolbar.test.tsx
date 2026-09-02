@@ -40,7 +40,12 @@ afterEach(() => {
 function renderToolbar(
   bandsInfo?: ImageBandsResponse | null,
   bandSelection?: BandSelection | null,
-  extra?: { completeWarning?: () => string | null; workingScaleReason?: string | null },
+  extra?: {
+    completeWarning?: () => string | null;
+    workingScaleReason?: string | null;
+    workingScaleSubject?: string | null;
+    coverageMultiCell?: boolean;
+  },
 ) {
   render(
     <AnnotateToolbar
@@ -52,6 +57,8 @@ function renderToolbar(
       onBandSelectionChange={() => {}}
       completeWarning={extra?.completeWarning}
       workingScaleReason={extra?.workingScaleReason ?? null}
+      workingScaleSubject={extra?.workingScaleSubject ?? null}
+      coverageMultiCell={extra?.coverageMultiCell}
     />,
   );
 }
@@ -479,6 +486,7 @@ describe("AnnotateToolbar Complete toggle coverage warning", () => {
     renderToolbar(undefined, undefined, {
       completeWarning: () => "Complete: 2 of 6 grid cells have not had every part on screen",
       workingScaleReason: null,
+      coverageMultiCell: true,
     });
 
     await act(async () => {
@@ -492,13 +500,15 @@ describe("AnnotateToolbar Complete toggle coverage warning", () => {
     ).toBe(true);
   });
 
-  it("toasts the no-working-scale sentence when the warning is null for want of a bar", async () => {
+  it("toasts the no-working-scale sentence, naming the subject the reason was computed for", async () => {
     seedImageDataset({ subject: "subject_a" });
     setCanvasBoxSubjects([]);
     vi.spyOn(classesApi, "setImageStatus").mockResolvedValue({});
     renderToolbar(undefined, undefined, {
       completeWarning: () => null,
       workingScaleReason: "no saved box or polygon annotation of subject_a",
+      workingScaleSubject: "subject_a",
+      coverageMultiCell: true,
     });
 
     await act(async () => {
@@ -513,6 +523,69 @@ describe("AnnotateToolbar Complete toggle coverage warning", () => {
     expect(toast!.message).toContain("so coverage was not checked");
   });
 
+  it("names the reason's own subject, never dataset.subject, when the two differ", async () => {
+    seedImageDataset({ subject: "subject_a" });
+    setCanvasBoxSubjects([]);
+    vi.spyOn(classesApi, "setImageStatus").mockResolvedValue({});
+    renderToolbar(undefined, undefined, {
+      completeWarning: () => null,
+      workingScaleReason: "no saved box or polygon annotation of other_subject",
+      workingScaleSubject: "other_subject",
+      coverageMultiCell: true,
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByLabelText("Complete"));
+    });
+
+    const toast = useStore
+      .getState()
+      .toasts.find((t) => t.message.includes("no working scale for other_subject"));
+    expect(toast).toBeTruthy();
+    expect(
+      useStore.getState().toasts.some((t) => t.message.includes("no working scale for subject_a")),
+    ).toBe(false);
+  });
+
+  it("states no active subject, rather than a literal null, when there is none", async () => {
+    seedImageDataset({ subject: "subject_a" });
+    setCanvasBoxSubjects([]);
+    vi.spyOn(classesApi, "setImageStatus").mockResolvedValue({});
+    renderToolbar(undefined, undefined, {
+      completeWarning: () => null,
+      workingScaleReason: "no active subject",
+      workingScaleSubject: null,
+      coverageMultiCell: true,
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByLabelText("Complete"));
+    });
+
+    const toast = useStore.getState().toasts.find((t) => t.message.includes("no active subject"));
+    expect(toast).toBeTruthy();
+    expect(toast!.message).not.toContain("null");
+  });
+
+  it("skips the no-bar toast on a single-cell raster with no coverage tracking", async () => {
+    seedImageDataset({ subject: "subject_a" });
+    setCanvasBoxSubjects([]);
+    vi.spyOn(classesApi, "setImageStatus").mockResolvedValue({});
+    const toastsBefore = useStore.getState().toasts.length;
+    renderToolbar(undefined, undefined, {
+      completeWarning: () => null,
+      workingScaleReason: "no saved box or polygon annotation of subject_a",
+      workingScaleSubject: "subject_a",
+      coverageMultiCell: false,
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByLabelText("Complete"));
+    });
+
+    expect(useStore.getState().toasts.length).toBe(toastsBefore);
+  });
+
   it("stays silent when the warning is null and a bar exists (every cell already swept)", async () => {
     seedImageDataset({ subject: "subject_a" });
     setCanvasBoxSubjects(["subject_a"]);
@@ -521,6 +594,7 @@ describe("AnnotateToolbar Complete toggle coverage warning", () => {
     renderToolbar(undefined, undefined, {
       completeWarning: () => null,
       workingScaleReason: null,
+      coverageMultiCell: true,
     });
 
     await act(async () => {

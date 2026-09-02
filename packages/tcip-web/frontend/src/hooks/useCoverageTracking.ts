@@ -149,7 +149,7 @@ export function useCoverageTracking(args: {
     () => ({
       swept: tracker.swept,
       pending: tracker.pending,
-      coarserCount: tracker.seenAtScale.size - tracker.swept.size,
+      coarserCount: tracker.coarserCount,
       noteServedAtNative: (cellName: string) => tracker.noteServedAtNative(cellName),
       completeWarning: () => {
         const facts = tracker.completeWarning();

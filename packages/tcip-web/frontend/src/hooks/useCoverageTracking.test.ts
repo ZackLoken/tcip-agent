@@ -5,7 +5,7 @@ import { api } from "@/api/client";
 import type { WorkingScaleBar } from "@/api/types.generated";
 import { useCoverageTracking } from "@/hooks/useCoverageTracking";
 import type { GridCell, GridGeometry } from "@/lib/coverage";
-import { coverageOutbox } from "@/lib/coverageTracker";
+import { resetCoverageOutbox } from "@/test/coverageOutbox";
 import { useStore } from "@/store";
 
 const GRID: GridGeometry = {
@@ -59,14 +59,16 @@ function trackingArgs(subject: string | null, workingScale: WorkingScaleBar | nu
 }
 
 afterEach(() => {
-  coverageOutbox.clearForTests();
+  resetCoverageOutbox();
   vi.restoreAllMocks();
 });
 
 describe("useCoverageTracking subject gating", () => {
   it("no active subject: no hydration fetch, no accumulation, no POST", async () => {
     const get = vi.spyOn(api.coverage, "get").mockResolvedValue(null);
-    const push = vi.spyOn(api.coverage, "push").mockResolvedValue({ status: "ok" });
+    const push = vi.spyOn(api.coverage, "push").mockResolvedValue({
+      record: { cells_seen_at_scale: {} },
+    });
     const { result } = renderHook(() => useCoverageTracking(trackingArgs(null)));
 
     result.current.noteServedAtNative("A1");
@@ -84,7 +86,9 @@ describe("useCoverageTracking subject gating", () => {
       viewing: NULL_VIEWING,
       updated_at: "2026-01-01T00:00:00+00:00",
     });
-    vi.spyOn(api.coverage, "push").mockResolvedValue({ status: "ok" });
+    vi.spyOn(api.coverage, "push").mockResolvedValue({
+      record: { cells_seen_at_scale: {} },
+    });
     const { result } = renderHook(() => useCoverageTracking(trackingArgs("tip", bar(0.5))));
 
     await waitFor(() =>
@@ -97,7 +101,9 @@ describe("useCoverageTracking subject gating", () => {
     vi.spyOn(api.coverage, "get").mockRejectedValue(
       new Error("plot.tif's stored view-coverage record does not validate"),
     );
-    vi.spyOn(api.coverage, "push").mockResolvedValue({ status: "ok" });
+    vi.spyOn(api.coverage, "push").mockResolvedValue({
+      record: { cells_seen_at_scale: {} },
+    });
     renderHook(() => useCoverageTracking(trackingArgs("tip")));
 
     await waitFor(() =>
@@ -109,7 +115,9 @@ describe("useCoverageTracking subject gating", () => {
 
   it("a missing record (the no-record answer) stays silent", async () => {
     vi.spyOn(api.coverage, "get").mockResolvedValue(null);
-    vi.spyOn(api.coverage, "push").mockResolvedValue({ status: "ok" });
+    vi.spyOn(api.coverage, "push").mockResolvedValue({
+      record: { cells_seen_at_scale: {} },
+    });
     const toastsBefore = useStore.getState().toasts.length;
     renderHook(() => useCoverageTracking(trackingArgs("tip")));
 
@@ -136,7 +144,9 @@ describe("useCoverageTracking sweep on another lattice", () => {
       viewing: NULL_VIEWING,
       updated_at: "2026-01-01T00:00:00+00:00",
     });
-    vi.spyOn(api.coverage, "push").mockResolvedValue({ status: "ok" });
+    vi.spyOn(api.coverage, "push").mockResolvedValue({
+      record: { cells_seen_at_scale: {} },
+    });
     const { result } = renderHook(() => useCoverageTracking(trackingArgs("tip", bar(0.5))));
 
     await waitFor(() => expect(result.current.sweptOtherLattice).not.toBeNull());
@@ -154,7 +164,9 @@ describe("useCoverageTracking sweep on another lattice", () => {
       viewing: NULL_VIEWING,
       updated_at: "2026-01-01T00:00:00+00:00",
     });
-    vi.spyOn(api.coverage, "push").mockResolvedValue({ status: "ok" });
+    vi.spyOn(api.coverage, "push").mockResolvedValue({
+      record: { cells_seen_at_scale: {} },
+    });
     const { result } = renderHook(() => useCoverageTracking(trackingArgs("tip", bar(0.5))));
 
     await waitFor(() => expect(result.current.swept.has("A1")).toBe(true));

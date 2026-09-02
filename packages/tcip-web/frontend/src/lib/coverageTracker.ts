@@ -43,6 +43,13 @@ export { meetsBar };
  *  the working-scale bar from the label file, never from anything echoed back here). */
 export type CoverageViewingInput = CoverageViewing;
 
+/** `post_coverage`'s own answer: the merged record beside its unchanged integer counts. Only the
+ *  fields the tracker itself reads back are declared here (see `routes/coverage.py`'s
+ *  `record_body`); a caller wanting the full response shapes its own type over `postFn`. */
+export interface CoveragePushResponse {
+  record: { cells_seen_at_scale: Record<string, number> };
+}
+
 /**
  * Sub-cell grain for the union-of-visibility sweep predicate (see `subdivideCell`): a cell
  * becomes "seen" once every one of its sub-rects has, at some point, been fully on screen.
@@ -81,26 +88,65 @@ function sameWorkingScaleBar(a: WorkingScaleBar | null, b: WorkingScaleBar | nul
 /** How long a failed push stays queued before the outbox retries it. */
 const OUTBOX_RETRY_MS = 5000;
 
+/** The stable marker `post_coverage`'s 500 body carries when the record committed but its audit
+ *  line could not be written (`routes/coverage.py`'s `AUDIT_ENTRY_NOT_WRITTEN`): a retry of the
+ *  same payload merges to no change and writes no line, so this answer is terminal like a 4xx,
+ *  never retried like an ordinary 5xx. */
+const AUDIT_ENTRY_NOT_WRITTEN = "audit_entry_not_written";
+
+/** The HTTP status a thrown push error carries, or null for one that carries none (a network
+ *  failure, or a body with no structured `detail` at all): the single place that reads it, so
+ *  the outbox's own terminality check and a live tracker's own retry stay one answer. */
+function pushErrorStatus(err: unknown): number | null {
+  return err instanceof StructuredRefusalError ? err.status : null;
+}
+
+function isAuditEntryNotWritten(err: unknown): boolean {
+  return (
+    err instanceof StructuredRefusalError &&
+    err.status === 500 &&
+    err.detail.error === AUDIT_ENTRY_NOT_WRITTEN
+  );
+}
+
+/** Whether a failed push can never succeed by retrying the identical payload: any 4xx (an
+ *  unknown cell, an unconformed stored record, a refused subject), or the audit-gap 500 by its
+ *  own marker. A network failure or an ordinary 5xx is not terminal and stays queued. */
+function isTerminalPushFailure(err: unknown): boolean {
+  if (isAuditEntryNotWritten(err)) return true;
+  const status = pushErrorStatus(err);
+  return status !== null && status >= 400 && status < 500;
+}
+
+/** The detail text a dropped payload's toast names, and whether it names an audit gap (a
+ *  distinct sentence from an ordinary refusal) rather than a plain refusal. */
+function pushFailureDetail(err: unknown): { detail: string; auditGap: boolean } {
+  return {
+    detail: err instanceof Error ? err.message : String(err),
+    auditGap: isAuditEntryNotWritten(err),
+  };
+}
+
 /**
  * The module-level outbox for a coverage push a tracker could not deliver before moving on (a
  * reset, a dispose, an unmount): one per app, independent of any tracker instance, so a payload
  * survives the identity change that orphaned it and keeps retrying on its own timer. A network
- * failure or a 5xx stays at the queue's head and is retried on the next tick; a 4xx (an unknown
- * cell, an unconformed stored record, a refused subject) is terminal and is dropped, so one
- * refused payload never blocks the facts behind it.
+ * failure or an ordinary 5xx stays at the queue's head and is retried on the next tick; a
+ * terminal failure (`isTerminalPushFailure`) is dropped, so one refused payload never blocks the
+ * facts behind it.
  */
-class CoverageOutbox {
+export class CoverageOutbox {
   private queue: CoveragePayload[] = [];
-  private postFn: ((body: CoveragePayload) => Promise<unknown>) | null = null;
-  private onDropped: ((imagePath: string, reason: string) => void) | null = null;
+  private postFn: ((body: CoveragePayload) => Promise<CoveragePushResponse>) | null = null;
+  private onDropped: ((imagePath: string, detail: string, auditGap: boolean) => void) | null = null;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private draining = false;
 
   /** Every tracker shares one `postFn` in practice (the app's own `api.coverage.push`); the
    *  latest caller's is the one the outbox retries with. */
   configure(
-    postFn: (body: CoveragePayload) => Promise<unknown>,
-    onDropped: (imagePath: string, reason: string) => void,
+    postFn: (body: CoveragePayload) => Promise<CoveragePushResponse>,
+    onDropped: (imagePath: string, detail: string, auditGap: boolean) => void,
   ): void {
     this.postFn = postFn;
     this.onDropped = onDropped;
@@ -108,15 +154,6 @@ class CoverageOutbox {
 
   get size(): number {
     return this.queue.length;
-  }
-
-  /** Test-only: drop every queued payload and any pending retry timer, so one test's leftover
-   *  outbox state never leaks into the next (this is a module-level singleton, one per app). */
-  clearForTests(): void {
-    this.queue = [];
-    if (this.timer !== null) clearTimeout(this.timer);
-    this.timer = null;
-    this.draining = false;
   }
 
   enqueue(body: CoveragePayload): void {
@@ -133,7 +170,12 @@ class CoverageOutbox {
   }
 
   private async drain(): Promise<void> {
-    if (this.draining || !this.postFn || this.queue.length === 0) return;
+    if (this.draining || this.queue.length === 0) return;
+    if (!this.postFn) {
+      // Nothing configured yet to drain with: reschedule rather than stall the queue forever.
+      this.schedule();
+      return;
+    }
     this.draining = true;
     while (this.queue.length > 0) {
       const body = this.queue[0];
@@ -141,10 +183,10 @@ class CoverageOutbox {
         await this.postFn(body);
         this.queue.shift();
       } catch (err: unknown) {
-        const status = err instanceof StructuredRefusalError ? err.status : null;
-        if (status !== null && status >= 400 && status < 500) {
+        if (isTerminalPushFailure(err)) {
           this.queue.shift();
-          this.onDropped?.(body.image_path, err instanceof Error ? err.message : String(err));
+          const { detail, auditGap } = pushFailureDetail(err);
+          this.onDropped?.(body.image_path, detail, auditGap);
           continue;
         }
         break;
@@ -156,6 +198,41 @@ class CoverageOutbox {
 }
 
 export const coverageOutbox = new CoverageOutbox();
+
+/** Test-only: drop every queued payload on `outbox` and any pending retry timer, so one test's
+ *  leftover state never leaks into the next. A plain function, not a method the shipped
+ *  singleton carries: `src/test/coverageOutbox.ts` is the one importer. */
+export function resetCoverageOutboxForTests(outbox: CoverageOutbox): void {
+  const internal = outbox as unknown as {
+    queue: CoveragePayload[];
+    timer: ReturnType<typeof setTimeout> | null;
+    draining: boolean;
+  };
+  internal.queue = [];
+  if (internal.timer !== null) clearTimeout(internal.timer);
+  internal.timer = null;
+  internal.draining = false;
+}
+
+/** Every tracker currently constructed and not yet disposed: one per open Annotate canvas (in
+ *  practice, one). React never unmounts a component on `beforeunload`/`pagehide`, so a
+ *  component's own cleanup (which would call `dispose`) never runs then either; App's unload
+ *  guard and its `pagehide` flush both need to reach a live tracker some other way. */
+const liveTrackers = new Set<CoverageTracker>();
+
+/** Whether any live tracker currently owes the server a fact: App's `beforeunload` guard fires
+ *  on this beside a non-empty `coverageOutbox`. */
+export function anyTrackerDirty(): boolean {
+  for (const t of liveTrackers) if (t.isDirty) return true;
+  return false;
+}
+
+/** Flush every live tracker's owed facts (to the outbox on failure, same as `flush()` always
+ *  does): App's `pagehide` handler, since a live tracker never gets its own unmount to call
+ *  `dispose` from. */
+export function flushAllTrackers(): void {
+  for (const t of liveTrackers) t.flush();
+}
 
 export class CoverageTracker {
   private keyParts: CoverageKeyParts | null = null;
@@ -179,7 +256,7 @@ export class CoverageTracker {
   private timer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(
-    private postFn: (body: CoveragePayload) => Promise<unknown>,
+    private postFn: (body: CoveragePayload) => Promise<CoveragePushResponse>,
     private opts: {
       debounceMs?: number;
       onChange?: () => void;
@@ -189,11 +266,21 @@ export class CoverageTracker {
       onPushError?: (detail: string) => void;
     } = {},
   ) {
-    coverageOutbox.configure(postFn, (imagePath, reason) =>
+    coverageOutbox.configure(postFn, (imagePath, detail, auditGap) =>
       this.opts.onPushError?.(
-        `coverage progress for ${imagePath} was refused and dropped: ${reason}`,
+        auditGap
+          ? `coverage progress for ${imagePath} was saved without its audit line: ${detail}`
+          : `coverage progress for ${imagePath} was refused and dropped: ${detail}`,
       ),
     );
+    liveTrackers.add(this);
+  }
+
+  /** Whether this tracker currently owes the server a fact (dirty, or a debounce still pending):
+   *  App's `beforeunload` guard reads this across every live tracker (`anyTrackerDirty`), since
+   *  React never unmounts a component on unload and a tracker's own `dispose` never runs then. */
+  get isDirty(): boolean {
+    return this.dirty;
   }
 
   /** Multi-cell grids only: single-cell grids (image within the display bound) get no tracking. */
@@ -214,6 +301,19 @@ export class CoverageTracker {
       if (meetsBar(atScale, this.bar)) out.add(name);
     }
     return out;
+  }
+
+  /** Cells the server has recorded (hydrated or acknowledged) whose recorded value falls below
+   *  the current bar, or every recorded cell while there is no bar to judge against: the
+   *  chrome's "coarser" remainder line. Counts `recordedMap` (what is actually on record), never
+   *  `seenAtScale` (which includes this session's own not-yet-acknowledged facts): a locally
+   *  seen, not-yet-saved cell is "not yet saved," never "on record ... coarser". */
+  get coarserCount(): number {
+    let count = 0;
+    for (const atScale of this.recordedMap.values()) {
+      if (!meetsBar(atScale, this.bar)) count++;
+    }
+    return count;
   }
 
   /** Cells whose current facts have not yet been acknowledged by the server: newly seen since
@@ -253,6 +353,7 @@ export class CoverageTracker {
     this.seenAtScaleMap = new Map();
     this.recordedMap = new Map();
     this.bar = null;
+    this.viewing = null;
     this.dirty = false;
     this.opts.onChange?.();
   }
@@ -296,10 +397,11 @@ export class CoverageTracker {
    * cell was on screen at once," which a raster whose cells exceed any working viewport can
    * never satisfy directly. Its recorded value is the minimum over its sub-cells' own maxima,
    * the tightest bound the tracker knows; a later pass that raises that bound still counts,
-   * whether or not the cell was already seen. A push is triggered only when a cell newly
-   * becomes seen, never by a rise on an already-seen cell alone: the raised value updates the
-   * local state and rides with whatever push a later event (a newly seen cell, a served cell, a
-   * viewing change, or flush) sends next.
+   * whether or not the cell was already seen. A push is scheduled only when a cell newly
+   * becomes seen, never by a rise on an already-seen cell alone: a rise sets `dirty` (so a
+   * `flush()` before any later event still carries it, a navigation dropping it otherwise) but
+   * schedules nothing itself, and rides with whatever push a later event (a newly seen cell, a
+   * served cell, a viewing change, or flush) sends next.
    */
   noteViewport(rect: PixelRect, scale: number): void {
     if (!this.active) return;
@@ -321,7 +423,11 @@ export class CoverageTracker {
       const prevSeen = this.seenAtScaleMap.get(cell.name);
       if (prevSeen === undefined || atScale > prevSeen) {
         this.seenAtScaleMap.set(cell.name, atScale);
-        if (prevSeen === undefined) this.markDirty();
+        if (prevSeen === undefined) {
+          this.markDirty();
+        } else {
+          this.dirty = true;
+        }
         changed = true;
       }
     }
@@ -358,9 +464,12 @@ export class CoverageTracker {
     return { unsweptCount, total: this.cells.length, bar: bar.value };
   }
 
-  /** Send any owed facts now (called before a reset and on unmount): a failed push here is
-   *  handed to the module outbox rather than dropped, since the tracker is about to move on
-   *  (or vanish) and can no longer retry it itself. */
+  /** Send any owed facts now, at once (called before a reset and on unmount): the identity
+   *  switching away must never defer its own outgoing image's push behind the outbox's own
+   *  retry cadence, so this posts immediately under the outgoing image's own key and only hands
+   *  the payload to the module outbox when that post itself fails -- the tracker is about to
+   *  move on (or vanish) and can no longer retry it itself, but a fresh failure there starts the
+   *  outbox's own retry timer from the failure, never from this call. */
   flush(): void {
     if (this.timer !== null) {
       clearTimeout(this.timer);
@@ -372,11 +481,15 @@ export class CoverageTracker {
     }
     const body = this.buildPayload(this.keyParts, this.grid, this.viewing);
     this.dirty = false;
-    coverageOutbox.enqueue(body);
+    void this.postFn(body).then(
+      () => {},
+      () => coverageOutbox.enqueue(body),
+    );
   }
 
   dispose(): void {
     this.flush();
+    liveTrackers.delete(this);
   }
 
   private markDirty(): void {
@@ -412,11 +525,7 @@ export class CoverageTracker {
     this.dirty = false;
     const body = this.buildPayload(this.keyParts, this.grid, this.viewing);
     void this.postFn(body).then(
-      () => {
-        for (const [name, atScale] of Object.entries(body.cells_seen_at_scale ?? {})) {
-          this.recordedMap.set(name, Math.max(this.recordedMap.get(name) ?? -Infinity, atScale));
-        }
-      },
+      (res) => this.adoptRecorded(res.record.cells_seen_at_scale),
       (err: unknown) => {
         this.dirty = true;
         this.opts.onPushError?.(err instanceof Error ? err.message : String(err));
@@ -424,5 +533,18 @@ export class CoverageTracker {
         this.markDirty();
       },
     );
+  }
+
+  /** Adopt `post_coverage`'s own merged answer into both `seenAtScale` and `recorded` (the same
+   *  merge `hydrate` applies to a fresh read), never the posted body: the response is the
+   *  server's authoritative merge, which can hold a cell another tab or session contributed that
+   *  never rode in this payload at all, and can hold a value higher than this payload's own on a
+   *  concurrent write. Reading the body instead would credit only what this tab itself sent. */
+  private adoptRecorded(recorded: Record<string, number>): void {
+    for (const [name, atScale] of Object.entries(recorded)) {
+      this.seenAtScaleMap.set(name, Math.max(this.seenAtScaleMap.get(name) ?? -Infinity, atScale));
+      this.recordedMap.set(name, Math.max(this.recordedMap.get(name) ?? -Infinity, atScale));
+    }
+    this.opts.onChange?.();
   }
 }

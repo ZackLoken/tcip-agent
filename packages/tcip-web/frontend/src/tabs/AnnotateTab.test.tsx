@@ -1170,7 +1170,9 @@ function mockMultiCellGrid() {
   // The Map tests below also mount the coverage-tracking hook, which reads and pushes the
   // session sweep record for the same raster; mocked here too so no real fetch is attempted.
   vi.spyOn(api.coverage, "get").mockResolvedValue(null);
-  vi.spyOn(api.coverage, "push").mockResolvedValue({ status: "ok" });
+  vi.spyOn(api.coverage, "push").mockResolvedValue({
+    record: { cells_seen_at_scale: {} },
+  });
   return vi.spyOn(api.coverage, "grid").mockResolvedValue({
     ...MULTI_CELL_GRID,
     derivation: "cells sized to one full-resolution screenful",
@@ -1240,7 +1242,9 @@ describe("AnnotateTab Map tool", () => {
 
   it("falls back to a drawing tool when the Map tool is withdrawn (no multi-cell grid)", async () => {
     vi.spyOn(api.coverage, "get").mockResolvedValue(null);
-    vi.spyOn(api.coverage, "push").mockResolvedValue({ status: "ok" });
+    vi.spyOn(api.coverage, "push").mockResolvedValue({
+      record: { cells_seen_at_scale: {} },
+    });
     // An ordinary raster's own lattice is one cell: settled, never pending, and offers no Map.
     vi.spyOn(api.coverage, "grid").mockResolvedValue({
       width: 1000,
@@ -1454,7 +1458,9 @@ describe("AnnotateTab completeness refresh and attestation control", () => {
       toJSON: () => "",
     } as DOMRect);
     vi.spyOn(api.coverage, "get").mockResolvedValue(null);
-    vi.spyOn(api.coverage, "push").mockResolvedValue({ status: "ok" });
+    vi.spyOn(api.coverage, "push").mockResolvedValue({
+      record: { cells_seen_at_scale: {} },
+    });
     vi.spyOn(api.coverage, "grid").mockResolvedValue({
       width: 800,
       height: 600,

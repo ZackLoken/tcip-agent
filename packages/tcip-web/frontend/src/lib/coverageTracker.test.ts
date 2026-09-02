@@ -3,7 +3,14 @@ import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vite
 import { StructuredRefusalError } from "@/api/http";
 import type { GridCell, GridGeometry, WorkingScaleBar } from "@/lib/coverage";
 import { meetsBar } from "@/lib/coverage";
-import { CoverageTracker, coverageOutbox, type CoveragePayload } from "@/lib/coverageTracker";
+import {
+  CoverageOutbox,
+  CoverageTracker,
+  coverageOutbox,
+  type CoveragePayload,
+  type CoveragePushResponse,
+} from "@/lib/coverageTracker";
+import { resetCoverageOutbox } from "@/test/coverageOutbox";
 
 const GRID: GridGeometry = {
   width: 300,
@@ -46,17 +53,20 @@ function bar(value: number): WorkingScaleBar {
   };
 }
 
-let post: Mock<(body: CoveragePayload) => Promise<unknown>>;
+let post: Mock<(body: CoveragePayload) => Promise<CoveragePushResponse>>;
 let tracker: CoverageTracker;
 
 beforeEach(() => {
   vi.useFakeTimers();
-  post = vi.fn(() => Promise.resolve({}));
+  // Echoes back what was posted, the ordinary case with no other tab or session contributing.
+  post = vi.fn((body: CoveragePayload) =>
+    Promise.resolve({ record: { cells_seen_at_scale: body.cells_seen_at_scale ?? {} } }),
+  );
   tracker = new CoverageTracker(post);
 });
 
 afterEach(() => {
-  coverageOutbox.clearForTests();
+  resetCoverageOutbox();
   vi.useRealTimers();
 });
 
@@ -225,6 +235,20 @@ describe("CoverageTracker posting", () => {
     expect(tracker.pending.has("A1")).toBe(true);
   });
 
+  it("a response carrying more than the body credits cells another tab or session contributed", async () => {
+    post.mockResolvedValueOnce({
+      record: { cells_seen_at_scale: { A1: 1, C1: 0.6 } }, // C1 rode in from elsewhere
+    });
+    tracker.reset(KEY, GRID, CELLS);
+    tracker.setViewing(NULL_VIEWING);
+    tracker.noteViewport({ x0: 0, y0: 0, x1: 100, y1: 100 }, 1); // posts A1 alone
+    await vi.advanceTimersByTimeAsync(400);
+    expect(post.mock.calls[0][0].cells_seen_at_scale).toEqual({ A1: 1 });
+    // C1 was never locally seen, but the response's own record credits it as seen and recorded.
+    expect(tracker.seenAtScale.get("C1")).toBe(0.6);
+    expect(tracker.pending.has("C1")).toBe(false);
+  });
+
   it("a push is triggered by a newly seen cell, a newly served cell and a viewing change, not by an at_scale rise alone", async () => {
     tracker.reset(KEY, GRID, CELLS);
     tracker.setViewing(NULL_VIEWING);
@@ -243,6 +267,19 @@ describe("CoverageTracker posting", () => {
     expect(post.mock.calls[1][0].cells_seen_at_scale).toEqual({ A1: 0.9 });
   });
 
+  it("a rise sets dirty without scheduling a push, so a flush before any later event still carries it", async () => {
+    tracker.reset(KEY, GRID, CELLS);
+    tracker.setViewing(NULL_VIEWING);
+    tracker.noteViewport({ x0: 0, y0: 0, x1: 100, y1: 100 }, 0.5); // A1 newly seen
+    await vi.advanceTimersByTimeAsync(400);
+    expect(post).toHaveBeenCalledTimes(1);
+
+    tracker.noteViewport({ x0: 0, y0: 0, x1: 100, y1: 100 }, 0.9); // A1 rises, already seen
+    tracker.flush(); // a navigation right after the rise, with no other event in between
+    expect(post).toHaveBeenCalledTimes(2);
+    expect(post.mock.calls[1][0].cells_seen_at_scale).toEqual({ A1: 0.9 });
+  });
+
   it("a push triggered by a viewing-only change with no cell delta still carries the facts", async () => {
     tracker.reset(KEY, GRID, CELLS);
     tracker.setViewing(NULL_VIEWING);
@@ -256,7 +293,9 @@ describe("CoverageTracker posting", () => {
   it("a failed push reports itself and retries on the next debounce tick, never silently", async () => {
     const onPushError = vi.fn();
     const failingTracker = new CoverageTracker(post, { onPushError });
-    post.mockRejectedValueOnce(new Error("network down")).mockResolvedValue({});
+    post
+      .mockRejectedValueOnce(new Error("network down"))
+      .mockResolvedValue({ record: { cells_seen_at_scale: {} } });
     failingTracker.reset(KEY, GRID, CELLS);
     failingTracker.setViewing(NULL_VIEWING);
     failingTracker.noteServedAtNative("B1");
@@ -287,33 +326,83 @@ describe("CoverageTracker posting", () => {
   });
 });
 
-describe("CoverageTracker outbox", () => {
-  it("a failed push at reset time is handed to the module outbox and retried under its own identity", async () => {
-    post.mockRejectedValueOnce(new Error("offline")).mockResolvedValue({});
+describe("CoverageTracker synchronous flush", () => {
+  it("a reset posts the outgoing image's owed facts immediately, under its own key, never deferred by the outbox's own delay", () => {
     tracker.reset(KEY, GRID, CELLS);
     tracker.setViewing(NULL_VIEWING);
     tracker.noteServedAtNative("A1");
-    tracker.reset(null, null, []); // flush() hands the owed payload straight to the outbox
-    expect(post).not.toHaveBeenCalled();
-    expect(coverageOutbox.size).toBeGreaterThan(0);
-    await vi.advanceTimersByTimeAsync(5000); // first outbox attempt: rejects, stays queued
+
+    tracker.reset({ ...KEY, imagePath: "C:/data/images/2026-01-01/other.tif" }, GRID, CELLS);
     expect(post).toHaveBeenCalledTimes(1);
+    expect(post.mock.calls[0][0].image_path).toBe(KEY.imagePath);
+    expect(coverageOutbox.size).toBe(0); // it succeeded: never touched the outbox at all
+  });
+
+  it("reset clears viewing, so a push under a new identity can never carry the previous image's context", () => {
+    tracker.reset(KEY, GRID, CELLS);
+    tracker.setViewing(NULL_VIEWING);
+    tracker.noteServedAtNative("A1");
+    vi.advanceTimersByTime(400); // the first identity's own push lands, viewing intact
+    post.mockClear();
+
+    tracker.reset({ ...KEY, imagePath: "C:/data/images/2026-01-01/other.tif" }, GRID, CELLS);
+    tracker.noteServedAtNative("B1"); // before setViewing runs again for the new identity
+    vi.advanceTimersByTime(400);
+    expect(post).not.toHaveBeenCalled(); // no viewing yet for this identity: nothing to post
+  });
+});
+
+describe("CoverageTracker outbox", () => {
+  it("a failed push at reset time posts once immediately, then is retried from the outbox under its own identity", async () => {
+    post
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockResolvedValue({ record: { cells_seen_at_scale: {} } });
+    tracker.reset(KEY, GRID, CELLS);
+    tracker.setViewing(NULL_VIEWING);
+    tracker.noteServedAtNative("A1");
+
+    tracker.reset(null, null, []); // flush() posts the outgoing image's facts at once
+    expect(post).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(0); // let the rejection reach the outbox
     expect(coverageOutbox.size).toBeGreaterThan(0);
-    await vi.advanceTimersByTimeAsync(5000); // second attempt: succeeds
+    await vi.advanceTimersByTimeAsync(5000); // the outbox's own first retry: succeeds
     expect(post).toHaveBeenCalledTimes(2);
     expect(coverageOutbox.size).toBe(0);
   });
 
   it("a 4xx answer drops the queued payload and the next one proceeds", async () => {
     const refusal = new StructuredRefusalError({ message: "unknown cell" }, 400, "unknown cell");
-    post.mockRejectedValueOnce(refusal).mockResolvedValue({});
+    post.mockRejectedValue(refusal);
     tracker.reset(KEY, GRID, CELLS);
     tracker.setViewing(NULL_VIEWING);
     tracker.noteServedAtNative("A1");
     tracker.reset(null, null, []);
-    await vi.advanceTimersByTimeAsync(5000);
-    expect(post).toHaveBeenCalledTimes(1);
+    expect(post).toHaveBeenCalledTimes(1); // flush()'s own immediate attempt, refused
+    await vi.advanceTimersByTimeAsync(5000); // the outbox's own retry, refused again: terminal
+    expect(post).toHaveBeenCalledTimes(2);
     expect(coverageOutbox.size).toBe(0);
+  });
+
+  it("the audit-gap 500 is terminal by its own marker, not retried like an ordinary 5xx", async () => {
+    const auditGap = new StructuredRefusalError(
+      { error: "audit_entry_not_written", message: "disk full" },
+      500,
+      "disk full",
+    );
+    post.mockRejectedValue(auditGap);
+    const onPushError = vi.fn();
+    const withOutbox = new CoverageTracker(post, { onPushError });
+    withOutbox.reset(KEY, GRID, CELLS);
+    withOutbox.setViewing(NULL_VIEWING);
+    withOutbox.noteServedAtNative("A1");
+    withOutbox.reset(null, null, []);
+    expect(post).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(5000); // the outbox's own retry, refused again: terminal
+    expect(post).toHaveBeenCalledTimes(2);
+    expect(coverageOutbox.size).toBe(0);
+    expect(onPushError).toHaveBeenCalledWith(
+      expect.stringContaining("saved without its audit line"),
+    );
   });
 
   it("a network failure stays queued and is retried, never dropped", async () => {
@@ -322,10 +411,32 @@ describe("CoverageTracker outbox", () => {
     tracker.setViewing(NULL_VIEWING);
     tracker.noteServedAtNative("A1");
     tracker.reset(null, null, []);
+    await vi.advanceTimersByTimeAsync(0); // let flush()'s own failed attempt reach the outbox
     const owed = coverageOutbox.size;
     expect(owed).toBeGreaterThan(0);
     await vi.advanceTimersByTimeAsync(5000);
     expect(coverageOutbox.size).toBe(owed);
+  });
+
+  it("drain reschedules rather than stalling when no postFn is configured yet", async () => {
+    const freshOutbox = new CoverageOutbox();
+    freshOutbox.enqueue({
+      image_path: KEY.imagePath,
+      dataset_root: KEY.datasetRoot,
+      subject: KEY.subject,
+      date: KEY.date,
+      grid: GRID,
+      cells_served_at_native: [],
+      cells_seen_at_scale: {},
+      viewing: NULL_VIEWING,
+    });
+    await vi.advanceTimersByTimeAsync(5000); // the first attempt: no postFn, must reschedule
+    expect(freshOutbox.size).toBe(1); // still queued, not silently stuck forever either
+
+    freshOutbox.configure(post, () => {});
+    await vi.advanceTimersByTimeAsync(5000); // the rescheduled attempt: now configured, succeeds
+    expect(post).toHaveBeenCalledTimes(1);
+    expect(freshOutbox.size).toBe(0);
   });
 });
 
@@ -365,6 +476,37 @@ describe("CoverageTracker hydration", () => {
     expect(tracker.swept.has("A1")).toBe(true);
     tracker.setWorkingScaleBar(bar(0.6));
     expect(tracker.swept.has("A1")).toBe(false);
+  });
+});
+
+describe("CoverageTracker coarserCount", () => {
+  it("counts recorded cells below the bar, never a locally-seen not-yet-saved cell", () => {
+    tracker.reset(KEY, GRID, CELLS);
+    tracker.hydrate({
+      grid: GRID,
+      cells_seen_at_scale: { A1: 0.3 },
+      cells_served_at_native: [],
+      viewing: NULL_VIEWING,
+      updated_at: "2026-01-01T00:00:00+00:00",
+    });
+    tracker.setWorkingScaleBar(bar(0.5));
+    expect(tracker.coarserCount).toBe(1); // A1 recorded at 0.3, below the 0.5 bar
+
+    tracker.noteViewport({ x0: 100, y0: 0, x1: 200, y1: 100 }, 0.2); // B1 seen locally, pending
+    expect(tracker.coarserCount).toBe(1); // B1 is not yet on record, so it never counts here
+  });
+
+  it("is zero once every recorded cell meets the bar", () => {
+    tracker.reset(KEY, GRID, CELLS);
+    tracker.hydrate({
+      grid: GRID,
+      cells_seen_at_scale: { A1: 0.5 },
+      cells_served_at_native: [],
+      viewing: NULL_VIEWING,
+      updated_at: "2026-01-01T00:00:00+00:00",
+    });
+    tracker.setWorkingScaleBar(bar(0.5));
+    expect(tracker.coarserCount).toBe(0);
   });
 });
 

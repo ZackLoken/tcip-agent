@@ -1380,6 +1380,7 @@ export function AnnotateTab() {
         onBandSelectionChange={setBandSelection}
         completeWarning={coverage.completeWarning}
         workingScaleReason={completeness.workingScaleReason}
+        workingScaleSubject={activeSubject}
         coverageMultiCell={coverageMultiCell}
       />
       <div className="relative flex-1 flex flex-col min-h-0">

@@ -5,7 +5,11 @@
 
 import type { HostSize, PixelRect } from "@/lib/viewGeometry";
 
-export type { GridGeometry, WorkingScaleBar } from "@/api/types.generated";
+export type {
+  CompletenessSetPayload as CompletenessSetPostBody,
+  GridGeometry,
+  WorkingScaleBar,
+} from "@/api/types.generated";
 import type { GridGeometry, WorkingScaleBar } from "@/api/types.generated";
 
 /** One served cell: a name plus its half-open native-pixel rect, clipped to the image extent. */
@@ -83,21 +87,6 @@ export function effectiveComplete(record: CompletenessRecord | undefined): Set<s
   if (!record) return new Set();
   const stale = new Set(record.stale_cells);
   return new Set(record.cells_complete.filter((c) => !stale.has(c)));
-}
-
-/** One explicit attestation write: set one cell's completeness for a subject to `complete`,
- *  never a toggle the caller infers from the stored state. POST /api/coverage/completeness. */
-export interface CompletenessSetPostBody {
-  image_path: string;
-  dataset_root: string | null;
-  subject: string;
-  grid: GridGeometry;
-  cell: string;
-  complete: boolean;
-  /** The view scale at the press; null for a non-GUI caller, stated explicitly rather than
-   *  omitted, the `CoveragePayload.date` precedent. */
-  view_scale: number | null;
-  user?: string | null;
 }
 
 /** The label reader's own reason, stripped of the record it dumps after a colon and a brace
@@ -331,4 +320,13 @@ export function completeWarningMessage(w: {
 }): string {
   const pct = (w.bar * 100).toFixed(1);
   return `Complete: ${w.unsweptCount} of ${w.total} grid cells have not had every part on screen at ${pct}% zoom or closer, in any combination of views.`;
+}
+
+/** The Complete toggle's own no-bar toast: `subject` and `reason` come from the same read
+ *  (`useRegionCompleteness`'s own `subject`/`workingScaleReason`), so the sentence can never name
+ *  a different subject than the one the reason was computed for. `subject` null (no active
+ *  subject) states the reason alone, since there is no working scale to name a subject for. */
+export function noWorkingScaleToast(subject: string | null, reason: string): string {
+  if (!subject) return `Complete: ${reason}, so coverage was not checked`;
+  return `Complete: no working scale for ${subject} on this image (${reason}), so coverage was not checked`;
 }
