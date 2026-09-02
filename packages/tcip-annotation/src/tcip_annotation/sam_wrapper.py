@@ -5,7 +5,7 @@ mask generation. Caches image embeddings for fast repeated predictions on the
 same image.
 
 Install:
-    pip install "sam-2 @ git+https://github.com/facebookresearch/sam2.git"
+    pip install "sam-2 @ git+https://github.com/facebookresearch/sam2.git@2b90b9f5ceec907a1c18123530e92e794ad901a4"
     # (the distribution is named `sam-2`; the import path is still `sam2`)
     # checkpoints download into ~/.cache/tcip/sam2/
     # see https://github.com/facebookresearch/sam2#model-description
