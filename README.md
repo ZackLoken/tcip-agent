@@ -76,7 +76,7 @@ cd packages/tcip-web/frontend
 npm install
 ```
 
-`docker build -f packages/tcip-web/Dockerfile` plus `docker run --network host` builds and runs the platform as a container, serving the GUI on loopback only.
+`docker build -f packages/tcip-web/Dockerfile` plus `docker run --network host` builds and runs the platform as a container, serving the GUI on loopback only. Host networking is a Linux Docker feature; it is not available on Docker Desktop for Windows or macOS.
 
 ### Developer tooling
 

@@ -171,7 +171,7 @@ source file under a covered root that no row names.
 
 | Module path | Ownership (one line) | In-repo imports | Imported by |
 |---|---|---|---|
-| packages/tcip-annotation/src/tcip_annotation/__init__.py | Headless annotation library: canonical name-based per-image JSON labels + a single-file COCO. | 8 | 6 |
+| packages/tcip-annotation/src/tcip_annotation/__init__.py | Headless annotation library: canonical name-based per-image JSON labels + a single-file COCO. | 8 | 7 |
 | packages/tcip-annotation/src/tcip_annotation/annotation_engine.py | AnnotationEngine: Annotation CRUD, spatial index, undo/redo. | 2 | 1 |
 | packages/tcip-annotation/src/tcip_annotation/format_io.py | Annotation I/O for the two on-disk formats: the canonical per-image JSON and a single-file COCO. | 4 | 6 |
 | packages/tcip-annotation/src/tcip_annotation/json_io.py | Per-image JSON: the canonical on-disk label format (ground truth + predictions). | 3 | 42 |
@@ -479,7 +479,7 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | scripts/drop_annotation_stats_image_status.py | Conform a project's ``annotation_stats`` record to drop its dead ``image_status`` key. | 3 | 0 |
 | scripts/drop_trait_spec_provenance.py | Conform a project's trait-spec records to drop the retired free-text ``provenance`` field, and remove the stale copies an earlier YAML-to-record conform step left behind. | 5 | 0 |
 | scripts/export_store.py | Write a root's database-held records and logs back out as files. | 6 | 0 |
-| scripts/foreground_fn_candidates.py | Compute foreground-only high-confidence FN candidates per image. | 1 | 0 |
+| scripts/foreground_fn_candidates.py | Compute foreground-only high-confidence FN candidates per image. | 2 | 0 |
 | scripts/gate_baseline.py | Parse ci.yml's jobs and run the steps it declares, so a local pass means CI would pass too. | 0 | 0 |
 | scripts/generate_frontend_routes.py | Generate the browser's route-path module from the backend's registered routes. | 1 | 0 |
 | scripts/generate_frontend_types.py | Generate the browser's coverage-record types from the pydantic models that declare them. | 9 | 0 |
@@ -2606,7 +2606,7 @@ Phase 3 verdict: single.
 ## S67. Local gate commands against the CI gate  <!-- queued: P5-308 unify -->
 
 Must agree: the checks a contributor runs locally are the checks CI runs.
-Side A: `CLAUDE.md` (documents `pytest -n 4`, `ruff`, `mypy`, and the frontend command chain).
+Side A: `CLAUDE.md` (documents `pytest -n 4`, `ruff`, `mypy`, and the frontend command chain; the docker job is CI-only by design, with no local counterpart).
 Side B: `.github/workflows/ci.yml` (mypy job, python job with `pytest -n auto` and `TCIP_MIN_TESTS`, typescript job with format:check/lint/typecheck/test/build, docker job building `packages/tcip-web/Dockerfile` and polling the served GUI).
 Phase 3 verdict: duplicated.
 

@@ -145,7 +145,7 @@ jobs:
         run: docker build -f packages/tcip-web/Dockerfile -t tcip-web:ci .
 
       - name: Import smoke (the system libs the slim base doesn't ship)
-        run: docker run --rm tcip-web:ci python -c "import cv2, rasterio, tcip_annotation"
+        run: docker run --rm tcip-web:ci python -c "import cv2, rasterio, torch, tcip_web"
 
       - name: Run and poll for the GUI
         run: |
@@ -167,7 +167,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
 
       - name: Install frontend dependencies
         working-directory: packages/tcip-web/frontend
