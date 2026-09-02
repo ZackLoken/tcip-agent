@@ -171,7 +171,7 @@ export function AnnotateTab() {
   const coverage = useCoverageTracking({
     imagePath: imgPath,
     datasetRoot: dataset.dataset_root,
-    subject: dataset.subject,
+    subject: activeSubject,
     date: dataset.date,
     grid: coverageGrid.grid,
     cells: coverageGrid.cells,
@@ -194,7 +194,7 @@ export function AnnotateTab() {
   const completeness = useRegionCompleteness({
     imagePath: imgPath,
     datasetRoot: dataset.dataset_root,
-    subject: dataset.subject,
+    subject: activeSubject,
     grid: coverageGrid.grid,
   });
   const coverageMultiCell = coverageGrid.cells.length > 1;
@@ -744,10 +744,8 @@ export function AnnotateTab() {
     },
     {
       keys: "enter",
-      action: () => {
-        if (mode === "polygon" && canvas.currentPolygon.length >= 3) commitPolygonAndTrack();
-      },
-      when: () => !isLocked,
+      action: () => commitPolygonAndTrack(),
+      when: () => !isLocked && mode === "polygon" && canvas.currentPolygon.length >= 3,
     },
     // Coverage cell navigation, multi-cell grids only: previous/next unswept cell.
     { keys: "[", action: () => stepCoverageCell(-1), when: () => coverageMultiCell },
@@ -1474,7 +1472,7 @@ export function AnnotateTab() {
         </CanvasStage>
 
         {ioError && (
-          <div className="absolute top-3 left-3 right-3 z-30 flex items-center gap-2 rounded-md border border-tcip-fp/50 bg-tcip-panel/95 px-3 py-1.5 text-[11px] text-tcip-fp">
+          <div className="absolute top-12 left-3 right-3 z-30 flex items-center gap-2 rounded-md border border-tcip-fp/50 bg-tcip-panel/95 px-3 py-1.5 text-[11px] text-tcip-fp">
             <span className="flex-1">{ioError}</span>
             {conflict && (
               <button className="tcip-btn text-[11px]" onClick={() => void reloadCurrent()}>
@@ -1513,11 +1511,12 @@ export function AnnotateTab() {
 
         {showCoverageChrome && (
           <CoverageChrome
-            subject={dataset.subject}
+            subject={activeSubject}
             derivation={coverageGrid.derivation ?? ""}
             gridFetchError={coverageGrid.error}
             readError={completeness.error}
             countsError={completeness.countsError}
+            canOverlay={coverageMultiCell && !!coverageGrid.grid}
             overlayOn={coverageOverlayOn}
             onToggleOverlay={toggleCoverageOverlay}
             currentCellName={activeCoverageCell?.name ?? null}
@@ -1534,6 +1533,7 @@ export function AnnotateTab() {
             swept={coverage.swept}
             activeComplete={completeness.activeComplete}
             activeStale={completeness.activeStale}
+            otherComplete={completeness.otherCompleteBySubject}
             annotationCounts={completeness.annotationCounts}
             onAttest={(complete) => {
               if (activeCoverageCell && coverageGrid.grid) {

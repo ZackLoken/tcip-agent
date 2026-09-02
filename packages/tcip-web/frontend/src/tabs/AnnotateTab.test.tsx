@@ -620,6 +620,22 @@ describe("AnnotateTab ioError banner", () => {
     expect(screen.queryByText(/changed elsewhere/)).not.toBeInTheDocument();
     expect(screen.queryByText("Reload")).not.toBeInTheDocument();
   });
+
+  it("sits in the row below the Overview pill, never on top of it", async () => {
+    render(<AnnotateTab />);
+    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
+    await flush();
+
+    act(addBox);
+    saveSpy.mockResolvedValueOnce({ status: "conflict" } as SaveResult);
+    pressSave();
+    await flush();
+
+    const banner = screen.getByText(/changed elsewhere/).closest("div");
+    const overview = screen.getByRole("button", { name: "Overview" });
+    expect(banner).toHaveClass("top-12");
+    expect(overview).toHaveClass("top-3");
+  });
 });
 
 describe("AnnotateTab legend", () => {
@@ -1361,6 +1377,59 @@ describe("AnnotateTab completeness refresh and attestation control", () => {
     ).toBeInTheDocument();
   });
 
+  it("switching the subject picker moves the attest control and the counts to that subject", async () => {
+    localStorage.removeItem("tcip.annotate.coverageGridOverlayOpen");
+    mockMultiCellGrid();
+    vi.spyOn(api.coverage, "completeness").mockResolvedValue({
+      by_subject: {
+        subject_a: {
+          grid: MULTI_CELL_GRID,
+          cells_complete: ["A1"],
+          attested_by: "user:z",
+          attested_at: "t",
+          stem: "img1",
+          date: "2026-01-01",
+          subject: "subject_a",
+          stale_cells: [],
+        },
+      },
+      annotation_counts: { subject_a: { A1: 2 }, subject_b: { A1: 5 } },
+      counts_grid: MULTI_CELL_GRID,
+      counts_error: null,
+    });
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
+      width: 200,
+      height: 200,
+      top: 0,
+      left: 0,
+      right: 200,
+      bottom: 200,
+      x: 0,
+      y: 0,
+      toJSON: () => "",
+    } as DOMRect);
+    render(<AnnotateTab />);
+    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
+    await flush();
+    triggerBelowNativeBaseFacts();
+    await waitFor(() => expect(api.coverage.grid).toHaveBeenCalled());
+    await flush();
+    fireEvent.click(screen.getByRole("button", { name: /Overlay off/ }));
+
+    expect(screen.getByText("Coverage for subject_a")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Unattest A1 for subject_a" })).toBeInTheDocument();
+    expect(screen.getByText("saved for subject_a: A1 (2)")).toBeInTheDocument();
+
+    act(() => useStore.getState().setActiveSubject("subject_b"));
+    await flush();
+
+    expect(screen.getByText("Coverage for subject_b")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Attest A1 complete for subject_b" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("saved for subject_b: A1 (5)")).toBeInTheDocument();
+  });
+
   it("a single-cell raster renders the chrome with its attest control", async () => {
     localStorage.removeItem("tcip.annotate.coverageGridOverlayOpen");
     vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
@@ -1397,8 +1466,10 @@ describe("AnnotateTab completeness refresh and attestation control", () => {
     await flush();
     await waitFor(() => expect(api.coverage.grid).toHaveBeenCalled());
     await flush();
-    fireEvent.click(screen.getByRole("button", { name: /Overlay off/ }));
 
+    // A single cell has no overlay to draw, so the toggle is withdrawn and the control is
+    // offered directly, with nothing to hide the cell behind.
+    expect(screen.queryByRole("button", { name: /Overlay/ })).not.toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "Attest A1 complete for subject_a" }),
     ).toBeInTheDocument();

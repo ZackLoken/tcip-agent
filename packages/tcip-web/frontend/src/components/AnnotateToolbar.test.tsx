@@ -155,6 +155,20 @@ describe("AnnotateToolbar draw mode", () => {
     );
   });
 
+  it("Box and Polygon describe themselves, the same as Point and Map do", () => {
+    render(
+      <AnnotateToolbar onSave={() => {}} saveDisabled={false} dirty={false} coverageMultiCell />,
+    );
+    expect(screen.getByRole("button", { name: "Box" })).toHaveAttribute(
+      "title",
+      expect.stringMatching(/box/i),
+    );
+    expect(screen.getByRole("button", { name: "Polygon" })).toHaveAttribute(
+      "title",
+      expect.stringMatching(/polygon/i),
+    );
+  });
+
   it("the image-position textbox has an accessible name, not just a visible counter beside it", () => {
     renderToolbar();
     expect(screen.getByRole("textbox", { name: "Image position" })).toBeInTheDocument();

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  breederReadErrorReason,
   cellAt,
   cellsIntersecting,
   completeWarningMessage,
@@ -309,5 +310,16 @@ describe("completeWarningMessage", () => {
       "Complete: 14 of 35 grid cells were never fully seen, in any combination of views, " +
         "at 35% zoom or closer this session.",
     );
+  });
+});
+
+describe("breederReadErrorReason", () => {
+  it("strips the reader's dict dump after the colon and brace", () => {
+    const raw = "record 0 carries no string subject: {'id': 1, 'image_id': 1, 'category_id': 0}";
+    expect(breederReadErrorReason(raw)).toBe("record 0 carries no string subject");
+  });
+
+  it("passes a reason with no brace through unchanged", () => {
+    expect(breederReadErrorReason("plot.json: not valid JSON")).toBe("plot.json: not valid JSON");
   });
 });

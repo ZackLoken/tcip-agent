@@ -119,4 +119,19 @@ describe("zoomToRect", () => {
     expect(view.offset_x).toBeLessThanOrEqual(0);
     expect(view.offset_y).toBeLessThanOrEqual(0);
   });
+
+  it("clamps a corner cell's pad to the raster's bounds, keeping cell scale", () => {
+    // 9000x9000 raster, 3x3 lattice (tile_size 3000), 1440x783 host, cell A1 at the corner.
+    const args = { host: { w: 1440, h: 783 }, imgW: 9000, imgH: 9000, padX: 1500, padY: 1500 };
+    const cellA1 = { x0: 0, y0: 0, x1: 3000, y1: 3000 };
+    const view = zoomToRect(cellA1, args);
+
+    // The top/left half-tile pad runs off the raster and is dropped: the fit window is the
+    // clamped 4500x4500 square, not the naive, unclamped 6000x6000 one.
+    const expectedScale = Math.min(args.host.w / 4500, args.host.h / 4500);
+    expect(view.scale).toBeCloseTo(expectedScale, 6);
+
+    const unclampedScale = Math.min(args.host.w / 6000, args.host.h / 6000);
+    expect(view.scale).toBeGreaterThan(unclampedScale);
+  });
 });
