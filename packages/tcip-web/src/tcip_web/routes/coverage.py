@@ -30,6 +30,7 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 
 import tcip_store
 
+from tcip_web.paths import assert_path_allowed
 from tcip_web.routes._coverage_models import CoverageRecord, CoverageViewing, GridGeometry
 from tcip_web.routes.classes import _audit_dataset_write, _guard_dataset_root
 from tcip_web.routes.images import _checked
@@ -97,7 +98,7 @@ def _grid_for_raster(src: Path, tile_size: int | None) -> tuple[dict, str]:
 
     Native dims come off the raster header (``image_dimensions``), never a decode. Raises
     ``tcip_mcp.pipelines.data.band_groups.BandGroupIncomplete`` for a band group missing a
-    member; ``get_grid`` turns that into a 409, ``get_completeness`` into its ``grid_error``
+    member; ``get_grid`` turns that into a 409, ``get_completeness`` into its ``counts_error``
     field rather than blocking the read.
     """
     from tcip_mcp.pipelines.image_utils import image_dimensions, resolve_image_source
@@ -320,14 +321,20 @@ def get_completeness(
 
     Each record carries ``stale_cells``: attested cells whose annotation content has changed since
     attestation (:mod:`tcip_mcp.pipelines.region_completeness`), recomputed fresh on every read so
-    a stale attestation is never served as if it still held.
+    a stale attestation is never served as if it still held. A label document that will not decode
+    for a subject that already holds a record here still refuses (400): staleness cannot be
+    computed without it.
 
-    ``annotation_counts`` (subject -> cell name -> count) is the active subject's saved-annotation
-    count per cell, computed once for the raster's current grid (:func:`_grid_for_raster`, the
-    same derivation ``get_grid`` uses) and read alongside ``by_subject`` rather than folded into
-    it: a count belongs to the grid, not to any one attestation record. A band group missing a
-    member (``_grid_for_raster`` refuses) reports ``grid_error`` and still serves ``by_subject``,
-    with ``annotation_counts`` empty, rather than blanking the whole read.
+    ``annotation_counts`` (subject -> cell name -> count) is every subject's saved-annotation count
+    per cell, one entry per subject present in the raster's label file; the hook selects the active
+    subject's entry client-side. ``counts_grid`` is the six-field lattice the counts were binned
+    against (:func:`_grid_for_raster`, the same derivation ``get_grid`` uses), served beside
+    ``annotation_counts`` rather than folded into it: a count belongs to the grid, not to any one
+    attestation record. The whole counts computation -- deriving the grid, reading the label file,
+    binning -- is best-effort beside ``by_subject``, which needs no raster at all: a band group
+    missing a member, a raster gone from disk, or any other raster-read failure reports the reason
+    in ``counts_error`` (with ``annotation_counts`` empty and ``counts_grid`` null) rather than
+    blanking the read.
     """
     from tcip_annotation.json_io import UnreadableLabelDocument, read_annotations
     from tcip_mcp.dataset_layout import (
@@ -340,6 +347,11 @@ def get_completeness(
     from tcip_mcp.pipelines.data.band_groups import BandGroupIncomplete
     from tcip_mcp.pipelines.reference_grid import reference_cells
     from tcip_mcp.pipelines.region_completeness import annotation_counts_by_cell, stale_cells
+
+    try:
+        src = assert_path_allowed(path)
+    except ValueError as exc:
+        raise HTTPException(403, str(exc)) from exc
 
     root = _resolve_root(path, dataset_root)
     stem = Path(path).stem
@@ -364,27 +376,23 @@ def get_completeness(
         by_subject[subject] = {**record, "stale_cells": stale}
 
     annotation_counts: dict[str, dict[str, int]] = {}
-    grid_error: Optional[str] = None
+    counts_grid: Optional[dict] = None
+    counts_error: Optional[str] = None
     try:
-        geometry, _derivation = _grid_for_raster(Path(path), None)
-    except BandGroupIncomplete as exc:
-        grid_error = str(exc)
-    else:
-        try:
-            _root_from_image, date, image_stem = parse_image_path(path)
-        except ValueError as exc:
-            raise HTTPException(400, str(exc)) from exc
+        geometry, _derivation = _grid_for_raster(src, None)
+        _root_from_image, date, image_stem = parse_image_path(path)
         label_path = annotation_path(root, date, image_stem)
-        try:
-            annotations = read_annotations(str(label_path)) if label_path.is_file() else []
-        except UnreadableLabelDocument as exc:
-            raise HTTPException(400, str(exc)) from exc
+        annotations = read_annotations(str(label_path)) if label_path.is_file() else []
         cells = reference_cells(
             geometry["width"], geometry["height"], geometry["tile_size"], 0.0, clamp=True)
         annotation_counts = annotation_counts_by_cell(annotations, cells, geometry["tile_size"])
+        counts_grid = geometry
+    except (BandGroupIncomplete, FileNotFoundError, OSError, ValueError,
+            UnreadableLabelDocument) as exc:
+        counts_error = str(exc)
 
     return {"by_subject": by_subject, "annotation_counts": annotation_counts,
-            "grid_error": grid_error}
+            "counts_grid": counts_grid, "counts_error": counts_error}
 
 
 @router.post("/completeness")
@@ -456,6 +464,12 @@ def post_completeness(payload: CompletenessSetPayload) -> dict:
         existing = store.get(bucket)
         grid_matches = existing is not None and existing.get("grid") == grid
         cells_complete = set(existing.get("cells_complete") or []) if grid_matches else set()
+
+        if not complete and payload.cell not in cells_complete:
+            # Nothing to unattest here, whether from no record, a different lattice, or a
+            # same-lattice record that never held this cell: an idempotent no-op, not a write.
+            return {"status": "ok", "complete": False, "cells_complete": sorted(cells_complete)}
+
         replaced = existing is not None and not grid_matches
         if complete:
             cells_complete.add(payload.cell)
