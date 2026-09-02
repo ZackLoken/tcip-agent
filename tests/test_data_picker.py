@@ -59,7 +59,8 @@ def test_narrow_manifest_to_date_matches_bind_manifest_stems_own_arithmetic(tmp_
 
     narrowing = narrow_manifest_to_date(manifest, DATES[0])
     binding = bind_manifest_stems(
-        manifest, DATES[0], SUBJECT, None, ["a", "b", "c", "d", "e", "f"])
+        manifest, DATES[0], SUBJECT, None, ["a", "b", "c", "d", "e", "f"],
+        images_dir=root / "images" / DATES[0])
 
     assert len(narrowing.train_ids) == binding.train_bound
     assert len(narrowing.val_ids) == binding.val_bound
@@ -180,6 +181,29 @@ def test_manifest_compatibility_admits_a_make_splits_manifest_with_no_empty_side
     config["data"]["split"] = {"manifest_dir": str(out)}
 
     assert manifest_compatibility(config, manifest, str(out)) == []
+
+
+def test_manifest_compatibility_scope_check_reaches_the_picker(tmp_path: Path, monkeypatch):
+    """Marker proof that manifest_compatibility reaches manifest_scope_issues, the one
+    accumulator every manifest-scope consumer shares: a site that stopped calling it would pass
+    this test's own scenario silently instead of raising the marker below."""
+    import tcip_mcp.pipelines.data.splits as splits_mod
+    from tcip_mcp.tools.training_tools import manifest_compatibility
+
+    root = _two_subject_two_date_dataset(tmp_path / "ds")
+    out = tmp_path / "m"
+    manifest = _draw(root, out)
+    config = _bespoke_config(root / "images" / DATES[0], root / "annotations" / DATES[0])
+    config["data"]["split"] = {"manifest_dir": str(out)}
+
+    monkeypatch.setattr(
+        splits_mod, "manifest_scope_issues",
+        lambda *a, **k: (["MARKER-COMPATIBILITY-SCOPE-ISSUE"], None),
+    )
+
+    issues = manifest_compatibility(config, manifest, str(out))
+
+    assert any("MARKER-COMPATIBILITY-SCOPE-ISSUE" in i for i in issues)
 
 
 def test_preflight_config_flags_a_manifest_with_no_images_root_recorded(tmp_path: Path):
@@ -354,7 +378,8 @@ def test_list_split_choices_offers_every_recorded_partition_with_the_bindings_ow
     by_dir = {m["manifest_dir"]: m for m in result["manifests"]}
 
     expected = bind_manifest_stems(
-        default_manifest, DATES[0], SUBJECT, None, ["a", "b", "c", "d", "e", "f"])
+        default_manifest, DATES[0], SUBJECT, None, ["a", "b", "c", "d", "e", "f"],
+        images_dir=root / "images" / DATES[0])
     default_entry = by_dir[str(dataset_default)]
     assert default_entry["enabled"] is True
     assert default_entry["train"] == expected.train_bound

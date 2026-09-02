@@ -469,6 +469,38 @@ def test_prioritize_review_queue_marks_a_bound_runs_calibration_side(tmp_path, m
     assert "marks_unresolved" not in r
 
 
+def test_prioritize_review_queue_scope_check_reaches_the_review_queue(tmp_path, monkeypatch):
+    """Marker proof that _resolve_calibration_ids reaches manifest_scope_issues, the one
+    accumulator every manifest-scope consumer shares: a site that stopped calling it would pass
+    this test's own scenario silently instead of surfacing the marker below in
+    marks_unresolved."""
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
+    import tcip_mcp.pipelines.data.splits as splits_mod
+    from tests.test_selection_disjointness_label_movement import DATES, _bind_run, _dataset, _draw
+
+    root = _dataset(tmp_path / "data")
+    manifest_dir = tmp_path / "manifest"
+    _draw(root, manifest_dir)
+    date = DATES[0]
+
+    experiment_id = "exp-pq-marker"
+    _bind_run(root, manifest_dir, experiment_id, date=date)
+    ckpt_path = _registered_checkpoint_from_experiment(tmp_path, experiment_id)
+    _stub_scorer(monkeypatch)
+    monkeypatch.setattr(
+        splits_mod, "manifest_scope_issues",
+        lambda *a, **k: (["MARKER-REVIEW-QUEUE-SCOPE-ISSUE"], None),
+    )
+
+    r = prioritize_review_queue(
+        checkpoint_path=ckpt_path, images_dir=str(root / "images" / date),
+        project_path=str(tmp_path))
+
+    assert "error" not in r, r
+    assert "marks_unresolved" in r
+    assert "MARKER-REVIEW-QUEUE-SCOPE-ISSUE" in r["marks_unresolved"]
+
+
 def test_prioritize_review_queue_unbound_run_carries_no_marks_or_reason(tmp_path, monkeypatch):
     """A checkpoint with no registry-recorded producer has nothing bound to check against: no
     ``calibration_member`` on any entry, and no ``marks_unresolved`` guessing at a reason."""

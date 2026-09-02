@@ -528,7 +528,7 @@ def auto_train_val(task: str, data_cfg: dict, transforms):
         from tcip_mcp.dataset_layout import annotation_date
         from tcip_mcp.pipelines.data.splits import (
             bind_manifest_stems, manifest_date_key, member_identity_parts,
-            refuse_if_images_root_moved,
+            require_manifest_scope,
         )
         from tcip_mcp.pipelines.resolution import dataset_hash, manifest_digest
         from tcip_mcp.pipelines.resolution import label_digests as compute_label_digests
@@ -547,14 +547,8 @@ def auto_train_val(task: str, data_cfg: dict, transforms):
         date = run_date
         # The admission draw below reads confirmed negatives under src["date"]; it must agree.
         src["date"] = date
+        # Reused below for labels_hash_at_split; bind_manifest_stems refuses an absent block.
         date_block = (manifest.get("members") or {}).get(manifest_date_key(date))
-        if date_block is None:
-            raise ValueError(
-                f"split manifest at {manifest_dir!r} holds no members under date {date!r}; it "
-                f"holds members under {sorted(manifest.get('members') or {})}."
-            )
-        refuse_if_images_root_moved(
-            "data.images_dir", images_dir, date_block.get("images_root"), date)
 
         subject, attribute = src.get("subject"), src.get("attribute")
         if not subject:
@@ -562,12 +556,19 @@ def auto_train_val(task: str, data_cfg: dict, transforms):
                 "data.split.manifest_dir requires data.subject: a manifest binds by subject, "
                 "and this run's own admission has none to compare against it."
             )
+        # Config-only, ahead of a build that would fail for an unrelated reason on a bad root.
+        require_manifest_scope(
+            manifest, manifest_dir=manifest_dir, subject=subject, attribute=attribute, date=date,
+            images_dir=images_dir, label="data.images_dir",
+        )
         detected_label_format = checked_label_format(task, data_cfg, src)
         full_ds, admitted, build_src = build_full_admitted_dataset(
             task, data_cfg, src, transforms, detected_label_format)
         binding = bind_manifest_stems(
             manifest, date, subject, attribute, admitted,
-            admission_counts=getattr(full_ds, "sample_counts", None))
+            admission_counts=getattr(full_ds, "sample_counts", None),
+            images_dir=images_dir, manifest_dir=manifest_dir)
+        assert date_block is not None, "bind_manifest_stems already refused an absent block"
 
         split_cfg = data_cfg.setdefault("split", {})
         split_cfg["resolved_group_by"] = manifest.get("group_by")

@@ -78,14 +78,14 @@ def _resolve_calibration_ids(
     ``calibration_stems=None`` with ``marks_unresolved`` naming why, never a guess at membership.
 
     A bound run's calibration side is scoped to the one capture date it bound to, never the whole
-    manifest (which may span other dates the run was never bound against): the same narrowing
-    :func:`~tcip_mcp.pipelines.data.splits.bind_manifest_stems` applies when it computes
-    ``calibration_bound``. Membership then turns on whether ``images_dir`` is the exact directory
-    the manifest recorded as that date's ``images_root`` (:func:`~tcip_mcp.pipelines.data.
-    splits.same_directory`, the one comparison :func:`~tcip_mcp.pipelines.data.
-    splits.refuse_if_images_root_moved` also uses): a candidate under a different root cannot be
-    that date's member by path shape, so a mismatch is disclosed under ``marks_unresolved`` rather
-    than guessed.
+    manifest (which may span other dates the run was never bound against): the same shared scope
+    check every manifest consumer shares (:func:`~tcip_mcp.pipelines.data.splits.
+    require_manifest_scope`), the one :func:`~tcip_mcp.pipelines.data.splits.bind_manifest_stems`
+    also calls when it computes ``calibration_bound``. Membership then turns on whether
+    ``images_dir`` is the exact directory the manifest recorded as that date's ``images_root``; an
+    absent recorded root refuses here the same way it refuses everywhere else this check runs,
+    rather than the opposite polarity a bare :func:`~tcip_mcp.pipelines.data.
+    splits.same_directory` comparison against a possibly-empty recorded root once read here.
     """
     experiment_id = checkpoint.producer
     if not experiment_id:
@@ -115,21 +115,21 @@ def _resolve_calibration_ids(
             f"this run is bound to split manifest {manifest_dir!r}, but it could not be read to "
             f"mark the queue's calibration-side candidates: {exc}"
         )
-    from tcip_mcp.pipelines.data.splits import (
-        manifest_date_key, member_identity_parts, same_directory,
-    )
+    from tcip_mcp.pipelines.data.splits import member_identity_parts, require_manifest_scope
 
-    date_block = (manifest.get("members") or {}).get(manifest_date_key(date)) or {}
-    recorded_root = date_block.get("images_root")
-    if not same_directory(images_dir, recorded_root):
-        return None, (
-            f"images_dir={str(images_dir)!r} is not the bound run's recorded images root for "
-            f"date {date!r} ({recorded_root!r}): the queue's calibration-side candidates cannot "
-            "be marked against a different root."
+    try:
+        narrowing = require_manifest_scope(
+            manifest, manifest_dir=manifest_dir, subject=manifest_binding.get("subject"),
+            attribute=manifest_binding.get("attribute"), date=date, images_dir=images_dir,
+            label="images_dir",
         )
-    calibration_ids = set((manifest.get("splits") or {}).get("calibration") or [])
-    this_date_calibration = {i for i in calibration_ids if member_identity_parts(i)[0] == date}
-    return {member_identity_parts(i)[1] for i in this_date_calibration}, None
+    except ValueError as exc:
+        return None, (
+            f"images_dir={str(images_dir)!r} could not be confirmed against the bound run's "
+            f"split manifest for date {date!r} to mark the queue's calibration-side candidates: "
+            f"{exc}"
+        )
+    return {member_identity_parts(i)[1] for i in narrowing.calibration_ids}, None
 
 
 def _calibration_marks(candidates: list, calibration_stems: set[str]) -> list[bool]:
