@@ -2603,7 +2603,7 @@ Phase 3 verdict: duplicated.
 
 Must agree: the environment name in the client config, the docs, and the environment file match.
 Side A: `.mcp.json` (launches `conda run -n tcip-agent python -m tcip_mcp`).
-Side B: `environment.yml:14` (`name: tcip-agent`).
+Side B: `environment.yml:15` (`name: tcip-agent`).
 Phase 3 verdict: duplicated.
 
 ## S66. Skill and docstring examples against real signatures
