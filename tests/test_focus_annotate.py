@@ -165,6 +165,33 @@ def test_focus_annotate_still_rejects_a_mode_the_gui_has_no_tool_for(tmp_path: P
     assert "error" in res and "lasso" in res["error"]
 
 
+def test_focus_annotate_rejects_a_mode_the_gui_has_no_tool_for_naming_the_real_vocabulary(
+    tmp_path: Path,
+) -> None:
+    from tcip_mcp.web_client import ANNOTATE_MODES
+
+    root = tmp_path / "proj"
+    date = "2026-03-02"
+    _scene(root, date, ["IMG_0000.JPG"])
+    _label(root, "catkin", date, "detect", "IMG_0000", 1)
+
+    res = focus("annotate", str(root), str(root), "catkin", date, mode="lasso")
+    assert "error" in res
+    for name in ANNOTATE_MODES:
+        assert name in res["error"]
+
+
+def test_focus_annotate_accepts_the_map_mode(tmp_path: Path) -> None:
+    root = tmp_path / "proj"
+    date = "2026-03-02"
+    _scene(root, date, ["IMG_0000.JPG"])
+    _label(root, "catkin", date, "detect", "IMG_0000", 1)
+
+    res = focus("annotate", str(root), str(root), "catkin", date, mode="map")
+    assert "error" not in res
+    assert res["mode"] == "map"
+
+
 def test_focus_annotate_empty_label_is_not_a_focus_target(tmp_path: Path) -> None:
     # An empty label file is a confirmed negative (nothing to show); skip it.
     root = tmp_path / "proj"

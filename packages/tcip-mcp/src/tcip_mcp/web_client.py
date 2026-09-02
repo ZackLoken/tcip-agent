@@ -198,6 +198,15 @@ validates against."""
 
 TAB_NAMES = get_args(ActiveTab)
 
+AnnotateMode = Literal["box", "polygon", "point", "map"]
+"""The Annotate canvas's tool modes: the vocabulary ``tcip_web.state.GuiState.mode`` holds. The
+first three draw; ``map`` navigates the coverage lattice (a click opens a cell's tile) and
+authors nothing. Declared here, not in ``tcip_web``, for the same reason as ``ActiveTab``: the
+agent's own ``focus`` tool validates a caller-supplied mode against this vocabulary and cannot
+import ``tcip_web``, so the vocabulary is the protocol's, and ``tcip_web.state`` imports it."""
+
+ANNOTATE_MODES = get_args(AnnotateMode)
+
 # One panel per GUI tab, plus "app" for steering the GUI itself (open a project, focus a tab).
 # The pusher and the receiver both validate against this one set, so neither drifts apart.
 VALID_PANELS = frozenset(TAB_NAMES) | {"app"}
