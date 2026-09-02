@@ -76,6 +76,7 @@ export function AnnotateToolbar({
   bandSelection,
   onBandSelectionChange,
   completeWarning,
+  workingScaleReason,
   coverageMultiCell,
 }: {
   onSave: () => void;
@@ -89,6 +90,9 @@ export function AnnotateToolbar({
   onBandSelectionChange?: (next: BandSelection) => void;
   // Coverage facts worth stating when Complete is checked (warn, never block); null = nothing.
   completeWarning?: () => string | null;
+  // Why the active subject has no working-scale bar on this image (a read pending, a read
+  // failure, or no saved box/polygon annotation of it); null once a bar exists.
+  workingScaleReason?: string | null;
   // The Map tool is offered only once the raster's coverage grid holds more than one cell.
   coverageMultiCell?: boolean;
 }) {
@@ -247,7 +251,17 @@ export function AnnotateToolbar({
         : "unannotated";
     if (next) {
       const warning = completeWarning?.();
-      if (warning) useStore.getState().pushToast(warning, "info");
+      if (warning) {
+        useStore.getState().pushToast(warning, "info");
+      } else if (workingScaleReason) {
+        useStore
+          .getState()
+          .pushToast(
+            `Complete: no working scale for ${dataset.subject} on this image ` +
+              `(${workingScaleReason}), so coverage was not checked`,
+            "info",
+          );
+      }
     }
     await writeCompleteStatus(newStatus);
   }

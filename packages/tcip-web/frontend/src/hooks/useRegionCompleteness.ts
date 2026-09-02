@@ -1,9 +1,10 @@
 /**
  * Wires the region-completeness store into the Annotate tab: fetches every subject's
  * attestation record and saved-annotation count for the open raster, exposes the active
- * subject's own complete/stale cells separate from every other subject's, and posts an explicit
- * attest/unattest/re-attest write. The store itself is the only source of truth, so every write
- * just refetches it.
+ * subject's own complete/stale cells separate from every other subject's, the active subject's
+ * working-scale bar (derived server-side from the label file, never a value the browser echoes
+ * back), and posts an explicit attest/unattest/re-attest write. The store itself is the only
+ * source of truth, so every write just refetches it.
  *
  * A record whose grid disagrees with the raster's current grid is never rendered on it (a grid
  * derivation can change between an attestation and now); its cell count and the record's own
@@ -14,9 +15,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { api } from "@/api/client";
+import type { WorkingScaleBar } from "@/api/types.generated";
 import {
   effectiveComplete,
   sameGrid,
+  type CellAttestedView,
   type CompletenessRecord,
   type GridGeometry,
 } from "@/lib/coverage";
@@ -33,6 +36,9 @@ export interface RegionCompleteness {
   activeComplete: ReadonlySet<string>;
   /** Cells attested complete for the active subject on the current grid but now stale. */
   activeStale: ReadonlySet<string>;
+  /** The active subject's scale provenance per attested cell, on the current grid; empty for a
+   *  cell attested before this field existed or on a record that predates it entirely. */
+  activeCellsAttestedView: Readonly<Record<string, CellAttestedView>>;
   /** Cells attested complete for another subject on the current grid, stale ones excluded. */
   otherComplete: ReadonlySet<string>;
   /** The same cells as `otherComplete`, kept per owning subject so a state list can name which
@@ -45,6 +51,13 @@ export interface RegionCompleteness {
   /** The active subject's saved-annotation count per cell, from the current grid; empty when the
    *  counts were binned on a different lattice than the one now showing (see `countsError`). */
   annotationCounts: Record<string, number>;
+  /** The active subject's working-scale bar for this image, derived fresh from the label file
+   *  on every read; null when there is none (see `workingScaleReason` for why). */
+  workingScale: WorkingScaleBar | null;
+  /** Why `workingScale` is null: the read has not answered yet, the read failed (with its own
+   *  text), or no box or polygon annotation of the subject is saved on this image. Null once a
+   *  bar exists. */
+  workingScaleReason: string | null;
   /** The completeness read's own failure, surfaced rather than read as "nothing attested". */
   error: string | null;
   /** Why `annotationCounts` is empty: the read's own `counts_error` (a raster the grid could not
@@ -54,8 +67,9 @@ export interface RegionCompleteness {
   /** Re-fetch the current image's record and counts, discarding nothing local: the store is the
    *  only source of truth, so a save that may have changed staleness or counts calls this. */
   reload: () => void;
-  /** Attest, unattest or re-attest one cell in the direction ``complete`` states. */
-  write: (cell: string, grid: GridGeometry, complete: boolean) => void;
+  /** Attest, unattest or re-attest one cell in the direction ``complete`` states, at ``viewScale``
+   *  (the view scale at the press; null for a caller with no view). */
+  write: (cell: string, grid: GridGeometry, complete: boolean, viewScale: number | null) => void;
 }
 
 export function useRegionCompleteness(args: {
@@ -69,6 +83,10 @@ export function useRegionCompleteness(args: {
     {},
   );
   const [countsGrid, setCountsGrid] = useState<GridGeometry | null>(null);
+  const [workingScaleBySubject, setWorkingScaleBySubject] = useState<
+    Record<string, WorkingScaleBar | null>
+  >({});
+  const [workingScaleError, setWorkingScaleError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [readCountsError, setReadCountsError] = useState<string | null>(null);
   const { imagePath, datasetRoot, subject, grid } = args;
@@ -78,15 +96,19 @@ export function useRegionCompleteness(args: {
       setBySubject({});
       setCountsBySubject({});
       setCountsGrid(null);
+      setWorkingScaleBySubject({});
+      setWorkingScaleError(null);
       setError(null);
       setReadCountsError(null);
       return;
     }
-    void api.coverage.completeness(imagePath, datasetRoot).then(
+    void api.coverage.completeness(imagePath, datasetRoot, subject).then(
       (res) => {
         setBySubject(res.by_subject);
         setCountsBySubject(res.annotation_counts);
         setCountsGrid(res.counts_grid);
+        setWorkingScaleBySubject(res.working_scale);
+        setWorkingScaleError(res.working_scale_error);
         setError(null);
         setReadCountsError(res.counts_error);
       },
@@ -94,11 +116,13 @@ export function useRegionCompleteness(args: {
         setBySubject({});
         setCountsBySubject({});
         setCountsGrid(null);
+        setWorkingScaleBySubject({});
+        setWorkingScaleError(null);
         setError(err instanceof Error ? err.message : String(err));
         setReadCountsError(null);
       },
     );
-  }, [imagePath, datasetRoot]);
+  }, [imagePath, datasetRoot, subject]);
 
   useEffect(() => {
     reload();
@@ -114,6 +138,11 @@ export function useRegionCompleteness(args: {
 
   const activeStale = useMemo(
     () => (activeOnGrid && activeRecord ? new Set(activeRecord.stale_cells) : new Set<string>()),
+    [activeRecord, activeOnGrid],
+  );
+
+  const activeCellsAttestedView = useMemo(
+    () => (activeOnGrid && activeRecord ? (activeRecord.cells_attested_view ?? {}) : {}),
     [activeRecord, activeOnGrid],
   );
 
@@ -161,8 +190,17 @@ export function useRegionCompleteness(args: {
     return null;
   }, [readCountsError, grid, countsGrid, countsOnGrid]);
 
+  const workingScale = subject ? (workingScaleBySubject[subject] ?? null) : null;
+  const workingScaleReason = useMemo(() => {
+    if (workingScale) return null;
+    if (workingScaleError) return workingScaleError;
+    if (!subject) return null;
+    if (!(subject in workingScaleBySubject)) return "the read has not answered yet";
+    return `no saved box or polygon annotation of ${subject}`;
+  }, [workingScale, workingScaleError, subject, workingScaleBySubject]);
+
   const write = useCallback(
-    (cell: string, writeGrid: GridGeometry, complete: boolean) => {
+    (cell: string, writeGrid: GridGeometry, complete: boolean, viewScale: number | null) => {
       if (!imagePath || !subject) return;
       void api.coverage
         .setCompleteness({
@@ -172,6 +210,7 @@ export function useRegionCompleteness(args: {
           grid: writeGrid,
           cell,
           complete,
+          view_scale: viewScale,
           user: useStore.getState().user,
         })
         .then(reload, (err: unknown) => {
@@ -190,10 +229,13 @@ export function useRegionCompleteness(args: {
   return {
     activeComplete,
     activeStale,
+    activeCellsAttestedView,
     otherComplete,
     otherCompleteBySubject,
     otherLattice,
     annotationCounts,
+    workingScale,
+    workingScaleReason,
     error,
     countsError,
     reload,

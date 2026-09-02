@@ -40,6 +40,7 @@ afterEach(() => {
 function renderToolbar(
   bandsInfo?: ImageBandsResponse | null,
   bandSelection?: BandSelection | null,
+  extra?: { completeWarning?: () => string | null; workingScaleReason?: string | null },
 ) {
   render(
     <AnnotateToolbar
@@ -49,6 +50,8 @@ function renderToolbar(
       bandsInfo={bandsInfo}
       bandSelection={bandSelection}
       onBandSelectionChange={() => {}}
+      completeWarning={extra?.completeWarning}
+      workingScaleReason={extra?.workingScaleReason ?? null}
     />,
   );
 }
@@ -465,6 +468,66 @@ describe("AnnotateToolbar Complete toggle, subject-scoped", () => {
       "C:/data/annotations/2026-01-01",
       undefined,
     );
+  });
+});
+
+describe("AnnotateToolbar Complete toggle coverage warning", () => {
+  it("toasts the completeWarning wording when unswept cells remain", async () => {
+    seedImageDataset({ subject: "subject_a" });
+    setCanvasBoxSubjects(["subject_a"]);
+    vi.spyOn(classesApi, "setImageStatus").mockResolvedValue({});
+    renderToolbar(undefined, undefined, {
+      completeWarning: () => "Complete: 2 of 6 grid cells have not had every part on screen",
+      workingScaleReason: null,
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByLabelText("Complete"));
+    });
+
+    expect(
+      useStore
+        .getState()
+        .toasts.some((t) => t.message.includes("2 of 6 grid cells have not had every part")),
+    ).toBe(true);
+  });
+
+  it("toasts the no-working-scale sentence when the warning is null for want of a bar", async () => {
+    seedImageDataset({ subject: "subject_a" });
+    setCanvasBoxSubjects([]);
+    vi.spyOn(classesApi, "setImageStatus").mockResolvedValue({});
+    renderToolbar(undefined, undefined, {
+      completeWarning: () => null,
+      workingScaleReason: "no saved box or polygon annotation of subject_a",
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByLabelText("Complete"));
+    });
+
+    const toast = useStore
+      .getState()
+      .toasts.find((t) => t.message.includes("no working scale for subject_a"));
+    expect(toast).toBeTruthy();
+    expect(toast!.message).toContain("no saved box or polygon annotation of subject_a");
+    expect(toast!.message).toContain("so coverage was not checked");
+  });
+
+  it("stays silent when the warning is null and a bar exists (every cell already swept)", async () => {
+    seedImageDataset({ subject: "subject_a" });
+    setCanvasBoxSubjects(["subject_a"]);
+    vi.spyOn(classesApi, "setImageStatus").mockResolvedValue({});
+    const toastsBefore = useStore.getState().toasts.length;
+    renderToolbar(undefined, undefined, {
+      completeWarning: () => null,
+      workingScaleReason: null,
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByLabelText("Complete"));
+    });
+
+    expect(useStore.getState().toasts.length).toBe(toastsBefore);
   });
 });
 

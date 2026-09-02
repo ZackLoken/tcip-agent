@@ -287,9 +287,12 @@ export const api = {
     push: (body: CoveragePayload) =>
       call<{ status: string }>(ROUTES.postCoverage, { method: "POST", body: JSON.stringify(body) }),
 
-    // Every subject's completeness record plus every subject's saved-annotation count per cell.
-    completeness: (path: string, dataset_root: string | null) =>
-      call<CompletenessResponse>(`${ROUTES.getCoverageCompleteness}?${q({ path, dataset_root })}`),
+    // Every subject's completeness record, every subject's saved-annotation count per cell, and
+    // the active subject's working-scale bar (served even absent from the file when named here).
+    completeness: (path: string, dataset_root: string | null, subject: string | null = null) =>
+      call<CompletenessResponse>(
+        `${ROUTES.getCoverageCompleteness}?${q({ path, dataset_root, subject })}`,
+      ),
 
     // Sets one cell's completeness in the direction the caller states, never a toggle.
     setCompleteness: (body: CompletenessSetPostBody) =>

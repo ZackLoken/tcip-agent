@@ -2,8 +2,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
 
 import { api } from "@/api/client";
+import type { WorkingScaleBar } from "@/api/types.generated";
 import { useCoverageTracking } from "@/hooks/useCoverageTracking";
 import type { GridCell, GridGeometry } from "@/lib/coverage";
+import { coverageOutbox } from "@/lib/coverageTracker";
 import { useStore } from "@/store";
 
 const GRID: GridGeometry = {
@@ -22,8 +24,25 @@ const CELLS: GridCell[] = [
   { name: "B2", x0: 100, y0: 100, x1: 200, y1: 200 },
   { name: "C2", x0: 200, y0: 100, x1: 300, y1: 200 },
 ];
+const NULL_VIEWING = {
+  bands: null,
+  stretch: null,
+  stats_source: null,
+  display_bounds: null,
+  base_served_size: null,
+};
 
-function trackingArgs(subject: string | null) {
+function bar(value: number): WorkingScaleBar {
+  return {
+    value,
+    median_extent_native_px: 46 / value,
+    annotation_count: 1,
+    judged_span_px: 46,
+    source: "s",
+  };
+}
+
+function trackingArgs(subject: string | null, workingScale: WorkingScaleBar | null = null) {
   return {
     imagePath: "C:/data/images/2026-01-01/mosaic.tif",
     datasetRoot: "C:/data",
@@ -34,11 +53,13 @@ function trackingArgs(subject: string | null) {
     view: { scale: 1, offset_x: 0, offset_y: 0 },
     imgW: 300,
     imgH: 200,
-    viewing: { stats_source: null, display_bounds: null, base_served_size: null },
+    viewing: NULL_VIEWING,
+    workingScale,
   };
 }
 
 afterEach(() => {
+  coverageOutbox.clearForTests();
   vi.restoreAllMocks();
 });
 
@@ -48,7 +69,6 @@ describe("useCoverageTracking subject gating", () => {
     const push = vi.spyOn(api.coverage, "push").mockResolvedValue({ status: "ok" });
     const { result } = renderHook(() => useCoverageTracking(trackingArgs(null)));
 
-    result.current.noteAuthoringCommit();
     result.current.noteServedAtNative("A1");
     await new Promise((r) => setTimeout(r, 500));
     expect(get).not.toHaveBeenCalled();
@@ -59,20 +79,13 @@ describe("useCoverageTracking subject gating", () => {
   it("with a subject, hydrates the stored record for the same (path, subject, date)", async () => {
     const get = vi.spyOn(api.coverage, "get").mockResolvedValue({
       grid: GRID,
-      cells_swept: ["A1"],
+      cells_seen_at_scale: { A1: 1 },
       cells_served_at_native: [],
-      viewing: {
-        bands: null,
-        stretch: null,
-        stats_source: null,
-        display_bounds: null,
-        base_served_size: null,
-        working_scale_bar: null,
-      },
+      viewing: NULL_VIEWING,
       updated_at: "2026-01-01T00:00:00+00:00",
     });
     vi.spyOn(api.coverage, "push").mockResolvedValue({ status: "ok" });
-    const { result } = renderHook(() => useCoverageTracking(trackingArgs("tip")));
+    const { result } = renderHook(() => useCoverageTracking(trackingArgs("tip", bar(0.5))));
 
     await waitFor(() =>
       expect(get).toHaveBeenCalledWith("C:/data/images/2026-01-01/mosaic.tif", "tip", "2026-01-01"),
@@ -115,23 +128,16 @@ describe("useCoverageTracking sweep on another lattice", () => {
     rows: 2,
   };
 
-  it("states a record's sweep count and dims when its grid differs from the current one", async () => {
+  it("states a record's seen-cell count and dims when its grid differs from the current one", async () => {
     vi.spyOn(api.coverage, "get").mockResolvedValue({
       grid: OTHER_GRID,
-      cells_swept: ["A1", "B1"],
+      cells_seen_at_scale: { A1: 1, B1: 1 },
       cells_served_at_native: [],
-      viewing: {
-        bands: null,
-        stretch: null,
-        stats_source: null,
-        display_bounds: null,
-        base_served_size: null,
-        working_scale_bar: null,
-      },
+      viewing: NULL_VIEWING,
       updated_at: "2026-01-01T00:00:00+00:00",
     });
     vi.spyOn(api.coverage, "push").mockResolvedValue({ status: "ok" });
-    const { result } = renderHook(() => useCoverageTracking(trackingArgs("tip")));
+    const { result } = renderHook(() => useCoverageTracking(trackingArgs("tip", bar(0.5))));
 
     await waitFor(() => expect(result.current.sweptOtherLattice).not.toBeNull());
     expect(result.current.sweptOtherLattice).toEqual({ count: 2, cols: 3, rows: 2 });
@@ -143,20 +149,13 @@ describe("useCoverageTracking sweep on another lattice", () => {
   it("null when the record's grid matches the current one, the ordinary case", async () => {
     vi.spyOn(api.coverage, "get").mockResolvedValue({
       grid: GRID,
-      cells_swept: ["A1"],
+      cells_seen_at_scale: { A1: 1 },
       cells_served_at_native: [],
-      viewing: {
-        bands: null,
-        stretch: null,
-        stats_source: null,
-        display_bounds: null,
-        base_served_size: null,
-        working_scale_bar: null,
-      },
+      viewing: NULL_VIEWING,
       updated_at: "2026-01-01T00:00:00+00:00",
     });
     vi.spyOn(api.coverage, "push").mockResolvedValue({ status: "ok" });
-    const { result } = renderHook(() => useCoverageTracking(trackingArgs("tip")));
+    const { result } = renderHook(() => useCoverageTracking(trackingArgs("tip", bar(0.5))));
 
     await waitFor(() => expect(result.current.swept.has("A1")).toBe(true));
     expect(result.current.sweptOtherLattice).toBeNull();

@@ -30,9 +30,33 @@
 import { useEffect, useId, useState } from "react";
 
 import { CollapsibleSection } from "@/components/CollapsibleSection";
+import { MAX_SCALE } from "@/components/Canvas/zoom";
 import type { OtherLatticeAttestation } from "@/hooks/useRegionCompleteness";
 import { useDisclosure } from "@/hooks/useDisclosure";
-import { breederReadErrorReason } from "@/lib/coverage";
+import {
+  breederReadErrorReason,
+  meetsBar,
+  type CellAttestedView,
+  type WorkingScaleBar,
+} from "@/lib/coverage";
+
+/** The sr-only line naming an attestation's own scale provenance: the view scale it was pressed
+ *  at, and whether this image's own coverage record showed the cell already seen at that write
+ *  (through `meetsBar`, the one comparison), so a reader can tell an attestation made from a
+ *  whole-frame view from one made after the sweep reached the record. */
+function attestedViewLine(cell: string, entry: CellAttestedView | undefined): string | null {
+  if (!entry) return null;
+  const n = entry.view_scale === null ? "an unstated" : `${(entry.view_scale * 100).toFixed(1)}%`;
+  const bar = entry.working_scale_bar_at_write;
+  const atScale = entry.seen_on_record.at_scale;
+  if (atScale === null || !entry.seen_on_record.grid_matched) {
+    return `${cell} attested at ${n} zoom, not seen on record`;
+  }
+  const met = bar ? meetsBar(atScale, bar) : false;
+  const s = `${(atScale * 100).toFixed(1)}%`;
+  const against = bar ? ` against a working scale of ${(bar.value * 100).toFixed(1)}%` : "";
+  return `${cell} attested at ${n} zoom, seen on record at ${s}${against}${met ? "" : " (below it)"}`;
+}
 
 /** Keyboard-operable disclosure for the overlay's marks, the pattern CollapsibleSection already
  *  uses elsewhere: a real button toggles a named region, no hover required. Opens upward from the
@@ -66,7 +90,10 @@ function CoverageKey(props: { panelOpen: boolean }) {
           className="absolute bottom-full right-0 z-30 mb-1 w-56 rounded-md border border-tcip-border-hover bg-tcip-panel p-2.5 text-[10px] text-tcip-fg shadow-lg"
         >
           <ul className="space-y-1">
-            <li>swept: the recorded sweep history, any session</li>
+            <li>
+              swept: every part of the cell has been on screen at the working scale, any session
+            </li>
+            <li>short dashes, no fill: seen at the working scale this session, not yet saved</li>
             <li>count in parentheses: saved annotations of the active subject</li>
             <li>solid border: attested complete, active subject</li>
             <li>dotted border: attested complete, another subject</li>
@@ -91,6 +118,7 @@ function attestLabel(subject: string, cell: string, complete: boolean, stale: bo
 function stateLines(props: {
   subject: string | null;
   swept: ReadonlySet<string>;
+  pending: ReadonlySet<string>;
   activeComplete: ReadonlySet<string>;
   activeStale: ReadonlySet<string>;
   otherComplete: Readonly<Record<string, readonly string[]>>;
@@ -99,6 +127,8 @@ function stateLines(props: {
   const lines: string[] = [];
   const swept = Array.from(props.swept).sort();
   if (swept.length) lines.push(`swept: ${swept.join(", ")}`);
+  const pending = Array.from(props.pending).sort();
+  if (pending.length) lines.push(`not yet saved: ${pending.join(", ")}`);
   if (props.subject) {
     const saved = Object.entries(props.annotationCounts)
       .filter(([, n]) => n > 0)
@@ -139,8 +169,21 @@ export function CoverageChrome(props: {
    *  or null: the sweep-history equivalent of `otherLattice`, read the same way. */
   sweptOtherLattice: OtherLatticeAttestation | null;
   swept: ReadonlySet<string>;
+  /** Cells seen locally, not yet acknowledged by the server (see coverageTracker.ts). */
+  pending: ReadonlySet<string>;
+  /** Cells recorded seen but not meeting the current bar (or every recorded cell while there is
+   *  no bar): the chrome's own "coarser" remainder line. */
+  coarserCount: number;
+  /** The active subject's working-scale bar for this image, or null (see `workingScaleReason`). */
+  workingScale: WorkingScaleBar | null;
+  workingScaleReason: string | null;
+  /** The image's own whole-frame fit scale (unclamped), so the panel can state when the bar sits
+   *  coarser than any real view could ever be. */
+  fitScale: number | null;
   activeComplete: ReadonlySet<string>;
   activeStale: ReadonlySet<string>;
+  /** The active subject's scale provenance per attested cell, on the current grid. */
+  activeCellsAttestedView: Readonly<Record<string, CellAttestedView>>;
   /** Another subject's complete cells on the current grid, keyed by that subject's name. */
   otherComplete: Readonly<Record<string, readonly string[]>>;
   annotationCounts: Record<string, number>;
@@ -192,15 +235,39 @@ export function CoverageChrome(props: {
   const lines = stateLines({
     subject: props.subject,
     swept: props.swept,
+    pending: props.pending,
     activeComplete: props.activeComplete,
     activeStale: props.activeStale,
     otherComplete: props.otherComplete,
     annotationCounts: props.annotationCounts,
   });
 
+  const attestedViewLineText = cell
+    ? attestedViewLine(cell, props.activeCellsAttestedView[cell])
+    : null;
+
   const readErrorReason = props.readError ? breederReadErrorReason(props.readError) : null;
   const noticeClass =
     "rounded-md border bg-tcip-panel/95 px-3 py-1.5 text-[11px] shadow-lg backdrop-blur";
+
+  const bar = props.workingScale;
+  const barPct = bar ? bar.value * 100 : null;
+  const belowFitScale = bar !== null && props.fitScale !== null && bar.value < props.fitScale;
+  const aboveZoomCeiling = bar !== null && bar.value > MAX_SCALE;
+  const workingScaleLine = bar
+    ? `Working scale ${barPct!.toFixed(1)}%: the median saved ${props.subject} annotation ` +
+      `(${bar.median_extent_native_px.toFixed(0)} px across, from ${bar.annotation_count}) spans ` +
+      `${bar.judged_span_px} px on screen, a default span`
+    : props.workingScaleReason;
+  const coarserLine = bar
+    ? `${props.coarserCount} cell${props.coarserCount === 1 ? "" : "s"} on record ${
+        props.coarserCount === 1 ? "was" : "were"
+      } seen at a coarser scale than ${props.subject}'s working scale`
+    : props.coarserCount > 0
+      ? `${props.coarserCount} cell${props.coarserCount === 1 ? "" : "s"} on record ${
+          props.coarserCount === 1 ? "was" : "were"
+        } fully on screen; no working scale to judge ${props.coarserCount === 1 ? "it" : "them"} against`
+      : null;
 
   return (
     <div className="absolute bottom-3 right-3 z-20 flex w-64 flex-col items-stretch gap-1.5">
@@ -223,6 +290,18 @@ export function CoverageChrome(props: {
         <p className={`${noticeClass} border-tcip-border text-tcip-muted`}>
           {props.sweptOtherLattice.count} cell{props.sweptOtherLattice.count === 1 ? "" : "s"} swept
           on a previous lattice ({props.sweptOtherLattice.cols}x{props.sweptOtherLattice.rows}).
+        </p>
+      )}
+      {belowFitScale && (
+        <p className={`${noticeClass} border-tcip-border text-tcip-muted`}>
+          {props.subject}&apos;s working scale ({barPct!.toFixed(1)}%) is coarser than the
+          whole-image view, so every view meets it.
+        </p>
+      )}
+      {aboveZoomCeiling && (
+        <p className={`${noticeClass} border-tcip-border text-tcip-warn`}>
+          {props.subject}&apos;s working scale ({barPct!.toFixed(1)}%) is beyond the viewer&apos;s
+          1000% zoom, so no view can sweep a cell.
         </p>
       )}
       <CollapsibleSection
@@ -263,6 +342,11 @@ export function CoverageChrome(props: {
             </p>
           )}
 
+          {props.subject && workingScaleLine && (
+            <p className="text-tcip-muted">{workingScaleLine}</p>
+          )}
+          {coarserLine && <p className="text-tcip-muted">{coarserLine}</p>}
+
           {lines.length > 0 && (
             <ul className="sr-only">
               {lines.map((line) => (
@@ -270,6 +354,7 @@ export function CoverageChrome(props: {
               ))}
             </ul>
           )}
+          {attestedViewLineText && <p className="sr-only">{attestedViewLineText}</p>}
 
           {cell &&
             !readErrorReason &&

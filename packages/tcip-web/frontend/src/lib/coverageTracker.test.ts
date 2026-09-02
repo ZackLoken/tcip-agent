@@ -1,7 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 
-import type { GridCell, GridGeometry } from "@/lib/coverage";
-import { CoverageTracker, type CoveragePayload } from "@/lib/coverageTracker";
+import { StructuredRefusalError } from "@/api/http";
+import type { GridCell, GridGeometry, WorkingScaleBar } from "@/lib/coverage";
+import { meetsBar } from "@/lib/coverage";
+import { CoverageTracker, coverageOutbox, type CoveragePayload } from "@/lib/coverageTracker";
 
 const GRID: GridGeometry = {
   width: 300,
@@ -26,6 +28,23 @@ const KEY = {
   date: "2026-01-01",
 };
 const FULL_VIEW = { x0: 0, y0: 0, x1: 300, y1: 200 };
+const NULL_VIEWING = {
+  bands: null,
+  stretch: null,
+  stats_source: null,
+  display_bounds: null,
+  base_served_size: null,
+};
+
+function bar(value: number): WorkingScaleBar {
+  return {
+    value,
+    median_extent_native_px: 46 / value,
+    annotation_count: 1,
+    judged_span_px: 46,
+    source: "s",
+  };
+}
 
 let post: Mock<(body: CoveragePayload) => Promise<unknown>>;
 let tracker: CoverageTracker;
@@ -37,45 +56,56 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  coverageOutbox.clearForTests();
   vi.useRealTimers();
 });
 
-describe("CoverageTracker sweep", () => {
-  it("accumulates no sweep without an authoring commit (no bar, no sweep)", () => {
+describe("CoverageTracker seen / swept", () => {
+  it("accumulates seen cells even with no bar set (no bar means no swept)", () => {
     tracker.reset(KEY, GRID, CELLS);
+    tracker.setViewing(NULL_VIEWING);
     tracker.noteViewport(FULL_VIEW, 1);
+    expect(tracker.seenAtScale.size).toBe(6);
     expect(tracker.swept.size).toBe(0);
     vi.advanceTimersByTime(1000);
-    expect(post).not.toHaveBeenCalled();
+    expect(post).toHaveBeenCalledTimes(1);
   });
 
-  it("sweeps exactly the cells fully contained in the viewport at or above the bar", () => {
+  it("swept is derived: a bar meets some cells and not others by value", () => {
     tracker.reset(KEY, GRID, CELLS);
-    tracker.noteAuthoringScale(0.5);
-    tracker.noteViewport({ x0: 0, y0: 0, x1: 250, y1: 150 }, 0.5);
+    tracker.noteViewport({ x0: 0, y0: 0, x1: 250, y1: 150 }, 0.5); // seen: A1, B1
+    tracker.setWorkingScaleBar(bar(0.5));
     expect(Array.from(tracker.swept).sort()).toEqual(["A1", "B1"]);
-    // A pass below the bar sweeps nothing, whatever it contains.
-    tracker.noteViewport(FULL_VIEW, 0.4);
-    expect(tracker.swept.size).toBe(2);
-  });
-
-  it("a commit at a coarser scale lowers the bar and re-evaluates the current viewport", () => {
-    tracker.reset(KEY, GRID, CELLS);
-    tracker.noteViewport(FULL_VIEW, 0.4);
-    tracker.noteAuthoringScale(0.5);
-    expect(tracker.swept.size).toBe(0); // the on-screen pass was below the bar
-    tracker.noteAuthoringScale(0.4);
-    expect(tracker.swept.size).toBe(6); // the same viewport now meets the lowered bar
-  });
-
-  it("viewport moments before the first commit count once a bar exists", () => {
-    tracker.reset(KEY, GRID, CELLS);
-    tracker.noteViewport({ x0: 0, y0: 0, x1: 250, y1: 150 }, 1); // A1, B1 at full scale
-    tracker.noteViewport({ x0: 180, y0: 0, x1: 310, y1: 160 }, 0.3); // C1 below the coming bar
+    tracker.setWorkingScaleBar(bar(0.9));
     expect(tracker.swept.size).toBe(0);
-    tracker.noteAuthoringScale(0.5);
-    // The pre-commit pans at scale 1 qualify against the 0.5 bar; the 0.3 pass does not.
-    expect(Array.from(tracker.swept).sort()).toEqual(["A1", "B1"]);
+  });
+
+  it("meetsBar is the one comparison, tested at equality", () => {
+    expect(meetsBar(0.5, bar(0.5))).toBe(true);
+    expect(meetsBar(0.49, bar(0.5))).toBe(false);
+    expect(meetsBar(null, bar(0.5))).toBe(false);
+    expect(meetsBar(0.5, null)).toBe(false);
+  });
+
+  it("a lowered bar derives more cells swept; a raised bar un-derives one without losing its facts", () => {
+    tracker.reset(KEY, GRID, CELLS);
+    tracker.noteViewport(FULL_VIEW, 0.5);
+    tracker.setWorkingScaleBar(bar(0.5));
+    expect(tracker.swept.size).toBe(6);
+    tracker.setWorkingScaleBar(bar(0.9));
+    expect(tracker.swept.size).toBe(0);
+    expect(tracker.seenAtScale.size).toBe(6); // the facts persist, only the derivation changed
+    tracker.setWorkingScaleBar(bar(0.5));
+    expect(tracker.swept.size).toBe(6);
+  });
+
+  it("a cell seen below the bar derives as swept once the bar lowers", () => {
+    tracker.reset(KEY, GRID, CELLS);
+    tracker.noteViewport({ x0: 0, y0: 0, x1: 100, y1: 100 }, 0.3); // A1 only, at 0.3
+    tracker.setWorkingScaleBar(bar(0.5));
+    expect(tracker.swept.has("A1")).toBe(false);
+    tracker.setWorkingScaleBar(bar(0.3));
+    expect(tracker.swept.has("A1")).toBe(true);
   });
 });
 
@@ -93,79 +123,41 @@ describe("CoverageTracker sub-cell union sweep", () => {
     rows: 1,
   };
 
-  it("sweeps a cell that never once fits fully in the viewport, once its sub-cells' union does", () => {
+  it("becomes seen once every sub-cell's union has been on screen, never at one whole pass", () => {
     tracker.reset(KEY, BIG_GRID, [BIG_CELL, OTHER_CELL]);
-    tracker.noteAuthoringScale(1);
-    // Each pass is one 128px sub-cell wide (< the cell's 512px) but full height, so it fully
-    // contains one column of sub-cells at a time, never the whole cell.
     tracker.noteViewport({ x0: 0, y0: 0, x1: 128, y1: 512 }, 1);
-    expect(tracker.swept.has("A1")).toBe(false);
+    expect(tracker.seenAtScale.has("A1")).toBe(false);
     tracker.noteViewport({ x0: 128, y0: 0, x1: 256, y1: 512 }, 1);
     tracker.noteViewport({ x0: 256, y0: 0, x1: 384, y1: 512 }, 1);
-    expect(tracker.swept.has("A1")).toBe(false); // union so far: x in [0, 384) only
+    expect(tracker.seenAtScale.has("A1")).toBe(false); // union so far: x in [0, 384) only
     tracker.noteViewport({ x0: 384, y0: 0, x1: 512, y1: 512 }, 1); // reaches the far edge
-    expect(tracker.swept.has("A1")).toBe(true);
+    expect(tracker.seenAtScale.get("A1")).toBe(1);
   });
 
-  it("never sweeps through a viewport narrower than one sub-cell, however densely it pans", () => {
+  it("never becomes seen through a viewport narrower than one sub-cell, however densely it pans", () => {
     tracker.reset(KEY, BIG_GRID, [BIG_CELL, OTHER_CELL]);
-    tracker.noteAuthoringScale(1);
-    // 100px passes are under the 128px sub-cell grain, so no sub-cell ever sits fully inside one.
     for (let x0 = 0; x0 < 512; x0 += 10) {
       tracker.noteViewport({ x0, y0: 0, x1: Math.min(x0 + 100, 512), y1: 512 }, 1);
     }
-    expect(tracker.swept.has("A1")).toBe(false);
-    // The same cell sweeps once the passes are as wide as the grain, so the tracker was live.
+    expect(tracker.seenAtScale.has("A1")).toBe(false);
     for (let x0 = 0; x0 < 512; x0 += 128) {
       tracker.noteViewport({ x0, y0: 0, x1: x0 + 128, y1: 512 }, 1);
     }
-    expect(tracker.swept.has("A1")).toBe(true);
+    expect(tracker.seenAtScale.has("A1")).toBe(true);
   });
 
-  it("does not sweep while the sub-cell union stays partial all session", () => {
+  it("a later pass raising one sub-cell's max raises the cell's own recorded bound", () => {
     tracker.reset(KEY, BIG_GRID, [BIG_CELL, OTHER_CELL]);
-    tracker.noteAuthoringScale(1);
-    // Always the same left-hand column: the rest of the cell's sub-cells are never seen.
-    for (let i = 0; i < 5; i++) {
-      tracker.noteViewport({ x0: 0, y0: 0, x1: 128, y1: 512 }, 1);
+    for (let x0 = 0; x0 < 512; x0 += 128) {
+      tracker.noteViewport({ x0, y0: 0, x1: x0 + 128, y1: 512 }, 0.4);
     }
-    expect(tracker.swept.has("A1")).toBe(false);
-  });
-
-  it("a late-arriving bar credits sub-cell union progress recorded before it existed", () => {
-    tracker.reset(KEY, BIG_GRID, [BIG_CELL, OTHER_CELL]);
-    // Panned across the whole cell at scale 1 before ever committing an annotation.
-    tracker.noteViewport({ x0: 0, y0: 0, x1: 128, y1: 512 }, 1);
-    tracker.noteViewport({ x0: 128, y0: 0, x1: 256, y1: 512 }, 1);
-    tracker.noteViewport({ x0: 256, y0: 0, x1: 384, y1: 512 }, 1);
-    tracker.noteViewport({ x0: 384, y0: 0, x1: 512, y1: 512 }, 1);
-    expect(tracker.swept.has("A1")).toBe(false); // no bar yet
-    tracker.noteAuthoringScale(0.5);
-    expect(tracker.swept.has("A1")).toBe(true); // the pre-commit union already clears the bar
-  });
-
-  it("closes the large-raster-lattice gap: a viewport too narrow for the old fixed-32-division grain can now sweep", () => {
-    // Real ValleyFarm large-raster cell edge: the old fixed 32-division grain gave ~469px
-    // sub-cells (too big for this 300px viewport); the new ~127px per-cell derivation fits.
-    const edge = 14996;
-    const cell: GridCell = { name: "A1", x0: 0, y0: 0, x1: edge, y1: edge };
-    const other: GridCell = { name: "B1", x0: edge, y0: 0, x1: edge * 2, y1: edge };
-    const grid: GridGeometry = {
-      width: edge * 2,
-      height: edge,
-      tile_size: edge,
-      overlap: 0,
-      cols: 2,
-      rows: 1,
-    };
-    tracker.reset(KEY, grid, [cell, other]);
-    tracker.noteAuthoringScale(1);
-    const viewportWidth = 300; // comfortably below the old grain, above the new one
-    const stride = 100; // dense overlap, so no sub-cell can straddle a gap between passes
-    for (let x0 = 0; x0 < edge; x0 += stride) {
-      tracker.noteViewport({ x0, y0: 0, x1: Math.min(x0 + viewportWidth, edge), y1: edge }, 1);
+    expect(tracker.seenAtScale.get("A1")).toBe(0.4);
+    tracker.noteViewport({ x0: 0, y0: 0, x1: 128, y1: 512 }, 0.9);
+    expect(tracker.seenAtScale.get("A1")).toBe(0.4); // the min over sub-cells is unchanged
+    for (let x0 = 128; x0 < 512; x0 += 128) {
+      tracker.noteViewport({ x0, y0: 0, x1: x0 + 128, y1: 512 }, 0.9);
     }
-    expect(tracker.swept.has("A1")).toBe(true);
+    expect(tracker.seenAtScale.get("A1")).toBe(0.9); // now every sub-cell's own max is 0.9
   });
 });
 
@@ -179,7 +171,7 @@ describe("CoverageTracker served-at-native", () => {
 });
 
 describe("CoverageTracker posting", () => {
-  it("debounces facts into one POST carrying both fact lists and the viewing context", async () => {
+  it("debounces facts into one POST carrying both fact maps and the viewing context", async () => {
     tracker.reset(KEY, GRID, CELLS);
     tracker.setViewing({
       bands: "3,2,1",
@@ -188,11 +180,10 @@ describe("CoverageTracker posting", () => {
       display_bounds: [[0, 255]],
       base_served_size: "150x100",
     });
-    tracker.noteAuthoringScale(1);
     tracker.noteViewport({ x0: 0, y0: 0, x1: 120, y1: 120 }, 1); // contains A1 only
     tracker.noteServedAtNative("B1");
     expect(post).not.toHaveBeenCalled();
-    vi.advanceTimersByTime(400);
+    await vi.advanceTimersByTimeAsync(400);
     expect(post).toHaveBeenCalledTimes(1);
     const body = post.mock.calls[0][0];
     expect(body.image_path).toBe(KEY.imagePath);
@@ -200,9 +191,8 @@ describe("CoverageTracker posting", () => {
     expect(body.subject).toBe("tip");
     expect(body.date).toBe("2026-01-01");
     expect(body.grid).toEqual(GRID);
-    expect(body.cells_swept).toEqual(["A1"]);
+    expect(body.cells_seen_at_scale).toEqual({ A1: 1 });
     expect(body.cells_served_at_native).toEqual(["B1"]);
-    // The symbology travels with the cells, or the record cannot say what rendering was seen.
     const viewing = body.viewing;
     expect(viewing.bands).toBe("3,2,1");
     expect(viewing.stretch).toBe("percent_clip");
@@ -214,10 +204,53 @@ describe("CoverageTracker posting", () => {
     });
     expect(viewing.display_bounds).toEqual([[0, 255]]);
     expect(viewing.base_served_size).toBe("150x100");
-    expect(viewing.working_scale_bar).toEqual({
-      value: 1,
-      source: expect.stringContaining("annotation commits"),
-    });
+  });
+
+  it("an acknowledged response moves a cell from pending to recorded", async () => {
+    tracker.reset(KEY, GRID, CELLS);
+    tracker.setViewing(NULL_VIEWING);
+    tracker.noteViewport({ x0: 0, y0: 0, x1: 100, y1: 100 }, 1);
+    expect(tracker.pending.has("A1")).toBe(true);
+    await vi.advanceTimersByTimeAsync(400);
+    expect(tracker.pending.has("A1")).toBe(false);
+  });
+
+  it("a cell raised past its recorded value is pending again", async () => {
+    tracker.reset(KEY, GRID, CELLS);
+    tracker.setViewing(NULL_VIEWING);
+    tracker.noteViewport({ x0: 0, y0: 0, x1: 100, y1: 100 }, 0.5);
+    await vi.advanceTimersByTimeAsync(400);
+    expect(tracker.pending.has("A1")).toBe(false);
+    tracker.noteViewport({ x0: 0, y0: 0, x1: 100, y1: 100 }, 0.9);
+    expect(tracker.pending.has("A1")).toBe(true);
+  });
+
+  it("a push is triggered by a newly seen cell, a newly served cell and a viewing change, not by an at_scale rise alone", async () => {
+    tracker.reset(KEY, GRID, CELLS);
+    tracker.setViewing(NULL_VIEWING);
+    tracker.noteViewport({ x0: 0, y0: 0, x1: 100, y1: 100 }, 0.5); // A1 newly seen
+    await vi.advanceTimersByTimeAsync(400);
+    expect(post).toHaveBeenCalledTimes(1);
+
+    tracker.noteViewport({ x0: 0, y0: 0, x1: 100, y1: 100 }, 0.9); // A1 rises, already seen
+    await vi.advanceTimersByTimeAsync(400);
+    expect(post).toHaveBeenCalledTimes(1); // no push from the rise alone
+
+    tracker.noteServedAtNative("B1"); // a newly served cell does trigger one
+    await vi.advanceTimersByTimeAsync(400);
+    expect(post).toHaveBeenCalledTimes(2);
+    // The raised value rode along with this later push.
+    expect(post.mock.calls[1][0].cells_seen_at_scale).toEqual({ A1: 0.9 });
+  });
+
+  it("a push triggered by a viewing-only change with no cell delta still carries the facts", async () => {
+    tracker.reset(KEY, GRID, CELLS);
+    tracker.setViewing(NULL_VIEWING);
+    await vi.advanceTimersByTimeAsync(400);
+    post.mockClear();
+    tracker.setViewing({ ...NULL_VIEWING, stretch: "minmax" });
+    await vi.advanceTimersByTimeAsync(400);
+    expect(post).toHaveBeenCalledTimes(1);
   });
 
   it("a failed push reports itself and retries on the next debounce tick, never silently", async () => {
@@ -225,6 +258,7 @@ describe("CoverageTracker posting", () => {
     const failingTracker = new CoverageTracker(post, { onPushError });
     post.mockRejectedValueOnce(new Error("network down")).mockResolvedValue({});
     failingTracker.reset(KEY, GRID, CELLS);
+    failingTracker.setViewing(NULL_VIEWING);
     failingTracker.noteServedAtNative("B1");
 
     await vi.advanceTimersByTimeAsync(400);
@@ -235,20 +269,9 @@ describe("CoverageTracker posting", () => {
     expect(post).toHaveBeenCalledTimes(2);
   });
 
-  it("a switch to another identity flushes owed facts under the old key first, then clears", () => {
-    tracker.reset(KEY, GRID, CELLS);
-    tracker.noteServedAtNative("B1");
-    tracker.reset({ ...KEY, imagePath: "C:/data/images/2026-01-01/other.tif" }, GRID, CELLS);
-    expect(post).toHaveBeenCalledTimes(1);
-    expect(post.mock.calls[0][0].image_path).toBe(KEY.imagePath);
-    expect(post.mock.calls[0][0].cells_served_at_native).toEqual(["B1"]);
-    expect(tracker.servedAtNative.size).toBe(0);
-    expect(tracker.swept.size).toBe(0);
-  });
-
   it("stays inert with no identity (subject missing upstream resets to null)", () => {
     tracker.reset(null, null, []);
-    tracker.noteAuthoringScale(1);
+    tracker.setWorkingScaleBar(bar(1));
     tracker.noteViewport(FULL_VIEW, 1);
     tracker.noteServedAtNative("A1");
     vi.advanceTimersByTime(1000);
@@ -257,7 +280,6 @@ describe("CoverageTracker posting", () => {
 
   it("a single-cell grid gets no tracking (image inside the display bound)", () => {
     tracker.reset(KEY, { ...GRID, cols: 1, rows: 1 }, [CELLS[0]]);
-    tracker.noteAuthoringScale(1);
     tracker.noteViewport(FULL_VIEW, 1);
     tracker.noteServedAtNative("A1");
     vi.advanceTimersByTime(1000);
@@ -265,46 +287,95 @@ describe("CoverageTracker posting", () => {
   });
 });
 
-const NULL_VIEWING = {
-  bands: null,
-  stretch: null,
-  stats_source: null,
-  display_bounds: null,
-  base_served_size: null,
-  working_scale_bar: null,
-};
+describe("CoverageTracker outbox", () => {
+  it("a failed push at reset time is handed to the module outbox and retried under its own identity", async () => {
+    post.mockRejectedValueOnce(new Error("offline")).mockResolvedValue({});
+    tracker.reset(KEY, GRID, CELLS);
+    tracker.setViewing(NULL_VIEWING);
+    tracker.noteServedAtNative("A1");
+    tracker.reset(null, null, []); // flush() hands the owed payload straight to the outbox
+    expect(post).not.toHaveBeenCalled();
+    expect(coverageOutbox.size).toBeGreaterThan(0);
+    await vi.advanceTimersByTimeAsync(5000); // first outbox attempt: rejects, stays queued
+    expect(post).toHaveBeenCalledTimes(1);
+    expect(coverageOutbox.size).toBeGreaterThan(0);
+    await vi.advanceTimersByTimeAsync(5000); // second attempt: succeeds
+    expect(post).toHaveBeenCalledTimes(2);
+    expect(coverageOutbox.size).toBe(0);
+  });
+
+  it("a 4xx answer drops the queued payload and the next one proceeds", async () => {
+    const refusal = new StructuredRefusalError({ message: "unknown cell" }, 400, "unknown cell");
+    post.mockRejectedValueOnce(refusal).mockResolvedValue({});
+    tracker.reset(KEY, GRID, CELLS);
+    tracker.setViewing(NULL_VIEWING);
+    tracker.noteServedAtNative("A1");
+    tracker.reset(null, null, []);
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(post).toHaveBeenCalledTimes(1);
+    expect(coverageOutbox.size).toBe(0);
+  });
+
+  it("a network failure stays queued and is retried, never dropped", async () => {
+    post.mockRejectedValue(new TypeError("Failed to fetch"));
+    tracker.reset(KEY, GRID, CELLS);
+    tracker.setViewing(NULL_VIEWING);
+    tracker.noteServedAtNative("A1");
+    tracker.reset(null, null, []);
+    const owed = coverageOutbox.size;
+    expect(owed).toBeGreaterThan(0);
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(coverageOutbox.size).toBe(owed);
+  });
+});
 
 describe("CoverageTracker hydration", () => {
   it("adopts a stored record's facts only when its grid matches", () => {
     tracker.reset(KEY, GRID, CELLS);
     tracker.hydrate({
       grid: { ...GRID, tile_size: 50 },
-      cells_swept: ["A1"],
+      cells_seen_at_scale: { A1: 1 },
       cells_served_at_native: ["B1"],
       viewing: NULL_VIEWING,
       updated_at: "2026-01-01T00:00:00+00:00",
     });
-    expect(tracker.swept.size).toBe(0);
+    expect(tracker.seenAtScale.size).toBe(0);
     tracker.hydrate({
       grid: GRID,
-      cells_swept: ["A1"],
+      cells_seen_at_scale: { A1: 0.7 },
       cells_served_at_native: ["B1"],
       viewing: NULL_VIEWING,
       updated_at: "2026-01-01T00:00:00+00:00",
     });
-    expect(Array.from(tracker.swept)).toEqual(["A1"]);
+    expect(tracker.seenAtScale.get("A1")).toBe(0.7);
     expect(Array.from(tracker.servedAtNative)).toEqual(["B1"]);
+    expect(tracker.pending.has("A1")).toBe(false); // hydrated = already acknowledged
+  });
+
+  it("a hydrated cell derives as swept under a bar at or below it, and not above it", () => {
+    tracker.reset(KEY, GRID, CELLS);
+    tracker.hydrate({
+      grid: GRID,
+      cells_seen_at_scale: { A1: 0.5 },
+      cells_served_at_native: [],
+      viewing: NULL_VIEWING,
+      updated_at: "2026-01-01T00:00:00+00:00",
+    });
+    tracker.setWorkingScaleBar(bar(0.5));
+    expect(tracker.swept.has("A1")).toBe(true);
+    tracker.setWorkingScaleBar(bar(0.6));
+    expect(tracker.swept.has("A1")).toBe(false);
   });
 });
 
 describe("CoverageTracker complete warning", () => {
-  it("applies only when a bar exists and unswept cells remain", () => {
+  it("applies only when a bar exists and unmet cells remain", () => {
     tracker.reset(KEY, GRID, CELLS);
     expect(tracker.completeWarning()).toBeNull(); // no bar
-    tracker.noteAuthoringScale(0.5);
-    tracker.noteViewport({ x0: 0, y0: 0, x1: 250, y1: 150 }, 0.5); // sweeps A1, B1
+    tracker.noteViewport({ x0: 0, y0: 0, x1: 250, y1: 150 }, 0.5); // seen: A1, B1
+    tracker.setWorkingScaleBar(bar(0.5));
     expect(tracker.completeWarning()).toEqual({ unsweptCount: 4, total: 6, bar: 0.5 });
-    tracker.noteViewport(FULL_VIEW, 0.5); // sweeps the rest
+    tracker.noteViewport(FULL_VIEW, 0.5); // seen: the rest
     expect(tracker.completeWarning()).toBeNull();
   });
 });
