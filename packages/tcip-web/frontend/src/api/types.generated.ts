@@ -43,6 +43,9 @@ export interface StatsSource {
 
 export interface WorkingScaleBar {
   value: number;
+  median_extent_native_px: number;
+  annotation_count: number;
+  judged_span_px: number;
   source: string;
 }
 
@@ -52,13 +55,12 @@ export interface CoverageViewing {
   stats_source: StatsSource | null;
   display_bounds: [number | null, number | null][] | null;
   base_served_size: string | null;
-  working_scale_bar: WorkingScaleBar | null;
 }
 
 export interface CoverageRecord {
   grid: GridGeometry;
   cells_served_at_native: string[];
-  cells_swept: string[];
+  cells_seen_at_scale: Record<string, number>;
   viewing: CoverageViewing;
   updated_at: string;
 }
@@ -70,7 +72,7 @@ export interface CoveragePayload {
   dataset_root?: string | null;
   grid: GridGeometry;
   cells_served_at_native?: string[];
-  cells_swept?: string[];
+  cells_seen_at_scale?: Record<string, number>;
   viewing: CoverageViewing;
 }
 

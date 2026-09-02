@@ -7,7 +7,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from tcip_annotation import json_io
-from tcip_annotation.state import Annotation, BBox
+from tcip_annotation.state import Annotation, BBox, Point, Polygon
 
 from tcip_mcp.dataset_layout import (
     region_completeness_digest_path,
@@ -20,7 +20,10 @@ from tcip_mcp.pipelines.region_completeness import (
     annotations_by_cell,
     cell_annotation_digest,
     cell_annotation_digests,
+    default_working_scale_source,
+    saved_extents,
     stale_cells,
+    working_scale_bar,
 )
 
 
@@ -288,3 +291,77 @@ class TestStaleCells:
         self._write_label(tmp_path / "annotations", "mosaic", edited)
         record = {"grid": grid, "cells_complete": ["A1"], "stem": "mosaic", "date": None}
         assert stale_cells(tmp_path, record, {"A1": digest}, "catkin") == []
+
+
+class TestSavedExtents:
+    def test_a_box_contributes_its_longer_side(self):
+        anns = [Annotation(subject="leaf", geometry=BBox(0, 0, 10, 4))]
+        assert saved_extents(anns, "leaf") == [10.0]
+
+    def test_a_polygon_contributes_its_bounding_boxs_longer_side(self):
+        anns = [Annotation(subject="leaf", geometry=Polygon([[(0, 0), (6, 0), (3, 20)]]))]
+        assert saved_extents(anns, "leaf") == [20.0]
+
+    def test_a_multi_ring_polygon_spans_every_ring(self):
+        rings = [[(0, 0), (5, 0), (5, 5), (0, 5)], [(50, 50), (60, 50), (60, 55), (50, 55)]]
+        anns = [Annotation(subject="leaf", geometry=Polygon(rings))]
+        assert saved_extents(anns, "leaf") == [60.0]
+
+    def test_a_point_contributes_nothing(self):
+        anns = [Annotation(subject="leaf", geometry=Point(5, 5))]
+        assert saved_extents(anns, "leaf") == []
+
+    def test_a_geometry_less_annotation_contributes_nothing(self):
+        anns = [Annotation(subject="leaf", geometry=None)]
+        assert saved_extents(anns, "leaf") == []
+
+    def test_filters_by_subject(self):
+        anns = [Annotation(subject="fruit", geometry=BBox(0, 0, 10, 10))]
+        assert saved_extents(anns, "leaf") == []
+
+    def test_mixed_geometries_yield_one_extent_per_box_or_polygon(self):
+        anns = [
+            Annotation(subject="leaf", geometry=BBox(0, 0, 10, 4)),
+            Annotation(subject="leaf", geometry=Point(1, 1)),
+            Annotation(subject="leaf", geometry=Polygon([[(0, 0), (6, 0), (3, 30)]])),
+            Annotation(subject="leaf", geometry=None),
+        ]
+        assert sorted(saved_extents(anns, "leaf")) == [10.0, 30.0]
+
+
+class TestWorkingScaleBar:
+    def test_no_extents_yields_no_bar(self):
+        assert working_scale_bar([], judged_span_px=46, source="s") is None
+
+    def test_one_extent_is_the_exact_quotient(self):
+        bar = working_scale_bar([100.0], judged_span_px=46, source="s")
+        assert bar == {
+            "value": 46 / 100.0, "median_extent_native_px": 100.0, "annotation_count": 1,
+            "judged_span_px": 46, "source": "s",
+        }
+
+    def test_an_odd_count_takes_the_middle_value(self):
+        bar = working_scale_bar([10.0, 100.0, 30.0], judged_span_px=46, source="s")
+        assert bar is not None
+        assert bar["median_extent_native_px"] == 30.0
+        assert bar["value"] == 46 / 30.0
+        assert bar["annotation_count"] == 3
+
+    def test_an_even_count_averages_the_two_middle_values(self):
+        bar = working_scale_bar([10.0, 20.0, 30.0, 40.0], judged_span_px=46, source="s")
+        assert bar is not None
+        assert bar["median_extent_native_px"] == 25.0
+        assert bar["value"] == 46 / 25.0
+
+    def test_a_single_whole_frame_annotation_yields_a_bar_every_ordinary_view_meets(self):
+        # A 4000px-wide annotation spanning nearly the whole frame yields a tiny scale value,
+        # below any real zoom level: exactly the ruling's stated consequence for a large object.
+        bar = working_scale_bar([4000.0], judged_span_px=46, source="s")
+        assert bar is not None
+        assert bar["value"] < 0.05
+
+
+def test_default_working_scale_source_names_the_span_and_disclaims_measurement():
+    source = default_working_scale_source(46)
+    assert "46" in source
+    assert "not a measurement" in source

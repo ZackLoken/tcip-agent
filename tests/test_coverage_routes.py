@@ -11,20 +11,11 @@ from fastapi.testclient import TestClient
 from PIL import Image
 
 from tcip_web.app import app
-from tcip_web.routes import coverage as coverage_route
 
 
 @pytest.fixture
 def client() -> TestClient:
     return TestClient(app, base_url="http://127.0.0.1")
-
-
-@pytest.fixture(autouse=True)
-def _fresh_audit_coalescing():
-    """The per-process audit-coalescing set must not leak notes across tests."""
-    coverage_route._audited_coverage_keys.clear()
-    yield
-    coverage_route._audited_coverage_keys.clear()
 
 
 @pytest.fixture
@@ -62,8 +53,7 @@ def _post_body(image_path: str, cells: list[str], grid: dict, **overrides) -> di
         "grid": _grid_only(grid),
         "cells_served_at_native": cells,
         "viewing": {"bands": None, "stretch": "minmax", "stats_source": {"read": "none"},
-                    "base_served_size": "100x80", "display_bounds": None,
-                    "working_scale_bar": None},
+                    "base_served_size": "100x80", "display_bounds": None},
     }
     body.update(overrides)
     return body
@@ -347,7 +337,7 @@ class TestAnnotationCounts:
         grid = _grid(client, manifest_path, tile_size=8)
         resp = client.post("/api/coverage/completeness", json={
             "image_path": manifest_path, "subject": "bush", "grid": _grid_only(grid),
-            "cell": "A1", "complete": True, "user": "breeder"})
+            "cell": "A1", "complete": True, "user": "breeder", "view_scale": None})
         assert resp.status_code == 200, resp.text
 
         band_b.unlink()
@@ -372,7 +362,7 @@ class TestCompletenessCountsAreBestEffort:
         grid = _grid(client, path, tile_size=64)
         resp = client.post("/api/coverage/completeness", json={
             "image_path": path, "subject": "catkin", "grid": _grid_only(grid), "cell": "A1",
-            "complete": True, "user": "breeder"})
+            "complete": True, "user": "breeder", "view_scale": None})
         assert resp.status_code == 200, resp.text
 
         Path(path).unlink()
@@ -412,7 +402,7 @@ class TestCompletenessCountsAreBestEffort:
         grid = _grid(client, path, tile_size=64)
         client.post("/api/coverage/completeness", json={
             "image_path": path, "subject": "catkin", "grid": _grid_only(grid), "cell": "A1",
-            "complete": True, "user": "breeder"})
+            "complete": True, "user": "breeder", "view_scale": None})
 
         label_path = root / "annotations" / "2026-03-01" / "plot.json"
         label_path.parent.mkdir(parents=True, exist_ok=True)
@@ -445,6 +435,90 @@ class TestCompletenessPathConfinement:
         resp = client.get("/api/coverage/completeness", params={
             "path": path, "dataset_root": str(root)})
         assert resp.status_code == 200, resp.text
+
+
+class TestWorkingScale:
+    """``get_completeness``'s ``working_scale`` field: a subject's working-scale bar, derived
+    fresh from the label file on every read, never a value the browser echoes back."""
+
+    def test_no_saved_annotation_of_the_subject_yields_a_null_bar(self, client, dated_dataset):
+        _root, path = dated_dataset
+        resp = client.get(
+            "/api/coverage/completeness", params={"path": path, "subject": "catkin"})
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["working_scale"] == {"catkin": None}
+        assert resp.json()["working_scale_error"] is None
+
+    def test_the_requested_subject_is_included_even_when_absent_from_the_file(
+        self, client, dated_dataset,
+    ):
+        """A negative or unannotated image still answers for the active subject rather than
+        omitting it: the requested subject is included with a null bar, not left out."""
+        from tcip_annotation import json_io
+        from tcip_annotation.state import Annotation, BBox
+
+        root, path = dated_dataset
+        json_io.write_annotations(
+            root / "annotations" / "2026-03-01" / "plot.json",
+            [Annotation(subject="bush", geometry=BBox(0, 0, 10, 4))], 100, 80)
+
+        got = client.get(
+            "/api/coverage/completeness", params={"path": path, "subject": "catkin"})
+        body = got.json()
+        assert body["working_scale"]["catkin"] is None
+        assert body["working_scale"]["bush"] is not None
+
+    def test_a_bar_is_derived_from_every_subject_present_in_the_file(
+        self, client, dated_dataset,
+    ):
+        from tcip_annotation import json_io
+        from tcip_annotation.state import Annotation, BBox
+
+        root, path = dated_dataset
+        json_io.write_annotations(
+            root / "annotations" / "2026-03-01" / "plot.json",
+            [Annotation(subject="catkin", geometry=BBox(0, 0, 10, 4)),
+             Annotation(subject="catkin", geometry=BBox(20, 20, 50, 24))], 100, 80)
+
+        got = client.get("/api/coverage/completeness", params={"path": path})
+        bar = got.json()["working_scale"]["catkin"]
+        assert bar["median_extent_native_px"] == 20.0  # median of [10, 30]
+        assert bar["judged_span_px"] == 46
+        assert "not a measurement" in bar["source"]
+
+    def test_a_raster_failure_leaves_the_bar_standing(self, client, dated_dataset):
+        """A missing raster costs only the counts (see TestCompletenessCountsAreBestEffort);
+        the working-scale bar needs no raster at all, only the label file."""
+        from tcip_annotation import json_io
+        from tcip_annotation.state import Annotation, BBox
+
+        root, path = dated_dataset
+        json_io.write_annotations(
+            root / "annotations" / "2026-03-01" / "plot.json",
+            [Annotation(subject="catkin", geometry=BBox(0, 0, 10, 4))], 100, 80)
+        Path(path).unlink()
+
+        got = client.get("/api/coverage/completeness", params={"path": path})
+        body = got.json()
+        assert body["working_scale"]["catkin"] is not None
+        assert body["working_scale_error"] is None
+        assert body["counts_error"]
+
+    def test_an_unreadable_label_empties_the_bar_and_names_the_reason(
+        self, client, dated_dataset,
+    ):
+        root, path = dated_dataset
+        label_path = root / "annotations" / "2026-03-01" / "plot.json"
+        label_path.parent.mkdir(parents=True, exist_ok=True)
+        label_path.write_text("not json {][", encoding="utf-8")
+
+        got = client.get(
+            "/api/coverage/completeness", params={"path": path, "subject": "catkin"})
+        assert got.status_code == 200, got.text
+        body = got.json()
+        assert body["working_scale"] == {}
+        assert body["working_scale_error"]
+        assert str(label_path) in body["working_scale_error"]
 
 
 class TestCoverageRecord:
@@ -531,42 +605,30 @@ class TestCoverageRecord:
         assert resp.status_code == 400
         assert "Z9" in resp.json()["detail"]
 
-    def test_swept_cells_merge_independently_of_served(self, client, dated_dataset):
+    def test_seen_cells_merge_independently_of_served_by_the_greater_value(
+        self, client, dated_dataset,
+    ):
         _root, path = dated_dataset
         grid = _grid(client, path, tile_size=64)
-        client.post("/api/coverage",
-                    json=_post_body(path, ["A1"], grid, cells_swept=["A1", "B1"]))
-        resp = client.post("/api/coverage",
-                           json=_post_body(path, [], grid, cells_swept=["A2"]))
+        client.post("/api/coverage", json=_post_body(
+            path, ["A1"], grid, cells_seen_at_scale={"A1": 0.5, "B1": 0.2}))
+        resp = client.post("/api/coverage", json=_post_body(
+            path, [], grid, cells_seen_at_scale={"A2": 0.3, "B1": 0.1}))
         assert resp.status_code == 200, resp.text
-        assert resp.json()["cells_swept"] == 3
+        assert resp.json()["record"]["cells_seen_at_scale"] == {"A1": 0.5, "A2": 0.3, "B1": 0.2}
         record = client.get("/api/coverage", params={
             "path": path, "subject": "bush", "date": "2026-03-01"}).json()["coverage"]
-        assert record["cells_swept"] == ["A1", "A2", "B1"]
+        assert record["cells_seen_at_scale"] == {"A1": 0.5, "A2": 0.3, "B1": 0.2}
         assert record["cells_served_at_native"] == ["A1"]
 
     def test_a_post_may_carry_either_fact_alone(self, client, dated_dataset):
         _root, path = dated_dataset
         grid = _grid(client, path, tile_size=64)
-        resp = client.post("/api/coverage", json=_post_body(path, [], grid,
-                                                            cells_swept=["B2"]))
+        resp = client.post("/api/coverage", json=_post_body(
+            path, [], grid, cells_seen_at_scale={"B2": 0.4}))
         assert resp.status_code == 200, resp.text
         assert resp.json()["cells_served_at_native"] == 0
-        assert resp.json()["cells_swept"] == 1
-
-    def test_working_scale_bar_round_trips_in_viewing(self, client, dated_dataset):
-        _root, path = dated_dataset
-        grid = _grid(client, path, tile_size=64)
-        viewing = {"bands": None, "stretch": "minmax", "stats_source": {"read": "none"},
-                   "base_served_size": "100x80", "display_bounds": None,
-                   "working_scale_bar": {
-                       "value": 0.125,
-                       "source": "minimum view scale at annotation-authoring events"}}
-        client.post("/api/coverage",
-                    json=_post_body(path, [], grid, cells_swept=["A1"], viewing=viewing))
-        record = client.get("/api/coverage", params={
-            "path": path, "subject": "bush", "date": "2026-03-01"}).json()["coverage"]
-        assert record["viewing"]["working_scale_bar"]["value"] == 0.125
+        assert resp.json()["record"]["cells_seen_at_scale"] == {"B2": 0.4}
 
     def test_post_from_a_plain_rgb_view_round_trips(self, client, dated_dataset):
         """The exact shape ``coverageTracker.ts`` sends for a plain RGB view: ``bands``/
@@ -582,12 +644,11 @@ class TestCoverageRecord:
             "date": "2026-03-01",
             "grid": _grid_only(grid),
             "cells_served_at_native": ["A1"],
-            "cells_swept": [],
+            "cells_seen_at_scale": {},
             "viewing": {
                 "stats_source": {"read": "none"},
                 "display_bounds": None,
                 "base_served_size": "100x80",
-                "working_scale_bar": None,
             },
         }
         resp = client.post("/api/coverage", json=body)
@@ -611,7 +672,7 @@ class TestCoverageRecord:
             "date": "2026-03-01",
             "grid": _grid_only(grid),
             "cells_served_at_native": [],
-            "cells_swept": ["A1"],
+            "cells_seen_at_scale": {"A1": 0.2},
             "viewing": {
                 "bands": "3,2,1",
                 "stretch": "percent_clip",
@@ -619,7 +680,6 @@ class TestCoverageRecord:
                                  "overview_scale": None},
                 "display_bounds": [[0.0, 1000.0], [5.0, 20.0], [1.0, 2.0]],
                 "base_served_size": "100x80",
-                "working_scale_bar": None,
             },
         }
         resp = client.post("/api/coverage", json=body)
@@ -730,32 +790,97 @@ class TestCoverageRecord:
         _root, path = dated_dataset
         client.post("/api/coverage",
                     json=_post_body(path, ["A1"], _grid(client, path, tile_size=64),
-                                    cells_swept=["B1"]))
+                                    cells_seen_at_scale={"B1": 0.2}))
         resp = client.post("/api/coverage",
                            json=_post_body(path, [], _grid(client, path, tile_size=100),
-                                           cells_swept=["A1"]))
+                                           cells_seen_at_scale={"A1": 0.2}))
         assert resp.json()["replaced"] is True
         record = client.get("/api/coverage", params={
             "path": path, "subject": "bush", "date": "2026-03-01"}).json()["coverage"]
         assert record["cells_served_at_native"] == []
-        assert record["cells_swept"] == ["A1"]
+        assert record["cells_seen_at_scale"] == {"A1": 0.2}
 
-    def test_unknown_swept_cell_is_refused(self, client, dated_dataset):
+    def test_unknown_seen_cell_is_refused(self, client, dated_dataset):
         _root, path = dated_dataset
         grid = _grid(client, path, tile_size=64)
-        resp = client.post("/api/coverage", json=_post_body(path, [], grid,
-                                                            cells_swept=["Q7"]))
+        resp = client.post("/api/coverage", json=_post_body(
+            path, [], grid, cells_seen_at_scale={"Q7": 0.5}))
         assert resp.status_code == 400
         assert "Q7" in resp.json()["detail"]
 
-    def test_audit_coalesces_to_one_entry_per_image(self, client, dated_dataset):
+    def test_every_write_audits_a_second_push_adding_a_cell_writes_a_second_line(
+        self, client, dated_dataset,
+    ):
         root, path = dated_dataset
         grid = _grid(client, path, tile_size=64)
         client.post("/api/coverage", json=_post_body(path, ["A1"], grid))
         client.post("/api/coverage", json=_post_body(path, ["B1"], grid))
         entries = _audit_entries(root, "gui_view_coverage")
-        assert len(entries) == 1
-        assert entries[0]["arguments"]["image_name"] == "plot.tif"
+        assert len(entries) == 2
+        assert entries[0]["arguments"]["cells_served_at_native_added"] == ["A1"]
+        assert entries[1]["arguments"]["cells_served_at_native_added"] == ["B1"]
+        assert entries[1]["arguments"]["image_name"] == "plot.tif"
+
+    def test_an_unchanged_push_writes_and_audits_nothing(self, client, dated_dataset):
+        root, path = dated_dataset
+        grid = _grid(client, path, tile_size=64)
+        client.post("/api/coverage", json=_post_body(path, ["A1"], grid))
+        before = client.get("/api/coverage", params={
+            "path": path, "subject": "bush", "date": "2026-03-01"}).json()["coverage"]
+
+        resp = client.post("/api/coverage", json=_post_body(path, ["A1"], grid))
+        assert resp.status_code == 200, resp.text
+
+        after = client.get("/api/coverage", params={
+            "path": path, "subject": "bush", "date": "2026-03-01"}).json()["coverage"]
+        assert after["updated_at"] == before["updated_at"]
+        assert len(_audit_entries(root, "gui_view_coverage")) == 1
+
+    def test_a_viewing_only_change_writes_and_audits(self, client, dated_dataset):
+        root, path = dated_dataset
+        grid = _grid(client, path, tile_size=64)
+        client.post("/api/coverage", json=_post_body(path, ["A1"], grid))
+        changed_viewing = {"bands": None, "stretch": "percent_clip",
+                           "stats_source": {"read": "none"}, "base_served_size": "100x80",
+                           "display_bounds": None}
+        resp = client.post("/api/coverage",
+                           json=_post_body(path, ["A1"], grid, viewing=changed_viewing))
+        assert resp.status_code == 200, resp.text
+
+        entries = _audit_entries(root, "gui_view_coverage")
+        assert len(entries) == 2
+        assert entries[1]["arguments"]["viewing_changed"] is True
+        assert entries[1]["arguments"]["cells_served_at_native_added"] == []
+        assert entries[1]["arguments"]["cells_seen_added"] == {}
+
+    def test_an_audit_append_failure_still_answers_500_though_the_write_already_landed(
+        self, client, dated_dataset, monkeypatch,
+    ):
+        """``tcip_store`` refuses a log append inside an open transaction, so the state write
+        commits before the audit line is attempted; a failed append cannot roll that back. What
+        it still guarantees: the caller is told 500, not a silent 200, so it knows its own retry
+        of this payload is what recovers the missing audit line rather than trusting a change
+        that landed with no trail."""
+        from tcip_mcp.audit import AuditEntryNotWritten
+
+        root, path = dated_dataset
+        grid = _grid(client, path, tile_size=64)
+
+        def _raise(*args, **kwargs):
+            raise AuditEntryNotWritten("gui_view_coverage", RuntimeError("disk full"))
+
+        import tcip_mcp.audit as audit_module
+
+        monkeypatch.setattr(audit_module, "record_event_or_raise", _raise)
+
+        unraising = TestClient(app, base_url="http://127.0.0.1", raise_server_exceptions=False)
+        resp = unraising.post("/api/coverage", json=_post_body(path, ["A1"], grid))
+        assert resp.status_code == 500
+
+        got = client.get("/api/coverage", params={
+            "path": path, "subject": "bush", "date": "2026-03-01"})
+        assert got.json()["coverage"]["cells_served_at_native"] == ["A1"]
+        assert _audit_entries(root, "gui_view_coverage") == []
 
 
 def test_view_coverage_path_locator(tmp_path):
@@ -767,7 +892,7 @@ def test_view_coverage_path_locator(tmp_path):
 class TestCompletenessRoute:
     def _toggle(self, client, path, grid, cell, subject="catkin", complete=True, **overrides):
         body = {"image_path": path, "subject": subject, "grid": _grid_only(grid), "cell": cell,
-               "complete": complete, "user": "breeder"}
+               "complete": complete, "user": "breeder", "view_scale": None}
         body.update(overrides)
         return client.post("/api/coverage/completeness", json=body)
 
@@ -932,6 +1057,41 @@ class TestCompletenessRoute:
             "/api/coverage/completeness", params={"path": path}).json()["by_subject"]["catkin"]
         assert record["grid"]["tile_size"] == 100
 
+    def test_an_old_record_with_no_cells_attested_view_map_still_reads_and_attests(
+        self, client, dated_dataset,
+    ):
+        """A record from before this field existed (no ``cells_attested_view`` key at all) is
+        still a valid completeness record: reading it back and attesting a further cell on it
+        both succeed, admitting the legitimate old-shape case rather than refusing it."""
+        import tcip_store as ts
+
+        from tcip_mcp.dataset_layout import region_completeness_key
+
+        root, path = dated_dataset
+        grid = _grid(client, path, tile_size=64)
+        old_record = {
+            "grid": _grid_only(grid),
+            "cells_complete": ["A1"],
+            "attested_by": "user:z",
+            "attested_at": "2026-01-01T00:00:00+00:00",
+            "stem": Path(path).stem,
+            "date": "2026-03-01",
+            "subject": "catkin",
+        }
+        bucket = f"catkin/{Path(path).stem}"
+        ts.replace(region_completeness_key(root), {bucket: old_record}, expect=ts.Version.ABSENT)
+
+        got = client.get("/api/coverage/completeness", params={"path": path})
+        assert got.status_code == 200, got.text
+        assert got.json()["by_subject"]["catkin"]["cells_complete"] == ["A1"]
+
+        resp = self._toggle(client, path, grid, "B2", view_scale=0.5)
+        assert resp.status_code == 200, resp.text
+        record = client.get(
+            "/api/coverage/completeness", params={"path": path}).json()["by_subject"]["catkin"]
+        assert set(record["cells_complete"]) == {"A1", "B2"}
+        assert "B2" in record["cells_attested_view"]
+
     def test_attest_on_a_new_lattice_returns_and_audits_the_replaced_cells(
         self, client, dated_dataset,
     ):
@@ -1042,9 +1202,114 @@ class TestCompletenessRoute:
         self._toggle(client, path, grid, "A1")
         entries = _audit_entries(root, "gui_set_region_completeness")
         assert len(entries) == 1
-        assert entries[0]["arguments"] == {
-            "image_name": "plot.tif", "subject": "catkin", "cell": "A1",
-            "complete": True, "stem": "plot", "date": "2026-03-01", "replaced": None}
+        args = entries[0]["arguments"]
+        assert args["image_name"] == "plot.tif"
+        assert args["subject"] == "catkin"
+        assert args["cell"] == "A1"
+        assert args["complete"] is True
+        assert args["stem"] == "plot"
+        assert args["date"] == "2026-03-01"
+        assert args["replaced"] is None
+        assert args["cells_attested_view"]["view_scale"] is None
+        assert args["cells_attested_view"]["seen_on_record"] == {
+            "at_scale": None, "grid_matched": False}
+
+    def test_view_scale_is_required(self, client, dated_dataset):
+        _root, path = dated_dataset
+        grid = _grid(client, path, tile_size=64)
+        body = {"image_path": path, "subject": "catkin", "grid": _grid_only(grid), "cell": "A1",
+               "complete": True, "user": "breeder"}
+        resp = client.post("/api/coverage/completeness", json=body)
+        assert resp.status_code == 422
+
+    def test_a_null_view_scale_is_admitted(self, client, dated_dataset):
+        """The calibration test's non-GUI caller states ``view_scale: null`` explicitly, the
+        ``CoveragePayload.date`` precedent: a legitimate call with no view succeeds."""
+        _root, path = dated_dataset
+        grid = _grid(client, path, tile_size=64)
+        resp = self._toggle(client, path, grid, "A1", view_scale=None)
+        assert resp.status_code == 200, resp.text
+
+    def test_attesting_stamps_the_working_scale_bar_at_write_from_the_label_file(
+        self, client, dated_dataset,
+    ):
+        from tcip_annotation import json_io
+        from tcip_annotation.state import Annotation, BBox
+
+        root, path = dated_dataset
+        grid = _grid(client, path, tile_size=64)
+        label_path = root / "annotations" / "2026-03-01" / "plot.json"
+        json_io.write_annotations(
+            label_path, [Annotation(subject="catkin", geometry=BBox(0, 0, 10, 4))], 100, 80)
+
+        resp = self._toggle(client, path, grid, "A1", view_scale=0.75)
+        assert resp.status_code == 200, resp.text
+
+        record = client.get(
+            "/api/coverage/completeness", params={"path": path}).json()["by_subject"]["catkin"]
+        entry = record["cells_attested_view"]["A1"]
+        assert entry["view_scale"] == 0.75
+        assert entry["working_scale_bar_at_write"]["median_extent_native_px"] == 10.0
+        assert entry["working_scale_bar_at_write"]["value"] == 46 / 10.0
+        assert entry["seen_on_record"] == {"at_scale": None, "grid_matched": False}
+
+    def test_attesting_reads_seen_on_record_from_the_matching_coverage_bucket(
+        self, client, dated_dataset,
+    ):
+        grid = _grid(client, dated_dataset[1], tile_size=64)
+        _root, path = dated_dataset
+        client.post("/api/coverage", json=_post_body(
+            path, [], grid, subject="catkin", cells_seen_at_scale={"A1": 0.5}))
+
+        resp = self._toggle(client, path, grid, "A1", view_scale=0.5)
+        assert resp.status_code == 200, resp.text
+
+        record = client.get(
+            "/api/coverage/completeness", params={"path": path}).json()["by_subject"]["catkin"]
+        assert record["cells_attested_view"]["A1"]["seen_on_record"] == {
+            "at_scale": 0.5, "grid_matched": True}
+
+    def test_seen_on_record_ignores_a_coverage_record_on_a_different_lattice(
+        self, client, dated_dataset,
+    ):
+        _root, path = dated_dataset
+        grid64 = _grid(client, path, tile_size=64)
+        grid100 = _grid(client, path, tile_size=100)
+        client.post("/api/coverage", json=_post_body(
+            path, [], grid100, subject="catkin", cells_seen_at_scale={"A1": 0.5}))
+
+        resp = self._toggle(client, path, grid64, "A1", view_scale=0.5)
+        assert resp.status_code == 200, resp.text
+
+        record = client.get(
+            "/api/coverage/completeness", params={"path": path}).json()["by_subject"]["catkin"]
+        assert record["cells_attested_view"]["A1"]["seen_on_record"] == {
+            "at_scale": None, "grid_matched": False}
+
+    def test_unattest_drops_the_cells_attested_view_entry(self, client, dated_dataset):
+        _root, path = dated_dataset
+        grid = _grid(client, path, tile_size=64)
+        self._toggle(client, path, grid, "A1", view_scale=0.5)
+        self._toggle(client, path, grid, "A1", complete=False)
+
+        record = client.get(
+            "/api/coverage/completeness", params={"path": path}).json()["by_subject"]["catkin"]
+        assert record["cells_complete"] == []
+        assert record["cells_attested_view"] == {}
+
+    def test_a_lattice_replace_clears_cells_attested_view(self, client, dated_dataset):
+        _root, path = dated_dataset
+        grid64 = _grid(client, path, tile_size=64)
+        self._toggle(client, path, grid64, "A1", view_scale=0.5)
+        self._toggle(client, path, grid64, "B2", view_scale=0.5)
+
+        grid100 = _grid(client, path, tile_size=100)
+        self._toggle(client, path, grid100, "A1", view_scale=0.9)
+
+        record = client.get(
+            "/api/coverage/completeness", params={"path": path}).json()["by_subject"]["catkin"]
+        assert list(record["cells_attested_view"]) == ["A1"]
+        assert record["cells_attested_view"]["A1"]["view_scale"] == 0.9
 
     def test_the_digest_is_named_before_the_record_that_attests_it(
         self, client, dated_dataset, monkeypatch,

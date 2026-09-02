@@ -1,22 +1,36 @@
-"""View-coverage routes: the reference grid over a raster and the per-image record of
-two per-cell facts: which cells were served to the browser at native resolution (a
-delivery fact) and which cells were swept in the viewport at or above the breeder's own
-working scale (a sweep fact). Neither is an attention claim. This "sweep" is the viewport-scan
-fact alone, distinct from both a persisted calibration curve and an HPO run's own sweep.
+"""View-coverage routes: the reference grid over a raster and the per-image record of two
+per-cell facts: which cells were served to the browser at native resolution (a delivery fact)
+and which cells have, at some point this session or an earlier one, sat fully on screen at some
+recorded scale (``cells_seen_at_scale``, a bound). Neither is an attention claim. Whether a seen
+cell counts as "swept" is derived against a subject's working-scale bar -- the view scale at
+which the median saved annotation of that subject on this image spans a documented default
+number of screen pixels (:data:`tcip_mcp.pipelines.reference_grid.JUDGED_SPAN_PX`), served by
+``get_completeness`` below and never stored on this record. The one comparison
+(``lib/coverage.ts``'s ``meetsBar``) lives in the browser; this route never compares a recorded
+scale against a bar.
 
 The grid geometry has one implementation (``tcip_mcp.pipelines.reference_grid``): the
 grid route serves cells computed there and the frontend consumes them verbatim, never
 re-deriving them. The record store is ``view_coverage.json``
 (``dataset_layout.view_coverage_path``), bucketed like ``image_status.json``
 (``status_bucket(subject, date)``, then image name). The store is advisory: training
-never reads it, and unviewed cells warn rather than block a Complete.
+never reads it, and unswept cells warn rather than block a Complete. Every write that changes
+the record is audited (``record_event_or_raise``, after the transaction commits, since a log
+append cannot join a record transaction): an append that cannot land still raises rather than
+warns, so the response answers 500 and the caller is told its own retry of the same payload is
+what recovers the missing line, rather than a silent 200 for a change with no audit trail.
 
 Also here: region-completeness routes, a different store on the same grid. An attestation ("I
 found every instance of this subject in these cells") gates a scientific claim (block
 calibration's completeness check), so unlike view coverage it is written with the same discipline
 as ``routes/classes.py``'s image-status store, and a stale attestation (a cell's annotation
 content edited or deleted since it was attested) is detected on every read, not trusted forever.
-See ``dataset_layout.region_completeness_path`` and ``tcip_mcp.pipelines.region_completeness``.
+An attestation also records its own scale provenance (``cells_attested_view``): the view scale
+the breeder pressed at, the working-scale bar derived from the label file at write time, and
+whether this image's own coverage record shows the cell seen on a matching lattice -- facts
+only, no verdict, since whether an unswept cell should have blocked the attestation stays
+advisory. See ``dataset_layout.region_completeness_path`` and
+``tcip_mcp.pipelines.region_completeness``.
 """
 
 from __future__ import annotations
@@ -36,10 +50,6 @@ from tcip_web.routes.classes import _audit_dataset_write, _guard_dataset_root
 from tcip_web.routes.images import _checked
 
 router = APIRouter(prefix="/api/coverage", tags=["coverage"])
-
-# One audit entry per image per backend process: the first coverage write for an image
-# audits, the debounced merges that follow coalesce into it.
-_audited_coverage_keys: set[tuple[str, str, str]] = set()
 
 _CONFORM_HINT = (
     "run scripts/conform_view_coverage_viewing.py against this dataset to bring it to the "
@@ -193,13 +203,13 @@ def get_coverage(
 
 
 class CoveragePayload(BaseModel):
-    """One coverage post from the browser: the session's accumulated served-at-native and
-    swept cell lists (either may be empty; the server union-merges, so resending is
-    harmless), with the grid they were accumulated against and the viewing context they
-    were served under. ``date`` and ``viewing`` carry no default: a non-dated dataset must
-    still pass ``date: null`` explicitly, so an image under a date bucket can never silently
-    land in the dateless one, and every post states the viewing context it was served under
-    rather than the model quietly filling in one no browser ever chose."""
+    """One coverage post from the browser: the session's accumulated served-at-native cells and
+    per-cell containment scales (either may be empty; the server merges, so resending is
+    harmless), with the grid they were accumulated against and the viewing context they were
+    served under. ``date`` and ``viewing`` carry no default: a non-dated dataset must still pass
+    ``date: null`` explicitly, so an image under a date bucket can never silently land in the
+    dateless one, and every post states the viewing context it was served under rather than the
+    model quietly filling in one no browser ever chose."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -209,7 +219,7 @@ class CoveragePayload(BaseModel):
     dataset_root: Optional[str] = None
     grid: GridGeometry
     cells_served_at_native: list[str] = []
-    cells_swept: list[str] = []
+    cells_seen_at_scale: dict[str, float] = {}
     viewing: CoverageViewing
 
 
@@ -217,15 +227,30 @@ class CoveragePayload(BaseModel):
 def post_coverage(payload: CoveragePayload) -> dict:
     """Merge a coverage delta into the per-image record.
 
-    Union-merge when the stored record's grid matches the posted one; a mismatched grid
-    replaces the record wholesale and the response flags it (``replaced``), since the
-    record carries the grid it was accumulated against precisely so a derivation change
-    can never silently misread old cell names. Cell names are validated against the
-    posted grid's own cells; unknown names are refused. On the merge path the stored
-    record is validated against ``CoverageRecord`` before its cells are folded in, naming
-    the conform script when it no longer holds that shape; the replace path overwrites it
-    wholesale, since there is nothing to merge into.
+    Merge when the stored record's grid matches the posted one: served cells union, and
+    ``cells_seen_at_scale`` keeps the greater value per cell (a cell's recorded scale only ever
+    rises). A mismatched grid replaces the record wholesale and the response flags it
+    (``replaced``), since the record carries the grid it was accumulated against precisely so a
+    derivation change can never silently misread old cell names. Cell names are validated
+    against the posted grid's own cells; unknown names are refused. On the merge path the stored
+    record is validated against ``CoverageRecord`` before its cells are folded in, naming the
+    conform script when it no longer holds that shape; the replace path overwrites it wholesale,
+    since there is nothing to merge into.
+
+    A write happens, and is audited, only when the merge actually changes something: a raised or
+    newly-seen cell, a newly served cell, a changed ``viewing``, or a replace. An unchanged push
+    neither writes nor stamps ``updated_at`` nor audits, so a tracker's own retry of an
+    already-acknowledged payload costs nothing.
+
+    The audit line is appended after the transaction commits, never inside it: ``tcip_store``
+    refuses an ``append`` while a transaction is open (a log cannot join a record transaction),
+    the same constraint ``plant_mapping.persist_mapping`` states for its own receipt. A failed
+    append still raises (``record_event_or_raise``, not the best-effort ``record_event``) rather
+    than warning: the write above has already landed, so the route answers 500 and the caller is
+    told plainly that its own retry of this payload is what recovers the missing line, never a
+    silent 200 for a change with no audit trail.
     """
+    from tcip_mcp.audit import record_event_or_raise
     from tcip_mcp.dataset_layout import status_bucket, view_coverage_key
     from tcip_mcp.pipelines.reference_grid import reference_cells
 
@@ -235,7 +260,7 @@ def post_coverage(payload: CoveragePayload) -> dict:
     valid_names = {c.name for c in reference_cells(
         grid["width"], grid["height"], grid["tile_size"], grid["overlap"], clamp=True)}
     unknown = sorted(
-        (set(payload.cells_served_at_native) | set(payload.cells_swept)) - valid_names)
+        (set(payload.cells_served_at_native) | set(payload.cells_seen_at_scale)) - valid_names)
     if unknown:
         raise HTTPException(
             400, f"cells not in this grid: {unknown}; the grid has {len(valid_names)} cells")
@@ -243,7 +268,8 @@ def post_coverage(payload: CoveragePayload) -> dict:
     bucket = status_bucket(subject, payload.date)
     image_name = Path(payload.image_path).name
     key = view_coverage_key(root)
-    replaced = False
+    viewing_dict = payload.viewing.model_dump()
+
     with tcip_store.transaction(key) as txn:
         store = txn.read(key, default={})
         if not isinstance(store, dict):
@@ -253,51 +279,86 @@ def post_coverage(payload: CoveragePayload) -> dict:
             records = store[bucket] = {}
         existing = records.get(image_name)
         served = set(payload.cells_served_at_native)
-        swept = set(payload.cells_swept)
-        if isinstance(existing, dict) and existing.get("grid") == grid:
+        seen = dict(payload.cells_seen_at_scale)
+        replaced = False
+        served_added = sorted(served)
+        seen_added = dict(seen)
+        viewing_changed = True
+        grid_matches = isinstance(existing, dict) and existing.get("grid") == grid
+        if grid_matches:
             _validated_record(image_name, existing)
-            served |= set(existing.get("cells_served_at_native") or [])
-            swept |= set(existing.get("cells_swept") or [])
+            prior_served = set(existing.get("cells_served_at_native") or [])
+            prior_seen = dict(existing.get("cells_seen_at_scale") or {})
+            served_added = sorted(served - prior_served)
+            served = served | prior_served
+            merged_seen = dict(prior_seen)
+            seen_added = {}
+            for name, scale in seen.items():
+                if scale > merged_seen.get(name, float("-inf")):
+                    merged_seen[name] = scale
+                    seen_added[name] = scale
+            seen = merged_seen
+            viewing_changed = existing.get("viewing") != viewing_dict
         else:
             replaced = existing is not None
+
+        changed = replaced or bool(served_added) or bool(seen_added) or viewing_changed
+        record_body = {"cells_seen_at_scale": seen, "cells_served_at_native": sorted(served)}
+        if not changed:
+            return {
+                "status": "ok",
+                "replaced": False,
+                "cells_served_at_native": len(served),
+                "total_cells": grid["cols"] * grid["rows"],
+                "record": record_body,
+            }
+
         records[image_name] = {
             "grid": grid,
             "cells_served_at_native": sorted(served),
-            "cells_swept": sorted(swept),
-            "viewing": payload.viewing.model_dump(),
+            "cells_seen_at_scale": seen,
+            "viewing": viewing_dict,
             "updated_at": datetime.now(timezone.utc).isoformat(),
         }
         txn.write(key, store)
 
-    audit_key = (root, bucket, image_name)
-    # A replaced grid re-audits even within one process: the record's identity changed.
-    if audit_key not in _audited_coverage_keys or replaced:
-        _audited_coverage_keys.add(audit_key)
-        _audit_dataset_write(
-            root, "gui_view_coverage",
-            {"image_name": image_name, "subject": subject, "date": payload.date,
-             "grid": grid},
-        )
+    # A log append cannot join a record transaction; see the docstring for what a failed
+    # append means at this position, after the write above has already committed.
+    record_event_or_raise(
+        "gui_view_coverage",
+        {"image_name": image_name, "subject": subject, "date": payload.date, "grid": grid,
+         "cells_seen_added": seen_added, "cells_served_at_native_added": served_added,
+         "viewing_changed": viewing_changed,
+         "viewing": viewing_dict if viewing_changed else None, "replaced": replaced},
+        source="gui", scope=root,
+    )
+
     return {
         "status": "ok",
         "replaced": replaced,
         "cells_served_at_native": len(served),
-        "cells_swept": len(swept),
         "total_cells": grid["cols"] * grid["rows"],
+        "record": record_body,
     }
 
 
 # Region completeness gates a scientific claim rather than warning advisory, so (unlike view
-# coverage above) every write is audited as well as transacted.
+# coverage above) its own write is audited after the transaction commits, not inside it.
 
 
 class CompletenessSetPayload(BaseModel):
     """One explicit attestation write: set one cell's completeness for a subject to
     ``complete``, never a toggle a caller infers from the stored state. ``complete=True``
     stamps the cell's current annotation-content digest (whether or not the cell was already
-    complete, so a re-attest restamps and clears staleness); ``complete=False`` clears the
-    stamp. The control that posts this states the direction in its own label, so the write it
-    performs always matches what the label promised."""
+    complete, so a re-attest restamps and clears staleness) and its scale provenance
+    (``cells_attested_view`` on the stored record); ``complete=False`` clears both. The control
+    that posts this states the direction in its own label, so the write it performs always
+    matches what the label promised.
+
+    ``view_scale`` carries no default, the ``CoveragePayload.date`` precedent: the canvas states
+    the view scale at the press explicitly, and a non-GUI caller with no view states ``null``
+    rather than the model quietly filling in a scale nobody chose.
+    """
 
     image_path: str
     subject: str
@@ -305,6 +366,7 @@ class CompletenessSetPayload(BaseModel):
     grid: GridGeometry
     cell: str
     complete: bool
+    view_scale: Optional[float]
     # GUI-set identity; stamped as attested_by ("user:<name>"), mirroring annotate.py/review.py.
     user: Optional[str] = None
 
@@ -313,28 +375,34 @@ class CompletenessSetPayload(BaseModel):
 def get_completeness(
     path: str = Query(..., description="Absolute path to the image file"),
     dataset_root: Optional[str] = Query(None),
+    subject: Optional[str] = Query(
+        None, description="Include this subject's working-scale bar even when it saved no "
+                          "annotation on this image, so a negative or unannotated image still "
+                          "answers for the active subject rather than omitting it"),
 ) -> dict:
     """Every subject's region-completeness record for the raster at ``path`` (its own stem), not
     just one subject's: lets the coverage overlay render a cell attested complete for a subject
     other than the one currently active, distinguishably from the active subject's own
     attestations.
 
-    Each record carries ``stale_cells``: attested cells whose annotation content has changed since
-    attestation (:mod:`tcip_mcp.pipelines.region_completeness`), recomputed fresh on every read so
-    a stale attestation is never served as if it still held. A label document that will not decode
-    for a subject that already holds a record here still refuses (400): staleness cannot be
-    computed without it.
+    Each record carries ``stale_cells`` (recomputed fresh on every read) and, where an
+    attestation stamped it, ``cells_attested_view`` (the scale provenance ``post_completeness``
+    records: facts only, no verdict). A label document that will not decode for a subject that
+    already holds a record here still refuses (400): staleness cannot be computed without it.
 
-    ``annotation_counts`` (subject -> cell name -> count) is every subject's saved-annotation count
-    per cell, one entry per subject present in the raster's label file; the hook selects the active
-    subject's entry client-side. ``counts_grid`` is the six-field lattice the counts were binned
-    against (:func:`_grid_for_raster`, the same derivation ``get_grid`` uses), served beside
-    ``annotation_counts`` rather than folded into it: a count belongs to the grid, not to any one
-    attestation record. The whole counts computation -- deriving the grid, reading the label file,
-    binning -- is best-effort beside ``by_subject``, which needs no raster at all: a band group
-    missing a member, a raster gone from disk, or any other raster-read failure reports the reason
-    in ``counts_error`` (with ``annotation_counts`` empty and ``counts_grid`` null) rather than
-    blanking the read.
+    ``working_scale`` (subject -> bar or ``null``) is every subject present in the raster's
+    label file, plus the requested ``subject`` when absent from it, each derived fresh from that
+    file (:func:`tcip_mcp.pipelines.region_completeness.working_scale_bar`) -- never a value the
+    browser echoes back. The label file is read once, ahead of and outside the raster-grid
+    block, and the same annotations feed ``annotation_counts``: a raster-read failure (a missing
+    file, an incomplete band group) leaves the bar standing and only costs ``counts_error``,
+    while a label-read failure empties both ``working_scale`` and ``annotation_counts``, named in
+    ``working_scale_error``/``counts_error`` alike.
+
+    ``annotation_counts`` (subject -> cell name -> count) is every subject's saved-annotation
+    count per cell, binned against ``counts_grid`` (:func:`_grid_for_raster`, the same
+    derivation ``get_grid`` uses and served beside ``annotation_counts`` rather than folded into
+    it: a count belongs to the grid, not to any one attestation record.
     """
     from tcip_annotation.json_io import UnreadableLabelDocument, read_annotations
     from tcip_mcp.dataset_layout import (
@@ -345,8 +413,14 @@ def get_completeness(
         region_completeness_key,
     )
     from tcip_mcp.pipelines.data.band_groups import BandGroupIncomplete
-    from tcip_mcp.pipelines.reference_grid import reference_cells
-    from tcip_mcp.pipelines.region_completeness import annotation_counts_by_cell, stale_cells
+    from tcip_mcp.pipelines.reference_grid import JUDGED_SPAN_PX, reference_cells
+    from tcip_mcp.pipelines.region_completeness import (
+        annotation_counts_by_cell,
+        default_working_scale_source,
+        saved_extents,
+        stale_cells,
+        working_scale_bar,
+    )
 
     try:
         src = assert_path_allowed(path)
@@ -365,34 +439,55 @@ def get_completeness(
     for bucket, record in store.items():
         if record.get("stem") != stem:
             continue
-        subject = record.get("subject")
-        if not isinstance(subject, str) or not subject:
+        record_subject = record.get("subject")
+        if not isinstance(record_subject, str) or not record_subject:
             continue
         stamped = digests.get(bucket)
         try:
-            stale = stale_cells(root, record, stamped if isinstance(stamped, dict) else {}, subject)
+            stale = stale_cells(
+                root, record, stamped if isinstance(stamped, dict) else {}, record_subject)
         except UnreadableLabelDocument as exc:
             raise HTTPException(400, str(exc)) from exc
-        by_subject[subject] = {**record, "stale_cells": stale}
+        by_subject[record_subject] = {**record, "stale_cells": stale}
 
-    annotation_counts: dict[str, dict[str, int]] = {}
-    counts_grid: Optional[dict] = None
-    counts_error: Optional[str] = None
+    label_error: Optional[str] = None
+    annotations: list = []
     try:
-        geometry, _derivation = _grid_for_raster(src, None)
         _root_from_image, date, image_stem = parse_image_path(path)
         label_path = annotation_path(root, date, image_stem)
         annotations = read_annotations(str(label_path)) if label_path.is_file() else []
-        cells = reference_cells(
-            geometry["width"], geometry["height"], geometry["tile_size"], 0.0, clamp=True)
-        annotation_counts = annotation_counts_by_cell(annotations, cells, geometry["tile_size"])
-        counts_grid = geometry
-    except (BandGroupIncomplete, FileNotFoundError, OSError, ValueError,
-            UnreadableLabelDocument) as exc:
-        counts_error = str(exc)
+    except (UnreadableLabelDocument, ValueError) as exc:
+        label_error = str(exc)
+
+    if label_error is not None:
+        working_scale: dict[str, Optional[dict]] = {}
+    else:
+        subjects = {a.subject for a in annotations if a.subject}
+        if subject:
+            subjects.add(subject)
+        source = default_working_scale_source(JUDGED_SPAN_PX)
+        working_scale = {
+            subj: working_scale_bar(
+                saved_extents(annotations, subj), judged_span_px=JUDGED_SPAN_PX, source=source)
+            for subj in subjects
+        }
+
+    annotation_counts: dict[str, dict[str, int]] = {}
+    counts_grid: Optional[dict] = None
+    counts_error: Optional[str] = label_error
+    if label_error is None:
+        try:
+            geometry, _derivation = _grid_for_raster(src, None)
+            cells = reference_cells(
+                geometry["width"], geometry["height"], geometry["tile_size"], 0.0, clamp=True)
+            annotation_counts = annotation_counts_by_cell(annotations, cells, geometry["tile_size"])
+            counts_grid = geometry
+        except (BandGroupIncomplete, FileNotFoundError, OSError, ValueError) as exc:
+            counts_error = str(exc)
 
     return {"by_subject": by_subject, "annotation_counts": annotation_counts,
-            "counts_grid": counts_grid, "counts_error": counts_error}
+            "counts_grid": counts_grid, "counts_error": counts_error,
+            "working_scale": working_scale, "working_scale_error": label_error}
 
 
 @router.post("/completeness")
@@ -400,14 +495,19 @@ def post_completeness(payload: CompletenessSetPayload) -> dict:
     """Set one cell's completeness for a subject to ``payload.complete``: never a toggle, so a
     control's label ("Attest", "Unattest", "Re-attest") always states the write it performs.
     ``complete=True`` stamps the cell's current annotation-content digest, whether or not the
-    cell was already complete (a re-attest restamps and clears staleness); ``complete=False``
-    clears the stamp.
+    cell was already complete (a re-attest restamps and clears staleness), and its scale
+    provenance in ``cells_attested_view`` (the pressed ``view_scale``, the working-scale bar
+    derived from the same label-file read at write time, and whether this image's own
+    view-coverage record -- read under ``status_bucket(subject, date)`` by the image's file
+    name, on a matching grid only -- shows the cell already seen); ``complete=False`` clears
+    both the digest stamp and the ``cells_attested_view`` entry.
 
     Cell names are validated against the posted grid's own cells, same as ``post_coverage``. A
-    stored record whose grid disagrees with the posted one replaces wholesale (cells and digest
-    stamps alike), rather than trusting a same-named cell across two different lattices; the
-    response and the audit line both carry the discarded record's grid and cells (``replaced``,
-    null when nothing was discarded), the way ``post_coverage`` states its own replacement.
+    stored record whose grid disagrees with the posted one replaces wholesale (cells, digest
+    stamps and scale provenance alike), rather than trusting a same-named cell across two
+    different lattices; the response and the audit line both carry the discarded record's grid
+    and cells (``replaced``, null when nothing was discarded), the way ``post_coverage`` states
+    its own replacement.
     """
     from tcip_annotation.json_io import UnreadableLabelDocument, read_annotations
 
@@ -419,9 +519,12 @@ def post_completeness(payload: CompletenessSetPayload) -> dict:
         region_completeness_key,
         status_bucket,
         unreadable_completeness_entries,
+        view_coverage_key,
     )
-    from tcip_mcp.pipelines.reference_grid import reference_cells
-    from tcip_mcp.pipelines.region_completeness import cell_annotation_digest
+    from tcip_mcp.pipelines.reference_grid import JUDGED_SPAN_PX, reference_cells
+    from tcip_mcp.pipelines.region_completeness import (
+        cell_annotation_digest, default_working_scale_source, saved_extents, working_scale_bar,
+    )
     from tcip_web.identity import resolve_user, user_id
 
     subject = _require_completeness_subject(payload.subject)
@@ -444,6 +547,7 @@ def post_completeness(payload: CompletenessSetPayload) -> dict:
     author = user_id(resolve_user(payload.user))
     now_iso = datetime.now(timezone.utc).isoformat()
     complete = payload.complete
+    image_name = Path(payload.image_path).name
 
     # Digest key named first, so it is applied first: stale_cells fails closed on a missing
     # digest, so a stamp must never land after the attestation that points at it.
@@ -466,6 +570,8 @@ def post_completeness(payload: CompletenessSetPayload) -> dict:
         existing = store.get(bucket)
         grid_matches = existing is not None and existing.get("grid") == grid
         cells_complete = set(existing.get("cells_complete") or []) if grid_matches else set()
+        cells_attested_view = (
+            dict(existing.get("cells_attested_view") or {}) if grid_matches else {})
 
         if not complete and payload.cell not in cells_complete:
             # Nothing to unattest here, whether from no record, a different lattice, or a
@@ -489,6 +595,7 @@ def post_completeness(payload: CompletenessSetPayload) -> dict:
         bucket_digests = dict(bucket_digests) if isinstance(bucket_digests, dict) else {}
         if replaced:
             bucket_digests = {}
+        annotations: list = []
         if complete:
             label_path = annotation_path(root, date, stem)
             try:
@@ -502,6 +609,29 @@ def post_completeness(payload: CompletenessSetPayload) -> dict:
         digests[bucket] = bucket_digests
         txn.write(digest_key, digests)
 
+        attested_view_entry: Optional[dict] = None
+        if complete:
+            bar = working_scale_bar(
+                saved_extents(annotations, subject), judged_span_px=JUDGED_SPAN_PX,
+                source=default_working_scale_source(JUDGED_SPAN_PX))
+            view_bucket = status_bucket(subject, date)
+            view_store = tcip_store.read(view_coverage_key(root), default={})
+            view_records = view_store.get(view_bucket) if isinstance(view_store, dict) else None
+            view_record = (
+                view_records.get(image_name) if isinstance(view_records, dict) else None)
+            grid_matched = isinstance(view_record, dict) and view_record.get("grid") == grid
+            at_scale = None
+            if grid_matched:
+                at_scale = (view_record.get("cells_seen_at_scale") or {}).get(payload.cell)
+            attested_view_entry = {
+                "view_scale": payload.view_scale,
+                "working_scale_bar_at_write": bar,
+                "seen_on_record": {"at_scale": at_scale, "grid_matched": grid_matched},
+            }
+            cells_attested_view[payload.cell] = attested_view_entry
+        else:
+            cells_attested_view.pop(payload.cell, None)
+
         store[bucket] = {
             "grid": grid,
             "cells_complete": sorted(cells_complete),
@@ -510,13 +640,15 @@ def post_completeness(payload: CompletenessSetPayload) -> dict:
             "stem": stem,
             "date": date,
             "subject": subject,
+            "cells_attested_view": cells_attested_view,
         }
         txn.write(completeness_key, store)
 
     _audit_dataset_write(
         root, "gui_set_region_completeness",
-        {"image_name": Path(payload.image_path).name, "subject": subject, "cell": payload.cell,
-         "complete": complete, "stem": stem, "date": date, "replaced": replaced_info},
+        {"image_name": image_name, "subject": subject, "cell": payload.cell,
+         "complete": complete, "stem": stem, "date": date, "replaced": replaced_info,
+         "cells_attested_view": attested_view_entry},
     )
     return {"status": "ok", "complete": complete, "cells_complete": sorted(cells_complete),
             "replaced": replaced_info}

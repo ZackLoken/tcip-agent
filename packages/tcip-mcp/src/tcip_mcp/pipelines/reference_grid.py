@@ -33,6 +33,18 @@ together, at 40 every label reads but covers most of its cell, and at 46 and abo
 read clearly with most of the cell content visible. The renders are session artifacts,
 not repo files; the procedure above re-derives the value."""
 
+JUDGED_SPAN_PX = 46
+"""A documented default in CSS screen pixels: the span at which a typical annotated object is
+taken as readable on screen, the denominator the working-scale bar
+(:func:`tcip_mcp.pipelines.region_completeness.working_scale_bar`) divides the median saved
+annotation's native-pixel extent by. Its only measured antecedent is
+:data:`POINTING_LEGIBLE_EDGE`, a text-legibility figure in artifact pixels for a different
+surface (the agent's pointing overlay, not a breeder's screen); a re-measurement of either value
+must never silently move the other, so this is its own constant rather than an alias. It is a
+default, not a measurement of object legibility: the procedure that would measure it is a
+session over a sample project's own saved annotations, rendering candidate spans on real
+content and reading back at which span a breeder can tell what the object is."""
+
 
 @dataclass(frozen=True)
 class Cell:
