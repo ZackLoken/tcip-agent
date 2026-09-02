@@ -31,6 +31,9 @@ class TrainRun:
     # Best selection value so far; train() resets this to the losing-side infinity for the run's
     # resolved selection_metric before the first epoch.
     best_metric: float = float("inf")
+    # The bare name train() resolved best_metric on, stamped once before the first epoch (the
+    # trainer's own resolution; nothing here re-derives a name from config). None until then.
+    best_metric_name: str | None = None
     metrics_history: list[dict] = field(default_factory=list)
     start_time: float = 0.0
     end_time: float = 0.0
@@ -68,17 +71,13 @@ class TrainRun:
         return False
 
     def to_dict(self) -> dict:
-        # Lazy: generic_trainer.py imports TrainRun from this module at load time, so importing
-        # it back at module scope here would be circular; by call time both are fully loaded.
-        from tcip_mcp.pipelines.training.generic_trainer import selection_metric_for_config
-
         return {
             "run_id": self.run_id,
             "status": self.status,
             "current_epoch": self.current_epoch,
             "current_stage": self.current_stage,
             "best_metric": self.best_metric,
-            "best_metric_name": selection_metric_for_config(self.config),
+            "best_metric_name": self.best_metric_name,
             "metrics_history": self.metrics_history,
             "origin": self.origin,
             "elapsed_seconds": (self.end_time or time.time()) - self.start_time if self.start_time else 0,

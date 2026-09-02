@@ -419,36 +419,6 @@ def resolve_selection_metric(
     return resolved
 
 
-def selection_metric_for_config(config: dict) -> str | None:
-    """The bare selection-metric name a run's config would resolve to, or ``None`` when it
-    cannot resolve one (an undeclared metric, a center-match trait's comparability-only
-    metric, or a config with no ``model_source`` at all).
-
-    Mirrors ``preflight_config``'s own extraction of task/trait/selection_metric, so a run
-    listing names the same metric preflight would have validated, without pinning a second
-    copy of that extraction. Never raises: the caller (a run's own listing row) reports a
-    metric name or nothing, never a stack trace over a config it did not author.
-    """
-    model_source = config.get(MODEL_SOURCE_KEY)
-    data_cfg = config.get("data")
-    train_cfg = config.get("training")
-    eval_cfg = (
-        (train_cfg.get("evaluation") if isinstance(train_cfg, dict) else None)
-        or (config.get("evaluation") if isinstance(config.get("evaluation"), dict) else None)
-        or {}
-    )
-    task = (
-        (model_source.get("task") if isinstance(model_source, dict) else None)
-        or (data_cfg.get("task", "detection") if isinstance(data_cfg, dict) else "detection")
-    )
-    trait = eval_cfg.get("trait")
-    requested = eval_cfg.get("selection_metric")
-    try:
-        return resolve_selection_metric(task, trait, requested)
-    except ValueError:
-        return None
-
-
 def _selection_value(task: str, val_metrics: dict, avg_loss: float, metric: str) -> float:
     """Best-model/early-stopping driver: ``val_metrics[f'{VAL_METRIC_PREFIX}{metric}']``.
 
@@ -661,6 +631,7 @@ def train(
         trait = eval_cfg.get("trait")
         selection_metric = resolve_selection_metric(
             task, trait, eval_cfg.get("selection_metric"), has_val_loader=val_loader is not None)
+        run.best_metric_name = selection_metric
         # The losing-side sentinel for this run's own direction: any real value beats it.
         higher_is_better = HIGHER_IS_BETTER_BY_METRIC[selection_metric]
         losing_side = float("-inf") if higher_is_better else float("inf")

@@ -22,6 +22,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import math
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -788,22 +789,25 @@ def reconstruct_from_status(
     """One record's run row, reconstructed from a status document the caller already read: the
     shape :func:`reconstruct_run_status` returns for the one record it resolved a ``run_id`` to,
     and the shape the run enumeration in ``training_tools.py`` builds per record without a
-    separate resolver round-trip. ``current_epoch`` costs one metrics-log read and is included
-    only when ``read_progress`` is true; ``best_metric`` (and so ``best_metric_name`` beside it)
-    is left ``None``, a running best isn't recoverable from the metrics log alone without
-    re-deriving the selection policy.
+    separate resolver round-trip. ``current_epoch``, ``best_metric`` and ``best_metric_name``
+    cost one metrics-log read and are included only when ``read_progress`` is true, read back
+    through :func:`best_selection_from_log` from what the run itself stamped, never re-derived
+    from the config.
     """
     current_epoch = None
+    best_metric_name = None
+    best_metric = None
     if read_progress:
         rows = read_metrics(experiment_id)
         current_epoch = rows[-1].get("epoch") if rows else None
+        best_metric_name, best_metric = best_selection_from_log(rows)
     return {
         "run_id": status.get("run_id", experiment_id),
         "experiment_id": experiment_id,
         "status": derived_state(status, stale_seconds),
         "current_epoch": current_epoch,
-        "best_metric": None,
-        "best_metric_name": None,
+        "best_metric": best_metric,
+        "best_metric_name": best_metric_name,
         "output_dir": status.get("output_dir"),
         "error": status.get("error"),
     }
@@ -895,6 +899,50 @@ def read_metrics(experiment_id: str, *, root: Path | str | None = None) -> list[
         logger.warning("experiment %s metrics log has %d entries at a schema_version this "
                        "reader does not accept", experiment_id, len(page.version_refused))
     return [dict(record) for record in page.records]
+
+
+def best_selection_from_log(rows: list[dict[str, Any]]) -> tuple[str | None, float | None]:
+    """The selection metric name and its best value, read from a run's own metrics-log rows.
+
+    Every row a training body writes carries ``selection_metric`` (the bare name
+    ``generic_trainer.train()`` resolved once, before the first epoch) and ``selection`` (that
+    epoch's value on it); this reads those back rather than re-deriving a name from the run's
+    config, which is a second, disagreeing resolution (a bespoke loop's rows, or a config whose
+    ``training.evaluation`` and top-level ``evaluation`` blocks differ, are exactly where a second
+    resolution drifts from the trainer's own).
+
+    The name is the most recently stamped one; the best is compared over every row stamped with
+    that name in its declared ranking direction (``evaluation.HIGHER_IS_BETTER_BY_METRIC`` on the
+    bare name, the same declaration ``resolve_selection_metric`` enforces before a run can select
+    on it). A row with no name or a non-finite value is skipped when finding the best. No name in
+    any row, or a name the declaration table does not carry, leaves both ``None``: a metric this
+    function cannot rank is never guessed at.
+    """
+    name: str | None = None
+    for row in reversed(rows):
+        candidate = row.get("selection_metric")
+        if isinstance(candidate, str) and candidate:
+            name = candidate
+            break
+    if name is None:
+        return None, None
+
+    from tcip_mcp.pipelines.training.evaluation import HIGHER_IS_BETTER_BY_METRIC
+
+    higher_is_better = HIGHER_IS_BETTER_BY_METRIC.get(name)
+    if higher_is_better is None:
+        return None, None
+
+    best: float | None = None
+    for row in rows:
+        if row.get("selection_metric") != name:
+            continue
+        value = row.get("selection")
+        if not isinstance(value, (int, float)) or isinstance(value, bool) or not math.isfinite(value):
+            continue
+        if best is None or (value > best if higher_is_better else value < best):
+            best = float(value)
+    return name, best
 
 
 def log_metrics(

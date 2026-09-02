@@ -376,6 +376,9 @@ def test_resolve_experiment_dir_for_run_refuses_unresolvable(tmp_path, monkeypat
 
 
 def test_reconstruct_run_status_from_disk(tmp_path, monkeypatch):
+    """A row with no stamped ``selection_metric`` (a bespoke loop that never called through
+    ``generic_trainer.train()``) carries no best: the best is derived from the trainer's own
+    stamped rows, never fabricated from a metric name this log never recorded."""
     monkeypatch.chdir(tmp_path)
     from tcip_mcp.experiments import (
         create_experiment, log_metrics, reconstruct_run_status, stamp_run_identity, update_status,
@@ -391,7 +394,68 @@ def test_reconstruct_run_status_from_disk(tmp_path, monkeypatch):
     assert result["status"] == "running"
     assert result["current_epoch"] == 3
     assert result["output_dir"] == "out_dir"
-    assert result["best_metric"] is None  # not fabricated from the metrics log
+    assert result["best_metric"] is None
+    assert result["best_metric_name"] is None
+
+
+def test_reconstruct_run_status_derives_best_from_stamped_rows(tmp_path, monkeypatch):
+    """A row shaped the way ``generic_trainer.train()`` actually writes it (``selection`` +
+    ``selection_metric``) does carry a name and a best, read back rather than re-derived from
+    config."""
+    monkeypatch.chdir(tmp_path)
+    from tcip_mcp.experiments import (
+        create_experiment, log_metrics, reconstruct_run_status, stamp_run_identity, update_status,
+    )
+
+    create_experiment("exp_stamped", {"model_source": {"builder": "x:y"}})
+    stamp_run_identity("exp_stamped", "run_stamped", "out_dir")
+    update_status("exp_stamped", "running")
+    log_metrics("exp_stamped", 1, {"selection": 0.5, "selection_metric": "map50"})
+    log_metrics("exp_stamped", 2, {"selection": 0.7, "selection_metric": "map50"})
+
+    result = reconstruct_run_status("run_stamped")
+    assert result is not None
+    assert result["best_metric_name"] == "map50"
+    assert result["best_metric"] == 0.7
+
+
+def test_best_selection_from_log_withholds_on_no_name_or_undeclared_direction():
+    from tcip_mcp.experiments import best_selection_from_log
+
+    # No row stamps a selection metric at all.
+    assert best_selection_from_log([{"epoch": 1, "loss": 0.1}]) == (None, None)
+
+    # A stamped name with no declared ranking direction is never guessed at.
+    assert best_selection_from_log(
+        [{"epoch": 1, "selection": 0.1, "selection_metric": "not_a_real_metric"}],
+    ) == (None, None)
+
+
+def test_best_selection_from_log_ranks_in_the_metrics_declared_direction():
+    from tcip_mcp.experiments import best_selection_from_log
+
+    # loss: lower is better.
+    name, best = best_selection_from_log([
+        {"epoch": 1, "selection": 0.9, "selection_metric": "loss"},
+        {"epoch": 2, "selection": 0.4, "selection_metric": "loss"},
+        {"epoch": 3, "selection": 0.6, "selection_metric": "loss"},
+    ])
+    assert (name, best) == ("loss", 0.4)
+
+    # map50: higher is better.
+    name, best = best_selection_from_log([
+        {"epoch": 1, "selection": 0.4, "selection_metric": "map50"},
+        {"epoch": 2, "selection": 0.9, "selection_metric": "map50"},
+        {"epoch": 3, "selection": 0.6, "selection_metric": "map50"},
+    ])
+    assert (name, best) == ("map50", 0.9)
+
+    # A non-finite row is skipped rather than winning the comparison.
+    name, best = best_selection_from_log([
+        {"epoch": 1, "selection": 0.5, "selection_metric": "loss"},
+        {"epoch": 2, "selection": float("nan"), "selection_metric": "loss"},
+    ])
+    assert (name, best) == ("loss", 0.5)
 
 
 def test_reconstruct_run_status_surfaces_error(tmp_path, monkeypatch):
