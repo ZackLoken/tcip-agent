@@ -35,17 +35,30 @@ ACTIVE_MARKER = ".active"
 _logged_root: Optional[str] = None
 
 
+def configured_workspace() -> Optional[Path]:
+    """The ``~``-expanded ``TCIP_WORKSPACE`` path, or ``None`` when it is unset or blank.
+
+    Neither creates the directory nor resolves it against the filesystem; :func:`workspace_root`
+    is the resolving, directory-creating form a caller that needs an existing workspace root
+    calls instead. The one read of ``TCIP_WORKSPACE`` this module and any other caller that must
+    only ask whether a workspace is configured (``tcip_web.app``'s startup-under-test rail)
+    share, so the two never carry separate implementations of the same decision.
+    """
+    raw = os.environ.get("TCIP_WORKSPACE", "").strip()
+    return Path(raw).expanduser() if raw else None
+
+
 def workspace_root(*, create: bool = True) -> Path:
     """Resolve the workspace root; log its absolute path once.
 
-    Reads ``TCIP_WORKSPACE`` (``~`` expanded), defaulting to ``~/tcip-projects/``.
-    ``create`` (default ``True``) creates it on first use so callers never race a missing
-    directory; a caller that only reads (the session-start hook) passes ``create=False`` so
-    the read cannot bring a workspace directory into existence on its own.
+    Reads ``TCIP_WORKSPACE`` (``~`` expanded, via :func:`configured_workspace`), defaulting to
+    ``~/tcip-projects/``. ``create`` (default ``True``) creates it on first use so callers never
+    race a missing directory; a caller that only reads (the session-start hook) passes
+    ``create=False`` so the read cannot bring a workspace directory into existence on its own.
     """
     global _logged_root
-    raw = os.environ.get("TCIP_WORKSPACE", "").strip()
-    root = Path(raw).expanduser() if raw else DEFAULT_WORKSPACE
+    configured = configured_workspace()
+    root = configured if configured is not None else DEFAULT_WORKSPACE
     if create:
         root.mkdir(parents=True, exist_ok=True)
     root = root.resolve()
