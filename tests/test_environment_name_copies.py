@@ -64,12 +64,15 @@ _ARCHITECTURE_SITES = _sites_in(REPO_ROOT / "ARCHITECTURE.md")
 # Enumerated, not derived, since none of these lines carries a structured key the name could be
 # read from; ARCHITECTURE.md's sites are derived above because its line numbers shift under edits.
 _PROSE_COPY_SITES = [
-    (REPO_ROOT / "README.md", 72),
-    (REPO_ROOT / "README.md", 94),
+    (REPO_ROOT / "README.md", 71),
+    (REPO_ROOT / "README.md", 93),
     (REPO_ROOT / "CONTRIBUTING.md", 14),
     (REPO_ROOT / "CONTRIBUTING.md", 26),
-    (REPO_ROOT / "CLAUDE.md", 198),
+    (REPO_ROOT / "CLAUDE.md", 199),
     (REPO_ROOT / "environment.yml", 4),
+    (REPO_ROOT / "environment.yml", 15),
+    (REPO_ROOT / "environment.linux.lock.yml", 3),
+    (REPO_ROOT / "environment.linux.lock.yml", 8),
     (REPO_ROOT / "packages" / "tcip-web" / "README.md", 44),
     (REPO_ROOT / "packages" / "tcip-web" / "README.md", 45),
     *_ARCHITECTURE_SITES,
@@ -90,7 +93,7 @@ def test_enumerated_prose_copy_carries_the_environment_name(path, line_no):
 
 
 # environment.yml itself, read structurally by _environment_name() above rather than as a copy.
-_SOURCE_SITE = (REPO_ROOT / "environment.yml", 14)
+_SOURCE_SITE = (REPO_ROOT / "environment.yml", 15)
 
 # The structured sites, each checked by its own dedicated test above rather than by a literal
 # line-content comparison.
