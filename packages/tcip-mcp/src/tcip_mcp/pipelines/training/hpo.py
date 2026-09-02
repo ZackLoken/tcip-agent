@@ -102,27 +102,34 @@ def available_schedulers() -> list[str]:
     return ["asha", "hyperband", "pbt", "median", "none"]
 
 
-def _to_tune_space(param_space: dict, grid: bool = False) -> dict:
+def _to_tune_space(
+    param_space: dict, grid: bool = False, grid_keys: frozenset[str] = frozenset(),
+) -> dict:
     """Convert the platform param-space dict into a Ray Tune search space.
 
-    ``grid=True`` enumerates the discrete axes (categorical / int) via ``grid_search``;
-    continuous axes stay sampled (a grid can't enumerate a continuous range).
+    ``grid=True`` enumerates every discrete axis (categorical / int) via ``grid_search``;
+    continuous axes stay sampled (a grid can't enumerate a continuous range). ``grid_keys``
+    names axes forced to ``grid_search`` regardless of ``grid`` (``run_hpo``'s own
+    ``data.split.seed`` draw axis, paired with a ``BasicVariantGenerator(constant_grid_search=
+    True)`` so every sampled point is trained once per seed whether the sweep's own
+    ``search_alg`` is ``random`` or ``grid``).
     """
     from ray import tune
 
     space: dict[str, Any] = {}
     for name, spec in param_space.items():
         ptype = spec["type"]
+        as_grid = grid or name in grid_keys
         if ptype == "loguniform":
             space[name] = tune.loguniform(spec["low"], spec["high"])
         elif ptype == "uniform":
             space[name] = tune.uniform(spec["low"], spec["high"])
         elif ptype == "int":
             vals = list(range(int(spec["low"]), int(spec["high"]) + 1))
-            space[name] = tune.grid_search(vals) if grid else tune.randint(spec["low"], spec["high"] + 1)
+            space[name] = tune.grid_search(vals) if as_grid else tune.randint(spec["low"], spec["high"] + 1)
         elif ptype == "categorical":
             choices = list(spec["choices"])
-            space[name] = tune.grid_search(choices) if grid else tune.choice(choices)
+            space[name] = tune.grid_search(choices) if as_grid else tune.choice(choices)
         else:
             raise ValueError(f"Unknown param type: {ptype}")
     return space
@@ -547,6 +554,7 @@ def tune_search(
     study_name: str = "tcip_hpo",
     resources_per_trial: dict | None = None,
     stop_all_when: Callable[[], bool] | None = None,
+    split_draws: int = 1,
 ) -> dict:
     """Run an HPO sweep on Ray Tune.
 
@@ -575,6 +583,12 @@ def tune_search(
             made while this returns True; the whole experiment stops once it does and no trial
             still looks unfinished, or (the bounded fallback, for a trial that never polls) once
             a configured staleness window has passed. See :func:`_build_sweep_stopper`.
+        split_draws: Above 1, ``param_space`` already carries a ``data.split.seed`` grid axis
+            (``run_hpo``'s own addition) and the search is built as
+            ``BasicVariantGenerator(constant_grid_search=True, random_state=seed)`` instead of
+            through ``build_search_alg``, so every sampled point is trained once per seed
+            (Ray's own pairing, ``ray.tune.search.basic_variant``) whether ``search_alg`` is
+            ``random`` or ``grid``. 1 (the default) leaves search-building unchanged.
 
     Returns dict with ``best_params``, ``best_value``, ``n_trials``, ``all_trials``,
     ``search_alg``, ``scheduler``, ``study_name`` (+ ``warm_start``/``baseline_params``).
@@ -601,7 +615,9 @@ def tune_search(
     import ray
     from ray import tune
 
-    space = _to_tune_space(param_space or get_default_space(), grid=(search_alg == "grid"))
+    grid_keys = frozenset({"data.split.seed"}) if split_draws > 1 else frozenset()
+    space = _to_tune_space(param_space or get_default_space(), grid=(search_alg == "grid"),
+                           grid_keys=grid_keys)
     resources = resources_per_trial or _default_trial_resources(max_concurrent)
 
     points = None
@@ -610,7 +626,12 @@ def tune_search(
         filtered = {k: v for k, v in baseline.items() if k in space}
         points = [filtered] if filtered else None
 
-    searcher = build_search_alg(search_alg, seed=seed, points_to_evaluate=points)
+    if split_draws > 1:
+        from ray.tune.search.basic_variant import BasicVariantGenerator
+        searcher = BasicVariantGenerator(
+            constant_grid_search=True, random_state=seed, points_to_evaluate=points)
+    else:
+        searcher = build_search_alg(search_alg, seed=seed, points_to_evaluate=points)
     sched = build_scheduler(
         scheduler, grace_period=grace_period, reduction_factor=reduction_factor,
         hyperparam_mutations=space,

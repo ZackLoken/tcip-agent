@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import itertools
+import json
 import logging
 import os
 import subprocess
@@ -23,6 +24,7 @@ from tcip_store import (
     check_json_value,
     register_store,
     store,
+    stored_number,
 )
 from tcip_store.file_backend import RootedFileLocator
 
@@ -1116,18 +1118,22 @@ def list_split_choices(experiment_id: str) -> dict:
 
     The listing is thin: the manifest directories other enumerable experiment configs in this
     project bound to (the picked config's own excluded, since it is "As recorded"), plus, when
-    ``dataset_root_of(data.images_dir)`` resolves, that root's ``splits`` directory, offered only
-    when something is actually recorded there (the ``make_splits`` default materializes it, it
-    does not always exist). The own-binding exclusion and the candidate dedupe compare each
-    directory through the same lexical normalization the store key uses
-    (``str(Path(p).absolute())``, no symlink resolution), so a differently spelled path to the
-    identical directory is never offered as if it were a second one.
+    ``dataset_root_of(data.images_dir)`` resolves, that root's ``splits`` directory (offered only
+    when something is actually recorded there directly, the ``make_splits`` default materializes
+    it, it does not always exist) and every directory one level under it holding a manifest
+    (where ``freeze_split_manifest`` writes a frozen run's own drawn partition). The own-binding
+    exclusion and the candidate dedupe compare each directory through the same lexical
+    normalization the store key uses (``str(Path(p).absolute())``, no symlink resolution), so a
+    differently spelled path to the identical directory is never offered as if it were a second
+    one.
 
     Returns ``{"error": ...}`` for an unknown ``experiment_id`` (the route's own 404). Otherwise:
     ``{"as_recorded": {"case": "bound"|"drawn", "line": str, "compatible": bool,
     "reason": str | None}, "manifests": [{"manifest_dir": str, "enabled": bool,
     "reason": str | None, "seed": int | None, "group_by": str | None, "train": int, "val": int,
-    "calibration": int, "other_dates": int, "replaced_split_keys": list[str]}, ...]}``.
+    "calibration": int, "other_dates": int, "replaced_split_keys": list[str],
+    "origin": dict | None}, ...]}``. ``origin`` is the manifest's own ``{"experiment_id",
+    "frozen_at"}`` for a frozen manifest, ``None`` for a drawn one.
     ``replaced_split_keys`` names the recorded ``data.split`` keys
     (:data:`_SPLIT_MANIFEST_CONFLICT_KEYS`) choosing any offered partition drops, read from the
     stored config once and carried on every entry: the same set for every candidate, since it
@@ -1216,6 +1222,15 @@ def list_split_choices(experiment_id: str) -> dict:
         if default_norm != own_norm and default_norm not in seen:
             seen.add(default_norm)
             candidate_dirs.append(default_dir)
+        # One level down: where freeze_split_manifest writes a frozen run's own partition.
+        splits_dir = Path(default_dir)
+        if splits_dir.is_dir():
+            for sub in sorted(p for p in splits_dir.iterdir() if p.is_dir()):
+                sub_norm = _norm_dir(str(sub))
+                if sub_norm == own_norm or sub_norm in seen:
+                    continue
+                seen.add(sub_norm)
+                candidate_dirs.append(str(sub))
 
     run_date = annotation_date(labels_dir)
     manifests: list[dict] = []
@@ -1227,7 +1242,7 @@ def list_split_choices(experiment_id: str) -> dict:
             manifests.append({
                 "manifest_dir": candidate_dir, "enabled": False, "reason": error_text,
                 "seed": None, "group_by": None, "train": 0, "val": 0, "calibration": 0,
-                "other_dates": 0, "replaced_split_keys": replaced_split_keys,
+                "other_dates": 0, "replaced_split_keys": replaced_split_keys, "origin": None,
             })
             continue
         candidate_config = candidate_config_with_manifest(config, candidate_dir)
@@ -1238,6 +1253,7 @@ def list_split_choices(experiment_id: str) -> dict:
             "group_by": manifest.get("group_by"), "train": len(narrowing.train_ids),
             "val": len(narrowing.val_ids), "calibration": len(narrowing.calibration_ids),
             "other_dates": narrowing.other_dates, "replaced_split_keys": replaced_split_keys,
+            "origin": manifest.get("origin"),
         }
         if issues:
             entry["enabled"] = False
@@ -1835,6 +1851,8 @@ def run_hpo(
     resources_per_trial: dict | None = None,
     study_name: str | None = None,
     auto_tensorboard: bool = True,
+    split_draws: int = 1,
+    split_draw_seeds: list[int] | None = None,
     *,
     relaunched_from: str | None = None,
 ) -> dict:
@@ -1906,6 +1924,22 @@ def run_hpo(
             that started it from another sweep's own recorded manifest; recorded on this
             sweep's manifest so a listing can show the fork, ``None`` when this sweep was not
             a relaunch. Refused when it names no sweep manifest under this resolved root.
+        split_draws: Above 1, adds ``data.split.seed`` to the search space as a grid over
+            ``split_draw_seeds`` (default: the base config's own ``data.split.seed``, else 42,
+            plus the draw index), paired with every sampled point through Ray's own
+            ``BasicVariantGenerator(constant_grid_search=True)`` so each point trains once per
+            seed, a blocked comparison of the split's own sensitivity. Refused, before minting
+            the sweep, when ``base_config`` is bound to a split manifest or names
+            ``data.val_images_dir`` (nothing to redraw), ``data.auto_val`` is off or ``task``
+            sits outside the drawn path's own tasks, ``search_alg`` is not ``random``/``grid``
+            (only the native generator pairs a grid axis), ``scheduler`` is not ``none`` (a
+            pruned draw is not comparable with a completed one), ``split_draw_seeds`` is given
+            at a length other than ``split_draws``, or ``param_space`` already sweeps
+            ``data.split.seed`` itself. The result groups trials by point (params minus the
+            seed) and chooses the best by mean over each point's draws; see
+            ``result["best_value_spread"]``. 1 (the default) changes nothing.
+        split_draw_seeds: The seeds ``split_draws`` pairs with every sampled point, one per
+            draw; omit for the derived default (see ``split_draws``).
     """
     from tcip_mcp.pipelines.training.hpo import tune_search, get_default_space
 
@@ -1930,6 +1964,18 @@ def run_hpo(
                 return {"error": f"relaunched_from names no sweep manifest under this root: "
                                   f"{relaunched_from!r}", "issues": []}
 
+        from tcip_mcp.pipelines.model_build import MODEL_SOURCE_KEY
+
+        # Checked ahead of preflight, so its own reason is what a bound/val_images_dir/task
+        # refusal reads as, not whatever preflight would have hit first.
+        hpo_task = (base_config.get(MODEL_SOURCE_KEY) or {}).get("task") \
+            or (base_config.get("data") or {}).get("task", "detection")
+        draws_refusal = _split_draws_refusal(
+            base_config, param_space, hpo_task, search_alg, scheduler,
+            split_draws, split_draw_seeds)
+        if draws_refusal is not None:
+            return {"error": draws_refusal, "issues": []}
+
         # Structural preflight over every point the search space could resolve a trial's
         # builder or data section to, not only the first sampled corner.
         for label, point in _preflight_points(param_space):
@@ -1945,18 +1991,27 @@ def run_hpo(
 
         from tcip_mcp.pipelines.training.evaluation import HIGHER_IS_BETTER_BY_METRIC
         from tcip_mcp.pipelines.training.generic_trainer import resolve_selection_metric
-        from tcip_mcp.pipelines.model_build import MODEL_SOURCE_KEY
         from tcip_mcp.pipelines.schemas import evaluation_section
 
         # Ray forbids setting metric/mode anywhere but the Tuner, so the direction is resolved
         # once here, from base_config; every trial's own resolution must agree with it.
-        hpo_model_source = base_config.get(MODEL_SOURCE_KEY) or {}
         hpo_eval_cfg = evaluation_section(base_config)
-        hpo_task = hpo_model_source.get("task") \
-            or (base_config.get("data") or {}).get("task", "detection")
         hpo_metric = resolve_selection_metric(
             hpo_task, hpo_eval_cfg.get("trait"), hpo_eval_cfg.get("selection_metric"))
         hpo_mode = "max" if HIGHER_IS_BETTER_BY_METRIC[hpo_metric] else "min"
+
+        search_param_space = param_space
+        resolved_draw_seeds: list[int] | None = None
+        if split_draws > 1:
+            base_seed = int(((base_config.get("data") or {}).get("split") or {}).get("seed", 42))
+            resolved_draw_seeds = (
+                list(split_draw_seeds) if split_draw_seeds is not None
+                else [base_seed + i for i in range(split_draws)]
+            )
+            search_param_space = {
+                **param_space,
+                "data.split.seed": {"type": "categorical", "choices": resolved_draw_seeds},
+            }
 
         import uuid
         from datetime import datetime, timezone
@@ -1985,6 +2040,8 @@ def run_hpo(
             "base_config": base_config,
             "sweep_dir": str(sweep_root),
             "relaunched_from": relaunched_from,
+            "split_draws": split_draws,
+            "split_draw_seeds": resolved_draw_seeds,
         }
         manifest_key = sweep_manifest_key(study_name, output_dir)
         manifest_lock = threading.Lock()
@@ -2034,7 +2091,7 @@ def run_hpo(
     try:
         result = tune_search(
             objective_fn=objective_fn,
-            param_space=param_space,
+            param_space=search_param_space,
             metric="objective",
             mode=hpo_mode,
             num_samples=n_trials,
@@ -2049,6 +2106,7 @@ def run_hpo(
             study_name=study_name,
             resources_per_trial=resources_per_trial,
             stop_all_when=lambda: cancel_path.exists(),
+            split_draws=split_draws,
         )
     except Exception as exc:
         # Stopped and joined before any terminal write, so the write below is always the
@@ -2086,10 +2144,32 @@ def run_hpo(
             pass
 
     result["tensorboard"] = tb_info
+
+    if split_draws > 1:
+        # The best is run_hpo's own choice by mean over each point's draws, over Ray's own
+        # trial values (all_trials), never Ray's get_best_result.
+        groups = group_split_draws(result.get("all_trials") or [], split_draws)
+        eligible = [g for g in groups if g["eligible"]]
+        result.pop("best_value_state", None)
+        if eligible:
+            pick = (max if hpo_mode == "max" else min)(eligible, key=lambda g: g["block"]["mean"])
+            result["best_params"] = pick["point"]
+            result.update(stored_number("best_value", pick["block"]["mean"]))
+            result["best_value_spread"] = pick["block"]
+        else:
+            result["best_params"] = None
+            result["best_value"] = None
+            result["best_value_state"] = (
+                "no eligible point: every drawn point had an errored or never-answered draw"
+            )
+            result["best_value_spread"] = None
+
     # best_value_state (stored_number's sibling for a non-finite best_value) rides along whenever the search produced one.
     manifest_result = {k: result.get(k) for k in ("best_params", "best_value", "n_trials")}
     if "best_value_state" in result:
         manifest_result["best_value_state"] = result["best_value_state"]
+    if "best_value_spread" in result:
+        manifest_result["best_value_spread"] = result["best_value_spread"]
     manifest.update(
         status="completed",
         finished_at=datetime.now(timezone.utc).isoformat(),
@@ -2260,6 +2340,109 @@ def _apply_hpo_params(base_config: dict, params: dict) -> dict:
         else:
             cfg[key] = value
     return cfg
+
+
+_SPLIT_DRAW_SEED_KEY = "data.split.seed"
+"""The dotted param key ``run_hpo``'s ``split_draws`` axis sweeps, the same key
+``_apply_hpo_params``'s dotted-path branch lands at ``base_config['data']['split']['seed']``."""
+
+
+def _split_draws_refusal(
+    base_config: dict, param_space: dict | None, task: str, search_alg: str, scheduler: str,
+    split_draws: int, split_draw_seeds: list[int] | None,
+) -> str | None:
+    """Every reason ``run_hpo`` refuses ``split_draws`` above 1, checked before minting the
+    sweep. ``None`` when nothing here objects, including every call at ``split_draws=1``: that
+    default asks for nothing this family governs."""
+    if split_draws <= 1:
+        return None
+    from tcip_mcp.pipelines.data.split_construction import STEM_TASKS
+    from tcip_mcp.pipelines.training.hpo import _NO_SCHEDULER
+
+    data_cfg = base_config.get("data") or {}
+    split_cfg = data_cfg.get("split") or {}
+    if split_cfg.get("manifest_dir"):
+        return (f"split_draws redraws the split, and base_config is bound to a split manifest "
+                f"({split_cfg['manifest_dir']!r}): a recorded partition is not redrawn.")
+    if data_cfg.get("val_images_dir"):
+        return ("split_draws redraws the split, and base_config names data.val_images_dir: an "
+                "explicit validation source draws nothing.")
+    if not data_cfg.get("auto_val", True):
+        return "split_draws needs a drawn validation split, and base_config sets data.auto_val=False."
+    if task not in STEM_TASKS:
+        return (f"split_draws needs a drawn validation split, and task={task!r} sits outside "
+                f"the drawn path's own tasks ({sorted(STEM_TASKS)}).")
+    if (search_alg or "random").lower() not in ("random", "grid"):
+        return (f"split_draws pairs a grid axis through Ray's own BasicVariantGenerator, which "
+                f"only the native search_alg values (random, grid) build; search_alg={search_alg!r} "
+                "does not.")
+    if (scheduler or "none").lower() not in _NO_SCHEDULER:
+        return (f"split_draws makes each draw a blocked comparison, and a pruning scheduler "
+                f"({scheduler!r}) could end one draw before another completes; pass "
+                "scheduler='none' with split_draws.")
+    if split_draw_seeds is not None and len(split_draw_seeds) != split_draws:
+        return (f"split_draw_seeds has {len(split_draw_seeds)} seed(s) but split_draws="
+                f"{split_draws}: one seed per draw.")
+    if _SPLIT_DRAW_SEED_KEY in (param_space or {}):
+        return (f"param_space already sweeps {_SPLIT_DRAW_SEED_KEY}, the same axis split_draws "
+                "adds as a paired grid; state the crossing through split_draws/"
+                "split_draw_seeds, not a second data.split.seed axis.")
+    return None
+
+
+def group_split_draws(all_trials: list[dict], split_draws: int) -> list[dict]:
+    """Group ``tune_search``'s own ``all_trials`` rows by the point each draw shares (every
+    param but :data:`_SPLIT_DRAW_SEED_KEY`), each group carrying the ``split_draws`` block this
+    family's result and manifest both record.
+
+    A group's block (``seeds``, ``values``, ``mean``, ``std``, ``min``, ``max``, ``n``) covers
+    only the group's ``COMPLETE`` rows with a real value; ``std`` is the sample standard
+    deviation, ``None`` under two values. ``n`` is every draw seen for the point (``COMPLETE``
+    and ``ERROR`` alike); a group short of ``split_draws`` complete draws also carries
+    ``n_complete`` and is not ``eligible`` for best. A row with no ``params`` at all (Ray's own
+    never-answered case) forms its own singleton, ineligible group, ``point`` ``None``: it names
+    no point to group under. Called with ``split_draws=1`` (a sweep that never asked for draws,
+    or an older result read back) still returns one trivially-complete block per point.
+    """
+    import statistics
+
+    groups: dict[str, dict] = {}
+    order: list[str] = []
+    for i, row in enumerate(all_trials):
+        params = row.get("params")
+        if params is None:
+            key, point = f"__unanswered_{i}__", None
+        else:
+            point = {k: v for k, v in params.items() if k != _SPLIT_DRAW_SEED_KEY}
+            key = json.dumps(point, sort_keys=True, default=str)
+        entry = groups.setdefault(key, {"point": point, "rows": []})
+        if key not in order:
+            order.append(key)
+        entry["rows"].append(row)
+
+    out: list[dict] = []
+    for key in order:
+        entry = groups[key]
+        rows = entry["rows"]
+        complete = [r for r in rows if r.get("state") == "COMPLETE" and r.get("value") is not None]
+        values = [float(r["value"]) for r in complete]
+        seeds = [(r.get("params") or {}).get(_SPLIT_DRAW_SEED_KEY) for r in complete]
+        block = {
+            "seeds": seeds,
+            "values": values,
+            "mean": statistics.fmean(values) if values else None,
+            "std": statistics.stdev(values) if len(values) > 1 else None,
+            "min": min(values) if values else None,
+            "max": max(values) if values else None,
+            "n": len(rows),
+        }
+        if len(values) < split_draws:
+            block["n_complete"] = len(values)
+        out.append({
+            "point": entry["point"], "block": block,
+            "eligible": entry["point"] is not None and len(values) >= split_draws,
+        })
+    return out
 
 
 def _first_sampled_point(param_space: dict) -> dict:

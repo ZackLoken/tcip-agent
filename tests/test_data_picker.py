@@ -375,6 +375,32 @@ def test_list_split_choices_offers_every_recorded_partition_with_the_bindings_ow
     assert broken_entry["reason"] is not None
 
 
+def test_list_split_choices_offers_a_frozen_manifest_with_its_origin(tmp_path: Path):
+    """A manifest freeze_split_manifest wrote one level under the dataset's own splits
+    directory is offered the identical checked-then-compatibility way as any other candidate,
+    with its origin carried on the row."""
+    from tcip_mcp.experiments import create_experiment
+    from tcip_mcp.tools.data_tools import freeze_split_manifest
+    from tcip_mcp.tools.training_tools import list_split_choices
+
+    from tests.test_freeze_split_manifest import _real_drawn_experiment
+
+    root = _two_subject_two_date_dataset(tmp_path / "ds")
+    _real_drawn_experiment(root, "exp-src")
+    frozen = freeze_split_manifest("exp-src")
+    assert "error" not in frozen, frozen
+
+    picked_cfg = _bespoke_config(root / "images" / DATES[0], root / "annotations" / DATES[0])
+    create_experiment("exp-picked-frozen", picked_cfg)
+
+    result = list_split_choices("exp-picked-frozen")
+    by_dir = {m["manifest_dir"]: m for m in result["manifests"]}
+
+    entry = by_dir[frozen["manifest_dir"]]
+    assert entry["enabled"] is True
+    assert entry["origin"]["experiment_id"] == "exp-src"
+
+
 def test_list_split_choices_as_recorded_reports_moved_directories_like_preflight(
     tmp_path: Path, monkeypatch,
 ):
