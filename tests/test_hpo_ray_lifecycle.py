@@ -82,7 +82,18 @@ def _install_fake_ray(monkeypatch, entered: list, release: list) -> ModuleType:
     ``_kill_ray_daemons_before_shutdown`` reads, holding one fake daemon per Ray process type;
     ``shutdown`` mirrors ``Node.kill_all_processes``, terminating whichever of those daemons
     are still alive (``ray.no_console`` decides whether that terminate call raises).
+    ``_kill_ray_daemons_before_shutdown`` looks up each fake daemon's descendants through the
+    real ``psutil``, so ``psutil.Process`` is patched here to report the fake pids as never
+    having any: a real pid this test made up matching a process actually running on the host
+    would otherwise be walked and its children killed.
     """
+    import psutil
+
+    def fake_psutil_process(pid):
+        raise psutil.NoSuchProcess(pid)
+
+    monkeypatch.setattr(psutil, "Process", fake_psutil_process)
+
     ray = ModuleType("ray")
     ray.init_calls = 0
     ray.shutdown_calls = 0
@@ -421,11 +432,8 @@ def test_a_console_free_exit_kills_ray_daemons_before_shutdown_signals_them(monk
     """Windows' console-signal shutdown path raises ``OSError: [WinError 6] The handle is
     invalid`` on a daemon started without a console; a console-free process must kill every
     daemon itself first so ``ray.shutdown()`` finds each one already dead and never signals
-    it, and the sweep's exit raises nothing. ``raising=False`` lets this monkeypatch land even
-    before ``_has_attached_console`` exists, so a baseline lacking it still reaches the
-    assertion below rather than failing on the patch itself: without the fix nothing is killed
-    ahead of ``ray.shutdown()``, so the still-alive daemon's terminate call raises and that
-    exception is what the assertion below catches.
+    it. Asserts the sweep's exit raises nothing, that every daemon was killed rather than
+    signalled, and that ``ray.shutdown()`` still ran.
     """
     import tcip_mcp.pipelines.training.hpo as hpo
 
@@ -439,7 +447,7 @@ def test_a_console_free_exit_kills_ray_daemons_before_shutdown_signals_them(monk
     escaped: BaseException | None = None
     try:
         _run_one_search()
-    except BaseException as exc:  # the assertion below is the guard, not this except
+    except BaseException as exc:
         escaped = exc
 
     assert escaped is None, f"the sweep's exit raised {escaped!r} instead of completing"
@@ -451,10 +459,9 @@ def test_a_console_free_exit_kills_ray_daemons_before_shutdown_signals_them(monk
 
 
 def test_a_process_with_a_console_lets_ray_shutdown_signal_its_daemons_directly(monkeypatch):
-    """Coverage for the companion path: with a console attached, nothing is killed ahead of
-    ``ray.shutdown()``, which signals each daemon through the terminate path exactly as it did
-    before this module gained a console-free path; this holds both before and after the fix,
-    since a console-attached exit never takes the new branch."""
+    """Coverage of the attached-console path: asserts nothing is killed ahead of
+    ``ray.shutdown()``, which signals each daemon through the terminate path, and that
+    ``ray.shutdown()`` still ran."""
     import tcip_mcp.pipelines.training.hpo as hpo
 
     entered = [threading.Event()]
