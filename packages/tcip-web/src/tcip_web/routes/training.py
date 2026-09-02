@@ -153,7 +153,10 @@ def launch_run_tensorboard(run_id: str, payload: EmptyBodyPayload) -> dict:
     ``SummaryWriter`` ever wrote one) never had anything to log to; that refusal carries
     ``no_logs: True`` so the GUI can say the run produced no logs instead of starting a
     TensorBoard against a directory nothing populated and offering a retry that would do the
-    same.
+    same. A run whose own status already carries an error is checked for events first rather
+    than refused on the error alone, so a crash that recorded a reason still reads as no-logs
+    (with that reason attached) when it produced none; an error paired with real event files
+    keeps the plain refusal, no retry warranted against a directory that has something to serve.
     """
     from pathlib import Path
 
@@ -161,15 +164,19 @@ def launch_run_tensorboard(run_id: str, payload: EmptyBodyPayload) -> dict:
     from tcip_mcp.tools.training_tools import check_training_status
 
     status = check_training_status(run_id)
-    if status.get("error"):
-        raise HTTPException(404, status["error"])
+    if "status" not in status:
+        raise HTTPException(404, status.get("error") or f"Run not found: {run_id}")
     output_dir = status.get("output_dir")
     tb_dir = Path(f"{output_dir}/tensorboard") if output_dir else None
     has_events = bool(tb_dir is not None and tb_dir.is_dir()
                        and any(tb_dir.glob("events.out.tfevents*")))
+    error = status.get("error")
+    if error and has_events:
+        raise HTTPException(404, error)
     if not has_events:
         raise HTTPException(
-            404, {"error": f"run produced no logs: {run_id}", "no_logs": True},
+            404,
+            {"error": error or f"run produced no logs: {run_id}", "no_logs": True},
         )
     return launch_tensorboard(f"{output_dir}/tensorboard", run_id=run_id)
 

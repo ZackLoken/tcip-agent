@@ -302,6 +302,31 @@ def test_tensorboard_route_404s_with_no_logs_for_a_stamped_dir_with_no_event_fil
     assert resp.json()["detail"]["no_logs"] is True
 
 
+def test_tensorboard_route_404s_with_no_logs_carrying_the_recorded_error(
+    tmp_path, monkeypatch, client: TestClient,
+) -> None:
+    """A run whose status the platform itself recorded carries a real error (a crash during
+    data load, say) and whose output directory holds no event file: the refusal must say both
+    that it produced no logs (so the tab offers no Try again) and what the recorded error was,
+    not the plain error text a run with real logs would still get."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
+    from tcip_mcp.experiments import create_experiment, stamp_run_identity, update_status
+
+    run_id = "exp-fails-at-data-load"
+    output_dir = tmp_path / "out"
+    output_dir.mkdir()
+    create_experiment(run_id, {"model_source": {"builder": "m:f"}})
+    stamp_run_identity(run_id, run_id, str(output_dir))
+    update_status(run_id, "failed", error="could not open the dataset's images_dir")
+
+    resp = client.post(f"/api/training/runs/{run_id}/tensorboard", json={})
+    assert resp.status_code == 404
+    detail = resp.json()["detail"]
+    assert detail["no_logs"] is True
+    assert detail["error"] == "could not open the dataset's images_dir"
+
+
 def test_list_runs_reconstructs_from_experiments(tmp_path, monkeypatch) -> None:
     """No live entry for either experiment (this process never held them in ``_RUNS``): the
     route's own rows now come from ``list_training_runs``'s unified disk enumeration with no
