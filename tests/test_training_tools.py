@@ -61,12 +61,17 @@ def _frozen_detection_builder(**kwargs):
 
 
 def _detection_smoke_cfg(builder: str, tmp_path: Path) -> dict:
+    """A smoke config over the bespoke detector at a small resize target: the detector's own
+    transform resizes the 224 px contract input to ``min_size``, so 64 keeps two smoke builds
+    plus twenty overfit steps to seconds where the 800 px default took minutes."""
     imgs = tmp_path / "images"
     lbls = tmp_path / "labels"
     imgs.mkdir()
     lbls.mkdir()
     return {
-        "model_source": {"builder": builder, "builder_kwargs": {"num_classes": 1}, "task": "detection"},
+        "model_source": {"builder": builder,
+                         "builder_kwargs": {"num_classes": 1, "min_size": 64, "max_size": 96},
+                         "task": "detection"},
         "data": {"images_dir": str(imgs), "labels_dir": str(lbls)},
         "training": {"batch_size": 2},
     }
