@@ -57,4 +57,14 @@ describe("EmbeddedTool", () => {
       screen.getByRole("link", { name: "Open in a new tab: Ray dashboard" }),
     ).toBeInTheDocument();
   });
+
+  it("carries its own title as a heading, not a plain span", () => {
+    render(<EmbeddedTool title="TensorBoard" url="http://localhost:6006" />);
+    expect(screen.getByRole("heading", { level: 2, name: "TensorBoard" })).toBeInTheDocument();
+  });
+
+  it("puts a failure sentence in a polite status region so a keyboard user hears it", () => {
+    render(<EmbeddedTool title="TensorBoard" url={null} error="This run produced no logs." />);
+    expect(screen.getByRole("status")).toHaveTextContent("This run produced no logs.");
+  });
 });

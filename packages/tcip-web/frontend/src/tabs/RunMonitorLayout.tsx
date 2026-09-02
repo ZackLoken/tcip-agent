@@ -29,7 +29,7 @@ export function RunMonitorLayout({
     <div className="flex-1 grid grid-cols-[400px_1fr] overflow-hidden">
       <div className="border-r border-tcip-border flex flex-col overflow-hidden">
         <div className="px-4 pt-4 pb-2 flex items-center gap-2">
-          <span className="tcip-heading">{title}</span>
+          <h2 className="tcip-heading">{title}</h2>
           <span className="flex-1" />
           {headerRight}
         </div>

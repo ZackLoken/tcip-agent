@@ -46,3 +46,29 @@ describe("Toasts live region politeness", () => {
     expect(status).toHaveAttribute("aria-live", "polite");
   });
 });
+
+describe("Toasts dismiss button naming", () => {
+  it("carries each toast's own message so two Dismiss buttons never share one name", () => {
+    render(<Toasts />);
+    act(() => useStore.getState().pushToast("Cancel failed: network error"));
+    act(() => useStore.getState().pushToast("Relaunch failed: network error"));
+
+    expect(
+      screen.getByRole("button", { name: "Dismiss: Cancel failed: network error" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Dismiss: Relaunch failed: network error" }),
+    ).toBeInTheDocument();
+  });
+
+  it("truncates a long message to its first words", () => {
+    render(<Toasts />);
+    act(() =>
+      useStore.getState().pushToast("Opened scratch-project-r2, but it has no dated images yet."),
+    );
+
+    expect(
+      screen.getByRole("button", { name: "Dismiss: Opened scratch-project-r2, but it has no…" }),
+    ).toBeInTheDocument();
+  });
+});

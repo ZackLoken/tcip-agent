@@ -9,6 +9,16 @@ const LEVEL_CLASS: Record<Toast["level"], string> = {
   success: "border-tcip-tp/50 text-tcip-tp",
 };
 
+const DISMISS_LABEL_WORDS = 6;
+
+/** The dismiss button's own name, so two toasts on screen at once never share one control
+ * name: the message's first few words, the whole message when it is already that short. */
+function dismissLabel(message: string): string {
+  const words = message.trim().split(/\s+/);
+  const lead = words.slice(0, DISMISS_LABEL_WORDS).join(" ");
+  return `Dismiss: ${lead}${words.length > DISMISS_LABEL_WORDS ? "…" : ""}`;
+}
+
 function ToastItem({ toast, onDismiss }: { toast: Toast; onDismiss: (id: number) => void }) {
   useEffect(() => {
     const id = window.setTimeout(() => onDismiss(toast.id), 6000);
@@ -29,7 +39,7 @@ function ToastItem({ toast, onDismiss }: { toast: Toast; onDismiss: (id: number)
       <button
         className="text-tcip-muted hover:text-tcip-fg"
         onClick={() => onDismiss(toast.id)}
-        aria-label="Dismiss notification"
+        aria-label={dismissLabel(toast.message)}
       >
         ×
       </button>

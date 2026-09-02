@@ -6,6 +6,18 @@ import type { MetricRow } from "@/api/training";
  * comparison refresh so the two surfaces poll on one cadence rather than two literals. */
 export const RUN_REFRESH_MS = 4000;
 
+/**
+ * The sentence both the Training and Tuning list headers state their own ordering with, so the
+ * two tabs never drift into naming a different scope (a browser window, say) for the same
+ * process-level fact: this app's own launches list first, in launch order, then every other
+ * recorded item follows, sorted by the given field. `itemNoun` is the singular ("run", "sweep").
+ */
+export function runOrderLine(itemNoun: string, sortField: string): string {
+  const plural = `${itemNoun}s`;
+  const capitalized = plural.charAt(0).toUpperCase() + plural.slice(1);
+  return `${capitalized} this app's own launches first, in launch order; every other recorded ${itemNoun} follows, sorted by ${sortField}.`;
+}
+
 /** The row's identity for de-duplication: epoch if present, else step, else none. */
 export function metricKey(row: MetricRow): number | undefined {
   if (typeof row.epoch === "number") return row.epoch;

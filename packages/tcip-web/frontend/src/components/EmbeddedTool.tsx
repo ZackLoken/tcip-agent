@@ -25,7 +25,7 @@ export function EmbeddedTool({
   return (
     <div className="tcip-panel flex h-full flex-col overflow-hidden">
       <div className="flex items-center gap-2 border-b border-tcip-border px-3 py-1.5">
-        <span className="tcip-heading">{title}</span>
+        <h2 className="tcip-heading">{title}</h2>
         <span className="flex-1" />
         {url && (
           <a
@@ -47,7 +47,11 @@ export function EmbeddedTool({
             Starting…
           </div>
         ) : (
-          <div className="flex h-full flex-col items-center justify-center gap-2 px-3 text-center">
+          <div
+            role="status"
+            aria-live="polite"
+            className="flex h-full flex-col items-center justify-center gap-2 px-3 text-center"
+          >
             <span className="text-[11px] text-tcip-fp">{error}</span>
             {onRetry && (
               <button

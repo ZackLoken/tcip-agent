@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { StructuredRefusalError } from "@/api/http";
 import { tuningApi, type Sweep, type SweepDetail, type SweepTrial } from "@/api/tuning";
 import type { TensorboardLaunch } from "@/api/training";
 import { DisclosureChevron } from "@/components/CollapsibleSection";
@@ -12,7 +13,7 @@ import { TERMINAL_STATUSES } from "@/lib/runStatus";
 import { useStore } from "@/store";
 import { defaultSweepRequest } from "@/tabs/agentPrompts";
 import { RunMonitorEmpty, RunMonitorLayout } from "@/tabs/RunMonitorLayout";
-import { RUN_REFRESH_MS } from "@/tabs/trainingMetrics";
+import { runOrderLine, RUN_REFRESH_MS } from "@/tabs/trainingMetrics";
 
 function hasContent(value: unknown): boolean {
   return typeof value === "object" && value !== null && Object.keys(value).length > 0;
@@ -35,7 +36,7 @@ function messageOf(e: unknown): string {
 
 function cellText(value: unknown): string {
   if (value === null || value === undefined) return "";
-  if (typeof value === "number") return Number.isInteger(value) ? String(value) : value.toFixed(4);
+  if (typeof value === "number") return String(value);
   if (typeof value === "string") return value;
   return JSON.stringify(value);
 }
@@ -195,8 +196,8 @@ export function TuningTab() {
   const sweepNonTerminal =
     detailForSelection === null || !TERMINAL_STATUSES.has(detailForSelection.status);
 
-  // One TensorBoard over the whole sweep directory: a pre-manifest attempt's 404 is not held
-  // off, only retried (useEmbeddedToolRetry) until the manifest and a launch land.
+  // One TensorBoard over the whole sweep directory: this route's own 404 is how the
+  // pre-manifest window presents here, so it is retried silently, never shown as a failure.
   const sweepTbStep = useCallback(async (): Promise<EmbeddedToolStepResult> => {
     if (!selectedId) return { url: null, error: null, done: true };
     try {
@@ -204,11 +205,14 @@ export function TuningTab() {
       const outcome = launchOutcome(launched);
       return { ...outcome, done: outcome.url != null || !sweepNonTerminal };
     } catch (e) {
+      if (e instanceof StructuredRefusalError && e.status === 404) {
+        return { url: null, error: null, done: !sweepNonTerminal };
+      }
       return { url: null, error: messageOf(e), done: !sweepNonTerminal };
     }
   }, [selectedId, sweepNonTerminal]);
 
-  const sweepTb = useEmbeddedToolRetry(!!selectedId, sweepTbAttempt, sweepTbStep);
+  const sweepTb = useEmbeddedToolRetry(selectedId, !!selectedId, sweepTbAttempt, sweepTbStep);
 
   // Every trial's TensorBoard costs a port out of a bounded range, so moving off a trial stops
   // the one it was showing.
@@ -451,6 +455,34 @@ export function TuningTab() {
                   Could not refresh this sweep's record: {detailError}
                 </div>
               )}
+              {!detail.has_manifest ? (
+                <div role="status" aria-live="polite" className="text-[11px] text-tcip-muted">
+                  {SWEEP_NO_RECORD_YET}
+                </div>
+              ) : detail.status === "cancelled" ? (
+                <div className="text-[11px] text-tcip-muted">
+                  Cancelled: {detail.error ?? NO_CANCEL_REASON}
+                </div>
+              ) : hasContent(detail.result) ? (
+                <>
+                  {detail.error ? (
+                    <div className="text-[11px] text-tcip-fp">{detail.error}</div>
+                  ) : null}
+                  <pre className="max-h-[24vh] text-[11px] font-mono p-3 tcip-panel overflow-auto">
+                    {JSON.stringify(detail.result, null, 2)}
+                  </pre>
+                </>
+              ) : !TERMINAL_STATUSES.has(detail.status) ? (
+                <div className="text-[11px] text-tcip-muted">
+                  The best config appears here once the sweep finishes. Pick one of its trials to
+                  follow that trial while it runs.
+                </div>
+              ) : (
+                <div className="text-[11px] text-tcip-muted">
+                  No result recorded; the sweep {detail.status}
+                  {detail.error ? `: ${detail.error}` : "."}
+                </div>
+              )}
               <div className="h-[46vh] min-h-[300px] shrink-0">
                 <EmbeddedTool
                   title="Ray dashboard"
@@ -464,34 +496,11 @@ export function TuningTab() {
                 <EmbeddedTool
                   title="Sweep TensorBoard"
                   url={sweepTb.url}
-                  loading={!sweepTb.url && !sweepTb.error}
+                  loading={!sweepTb.url && !sweepTb.error && sweepNonTerminal}
                   error={sweepTb.error}
                   onRetry={() => setSweepTbAttempt((n) => n + 1)}
                 />
               </div>
-              {!detail.has_manifest ? (
-                <div className="text-[11px] text-tcip-muted">{SWEEP_NO_RECORD_YET}</div>
-              ) : detail.status === "cancelled" ? (
-                <div className="text-[11px] text-tcip-muted">
-                  Cancelled: {detail.error ?? NO_CANCEL_REASON}
-                </div>
-              ) : (
-                <>
-                  {detail.error ? (
-                    <div className="text-[11px] text-tcip-fp">{detail.error}</div>
-                  ) : null}
-                  {hasContent(detail.result) ? (
-                    <pre className="max-h-[24vh] text-[11px] font-mono p-3 tcip-panel overflow-auto">
-                      {JSON.stringify(detail.result, null, 2)}
-                    </pre>
-                  ) : !TERMINAL_STATUSES.has(detail.status) ? (
-                    <div className="text-[11px] text-tcip-muted">
-                      The best config appears here once the sweep finishes. Pick one of its trials
-                      to follow that trial while it runs.
-                    </div>
-                  ) : null}
-                </>
-              )}
             </div>
           ) : detailError ? (
             <div className="text-[11px] text-tcip-fp">{detailError}</div>
@@ -528,8 +537,7 @@ export function TuningTab() {
         )}
         {sweeps.length > 0 && (
           <div className="text-[10px] text-tcip-muted mb-1">
-            Sweeps this window launched first, in launch order; every other recorded sweep follows,
-            sorted by sweep id.
+            {runOrderLine("sweep", "sweep id")}
           </div>
         )}
         {sweeps.length > 0 && (
@@ -538,10 +546,14 @@ export function TuningTab() {
               const expanded = selectedId === s.sweep_id;
               const running = SWEEP_CANCELLABLE.has(s.status);
               const searchLine = [
-                s.n_trials != null ? `${s.n_trials} trials planned` : null,
+                s.n_trials != null
+                  ? `${s.n_trials} trial${s.n_trials === 1 ? "" : "s"} planned`
+                  : null,
                 s.search_alg ? `search ${s.search_alg}` : null,
                 s.scheduler
-                  ? `scheduler ${s.scheduler === "none" ? "no scheduler" : s.scheduler}`
+                  ? s.scheduler === "none"
+                    ? "no scheduler"
+                    : `scheduler ${s.scheduler}`
                   : null,
                 s.param_space_keys && s.param_space_keys.length > 0
                   ? `axes ${s.param_space_keys.join(", ")}`
@@ -567,7 +579,9 @@ export function TuningTab() {
                     <button
                       type="button"
                       aria-expanded={expanded}
-                      aria-label={`${s.sweep_id} ${s.status}`}
+                      aria-label={`${s.sweep_id} ${s.status}${
+                        running && s.cancel_requested ? ", stop requested" : ""
+                      }`}
                       aria-describedby={describedBy || undefined}
                       className="flex-1 flex items-start gap-2 text-left"
                       onClick={() => toggleSweep(s.sweep_id)}
@@ -625,13 +639,15 @@ export function TuningTab() {
                       )}
                       <ul className="space-y-1">
                         {trials.length === 0 ? (
-                          <li className="text-[10px] text-tcip-muted">
-                            {hasManifest === false
-                              ? SWEEP_NO_RECORD_YET
-                              : hasManifest === true
-                                ? "No trials on disk yet."
-                                : "Reading this sweep's record…"}
-                          </li>
+                          // hasManifest === false: the detail pane already carries
+                          // SWEEP_NO_RECORD_YET; nothing renders here so it appears once.
+                          hasManifest === true ? (
+                            <li className="text-[10px] text-tcip-muted">No trials on disk yet.</li>
+                          ) : hasManifest === null ? (
+                            <li className="text-[10px] text-tcip-muted">
+                              Reading this sweep's record…
+                            </li>
+                          ) : null
                         ) : (
                           trials.map((t) => (
                             <li key={t.trial_id}>
@@ -647,15 +663,12 @@ export function TuningTab() {
                               >
                                 <span className="block font-mono text-[11px]">{t.trial_id}</span>
                                 <span className="block text-[10px] text-tcip-muted">
-                                  {t.has_metrics ? "metrics" : "no metrics yet"}
+                                  {t.has_metrics ? "metrics recorded" : "no metrics yet"}
                                   {Object.keys(t.params).length > 0 && (
                                     <>
                                       {" · "}
                                       {Object.entries(t.params).map(([k, v], i) => (
-                                        <span
-                                          key={k}
-                                          title={typeof v === "number" ? String(v) : undefined}
-                                        >
+                                        <span key={k}>
                                           {i > 0 ? ", " : ""}
                                           {k}={cellText(v)}
                                         </span>

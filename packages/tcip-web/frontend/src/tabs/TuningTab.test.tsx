@@ -398,10 +398,12 @@ describe("TuningTab sweep detail before a manifest exists", () => {
       fireEvent.click(screen.getByText("hpo-pending"));
 
       await vi.waitFor(() =>
-        expect(
-          screen.getAllByText("This sweep's record is not written yet.").length,
-        ).toBeGreaterThan(0),
+        expect(screen.getByText("This sweep's record is not written yet.")).toBeInTheDocument(),
       );
+      // Once, in the detail's own polite status region, never duplicated under the row too.
+      const notWritten = screen.getByText("This sweep's record is not written yet.");
+      expect(screen.getAllByText("This sweep's record is not written yet.")).toHaveLength(1);
+      expect(notWritten.closest('[role="status"]')).not.toBeNull();
       expect(getSweepSpy).toHaveBeenCalledTimes(1);
 
       // The shared poll (the listing's own cadence) picks the manifest up on its own; no
@@ -454,6 +456,58 @@ describe("TuningTab sweep detail before a manifest exists", () => {
       vi.useRealTimers();
     }
   });
+
+  it("shows the sweep TensorBoard panel's calm loading state in the pre-manifest window, never the raw refusal or a Try again", async () => {
+    vi.spyOn(tuningApi, "listSweeps").mockResolvedValue({
+      sweeps: [sweep({ sweep_id: "hpo-pending", status: "running" })],
+    });
+    vi.spyOn(tuningApi, "getSweep").mockResolvedValue(
+      sweepDetail({ sweep_id: "hpo-pending", status: "running", has_manifest: false }),
+    );
+    vi.spyOn(tuningApi, "listTrials").mockResolvedValue({ sweep_id: "hpo-pending", trials: [] });
+    vi.spyOn(tuningApi, "getRayDashboard").mockResolvedValue({ url: null });
+    vi.spyOn(tuningApi, "launchSweepTensorboard").mockRejectedValue(
+      new StructuredRefusalError(
+        { error: "sweep not found: hpo-pending" },
+        404,
+        "sweep not found: hpo-pending",
+      ),
+    );
+
+    render(<TuningTab />);
+    fireEvent.click(await screen.findByText("hpo-pending"));
+
+    expect(await screen.findByRole("heading", { name: "Sweep TensorBoard" })).toBeInTheDocument();
+    expect(screen.queryByText(/sweep not found/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Try again: Sweep TensorBoard" })).toBeNull();
+  });
+});
+
+describe("TuningTab settled sweep TensorBoard panel", () => {
+  it("never shows Starting… once the sweep has settled, even with an attempt still in flight", async () => {
+    vi.spyOn(tuningApi, "listSweeps").mockResolvedValue({
+      sweeps: [sweep({ sweep_id: "hpo-settled", status: "cancelled" })],
+    });
+    vi.spyOn(tuningApi, "getSweep").mockResolvedValue(
+      sweepDetail({
+        sweep_id: "hpo-settled",
+        status: "cancelled",
+        error: "the sweep was cancelled by request before it could finish",
+        result: { status: "cancelled" },
+      }),
+    );
+    vi.spyOn(tuningApi, "listTrials").mockResolvedValue({ sweep_id: "hpo-settled", trials: [] });
+    vi.spyOn(tuningApi, "getRayDashboard").mockResolvedValue({ url: null });
+    // Never resolves: the settle outran the panel's own in-flight attempt.
+    vi.spyOn(tuningApi, "launchSweepTensorboard").mockReturnValue(new Promise(() => {}));
+
+    render(<TuningTab />);
+    fireEvent.click(await screen.findByText("hpo-settled"));
+
+    await screen.findByText("Cancelled: the sweep was cancelled by request before it could finish");
+    expect(screen.queryByText("Starting…")).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Sweep TensorBoard" })).not.toBeInTheDocument();
+  });
 });
 
 describe("TuningTab selection change", () => {
@@ -493,6 +547,85 @@ describe("TuningTab selection change", () => {
     // not merely once hpo-b's own records eventually arrive.
     await waitFor(() => expect(screen.queryByText("trial_a1")).not.toBeInTheDocument());
     expect(screen.queryByText("(completed)")).not.toBeInTheDocument();
+  });
+
+  it("launches a fresh TensorBoard for the newly selected sweep, not the previous one's, on a direct switch", async () => {
+    vi.spyOn(tuningApi, "listSweeps").mockResolvedValue({
+      sweeps: [
+        sweep({ sweep_id: "hpo-a", status: "completed" }),
+        sweep({ sweep_id: "hpo-b", status: "completed" }),
+      ],
+    });
+    vi.spyOn(tuningApi, "getSweep").mockImplementation((id: string) =>
+      Promise.resolve(sweepDetail({ sweep_id: id, status: "completed" })),
+    );
+    vi.spyOn(tuningApi, "listTrials").mockResolvedValue({ sweep_id: "hpo-a", trials: [] });
+    vi.spyOn(tuningApi, "getRayDashboard").mockResolvedValue({ url: null });
+    const launchTbSpy = vi
+      .spyOn(tuningApi, "launchSweepTensorboard")
+      .mockImplementation((id) => Promise.resolve({ url: `http://localhost:6006/${id}` }));
+
+    render(<TuningTab />);
+    fireEvent.click(await screen.findByText("hpo-a"));
+    await waitFor(() => expect(launchTbSpy).toHaveBeenCalledWith("hpo-a"));
+
+    fireEvent.click(screen.getByText("hpo-b"));
+    await waitFor(() => expect(launchTbSpy).toHaveBeenCalledWith("hpo-b"));
+    expect(screen.getByTitle("Sweep TensorBoard")).toHaveAttribute(
+      "src",
+      "http://localhost:6006/hpo-b",
+    );
+  });
+});
+
+describe("TuningTab sweep detail layout", () => {
+  it("places the result summary above the Ray and TensorBoard panels", async () => {
+    vi.spyOn(tuningApi, "listSweeps").mockResolvedValue({
+      sweeps: [sweep({ sweep_id: "hpo-layout", status: "completed" })],
+    });
+    vi.spyOn(tuningApi, "getSweep").mockResolvedValue(
+      sweepDetail({
+        sweep_id: "hpo-layout",
+        status: "completed",
+        result: { best_trial: "trial_1" },
+      }),
+    );
+    vi.spyOn(tuningApi, "listTrials").mockResolvedValue({ sweep_id: "hpo-layout", trials: [] });
+    vi.spyOn(tuningApi, "getRayDashboard").mockResolvedValue({ url: null });
+    vi.spyOn(tuningApi, "launchSweepTensorboard").mockResolvedValue({ error: "no cluster" });
+
+    render(<TuningTab />);
+    fireEvent.click(await screen.findByText("hpo-layout"));
+
+    const result = await screen.findByText(/"best_trial": "trial_1"/);
+    const rayHeading = screen.getByRole("heading", { name: "Ray dashboard" });
+    expect(
+      result.compareDocumentPosition(rayHeading) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+});
+
+describe("TuningTab row accessible name", () => {
+  it("carries the stop-requested state in the row's own name, not only in its visible text", async () => {
+    vi.spyOn(tuningApi, "listSweeps")
+      .mockResolvedValueOnce({
+        sweeps: [sweep({ sweep_id: "hpo-stopping", status: "running", cancel_requested: false })],
+      })
+      .mockResolvedValue({
+        sweeps: [sweep({ sweep_id: "hpo-stopping", status: "running", cancel_requested: true })],
+      });
+    vi.spyOn(tuningApi, "cancel").mockResolvedValue({
+      study_name: "hpo-stopping",
+      status: "running",
+      cancel_requested: true,
+    });
+
+    render(<TuningTab />);
+    fireEvent.click(await screen.findByRole("button", { name: "Cancel hpo-stopping" }));
+
+    expect(
+      await screen.findByRole("button", { name: "hpo-stopping running, stop requested" }),
+    ).toBeInTheDocument();
   });
 });
 
@@ -574,10 +707,36 @@ describe("TuningTab detail promise", () => {
     render(<TuningTab />);
     fireEvent.click(await screen.findByText("hpo-failed-detail"));
 
-    expect(await screen.findByText("the sweep's base config fails preflight")).toBeInTheDocument();
+    expect(
+      await screen.findByText(
+        "No result recorded; the sweep failed: the sweep's base config fails preflight",
+      ),
+    ).toBeInTheDocument();
     expect(
       screen.queryByText(/The best config appears here once the sweep finishes/),
     ).not.toBeInTheDocument();
+  });
+
+  it("says no result was recorded, with the sweep's own status, for a terminal sweep the record never gave one", async () => {
+    vi.spyOn(tuningApi, "listSweeps").mockResolvedValue({
+      sweeps: [sweep({ sweep_id: "hpo-interrupted-detail", status: "interrupted" })],
+    });
+    vi.spyOn(tuningApi, "getSweep").mockResolvedValue(
+      sweepDetail({ sweep_id: "hpo-interrupted-detail", status: "interrupted", error: null }),
+    );
+    vi.spyOn(tuningApi, "listTrials").mockResolvedValue({
+      sweep_id: "hpo-interrupted-detail",
+      trials: [],
+    });
+    vi.spyOn(tuningApi, "getRayDashboard").mockResolvedValue({ url: null });
+    vi.spyOn(tuningApi, "launchSweepTensorboard").mockResolvedValue({ error: "no cluster" });
+
+    render(<TuningTab />);
+    fireEvent.click(await screen.findByText("hpo-interrupted-detail"));
+
+    expect(
+      await screen.findByText("No result recorded; the sweep interrupted."),
+    ).toBeInTheDocument();
   });
 
   it("keeps the future-tense promise for a running sweep with no result yet", async () => {
@@ -628,26 +787,25 @@ describe("TuningTab sweep summary line", () => {
     fireEvent.click(await screen.findByText("hpo-labeled-1"));
 
     expect(
-      await screen.findByText(
-        "1 trials planned · search random · scheduler no scheduler · axes weight_decay",
-      ),
+      await screen.findByText("1 trial planned · search random · no scheduler · axes weight_decay"),
     ).toBeInTheDocument();
     expect(screen.queryByText(/scheduler none/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/scheduler no scheduler/)).not.toBeInTheDocument();
   });
 
-  it("carries the trial line's full rounded value as a title", async () => {
+  it("shows the trial line's own parameter value exactly as recorded, with no rounding or title", async () => {
     vi.spyOn(tuningApi, "listSweeps").mockResolvedValue({
-      sweeps: [sweep({ sweep_id: "hpo-trial-title", status: "running" })],
+      sweeps: [sweep({ sweep_id: "hpo-trial-exact", status: "running" })],
     });
     vi.spyOn(tuningApi, "getSweep").mockResolvedValue(
-      sweepDetail({ sweep_id: "hpo-trial-title", status: "running" }),
+      sweepDetail({ sweep_id: "hpo-trial-exact", status: "running" }),
     );
     vi.spyOn(tuningApi, "listTrials").mockResolvedValue({
-      sweep_id: "hpo-trial-title",
+      sweep_id: "hpo-trial-exact",
       trials: [
         {
           trial_id: "trial_1",
-          has_metrics: false,
+          has_metrics: true,
           params: { weight_decay: 0.0016999999 },
           unconsumed_params: [],
         },
@@ -657,10 +815,11 @@ describe("TuningTab sweep summary line", () => {
     vi.spyOn(tuningApi, "launchSweepTensorboard").mockResolvedValue({ error: "no cluster" });
 
     render(<TuningTab />);
-    fireEvent.click(await screen.findByText("hpo-trial-title"));
+    fireEvent.click(await screen.findByText("hpo-trial-exact"));
 
-    const rounded = await screen.findByText("weight_decay=0.0017");
-    expect(rounded).toHaveAttribute("title", "0.0016999999");
+    const exact = await screen.findByText("weight_decay=0.0016999999");
+    expect(exact).not.toHaveAttribute("title");
+    expect(screen.getByText(/metrics recorded/)).toBeInTheDocument();
   });
 });
 
@@ -672,6 +831,30 @@ describe("TuningTab heading", () => {
     const headings = screen.getAllByRole("heading", { level: 1 });
     expect(headings).toHaveLength(1);
     expect(headings[0]).toHaveTextContent("Tuning");
+  });
+
+  it("carries the sidebar and the embedded panels' own section titles as level-2 headings", async () => {
+    vi.spyOn(tuningApi, "listSweeps").mockResolvedValue({
+      sweeps: [sweep({ sweep_id: "hpo-heading", status: "completed" })],
+    });
+    vi.spyOn(tuningApi, "getSweep").mockResolvedValue(
+      sweepDetail({ sweep_id: "hpo-heading", status: "completed" }),
+    );
+    vi.spyOn(tuningApi, "listTrials").mockResolvedValue({ sweep_id: "hpo-heading", trials: [] });
+    vi.spyOn(tuningApi, "getRayDashboard").mockResolvedValue({ url: "http://localhost:8265" });
+    vi.spyOn(tuningApi, "launchSweepTensorboard").mockResolvedValue({
+      url: "http://localhost:6006",
+    });
+
+    render(<TuningTab />);
+    expect(await screen.findByRole("heading", { level: 2, name: "Sweeps" })).toBeInTheDocument();
+    fireEvent.click(screen.getByText("hpo-heading"));
+    expect(
+      await screen.findByRole("heading", { level: 2, name: "Ray dashboard" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { level: 2, name: "Sweep TensorBoard" }),
+    ).toBeInTheDocument();
   });
 });
 
@@ -685,7 +868,7 @@ describe("TuningTab list order", () => {
     expect(await screen.findByText("hpo-a")).toBeInTheDocument();
     expect(
       screen.getByText(
-        /Sweeps this window launched first, in launch order; every other recorded sweep follows/,
+        /Sweeps this app's own launches first, in launch order; every other recorded sweep follows/,
       ),
     ).toBeInTheDocument();
   });

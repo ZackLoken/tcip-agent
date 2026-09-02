@@ -24,7 +24,7 @@ import { useStore } from "@/store";
 import { defaultTrainingRequest } from "@/tabs/agentPrompts";
 import { CHART, CHART_LINE_COLORS } from "@/tabs/chartTheme";
 import { RunMonitorEmpty, RunMonitorLayout } from "@/tabs/RunMonitorLayout";
-import { mergeMetric, RUN_REFRESH_MS } from "@/tabs/trainingMetrics";
+import { mergeMetric, runOrderLine, RUN_REFRESH_MS } from "@/tabs/trainingMetrics";
 
 // Runs can only be stopped while still active; terminal/historical runs show no button.
 const TRAINING_CANCELLABLE: ReadonlySet<string> = new Set(["created", "running"]);
@@ -40,6 +40,16 @@ function unmarkableReason(run: TrainingRunSummary): string | null {
 
 function messageOf(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
+}
+
+/** The row's own select control name: id and status alone, with the best value and its
+ * metric appended exactly as the record carries them when both are present. */
+function runRowLabel(run: TrainingRunSummary): string {
+  const base = `${run.run_id} ${run.status}`;
+  if (run.best_metric === undefined || run.best_metric === null || !run.best_metric_name) {
+    return base;
+  }
+  return `${base}, best ${run.best_metric_name} ${run.best_metric}`;
 }
 
 const NO_OTHER_PARTITION =
@@ -131,7 +141,9 @@ export function TrainingTab() {
   const [runsError, setRunsError] = useState<string | null>(null);
   const [selectedRun, setSelectedRun] = useState<string | null>(null);
   const [metrics, setMetrics] = useState<MetricRow[]>([]);
-  const [tbNoLogs, setTbNoLogs] = useState(false);
+  // Non-null once the run's own TensorBoard refusal names no_logs; its error is the run's own
+  // recorded status.error, null when the run produced no logs but recorded no reason either.
+  const [tbNoLogs, setTbNoLogs] = useState<{ error: string | null } | null>(null);
   const [tbAttempt, setTbAttempt] = useState(0);
   const [markedRunIds, setMarkedRunIds] = useState<Set<string>>(new Set());
   // Cancel in flight, by run id: disables that row's own Cancel button with a pending label,
@@ -277,7 +289,7 @@ export function TrainingTab() {
   // tbNoLogs is a step side effect below, not part of the hook's own outcome, since its text
   // overrides tbError's; reset it on the same triggers the hook itself resets url/error on.
   useEffect(() => {
-    setTbNoLogs(false);
+    setTbNoLogs(null);
   }, [selectedRun, tbAttempt]);
 
   // Adopt the TensorBoard already serving this run, or start one, retrying on a timer while
@@ -312,19 +324,24 @@ export function TrainingTab() {
     }
 
     if (url) {
-      setTbNoLogs(false);
+      setTbNoLogs(null);
       return { url, error: null, done: true };
     }
     const terminal = TERMINAL_STATUSES.has(detail.status ?? "");
     if (!terminal) return { url: null, error: null, done: false };
     if (noLogs) {
-      setTbNoLogs(true);
+      setTbNoLogs({ error: detail.error ?? null });
       return { url: null, error: null, done: true };
     }
     return { url: null, error: failure ?? "No TensorBoard is serving this run.", done: true };
   }, [selectedRun]);
 
-  const { url: tbUrl, error: tbError } = useEmbeddedToolRetry(!!selectedRun, tbAttempt, tbStep);
+  const { url: tbUrl, error: tbError } = useEmbeddedToolRetry(
+    selectedRun,
+    !!selectedRun,
+    tbAttempt,
+    tbStep,
+  );
 
   async function onCancel(runId: string) {
     setPendingCancel((prev) => new Set(prev).add(runId));
@@ -351,6 +368,15 @@ export function TrainingTab() {
   const chartData = useMemo(() => {
     return metrics.map((m, i) => ({ step: m.epoch ?? m.step ?? i, ...m }));
   }, [metrics]);
+
+  const selectedRunSummary = runs.find((r) => r.run_id === selectedRun);
+  const selectedRunTerminal = TERMINAL_STATUSES.has(selectedRunSummary?.status ?? "");
+
+  const noLogsMessage = tbNoLogs
+    ? tbNoLogs.error
+      ? `This run failed: ${tbNoLogs.error}. It produced no logs.`
+      : "This run produced no logs."
+    : null;
 
   const metricKeys = useMemo(() => {
     const keys = new Set<string>();
@@ -387,7 +413,7 @@ export function TrainingTab() {
             </>
           ) : selectedRun ? (
             <>
-              <span className="tcip-heading">Live metrics</span>
+              <h2 className="tcip-heading">Live metrics</h2>
               <span className="font-mono text-[12px] text-tcip-fg">{selectedRun}</span>
             </>
           ) : (
@@ -440,7 +466,11 @@ export function TrainingTab() {
                   </ResponsiveContainer>
                 ) : (
                   <div className="flex items-center justify-center h-full text-tcip-muted text-[12px]">
-                    {selectedRun ? "Waiting for metrics…" : "No run selected."}
+                    {!selectedRun
+                      ? "No run selected."
+                      : selectedRunTerminal
+                        ? "This run recorded no metrics."
+                        : "Waiting for metrics…"}
                   </div>
                 )}
               </div>
@@ -451,7 +481,7 @@ export function TrainingTab() {
                     title="TensorBoard"
                     url={tbUrl}
                     loading={!tbUrl && !tbError && !tbNoLogs}
-                    error={tbNoLogs ? "This run produced no logs." : tbError}
+                    error={noLogsMessage ?? tbError}
                     onRetry={tbNoLogs ? undefined : () => setTbAttempt((n) => n + 1)}
                   />
                 </div>
@@ -500,8 +530,7 @@ export function TrainingTab() {
         )}
         {runs.length > 0 && (
           <div className="text-[10px] text-tcip-muted mb-1">
-            Runs this app's own launches first, in launch order; every other recorded run follows,
-            sorted by experiment id.
+            {runOrderLine("run", "experiment id")}
           </div>
         )}
         <ul className="space-y-1">
@@ -522,7 +551,7 @@ export function TrainingTab() {
                   <button
                     type="button"
                     aria-pressed={selectedRun === r.run_id}
-                    aria-label={`${r.run_id} ${r.status}`}
+                    aria-label={runRowLabel(r)}
                     className="flex-1 text-left"
                     onClick={() => setSelectedRun(r.run_id)}
                   >
@@ -540,8 +569,8 @@ export function TrainingTab() {
                       {r.best_metric !== undefined &&
                         r.best_metric !== null &&
                         r.best_metric_name && (
-                          <span className="tabular-nums" title={String(r.best_metric)}>
-                            best {r.best_metric_name} {Number(r.best_metric).toFixed(3)}
+                          <span className="tabular-nums">
+                            best {r.best_metric_name} {r.best_metric}
                           </span>
                         )}
                     </div>
