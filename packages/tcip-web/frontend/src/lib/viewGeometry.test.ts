@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { clampView, zoomToRect } from "@/lib/viewGeometry";
+import { clampView, fitView, zoomToRect } from "@/lib/viewGeometry";
 
 describe("clampView", () => {
   it("pins an image larger than the canvas so no gap opens beyond either edge", () => {
@@ -51,6 +51,26 @@ describe("clampView", () => {
   it("returns the same object when nothing needs clamping", () => {
     const view = { scale: 1, offset_x: -100, offset_y: -50 };
     expect(clampView(view, { w: 400, h: 300 }, 1000, 800)).toBe(view);
+  });
+});
+
+describe("fitView", () => {
+  it("scales to the tighter axis and centers the image", () => {
+    const view = fitView({ w: 400, h: 300 }, 1000, 500);
+    expect(view.scale).toBe(0.4);
+    expect(view.offset_x).toBe((400 - 1000 * 0.4) / 2);
+    expect(view.offset_y).toBe((300 - 500 * 0.4) / 2);
+  });
+
+  it("matches CanvasStage's own auto-fit math for the same inputs", () => {
+    const host = { w: 733, h: 517 };
+    const scale = Math.min(host.w / 2000, host.h / 1200);
+    const view = fitView(host, 2000, 1200);
+    expect(view).toEqual({
+      scale,
+      offset_x: (host.w - 2000 * scale) / 2,
+      offset_y: (host.h - 1200 * scale) / 2,
+    });
   });
 });
 
