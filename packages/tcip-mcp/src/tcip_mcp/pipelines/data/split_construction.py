@@ -12,6 +12,12 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
+STEM_TASKS = frozenset({"detection", "instance_seg", "semantic_seg", "classification"})
+"""Tasks ``auto_train_val``'s drawn (step 2) path covers: a run outside this set never reaches
+that branch, so nothing here draws a train/val split for it. Module-level so a caller deciding
+whether a task admits the drawn path (``run_hpo``'s ``split_draws`` refusal) checks the same set
+``auto_train_val`` itself walks, rather than a second copy that could drift from it."""
+
 
 def dataset_identity(data_cfg: dict) -> tuple[str | None, str | None]:
     """``(dataset_id, dataset_fingerprint)`` for the run's dataset, the content end of the
@@ -451,8 +457,6 @@ def auto_train_val(task: str, data_cfg: dict, transforms):
     from tcip_mcp.tools.training_tools import (
         _dataset_source_kwargs, _split_manifest_drawn_conflicts,
     )
-
-    STEM_TASKS = {"detection", "instance_seg", "semantic_seg", "classification"}
 
     src = _dataset_source_kwargs(task, data_cfg)
     tiling = data_cfg.get("tiling")  # detection tiling (None for other tasks/configs)
