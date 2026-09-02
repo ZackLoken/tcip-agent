@@ -67,8 +67,10 @@ The example below is representative, not exhaustive; `training` is an open dict,
 `generic_trainer.train()`'s own docstring is the canonical, always-current list of every key it
 reads (device/seed/deterministic/mixed_precision/stages/optimizer/scheduler/lr_scaling/
 stage_warmup_epochs/enforce_monotonic_unfreeze/gradient_accumulation_steps/
-checkpoint_every_n_epochs/early_stopping/evaluation). Read that docstring rather than assuming this
-example is complete.
+checkpoint_every_n_epochs/early_stopping). Read that docstring rather than assuming this
+example is complete. `evaluation` is not a member of `training`: it is accepted at the config's
+top level or nested under `training.evaluation`, a present top-level block always winning, read
+the same way everywhere through `schemas.evaluation_section`.
 
 ```python
 config = {

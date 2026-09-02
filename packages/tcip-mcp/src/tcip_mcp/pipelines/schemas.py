@@ -94,18 +94,31 @@ def normalize_train_config(config: dict) -> dict:
     return cfg
 
 
+_NO_TOP_LEVEL_EVALUATION = object()
+
+
 def evaluation_section(config: dict) -> dict:
     """The ``evaluation`` block that governs a run, read the one way every caller agrees on.
 
     A config may carry ``evaluation`` at the top level, nested under ``training.evaluation``, or
-    both; ``normalize_train_config``'s hoist already says which wins (top-level, never
-    overwritten by the nested value), so this returns ``normalize_train_config(config)``'s own
-    ``evaluation`` key, or an empty dict when neither placement carries one. The trainer,
+    both. Same precedence as ``normalize_train_config``'s hoist: a present top-level key wins,
+    whatever its own value, and ``training.evaluation`` is honoured only when the top level
+    carries no ``evaluation`` key at all. Read directly off ``config``, never through
+    ``normalize_train_config(config).get(...)``: that helper's ``dict(config)`` copy is a
+    CPython C-level copy that bypasses a dict-subclass's own ``__getitem__``/``get`` overrides,
+    so a caller reading through the copy (an HPO trial's access-tracking config, in particular)
+    would never see its own top-level ``evaluation`` read recorded. The trainer,
     ``preflight_config`` and the sweep's direction resolution all call this rather than each
-    choosing between the two placements on its own; calling it again on an already-normalized
-    config returns the same block, since the hoist is idempotent.
+    choosing between the two placements on its own.
+
+    The returned block is the caller's own object, top-level or nested, never copied; a caller
+    that wants to keep it must not mutate it in place.
     """
-    return normalize_train_config(config).get("evaluation") or {}
+    top = config.get("evaluation", _NO_TOP_LEVEL_EVALUATION)
+    if top is not _NO_TOP_LEVEL_EVALUATION:
+        return top or {}
+    training = config.get("training") or {}
+    return training.get("evaluation") or {}
 
 
 def validate_train_config_schema(config: dict) -> list[str]:
