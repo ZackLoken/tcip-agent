@@ -76,9 +76,10 @@ human approval prompt, and a `cd`-then-relative write is an accepted residual of
 - A path a route reads out of the platform's own records (a manifest directory an experiment
   config names, say) is trusted for reading and never for writing; `assert_path_allowed` is for
   a client-supplied path, not this kind.
-- Under pytest or a starlette `TestClient` the app refuses to start unless `TCIP_WORKSPACE` is
-  set (`app.WorkspaceUnsetUnderTest`); set it and `TCIP_STATE_ROOT` to scratch directories
-  before starting one.
+- Under pytest, with starlette's `TestClient` module loaded, or on a request arriving from an
+  in-process test transport (starlette's `TestClient` or httpx's `ASGITransport`), the app
+  refuses to start unless `TCIP_WORKSPACE` is set (`app.WorkspaceUnsetUnderTest`); set it and
+  `TCIP_STATE_ROOT` to scratch directories before starting one.
 - Review save formats mirror the annotation-engine's `{json, coco}` scope (see
   `packages/tcip-annotation/CLAUDE.md`); don't add a frontend format option the backend can't read.
 - The GUI follows minimalist design without dropping functionality (Zack's standing preference):
