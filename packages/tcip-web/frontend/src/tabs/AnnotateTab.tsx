@@ -14,6 +14,7 @@ import { AnnotateToolbar } from "@/components/AnnotateToolbar";
 import { CanvasStage } from "@/components/Canvas/CanvasStage";
 import { CoverageChrome } from "@/components/Canvas/CoverageChrome";
 import { CoverageOverlay } from "@/components/Canvas/CoverageOverlay";
+import { TabHeading } from "@/components/TabHeading";
 import { useBandSelection } from "@/hooks/useBandSelection";
 import { useCoverageGrid } from "@/hooks/useCoverageGrid";
 import { useCoverageTracking } from "@/hooks/useCoverageTracking";
@@ -1345,6 +1346,7 @@ export function AnnotateTab() {
 
   return (
     <div className="flex-1 flex flex-col min-h-0">
+      <TabHeading tab="annotate" />
       <AnnotateToolbar
         onSave={() => void save()}
         saveDisabled={saveDisabled}

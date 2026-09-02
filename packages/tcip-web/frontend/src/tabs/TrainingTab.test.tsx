@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
 import { StructuredRefusalError } from "@/api/http";
 import {
@@ -11,6 +11,7 @@ import {
 } from "@/api/training";
 import { useStore } from "@/store";
 import { TrainingTab, dataPickerFor } from "@/tabs/TrainingTab";
+import { RUN_REFRESH_MS } from "@/tabs/trainingMetrics";
 
 // The live metrics stream owns a real WebSocket; only the run list and its controls are under
 // test here, so the transport is replaced while the rest of the module stays real.
@@ -80,6 +81,113 @@ describe("TrainingTab run list", () => {
     expect(await screen.findByText("train-done")).toBeInTheDocument();
     expect(screen.getByText("train-done-agent")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Cancel" })).not.toBeInTheDocument();
+  });
+
+  it("shows the experiment id beside the run id, once when the two are the same", async () => {
+    vi.spyOn(trainingApi, "listRuns").mockResolvedValue({
+      runs: [
+        run({ run_id: "train-forked", status: "running", experiment_id: "exp-forked" }),
+        run({ run_id: "train-same", status: "running", experiment_id: "train-same" }),
+        run({ run_id: "train-unresolved", status: "running", experiment_id: null }),
+      ],
+    });
+
+    render(<TrainingTab />);
+    expect(await screen.findByText("train-forked")).toBeInTheDocument();
+    expect(screen.getByText(/exp-forked/)).toBeInTheDocument();
+    expect(screen.getAllByText("train-same")).toHaveLength(1);
+    expect(screen.getByText("train-unresolved")).toBeInTheDocument();
+    expect(screen.queryByText("null")).not.toBeInTheDocument();
+  });
+
+  it("names the best value's own metric, and shows nothing when the row carries no name", async () => {
+    vi.spyOn(trainingApi, "listRuns").mockResolvedValue({
+      runs: [
+        run({
+          run_id: "train-named",
+          status: "completed",
+          best_metric: 0.812,
+          best_metric_name: "map50",
+        }),
+        run({
+          run_id: "train-unnamed",
+          status: "completed",
+          best_metric: 0.5,
+          best_metric_name: null,
+        }),
+      ],
+    });
+
+    render(<TrainingTab />);
+    expect(await screen.findByText("best val_map50 0.812")).toBeInTheDocument();
+    expect(screen.queryByText(/best.*0\.500/)).not.toBeInTheDocument();
+  });
+
+  it("states how the run list is ordered", async () => {
+    vi.spyOn(trainingApi, "listRuns").mockResolvedValue({
+      runs: [run({ run_id: "train-a", status: "running" })],
+    });
+
+    render(<TrainingTab />);
+    expect(await screen.findByText("train-a")).toBeInTheDocument();
+    expect(
+      screen.getByText(/Live runs first, in launch order; other recorded runs follow/),
+    ).toBeInTheDocument();
+  });
+});
+
+describe("TrainingTab heading", () => {
+  it("renders exactly one top-level heading naming the tab", async () => {
+    vi.spyOn(trainingApi, "listRuns").mockResolvedValue({ runs: [] });
+    render(<TrainingTab />);
+    await waitFor(() => expect(trainingApi.listRuns).toHaveBeenCalled());
+    const headings = screen.getAllByRole("heading", { level: 1 });
+    expect(headings).toHaveLength(1);
+    expect(headings[0]).toHaveTextContent("Training");
+  });
+});
+
+describe("TrainingTab tensorboard panel", () => {
+  it("says a run produced no logs and offers no Try again, rather than a raw refusal", async () => {
+    vi.spyOn(trainingApi, "listRuns").mockResolvedValue({
+      runs: [run({ run_id: "train-nologs", status: "failed" })],
+    });
+    vi.spyOn(trainingApi, "getRun").mockResolvedValue({
+      run_id: "train-nologs",
+      status: "failed",
+      tensorboard_url: null,
+    });
+    vi.spyOn(trainingApi, "launchTensorboard").mockRejectedValue(
+      new StructuredRefusalError(
+        { error: "run has no output directory: train-nologs", no_logs: true },
+        404,
+        "run has no output directory: train-nologs",
+      ),
+    );
+
+    render(<TrainingTab />);
+    fireEvent.click(await screen.findByText("train-nologs"));
+
+    expect(await screen.findByText("This run produced no logs.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Try again" })).not.toBeInTheDocument();
+  });
+
+  it("keeps Try again for an ordinary failed launch", async () => {
+    vi.spyOn(trainingApi, "listRuns").mockResolvedValue({
+      runs: [run({ run_id: "train-broken", status: "failed" })],
+    });
+    vi.spyOn(trainingApi, "getRun").mockResolvedValue({
+      run_id: "train-broken",
+      status: "failed",
+      tensorboard_url: null,
+    });
+    vi.spyOn(trainingApi, "launchTensorboard").mockRejectedValue(new Error("connection refused"));
+
+    render(<TrainingTab />);
+    fireEvent.click(await screen.findByText("train-broken"));
+
+    expect(await screen.findByText("connection refused")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
   });
 });
 
@@ -481,36 +589,42 @@ describe("TrainingTab compare", () => {
       same_dataset_fingerprint: null,
     });
 
-    render(<TrainingTab />);
-    await screen.findByText("run-a");
-    fireEvent.click(within(rowFor("run-a")).getByRole("button", { name: "Compare run-a" }));
-    fireEvent.click(within(rowFor("run-b")).getByRole("button", { name: "Compare run-b" }));
-    expect(await screen.findByText("Comparing")).toBeInTheDocument();
+    vi.useFakeTimers();
+    try {
+      render(<TrainingTab />);
+      await vi.waitFor(() => expect(screen.getByText("run-a")).toBeInTheDocument());
+      fireEvent.click(within(rowFor("run-a")).getByRole("button", { name: "Compare run-a" }));
+      fireEvent.click(within(rowFor("run-b")).getByRole("button", { name: "Compare run-b" }));
+      await vi.waitFor(() => expect(screen.getByText("Comparing")).toBeInTheDocument());
 
-    // run-b's own record now carries both a resolved id and a tracking failure: a naive
-    // `experiment_id` truthiness check would still call it markable, unlike unmarkableReason.
-    listRuns.mockResolvedValueOnce({
-      runs: [
-        run({ run_id: "run-a", status: "running", experiment_id: "exp-a" }),
-        run({
-          run_id: "run-b",
-          status: "running",
-          experiment_id: "exp-b",
-          experiment_error: "dataset_identity failed: boom",
-        }),
-      ],
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+      // run-b's own record now carries both a resolved id and a tracking failure: a naive
+      // `experiment_id` truthiness check would still call it markable, unlike unmarkableReason.
+      listRuns.mockResolvedValueOnce({
+        runs: [
+          run({ run_id: "run-a", status: "running", experiment_id: "exp-a" }),
+          run({
+            run_id: "run-b",
+            status: "running",
+            experiment_id: "exp-b",
+            experiment_error: "dataset_identity failed: boom",
+          }),
+        ],
+      });
+      // Both tabs now poll rather than offer a manual Refresh; advance one tick of it.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(RUN_REFRESH_MS);
+      });
 
-    await waitFor(() =>
       expect(
         within(rowFor("run-b")).getByText(
           "experiment tracking failed: dataset_identity failed: boom",
         ),
-      ).toBeInTheDocument(),
-    );
-    // Only one run is still markable, so the detail falls back out of the comparison view.
-    expect(screen.queryByText("Comparing")).not.toBeInTheDocument();
+      ).toBeInTheDocument();
+      // Only one run is still markable, so the detail falls back out of the comparison view.
+      expect(screen.queryByText("Comparing")).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("names each run's Cancel control with that run's own id", async () => {
@@ -570,33 +684,41 @@ describe("TrainingTab compare", () => {
     });
     const pushToast = vi.spyOn(useStore.getState(), "pushToast");
 
-    render(<TrainingTab />);
-    await screen.findByText("run-1");
-    for (const id of ["run-1", "run-2", "run-3", "run-4"]) {
-      fireEvent.click(within(rowFor(id)).getByRole("button", { name: `Compare ${id}` }));
+    vi.useFakeTimers();
+    try {
+      render(<TrainingTab />);
+      await vi.waitFor(() => expect(screen.getByText("run-1")).toBeInTheDocument());
+      for (const id of ["run-1", "run-2", "run-3", "run-4"]) {
+        fireEvent.click(within(rowFor(id)).getByRole("button", { name: `Compare ${id}` }));
+      }
+      await vi.waitFor(() => expect(screen.getByText("4 of 4 runs")).toBeInTheDocument());
+
+      // run-1 turns unmarkable without ever leaving markedRunIds: the header's own count (the
+      // markable set, marked.length) drops to 3 while the raw id set still holds four.
+      listRuns.mockResolvedValueOnce({
+        runs: [
+          run({
+            run_id: "run-1",
+            status: "running",
+            experiment_id: "exp-run-1",
+            experiment_error: "dataset_identity failed: boom",
+          }),
+          ...allRuns.slice(1),
+        ],
+      });
+      // Both tabs now poll rather than offer a manual Refresh; advance one tick of it.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(RUN_REFRESH_MS);
+      });
+      expect(screen.getByText("3 of 4 runs")).toBeInTheDocument();
+
+      fireEvent.click(within(rowFor("run-5")).getByRole("button", { name: "Compare run-5" }));
+
+      expect(pushToast).not.toHaveBeenCalledWith(expect.stringContaining("at most 4 runs"));
+      await vi.waitFor(() => expect(screen.getByText("4 of 4 runs")).toBeInTheDocument());
+    } finally {
+      vi.useRealTimers();
     }
-    expect(await screen.findByText("4 of 4 runs")).toBeInTheDocument();
-
-    // run-1 turns unmarkable without ever leaving markedRunIds: the header's own count (the
-    // markable set, marked.length) drops to 3 while the raw id set still holds four.
-    listRuns.mockResolvedValueOnce({
-      runs: [
-        run({
-          run_id: "run-1",
-          status: "running",
-          experiment_id: "exp-run-1",
-          experiment_error: "dataset_identity failed: boom",
-        }),
-        ...allRuns.slice(1),
-      ],
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
-    await waitFor(() => expect(screen.getByText("3 of 4 runs")).toBeInTheDocument());
-
-    fireEvent.click(within(rowFor("run-5")).getByRole("button", { name: "Compare run-5" }));
-
-    expect(pushToast).not.toHaveBeenCalledWith(expect.stringContaining("at most 4 runs"));
-    expect(await screen.findByText("4 of 4 runs")).toBeInTheDocument();
   });
 });
 

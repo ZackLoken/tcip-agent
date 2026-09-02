@@ -4,6 +4,7 @@ import ReactMarkdown, { type Components } from "react-markdown";
 import { metaApi, type FrictionReport, type Retrospective } from "@/api/meta";
 import { sessionsApi, type SessionEntry } from "@/api/sessions";
 import { CollapsibleSection } from "@/components/CollapsibleSection";
+import { TabHeading } from "@/components/TabHeading";
 import { useStore } from "@/store";
 
 // Sized to this panel's own typography rather than the markdown renderer's defaults, and links
@@ -96,6 +97,7 @@ export function MetaTab() {
 
   return (
     <div className="flex-1 overflow-auto p-4 flex flex-col gap-4">
+      <TabHeading tab="meta" />
       <div className="flex items-center gap-3">
         <div className="tcip-heading">Agent meta-loop</div>
         <button className="tcip-btn text-[11px]" onClick={() => void refresh()} disabled={loading}>

@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 
+import { StructuredRefusalError } from "@/api/http";
 import { tuningApi, type Sweep, type SweepDetail, type SweepTrial } from "@/api/tuning";
 import type { TensorboardLaunch } from "@/api/training";
 import { DisclosureChevron } from "@/components/CollapsibleSection";
 import { EmbeddedTool } from "@/components/EmbeddedTool";
 import { LaunchPicker } from "@/components/LaunchPicker";
+import { TabHeading } from "@/components/TabHeading";
 import { useEditableAgentRequest } from "@/hooks/useEditableAgentRequest";
 import { TERMINAL_STATUSES } from "@/lib/runStatus";
 import { useStore } from "@/store";
@@ -41,6 +43,10 @@ function cellText(value: unknown): string {
  * detail pane, from this one wording. */
 const NO_CANCEL_REASON = "no reason recorded";
 
+/** Shown in place of a 404 or an empty trial list during the window before ``run_hpo`` writes
+ * a sweep's first manifest, or for a sweep that was refused before it wrote one. */
+const SWEEP_NO_RECORD_YET = "This sweep has no record yet.";
+
 /** The one sweep status Cancel is offered on, the same explicit-allowlist shape
  * TrainingTab's TRAINING_CANCELLABLE uses rather than inferring it from TERMINAL_STATUSES:
  * a sweep the backend derives as "interrupted" is done, not merely non-terminal. */
@@ -55,6 +61,9 @@ export function TuningTab() {
   const [sweepsError, setSweepsError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detail, setDetail] = useState<SweepDetail | null>(null);
+  // null: not yet heard from the manifest; true: confirmed absent; false: confirmed present.
+  // TensorBoard below waits for false, never the stale value the prior selection left behind.
+  const [sweepMissing, setSweepMissing] = useState<boolean | null>(null);
   const [trials, setTrials] = useState<SweepTrial[]>([]);
   const [selectedTrialId, setSelectedTrialId] = useState<string | null>(null);
   const [trialMetrics, setTrialMetrics] = useState<Record<string, unknown>[]>([]);
@@ -94,27 +103,39 @@ export function TuningTab() {
   useEffect(() => {
     if (!selectedId) {
       setDetail(null);
+      setSweepMissing(null);
       setTrials([]);
       return;
     }
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const poll = async () => {
+      let d: SweepDetail;
       try {
-        const d = await tuningApi.getSweep(selectedId);
+        d = await tuningApi.getSweep(selectedId);
+      } catch (e) {
         if (cancelled) return;
-        setDetail(d);
-        try {
-          const t = await tuningApi.listTrials(selectedId);
-          if (!cancelled) setTrials(t.trials ?? []);
-        } catch {
-          // A sweep launched here has no trial directory until its first trial writes one.
-          if (!cancelled) setTrials([]);
+        // Pre-manifest 404: keep polling so the detail loads on its own once run_hpo writes
+        // one, with no "Try again" for the breeder to press.
+        if (e instanceof StructuredRefusalError && e.status === 404) {
+          setDetail(null);
+          setSweepMissing(true);
+          setTrials([]);
+          timer = setTimeout(poll, 3000);
         }
-        if (!cancelled && !TERMINAL_STATUSES.has(d.status)) timer = setTimeout(poll, 3000);
-      } catch {
-        /* ignore */
+        return;
       }
+      if (cancelled) return;
+      setDetail(d);
+      setSweepMissing(false);
+      try {
+        const t = await tuningApi.listTrials(selectedId);
+        if (!cancelled) setTrials(t.trials ?? []);
+      } catch {
+        // A sweep launched here has no trial directory until its first trial writes one.
+        if (!cancelled) setTrials([]);
+      }
+      if (!cancelled && !TERMINAL_STATUSES.has(d.status)) timer = setTimeout(poll, 3000);
     };
     void poll();
     return () => {
@@ -164,11 +185,13 @@ export function TuningTab() {
     };
   }, [selectedId, rayAttempt]);
 
-  // One TensorBoard over the whole sweep directory: the launch is idempotent and answers with the
-  // url of whatever is already serving it, so there is nothing to wait for afterwards.
+  // One TensorBoard over the whole sweep directory: the launch is idempotent, so there is
+  // nothing to wait for beyond a manifest existing to serve; held off until one does.
   useEffect(() => {
     setSweepTb({ url: null, error: null });
-    if (!selectedId) return;
+    // sweepMissing !== false: hold off on both the unknown state and a confirmed absence,
+    // never only the latter.
+    if (!selectedId || sweepMissing !== false) return;
     let cancelled = false;
     void tuningApi.launchSweepTensorboard(selectedId).then(
       (launched) => {
@@ -181,7 +204,7 @@ export function TuningTab() {
     return () => {
       cancelled = true;
     };
-  }, [selectedId, sweepTbAttempt]);
+  }, [selectedId, sweepTbAttempt, sweepMissing]);
 
   // Every trial's TensorBoard costs a port out of a bounded range, so moving off a trial stops
   // the one it was showing.
@@ -221,6 +244,9 @@ export function TuningTab() {
 
   function toggleSweep(sweepId: string) {
     setSelectedTrialId(null);
+    // Batched with the id change, so the TensorBoard effect never runs against the previous
+    // selection's sweepMissing before the detail poll has had a chance to say anything at all.
+    setSweepMissing(null);
     setSelectedId((current) => (current === sweepId ? null : sweepId));
   }
 
@@ -286,269 +312,286 @@ export function TuningTab() {
   }
 
   return (
-    <RunMonitorLayout
-      title="Sweeps"
-      onRefresh={() => void refresh()}
-      headerRight={
-        <button
-          type="button"
-          aria-expanded={pickerOpen}
-          className={pickerOpen ? "tcip-btn text-[11px]" : "tcip-btn-primary text-[11px]"}
-          onClick={() => setPickerOpen((open) => !open)}
-        >
-          Start a sweep
-        </button>
-      }
-      detailHeader={
-        selectedTrial ? (
-          <>
-            <span className="tcip-heading">Trial</span>
-            <span className="font-mono text-[12px] text-tcip-fg">{selectedTrial.trial_id}</span>
-            <span className="text-[11px] text-tcip-muted">of {detail?.sweep_id}</span>
-          </>
-        ) : detail ? (
-          <>
-            <span className="tcip-heading">Sweep</span>
-            <span className="font-mono text-[12px] text-tcip-fg">{detail.sweep_id}</span>
-            <span className="text-[11px] text-tcip-muted">({detail.status})</span>
-          </>
-        ) : (
-          <span className="tcip-heading">Select a sweep</span>
-        )
-      }
-      detail={
-        selectedTrial ? (
-          <div className="flex flex-col gap-4">
-            <div className="h-[52vh] min-h-[320px] shrink-0">
-              <EmbeddedTool
-                title="Trial TensorBoard"
-                url={trialTb.url}
-                loading={!trialTb.url && !trialTb.error}
-                error={trialTb.error}
-                onRetry={() => setTrialTbAttempt((n) => n + 1)}
-              />
-            </div>
-            <div>
-              <div className="tcip-heading mb-1">Parameters</div>
-              {Object.keys(selectedTrial.params).length === 0 ? (
-                <div className="text-[11px] text-tcip-muted">
-                  This trial has not written a resolved config yet.
-                </div>
-              ) : (
-                <pre className="text-[11px] font-mono p-3 tcip-panel overflow-auto">
-                  {JSON.stringify(selectedTrial.params, null, 2)}
-                </pre>
-              )}
-              {selectedTrial.unconsumed_params.length > 0 && (
-                <div className="mt-1 text-[11px] text-tcip-fp">
-                  Swept but not read by the training config:{" "}
-                  {selectedTrial.unconsumed_params.join(", ")}
-                </div>
-              )}
-            </div>
-            <div>
-              <div className="tcip-heading mb-1">Metrics</div>
-              {trialMetrics.length === 0 ? (
-                <div className="text-[11px] text-tcip-muted">
-                  No metrics rows from this trial yet.
-                </div>
-              ) : (
-                <div className="tcip-panel overflow-auto">
-                  <table className="w-full text-[11px] font-mono">
-                    <thead>
-                      <tr className="text-tcip-muted">
-                        {metricColumns.map((k) => (
-                          <th key={k} className="px-2 py-1 text-left font-normal">
-                            {k}
-                          </th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {trialMetrics.map((row, i) => (
-                        <tr key={i} className="border-t border-tcip-border">
+    <>
+      <TabHeading tab="tuning" />
+      <RunMonitorLayout
+        title="Sweeps"
+        headerRight={
+          <button
+            type="button"
+            aria-expanded={pickerOpen}
+            className={pickerOpen ? "tcip-btn text-[11px]" : "tcip-btn-primary text-[11px]"}
+            onClick={() => setPickerOpen((open) => !open)}
+          >
+            Start a sweep
+          </button>
+        }
+        detailHeader={
+          selectedTrial ? (
+            <>
+              <span className="tcip-heading">Trial</span>
+              <span className="font-mono text-[12px] text-tcip-fg">{selectedTrial.trial_id}</span>
+              <span className="text-[11px] text-tcip-muted">of {detail?.sweep_id}</span>
+            </>
+          ) : detail ? (
+            <>
+              <span className="tcip-heading">Sweep</span>
+              <span className="font-mono text-[12px] text-tcip-fg">{detail.sweep_id}</span>
+              <span className="text-[11px] text-tcip-muted">({detail.status})</span>
+            </>
+          ) : sweepMissing ? (
+            <>
+              <span className="tcip-heading">Sweep</span>
+              <span className="font-mono text-[12px] text-tcip-fg">{selectedId}</span>
+              <span className="text-[11px] text-tcip-muted">(no record yet)</span>
+            </>
+          ) : (
+            <span className="tcip-heading">Select a sweep</span>
+          )
+        }
+        detail={
+          selectedTrial ? (
+            <div className="flex flex-col gap-4">
+              <div className="h-[52vh] min-h-[320px] shrink-0">
+                <EmbeddedTool
+                  title="Trial TensorBoard"
+                  url={trialTb.url}
+                  loading={!trialTb.url && !trialTb.error}
+                  error={trialTb.error}
+                  onRetry={() => setTrialTbAttempt((n) => n + 1)}
+                />
+              </div>
+              <div>
+                <div className="tcip-heading mb-1">Parameters</div>
+                {Object.keys(selectedTrial.params).length === 0 ? (
+                  <div className="text-[11px] text-tcip-muted">
+                    This trial has not written a resolved config yet.
+                  </div>
+                ) : (
+                  <pre className="text-[11px] font-mono p-3 tcip-panel overflow-auto">
+                    {JSON.stringify(selectedTrial.params, null, 2)}
+                  </pre>
+                )}
+                {selectedTrial.unconsumed_params.length > 0 && (
+                  <div className="mt-1 text-[11px] text-tcip-fp">
+                    Swept but not read by the training config:{" "}
+                    {selectedTrial.unconsumed_params.join(", ")}
+                  </div>
+                )}
+              </div>
+              <div>
+                <div className="tcip-heading mb-1">Metrics</div>
+                {trialMetrics.length === 0 ? (
+                  <div className="text-[11px] text-tcip-muted">
+                    No metrics rows from this trial yet.
+                  </div>
+                ) : (
+                  <div className="tcip-panel overflow-auto">
+                    <table className="w-full text-[11px] font-mono">
+                      <thead>
+                        <tr className="text-tcip-muted">
                           {metricColumns.map((k) => (
-                            <td key={k} className="px-2 py-1 tabular-nums">
-                              {cellText(row[k])}
-                            </td>
+                            <th key={k} className="px-2 py-1 text-left font-normal">
+                              {k}
+                            </th>
                           ))}
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                      </thead>
+                      <tbody>
+                        {trialMetrics.map((row, i) => (
+                          <tr key={i} className="border-t border-tcip-border">
+                            {metricColumns.map((k) => (
+                              <td key={k} className="px-2 py-1 tabular-nums">
+                                {cellText(row[k])}
+                              </td>
+                            ))}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : detail ? (
+            <div className="flex flex-col gap-3">
+              <div className="h-[46vh] min-h-[300px] shrink-0">
+                <EmbeddedTool
+                  title="Ray dashboard"
+                  url={rayUrl}
+                  loading={!rayUrl && !rayError}
+                  error={rayError}
+                  onRetry={() => setRayAttempt((n) => n + 1)}
+                />
+              </div>
+              <div className="h-[38vh] min-h-[260px] shrink-0">
+                <EmbeddedTool
+                  title="Sweep TensorBoard"
+                  url={sweepTb.url}
+                  loading={!sweepTb.url && !sweepTb.error}
+                  error={sweepTb.error}
+                  onRetry={() => setSweepTbAttempt((n) => n + 1)}
+                />
+              </div>
+              {detail.status === "cancelled" ? (
+                <div className="text-[11px] text-tcip-muted">
+                  Cancelled: {detail.error ?? NO_CANCEL_REASON}
                 </div>
+              ) : (
+                <>
+                  {detail.error ? (
+                    <div className="text-[11px] text-tcip-fp">{detail.error}</div>
+                  ) : null}
+                  {hasContent(detail.result) ? (
+                    <pre className="max-h-[24vh] text-[11px] font-mono p-3 tcip-panel overflow-auto">
+                      {JSON.stringify(detail.result, null, 2)}
+                    </pre>
+                  ) : (
+                    <div className="text-[11px] text-tcip-muted">
+                      The best config appears here once the sweep finishes. Pick one of its trials
+                      to follow that trial while it runs.
+                    </div>
+                  )}
+                </>
               )}
             </div>
-          </div>
-        ) : detail ? (
-          <div className="flex flex-col gap-3">
-            <div className="h-[46vh] min-h-[300px] shrink-0">
-              <EmbeddedTool
-                title="Ray dashboard"
-                url={rayUrl}
-                loading={!rayUrl && !rayError}
-                error={rayError}
-                onRetry={() => setRayAttempt((n) => n + 1)}
-              />
+          ) : sweepMissing ? (
+            <div className="text-[11px] text-tcip-muted">{SWEEP_NO_RECORD_YET}</div>
+          ) : (
+            <div className="text-[11px] text-tcip-muted">
+              Select a sweep to see its trials and its result.
             </div>
-            <div className="h-[38vh] min-h-[260px] shrink-0">
-              <EmbeddedTool
-                title="Sweep TensorBoard"
-                url={sweepTb.url}
-                loading={!sweepTb.url && !sweepTb.error}
-                error={sweepTb.error}
-                onRetry={() => setSweepTbAttempt((n) => n + 1)}
-              />
-            </div>
-            {detail.status === "cancelled" ? (
-              <div className="text-[11px] text-tcip-muted">
-                Cancelled: {detail.error ?? NO_CANCEL_REASON}
-              </div>
-            ) : (
-              <>
-                {detail.error ? (
-                  <div className="text-[11px] text-tcip-fp">{detail.error}</div>
-                ) : null}
-                {hasContent(detail.result) ? (
-                  <pre className="max-h-[24vh] text-[11px] font-mono p-3 tcip-panel overflow-auto">
-                    {JSON.stringify(detail.result, null, 2)}
-                  </pre>
-                ) : (
-                  <div className="text-[11px] text-tcip-muted">
-                    The best config appears here once the sweep finishes. Pick one of its trials to
-                    follow that trial while it runs.
-                  </div>
-                )}
-              </>
-            )}
+          )
+        }
+      >
+        {pickerOpen && (
+          <div className="mb-3 pb-3 border-b border-tcip-border">
+            <LaunchPicker
+              composerLabel="Describe a new one to the agent"
+              request={request}
+              onRequestChange={setRequest}
+              onSend={sendToAgent}
+            />
           </div>
-        ) : (
-          <div className="text-[11px] text-tcip-muted">
-            Select a sweep to see its trials and its result.
-          </div>
-        )
-      }
-    >
-      {pickerOpen && (
-        <div className="mb-3 pb-3 border-b border-tcip-border">
-          <LaunchPicker
-            composerLabel="Describe a new one to the agent"
-            request={request}
-            onRequestChange={setRequest}
-            onSend={sendToAgent}
-          />
-        </div>
-      )}
+        )}
 
-      {sweepsError && (
-        <div className="text-[11px] text-tcip-fp mb-2">
-          {sweepsError}{" "}
-          <button className="tcip-btn text-[11px] ml-1" onClick={() => void refresh()}>
-            Retry
-          </button>
-        </div>
-      )}
-      {sweeps.length === 0 && !sweepsError && (
-        <RunMonitorEmpty>No sweeps yet. Use "Start a sweep" above.</RunMonitorEmpty>
-      )}
-      {sweeps.length > 0 && (
-        <ul className="space-y-1">
-          {sweeps.map((s) => {
-            const expanded = selectedId === s.sweep_id;
-            const running = SWEEP_CANCELLABLE.has(s.status);
-            const searchLine = [
-              s.n_trials != null ? `${s.n_trials} trials planned` : null,
-              s.search_alg,
-              s.scheduler,
-              s.param_space_keys && s.param_space_keys.length > 0
-                ? s.param_space_keys.join(", ")
-                : null,
-            ]
-              .filter((part): part is string => !!part)
-              .join(" · ");
-            return (
-              <li key={s.sweep_id}>
-                <div
-                  className={`flex items-start gap-1 p-2 rounded border transition-colors ${
-                    expanded && !selectedTrialId
-                      ? "border-tcip-accent bg-tcip-accent/10"
-                      : "border-tcip-border hover:border-tcip-border-hover hover:bg-tcip-hover"
-                  }`}
-                >
-                  <button
-                    type="button"
-                    aria-expanded={expanded}
-                    className="flex-1 flex items-start gap-2 text-left"
-                    onClick={() => toggleSweep(s.sweep_id)}
+        {sweepsError && (
+          <div className="text-[11px] text-tcip-fp mb-2">
+            {sweepsError}{" "}
+            <button className="tcip-btn text-[11px] ml-1" onClick={() => void refresh()}>
+              Retry
+            </button>
+          </div>
+        )}
+        {sweeps.length === 0 && !sweepsError && (
+          <RunMonitorEmpty>No sweeps yet. Use "Start a sweep" above.</RunMonitorEmpty>
+        )}
+        {sweeps.length > 0 && (
+          <div className="text-[10px] text-tcip-muted mb-1">
+            Live sweeps first, in launch order; other recorded sweeps follow, sorted by sweep id.
+          </div>
+        )}
+        {sweeps.length > 0 && (
+          <ul className="space-y-1">
+            {sweeps.map((s) => {
+              const expanded = selectedId === s.sweep_id;
+              const running = SWEEP_CANCELLABLE.has(s.status);
+              const searchLine = [
+                s.n_trials != null ? `${s.n_trials} trials planned` : null,
+                s.search_alg,
+                s.scheduler,
+                s.param_space_keys && s.param_space_keys.length > 0
+                  ? s.param_space_keys.join(", ")
+                  : null,
+              ]
+                .filter((part): part is string => !!part)
+                .join(" · ");
+              return (
+                <li key={s.sweep_id}>
+                  <div
+                    className={`flex items-start gap-1 p-2 rounded border transition-colors ${
+                      expanded && !selectedTrialId
+                        ? "border-tcip-accent bg-tcip-accent/10"
+                        : "border-tcip-border hover:border-tcip-border-hover hover:bg-tcip-hover"
+                    }`}
                   >
-                    <span className="mt-[3px] text-tcip-muted">
-                      <DisclosureChevron open={expanded} />
-                    </span>
-                    <span className="flex-1">
-                      <span className="block font-mono text-[11px]">{s.sweep_id}</span>
-                      <span className="block text-[10px] text-tcip-muted">
-                        {s.status}
-                        {running && s.cancel_requested ? " · stop requested" : ""}
-                        {s.relaunched_from ? ` · relaunched from ${s.relaunched_from}` : ""}
+                    <button
+                      type="button"
+                      aria-expanded={expanded}
+                      className="flex-1 flex items-start gap-2 text-left"
+                      onClick={() => toggleSweep(s.sweep_id)}
+                    >
+                      <span className="mt-[3px] text-tcip-muted">
+                        <DisclosureChevron open={expanded} />
                       </span>
-                      {s.error ? (
-                        <span className="block text-[10px] text-tcip-fp">{s.error}</span>
-                      ) : (
-                        s.status === "cancelled" && (
-                          <span className="block text-[10px] text-tcip-muted">
-                            {NO_CANCEL_REASON}
-                          </span>
-                        )
-                      )}
-                      {!s.relaunchable && s.reason && (
-                        <span className="block text-[10px] text-tcip-muted">{s.reason}</span>
-                      )}
-                    </span>
-                  </button>
-                  {sweepAction(s)}
-                </div>
-                {expanded && (
-                  <div className="mt-1 ml-5">
-                    {searchLine && (
-                      <div className="text-[10px] text-tcip-muted mb-1">{searchLine}</div>
-                    )}
-                    <ul className="space-y-1">
-                      {trials.length === 0 ? (
-                        <li className="text-[10px] text-tcip-muted">No trials on disk yet.</li>
-                      ) : (
-                        trials.map((t) => (
-                          <li key={t.trial_id}>
-                            <button
-                              type="button"
-                              aria-pressed={selectedTrialId === t.trial_id}
-                              className={`w-full p-2 rounded border text-left transition-colors ${
-                                selectedTrialId === t.trial_id
-                                  ? "border-tcip-accent bg-tcip-accent/10"
-                                  : "border-tcip-border hover:border-tcip-border-hover hover:bg-tcip-hover"
-                              }`}
-                              onClick={() => setSelectedTrialId(t.trial_id)}
-                            >
-                              <span className="block font-mono text-[11px]">{t.trial_id}</span>
-                              <span className="block text-[10px] text-tcip-muted">
-                                {t.has_metrics ? "metrics" : "no metrics yet"}
-                                {Object.keys(t.params).length > 0
-                                  ? ` · ${Object.entries(t.params)
-                                      .map(([k, v]) => `${k}=${cellText(v)}`)
-                                      .join(", ")}`
-                                  : ""}
-                              </span>
-                            </button>
-                          </li>
-                        ))
-                      )}
-                    </ul>
+                      <span className="flex-1">
+                        <span className="block font-mono text-[11px]">{s.sweep_id}</span>
+                        <span className="block text-[10px] text-tcip-muted">
+                          {s.status}
+                          {running && s.cancel_requested ? " · stop requested" : ""}
+                          {s.relaunched_from ? ` · relaunched from ${s.relaunched_from}` : ""}
+                        </span>
+                        {s.error ? (
+                          <span className="block text-[10px] text-tcip-fp">{s.error}</span>
+                        ) : (
+                          s.status === "cancelled" && (
+                            <span className="block text-[10px] text-tcip-muted">
+                              {NO_CANCEL_REASON}
+                            </span>
+                          )
+                        )}
+                        {!s.relaunchable && s.reason && (
+                          <span className="block text-[10px] text-tcip-muted">{s.reason}</span>
+                        )}
+                      </span>
+                    </button>
+                    {sweepAction(s)}
                   </div>
-                )}
-              </li>
-            );
-          })}
-        </ul>
-      )}
-    </RunMonitorLayout>
+                  {expanded && (
+                    <div className="mt-1 ml-5">
+                      {searchLine && (
+                        <div className="text-[10px] text-tcip-muted mb-1">{searchLine}</div>
+                      )}
+                      <ul className="space-y-1">
+                        {trials.length === 0 ? (
+                          <li className="text-[10px] text-tcip-muted">
+                            {sweepMissing ? SWEEP_NO_RECORD_YET : "No trials on disk yet."}
+                          </li>
+                        ) : (
+                          trials.map((t) => (
+                            <li key={t.trial_id}>
+                              <button
+                                type="button"
+                                aria-pressed={selectedTrialId === t.trial_id}
+                                className={`w-full p-2 rounded border text-left transition-colors ${
+                                  selectedTrialId === t.trial_id
+                                    ? "border-tcip-accent bg-tcip-accent/10"
+                                    : "border-tcip-border hover:border-tcip-border-hover hover:bg-tcip-hover"
+                                }`}
+                                onClick={() => setSelectedTrialId(t.trial_id)}
+                              >
+                                <span className="block font-mono text-[11px]">{t.trial_id}</span>
+                                <span className="block text-[10px] text-tcip-muted">
+                                  {t.has_metrics ? "metrics" : "no metrics yet"}
+                                  {Object.keys(t.params).length > 0
+                                    ? ` · ${Object.entries(t.params)
+                                        .map(([k, v]) => `${k}=${cellText(v)}`)
+                                        .join(", ")}`
+                                    : ""}
+                                </span>
+                              </button>
+                            </li>
+                          ))
+                        )}
+                      </ul>
+                    </div>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </RunMonitorLayout>
+    </>
   );
 }

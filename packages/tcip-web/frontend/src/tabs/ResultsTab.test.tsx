@@ -1162,3 +1162,13 @@ describe("ResultsTab delivery events (read-only)", () => {
     expect(screen.getByText(/nothing has shipped from this project yet/i)).toBeInTheDocument();
   });
 });
+
+describe("ResultsTab heading", () => {
+  it("renders exactly one top-level heading naming the tab", async () => {
+    render(<ResultsTab />);
+    await waitFor(() => expect(resultsApi.traits).toHaveBeenCalled());
+    const headings = screen.getAllByRole("heading", { level: 1 });
+    expect(headings).toHaveLength(1);
+    expect(headings[0]).toHaveTextContent("Results");
+  });
+});

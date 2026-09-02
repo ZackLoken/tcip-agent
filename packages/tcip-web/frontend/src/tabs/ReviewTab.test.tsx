@@ -1482,3 +1482,13 @@ describe("ReviewTab canvas-push binding-presence gate", () => {
     expect(useStore.getState().canvasBindingMissing).toBe(false);
   });
 });
+
+describe("ReviewTab heading", () => {
+  it("renders exactly one top-level heading naming the tab", async () => {
+    render(<ReviewTab />);
+    await waitFor(() => expect(matchesSpy).toHaveBeenCalledTimes(1));
+    const headings = screen.getAllByRole("heading", { level: 1 });
+    expect(headings).toHaveLength(1);
+    expect(headings[0]).toHaveTextContent("Review");
+  });
+});

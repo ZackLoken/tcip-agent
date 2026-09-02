@@ -17,11 +17,10 @@ export function defaultTrainingRequest(datasetRoot: string | null, subject: stri
   return (
     `Configure and launch a training run${scopePhrase(datasetRoot, subject)}. Pick the model ` +
     "and training config (architecture, task, batch size, schedule) that suit this data, " +
-    "validate it with preflight_config, then launch it with launch_training. Check how large " +
-    "this dataset's objects are relative to the full-frame resolution (inspect_project, " +
-    "scripts/scan_dataset.py and validate_data_quality all report on the data) and decide from " +
-    "that whether to train on tiles or on whole frames, then tell me which you chose and why. " +
-    "If you train tiled on full-width strip-layout rasters read windowed, also consider the " +
+    "check the config is sound before launching it, then launch the run. Check how large " +
+    "this dataset's objects are relative to the full-frame resolution and decide from that " +
+    "whether to train on tiles or on whole frames, then tell me which you chose and why. If " +
+    "you train tiled on full-width strip-layout rasters read windowed, also consider the " +
     "sampler choice: shuffled tile access forces repeated strip decodes there. " +
     "Let me know once it's running so I can watch it here."
   );
@@ -32,7 +31,7 @@ export function defaultSweepRequest(datasetRoot: string | null): string {
   return (
     `Run a hyperparameter sweep${where}. Pick the training config and task, decide which ` +
     "hyperparameters are worth searching (e.g. learning rate, batch size, weight decay) and " +
-    "reasonable ranges for them, choose a search algorithm/scheduler and a sensible number of " +
-    "trials, and launch it with run_hpo. Let me know once it's running so I can watch it here."
+    "reasonable ranges for them, choose a search algorithm and scheduler and a sensible " +
+    "number of trials, then launch it. Let me know once it's running so I can watch it here."
   );
 }

@@ -10,18 +10,20 @@ import {
   YAxis,
 } from "recharts";
 
+import { StructuredRefusalError } from "@/api/http";
 import { openTrainingStream, trainingApi } from "@/api/training";
 import type { LaunchableConfig, MetricRow, SplitChoices, TrainingRunSummary } from "@/api/training";
 import { EmbeddedTool } from "@/components/EmbeddedTool";
 import { LaunchPicker, type DataPicker, type LaunchPickerRow } from "@/components/LaunchPicker";
 import { MAX_MARKED_RUNS, RunComparison, type MarkedRun } from "@/components/RunComparison";
+import { TabHeading } from "@/components/TabHeading";
 import { useEditableAgentRequest } from "@/hooks/useEditableAgentRequest";
 import { TERMINAL_STATUSES } from "@/lib/runStatus";
 import { useStore } from "@/store";
 import { defaultTrainingRequest } from "@/tabs/agentPrompts";
 import { CHART, CHART_LINE_COLORS } from "@/tabs/chartTheme";
 import { RunMonitorEmpty, RunMonitorLayout } from "@/tabs/RunMonitorLayout";
-import { mergeMetric, RUN_REFRESH_MS } from "@/tabs/trainingMetrics";
+import { mergeMetric, RUN_REFRESH_MS, VAL_METRIC_PREFIX } from "@/tabs/trainingMetrics";
 
 // Runs can only be stopped while still active; terminal/historical runs show no button.
 const TRAINING_CANCELLABLE: ReadonlySet<string> = new Set(["created", "running"]);
@@ -128,6 +130,7 @@ export function TrainingTab() {
   const [metrics, setMetrics] = useState<MetricRow[]>([]);
   const [tbUrl, setTbUrl] = useState<string | null>(null);
   const [tbError, setTbError] = useState<string | null>(null);
+  const [tbNoLogs, setTbNoLogs] = useState(false);
   const [tbAttempt, setTbAttempt] = useState(0);
   const [markedRunIds, setMarkedRunIds] = useState<Set<string>>(new Set());
   const streamRef = useRef<(() => void) | null>(null);
@@ -271,6 +274,7 @@ export function TrainingTab() {
   useEffect(() => {
     setTbUrl(null);
     setTbError(null);
+    setTbNoLogs(false);
     if (!selectedRun) return;
     const runId = selectedRun;
     let cancelled = false;
@@ -288,6 +292,7 @@ export function TrainingTab() {
 
       let url = detail.tensorboard_url ?? null;
       let failure: string | null = null;
+      let noLogs = false;
       if (!url) {
         try {
           const launched = await trainingApi.launchTensorboard(runId);
@@ -296,7 +301,11 @@ export function TrainingTab() {
             failure = launched.output ? `${launched.error}: ${launched.output}` : launched.error;
           }
         } catch (e) {
-          failure = e instanceof Error ? e.message : String(e);
+          if (e instanceof StructuredRefusalError && e.detail.no_logs === true) {
+            noLogs = true;
+          } else {
+            failure = e instanceof Error ? e.message : String(e);
+          }
         }
       }
       if (cancelled) return;
@@ -304,10 +313,16 @@ export function TrainingTab() {
       if (url) {
         setTbUrl(url);
         setTbError(null);
+        setTbNoLogs(false);
         return;
       }
       if (TERMINAL_STATUSES.has(detail.status ?? "")) {
-        setTbError(failure ?? "No TensorBoard is serving this run.");
+        if (noLogs) {
+          setTbNoLogs(true);
+          setTbError(null);
+        } else {
+          setTbError(failure ?? "No TensorBoard is serving this run.");
+        }
         return;
       }
       setTbError(null);
@@ -345,214 +360,231 @@ export function TrainingTab() {
   }, [metrics]);
 
   return (
-    <RunMonitorLayout
-      title="Runs"
-      onRefresh={() => void refreshRuns()}
-      headerRight={
-        <button
-          type="button"
-          aria-expanded={pickerOpen}
-          className={pickerOpen ? "tcip-btn text-[11px]" : "tcip-btn-primary text-[11px]"}
-          onClick={() => setPickerOpen((open) => !open)}
-        >
-          Start a run
-        </button>
-      }
-      detailHeader={
-        comparing ? (
-          <>
-            <span className="tcip-heading">Comparing</span>
-            <span className="text-[11px] text-tcip-muted">
-              {marked.length} of {MAX_MARKED_RUNS} runs
-            </span>
-          </>
-        ) : selectedRun ? (
-          <>
-            <span className="tcip-heading">Live metrics</span>
-            <span className="font-mono text-[12px] text-tcip-fg">{selectedRun}</span>
-          </>
-        ) : (
-          <span className="tcip-heading">Select a run to view metrics</span>
-        )
-      }
-      detail={
-        comparing ? (
-          <RunComparison marked={marked} projectRoot={projectRoot} />
-        ) : (
-          <div className="flex flex-col gap-4">
-            <div className="h-[38vh] min-h-[220px] shrink-0">
-              {selectedRun && chartData.length > 0 ? (
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={chartData}>
-                    <CartesianGrid stroke={CHART.grid} strokeDasharray="3 3" />
-                    <XAxis
-                      dataKey="step"
-                      stroke={CHART.axis}
-                      style={{ fontSize: 11 }}
-                      label={{
-                        value: "epoch/step",
-                        position: "insideBottom",
-                        offset: -5,
-                        fill: CHART.axis,
-                      }}
-                    />
-                    <YAxis stroke={CHART.axis} style={{ fontSize: 11 }} />
-                    <Tooltip
-                      contentStyle={{
-                        background: CHART.tooltipBg,
-                        border: `1px solid ${CHART.tooltipBorder}`,
-                        borderRadius: 4,
-                        fontSize: 11,
-                      }}
-                    />
-                    <Legend wrapperStyle={{ fontSize: 11, color: CHART.legendText }} />
-                    {metricKeys.map((key, i) => (
-                      <Line
-                        key={key}
-                        type="monotone"
-                        dataKey={key}
-                        stroke={CHART_LINE_COLORS[i % CHART_LINE_COLORS.length]}
-                        dot={false}
-                        strokeWidth={1.5}
-                        isAnimationActive={false}
+    <>
+      <TabHeading tab="training" />
+      <RunMonitorLayout
+        title="Runs"
+        headerRight={
+          <button
+            type="button"
+            aria-expanded={pickerOpen}
+            className={pickerOpen ? "tcip-btn text-[11px]" : "tcip-btn-primary text-[11px]"}
+            onClick={() => setPickerOpen((open) => !open)}
+          >
+            Start a run
+          </button>
+        }
+        detailHeader={
+          comparing ? (
+            <>
+              <span className="tcip-heading">Comparing</span>
+              <span className="text-[11px] text-tcip-muted">
+                {marked.length} of {MAX_MARKED_RUNS} runs
+              </span>
+            </>
+          ) : selectedRun ? (
+            <>
+              <span className="tcip-heading">Live metrics</span>
+              <span className="font-mono text-[12px] text-tcip-fg">{selectedRun}</span>
+            </>
+          ) : (
+            <span className="tcip-heading">Select a run to view metrics</span>
+          )
+        }
+        detail={
+          comparing ? (
+            <RunComparison marked={marked} projectRoot={projectRoot} />
+          ) : (
+            <div className="flex flex-col gap-4">
+              <div className="h-[38vh] min-h-[220px] shrink-0">
+                {selectedRun && chartData.length > 0 ? (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={chartData}>
+                      <CartesianGrid stroke={CHART.grid} strokeDasharray="3 3" />
+                      <XAxis
+                        dataKey="step"
+                        stroke={CHART.axis}
+                        style={{ fontSize: 11 }}
+                        label={{
+                          value: "epoch/step",
+                          position: "insideBottom",
+                          offset: -5,
+                          fill: CHART.axis,
+                        }}
                       />
-                    ))}
-                  </LineChart>
-                </ResponsiveContainer>
-              ) : (
-                <div className="flex items-center justify-center h-full text-tcip-muted text-[12px]">
-                  {selectedRun ? "Waiting for metrics…" : "No run selected."}
+                      <YAxis stroke={CHART.axis} style={{ fontSize: 11 }} />
+                      <Tooltip
+                        contentStyle={{
+                          background: CHART.tooltipBg,
+                          border: `1px solid ${CHART.tooltipBorder}`,
+                          borderRadius: 4,
+                          fontSize: 11,
+                        }}
+                      />
+                      <Legend wrapperStyle={{ fontSize: 11, color: CHART.legendText }} />
+                      {metricKeys.map((key, i) => (
+                        <Line
+                          key={key}
+                          type="monotone"
+                          dataKey={key}
+                          stroke={CHART_LINE_COLORS[i % CHART_LINE_COLORS.length]}
+                          dot={false}
+                          strokeWidth={1.5}
+                          isAnimationActive={false}
+                        />
+                      ))}
+                    </LineChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div className="flex items-center justify-center h-full text-tcip-muted text-[12px]">
+                    {selectedRun ? "Waiting for metrics…" : "No run selected."}
+                  </div>
+                )}
+              </div>
+
+              {selectedRun && (
+                <div className="h-[60vh] min-h-[360px] shrink-0">
+                  <EmbeddedTool
+                    title="TensorBoard"
+                    url={tbUrl}
+                    loading={!tbUrl && !tbError && !tbNoLogs}
+                    error={tbNoLogs ? "This run produced no logs." : tbError}
+                    onRetry={tbNoLogs ? undefined : () => setTbAttempt((n) => n + 1)}
+                  />
                 </div>
               )}
             </div>
-
-            {selectedRun && (
-              <div className="h-[60vh] min-h-[360px] shrink-0">
-                <EmbeddedTool
-                  title="TensorBoard"
-                  url={tbUrl}
-                  loading={!tbUrl && !tbError}
-                  error={tbError}
-                  onRetry={() => setTbAttempt((n) => n + 1)}
-                />
-              </div>
-            )}
-          </div>
-        )
-      }
-    >
-      {pickerOpen && (
-        <div className="mb-3 pb-3 border-b border-tcip-border">
-          <LaunchPicker
-            list={{
-              title: "Configs in this project",
-              emptyMessage: "No config exists in this project yet.",
-              error: configsError ?? undefined,
-              onRetry: () => void refreshConfigs(),
-              rows: configs.map((cfg) =>
-                configRow(
-                  cfg,
-                  splitChoicesById[cfg.experiment_id],
-                  splitChoicesLoadingId === cfg.experiment_id,
-                  splitChoiceErrors[cfg.experiment_id],
-                  (dir) => startFromConfig(cfg.experiment_id, dir),
+          )
+        }
+      >
+        {pickerOpen && (
+          <div className="mb-3 pb-3 border-b border-tcip-border">
+            <LaunchPicker
+              list={{
+                title: "Configs in this project",
+                emptyMessage: "No config exists in this project yet.",
+                error: configsError ?? undefined,
+                onRetry: () => void refreshConfigs(),
+                rows: configs.map((cfg) =>
+                  configRow(
+                    cfg,
+                    splitChoicesById[cfg.experiment_id],
+                    splitChoicesLoadingId === cfg.experiment_id,
+                    splitChoiceErrors[cfg.experiment_id],
+                    (dir) => startFromConfig(cfg.experiment_id, dir),
+                  ),
                 ),
-              ),
-            }}
-            composerLabel="Describe a new one to the agent"
-            request={request}
-            onRequestChange={setRequest}
-            onSend={sendToAgent}
-            onSelect={(key) => void loadSplitChoices(key)}
-          />
-        </div>
-      )}
+              }}
+              composerLabel="Describe a new one to the agent"
+              request={request}
+              onRequestChange={setRequest}
+              onSend={sendToAgent}
+              onSelect={(key) => void loadSplitChoices(key)}
+            />
+          </div>
+        )}
 
-      {runsError && (
-        <div className="text-[11px] text-tcip-fp mb-2">
-          {runsError}{" "}
-          <button className="tcip-btn text-[11px] ml-1" onClick={() => void refreshRuns()}>
-            Retry
-          </button>
-        </div>
-      )}
-      {runs.length === 0 && !runsError && (
-        <RunMonitorEmpty>No runs yet. Use "Start a run" above.</RunMonitorEmpty>
-      )}
-      <ul className="space-y-1">
-        {runs.map((r) => {
-          const isMarked = markedRunIds.has(r.run_id);
-          const reason = unmarkableReason(r);
-          return (
-            <li key={r.run_id}>
-              <div
-                className={`flex items-start gap-1 p-2 rounded border transition-colors ${
-                  selectedRun === r.run_id && !isMarked
-                    ? "border-tcip-accent bg-tcip-accent/10"
-                    : "border-tcip-border hover:border-tcip-border-hover hover:bg-tcip-hover"
-                }`}
-              >
-                <button
-                  type="button"
-                  aria-pressed={selectedRun === r.run_id}
-                  className="flex-1 text-left"
-                  onClick={() => setSelectedRun(r.run_id)}
+        {runsError && (
+          <div className="text-[11px] text-tcip-fp mb-2">
+            {runsError}{" "}
+            <button className="tcip-btn text-[11px] ml-1" onClick={() => void refreshRuns()}>
+              Retry
+            </button>
+          </div>
+        )}
+        {runs.length === 0 && !runsError && (
+          <RunMonitorEmpty>No runs yet. Use "Start a run" above.</RunMonitorEmpty>
+        )}
+        {runs.length > 0 && (
+          <div className="text-[10px] text-tcip-muted mb-1">
+            Live runs first, in launch order; other recorded runs follow, sorted by experiment id.
+          </div>
+        )}
+        <ul className="space-y-1">
+          {runs.map((r) => {
+            const isMarked = markedRunIds.has(r.run_id);
+            const reason = unmarkableReason(r);
+            return (
+              <li key={r.run_id}>
+                <div
+                  className={`flex items-start gap-1 p-2 rounded border transition-colors ${
+                    selectedRun === r.run_id && !isMarked
+                      ? "border-tcip-accent bg-tcip-accent/10"
+                      : "border-tcip-border hover:border-tcip-border-hover hover:bg-tcip-hover"
+                  }`}
                 >
-                  <div className="font-mono text-[11px]">{r.run_id}</div>
-                  <div className="text-[10px] text-tcip-muted flex justify-between">
-                    <span>
-                      {r.status}
-                      {r.external && r.status === "running" ? " · agent" : ""}
-                    </span>
-                    {r.best_metric !== undefined && r.best_metric !== null && (
-                      <span className="tabular-nums">best: {Number(r.best_metric).toFixed(3)}</span>
-                    )}
-                  </div>
-                </button>
-                <div className="flex flex-col items-end gap-1 shrink-0">
-                  <div
-                    role="group"
-                    aria-label="Run actions"
-                    className="inline-flex rounded border border-tcip-border overflow-hidden"
+                  <button
+                    type="button"
+                    aria-pressed={selectedRun === r.run_id}
+                    className="flex-1 text-left"
+                    onClick={() => setSelectedRun(r.run_id)}
                   >
-                    <button
-                      type="button"
-                      aria-pressed={isMarked}
-                      aria-label={`Compare ${r.run_id}`}
-                      aria-describedby={reason ? `compare-reason-${r.run_id}` : undefined}
-                      disabled={!isMarked && !!reason}
-                      className={`px-2 py-1 text-[10px] transition-colors disabled:opacity-40 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-tcip-accent/70 ${
-                        isMarked ? "bg-tcip-accent text-white" : "hover:bg-tcip-hover"
-                      }`}
-                      onClick={() => toggleMarked(r)}
+                    <div className="font-mono text-[11px]">
+                      {r.run_id}
+                      {r.experiment_id && r.experiment_id !== r.run_id && (
+                        <span className="text-tcip-muted"> · {r.experiment_id}</span>
+                      )}
+                    </div>
+                    <div className="text-[10px] text-tcip-muted flex justify-between">
+                      <span>
+                        {r.status}
+                        {r.external && r.status === "running" ? " · agent" : ""}
+                      </span>
+                      {r.best_metric !== undefined &&
+                        r.best_metric !== null &&
+                        r.best_metric_name && (
+                          <span className="tabular-nums">
+                            best {VAL_METRIC_PREFIX}
+                            {r.best_metric_name} {Number(r.best_metric).toFixed(3)}
+                          </span>
+                        )}
+                    </div>
+                  </button>
+                  <div className="flex flex-col items-end gap-1 shrink-0">
+                    <div
+                      role="group"
+                      aria-label="Run actions"
+                      className="inline-flex rounded border border-tcip-border overflow-hidden"
                     >
-                      Compare
-                    </button>
-                    {TRAINING_CANCELLABLE.has(r.status) && (
                       <button
                         type="button"
-                        aria-label={`Cancel ${r.run_id}`}
-                        className="px-2 py-1 text-[10px] border-l border-tcip-border hover:bg-tcip-hover transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-tcip-accent/70"
-                        onClick={() => void onCancel(r.run_id)}
+                        aria-pressed={isMarked}
+                        aria-label={`Compare ${r.run_id}`}
+                        aria-describedby={reason ? `compare-reason-${r.run_id}` : undefined}
+                        disabled={!isMarked && !!reason}
+                        className={`px-2 py-1 text-[10px] transition-colors disabled:opacity-40 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-tcip-accent/70 ${
+                          isMarked ? "bg-tcip-accent text-white" : "hover:bg-tcip-hover"
+                        }`}
+                        onClick={() => toggleMarked(r)}
                       >
-                        Cancel
+                        Compare
                       </button>
+                      {TRAINING_CANCELLABLE.has(r.status) && (
+                        <button
+                          type="button"
+                          aria-label={`Cancel ${r.run_id}`}
+                          className="px-2 py-1 text-[10px] border-l border-tcip-border hover:bg-tcip-hover transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-tcip-accent/70"
+                          onClick={() => void onCancel(r.run_id)}
+                        >
+                          Cancel
+                        </button>
+                      )}
+                    </div>
+                    {reason && (
+                      <span
+                        id={`compare-reason-${r.run_id}`}
+                        className="text-[10px] text-tcip-muted text-right max-w-[150px]"
+                      >
+                        {reason}
+                      </span>
                     )}
                   </div>
-                  {reason && (
-                    <span
-                      id={`compare-reason-${r.run_id}`}
-                      className="text-[10px] text-tcip-muted text-right max-w-[150px]"
-                    >
-                      {reason}
-                    </span>
-                  )}
                 </div>
-              </div>
-            </li>
-          );
-        })}
-      </ul>
-    </RunMonitorLayout>
+              </li>
+            );
+          })}
+        </ul>
+      </RunMonitorLayout>
+    </>
   );
 }
