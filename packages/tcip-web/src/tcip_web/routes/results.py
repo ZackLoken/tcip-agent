@@ -30,7 +30,7 @@ import logging
 import os
 from collections.abc import Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal, Optional
+from typing import TYPE_CHECKING, Literal, Optional
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import Response
@@ -148,19 +148,18 @@ def _guarded_project_root(project_root: str) -> Path:
         raise HTTPException(403, str(exc)) from exc
 
 
-def _audit(project_root: str, tool: str, arguments: dict, **extra: Any) -> None:
+def _audit(project_root: str, tool: str, arguments: dict) -> None:
     """Record a GUI results mutation in the project's audit log.
 
     A delivery and the plant mapping behind it are project state, not dataset state: the
     dataset can be read by more than one project, but the export is this project's own
-    outward action. ``extra`` carries a fact the entry shape has no home for, such as the
-    person an action is recorded as coming from. Never fails the request.
+    outward action. Never fails the request.
     """
     if not project_root:
         return
     from tcip_mcp.audit import record_event
 
-    record_event(tool, arguments, source="gui", scope=project_root, **extra)
+    record_event(tool, arguments, source="gui", scope=project_root)
 
 
 # ── Plant mapping ──────────────────────────────────────────────────────
@@ -188,8 +187,10 @@ def build_plant_mapping(payload: BuildMappingPayload, request: Request) -> dict:
     answers 409: the record it would have named is left on disk, refused until a rebuild replaces
     it.
 
-    Answers ``{"mapping", "summary", "unreadable", "nn_tolerance_m"}``; the last is the persisted
-    record's own ``{"value": ..., "source": ...}``, never recomputed here.
+    Answers ``{"mapping", "summary", "unreadable", "nn_tolerance_m", "max_match_distance_m"}``;
+    ``nn_tolerance_m`` is the persisted record's own ``{"value": ..., "source": ...}``, never
+    recomputed here, and ``max_match_distance_m`` is that tolerance's own loosest accepted
+    distance, derived from it through ``plant_mapping.match_gates``.
     """
     from tcip_store.layout_claims import NAME_SEGMENT
 
@@ -263,6 +264,8 @@ def build_plant_mapping(payload: BuildMappingPayload, request: Request) -> dict:
         "summary": summary,
         "unreadable": build.unreadable,
         "nn_tolerance_m": build.nn_tolerance_m,
+        "max_match_distance_m": plant_mapping.match_gates(
+            build.nn_tolerance_m["value"])["max_match_distance_m"],
     }
 
 
@@ -272,6 +275,12 @@ class LoadMappingPayload(BaseModel):
 
 @router.post("/plant_mapping/load")
 def load_plant_mapping(payload: LoadMappingPayload) -> dict:
+    """The persisted mapping under ``payload.name``, or an empty one when nothing is stored.
+
+    Answers ``{"mapping", "nn_tolerance_m", "max_match_distance_m"}`` when a build is found (the
+    latter two ``None`` otherwise), the same tolerance fields ``build_plant_mapping`` answers, so
+    a reopened mapping states the same radius a fresh build would.
+    """
     from tcip_store import StoreError
     from tcip_store.layout_claims import NAME_SEGMENT
 
@@ -286,7 +295,14 @@ def load_plant_mapping(payload: LoadMappingPayload) -> dict:
         build = plant_mapping.load_mapping(root, payload.name)
     except (StoreError, ValueError) as exc:
         raise HTTPException(409, str(exc)) from exc
-    return {"mapping": build.rows() if build is not None else {}}
+    if build is None:
+        return {"mapping": {}, "nn_tolerance_m": None, "max_match_distance_m": None}
+    return {
+        "mapping": build.rows(),
+        "nn_tolerance_m": build.nn_tolerance_m,
+        "max_match_distance_m": plant_mapping.match_gates(
+            build.nn_tolerance_m["value"])["max_match_distance_m"],
+    }
 
 
 @router.get("/plant_mapping/list")

@@ -93,6 +93,8 @@ def test_build_reports_image_count_mapped_count_and_mean_distance_as_three_answe
     """A date's summary keeps the three quantities apart. The fixture's first date makes them three
     different numbers (four images, two plants resolved, three GPS distances recorded), so a summary
     that reused one of them for another would read wrong rather than merely coincide."""
+    from tcip_mcp.pipelines.postprocessing.plant_mapping import NEAREST_MATCH_FACTOR
+
     payload = _capture_fixture(tmp_path)
     body = client.post("/api/results/plant_mapping/build", json=payload).json()
 
@@ -116,6 +118,8 @@ def test_build_reports_image_count_mapped_count_and_mean_distance_as_three_answe
     assert set(body["nn_tolerance_m"]) == {"value", "source"}
     assert isinstance(body["nn_tolerance_m"]["value"], float)
     assert body["nn_tolerance_m"]["source"] in {"grid_pitch", "fallback", "stated", "stated_capped"}
+    assert body["max_match_distance_m"] == pytest.approx(
+        body["nn_tolerance_m"]["value"] * NEAREST_MATCH_FACTOR)
 
 
 def test_build_without_a_stated_tolerance_derives_it_from_the_plot_grid_pitch(
@@ -127,7 +131,8 @@ def test_build_without_a_stated_tolerance_derives_it_from_the_plot_grid_pitch(
     from tcip_mcp.pipelines.postprocessing import plant_mapping
 
     payload = _capture_fixture(tmp_path)
-    client.post("/api/results/plant_mapping/build", json=payload)
+    resp = client.post("/api/results/plant_mapping/build", json=payload)
+    assert resp.status_code == 200, resp.text
 
     build = plant_mapping.load_mapping(tmp_path, payload["name"])
     assert build is not None
@@ -137,12 +142,15 @@ def test_build_without_a_stated_tolerance_derives_it_from_the_plot_grid_pitch(
 def test_build_response_carries_the_persisted_record_own_tolerance_dict(
     client: TestClient, tmp_path: Path,
 ) -> None:
-    """The response's ``nn_tolerance_m`` is the persisted record's own value, not a second
-    computation: the two must agree by construction, never merely by coincidence."""
+    """The response's ``nn_tolerance_m`` equals the persisted record's own value: this cannot
+    prove the route never recomputes it, only that whatever it answers agrees with what
+    ``persist_mapping`` actually wrote."""
     from tcip_mcp.pipelines.postprocessing import plant_mapping
 
     payload = _capture_fixture(tmp_path)
-    body = client.post("/api/results/plant_mapping/build", json=payload).json()
+    resp = client.post("/api/results/plant_mapping/build", json=payload)
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
 
     build = plant_mapping.load_mapping(tmp_path, payload["name"])
     assert build is not None

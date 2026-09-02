@@ -20,7 +20,11 @@ from PIL import Image
 import tcip_store as ts
 from tcip_annotation import json_io
 from tcip_annotation.state import Annotation, BBox
-from tcip_mcp.pipelines.postprocessing.plant_mapping import NN_TOLERANCE_METERS, plant_mapping_key
+from tcip_mcp.pipelines.postprocessing.plant_mapping import (
+    NEAREST_MATCH_FACTOR,
+    NN_TOLERANCE_METERS,
+    plant_mapping_key,
+)
 from tcip_mcp.traits import CENTER_MATCH, get_trait
 from tcip_mcp.tools.phenology_tools import (
     _classification_items,
@@ -75,6 +79,7 @@ def test_build_plant_mapping_wraps_build_and_persists(
     assert res["n_mapped"] + res["n_unmapped"] == 1
     assert "2026-02-11" in res["per_date"]
     assert res["nn_tolerance_m"] == {"value": NN_TOLERANCE_METERS, "source": "fallback"}
+    assert res["max_match_distance_m"] == pytest.approx(NN_TOLERANCE_METERS * NEAREST_MATCH_FACTOR)
     persisted = ts.read(plant_mapping_key(tmp_path, name))
     assert list(persisted["assignments"].keys()) == ["2026-02-11"]
     assert persisted["assignments"]["2026-02-11"][0]["stem"] == "img1"
