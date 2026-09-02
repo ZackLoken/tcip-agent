@@ -6,6 +6,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import numpy as np
+import pytest
+import tifffile
+from PIL import Image
+
 from tcip_annotation import json_io
 from tcip_annotation.state import Annotation, BBox, Point, Polygon
 
@@ -20,11 +25,43 @@ from tcip_mcp.pipelines.region_completeness import (
     annotations_by_cell,
     cell_annotation_digest,
     cell_annotation_digests,
+    dataset_physical_extent,
     default_working_scale_source,
+    raster_pixel_size,
+    raster_pixel_size_reason,
     saved_extents,
     stale_cells,
     working_scale_bar,
 )
+
+# UTM zone 15N: the real projected CRS the fixtures below default to (the same one
+# test_orthomosaic_mapping.py's own fixtures use).
+_UTM_15N_EPSG = 32615
+
+
+def _geokeys(*, model_type: int = 1, projected_epsg: int | None = _UTM_15N_EPSG) -> tuple:
+    entries: list = [1024, 0, 1, model_type]
+    if projected_epsg is not None:
+        entries += [3072, 0, 1, projected_epsg]
+    return (1, 1, 0, len(entries) // 4, *entries)
+
+
+def _write_geotiff(
+    path: Path, *, pixel_scale: tuple = (0.5, 0.5, 0.0), projected_epsg: int | None = _UTM_15N_EPSG,
+    model_type: int = 1, include_transformation_tag: bool = False,
+) -> None:
+    """A striped GeoTIFF written the way tests/test_orthomosaic_mapping.py's own fixtures are
+    (verified this session against pyproj 3.7.2 and tifffile's own reader)."""
+    arr = np.zeros((5, 5, 3), dtype=np.uint8)
+    geokeys = _geokeys(model_type=model_type, projected_epsg=projected_epsg)
+    extratags = [
+        (33550, "d", 3, pixel_scale, False),
+        (33922, "d", 6, (0.0, 0.0, 0.0, 500_000.0, 4_800_000.0, 0.0), False),
+        (34735, "H", len(geokeys), geokeys, False),
+    ]
+    if include_transformation_tag:
+        extratags.append((34264, "d", 16, tuple(1.0 for _ in range(16)), False))
+    tifffile.imwrite(str(path), arr, photometric="rgb", extratags=extratags)
 
 
 def test_region_completeness_path_locator(tmp_path):
@@ -365,3 +402,172 @@ def test_default_working_scale_source_names_the_span_and_disclaims_measurement()
     source = default_working_scale_source(46)
     assert "46" in source
     assert "not a measurement" in source
+
+
+class TestRasterPixelSize:
+    def test_a_projected_geotiff_resolves_its_pixel_size(self, tmp_path):
+        path = tmp_path / "mosaic.tif"
+        _write_geotiff(path, pixel_scale=(0.5, 0.5, 0.0))
+        size = raster_pixel_size(path)
+        assert size is not None
+        assert size.metres_per_px == pytest.approx(0.5)
+        assert raster_pixel_size_reason(path) is None
+
+    def test_a_foot_unit_raster_converts_through_the_pyproj_factor(self, tmp_path):
+        path = tmp_path / "mosaic.tif"
+        _write_geotiff(path, pixel_scale=(1.0, 1.0, 0.0), projected_epsg=2264)
+        size = raster_pixel_size(path)
+        assert size is not None
+        assert size.metres_per_px == pytest.approx(0.3048, abs=1e-3)
+
+    def test_no_georeferencing_tags_has_no_pixel_size(self, tmp_path):
+        path = tmp_path / "plain.tif"
+        Image.fromarray(np.zeros((5, 5, 3), dtype=np.uint8)).save(path)
+        assert raster_pixel_size(path) is None
+        assert raster_pixel_size_reason(path)
+
+    def test_a_rotated_raster_has_no_pixel_size(self, tmp_path):
+        path = tmp_path / "rotated.tif"
+        _write_geotiff(path, include_transformation_tag=True)
+        assert raster_pixel_size(path) is None
+        assert "ModelTransformationTag" in raster_pixel_size_reason(path)
+
+    def test_a_geographic_crs_under_a_projected_model_type_has_no_pixel_size(self, tmp_path):
+        """The raster's own GTModelTypeGeoKey says Projected (read_geotransform admits it), but
+        the EPSG it names resolves to a geographic CRS: a disagreement this module's own
+        is_projected check catches, distinct from read_geotransform's own model-type refusal."""
+        path = tmp_path / "geo.tif"
+        _write_geotiff(path, projected_epsg=4326)
+        assert raster_pixel_size(path) is None
+        assert raster_pixel_size_reason(path) == "its georeferencing is not projected"
+
+    def test_an_unresolvable_epsg_has_no_pixel_size_naming_it_user_defined(self, tmp_path):
+        path = tmp_path / "userdef.tif"
+        _write_geotiff(path, projected_epsg=32767)
+        assert raster_pixel_size(path) is None
+        reason = raster_pixel_size_reason(path)
+        assert "32767" in reason
+        assert "user-defined" in reason
+
+    def test_a_compound_epsg_has_no_pixel_size_naming_it_compound(self, tmp_path):
+        path = tmp_path / "compound.tif"
+        _write_geotiff(path, projected_epsg=7415)
+        assert raster_pixel_size(path) is None
+        reason = raster_pixel_size_reason(path)
+        assert "7415" in reason
+        assert "compound" in reason
+
+    def test_an_anisotropic_raster_has_no_pixel_size(self, tmp_path):
+        path = tmp_path / "aniso.tif"
+        _write_geotiff(path, pixel_scale=(0.5, 0.6, 0.0))
+        assert raster_pixel_size(path) is None
+        assert raster_pixel_size_reason(path) == "its pixel scales differ by axis"
+
+    def test_pixel_scales_within_the_isotropy_slack_still_resolve(self, tmp_path):
+        path = tmp_path / "slack.tif"
+        _write_geotiff(path, pixel_scale=(0.03, 0.030000001, 0.0))
+        size = raster_pixel_size(path)
+        assert size is not None
+        assert size.metres_per_px == pytest.approx(0.03)
+
+    def test_a_npy_raster_is_skipped_as_not_a_tiff(self, tmp_path):
+        path = tmp_path / "array.npy"
+        np.save(path, np.zeros((5, 5, 3), dtype=np.uint8))
+        assert raster_pixel_size(path) is None
+        assert raster_pixel_size_reason(path) == "it is not a TIFF"
+
+    def test_a_photographic_capture_has_no_pixel_size(self, tmp_path):
+        path = tmp_path / "photo.jpg"
+        Image.fromarray(np.zeros((5, 5, 3), dtype=np.uint8)).save(path)
+        assert raster_pixel_size(path) is None
+        assert raster_pixel_size_reason(path) == "it is not a raster"
+
+
+class TestDatasetPhysicalExtent:
+    def _dataset(self, tmp_path: Path) -> tuple[Path, Path, Path]:
+        root = tmp_path / "ds"
+        img_dir = root / "images" / "2026-01-01"
+        ann_dir = root / "annotations" / "2026-01-01"
+        img_dir.mkdir(parents=True)
+        ann_dir.mkdir(parents=True)
+        return root, img_dir, ann_dir
+
+    def test_pools_across_rasters_at_different_pixel_sizes_and_differs_from_the_pixel_median(
+        self, tmp_path,
+    ):
+        root, img_dir, ann_dir = self._dataset(tmp_path)
+        _write_geotiff(img_dir / "a.tif", pixel_scale=(0.5, 0.5, 0.0))
+        json_io.write_annotations(
+            ann_dir / "a.json", [Annotation(subject="leaf", geometry=BBox(0, 0, 10, 4))], 5, 5)
+        _write_geotiff(img_dir / "b.tif", pixel_scale=(1.0, 1.0, 0.0))
+        json_io.write_annotations(
+            ann_dir / "b.json", [Annotation(subject="leaf", geometry=BBox(0, 0, 20, 4))], 5, 5)
+        # A negative georeferenced raster of a third pixel size: contributes no annotation, and
+        # its own pixel size must not skew the median of the two that do contribute.
+        _write_geotiff(img_dir / "c.tif", pixel_scale=(2.0, 2.0, 0.0))
+        json_io.write_annotations(ann_dir / "c.json", [], 5, 5, keep_empty=True)
+
+        extent = dataset_physical_extent(root, "leaf", pixel_sizes={})
+        assert extent is not None
+        assert extent.median_extent_m == pytest.approx(12.5)  # median of [5.0, 20.0] metres
+        assert extent.annotation_count == 2
+        assert extent.image_count == 2
+        # The pooled native-pixel median (10, 20 -> 15.0) is a different number: the metres
+        # conversion is applied per contributor before pooling, never after.
+        assert extent.median_extent_m != 15.0
+        assert extent.metres_per_px_min == pytest.approx(0.5)
+        assert extent.metres_per_px_max == pytest.approx(1.0)
+        assert extent.dates == ("2026-01-01",)
+
+    def test_a_contributor_with_no_known_pixel_size_does_not_contribute(self, tmp_path):
+        root, img_dir, ann_dir = self._dataset(tmp_path)
+        _write_geotiff(img_dir / "a.tif", pixel_scale=(0.5, 0.5, 0.0))
+        json_io.write_annotations(
+            ann_dir / "a.json", [Annotation(subject="leaf", geometry=BBox(0, 0, 10, 4))], 5, 5)
+        Image.fromarray(np.zeros((5, 5, 3), dtype=np.uint8)).save(img_dir / "photo.jpg")
+        json_io.write_annotations(
+            ann_dir / "photo.json",
+            [Annotation(subject="leaf", geometry=BBox(0, 0, 40, 4))], 5, 5)
+
+        extent = dataset_physical_extent(root, "leaf", pixel_sizes={})
+        assert extent is not None
+        assert extent.annotation_count == 1
+        assert extent.image_count == 1
+        assert extent.median_extent_m == pytest.approx(5.0)
+
+    def test_no_annotation_with_a_known_pixel_size_yields_none(self, tmp_path):
+        root, img_dir, ann_dir = self._dataset(tmp_path)
+        Image.fromarray(np.zeros((5, 5, 3), dtype=np.uint8)).save(img_dir / "photo.jpg")
+        json_io.write_annotations(
+            ann_dir / "photo.json",
+            [Annotation(subject="leaf", geometry=BBox(0, 0, 10, 4))], 5, 5)
+        assert dataset_physical_extent(root, "leaf", pixel_sizes={}) is None
+
+    def test_a_dateless_dataset_walks_the_flat_bucket(self, tmp_path):
+        root = tmp_path / "ds"
+        img_dir = root / "images"
+        ann_dir = root / "annotations"
+        img_dir.mkdir(parents=True)
+        ann_dir.mkdir(parents=True)
+        _write_geotiff(img_dir / "a.tif", pixel_scale=(0.5, 0.5, 0.0))
+        json_io.write_annotations(
+            ann_dir / "a.json", [Annotation(subject="leaf", geometry=BBox(0, 0, 10, 4))], 5, 5)
+
+        extent = dataset_physical_extent(root, "leaf", pixel_sizes={})
+        assert extent is not None
+        assert extent.dates == (None,)
+
+    def test_an_ambiguous_image_stem_ends_the_derivation(self, tmp_path):
+        from tcip_mcp.pipelines.data.band_groups import write_band_group_manifest
+        from tcip_mcp.pipelines.image_utils import AmbiguousImageStem
+
+        root, img_dir, _ann_dir = self._dataset(tmp_path)
+        band_a = img_dir / "cap_G.tif"
+        band_b = img_dir / "cap_R.tif"
+        _write_geotiff(band_a, pixel_scale=(0.5, 0.5, 0.0))
+        _write_geotiff(band_b, pixel_scale=(0.5, 0.5, 0.0))
+        write_band_group_manifest(img_dir, "cap", {"Green": band_a, "Red": band_b})
+        _write_geotiff(img_dir / "cap.tif", pixel_scale=(0.5, 0.5, 0.0))
+
+        with pytest.raises(AmbiguousImageStem):
+            dataset_physical_extent(root, "leaf", pixel_sizes={})

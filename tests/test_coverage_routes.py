@@ -59,6 +59,25 @@ def _post_body(image_path: str, cells: list[str], grid: dict, **overrides) -> di
     return body
 
 
+def _write_georeferenced_raster(
+    path: Path, width: int = 100, height: int = 80, pixel_scale: tuple = (1.0, 1.0, 0.0),
+) -> None:
+    """A striped UTM-15N GeoTIFF at ``path``, real georeferencing tags, an explicit pixel size."""
+    import tifffile
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    arr = np.zeros((height, width, 3), dtype=np.uint8)
+    geokeys = (1, 1, 0, 2, 1024, 0, 1, 1, 3072, 0, 1, 32615)  # UTM zone 15N
+    tifffile.imwrite(
+        str(path), arr, photometric="rgb", rowsperstrip=8,
+        extratags=[
+            (33550, "d", 3, pixel_scale, False),
+            (33922, "d", 6, (0.0, 0.0, 0.0, 500_000.0, 4_800_000.0, 0.0), False),
+            (34735, "H", len(geokeys), geokeys, False),
+        ],
+    )
+
+
 def _grid(client: TestClient, path: str, tile_size: int | None = None) -> dict:
     params = {"path": path}
     if tile_size is not None:
@@ -549,6 +568,124 @@ class TestWorkingScale:
         assert body["working_scale_error"]
         assert str(label_path) in body["working_scale_error"]
 
+    def test_an_annotated_image_keeps_its_own_bar_marked_from_this_image(
+        self, client, dated_dataset,
+    ):
+        from tcip_annotation import json_io
+        from tcip_annotation.state import Annotation, BBox
+
+        root, path = dated_dataset
+        json_io.write_annotations(
+            root / "annotations" / "2026-03-01" / "plot.json",
+            [Annotation(subject="catkin", geometry=BBox(0, 0, 10, 4))], 100, 80)
+
+        got = client.get("/api/coverage/completeness", params={"path": path})
+        bar = got.json()["working_scale"]["catkin"]
+        assert bar["from_this_image"] is True
+
+    def test_a_negative_georeferenced_image_falls_back_to_the_dataset_derived_bar(
+        self, client, tmp_path,
+    ):
+        from tcip_annotation import json_io
+        from tcip_annotation.state import Annotation, BBox
+
+        root = tmp_path / "ds"
+        img_dir = root / "images" / "2026-03-01"
+        ann_dir = root / "annotations" / "2026-03-01"
+        _write_georeferenced_raster(img_dir / "annotated.tif", pixel_scale=(0.5, 0.5, 0.0))
+        json_io.write_annotations(
+            ann_dir / "annotated.json",
+            [Annotation(subject="catkin", geometry=BBox(0, 0, 10, 4))], 100, 80)
+        _write_georeferenced_raster(img_dir / "negative.tif", pixel_scale=(0.5, 0.5, 0.0))
+        json_io.write_annotations(ann_dir / "negative.json", [], 100, 80, keep_empty=True)
+
+        got = client.get("/api/coverage/completeness", params={
+            "path": str(img_dir / "negative.tif"), "dataset_root": str(root),
+            "subject": "catkin"})
+        assert got.status_code == 200, got.text
+        body = got.json()
+        bar = body["working_scale"]["catkin"]
+        assert bar is not None
+        assert bar["from_this_image"] is False
+        # Both rasters share one pixel size, so the dataset median (5.0m over 10px) expressed
+        # through this image's own pixel size (0.5 m/px) is the same 10px it started as.
+        assert bar["median_extent_native_px"] == pytest.approx(10.0)
+        assert body["working_scale_reason"] == {}
+
+    def test_no_dataset_annotation_with_a_known_pixel_size_names_the_reason(
+        self, client, tmp_path,
+    ):
+        from tcip_annotation import json_io
+
+        root = tmp_path / "ds"
+        img_dir = root / "images" / "2026-03-01"
+        ann_dir = root / "annotations" / "2026-03-01"
+        _write_georeferenced_raster(img_dir / "negative.tif", pixel_scale=(0.5, 0.5, 0.0))
+        json_io.write_annotations(ann_dir / "negative.json", [], 100, 80, keep_empty=True)
+
+        got = client.get("/api/coverage/completeness", params={
+            "path": str(img_dir / "negative.tif"), "dataset_root": str(root),
+            "subject": "catkin"})
+        body = got.json()
+        assert body["working_scale"]["catkin"] is None
+        assert "no saved catkin annotation on any georeferenced image" in \
+            body["working_scale_reason"]["catkin"]
+
+    def test_two_subjects_share_one_walk_of_the_dataset(self, client, tmp_path, monkeypatch):
+        """Two subjects both needing the dataset-derived bar in one request must not double the
+        walk's own I/O: the raster tag read and the label read are each shared through the
+        pixel-size/label caches, counted here directly against the transform reader and the
+        label reader."""
+        from tcip_annotation import json_io
+        from tcip_annotation.state import Annotation, BBox
+
+        root = tmp_path / "ds"
+        neg_dir = root / "images" / "2026-01-01"
+        neg_ann_dir = root / "annotations" / "2026-01-01"
+        _write_georeferenced_raster(neg_dir / "negative.tif", pixel_scale=(0.5, 0.5, 0.0))
+        json_io.write_annotations(
+            neg_ann_dir / "negative.json", [Annotation(subject="bush", geometry=None)], 100, 80)
+
+        shared_dir = root / "images" / "2026-02-01"
+        shared_ann_dir = root / "annotations" / "2026-02-01"
+        _write_georeferenced_raster(shared_dir / "shared.tif", pixel_scale=(0.5, 0.5, 0.0))
+        json_io.write_annotations(
+            shared_ann_dir / "shared.json",
+            [Annotation(subject="catkin", geometry=BBox(0, 0, 10, 4)),
+             Annotation(subject="bush", geometry=BBox(0, 0, 20, 4))], 100, 80)
+
+        import tcip_annotation.json_io as json_io_module
+        import tcip_mcp.pipelines.postprocessing.orthomosaic_mapping as ortho_module
+
+        calls = {"annotations": 0, "geotransform": 0}
+        real_read_annotations = json_io_module.read_annotations
+        real_read_geotransform = ortho_module.read_geotransform
+
+        def counting_read_annotations(path):
+            calls["annotations"] += 1
+            return real_read_annotations(path)
+
+        def counting_read_geotransform(path):
+            calls["geotransform"] += 1
+            return real_read_geotransform(path)
+
+        monkeypatch.setattr(json_io_module, "read_annotations", counting_read_annotations)
+        monkeypatch.setattr(ortho_module, "read_geotransform", counting_read_geotransform)
+
+        got = client.get("/api/coverage/completeness", params={
+            "path": str(neg_dir / "negative.tif"), "dataset_root": str(root),
+            "subject": "catkin"})
+        assert got.status_code == 200, got.text
+        body = got.json()
+        assert body["working_scale"]["catkin"] is not None
+        assert body["working_scale"]["bush"] is not None
+
+        # This image's own geotransform reads twice regardless of subject count (its own pixel
+        # size, plus the pre-existing counts-grid derivation); the shared raster reads once.
+        assert calls["geotransform"] == 3
+        # One label read per file the walk visits, shared across both subjects too.
+        assert calls["annotations"] == 3
+
 
 class TestCoverageRecord:
     def test_post_get_roundtrip(self, client, dated_dataset):
@@ -580,17 +717,46 @@ class TestCoverageRecord:
             "path": path, "subject": "bush", "date": "2026-03-01"}).json()["coverage"]
         assert record["cells_served_at_native"] == ["A1", "B1"]
 
-    def test_mismatched_grid_replaces_wholesale_and_flags(self, client, dated_dataset):
+    def test_mismatched_grid_without_replace_refuses_and_leaves_the_record_byte_identical(
+        self, client, dated_dataset,
+    ):
         _root, path = dated_dataset
         client.post("/api/coverage",
                     json=_post_body(path, ["A1"], _grid(client, path, tile_size=64)))
+        before = client.get("/api/coverage", params={
+            "path": path, "subject": "bush", "date": "2026-03-01"}).json()["coverage"]
+
         resp = client.post("/api/coverage",
                            json=_post_body(path, ["A1"], _grid(client, path, tile_size=100)))
+        assert resp.status_code == 409
+        detail = resp.json()["detail"]
+        assert detail["error"] == "coverage_lattice_mismatch"
+        assert detail["stored_grid"]["tile_size"] == 64
+        assert detail["cells_seen"] == 0
+
+        after = client.get("/api/coverage", params={
+            "path": path, "subject": "bush", "date": "2026-03-01"}).json()["coverage"]
+        assert after == before
+
+    def test_mismatched_grid_replaces_wholesale_and_flags_with_the_replace_flag(
+        self, client, dated_dataset,
+    ):
+        root, path = dated_dataset
+        client.post("/api/coverage",
+                    json=_post_body(path, ["A1"], _grid(client, path, tile_size=64)))
+        resp = client.post("/api/coverage",
+                           json=_post_body(path, ["A1"], _grid(client, path, tile_size=100),
+                                           replace=True))
+        assert resp.status_code == 200, resp.text
         assert resp.json()["replaced"] is True
         record = client.get("/api/coverage", params={
             "path": path, "subject": "bush", "date": "2026-03-01"}).json()["coverage"]
         assert record["grid"]["tile_size"] == 100
         assert record["cells_served_at_native"] == ["A1"]
+
+        entries = _audit_entries(root, "gui_view_coverage")
+        assert entries[-1]["arguments"]["replace_confirmed"] is True
+        assert entries[0]["arguments"]["replace_confirmed"] is False
 
     def test_subject_is_required(self, client, dated_dataset):
         _root, path = dated_dataset
@@ -822,14 +988,15 @@ class TestCoverageRecord:
     def test_post_coverage_replace_path_over_an_old_shape_record_succeeds(
         self, client, dated_dataset,
     ):
-        """A mismatched grid replaces the record wholesale, with nothing to merge into, so an
-        old-shape stored record does not block it."""
+        """A confirmed replace overwrites the record wholesale, with nothing to merge into, so
+        an old-shape stored record does not block it."""
         root, path = dated_dataset
         grid64 = _grid(client, path, tile_size=64)
         self._seed_old_shape_record(root, "bush/2026-03-01", "plot.tif", grid64)
         grid100 = _grid(client, path, tile_size=100)
 
-        resp = client.post("/api/coverage", json=_post_body(path, ["A1"], grid100))
+        resp = client.post("/api/coverage",
+                           json=_post_body(path, ["A1"], grid100, replace=True))
         assert resp.status_code == 200, resp.text
         assert resp.json()["replaced"] is True
         record = client.get("/api/coverage", params={
@@ -843,7 +1010,7 @@ class TestCoverageRecord:
                                     cells_seen_at_scale={"B1": 0.2}))
         resp = client.post("/api/coverage",
                            json=_post_body(path, [], _grid(client, path, tile_size=100),
-                                           cells_seen_at_scale={"A1": 0.2}))
+                                           cells_seen_at_scale={"A1": 0.2}, replace=True))
         assert resp.json()["replaced"] is True
         record = client.get("/api/coverage", params={
             "path": path, "subject": "bush", "date": "2026-03-01"}).json()["coverage"]
@@ -1329,6 +1496,86 @@ class TestCompletenessRoute:
         assert entry["working_scale_bar_at_write"]["median_extent_native_px"] == 10.0
         assert entry["working_scale_bar_at_write"]["value"] == 46 / 10.0
         assert entry["seen_on_record"] == {"at_scale": None, "grid_matched": False}
+        assert entry["working_scale_bar_at_write"]["from_this_image"] is True
+
+    def test_attesting_a_negative_stamps_the_dataset_derived_bar(self, client, tmp_path):
+        from tcip_annotation import json_io
+        from tcip_annotation.state import Annotation, BBox
+
+        root = tmp_path / "ds"
+        img_dir = root / "images" / "2026-03-01"
+        ann_dir = root / "annotations" / "2026-03-01"
+        _write_georeferenced_raster(img_dir / "annotated.tif", pixel_scale=(0.5, 0.5, 0.0))
+        json_io.write_annotations(
+            ann_dir / "annotated.json",
+            [Annotation(subject="catkin", geometry=BBox(0, 0, 10, 4))], 100, 80)
+        _write_georeferenced_raster(img_dir / "negative.tif", pixel_scale=(0.5, 0.5, 0.0))
+        json_io.write_annotations(ann_dir / "negative.json", [], 100, 80, keep_empty=True)
+
+        neg_path = str(img_dir / "negative.tif")
+        grid = _grid(client, neg_path, tile_size=64)
+        resp = client.post("/api/coverage/completeness", json={
+            "image_path": neg_path, "subject": "catkin", "dataset_root": str(root),
+            "grid": _grid_only(grid), "cell": "A1", "complete": True, "user": "breeder",
+            "view_scale": 0.5})
+        assert resp.status_code == 200, resp.text
+        assert "working_scale_error" not in resp.json()
+
+        record = client.get("/api/coverage/completeness", params={
+            "path": neg_path, "dataset_root": str(root)}).json()["by_subject"]["catkin"]
+        bar = record["cells_attested_view"]["A1"]["working_scale_bar_at_write"]
+        assert bar is not None
+        assert bar["from_this_image"] is False
+        assert bar["median_extent_native_px"] == pytest.approx(10.0)
+
+    def test_a_failed_pre_transaction_derivation_stamps_a_null_bar_and_returns_the_error(
+        self, client, dated_dataset, monkeypatch,
+    ):
+        import tcip_mcp.pipelines.region_completeness as region_completeness_module
+
+        def _raise(*args, **kwargs):
+            raise OSError("disk read failed")
+
+        monkeypatch.setattr(region_completeness_module, "raster_pixel_size", _raise)
+
+        root, path = dated_dataset
+        grid = _grid(client, path, tile_size=64)
+        resp = self._toggle(client, path, grid, "A1")
+        assert resp.status_code == 200, resp.text
+        assert "disk read failed" in resp.json()["working_scale_error"]
+
+        record = client.get(
+            "/api/coverage/completeness", params={"path": path}).json()["by_subject"]["catkin"]
+        entry = record["cells_attested_view"]["A1"]
+        assert entry["working_scale_bar_at_write"] is None
+
+    def test_a_stored_bar_without_the_from_this_image_key_reads(self, client, dated_dataset):
+        import tcip_store as ts
+
+        from tcip_mcp.dataset_layout import region_completeness_key
+
+        root, path = dated_dataset
+        grid = _grid(client, path, tile_size=64)
+        old_record = {
+            "grid": _grid_only(grid), "cells_complete": ["A1"], "attested_by": "user:z",
+            "attested_at": "2026-01-01T00:00:00+00:00", "stem": Path(path).stem,
+            "date": "2026-03-01", "subject": "catkin",
+            "cells_attested_view": {"A1": {
+                "view_scale": 0.5,
+                "working_scale_bar_at_write": {
+                    "value": 4.6, "median_extent_native_px": 10.0, "annotation_count": 1,
+                    "judged_span_px": 46, "source": "s"},
+                "seen_on_record": {"at_scale": None, "grid_matched": False},
+            }},
+        }
+        ts.replace(region_completeness_key(root), {f"catkin/{Path(path).stem}": old_record},
+                  expect=ts.Version.ABSENT)
+
+        got = client.get("/api/coverage/completeness", params={"path": path})
+        assert got.status_code == 200, got.text
+        bar = got.json()["by_subject"]["catkin"]["cells_attested_view"]["A1"][
+            "working_scale_bar_at_write"]
+        assert "from_this_image" not in bar
 
     def test_attesting_reads_seen_on_record_from_the_matching_coverage_bucket(
         self, client, dated_dataset,

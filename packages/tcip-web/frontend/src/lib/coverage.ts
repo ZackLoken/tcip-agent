@@ -70,8 +70,10 @@ export interface CompletenessRecord {
  *  case. */
 /** `working_scale` (subject -> bar or null) is derived fresh from the label file on every read,
  *  never a value the browser echoes back; `working_scale_error` names why it is empty (a
- *  label-read failure), distinct from `counts_error` (a raster-read failure costs only the
- *  counts, never the bar). */
+ *  label-read failure, or a failure in the pixel-size/dataset-extent derivation), distinct from
+ *  `counts_error` (a raster-read failure costs only the counts, never the bar).
+ *  `working_scale_reason` (subject -> clause) names why a null bar has none, per subject, for
+ *  every subject `working_scale` maps to null; absent for a subject whose bar exists. */
 export interface CompletenessResponse {
   by_subject: Record<string, CompletenessRecord>;
   annotation_counts: Record<string, Record<string, number>>;
@@ -79,6 +81,7 @@ export interface CompletenessResponse {
   counts_error: string | null;
   working_scale: Record<string, WorkingScaleBar | null>;
   working_scale_error: string | null;
+  working_scale_reason: Record<string, string>;
 }
 
 /** Cells genuinely complete right now: attested, minus any that have since gone stale. A stale
@@ -329,4 +332,14 @@ export function completeWarningMessage(w: {
 export function noWorkingScaleToast(subject: string | null, reason: string): string {
   if (!subject) return `Complete: ${reason}, so coverage was not checked`;
   return `Complete: no working scale for ${subject} on this image (${reason}), so coverage was not checked`;
+}
+
+/** The sentence a Complete toast adds when the coverage tracker's replace hold stands: cells
+ *  seen on a previous lattice have not been discarded, so this lattice's own sweeps are still
+ *  unsaved. Stated beside whatever else the toggle already says, never in place of it. */
+export function replaceRequiredToastSentence(cellsSeen: number): string {
+  return (
+    `${cellsSeen} cell${cellsSeen === 1 ? "" : "s"} seen on a previous lattice ` +
+    "are not yet replaced, so coverage progress on this lattice is still unsaved."
+  );
 }

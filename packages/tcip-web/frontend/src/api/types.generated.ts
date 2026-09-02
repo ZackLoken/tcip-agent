@@ -47,6 +47,7 @@ export interface WorkingScaleBar {
   annotation_count: number;
   judged_span_px: number;
   source: string;
+  from_this_image?: boolean | null;
 }
 
 export interface CoverageViewing {
@@ -74,6 +75,7 @@ export interface CoveragePayload {
   cells_served_at_native?: string[];
   cells_seen_at_scale?: Record<string, number>;
   viewing: CoverageViewing;
+  replace?: boolean;
 }
 
 export interface CompletenessSetPayload {

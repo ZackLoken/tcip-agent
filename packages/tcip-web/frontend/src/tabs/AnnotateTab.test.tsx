@@ -1203,6 +1203,7 @@ describe("AnnotateTab Map tool", () => {
       counts_error: null,
       working_scale: {},
       working_scale_error: null,
+      working_scale_reason: {},
     });
     useStore.getState().setRegistry({ tip: {} });
     useStore.setState((s) => ({
@@ -1263,6 +1264,7 @@ describe("AnnotateTab Map tool", () => {
       counts_error: null,
       working_scale: {},
       working_scale_error: null,
+      working_scale_reason: {},
     });
     useStore.getState().setRegistry({ tip: {} });
     useStore.setState((s) => ({
@@ -1288,6 +1290,7 @@ describe("AnnotateTab completeness refresh and attestation control", () => {
       counts_error: null,
       working_scale: {},
       working_scale_error: null,
+      working_scale_reason: {},
     });
     render(<AnnotateTab />);
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
@@ -1323,6 +1326,7 @@ describe("AnnotateTab completeness refresh and attestation control", () => {
       counts_error: null,
       working_scale: {},
       working_scale_error: null,
+      working_scale_reason: {},
     });
     vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
       width: 200,
@@ -1410,6 +1414,7 @@ describe("AnnotateTab completeness refresh and attestation control", () => {
       counts_error: null,
       working_scale: {},
       working_scale_error: null,
+      working_scale_reason: {},
     });
     vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
       width: 200,
@@ -1478,6 +1483,7 @@ describe("AnnotateTab completeness refresh and attestation control", () => {
       counts_error: null,
       working_scale: {},
       working_scale_error: null,
+      working_scale_reason: {},
     });
     render(<AnnotateTab />);
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));

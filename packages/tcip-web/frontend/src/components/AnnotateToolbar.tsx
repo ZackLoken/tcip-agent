@@ -17,7 +17,8 @@ import { DisclosureChevron } from "@/components/CollapsibleSection";
 import { useDisclosure } from "@/hooks/useDisclosure";
 import { stepTarget, useImageNav } from "@/hooks/useImageNav";
 import { showsBandPicker, type BandSelection } from "@/lib/bandSelection";
-import { noWorkingScaleToast } from "@/lib/coverage";
+import { noWorkingScaleToast, replaceRequiredToastSentence } from "@/lib/coverage";
+import type { ReplaceRequired } from "@/lib/coverageTracker";
 import { canvasHoldsSubject } from "@/lib/imageStatus";
 import { imagePath } from "@/lib/paths";
 import { useStore } from "@/store";
@@ -80,6 +81,7 @@ export function AnnotateToolbar({
   workingScaleReason,
   workingScaleSubject,
   coverageMultiCell,
+  replaceRequired,
 }: {
   onSave: () => void;
   saveDisabled: boolean;
@@ -101,6 +103,9 @@ export function AnnotateToolbar({
   // The Map tool is offered only once the raster's coverage grid holds more than one cell; the
   // no-bar/coverage-warning toast is offered only then too, since there is no tracking otherwise.
   coverageMultiCell?: boolean;
+  // The coverage tracker's replace hold, or null: the Complete toast names it beside whatever
+  // else it already says, since a hold means this lattice's own sweeps are still unsaved.
+  replaceRequired?: ReplaceRequired | null;
 }) {
   const dataset = useStore((s) => s.gui.dataset);
   const mode = useStore((s) => s.gui.mode);
@@ -257,13 +262,16 @@ export function AnnotateToolbar({
         : "unannotated";
     if (next && coverageMultiCell) {
       const warning = completeWarning?.();
-      if (warning) {
-        useStore.getState().pushToast(warning, "info");
-      } else if (workingScaleReason) {
-        useStore
-          .getState()
-          .pushToast(noWorkingScaleToast(workingScaleSubject ?? null, workingScaleReason), "info");
-      }
+      const base =
+        warning ??
+        (workingScaleReason
+          ? noWorkingScaleToast(workingScaleSubject ?? null, workingScaleReason)
+          : null);
+      const holdSentence = replaceRequired
+        ? replaceRequiredToastSentence(replaceRequired.cellsSeen)
+        : null;
+      const message = [base, holdSentence].filter((p): p is string => !!p).join(" ");
+      if (message) useStore.getState().pushToast(message, "info");
     }
     await writeCompleteStatus(newStatus);
   }

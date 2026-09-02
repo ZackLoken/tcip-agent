@@ -67,7 +67,12 @@ class WorkingScaleBar(BaseModel):
     ``annotation_count`` box/polygon annotations) spans ``judged_span_px`` screen pixels.
     Derived from the label file alone (:func:`tcip_mcp.pipelines.region_completeness.
     working_scale_bar`), never echoed back from the browser: ``source`` states in one line that
-    ``judged_span_px`` is a documented default, not a measurement of object legibility."""
+    ``judged_span_px`` is a documented default, not a measurement of object legibility.
+
+    ``from_this_image`` is true when the median is over this image's own saved annotations,
+    false when it is the dataset's physical median expressed through this image's own pixel
+    size (:func:`tcip_mcp.pipelines.region_completeness.dataset_physical_extent`); a stored bar
+    written before this field existed carries no key, read as absent, never as false."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -76,6 +81,7 @@ class WorkingScaleBar(BaseModel):
     annotation_count: int
     judged_span_px: int
     source: str
+    from_this_image: Optional[bool] = None
 
 
 class CoverageViewing(BaseModel):

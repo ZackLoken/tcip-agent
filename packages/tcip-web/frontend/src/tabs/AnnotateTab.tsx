@@ -1382,6 +1382,7 @@ export function AnnotateTab() {
         workingScaleReason={completeness.workingScaleReason}
         workingScaleSubject={activeSubject}
         coverageMultiCell={coverageMultiCell}
+        replaceRequired={coverage.replaceRequired}
       />
       <div className="relative flex-1 flex flex-col min-h-0">
         <CanvasStage
@@ -1536,7 +1537,8 @@ export function AnnotateTab() {
               !!activeCoverageCell && completeness.activeStale.has(activeCoverageCell.name)
             }
             otherLattice={completeness.otherLattice}
-            sweptOtherLattice={coverage.sweptOtherLattice}
+            replaceRequired={coverage.replaceRequired}
+            onArmReplace={coverage.armReplace}
             swept={coverage.swept}
             pending={coverage.pending}
             coarserCount={coverage.coarserCount}

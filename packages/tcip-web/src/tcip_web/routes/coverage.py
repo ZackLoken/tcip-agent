@@ -62,6 +62,10 @@ _CONFORM_HINT = (
 # decodeRefusal parses detail as an object; coverageTracker.ts's outbox reads it as terminal).
 AUDIT_ENTRY_NOT_WRITTEN = "audit_entry_not_written"
 
+# The stable marker post_coverage's 409 body carries for a grid mismatch with no replace flag;
+# coverageTracker.ts reads it to set the tracker's replace hold, never to retry or drop the push.
+COVERAGE_LATTICE_MISMATCH = "coverage_lattice_mismatch"
+
 
 def _require_date_matches_path(image_path: str, date: Optional[str]) -> None:
     """Refuse a posted ``date`` that disagrees with the date :func:`parse_image_path` reads off
@@ -217,7 +221,7 @@ def get_coverage(
     (400), naming ``scripts/conform_view_coverage_viewing.py`` rather than serving it as-is."""
     from tcip_mcp.dataset_layout import status_bucket, view_coverage_key
 
-    _require_subject(subject)
+    subject = _require_subject(subject)
     root = _resolve_root(path, dataset_root)
     store = tcip_store.read(view_coverage_key(root), default={})
     if not isinstance(store, dict):
@@ -237,7 +241,10 @@ class CoveragePayload(BaseModel):
     served under. ``date`` and ``viewing`` carry no default: a non-dated dataset must still pass
     ``date: null`` explicitly, so an image under a date bucket can never silently land in the
     dateless one, and every post states the viewing context it was served under rather than the
-    model quietly filling in one no browser ever chose."""
+    model quietly filling in one no browser ever chose. ``replace`` confirms a grid mismatch's
+    wholesale replace of the stored record; a first record (no prior record at all) needs no
+    flag, and a mismatched grid without one refuses with 409 rather than silently discarding a
+    previous lattice's sweeps."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -249,6 +256,7 @@ class CoveragePayload(BaseModel):
     cells_served_at_native: list[str] = []
     cells_seen_at_scale: dict[str, float] = {}
     viewing: CoverageViewing
+    replace: bool = False
 
 
 @router.post("")
@@ -257,13 +265,16 @@ def post_coverage(payload: CoveragePayload) -> dict:
 
     Merge when the stored record's grid matches the posted one: served cells union, and
     ``cells_seen_at_scale`` keeps the greater value per cell (a cell's recorded scale only ever
-    rises). A mismatched grid replaces the record wholesale and the response flags it
-    (``replaced``), since the record carries the grid it was accumulated against precisely so a
-    derivation change can never silently misread old cell names. Cell names are validated
-    against the posted grid's own cells; unknown names are refused. On the merge path the stored
-    record is validated against ``CoverageRecord`` before its cells are folded in, naming the
-    conform script when it no longer holds that shape; the replace path overwrites it wholesale,
-    since there is nothing to merge into.
+    rises). A mismatched grid against an existing record refuses with 409
+    (``COVERAGE_LATTICE_MISMATCH``, naming the stored grid and its ``cells_seen`` count) unless
+    ``payload.replace`` is true, since the record carries the grid it was accumulated against
+    precisely so a derivation change can never silently discard a previous lattice's sweeps; with
+    the flag the record is replaced wholesale and the response flags it (``replaced``), and the
+    audit line carries ``replace_confirmed``. A first record (no prior record at all) needs no
+    flag. Cell names are validated against the posted grid's own cells; unknown names are
+    refused. On the merge path the stored record is validated against ``CoverageRecord`` before
+    its cells are folded in, naming the conform script when it no longer holds that shape; the
+    replace path overwrites it wholesale, since there is nothing to merge into.
 
     A write happens, and is audited, only when the merge actually changes something: a raised or
     newly-seen cell, a newly served cell, a changed ``viewing``, or a replace. An unchanged push
@@ -315,7 +326,19 @@ def post_coverage(payload: CoveragePayload) -> dict:
         seen_added = dict(seen)
         viewing_changed = True
         grid_matches = isinstance(existing, dict) and existing.get("grid") == grid
-        if grid_matches:
+        if not grid_matches and isinstance(existing, dict) and not payload.replace:
+            stored_grid = existing.get("grid") or {}
+            raise HTTPException(409, {
+                "error": COVERAGE_LATTICE_MISMATCH,
+                "message": (
+                    f"{image_name}'s stored coverage record was accumulated against a grid "
+                    f"this push's grid disagrees with; pass replace: true to discard it and "
+                    f"record on the new lattice"),
+                "stored_grid": {"cols": stored_grid.get("cols"), "rows": stored_grid.get("rows"),
+                                 "tile_size": stored_grid.get("tile_size")},
+                "cells_seen": len(existing.get("cells_seen_at_scale") or {}),
+            })
+        if grid_matches and isinstance(existing, dict):
             _validated_record(image_name, existing)
             prior_served = set(existing.get("cells_served_at_native") or [])
             prior_seen = dict(existing.get("cells_seen_at_scale") or {})
@@ -360,7 +383,8 @@ def post_coverage(payload: CoveragePayload) -> dict:
             {"image_name": image_name, "subject": subject, "date": payload.date, "grid": grid,
              "cells_seen_added": seen_added, "cells_served_at_native_added": served_added,
              "viewing_changed": viewing_changed,
-             "viewing": viewing_dict if viewing_changed else None, "replaced": replaced},
+             "viewing": viewing_dict if viewing_changed else None, "replaced": replaced,
+             "replace_confirmed": payload.replace},
             source="gui", scope=root,
         )
     except AuditEntryNotWritten as exc:
@@ -427,11 +451,20 @@ def get_completeness(
     ``working_scale`` (subject -> bar or ``null``) is every subject present in the raster's
     label file, plus the requested ``subject`` when absent from it, each derived fresh from that
     file (:func:`tcip_mcp.pipelines.region_completeness.working_scale_bar`) -- never a value the
-    browser echoes back. The label file is read once, ahead of and outside the raster-grid
-    block, and the same annotations feed ``annotation_counts``: a raster-read failure (a missing
-    file, an incomplete band group) leaves the bar standing and only costs ``counts_error``,
-    while a label-read failure empties both ``working_scale`` and ``annotation_counts``, named in
-    ``working_scale_error``/``counts_error`` alike.
+    browser echoes back. When a subject saved no box or polygon annotation of its own on this
+    image, its bar falls back to the dataset's physical median for that subject
+    (:func:`tcip_mcp.pipelines.region_completeness.dataset_physical_extent`), expressed through
+    this image's own pixel size (:func:`tcip_mcp.pipelines.region_completeness.raster_pixel_size`)
+    when both are known; the served/stored dict's ``from_this_image`` says which branch produced
+    it. Where neither exists, ``working_scale[subject]`` stays null and
+    ``working_scale_reason: dict[str, str]`` names why, per subject. The label file is read once,
+    ahead of and outside the raster-grid block, and the same annotations feed
+    ``annotation_counts``: a raster-read failure (a missing file, an incomplete band group) leaves
+    the bar standing and only costs ``counts_error``, while a label-read failure empties both
+    ``working_scale`` and ``annotation_counts``, named in ``working_scale_error``/``counts_error``
+    alike; a failure in the pixel-size/dataset-extent derivation alone (an ``AmbiguousImageStem``,
+    an unreadable label elsewhere in the dataset, an ``OSError``) costs only the bars it would have
+    produced and is named the same way, in ``working_scale_error``.
 
     ``annotation_counts`` (subject -> cell name -> count) is every subject's saved-annotation
     count per cell, binned against ``counts_grid`` (:func:`_grid_for_raster`, the same
@@ -449,8 +482,13 @@ def get_completeness(
     from tcip_mcp.pipelines.data.band_groups import BandGroupIncomplete
     from tcip_mcp.pipelines.reference_grid import JUDGED_SPAN_PX, reference_cells
     from tcip_mcp.pipelines.region_completeness import (
+        PixelSize,
         annotation_counts_by_cell,
+        dataset_extent_source,
+        dataset_physical_extent,
         default_working_scale_source,
+        raster_pixel_size,
+        raster_pixel_size_reason,
         saved_extents,
         stale_cells,
         working_scale_bar,
@@ -493,18 +531,69 @@ def get_completeness(
     except (UnreadableLabelDocument, ValueError, FileNotFoundError, OSError) as exc:
         label_error = str(exc)
 
+    working_scale_reason: dict[str, str] = {}
+    dataset_error: Optional[str] = None
     if label_error is not None:
         working_scale: dict[str, Optional[dict]] = {}
     else:
         subjects = {a.subject for a in annotations if a.subject}
         if subject:
             subjects.add(subject)
-        source = default_working_scale_source(JUDGED_SPAN_PX)
-        working_scale = {
-            subj: working_scale_bar(
-                saved_extents(annotations, subj), judged_span_px=JUDGED_SPAN_PX, source=source)
-            for subj in subjects
-        }
+        own_source = default_working_scale_source(JUDGED_SPAN_PX)
+        working_scale = {}
+        pixel_sizes: dict[Path, Optional[PixelSize]] = {}
+        label_cache: dict[Path, list] = {}
+        this_image_pixel_size: Optional[PixelSize] = None
+        this_image_pixel_size_reason: Optional[str] = None
+        this_image_pixel_size_checked = False
+        for subj in sorted(subjects):
+            own_bar = working_scale_bar(
+                saved_extents(annotations, subj), judged_span_px=JUDGED_SPAN_PX,
+                source=own_source)
+            if own_bar is not None:
+                own_bar["from_this_image"] = True
+                working_scale[subj] = own_bar
+                continue
+            if not this_image_pixel_size_checked:
+                this_image_pixel_size_checked = True
+                if src not in pixel_sizes:
+                    pixel_sizes[src] = raster_pixel_size(src)
+                this_image_pixel_size = pixel_sizes[src]
+                if this_image_pixel_size is None:
+                    this_image_pixel_size_reason = raster_pixel_size_reason(src)
+            if this_image_pixel_size is None:
+                working_scale[subj] = None
+                working_scale_reason[subj] = (
+                    f"no saved box or polygon annotation of {subj} on this image and no known "
+                    f"pixel size ({this_image_pixel_size_reason})")
+                continue
+            if dataset_error is not None:
+                working_scale[subj] = None
+                continue
+            try:
+                extent = dataset_physical_extent(
+                    root, subj, pixel_sizes=pixel_sizes, label_cache=label_cache)
+            except (OSError, ValueError, UnreadableLabelDocument) as exc:
+                dataset_error = str(exc)
+                working_scale[subj] = None
+                continue
+            if extent is None:
+                working_scale[subj] = None
+                working_scale_reason[subj] = (
+                    f"no saved {subj} annotation on any georeferenced image with a known pixel "
+                    "size")
+                continue
+            native_extent_px = extent.median_extent_m / this_image_pixel_size.metres_per_px
+            dataset_bar = working_scale_bar(
+                [native_extent_px], judged_span_px=JUDGED_SPAN_PX,
+                source=dataset_extent_source(
+                    subj, extent, this_image_pixel_size.metres_per_px, JUDGED_SPAN_PX))
+            assert dataset_bar is not None
+            dataset_bar["annotation_count"] = extent.annotation_count
+            dataset_bar["from_this_image"] = False
+            working_scale[subj] = dataset_bar
+
+    working_scale_error = label_error if label_error is not None else dataset_error
 
     annotation_counts: dict[str, dict[str, int]] = {}
     counts_grid: Optional[dict] = None
@@ -521,7 +610,8 @@ def get_completeness(
 
     return {"by_subject": by_subject, "annotation_counts": annotation_counts,
             "counts_grid": counts_grid, "counts_error": counts_error,
-            "working_scale": working_scale, "working_scale_error": label_error}
+            "working_scale": working_scale, "working_scale_error": working_scale_error,
+            "working_scale_reason": working_scale_reason}
 
 
 @router.post("/completeness")
@@ -542,6 +632,15 @@ def post_completeness(payload: CompletenessSetPayload) -> dict:
     different lattices; the response and the audit line both carry the discarded record's grid
     and cells (``replaced``, null when nothing was discarded), the way ``post_coverage`` states
     its own replacement.
+
+    An attestation stamps the bar the breeder actually swept against: this image's own saved
+    annotations first, the dataset's physical median (:func:`~tcip_mcp.pipelines.
+    region_completeness.dataset_physical_extent`) expressed through this image's own pixel size
+    when the image saved none of its own. Both are resolved once, before the transaction opens
+    (neither reads this image's label file, which stays a single read inside it); a failure there
+    (an ``AmbiguousImageStem``, a bad manifest, an ``OSError``) never refuses the cell -- the
+    attestation proceeds and stamps a null bar, and the failure is named in the response's
+    ``working_scale_error`` (present only when one occurred).
     """
     from tcip_annotation.json_io import UnreadableLabelDocument, read_annotations
 
@@ -557,7 +656,15 @@ def post_completeness(payload: CompletenessSetPayload) -> dict:
     )
     from tcip_mcp.pipelines.reference_grid import JUDGED_SPAN_PX, reference_cells
     from tcip_mcp.pipelines.region_completeness import (
-        cell_annotation_digest, default_working_scale_source, saved_extents, working_scale_bar,
+        DatasetExtent,
+        PixelSize,
+        cell_annotation_digest,
+        dataset_extent_source,
+        dataset_physical_extent,
+        default_working_scale_source,
+        raster_pixel_size,
+        saved_extents,
+        working_scale_bar,
     )
     from tcip_web.identity import resolve_user, user_id
 
@@ -583,6 +690,24 @@ def post_completeness(payload: CompletenessSetPayload) -> dict:
     complete = payload.complete
     image_name = Path(payload.image_path).name
 
+    # Resolved before the transaction opens: neither reads this image's own label file, so the
+    # lock below holds no directory walk and a failure here never refuses the cell.
+    dataset_pixel_size: Optional[PixelSize] = None
+    dataset_extent: Optional[DatasetExtent] = None
+    working_scale_derivation_error: Optional[str] = None
+    if complete:
+        try:
+            img_path = Path(payload.image_path)
+            pixel_sizes: dict[Path, Optional[PixelSize]] = {img_path: raster_pixel_size(img_path)}
+            dataset_pixel_size = pixel_sizes[img_path]
+            if dataset_pixel_size is not None:
+                dataset_extent = dataset_physical_extent(
+                    root, subject, pixel_sizes=pixel_sizes)
+        except (OSError, ValueError, UnreadableLabelDocument) as exc:
+            working_scale_derivation_error = str(exc)
+            dataset_pixel_size = None
+            dataset_extent = None
+
     # Digest key named first, so it is applied first: stale_cells fails closed on a missing
     # digest, so a stamp must never land after the attestation that points at it.
     with tcip_store.transaction(digest_key, completeness_key) as txn:
@@ -603,9 +728,9 @@ def post_completeness(payload: CompletenessSetPayload) -> dict:
         store = normalize_region_completeness_store(raw_store)
         existing = store.get(bucket)
         grid_matches = existing is not None and existing.get("grid") == grid
-        cells_complete = set(existing.get("cells_complete") or []) if grid_matches else set()
-        cells_attested_view = (
-            dict(existing.get("cells_attested_view") or {}) if grid_matches else {})
+        matched_existing = existing if grid_matches and existing is not None else None
+        cells_complete = set((matched_existing or {}).get("cells_complete") or [])
+        cells_attested_view = dict((matched_existing or {}).get("cells_attested_view") or {})
 
         if not complete and payload.cell not in cells_complete:
             # Nothing to unattest here, whether from no record, a different lattice, or a
@@ -645,9 +770,25 @@ def post_completeness(payload: CompletenessSetPayload) -> dict:
 
         attested_view_entry: Optional[dict] = None
         if complete:
-            bar = working_scale_bar(
-                saved_extents(annotations, subject), judged_span_px=JUDGED_SPAN_PX,
-                source=default_working_scale_source(JUDGED_SPAN_PX))
+            own_extents = saved_extents(annotations, subject)
+            if own_extents:
+                bar = working_scale_bar(
+                    own_extents, judged_span_px=JUDGED_SPAN_PX,
+                    source=default_working_scale_source(JUDGED_SPAN_PX))
+                assert bar is not None
+                bar["from_this_image"] = True
+            elif dataset_pixel_size is not None and dataset_extent is not None:
+                native_extent_px = dataset_extent.median_extent_m / dataset_pixel_size.metres_per_px
+                bar = working_scale_bar(
+                    [native_extent_px], judged_span_px=JUDGED_SPAN_PX,
+                    source=dataset_extent_source(
+                        subject, dataset_extent, dataset_pixel_size.metres_per_px,
+                        JUDGED_SPAN_PX))
+                assert bar is not None
+                bar["annotation_count"] = dataset_extent.annotation_count
+                bar["from_this_image"] = False
+            else:
+                bar = None
             view_bucket = status_bucket(subject, date)
             view_store = tcip_store.read(view_coverage_key(root), default={})
             view_records = view_store.get(view_bucket) if isinstance(view_store, dict) else None
@@ -655,7 +796,7 @@ def post_completeness(payload: CompletenessSetPayload) -> dict:
                 view_records.get(image_name) if isinstance(view_records, dict) else None)
             grid_matched = isinstance(view_record, dict) and view_record.get("grid") == grid
             at_scale = None
-            if grid_matched:
+            if grid_matched and isinstance(view_record, dict):
                 at_scale = (view_record.get("cells_seen_at_scale") or {}).get(payload.cell)
             attested_view_entry = {
                 "view_scale": payload.view_scale,
@@ -684,5 +825,8 @@ def post_completeness(payload: CompletenessSetPayload) -> dict:
          "complete": complete, "stem": stem, "date": date, "replaced": replaced_info,
          "cells_attested_view": attested_view_entry},
     )
-    return {"status": "ok", "complete": complete, "cells_complete": sorted(cells_complete),
-            "replaced": replaced_info}
+    response = {"status": "ok", "complete": complete, "cells_complete": sorted(cells_complete),
+                "replaced": replaced_info}
+    if working_scale_derivation_error is not None:
+        response["working_scale_error"] = working_scale_derivation_error
+    return response
