@@ -428,13 +428,14 @@ def test_a_config_naming_an_unregistered_trait_still_lists(tmp_path, monkeypatch
     monkeypatch.chdir(tmp_path)
     from tcip_mcp.pipelines.training.run_registry import create_run, list_runs
 
-    create_run(
+    run = create_run(
         {"model_source": {"builder": "x:y", "task": "detection"}, "data": {},
          "training": {"evaluation": {"trait": "no_such_trait_here"}}},
         str(tmp_path / "out"),
     )
 
-    rows = list_runs()
+    # The registry is process-wide, so the listing may hold runs other tests created.
+    rows = [row for row in list_runs() if row["run_id"] == run.run_id]
     assert len(rows) == 1
     assert rows[0]["best_metric_name"] is None  # train() never ran, so nothing was stamped yet
 
