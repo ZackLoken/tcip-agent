@@ -48,6 +48,8 @@ class HPOJob:
     result: dict[str, Any] = field(default_factory=dict)
     # The platform root this sweep launched under, resolved on the request thread.
     platform_root: str = field(default_factory=_current_root)
+    # A relaunch's source sweep name, in memory only; the persisted document gains nothing.
+    relaunched_from: Optional[str] = None
 
 
 def _manifest_fields(manifest: dict) -> dict:
@@ -137,10 +139,22 @@ def _summary(job: HPOJob) -> dict:
     projection, read fresh (outside the registry's own lock) for whichever caller is listing.
     ``status`` is the derived liveness (:func:`_job_sweep_state`), never the registry's own
     persisted ``job.status`` verbatim: the persisted document keeps that (see
-    :func:`_persisted_summary`), and gains nothing from this derivation."""
-    manifest = _read_manifest(job.sweep_id, root=job.platform_root) or {}
+    :func:`_persisted_summary`), and gains nothing from this derivation.
+
+    ``has_manifest`` reports whether ``run_hpo`` has written this sweep's first manifest yet,
+    the fact a caller keys a pre-manifest render on rather than a 404 the relaunch route never
+    produces (it registers the job before it answers). ``relaunched_from`` falls back to the
+    job's own in-memory record (set at relaunch) only in that same pre-manifest window; once a
+    manifest exists, its own recorded field is authoritative and wins.
+    """
+    raw_manifest = _read_manifest(job.sweep_id, root=job.platform_root)
+    manifest = raw_manifest or {}
+    has_manifest = raw_manifest is not None
     status = _job_sweep_state(job, manifest)
-    return {**_persisted_summary(job), **_manifest_fields(manifest), "status": status}
+    fields = _manifest_fields(manifest)
+    if not has_manifest and job.relaunched_from:
+        fields["relaunched_from"] = job.relaunched_from
+    return {**_persisted_summary(job), **fields, "status": status, "has_manifest": has_manifest}
 
 
 def _from_summary(s: dict, root: str) -> HPOJob:
@@ -196,6 +210,7 @@ def _manifest_summary(manifest: dict) -> dict:
             "error": manifest.get("error"),
             "has_result": bool(manifest.get("result")),
             "external": True,
+            "has_manifest": True,
             **_manifest_fields(manifest)}
 
 
@@ -506,7 +521,7 @@ def relaunch_sweep(payload: RelaunchSweepPayload) -> dict:
     output_dir = str(hpo_root())
     spec = _relaunch_spec(manifest)
 
-    job = HPOJob(sweep_id=f"hpo-{uuid.uuid4().hex[:8]}")
+    job = HPOJob(sweep_id=f"hpo-{uuid.uuid4().hex[:8]}", relaunched_from=manifest["study_name"])
     _registry.register(job.sweep_id, job, job_root=job.platform_root)
     mark_sweep_launching(job.sweep_id, output_dir)
     t = threading.Thread(
@@ -552,20 +567,27 @@ def get_sweep(sweep_id: str) -> dict:
     manifest under the current root. ``status`` is the derived liveness in both branches (see
     :func:`_job_sweep_state`/:func:`_manifest_summary`), not either source's own recorded
     value; ``relaunched_from`` is a top-level field on both branches too, the manifest's own
-    (``None`` when the sweep was not a relaunch, or has no manifest yet)."""
+    when one exists, else (live branch only, pre-manifest) the job's own in-memory record.
+    ``has_manifest`` is always true on the disk branch (a disk sweep has one by definition) and
+    reflects whether ``run_hpo`` has written one yet on the live branch."""
     from tcip_web import jobstore
     from tcip_mcp.tools.training_tools import TCIP_HEARTBEAT_STALE_SECONDS, sweep_state
 
     j = _registry.get(sweep_id)
     if j is not None:
-        manifest = _read_manifest(j.sweep_id, root=j.platform_root) or {}
+        raw_manifest = _read_manifest(j.sweep_id, root=j.platform_root)
+        manifest = raw_manifest or {}
+        has_manifest = raw_manifest is not None
         status = _job_sweep_state(j, manifest)
         response = (
             _terminal_response(j) if j.status in jobstore.TERMINAL_STATUSES
             else {"sweep_id": j.sweep_id, "status": j.status, "error": j.error, "result": j.result}
         )
         response["status"] = status
-        response["relaunched_from"] = manifest.get("relaunched_from")
+        response["has_manifest"] = has_manifest
+        response["relaunched_from"] = (
+            manifest.get("relaunched_from") if has_manifest else j.relaunched_from
+        )
         return _enrich_with_study_result(response, sweep_id, root=j.platform_root)
     disk_manifest = _read_manifest(sweep_id)
     if disk_manifest is None:
@@ -578,6 +600,7 @@ def get_sweep(sweep_id: str) -> dict:
         "result": disk_manifest.get("result") or {},
         "manifest": disk_manifest,
         "relaunched_from": disk_manifest.get("relaunched_from"),
+        "has_manifest": True,
         "external": True,
     }
     return _enrich_with_study_result(response, sweep_id, root=None)

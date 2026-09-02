@@ -236,6 +236,51 @@ def test_get_sweep_reads_the_manifest_when_the_sweep_is_not_in_memory(client, hp
     assert body["manifest"]["study_name"] == "hpo_done0001"
 
 
+def test_has_manifest_is_false_pre_manifest_and_true_for_a_disk_sweep(
+    client, hpo_root, monkeypatch
+) -> None:
+    """A live job with no manifest yet answers ``has_manifest: false`` on both the listing row
+    and the detail, the fact a relaunch's pre-manifest window keys on rather than a 404 the
+    route never produces; a disk-only sweep (a manifest by definition) always answers true."""
+    from tcip_web.routes import tuning
+
+    monkeypatch.setitem(tuning._registry.jobs, "hpo-premanifest1",
+                        tuning.HPOJob(sweep_id="hpo-premanifest1", status="running"))
+
+    listing = client.get("/api/tuning/sweeps").json()["sweeps"]
+    row = next(s for s in listing if s["sweep_id"] == "hpo-premanifest1")
+    assert row["has_manifest"] is False
+    detail = client.get("/api/tuning/sweeps/hpo-premanifest1").json()
+    assert detail["has_manifest"] is False
+
+    _write_sweep(hpo_root, "hpo_disk0001", status="completed",
+                 result={"best_params": {"lr": 0.01}, "best_value": 0.2})
+    disk_body = client.get("/api/tuning/sweeps/hpo_disk0001").json()
+    assert disk_body["has_manifest"] is True
+    disk_listing = client.get("/api/tuning/sweeps").json()["sweeps"]
+    disk_row = next(s for s in disk_listing if s["sweep_id"] == "hpo_disk0001")
+    assert disk_row["has_manifest"] is True
+
+
+def test_relaunched_from_names_the_parent_before_the_manifest_exists(
+    client, hpo_root, monkeypatch
+) -> None:
+    """The source sweep is known at launch, in the job's own in-memory record, and the
+    listing row and the detail must name it in the pre-manifest window rather than only once
+    a manifest exists to read it back off."""
+    from tcip_web.routes import tuning
+
+    monkeypatch.setitem(tuning._registry.jobs, "hpo-relaunch-pre1",
+                        tuning.HPOJob(sweep_id="hpo-relaunch-pre1", status="running",
+                                     relaunched_from="hpo_source0001"))
+
+    listing = client.get("/api/tuning/sweeps").json()["sweeps"]
+    row = next(s for s in listing if s["sweep_id"] == "hpo-relaunch-pre1")
+    assert row["relaunched_from"] == "hpo_source0001"
+    detail = client.get("/api/tuning/sweeps/hpo-relaunch-pre1").json()
+    assert detail["relaunched_from"] == "hpo_source0001"
+
+
 def _write_study_result(study: str, **fields) -> None:
     import tcip_store
     from tcip_mcp.tools.training_tools import study_result_key
