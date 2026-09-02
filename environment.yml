@@ -10,7 +10,8 @@
 # GPU note: defaults to the CUDA build (cu126) via --extra-index-url below; it runs fine without a GPU too, since every device placement here branches on torch.cuda.is_available(). CI installs its own separate CPU wheel (.github/workflows/ci.yml), unaffected by this.
 #
 # environment.win.lock.yml is a frozen export from one Windows machine, taken before this
-# file's Node and OpenCV corrections; it is kept only for the mypy pin its CI comment cites, never as a path to create an environment.
+# file's Node and OpenCV corrections; it is kept only for the mypy pin its CI comment cites, never as a path to create an environment. environment.linux.lock.yml is the same kind of
+# export from a fresh Linux container, a record of what resolved there.
 name: tcip-agent
 channels:
   - conda-forge
