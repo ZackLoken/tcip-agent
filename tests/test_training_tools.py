@@ -421,30 +421,22 @@ def test_preflight_config_rejects_incoherent_selection_metric(tmp_path):
     assert any("no declared ranking direction" in i for i in r["issues"])
 
 
-def test_selection_metric_for_config_names_or_withholds_the_derived_metric():
-    """The runs listing's own metric-name helper: the same resolution
-    ``preflight_config``'s coherence gate runs above, read back as a name instead of an
-    issue list, ``None`` rather than a raise when the config cannot resolve one."""
-    pytest.importorskip("torch")
-    from tcip_mcp.pipelines.training.generic_trainer import selection_metric_for_config
+def test_a_config_naming_an_unregistered_trait_still_lists(tmp_path, monkeypatch):
+    """A run's own row never touches the trait registry: naming a trait this platform's
+    registry does not carry (an evaluation.trait config field with no matching spec) must not
+    take down the whole run listing, the way a per-row trait lookup used to."""
+    monkeypatch.chdir(tmp_path)
+    from tcip_mcp.pipelines.training.run_registry import create_run, list_runs
 
-    # Detection with no evaluation block resolves to the composite objective, the same
-    # default resolve_selection_metric derives with no explicit selection_metric.
-    assert selection_metric_for_config(
-        {"model_source": {"task": "detection"}, "data": {}},
-    ) == "objective"
+    create_run(
+        {"model_source": {"builder": "x:y", "task": "detection"}, "data": {},
+         "training": {"evaluation": {"trait": "no_such_trait_here"}}},
+        str(tmp_path / "out"),
+    )
 
-    # An undeclared metric resolves to nothing rather than raising.
-    assert selection_metric_for_config(
-        {"model_source": {"task": "detection"}, "data": {},
-         "training": {"evaluation": {"selection_metric": "not_a_real_metric"}}},
-    ) is None
-
-    # A comparability-only metric for a center-match trait resolves to nothing either.
-    assert selection_metric_for_config(
-        {"model_source": {"task": "detection"}, "data": {},
-         "training": {"evaluation": {"trait": "catkin", "selection_metric": "map50"}}},
-    ) is None
+    rows = list_runs()
+    assert len(rows) == 1
+    assert rows[0]["best_metric_name"] is None  # train() never ran, so nothing was stamped yet
 
 
 # preflight_config's reserve_calibration_fraction feasibility check (N7): a training-launch-time

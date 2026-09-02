@@ -247,6 +247,9 @@ def test_tensorboard_route_launches_under_the_run_output_dir(client: TestClient,
     # The GUI's link comes from a TensorBoard this process started, so the route must reach
     # launch_tensorboard with the run's own log directory and hand back what it returned.
     calls: list[tuple[str, str]] = []
+    tb_dir = tmp_path / "tensorboard"
+    tb_dir.mkdir()
+    (tb_dir / "events.out.tfevents.1.host").write_bytes(b"")
 
     def fake_status(run_id: str) -> dict:
         return {"run_id": run_id, "status": "running", "output_dir": str(tmp_path)}
@@ -278,6 +281,23 @@ def test_tensorboard_route_404s_with_no_logs_for_a_run_with_no_output_dir(
     monkeypatch.setattr("tcip_mcp.tools.training_tools.check_training_status", fake_status)
 
     resp = client.post("/api/training/runs/run-nologs/tensorboard", json={})
+    assert resp.status_code == 404
+    assert resp.json()["detail"]["no_logs"] is True
+
+
+def test_tensorboard_route_404s_with_no_logs_for_a_stamped_dir_with_no_event_file(
+    client: TestClient, monkeypatch, tmp_path: Path,
+) -> None:
+    """A run whose output directory was stamped before the child crashed (e.g. it never
+    reached ``SummaryWriter``) has a real output directory but no event file for TensorBoard
+    to serve; that reads as ``no_logs`` too, not as a launchable board over an empty directory."""
+
+    def fake_status(run_id: str) -> dict:
+        return {"run_id": run_id, "status": "failed", "output_dir": str(tmp_path), "error": None}
+
+    monkeypatch.setattr("tcip_mcp.tools.training_tools.check_training_status", fake_status)
+
+    resp = client.post("/api/training/runs/run-nologs-2/tensorboard", json={})
     assert resp.status_code == 404
     assert resp.json()["detail"]["no_logs"] is True
 
@@ -424,9 +444,12 @@ def test_relaunch_route_forks_a_run_s_config_and_names_the_parent(
 def test_list_runs_route_names_the_run_s_selection_metric(
     tmp_path, monkeypatch, client: TestClient
 ) -> None:
-    """A launched run's row carries the metric its config resolves ``model_best.pt``/early
-    stopping by, so the Training tab can label its best value instead of showing a bare
-    number."""
+    """A launched (subprocess-delegated) run's row carries the metric the trainer itself
+    stamped on its metrics-log rows, and the best value read back beside it, so the Training
+    tab can label its best value instead of showing nothing (the parent's placeholder
+    ``inf``) or a name with no value (``None``, the pre-fix disk reconstruction)."""
+    import math
+
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     monkeypatch.setattr(
@@ -453,9 +476,11 @@ def test_list_runs_route_names_the_run_s_selection_metric(
     from tcip_web.routes.training import list_runs_route
 
     by_id = {r["run_id"]: r for r in list_runs_route()["runs"]}
+    row = by_id[result["run_id"]]
     # Regression selects on the training loss by default; there is no evaluation.selection_metric
     # override in this config.
-    assert by_id[result["run_id"]]["best_metric_name"] == "loss"
+    assert row["best_metric_name"] == "loss"
+    assert isinstance(row["best_metric"], (int, float)) and math.isfinite(row["best_metric"])
 
 
 def test_list_runs_excludes_hpo_trials(monkeypatch) -> None:

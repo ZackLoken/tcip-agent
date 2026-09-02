@@ -148,10 +148,15 @@ def launch_run_tensorboard(run_id: str, payload: EmptyBodyPayload) -> dict:
     started by the agent's own process is not one this process can hand the browser a URL for.
     This route is how a TensorBoard exists from the GUI's side, whichever process trained the run.
 
-    A run with no recorded output directory (it failed before writing one) never had anything
-    to log to; that refusal carries ``no_logs: True`` so the GUI can say the run produced no
-    logs instead of offering a retry against a run whose own output directory does not exist.
+    A run with no recorded output directory (it failed before writing one) or whose output
+    directory's ``tensorboard`` subdirectory holds no event file (it crashed before
+    ``SummaryWriter`` ever wrote one) never had anything to log to; that refusal carries
+    ``no_logs: True`` so the GUI can say the run produced no logs instead of starting a
+    TensorBoard against a directory nothing populated and offering a retry that would do the
+    same.
     """
+    from pathlib import Path
+
     from tcip_mcp.pipelines.training.tensorboard_manager import launch_tensorboard
     from tcip_mcp.tools.training_tools import check_training_status
 
@@ -159,9 +164,12 @@ def launch_run_tensorboard(run_id: str, payload: EmptyBodyPayload) -> dict:
     if status.get("error"):
         raise HTTPException(404, status["error"])
     output_dir = status.get("output_dir")
-    if not output_dir:
+    tb_dir = Path(f"{output_dir}/tensorboard") if output_dir else None
+    has_events = bool(tb_dir is not None and tb_dir.is_dir()
+                       and any(tb_dir.glob("events.out.tfevents*")))
+    if not has_events:
         raise HTTPException(
-            404, {"error": f"run has no output directory: {run_id}", "no_logs": True},
+            404, {"error": f"run produced no logs: {run_id}", "no_logs": True},
         )
     return launch_tensorboard(f"{output_dir}/tensorboard", run_id=run_id)
 
