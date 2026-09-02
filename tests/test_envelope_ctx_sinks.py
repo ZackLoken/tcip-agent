@@ -233,3 +233,15 @@ def test_calibration_keeps_an_experiment_the_caller_named(tmp_path, monkeypatch)
                   tiled=False, staged_conf_floor=0.05)
 
     assert seen["experiment_id"] == "expOther"
+
+
+def test_evaluation_section_reads_the_same_precedence_the_stock_trainer_does(tmp_path):
+    """A bespoke ``train(ctx)`` loop reading its own ``trait``/``selection_metric`` must see the
+    same block the stock trainer and preflight agree on: a top-level ``evaluation`` wins over
+    ``training.evaluation``."""
+    config = {**CONFIG, "evaluation": {"selection_metric": "f1"},
+              "training": {"evaluation": {"selection_metric": "loss"}}}
+    run = create_run(config, str(tmp_path / "out"))
+    ctx = TrainContext(run=run, train_loader=None, experiment_id=None)
+
+    assert ctx.evaluation_section() == {"selection_metric": "f1"}

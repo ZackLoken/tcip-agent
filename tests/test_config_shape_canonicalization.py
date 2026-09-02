@@ -83,6 +83,10 @@ def test_evaluation_section_returns_an_empty_dict_when_neither_is_present():
 
 
 def test_evaluation_section_is_idempotent_on_an_already_normalized_config():
+    """Coverage, not a guard: this shape is stable under any implementation that agrees with
+    itself, since normalize_train_config's hoist is a no-op once the top-level key already
+    exists. The precedence itself is proven by
+    test_evaluation_section_agrees_with_the_hoist_precedence_on_four_shapes below."""
     from tcip_mcp.pipelines.schemas import evaluation_section, normalize_train_config
 
     cfg = normalize_train_config({
@@ -90,6 +94,28 @@ def test_evaluation_section_is_idempotent_on_an_already_normalized_config():
         "training": {"evaluation": {"selection_metric": "loss"}},
     })
     assert evaluation_section(cfg) == evaluation_section(normalize_train_config(cfg))
+
+
+def test_evaluation_section_agrees_with_the_hoist_precedence_on_four_shapes():
+    """A consistency test whose two sides are different implementations: evaluation_section
+    reads config directly (no copy), normalize_train_config's own setdefault hoist reads through
+    a shallow copy; the two must still agree on which block governs, on every shape a config may
+    take (both placements present, a falsy top-level block beside a real nested one, nested
+    only, neither)."""
+    from tcip_mcp.pipelines.schemas import evaluation_section, normalize_train_config
+
+    def via_hoist(cfg: dict) -> dict:
+        return normalize_train_config(cfg).get("evaluation") or {}
+
+    shapes = [
+        {"evaluation": {"selection_metric": "f1"},
+         "training": {"evaluation": {"selection_metric": "loss"}}},
+        {"evaluation": {}, "training": {"evaluation": {"selection_metric": "loss"}}},
+        {"training": {"evaluation": {"selection_metric": "loss"}}},
+        {"training": {"batch_size": 4}},
+    ]
+    for cfg in shapes:
+        assert evaluation_section(cfg) == via_hoist(cfg)
 
 
 def test_stage_spec_tolerates_but_no_longer_declares_lr():

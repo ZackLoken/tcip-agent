@@ -61,6 +61,16 @@ class TrainContext:
         c = self.config
         return c.get("seed", c.get("training", {}).get("seed"))
 
+    def evaluation_section(self) -> dict:
+        """The ``evaluation`` block governing this run: top level or ``training.evaluation``,
+        a present top-level block winning. A bespoke ``train(ctx)`` loop that reads
+        ``trait``/``selection_metric``/``conf_threshold``/... reads them from here, not a plain
+        ``ctx.config.get("evaluation")``, so it agrees with the stock trainer and preflight on
+        which placement governs."""
+        from tcip_mcp.pipelines.schemas import evaluation_section
+
+        return evaluation_section(self.config)
+
     @property
     def device(self) -> Any:
         import torch

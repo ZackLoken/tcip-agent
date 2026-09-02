@@ -570,8 +570,13 @@ def train(
     - ``early_stopping`` (``{enabled, patience, min_delta}``, default enabled-if-val_loader,
       patience 7, min_delta 1e-4).
     - ``evaluation`` (``{trait, selection_metric, conf_threshold, iou_threshold, iou_type,
-      max_dets, score_weights}``, all optional), ``trait`` and ``selection_metric`` drive
-      ``resolve_selection_metric``; the rest pass through to ``_validate``/``evaluate``.
+      max_dets, score_weights}``, all optional), read through ``schemas.evaluation_section``
+      rather than a plain ``config.get``: a top-level ``evaluation`` block wins over
+      ``training.evaluation``, which is honoured only when no top-level block exists at all.
+      Every other ``training.*`` key above still relies on the launch path's hoist
+      (``normalize_train_config``) landing it at the top level before this function ever reads
+      it. ``trait`` and ``selection_metric`` drive ``resolve_selection_metric``; the rest pass
+      through to ``_validate``/``evaluate``.
     """
     config = run.config
     run.status = "running"
