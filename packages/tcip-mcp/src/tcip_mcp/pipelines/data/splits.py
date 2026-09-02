@@ -272,13 +272,15 @@ def group_balanced_split(
     for gk in sorted(fg_groups, key=lambda g: group_ann[g], reverse=True):
         if gk in used:
             continue
-        best_split, best_score = None, None
+        best_split: str | None = None
+        best_score: float | None = None
         for n in active:
             ann_ratio = (state_ann[n] + group_ann[gk]) / max(1.0, targets_ann[n])
             tile_ratio = (state_tiles[n] + group_tiles[gk]) / max(1.0, targets_tiles[n])
             score = 0.7 * ann_ratio + 0.3 * tile_ratio
             if best_score is None or score < best_score:
                 best_split, best_score = n, score
+        assert best_split is not None, "active is non-empty, so the loop above always assigns"
         assignment[gk] = best_split
         used.add(gk)
         state_ann[best_split] += group_ann[gk]
@@ -438,25 +440,141 @@ def narrow_manifest_to_date(manifest: dict, date: str | None) -> ManifestDateNar
     )
 
 
+def normalize_scope(subject: str | None, attribute: str | None) -> tuple[str | None, str | None]:
+    """A caller's ``(subject, attribute)``, normalized the way
+    :func:`~tcip_mcp.tools.training_tools._dataset_source_kwargs` already normalizes a run's own:
+    a falsy value (``None`` or ``""``) reads as ``None``. Applied on the caller's side of every
+    scope comparison :func:`manifest_scope_issues` makes, so a checkpoint whose stamped config
+    carries ``attribute=""`` compares equal to a manifest drawn with ``attribute=None``, the
+    manifest the run that produced it actually bound to.
+    """
+    return (subject or None, attribute or None)
+
+
+def empty_side_issue(narrowing: ManifestDateNarrowing, date: str | None) -> list[str]:
+    """The one-item list naming ``narrowing``'s empty train or val side, or an empty list when
+    both hold at least one member under ``date``.
+
+    Shared by the two callers that bind or list a partition (:func:`bind_manifest_stems` and
+    :func:`~tcip_mcp.tools.training_tools._manifest_dependent_issues`), each of which calls this
+    itself after its own scope check: a run needs both sides to train and validate on, so this is
+    never part of :func:`manifest_scope_issues`, which the calibration door and the review queue
+    also share and which hold out a calibration side regardless of whether train/val are
+    populated.
+    """
+    if narrowing.train_ids and narrowing.val_ids:
+        return []
+    return [
+        f"binding to the split manifest under date {date!r} leaves an empty side "
+        f"(train={len(narrowing.train_ids)}, val={len(narrowing.val_ids)}); a run needs both."
+    ]
+
+
+def manifest_scope_issues(
+    manifest: dict, *, subject: str | None, attribute: str | None, date: str | None,
+    images_dir: str | Path | None, label: str, manifest_dir: str | None = None,
+) -> tuple[list[str], ManifestDateNarrowing | None]:
+    """Every objection a caller's scope raises against ``manifest`` for one capture ``date``,
+    from the manifest's own recorded facts: the ``subject``/``attribute`` agreement (normalized
+    through :func:`normalize_scope` on the caller's side, so an empty-string attribute compares
+    equal to an unset one), the date's members block being positively present (a missing key or
+    an explicit ``null`` value both read as absent: the stricter of the two readings, since a
+    ``null`` block names nothing), that block naming an images root (a stated root must be
+    positively carried, never merely not contradicted), the caller's own ``images_dir`` being
+    stated, and the two roots not having moved apart
+    (:func:`refuse_if_images_root_moved`, under ``label``).
+
+    Returns ``(issues, narrowing)``: every objection together (never only the first), and the
+    manifest's membership narrowed to ``date`` (:func:`narrow_manifest_to_date`) once the members
+    block is confirmed present, ``None`` when it is not (nothing to narrow). Never checks whether
+    the narrowed train/val sides are non-empty: that is :func:`empty_side_issue`'s job for the two
+    callers that need it, not every caller's (the calibration door and the review queue hold out a
+    calibration side regardless of whether train/val are populated).
+
+    ``manifest_dir``, when given, names the manifest in every sentence; a caller without one gets
+    "the split manifest".
+    """
+    issues: list[str] = []
+    name = f"split manifest at {manifest_dir!r}" if manifest_dir else "the split manifest"
+    norm_subject, norm_attribute = normalize_scope(subject, attribute)
+    manifest_subject, manifest_attribute = manifest.get("subject"), manifest.get("attribute")
+    if (manifest_subject, manifest_attribute) != (norm_subject, norm_attribute):
+        issues.append(
+            f"{name} was drawn for subject={manifest_subject!r}, attribute="
+            f"{manifest_attribute!r}, but this run is subject={norm_subject!r}, attribute="
+            f"{norm_attribute!r}: a run only binds to its own subject's (and attribute's) "
+            "manifest."
+        )
+
+    members = manifest.get("members") or {}
+    date_key = manifest_date_key(date)
+    date_block = members.get(date_key)
+    if date_key not in members or date_block is None:
+        issues.append(
+            f"{name} holds no members under date {date!r}; it holds members under "
+            f"{sorted(members)}."
+        )
+        return issues, None
+
+    images_root = date_block.get("images_root")
+    if not images_root:
+        issues.append("the manifest's members under this date name no images root.")
+    elif not images_dir:
+        issues.append(f"the run states no {label} to compare against {name}'s images root.")
+    else:
+        try:
+            refuse_if_images_root_moved(label, images_dir, images_root, date)
+        except ValueError as exc:
+            issues.append(str(exc))
+
+    narrowing = narrow_manifest_to_date(manifest, date)
+    return issues, narrowing
+
+
+def require_manifest_scope(
+    manifest: dict, *, subject: str | None, attribute: str | None, date: str | None,
+    images_dir: str | Path | None, label: str, manifest_dir: str | None = None,
+) -> ManifestDateNarrowing:
+    """:func:`manifest_scope_issues`, raising every objection together (joined with ``"; "``)
+    rather than returning them, for a caller that refuses on any of them. Reached only when the
+    accumulator finds no issue at all, so the narrowing it returns is never ``None`` here (an
+    absent members block is itself an issue, and issues always raise before a caller sees the
+    narrowing).
+    """
+    issues, narrowing = manifest_scope_issues(
+        manifest, subject=subject, attribute=attribute, date=date, images_dir=images_dir,
+        label=label, manifest_dir=manifest_dir,
+    )
+    if issues:
+        raise ValueError("; ".join(issues))
+    assert narrowing is not None, "no issue means the members block under date was found"
+    return narrowing
+
+
 def bind_manifest_stems(
     manifest: dict, date: str | None, subject: str, attribute: str | None,
-    admitted: Sequence[str], *, admission_counts: dict[str, int] | None = None,
+    admitted: Sequence[str], *, images_dir: str | Path | None,
+    admission_counts: dict[str, int] | None = None, manifest_dir: str | None = None,
 ) -> ManifestBinding:
     """Bind a run's admitted stems for one capture date to a split manifest's recorded partition.
 
     ``admitted`` is the run's own draw for ``date`` (the task path's admission, e.g.
-    ``trainable_stems``' return), never re-derived here. Refuses, in order:
+    ``trainable_stems``' return), never re-derived here. ``images_dir`` is the run's own images
+    directory (``None`` states the run has none); ``manifest_dir``, when given, names the manifest
+    in the messages :func:`manifest_scope_issues` produces. Refuses, in order:
 
-    - the manifest's ``subject``/``attribute`` disagree with the run's;
-    - the manifest holds no members under ``date`` (its ``members`` keys, via
-      :func:`manifest_date_key`, name what it does hold);
+    - the manifest's ``subject``/``attribute`` disagree with the run's, the manifest holds no
+      members under ``date``, its members under ``date`` name no images root, the run states no
+      ``images_dir``, or ``images_dir`` is not the manifest's own recorded root for ``date``
+      (:func:`require_manifest_scope`, the one implementation this shares with every other
+      caller that binds or restricts a read to a split manifest);
     - a stem the run admits that the manifest assigns to none of ``train``, ``val`` or
       ``calibration`` (training it would put it on a side the manifest never chose; the remedy is
       regenerating the split over the current data, which draws through the same admission);
     - a ``train`` or ``val`` member under ``date`` the run does not admit (the data moved under
       the manifest: a label emptied, a confirmation withdrawn, an assessment removed), naming
       ``admission_counts`` when the caller supplied it;
-    - an empty ``train`` or ``val`` side once narrowed to ``date``.
+    - an empty ``train`` or ``val`` side once narrowed to ``date`` (:func:`empty_side_issue`).
 
     A ``calibration`` member is never a reason to refuse: it is held out from training and from
     selection, so it is placed on neither loader whether or not the run currently admits it (its
@@ -468,23 +586,10 @@ def bind_manifest_stems(
     scope, the train/val refusals fire only when the data moved since the split was drawn, and
     the remedy they name (regenerate the split) exists.
     """
-    manifest_subject, manifest_attribute = manifest.get("subject"), manifest.get("attribute")
-    if (manifest_subject, manifest_attribute) != (subject, attribute):
-        raise ValueError(
-            f"split manifest was drawn for subject={manifest_subject!r}, attribute="
-            f"{manifest_attribute!r}, but this run is subject={subject!r}, attribute="
-            f"{attribute!r}: a run only binds to its own subject's (and attribute's) manifest."
-        )
-    members = manifest.get("members") or {}
-    date_key = manifest_date_key(date)
-    if date_key not in members:
-        raise ValueError(
-            f"split manifest holds no members under date {date!r}; it holds members under "
-            f"{sorted(members)}. Regenerate the split over this date, or launch against the "
-            "date the manifest was drawn for."
-        )
-
-    narrowing = narrow_manifest_to_date(manifest, date)
+    narrowing = require_manifest_scope(
+        manifest, manifest_dir=manifest_dir, subject=subject, attribute=attribute, date=date,
+        images_dir=images_dir, label="data.images_dir",
+    )
 
     admitted_ids = {member_identity(date, s) for s in admitted}
     unassigned = sorted(admitted_ids - narrowing.all_ids)
@@ -511,13 +616,11 @@ def bind_manifest_stems(
             f"removed); regenerate the split over the current data.{counts_note}"
         )
 
+    empty = empty_side_issue(narrowing, date)
+    if empty:
+        raise ValueError("; ".join(empty))
     train_bound = sorted(member_identity_parts(i)[1] for i in narrowing.train_ids)
     val_bound = sorted(member_identity_parts(i)[1] for i in narrowing.val_ids)
-    if not train_bound or not val_bound:
-        raise ValueError(
-            f"binding to the split manifest under date {date!r} leaves an empty side "
-            f"(train={len(train_bound)}, val={len(val_bound)}); a run needs both."
-        )
     calibration_bound = sorted(member_identity_parts(i)[1] for i in narrowing.calibration_ids)
     calibration_unadmitted = len(narrowing.calibration_ids - admitted_ids)
     return ManifestBinding(
@@ -1093,11 +1196,12 @@ def calibration_universe_from_manifest(
     tree and one date can still land short.
     """
     present_set = set(present)
-    splits = manifest.get("splits") or {}
-    train_ids = {i for i in (splits.get("train") or []) if member_identity_parts(i)[0] == date}
-    val_ids = {i for i in (splits.get("val") or []) if member_identity_parts(i)[0] == date}
-    calibration_ids = {i for i in (splits.get("calibration") or [])
-                       if member_identity_parts(i)[0] == date}
+    narrowing = narrow_manifest_to_date(manifest, date)
+    train_ids, val_ids, calibration_ids = (
+        narrowing.train_ids, narrowing.val_ids, narrowing.calibration_ids,
+    )
+    # narrow_manifest_to_date's own all_ids is manifest-wide by design (bind_manifest_stems'
+    # own concern); this door's excluded_unassigned_stems needs the date-scoped union instead.
     all_ids = train_ids | val_ids | calibration_ids
 
     stems = sorted(member_identity_parts(i)[1] for i in calibration_ids
@@ -1147,8 +1251,8 @@ def resolve_manifest_calibration_universe(
     present: Iterable[str], *, min_foreground_groups: dict[str, int] | None = None,
 ) -> tuple[list[str], str | None, dict[str, str] | None, dict[str, list[str]], str | None]:
     """The checks every door restricting a read to a split manifest shares, ahead of
-    :func:`calibration_universe_from_manifest`'s own draw: the manifest's ``subject``/
-    ``attribute`` must equal the door's, the labels directory's date
+    :func:`calibration_universe_from_manifest`'s own draw, through :func:`require_manifest_scope`:
+    the manifest's ``subject``/``attribute`` must equal the door's, the labels directory's date
     (:func:`~tcip_mcp.dataset_layout.annotation_date`) must be one the manifest holds members
     under, and the manifest's ``images_root`` for that date must be the door's ``images_dir``,
     each refusing by name. Called from ``calibrate_operating_point``, ``evaluate_model``,
@@ -1164,20 +1268,13 @@ def resolve_manifest_calibration_universe(
     """
     from tcip_mcp.dataset_layout import annotation_date
 
-    if (manifest.get("subject"), manifest.get("attribute")) != (subject, attribute):
-        raise ValueError(
-            f"split manifest at {split_manifest_dir!r} was drawn for subject="
-            f"{manifest.get('subject')!r}, attribute={manifest.get('attribute')!r}, but this "
-            f"door's recorded scope is subject={subject!r}, attribute={attribute!r}."
-        )
+    # Normalized once here, so the scope check and the foreground read below agree on "".
+    subject, attribute = normalize_scope(subject, attribute)
     date = annotation_date(labels_dir)
-    date_block = (manifest.get("members") or {}).get(manifest_date_key(date))
-    if date_block is None:
-        raise ValueError(
-            f"split manifest at {split_manifest_dir!r} holds no members under date {date!r}; "
-            f"it holds members under {sorted(manifest.get('members') or {})}."
-        )
-    refuse_if_images_root_moved("images_dir", images_dir, date_block.get("images_root"), date)
+    require_manifest_scope(
+        manifest, manifest_dir=str(split_manifest_dir), subject=subject, attribute=attribute,
+        date=date, images_dir=images_dir, label="images_dir",
+    )
     present_stems = list(present)
     foreground_stems = {
         s for s in present_stems

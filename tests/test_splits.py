@@ -398,3 +398,112 @@ def test_image_extent_from_labels(tmp_path):
     )
     assert image_extent_from_labels(labels_dir, "mosaic1") == (4000, 3000)
     assert image_extent_from_labels(labels_dir, "missing") is None
+
+
+# -- manifest_scope_issues / normalize_scope -------------------------------------
+
+
+def _leaf_dataset(root, *, date: str | None):
+    """A minimal ``leaf``-labeled tree ``make_splits`` can draw from: a dated
+    ``images/<date>/`` + ``annotations/<date>/`` pair when ``date`` is given, a flat
+    ``images/`` + ``annotations/`` pair otherwise."""
+    from PIL import Image
+    from tcip_annotation import json_io
+    from tcip_annotation.state import Annotation, BBox
+    from tcip_mcp.class_registry import ClassRegistry, Subject, write_registry
+
+    write_registry(root / "classes.json", ClassRegistry(subjects=(Subject(name="leaf"),)))
+    images_dir = root / "images" / date if date else root / "images"
+    labels_dir = root / "annotations" / date if date else root / "annotations"
+    images_dir.mkdir(parents=True)
+    labels_dir.mkdir(parents=True)
+    for stem in ("a", "b", "c", "d"):
+        Image.new("RGB", (64, 64), (100, 120, 90)).save(images_dir / f"{stem}.jpg")
+        json_io.write_annotations(
+            labels_dir / f"{stem}.json",
+            [Annotation(subject="leaf", geometry=BBox(4, 4, 20, 20))], 64, 64, keep_empty=True,
+        )
+    return images_dir, labels_dir
+
+
+def _draw_leaf_manifest(root, out, *, date: str | None):
+    from tcip_mcp.tools.data_tools import make_splits, split_manifest_key
+
+    result = make_splits(str(root), output_path=str(out), subject="leaf", seed=1,
+                         train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
+    assert "error" not in result, result
+    return ts.read(split_manifest_key(out))
+
+
+def test_normalize_scope_maps_empty_string_to_none():
+    from tcip_mcp.pipelines.data.splits import normalize_scope
+
+    assert normalize_scope("", "") == (None, None)
+    assert normalize_scope("leaf", "") == ("leaf", None)
+    assert normalize_scope(None, "condition") == (None, "condition")
+
+
+def test_manifest_scope_issues_reports_every_objection_together(tmp_path):
+    from tcip_mcp.pipelines.data.splits import manifest_scope_issues
+
+    root = tmp_path / "ds"
+    date = "2-11-26"
+    _leaf_dataset(root, date=date)
+    manifest = _draw_leaf_manifest(root, tmp_path / "m", date=date)
+
+    issues, narrowing = manifest_scope_issues(
+        manifest, subject="other", attribute=None, date=date, images_dir=None,
+        label="data.images_dir",
+    )
+
+    assert any("subject" in i for i in issues)
+    assert any("images_dir" in i for i in issues)
+    assert len(issues) >= 2
+    assert narrowing is not None
+
+
+def test_manifest_scope_issues_names_the_manifest_directory_when_given(tmp_path):
+    from tcip_mcp.pipelines.data.splits import manifest_scope_issues
+
+    root = tmp_path / "ds"
+    date = "2-11-26"
+    _leaf_dataset(root, date=date)
+    out = tmp_path / "m"
+    manifest = _draw_leaf_manifest(root, out, date=date)
+
+    unnamed, _ = manifest_scope_issues(
+        manifest, subject="leaf", attribute=None, date="2099-01-01", images_dir=None,
+        label="data.images_dir",
+    )
+    assert any(i.startswith("the split manifest holds no members") for i in unnamed)
+
+    named, _ = manifest_scope_issues(
+        manifest, subject="leaf", attribute=None, date="2099-01-01", images_dir=None,
+        label="data.images_dir", manifest_dir=str(out),
+    )
+    assert any(i.startswith(f"split manifest at {str(out)!r} holds no members") for i in named)
+
+
+def test_manifest_scope_issues_admits_a_make_splits_manifest_dated_and_flat(tmp_path):
+    from tcip_mcp.pipelines.data.splits import manifest_scope_issues
+
+    dated_root = tmp_path / "dated"
+    date = "2-11-26"
+    dated_images, _ = _leaf_dataset(dated_root, date=date)
+    dated_manifest = _draw_leaf_manifest(dated_root, tmp_path / "m-dated", date=date)
+    issues, narrowing = manifest_scope_issues(
+        dated_manifest, subject="leaf", attribute=None, date=date,
+        images_dir=str(dated_images), label="data.images_dir",
+    )
+    assert issues == []
+    assert narrowing is not None
+
+    flat_root = tmp_path / "flat"
+    flat_images, _ = _leaf_dataset(flat_root, date=None)
+    flat_manifest = _draw_leaf_manifest(flat_root, tmp_path / "m-flat", date=None)
+    issues, narrowing = manifest_scope_issues(
+        flat_manifest, subject="leaf", attribute=None, date=None,
+        images_dir=str(flat_images), label="data.images_dir",
+    )
+    assert issues == []
+    assert narrowing is not None

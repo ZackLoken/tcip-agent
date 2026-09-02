@@ -137,22 +137,18 @@ def _manifest_dir_conflicts(config: dict) -> tuple[list[str], bool]:
 
 def _manifest_dependent_issues(config: dict, manifest: dict, manifest_dir: str) -> list[str]:
     """Every objection that needs the manifest itself, read at ``manifest_dir``, to answer: the
-    subject/attribute agreement, the run's own date having a members block, that block naming an
-    images root (positively carried, never merely not contradicted), the images root not having
-    moved, and the sides narrowed to that date not being empty. Called only once
+    run's own date having a members block (config-only, ahead of the rest), then the shared scope
+    check every manifest consumer shares (:func:`~tcip_mcp.pipelines.data.splits.
+    manifest_scope_issues`: subject/attribute agreement, the members block under that date, its
+    images root, the images root not having moved) plus the sides narrowed to that date not being
+    empty (:func:`~tcip_mcp.pipelines.data.splits.empty_side_issue`). Called only once
     :func:`_manifest_dir_conflicts`'s task check has passed and the manifest has been read
     successfully; :func:`manifest_compatibility` composes both for a caller with one manifest in
     hand, and ``preflight_config`` calls this directly so a failed read never hides the other
     check's issues.
-
-    A ``members`` block that names no ``images_root`` for the run's own date is an issue here
-    (``make_splits`` always writes one, so a manifest missing it was hand-edited or predates the
-    field): a stated root must be positively carried, never merely not contradicted.
     """
     from tcip_mcp.dataset_layout import annotation_date
-    from tcip_mcp.pipelines.data.splits import (
-        manifest_date_key, narrow_manifest_to_date, refuse_if_images_root_moved,
-    )
+    from tcip_mcp.pipelines.data.splits import empty_side_issue, manifest_scope_issues
     from tcip_mcp.pipelines.model_build import MODEL_SOURCE_KEY
 
     model_source = config.get(MODEL_SOURCE_KEY)
@@ -161,56 +157,27 @@ def _manifest_dependent_issues(config: dict, manifest: dict, manifest_dir: str) 
     task_for_manifest = (model_source.get("task") if isinstance(model_source, dict) else None) \
         or data_cfg.get("task", "detection")
 
-    issues: list[str] = []
     norm_src = _dataset_source_kwargs(task_for_manifest, data_cfg)
     subject, attribute = norm_src.get("subject"), norm_src.get("attribute")
-    if (manifest.get("subject"), manifest.get("attribute")) != (subject, attribute):
-        issues.append(
-            f"split manifest was drawn for subject={manifest.get('subject')!r}, "
-            f"attribute={manifest.get('attribute')!r}, but this run is "
-            f"subject={subject!r}, attribute={attribute!r}: a run only binds to its "
-            "own subject's (and attribute's) manifest."
-        )
 
     labels_dir = data_cfg.get("labels_dir", "")
     run_date = annotation_date(labels_dir)
     declared_date = data_cfg.get("date")
     if declared_date is not None and declared_date != run_date:
-        issues.append(
+        return [
             f"data.date={declared_date!r} disagrees with the date "
             f"data.labels_dir={labels_dir!r} is under ({run_date!r}); a split "
             "manifest binds under one date, so the negative confirmations and the "
             "manifest must be read under the same one."
-        )
-        return issues
+        ]
 
-    date_block = (manifest.get("members") or {}).get(manifest_date_key(run_date))
-    if date_block is None:
-        issues.append(
-            f"split manifest at {manifest_dir!r} holds no members under date {run_date!r}; it "
-            f"holds members under {sorted(manifest.get('members') or {})}."
-        )
-        return issues
-
-    images_root = date_block.get("images_root")
-    if not images_root:
-        issues.append("the manifest's members under this date name no images root.")
-    else:
-        try:
-            refuse_if_images_root_moved(
-                "data.images_dir", data_cfg.get("images_dir"), images_root, run_date,
-            )
-        except ValueError as exc:
-            issues.append(str(exc))
-
-    narrowing = narrow_manifest_to_date(manifest, run_date)
-    if not narrowing.train_ids or not narrowing.val_ids:
-        issues.append(
-            f"binding to this manifest under date {run_date!r} leaves an empty side "
-            f"(train={len(narrowing.train_ids)}, val={len(narrowing.val_ids)}); a run needs "
-            "both."
-        )
-
+    issues, narrowing = manifest_scope_issues(
+        manifest, subject=subject, attribute=attribute, date=run_date,
+        images_dir=data_cfg.get("images_dir"), label="data.images_dir",
+        manifest_dir=manifest_dir,
+    )
+    if narrowing is not None:
+        issues.extend(empty_side_issue(narrowing, run_date))
     return issues
 
 

@@ -96,7 +96,8 @@ def test_bind_manifest_stems_binds_the_manifests_own_partition_for_one_date(tmp_
     manifest = _draw(root, tmp_path / "m")
 
     binding = bind_manifest_stems(
-        manifest, DATES[0], SUBJECT, None, ["a", "b", "c", "d", "e", "f"])
+        manifest, DATES[0], SUBJECT, None, ["a", "b", "c", "d", "e", "f"],
+        images_dir=root / "images" / DATES[0])
 
     assert binding.train and binding.val
     assert sorted(binding.train + binding.val + binding.calibration) == \
@@ -111,7 +112,8 @@ def test_bind_manifest_stems_refuses_a_subject_mismatch(tmp_path: Path):
     manifest = _draw(root, tmp_path / "m")
 
     with pytest.raises(ValueError, match="subject"):
-        bind_manifest_stems(manifest, DATES[0], OTHER_SUBJECT, None, ["b"])
+        bind_manifest_stems(manifest, DATES[0], OTHER_SUBJECT, None, ["b"],
+                            images_dir=root / "images" / DATES[0])
 
 
 def test_bind_manifest_stems_refuses_an_attribute_mismatch(tmp_path: Path):
@@ -121,7 +123,8 @@ def test_bind_manifest_stems_refuses_an_attribute_mismatch(tmp_path: Path):
     manifest = _draw(root, tmp_path / "m", subject=SUBJECT, attribute="condition")
 
     with pytest.raises(ValueError, match="attribute"):
-        bind_manifest_stems(manifest, DATES[0], SUBJECT, None, ["assessed_a", "assessed_b"])
+        bind_manifest_stems(manifest, DATES[0], SUBJECT, None, ["assessed_a", "assessed_b"],
+                            images_dir=root / "images" / DATES[0])
 
 
 def test_bind_manifest_stems_refuses_a_date_the_manifest_holds_no_members_under(tmp_path: Path):
@@ -131,7 +134,8 @@ def test_bind_manifest_stems_refuses_a_date_the_manifest_holds_no_members_under(
     manifest = _draw(root, tmp_path / "m")
 
     with pytest.raises(ValueError, match="2026-01-01"):
-        bind_manifest_stems(manifest, "2026-01-01", SUBJECT, None, [])
+        bind_manifest_stems(manifest, "2026-01-01", SUBJECT, None, [],
+                            images_dir=root / "images" / DATES[0])
 
 
 def test_bind_manifest_stems_refuses_an_admitted_stem_assigned_to_neither_side(tmp_path: Path):
@@ -142,7 +146,8 @@ def test_bind_manifest_stems_refuses_an_admitted_stem_assigned_to_neither_side(t
 
     with pytest.raises(ValueError, match="no side"):
         bind_manifest_stems(manifest, DATES[0], SUBJECT, None,
-                            ["a", "b", "c", "d", "e", "f", "g"])
+                            ["a", "b", "c", "d", "e", "f", "g"],
+                            images_dir=root / "images" / DATES[0])
 
 
 def test_bind_manifest_stems_refuses_a_manifest_member_the_run_does_not_admit(tmp_path: Path):
@@ -152,7 +157,8 @@ def test_bind_manifest_stems_refuses_a_manifest_member_the_run_does_not_admit(tm
     manifest = _draw(root, tmp_path / "m")
 
     with pytest.raises(ValueError, match="not in this run's admitted"):
-        bind_manifest_stems(manifest, DATES[0], SUBJECT, None, ["a"])
+        bind_manifest_stems(manifest, DATES[0], SUBJECT, None, ["a"],
+                            images_dir=root / "images" / DATES[0])
 
 
 def test_bind_manifest_stems_refuses_an_empty_side_after_binding(tmp_path: Path):
@@ -169,7 +175,8 @@ def test_bind_manifest_stems_refuses_an_empty_side_after_binding(tmp_path: Path)
 
     with pytest.raises(ValueError, match="empty side"):
         bind_manifest_stems(manifest, DATES[0], SUBJECT, None,
-                            ["a", "b", "c", "d", "e", "f"])
+                            ["a", "b", "c", "d", "e", "f"],
+                            images_dir=root / "images" / DATES[0])
 
 
 def test_bind_manifest_stems_places_a_calibration_stem_on_neither_loader(tmp_path: Path):
@@ -179,7 +186,8 @@ def test_bind_manifest_stems_places_a_calibration_stem_on_neither_loader(tmp_pat
     manifest = _draw(root, tmp_path / "m")
 
     binding = bind_manifest_stems(
-        manifest, DATES[0], SUBJECT, None, ["a", "b", "c", "d", "e", "f"])
+        manifest, DATES[0], SUBJECT, None, ["a", "b", "c", "d", "e", "f"],
+        images_dir=root / "images" / DATES[0])
 
     assert binding.calibration
     assert set(binding.calibration).isdisjoint(binding.train)
@@ -204,7 +212,8 @@ def test_bind_manifest_stems_a_missing_calibration_member_does_not_refuse(tmp_pa
     dropped, kept_calibration = calibration_this_date[0], calibration_this_date[1:]
     admitted = [s for s in ("a", "b", "c", "d", "e", "f") if s != dropped]
 
-    binding = bind_manifest_stems(manifest, DATES[0], SUBJECT, None, admitted)
+    binding = bind_manifest_stems(manifest, DATES[0], SUBJECT, None, admitted,
+                                  images_dir=root / "images" / DATES[0])
 
     assert binding.train and binding.val
     # The manifest's own calibration membership is recorded whole, admitted or not (the run
@@ -544,6 +553,67 @@ def test_auto_train_val_manifest_refuses_a_moved_images_root_by_name(tmp_path: P
         auto_train_val("detection", data_cfg, None)
 
 
+def test_auto_train_val_manifest_refuses_a_members_block_with_no_images_root(tmp_path: Path):
+    """A manifest whose members block under this date names no images root now refuses at the
+    child's own runtime bind (it binds today, since the deleted inline check was a no-op on an
+    absent recorded root), the same fact manifest_compatibility already flagged before Start."""
+    import tcip_store as ts
+    from tcip_mcp.pipelines.data.split_construction import auto_train_val
+    from tcip_mcp.pipelines.data.splits import manifest_date_key
+    from tcip_mcp.tools.data_tools import split_manifest_key
+
+    root = _two_subject_two_date_dataset(tmp_path / "ds")
+    out = tmp_path / "m"
+    manifest = _draw(root, out)
+    date_key = manifest_date_key(DATES[0])
+    manifest["members"][date_key] = {
+        k: v for k, v in manifest["members"][date_key].items() if k != "images_root"
+    }
+    ts.replace(split_manifest_key(out), manifest)
+    data_cfg = _run_data_cfg(root, out, DATES[0])
+
+    with pytest.raises(ValueError, match="images root"):
+        auto_train_val("detection", data_cfg, None)
+
+
+def test_auto_train_val_manifest_refuses_a_config_with_no_images_dir(tmp_path: Path):
+    """A run naming data.split.manifest_dir but no data.images_dir at all now refuses at the
+    child's own runtime bind (it binds today, since the deleted inline check was a no-op on an
+    empty caller-side images_dir too): a manifest's recorded images root has nothing to compare
+    against."""
+    from tcip_mcp.pipelines.data.split_construction import auto_train_val
+
+    root = _two_subject_two_date_dataset(tmp_path / "ds")
+    out = tmp_path / "m"
+    _draw(root, out)
+    data_cfg = _run_data_cfg(root, out, DATES[0])
+    data_cfg["images_dir"] = ""
+
+    with pytest.raises(ValueError, match="images_dir"):
+        auto_train_val("detection", data_cfg, None)
+
+
+def test_auto_train_val_manifest_scope_check_reaches_the_child(tmp_path: Path, monkeypatch):
+    """Marker proof that the child's runtime bind reaches manifest_scope_issues, the one
+    accumulator every manifest-scope consumer shares: a site that stopped calling it would pass
+    this test's own scenario silently instead of raising the marker below."""
+    import tcip_mcp.pipelines.data.splits as splits_mod
+    from tcip_mcp.pipelines.data.split_construction import auto_train_val
+
+    root = _two_subject_two_date_dataset(tmp_path / "ds")
+    out = tmp_path / "m"
+    _draw(root, out)
+    data_cfg = _run_data_cfg(root, out, DATES[0])
+
+    monkeypatch.setattr(
+        splits_mod, "manifest_scope_issues",
+        lambda *a, **k: (["MARKER-CHILD-SCOPE-ISSUE"], None),
+    )
+
+    with pytest.raises(ValueError, match="MARKER-CHILD-SCOPE-ISSUE"):
+        auto_train_val("detection", data_cfg, None)
+
+
 def test_preflight_config_flags_a_moved_images_root_by_name(tmp_path: Path):
     from tcip_mcp.tools.training_tools import preflight_config
 
@@ -659,7 +729,8 @@ def test_persist_split_manifest_carries_the_manifest_binding(tmp_path: Path):
     # An independent bind over this run's own admitted train/val stems, checked against the
     # persisted counts and hash rather than a tautology a two-sided binder would also pass.
     expected = bind_manifest_stems(
-        manifest, DATES[0], SUBJECT, None, sorted(train_ds.stems) + sorted(val_ds.stems))
+        manifest, DATES[0], SUBJECT, None, sorted(train_ds.stems) + sorted(val_ds.stems),
+        images_dir=root / "images" / DATES[0])
     assert binding["calibration_bound"] == expected.calibration_bound == len(expected.calibration)
     assert binding["calibration_unadmitted"] == 0
     assert binding["other_dates"] > 0  # the manifest's other date's members, across all three sides

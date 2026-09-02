@@ -92,6 +92,16 @@ def test_freeze_split_manifest_round_trips_through_a_real_bind(tmp_path: Path):
     }
     assert manifest_compatibility(second_cfg, manifest, manifest_dir) == []
 
+    from tcip_mcp.pipelines.data.splits import manifest_scope_issues
+
+    scope_issues, scope_narrowing = manifest_scope_issues(
+        manifest, subject=SUBJECT, attribute=None, date=DATES[0],
+        images_dir=str(root / "images" / DATES[0]), label="data.images_dir",
+        manifest_dir=manifest_dir,
+    )
+    assert scope_issues == []
+    assert scope_narrowing is not None
+
     second_data_cfg = dict(second_cfg["data"])
     train_ds, val_ds, label_digests = auto_train_val("detection", second_data_cfg, None)
     assert label_digests is not None

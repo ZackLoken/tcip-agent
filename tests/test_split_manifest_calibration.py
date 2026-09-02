@@ -145,6 +145,53 @@ def test_calibration_universe_from_manifest_floor_is_foreground_aware(tmp_path: 
             foreground_stems={calibration_this_date[0]})
 
 
+# -- resolve_manifest_calibration_universe's scope check --------------------------
+
+
+def test_resolve_manifest_calibration_universe_refuses_a_members_block_with_no_images_root(
+    tmp_path: Path,
+):
+    """A manifest whose members block under this date names no images root now refuses at the
+    calibration door too (it drew a universe today, since the deleted no-op comparison never
+    caught an absent recorded root)."""
+    import tcip_store as ts
+    from tcip_mcp.pipelines.data.splits import (
+        manifest_date_key, resolve_manifest_calibration_universe,
+    )
+    from tcip_mcp.tools.data_tools import split_manifest_key
+
+    root = _two_date_dataset(tmp_path / "ds")
+    out = tmp_path / "m"
+    manifest = _draw(root, out)
+    date_key = manifest_date_key(DATES[0])
+    manifest["members"][date_key] = {
+        k: v for k, v in manifest["members"][date_key].items() if k != "images_root"
+    }
+    ts.replace(split_manifest_key(out), manifest)
+
+    with pytest.raises(ValueError, match="images root"):
+        resolve_manifest_calibration_universe(
+            manifest, str(out), str(root / "annotations" / DATES[0]),
+            str(root / "images" / DATES[0]), SUBJECT, None, list(_STEMS))
+
+
+def test_resolve_manifest_calibration_universe_refuses_a_door_with_no_images_dir(
+    tmp_path: Path,
+):
+    """A door naming no images_dir at all now refuses at the calibration door too (it drew a
+    universe today, since the deleted no-op comparison never caught an empty caller-side root)."""
+    from tcip_mcp.pipelines.data.splits import resolve_manifest_calibration_universe
+
+    root = _two_date_dataset(tmp_path / "ds")
+    out = tmp_path / "m"
+    manifest = _draw(root, out)
+
+    with pytest.raises(ValueError, match="images_dir"):
+        resolve_manifest_calibration_universe(
+            manifest, str(out), str(root / "annotations" / DATES[0]), None, SUBJECT, None,
+            list(_STEMS))
+
+
 # -- resolve_locked_cal_holdout_split's split_manifest_dir -----------------------
 
 
@@ -281,6 +328,51 @@ def test_calibrate_operating_point_manifest_refuses_a_subject_mismatch(tmp_path:
             _CalStub(subject="a_different_subject"), "catkin",
             str(root / "annotations" / DATES[0]), str(root / "images" / DATES[0]),
             split_manifest_dir=str(out), **_CAL_KWARGS)
+
+
+def test_resolve_manifest_calibration_universe_admits_a_doors_empty_string_attribute(
+    tmp_path: Path,
+):
+    """An explicit empty-string attribute the door states normalizes to ``None`` the same way
+    the training child's own admission normalizes it, so a door with no attribute draws a
+    universe from a manifest drawn with none, rather than being refused for a divergence that
+    reads the same fact two ways."""
+    from tcip_mcp.pipelines.data.splits import resolve_manifest_calibration_universe
+
+    root = _two_date_dataset(tmp_path / "ds")
+    out = tmp_path / "m"
+    manifest = _draw(root, out)
+
+    stems, _group_by, _group_key_map, _excluded, cal_date = resolve_manifest_calibration_universe(
+        manifest, str(out), str(root / "annotations" / DATES[0]),
+        str(root / "images" / DATES[0]), SUBJECT, "", list(_STEMS))
+
+    assert stems
+    assert cal_date == DATES[0]
+
+
+def test_resolve_manifest_calibration_universe_scope_check_reaches_the_calibration_door(
+    tmp_path: Path, monkeypatch,
+):
+    """Marker proof that resolve_manifest_calibration_universe reaches manifest_scope_issues,
+    the one accumulator every manifest-scope consumer shares: a site that stopped calling it
+    would pass this test's own scenario silently instead of raising the marker below."""
+    import tcip_mcp.pipelines.data.splits as splits_mod
+
+    root = _two_date_dataset(tmp_path / "ds")
+    out = tmp_path / "m"
+    manifest = _draw(root, out)
+
+    monkeypatch.setattr(
+        splits_mod, "manifest_scope_issues",
+        lambda *a, **k: (["MARKER-CALIBRATION-DOOR-SCOPE-ISSUE"], None),
+    )
+
+    with pytest.raises(ValueError, match="MARKER-CALIBRATION-DOOR-SCOPE-ISSUE"):
+        splits_mod.resolve_manifest_calibration_universe(
+            manifest, str(out), str(root / "annotations" / DATES[0]),
+            str(root / "images" / DATES[0]), SUBJECT, None, list(_STEMS),
+        )
 
 
 def test_calibrate_operating_point_manifest_conflicts_with_group_by(tmp_path: Path):

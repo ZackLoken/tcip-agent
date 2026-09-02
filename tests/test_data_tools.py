@@ -1163,7 +1163,7 @@ def test_make_splits_writes_no_member_block_for_a_date_that_admits_nothing(tmp_p
 
     assert "2-12-26" not in manifest["members"]
     with pytest.raises(ValueError, match=r"holds members under \['2-11-26'\]"):
-        bind_manifest_stems(manifest, "2-12-26", "leaf", None, [])
+        bind_manifest_stems(manifest, "2-12-26", "leaf", None, [], images_dir=images_dir)
 
 
 def test_make_splits_materialize_negative_carry_reads_only_the_materializing_dates_bucket(
