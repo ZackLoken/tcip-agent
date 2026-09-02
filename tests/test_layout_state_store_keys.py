@@ -88,10 +88,9 @@ def test_recording_view_coverage_leaves_the_confirmed_negatives_untouched(
         "date": "2026-03-01",
         "grid": {k: grid[k] for k in ("width", "height", "tile_size", "overlap", "cols", "rows")},
         "cells_served_at_native": [cell],
-        "cells_swept": [],
+        "cells_seen_at_scale": {},
         "viewing": {"stretch": "minmax", "stats_source": {"read": "none"},
-                   "display_bounds": None, "base_served_size": None,
-                   "working_scale_bar": None},
+                   "display_bounds": None, "base_served_size": None},
     })
     assert resp.status_code == 200, resp.text
 
@@ -102,5 +101,5 @@ def test_recording_view_coverage_leaves_the_confirmed_negatives_untouched(
     coverage = ts.read(view_coverage_key(root))
     record = coverage[bucket]["plot.tif"]
     assert record["cells_served_at_native"] == [cell]
-    assert record["cells_swept"] == []
+    assert record["cells_seen_at_scale"] == {}
     assert record["grid"]["cols"] * record["grid"]["rows"] == len(grid["cells"])

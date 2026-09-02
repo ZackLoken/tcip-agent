@@ -16,9 +16,11 @@ re-deriving them. The record store is ``view_coverage.json``
 (``status_bucket(subject, date)``, then image name). The store is advisory: training
 never reads it, and unswept cells warn rather than block a Complete. Every write that changes
 the record is audited (``record_event_or_raise``, after the transaction commits, since a log
-append cannot join a record transaction): an append that cannot land still raises rather than
-warns, so the response answers 500 and the caller is told its own retry of the same payload is
-what recovers the missing line, rather than a silent 200 for a change with no audit trail.
+append cannot join a record transaction): an append that cannot land still raises
+(``AuditEntryNotWritten``, named by a stable marker in the 500 body) rather than warning, but by
+then the record is already committed, so the missing line stays missing -- a retry of the same
+payload merges to no change and writes and audits nothing. The 500 tells the caller the true
+guarantee (the change landed, its line did not), never that its own retry is what recovers it.
 
 Also here: region-completeness routes, a different store on the same grid. An attestation ("I
 found every instance of this subject in these cells") gates a scientific claim (block
@@ -55,6 +57,32 @@ _CONFORM_HINT = (
     "run scripts/conform_view_coverage_viewing.py against this dataset to bring it to the "
     "current shape (--plan first to preview the change)"
 )
+
+# The stable marker post_coverage's 500 body carries for AuditEntryNotWritten (api/http.ts's
+# decodeRefusal parses detail as an object; coverageTracker.ts's outbox reads it as terminal).
+AUDIT_ENTRY_NOT_WRITTEN = "audit_entry_not_written"
+
+
+def _require_date_matches_path(image_path: str, date: Optional[str]) -> None:
+    """Refuse a posted ``date`` that disagrees with the date :func:`parse_image_path` reads off
+    ``image_path`` itself (an explicit ``null`` against a dated image, or a date against a
+    dateless one): the two must agree by construction, since a record filed under a bucket the
+    image's own path never carries would silently split one image's coverage across two buckets.
+    A path outside the recognized ``<root>/images/[<date>/]<stem>`` tree carries nothing to
+    compare against and is left to whatever check already applies to it (``_resolve_root``, on
+    the branch that itself calls ``parse_image_path``)."""
+    from tcip_mcp.dataset_layout import parse_image_path
+
+    try:
+        _root, parsed_date, _stem = parse_image_path(image_path)
+    except ValueError:
+        return
+    if parsed_date != date:
+        raise HTTPException(
+            400,
+            f"date {date!r} disagrees with the date {parsed_date!r} parse_image_path reads off "
+            f"{image_path!r}; the two must agree so one image's coverage can never split across "
+            f"two buckets")
 
 
 def _validated_record(image_name: str, record: dict) -> None:
@@ -246,15 +274,17 @@ def post_coverage(payload: CoveragePayload) -> dict:
     refuses an ``append`` while a transaction is open (a log cannot join a record transaction),
     the same constraint ``plant_mapping.persist_mapping`` states for its own receipt. A failed
     append still raises (``record_event_or_raise``, not the best-effort ``record_event``) rather
-    than warning: the write above has already landed, so the route answers 500 and the caller is
-    told plainly that its own retry of this payload is what recovers the missing line, never a
-    silent 200 for a change with no audit trail.
+    than warning: the write above has already landed, so the route answers 500, naming
+    ``AuditEntryNotWritten`` by a stable marker in the body, and tells the caller the true
+    guarantee: the record is committed, its line is not, and a retry of this same payload merges
+    to no change and writes and audits nothing, never recovering it.
     """
-    from tcip_mcp.audit import record_event_or_raise
+    from tcip_mcp.audit import AuditEntryNotWritten, record_event_or_raise
     from tcip_mcp.dataset_layout import status_bucket, view_coverage_key
     from tcip_mcp.pipelines.reference_grid import reference_cells
 
     subject = _require_subject(payload.subject)
+    _require_date_matches_path(payload.image_path, payload.date)
     root = _resolve_root(payload.image_path, payload.dataset_root)
     grid = payload.grid.model_dump()
     valid_names = {c.name for c in reference_cells(
@@ -324,14 +354,18 @@ def post_coverage(payload: CoveragePayload) -> dict:
 
     # A log append cannot join a record transaction; see the docstring for what a failed
     # append means at this position, after the write above has already committed.
-    record_event_or_raise(
-        "gui_view_coverage",
-        {"image_name": image_name, "subject": subject, "date": payload.date, "grid": grid,
-         "cells_seen_added": seen_added, "cells_served_at_native_added": served_added,
-         "viewing_changed": viewing_changed,
-         "viewing": viewing_dict if viewing_changed else None, "replaced": replaced},
-        source="gui", scope=root,
-    )
+    try:
+        record_event_or_raise(
+            "gui_view_coverage",
+            {"image_name": image_name, "subject": subject, "date": payload.date, "grid": grid,
+             "cells_seen_added": seen_added, "cells_served_at_native_added": served_added,
+             "viewing_changed": viewing_changed,
+             "viewing": viewing_dict if viewing_changed else None, "replaced": replaced},
+            source="gui", scope=root,
+        )
+    except AuditEntryNotWritten as exc:
+        raise HTTPException(
+            500, {"error": AUDIT_ENTRY_NOT_WRITTEN, "message": str(exc)}) from exc
 
     return {
         "status": "ok",
@@ -342,8 +376,8 @@ def post_coverage(payload: CoveragePayload) -> dict:
     }
 
 
-# Region completeness gates a scientific claim rather than warning advisory, so (unlike view
-# coverage above) its own write is audited after the transaction commits, not inside it.
+# Region completeness gates a scientific claim; its write also audits after the commit, above,
+# through the best-effort record_event emitter, so a failed append there warns, never raises.
 
 
 class CompletenessSetPayload(BaseModel):
@@ -456,7 +490,7 @@ def get_completeness(
         _root_from_image, date, image_stem = parse_image_path(path)
         label_path = annotation_path(root, date, image_stem)
         annotations = read_annotations(str(label_path)) if label_path.is_file() else []
-    except (UnreadableLabelDocument, ValueError) as exc:
+    except (UnreadableLabelDocument, ValueError, FileNotFoundError, OSError) as exc:
         label_error = str(exc)
 
     if label_error is not None:

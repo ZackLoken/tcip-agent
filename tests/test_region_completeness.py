@@ -355,7 +355,7 @@ class TestWorkingScaleBar:
 
     def test_a_single_whole_frame_annotation_yields_a_bar_every_ordinary_view_meets(self):
         # A 4000px-wide annotation spanning nearly the whole frame yields a tiny scale value,
-        # below any real zoom level: exactly the ruling's stated consequence for a large object.
+        # below any real zoom level: the accepted consequence for a large object.
         bar = working_scale_bar([4000.0], judged_span_px=46, source="s")
         assert bar is not None
         assert bar["value"] < 0.05

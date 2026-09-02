@@ -1398,7 +1398,7 @@ REGISTERED = {
     "view_coverage": Registered(
         {"catkin/2026-03-04": {"a_1.jpg": {"grid": {"rows": 3, "cols": 3},
                                            "cells_served_at_native": ["r1c1"],
-                                           "cells_swept": ["r1c1"]}}},
+                                           "cells_seen_at_scale": {"r1c1": 1.0}}}},
         dataset_layout.view_coverage_key, ".tcip/state/view_coverage.json"),
     "region_completeness": Registered(
         {"catkin/orthö": {"grid": {"rows": 2, "cols": 2}, "cells_complete": ["r1c1"],

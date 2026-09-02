@@ -60,14 +60,14 @@ def declared_models() -> list[type[BaseModel]]:
         StatsSource,
         WorkingScaleBar,
     )
-    from tcip_web.routes.coverage import CoveragePayload
+    from tcip_web.routes.coverage import CompletenessSetPayload, CoveragePayload
     from tcip_web.routes.review import ActionPayload
     from tcip_web.routes.terminal import TerminalInputFrame, TerminalResizeFrame
     from tcip_web.routes.training import TrainingMetricFrame, TrainingStatusFrame
     from tcip_web.state import GuiVocabulary
 
     return [GridGeometry, StatsSource, WorkingScaleBar, CoverageViewing, CoverageRecord,
-            CoveragePayload, ActionPayload, GuiVocabulary,
+            CoveragePayload, CompletenessSetPayload, ActionPayload, GuiVocabulary,
             TrainingMetricFrame, TrainingStatusFrame, TerminalInputFrame, TerminalResizeFrame]
 
 

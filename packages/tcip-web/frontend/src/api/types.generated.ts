@@ -76,6 +76,17 @@ export interface CoveragePayload {
   viewing: CoverageViewing;
 }
 
+export interface CompletenessSetPayload {
+  image_path: string;
+  subject: string;
+  dataset_root?: string | null;
+  grid: GridGeometry;
+  cell: string;
+  complete: boolean;
+  view_scale: number | null;
+  user?: string | null;
+}
+
 export interface ActionPayload {
   dataset_root: string;
   image_name: string;
