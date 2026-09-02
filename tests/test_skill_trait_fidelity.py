@@ -15,7 +15,6 @@ from pathlib import Path
 import pytest
 
 REPO = Path(__file__).resolve().parents[1]
-SKILLS = REPO / ".github" / "skills"
 
 
 def _load_guardrail():
@@ -30,42 +29,46 @@ def _load_guardrail():
 
 guardrail = _load_guardrail()
 
-# skill dir (under .github/skills) -> crops.yml crop key (None = domain skill, global check)
+# knowledge document name -> crops.yml crop key (None = domain document, global check)
 CROP_SKILLS = {
-    "crops/hazelnut": "hazelnut",
-    "crops/chestnut": "chestnut",
-    "crops/currant": "currant",
-    "crops/elderberry": "elderberry",
-    "crops/persimmon": "persimmon",
-    "crops/black-locust": "black_locust",
+    "hazelnut": "hazelnut",
+    "chestnut": "chestnut",
+    "currant": "currant",
+    "elderberry": "elderberry",
+    "persimmon": "persimmon",
+    "black-locust": "black_locust",
     "crop-science": None,
 }
 
 
-@pytest.mark.parametrize("rel,crop_key", list(CROP_SKILLS.items()))
-def test_skill_asserts_no_fabricated_traits(rel: str, crop_key: str | None) -> None:
-    skill = SKILLS / rel / "SKILL.md"
-    assert skill.exists(), f"missing skill: {skill}"
+@pytest.mark.parametrize("name,crop_key", list(CROP_SKILLS.items()))
+def test_skill_asserts_no_fabricated_traits(name: str, crop_key: str | None) -> None:
+    from tcip_mcp.knowledge import document_path
+
+    skill = document_path(name)
+    assert skill.exists(), f"missing document: {skill}"
     unknown = guardrail.unknown_trait_tokens(skill, crop_key)
     assert not unknown, (
-        f"{rel}/SKILL.md backticks trait-like tokens not in crops.yml and not allow-listed: "
-        f"{unknown}. Either it's a fabricated trait (fix the skill) or a real platform token "
+        f"{name}: backticks trait-like tokens not in crops.yml and not allow-listed: "
+        f"{unknown}. Either it's a fabricated trait (fix the document) or a real platform token "
         "(add it to NON_TRAIT_ALLOW in scripts/verify_skill_traits.py)."
     )
 
 
 @pytest.mark.parametrize(
-    "rel,crop_key", [(r, c) for r, c in CROP_SKILLS.items() if c is not None]
+    "name,crop_key", [(n, c) for n, c in CROP_SKILLS.items() if c is not None]
 )
-def test_skill_asserts_no_off_crop_traits(rel: str, crop_key: str) -> None:
-    """Every real trait a per-crop skill backticks must actually be assigned to that crop in
+def test_skill_asserts_no_off_crop_traits(name: str, crop_key: str) -> None:
+    """Every real trait a per-crop document backticks must actually be assigned to that crop in
     crops.yml: the mis-assignment check `test_skill_asserts_no_fabricated_traits` doesn't cover
     it (that one only checks fabrication, never crop assignment)."""
-    skill = SKILLS / rel / "SKILL.md"
+    from tcip_mcp.knowledge import document_path
+
+    skill = document_path(name)
     off_crop = guardrail.off_crop_tokens(skill, crop_key)
     assert not off_crop, (
-        f"{rel}/SKILL.md backticks trait(s) crops.yml does not assign to {crop_key!r}: "
-        f"{off_crop}. Either the skill or crops.yml's crop assignment is wrong."
+        f"{name}: backticks trait(s) crops.yml does not assign to {crop_key!r}: "
+        f"{off_crop}. Either the document or crops.yml's crop assignment is wrong."
     )
 
 

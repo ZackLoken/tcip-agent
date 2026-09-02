@@ -198,7 +198,7 @@ The agent must never write ground truth the human hasn't seen. Stage proposals t
 
 Flow: run inference (or `stage_proposals`) → `focus(tab='review')` the human to the weakest/flagged
 frames → they accept on the canvas → only then does it become GT. See
-`.github/skills/delivery` for what ships after sign-off.
+`packages/tcip-mcp/src/tcip_mcp/knowledge/delivery.md` for what ships after sign-off.
 
 ## Quality Metrics
 

@@ -58,9 +58,10 @@ change needs to inspect or convert a root's on-disk state.
   pull request for one of these without a design discussion already open.
 - One concern per commit, in dependency order, with LF line endings. A commit message states
   the standing constraint the change installs, not a narrative of the session that wrote it.
-- The crop trait vocabulary is controlled: it lives in `crops.yml` and `.github/skills/crops/`.
-  Do not invent a trait name, state, or column prefix anywhere else; thread a real trait through
-  as data read from the project's own registry.
+- The crop trait vocabulary is controlled: it lives in `crops.yml` and
+  `packages/tcip-mcp/src/tcip_mcp/knowledge/crops/`. Do not invent a trait name, state, or
+  column prefix anywhere else; thread a real trait through as data read from the project's own
+  registry.
 - Agent-driven contributions are welcome under the same gates as a human's: the same tests, the
   same review, the same design-first rule for a persisted-format or refusal change. A pull
   request is judged on what it changes, not on who or what wrote it.

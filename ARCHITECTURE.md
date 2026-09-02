@@ -62,11 +62,12 @@ source file under a covered root that no row names.
 | packages/tcip-mcp/src/tcip_mcp/__init__.py | TCIP MCP Server: domain tools for the phenotyping platform. | 0 | 0 |
 | packages/tcip-mcp/src/tcip_mcp/__main__.py | Entry point: ``python -m tcip_mcp``. | 1 | 0 |
 | packages/tcip-mcp/src/tcip_mcp/agent_identity.py | Which agent harness this MCP server process serves, declared at the handshake, and the session it minted; projected onto every audit line, statement record and HTTP push. | 0 | 7 |
-| packages/tcip-mcp/src/tcip_mcp/audit.py | Audit logging decorator for MCP tools, the log each event's scope routes it to, and the refusal a call raises when its own entry cannot be appended. | 5 | 33 |
+| packages/tcip-mcp/src/tcip_mcp/audit.py | Audit logging decorator for MCP tools, the log each event's scope routes it to, and the refusal a call raises when its own entry cannot be appended. | 5 | 34 |
 | packages/tcip-mcp/src/tcip_mcp/class_registry.py | The dataset's class registry, subjects, their attributes, and the deterministic name→id assignment a training run uses (and records, so predictions stay decodable). | 2 | 12 |
 | packages/tcip-mcp/src/tcip_mcp/dataset_layout.py | Canonical dataset-layout resolver: the single source of truth for where an image's ground-truth labels and model predictions live on disk. | 6 | 42 |
 | packages/tcip-mcp/src/tcip_mcp/experiments.py | Experiment tracking for ML training runs. | 11 | 18 |
 | packages/tcip-mcp/src/tcip_mcp/identity.py | The platform's recorded-actor convention, in one place. | 0 | 3 |
+| packages/tcip-mcp/src/tcip_mcp/knowledge/__init__.py | The one canonical domain-knowledge directory and its one reader: list_documents, document_path, document_paths, read_document, crops_yml_path. | 0 | 5 |
 | packages/tcip-mcp/src/tcip_mcp/model_registry.py | Model registry, track trained models and their performance. | 7 | 18 |
 | packages/tcip-mcp/src/tcip_mcp/operationalization.py | Per-project trait-operationalization records: what a delivered number means, who confirmed it, and the precondition every crossing delivery door checks. | 10 | 10 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/__init__.py | Pipeline sub-package: data, models, training, evaluation, inference, postprocessing. | 0 | 0 |
@@ -138,7 +139,7 @@ source file under a covered root that no row names.
 | packages/tcip-mcp/src/tcip_mcp/project_record.py | The project record: the one document every project carries, holding its authored site. | 2 | 6 |
 | packages/tcip-mcp/src/tcip_mcp/project_status.py | Per-project status pointer: a small, persisted summary of recent activity. | 2 | 3 |
 | packages/tcip-mcp/src/tcip_mcp/registry_paths.py | The containment core and grammar-aware external test the checkpoint and dataset registries share, plus the resolver every stored registry path becomes an absolute one through. | 0 | 5 |
-| packages/tcip-mcp/src/tcip_mcp/server.py | MCP server entry point: register all domain tools and run on stdio. | 23 | 22 |
+| packages/tcip-mcp/src/tcip_mcp/server.py | MCP server entry point: register all domain tools and run on stdio. | 24 | 23 |
 | packages/tcip-mcp/src/tcip_mcp/statements.py | Comparable-value and content-hash primitives shared by every statement kind. | 0 | 2 |
 | packages/tcip-mcp/src/tcip_mcp/store_catalogue.py | The whole store catalogue in one import: every module that registers a store, package-only so account_for reaches it with no repo root on sys.path. | 34 | 4 |
 | packages/tcip-mcp/src/tcip_mcp/tools/__init__.py | Tool sub-package: each module registers tools with the MCP server. | 0 | 0 |
@@ -151,6 +152,7 @@ source file under a covered root that no row names.
 | packages/tcip-mcp/src/tcip_mcp/tools/gui_tools.py | GUI-driving tools: push data to a panel, or drive the live Annotate/Review tab to a frame. | 9 | 1 |
 | packages/tcip-mcp/src/tcip_mcp/tools/inference_tools.py | Inference MCP tools: run_inference, export_predictions and tabulate_counts, sharing one verified body (``_run_inference_verified``) so the firewalled operating point (conf/NMS/tiling/max_dets) resolves identically for every entry point that runs a model over images; export_predictions and tabulate_counts's live-with-predictions_dir path also share one publish bracket (tile gate, count-claim gate, frozen-lineage refusal, write, lineage link), and tabulate_counts alone gains a second, bucket-only source regime reading an existing prediction bucket with no pass at all. | 22 | 5 |
 | packages/tcip-mcp/src/tcip_mcp/tools/ingest_tools.py | Image ingestion: turn a raw folder of photos into a structured TCIP project. | 10 | 1 |
+| packages/tcip-mcp/src/tcip_mcp/tools/knowledge_tools.py | The domain_knowledge MCP tool, the one non-Claude-Code-skill route to the knowledge documents; its description is composed at import time from the corpus itself. | 3 | 1 |
 | packages/tcip-mcp/src/tcip_mcp/tools/meta_tools.py | Meta-loop tools for self-improvement. | 6 | 4 |
 | packages/tcip-mcp/src/tcip_mcp/tools/model_tools.py | Model management tools, registry, listing, comparison. | 8 | 3 |
 | packages/tcip-mcp/src/tcip_mcp/tools/operationalization_tools.py | The agent's statement tool for trait operationalizations; it can state, never confirm. | 4 | 1 |
@@ -162,7 +164,7 @@ source file under a covered root that no row names.
 | packages/tcip-mcp/src/tcip_mcp/tools/scale_tools.py | Physical per-pixel scale calibration: the delivery-gating producer for ``resolve_scale.json``. | 10 | 1 |
 | packages/tcip-mcp/src/tcip_mcp/tools/training_tools.py | Training MCP tools, config validation, launch training, HPO, status. | 31 | 10 |
 | packages/tcip-mcp/src/tcip_mcp/tools/vision_tools.py | Vision tools: render annotations and predictions for visual analysis. | 22 | 3 |
-| packages/tcip-mcp/src/tcip_mcp/traits.py | Trait knowledge, the human-defined *semantics* of each measurable trait (Tier C). | 6 | 22 |
+| packages/tcip-mcp/src/tcip_mcp/traits.py | Trait knowledge, the human-defined *semantics* of each measurable trait (Tier C). | 7 | 22 |
 | packages/tcip-mcp/src/tcip_mcp/utils/__init__.py | Shared low-level utilities for tcip-mcp. | 0 | 0 |
 | packages/tcip-mcp/src/tcip_mcp/web_client.py | HTTP client for MCP tools to push state to the tcip-web backend. | 4 | 11 |
 | packages/tcip-mcp/src/tcip_mcp/workspace.py | Workspace resolver: where TCIP projects live on disk. | 4 | 21 |
@@ -481,6 +483,7 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | scripts/export_store.py | Write a root's database-held records and logs back out as files. | 6 | 0 |
 | scripts/foreground_fn_candidates.py | Compute foreground-only high-confidence FN candidates per image. | 2 | 0 |
 | scripts/gate_baseline.py | Parse ci.yml's jobs and run the steps it declares, so a local pass means CI would pass too. | 0 | 0 |
+| scripts/generate_claude_skills.py | Render the thin `.claude/skills/<name>/SKILL.md` files from the canonical knowledge documents. | 1 | 0 |
 | scripts/generate_frontend_routes.py | Generate the browser's route-path module from the backend's registered routes. | 1 | 0 |
 | scripts/generate_frontend_types.py | Generate the browser's coverage-record types from the pydantic models that declare them. | 9 | 0 |
 | scripts/generate_frozen_manifest.py | Render the store registry's freeze classifications into the shipped frozen-formats.json; --check holds CI to the committed edition. | 2 | 0 |
@@ -501,8 +504,8 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | scripts/smoke_terminal_e2e.py | One-shot smoke: the embedded agent terminal against the real `claude` CLI. | 2 | 0 |
 | scripts/verify_citations.py | Check that literature citations point at real code, real papers, and real sentences. | 0 | 0 |
 | scripts/verify_claims.py | List every claim-shaped sentence this change *adds* to comments and docstrings. | 0 | 0 |
-| scripts/verify_doc_examples.py | Verify that code examples in skills and source docstrings actually work. | 0 | 0 |
-| scripts/verify_skill_tools.py | Guardrail: hold every tool name in agent-facing prose to the registry. | 1 | 0 |
+| scripts/verify_doc_examples.py | Verify that code examples in skills and source docstrings actually work. | 1 | 0 |
+| scripts/verify_skill_tools.py | Guardrail: hold every tool name in agent-facing prose to the registry. | 2 | 0 |
 | scripts/verify_skill_traits.py | Guardrail: flag every trait-like token in a crop/domain SKILL.md that is not in crops.yml. | 1 | 0 |
 | scripts/watch_agent_chat.py | Read the in-app TCIP agent chat from the orchestrating Claude Code session. | 0 | 0 |
 
@@ -655,6 +658,7 @@ A module counts as zero-importer when no other module in its own scanned tree re
 | scripts | scripts/export_store.py |
 | scripts | scripts/foreground_fn_candidates.py |
 | scripts | scripts/gate_baseline.py |
+| scripts | scripts/generate_claude_skills.py |
 | scripts | scripts/generate_frontend_routes.py |
 | scripts | scripts/generate_frontend_types.py |
 | scripts | scripts/generate_frozen_manifest.py |
@@ -758,7 +762,7 @@ Docstring is the function's docstring first line, verbatim.
 
 | tool | line | audited | docstring first line |
 |---|---|---|---|
-| `ingest_images` | `ingest_tools.py:172` | yes | Copy raw images into a structured project, bucketed by the capture date each file states. |
+| `ingest_images` | `ingest_tools.py:173` | yes | Copy raw images into a structured project, bucketed by the capture date each file states. |
 
 ### meta_tools.py (4 tools)
 
@@ -768,6 +772,12 @@ Docstring is the function's docstring first line, verbatim.
 | `load_project_memory` | `meta_tools.py:306` | yes | Read one project-memory corpus into context so context isn't lost between sessions. |
 | `project_retrospective` | `meta_tools.py:393` | yes | Write an end-of-project retrospective to markdown. |
 | `record_distillation_pass` | `meta_tools.py:496` | yes | Record that you reviewed this project's friction/retrospectives (e.g. via |
+
+### knowledge_tools.py (1 tool)
+
+| tool | line | audited | docstring first line |
+|---|---|---|---|
+| `domain_knowledge` | `knowledge_tools.py:31` | yes | Read the platform's domain knowledge: trait semantics, workflow patterns, and per-crop |
 
 ### model_tools.py (3 tools)
 
@@ -1149,7 +1159,7 @@ Names not re-exported in `__all__` but importable directly from their defining s
 ## 4. Entry points
 
 `python -m tcip_mcp`: `packages/tcip-mcp/src/tcip_mcp/__main__.py:1-5` imports `main`
-from `tcip_mcp.server` and calls it: `packages/tcip-mcp/src/tcip_mcp/server.py:68`
+from `tcip_mcp.server` and calls it: `packages/tcip-mcp/src/tcip_mcp/server.py:69`
 (`def main()`). `server.py:9` defines `mcp = MCPServer("tcip-pipeline")`, the object every
 `@mcp.tool()` decorator in `packages/tcip-mcp/src/tcip_mcp/tools/*.py` registers against
 (`python scripts/list_tools.py` lists them; the count is never written down, since it drifts).
@@ -2395,7 +2405,7 @@ Phase 3 verdict: single.
 ## S37. traits.py trait specs against crops.yml controlled vocabulary
 
 Must agree: a registered trait's delivered phenotypes and units exist in the crops.yml vocabulary.
-Side A: `packages/tcip-mcp/src/tcip_mcp/traits.py:229` (`def crops_yml_path(`, the one placement of `.github/skills/crops/crops.yml`, loaded once for every reader of it by `_crops_traits`, line 228).
+Side A: `packages/tcip-mcp/src/tcip_mcp/knowledge/__init__.py:119` (`def crops_yml_path(`, the one placement of `packages/tcip-mcp/src/tcip_mcp/knowledge/crops/crops.yml`), reached through `packages/tcip-mcp/src/tcip_mcp/traits.py:229` (`def crops_yml_path(`, delegating), loaded once for every reader of it by `_crops_traits`, line 236.
 Side B: `packages/tcip-mcp/src/tcip_mcp/traits.py:300` (`_spec_from_config` cross-checks each spec against `_crops_vocab`, line 241) and `scripts/verify_skill_traits.py:46` (`load_vocab` checks a skill's trait tokens through that same read, and refuses an empty vocabulary rather than reporting a clean skill).
 Phase 3 verdict: single.
 
@@ -2585,7 +2595,7 @@ Phase 3 verdict: duplicated.
 ## S64. MCP tool registry against documented tool names  <!-- queued: P5-303 unify -->
 
 Must agree: any document naming a tool names one the server actually registers.
-Side A: `packages/tcip-mcp/src/tcip_mcp/server.py:40` (`def list_registered_tools() -> list[str]:`).
+Side A: `packages/tcip-mcp/src/tcip_mcp/server.py:41` (`def list_registered_tools() -> list[str]:`).
 Side B: `scripts/list_tools.py:15` (`from tcip_mcp.server import list_registered_tools`).
 Phase 3 verdict: duplicated.
 
@@ -2599,8 +2609,8 @@ Phase 3 verdict: duplicated.
 ## S66. Skill and docstring examples against real signatures
 
 Must agree: a documented call binds against the real function signature.
-Side A: `.github/skills/` (python fenced examples in SKILL.md files).
-Side B: `scripts/verify_doc_examples.py:33` (`_MD_FENCE = re.compile(r"```python\n(.*?)```", re.DOTALL)`).
+Side A: `packages/tcip-mcp/src/tcip_mcp/knowledge/` (python fenced examples in the knowledge documents).
+Side B: `scripts/verify_doc_examples.py:32` (`_MD_FENCE = re.compile(r"```python\n(.*?)```", re.DOTALL)`).
 Phase 3 verdict: single.
 
 ## S67. Local gate commands against the CI gate  <!-- queued: P5-308 unify -->

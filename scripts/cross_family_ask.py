@@ -82,7 +82,7 @@ CONDITIONS = {
         "guidance": False,
     },
     "guidance-equalized": {
-        "description": "Every harness is told to read CLAUDE.md and .github/skills/ first.",
+        "description": "Every harness is told to read CLAUDE.md and the knowledge documents first.",
         "mcp": "tcip",
         "guidance": True,
     },
@@ -199,8 +199,8 @@ def model_matches(requested: str, used: str) -> bool:
 
 
 GUIDANCE_PREFIX = (
-    "Before you begin, read CLAUDE.md at the repository root and the SKILL.md files "
-    "under .github/skills/ that are relevant to this task.\n\n"
+    "Before you begin, read CLAUDE.md at the repository root and the knowledge documents "
+    "under packages/tcip-mcp/src/tcip_mcp/knowledge/ that are relevant to this task.\n\n"
 )
 
 

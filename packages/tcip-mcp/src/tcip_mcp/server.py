@@ -21,6 +21,7 @@ import tcip_mcp.tools.project_tools  # noqa: F401, E402
 import tcip_mcp.tools.ingest_tools  # noqa: F401, E402
 import tcip_mcp.tools.experiment_tools  # noqa: F401, E402
 import tcip_mcp.tools.meta_tools  # noqa: F401, E402
+import tcip_mcp.tools.knowledge_tools  # noqa: F401, E402
 import tcip_mcp.tools.phenology_tools  # noqa: F401, E402
 import tcip_mcp.tools.operationalization_tools  # noqa: F401, E402
 import tcip_mcp.tools.trait_spec_authoring_tools  # noqa: F401, E402

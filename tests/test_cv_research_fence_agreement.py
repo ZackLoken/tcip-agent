@@ -34,7 +34,6 @@ import re
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
-CV_RESEARCH_SKILL = REPO / ".github" / "skills" / "cv-research" / "SKILL.md"
 FENCE_SETTINGS = REPO / "packages" / "tcip-web" / "src" / "tcip_web" / "agent_terminal.settings.json"
 
 _SECTION_1 = re.compile(r"## 1\. Research.*?(?=\n## 2\.)", re.DOTALL)
@@ -66,10 +65,12 @@ def _hosts_from_source_list(section_text: str) -> set[str]:
 
 
 def _skill_hosts() -> set[str]:
-    """The academic hosts cv-research SKILL.md's section 1 names, read from the live file."""
-    text = CV_RESEARCH_SKILL.read_text(encoding="utf-8")
+    """The academic hosts the cv-research document's section 1 names, read from the live file."""
+    from tcip_mcp.knowledge import document_path
+
+    text = document_path("cv-research").read_text(encoding="utf-8")
     section = _SECTION_1.search(text)
-    assert section, "cv-research SKILL.md has no '## 1. Research' section to read hosts from"
+    assert section, "the cv-research document has no '## 1. Research' section to read hosts from"
     return _hosts_from_source_list(section.group(0))
 
 

@@ -58,8 +58,8 @@ without notice.
 - The frontend (`packages/tcip-web/frontend/`) in its entirety.
 - Internal functions inside a pipeline module (`packages/tcip-mcp/src/tcip_mcp/pipelines/`) that
   are not themselves an MCP tool or a documented script entry point.
-- The prose inside a skill (`.github/skills/`): domain knowledge that is expected to be refined
-  as the platform and the crops it covers grow.
+- The prose inside a knowledge document (`packages/tcip-mcp/src/tcip_mcp/knowledge/`): domain
+  knowledge that is expected to be refined as the platform and the crops it covers grow.
 - The audit log's line shape, beyond what `frozen-formats.json` pins for the `audit_log` store
   itself (its `kind: log`, `frozen: true`, current `schema_version`). What a given line's fields
   mean beyond that ceiling is not a promise this document extends.

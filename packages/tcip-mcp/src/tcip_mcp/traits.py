@@ -228,9 +228,9 @@ SPEC_SUFFIX = ".json"
 
 def crops_yml_path() -> Path:
     """Where the crops.yml controlled vocabulary lives, stated once for every reader of it."""
-    from tcip_mcp.project_paths import repo_root_from_here
+    from tcip_mcp.knowledge import crops_yml_path as _knowledge_crops_yml_path
 
-    return repo_root_from_here() / ".github" / "skills" / "crops" / "crops.yml"
+    return _knowledge_crops_yml_path()
 
 
 def _crops_traits() -> list[dict]:

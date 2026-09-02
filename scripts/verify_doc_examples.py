@@ -27,7 +27,6 @@ from dataclasses import dataclass
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
-SKILLS = REPO / ".github" / "skills"
 SOURCE_ROOTS = [REPO / "packages" / "tcip-mcp" / "src", REPO / "packages" / "tcip-annotation" / "src"]
 
 _MD_FENCE = re.compile(r"```python\n(.*?)```", re.DOTALL)
@@ -200,8 +199,10 @@ def check(example: Example) -> list[Problem]:
 
 
 def collect() -> list[Example]:
+    from tcip_mcp.knowledge import document_paths
+
     examples: list[Example] = []
-    for md in sorted(SKILLS.rglob("*.md")):
+    for md in sorted(document_paths()):
         examples += _md_examples(md)
     for root in SOURCE_ROOTS:
         for py in sorted(root.rglob("*.py")):

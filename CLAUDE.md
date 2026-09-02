@@ -31,9 +31,10 @@ atomic records, logs and blobs over a database backend and a file backend that m
 thing; bottom of the stack), `packages/tcip-annotation/` (headless annotation and review engine),
 `packages/tcip-mcp/` (the MCP server, domain tools and composable ML; your primary surface),
 `packages/tcip-web/` (FastAPI plus Vite/React/TS/Konva; the breeder's only surface). `scripts/`
-holds one-off logged scripts; `.github/skills/` holds domain knowledge as repo files (read with
-Read, not the Skill tool) and is loaded before acting in its domain. The registered crops are
-`crops.yml`'s, six today.
+holds one-off logged scripts; domain knowledge lives in `packages/tcip-mcp/src/tcip_mcp/knowledge/`
+as repo files, loaded before acting in its domain. Claude Code reaches it through the generated
+skills under `.claude/skills/`; any other client reaches it through the `domain_knowledge` tool;
+a document is read in full either way. The registered crops are `crops.yml`'s, six today.
 
 ## Operating posture
 
@@ -222,7 +223,8 @@ via `$TCIP_STATE_ROOT`, pinned at startup by the web backend and every MCP serve
   `packages/tcip-mcp/src/tcip_mcp/tools/`, decorated `@mcp.tool()` and `@audited`. Prefer a
   logged script in `scripts/` over a new MCP tool; add a tool only for an audit seam,
   long-running infrastructure, or domain knowledge the agent lacks.
-- Crop traits are controlled vocabulary in `.github/skills/crops/`; verify there before asserting.
+- Crop traits are controlled vocabulary in `packages/tcip-mcp/src/tcip_mcp/knowledge/crops/`;
+  verify there before asserting.
 - The word provisional is reserved for the delivery gate's acknowledged-unvalidated sense
   (the `majority_provisional` field, the provisional floor). A plain value says default, a
   bound says cap or ceiling, an unsettled policy says tentative or draft.
@@ -232,5 +234,6 @@ via `$TCIP_STATE_ROOT`, pinned at startup by the web backend and every MCP serve
   `round <n>`, `Phase <n>`), no inline decision dates, no bold or all-caps emphasis, no em
   dashes. If nothing survives once that framing is stripped, write nothing.
 - `docs/` and `.claude/` are local, gitignored dev tooling (the audit record, the remediation
-  plan and rulings, hooks, worktrees); `docs/current-task.md` and `docs/recent-summary.md` are
-  injected at session start where they exist.
+  plan and rulings, hooks, worktrees), except the generated skills under `.claude/skills/`,
+  which are tracked; `docs/current-task.md` and `docs/recent-summary.md` are injected at session
+  start where they exist.

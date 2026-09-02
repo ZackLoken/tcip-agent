@@ -33,10 +33,11 @@ under the workspace.
 
     black-locust_tree_trunk-diameter
 
-- `crop`: one of the six controlled crops (verify in `.github/skills/crops/`).
+- `crop`: one of the six controlled crops (verify in
+  `packages/tcip-mcp/src/tcip_mcp/knowledge/crops/`).
 - `subject`: the object the annotations isolate (see step 3 below).
-- `phenotype`: what is being measured (see `.github/skills/crop-science`), never a
-  `crops.yml` trait name.
+- `phenotype`: what is being measured (see
+  `packages/tcip-mcp/src/tcip_mcp/knowledge/crop-science.md`), never a `crops.yml` trait name.
 
 The site (field/orchard) is no longer part of the name: it is a required argument of
 `init_project` and `ingest_images`, recorded once on the project's own record
@@ -86,7 +87,8 @@ it. `crop` is required and is never inferred from the path or a slug.
 ## 3. Translate the goal into a trait, task, and `classes.json`
 
 Turn the breeder's sentence into a trait and the classes they distinguish. The CV task is yours to
-derive from the data, not from the phrasing (see `.github/skills/pipeline-design`):
+derive from the data, not from the phrasing (see
+`packages/tcip-mcp/src/tcip_mcp/knowledge/pipeline-design.md`):
 
 - Task: the task string is an input to `build_dataset`, which routes a known set; a bespoke
   `dataset_source` is the seam for a task it does not route. A breeder saying "detect the
@@ -102,12 +104,13 @@ derive from the data, not from the phrasing (see `.github/skills/pipeline-design
   `write_class_map(dataset_root, subjects)` tool (never hand-edit the file) for what the breeder
   actually distinguishes: it validates the nested subject/attribute shape and writes the file plus
   an audit record. Keep it minimal first (progressive disclosure); class semantics live in
-  `classes.json`, never in filenames. Verify crop traits against `.github/skills/crops/` before
-  asserting them.
+  `classes.json`, never in filenames. Verify crop traits against
+  `packages/tcip-mcp/src/tcip_mcp/knowledge/crops/` before asserting them.
 
 ## 4. Bootstrap annotation (engine-assisted)
 
-There must be something to train on. Two paths (see `.github/skills/annotation`):
+There must be something to train on. Two paths (see
+`packages/tcip-mcp/src/tcip_mcp/knowledge/annotation.md`):
 
 - Agent/MCP path: `propose_annotations` a starter batch with a chosen `engine` (`'sam'` is the
   built-in reference; the agent can bring another) → review the candidates visually (`visualize`,
@@ -143,15 +146,15 @@ side and an `origin` naming the run, and the calibration doors refuse it by thei
 
 - Write an `nn.Module` (from scratch or importing the plain blocks) + a `train(ctx)` loop,
   build via `model_source` → `build_model`, pre-flight with `model_contract`; see
-  `.github/skills/pipeline-design`.
+  `packages/tcip-mcp/src/tcip_mcp/knowledge/pipeline-design.md`.
 - `launch_training` (immutable experiment per run) → watch metrics.
 - `run_inference` to produce predictions for the review loop.
 
 ## 7. Prioritize review + deliver
 
 `prioritize_review_queue` to focus the breeder's attention on the model's weakest
-predictions, then deliver per `.github/skills/delivery`. Set the workspace's active
-project so the GUI opens what you built, closing the loop for the human.
+predictions, then deliver per `packages/tcip-mcp/src/tcip_mcp/knowledge/delivery.md`. Set the
+workspace's active project so the GUI opens what you built, closing the loop for the human.
 
 ## Reading the live session: `view_gui_state`
 

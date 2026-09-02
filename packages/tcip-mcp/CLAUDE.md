@@ -8,9 +8,12 @@ operating posture, and pipeline/model rules there apply here and aren't restated
 ```
 src/tcip_mcp/
   server.py, __main__.py   # MCP entry point; registers all tool modules
+  knowledge/      # the canonical domain-knowledge directory (eleven documents plus
+                  # crops/<crop>.md, crops/crops.yml), read through __init__.py; source
+                  # for both the generated Claude Code skills and the domain_knowledge tool
   tools/          # domain tools, one module per area: annotation, data, experiment, feedback,
-                  # gui, inference, ingest, meta, model, operationalization, orthomosaic,
-                  # phenology, project, proposal, training, vision
+                  # gui, inference, ingest, knowledge, meta, model, operationalization,
+                  # orthomosaic, phenology, project, proposal, training, vision
   pipelines/      # composable ML: active_learning, components, data, feedback, inference,
                   # measurement, postprocessing, training (submodules), plus:
     derivations.py        # Tier-A derivations: compute a parameter (channels, num_classes,
@@ -39,10 +42,12 @@ src/tcip_mcp/
   audit.py, project_status.py, web_client.py
 ```
 
-Every MCP tool in `tools/` is decorated `@mcp.tool()` + `@audited`; a door demoted from tool status
-(run only through its own `scripts/` entry point) keeps `@audited` without registering. Run
-`python scripts/list_tools.py` for the current tool list/count; never hardcode a count in a doc
-or comment, since it drifts.
+Every MCP tool in `tools/` is decorated `@mcp.tool()` + `@audited`, except `domain_knowledge`,
+whose `@mcp.tool(description=...)` composes its client-visible description from the knowledge
+corpus at import time rather than leaving it as the bare docstring. A door demoted from tool
+status (run only through its own `scripts/` entry point) keeps `@audited` without registering.
+Run `python scripts/list_tools.py` for the current tool list/count; never hardcode a count in a
+doc or comment, since it drifts.
 
 ## Conventions specific to this package
 
