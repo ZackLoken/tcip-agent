@@ -55,9 +55,10 @@ silently corrupts results and compounds across sessions.
   read this session. One docstring, one sample project, one capture rig describes that instance,
   not the platform's general case; ask before generalizing. A claim about purpose is checked by
   testing its premise.
-- Before any consumer sweep or exploratory read, run `mcp__claude-context__search_code` first
-  (concept-shaped matches grep misses), then `git grep` to pin the file and line. The index
-  reflects the last rebuild, so uncommitted code is grep-only.
+- Before any consumer sweep or exploratory read: when a claude-context server is configured for
+  the session, run its search first (concept-shaped matches grep misses), then `git grep` to pin
+  the file and line; without one configured, `git grep` alone. The index reflects the last
+  rebuild, so uncommitted code is grep-only.
 - Progressive disclosure: start simple; add complexity only when data or metrics justify it.
 
 ## Invariants that protect the science

@@ -1180,11 +1180,11 @@ is decided per request by `tcip_web.trust_boundary.TrustBoundaryMiddleware` (`tr
 282`), which refuses one unless `TCIP_WEB_ALLOW_INSECURE=1` is set (`insecure_opt_in`,
 `trust_boundary.py:128`).
 
-`.mcp.json` (repo root): declares two MCP servers. `tcip` launches
-`conda run -n tcip-agent --no-capture-output python -m tcip_mcp`. `claude-context`
-launches `.claude/hooks/claude_context_launch.cmd` with `EMBEDDING_PROVIDER`,
-`OLLAMA_HOST`, `EMBEDDING_MODEL`, `MILVUS_ADDRESS`, `HYBRID_MODE`, and
-`CLAUDE_CONTEXT_BACKGROUND_SYNC` set in its `env` block.
+`.mcp.json` (repo root): declares one MCP server, `tcip`, which launches
+`conda run -n tcip-agent --no-capture-output python -m tcip_mcp`. A semantic code-search server
+(claude-context, backed by an embedding model and a vector store) is optional developer tooling
+some maintainers configure locally; it is not part of the platform and is not declared in this
+tracked file, so its presence or configuration varies per machine.
 
 `scripts/` (repo root): a non-API surface, not imported by `tcip_mcp`, `tcip_web`, or
 `tcip_annotation` package code; each file is a standalone script invoked directly
