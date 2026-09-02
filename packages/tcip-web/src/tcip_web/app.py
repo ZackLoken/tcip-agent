@@ -14,6 +14,8 @@ from __future__ import annotations
 import asyncio
 import itertools
 import logging
+import os
+import sys
 import threading
 import uuid
 from collections import defaultdict, deque
@@ -90,6 +92,58 @@ async def _lifespan(_app: FastAPI):
 # and a route that reaches a store with no backend bound would refuse rather than write.
 bind_default()
 
+
+class WorkspaceUnsetUnderTest(RuntimeError):
+    """Raised in place of pinning a platform-state root, when this app is served under a test
+    with no ``TCIP_WORKSPACE`` bound.
+
+    Left unrefused, :func:`bind_startup_root` would resolve the default workspace
+    (``tcip_mcp.workspace.workspace_root``, ``~/tcip-projects``) and pin, then write into,
+    whichever project the operator's real active-project marker names: a pytest run or a bare
+    ``TestClient`` request has no business touching that project.
+    """
+
+
+def _running_under_pytest() -> bool:
+    """True once a pytest process has begun collection, for the whole run.
+
+    pytest inserts itself into ``sys.modules`` at startup and never removes itself.
+    """
+    return "pytest" in sys.modules
+
+
+def _scope_is_starlette_test_client(scope: dict[str, Any]) -> bool:
+    """True when an ASGI scope's client address is starlette's ``TestClient`` default identity.
+
+    ``starlette.testclient.TestClient.__init__`` defaults its ``client`` argument to
+    ``("testclient", 50000)`` (verified against the installed ``starlette`` package); a
+    request carrying that host was issued by a ``TestClient``, real network traffic never
+    arrives with it.
+    """
+    client = scope.get("client")
+    return client is not None and client[0] == "testclient"
+
+
+def raise_if_workspace_unset_under_test(scope: dict[str, Any] | None = None) -> None:
+    """Refuse to pin a platform-state root under a test that never set ``TCIP_WORKSPACE``.
+
+    Runs ahead of every marker read this app performs: at the top of
+    :func:`bind_startup_root` with no scope available (the pytest-process signal alone) and in
+    :class:`_BindStartupRootMiddleware` with the request's own scope (either signal). Passes
+    silently once ``TCIP_WORKSPACE`` is set, non-blank, or nothing signals a test is running,
+    so a served app (``python -m tcip_web``) keeps its default workspace untouched.
+    """
+    if os.environ.get("TCIP_WORKSPACE", "").strip():
+        return
+    if not (_running_under_pytest() or (scope is not None and _scope_is_starlette_test_client(scope))):
+        return
+    raise WorkspaceUnsetUnderTest(
+        "TCIP_WORKSPACE is unset. This served app would otherwise pin the workspace's "
+        "active project and write into it. Set TCIP_WORKSPACE and TCIP_STATE_ROOT to "
+        "scratch directories before starting a test client against it."
+    )
+
+
 def bind_startup_root() -> None:
     """Pin this process's platform-state root once, a served app's own responsibility rather
     than an importer's, and only when nothing has bound one yet.
@@ -104,7 +158,13 @@ def bind_startup_root() -> None:
     Checks :func:`tcip_mcp.project_paths.root_binding` rather than a flag of its own: a
     ``set_active_project`` repin that lands before the first request already leaves a
     binding in place, and this must not replace it with a fresh marker read.
+
+    Raises :class:`WorkspaceUnsetUnderTest` first, before either check, when this process is
+    a pytest run with no ``TCIP_WORKSPACE`` bound; the client-identity half of that rail lives
+    in :class:`_BindStartupRootMiddleware`, which alone sees the request scope.
     """
+    raise_if_workspace_unset_under_test()
+
     from tcip_mcp.project_paths import pin_platform_root, root_binding
 
     if root_binding() is not None:
@@ -137,6 +197,11 @@ class _BindStartupRootMiddleware:
     file-lock timeout, so it runs off the event loop in a worker thread, under the module
     lock above; once a root is bound the check inside :func:`bind_startup_root` is cheap, so
     later requests still pay the thread hop but no further store read.
+
+    Checks :func:`raise_if_workspace_unset_under_test` with this request's own scope before
+    that thread hop: the scope carries the client-address signal :func:`bind_startup_root`
+    cannot see on its own, so a bare ``TestClient`` request with no ``TCIP_WORKSPACE`` bound
+    is refused here even outside a pytest process.
     """
 
     def __init__(self, app: Any) -> None:
@@ -144,6 +209,7 @@ class _BindStartupRootMiddleware:
 
     async def __call__(self, scope: dict, receive: Any, send: Any) -> None:
         if scope["type"] in ("http", "websocket"):
+            raise_if_workspace_unset_under_test(scope)
             await asyncio.to_thread(_bind_startup_root_serialized)
         await self.app(scope, receive, send)
 

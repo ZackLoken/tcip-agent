@@ -1138,7 +1138,12 @@ when a request is served before the lifespan has run, at that first request, nev
 active-project marker (`tcip_mcp.project_paths.pin_platform_root(from_marker=True)`) the first
 time either the lifespan (`app.py:50`) or the startup middleware (`app.py:131`) calls it, so
 every way the app is served (this entry point, a bare `uvicorn tcip_web.app:app`,
-`--lifespan off`, the reloader's child) pins a root before anything resolves a `.tcip` path. Exposure is a property
+`--lifespan off`, the reloader's child) pins a root before anything resolves a `.tcip` path.
+Ahead of that read, `raise_if_workspace_unset_under_test` (`app.py:127`) refuses with
+`WorkspaceUnsetUnderTest` (`app.py:96`) when `TCIP_WORKSPACE` is unset or blank and the process
+looks like a test (`pytest` loaded, or the ASGI scope's client host is starlette's `TestClient`
+default identity, `"testclient"`), so a pytest run or a bare `TestClient` request can never pin
+the operator's real workspace. Exposure is a property
 of the accepted connection rather than the configured bind host, so this entry point always
 binds the requested host and port; whether an arrival through a non-loopback address is served
 is decided per request by `tcip_web.trust_boundary.TrustBoundaryMiddleware` (`trust_boundary.py:

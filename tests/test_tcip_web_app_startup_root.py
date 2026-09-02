@@ -10,6 +10,7 @@ import sys
 import time
 
 import httpx
+import pytest
 from fastapi.testclient import TestClient
 
 from tcip_mcp import project_paths, workspace
@@ -45,6 +46,98 @@ def test_importing_the_app_alone_pins_nothing(tmp_path, monkeypatch):
     before, after = result.stdout.splitlines()
     assert before == "None"
     assert after == "None"
+
+
+def _unbind_workspace_default(tmp_path, monkeypatch):
+    """Make the workspace's default (``TCIP_WORKSPACE`` unset) resolve under ``tmp_path``, so
+    a refusal test run against code without the rail still touches only tmp and never a real
+    marker.
+
+    ``tcip_mcp.workspace.DEFAULT_WORKSPACE`` is ``Path.home() / "tcip-projects"`` computed once
+    at import, so ``HOME``/``USERPROFILE`` alone do not move it; the module attribute is patched
+    directly.
+    """
+    fake_home = tmp_path / "fakehome"
+    fake_home.mkdir()
+    monkeypatch.delenv("TCIP_WORKSPACE", raising=False)
+    monkeypatch.setenv("HOME", str(fake_home))
+    monkeypatch.setenv("USERPROFILE", str(fake_home))
+    monkeypatch.setattr(workspace, "DEFAULT_WORKSPACE", fake_home / "tcip-projects")
+
+
+def test_workspace_unset_under_pytest_refuses_the_first_request(tmp_path, monkeypatch):
+    """A pytest process with no ``TCIP_WORKSPACE`` bound must never pin the operator's real
+    workspace: the incident this rail closes was a probe exactly like this one, absent the
+    rail. Asserts the exception by name so the test also runs against code lacking the class.
+    """
+    _unbind_workspace_default(tmp_path, monkeypatch)
+    project_paths.restore_binding(None)
+
+    with pytest.raises(Exception) as excinfo:
+        TestClient(app, base_url="http://127.0.0.1").get("/health")
+    assert type(excinfo.value).__name__ == "WorkspaceUnsetUnderTest"
+
+
+def test_workspace_unset_under_pytest_refuses_entering_the_lifespan(tmp_path, monkeypatch):
+    """The same refusal fires from ``bind_startup_root``'s own call inside the lifespan, not
+    only from the middleware's scope check: entering ``with TestClient(app):`` runs
+    ``_lifespan``, whose first line is ``bind_startup_root``."""
+    _unbind_workspace_default(tmp_path, monkeypatch)
+    project_paths.restore_binding(None)
+
+    with pytest.raises(Exception) as excinfo:
+        with TestClient(app, base_url="http://127.0.0.1"):
+            pass
+    assert type(excinfo.value).__name__ == "WorkspaceUnsetUnderTest"
+
+
+_TEST_CLIENT_WITHOUT_PYTEST = """\
+from fastapi.testclient import TestClient
+from tcip_web.app import app
+
+try:
+    TestClient(app, base_url="http://127.0.0.1").get("/health")
+except Exception as exc:
+    print(type(exc).__name__)
+else:
+    print("no-exception")
+"""
+
+
+def test_workspace_unset_test_client_signal_without_pytest_refuses(tmp_path):
+    """A bare ``TestClient`` request with no ``TCIP_WORKSPACE`` bound is refused even outside a
+    pytest process: this subprocess never imports pytest, so only the middleware's own scope
+    check (starlette's ``TestClient`` default client host, ``"testclient"``) can catch it,
+    proving that signal works on its own rather than piggybacking on the pytest one."""
+    fake_home = tmp_path / "fakehome"
+    fake_home.mkdir()
+    scratch_state = tmp_path / "state"
+    scratch_state.mkdir()
+    env = dict(os.environ)
+    env.pop("TCIP_WORKSPACE", None)
+    env["HOME"] = str(fake_home)
+    env["USERPROFILE"] = str(fake_home)
+    env["TCIP_STATE_ROOT"] = str(scratch_state)
+
+    result = subprocess.run(
+        [sys.executable, "-c", _TEST_CLIENT_WITHOUT_PYTEST],
+        capture_output=True, text=True, cwd=str(tmp_path), env=env, timeout=60,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "WorkspaceUnsetUnderTest"
+
+
+def test_workspace_set_admits_the_first_request(tmp_path):
+    """Admits-valid-work companion to the refusals above: with ``TCIP_WORKSPACE`` set, as the
+    repo's own ``tmp_path`` fixture already leaves it for every test, the rail never fires.
+    ``test_tcip_web_routes.py`` and ``test_tcip_web_projects_routes.py`` are the standing proof
+    that a normal request against this app succeeds end to end; this asserts the narrow claim
+    that ``raise_if_workspace_unset_under_test`` itself stays silent."""
+    project_paths.restore_binding(None)
+
+    resp = TestClient(app, base_url="http://127.0.0.1").get("/health")
+
+    assert resp.status_code == 200
 
 
 def test_first_request_pins_from_the_marker(tmp_path, monkeypatch):
