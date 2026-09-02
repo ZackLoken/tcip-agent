@@ -23,18 +23,47 @@ def _never_search(ran: list):
 # -- refusals --------------------------------------------------------------------
 
 
-def test_run_hpo_refuses_split_draws_bound_to_a_manifest(tmp_path, real_hpo_base_config, monkeypatch):
+def test_run_hpo_refuses_split_draws_when_a_bound_manifest_would_starve_a_side(
+    tmp_path, monkeypatch,
+):
+    """A manifest whose date's train-plus-val members resolve to only one group under its own
+    recorded grouping refuses the sweep before minting, the same distinct-groups check
+    preflight_config runs for one config."""
+    import tcip_store as ts
     import tcip_mcp.tools.training_tools as tt
+    from tcip_mcp.tools.data_tools import make_splits, split_manifest_key
+
+    from tests.test_split_manifest_binding import DATES, SUBJECT, _two_subject_two_date_dataset
 
     ran = []
     monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", _never_search(ran))
 
-    cfg = dict(real_hpo_base_config)
-    cfg["data"] = {**cfg["data"], "split": {"manifest_dir": str(tmp_path / "m")}}
+    root = _two_subject_two_date_dataset(tmp_path / "ds")
+    manifest_dir = tmp_path / "m"
+    make_result = make_splits(str(root), output_path=str(manifest_dir), subject=SUBJECT,
+                              seed=2, train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
+    assert "error" not in make_result, make_result
+    manifest = ts.read(split_manifest_key(manifest_dir))
+    date_ids = [i for side in ("train", "val") for i in manifest["splits"][side]
+               if i.split("/", 1)[0] == DATES[0]]
+    ts.replace(split_manifest_key(manifest_dir), {
+        **manifest, "group_by": "explicit_map",
+        "group_key_map": {i: "the_one_group" for i in date_ids},
+    })
+
+    cfg = {
+        "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
+                         "builder_kwargs": {"num_classes": 1}, "task": "detection"},
+        "data": {
+            "images_dir": str(root / "images" / DATES[0]),
+            "labels_dir": str(root / "annotations" / DATES[0]),
+            "subject": SUBJECT, "split": {"manifest_dir": str(manifest_dir)},
+        },
+    }
     result = tt.run_hpo(base_config=cfg, n_trials=1, output_dir=str(tmp_path),
                         scheduler="none", split_draws=2)
 
-    assert "error" in result and "manifest" in result["error"]
+    assert "error" in result and "would starve" in result["error"]
     assert not ran
     assert list(tmp_path.glob("hpo_*")) == []
 
@@ -199,6 +228,91 @@ def test_tune_search_refuses_split_draws_without_the_axis_in_param_space(tmp_pat
 
 
 # -- admits valid work -------------------------------------------------------------
+
+
+def _bound_hpo_config(root, manifest_dir, date, subject, *, auto_val: bool | None = None) -> dict:
+    data: dict = {
+        "images_dir": str(root / "images" / date), "labels_dir": str(root / "annotations" / date),
+        "subject": subject, "split": {"manifest_dir": str(manifest_dir)},
+    }
+    if auto_val is not None:
+        data["auto_val"] = auto_val
+    return {
+        "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
+                         "builder_kwargs": {"num_classes": 1}, "task": "detection"},
+        "data": data,
+    }
+
+
+def test_run_hpo_admits_split_draws_bound_to_a_manifest_and_sets_the_redraw_flag(
+    tmp_path, monkeypatch,
+):
+    """A base_config bound to a split manifest is no longer refused: run_hpo sets
+    data.split.redraw_within_manifest on its own copy, so every trial redraws train and val
+    inside the manifest's own members instead of the manifest's one recorded partition, and the
+    recorded sweep manifest's own base_config carries the claim."""
+    import tcip_mcp.tools.training_tools as tt
+    from tcip_mcp.tools.data_tools import make_splits
+
+    from tests.test_split_manifest_binding import DATES, SUBJECT, _two_subject_two_date_dataset
+
+    root = _two_subject_two_date_dataset(tmp_path / "ds")
+    manifest_dir = tmp_path / "m"
+    make_result = make_splits(str(root), output_path=str(manifest_dir), subject=SUBJECT,
+                              seed=2, train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
+    assert "error" not in make_result, make_result
+
+    captured: dict = {}
+
+    def fake_search(**kw):
+        captured.update(kw)
+        return {"best_params": {}, "best_value": 0.1, "n_trials": 1,
+                "study_name": kw["study_name"], "all_trials": []}
+
+    monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", fake_search)
+
+    cfg = _bound_hpo_config(root, manifest_dir, DATES[0], SUBJECT)
+    result = tt.run_hpo(base_config=cfg, n_trials=1, output_dir=str(tmp_path),
+                        scheduler="none", split_draws=2)
+
+    assert "error" not in result, result
+    assert captured["param_space"]["data.split.seed"] == {
+        "type": "categorical", "choices": [42, 43],
+    }
+    assert cfg["data"]["split"] == {"manifest_dir": str(manifest_dir)}  # the caller's own copy
+
+    import tcip_store as ts
+    manifest = ts.read(tt.sweep_manifest_key(result["study_name"], str(tmp_path)))
+    recorded_split = manifest["base_config"]["data"]["split"]
+    assert recorded_split["redraw_within_manifest"] is True
+    assert recorded_split["seed"] == 42
+
+
+def test_run_hpo_admits_split_draws_bound_with_auto_val_false(tmp_path, monkeypatch):
+    """A bound base_config reads neither val_images_dir nor auto_val (the manifest branch binds
+    ahead of both), so auto_val=False no longer refuses it the way it refuses a drawn config."""
+    import tcip_mcp.tools.training_tools as tt
+    from tcip_mcp.tools.data_tools import make_splits
+
+    from tests.test_split_manifest_binding import DATES, SUBJECT, _two_subject_two_date_dataset
+
+    root = _two_subject_two_date_dataset(tmp_path / "ds")
+    manifest_dir = tmp_path / "m"
+    make_result = make_splits(str(root), output_path=str(manifest_dir), subject=SUBJECT,
+                              seed=2, train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
+    assert "error" not in make_result, make_result
+
+    def fake_search(**kw):
+        return {"best_params": {}, "best_value": 0.1, "n_trials": 1,
+                "study_name": kw["study_name"], "all_trials": []}
+
+    monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", fake_search)
+
+    cfg = _bound_hpo_config(root, manifest_dir, DATES[0], SUBJECT, auto_val=False)
+    result = tt.run_hpo(base_config=cfg, n_trials=1, output_dir=str(tmp_path),
+                        scheduler="none", split_draws=2)
+
+    assert "error" not in result, result
 
 
 def test_run_hpo_admits_split_draws_and_derives_seeds_from_the_base_config(

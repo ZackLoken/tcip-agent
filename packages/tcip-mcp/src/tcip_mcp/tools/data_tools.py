@@ -269,8 +269,14 @@ def freeze_split_manifest(experiment_id: str, output_path: str | None = None) ->
                          "(it never reached a real dataset build), so there is no drawn "
                          "partition to freeze."}
     if split.get("manifest_binding"):
+        bound_dir = split["manifest_binding"].get("manifest_dir")
+        if split.get("redrawn_within_manifest"):
+            return {"error": f"{experiment_id!r} redrew train and val inside the split manifest "
+                             f"at {bound_dir!r} already: reproduce it by binding a later run to "
+                             "that same manifest with the same seed and "
+                             "data.split.redraw_within_manifest=true, never by freezing."}
         return {"error": f"{experiment_id!r} was bound to a split manifest already "
-                         f"({split['manifest_binding'].get('manifest_dir')!r}): bind a later run "
+                         f"({bound_dir!r}): bind a later run "
                          "to that manifest directly instead of freezing this one's."}
     resolved_group_by = split.get("group_by")
     if resolved_group_by == "spatial_strip":

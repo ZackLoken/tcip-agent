@@ -67,7 +67,10 @@ def _manifest_fields(manifest: dict) -> dict:
     for one that genuinely was not a relaunch: a relaunch of an older sweep must still work
     (see :func:`_missing_relaunch_fields`, which does not require this key). ``split_draws``
     projects the same way, ``None`` for a manifest predating it (read as 1, no draws, by
-    ``run_hpo``'s own default): the header line only renders it above 1.
+    ``run_hpo``'s own default): the header line only renders it above 1. ``redraws_within_manifest``
+    reads the recorded ``base_config``'s own ``data.split.redraw_within_manifest``, ``False``
+    for a manifest carrying none (predating the flag, or a config that never set it): the
+    header's draws line names the bound manifest as what each draw redraws inside only then.
 
     An empty ``manifest`` (no manifest exists yet, or one predating a caller's own launch) is
     never relaunchable, but carries no reason either: the pre-manifest window and every refused
@@ -79,9 +82,11 @@ def _manifest_fields(manifest: dict) -> dict:
         return {
             "n_trials": None, "search_alg": None, "scheduler": None, "param_space_keys": [],
             "relaunchable": False, "reason": None, "cancel_requested": False,
-            "relaunched_from": None, "split_draws": None,
+            "relaunched_from": None, "split_draws": None, "redraws_within_manifest": False,
         }
     relaunchable = "base_config" in manifest
+    base_config = manifest.get("base_config") or {}
+    base_split = (base_config.get("data") or {}).get("split") or {}
     return {
         "n_trials": manifest.get("n_trials"),
         "search_alg": manifest.get("search_alg"),
@@ -92,6 +97,7 @@ def _manifest_fields(manifest: dict) -> dict:
         "cancel_requested": bool(manifest.get("cancel_requested")),
         "relaunched_from": manifest.get("relaunched_from"),
         "split_draws": manifest.get("split_draws"),
+        "redraws_within_manifest": bool(base_split.get("redraw_within_manifest")),
     }
 
 

@@ -254,6 +254,32 @@ describe("TuningTab sweep row actions", () => {
     expect(await screen.findByText(/4 trials planned, 3 draws each/)).toBeInTheDocument();
   });
 
+  it("names the bound manifest on the draws line when the base config redraws inside it", async () => {
+    vi.spyOn(tuningApi, "listSweeps").mockResolvedValue({
+      sweeps: [
+        sweep({
+          sweep_id: "hpo-redraw-1",
+          status: "running",
+          n_trials: 4,
+          split_draws: 2,
+          redraws_within_manifest: true,
+        }),
+      ],
+    });
+    vi.spyOn(tuningApi, "getSweep").mockResolvedValue(
+      sweepDetail({ sweep_id: "hpo-redraw-1", status: "running" }),
+    );
+    vi.spyOn(tuningApi, "listTrials").mockResolvedValue({ sweep_id: "hpo-redraw-1", trials: [] });
+    vi.spyOn(tuningApi, "getRayDashboard").mockResolvedValue({ url: null });
+    vi.spyOn(tuningApi, "launchSweepTensorboard").mockResolvedValue({ error: "no cluster" });
+
+    render(<TuningTab />);
+    fireEvent.click(await screen.findByText("hpo-redraw-1"));
+    expect(
+      await screen.findByText(/4 trials planned, 2 draws each inside the bound manifest/),
+    ).toBeInTheDocument();
+  });
+
   it("states only the trial count when split_draws is 1 or absent", async () => {
     vi.spyOn(tuningApi, "listSweeps").mockResolvedValue({
       sweeps: [sweep({ sweep_id: "hpo-no-draws-1", status: "running", n_trials: 4 })],

@@ -205,6 +205,36 @@ def test_freeze_split_manifest_refuses_a_bound_run(tmp_path: Path):
     assert "error" in result and "bound" in result["error"]
 
 
+def test_freeze_split_manifest_refuses_a_redrawn_bound_run_naming_the_reproduction(
+    tmp_path: Path,
+):
+    from tcip_mcp.tools.data_tools import freeze_split_manifest, make_splits
+
+    root = _two_subject_two_date_dataset(tmp_path / "ds")
+    bound_manifest_dir = tmp_path / "src-manifest"
+    make_result = make_splits(str(root), output_path=str(bound_manifest_dir), subject=SUBJECT,
+                              seed=2, train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
+    assert "error" not in make_result, make_result
+
+    images_dir, labels_dir = root / "images" / DATES[0], root / "annotations" / DATES[0]
+    data_cfg = {"images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": SUBJECT,
+               "split": {"manifest_dir": str(bound_manifest_dir),
+                         "redraw_within_manifest": True, "seed": 11}}
+    _reg, id_map = resolve_registry_id_map(str(labels_dir), SUBJECT, None)
+    create_experiment("exp-redrawn-bound", {
+        "model_source": {"builder": BUILDER, "task": "detection"},
+        "data": {**data_cfg, "id_map": id_map},
+    })
+    train_ds, val_ds, label_digests = auto_train_val("detection", data_cfg, None)
+    persist_split_manifest("exp-redrawn-bound", train_ds, val_ds, data_cfg,
+                           label_digests=label_digests)
+
+    result = freeze_split_manifest("exp-redrawn-bound")
+    assert "error" in result
+    assert "redrew" in result["error"]
+    assert "redraw_within_manifest" in result["error"]
+
+
 def test_freeze_split_manifest_refuses_a_spatial_split(tmp_path: Path):
     """The record's own ``group_by`` names a spatial split (``spatial_strip``, region
     identities, never bare stems): the one field freeze_split_manifest's spatial refusal reads,

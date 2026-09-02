@@ -360,15 +360,213 @@ def test_auto_train_val_binds_to_the_manifests_own_partition_for_its_date(tmp_pa
 
     train_ds, val_ds, _ = auto_train_val("detection", data_cfg, None)
 
-    date_members = {s for identity in manifest["splits"]["train"] + manifest["splits"]["val"]
-                   for d, s in [identity.split("/", 1)] if d == DATES[0]}
+    def _date_side(side: str) -> set[str]:
+        return {s for identity in manifest["splits"][side]
+               for d, s in [identity.split("/", 1)] if d == DATES[0]}
+
+    date_members = _date_side("train") | _date_side("val")
     assert sorted(train_ds.stems + val_ds.stems) == sorted(date_members)
+    assert set(train_ds.stems) == _date_side("train")
+    assert set(val_ds.stems) == _date_side("val")
     binding = data_cfg["split"]["manifest_binding"]
     assert binding["manifest_dir"] == str(out)
     assert binding["subject"] == SUBJECT
     assert binding["date"] == DATES[0]
     assert binding["labels_hash_now"]
     assert "train" not in binding and "val" not in binding
+    assert "redrawn_within_manifest" not in binding
+
+
+# -- redraw_within_manifest ------------------------------------------------------
+
+
+def test_auto_train_val_redraws_inside_the_bound_manifests_own_members(tmp_path: Path):
+    from tcip_mcp.experiments import create_experiment, read_split_manifest
+    from tcip_mcp.pipelines.data.split_construction import auto_train_val, persist_split_manifest
+
+    root = _two_subject_two_date_dataset(tmp_path / "ds")
+    out = tmp_path / "m"
+    manifest = _draw(root, out)
+
+    def _date_side(side: str) -> set[str]:
+        return {s for identity in manifest["splits"][side]
+               for d, s in [identity.split("/", 1)] if d == DATES[0]}
+
+    union = _date_side("train") | _date_side("val")
+    plain_data_cfg = _run_data_cfg(root, out, DATES[0])
+    auto_train_val("detection", plain_data_cfg, None)
+    plain_labels_hash = plain_data_cfg["split"]["manifest_binding"]["labels_hash_now"]
+
+    data_cfg = _run_data_cfg(root, out, DATES[0])
+    data_cfg["split"]["redraw_within_manifest"] = True
+    data_cfg["split"]["seed"] = 1
+
+    train_ds, val_ds, label_digests = auto_train_val("detection", data_cfg, None)
+
+    assert set(train_ds.stems) | set(val_ds.stems) == union
+    assert set(train_ds.stems).isdisjoint(val_ds.stems)
+    assert (set(train_ds.stems), set(val_ds.stems)) != (_date_side("train"), _date_side("val"))
+
+    binding = data_cfg["split"]["manifest_binding"]
+    assert binding["labels_hash_now"] == plain_labels_hash
+    redrawn = binding["redrawn_within_manifest"]
+    assert redrawn == {"seed": 1, "val_ratio": len(_date_side("val")) / len(union),
+                       "stratify_foreground": True}
+    assert data_cfg["split"]["resolved_seed"] == 1
+    assert data_cfg["split"]["resolved_group_by"] == manifest["group_by"]
+
+    create_experiment("exp-redrawn", {})
+    persist_split_manifest("exp-redrawn", train_ds, val_ds, data_cfg, label_digests=label_digests)
+    persisted = read_split_manifest("exp-redrawn")
+    assert persisted["redrawn_within_manifest"] is True
+    assert sorted(persisted["train"]) == sorted(train_ds.stems)
+    assert sorted(persisted["val"]) == sorted(val_ds.stems)
+
+
+def test_auto_train_val_redraw_two_seeds_differ_the_same_seed_repeats(tmp_path: Path):
+    from tcip_mcp.pipelines.data.split_construction import auto_train_val
+
+    root = _two_subject_two_date_dataset(tmp_path / "ds")
+    out = tmp_path / "m"
+    _draw(root, out)
+
+    def _redraw(seed: int) -> tuple[frozenset[str], frozenset[str]]:
+        data_cfg = _run_data_cfg(root, out, DATES[0])
+        data_cfg["split"]["redraw_within_manifest"] = True
+        data_cfg["split"]["seed"] = seed
+        train_ds, val_ds, _ = auto_train_val("detection", data_cfg, None)
+        return frozenset(train_ds.stems), frozenset(val_ds.stems)
+
+    first_a = _redraw(3)
+    first_b = _redraw(3)
+    assert first_a == first_b
+
+    seed_partitions = {seed: _redraw(seed) for seed in (3, 17, 41, 97)}
+    assert len(set(seed_partitions.values())) > 1
+
+
+def test_auto_train_val_redraw_without_a_seed_refuses(tmp_path: Path):
+    from tcip_mcp.pipelines.data.split_construction import auto_train_val
+
+    root = _two_subject_two_date_dataset(tmp_path / "ds")
+    out = tmp_path / "m"
+    _draw(root, out)
+    data_cfg = _run_data_cfg(root, out, DATES[0])
+    data_cfg["split"]["redraw_within_manifest"] = True
+
+    with pytest.raises(ValueError, match="redraw_within_manifest=true requires"):
+        auto_train_val("detection", data_cfg, None)
+
+
+def test_auto_train_val_redraw_beside_another_conflict_key_still_refuses(tmp_path: Path):
+    from tcip_mcp.pipelines.data.split_construction import auto_train_val
+
+    root = _two_subject_two_date_dataset(tmp_path / "ds")
+    out = tmp_path / "m"
+    _draw(root, out)
+    data_cfg = _run_data_cfg(root, out, DATES[0])
+    data_cfg["split"]["redraw_within_manifest"] = True
+    data_cfg["split"]["seed"] = 11
+    data_cfg["split"]["val_ratio"] = 0.3
+
+    with pytest.raises(ValueError, match="val_ratio"):
+        auto_train_val("detection", data_cfg, None)
+
+
+def test_auto_train_val_a_seed_without_the_flag_still_conflicts(tmp_path: Path):
+    from tcip_mcp.pipelines.data.split_construction import auto_train_val
+
+    root = _two_subject_two_date_dataset(tmp_path / "ds")
+    out = tmp_path / "m"
+    _draw(root, out)
+    data_cfg = _run_data_cfg(root, out, DATES[0])
+    data_cfg["split"]["seed"] = 11
+
+    with pytest.raises(ValueError, match="seed"):
+        auto_train_val("detection", data_cfg, None)
+
+
+def test_auto_train_val_redraw_refuses_an_unrecognized_group_by_by_name(tmp_path: Path):
+    import tcip_store as ts
+    from tcip_mcp.pipelines.data.split_construction import auto_train_val
+    from tcip_mcp.tools.data_tools import split_manifest_key
+
+    root = _two_subject_two_date_dataset(tmp_path / "ds")
+    out = tmp_path / "m"
+    manifest = _draw(root, out)
+    ts.replace(split_manifest_key(out), {**manifest, "group_by": "bogus_policy"})
+
+    data_cfg = _run_data_cfg(root, out, DATES[0])
+    data_cfg["split"]["redraw_within_manifest"] = True
+    data_cfg["split"]["seed"] = 11
+
+    with pytest.raises(ValueError, match="Unrecognized group_by"):
+        auto_train_val("detection", data_cfg, None)
+
+
+def _collapse_date_to_one_group(manifest: dict, date: str) -> dict:
+    """``manifest``, mutated so ``date``'s own train-plus-val members all resolve to one
+    explicit-map group, the shape a redraw's distinct-groups check refuses by name; the other
+    date and calibration are left as drawn."""
+    date_ids = [i for side in ("train", "val") for i in manifest["splits"][side]
+               if i.split("/", 1)[0] == date]
+    group_key_map = {i: "the_one_group" for i in date_ids}
+    return {**manifest, "group_by": "explicit_map", "group_key_map": group_key_map}
+
+
+def test_auto_train_val_redraw_refuses_a_single_group_date_by_name(tmp_path: Path):
+    import tcip_store as ts
+    from tcip_mcp.pipelines.data.split_construction import auto_train_val
+    from tcip_mcp.tools.data_tools import split_manifest_key
+
+    root = _two_subject_two_date_dataset(tmp_path / "ds")
+    out = tmp_path / "m"
+    manifest = _draw(root, out)
+    ts.replace(split_manifest_key(out), _collapse_date_to_one_group(manifest, DATES[0]))
+
+    data_cfg = _run_data_cfg(root, out, DATES[0])
+    data_cfg["split"]["redraw_within_manifest"] = True
+    data_cfg["split"]["seed"] = 11
+
+    with pytest.raises(ValueError, match="starved"):
+        auto_train_val("detection", data_cfg, None)
+
+
+def test_preflight_config_flags_a_single_group_redraw_date(tmp_path: Path):
+    import tcip_store as ts
+    from tcip_mcp.tools.training_tools import preflight_config
+    from tcip_mcp.tools.data_tools import split_manifest_key
+
+    root = _two_subject_two_date_dataset(tmp_path / "ds")
+    out = tmp_path / "m"
+    manifest = _draw(root, out)
+    ts.replace(split_manifest_key(out), _collapse_date_to_one_group(manifest, DATES[0]))
+
+    config = _preflight_config(root, out, DATES[0],
+                               split={"manifest_dir": str(out), "redraw_within_manifest": True,
+                                      "seed": 11})
+
+    result = preflight_config(config)
+
+    assert any("distinct group" in i for i in result["issues"])
+
+
+def test_preflight_config_admits_the_redraw_pair_with_a_warning(tmp_path: Path):
+    from tcip_mcp.tools.training_tools import preflight_config
+
+    root = _two_subject_two_date_dataset(tmp_path / "ds")
+    out = tmp_path / "m"
+    _draw(root, out)
+
+    config = _preflight_config(root, out, DATES[0],
+                               split={"manifest_dir": str(out), "redraw_within_manifest": True,
+                                      "seed": 11})
+
+    result = preflight_config(config)
+
+    manifest_issues = [i for i in result["issues"] if "manifest" in i]
+    assert manifest_issues == []
+    assert any("redraw_within_manifest" in w for w in result["warnings"])
 
 
 def test_auto_train_val_second_bind_on_the_same_config_binds_again(tmp_path: Path):

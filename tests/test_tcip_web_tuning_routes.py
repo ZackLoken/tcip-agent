@@ -980,6 +980,23 @@ def test_manifest_fields_projects_relaunched_from_none_when_the_manifest_lacks_t
     assert _manifest_fields(manifest)["relaunched_from"] is None
 
 
+def test_manifest_fields_projects_redraws_within_manifest_from_the_base_config() -> None:
+    """The recorded base_config's own data.split.redraw_within_manifest is the source of truth
+    for the sweep listing's redraws_within_manifest field: false for a manifest predating the
+    flag or one that never set it, true only when the base config actually carries it."""
+    from tcip_web.routes.tuning import _manifest_fields
+
+    without_flag = {"study_name": "hpo_old2", "base_config": {
+        "data": {"split": {"manifest_dir": "m"}},
+    }}
+    assert _manifest_fields(without_flag)["redraws_within_manifest"] is False
+
+    with_flag = {"study_name": "hpo_redraw2", "base_config": {
+        "data": {"split": {"manifest_dir": "m", "redraw_within_manifest": True, "seed": 5}},
+    }}
+    assert _manifest_fields(with_flag)["redraws_within_manifest"] is True
+
+
 def test_relaunch_of_an_older_manifest_missing_relaunched_from_still_succeeds(
     client: TestClient, hpo_root
 ) -> None:
