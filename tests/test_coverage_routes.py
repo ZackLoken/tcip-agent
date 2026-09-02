@@ -246,18 +246,18 @@ class TestGridDerivation:
     def test_display_bounded_derivation_for_an_ordinary_source(self, client, dated_dataset):
         _root, path = dated_dataset
         got = _grid(client, path)
-        assert got["derivation"] == "one display-bounded serve per cell"
+        assert got["derivation"] == "cells sized to one full-resolution screenful"
 
     def test_large_raster_derivation_for_a_georeferenced_source(self, client, tmp_path):
         width, height = 4200, 2100
         path = TestGridRoute._write_georeferenced_tiff(tmp_path, width, height)
         got = _grid(client, path)
-        assert got["derivation"] == "16 divisions of the long edge"
+        assert got["derivation"] == "the long edge in 16 equal divisions"
 
     def test_chosen_derivation_for_an_explicit_tile_size(self, client, dated_dataset):
         _root, path = dated_dataset
         got = _grid(client, path, tile_size=40)
-        assert got["derivation"] == "chosen: 40 px"
+        assert got["derivation"] == "a chosen cell edge of 40 px"
 
 
 class TestAnnotationCounts:
@@ -776,10 +776,12 @@ class TestCompletenessRoute:
         grid = _grid(client, path, tile_size=64)
         resp = self._toggle(client, path, grid, "A1", complete=True)
         assert resp.status_code == 200, resp.text
-        assert resp.json() == {"status": "ok", "complete": True, "cells_complete": ["A1"]}
+        assert resp.json() == {
+            "status": "ok", "complete": True, "cells_complete": ["A1"], "replaced": None}
 
         resp = self._toggle(client, path, grid, "A1", complete=False)
-        assert resp.json() == {"status": "ok", "complete": False, "cells_complete": []}
+        assert resp.json() == {
+            "status": "ok", "complete": False, "cells_complete": [], "replaced": None}
 
     def test_re_attesting_a_stale_cell_keeps_it_complete_with_a_fresh_digest(
         self, client, dated_dataset,
@@ -804,7 +806,8 @@ class TestCompletenessRoute:
 
         resp = self._toggle(client, path, grid, "A1", complete=True)
         assert resp.status_code == 200, resp.text
-        assert resp.json() == {"status": "ok", "complete": True, "cells_complete": ["A1"]}
+        assert resp.json() == {
+            "status": "ok", "complete": True, "cells_complete": ["A1"], "replaced": None}
 
         record = client.get(
             "/api/coverage/completeness", params={"path": path}).json()["by_subject"]["catkin"]
@@ -839,7 +842,8 @@ class TestCompletenessRoute:
         grid = _grid(client, path, tile_size=64)
         resp = self._toggle(client, path, grid, "A1", complete=False)
         assert resp.status_code == 200, resp.text
-        assert resp.json() == {"status": "ok", "complete": False, "cells_complete": []}
+        assert resp.json() == {
+            "status": "ok", "complete": False, "cells_complete": [], "replaced": None}
 
         assert client.get(
             "/api/coverage/completeness", params={"path": path}).json()["by_subject"] == {}
@@ -853,7 +857,8 @@ class TestCompletenessRoute:
         assert self._toggle(client, path, grid, "A1", complete=True).status_code == 200
         resp = self._toggle(client, path, grid, "A1", complete=False)
         assert resp.status_code == 200, resp.text
-        assert resp.json() == {"status": "ok", "complete": False, "cells_complete": []}
+        assert resp.json() == {
+            "status": "ok", "complete": False, "cells_complete": [], "replaced": None}
 
     def test_complete_direction_is_required(self, client, dated_dataset):
         _root, path = dated_dataset
@@ -926,6 +931,37 @@ class TestCompletenessRoute:
         record = client.get(
             "/api/coverage/completeness", params={"path": path}).json()["by_subject"]["catkin"]
         assert record["grid"]["tile_size"] == 100
+
+    def test_attest_on_a_new_lattice_returns_and_audits_the_replaced_cells(
+        self, client, dated_dataset,
+    ):
+        """The previous-lattice discard is recorded, not just enacted: the response and the
+        audit line both name the grid and cells a lattice-changing attest just overwrote, the
+        way post_coverage already states its own replacement."""
+        root, path = dated_dataset
+        grid64 = _grid(client, path, tile_size=64)
+        self._toggle(client, path, grid64, "A1")
+        self._toggle(client, path, grid64, "B2")
+
+        grid100 = _grid(client, path, tile_size=100)
+        resp = self._toggle(client, path, grid100, "A1")
+        assert resp.status_code == 200, resp.text
+        replaced = resp.json()["replaced"]
+        assert replaced["cells_complete"] == ["A1", "B2"]
+        assert replaced["grid"]["tile_size"] == 64
+
+        entries = _audit_entries(root, "gui_set_region_completeness")
+        audited = entries[-1]["arguments"]["replaced"]
+        assert audited["cells_complete"] == ["A1", "B2"]
+        assert audited["grid"]["tile_size"] == 64
+
+    def test_attest_on_the_same_lattice_carries_replaced_null(self, client, dated_dataset):
+        _root, path = dated_dataset
+        grid = _grid(client, path, tile_size=64)
+        self._toggle(client, path, grid, "A1")
+        resp = self._toggle(client, path, grid, "B2")
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["replaced"] is None
 
     def test_toggle_refuses_when_the_store_holds_an_unrecognized_entry(self, client, dated_dataset):
         """An entry the normalizer cannot read (a legacy or corrupt shape) must not be silently
@@ -1008,7 +1044,7 @@ class TestCompletenessRoute:
         assert len(entries) == 1
         assert entries[0]["arguments"] == {
             "image_name": "plot.tif", "subject": "catkin", "cell": "A1",
-            "complete": True, "stem": "plot", "date": "2026-03-01"}
+            "complete": True, "stem": "plot", "date": "2026-03-01", "replaced": None}
 
     def test_the_digest_is_named_before_the_record_that_attests_it(
         self, client, dated_dataset, monkeypatch,
