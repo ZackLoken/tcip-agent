@@ -22,6 +22,7 @@ export interface EmbeddedToolStepResult extends EmbeddedToolOutcome {
 }
 
 export function useEmbeddedToolRetry(
+  key: string | null,
   active: boolean,
   attempt: number,
   step: () => Promise<EmbeddedToolStepResult>,
@@ -47,7 +48,8 @@ export function useEmbeddedToolRetry(
       cancelled = true;
       if (timer) clearTimeout(timer);
     };
-  }, [active, attempt, retryMs]);
+    // A key change (a direct switch from one run or sweep to another) resets and restarts too.
+  }, [key, active, attempt, retryMs]);
 
   return outcome;
 }
