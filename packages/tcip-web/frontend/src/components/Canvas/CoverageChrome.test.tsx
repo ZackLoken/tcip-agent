@@ -3,6 +3,10 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 
 import { CoverageChrome } from "@/components/Canvas/CoverageChrome";
 
+// Distinct from both the real MAX_SCALE (10) and the bar under test below (12), so only a
+// genuinely derived notice tracks it, never a hardcoded "1000%" literal.
+vi.mock("@/components/Canvas/zoom", () => ({ MAX_SCALE: 7.5 }));
+
 beforeEach(() => {
   localStorage.clear();
 });
@@ -401,10 +405,11 @@ describe("CoverageChrome", () => {
     expect(screen.queryByText(/coarser than the whole-image view/)).not.toBeInTheDocument();
   });
 
-  it("notes when the bar sits beyond the viewer's zoom ceiling", () => {
+  it("notes when the bar sits beyond the viewer's zoom ceiling, derived from MAX_SCALE never a literal", () => {
     render(<CoverageChrome {...baseProps()} workingScale={bar(12)} />);
+    // 750%, the mocked MAX_SCALE above: a hardcoded "1000%" literal would fail this.
     expect(
-      screen.getByText(/fruit's working scale \(1200\.0%\) is beyond the viewer's 1000% zoom/),
+      screen.getByText(/fruit's working scale \(1200\.0%\) is beyond the viewer's 750% zoom/),
     ).toBeInTheDocument();
   });
 
@@ -424,9 +429,33 @@ describe("CoverageChrome", () => {
     ).toBeInTheDocument();
   });
 
-  it("carries a not-yet-saved line for pending cells in the hidden state list", () => {
-    render(<CoverageChrome {...baseProps()} pending={new Set(["A1", "B2"])} />);
+  it("renders no coarser-cells line when the count is zero, bar present or absent", () => {
+    const { rerender } = render(
+      <CoverageChrome {...baseProps()} workingScale={bar(0.5)} coarserCount={0} />,
+    );
+    expect(screen.queryByText(/on record/)).not.toBeInTheDocument();
+
+    rerender(<CoverageChrome {...baseProps()} workingScale={null} coarserCount={0} />);
+    expect(screen.queryByText(/on record/)).not.toBeInTheDocument();
+  });
+
+  it("carries a not-yet-saved line for pending cells that have also swept, in the hidden state list", () => {
+    render(
+      <CoverageChrome
+        {...baseProps()}
+        swept={new Set(["A1", "B2"])}
+        pending={new Set(["A1", "B2"])}
+      />,
+    );
     expect(screen.getByText("not yet saved: A1, B2")).toBeInTheDocument();
+  });
+
+  it("excludes a pending cell that has not yet swept, the same set the overlay marks", () => {
+    render(
+      <CoverageChrome {...baseProps()} swept={new Set(["A1"])} pending={new Set(["A1", "B2"])} />,
+    );
+    expect(screen.getByText("not yet saved: A1")).toBeInTheDocument();
+    expect(screen.queryByText(/B2/)).not.toBeInTheDocument();
   });
 
   it("states the current cell's attestation scale provenance for a screen-reader user", () => {
@@ -445,6 +474,27 @@ describe("CoverageChrome", () => {
     expect(
       screen.getByText(/A1 attested at 50\.0% zoom, seen on record at 60\.0%/),
     ).toBeInTheDocument();
+  });
+
+  it("states no working scale recorded at attestation, with no verdict, when the bar at write is null", () => {
+    render(
+      <CoverageChrome
+        {...baseProps()}
+        activeCellsAttestedView={{
+          A1: {
+            view_scale: 0.5,
+            working_scale_bar_at_write: null,
+            seen_on_record: { at_scale: 0.6, grid_matched: true },
+          },
+        }}
+      />,
+    );
+    expect(
+      screen.getByText(
+        /A1 attested at 50\.0% zoom, seen on record at 60\.0%, no working scale recorded at attestation/,
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/below it/)).not.toBeInTheDocument();
   });
 
   it("states not seen on record when the coverage record never showed the cell", () => {

@@ -17,6 +17,7 @@ import { DisclosureChevron } from "@/components/CollapsibleSection";
 import { useDisclosure } from "@/hooks/useDisclosure";
 import { stepTarget, useImageNav } from "@/hooks/useImageNav";
 import { showsBandPicker, type BandSelection } from "@/lib/bandSelection";
+import { noWorkingScaleToast } from "@/lib/coverage";
 import { canvasHoldsSubject } from "@/lib/imageStatus";
 import { imagePath } from "@/lib/paths";
 import { useStore } from "@/store";
@@ -77,6 +78,7 @@ export function AnnotateToolbar({
   onBandSelectionChange,
   completeWarning,
   workingScaleReason,
+  workingScaleSubject,
   coverageMultiCell,
 }: {
   onSave: () => void;
@@ -93,7 +95,11 @@ export function AnnotateToolbar({
   // Why the active subject has no working-scale bar on this image (a read pending, a read
   // failure, or no saved box/polygon annotation of it); null once a bar exists.
   workingScaleReason?: string | null;
-  // The Map tool is offered only once the raster's coverage grid holds more than one cell.
+  // The subject `workingScaleReason` was computed for (gui.active_subject, not necessarily
+  // dataset.subject): the no-bar toast names this subject, never a different one.
+  workingScaleSubject?: string | null;
+  // The Map tool is offered only once the raster's coverage grid holds more than one cell; the
+  // no-bar/coverage-warning toast is offered only then too, since there is no tracking otherwise.
   coverageMultiCell?: boolean;
 }) {
   const dataset = useStore((s) => s.gui.dataset);
@@ -249,18 +255,14 @@ export function AnnotateToolbar({
       : hasContent
         ? "partial"
         : "unannotated";
-    if (next) {
+    if (next && coverageMultiCell) {
       const warning = completeWarning?.();
       if (warning) {
         useStore.getState().pushToast(warning, "info");
       } else if (workingScaleReason) {
         useStore
           .getState()
-          .pushToast(
-            `Complete: no working scale for ${dataset.subject} on this image ` +
-              `(${workingScaleReason}), so coverage was not checked`,
-            "info",
-          );
+          .pushToast(noWorkingScaleToast(workingScaleSubject ?? null, workingScaleReason), "info");
       }
     }
     await writeCompleteStatus(newStatus);

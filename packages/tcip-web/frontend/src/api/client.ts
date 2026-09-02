@@ -20,6 +20,7 @@ import type {
   CoverageGridResponse,
   GridGeometry,
 } from "@/lib/coverage";
+import type { CoveragePushResponse } from "@/lib/coverageTracker";
 import { annotationsToCanvas } from "@/lib/labelSerde";
 import type {
   Annotation,
@@ -283,9 +284,13 @@ export const api = {
         `${ROUTES.getCoverage}?${q({ path, subject, date })}`,
       ).then((body) => body.coverage),
 
-    // Union-merged server-side on a matching grid; a mismatched grid replaces the record.
+    // Union-merged server-side; the answer also carries status/replaced/total_cells, undeclared
+    // since no caller reads them. `record` is the server's authoritative merge, never the body.
     push: (body: CoveragePayload) =>
-      call<{ status: string }>(ROUTES.postCoverage, { method: "POST", body: JSON.stringify(body) }),
+      call<CoveragePushResponse>(ROUTES.postCoverage, {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
 
     // Every subject's completeness record, every subject's saved-annotation count per cell, and
     // the active subject's working-scale bar (served even absent from the file when named here).

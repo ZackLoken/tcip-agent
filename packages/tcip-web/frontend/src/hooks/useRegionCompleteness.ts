@@ -194,7 +194,7 @@ export function useRegionCompleteness(args: {
   const workingScaleReason = useMemo(() => {
     if (workingScale) return null;
     if (workingScaleError) return workingScaleError;
-    if (!subject) return null;
+    if (!subject) return "no active subject";
     if (!(subject in workingScaleBySubject)) return "the read has not answered yet";
     return `no saved box or polygon annotation of ${subject}`;
   }, [workingScale, workingScaleError, subject, workingScaleBySubject]);

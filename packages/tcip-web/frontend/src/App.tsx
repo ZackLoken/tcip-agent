@@ -24,7 +24,7 @@ import { useImageStatusHydrate } from "@/hooks/useImageStatusHydrate";
 import { applyAnnotateFocus, type AnnotateFocusData } from "@/lib/annotateFocus";
 import { notifyCanvasStateRequest } from "@/lib/canvasSync";
 import { attachCtrlWheelGuard } from "@/lib/ctrlWheelGuard";
-import { coverageOutbox } from "@/lib/coverageTracker";
+import { anyTrackerDirty, coverageOutbox, flushAllTrackers } from "@/lib/coverageTracker";
 import { applyReviewFocus, type ReviewFocusData } from "@/lib/reviewFocus";
 import { openProjectByName } from "@/lib/openProject";
 import { useStore } from "@/store";
@@ -217,14 +217,24 @@ function App() {
     };
   }, [projectRoot]);
 
-  // A refresh/close with unsaved canvas edits gets the browser's leave-page prompt; a non-empty
-  // coverage outbox (a push the tracker could not deliver before moving on) gets it too.
+  // A refresh/close with unsaved canvas edits, a non-empty coverage outbox, or a live tracker
+  // still owing the server a fact (React never unmounts on unload) gets the leave-page prompt.
   useEffect(() => {
     function guardUnload(e: BeforeUnloadEvent) {
-      if (useStore.getState().canvas.dirty || coverageOutbox.size > 0) e.preventDefault();
+      if (useStore.getState().canvas.dirty || coverageOutbox.size > 0 || anyTrackerDirty()) {
+        e.preventDefault();
+      }
+    }
+    // pagehide fires ahead of the actual unload; flush every live tracker one last time.
+    function flushOnHide() {
+      flushAllTrackers();
     }
     window.addEventListener("beforeunload", guardUnload);
-    return () => window.removeEventListener("beforeunload", guardUnload);
+    window.addEventListener("pagehide", flushOnHide);
+    return () => {
+      window.removeEventListener("beforeunload", guardUnload);
+      window.removeEventListener("pagehide", flushOnHide);
+    };
   }, []);
 
   // Hydrate the subject registry whenever the dataset selection changes.

@@ -323,6 +323,19 @@ describe("useRegionCompleteness", () => {
     expect(result.current.workingScaleReason).toBeNull();
   });
 
+  it("states no active subject as the reason with no subject, rather than a silent null", async () => {
+    vi.spyOn(api.coverage, "completeness").mockResolvedValue(response({}));
+    const { result } = renderHook(() =>
+      useRegionCompleteness({
+        imagePath: "C:/data/images/2026-01-01/mosaic.tif",
+        datasetRoot: "C:/data",
+        subject: null,
+        grid: GRID,
+      }),
+    );
+    await waitFor(() => expect(result.current.workingScaleReason).toBe("no active subject"));
+  });
+
   it("states the served working_scale_error as the reason when the label read failed", async () => {
     vi.spyOn(api.coverage, "completeness").mockResolvedValue(
       response({}, { working_scale: {}, working_scale_error: "plot.json: not valid JSON" }),

@@ -2,8 +2,28 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, render, screen } from "@testing-library/react";
 
 import App from "@/App";
-import { coverageOutbox } from "@/lib/coverageTracker";
+import { CoverageTracker, coverageOutbox, type CoveragePushResponse } from "@/lib/coverageTracker";
+import { resetCoverageOutbox } from "@/test/coverageOutbox";
 import { useStore } from "@/store";
+
+const TRACKER_KEY = {
+  imagePath: "C:/data/images/2026-01-01/mosaic.tif",
+  datasetRoot: "C:/data",
+  subject: "leaf",
+  date: "2026-01-01",
+};
+const TRACKER_GRID = { width: 100, height: 100, tile_size: 50, overlap: 0, cols: 2, rows: 2 };
+const TRACKER_CELLS = [
+  { name: "A1", x0: 0, y0: 0, x1: 50, y1: 50 },
+  { name: "B1", x0: 50, y0: 0, x1: 100, y1: 50 },
+];
+const NULL_VIEWING = {
+  bands: null,
+  stretch: null,
+  stats_source: null,
+  display_bounds: null,
+  base_served_size: null,
+};
 
 // App's own socket/tab-sync effects reach the network; only the tab/panel wiring is under
 // test here, so both are stubbed rather than left to hit a backend that isn't running.
@@ -61,7 +81,7 @@ describe("App tab/panel wiring", () => {
 });
 
 describe("App unload guard", () => {
-  afterEach(() => coverageOutbox.clearForTests());
+  afterEach(() => resetCoverageOutbox());
 
   it("guards a refresh/close while a coverage push is still owed to the server", () => {
     render(<App />);
@@ -92,5 +112,40 @@ describe("App unload guard", () => {
     const event = new Event("beforeunload", { cancelable: true });
     window.dispatchEvent(event);
     expect(event.defaultPrevented).toBe(false);
+  });
+
+  it("guards a refresh/close while a live tracker still owes the server a fact", () => {
+    render(<App />);
+    const post = vi.fn(
+      (): Promise<CoveragePushResponse> => new Promise<CoveragePushResponse>(() => {}),
+    );
+    const tracker = new CoverageTracker(post);
+    try {
+      tracker.reset(TRACKER_KEY, TRACKER_GRID, TRACKER_CELLS);
+      tracker.setViewing(NULL_VIEWING);
+      tracker.noteServedAtNative("A1");
+
+      const event = new Event("beforeunload", { cancelable: true });
+      window.dispatchEvent(event);
+      expect(event.defaultPrevented).toBe(true);
+    } finally {
+      tracker.dispose();
+    }
+  });
+
+  it("pagehide flushes every live tracker's owed facts", () => {
+    render(<App />);
+    const post = vi.fn(() => Promise.resolve({ record: { cells_seen_at_scale: {} } }));
+    const tracker = new CoverageTracker(post);
+    try {
+      tracker.reset(TRACKER_KEY, TRACKER_GRID, TRACKER_CELLS);
+      tracker.setViewing(NULL_VIEWING);
+      tracker.noteServedAtNative("A1");
+
+      window.dispatchEvent(new Event("pagehide"));
+      expect(post).toHaveBeenCalledTimes(1);
+    } finally {
+      tracker.dispose();
+    }
   });
 });

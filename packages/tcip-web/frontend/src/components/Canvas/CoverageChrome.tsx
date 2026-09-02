@@ -52,9 +52,12 @@ function attestedViewLine(cell: string, entry: CellAttestedView | undefined): st
   if (atScale === null || !entry.seen_on_record.grid_matched) {
     return `${cell} attested at ${n} zoom, not seen on record`;
   }
-  const met = bar ? meetsBar(atScale, bar) : false;
   const s = `${(atScale * 100).toFixed(1)}%`;
-  const against = bar ? ` against a working scale of ${(bar.value * 100).toFixed(1)}%` : "";
+  if (bar === null) {
+    return `${cell} attested at ${n} zoom, seen on record at ${s}, no working scale recorded at attestation`;
+  }
+  const met = meetsBar(atScale, bar);
+  const against = ` against a working scale of ${(bar.value * 100).toFixed(1)}%`;
   return `${cell} attested at ${n} zoom, seen on record at ${s}${against}${met ? "" : " (below it)"}`;
 }
 
@@ -93,7 +96,10 @@ function CoverageKey(props: { panelOpen: boolean }) {
             <li>
               swept: every part of the cell has been on screen at the working scale, any session
             </li>
-            <li>short dashes, no fill: seen at the working scale this session, not yet saved</li>
+            <li>
+              short dashes, no fill: swept this session, not yet saved -- the same cells the "not
+              yet saved" state line names
+            </li>
             <li>count in parentheses: saved annotations of the active subject</li>
             <li>solid border: attested complete, active subject</li>
             <li>dotted border: attested complete, another subject</li>
@@ -127,7 +133,11 @@ function stateLines(props: {
   const lines: string[] = [];
   const swept = Array.from(props.swept).sort();
   if (swept.length) lines.push(`swept: ${swept.join(", ")}`);
-  const pending = Array.from(props.pending).sort();
+  // Only a swept cell whose facts are still pending gets the overlay's short-dash mark
+  // (CoverageOverlay's own `swept && pending`); this line names the same set.
+  const pending = Array.from(props.swept)
+    .filter((name) => props.pending.has(name))
+    .sort();
   if (pending.length) lines.push(`not yet saved: ${pending.join(", ")}`);
   if (props.subject) {
     const saved = Object.entries(props.annotationCounts)
@@ -259,15 +269,16 @@ export function CoverageChrome(props: {
       `(${bar.median_extent_native_px.toFixed(0)} px across, from ${bar.annotation_count}) spans ` +
       `${bar.judged_span_px} px on screen, a default span`
     : props.workingScaleReason;
-  const coarserLine = bar
-    ? `${props.coarserCount} cell${props.coarserCount === 1 ? "" : "s"} on record ${
-        props.coarserCount === 1 ? "was" : "were"
-      } seen at a coarser scale than ${props.subject}'s working scale`
-    : props.coarserCount > 0
-      ? `${props.coarserCount} cell${props.coarserCount === 1 ? "" : "s"} on record ${
-          props.coarserCount === 1 ? "was" : "were"
-        } fully on screen; no working scale to judge ${props.coarserCount === 1 ? "it" : "them"} against`
-      : null;
+  const coarserLine =
+    props.coarserCount === 0
+      ? null
+      : bar
+        ? `${props.coarserCount} cell${props.coarserCount === 1 ? "" : "s"} on record ${
+            props.coarserCount === 1 ? "was" : "were"
+          } seen at a coarser scale than ${props.subject}'s working scale`
+        : `${props.coarserCount} cell${props.coarserCount === 1 ? "" : "s"} on record ${
+            props.coarserCount === 1 ? "was" : "were"
+          } fully on screen; no working scale to judge ${props.coarserCount === 1 ? "it" : "them"} against`;
 
   return (
     <div className="absolute bottom-3 right-3 z-20 flex w-64 flex-col items-stretch gap-1.5">
@@ -300,8 +311,8 @@ export function CoverageChrome(props: {
       )}
       {aboveZoomCeiling && (
         <p className={`${noticeClass} border-tcip-border text-tcip-warn`}>
-          {props.subject}&apos;s working scale ({barPct!.toFixed(1)}%) is beyond the viewer&apos;s
-          1000% zoom, so no view can sweep a cell.
+          {props.subject}&apos;s working scale ({barPct!.toFixed(1)}%) is beyond the viewer&apos;s{" "}
+          {(MAX_SCALE * 100).toFixed(0)}% zoom, so no view can sweep a cell.
         </p>
       )}
       <CollapsibleSection
