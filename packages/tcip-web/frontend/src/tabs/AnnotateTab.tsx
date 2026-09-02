@@ -12,10 +12,12 @@ import { InProgressPolygon } from "@/components/annotate/InProgressPolygon";
 import { SnapIndicator } from "@/components/annotate/SnapIndicator";
 import { AnnotateToolbar } from "@/components/AnnotateToolbar";
 import { CanvasStage } from "@/components/Canvas/CanvasStage";
-import { CoverageMinimap } from "@/components/Canvas/CoverageMinimap";
+import { CoverageChrome } from "@/components/Canvas/CoverageChrome";
+import { CoverageOverlay } from "@/components/Canvas/CoverageOverlay";
 import { useBandSelection } from "@/hooks/useBandSelection";
 import { useCoverageGrid } from "@/hooks/useCoverageGrid";
 import { useCoverageTracking } from "@/hooks/useCoverageTracking";
+import { useDisclosure } from "@/hooks/useDisclosure";
 import { useImageBands } from "@/hooks/useImageBands";
 import { useImageNav } from "@/hooks/useImageNav";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
@@ -23,11 +25,11 @@ import { usePrefetchAdjacentImages } from "@/hooks/usePrefetchAdjacentImages";
 import { useRegionCompleteness } from "@/hooks/useRegionCompleteness";
 import { useRegionServes } from "@/hooks/useRegionServes";
 import { compositeParams } from "@/lib/bandSelection";
-import { stepUnsweptCell, type GridCell } from "@/lib/coverage";
+import { cellAt, stepUnsweptCell, type GridCell } from "@/lib/coverage";
 import type { LoadedImage } from "@/lib/imageLoader";
 import { canvasHoldsSubject } from "@/lib/imageStatus";
 import { currentImage, labelPath } from "@/lib/paths";
-import { zoomToRect } from "@/lib/viewGeometry";
+import { fitView, zoomToRect } from "@/lib/viewGeometry";
 import {
   buildAnnotateShapes,
   computeViewport,
@@ -193,8 +195,12 @@ export function AnnotateTab() {
     imagePath: imgPath,
     datasetRoot: dataset.dataset_root,
     subject: dataset.subject,
+    grid: coverageGrid.grid,
   });
   const coverageMultiCell = coverageGrid.cells.length > 1;
+  const { open: coverageOverlayOn, toggle: toggleCoverageOverlay } = useDisclosure(
+    "tcip.annotate.coverageGridOverlayOpen",
+  );
 
   function jumpToCell(cell: GridCell) {
     const host = measureCanvasHost();
@@ -207,6 +213,24 @@ export function AnnotateTab() {
         { host, imgW: canvas.imgWidth, imgH: canvas.imgHeight, padX: pad, padY: pad },
       ),
     );
+  }
+
+  function coverageViewportRect() {
+    const host = measureCanvasHost();
+    if (!host) return null;
+    const vp = computeViewport(view, host, canvas.imgWidth, canvas.imgHeight);
+    return vp ? { x0: vp.x, y0: vp.y, x1: vp.x + vp.w, y1: vp.y + vp.h } : null;
+  }
+
+  function cellForRect(rect: ReturnType<typeof coverageViewportRect>): GridCell | null {
+    if (!rect) return null;
+    return cellAt(coverageGrid.cells, (rect.x0 + rect.x1) / 2, (rect.y0 + rect.y1) / 2);
+  }
+
+  function overview() {
+    const host = measureCanvasHost();
+    if (!host || canvas.imgWidth <= 0 || canvas.imgHeight <= 0) return;
+    setView(fitView(host, canvas.imgWidth, canvas.imgHeight));
   }
 
   function stepCoverageCell(delta: 1 | -1) {
@@ -783,6 +807,7 @@ export function AnnotateTab() {
     // (e.g. an outside click meant to deselect), forcing a second click.
     didDragRef.current = false;
     if (outsideImage(ix, iy)) return;
+    if (mode === "map") return; // navigation only; the click (onClick) does the jump
     if (mode === "point") {
       // A press on an existing point selects it and picks it up; the whole mark is the handle.
       // Missing every point does nothing here: the click (see onClick) places a new one, so a
@@ -894,7 +919,7 @@ export function AnnotateTab() {
   const processMoveRef = useRef<(ix: number, iy: number) => void>(() => {});
   processMoveRef.current = (ix: number, iy: number) => {
     setCursor([ix, iy]);
-    if (isLocked) return;
+    if (isLocked || mode === "map") return; // Map mode authors nothing on hover either
 
     // Point drag (repositioning a placed point)
     const pDrag = pointDragRef.current;
@@ -1028,7 +1053,7 @@ export function AnnotateTab() {
   }, []);
 
   const onUp = (ix: number, iy: number) => {
-    if (isLocked) return;
+    if (isLocked || mode === "map") return;
     if (pointDragRef.current !== null) {
       pointDragRef.current = null;
       // didDragRef stays set: the trailing click of this release must not place a second point
@@ -1083,9 +1108,16 @@ export function AnnotateTab() {
   };
 
   const onClick = (ix: number, iy: number, ev: Konva.KonvaEventObject<MouseEvent>) => {
-    if (isLocked) return;
     if (ev.evt.button !== 0) return;
     if (outsideImage(ix, iy)) return;
+    if (mode === "map") {
+      // Navigation only: a click opens the cell's tile, no annotation handler runs, and this
+      // is offered even while the image is locked (viewing coverage is not an edit).
+      const cell = cellAt(coverageGrid.cells, ix, iy);
+      if (cell) jumpToCell(cell);
+      return;
+    }
+    if (isLocked) return;
     if (mode === "point") {
       if (didDragRef.current) {
         didDragRef.current = false; // the trailing click of a point select/drag release
@@ -1307,6 +1339,9 @@ export function AnnotateTab() {
   const renderLabels = annotateUi.visible;
   const hoveredIdx = annotateUi.hoveredPolygonIdx;
   const draggingIdx = annotateUi.draggingVertex?.[0];
+  const coverageViewport = coverageViewportRect();
+  const activeCoverageCell = cellForRect(coverageViewport);
+  const showCoverageChrome = coverageMultiCell || !!coverageGrid.error;
 
   return (
     <div className="flex-1 flex flex-col min-h-0">
@@ -1319,6 +1354,7 @@ export function AnnotateTab() {
         bandSelection={bandSelection}
         onBandSelectionChange={setBandSelection}
         completeWarning={coverage.completeWarning}
+        coverageMultiCell={coverageMultiCell}
       />
       <div className="relative flex-1 flex flex-col min-h-0">
         <CanvasStage
@@ -1373,6 +1409,18 @@ export function AnnotateTab() {
             </>
           }
         >
+          {coverageMultiCell && coverageOverlayOn && coverageGrid.grid && (
+            <CoverageOverlay
+              cells={coverageGrid.cells}
+              viewport={coverageViewport}
+              scale={s}
+              swept={coverage.swept}
+              activeComplete={completeness.activeComplete}
+              activeStale={completeness.activeStale}
+              otherComplete={completeness.otherComplete}
+              annotationCounts={completeness.annotationCounts}
+            />
+          )}
           {/* Committed shapes: memoized, cursor-independent (see AnnotationShapes) */}
           <AnnotationShapes
             boxes={canvas.boxes}
@@ -1429,26 +1477,37 @@ export function AnnotateTab() {
 
         <AnnotateLegend />
 
-        {coverageMultiCell && coverageGrid.grid && (
-          <CoverageMinimap
-            imagePath={imgPath}
-            composite={composite}
-            grid={coverageGrid.grid}
-            cells={coverageGrid.cells}
-            swept={coverage.swept}
-            sweptVersion={coverage.version}
-            viewport={(() => {
-              const host = measureCanvasHost();
-              const vp = host
-                ? computeViewport(view, host, canvas.imgWidth, canvas.imgHeight)
-                : null;
-              return vp ? { x0: vp.x, y0: vp.y, x1: vp.x + vp.w, y1: vp.y + vp.h } : null;
-            })()}
-            onJump={jumpToCell}
-            activeComplete={completeness.activeComplete}
-            otherComplete={completeness.otherComplete}
-            onToggleComplete={(cell) => {
-              if (coverageGrid.grid) completeness.toggle(cell.name, coverageGrid.grid);
+        <button
+          type="button"
+          onClick={overview}
+          title="Overview: fit the whole image to the canvas"
+          className="absolute top-3 left-3 z-20 rounded-full border border-tcip-border bg-tcip-panel/90 px-2.5 py-1 text-[11px] text-tcip-muted backdrop-blur hover:border-tcip-border-hover hover:text-tcip-fg"
+        >
+          Overview
+        </button>
+
+        {showCoverageChrome && (
+          <CoverageChrome
+            derivation={coverageGrid.derivation ?? ""}
+            gridFetchError={coverageGrid.error}
+            readError={completeness.error}
+            countsError={completeness.countsError}
+            overlayOn={coverageOverlayOn}
+            onToggleOverlay={toggleCoverageOverlay}
+            currentCellName={activeCoverageCell?.name ?? null}
+            currentCellComplete={
+              !!activeCoverageCell &&
+              (completeness.activeComplete.has(activeCoverageCell.name) ||
+                completeness.activeStale.has(activeCoverageCell.name))
+            }
+            currentCellStale={
+              !!activeCoverageCell && completeness.activeStale.has(activeCoverageCell.name)
+            }
+            otherLattice={completeness.otherLattice}
+            onAttest={(complete) => {
+              if (activeCoverageCell && coverageGrid.grid) {
+                completeness.write(activeCoverageCell.name, coverageGrid.grid, complete);
+              }
             }}
           />
         )}

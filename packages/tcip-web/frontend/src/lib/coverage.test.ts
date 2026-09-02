@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  cellAt,
   cellsIntersecting,
   completeWarningMessage,
   effectiveComplete,
@@ -53,6 +54,23 @@ describe("cell rect predicates", () => {
         viewport,
       ),
     ).toBe(false);
+  });
+});
+
+describe("cellAt", () => {
+  it("finds the cell a point falls in, the Map tool's click and the chrome's current-cell lookup", () => {
+    expect(cellAt(CELLS, 150, 150)?.name).toBe("B2");
+    expect(cellAt(CELLS, 0, 0)?.name).toBe("A1");
+  });
+
+  it("respects the half-open convention: a cell's own x1/y1 belongs to its neighbor", () => {
+    expect(cellAt(CELLS, 100, 50)?.name).toBe("B1");
+    expect(cellAt(CELLS, 99, 50)?.name).toBe("A1");
+  });
+
+  it("returns null outside every cell", () => {
+    expect(cellAt(CELLS, 1000, 1000)).toBeNull();
+    expect(cellAt([], 1, 1)).toBeNull();
   });
 });
 

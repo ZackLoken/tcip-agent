@@ -19,6 +19,11 @@ export interface GridCell {
 
 export interface CoverageGridResponse extends GridGeometry {
   cells: GridCell[];
+  /** How the tile size was chosen: "16 divisions of the long edge", "one display-bounded serve
+   *  per cell", or "chosen: <n> px" for an explicit tile_size. Not part of GridGeometry; stripped
+   *  back off (see useCoverageGrid) before a grid round-trips into a coverage or completeness
+   *  payload, which forbids extra keys. */
+  derivation: string;
 }
 
 /** One subject's region-completeness record, as GET /api/coverage/completeness returns it
@@ -35,6 +40,18 @@ export interface CompletenessRecord {
   stale_cells: string[];
 }
 
+/** GET /api/coverage/completeness's full response: every subject's record, plus every subject's
+ *  saved-annotation count per cell over the raster's current grid. `annotation_counts` sits
+ *  beside `by_subject`, never inside it: a count belongs to the grid, not to any one attestation
+ *  record, so it is served even for a subject with no record yet. `grid_error` is set (and
+ *  `annotation_counts` empty) when the current grid could not be derived (an incomplete band
+ *  group); `by_subject` still serves in that case. */
+export interface CompletenessResponse {
+  by_subject: Record<string, CompletenessRecord>;
+  annotation_counts: Record<string, Record<string, number>>;
+  grid_error: string | null;
+}
+
 /** Cells genuinely complete right now: attested, minus any that have since gone stale. A stale
  *  attestation must never render as if it still held. */
 export function effectiveComplete(record: CompletenessRecord | undefined): Set<string> {
@@ -43,13 +60,15 @@ export function effectiveComplete(record: CompletenessRecord | undefined): Set<s
   return new Set(record.cells_complete.filter((c) => !stale.has(c)));
 }
 
-/** One double-click: toggle one cell's completeness for a subject. POST /api/coverage/completeness. */
-export interface CompletenessTogglePostBody {
+/** One explicit attestation write: set one cell's completeness for a subject to `complete`,
+ *  never a toggle the caller infers from the stored state. POST /api/coverage/completeness. */
+export interface CompletenessSetPostBody {
   image_path: string;
   dataset_root: string | null;
   subject: string;
   grid: GridGeometry;
   cell: string;
+  complete: boolean;
   user?: string | null;
 }
 
@@ -78,6 +97,12 @@ export function rectFullyInside(inner: PixelRect, outer: PixelRect): boolean {
 
 export function cellsIntersecting(cells: GridCell[], rect: PixelRect): GridCell[] {
   return cells.filter((c) => rectsOverlap(c, rect));
+}
+
+/** The cell containing image-coordinate point `(x, y)`, or null outside every cell: one lookup
+ *  shared by the Map tool's click and the chrome's "current cell" (viewport center). */
+export function cellAt(cells: GridCell[], x: number, y: number): GridCell | null {
+  return cells.find((c) => x >= c.x0 && x < c.x1 && y >= c.y0 && y < c.y1) ?? null;
 }
 
 /**

@@ -14,9 +14,14 @@ import type { LoadedImage } from "@/lib/imageLoader";
 export interface CoverageGridState {
   grid: GridGeometry | null;
   cells: GridCell[];
+  /** How the tile size was chosen, or null while no grid is loaded. */
+  derivation: string | null;
+  /** The grid fetch's own refusal, or null; a failure must read as an error, never as "no
+   *  grid needed here". */
+  error: string | null;
 }
 
-const EMPTY: CoverageGridState = { grid: null, cells: [] };
+const EMPTY: CoverageGridState = { grid: null, cells: [], derivation: null, error: null };
 
 export function useCoverageGrid(
   imagePath: string | null,
@@ -38,12 +43,14 @@ export function useCoverageGrid(
     void api.coverage.grid(imagePath).then(
       (res) => {
         if (cancelled) return;
-        const { cells, ...grid } = res;
-        setState({ path: imagePath, grid, cells });
+        const { cells, derivation, ...grid } = res;
+        setState({ path: imagePath, grid, cells, derivation, error: null });
       },
       (e: unknown) => {
-        if (!cancelled && fetchingRef.current === imagePath) fetchingRef.current = null;
-        console.warn("coverage grid fetch failed", e);
+        if (cancelled) return;
+        if (fetchingRef.current === imagePath) fetchingRef.current = null;
+        const detail = e instanceof Error ? e.message : String(e);
+        setState({ path: imagePath, ...EMPTY, error: detail });
       },
     );
     return () => {

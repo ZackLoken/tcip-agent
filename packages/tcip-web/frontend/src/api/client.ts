@@ -15,8 +15,8 @@ import {
 } from "@/api/types.generated";
 import type { CanvasStateBody } from "@/lib/canvasSync";
 import type {
-  CompletenessRecord,
-  CompletenessTogglePostBody,
+  CompletenessResponse,
+  CompletenessSetPostBody,
   CoverageGridResponse,
 } from "@/lib/coverage";
 import { annotationsToCanvas } from "@/lib/labelSerde";
@@ -286,16 +286,12 @@ export const api = {
     push: (body: CoveragePayload) =>
       call<{ status: string }>(ROUTES.postCoverage, { method: "POST", body: JSON.stringify(body) }),
 
-    // Every subject's region-completeness record for the raster at `path`, so the minimap can
-    // tell the active subject's attestations apart from another subject's.
+    // Every subject's completeness record plus every subject's saved-annotation count per cell.
     completeness: (path: string, dataset_root: string | null) =>
-      call<{ by_subject: Record<string, CompletenessRecord> }>(
-        `${ROUTES.getCoverageCompleteness}?${q({ path, dataset_root })}`,
-      ),
+      call<CompletenessResponse>(`${ROUTES.getCoverageCompleteness}?${q({ path, dataset_root })}`),
 
-    // Toggles one cell's completeness for a subject; the server stamps or clears its content
-    // digest so a later edit inside the cell is told apart from an unedited attestation.
-    toggleCompleteness: (body: CompletenessTogglePostBody) =>
+    // Sets one cell's completeness in the direction the caller states, never a toggle.
+    setCompleteness: (body: CompletenessSetPostBody) =>
       call<{ status: string; complete: boolean; cells_complete: string[] }>(
         ROUTES.postCoverageCompleteness,
         { method: "POST", body: JSON.stringify(body) },

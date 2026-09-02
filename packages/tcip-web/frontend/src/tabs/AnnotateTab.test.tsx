@@ -1109,3 +1109,40 @@ describe("AnnotateTab canvas-push binding-presence gate", () => {
     expect(useStore.getState().canvasBindingMissing).toBe(false);
   });
 });
+
+describe("AnnotateTab Map tool", () => {
+  const stage = () => screen.getByTestId("canvas-stage");
+
+  async function mountMapMode() {
+    useStore.getState().setRegistry({ tip: {} });
+    useStore.setState((s) => ({
+      gui: { ...s.gui, mode: "map" as const, active_subject: "tip" },
+    }));
+    render(<AnnotateTab />);
+    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
+    await flush();
+  }
+
+  it("a press-and-click in Map mode authors no point, box or polygon vertex", async () => {
+    await mountMapMode();
+    fireEvent.mouseDown(stage(), { clientX: 50, clientY: 50, button: 0 });
+    fireEvent.click(stage(), { clientX: 50, clientY: 50, button: 0 });
+    await flush();
+
+    expect(useStore.getState().canvas.points).toHaveLength(0);
+    expect(useStore.getState().canvas.boxes).toHaveLength(0);
+    expect(useStore.getState().canvas.polygons).toHaveLength(0);
+    expect(useStore.getState().canvas.currentPolygon).toHaveLength(0);
+  });
+
+  it("Map mode is inert even over a lockedImage, since navigation is not an edit", async () => {
+    // The same click a Point-mode press would use to author a point.
+    await mountMapMode();
+    useStore.setState((s) => ({
+      imageStatus: { ...s.imageStatus, byImage: { "img1.jpg": "complete" } },
+    }));
+    fireEvent.click(stage(), { clientX: 50, clientY: 50, button: 0 });
+    await flush();
+    expect(useStore.getState().canvas.points).toHaveLength(0);
+  });
+});
