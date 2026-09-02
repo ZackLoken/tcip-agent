@@ -175,9 +175,9 @@ def select_best_model(
         return {"error": "No models registered"}
     if not metric:
         return {
-            "error": "metric is required: select_best_model has no default (a labeled "
-                     "comparability metric like val_map50 doesn't necessarily govern a trait's "
-                     "phenotype). Pick one of available_metrics.",
+            "error": "metric is required: there is no default (a labeled comparability metric "
+                     "like val_map50 doesn't necessarily govern a trait's phenotype). Pick one "
+                     "of the available metrics.",
             "available_metrics": _labeled_available_metrics(models),
             "n_models": len(models),
         }
@@ -199,8 +199,8 @@ def select_best_model(
     else:
         return {
             "error": f"'{metric}' has no declared ranking direction (evaluation."
-                     "HIGHER_IS_BETTER_BY_METRIC names no entry for it). Pass higher_is_better "
-                     "explicitly to rank by it anyway, or pick one of available_metrics.",
+                     "HIGHER_IS_BETTER_BY_METRIC names no entry for it). State a direction to "
+                     "rank by it anyway, or pick one of the available metrics.",
             "needs_direction": True,
             "available_metrics": _labeled_available_metrics(models),
             "n_models": len(models),
@@ -217,7 +217,7 @@ def select_best_model(
         if carriers and not include_unverified and all(m in unverified for m in carriers):
             return {
                 "error": f"every registered model carrying '{metric}' is unverified "
-                         "(metrics_source is not 'trainer'); pass include_unverified=True to "
+                         "(metrics_source is not 'trainer'); include unverified models to "
                          "rank them, or register a verified run.",
                 "all_unverified": True,
                 "excluded_unverified": excluded_unverified,
