@@ -41,9 +41,10 @@ describe("defaultSweepRequest", () => {
 });
 
 describe("both composer defaults", () => {
-  // A tool, script or function name reads as snake_case, a dotted module path, or a
-  // scripts/ path; none of those shapes belongs in a request meant for a breeder to read.
-  const IDENTIFIER_SHAPED = /[a-zA-Z]+_[a-zA-Z_]+|scripts\/|\.py\b/;
+  // snake_case, a dotted module path (segments at least two characters, so "e.g." never
+  // trips it), a scripts/ path, a .py suffix, or a backticked token.
+  const IDENTIFIER_SHAPED =
+    /[a-zA-Z]+_[a-zA-Z_]+|[a-zA-Z][a-zA-Z0-9_]+(?:\.[a-zA-Z][a-zA-Z0-9_]+)+|scripts\/|\.py\b|`[^`]+`/;
 
   it("names no tool, script or function the agent should call", () => {
     // "leaf", not "subject_a": an underscored subject name would trip the identifier check
@@ -52,5 +53,13 @@ describe("both composer defaults", () => {
     expect(defaultTrainingRequest("/data/valley", "leaf")).not.toMatch(IDENTIFIER_SHAPED);
     expect(defaultSweepRequest(null)).not.toMatch(IDENTIFIER_SHAPED);
     expect(defaultSweepRequest("/data/valley")).not.toMatch(IDENTIFIER_SHAPED);
+  });
+
+  it("catches every shape the guard names, and nothing narrower", () => {
+    expect("tuning.launch").toMatch(IDENTIFIER_SHAPED);
+    expect("`preflight`").toMatch(IDENTIFIER_SHAPED);
+    expect("scripts/scan_dataset.py").toMatch(IDENTIFIER_SHAPED);
+    // An abbreviation, not a module path: each segment must be at least two characters.
+    expect("e.g.").not.toMatch(IDENTIFIER_SHAPED);
   });
 });
