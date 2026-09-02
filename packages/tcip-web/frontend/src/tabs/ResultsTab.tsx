@@ -43,7 +43,8 @@ function recordKey(record: { trait: string; delivery_kind: string }): string {
   return `${record.trait}::${record.delivery_kind}`;
 }
 
-// build_mapping's own four nn_tolerance_m sources, in the breeder's words; an unmapped source renders as itself.
+// build_mapping's own four nn_tolerance_m sources, in the breeder's words; a source string this
+// map does not know renders as its own raw string.
 const TOLERANCE_SOURCE_PHRASES: Record<string, string> = {
   grid_pitch: "derived from the plot's grid pitch",
   fallback: "the fallback, since fewer than two plants had positions",
@@ -334,6 +335,7 @@ export function ResultsTab() {
   const [nnTolerance, setNnTolerance] = useState<number | "">("");
   const [buildSummary, setBuildSummary] = useState<PlantMappingSummary | null>(null);
   const [buildTolerance, setBuildTolerance] = useState<PlantMappingTolerance | null>(null);
+  const [buildMaxMatchDistance, setBuildMaxMatchDistance] = useState<number | null>(null);
   const [buildMsg, setBuildMsg] = useState<string | null>(null);
   const [building, setBuilding] = useState(false);
 
@@ -642,6 +644,7 @@ export function ResultsTab() {
     setBuildMsg(null);
     setBuildSummary(null);
     setBuildTolerance(null);
+    setBuildMaxMatchDistance(null);
     try {
       const res = await resultsApi.buildPlantMapping({
         name: mappingName,
@@ -651,6 +654,7 @@ export function ResultsTab() {
       });
       setBuildSummary(res.summary);
       setBuildTolerance(res.nn_tolerance_m);
+      setBuildMaxMatchDistance(res.max_match_distance_m);
       setBuildMsg(`Mapping built + saved as ${mappingName}`);
       refreshMappingNames();
     } catch (e) {
@@ -913,7 +917,7 @@ export function ResultsTab() {
             />
           </div>
           <div className="flex flex-col gap-2">
-            <label className="tcip-label">NN tolerance (m)</label>
+            <label className="tcip-label">Match tolerance (m)</label>
             <input
               className="tcip-input"
               type="number"
@@ -937,9 +941,9 @@ export function ResultsTab() {
         </div>
         {buildSummary && (
           <div className="mt-2 text-[11px] text-tcip-muted tabular-nums">
-            {buildTolerance && (
+            {buildTolerance && buildMaxMatchDistance !== null && (
               <div className="mb-1">
-                {`Match radius ${buildTolerance.value.toFixed(2)} m (${toleranceSourceText(buildTolerance.source)})`}
+                {`Match tolerance ${buildTolerance.value.toFixed(2)} m (${toleranceSourceText(buildTolerance.source)}); matches accepted out to ${buildMaxMatchDistance.toFixed(2)} m`}
               </div>
             )}
             {Object.entries(buildSummary).map(([d, s]) => (

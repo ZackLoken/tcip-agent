@@ -70,8 +70,10 @@ def build_plant_mapping(
     Returns a compact per-date summary (images, mapped count, avg GPS distance) plus totals,
     the mapping's ``name``, the resolved ``project_root`` and ``dataset_root``,
     ``nn_tolerance_m`` (the persisted record's own ``{"value": ..., "source": ...}``, never
-    recomputed here), and ``unreadable`` (per date, the captures PIL could not open), not the
-    full per-image mapping (that lives in the persisted record).
+    recomputed here), ``max_match_distance_m`` (the tolerance's own loosest accepted distance,
+    derived from it through ``plant_mapping.match_gates``), and ``unreadable`` (per date, the
+    captures PIL could not open), not the full per-image mapping (that lives in the persisted
+    record).
     """
     from tcip_store.layout_claims import NAME_SEGMENT
 
@@ -154,6 +156,8 @@ def build_plant_mapping(
         "n_unmapped": total_images - total_mapped,
         "per_date": per_date,
         "nn_tolerance_m": build.nn_tolerance_m,
+        "max_match_distance_m": plant_mapping.match_gates(
+            build.nn_tolerance_m["value"])["max_match_distance_m"],
     }
 
 

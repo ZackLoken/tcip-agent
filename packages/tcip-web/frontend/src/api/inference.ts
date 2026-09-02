@@ -357,10 +357,15 @@ export const resultsApi = {
       mapping: unknown;
       unreadable: Record<string, string[]>;
       nn_tolerance_m: PlantMappingTolerance;
+      max_match_distance_m: number;
     }>(ROUTES.postResultsPlantMappingBuild, body),
 
   loadPlantMapping: (name: string) =>
-    postJson<{ mapping: unknown }>(ROUTES.postResultsPlantMappingLoad, { name }),
+    postJson<{
+      mapping: unknown;
+      nn_tolerance_m: PlantMappingTolerance | null;
+      max_match_distance_m: number | null;
+    }>(ROUTES.postResultsPlantMappingLoad, { name }),
 
   // Every mapping name persisted under the open project, for the Results tab's name picker.
   listPlantMappings: () => getJson<{ names: string[] }>(ROUTES.getResultsPlantMappingList),

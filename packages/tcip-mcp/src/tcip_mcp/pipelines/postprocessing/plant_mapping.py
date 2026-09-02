@@ -59,6 +59,14 @@ EARTH_RADIUS_M = 6_378_137.0
 
 NN_TOLERANCE_METERS = 10.0
 
+SEQUENCE_MATCH_FACTOR = 2
+"""assign_plants' sequence-anchored gate: a run's nearest unclaimed plant is accepted out to this
+many times nn_tolerance_m before falling through to plain nearest-neighbour."""
+
+NEAREST_MATCH_FACTOR = 3
+"""assign_plants' plain nearest-neighbour gate, the loosest a match is ever accepted at: this
+many times nn_tolerance_m."""
+
 
 @dataclass
 class ImageStamp:
@@ -174,6 +182,7 @@ class MappingBuild:
             "dataset_root": self.dataset_root,
             "built_at": self.built_at,
             "record_sha256": self.record_sha256,
+            "nn_tolerance_m": self.nn_tolerance_m,
             "capture_identity": self.capture_identity,
             "captures_unverified": verified["captures_unverified"],
             "plant_csvs_unverified": verified["plant_csvs_unverified"],
@@ -565,10 +574,10 @@ def assign_plants(
                     best_idx = i
                     best_d = d
 
-            if best_idx < 0 or best_d is None or best_d > nn_tolerance_m * 2:
+            if best_idx < 0 or best_d is None or best_d > nn_tolerance_m * SEQUENCE_MATCH_FACTOR:
                 # Fall through to plain NN, even if claimed: duplicates can happen
                 plant, d = _nearest_plant(s.lat, s.lon, plants)
-                if plant is None or d is None or d > nn_tolerance_m * 3:
+                if plant is None or d is None or d > nn_tolerance_m * NEAREST_MATCH_FACTOR:
                     out.append(
                         Assignment(
                             image_path=s.path,
@@ -633,6 +642,19 @@ def grid_pitch_m(plants: list[PlantRecord]) -> float:
     return nn[len(nn) // 2]
 
 
+def match_gates(nn_tolerance_m: float) -> dict:
+    """The distances a match is actually accepted out to, given ``nn_tolerance_m``: the stated
+    tolerance itself, the sequence-anchored gate's own ceiling, and ``max_match_distance_m``,
+    ``assign_plants``' loosest gate (the plain nearest-neighbour fallback). Derived once here so
+    a caller states the same ceiling ``assign_plants`` enforces rather than restating its factors.
+    """
+    return {
+        "nn_tolerance_m": nn_tolerance_m,
+        "sequence_match_distance_m": nn_tolerance_m * SEQUENCE_MATCH_FACTOR,
+        "max_match_distance_m": nn_tolerance_m * NEAREST_MATCH_FACTOR,
+    }
+
+
 def build_mapping(
     images_root: Path,
     plant_csv_paths: list[Path],
@@ -653,10 +675,11 @@ def build_mapping(
     calling here); this function does not re-derive them.
 
     ``nn_tolerance_m`` is derived from the plot's ``grid_pitch_m`` when the caller does not pin it
-    (not a pinned 10 m): pitch/6, so assign_plants' loosest 3x gate keeps the effective match
-    radius within half a grid cell. An explicit value is honored but still capped at that
-    pitch-derived ceiling; ``nn_tolerance_m`` on the record carries which of the four branches
-    (derived, capped, stated, fallback) produced the value.
+    (not a pinned 10 m): pitch/6, so assign_plants' loosest ``NEAREST_MATCH_FACTOR``-times gate
+    keeps the effective match radius within half a grid cell. An explicit value is honored but
+    still capped at that pitch-derived ceiling; ``nn_tolerance_m`` on the record carries which of
+    the four branches (``grid_pitch``, ``fallback``, ``stated_capped``, ``stated``) produced the
+    value.
 
     A date's captures are enumerated through ``image_utils.list_logical_images``, so a band
     raster or a band group ingested under a mapped date is a capture the identity sees. That
@@ -677,8 +700,8 @@ def build_mapping(
         for p in plant_csv_paths if p.is_file()
     ]
 
-    # The ceiling: assign_plants' loosest gate is 3x nn_tolerance, so pitch/6 -> effective radius
-    # <= pitch/2. Derive the tolerance from the layout in hand; only cap an explicit override.
+    # The ceiling: assign_plants' loosest gate is NEAREST_MATCH_FACTOR x nn_tolerance, so pitch/6
+    # -> effective radius <= pitch/2; derive the tolerance from the layout, cap only an override.
     pitch = grid_pitch_m(plants)
     _cap = pitch / 6
     tolerance_source: str

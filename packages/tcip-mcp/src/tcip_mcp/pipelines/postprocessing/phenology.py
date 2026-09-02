@@ -573,7 +573,7 @@ def _write_phenology_delivery(
     cannot exist without both the gate having run and the delivery having been recorded.
 
     ``plant_mapping`` is the mapping this delivery attributed detections through: ``{"name",
-    "project_root", "dataset_id", "dataset_root", "built_at", "record_sha256",
+    "project_root", "dataset_id", "dataset_root", "built_at", "record_sha256", "nn_tolerance_m",
     "capture_identity", "captures_unverified", "plant_csvs_unverified"}``, the caller's own
     ``MappingBuild`` plus ``verify_mapping_inputs``'s disclosure. Required, never defaulted: a
     phenology delivery always reads a mapping, so there is no legitimate case with nothing to

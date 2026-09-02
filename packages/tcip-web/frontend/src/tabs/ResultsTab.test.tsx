@@ -1163,7 +1163,7 @@ describe("ResultsTab delivery events (read-only)", () => {
   });
 });
 
-describe("ResultsTab plant-mapping build: match-radius phrase", () => {
+describe("ResultsTab plant-mapping build: match-tolerance phrase", () => {
   function mockTreeAndMappings() {
     vi.spyOn(api.dataset, "tree").mockResolvedValue({
       dataset_root: "C:/data",
@@ -1185,6 +1185,7 @@ describe("ResultsTab plant-mapping build: match-radius phrase", () => {
       unreadable: {},
       summary: { "2026-01-01": { n_images: 3, n_mapped: 2, avg_distance_m: 1.4 } },
       nn_tolerance_m,
+      max_match_distance_m: nn_tolerance_m.value * 3,
     });
 
     render(<ResultsTab />);
@@ -1213,7 +1214,11 @@ describe("ResultsTab plant-mapping build: match-radius phrase", () => {
 
   it("names the stated value for source stated", async () => {
     await buildWithTolerance({ value: 3, source: "stated" });
-    expect(await screen.findByText("Match radius 3.00 m (the stated value)")).toBeInTheDocument();
+    expect(
+      await screen.findByText(
+        "Match tolerance 3.00 m (the stated value); matches accepted out to 9.00 m",
+      ),
+    ).toBeInTheDocument();
   });
 
   it("names the capped stated value for source stated_capped", async () => {

@@ -799,6 +799,38 @@ def test_full_round_trip_delivers_and_a_rebuild_reads_back(
     assert "error" not in res2, res2
 
 
+def test_the_delivery_events_plant_mapping_block_carries_the_tolerance_dict(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Coverage: the disclosure a phenology delivery records carries the mapping's own
+    ``nn_tolerance_m``, so a delivered milestone states the radius its identities were matched
+    under."""
+    _init(tmp_path, monkeypatch)
+    dataset_root = _dataset(tmp_path)
+    images_root, plant_csv, preds_by_date = _write_scene(dataset_root)
+
+    build_res = build_plant_mapping(
+        name="valley", images_root=str(images_root), plant_csv_paths=[str(plant_csv)])
+    assert "error" not in build_res, build_res
+    build = plant_mapping.load_mapping(tmp_path, "valley")
+    assert build is not None
+
+    _seed_currant_bloom_trait(tmp_path)
+    out_csv = tmp_path / "out" / "bloom_phenology.csv"
+    res = compute_phenology(
+        trait="currant_bloom", mapping_name="valley", predictions_by_date=preds_by_date,
+        output_csv_path=str(out_csv), acknowledge_unvalidated=True)
+    assert "error" not in res, res
+
+    from tcip_mcp.pipelines import resolution
+
+    scope = resolution.delivery_events_scope(tmp_path)
+    keys = ts.keys(resolution.DELIVERY_EVENTS_STORE, str(scope))
+    events = [ts.read(k) for k in keys if ts.read(k)["door"] == "compute_phenology"]
+    assert len(events) == 1, events
+    assert events[0]["plant_mapping"]["nn_tolerance_m"] == build.nn_tolerance_m
+
+
 # ── rail 12: a moved plant CSV and an archived date deliver, disclosed rather than refused
 
 
