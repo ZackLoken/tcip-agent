@@ -58,6 +58,40 @@ def test_run_config_exposes_top_level_stages_after_normalize(tmp_path, monkeypat
     assert len(run.config["stages"]) == 2  # not the default single 10-epoch stage
 
 
+def test_evaluation_section_returns_the_top_level_block_when_both_are_present():
+    from tcip_mcp.pipelines.schemas import evaluation_section
+
+    cfg = {
+        "evaluation": {"selection_metric": "f1"},
+        "training": {"evaluation": {"selection_metric": "loss"}},
+    }
+    assert evaluation_section(cfg) == {"selection_metric": "f1"}
+
+
+def test_evaluation_section_returns_the_nested_block_when_only_it_is_present():
+    from tcip_mcp.pipelines.schemas import evaluation_section
+
+    cfg = {"training": {"evaluation": {"selection_metric": "loss"}}}
+    assert evaluation_section(cfg) == {"selection_metric": "loss"}
+
+
+def test_evaluation_section_returns_an_empty_dict_when_neither_is_present():
+    from tcip_mcp.pipelines.schemas import evaluation_section
+
+    assert evaluation_section({}) == {}
+    assert evaluation_section({"training": {"batch_size": 4}}) == {}
+
+
+def test_evaluation_section_is_idempotent_on_an_already_normalized_config():
+    from tcip_mcp.pipelines.schemas import evaluation_section, normalize_train_config
+
+    cfg = normalize_train_config({
+        "evaluation": {"selection_metric": "f1"},
+        "training": {"evaluation": {"selection_metric": "loss"}},
+    })
+    assert evaluation_section(cfg) == evaluation_section(normalize_train_config(cfg))
+
+
 def test_stage_spec_tolerates_but_no_longer_declares_lr():
     # Per-stage lr was a lie (train() never reads it; the optimizer block sets LR). The field
     # is gone, but extra="allow" means an old config carrying stage lr still validates.

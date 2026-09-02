@@ -534,7 +534,8 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
 
     # Fail fast on an explicit selection_metric that is undeclared or, with a center-match trait,
     # comparability-only, at validation time rather than mid-run.
-    eval_cfg = train_cfg.get("evaluation") or config.get("evaluation") or {}
+    from tcip_mcp.pipelines.schemas import evaluation_section
+    eval_cfg = evaluation_section(config)
     sel_metric = eval_cfg.get("selection_metric")
     trait_name = eval_cfg.get("trait")
     if sel_metric:
@@ -1686,6 +1687,7 @@ def _run_hpo_trial(config: dict, report, base_config: dict, trial_dir: str) -> N
     from tcip_mcp.pipelines.data.samplers import build_sampler
     from tcip_mcp.pipelines.data.split_construction import auto_train_val
     from tcip_mcp.pipelines.model_build import MODEL_SOURCE_KEY
+    from tcip_mcp.pipelines.schemas import evaluation_section
     from torch.utils.data import DataLoader
 
     model_source = merged.get(MODEL_SOURCE_KEY)
@@ -1694,7 +1696,7 @@ def _run_hpo_trial(config: dict, report, base_config: dict, trial_dir: str) -> N
     data_cfg = merged.setdefault("data", {})
     train_cfg = merged.get("training", {})
     task = (model_source.get("task") if model_source else None) or data_cfg.get("task", "detection")
-    eval_cfg = merged.get("evaluation") or {}
+    eval_cfg = evaluation_section(merged)
     try:
         higher_is_better = HIGHER_IS_BETTER_BY_METRIC[resolve_selection_metric(
             task, eval_cfg.get("trait"), eval_cfg.get("selection_metric"))]
@@ -1933,12 +1935,12 @@ def run_hpo(
         from tcip_mcp.pipelines.training.evaluation import HIGHER_IS_BETTER_BY_METRIC
         from tcip_mcp.pipelines.training.generic_trainer import resolve_selection_metric
         from tcip_mcp.pipelines.model_build import MODEL_SOURCE_KEY
+        from tcip_mcp.pipelines.schemas import evaluation_section
 
         # Ray forbids setting metric/mode anywhere but the Tuner, so the direction is resolved
         # once here, from base_config; every trial's own resolution must agree with it.
         hpo_model_source = base_config.get(MODEL_SOURCE_KEY) or {}
-        hpo_eval_cfg = (base_config.get("training") or {}).get("evaluation") \
-            or base_config.get("evaluation") or {}
+        hpo_eval_cfg = evaluation_section(base_config)
         hpo_task = hpo_model_source.get("task") \
             or (base_config.get("data") or {}).get("task", "detection")
         hpo_metric = resolve_selection_metric(

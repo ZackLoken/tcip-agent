@@ -94,6 +94,20 @@ def normalize_train_config(config: dict) -> dict:
     return cfg
 
 
+def evaluation_section(config: dict) -> dict:
+    """The ``evaluation`` block that governs a run, read the one way every caller agrees on.
+
+    A config may carry ``evaluation`` at the top level, nested under ``training.evaluation``, or
+    both; ``normalize_train_config``'s hoist already says which wins (top-level, never
+    overwritten by the nested value), so this returns ``normalize_train_config(config)``'s own
+    ``evaluation`` key, or an empty dict when neither placement carries one. The trainer,
+    ``preflight_config`` and the sweep's direction resolution all call this rather than each
+    choosing between the two placements on its own; calling it again on an already-normalized
+    config returns the same block, since the hoist is idempotent.
+    """
+    return normalize_train_config(config).get("evaluation") or {}
+
+
 def validate_train_config_schema(config: dict) -> list[str]:
     """Validate a training config against the pydantic schema; return issue strings.
 
