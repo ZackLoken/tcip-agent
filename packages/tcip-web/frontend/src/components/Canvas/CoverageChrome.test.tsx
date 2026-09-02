@@ -103,12 +103,10 @@ describe("CoverageChrome", () => {
 
   it("a confirmation armed for one cell does not carry over to the next", () => {
     const onAttest = vi.fn();
+    // One shared reference isolates the reset this test names (currentCellName).
+    const otherLattice = { count: 1, cols: 2, rows: 2 };
     const { rerender } = render(
-      <CoverageChrome
-        {...baseProps()}
-        otherLattice={{ count: 1, cols: 2, rows: 2 }}
-        onAttest={onAttest}
-      />,
+      <CoverageChrome {...baseProps()} otherLattice={otherLattice} onAttest={onAttest} />,
     );
     fireEvent.click(screen.getByRole("button", { name: "Attest A1 complete" }));
     expect(screen.getByText(/Confirm:/)).toBeInTheDocument();
@@ -117,7 +115,7 @@ describe("CoverageChrome", () => {
       <CoverageChrome
         {...baseProps()}
         currentCellName="B2"
-        otherLattice={{ count: 1, cols: 2, rows: 2 }}
+        otherLattice={otherLattice}
         onAttest={onAttest}
       />,
     );
@@ -130,9 +128,30 @@ describe("CoverageChrome", () => {
     expect(screen.queryByText(/Attest/)).not.toBeInTheDocument();
   });
 
+  it("carries a key naming every lattice mark, since the overlay itself names none", () => {
+    render(<CoverageChrome {...baseProps()} />);
+    expect(screen.getByText(/swept/i)).toBeInTheDocument();
+    expect(screen.getByText(/saved annotations/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/attested complete/i).length).toBeGreaterThan(0);
+    expect(screen.getByText(/changed since attested/i)).toBeInTheDocument();
+  });
+
   it("a completeness read failure hides the attestation control and shows the error", () => {
     render(<CoverageChrome {...baseProps()} readError="network down" />);
     expect(screen.getByText(/completeness unavailable: network down/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Attest/ })).not.toBeInTheDocument();
+  });
+
+  it("a completeness failure on a raster with no grid states the error, not an empty derivation line", () => {
+    render(
+      <CoverageChrome
+        {...baseProps()}
+        derivation=""
+        currentCellName={null}
+        readError="network down"
+      />,
+    );
+    expect(screen.getByText(/completeness unavailable: network down/)).toBeInTheDocument();
+    expect(screen.queryByText(/A cell is not a training tile/)).not.toBeInTheDocument();
   });
 });

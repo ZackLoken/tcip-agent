@@ -1,7 +1,8 @@
 /**
  * Annotate-tab context toolbar. Two rows matching the approved mockup:
- *   Row 1: draw mode (Point/Box/Polygon), the subject picker pill, an Editor toggle, then the
- *          nav filter, image navigation, and the Complete checkbox.
+ *   Row 1: tool mode (Point/Box/Polygon, plus Map on a multi-cell raster), the subject picker
+ *          pill, an Editor toggle, then the nav filter, image navigation, and the Complete
+ *          checkbox.
  *   Editor: a second toolbar (collapsed by default, remembered) holding the tools you
  *           flip constantly (Snap / Stream / Show labels) plus Undo / Redo / Save.
  * Lives directly under the global TopBar; Undo/Redo/Save are wired up from AnnotateTab.

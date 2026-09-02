@@ -21,8 +21,6 @@ import type { ViewState } from "@/store/types";
 
 export interface CoverageTracking {
   swept: ReadonlySet<string>;
-  /** Bumped whenever the tracked facts change; drives minimap redraws. */
-  version: number;
   noteAuthoringCommit: () => void;
   noteServedAtNative: (cellName: string) => void;
   /** The Complete warning's wording, or null when the warning does not apply. */
@@ -41,6 +39,8 @@ export function useCoverageTracking(args: {
   imgH: number;
   viewing: CoverageViewingInput;
 }): CoverageTracking {
+  // Bumped whenever the tracker's own facts change, purely to give the memo below a dependency
+  // to recompute on: nothing reads the count itself.
   const [version, setVersion] = useState(0);
   const trackerRef = useRef<CoverageTracker | null>(null);
   if (trackerRef.current === null) {
@@ -102,7 +102,6 @@ export function useCoverageTracking(args: {
   return useMemo(
     () => ({
       swept: tracker.swept,
-      version,
       noteAuthoringCommit: () => tracker.noteAuthoringScale(useStore.getState().gui.view.scale),
       noteServedAtNative: (cellName: string) => tracker.noteServedAtNative(cellName),
       completeWarning: () => {
@@ -110,6 +109,7 @@ export function useCoverageTracking(args: {
         return facts ? completeWarningMessage(facts) : null;
       },
     }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- version forces the recompute a mutable Set's own mutation gives no other signal for.
     [tracker, version],
   );
 }

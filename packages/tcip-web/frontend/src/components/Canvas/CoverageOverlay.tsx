@@ -3,8 +3,10 @@
  * coordinates, culled to the viewport, listening={false} like every other canvas layer. Cell
  * fills and markers read from records the caller (AnnotateTab) already resolved through
  * useCoverageGrid/useRegionCompleteness; nothing here derives a cell state on its own. State is
- * never conveyed by fill color alone: every marked cell also carries a count, a stroke-width
- * distinction, or a strike-through, so the overlay reads correctly without color.
+ * never conveyed by fill color alone: swept also carries a dashed border, attested a solid one
+ * (brighter and wider for the active subject than another's), stale a strike-through, and a
+ * saved count is a label rather than a third fill. The overlay itself names none of these; the
+ * canvas chrome carries the key (see CoverageChrome).
  */
 
 import { Group, Line, Rect, Text } from "react-konva";
@@ -15,15 +17,52 @@ import type { PixelRect } from "@/lib/viewGeometry";
 
 const LABEL_FONT_PX = 10;
 
-/** Smallest on-screen cell edge, in screen px, at which a cell's name and saved-annotation count
- *  are drawn: four times the overlay's own 10px label font, enough room for a short cell name
- *  and its count without crowding the cell edge. A plain, documented default (the same idiom as
- *  reference_grid.derive_large_raster_grid_tile_size's divisions=16), pending a real annotation
- *  session to check the grain against. */
-export const CELL_LABEL_FLOOR_PX = LABEL_FONT_PX * 4;
+/** Arial's own per-glyph advance widths (a fraction of font size), the font Konva's Text
+ *  defaults to with no fontFamily set: the metric the label floor below measures against. */
+const GLYPH_ADVANCE_EM: Record<"digit" | "upper" | "space" | "paren", number> = {
+  digit: 0.556,
+  upper: 0.667,
+  space: 0.278,
+  paren: 0.333,
+};
 
+function glyphAdvanceEm(ch: string): number {
+  if (/[0-9]/.test(ch)) return GLYPH_ADVANCE_EM.digit;
+  if (/[A-Z]/.test(ch)) return GLYPH_ADVANCE_EM.upper;
+  if (ch === " ") return GLYPH_ADVANCE_EM.space;
+  if (ch === "(" || ch === ")") return GLYPH_ADVANCE_EM.paren;
+  return GLYPH_ADVANCE_EM.upper;
+}
+
+/** A label's rendered width at `fontPx`, from `GLYPH_ADVANCE_EM` rather than a live canvas
+ *  measurement: jsdom carries no 2D canvas context, so a measurement taken here would read zero
+ *  under test and the floor it feeds would silently vanish. */
+export function measureLabelWidth(text: string, fontPx: number): number {
+  let em = 0;
+  for (const ch of text) em += glyphAdvanceEm(ch);
+  return em * fontPx;
+}
+
+/** The widest label this platform's own lattice can produce: `derive_large_raster_grid_tile_size`
+ *  (reference_grid.py) caps a large raster's lattice at 16 divisions of the long edge, so the
+ *  widest cell name is a single-letter column plus a two-digit row ("P16"); a three-digit
+ *  saved-annotation count is the assumed practical ceiling for the parenthesised suffix. */
+const WIDEST_LABEL = "P16 (137)";
+
+const LABEL_INSET_PX = 2;
+
+/** Smallest on-screen cell edge, in screen px, at which a cell's name and saved-annotation count
+ *  are drawn: the widest label this lattice can produce, measured at the label font, plus the
+ *  inset the label is drawn at on each side. Below this a cell's own edge cannot hold its own
+ *  worst-case label without overrunning into the next cell. */
+export const CELL_LABEL_FLOOR_PX =
+  Math.ceil(measureLabelWidth(WIDEST_LABEL, LABEL_FONT_PX)) + 2 * LABEL_INSET_PX;
+
+/** #507754, tcip-accent (tailwind.config.ts): the recorded sweep fill. */
 const SWEPT_RGB = "80, 119, 84";
+/** #E6976B, tcip-warn: the attested border and the stale strike. */
 const ATTEST_RGB = "230, 151, 107";
+/** #E7E5DC, tcip-fg: the per-cell border and label. */
 const BORDER_RGB = "231, 229, 220";
 
 export function CoverageOverlay(props: {
@@ -58,13 +97,24 @@ export function CoverageOverlay(props: {
         return (
           <Group key={cell.name}>
             {props.swept.has(cell.name) && (
-              <Rect
-                x={cell.x0}
-                y={cell.y0}
-                width={w}
-                height={h}
-                fill={`rgba(${SWEPT_RGB}, 0.16)`}
-              />
+              <>
+                <Rect
+                  x={cell.x0}
+                  y={cell.y0}
+                  width={w}
+                  height={h}
+                  fill={`rgba(${SWEPT_RGB}, 0.16)`}
+                />
+                <Rect
+                  x={cell.x0 + strokeW}
+                  y={cell.y0 + strokeW}
+                  width={Math.max(0, w - 2 * strokeW)}
+                  height={Math.max(0, h - 2 * strokeW)}
+                  stroke={`rgba(${SWEPT_RGB}, 0.7)`}
+                  strokeWidth={strokeW}
+                  dash={[4 * strokeW, 3 * strokeW]}
+                />
+              </>
             )}
             <Rect
               x={cell.x0}

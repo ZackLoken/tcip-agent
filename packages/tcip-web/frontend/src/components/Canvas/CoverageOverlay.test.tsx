@@ -1,7 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import { render } from "@testing-library/react";
 
-import { CELL_LABEL_FLOOR_PX, CoverageOverlay } from "@/components/Canvas/CoverageOverlay";
+import {
+  CELL_LABEL_FLOOR_PX,
+  CoverageOverlay,
+  measureLabelWidth,
+} from "@/components/Canvas/CoverageOverlay";
 import type { GridCell } from "@/lib/coverage";
 
 // Konva needs a real 2D canvas; render each primitive as an inspectable div, the pattern
@@ -10,13 +14,20 @@ vi.mock("react-konva", () => ({
   Group: (props: { children?: React.ReactNode }) => (
     <div data-testid="k-group">{props.children}</div>
   ),
-  Rect: (props: { fill?: string; stroke?: string; width: number; height: number }) => (
+  Rect: (props: {
+    fill?: string;
+    stroke?: string;
+    width: number;
+    height: number;
+    dash?: number[];
+  }) => (
     <div
       data-testid="k-rect"
       data-fill={props.fill}
       data-stroke={props.stroke}
       data-w={props.width}
       data-h={props.height}
+      data-dash={props.dash ? "true" : undefined}
     />
   ),
   Line: (props: { stroke?: string }) => <div data-testid="k-line" data-stroke={props.stroke} />,
@@ -26,6 +37,13 @@ vi.mock("react-konva", () => ({
 function cell(name: string, x0: number, y0: number, x1: number, y1: number): GridCell {
   return { name, x0, y0, x1, y1 };
 }
+
+describe("CELL_LABEL_FLOOR_PX", () => {
+  it("fits the platform's own worst-case label: a 16-division lattice's widest cell name plus a three-digit count", () => {
+    const worstCase = measureLabelWidth("P16 (137)", 10);
+    expect(CELL_LABEL_FLOOR_PX).toBeGreaterThanOrEqual(worstCase + 4);
+  });
+});
 
 describe("CoverageOverlay", () => {
   it("renders nothing without a measured viewport", () => {
@@ -114,6 +132,24 @@ describe("CoverageOverlay", () => {
       (el.getAttribute("data-fill") ?? "").includes("80, 119, 84"),
     );
     expect(fills).toHaveLength(1);
+  });
+
+  it("a swept cell also carries a dashed stroke, never colour alone", () => {
+    const { container } = render(
+      <CoverageOverlay
+        cells={[cell("A1", 0, 0, 100, 100), cell("B1", 100, 0, 200, 100)]}
+        viewport={{ x0: 0, y0: 0, x1: 200, y1: 100 }}
+        scale={1}
+        swept={new Set(["A1"])}
+        activeComplete={new Set()}
+        activeStale={new Set()}
+        otherComplete={new Set()}
+        annotationCounts={{}}
+      />,
+    );
+    const dashed = Array.from(container.querySelectorAll("[data-testid=k-rect][data-dash=true]"));
+    expect(dashed).toHaveLength(1);
+    expect(dashed[0].getAttribute("data-stroke") ?? "").toContain("80, 119, 84");
   });
 
   it("a stale attested cell draws the strike-through line the active-complete one does not", () => {

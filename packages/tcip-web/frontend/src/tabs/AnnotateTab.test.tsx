@@ -5,7 +5,9 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { api } from "@/api/client";
 import type { SaveResult } from "@/api/client";
 import { classesApi, subjectColor } from "@/api/classes";
+import * as CanvasStageMock from "@/components/Canvas/CanvasStage";
 import { notifyCanvasStateRequest } from "@/lib/canvasSync";
+import type { CompletenessRecord } from "@/lib/coverage";
 import { sessionsApi } from "@/api/sessions";
 import { useStore } from "@/store";
 import { AnnotateTab } from "@/tabs/AnnotateTab";
@@ -42,35 +44,46 @@ vi.mock("react-konva", () => ({
 // Pixel handlers are forwarded as plain mouse events (clientX/Y stand in for image-pixel coords;
 // the real screen<->image conversion is CanvasStage's own concern) so tests can drive the drawing
 // tools without a real Konva stage.
-vi.mock("@/components/Canvas/CanvasStage", () => ({
-  CanvasStage: (props: {
-    children?: React.ReactNode;
-    overlay?: React.ReactNode;
-    imageUrl?: string | null;
-    onPixelDown?: (x: number, y: number, ev: unknown) => void;
-    onPixelMove?: (x: number, y: number, ev: unknown) => void;
-    onPixelUp?: (x: number, y: number, ev: unknown) => void;
-    onPixelClick?: (x: number, y: number, ev: unknown) => void;
-    onPixelContextMenu?: (x: number, y: number, ev: unknown) => void;
-  }) => (
-    <div
-      data-testid="canvas-stage"
-      data-image-url={props.imageUrl ?? ""}
-      onMouseDown={(e) => props.onPixelDown?.(e.clientX, e.clientY, { evt: { button: e.button } })}
-      onMouseMove={(e) => props.onPixelMove?.(e.clientX, e.clientY, { evt: { buttons: 1 } })}
-      onMouseUp={(e) => props.onPixelUp?.(e.clientX, e.clientY, { evt: {} })}
-      onClick={(e) => props.onPixelClick?.(e.clientX, e.clientY, { evt: { button: e.button } })}
-      onContextMenu={(e) =>
-        props.onPixelContextMenu?.(e.clientX, e.clientY, {
-          evt: { button: 2, preventDefault: () => {} },
-        })
-      }
-    >
-      {props.children}
-      {props.overlay}
-    </div>
-  ),
-}));
+vi.mock("@/components/Canvas/CanvasStage", () => {
+  let capturedOnBaseFacts: ((facts: unknown) => void) | undefined;
+  return {
+    CanvasStage: (props: {
+      children?: React.ReactNode;
+      overlay?: React.ReactNode;
+      imageUrl?: string | null;
+      onBaseFacts?: (facts: unknown) => void;
+      onPixelDown?: (x: number, y: number, ev: unknown) => void;
+      onPixelMove?: (x: number, y: number, ev: unknown) => void;
+      onPixelUp?: (x: number, y: number, ev: unknown) => void;
+      onPixelClick?: (x: number, y: number, ev: unknown) => void;
+      onPixelContextMenu?: (x: number, y: number, ev: unknown) => void;
+    }) => {
+      capturedOnBaseFacts = props.onBaseFacts;
+      return (
+        <div
+          data-testid="canvas-stage"
+          data-canvas-host
+          data-image-url={props.imageUrl ?? ""}
+          onMouseDown={(e) =>
+            props.onPixelDown?.(e.clientX, e.clientY, { evt: { button: e.button } })
+          }
+          onMouseMove={(e) => props.onPixelMove?.(e.clientX, e.clientY, { evt: { buttons: 1 } })}
+          onMouseUp={(e) => props.onPixelUp?.(e.clientX, e.clientY, { evt: {} })}
+          onClick={(e) => props.onPixelClick?.(e.clientX, e.clientY, { evt: { button: e.button } })}
+          onContextMenu={(e) =>
+            props.onPixelContextMenu?.(e.clientX, e.clientY, {
+              evt: { button: 2, preventDefault: () => {} },
+            })
+          }
+        >
+          {props.children}
+          {props.overlay}
+        </div>
+      );
+    },
+    __triggerBaseFacts: (facts: unknown) => capturedOnBaseFacts?.(facts),
+  };
+});
 vi.mock("@/components/AnnotateToolbar", () => ({
   AnnotateToolbar: (props: { bandsInfo?: { band_count: number } | null }) => (
     <div data-testid="toolbar" data-band-count={props.bandsInfo?.band_count ?? ""} />
@@ -1110,10 +1123,66 @@ describe("AnnotateTab canvas-push binding-presence gate", () => {
   });
 });
 
+const MULTI_CELL_GRID = {
+  width: 1000,
+  height: 800,
+  tile_size: 500,
+  overlap: 0,
+  cols: 2,
+  rows: 2,
+};
+const MULTI_CELL_CELLS = [
+  { name: "A1", x0: 0, y0: 0, x1: 500, y1: 400 },
+  { name: "B1", x0: 500, y0: 0, x1: 1000, y1: 400 },
+  { name: "A2", x0: 0, y0: 400, x1: 500, y1: 800 },
+  { name: "B2", x0: 500, y0: 400, x1: 1000, y1: 800 },
+];
+const BELOW_NATIVE_BASE_FACTS = {
+  ok: true,
+  servedSize: { w: 500, h: 400 },
+  servedSizeRaw: "500x400",
+  statsSource: null,
+  displayBounds: null,
+  imageError: null,
+  image: null,
+  aborted: false,
+  headerParseError: null,
+};
+
+function mockMultiCellGrid() {
+  // The Map tests below also mount the coverage-tracking hook, which reads and pushes the
+  // session sweep record for the same raster; mocked here too so no real fetch is attempted.
+  vi.spyOn(api.coverage, "get").mockResolvedValue(null);
+  vi.spyOn(api.coverage, "push").mockResolvedValue({ status: "ok" });
+  return vi.spyOn(api.coverage, "grid").mockResolvedValue({
+    ...MULTI_CELL_GRID,
+    derivation: "one display-bounded serve per cell",
+    cells: MULTI_CELL_CELLS,
+  });
+}
+
+// The mock module's own extra export, absent from the real CanvasStage's type: cast once here
+// rather than at every call site.
+const triggerBaseFacts = (
+  CanvasStageMock as unknown as { __triggerBaseFacts: (facts: unknown) => void }
+).__triggerBaseFacts;
+
+// Drives the coverage grid's fetch (useCoverageGrid needs a served-below-native base serve).
+function triggerBelowNativeBaseFacts() {
+  act(() => triggerBaseFacts(BELOW_NATIVE_BASE_FACTS));
+}
+
 describe("AnnotateTab Map tool", () => {
   const stage = () => screen.getByTestId("canvas-stage");
 
   async function mountMapMode() {
+    mockMultiCellGrid();
+    vi.spyOn(api.coverage, "completeness").mockResolvedValue({
+      by_subject: {},
+      annotation_counts: {},
+      counts_grid: null,
+      counts_error: null,
+    });
     useStore.getState().setRegistry({ tip: {} });
     useStore.setState((s) => ({
       gui: { ...s.gui, mode: "map" as const, active_subject: "tip" },
@@ -1121,6 +1190,10 @@ describe("AnnotateTab Map tool", () => {
     render(<AnnotateTab />);
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
     await flush();
+    triggerBelowNativeBaseFacts();
+    await waitFor(() => expect(api.coverage.grid).toHaveBeenCalled());
+    await flush();
+    expect(useStore.getState().gui.mode).toBe("map");
   }
 
   it("a press-and-click in Map mode authors no point, box or polygon vertex", async () => {
@@ -1144,6 +1217,119 @@ describe("AnnotateTab Map tool", () => {
     fireEvent.click(stage(), { clientX: 50, clientY: 50, button: 0 });
     await flush();
     expect(useStore.getState().canvas.points).toHaveLength(0);
+  });
+
+  it("falls back to a drawing tool when the Map tool is withdrawn (no multi-cell grid)", async () => {
+    useStore.getState().setRegistry({ tip: {} });
+    useStore.setState((s) => ({
+      gui: { ...s.gui, mode: "map" as const, active_subject: "tip" },
+    }));
+    render(<AnnotateTab />);
+    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
+    await flush();
+    // A base serve at native resolution settles "no grid needed" (never pending), the state
+    // an ordinary single-cell raster reaches once its own serve reports back.
+    act(() => triggerBaseFacts({ ...BELOW_NATIVE_BASE_FACTS, servedSize: { w: 1000, h: 800 } }));
+    await flush();
+
+    expect(useStore.getState().gui.mode).toBe("box");
+  });
+});
+
+describe("AnnotateTab completeness refresh and attestation control", () => {
+  it("a save refetches completeness, so counts and staleness never go stale on the open image", async () => {
+    const completenessSpy = vi.spyOn(api.coverage, "completeness").mockResolvedValue({
+      by_subject: {},
+      annotation_counts: {},
+      counts_grid: null,
+      counts_error: null,
+    });
+    render(<AnnotateTab />);
+    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
+    await flush();
+    const callsBeforeSave = completenessSpy.mock.calls.length;
+
+    act(addBox);
+    pressSave();
+    await flush();
+
+    expect(saveSpy).toHaveBeenCalledTimes(1);
+    expect(completenessSpy.mock.calls.length).toBeGreaterThan(callsBeforeSave);
+  });
+
+  it("a completeness read failure shows in the chrome on an ordinary single-cell raster", async () => {
+    vi.spyOn(api.coverage, "completeness").mockRejectedValue(new Error("network down"));
+    render(<AnnotateTab />);
+    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
+    await flush();
+
+    expect(screen.getByText(/completeness unavailable: network down/)).toBeInTheDocument();
+  });
+
+  async function mountWithCoverageChrome(bySubject: Record<string, CompletenessRecord>) {
+    mockMultiCellGrid();
+    vi.spyOn(api.coverage, "completeness").mockResolvedValue({
+      by_subject: bySubject,
+      annotation_counts: {},
+      counts_grid: null,
+      counts_error: null,
+    });
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
+      width: 200,
+      height: 200,
+      top: 0,
+      left: 0,
+      right: 200,
+      bottom: 200,
+      x: 0,
+      y: 0,
+      toJSON: () => "",
+    } as DOMRect);
+    render(<AnnotateTab />);
+    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
+    await flush();
+    triggerBelowNativeBaseFacts();
+    await waitFor(() => expect(api.coverage.grid).toHaveBeenCalled());
+    await flush();
+  }
+
+  it("labels the control Attest when the raw stored set never held the cell", async () => {
+    await mountWithCoverageChrome({});
+    expect(screen.getByRole("button", { name: "Attest A1 complete" })).toBeInTheDocument();
+  });
+
+  it("labels the control Unattest when the raw stored set holds the cell and it is fresh", async () => {
+    await mountWithCoverageChrome({
+      subject_a: {
+        grid: MULTI_CELL_GRID,
+        cells_complete: ["A1"],
+        attested_by: "user:z",
+        attested_at: "t",
+        stem: "img1",
+        date: "2026-01-01",
+        subject: "subject_a",
+        stale_cells: [],
+      },
+    });
+    expect(screen.getByRole("button", { name: "Unattest A1" })).toBeInTheDocument();
+  });
+
+  it("labels the control Re-attest when the raw stored set holds the cell and it is stale", async () => {
+    await mountWithCoverageChrome({
+      subject_a: {
+        grid: MULTI_CELL_GRID,
+        cells_complete: ["A1"],
+        attested_by: "user:z",
+        attested_at: "t",
+        stem: "img1",
+        date: "2026-01-01",
+        subject: "subject_a",
+        stale_cells: ["A1"],
+      },
+    });
+    expect(
+      screen.getByRole("button", { name: "Re-attest A1 (changed since attested)" }),
+    ).toBeInTheDocument();
   });
 });
 
