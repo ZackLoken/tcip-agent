@@ -68,9 +68,10 @@ def build_plant_mapping(
     plant_mapping.load_mapping` refuses to read it until a rebuild replaces it.
 
     Returns a compact per-date summary (images, mapped count, avg GPS distance) plus totals,
-    the mapping's ``name``, the resolved ``project_root`` and ``dataset_root``, and
-    ``unreadable`` (per date, the captures PIL could not open), not the full per-image mapping
-    (that lives in the persisted record).
+    the mapping's ``name``, the resolved ``project_root`` and ``dataset_root``,
+    ``nn_tolerance_m`` (the persisted record's own ``{"value": ..., "source": ...}``, never
+    recomputed here), and ``unreadable`` (per date, the captures PIL could not open), not the
+    full per-image mapping (that lives in the persisted record).
     """
     from tcip_store.layout_claims import NAME_SEGMENT
 
@@ -152,6 +153,7 @@ def build_plant_mapping(
         "n_mapped": total_mapped,
         "n_unmapped": total_images - total_mapped,
         "per_date": per_date,
+        "nn_tolerance_m": build.nn_tolerance_m,
     }
 
 

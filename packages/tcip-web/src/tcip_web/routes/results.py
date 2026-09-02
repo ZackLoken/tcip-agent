@@ -30,7 +30,7 @@ import logging
 import os
 from collections.abc import Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal, Optional
+from typing import TYPE_CHECKING, Any, Literal, Optional
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import Response
@@ -148,7 +148,7 @@ def _guarded_project_root(project_root: str) -> Path:
         raise HTTPException(403, str(exc)) from exc
 
 
-def _audit(project_root: str, tool: str, arguments: dict, **extra: object) -> None:
+def _audit(project_root: str, tool: str, arguments: dict, **extra: Any) -> None:
     """Record a GUI results mutation in the project's audit log.
 
     A delivery and the plant mapping behind it are project state, not dataset state: the
@@ -187,6 +187,9 @@ def build_plant_mapping(payload: BuildMappingPayload, request: Request) -> dict:
     routable connection they are confined to the allowed roots. A receipt that cannot be written
     answers 409: the record it would have named is left on disk, refused until a rebuild replaces
     it.
+
+    Answers ``{"mapping", "summary", "unreadable", "nn_tolerance_m"}``; the last is the persisted
+    record's own ``{"value": ..., "source": ...}``, never recomputed here.
     """
     from tcip_store.layout_claims import NAME_SEGMENT
 
@@ -259,6 +262,7 @@ def build_plant_mapping(payload: BuildMappingPayload, request: Request) -> dict:
         "mapping": build.rows(),
         "summary": summary,
         "unreadable": build.unreadable,
+        "nn_tolerance_m": build.nn_tolerance_m,
     }
 
 

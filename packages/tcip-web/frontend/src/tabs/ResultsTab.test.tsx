@@ -1163,6 +1163,70 @@ describe("ResultsTab delivery events (read-only)", () => {
   });
 });
 
+describe("ResultsTab plant-mapping build: match-radius phrase", () => {
+  function mockTreeAndMappings() {
+    vi.spyOn(api.dataset, "tree").mockResolvedValue({
+      dataset_root: "C:/data",
+      dates_with_images: [],
+      subjects: [],
+      model_names: [],
+      subjects_by_date: {},
+      models_by_date: {},
+      prediction_dirs: {},
+      label_problem: null,
+    });
+    vi.spyOn(resultsApi, "listPlantMappings").mockResolvedValue({ names: [] });
+  }
+
+  async function buildWithTolerance(nn_tolerance_m: { value: number; source: string }) {
+    mockTreeAndMappings();
+    vi.spyOn(resultsApi, "buildPlantMapping").mockResolvedValue({
+      mapping: {},
+      unreadable: {},
+      summary: { "2026-01-01": { n_images: 3, n_mapped: 2, avg_distance_m: 1.4 } },
+      nn_tolerance_m,
+    });
+
+    render(<ResultsTab />);
+    await waitFor(() => expect(resultsApi.listPlantMappings).toHaveBeenCalled());
+
+    fireEvent.change(screen.getByPlaceholderText("valley-2026"), {
+      target: { value: "valley-2026" },
+    });
+    fireEvent.change(screen.getByPlaceholderText("…/plants_block_A.csv"), {
+      target: { value: "C:/plants.csv" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /build \+ save mapping/i }));
+    await waitFor(() => expect(resultsApi.buildPlantMapping).toHaveBeenCalled());
+  }
+
+  it("names the plot's grid pitch for source grid_pitch", async () => {
+    await buildWithTolerance({ value: 0.75, source: "grid_pitch" });
+    expect(await screen.findByText(/0\.75 m/)).toBeInTheDocument();
+    expect(screen.getByText(/derived from the plot's grid pitch/)).toBeInTheDocument();
+  });
+
+  it("names the fallback for source fallback", async () => {
+    await buildWithTolerance({ value: 10, source: "fallback" });
+    expect(await screen.findByText(/fewer than two plants had positions/)).toBeInTheDocument();
+  });
+
+  it("names the stated value for source stated", async () => {
+    await buildWithTolerance({ value: 3, source: "stated" });
+    expect(await screen.findByText("Match radius 3.00 m (the stated value)")).toBeInTheDocument();
+  });
+
+  it("names the capped stated value for source stated_capped", async () => {
+    await buildWithTolerance({ value: 2, source: "stated_capped" });
+    expect(await screen.findByText(/capped to the grid pitch/)).toBeInTheDocument();
+  });
+
+  it("renders a source this map does not know as its own raw string", async () => {
+    await buildWithTolerance({ value: 5, source: "future_branch" });
+    expect(await screen.findByText(/future_branch/)).toBeInTheDocument();
+  });
+});
+
 describe("ResultsTab heading", () => {
   it("renders exactly one top-level heading naming the tab", async () => {
     render(<ResultsTab />);
