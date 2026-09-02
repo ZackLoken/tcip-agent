@@ -10,6 +10,9 @@ export interface TrainingRunSummary {
   status: string;
   current_epoch?: number;
   best_metric?: number;
+  /** The bare metric name (val_-unprefixed) ``best_metric`` was selected on; null when the
+   * run's config cannot resolve one. */
+  best_metric_name?: string | null;
   output_dir?: string;
   config_summary?: Record<string, unknown>;
   external?: boolean; // reconstructed from experiment records: running in another process

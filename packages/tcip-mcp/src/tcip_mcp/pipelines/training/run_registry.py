@@ -68,12 +68,17 @@ class TrainRun:
         return False
 
     def to_dict(self) -> dict:
+        # Lazy: generic_trainer.py imports TrainRun from this module at load time, so importing
+        # it back at module scope here would be circular; by call time both are fully loaded.
+        from tcip_mcp.pipelines.training.generic_trainer import selection_metric_for_config
+
         return {
             "run_id": self.run_id,
             "status": self.status,
             "current_epoch": self.current_epoch,
             "current_stage": self.current_stage,
             "best_metric": self.best_metric,
+            "best_metric_name": selection_metric_for_config(self.config),
             "metrics_history": self.metrics_history,
             "origin": self.origin,
             "elapsed_seconds": (self.end_time or time.time()) - self.start_time if self.start_time else 0,

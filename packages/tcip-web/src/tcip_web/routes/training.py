@@ -147,6 +147,10 @@ def launch_run_tensorboard(run_id: str, payload: EmptyBodyPayload) -> dict:
     ``tensorboard_manager`` tracks its children in module-level process state, so a TensorBoard
     started by the agent's own process is not one this process can hand the browser a URL for.
     This route is how a TensorBoard exists from the GUI's side, whichever process trained the run.
+
+    A run with no recorded output directory (it failed before writing one) never had anything
+    to log to; that refusal carries ``no_logs: True`` so the GUI can say the run produced no
+    logs instead of offering a retry against a run whose own output directory does not exist.
     """
     from tcip_mcp.pipelines.training.tensorboard_manager import launch_tensorboard
     from tcip_mcp.tools.training_tools import check_training_status
@@ -156,7 +160,9 @@ def launch_run_tensorboard(run_id: str, payload: EmptyBodyPayload) -> dict:
         raise HTTPException(404, status["error"])
     output_dir = status.get("output_dir")
     if not output_dir:
-        raise HTTPException(404, f"run has no output directory: {run_id}")
+        raise HTTPException(
+            404, {"error": f"run has no output directory: {run_id}", "no_logs": True},
+        )
     return launch_tensorboard(f"{output_dir}/tensorboard", run_id=run_id)
 
 

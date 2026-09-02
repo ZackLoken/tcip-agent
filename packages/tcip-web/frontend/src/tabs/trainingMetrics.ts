@@ -20,6 +20,12 @@ const NON_METRIC_KEYS = new Set(["epoch", "step", "timestamp"]);
  * beside `train_loss`); a companion key, never itself offered as a metric. */
 export const METRIC_STATE_SUFFIX = "_state";
 
+/** The prefix every validation metric is stamped with (``VAL_METRIC_PREFIX`` in
+ * evaluation.py): ``evaluation.HIGHER_IS_BETTER_BY_METRIC``'s own keys are bare, and a run's
+ * own resolved selection-metric name is bare too, so both need this prepended to match a
+ * stamped metric key. */
+export const VAL_METRIC_PREFIX = "val_";
+
 /**
  * Keys eligible to plot or rank as a metric: present with a numeric value, not one of a row's
  * own bookkeeping fields, and not another key's `_state` companion. The one filter the
