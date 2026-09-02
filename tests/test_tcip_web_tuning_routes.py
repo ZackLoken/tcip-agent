@@ -717,7 +717,7 @@ def test_relaunch_route_404s_for_an_unknown_sweep(client: TestClient, hpo_root) 
 
 
 def test_relaunch_route_409s_when_the_manifest_holds_no_base_config(client: TestClient, hpo_root) -> None:
-    _write_sweep(hpo_root, "hpo_nobase01")  # a manifest predating this family: no base_config
+    _write_sweep(hpo_root, "hpo_nobase01")  # a manifest without base_config
     resp = client.post("/api/tuning/sweeps", json={"study_name": "hpo_nobase01"})
     assert resp.status_code == 409
 
@@ -858,8 +858,8 @@ def test_relaunch_replays_every_manifest_field_run_hpo_was_given(
 def test_relaunch_of_a_manifest_predating_split_draws_still_relaunches(
     client: TestClient, hpo_root, monkeypatch
 ) -> None:
-    """A manifest from before this family carries neither split_draws nor split_draw_seeds;
-    the relaunch route reads them as run_hpo's own defaults (1, None) rather than refusing."""
+    """A manifest without the field carries neither split_draws nor split_draw_seeds; the
+    relaunch route reads them as run_hpo's own defaults (1, None) rather than refusing."""
     from tcip_web.routes import tuning
 
     captured: dict = {}
