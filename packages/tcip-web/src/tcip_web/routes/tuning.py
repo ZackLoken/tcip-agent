@@ -487,6 +487,9 @@ def relaunch_sweep(payload: RelaunchSweepPayload) -> dict:
     launched under a root this process has since repinned away from is still relaunchable.
     ``output_dir`` is always this request thread's own ``hpo_root()``, never a path the
     manifest carries (an absolute path in a file is not a path this process should follow).
+    ``relaunched_from`` is recorded from the source manifest's own ``study_name``, never the
+    request body's echoed string, so the two names it might resolve to the same record under
+    (case, say) never disagree on this sweep's manifest.
     Marks the new sweep id as launching, on this request thread, before the worker starts, so
     a cancel that arrives before ``run_hpo`` writes its own first manifest still reaches it."""
     from tcip_mcp.tools.training_tools import hpo_root, mark_sweep_launching
@@ -507,7 +510,7 @@ def relaunch_sweep(payload: RelaunchSweepPayload) -> dict:
     _registry.register(job.sweep_id, job, job_root=job.platform_root)
     mark_sweep_launching(job.sweep_id, output_dir)
     t = threading.Thread(
-        target=_worker, args=(job, spec, output_dir, payload.study_name), daemon=True)
+        target=_worker, args=(job, spec, output_dir, manifest["study_name"]), daemon=True)
     with _lock:
         for sweep_id in [sid for sid, done in _workers.items() if not done.is_alive()]:
             _workers.pop(sweep_id, None)
@@ -547,7 +550,9 @@ def list_sweeps() -> dict:
 def get_sweep(sweep_id: str) -> dict:
     """One sweep by id: a live entry (whichever root it launched under) wins, else its
     manifest under the current root. ``status`` is the derived liveness in both branches (see
-    :func:`_job_sweep_state`/:func:`_manifest_summary`), not either source's own recorded value."""
+    :func:`_job_sweep_state`/:func:`_manifest_summary`), not either source's own recorded
+    value; ``relaunched_from`` is a top-level field on both branches too, the manifest's own
+    (``None`` when the sweep was not a relaunch, or has no manifest yet)."""
     from tcip_web import jobstore
     from tcip_mcp.tools.training_tools import TCIP_HEARTBEAT_STALE_SECONDS, sweep_state
 
@@ -560,6 +565,7 @@ def get_sweep(sweep_id: str) -> dict:
             else {"sweep_id": j.sweep_id, "status": j.status, "error": j.error, "result": j.result}
         )
         response["status"] = status
+        response["relaunched_from"] = manifest.get("relaunched_from")
         return _enrich_with_study_result(response, sweep_id, root=j.platform_root)
     disk_manifest = _read_manifest(sweep_id)
     if disk_manifest is None:
@@ -571,6 +577,7 @@ def get_sweep(sweep_id: str) -> dict:
         "error": disk_manifest.get("error"),
         "result": disk_manifest.get("result") or {},
         "manifest": disk_manifest,
+        "relaunched_from": disk_manifest.get("relaunched_from"),
         "external": True,
     }
     return _enrich_with_study_result(response, sweep_id, root=None)

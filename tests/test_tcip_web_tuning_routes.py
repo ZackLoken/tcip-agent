@@ -839,6 +839,36 @@ def test_relaunch_records_the_source_study_as_relaunched_from_on_the_new_manifes
     assert manifest["relaunched_from"] == "hpo_relsrc001"
 
 
+def test_relaunch_records_the_source_manifests_own_study_name_not_the_requests(
+    client: TestClient, hpo_root, monkeypatch
+) -> None:
+    """relaunched_from is the source manifest's own recorded study_name, never the request
+    body's echoed string: proven by handing back a manifest whose study_name differs from what
+    was requested, the shape a case-differing lookup on the file backend produces."""
+    from tcip_web.routes import tuning
+
+    captured: dict = {}
+
+    def fake_run_hpo(**kwargs):
+        captured.update(kwargs)
+        return {"study_name": kwargs["study_name"]}
+
+    monkeypatch.setattr("tcip_mcp.tools.training_tools.run_hpo", fake_run_hpo)
+
+    base_config = {"model_source": {"builder": "x:y"}, "data": {}, "training": {}}
+    source_manifest = {
+        "study_name": "hpo_source_actual1", "status": "completed", "n_trials": 1,
+        "base_config": base_config, **_RELAUNCH_FIELD_DEFAULTS,
+    }
+    monkeypatch.setattr(tuning, "_read_manifest", lambda sweep_id, root=None: source_manifest)
+
+    resp = client.post("/api/tuning/sweeps", json={"study_name": "HPO_SOURCE_ACTUAL1"})
+    assert resp.status_code == 200
+    assert tuning.wait_for_workers(timeout_s=_worker_join_bound()) == ()
+
+    assert captured["relaunched_from"] == "hpo_source_actual1"
+
+
 def test_manifest_fields_projects_relaunched_from_none_when_the_manifest_lacks_the_key() -> None:
     """An older manifest, from before this field existed, projects relaunched_from as None the
     same as a manifest that genuinely was not a relaunch, rather than being treated as missing
@@ -1144,3 +1174,49 @@ def test_get_sweep_live_branch_carries_no_manifest_field(
 
     body = client.get(f"/api/tuning/sweeps/{sweep_id}").json()
     assert "manifest" not in body
+
+
+def test_get_sweep_live_branch_exposes_relaunched_from_top_level(
+    client: TestClient, hpo_root, monkeypatch
+) -> None:
+    """The live get_sweep branch projects relaunched_from as a top-level field, the same as
+    the listing row, without adding a manifest field to the body (see
+    test_get_sweep_live_branch_carries_no_manifest_field)."""
+    from tcip_web.routes import tuning
+
+    def fake_run_hpo(*, study_name, **kwargs):
+        import tcip_store
+        from tcip_mcp.tools.training_tools import sweep_manifest_key
+
+        tcip_store.replace(
+            sweep_manifest_key(study_name),
+            {"study_name": study_name, "status": "completed", "n_trials": 1,
+             **_RELAUNCH_FIELD_DEFAULTS,
+             "base_config": {"model_source": {"builder": "x:y"}, "data": {}, "training": {}},
+             "relaunched_from": "hpo_relsrc_top1"},
+        )
+        return {"study_name": study_name}
+
+    monkeypatch.setattr("tcip_mcp.tools.training_tools.run_hpo", fake_run_hpo)
+    _write_sweep(hpo_root, "hpo_relsrc_top1",
+                 base_config={"model_source": {"builder": "x:y"}, "data": {}, "training": {}})
+
+    resp = client.post("/api/tuning/sweeps", json={"study_name": "hpo_relsrc_top1"})
+    sweep_id = resp.json()["sweep_id"]
+    assert tuning.wait_for_workers(timeout_s=_worker_join_bound()) == ()
+
+    body = client.get(f"/api/tuning/sweeps/{sweep_id}").json()
+    assert body["relaunched_from"] == "hpo_relsrc_top1"
+    assert "manifest" not in body
+
+
+def test_get_sweep_disk_branch_exposes_relaunched_from_top_level(client, hpo_root) -> None:
+    """The disk get_sweep branch projects relaunched_from at the top level too, beside the
+    raw manifest that already carries it nested."""
+    _write_sweep(hpo_root, "hpo_disk_relsrc1",
+                 base_config={"model_source": {"builder": "x:y"}, "data": {}, "training": {}},
+                 relaunched_from="hpo_disk_source0")
+
+    body = client.get("/api/tuning/sweeps/hpo_disk_relsrc1").json()
+    assert body["relaunched_from"] == "hpo_disk_source0"
+    assert body["manifest"]["relaunched_from"] == "hpo_disk_source0"
