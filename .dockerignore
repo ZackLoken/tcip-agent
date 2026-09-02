@@ -10,9 +10,9 @@ data/
 references/pdf/
 .review-corpus/
 
-__pycache__/
-*.pyc
-*.egg-info/
+**/__pycache__/
+**/*.pyc
+**/*.egg-info/
 dist/
 build/
 *.whl

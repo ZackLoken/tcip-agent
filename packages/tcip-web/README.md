@@ -126,5 +126,7 @@ re-litigated):
 from a checkout (`python -m tcip_web`) needs only `npm run build` (writes
 `packages/tcip-web/static/`). To ship the GUI inside a wheel, build the frontend
 first, then include the built `static/` at `tcip_web/static/` in the wheel (e.g. a
-hatch `force-include`). Build the frontend before building the wheel, or the wheel will
-ship API-only and `/` returns a 503 with build instructions.
+hatch `force-include`); the Dockerfile takes the same route with a build-time `COPY`
+into `src/tcip_web/static/` before the pip install, rather than a hatch declaration.
+Build the frontend before building the wheel, or the wheel will ship API-only and
+`/` returns a 503 with build instructions.

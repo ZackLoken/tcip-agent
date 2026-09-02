@@ -1,7 +1,7 @@
 # Run with `docker run --network host`: the backend binds the host's loopback and no port is
-# published. The GUI's in-app agent terminal needs a Claude Code install this image does not carry.
+# published. A published port (`-p`) cannot serve this image either: it would arrive through a bridged, non-loopback address, which the backend's trust boundary refuses. The GUI's in-app agent terminal needs a Claude Code install this image does not carry.
 
-FROM node:20 AS frontend-builder
+FROM node:22 AS frontend-builder
 WORKDIR /app
 COPY packages/tcip-web/frontend/ packages/tcip-web/frontend/
 WORKDIR /app/packages/tcip-web/frontend
@@ -25,8 +25,8 @@ COPY packages/tcip-annotation/ packages/tcip-annotation/
 COPY packages/tcip-mcp/ packages/tcip-mcp/
 COPY packages/tcip-web/ packages/tcip-web/
 
-# STATIC_DIR (tcip_web/app.py) prefers a copy packaged inside the installed package; landing the
-# built bundle here before the pip install below carries it into that wheel (packages/tcip-web/README.md).
+# _find_static_dir (tcip_web/app.py) checks tcip_web/static/ before the src-layout checkout;
+# landing the built bundle there before the pip install below carries it into that wheel.
 COPY --from=frontend-builder /app/packages/tcip-web/static/ packages/tcip-web/src/tcip_web/static/
 
 RUN pip install --no-cache-dir \
@@ -34,7 +34,5 @@ RUN pip install --no-cache-dir \
     packages/tcip-annotation \
     packages/tcip-mcp \
     packages/tcip-web
-
-EXPOSE 8765
 
 CMD ["python", "-m", "tcip_web"]
