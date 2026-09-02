@@ -547,7 +547,11 @@ export function TuningTab() {
               const running = SWEEP_CANCELLABLE.has(s.status);
               const searchLine = [
                 s.n_trials != null
-                  ? `${s.n_trials} trial${s.n_trials === 1 ? "" : "s"} planned`
+                  ? `${s.n_trials} trial${s.n_trials === 1 ? "" : "s"} planned${
+                      s.split_draws != null && s.split_draws > 1
+                        ? `, ${s.split_draws} draws each`
+                        : ""
+                    }`
                   : null,
                 s.search_alg ? `search ${s.search_alg}` : null,
                 s.scheduler

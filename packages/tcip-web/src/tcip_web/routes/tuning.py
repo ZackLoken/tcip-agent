@@ -65,7 +65,9 @@ def _manifest_fields(manifest: dict) -> dict:
     ``cancel_hpo`` and never derived from a side file this route cannot see across roots.
     ``relaunched_from`` projects as ``None`` for a manifest predating the field, the same as
     for one that genuinely was not a relaunch: a relaunch of an older sweep must still work
-    (see :func:`_missing_relaunch_fields`, which does not require this key).
+    (see :func:`_missing_relaunch_fields`, which does not require this key). ``split_draws``
+    projects the same way, ``None`` for a manifest predating it (read as 1, no draws, by
+    ``run_hpo``'s own default): the header line only renders it above 1.
 
     An empty ``manifest`` (no manifest exists yet, or one predating a caller's own launch) is
     never relaunchable, but carries no reason either: the pre-manifest window and every refused
@@ -77,7 +79,7 @@ def _manifest_fields(manifest: dict) -> dict:
         return {
             "n_trials": None, "search_alg": None, "scheduler": None, "param_space_keys": [],
             "relaunchable": False, "reason": None, "cancel_requested": False,
-            "relaunched_from": None,
+            "relaunched_from": None, "split_draws": None,
         }
     relaunchable = "base_config" in manifest
     return {
@@ -89,6 +91,7 @@ def _manifest_fields(manifest: dict) -> dict:
         "reason": None if relaunchable else "this sweep's record holds no base config",
         "cancel_requested": bool(manifest.get("cancel_requested")),
         "relaunched_from": manifest.get("relaunched_from"),
+        "split_draws": manifest.get("split_draws"),
     }
 
 
@@ -399,6 +402,8 @@ class _RelaunchSpec:
     warm_start: bool
     baseline_params: Optional[dict[str, Any]]
     resources_per_trial: Optional[dict[str, Any]]
+    split_draws: int = 1
+    split_draw_seeds: Optional[list[int]] = None
 
 
 _RELAUNCH_FIELDS: tuple[str, ...] = (
@@ -419,7 +424,11 @@ def _missing_relaunch_fields(manifest: dict) -> list[str]:
 def _relaunch_spec(manifest: dict) -> _RelaunchSpec:
     """``manifest``'s own ``run_hpo`` arguments, read directly rather than defaulted: a caller
     checks :func:`_missing_relaunch_fields` first, so a key absent here would be a programming
-    error, never a silently substituted value that was never the sweep's own."""
+    error, never a silently substituted value that was never the sweep's own.
+
+    ``split_draws``/``split_draw_seeds`` are the one exception, read with ``run_hpo``'s own
+    defaults (1, ``None``) rather than required: a manifest from before this family carries
+    neither key, and must still relaunch."""
     return _RelaunchSpec(
         base_config=manifest["base_config"],
         param_space=manifest["param_space"],
@@ -432,6 +441,8 @@ def _relaunch_spec(manifest: dict) -> _RelaunchSpec:
         warm_start=bool(manifest["warm_start"]),
         baseline_params=manifest["baseline_params"],
         resources_per_trial=manifest["resources_per_trial"],
+        split_draws=manifest.get("split_draws", 1),
+        split_draw_seeds=manifest.get("split_draw_seeds"),
     )
 
 
@@ -470,6 +481,8 @@ def _worker(job: HPOJob, spec: _RelaunchSpec, output_dir: str, relaunched_from: 
             resources_per_trial=spec.resources_per_trial,
             study_name=job.sweep_id,
             auto_tensorboard=False,
+            split_draws=spec.split_draws,
+            split_draw_seeds=spec.split_draw_seeds,
             relaunched_from=relaunched_from,
         )
         if isinstance(res, dict) and res.get("status") == "cancelled":
