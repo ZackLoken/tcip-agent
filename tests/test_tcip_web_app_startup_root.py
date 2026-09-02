@@ -1,5 +1,12 @@
 """Tests for tcip_web.app's platform-state root pin: a served app's own responsibility,
-never an importer's, and off the event loop when the marker read can block."""
+never an importer's, and off the event loop when the marker read can block.
+
+The marker-seeding tests below (``test_first_request_pins_from_the_marker``,
+``test_a_binding_set_before_the_first_request_is_not_replaced``,
+``test_lifespan_binds_before_rehydrate_reads_a_registry``,
+``test_concurrent_first_requests_on_separate_loops_bind_once``), each setting
+``TCIP_WORKSPACE`` and asserting a 200 response, are the proof that the startup-under-test
+rail admits a bound workspace; no separate admits-valid-work test duplicates that here."""
 
 from __future__ import annotations
 
@@ -67,8 +74,8 @@ def _unbind_workspace_default(tmp_path, monkeypatch):
 
 def test_workspace_unset_under_pytest_refuses_the_first_request(tmp_path, monkeypatch):
     """A pytest process with no ``TCIP_WORKSPACE`` bound must never pin the operator's real
-    workspace: the incident this rail closes was a probe exactly like this one, absent the
-    rail. Asserts the exception by name so the test also runs against code lacking the class.
+    workspace. Asserts the exception by name so the test also runs against code lacking the
+    class.
     """
     _unbind_workspace_default(tmp_path, monkeypatch)
     project_paths.restore_binding(None)
@@ -81,7 +88,7 @@ def test_workspace_unset_under_pytest_refuses_the_first_request(tmp_path, monkey
 def test_workspace_unset_under_pytest_refuses_entering_the_lifespan(tmp_path, monkeypatch):
     """The same refusal fires from ``bind_startup_root``'s own call inside the lifespan, not
     only from the middleware's scope check: entering ``with TestClient(app):`` runs
-    ``_lifespan``, whose first line is ``bind_startup_root``."""
+    ``_lifespan``, which calls ``bind_startup_root`` before any request is served."""
     _unbind_workspace_default(tmp_path, monkeypatch)
     project_paths.restore_binding(None)
 
@@ -106,9 +113,12 @@ else:
 
 def test_workspace_unset_test_client_signal_without_pytest_refuses(tmp_path):
     """A bare ``TestClient`` request with no ``TCIP_WORKSPACE`` bound is refused even outside a
-    pytest process: this subprocess never imports pytest, so only the middleware's own scope
-    check (starlette's ``TestClient`` default client host, ``"testclient"``) can catch it,
-    proving that signal works on its own rather than piggybacking on the pytest one."""
+    pytest process: this subprocess never imports pytest, so only the process-level signal that
+    ``starlette.testclient`` has been imported, or the middleware's own scope check, can catch
+    it, proving the refusal does not depend on the pytest signal. The two later tests each
+    isolate one of those two signals on its own: the module-import signal alone (entering the
+    lifespan with no request) and the scope-check signal alone (an ``httpx.ASGITransport``
+    client, which never imports ``starlette.testclient``)."""
     fake_home = tmp_path / "fakehome"
     fake_home.mkdir()
     scratch_state = tmp_path / "state"
@@ -127,17 +137,90 @@ def test_workspace_unset_test_client_signal_without_pytest_refuses(tmp_path):
     assert result.stdout.strip() == "WorkspaceUnsetUnderTest"
 
 
-def test_workspace_set_admits_the_first_request(tmp_path):
-    """Admits-valid-work companion to the refusals above: with ``TCIP_WORKSPACE`` set, as the
-    repo's own ``tmp_path`` fixture already leaves it for every test, the rail never fires.
-    ``test_tcip_web_routes.py`` and ``test_tcip_web_projects_routes.py`` are the standing proof
-    that a normal request against this app succeeds end to end; this asserts the narrow claim
-    that ``raise_if_workspace_unset_under_test`` itself stays silent."""
-    project_paths.restore_binding(None)
+_TEST_CLIENT_CONTEXT_WITHOUT_PYTEST = """\
+from fastapi.testclient import TestClient
+from tcip_web.app import app
 
-    resp = TestClient(app, base_url="http://127.0.0.1").get("/health")
+try:
+    with TestClient(app, base_url="http://127.0.0.1"):
+        pass
+except Exception as exc:
+    print(type(exc).__name__)
+else:
+    print("no-exception")
+"""
 
-    assert resp.status_code == 200
+
+def test_workspace_unset_test_client_import_signal_without_pytest_refuses_the_lifespan(tmp_path):
+    """Entering ``with TestClient(app):`` with no request yet runs the lifespan, which calls
+    ``bind_startup_root`` with no ASGI scope available: neither the pytest signal nor the
+    middleware's scope check can catch that case, so only the process-level signal that
+    ``starlette.testclient`` has been imported does. This subprocess never imports pytest,
+    proving that signal works on its own; the baseline (code without it) prints
+    "no-exception"."""
+    fake_home = tmp_path / "fakehome"
+    fake_home.mkdir()
+    scratch_state = tmp_path / "state"
+    scratch_state.mkdir()
+    env = dict(os.environ)
+    env.pop("TCIP_WORKSPACE", None)
+    env["HOME"] = str(fake_home)
+    env["USERPROFILE"] = str(fake_home)
+    env["TCIP_STATE_ROOT"] = str(scratch_state)
+
+    result = subprocess.run(
+        [sys.executable, "-c", _TEST_CLIENT_CONTEXT_WITHOUT_PYTEST],
+        capture_output=True, text=True, cwd=str(tmp_path), env=env, timeout=60,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "WorkspaceUnsetUnderTest"
+
+
+_HTTPX_ASGI_TRANSPORT_WITHOUT_PYTEST = """\
+import asyncio
+
+import httpx
+from tcip_web.app import app
+
+
+async def _get():
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        await client.get("/health")
+
+
+try:
+    asyncio.run(_get())
+except Exception as exc:
+    print(type(exc).__name__)
+else:
+    print("no-exception")
+"""
+
+
+def test_workspace_unset_asgi_transport_signal_without_pytest_refuses(tmp_path):
+    """A request through a bare ``httpx.ASGITransport`` client with no ``TCIP_WORKSPACE`` bound
+    is refused even outside a pytest process and with starlette's ``TestClient`` never imported:
+    this subprocess uses only ``httpx.AsyncClient`` (``ASGITransport`` implements only the async
+    transport interface, verified against the installed httpx), so only the middleware's scope
+    check recognising ``ASGITransport``'s default client identity (``("127.0.0.1", 123)``,
+    verified against the installed httpx) can catch it."""
+    fake_home = tmp_path / "fakehome"
+    fake_home.mkdir()
+    scratch_state = tmp_path / "state"
+    scratch_state.mkdir()
+    env = dict(os.environ)
+    env.pop("TCIP_WORKSPACE", None)
+    env["HOME"] = str(fake_home)
+    env["USERPROFILE"] = str(fake_home)
+    env["TCIP_STATE_ROOT"] = str(scratch_state)
+
+    result = subprocess.run(
+        [sys.executable, "-c", _HTTPX_ASGI_TRANSPORT_WITHOUT_PYTEST],
+        capture_output=True, text=True, cwd=str(tmp_path), env=env, timeout=60,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "WorkspaceUnsetUnderTest"
 
 
 def test_first_request_pins_from_the_marker(tmp_path, monkeypatch):

@@ -14,7 +14,6 @@ from __future__ import annotations
 import asyncio
 import itertools
 import logging
-import os
 import sys
 import threading
 import uuid
@@ -38,6 +37,7 @@ from tcip_mcp.web_client import (
     PANEL_EVENT_REVIEW_FOCUS,
     VALID_PANELS,
 )
+from tcip_mcp.workspace import configured_workspace
 from tcip_web.trust_boundary import TrustBoundaryMiddleware, log_exposure_opt_in, origin_allowed
 
 logger = logging.getLogger(__name__)
@@ -99,8 +99,9 @@ class WorkspaceUnsetUnderTest(RuntimeError):
 
     Left unrefused, :func:`bind_startup_root` would resolve the default workspace
     (``tcip_mcp.workspace.workspace_root``, ``~/tcip-projects``) and pin, then write into,
-    whichever project the operator's real active-project marker names: a pytest run or a bare
-    ``TestClient`` request has no business touching that project.
+    whichever project the operator's real active-project marker names: a pytest process, a
+    process that has loaded an in-process test client, or a request arriving from one has no
+    business touching that project.
     """
 
 
@@ -112,30 +113,51 @@ def _running_under_pytest() -> bool:
     return "pytest" in sys.modules
 
 
-def _scope_is_starlette_test_client(scope: dict[str, Any]) -> bool:
-    """True when an ASGI scope's client address is starlette's ``TestClient`` default identity.
+def _in_process_test_client_loaded() -> bool:
+    """True once this process has imported starlette's ``TestClient`` module, for the whole run.
 
-    ``starlette.testclient.TestClient.__init__`` defaults its ``client`` argument to
-    ``("testclient", 50000)`` (verified against the installed ``starlette`` package); a
-    request carrying that host was issued by a ``TestClient``, real network traffic never
-    arrives with it.
+    Entering ``with TestClient(app):`` runs the lifespan with no request and so no ASGI scope,
+    which :func:`bind_startup_root` calls before either check below can see one; this is the
+    signal that catches that case. Verified in a fresh subprocess: importing ``tcip_web.app``
+    alone leaves ``starlette.testclient`` out of ``sys.modules``, while importing
+    ``fastapi.testclient`` (which re-exports ``starlette.testclient.TestClient``) or
+    ``starlette.testclient`` directly brings it in, and neither module removes itself once
+    imported.
     """
+    return "starlette.testclient" in sys.modules
+
+
+_IN_PROCESS_TEST_TRANSPORT_CLIENTS = frozenset({("testclient", 50000), ("127.0.0.1", 123)})
+"""The client addresses an in-process ASGI test transport stamps on the scope it hands the app.
+``starlette.testclient.TestClient.__init__`` defaults its ``client`` argument to
+``("testclient", 50000)``, and ``httpx.ASGITransport.__init__`` defaults its own ``client``
+argument to ``("127.0.0.1", 123)`` (both verified against the installed packages); real network
+traffic never arrives with either identity, source port 123 least of all, a privileged port."""
+
+
+def _scope_is_in_process_test_client(scope: dict[str, Any]) -> bool:
+    """True when an ASGI scope's client address matches an in-process test transport's default
+    identity (:data:`_IN_PROCESS_TEST_TRANSPORT_CLIENTS`), naming both starlette's ``TestClient``
+    and httpx's ``ASGITransport`` rather than starlette's alone."""
     client = scope.get("client")
-    return client is not None and client[0] == "testclient"
+    return client is not None and tuple(client) in _IN_PROCESS_TEST_TRANSPORT_CLIENTS
 
 
 def raise_if_workspace_unset_under_test(scope: dict[str, Any] | None = None) -> None:
     """Refuse to pin a platform-state root under a test that never set ``TCIP_WORKSPACE``.
 
     Runs ahead of every marker read this app performs: at the top of
-    :func:`bind_startup_root` with no scope available (the pytest-process signal alone) and in
-    :class:`_BindStartupRootMiddleware` with the request's own scope (either signal). Passes
-    silently once ``TCIP_WORKSPACE`` is set, non-blank, or nothing signals a test is running,
-    so a served app (``python -m tcip_web``) keeps its default workspace untouched.
+    :func:`bind_startup_root` with no scope available (the pytest-process and test-client-import
+    signals) and in :class:`_BindStartupRootMiddleware` with the request's own scope (all three
+    signals). Passes silently once ``TCIP_WORKSPACE`` is configured
+    (:func:`tcip_mcp.workspace.configured_workspace`) or nothing signals a test is running, so a
+    served app (``python -m tcip_web``) keeps its default workspace untouched.
     """
-    if os.environ.get("TCIP_WORKSPACE", "").strip():
+    if configured_workspace() is not None:
         return
-    if not (_running_under_pytest() or (scope is not None and _scope_is_starlette_test_client(scope))):
+    process_signal = _running_under_pytest() or _in_process_test_client_loaded()
+    scope_signal = scope is not None and _scope_is_in_process_test_client(scope)
+    if not (process_signal or scope_signal):
         return
     raise WorkspaceUnsetUnderTest(
         "TCIP_WORKSPACE is unset. This served app would otherwise pin the workspace's "
@@ -160,8 +182,9 @@ def bind_startup_root() -> None:
     binding in place, and this must not replace it with a fresh marker read.
 
     Raises :class:`WorkspaceUnsetUnderTest` first, before either check, when this process is
-    a pytest run with no ``TCIP_WORKSPACE`` bound; the client-identity half of that rail lives
-    in :class:`_BindStartupRootMiddleware`, which alone sees the request scope.
+    a pytest run or has loaded an in-process test client with no ``TCIP_WORKSPACE`` bound; the
+    scope-carried signals of that rail live in :class:`_BindStartupRootMiddleware`, which alone
+    sees the request scope.
     """
     raise_if_workspace_unset_under_test()
 
@@ -200,8 +223,8 @@ class _BindStartupRootMiddleware:
 
     Checks :func:`raise_if_workspace_unset_under_test` with this request's own scope before
     that thread hop: the scope carries the client-address signal :func:`bind_startup_root`
-    cannot see on its own, so a bare ``TestClient`` request with no ``TCIP_WORKSPACE`` bound
-    is refused here even outside a pytest process.
+    cannot see on its own, so a request from a bare ``TestClient`` or an ``httpx.ASGITransport``
+    client with no ``TCIP_WORKSPACE`` bound is refused here even outside a pytest process.
     """
 
     def __init__(self, app: Any) -> None:

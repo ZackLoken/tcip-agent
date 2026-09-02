@@ -867,13 +867,13 @@ registered at HEAD.
 
 | method | path | handler | line |
 |---|---|---|---|
-| GET | `/api/state` | `get_state` | `app.py:287` |
-| POST | `/api/state/tab` | `set_active_tab` | `app.py:296` |
-| WS | `/ws/state` | `state_ws` | `app.py:304` |
-| GET | `/health` | `health` | `app.py:400` |
-| GET | `/` | `index` | `app.py:408` |
-| POST | `/api/events/{panel}` | `post_panel_event` | `app.py:472` |
-| WS | `/ws/panel/{panel}` | `panel_ws` | `app.py:523` |
+| GET | `/api/state` | `get_state` | `app.py:310` |
+| POST | `/api/state/tab` | `set_active_tab` | `app.py:319` |
+| WS | `/ws/state` | `state_ws` | `app.py:327` |
+| GET | `/health` | `health` | `app.py:423` |
+| GET | `/` | `index` | `app.py:432` |
+| POST | `/api/events/{panel}` | `post_panel_event` | `app.py:495` |
+| WS | `/ws/panel/{panel}` | `panel_ws` | `app.py:546` |
 
 ### routes/annotate.py, prefix `/api/annotate` (2 routes)
 
@@ -1134,16 +1134,19 @@ from `tcip_mcp.server` and calls it: `packages/tcip-mcp/src/tcip_mcp/server.py:6
 (line 72). The port write resolves under the workspace root, not the platform-state root, so
 it needs no pin first; the app pins the platform-state root at the lifespan's startup or,
 when a request is served before the lifespan has run, at that first request, never at import:
-`bind_startup_root` (`packages/tcip-web/src/tcip_web/app.py:147`) reads the workspace's
+`bind_startup_root` (`packages/tcip-web/src/tcip_web/app.py:169`) reads the workspace's
 active-project marker (`tcip_mcp.project_paths.pin_platform_root(from_marker=True)`) the first
-time either the lifespan (`app.py:54`) or the startup middleware (`app.py:191`) calls it, so
+time either the lifespan (`app.py:54`) or the startup middleware (`app.py:236`) calls it, so
 every way the app is served (this entry point, a bare `uvicorn tcip_web.app:app`,
 `--lifespan off`, the reloader's child) pins a root before anything resolves a `.tcip` path.
-Ahead of that read, `raise_if_workspace_unset_under_test` (`app.py:127`) refuses with
-`WorkspaceUnsetUnderTest` (`app.py:96`) when `TCIP_WORKSPACE` is unset or blank and the process
-looks like a test (`pytest` loaded, or the ASGI scope's client host is starlette's `TestClient`
-default identity, `"testclient"`), so a pytest run or a bare `TestClient` request can never pin
-the operator's real workspace. Exposure is a property
+Ahead of that read, `raise_if_workspace_unset_under_test` (`app.py:146`) refuses with
+`WorkspaceUnsetUnderTest` (`app.py:96`) when `TCIP_WORKSPACE` is unconfigured
+(`tcip_mcp.workspace.configured_workspace`) and the process or the request looks like a test:
+`pytest` loaded, starlette's `TestClient` module loaded (catching a lifespan entered with no
+request and so no ASGI scope), or the ASGI scope's client address matching an in-process test
+transport's default identity (starlette's `TestClient`, `("testclient", 50000)`, or httpx's
+`ASGITransport`, `("127.0.0.1", 123)`). So a pytest run or a request from a bare `TestClient` or
+`ASGITransport` client can never pin the operator's real workspace. Exposure is a property
 of the accepted connection rather than the configured bind host, so this entry point always
 binds the requested host and port; whether an arrival through a non-loopback address is served
 is decided per request by `tcip_web.trust_boundary.TrustBoundaryMiddleware` (`trust_boundary.py:
@@ -1789,7 +1792,7 @@ Reader: `StateStore.load_from_disk`, `tcip_web/state.py:298`.
 `StateStore.mutate`, `tcip_web/state.py:30`, validates the merged mutation through `GuiState`
 before holding it, raising `GuiMutationInvalid` (`tcip_web/state.py:29`) on a field that does not
 validate or a key `GuiState` does not declare; `app.py`'s `_gui_mutation_invalid_handler`,
-`packages/tcip-web/src/tcip_web/app.py:244`, answers a route that raises it with 400 and the
+`packages/tcip-web/src/tcip_web/app.py:267`, answers a route that raises it with 400 and the
 validation message rather than the 500 an unhandled `ValueError` would produce.
 
 Seam S10 ("Live GUI state .tcip/state/gui.json"), verdict `both-sides-restated`,
@@ -1870,9 +1873,9 @@ No seam id in `seam-coverage.json`'s 67-entry inventory names `.tcip/datasets.js
 
 Path: `<workspace_root>/.active`, a workspace-root sibling, not inside `.tcip/`.
 
-Writer: `set_active_project`, `packages/tcip-mcp/src/tcip_mcp/workspace.py:278`.
+Writer: `set_active_project`, `packages/tcip-mcp/src/tcip_mcp/workspace.py:291`.
 
-Readers: `read_active_project`, `workspace.py:158`; `resolve_project_path`, `workspace.py:239`.
+Readers: `read_active_project`, `workspace.py:171`; `resolve_project_path`, `workspace.py:252`.
 
 Seam S02 ("Workspace root and the .active project marker"), verdict `both-sides-restated`,
 `phase0_implementation: mixed`: `tests/test_tcip_web_projects_routes.py:160`,
@@ -2088,14 +2091,14 @@ Phase 3 verdict: single.
 
 Must agree: sender and receiver accept the same set of panel names.
 Side A: `packages/tcip-mcp/src/tcip_mcp/web_client.py:203` (`VALID_PANELS = frozenset(`).
-Side B: `packages/tcip-web/src/tcip_web/app.py:39` (`VALID_PANELS,`).
+Side B: `packages/tcip-web/src/tcip_web/app.py:38` (`VALID_PANELS,`).
 Phase 3 verdict: duplicated.
 
 ## S05. Panel event_type vocabulary  <!-- queued: P5-272 unify -->
 
 Must agree: the Python poster, the FastAPI hub, and the browser handler use the same event_type strings.
 Side A: `packages/tcip-mcp/src/tcip_mcp/tools/gui_tools.py:218` (`result = post_panel_event("app", "annotate_focus", payload)`).
-Side B: `packages/tcip-web/src/tcip_web/app.py:495` (`if event.event_type == PANEL_EVENT_REVIEW_FOCUS:`).
+Side B: `packages/tcip-web/src/tcip_web/app.py:518` (`if event.event_type == PANEL_EVENT_REVIEW_FOCUS:`).
 Phase 3 verdict: single. The posted payload carries `active_subject` beside `subject` (`packages/tcip-mcp/src/tcip_mcp/tools/gui_tools.py:216`), the key both readers take (`packages/tcip-web/src/tcip_web/app.py:296`, `frontend/src/lib/annotateFocus.ts:21,54`), held by `tests/test_event_integration.py`'s producer-driven test, which posts the focus tool's own event and asserts the advisory state's `active_subject`.
 
 ## S06. `audit_log`, one append-only store under three kinds of root
@@ -2435,7 +2438,7 @@ Phase 3 verdict: duplicated.
 ## S48. State WebSocket snapshot protocol  <!-- queued: P5-288 unify -->
 
 Must agree: the browser knows which slices of a broadcast snapshot are backend-authoritative and orders them by version.
-Side A: `packages/tcip-web/src/tcip_web/app.py:303` (`@app.websocket("/ws/state")`).
+Side A: `packages/tcip-web/src/tcip_web/app.py:326` (`@app.websocket("/ws/state")`).
 Side B: `packages/tcip-web/src/tcip_web/state.py:214` (`def version(self) -> int:`, "Monotonic version, bumped on every state change.").
 Phase 3 verdict: duplicated.
 
@@ -2478,14 +2481,14 @@ Phase 3 verdict: single.
 
 Must agree: the directory Vite writes is one of the directories the backend looks in.
 Side A: `packages/tcip-web/frontend/vite.config.ts:25` (`outDir: "../static",`).
-Side B: `packages/tcip-web/src/tcip_web/app.py:364` (`def _find_static_dir() -> Path:`).
+Side B: `packages/tcip-web/src/tcip_web/app.py:387` (`def _find_static_dir() -> Path:`).
 Phase 3 verdict: duplicated.
 
 ## S55. Vite dev-server proxy prefixes  <!-- queued: P5-306 unify -->
 
 Must agree: every backend path the browser calls in dev falls under a proxied prefix.
 Side A: `packages/tcip-web/frontend/vite.config.ts:20` (`proxy: {`).
-Side B: `packages/tcip-web/src/tcip_web/app.py:303` (`@app.websocket("/ws/state")`, one of the endpoints not under the `/api` prefix).
+Side B: `packages/tcip-web/src/tcip_web/app.py:326` (`@app.websocket("/ws/state")`, one of the endpoints not under the `/api` prefix).
 Phase 3 verdict: duplicated. The prefix literals still stand on their own, but `tests/test_frontend_route_paths.py` now fails when a path the frontend references falls outside them, sockets under the API prefix included.
 
 ## S56. Tab-name vocabulary  <!-- queued: P5-290 unify -->
@@ -2520,7 +2523,7 @@ Phase 3 verdict: single.
 
 Must agree: every WebSocket endpoint applies the same origin policy before accept().
 Side A: `packages/tcip-web/src/tcip_web/trust_boundary.py:256` (`def origin_allowed(origin: str | None, scope: Mapping[str, Any]) -> bool:`).
-Side B: `packages/tcip-web/src/tcip_web/app.py:306` (`if not origin_allowed(websocket.headers.get("origin"), websocket.scope):`).
+Side B: `packages/tcip-web/src/tcip_web/app.py:329` (`if not origin_allowed(websocket.headers.get("origin"), websocket.scope):`).
 Phase 3 verdict: single.
 
 ## S61. Bash guard and PowerShell guard protected-path sets
