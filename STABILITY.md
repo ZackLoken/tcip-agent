@@ -11,10 +11,12 @@ registry and held to it by `tests/test_frozen_manifest.py`, is the freeze commit
 store this platform registers, with a `frozen` classification and a `schema_version` ceiling.
 A store's documents carry no version field until that store's first bump; absence means the
 frozen version 1. A store the manifest marks `frozen: false` is unstable by design (view-state
-and canvas records the GUI itself owns) or a genuine interop format (COCO, other tools'
-formats); neither carries this commitment. Read `frozen-formats.json` itself for which store is
-which and its current ceiling; this document describes the commitment, not a copy of the list
-that will drift out of date beside the source of truth.
+and canvas records the GUI itself owns: `canvas_geometry`, `canvas_meta`, `view_coverage`, and
+`backend_port`, the runtime handshake state naming which port the web backend bound to) or a
+genuine interop format (`coco_documents`, other tools' formats); neither carries this commitment.
+Read `frozen-formats.json` itself for which store is which and its current ceiling; this document
+describes the commitment, not a copy of the list that will drift out of date beside the source of
+truth.
 
 ## The MCP tool surface
 
@@ -25,11 +27,12 @@ as tools are added or renamed.
 
 ## The two storage backends
 
-Every process binds one storage backend at its entry point: an unset environment binds the
-database (`<root>/.tcip/store.db`), `TCIP_STORE_BACKEND=file` binds the loose-file layout that
-reads and writes the same records as files, and any other value refuses. `scripts/export_store.py`
-writes a root's database-held records back out as files; `scripts/adopt_store.py` moves a root's
-loose files into a database. Both backends are stable, adopter-facing choices; a root written by
+Every process binds one storage backend at its entry point: an unset environment or
+`TCIP_STORE_BACKEND=sqlite` binds the database (`<root>/.tcip/store.db`),
+`TCIP_STORE_BACKEND=file` binds the loose-file layout that reads and writes the same records as
+files, and any other value refuses. `scripts/export_store.py` writes a root's database-held
+records back out as files; `scripts/adopt_store.py` moves a root's loose files into a database.
+Both backends are stable, adopter-facing choices; a root written by
 one backend is legible to the other only through these conversion scripts, never by binding the
 other backend directly against files the first one produced.
 
@@ -47,14 +50,16 @@ account; `__all__` is the only boundary, not internal usage.
 
 Every script listed under `scripts/README.md`'s General capabilities section is written to be
 reached for again, with its own docstring and `--help` as the usage contract. A script under that
-document's Pilot/incident-bound or Dead sections carries no such commitment; it was written for
-one past investigation or is unreachable code, and either category can be rewritten or removed
+document's Pilot/incident-bound or One-off conforms sections carries no such commitment: the
+former was written for one past investigation, the latter for carrying one root's on-disk state
+onto a shape one specific past change now requires, and either can be rewritten or removed
 without notice.
 
 ## Not stable
 
 - The web routes (`packages/tcip-web/src/tcip_web/routes/`): the GUI's own, free to change
-  alongside the frontend that is their only consumer.
+  alongside the frontend and the MCP server's own panel client (`tcip_mcp.web_client`, which
+  posts to `/api/events/<panel>` and documents `/api/state/tab`), which move with them.
 - The frontend (`packages/tcip-web/frontend/`) in its entirety.
 - Internal functions inside a pipeline module (`packages/tcip-mcp/src/tcip_mcp/pipelines/`) that
   are not themselves an MCP tool or a documented script entry point.

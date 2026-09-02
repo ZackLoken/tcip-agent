@@ -28,8 +28,8 @@ report it as blank rather than omitting the row.
 - `operating_point_conf` / `operating_point_validated`:
 - `positive_state_classifier_validated` (phenology deliveries only):
 - `unvalidated_dimensions`:
-- `plant_mapping_sha256`:
-- `captures_unverified` / `plant_csvs_unverified`:
+- `plant_mapping_sha256` (phenology deliveries only):
+- `captures_unverified` / `plant_csvs_unverified` (phenology deliveries only):
 
 ## What is wrong
 

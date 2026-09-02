@@ -28,20 +28,10 @@ reaching for again versus one built narrowly for a specific past investigation.
 - `check_dataset_identity.py` - recomputes a dataset's on-disk fingerprint and compares it
   against the fingerprint recorded in `dataset.json` and the project's `.tcip/datasets.json`,
   to catch data that changed or moved since it was registered.
-- `conform_registry_experiment_id.py` - conforms a project's registry entries to carry
-  `experiment_id` (the run whose completion bound an entry, `null` for one no run bound), for an
-  entry registered before the producer-binding field existed. `--plan` previews; an entry
-  carrying a leftover `experiment:<id>` tag is refused, since the tag was never verified and no
-  run record exists to check it against; re-register it through `register_model_from_experiment`
-  instead.
 - `drop_annotation_stats_image_status.py` - drops the dead `image_status` key from a project's
   `annotation_stats` record, which every writer put there empty and nothing read. `--plan`
   previews; a record whose `image_status` is not empty is refused, since that would mean a writer
   this script does not know about.
-- `conform_view_coverage_viewing.py` - conforms a dataset's stored `view_coverage` records'
-  `viewing` sub-object to the current `CoverageViewing` shape, mapping the old string forms of
-  `stats_source` and `display_bounds` to the new structured ones. `--plan` previews; a `viewing`
-  it cannot parse is refused by image name and the dataset left untouched.
 - `generate_frontend_types.py` - renders `frontend/src/api/types.generated.ts` from the pydantic
   models that declare the view-coverage record's shape and the GUI's tab/mode vocabulary
   (`tcip_web.state.GuiVocabulary`), so the browser's types are a projection of the backend's
@@ -133,15 +123,6 @@ reaching for again versus one built narrowly for a specific past investigation.
 - `generate_favicon.ps1` - renders the browser-tab favicon from the source logo: crops its
   transparent margins, resizes the result to 512x512, and writes it plus a 32x32 copy to the
   frontend's public assets.
-- `conform_cal_holdout_locks.py` - conforms every pre-existing `cal_holdout_split_lock` record
-  under a root to carry `split_manifest_dir`, the key every lock this family writes now
-  declares. A one-off operator fix for a record written before this family, never a runtime
-  migration.
-- `conform_dataset_registry_paths.py` - conforms a project's dataset registry entries onto the
-  relative-path row `register_dataset` now writes, for a project registered before that change.
-- `conform_metrics_marker.py` - stamps the `metrics_logged` marker onto every experiment a
-  root's status record predates, so `is_pristine` reads the marker instead of scanning the
-  metrics log.
 - `conform_model_registry_paths.py` - conforms a project's model registry index to
   `schema_version` 2 and respells every entry's `checkpoint_path` relative to the project root,
   per the version-2 convention.
@@ -151,9 +132,6 @@ reaching for again versus one built narrowly for a specific past investigation.
 - `drop_trait_spec_provenance.py` - conforms a project's trait-spec records to drop the retired
   free-text `provenance` field, and removes stale YAML copies an earlier YAML-to-record conform
   step left behind.
-- `restamp_dataset_fingerprint.py` - restamps a bare legacy dataset fingerprint onto the
-  formula-version-prefixed form `dataset_fingerprint` now returns, refusing rather than papering
-  over a fingerprint mismatch it cannot explain.
 - `scan_dataset.py` - read-only census of a dataset folder before splitting, validating, or
   training on it: image/label/prediction counts, the detected label format, and which files are
   excluded from every bucket walk because they collide with a prediction bucket's provenance
@@ -174,6 +152,36 @@ reaching for again versus one built narrowly for a specific past investigation.
 - `cross_family_ask.py` - poses one identical question to several agent harnesses (claude,
   codex, antigravity) and records comparable answers: the exact prompt, argv, stdout/stderr, the
   extracted response, and run metadata describing what the harness was and how long it took.
+
+## One-off conforms
+
+Each script here carries existing on-disk records onto a shape one specific past change now
+requires, and says so in its own docstring: a one-off operator fix, never a runtime migration.
+Run once against a root whose state predates the change it names; reaching for one again means a
+fresh root predates another change, not a capability to build on.
+
+- `conform_cal_holdout_locks.py` - conforms every pre-existing `cal_holdout_split_lock` record
+  under a root to carry `split_manifest_dir`, the key every lock this family writes now
+  declares. A one-off operator fix for a record written before this family, never a runtime
+  migration.
+- `conform_dataset_registry_paths.py` - conforms a project's dataset registry entries onto the
+  relative-path row `register_dataset` now writes, for a project registered before that change.
+- `conform_metrics_marker.py` - stamps the `metrics_logged` marker onto every experiment a
+  root's status record predates, so `is_pristine` reads the marker instead of scanning the
+  metrics log.
+- `conform_registry_experiment_id.py` - conforms a project's registry entries to carry
+  `experiment_id` (the run whose completion bound an entry, `null` for one no run bound), for an
+  entry registered before the producer-binding field existed. `--plan` previews; an entry
+  carrying a leftover `experiment:<id>` tag is refused, since the tag was never verified and no
+  run record exists to check it against; re-register it through `register_model_from_experiment`
+  instead.
+- `conform_view_coverage_viewing.py` - conforms a dataset's stored `view_coverage` records'
+  `viewing` sub-object to the current `CoverageViewing` shape, mapping the old string forms of
+  `stats_source` and `display_bounds` to the new structured ones. `--plan` previews; a `viewing`
+  it cannot parse is refused by image name and the dataset left untouched.
+- `restamp_dataset_fingerprint.py` - restamps a bare legacy dataset fingerprint onto the
+  formula-version-prefixed form `dataset_fingerprint` now returns, refusing rather than papering
+  over a fingerprint mismatch it cannot explain.
 
 ## Pilot/incident-bound
 
