@@ -1809,6 +1809,8 @@ def run_hpo(
     resources_per_trial: dict | None = None,
     study_name: str | None = None,
     auto_tensorboard: bool = True,
+    *,
+    relaunched_from: str | None = None,
 ) -> dict:
     """Run hyperparameter optimization on Ray Tune, training each trial for real.
 
@@ -1873,6 +1875,10 @@ def run_hpo(
             Tuning route's launch passes ``False``: it serves its own per-sweep TensorBoard
             view on demand, so leaving this on there would run a second, unaddressable
             TensorBoard process over the same trials.
+        relaunched_from: The sweep this one replays, for a caller (the Tuning route's relaunch)
+            that started it from another sweep's own recorded manifest; recorded on this
+            sweep's manifest so a listing can show the fork, ``None`` when this sweep was not
+            a relaunch.
     """
     from tcip_mcp.pipelines.training.hpo import tune_search, get_default_space
 
@@ -1940,6 +1946,7 @@ def run_hpo(
             "param_space": param_space,
             "base_config": base_config,
             "sweep_dir": str(sweep_root),
+            "relaunched_from": relaunched_from,
         }
         manifest_key = sweep_manifest_key(study_name, output_dir)
         manifest_lock = threading.Lock()
