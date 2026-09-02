@@ -113,6 +113,41 @@ def test_build_reports_image_count_mapped_count_and_mean_distance_as_three_answe
     assert other["n_mapped"] == 1
     assert other["avg_distance_m"] == pytest.approx(0.0, abs=1e-6)
 
+    assert set(body["nn_tolerance_m"]) == {"value", "source"}
+    assert isinstance(body["nn_tolerance_m"]["value"], float)
+    assert body["nn_tolerance_m"]["source"] in {"grid_pitch", "fallback", "stated", "stated_capped"}
+
+
+def test_build_without_a_stated_tolerance_derives_it_from_the_plot_grid_pitch(
+    client: TestClient, tmp_path: Path,
+) -> None:
+    """A payload naming no ``nn_tolerance_m`` derives the match radius from the plot's own grid
+    pitch, the same as the tool's own default; a route that pinned a numeric default instead
+    would always land on ``stated``/``stated_capped``, never ``grid_pitch``."""
+    from tcip_mcp.pipelines.postprocessing import plant_mapping
+
+    payload = _capture_fixture(tmp_path)
+    client.post("/api/results/plant_mapping/build", json=payload)
+
+    build = plant_mapping.load_mapping(tmp_path, payload["name"])
+    assert build is not None
+    assert build.nn_tolerance_m["source"] == "grid_pitch"
+
+
+def test_build_response_carries_the_persisted_record_own_tolerance_dict(
+    client: TestClient, tmp_path: Path,
+) -> None:
+    """The response's ``nn_tolerance_m`` is the persisted record's own value, not a second
+    computation: the two must agree by construction, never merely by coincidence."""
+    from tcip_mcp.pipelines.postprocessing import plant_mapping
+
+    payload = _capture_fixture(tmp_path)
+    body = client.post("/api/results/plant_mapping/build", json=payload).json()
+
+    build = plant_mapping.load_mapping(tmp_path, payload["name"])
+    assert build is not None
+    assert body["nn_tolerance_m"] == build.nn_tolerance_m
+
 
 def test_a_mapping_persisted_into_platform_state_is_audited_into_the_owning_project(
     client: TestClient, tmp_path: Path,

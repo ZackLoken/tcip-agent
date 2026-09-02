@@ -87,6 +87,13 @@ export interface PlantMappingSummary {
   [date: string]: { n_images: number; n_mapped: number; avg_distance_m: number };
 }
 
+// The persisted mapping record's own resolved match radius: never recomputed by a caller, and
+// `source` names which of build_mapping's four branches produced `value`.
+export interface PlantMappingTolerance {
+  value: number;
+  source: string;
+}
+
 export interface PerPlantRow {
   plant_id: string;
   accession: string | null;
@@ -349,6 +356,7 @@ export const resultsApi = {
       summary: PlantMappingSummary;
       mapping: unknown;
       unreadable: Record<string, string[]>;
+      nn_tolerance_m: PlantMappingTolerance;
     }>(ROUTES.postResultsPlantMappingBuild, body),
 
   loadPlantMapping: (name: string) =>

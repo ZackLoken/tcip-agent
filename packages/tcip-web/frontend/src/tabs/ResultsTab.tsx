@@ -23,6 +23,7 @@ import {
   type OnsetRow,
   type PerPlantRow,
   type PlantMappingSummary,
+  type PlantMappingTolerance,
   type TraitSpecStatementRecord,
 } from "@/api/inference";
 import { DeliveryEventsPanel } from "@/components/DeliveryEventsPanel";
@@ -40,6 +41,18 @@ interface DateRow {
 /** One operationalization record, addressed by the pair its store is keyed on. */
 function recordKey(record: { trait: string; delivery_kind: string }): string {
   return `${record.trait}::${record.delivery_kind}`;
+}
+
+// build_mapping's own four nn_tolerance_m sources, in the breeder's words; an unmapped source renders as itself.
+const TOLERANCE_SOURCE_PHRASES: Record<string, string> = {
+  grid_pitch: "derived from the plot's grid pitch",
+  fallback: "the fallback, since fewer than two plants had positions",
+  stated: "the stated value",
+  stated_capped: "the stated value, capped to the grid pitch",
+};
+
+function toleranceSourceText(source: string): string {
+  return TOLERANCE_SOURCE_PHRASES[source] ?? source;
 }
 
 /**
@@ -320,6 +333,7 @@ export function ResultsTab() {
   const [plantCsvText, setPlantCsvText] = useState("");
   const [nnTolerance, setNnTolerance] = useState<number | "">("");
   const [buildSummary, setBuildSummary] = useState<PlantMappingSummary | null>(null);
+  const [buildTolerance, setBuildTolerance] = useState<PlantMappingTolerance | null>(null);
   const [buildMsg, setBuildMsg] = useState<string | null>(null);
   const [building, setBuilding] = useState(false);
 
@@ -627,6 +641,7 @@ export function ResultsTab() {
     setBuilding(true);
     setBuildMsg(null);
     setBuildSummary(null);
+    setBuildTolerance(null);
     try {
       const res = await resultsApi.buildPlantMapping({
         name: mappingName,
@@ -635,6 +650,7 @@ export function ResultsTab() {
         ...(nnTolerance === "" ? {} : { nn_tolerance_m: nnTolerance }),
       });
       setBuildSummary(res.summary);
+      setBuildTolerance(res.nn_tolerance_m);
       setBuildMsg(`Mapping built + saved as ${mappingName}`);
       refreshMappingNames();
     } catch (e) {
@@ -921,6 +937,11 @@ export function ResultsTab() {
         </div>
         {buildSummary && (
           <div className="mt-2 text-[11px] text-tcip-muted tabular-nums">
+            {buildTolerance && (
+              <div className="mb-1">
+                {`Match radius ${buildTolerance.value.toFixed(2)} m (${toleranceSourceText(buildTolerance.source)})`}
+              </div>
+            )}
             {Object.entries(buildSummary).map(([d, s]) => (
               <div key={d}>
                 {d}: {s.n_mapped}/{s.n_images} mapped · avg {s.avg_distance_m.toFixed(1)} m
