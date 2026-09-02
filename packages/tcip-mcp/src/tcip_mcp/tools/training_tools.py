@@ -1888,7 +1888,7 @@ def run_hpo(
         relaunched_from: The sweep this one replays, for a caller (the Tuning route's relaunch)
             that started it from another sweep's own recorded manifest; recorded on this
             sweep's manifest so a listing can show the fork, ``None`` when this sweep was not
-            a relaunch.
+            a relaunch. Refused when it names no sweep manifest under this resolved root.
     """
     from tcip_mcp.pipelines.training.hpo import tune_search, get_default_space
 
@@ -1902,6 +1902,16 @@ def run_hpo(
         # every trial's resolved config once a sampled point is applied to it.
         check_json_value(param_space, path="param_space")
         check_json_value(base_config, path="base_config")
+
+        if relaunched_from is not None:
+            try:
+                source_exists = store.read(
+                    sweep_manifest_key(relaunched_from, output_dir), default=None) is not None
+            except BadKey:
+                source_exists = False
+            if not source_exists:
+                return {"error": f"relaunched_from names no sweep manifest under this root: "
+                                  f"{relaunched_from!r}", "issues": []}
 
         # Structural preflight over every point the search space could resolve a trial's
         # builder or data section to, not only the first sampled corner.

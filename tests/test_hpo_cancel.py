@@ -448,3 +448,36 @@ def test_sweep_stopper_stop_all_true_after_the_stale_window_elapses_regardless_o
     stale = time.time() - 10
     os.utime(sentinel, (stale, stale))
     assert stopper.stop_all() is True  # the bounded fallback: Ray's own stop takes over
+
+
+def test_run_hpo_refuses_a_relaunched_from_naming_no_sweep_manifest_under_this_root(
+    tmp_path, real_hpo_base_config
+) -> None:
+    """relaunched_from must name a sweep this root actually holds a manifest for: a name that
+    resolves to nothing is refused before anything is minted, rather than recorded verbatim as
+    fabricated lineage on a frozen record."""
+    import tcip_store
+    from tcip_mcp.tools.training_tools import run_hpo, sweep_manifest_key
+
+    result = run_hpo(base_config=real_hpo_base_config, n_trials=1, output_dir=str(tmp_path),
+                     study_name="hpo_refused_relaunch1", relaunched_from="hpo_does_not_exist")
+    assert "error" in result
+    assert "hpo_does_not_exist" in result["error"]
+    assert not tcip_store.exists(sweep_manifest_key("hpo_refused_relaunch1", str(tmp_path)))
+
+
+def test_run_hpo_with_no_relaunched_from_is_unaffected_by_the_new_check(
+    tmp_path, real_hpo_base_config, monkeypatch
+) -> None:
+    """Admits valid work: a direct run_hpo call that never names relaunched_from is not
+    touched by the refusal added for the case where it is given."""
+    from tcip_mcp.tools.training_tools import run_hpo
+
+    monkeypatch.setattr(
+        "tcip_mcp.pipelines.training.hpo.tune_search",
+        lambda **kw: {"best_params": {}, "best_value": 0.1, "n_trials": 1,
+                     "study_name": kw["study_name"]},
+    )
+    result = run_hpo(base_config=real_hpo_base_config, n_trials=1, output_dir=str(tmp_path),
+                     study_name="hpo_norelaunch1")
+    assert "error" not in result
