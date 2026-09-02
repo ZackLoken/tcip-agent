@@ -87,37 +87,84 @@ def cell_annotation_digest(annotations: list[Annotation], subject: str, cell: Ce
     return _digest_of_records(records)
 
 
-def cell_annotation_digests(
-    annotations: list[Annotation], subject: str, cells: list[Cell], tile_size: int,
-    overlap: float = 0.0,
-) -> dict[str, str]:
-    """:func:`cell_annotation_digest` for every cell in ``cells`` at once, one pass over
-    ``annotations`` rather than one pass per cell -- O(annotations + cells) instead of
-    O(annotations x cells), the real cost at real orthomosaic scale (thousands of annotations,
-    up to hundreds of reserved-region cells).
+def _bin_annotations(
+    annotations: list[Annotation], cells: list[Cell], tile_size: int, overlap: float,
+) -> dict[str, list[Annotation]]:
+    """Every one of ``annotations`` whose center falls in one of ``cells``, one pass over
+    ``annotations`` -- O(annotations + cells) instead of O(annotations x cells), the real cost at
+    real orthomosaic scale (thousands of annotations, up to hundreds of reserved-region cells).
+    No subject filter: :func:`annotations_by_cell` and :func:`annotation_counts_by_cell` apply
+    theirs after, so the one pass over ``annotations`` here serves either.
 
-    Requires ``overlap == 0.0`` (every real region-completeness/coverage grid caller constructs
-    one) to bin by direct ``tile_size`` floor-division of each annotation's center, the same
-    origin math :func:`~tcip_mcp.pipelines.reference_grid.reference_cells` itself uses -- a
-    non-zero overlap would put some points in more than one cell, which floor-division alone
-    cannot resolve, so that case falls back to :func:`cell_annotation_digest` per cell instead of
-    silently computing a wrong digest.
+    ``overlap == 0.0`` (every real region-completeness/coverage grid carries it) bins by direct
+    ``tile_size`` floor-division of each annotation's center, the same origin math
+    :func:`~tcip_mcp.pipelines.reference_grid.reference_cells` itself uses. A non-zero overlap
+    would put some points in more than one cell, which floor-division alone cannot resolve, so
+    that case falls back to per-cell containment instead of silently computing a wrong bin.
     """
+    buckets: dict[str, list[Annotation]] = {c.name: [] for c in cells}
     if overlap != 0.0:
-        return {c.name: cell_annotation_digest(annotations, subject, c) for c in cells}
+        for a in annotations:
+            center = _annotation_center(a)
+            if center is None:
+                continue
+            for c in cells:
+                if _in_cell(center, c):
+                    buckets[c.name].append(a)
+        return buckets
     by_colrow = {(c.col, c.row): c.name for c in cells}
-    buckets: dict[str, list[dict]] = {c.name: [] for c in cells}
     for a in annotations:
-        if a.subject != subject:
-            continue
         center = _annotation_center(a)
         if center is None:
             continue
         x, y = center
         name = by_colrow.get((int(x // tile_size), int(y // tile_size)))
         if name is not None:
-            buckets[name].append(_annotation_record(a))
-    return {name: _digest_of_records(records) for name, records in buckets.items()}
+            buckets[name].append(a)
+    return buckets
+
+
+def annotations_by_cell(
+    annotations: list[Annotation], subject: str, cells: list[Cell], tile_size: int,
+    overlap: float = 0.0,
+) -> dict[str, list[Annotation]]:
+    """``subject``'s annotations from ``annotations``, binned by which of ``cells`` each one's
+    center falls in (:func:`_bin_annotations`): the shared binning
+    :func:`cell_annotation_digests` and the completeness route's per-cell saved-annotation counts
+    (:func:`annotation_counts_by_cell`) both read off, so the two can never drift into computing
+    "which cell" two different ways.
+    """
+    by_cell = _bin_annotations(annotations, cells, tile_size, overlap)
+    return {name: [a for a in anns if a.subject == subject] for name, anns in by_cell.items()}
+
+
+def annotation_counts_by_cell(
+    annotations: list[Annotation], cells: list[Cell], tile_size: int, overlap: float = 0.0,
+) -> dict[str, dict[str, int]]:
+    """Every subject's per-cell annotation count over ``cells``, one pass over ``annotations``
+    (:func:`_bin_annotations`) regardless of how many subjects are present -- the completeness
+    route's ``annotation_counts`` field, read once per raster rather than once per subject.
+    """
+    by_cell = _bin_annotations(annotations, cells, tile_size, overlap)
+    counts: dict[str, dict[str, int]] = {}
+    for cell_name, anns in by_cell.items():
+        for a in anns:
+            subject_counts = counts.setdefault(a.subject, {})
+            subject_counts[cell_name] = subject_counts.get(cell_name, 0) + 1
+    return counts
+
+
+def cell_annotation_digests(
+    annotations: list[Annotation], subject: str, cells: list[Cell], tile_size: int,
+    overlap: float = 0.0,
+) -> dict[str, str]:
+    """:func:`cell_annotation_digest` for every cell in ``cells`` at once, via
+    :func:`annotations_by_cell`'s shared one-pass binning rather than one digest computation per
+    cell.
+    """
+    by_cell = annotations_by_cell(annotations, subject, cells, tile_size, overlap)
+    return {name: _digest_of_records([_annotation_record(a) for a in anns])
+            for name, anns in by_cell.items()}
 
 
 def stale_cells(

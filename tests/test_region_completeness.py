@@ -16,6 +16,8 @@ from tcip_mcp.dataset_layout import (
 )
 from tcip_mcp.pipelines.reference_grid import reference_cells
 from tcip_mcp.pipelines.region_completeness import (
+    annotation_counts_by_cell,
+    annotations_by_cell,
     cell_annotation_digest,
     cell_annotation_digests,
     stale_cells,
@@ -149,6 +151,89 @@ class TestCellAnnotationDigests:
         got = cell_annotation_digests(anns, "catkin", cells, tile_size=64, overlap=0.2)
         expected = {c.name: cell_annotation_digest(anns, "catkin", c) for c in cells}
         assert got == expected
+
+
+class TestAnnotationsByCell:
+    """The shared binning cell_annotation_digests now calls: subject's annotations grouped by
+    cell name, one pass over annotations."""
+
+    def _cells(self, width=128, height=128, tile_size=64, overlap=0.0):
+        return reference_cells(width, height, tile_size, overlap, clamp=True)
+
+    def test_bins_by_cell_and_filters_by_subject(self):
+        cells = self._cells()
+        catkin_a1 = Annotation(subject="catkin", geometry=BBox(1, 1, 9, 9))
+        catkin_b1 = Annotation(subject="catkin", geometry=BBox(70, 1, 78, 9))
+        bush_a1 = Annotation(subject="bush", geometry=BBox(2, 2, 10, 10))
+        got = annotations_by_cell([catkin_a1, catkin_b1, bush_a1], "catkin", cells, tile_size=64)
+        assert got["A1"] == [catkin_a1]
+        assert got["B1"] == [catkin_b1]
+        assert got["A2"] == []
+        assert got["B2"] == []
+
+    def test_every_cell_in_the_grid_gets_an_entry_even_when_empty(self):
+        cells = self._cells()
+        got = annotations_by_cell([], "catkin", cells, tile_size=64)
+        assert set(got) == {c.name for c in cells}
+        assert all(v == [] for v in got.values())
+
+    def test_feeds_cell_annotation_digests_identically_to_before(self):
+        """cell_annotation_digests, refactored to call this, must still agree with the per-cell
+        digest exactly -- the property TestCellAnnotationDigests already proves, restated here
+        against the shared binning directly."""
+        cells = self._cells()
+        anns = [
+            Annotation(subject="catkin", geometry=BBox(1, 1, 9, 9)),
+            Annotation(subject="catkin", geometry=BBox(70, 1, 78, 9)),
+        ]
+        digests = cell_annotation_digests(anns, "catkin", cells, tile_size=64)
+        by_cell = annotations_by_cell(anns, "catkin", cells, tile_size=64)
+        for cell in cells:
+            expected = cell_annotation_digest(by_cell[cell.name], "catkin", cell)
+            assert digests[cell.name] == expected
+
+    def test_nonzero_overlap_falls_back_to_per_cell_containment(self):
+        cells = self._cells(overlap=0.2)
+        ann = Annotation(subject="catkin", geometry=BBox(1, 1, 9, 9))
+        got = annotations_by_cell([ann], "catkin", cells, tile_size=64, overlap=0.2)
+        assert got["A1"] == [ann]
+
+
+class TestAnnotationCountsByCell:
+    """Every subject's per-cell annotation count, one pass over annotations regardless of how
+    many subjects are present: the completeness route's ``annotation_counts`` field."""
+
+    def _cells(self, width=128, height=128, tile_size=64, overlap=0.0):
+        return reference_cells(width, height, tile_size, overlap, clamp=True)
+
+    def test_counts_every_subject_present_in_one_pass(self):
+        cells = self._cells()
+        anns = [
+            Annotation(subject="catkin", geometry=BBox(1, 1, 9, 9)),
+            Annotation(subject="catkin", geometry=BBox(2, 2, 10, 10)),
+            Annotation(subject="bush", geometry=BBox(70, 1, 78, 9)),
+        ]
+        got = annotation_counts_by_cell(anns, cells, tile_size=64)
+        assert got == {"catkin": {"A1": 2}, "bush": {"B1": 1}}
+
+    def test_no_annotations_yields_no_subjects(self):
+        cells = self._cells()
+        assert annotation_counts_by_cell([], cells, tile_size=64) == {}
+
+    def test_agrees_with_annotations_by_cell_lengths(self):
+        cells = self._cells()
+        anns = [
+            Annotation(subject="catkin", geometry=BBox(1, 1, 9, 9)),
+            Annotation(subject="catkin", geometry=BBox(70, 1, 78, 9)),
+            Annotation(subject="catkin", geometry=BBox(70, 70, 78, 78)),
+        ]
+        counts = annotation_counts_by_cell(anns, cells, tile_size=64)
+        by_cell = annotations_by_cell(anns, "catkin", cells, tile_size=64)
+        for name, cell_anns in by_cell.items():
+            if cell_anns:
+                assert counts["catkin"][name] == len(cell_anns)
+            else:
+                assert name not in counts.get("catkin", {})
 
 
 class TestStaleCells:
