@@ -44,10 +44,12 @@ export function TopBar() {
       />
 
       {/* Tabs: the grid's auto track keeps them truly centered */}
-      <div className="flex items-center gap-1 justify-self-center">
+      <div role="tablist" aria-label="Tabs" className="flex items-center gap-1 justify-self-center">
         {TAB_NAMES.map((id) => (
           <button
             key={id}
+            role="tab"
+            aria-selected={activeTab === id}
             onClick={() => setActiveTab(id)}
             className={`px-3 h-7 rounded text-[12px] font-medium transition-colors ${
               activeTab === id

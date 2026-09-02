@@ -36,4 +36,25 @@ describe("EmbeddedTool", () => {
     expect(link).toHaveAttribute("target", "_blank");
     expect(link).toHaveAttribute("rel", "noopener noreferrer");
   });
+
+  it("names Try again and Open in a new tab with the tool's own title", () => {
+    const onRetry = vi.fn();
+    const { unmount } = render(
+      <EmbeddedTool
+        title="Sweep TensorBoard"
+        url={null}
+        error="sweep not found"
+        onRetry={onRetry}
+      />,
+    );
+    expect(
+      screen.getByRole("button", { name: "Try again: Sweep TensorBoard" }),
+    ).toBeInTheDocument();
+    unmount();
+
+    render(<EmbeddedTool title="Ray dashboard" url="http://localhost:8265" />);
+    expect(
+      screen.getByRole("link", { name: "Open in a new tab: Ray dashboard" }),
+    ).toBeInTheDocument();
+  });
 });
