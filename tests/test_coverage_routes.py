@@ -297,7 +297,10 @@ class TestAnnotationCounts:
         body = got.json()
         assert body["by_subject"] == {}
         assert body["annotation_counts"] == {"catkin": {cell_a["name"]: 1, cell_b["name"]: 1}}
-        assert body["grid_error"] is None
+        assert body["counts_error"] is None
+        assert {k: body["counts_grid"][k] for k in
+                ("width", "height", "tile_size", "overlap", "cols", "rows")} == \
+            {k: served[k] for k in ("width", "height", "tile_size", "overlap", "cols", "rows")}
 
     def test_counts_use_the_same_grid_the_grid_route_serves(self, client, tmp_path):
         """``_grid_for_raster`` is the one implementation both routes call: the completeness
@@ -321,11 +324,12 @@ class TestAnnotationCounts:
             "path": path, "dataset_root": str(root)}).json()["annotation_counts"]
         assert counts == {"catkin": {one_cell["name"]: 1}}
 
-    def test_incomplete_band_group_reports_grid_error_and_serves_by_subject_without_counts(
+    def test_incomplete_band_group_reports_counts_error_and_serves_by_subject_with_its_record(
         self, client, tmp_path,
     ):
         """A band group missing a member cannot derive a grid at all; the read still serves
-        ``by_subject`` (empty here) with the refusal named in ``grid_error``, never blanked."""
+        ``by_subject`` with the record attested while the group was complete, the refusal named
+        in ``counts_error``, never blanked."""
         import numpy as np
         import tifffile
 
@@ -338,15 +342,109 @@ class TestAnnotationCounts:
         tifffile.imwrite(str(band_a), np.full((16, 16), 1, dtype=np.uint16))
         tifffile.imwrite(str(band_b), np.full((16, 16), 2, dtype=np.uint16))
         write_band_group_manifest(img_dir, "cap", {"Green": band_a, "Red": band_b})
+        manifest_path = str(img_dir / "cap.bandgroup")
+
+        grid = _grid(client, manifest_path, tile_size=8)
+        resp = client.post("/api/coverage/completeness", json={
+            "image_path": manifest_path, "subject": "bush", "grid": _grid_only(grid),
+            "cell": "A1", "complete": True, "user": "breeder"})
+        assert resp.status_code == 200, resp.text
+
         band_b.unlink()
 
-        resp = client.get("/api/coverage/completeness", params={"path": str(img_dir / "cap.tif")})
+        resp = client.get("/api/coverage/completeness", params={"path": manifest_path})
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["by_subject"]["bush"]["cells_complete"] == ["A1"]
+        assert body["annotation_counts"] == {}
+        assert body["counts_grid"] is None
+        assert body["counts_error"]
+        assert "cap" in body["counts_error"]
+
+
+class TestCompletenessCountsAreBestEffort:
+    """The counts computation (grid derivation, label read, binning) is best-effort beside
+    ``by_subject``, which needs no raster at all: a raster-side failure costs ``counts_error``,
+    never the records."""
+
+    def test_a_missing_raster_serves_the_records_with_a_counts_error(self, client, dated_dataset):
+        root, path = dated_dataset
+        grid = _grid(client, path, tile_size=64)
+        resp = client.post("/api/coverage/completeness", json={
+            "image_path": path, "subject": "catkin", "grid": _grid_only(grid), "cell": "A1",
+            "complete": True, "user": "breeder"})
+        assert resp.status_code == 200, resp.text
+
+        Path(path).unlink()
+
+        got = client.get("/api/coverage/completeness", params={"path": path})
+        assert got.status_code == 200, got.text
+        body = got.json()
+        assert body["by_subject"]["catkin"]["cells_complete"] == ["A1"]
+        assert body["annotation_counts"] == {}
+        assert body["counts_grid"] is None
+        assert body["counts_error"]
+
+    def test_an_unreadable_label_costs_only_the_counts_when_no_record_needs_it(
+        self, client, dated_dataset,
+    ):
+        root, path = dated_dataset
+        label_path = root / "annotations" / "2026-03-01" / "plot.json"
+        label_path.parent.mkdir(parents=True, exist_ok=True)
+        label_path.write_text("not json {][", encoding="utf-8")
+
+        resp = client.get("/api/coverage/completeness", params={"path": path})
         assert resp.status_code == 200, resp.text
         body = resp.json()
         assert body["by_subject"] == {}
         assert body["annotation_counts"] == {}
-        assert body["grid_error"]
-        assert "cap" in body["grid_error"]
+        assert body["counts_grid"] is None
+        assert body["counts_error"]
+        assert str(label_path) in body["counts_error"]
+
+    def test_an_unreadable_label_still_refuses_when_a_record_depends_on_it(
+        self, client, dated_dataset,
+    ):
+        """The pre-existing rule stays: staleness cannot be computed for an existing record
+        without the label file, so that path still refuses rather than reporting a counts
+        error and serving a record whose staleness is unknown."""
+        root, path = dated_dataset
+        grid = _grid(client, path, tile_size=64)
+        client.post("/api/coverage/completeness", json={
+            "image_path": path, "subject": "catkin", "grid": _grid_only(grid), "cell": "A1",
+            "complete": True, "user": "breeder"})
+
+        label_path = root / "annotations" / "2026-03-01" / "plot.json"
+        label_path.parent.mkdir(parents=True, exist_ok=True)
+        label_path.write_text("not json {][", encoding="utf-8")
+
+        resp = client.get("/api/coverage/completeness", params={"path": path})
+        assert resp.status_code == 400
+        assert str(label_path) in resp.json()["detail"]
+
+
+class TestCompletenessPathConfinement:
+    """``get_completeness`` opens the raster (for its counts) through the same allow-list
+    ``get_grid`` uses, on every branch."""
+
+    def test_a_path_outside_the_allowed_roots_is_refused_even_with_an_allowed_dataset_root(
+        self, client, dated_dataset, tmp_path_factory,
+    ):
+        root, _path = dated_dataset
+        outside_dir = tmp_path_factory.mktemp("outside") / "images" / "2026-03-01"
+        outside_dir.mkdir(parents=True)
+        outside_path = outside_dir / "secret.tif"
+        Image.fromarray(np.zeros((80, 100, 3), dtype=np.uint8)).save(outside_path)
+
+        resp = client.get("/api/coverage/completeness", params={
+            "path": str(outside_path), "dataset_root": str(root)})
+        assert resp.status_code == 403
+
+    def test_an_in_root_read_still_answers(self, client, dated_dataset):
+        root, path = dated_dataset
+        resp = client.get("/api/coverage/completeness", params={
+            "path": path, "dataset_root": str(root)})
+        assert resp.status_code == 200, resp.text
 
 
 class TestCoverageRecord:
@@ -731,6 +829,31 @@ class TestCompletenessRoute:
         assert reattest.status_code == 200, reattest.text
         assert reattest.json()["complete"] is True
         assert reattest.json()["cells_complete"] == ["A1"]
+
+    def test_unattest_of_a_never_attested_cell_writes_nothing(self, client, dated_dataset):
+        """complete=false on a bucket with no existing record is an idempotent no-op: nothing
+        to unattest, so no record is minted and block calibration's view is unchanged."""
+        from tcip_mcp.pipelines.region_completeness import incomplete_cells_for_rect
+
+        root, path = dated_dataset
+        grid = _grid(client, path, tile_size=64)
+        resp = self._toggle(client, path, grid, "A1", complete=False)
+        assert resp.status_code == 200, resp.text
+        assert resp.json() == {"status": "ok", "complete": False, "cells_complete": []}
+
+        assert client.get(
+            "/api/coverage/completeness", params={"path": path}).json()["by_subject"] == {}
+        assert incomplete_cells_for_rect(root, "catkin", Path(path).stem, (0, 0, 64, 64)) is None
+
+    def test_attest_then_unattest_still_works(self, client, dated_dataset):
+        """Admits valid work: the never-attested no-op does not disturb the ordinary
+        attest/unattest sequence."""
+        _root, path = dated_dataset
+        grid = _grid(client, path, tile_size=64)
+        assert self._toggle(client, path, grid, "A1", complete=True).status_code == 200
+        resp = self._toggle(client, path, grid, "A1", complete=False)
+        assert resp.status_code == 200, resp.text
+        assert resp.json() == {"status": "ok", "complete": False, "cells_complete": []}
 
     def test_complete_direction_is_required(self, client, dated_dataset):
         _root, path = dated_dataset

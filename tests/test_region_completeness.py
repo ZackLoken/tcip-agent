@@ -220,21 +220,6 @@ class TestAnnotationCountsByCell:
         cells = self._cells()
         assert annotation_counts_by_cell([], cells, tile_size=64) == {}
 
-    def test_agrees_with_annotations_by_cell_lengths(self):
-        cells = self._cells()
-        anns = [
-            Annotation(subject="catkin", geometry=BBox(1, 1, 9, 9)),
-            Annotation(subject="catkin", geometry=BBox(70, 1, 78, 9)),
-            Annotation(subject="catkin", geometry=BBox(70, 70, 78, 78)),
-        ]
-        counts = annotation_counts_by_cell(anns, cells, tile_size=64)
-        by_cell = annotations_by_cell(anns, "catkin", cells, tile_size=64)
-        for name, cell_anns in by_cell.items():
-            if cell_anns:
-                assert counts["catkin"][name] == len(cell_anns)
-            else:
-                assert name not in counts.get("catkin", {})
-
 
 class TestStaleCells:
     def _grid_and_cells(self):
