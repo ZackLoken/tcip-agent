@@ -711,8 +711,8 @@ Docstring is the function's docstring first line, verbatim.
 | tool | line | audited | docstring first line |
 |---|---|---|---|
 | `freeze_split_manifest` | `data_tools.py:222` | yes | Freeze a finished run's own drawn train/val partition into a ``split_manifest`` record, |
-| `validate_data_quality` | `data_tools.py:542` | yes | Run quality checks on a dataset (any supported annotation format). |  <!-- queued: P5-18 unify -->
-| `make_splits` | `data_tools.py:693` | yes | Compute a leakage-free, annotation-stratified train/val/calibration split. |
+| `validate_data_quality` | `data_tools.py:563` | yes | Run quality checks on a dataset (any supported annotation format). |  <!-- queued: P5-18 unify -->
+| `make_splits` | `data_tools.py:714` | yes | Compute a leakage-free, annotation-stratified train/val/calibration split. |
 
 ### experiment_tools.py (4 tools)
 
@@ -850,8 +850,8 @@ anything.
 | `list_training_runs` | `training_tools.py:1041` | yes | List every training run this platform can currently account for. |
 | `cancel_training` | `training_tools.py:1271` | yes | Request graceful cancellation of a running training run. |
 | `run_hpo` | `training_tools.py:1839` | yes | Run hyperparameter optimization on Ray Tune, training each trial for real. |
-| `cancel_hpo` | `training_tools.py:2198` | yes | Request cooperative cancellation of a running HPO sweep. |
-| `evaluate_model` | `training_tools.py:2704` | yes | Evaluate a trained checkpoint on a (held-out) dataset and write test_results.json. |
+| `cancel_hpo` | `training_tools.py:2210` | yes | Request cooperative cancellation of a running HPO sweep. |
+| `evaluate_model` | `training_tools.py:2738` | yes | Evaluate a trained checkpoint on a (held-out) dataset and write test_results.json. |
 
 ### vision_tools.py (3 tools)
 
@@ -1324,9 +1324,9 @@ Writers: `set_image_status`,
 (`trainable_stems`) before the split's manifest or file tree is written, then
 attributed to a split by
 `negative_carry = _compute_negative_carry(label_map, bare_parts, image_map, subject, only_date)`
-`packages/tcip-mcp/src/tcip_mcp/tools/data_tools.py:936`, then applied by
+`packages/tcip-mcp/src/tcip_mcp/tools/data_tools.py:957`, then applied by
 `_apply_negative_carry(negative_carry, out_dir, subject)`
-`packages/tcip-mcp/src/tcip_mcp/tools/data_tools.py:1122`).
+`packages/tcip-mcp/src/tcip_mcp/tools/data_tools.py:1143`).
 
 Readers: `tcip_mcp.pipelines.data.label_queries.confirmed_negative_names`,
 `packages/tcip-mcp/src/tcip_mcp/pipelines/data/label_queries.py:424`; `_status_bucket_for`,
@@ -1952,7 +1952,13 @@ Path: `<output_path>/split_manifest.json`, addressed by `split_manifest_key`,
 `packages/tcip-mcp/src/tcip_mcp/tools/data_tools.py:37`, under whatever directory the caller
 asked the partition to be written to; no dataset resolver owns this layout.
 
-Writer: `make_splits`, `data_tools.py:693`, when `output_path` is given or `materialize=True`.
+Writer: `make_splits`, `data_tools.py:714`, when `output_path` is given or `materialize=True`.
+A finished run's own drawn train/val partition freezes into the identical shape through
+`freeze_split_manifest` (`data_tools.py:222`), the second writer; both compose their fields
+through the one `compose_split_manifest` (`data_tools.py:123`) that builds the dict and writes
+it, so the two writers can never disagree on what a `split_manifest` record carries. A frozen
+manifest also carries `origin` (`{"experiment_id", "frozen_at"}`), absent on a drawn one, the
+field `read_split_manifest_dir` and its callers use to tell the two apart.
 The three sides are `splits.SPLIT_NAMES` (`train`, `val`, `calibration`); a manifest write states
 all three ratios (`train_ratio`, `val_ratio`, `calibration_ratio`) non-zero, refusing whichever is
 zero by name, since a manifest always draws all three sides. The draw refuses, before any write,
@@ -1970,7 +1976,9 @@ per-stem sha256[:16] over each admitted stem's own label bytes, the same absent-
 but admitted nothing writes no block, so a reader that finds none under a date treats it as one
 the manifest never held, not one it holds empty), `splits` (`train`/`val`/`calibration`
 identities, `<date>/<stem>`, the bare `<stem>` under a flat tree), `admission_counts` (the summed
-`trainable_stems` counts across every date), `calibration_foreground_groups_by_date` and
+`trainable_stems` counts across every date; a frozen manifest records this as `{}`, since
+freezing a training run's own drawn partition records no admission draw),
+`calibration_foreground_groups_by_date` and
 `realized_ratios` (both described below). The answer (and the persisted manifest
 record) also carry `calibration_foreground_groups_by_date`, a count for every date `members`
 holds, `0` included, since the floor above is over the whole draw and one date's own calibration
