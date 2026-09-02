@@ -1,6 +1,6 @@
 """``scripts/conform_view_coverage_viewing.py``: the one-off conform step for a dataset whose
 ``view_coverage`` records still carry the old string forms of ``stats_source`` and
-``display_bounds``.
+``display_bounds``, a stored ``working_scale_bar``, or an old ``cells_swept`` name list.
 """
 
 from __future__ import annotations
@@ -38,7 +38,7 @@ def _bind_sqlite() -> SqliteBackend:
     return backend
 
 
-def _old_shape_record(**viewing_overrides) -> dict:
+def _old_shape_record(*, cells_swept=(), **viewing_overrides) -> dict:
     viewing = {
         "stats_source": "sampled(seed=0, pixel_fraction=0.500000)",
         "display_bounds": "0,1000;5,20",
@@ -48,7 +48,7 @@ def _old_shape_record(**viewing_overrides) -> dict:
     return {
         "grid": _GRID,
         "cells_served_at_native": ["A1"],
-        "cells_swept": [],
+        "cells_swept": list(cells_swept),
         "viewing": viewing,
         "updated_at": "2026-01-01T00:00:00+00:00",
     }
@@ -109,11 +109,14 @@ def test_an_old_shape_record_conforms_and_the_route_serves_it(tmp_path: Path):
     assert refused is False
     assert outcomes == ["bush/2026-03-01/plot.tif: conformed viewing"]
     stored = ts.read(view_coverage_key(tmp_path))
-    viewing = stored["bush/2026-03-01"]["plot.tif"]["viewing"]
+    record = stored["bush/2026-03-01"]["plot.tif"]
+    assert record["cells_seen_at_scale"] == {}
+    viewing = record["viewing"]
     assert viewing["stats_source"] == {
         "read": "window_sample", "seed": 0, "pixel_fraction": 0.5, "overview_scale": None,
     }
     assert viewing["display_bounds"] == [[0.0, 1000.0], [5.0, 20.0]]
+    assert "working_scale_bar" not in viewing
 
     client = TestClient(app, base_url="http://127.0.0.1")
     resp = client.get("/api/coverage", params={
@@ -121,6 +124,24 @@ def test_an_old_shape_record_conforms_and_the_route_serves_it(tmp_path: Path):
         "subject": "bush", "date": "2026-03-01", "dataset_root": str(tmp_path)})
     assert resp.status_code == 200, resp.text
     assert resp.json()["coverage"]["viewing"]["base_served_size"] == "100x80"
+
+
+def test_an_old_swept_list_is_dropped_and_its_count_reported(tmp_path: Path):
+    _bind_sqlite()
+    module = _load_script()
+    _seed_fresh(tmp_path, "bush/2026-03-01", "plot.tif",
+                _old_shape_record(cells_swept=["A1", "B2"]))
+
+    outcomes, refused = module.conform_root(tmp_path, plan=False)
+
+    assert refused is False
+    assert outcomes == [
+        "bush/2026-03-01/plot.tif: conformed viewing and dropped 2 old swept cell names: no "
+        "scale can be anchored to a cell swept under a bar the record no longer holds"
+    ]
+    record = ts.read(view_coverage_key(tmp_path))["bush/2026-03-01"]["plot.tif"]
+    assert record["cells_seen_at_scale"] == {}
+    assert "cells_swept" not in record
 
 
 def test_an_empty_viewing_conforms_to_all_nulls_and_the_route_serves_it(tmp_path: Path):
@@ -139,7 +160,7 @@ def test_an_empty_viewing_conforms_to_all_nulls_and_the_route_serves_it(tmp_path
     stored = ts.read(view_coverage_key(tmp_path))
     viewing = stored["bush/2026-03-01"]["empty.tif"]["viewing"]
     assert viewing == {
-        "bands": None, "stretch": None, "base_served_size": None, "working_scale_bar": None,
+        "bands": None, "stretch": None, "base_served_size": None,
         "stats_source": None, "display_bounds": None,
     }
 
@@ -168,21 +189,21 @@ def test_a_record_already_in_the_current_shape_is_reported_unchanged(tmp_path: P
     _bind_sqlite()
     module = _load_script()
     conformed_viewing = {
-        "bands": None, "stretch": None, "base_served_size": "100x80", "working_scale_bar": None,
+        "bands": None, "stretch": None, "base_served_size": "100x80",
         "stats_source": {"read": "none", "seed": None, "pixel_fraction": None,
                           "overview_scale": None},
         "display_bounds": None,
     }
     record = {
-        "grid": _GRID, "cells_served_at_native": [], "cells_swept": [], "viewing": conformed_viewing,
-        "updated_at": "2026-01-01T00:00:00+00:00",
+        "grid": _GRID, "cells_served_at_native": [], "cells_seen_at_scale": {},
+        "viewing": conformed_viewing, "updated_at": "2026-01-01T00:00:00+00:00",
     }
     _seed_fresh(tmp_path, "bush/2026-03-01", "plot.tif", record)
 
     outcomes, refused = module.conform_root(tmp_path, plan=False)
 
     assert refused is False
-    assert outcomes == ["bush/2026-03-01/plot.tif: viewing already validates, unchanged"]
+    assert outcomes == ["bush/2026-03-01/plot.tif: record already validates, unchanged"]
     assert ts.read(view_coverage_key(tmp_path))["bush/2026-03-01"]["plot.tif"] == record
 
 

@@ -13,10 +13,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import statistics
 from pathlib import Path
 
 import tcip_store
-from tcip_annotation.state import Annotation, BBox, Point, Polygon
+from tcip_annotation.state import Annotation, BBox, Point, Polygon, bbox_of
 
 from tcip_mcp.pipelines.reference_grid import Cell
 
@@ -222,6 +223,67 @@ def stale_cells(
         if stamped is None or digests.get(name) != stamped:
             stale.append(name)
     return stale
+
+
+def default_working_scale_source(judged_span_px: int) -> str:
+    """The one sentence :func:`working_scale_bar`'s ``source`` field carries wherever a route
+    serves or stores a bar: states plainly that ``judged_span_px`` is a documented default, not
+    a measurement of this subject's own legibility, so a caller on either side of the route
+    boundary reads the same disclosure rather than two independently-worded ones."""
+    return (
+        f"a documented default: {judged_span_px}px is the span a typical annotated object is "
+        "taken to read at on screen, not a measurement of this subject's own legibility"
+    )
+
+
+def saved_extents(annotations: list[Annotation], subject: str) -> list[float]:
+    """The longer bounding-box side, in native pixels, of every ``subject`` annotation in
+    ``annotations`` that carries a box or polygon geometry: the raw material the working-scale
+    bar (:func:`working_scale_bar`) takes its median over.
+
+    A :class:`Point` and a geometry-less annotation contribute nothing: neither has a bounding
+    box, and a point's tiny nominal extent would pull the median toward a scale no box or polygon
+    on the image was actually judged at. The longer side is the ruling's own word for it,
+    "spans": the box or polygon's longer edge is what a breeder's eye has to take in to judge the
+    object legible, not its narrower one.
+    """
+    extents: list[float] = []
+    for a in annotations:
+        if a.subject != subject:
+            continue
+        g = a.geometry
+        if not isinstance(g, (BBox, Polygon)):
+            continue
+        box = bbox_of(g)
+        extents.append(max(box.x2 - box.x1, box.y2 - box.y1))
+    return extents
+
+
+def working_scale_bar(
+    extents: list[float], *, judged_span_px: int, source: str,
+) -> dict | None:
+    """The view scale at which the median of ``extents`` spans ``judged_span_px`` screen pixels,
+    or ``None`` for no extents at all.
+
+    One median over every extent handed in (the ruling's own measure, per image and per
+    subject): a per-cell bar would be a different measure over too few annotations per cell to
+    be a real median, and is not computed here. The value is not clamped to the viewer's zoom
+    ladder or to the image's own fit scale; a caller that wants to state what an out-of-range bar
+    means does so on the served value, not by silently bending it back into range. A single
+    whole-frame annotation on an otherwise unannotated image yields a bar every ordinary view
+    meets, the ruling's own consequence for a large object: the median moves as more annotations
+    are saved, never adjusted here to soften that.
+    """
+    if not extents:
+        return None
+    median_extent = statistics.median(extents)
+    return {
+        "value": judged_span_px / median_extent,
+        "median_extent_native_px": median_extent,
+        "annotation_count": len(extents),
+        "judged_span_px": judged_span_px,
+        "source": source,
+    }
 
 
 def incomplete_cells_for_rect(

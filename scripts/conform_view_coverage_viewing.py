@@ -1,28 +1,34 @@
-"""Conform a dataset's stored ``view_coverage`` records to the current ``CoverageViewing`` shape.
+"""Conform a dataset's stored ``view_coverage`` records to the current ``CoverageRecord`` shape.
 
 A deliberate one-off operator script, per this repo's no-backward-compatibility boundary
-(CLAUDE.md): ``CoverageViewing`` now declares a fixed six-key shape with a structured
-``stats_source`` and a positional ``display_bounds``, so a record still carrying the old bare
-string forms needs conforming before ``get_coverage``/``post_coverage`` (which refuse a
-``viewing`` that does not validate) will read it again. It never runs as part of any runtime path.
+(CLAUDE.md): ``CoverageViewing`` now declares a fixed five-key shape with a structured
+``stats_source`` and a positional ``display_bounds`` and no longer carries a
+``working_scale_bar`` (the bar is derived server-side from the label file, never stored on this
+record), and ``CoverageRecord`` carries ``cells_seen_at_scale`` in place of a bare ``cells_swept``
+name list. A record still carrying any of the old shapes needs conforming before
+``get_coverage``/``post_coverage`` (which refuse a record that does not validate) will read it
+again. It never runs as part of any runtime path.
 
-For every bucket and image in a dataset's ``view_coverage`` record whose ``viewing`` does not
-already validate as ``CoverageViewing``, this maps the old string forms of ``stats_source``
-(``"none"``, ``"dtype_full_scale"`` and ``"served_array"`` to the read alone;
-``overview(scale=...)`` and ``sampled(seed=..., pixel_fraction=...)`` to ``"overview"`` and
-``"window_sample"`` with their numbers) and of ``display_bounds`` (``lo,hi;lo,hi`` to pairs) to
-the new values, carries ``bands``/``stretch``/``base_served_size``/``working_scale_bar`` through
-unchanged, and sets any of the six keys absent from the stored ``viewing`` to ``null``.
+For every bucket and image in a dataset's ``view_coverage`` record that does not already
+validate as ``CoverageRecord``, this maps the old string forms of ``stats_source`` (``"none"``,
+``"dtype_full_scale"`` and ``"served_array"`` to the read alone; ``overview(scale=...)`` and
+``sampled(seed=..., pixel_fraction=...)`` to ``"overview"`` and ``"window_sample"`` with their
+numbers) and of ``display_bounds`` (``lo,hi;lo,hi`` to pairs) to the new values, carries
+``bands``/``stretch``/``base_served_size`` through unchanged, drops a stored ``working_scale_bar``
+key from ``viewing`` outright (the stored bar was always the latest session's, never a bound any
+particular cell was actually swept under), and drops a stored ``cells_swept`` name list from the
+record, reporting its count: no scale can be anchored to a cell swept under a bar the record no
+longer holds, so those names carry to ``cells_seen_at_scale`` (which starts empty, not
+back-filled) rather than being fabricated a scale they were never recorded against.
 
     python scripts/conform_view_coverage_viewing.py <dataset_root> [<dataset_root> ...]
     python scripts/conform_view_coverage_viewing.py --plan <dataset_root>
 
-Every image in a root is validated before anything is written: a ``viewing`` that neither
-validates as-is nor reshapes into something that does refuses the whole root by image name and
-leaves it untouched, so a root is never left half-conformed. Every other root named on the
-command line still runs. The write, when there is one, happens inside the same
-``tcip_store.transaction`` lock the route itself takes on the record's key, so it can never race
-a concurrent post.
+Every image in a root is validated before anything is written: a record that neither validates
+as-is nor reshapes into something that does refuses the whole root by image name and leaves it
+untouched, so a root is never left half-conformed. Every other root named on the command line
+still runs. The write, when there is one, happens inside the same ``tcip_store.transaction`` lock
+the route itself takes on the record's key, so it can never race a concurrent post.
 
 Exit codes: 0 conformed (or nothing to conform) for every root named; 2 if any root was refused.
 """
@@ -42,8 +48,10 @@ import tcip_store as ts  # noqa: E402
 from pydantic import ValidationError  # noqa: E402
 from tcip_mcp.dataset_layout import view_coverage_key  # noqa: E402
 from tcip_store.binding import bind_default  # noqa: E402
-from tcip_web.routes._coverage_models import CoverageViewing  # noqa: E402
+from tcip_web.routes._coverage_models import CoverageRecord  # noqa: E402
 
+# working_scale_bar stays a recognized key so an old viewing carrying it does not refuse as an
+# unknown key; _reshaped_viewing below drops it unconditionally rather than mapping it forward.
 _VIEWING_KEYS = frozenset(
     {"bands", "stretch", "base_served_size", "working_scale_bar", "stats_source", "display_bounds"})
 _STATS_SOURCE_LITERALS = ("none", "dtype_full_scale", "served_array")
@@ -93,13 +101,15 @@ def _parse_display_bounds(value: object) -> list[list[float]] | None:
 
 
 def _reshaped_viewing(viewing: dict) -> dict:
-    """The full six-key ``CoverageViewing`` shape mapped from ``viewing``'s old forms.
+    """The current five-key ``CoverageViewing`` shape mapped from ``viewing``'s old forms.
 
-    ``bands``, ``stretch``, ``base_served_size`` and ``working_scale_bar`` already carry the
-    current shape wherever the route ever wrote them, so they pass through unchanged (``None``
-    where the key was never present); only ``stats_source`` and ``display_bounds`` held a
-    different shape before this change. Raises ``ValueError`` naming any key outside the six
-    declared ones rather than silently dropping it: a stray key never reaches ``.get()``.
+    ``bands``, ``stretch`` and ``base_served_size`` already carry the current shape wherever the
+    route ever wrote them, so they pass through unchanged (``None`` where the key was never
+    present); ``stats_source`` and ``display_bounds`` held a different shape before this change;
+    a stored ``working_scale_bar`` (any shape) is dropped outright, never mapped forward, since
+    the bar is now derived server-side and a value echoed back from the browser recorded
+    nothing. Raises ``ValueError`` naming any key outside the recognized ones rather than
+    silently dropping it: a stray key never reaches ``.get()``.
     """
     unknown = sorted(set(viewing) - _VIEWING_KEYS)
     if unknown:
@@ -108,7 +118,6 @@ def _reshaped_viewing(viewing: dict) -> dict:
         "bands": viewing.get("bands"),
         "stretch": viewing.get("stretch"),
         "base_served_size": viewing.get("base_served_size"),
-        "working_scale_bar": viewing.get("working_scale_bar"),
         "stats_source": _parse_stats_source(viewing.get("stats_source")),
         "display_bounds": _parse_display_bounds(viewing.get("display_bounds")),
     }
@@ -117,25 +126,45 @@ def _reshaped_viewing(viewing: dict) -> dict:
 def _conform_record(record: dict, *, plan: bool) -> tuple[str, dict | None]:
     """One outcome line and, when the record needs conforming, its replacement.
 
-    The replacement is ``None`` (and the outcome says so) when the stored ``viewing`` already
-    validates: a rerun against an already-conformed dataset is a no-op. Raises ``ValueError``
-    naming what could not be parsed or still does not validate once reshaped.
+    The replacement is ``None`` (and the outcome says so) when the stored record already
+    validates as ``CoverageRecord``: a rerun against an already-conformed dataset is a no-op.
+    Raises ``ValueError`` naming what could not be parsed or still does not validate once
+    reshaped.
     """
+    try:
+        CoverageRecord.model_validate(record)
+        return "record already validates, unchanged", None
+    except ValidationError:
+        pass
     viewing = record.get("viewing")
     if not isinstance(viewing, dict):
         raise ValueError(f"viewing is not a mapping: {viewing!r}")
+    reshaped_viewing = _reshaped_viewing(viewing)
+    old_swept = record.get("cells_swept")
+    if old_swept is not None and not isinstance(old_swept, list):
+        raise ValueError(f"cells_swept is not a list: {old_swept!r}")
+    dropped_count = len(old_swept) if isinstance(old_swept, list) else 0
+    reshaped = {
+        "grid": record.get("grid"),
+        "cells_served_at_native": record.get("cells_served_at_native") or [],
+        "cells_seen_at_scale": {},
+        "viewing": reshaped_viewing,
+        "updated_at": record.get("updated_at"),
+    }
     try:
-        CoverageViewing.model_validate(viewing)
-        return "viewing already validates, unchanged", None
-    except ValidationError:
-        pass
-    reshaped = _reshaped_viewing(viewing)
-    try:
-        CoverageViewing.model_validate(reshaped)
+        CoverageRecord.model_validate(reshaped)
     except ValidationError as exc:
-        raise ValueError(f"reshaped viewing still does not validate: {exc}") from exc
+        raise ValueError(f"reshaped record still does not validate: {exc}") from exc
     verb = "would conform" if plan else "conformed"
-    return f"{verb} viewing", {**record, "viewing": reshaped}
+    if dropped_count:
+        name = "swept cell name" if dropped_count == 1 else "swept cell names"
+        message = (
+            f"{verb} viewing and dropped {dropped_count} old {name}: no scale can be anchored "
+            "to a cell swept under a bar the record no longer holds"
+        )
+    else:
+        message = f"{verb} viewing"
+    return message, reshaped
 
 
 def _conform_store(store: dict, *, plan: bool) -> tuple[list[str], dict, bool]:

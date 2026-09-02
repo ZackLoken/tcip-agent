@@ -10,8 +10,10 @@ mapper covers only the schema shapes these models use (string/number/integer/boo
 union, a nested model by ``$ref``, an array, a fixed-length tuple, a string-enum union, a
 single-member ``Literal`` discriminator rendered as its literal type, and a free-form object
 (``additionalProperties`` true, no ``properties``) rendered as ``Record<string, unknown>``);
-annotation keywords such as ``title`` and ``default`` are ignored rather than mapped, and any
-other shape (including an object with its own fixed, non-``$ref`` property set) refuses by name.
+annotation keywords such as ``title`` and ``default`` are ignored rather than mapped, a typed
+mapping (``dict[str, T]``, ``additionalProperties`` a schema rather than a bare ``true``) renders
+``Record<string, T>``, and any other shape (including an object with its own fixed, non-``$ref``
+property set) refuses by name.
 ``tcip_mcp.web_client.TAB_NAMES`` and ``PLATFORM_PANEL_EVENTS``, each of ``web_client``'s own
 named ``PANEL_EVENT_*`` constants, ``routes/images.py``'s ``IMAGE_ERROR_HEADER`` and
 ``OVERVIEWS_REQUIRED``, and ``tcip_web.jobstore.TERMINAL_STATUSES`` are projected alongside the
@@ -148,6 +150,9 @@ def _ts_type(schema: dict, where: str) -> str:
         # model's own fields arrive as a ``$ref`` instead, so a fixed non-``$ref`` shape refuses.
         if not schema.get("properties") and schema.get("additionalProperties") is True:
             return "Record<string, unknown>"
+        if not schema.get("properties") and isinstance(schema.get("additionalProperties"), dict):
+            # dict[str, T] (a typed mapping, not free-form): Record<string, T>.
+            return f"Record<string, {_ts_type(schema['additionalProperties'], where)}>"
     if kind == "array":
         if "prefixItems" in schema:
             items = ", ".join(_ts_type(s, where) for s in schema["prefixItems"])

@@ -62,12 +62,19 @@ class StatsSource(BaseModel):
 
 
 class WorkingScaleBar(BaseModel):
-    """The coarsest view scale at which annotations were committed on an image and subject this
-    session, and how that scale was measured."""
+    """A subject's working-scale bar for one image: the view scale at which the median saved
+    annotation's longer bounding-box side (``median_extent_native_px``, over
+    ``annotation_count`` box/polygon annotations) spans ``judged_span_px`` screen pixels.
+    Derived from the label file alone (:func:`tcip_mcp.pipelines.region_completeness.
+    working_scale_bar`), never echoed back from the browser: ``source`` states in one line that
+    ``judged_span_px`` is a documented default, not a measurement of object legibility."""
 
     model_config = ConfigDict(extra="forbid")
 
     value: float
+    median_extent_native_px: float
+    annotation_count: int
+    judged_span_px: int
     source: str
 
 
@@ -94,17 +101,24 @@ class CoverageViewing(BaseModel):
     stats_source: Optional[StatsSource]
     display_bounds: Optional[list[tuple[Optional[float], Optional[float]]]]
     base_served_size: Optional[str]
-    working_scale_bar: Optional[WorkingScaleBar]
 
 
 class CoverageRecord(BaseModel):
     """The stored per-image view-coverage record, as ``get_coverage`` serves it and
-    ``post_coverage`` writes it."""
+    ``post_coverage`` writes it.
+
+    ``cells_seen_at_scale`` is a bound, not an attention claim: a recorded value means every
+    sub-cell of that cell has, across any number of viewport moments this session or an earlier
+    one, been fully on screen at or above it (``coverageTracker.ts``'s ``subCellScale``, the
+    tightest bound the tracker knows). Whether a cell counts as "swept" is derived against a
+    working-scale bar the record no longer carries (see ``routes/coverage.py``'s docstring and
+    ``lib/coverage.ts``'s ``meetsBar``), never stored here.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
     grid: GridGeometry
     cells_served_at_native: list[str]
-    cells_swept: list[str]
+    cells_seen_at_scale: dict[str, float]
     viewing: CoverageViewing
     updated_at: str
