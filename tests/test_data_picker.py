@@ -401,6 +401,38 @@ def test_list_split_choices_offers_a_frozen_manifest_with_its_origin(tmp_path: P
     assert entry["origin"]["experiment_id"] == "exp-src"
 
 
+def test_list_split_choices_offers_two_frozen_manifests_under_one_splits_directory(tmp_path: Path):
+    """Two runs each freeze to their own default directory (no output_path given), landing
+    under the dataset's one splits/ directory; list_split_choices offers both."""
+    from tcip_mcp.experiments import create_experiment
+    from tcip_mcp.tools.data_tools import freeze_split_manifest
+    from tcip_mcp.tools.training_tools import list_split_choices
+
+    from tests.test_freeze_split_manifest import _real_drawn_experiment
+
+    root = _two_subject_two_date_dataset(tmp_path / "ds")
+    _real_drawn_experiment(root, "exp-first")
+    _real_drawn_experiment(root, "exp-second")
+    first = freeze_split_manifest("exp-first")
+    second = freeze_split_manifest("exp-second")
+    assert "error" not in first, first
+    assert "error" not in second, second
+    assert Path(first["manifest_dir"]).parent == root / "splits"
+    assert Path(second["manifest_dir"]).parent == root / "splits"
+    assert first["manifest_dir"] != second["manifest_dir"]
+
+    picked_cfg = _bespoke_config(root / "images" / DATES[0], root / "annotations" / DATES[0])
+    create_experiment("exp-picked-both-frozen", picked_cfg)
+
+    result = list_split_choices("exp-picked-both-frozen")
+    by_dir = {m["manifest_dir"]: m for m in result["manifests"]}
+
+    assert by_dir[first["manifest_dir"]]["enabled"] is True
+    assert by_dir[first["manifest_dir"]]["origin"]["experiment_id"] == "exp-first"
+    assert by_dir[second["manifest_dir"]]["enabled"] is True
+    assert by_dir[second["manifest_dir"]]["origin"]["experiment_id"] == "exp-second"
+
+
 def test_list_split_choices_as_recorded_reports_moved_directories_like_preflight(
     tmp_path: Path, monkeypatch,
 ):

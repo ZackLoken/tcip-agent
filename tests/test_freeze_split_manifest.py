@@ -21,8 +21,8 @@ from tcip_mcp.pipelines.data.split_construction import auto_train_val, persist_s
 
 from tests.test_split_manifest_binding import DATES, SUBJECT, _two_subject_two_date_dataset
 
-# freeze_split_manifest is imported inside each test body, not here, so a baseline that
-# predates it still collects this module and reaches each test's own assertion.
+# freeze_split_manifest is imported inside each test body, not here, so a tree without it
+# still collects this module and reaches each test's own assertion.
 
 BUILDER = "tests.bespoke_models:build_bespoke_detection"
 
@@ -73,6 +73,7 @@ def test_freeze_split_manifest_round_trips_through_a_real_bind(tmp_path: Path):
     assert "error" not in result, result
     manifest_dir = result["manifest_dir"]
     assert manifest_dir == str(root / "splits" / "frozen-exp-src")
+    assert "calibration" in result["note"] and "refuse" in result["note"]
 
     manifest = read_split_manifest_dir(manifest_dir)
     assert manifest["origin"]["experiment_id"] == "exp-src"
@@ -178,6 +179,40 @@ def test_freeze_split_manifest_refuses_a_spatial_split(tmp_path: Path):
 
     result = freeze_split_manifest("exp-spatial")
     assert "error" in result and "spatial" in result["error"]
+
+
+def test_freeze_split_manifest_refuses_no_group_by(tmp_path: Path):
+    """A split record with no group_by at all (predating the field): freeze_split_manifest
+    never defaults it to 'stem'."""
+    import tcip_store as ts
+    from tcip_mcp.experiments import split_key
+    from tcip_mcp.tools.data_tools import freeze_split_manifest
+
+    root = _two_subject_two_date_dataset(tmp_path / "ds")
+    _real_drawn_experiment(root, "exp-no-group-by")
+
+    split = ts.read(split_key("exp-no-group-by"))
+    ts.replace(split_key("exp-no-group-by"), {**split, "group_by": None})
+
+    result = freeze_split_manifest("exp-no-group-by")
+    assert "error" in result and "group_by" in result["error"]
+
+
+def test_freeze_split_manifest_refuses_no_dataset_hash(tmp_path: Path):
+    """A split record with no dataset_hash at all: freeze_split_manifest cannot check the
+    labels have not moved, so it refuses rather than skipping the check."""
+    import tcip_store as ts
+    from tcip_mcp.experiments import split_key
+    from tcip_mcp.tools.data_tools import freeze_split_manifest
+
+    root = _two_subject_two_date_dataset(tmp_path / "ds")
+    _real_drawn_experiment(root, "exp-no-hash")
+
+    split = ts.read(split_key("exp-no-hash"))
+    ts.replace(split_key("exp-no-hash"), {**split, "dataset_hash": None})
+
+    result = freeze_split_manifest("exp-no-hash")
+    assert "error" in result and "dataset_hash" in result["error"]
 
 
 def test_freeze_split_manifest_refuses_an_external_validation_run(tmp_path: Path):
