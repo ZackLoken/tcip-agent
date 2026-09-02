@@ -75,6 +75,7 @@ export function AnnotateToolbar({
   bandSelection,
   onBandSelectionChange,
   completeWarning,
+  coverageMultiCell,
 }: {
   onSave: () => void;
   saveDisabled: boolean;
@@ -87,6 +88,8 @@ export function AnnotateToolbar({
   onBandSelectionChange?: (next: BandSelection) => void;
   // Coverage facts worth stating when Complete is checked (warn, never block); null = nothing.
   completeWarning?: () => string | null;
+  // The Map tool is offered only once the raster's coverage grid holds more than one cell.
+  coverageMultiCell?: boolean;
 }) {
   const dataset = useStore((s) => s.gui.dataset);
   const mode = useStore((s) => s.gui.mode);
@@ -263,7 +266,7 @@ export function AnnotateToolbar({
         <div
           className="inline-flex gap-0.5 rounded border border-tcip-border bg-tcip-bg p-0.5"
           role="group"
-          aria-label="Draw mode"
+          aria-label="Tool"
         >
           <button
             aria-pressed={mode === "point"}
@@ -325,6 +328,25 @@ export function AnnotateToolbar({
             </svg>
             Polygon
           </button>
+          {coverageMultiCell && (
+            <button
+              aria-pressed={mode === "map"}
+              onClick={() => setMode("map")}
+              title="Map: click a coverage cell to open its tile; no annotation is authored"
+              className={`flex h-6 items-center gap-1.5 rounded-[4px] px-2.5 text-[12px] font-semibold transition-colors ${
+                mode === "map" ? "bg-tcip-accent text-white" : "text-tcip-muted hover:text-tcip-fg"
+              }`}
+            >
+              <svg viewBox="0 0 16 16" width="13" height="13" fill="none" aria-hidden="true">
+                <path
+                  d="M1.5 3.5v10M14.5 3.5v10M1.5 3.5h13M1.5 8h13M1.5 13.5h13M6 3.5v10M11 3.5v10"
+                  stroke="currentColor"
+                  strokeWidth="1"
+                />
+              </svg>
+              Map
+            </button>
+          )}
         </div>
 
         {/* Subject picker pill */}

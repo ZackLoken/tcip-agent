@@ -1,8 +1,8 @@
 /**
  * Wires the CoverageTracker into the Annotate tab: resets on the (image, subject, date,
  * dataset, grid) identity, hydrates from the stored record, feeds it viewport passes and the
- * viewing context, and exposes the swept set for the minimap plus the Complete warning facts.
- * No active subject means no accumulation and no POST.
+ * viewing context, and exposes the swept set for the coverage grid overlay plus the Complete
+ * warning facts. No active subject means no accumulation and no POST.
  *
  * Only the Annotate tab calls this hook, but the band selection its `viewing.bands`/`stretch`
  * carries is held per band-set signature across both tabs (`useBandSelection`), so a composite

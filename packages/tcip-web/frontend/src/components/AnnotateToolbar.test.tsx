@@ -124,9 +124,25 @@ describe("AnnotateToolbar draw mode", () => {
 
   it("renders Point immediately to the left of Box (Point, Box, Polygon)", () => {
     renderToolbar();
-    const group = screen.getByRole("group", { name: "Draw mode" });
+    const group = screen.getByRole("group", { name: "Tool" });
     const labels = Array.from(group.querySelectorAll("button")).map((b) => b.textContent);
     expect(labels).toEqual(["Point", "Box", "Polygon"]);
+  });
+
+  it("offers no Map tool for a raster with no multi-cell coverage grid", () => {
+    renderToolbar();
+    expect(screen.queryByRole("button", { name: /^Map$/ })).not.toBeInTheDocument();
+  });
+
+  it("offers Map for a multi-cell raster and switches the store's mode to it", () => {
+    render(
+      <AnnotateToolbar onSave={() => {}} saveDisabled={false} dirty={false} coverageMultiCell />,
+    );
+    const mapButton = screen.getByRole("button", { name: /^Map$/ });
+    expect(mapButton).toHaveAttribute("aria-pressed", "false");
+    fireEvent.click(mapButton);
+    expect(useStore.getState().gui.mode).toBe("map");
+    expect(mapButton).toHaveAttribute("aria-pressed", "true");
   });
 });
 
