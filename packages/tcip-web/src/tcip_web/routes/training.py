@@ -245,6 +245,16 @@ def compare_best_route(payload: CompareBestPayload) -> dict:
     }
 
 
+@router.get("/metric-directions")
+def metric_directions_route() -> dict:
+    """Every metric name evaluation.py declares a ranking direction for, a plain read with no
+    audit line and no registry touch: the comparison's own metric chooser groups its stamped
+    keys by this table on mount, instead of eliciting it through the audited rank tool."""
+    from tcip_mcp.pipelines.training.evaluation import HIGHER_IS_BETTER_BY_METRIC
+
+    return {"higher_is_better": dict(HIGHER_IS_BETTER_BY_METRIC)}
+
+
 # ── WebSocket live metrics ──────────────────────────────────────────────
 
 

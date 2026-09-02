@@ -375,8 +375,8 @@ describe("TrainingTab compare", () => {
       expect(openTrainingStream).toHaveBeenCalledWith("/proj", "run-a", expect.any(Function)),
     );
 
-    fireEvent.click(within(rowFor("run-a")).getByRole("button", { name: "Compare" }));
-    fireEvent.click(within(rowFor("run-b")).getByRole("button", { name: "Compare" }));
+    fireEvent.click(within(rowFor("run-a")).getByRole("button", { name: "Compare run-a" }));
+    fireEvent.click(within(rowFor("run-b")).getByRole("button", { name: "Compare run-b" }));
 
     expect(await screen.findByText("Comparing")).toBeInTheDocument();
     expect(stopSingle).toHaveBeenCalled();
@@ -398,17 +398,17 @@ describe("TrainingTab compare", () => {
     render(<TrainingTab />);
     await screen.findByText("run-1");
     for (const id of ["run-1", "run-2", "run-3", "run-4"]) {
-      fireEvent.click(within(rowFor(id)).getByRole("button", { name: "Compare" }));
+      fireEvent.click(within(rowFor(id)).getByRole("button", { name: `Compare ${id}` }));
     }
-    fireEvent.click(within(rowFor("run-5")).getByRole("button", { name: "Compare" }));
+    fireEvent.click(within(rowFor("run-5")).getByRole("button", { name: "Compare run-5" }));
 
     expect(pushToast).toHaveBeenCalledWith(expect.stringContaining("at most 4 runs"));
     // The fifth toggle stayed off: the fourth (last accepted) row is still the marked one.
-    expect(within(rowFor("run-4")).getByRole("button", { name: "Compare" })).toHaveAttribute(
+    expect(within(rowFor("run-4")).getByRole("button", { name: "Compare run-4" })).toHaveAttribute(
       "aria-pressed",
       "true",
     );
-    expect(within(rowFor("run-5")).getByRole("button", { name: "Compare" })).toHaveAttribute(
+    expect(within(rowFor("run-5")).getByRole("button", { name: "Compare run-5" })).toHaveAttribute(
       "aria-pressed",
       "false",
     );
@@ -430,23 +430,25 @@ describe("TrainingTab compare", () => {
     await screen.findByText("run-unresolved");
 
     const unresolvedToggle = within(rowFor("run-unresolved")).getByRole("button", {
-      name: "Compare",
+      name: "Compare run-unresolved",
     });
     expect(unresolvedToggle).toBeDisabled();
     expect(unresolvedToggle).not.toHaveAttribute("title");
-    expect(
-      within(rowFor("run-unresolved")).getByText("experiment not resolved yet"),
-    ).toBeInTheDocument();
+    const unresolvedReason = within(rowFor("run-unresolved")).getByText(
+      "experiment not resolved yet",
+    );
+    expect(unresolvedReason).toBeInTheDocument();
+    expect(unresolvedToggle).toHaveAttribute("aria-describedby", unresolvedReason.id);
 
     const failedToggle = within(rowFor("run-failed-tracking")).getByRole("button", {
-      name: "Compare",
+      name: "Compare run-failed-tracking",
     });
     expect(failedToggle).toBeDisabled();
-    expect(
-      within(rowFor("run-failed-tracking")).getByText(
-        "experiment tracking failed: dataset_identity failed: boom",
-      ),
-    ).toBeInTheDocument();
+    const failedReason = within(rowFor("run-failed-tracking")).getByText(
+      "experiment tracking failed: dataset_identity failed: boom",
+    );
+    expect(failedReason).toBeInTheDocument();
+    expect(failedToggle).toHaveAttribute("aria-describedby", failedReason.id);
   });
 
   it("groups Compare and Cancel as one action group", async () => {
@@ -458,8 +460,57 @@ describe("TrainingTab compare", () => {
     await screen.findByText("run-grouped");
 
     const group = within(rowFor("run-grouped")).getByRole("group", { name: "Run actions" });
-    expect(within(group).getByRole("button", { name: "Compare" })).toBeInTheDocument();
+    expect(within(group).getByRole("button", { name: "Compare run-grouped" })).toBeInTheDocument();
     expect(within(group).getByRole("button", { name: "Cancel run-grouped" })).toBeInTheDocument();
+  });
+
+  it("drops a run from the marked comparison the moment its own reason turns unmarkable, through the one implementation toggleMarked also consults", async () => {
+    setProjectRoot("/proj");
+    const listRuns = vi.spyOn(trainingApi, "listRuns");
+    listRuns.mockResolvedValueOnce({
+      runs: [
+        run({ run_id: "run-a", status: "running", experiment_id: "exp-a" }),
+        run({ run_id: "run-b", status: "running", experiment_id: "exp-b" }),
+      ],
+    });
+    vi.spyOn(trainingApi, "compare").mockResolvedValue({
+      experiments: [{ experiment_id: "exp-a" }, { experiment_id: "exp-b" }] as unknown as Awaited<
+        ReturnType<typeof trainingApi.compare>
+      >["experiments"],
+      count: 2,
+      same_dataset_fingerprint: null,
+    });
+
+    render(<TrainingTab />);
+    await screen.findByText("run-a");
+    fireEvent.click(within(rowFor("run-a")).getByRole("button", { name: "Compare run-a" }));
+    fireEvent.click(within(rowFor("run-b")).getByRole("button", { name: "Compare run-b" }));
+    expect(await screen.findByText("Comparing")).toBeInTheDocument();
+
+    // run-b's own record now carries both a resolved id and a tracking failure: a naive
+    // `experiment_id` truthiness check would still call it markable, unlike unmarkableReason.
+    listRuns.mockResolvedValueOnce({
+      runs: [
+        run({ run_id: "run-a", status: "running", experiment_id: "exp-a" }),
+        run({
+          run_id: "run-b",
+          status: "running",
+          experiment_id: "exp-b",
+          experiment_error: "dataset_identity failed: boom",
+        }),
+      ],
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+
+    await waitFor(() =>
+      expect(
+        within(rowFor("run-b")).getByText(
+          "experiment tracking failed: dataset_identity failed: boom",
+        ),
+      ).toBeInTheDocument(),
+    );
+    // Only one run is still markable, so the detail falls back out of the comparison view.
+    expect(screen.queryByText("Comparing")).not.toBeInTheDocument();
   });
 
   it("names each run's Cancel control with that run's own id", async () => {

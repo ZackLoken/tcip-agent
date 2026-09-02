@@ -133,7 +133,7 @@ export function TrainingTab() {
   const streamRef = useRef<(() => void) | null>(null);
 
   const marked: MarkedRun[] = runs
-    .filter((r) => markedRunIds.has(r.run_id) && r.experiment_id)
+    .filter((r) => markedRunIds.has(r.run_id) && !unmarkableReason(r))
     .map((r) => ({ runId: r.run_id, experimentId: r.experiment_id as string }));
   const comparing = marked.length >= 2;
 
@@ -144,6 +144,7 @@ export function TrainingTab() {
         next.delete(run.run_id);
         return next;
       }
+      if (unmarkableReason(run)) return prev;
       if (next.size >= MAX_MARKED_RUNS) {
         useStore
           .getState()
@@ -507,6 +508,8 @@ export function TrainingTab() {
                     <button
                       type="button"
                       aria-pressed={isMarked}
+                      aria-label={`Compare ${r.run_id}`}
+                      aria-describedby={reason ? `compare-reason-${r.run_id}` : undefined}
                       disabled={!isMarked && !!reason}
                       className={`px-2 py-1 text-[10px] transition-colors disabled:opacity-40 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-tcip-accent/70 ${
                         isMarked ? "bg-tcip-accent text-white" : "hover:bg-tcip-hover"
@@ -527,7 +530,10 @@ export function TrainingTab() {
                     )}
                   </div>
                   {reason && (
-                    <span className="text-[10px] text-tcip-muted text-right max-w-[150px]">
+                    <span
+                      id={`compare-reason-${r.run_id}`}
+                      className="text-[10px] text-tcip-muted text-right max-w-[150px]"
+                    >
                       {reason}
                     </span>
                   )}

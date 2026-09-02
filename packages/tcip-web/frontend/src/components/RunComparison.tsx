@@ -31,11 +31,18 @@ export const MAX_MARKED_RUNS = 4;
 
 const NOT_FINITE_SUFFIX = "_state";
 const UNRECORDED = "unrecorded";
-const READING = "reading";
+/** A column whose experiment id the returned answer never carried at all (never a still-loading
+ * state: the component's own early return covers that case before any column renders). */
+const NOT_IN_ANSWER = "not in the comparison answer";
+const NO_REGISTERED_CHECKPOINT = "no registered checkpoint";
+/** The tool's own wording for a marked set with nothing at all to rank. */
+const NO_MARKED_CHECKPOINT = "none of the marked experiments registered a checkpoint";
+const NOT_RANKED_NO_CHECKPOINT = `not ranked: ${NO_REGISTERED_CHECKPOINT}`;
+const OPEN_PROJECT_FOR_METRICS = "open the project to stream metrics";
 
 function cellText(value: unknown): string {
   if (value === null || value === undefined) return UNRECORDED;
-  if (typeof value === "number") return Number.isInteger(value) ? String(value) : value.toFixed(4);
+  if (typeof value === "number") return Number.isInteger(value) ? String(value) : value.toFixed(3);
   return String(value);
 }
 
@@ -96,14 +103,12 @@ function loggedMetricCell(row: MetricRow | undefined, key: string): string {
   return cellText(row[key]);
 }
 
-/**
- * Side-by-side detail for two to four marked runs: one column per run, every value labelled by
- * the record it came from (never a placeholder for one the platform never recorded), the last
- * logged row, the runs' own registered checkpoints, an overlay chart over their live streams,
- * and one grouped rank control wrapping the platform's own best-model derivation over exactly
- * this marked set. Nothing here reaches a delivered number, a weight or a deletion, and ranking
- * never creates a registry.
- */
+// evaluation.HIGHER_IS_BETTER_BY_METRIC's own keys are bare (val_-stripped); a stamped metric
+// key carries this same prefix the tool strips before its own lookup.
+const VAL_METRIC_PREFIX = "val_";
+
+/** Side-by-side detail for two to four marked runs: one column per run labelled by the record it
+ * came from, an overlay chart, and one rank control over the platform's best-model derivation. */
 export function RunComparison({
   marked,
   projectRoot,
@@ -115,15 +120,50 @@ export function RunComparison({
   const [compareError, setCompareError] = useState<string | null>(null);
   const [seriesByRun, setSeriesByRun] = useState<Record<string, MetricRow[]>>({});
 
+  const [rankMetric, setRankMetric] = useState("");
+  const [rankDirection, setRankDirection] = useState<boolean | null>(null);
+  const [includeUnverified, setIncludeUnverified] = useState(false);
+  const [needsDirection, setNeedsDirection] = useState(false);
+  const [needsUnverifiedOption, setNeedsUnverifiedOption] = useState(false);
+  const [rankResult, setRankResult] = useState<Awaited<
+    ReturnType<typeof trainingApi.compareBest>
+  > | null>(null);
+  // The metric rankResult actually ranked by, kept separate from rankMetric so a chooser change
+  // after a successful rank never relabels the answer already on screen.
+  const [rankedMetric, setRankedMetric] = useState("");
+  const [rankError, setRankError] = useState<string | null>(null);
+  const [higherIsBetterByMetric, setHigherIsBetterByMetric] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    let cancelled = false;
+    trainingApi
+      .metricDirections()
+      .then((r) => {
+        if (!cancelled) setHigherIsBetterByMetric(r.higher_is_better);
+      })
+      .catch(() => {
+        if (!cancelled) setHigherIsBetterByMetric({});
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const markedKey = marked.map((m) => m.experimentId).join(",");
 
   useEffect(() => {
     let cancelled = false;
     const ids = marked.map((m) => m.experimentId);
-    // The marked set just changed identity: the previous answer describes a different set of
-    // columns and must not linger as if it already described the new one.
+    // The marked set just changed identity: the previous answer, and any rank computed from it,
+    // must not linger as if they already described the new set.
     setResult(null);
     setCompareError(null);
+    setRankResult(null);
+    setRankedMetric("");
+    setRankError(null);
+    setNeedsDirection(false);
+    setNeedsUnverifiedOption(false);
+    setRankMetric("");
     async function refresh() {
       try {
         const r = await trainingApi.compare(ids);
@@ -176,6 +216,23 @@ export function RunComparison({
   const metricRows = loggedMetricKeys(result?.experiments ?? []);
   const rankMetricOptions = registryMetricKeys(result?.experiments ?? []);
 
+  const registryEntriesCount = columns.reduce((sum, c) => sum + (c.exp?.registry?.length ?? 0), 0);
+  const allColumnsLoaded = columns.length > 0 && columns.every((c) => c.hasEntry);
+  const noMarkedCheckpoint =
+    allColumnsLoaded && columns.every((c) => !c.exp?.registry_error) && registryEntriesCount === 0;
+  const columnsWithNoCheckpoint = columns.filter(
+    (c) => c.hasEntry && !c.exp?.registry_error && (c.exp?.registry?.length ?? 0) === 0,
+  );
+
+  function hasDeclaredDirection(metric: string): boolean {
+    const bare = metric.startsWith(VAL_METRIC_PREFIX)
+      ? metric.slice(VAL_METRIC_PREFIX.length)
+      : metric;
+    return higherIsBetterByMetric[bare] !== undefined;
+  }
+  const declaredMetricOptions = rankMetricOptions.filter(hasDeclaredDirection);
+  const undeclaredMetricOptions = rankMetricOptions.filter((k) => !hasDeclaredDirection(k));
+
   const runSeries: RunSeries[] = marked.map((m) => ({
     runId: m.runId,
     rows: seriesByRun[m.runId] ?? [],
@@ -192,16 +249,6 @@ export function RunComparison({
   // is called even before a metric is picked (an empty metric key then just plots nothing).
   const { points: chartData, droppedByRun } = joinRunSeries(runSeries, overlayMetric);
 
-  const [rankMetric, setRankMetric] = useState("");
-  const [rankDirection, setRankDirection] = useState<boolean | null>(null);
-  const [includeUnverified, setIncludeUnverified] = useState(false);
-  const [needsDirection, setNeedsDirection] = useState(false);
-  const [needsUnverifiedOption, setNeedsUnverifiedOption] = useState(false);
-  const [rankResult, setRankResult] = useState<Awaited<
-    ReturnType<typeof trainingApi.compareBest>
-  > | null>(null);
-  const [rankError, setRankError] = useState<string | null>(null);
-
   function onRankMetricChange(metric: string) {
     setRankMetric(metric);
     setRankDirection(null);
@@ -209,6 +256,7 @@ export function RunComparison({
     setNeedsDirection(false);
     setNeedsUnverifiedOption(false);
     setRankResult(null);
+    setRankedMetric("");
     setRankError(null);
   }
 
@@ -222,8 +270,10 @@ export function RunComparison({
         include_unverified: includeUnverified,
       });
       setRankResult(res);
+      setRankedMetric(rankMetric);
     } catch (e) {
       setRankResult(null);
+      setRankedMetric("");
       // Branches on the tool's own refusal fields, never on matching the error text: the route
       // now carries select_best_model's whole error dict as the refusal's structured detail.
       if (e instanceof StructuredRefusalError) {
@@ -282,7 +332,7 @@ export function RunComparison({
               <th className="tcip-th">Builder</th>
               {columns.map((c) => (
                 <td key={c.runId} className="px-2 py-1">
-                  {c.hasEntry ? (c.exp?.model ?? "no builder recorded") : READING}
+                  {c.hasEntry ? (c.exp?.model ?? "no builder recorded") : NOT_IN_ANSWER}
                 </td>
               ))}
             </tr>
@@ -292,7 +342,7 @@ export function RunComparison({
                 <td key={c.runId} className="px-2 py-1">
                   {c.hasEntry
                     ? `${c.exp?.task ?? UNRECORDED} / ${c.exp?.subject ?? UNRECORDED}`
-                    : READING}
+                    : NOT_IN_ANSWER}
                 </td>
               ))}
             </tr>
@@ -300,7 +350,7 @@ export function RunComparison({
               <th className="tcip-th">State</th>
               {columns.map((c) => (
                 <td key={c.runId} className="px-2 py-1">
-                  {c.hasEntry ? (c.exp?.state ?? UNRECORDED) : READING}
+                  {c.hasEntry ? (c.exp?.state ?? UNRECORDED) : NOT_IN_ANSWER}
                   {c.exp?.status_error ? (
                     <span className="block text-tcip-fp">{c.exp.status_error}</span>
                   ) : null}
@@ -311,16 +361,12 @@ export function RunComparison({
               <th className="tcip-th">Epochs logged</th>
               {columns.map((c) => (
                 <td key={c.runId} className="px-2 py-1 tabular-nums">
-                  {c.hasEntry ? (c.exp?.n_epochs ?? UNRECORDED) : READING}
+                  {c.hasEntry ? (c.exp?.n_epochs ?? UNRECORDED) : NOT_IN_ANSWER}
                 </td>
               ))}
             </tr>
             <tr className="border-b border-tcip-border">
               <th className="tcip-th">Images</th>
-              <td colSpan={columns.length} className="px-2 py-1 text-tcip-muted" />
-            </tr>
-            <tr className="border-b border-tcip-border">
-              <th className="tcip-th" />
               <td colSpan={columns.length} className="px-2 py-1">
                 {result.same_dataset_fingerprint === true
                   ? "same source images"
@@ -333,7 +379,7 @@ export function RunComparison({
               <th className="tcip-th">Partition</th>
               {columns.map((c) => (
                 <td key={c.runId} className="px-2 py-1">
-                  {c.hasEntry ? splitLine(c.exp?.split) : READING}
+                  {c.hasEntry ? splitLine(c.exp?.split) : NOT_IN_ANSWER}
                 </td>
               ))}
             </tr>
@@ -369,7 +415,9 @@ export function RunComparison({
                   <th className="tcip-th">{key}</th>
                   {columns.map((c) => (
                     <td key={c.runId} className="px-2 py-1 tabular-nums">
-                      {c.hasEntry ? loggedMetricCell(c.exp?.last_logged_metrics, key) : READING}
+                      {c.hasEntry
+                        ? loggedMetricCell(c.exp?.last_logged_metrics, key)
+                        : NOT_IN_ANSWER}
                     </td>
                   ))}
                 </tr>
@@ -398,7 +446,7 @@ export function RunComparison({
               {columns.map((c) => (
                 <td key={c.runId} className="px-2 py-1 align-top">
                   {!c.hasEntry ? (
-                    <span className="text-tcip-muted">{READING}</span>
+                    <span className="text-tcip-muted">{NOT_IN_ANSWER}</span>
                   ) : c.exp?.registry_error ? (
                     <span className="text-tcip-fp">{c.exp.registry_error}</span>
                   ) : c.exp?.registry && c.exp.registry.length > 0 ? (
@@ -407,7 +455,7 @@ export function RunComparison({
                         <li key={entry.name}>
                           <span className="block font-mono">{entry.name}</span>
                           <span className="block text-tcip-muted">
-                            {entry.metrics_source ?? "no metrics"}
+                            {entry.metrics_source ?? UNRECORDED}
                             {entry.registered_at
                               ? ` (${new Date(entry.registered_at).toLocaleString()})`
                               : ""}
@@ -416,7 +464,7 @@ export function RunComparison({
                       ))}
                     </ul>
                   ) : (
-                    <span className="text-tcip-muted">none registered</span>
+                    <span className="text-tcip-muted">{NO_REGISTERED_CHECKPOINT}</span>
                   )}
                 </td>
               ))}
@@ -430,6 +478,7 @@ export function RunComparison({
           <span className="tcip-heading">Overlay</span>
           {overlayMetricOptions.length > 0 && (
             <select
+              aria-label="Overlay metric"
               className="tcip-select text-[11px]"
               value={overlayMetric}
               onChange={(e) => setOverlayMetric(e.target.value)}
@@ -474,7 +523,7 @@ export function RunComparison({
           </ResponsiveContainer>
         ) : (
           <div className="flex items-center justify-center h-full text-tcip-muted text-[12px]">
-            Waiting for metrics...
+            {projectRoot ? "Waiting for metrics..." : OPEN_PROJECT_FOR_METRICS}
           </div>
         )}
         {Object.entries(droppedByRun).some(([, n]) => n > 0) && (
@@ -493,30 +542,54 @@ export function RunComparison({
       <div className="tcip-panel p-2">
         <div className="tcip-heading mb-2">Rank</div>
         <div className="flex flex-wrap items-center gap-2">
-          <select
-            className="tcip-select text-[11px]"
-            value={rankMetric}
-            onChange={(e) => onRankMetricChange(e.target.value)}
-          >
-            <option value="">Choose a metric...</option>
-            {rankMetricOptions.map((k) => (
-              <option key={k} value={k}>
-                {k}
-              </option>
-            ))}
-          </select>
+          {noMarkedCheckpoint ? (
+            <span className="text-[11px] text-tcip-muted">{NO_MARKED_CHECKPOINT}</span>
+          ) : (
+            <select
+              aria-label="Rank by metric"
+              className="tcip-select text-[11px]"
+              value={rankMetric}
+              onChange={(e) => onRankMetricChange(e.target.value)}
+            >
+              <option value="">Choose a metric...</option>
+              {declaredMetricOptions.map((k) => (
+                <option key={k} value={k}>
+                  {k}
+                </option>
+              ))}
+              {undeclaredMetricOptions.length > 0 && (
+                <optgroup label="no declared direction">
+                  {undeclaredMetricOptions.map((k) => (
+                    <option key={k} value={k}>
+                      {k}
+                    </option>
+                  ))}
+                </optgroup>
+              )}
+            </select>
+          )}
           {needsDirection && (
-            <div className="inline-flex rounded border border-tcip-border overflow-hidden">
+            <div
+              role="group"
+              aria-label="Ranking direction"
+              className="inline-flex rounded border border-tcip-border overflow-hidden"
+            >
               <button
                 type="button"
-                className={`px-2 py-1 text-[11px] ${rankDirection === true ? "bg-tcip-accent text-white" : ""}`}
+                aria-pressed={rankDirection === true}
+                className={`px-2 py-1 text-[11px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-tcip-accent/70 ${
+                  rankDirection === true ? "bg-tcip-accent text-white" : "hover:bg-tcip-hover"
+                }`}
                 onClick={() => setRankDirection(true)}
               >
                 higher is better
               </button>
               <button
                 type="button"
-                className={`px-2 py-1 text-[11px] ${rankDirection === false ? "bg-tcip-accent text-white" : ""}`}
+                aria-pressed={rankDirection === false}
+                className={`px-2 py-1 text-[11px] border-l border-tcip-border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-tcip-accent/70 ${
+                  rankDirection === false ? "bg-tcip-accent text-white" : "hover:bg-tcip-hover"
+                }`}
                 onClick={() => setRankDirection(false)}
               >
                 lower is better
@@ -536,24 +609,46 @@ export function RunComparison({
           <button
             type="button"
             className="tcip-btn text-[11px]"
-            disabled={!rankMetric || (needsDirection && rankDirection === null)}
+            disabled={
+              noMarkedCheckpoint || !rankMetric || (needsDirection && rankDirection === null)
+            }
             onClick={() => void onRank()}
           >
             Rank
           </button>
         </div>
-        {rankError && <div className="mt-2 text-[11px] text-tcip-fp">{rankError}</div>}
+        {rankError && (
+          <div role="status" className="mt-2 text-[11px] text-tcip-fp">
+            {rankError}
+          </div>
+        )}
         {rankResult && (
           <div className="mt-2 text-[11px]">
             <span className="font-mono">{rankResult.name}</span>
-            {rankResult.experiment_id && (
+            {rankResult.experiment_id && rankResult.experiment_id !== rankResult.name && (
               <span className="text-tcip-muted"> ({rankResult.experiment_id})</span>
             )}
+            {rankedMetric && (
+              <span className="text-tcip-muted">
+                {" "}
+                / {rankedMetric}: {cellText(rankResult.metrics[rankedMetric])}
+              </span>
+            )}
             <span className="block text-tcip-muted">
-              {rankResult.metrics_source ?? "no source"} / {rankResult.direction_source} direction
-              {rankResult.excluded_unverified.length > 0
-                ? ` / excluded: ${rankResult.excluded_unverified.map((e) => e.name).join(", ")}`
-                : ""}
+              {[
+                rankResult.metrics_source ?? UNRECORDED,
+                `${rankResult.direction_source} direction`,
+                rankResult.excluded_unverified.length > 0
+                  ? `excluded: ${rankResult.excluded_unverified.map((e) => e.name).join(", ")}`
+                  : null,
+                columnsWithNoCheckpoint.length > 0
+                  ? columnsWithNoCheckpoint
+                      .map((c) => `${c.experimentId}: ${NOT_RANKED_NO_CHECKPOINT}`)
+                      .join(", ")
+                  : null,
+              ]
+                .filter(Boolean)
+                .join(" / ")}
             </span>
           </div>
         )}

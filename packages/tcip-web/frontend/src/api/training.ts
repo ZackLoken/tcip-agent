@@ -195,6 +195,11 @@ export const trainingApi = {
     higher_is_better?: boolean | null;
     include_unverified?: boolean;
   }) => postJson<CompareBestResult>(ROUTES.postTrainingCompareBest, params),
+
+  /** evaluation.py's own declared-direction table, unaudited: a plain read the comparison's
+   * metric chooser groups its stamped keys by, never a call through the rank tool. */
+  metricDirections: () =>
+    getJson<{ higher_is_better: Record<string, boolean> }>(ROUTES.getTrainingMetricDirections),
 };
 
 export type TrainingStreamMsg = TrainingMetricFrame | TrainingStatusFrame;
