@@ -11,7 +11,7 @@ import Konva from "konva";
 import { MAX_SCALE, MIN_SCALE } from "@/components/Canvas/zoom";
 import { useOverviewBuild } from "@/hooks/useOverviewBuild";
 import { loadImage, type LoadedImage } from "@/lib/imageLoader";
-import { clampView } from "@/lib/viewGeometry";
+import { clampView, fitView } from "@/lib/viewGeometry";
 import { useStore } from "@/store";
 import type { ViewState } from "@/store/types";
 
@@ -187,12 +187,7 @@ export function CanvasStage(props: CanvasStageProps) {
     if (didFit.current === key) return;
     if (dims.w <= 1 || dims.h <= 1) return; // wait for a real measurement before fitting
     didFit.current = key;
-    const scale = Math.min(dims.w / props.imgWidth, dims.h / props.imgHeight);
-    setView({
-      scale,
-      offset_x: (dims.w - props.imgWidth * scale) / 2,
-      offset_y: (dims.h - props.imgHeight * scale) / 2,
-    });
+    setView(fitView(dims, props.imgWidth, props.imgHeight));
   }, [img, props.imageUrl, props.imgWidth, props.imgHeight, props.autoFit, dims, setView]);
 
   // Expose stage ref

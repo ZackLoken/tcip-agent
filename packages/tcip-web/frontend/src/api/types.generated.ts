@@ -101,7 +101,7 @@ export interface ActionPayload {
 
 export interface GuiVocabulary {
   active_tab: "annotate" | "review" | "training" | "tuning" | "inference" | "results" | "meta";
-  mode: "box" | "polygon" | "point";
+  mode: "box" | "polygon" | "point" | "map";
 }
 
 export interface TrainingMetricFrame {

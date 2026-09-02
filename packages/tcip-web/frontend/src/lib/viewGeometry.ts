@@ -37,6 +37,20 @@ export function clampView(view: ViewState, host: HostSize, imgW: number, imgH: n
 }
 
 /**
+ * The view that fits the whole `imgW` x `imgH` frame inside `host`, centered on both axes: one
+ * implementation for the canvas's one-shot auto-fit and the Overview control, so a click on
+ * Overview always lands on the exact view the canvas opens an image at.
+ */
+export function fitView(host: HostSize, imgW: number, imgH: number): ViewState {
+  const scale = Math.min(host.w / imgW, host.h / imgH);
+  return {
+    scale,
+    offset_x: (host.w - imgW * scale) / 2,
+    offset_y: (host.h - imgH * scale) / 2,
+  };
+}
+
+/**
  * The view that centers `rect`, padded by `padX`/`padY` (absolute pads in image pixels, per
  * axis), at the largest scale that fits the padded rect. The scale is clamped to the zoom
  * ladder's range and the offsets are pan-clamped against the image.
