@@ -221,6 +221,16 @@ def test_compare_route_handles_empty_ids(client: TestClient) -> None:
     assert isinstance(resp.json(), dict)
 
 
+def test_metric_directions_route_answers_the_declared_table(client: TestClient) -> None:
+    """A plain read of evaluation.py's own declared-direction table: the comparison's metric
+    chooser groups by this on mount, never by calling the audited rank tool with no metric."""
+    from tcip_mcp.pipelines.training.evaluation import HIGHER_IS_BETTER_BY_METRIC
+
+    resp = client.get("/api/training/metric-directions")
+    assert resp.status_code == 200
+    assert resp.json()["higher_is_better"] == HIGHER_IS_BETTER_BY_METRIC
+
+
 def test_cancel_unknown_run_returns_404(client: TestClient) -> None:
     resp = client.post("/api/training/runs/does-not-exist/cancel", json={})
     assert resp.status_code == 404
