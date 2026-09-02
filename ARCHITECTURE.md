@@ -1136,7 +1136,7 @@ it needs no pin first; the app pins the platform-state root at the lifespan's st
 when a request is served before the lifespan has run, at that first request, never at import:
 `bind_startup_root` (`packages/tcip-web/src/tcip_web/app.py:147`) reads the workspace's
 active-project marker (`tcip_mcp.project_paths.pin_platform_root(from_marker=True)`) the first
-time either the lifespan (`app.py:50`) or the startup middleware (`app.py:131`) calls it, so
+time either the lifespan (`app.py:54`) or the startup middleware (`app.py:191`) calls it, so
 every way the app is served (this entry point, a bare `uvicorn tcip_web.app:app`,
 `--lifespan off`, the reloader's child) pins a root before anything resolves a `.tcip` path.
 Ahead of that read, `raise_if_workspace_unset_under_test` (`app.py:127`) refuses with
