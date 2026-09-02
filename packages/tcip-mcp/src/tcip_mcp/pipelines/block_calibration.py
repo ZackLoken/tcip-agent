@@ -137,7 +137,7 @@ def _check_completeness(
         raise BlockCalibrationRefused(
             "block calibration refused: the reserved calibration/test regions are not fully "
             f"attested complete for subject {subject!r} -- {'; '.join(problems)}. Attest every "
-            "listed cell complete (the CoverageMinimap double-click affordance) before block "
+            "listed cell complete (the Annotate canvas's Attest control) before block "
             "calibration can treat this region's GT as trustworthy."
         )
 

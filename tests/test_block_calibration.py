@@ -130,7 +130,7 @@ def _build_experiment(tmp_path: Path, *, reserve_frac: float = 0.15,
 def _attest_regions_complete(root: Path, stem: str, regions: list[list[tuple[int, int, int, int]]],
                              *, subject: str = "catkin") -> None:
     """Directly writes the region-completeness store (bypassing the HTTP route, same effect as a
-    breeder double-clicking every intersecting cell complete): every reference-grid cell (at the
+    breeder attesting every intersecting cell complete): every reference-grid cell (at the
     training tile_size, clamped) that any rect in ``regions`` overlaps is marked complete, with a
     real content digest so the staleness check reads it as fresh."""
     from tcip_annotation import json_io as _json_io
@@ -1175,16 +1175,17 @@ def _attest_regions_complete_through_the_coverage_route(
     *, subject: str = "catkin",
 ) -> list[str]:
     """Attest every reference-grid cell the given regions touch through the coverage route the
-    CoverageMinimap posts to, one cell per request, and return the attested cell names. The grid
-    posted is the one the grid route serves, the same lattice the browser draws, with the cell
-    list split off the way the browser's grid hook splits it before posting."""
+    Annotate canvas's Attest control posts to, one cell per request, and return the attested
+    cell names. The grid posted is the one the grid route serves, the same lattice the browser
+    draws, with the cell list and derivation line split off the way the browser's grid hook
+    splits them before posting."""
     from tcip_mcp.pipelines.data.tiling import rects_overlap
 
     grid_resp = client.get("/api/coverage/grid", params={"path": image_path, "tile_size": TILE})
     assert grid_resp.status_code == 200, grid_resp.text
     served = grid_resp.json()
     cells = served["cells"]
-    grid = {key: value for key, value in served.items() if key != "cells"}
+    grid = {key: value for key, value in served.items() if key not in ("cells", "derivation")}
     all_rects = [tuple(r) for region in regions for r in region]
     covered = sorted(
         c["name"] for c in cells
@@ -1193,7 +1194,7 @@ def _attest_regions_complete_through_the_coverage_route(
     for name in covered:
         resp = client.post("/api/coverage/completeness", json={
             "image_path": image_path, "subject": subject, "grid": grid, "cell": name,
-            "user": "breeder"})
+            "complete": True, "user": "breeder"})
         assert resp.status_code == 200, resp.text
         assert resp.json()["complete"] is True
     return covered

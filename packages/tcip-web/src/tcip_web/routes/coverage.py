@@ -89,6 +89,41 @@ def _require_completeness_subject(subject: Optional[str]) -> str:
     return subject
 
 
+def _grid_for_raster(src: Path, tile_size: int | None) -> tuple[dict, str]:
+    """The reference-grid geometry for the raster at ``src`` and the one-line explanation of how
+    its tile size was chosen, shared by ``get_grid`` and ``get_completeness`` (the latter's own
+    ``annotation_counts`` field) so the grid a breeder sees and the grid a saved-annotation count
+    is binned against can never be two different lattices.
+
+    Native dims come off the raster header (``image_dimensions``), never a decode. Raises
+    ``tcip_mcp.pipelines.data.band_groups.BandGroupIncomplete`` for a band group missing a
+    member; ``get_grid`` turns that into a 409, ``get_completeness`` into its ``grid_error``
+    field rather than blocking the read.
+    """
+    from tcip_mcp.pipelines.image_utils import image_dimensions, resolve_image_source
+    from tcip_mcp.pipelines.raster_source import is_georeferenced, opens_windowed
+    from tcip_mcp.pipelines.reference_grid import (
+        derive_coverage_tile_size,
+        derive_large_raster_grid_tile_size,
+        grid_geometry,
+    )
+
+    source = resolve_image_source(src.parent, src.stem)
+    width, height = image_dimensions(source)
+    # A stitched orthomosaic carries real per-pixel georeferencing; an ordinary drone/ground
+    # capture (any pixel size) carries at most a single EXIF GPS point, never that.
+    if tile_size is not None:
+        edge = tile_size
+        derivation = f"chosen: {tile_size} px"
+    elif opens_windowed(source, 3) and is_georeferenced(source):
+        edge = derive_large_raster_grid_tile_size(width, height)
+        derivation = "16 divisions of the long edge"
+    else:
+        edge = derive_coverage_tile_size(width, height)
+        derivation = "one display-bounded serve per cell"
+    return grid_geometry(width, height, edge, 0.0), derivation
+
+
 @router.get("/grid")
 def get_grid(
     path: str = Query(..., description="Absolute path to the image file"),
@@ -96,22 +131,20 @@ def get_grid(
                                   "omitted derives the coverage lattice edge"),
     overlap: float = Query(0.0),
 ) -> dict:
-    """The reference grid over ``path``'s native frame: geometry plus the full cell list.
+    """The reference grid over ``path``'s native frame: geometry plus the full cell list and the
+    ``derivation`` line naming how the tile size was chosen ("16 divisions of the long edge",
+    "one display-bounded serve per cell", or "chosen: <n> px" for an explicit ``tile_size``); a
+    cell is never a training tile, a different lattice with a different origin and (by default)
+    a training overlap.
 
-    Native dims come off the raster header (``image_dimensions``), never a decode.
     ``overlap`` other than 0 is refused: the coverage record's exact-partition contract
     puts every native pixel in exactly one cell, which overlapping cells break. The
-    frontend consumes these cells verbatim and never re-derives them.
+    frontend consumes these cells verbatim and never re-derives them; ``derivation`` is not
+    part of ``GridGeometry`` and is stripped back off before a grid round-trips into a
+    coverage or completeness payload.
     """
     from tcip_mcp.pipelines.data.band_groups import BandGroupIncomplete
-    from tcip_mcp.pipelines.image_utils import image_dimensions, resolve_image_source
-    from tcip_mcp.pipelines.raster_source import is_georeferenced, opens_windowed
-    from tcip_mcp.pipelines.reference_grid import (
-        derive_coverage_tile_size,
-        derive_large_raster_grid_tile_size,
-        grid_geometry,
-        reference_cells,
-    )
+    from tcip_mcp.pipelines.reference_grid import reference_cells
 
     src = _checked(path)
     if overlap != 0.0:
@@ -120,21 +153,14 @@ def get_grid(
             f"the coverage grid requires overlap 0: its exact-partition contract puts every "
             f"native pixel in exactly one cell, which overlapping cells break; got {overlap}")
     try:
-        source = resolve_image_source(src.parent, src.stem)
+        geometry, derivation = _grid_for_raster(src, tile_size)
     except BandGroupIncomplete as exc:
         raise HTTPException(409, str(exc)) from exc
-    width, height = image_dimensions(source)
-    # A stitched orthomosaic carries real per-pixel georeferencing; an ordinary drone/ground
-    # capture (any pixel size) carries at most a single EXIF GPS point, never that.
-    if tile_size is not None:
-        edge = tile_size
-    elif opens_windowed(source, 3) and is_georeferenced(source):
-        edge = derive_large_raster_grid_tile_size(width, height)
-    else:
-        edge = derive_coverage_tile_size(width, height)
-    cells = reference_cells(width, height, edge, 0.0, clamp=True)
+    cells = reference_cells(
+        geometry["width"], geometry["height"], geometry["tile_size"], 0.0, clamp=True)
     return {
-        **grid_geometry(width, height, edge, 0.0),
+        **geometry,
+        "derivation": derivation,
         "cells": [{"name": c.name, "x0": c.x0, "y0": c.y0, "x1": c.x1, "y1": c.y1}
                   for c in cells],
     }
@@ -264,14 +290,20 @@ def post_coverage(payload: CoveragePayload) -> dict:
 # coverage above) every write is audited as well as transacted.
 
 
-class CompletenessTogglePayload(BaseModel):
-    """One double-click on the minimap: toggle one cell's completeness for a subject."""
+class CompletenessSetPayload(BaseModel):
+    """One explicit attestation write: set one cell's completeness for a subject to
+    ``complete``, never a toggle a caller infers from the stored state. ``complete=True``
+    stamps the cell's current annotation-content digest (whether or not the cell was already
+    complete, so a re-attest restamps and clears staleness); ``complete=False`` clears the
+    stamp. The control that posts this states the direction in its own label, so the write it
+    performs always matches what the label promised."""
 
     image_path: str
     subject: str
     dataset_root: Optional[str] = None
     grid: GridGeometry
     cell: str
+    complete: bool
     # GUI-set identity; stamped as attested_by ("user:<name>"), mirroring annotate.py/review.py.
     user: Optional[str] = None
 
@@ -282,20 +314,32 @@ def get_completeness(
     dataset_root: Optional[str] = Query(None),
 ) -> dict:
     """Every subject's region-completeness record for the raster at ``path`` (its own stem), not
-    just one subject's: lets the minimap render a cell attested complete for a subject other than
-    the one currently active, distinguishably from the active subject's own attestations.
+    just one subject's: lets the coverage overlay render a cell attested complete for a subject
+    other than the one currently active, distinguishably from the active subject's own
+    attestations.
 
     Each record carries ``stale_cells``: attested cells whose annotation content has changed since
     attestation (:mod:`tcip_mcp.pipelines.region_completeness`), recomputed fresh on every read so
     a stale attestation is never served as if it still held.
+
+    ``annotation_counts`` (subject -> cell name -> count) is the active subject's saved-annotation
+    count per cell, computed once for the raster's current grid (:func:`_grid_for_raster`, the
+    same derivation ``get_grid`` uses) and read alongside ``by_subject`` rather than folded into
+    it: a count belongs to the grid, not to any one attestation record. A band group missing a
+    member (``_grid_for_raster`` refuses) reports ``grid_error`` and still serves ``by_subject``,
+    with ``annotation_counts`` empty, rather than blanking the whole read.
     """
+    from tcip_annotation.json_io import UnreadableLabelDocument, read_annotations
     from tcip_mcp.dataset_layout import (
+        annotation_path,
         normalize_region_completeness_store,
+        parse_image_path,
         region_completeness_digest_key,
         region_completeness_key,
     )
-    from tcip_annotation.json_io import UnreadableLabelDocument
-    from tcip_mcp.pipelines.region_completeness import stale_cells
+    from tcip_mcp.pipelines.data.band_groups import BandGroupIncomplete
+    from tcip_mcp.pipelines.reference_grid import reference_cells
+    from tcip_mcp.pipelines.region_completeness import annotation_counts_by_cell, stale_cells
 
     root = _resolve_root(path, dataset_root)
     stem = Path(path).stem
@@ -318,13 +362,38 @@ def get_completeness(
         except UnreadableLabelDocument as exc:
             raise HTTPException(400, str(exc)) from exc
         by_subject[subject] = {**record, "stale_cells": stale}
-    return {"by_subject": by_subject}
+
+    annotation_counts: dict[str, dict[str, int]] = {}
+    grid_error: Optional[str] = None
+    try:
+        geometry, _derivation = _grid_for_raster(Path(path), None)
+    except BandGroupIncomplete as exc:
+        grid_error = str(exc)
+    else:
+        try:
+            _root_from_image, date, image_stem = parse_image_path(path)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        label_path = annotation_path(root, date, image_stem)
+        try:
+            annotations = read_annotations(str(label_path)) if label_path.is_file() else []
+        except UnreadableLabelDocument as exc:
+            raise HTTPException(400, str(exc)) from exc
+        cells = reference_cells(
+            geometry["width"], geometry["height"], geometry["tile_size"], 0.0, clamp=True)
+        annotation_counts = annotation_counts_by_cell(annotations, cells, geometry["tile_size"])
+
+    return {"by_subject": by_subject, "annotation_counts": annotation_counts,
+            "grid_error": grid_error}
 
 
 @router.post("/completeness")
-def post_completeness(payload: CompletenessTogglePayload) -> dict:
-    """Toggle one cell's completeness for a subject: not-complete -> complete (stamping the
-    cell's current annotation-content digest) or complete -> not-complete (clearing its stamp).
+def post_completeness(payload: CompletenessSetPayload) -> dict:
+    """Set one cell's completeness for a subject to ``payload.complete``: never a toggle, so a
+    control's label ("Attest", "Unattest", "Re-attest") always states the write it performs.
+    ``complete=True`` stamps the cell's current annotation-content digest, whether or not the
+    cell was already complete (a re-attest restamps and clears staleness); ``complete=False``
+    clears the stamp.
 
     Cell names are validated against the posted grid's own cells, same as ``post_coverage``. A
     stored record whose grid disagrees with the posted one replaces wholesale (cells and digest
@@ -364,6 +433,7 @@ def post_completeness(payload: CompletenessTogglePayload) -> dict:
     digest_key = region_completeness_digest_key(root)
     author = user_id(resolve_user(payload.user))
     now_iso = datetime.now(timezone.utc).isoformat()
+    complete = payload.complete
 
     # Digest key named first, so it is applied first: stale_cells fails closed on a missing
     # digest, so a stamp must never land after the attestation that points at it.
@@ -387,7 +457,6 @@ def post_completeness(payload: CompletenessTogglePayload) -> dict:
         grid_matches = existing is not None and existing.get("grid") == grid
         cells_complete = set(existing.get("cells_complete") or []) if grid_matches else set()
         replaced = existing is not None and not grid_matches
-        complete = payload.cell not in cells_complete
         if complete:
             cells_complete.add(payload.cell)
         else:
