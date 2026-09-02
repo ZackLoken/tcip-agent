@@ -29,7 +29,7 @@ BUILDER = "tests.bespoke_models:build_bespoke_detection"
 
 def _real_drawn_experiment(
     root: Path, experiment_id: str, *, date: str = DATES[0], subject: str = SUBJECT,
-    val_images_dir: str | None = None, auto_val: bool = True,
+    attribute: str | None = None, val_images_dir: str | None = None, auto_val: bool = True,
 ) -> dict:
     """Draws a real train/val split over ``root``'s own fixture dataset (through auto_train_val,
     the identical function a training run's own draw calls) and persists it as ``experiment_id``'s
@@ -40,10 +40,11 @@ def _real_drawn_experiment(
     images_dir = root / "images" / date
     labels_dir = root / "annotations" / date
     data_cfg: dict = {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
-                      "subject": subject, "auto_val": auto_val}
+                      "subject": subject, "attribute": attribute, "auto_val": auto_val}
     if val_images_dir is not None:
         data_cfg["val_images_dir"] = val_images_dir
-    _reg, id_map = resolve_registry_id_map(str(labels_dir), subject, None)
+    # data_cfg keeps the caller's raw attribute; the registry lookup needs "no attribute" as None.
+    _reg, id_map = resolve_registry_id_map(str(labels_dir), subject, attribute or None)
 
     config = {
         "model_source": {"builder": BUILDER, "task": "detection"},
@@ -104,6 +105,38 @@ def test_freeze_split_manifest_round_trips_through_a_real_bind(tmp_path: Path):
 
     second_data_cfg = dict(second_cfg["data"])
     train_ds, val_ds, label_digests = auto_train_val("detection", second_data_cfg, None)
+    assert label_digests is not None
+    assert len(train_ds) > 0 and len(val_ds) > 0
+
+
+def test_freeze_split_manifest_from_an_empty_string_attribute_run_binds(tmp_path: Path):
+    """A run whose durable config carries ``data.attribute=""`` (an explicit empty string, not
+    ``None``) freezes a manifest a later, attribute-unscoped run still binds to: the frozen
+    ``attribute`` is normalized on write, and the scope check normalizes both sides of the
+    comparison, so neither reads the checkpoint's own ``""`` as a distinct scope from the
+    manifest's ``None``."""
+    from tcip_mcp.tools.data_tools import freeze_split_manifest, read_split_manifest_dir
+    from tcip_mcp.tools.training_tools import manifest_compatibility
+
+    root = _two_subject_two_date_dataset(tmp_path / "ds")
+    _real_drawn_experiment(root, "exp-empty-attribute", attribute="")
+
+    result = freeze_split_manifest("exp-empty-attribute")
+    assert "error" not in result, result
+
+    manifest = read_split_manifest_dir(result["manifest_dir"])
+    assert manifest["attribute"] is None
+
+    second_cfg: dict[str, Any] = {
+        "model_source": {"builder": BUILDER, "task": "detection"},
+        "data": {"images_dir": str(root / "images" / DATES[0]),
+                 "labels_dir": str(root / "annotations" / DATES[0]), "subject": SUBJECT,
+                 "split": {"manifest_dir": result["manifest_dir"]}},
+    }
+    assert manifest_compatibility(second_cfg, manifest, result["manifest_dir"]) == []
+
+    train_ds, val_ds, label_digests = auto_train_val(
+        "detection", dict(second_cfg["data"]), None)
     assert label_digests is not None
     assert len(train_ds) > 0 and len(val_ds) > 0
 

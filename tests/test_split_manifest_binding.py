@@ -223,6 +223,28 @@ def test_bind_manifest_stems_a_missing_calibration_member_does_not_refuse(tmp_pa
     assert binding.calibration_unadmitted == 1
 
 
+def test_bind_manifest_stems_scope_check_reaches_the_binder(tmp_path: Path, monkeypatch):
+    """Marker proof that bind_manifest_stems itself reaches manifest_scope_issues (through its
+    own require_manifest_scope call), not only the child's pre-build check ahead of it: a caller
+    that reaches bind_manifest_stems by any other route (a script, a future consumer) still gets
+    the shared scope check, and a site that stopped calling it here would pass this test's own
+    scenario silently instead of raising the marker below."""
+    import tcip_mcp.pipelines.data.splits as splits_mod
+
+    root = _two_subject_two_date_dataset(tmp_path / "ds")
+    manifest = _draw(root, tmp_path / "m")
+
+    monkeypatch.setattr(
+        splits_mod, "manifest_scope_issues",
+        lambda *a, **k: (["MARKER-BINDER-SCOPE-ISSUE"], None),
+    )
+
+    with pytest.raises(ValueError, match="MARKER-BINDER-SCOPE-ISSUE"):
+        splits_mod.bind_manifest_stems(
+            manifest, DATES[0], SUBJECT, None, ["a", "b", "c", "d", "e", "f"],
+            images_dir=root / "images" / DATES[0])
+
+
 # -- read_split_manifest_dir ----------------------------------------------------
 
 
@@ -554,9 +576,8 @@ def test_auto_train_val_manifest_refuses_a_moved_images_root_by_name(tmp_path: P
 
 
 def test_auto_train_val_manifest_refuses_a_members_block_with_no_images_root(tmp_path: Path):
-    """A manifest whose members block under this date names no images root now refuses at the
-    child's own runtime bind (it binds today, since the deleted inline check was a no-op on an
-    absent recorded root), the same fact manifest_compatibility already flagged before Start."""
+    """A manifest whose members block under this date names no images root refuses at the
+    child's own runtime bind, the same fact manifest_compatibility already flags before Start."""
     import tcip_store as ts
     from tcip_mcp.pipelines.data.split_construction import auto_train_val
     from tcip_mcp.pipelines.data.splits import manifest_date_key
@@ -577,10 +598,8 @@ def test_auto_train_val_manifest_refuses_a_members_block_with_no_images_root(tmp
 
 
 def test_auto_train_val_manifest_refuses_a_config_with_no_images_dir(tmp_path: Path):
-    """A run naming data.split.manifest_dir but no data.images_dir at all now refuses at the
-    child's own runtime bind (it binds today, since the deleted inline check was a no-op on an
-    empty caller-side images_dir too): a manifest's recorded images root has nothing to compare
-    against."""
+    """A run naming data.split.manifest_dir but no data.images_dir at all refuses at the child's
+    own runtime bind: a manifest's recorded images root has nothing to compare against."""
     from tcip_mcp.pipelines.data.split_construction import auto_train_val
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
@@ -589,7 +608,7 @@ def test_auto_train_val_manifest_refuses_a_config_with_no_images_dir(tmp_path: P
     data_cfg = _run_data_cfg(root, out, DATES[0])
     data_cfg["images_dir"] = ""
 
-    with pytest.raises(ValueError, match="images_dir"):
+    with pytest.raises(ValueError, match="states no data.images_dir"):
         auto_train_val("detection", data_cfg, None)
 
 

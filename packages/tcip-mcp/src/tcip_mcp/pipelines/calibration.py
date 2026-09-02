@@ -156,8 +156,9 @@ def calibrate_operating_point(predictor, trait, labels_dir, images_dir, *,
 
         manifest = read_split_manifest_dir(split_manifest_dir)
         split_manifest_sha256 = manifest_digest(manifest)
-        stems, group_by, group_key_map, excluded, cal_date = resolve_manifest_calibration_universe(
-            manifest, split_manifest_dir, labels_dir, images_dir, _subject, _attribute, stems)
+        stems, group_by, group_key_map, excluded, cal_date, _subject, _attribute = \
+            resolve_manifest_calibration_universe(
+                manifest, split_manifest_dir, labels_dir, images_dir, _subject, _attribute, stems)
         stem_to_image = {s: stem_to_image[s] for s in stems}
     else:
         group_by = group_by or "tile_prefix"

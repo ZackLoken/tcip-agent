@@ -476,6 +476,7 @@ def test_manifest_scope_issues_names_the_manifest_directory_when_given(tmp_path)
         label="data.images_dir",
     )
     assert any(i.startswith("the split manifest holds no members") for i in unnamed)
+    assert any("Regenerate the split over this date" in i for i in unnamed)
 
     named, _ = manifest_scope_issues(
         manifest, subject="leaf", attribute=None, date="2099-01-01", images_dir=None,

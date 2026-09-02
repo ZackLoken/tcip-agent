@@ -147,7 +147,7 @@ def main(argv: list[str] | None = None) -> int:
         manifest = read_split_manifest_dir(args.split_manifest_dir)
         split_manifest_sha256 = manifest_digest(manifest)
         try:
-            stems, group_by, group_key_map, _excluded, cal_date = \
+            stems, group_by, group_key_map, _excluded, cal_date, args.subject, args.attribute = \
                 resolve_manifest_calibration_universe(
                     manifest, args.split_manifest_dir, args.labels_dir, args.images_dir,
                     args.subject, args.attribute, stems)
