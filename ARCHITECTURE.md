@@ -277,12 +277,12 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | packages/tcip-web/frontend/src/components/Canvas/CanvasStage.test.tsx | (none found) | 3 | 0 |
 | packages/tcip-web/frontend/src/components/Canvas/CanvasStage.tsx | Shared Konva Stage wrapper with pan + zoom state managed in the store. | 6 | 5 |
 | packages/tcip-web/frontend/src/components/Canvas/CoverageChrome.test.tsx | (none found) | 1 | 0 |
-| packages/tcip-web/frontend/src/components/Canvas/CoverageChrome.tsx | Coverage grid chrome for a multi-cell raster: the overlay toggle, the grid's own derivation line, the attestation control for the cell under the viewport center, and the errors and previous-lattice fact a breeder needs before trusting or acting on any of it. | 1 | 2 |
+| packages/tcip-web/frontend/src/components/Canvas/CoverageChrome.tsx | Coverage grid chrome for the open raster: the overlay toggle, a key naming what each overlay mark means, the grid's own derivation line, the attestation control for the cell under the viewport center (or the cell a Map click just opened, while it stays in view), and the errors and previous-lattice facts a breeder needs before trusting or acting on any of it. | 3 | 2 |
 | packages/tcip-web/frontend/src/components/Canvas/CoverageOverlay.test.tsx | (none found) | 1 | 0 |
 | packages/tcip-web/frontend/src/components/Canvas/CoverageOverlay.tsx | The coverage lattice drawn on the annotation canvas itself: a Konva layer content in image coordinates, culled to the viewport, listening={false} like every other canvas layer. | 2 | 1 |
 | packages/tcip-web/frontend/src/components/Canvas/zoom.test.ts | (none found) | 1 | 0 |
 | packages/tcip-web/frontend/src/components/Canvas/zoom.ts | Discrete zoom levels (5% .. | 0 | 3 |
-| packages/tcip-web/frontend/src/components/CollapsibleSection.tsx | The app's collapsible-section primitive: one chevron glyph and one trigger+content unit. | 1 | 6 |
+| packages/tcip-web/frontend/src/components/CollapsibleSection.tsx | The app's collapsible-section primitive: one chevron glyph and one trigger+content unit. | 1 | 7 |
 | packages/tcip-web/frontend/src/components/ColorPickerModal.tsx | Dark color picker: SI palette + basic palette + hex input, resolving to a hex string. | 0 | 1 |
 | packages/tcip-web/frontend/src/components/DeliveryEventsPanel.tsx | What has shipped from this project: one row per completed delivery, read-only. | 1 | 1 |
 | packages/tcip-web/frontend/src/components/EmbeddedTool.test.tsx | (none found) | 1 | 0 |
@@ -335,11 +335,11 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | packages/tcip-web/frontend/src/hooks/useActiveTabSync.ts | Mirror the active tab into the backend GUI state so view_gui_state reports the tab the human actually sees. | 3 | 2 |
 | packages/tcip-web/frontend/src/hooks/useBandSelection.test.ts | (none found) | 3 | 0 |
 | packages/tcip-web/frontend/src/hooks/useBandSelection.ts | The breeder's band selection for the image `bandsInfo` describes, held once per band-set signature (the image's band names, in order) rather than per component, so a composite chosen in one tab is the one the other renders over the same band set, and a detour through a differently-banded image (or a plain colour photo) neither applies the old selection nor destroys it. | 2 | 3 |
-| packages/tcip-web/frontend/src/hooks/useCoverageGrid.test.ts | (none found) | 4 | 0 |
-| packages/tcip-web/frontend/src/hooks/useCoverageGrid.ts | The coverage lattice for the open raster, fetched once the base serve shows the raster is larger than one display-bounded serve (Served-Size below the native dims). | 3 | 3 |
+| packages/tcip-web/frontend/src/hooks/useCoverageGrid.test.ts | (none found) | 3 | 0 |
+| packages/tcip-web/frontend/src/hooks/useCoverageGrid.ts | The coverage lattice for the open raster, fetched for every raster once its path is known: an ordinary image inside the display bound derives a trivial one-cell lattice, which still names its own derivation and carries the one cell the chrome names and attests. | 2 | 3 |
 | packages/tcip-web/frontend/src/hooks/useCoverageTracking.test.ts | (none found) | 4 | 0 |
 | packages/tcip-web/frontend/src/hooks/useCoverageTracking.ts | Wires the CoverageTracker into the Annotate tab: resets on the (image, subject, date, dataset, grid) identity, hydrates from the stored record, feeds it viewport passes and the viewing context, and exposes the swept set for the coverage grid overlay plus the Complete warning facts. | 6 | 2 |
-| packages/tcip-web/frontend/src/hooks/useDisclosure.ts | Open/closed state for a collapsible region, optionally remembered across sessions. | 0 | 4 |
+| packages/tcip-web/frontend/src/hooks/useDisclosure.ts | Open/closed state for a collapsible region, optionally remembered across sessions. | 0 | 5 |
 | packages/tcip-web/frontend/src/hooks/useEditableAgentRequest.test.tsx | (none found) | 1 | 0 |
 | packages/tcip-web/frontend/src/hooks/useEditableAgentRequest.ts | A staged agent request that follows the dataset selection until the breeder edits it. | 0 | 4 |
 | packages/tcip-web/frontend/src/hooks/useImageBands.test.ts | (none found) | 2 | 0 |
@@ -373,7 +373,7 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | packages/tcip-web/frontend/src/lib/editGeometry.test.ts | (none found) | 1 | 0 |
 | packages/tcip-web/frontend/src/lib/editGeometry.ts | Pure geometry for in-place box/polygon editing, shared by the Annotate and Review tabs' editors. | 2 | 2 |
 | packages/tcip-web/frontend/src/lib/imageLoader.test.ts | (none found) | 1 | 0 |
-| packages/tcip-web/frontend/src/lib/imageLoader.ts | Shared image loader for /api/images serves. | 1 | 8 |
+| packages/tcip-web/frontend/src/lib/imageLoader.ts | Shared image loader for /api/images serves. | 1 | 6 |
 | packages/tcip-web/frontend/src/lib/imageStatus.test.ts | (none found) | 2 | 0 |
 | packages/tcip-web/frontend/src/lib/imageStatus.ts | (none found) | 1 | 4 |
 | packages/tcip-web/frontend/src/lib/joinRunSeries.test.ts | (none found) | 2 | 0 |
@@ -840,11 +840,11 @@ anything.
 | `preflight_config` | `training_tools.py:258` | yes | Validate a training configuration before launching. |
 | `launch_training` | `training_tools.py:650` | yes | Launch a training run in an isolated subprocess from a bespoke ``model_source`` builder. |
 | `check_training_status` | `training_tools.py:884` | yes | Check the status of a training run. |
-| `list_training_runs` | `training_tools.py:1028` | yes | List every training run this platform can currently account for. |
-| `cancel_training` | `training_tools.py:1244` | yes | Request graceful cancellation of a running training run. |
-| `run_hpo` | `training_tools.py:1811` | yes | Run hyperparameter optimization on Ray Tune, training each trial for real. |
-| `cancel_hpo` | `training_tools.py:2106` | yes | Request cooperative cancellation of a running HPO sweep. |
-| `evaluate_model` | `training_tools.py:2509` | yes | Evaluate a trained checkpoint on a (held-out) dataset and write test_results.json. |
+| `list_training_runs` | `training_tools.py:1027` | yes | List every training run this platform can currently account for. |
+| `cancel_training` | `training_tools.py:1243` | yes | Request graceful cancellation of a running training run. |
+| `run_hpo` | `training_tools.py:1810` | yes | Run hyperparameter optimization on Ray Tune, training each trial for real. |
+| `cancel_hpo` | `training_tools.py:2105` | yes | Request cooperative cancellation of a running HPO sweep. |
+| `evaluate_model` | `training_tools.py:2508` | yes | Evaluate a trained checkpoint on a (held-out) dataset and write test_results.json. |
 
 ### vision_tools.py (3 tools)
 
@@ -2008,7 +2008,7 @@ config-only conflict and task checks (computed before any read, so an unreadable
 suppresses them) and the manifest-dependent checks (subject/attribute, date, images-root
 presence and movement, and an empty train/val side once narrowed to the run's own date).
 `preflight_config` calls both halves directly, in the same order, over a manifest it read
-itself; `training_tools.list_split_choices` (`training_tools.py:1087`), the relaunch data
+itself; `training_tools.list_split_choices` (`training_tools.py:1086`), the relaunch data
 picker's own reader wrapped by `GET /api/training/configs/{experiment_id}/splits`, calls the
 composed function per candidate manifest it read through the checked variant above, and builds
 each candidate's launch config through `training_tools.candidate_config_with_manifest`
@@ -2493,7 +2493,7 @@ Phase 3 verdict: duplicated.
 
 Must agree: the token the browser echoes is the same token the backend minted for that label file.
 Side A: `packages/tcip-web/src/tcip_web/routes/annotate.py:190` (`"base_mtime": token,`, the token the load route mints; the save route compares the echoed one at `routes/annotate.py:200`).
-Side B: `packages/tcip-web/frontend/src/tabs/AnnotateTab.tsx:414` (`base_mtime: paths.mtime,`).
+Side B: `packages/tcip-web/frontend/src/tabs/AnnotateTab.tsx:415` (`base_mtime: paths.mtime,`).
 Phase 3 verdict: single.
 
 ## S54. Built frontend bundle location  <!-- queued: P5-305 unify -->
