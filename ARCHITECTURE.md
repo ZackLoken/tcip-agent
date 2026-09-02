@@ -929,11 +929,11 @@ registered at HEAD.
 
 | method | path | handler | line |
 |---|---|---|---|
-| GET | `/grid` | `get_grid` | `routes/coverage.py:129` |
-| GET | `` (root) | `get_coverage` | `routes/coverage.py:171` |
-| POST | `` (root) | `post_coverage` | `routes/coverage.py:217` |
-| GET | `/completeness` | `get_completeness` | `routes/coverage.py:313` |
-| POST | `/completeness` | `post_completeness` | `routes/coverage.py:399` |
+| GET | `/grid` | `get_grid` | `routes/coverage.py:139` |
+| GET | `` (root) | `get_coverage` | `routes/coverage.py:181` |
+| POST | `` (root) | `post_coverage` | `routes/coverage.py:227` |
+| GET | `/completeness` | `get_completeness` | `routes/coverage.py:375` |
+| POST | `/completeness` | `post_completeness` | `routes/coverage.py:494` |
 
 ### routes/dataset.py, prefix `/api/dataset` (3 routes)
 
@@ -2301,9 +2301,9 @@ Phase 3 verdict: single.
 
 Must agree: an attestation written by the GUI is readable, and staleness-checkable, by the calibration path that relies on it.
 Side A: `packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:566` (`def region_completeness_path(dataset_root: str | Path) -> Path:`).
-Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/region_completeness.py:170` (`def stale_cells(`).
+Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/region_completeness.py:171` (`def stale_cells(`).
 Phase 3 verdict: restated-in-test.
-Differs from phase0 record: phase0 cited a line inside the function's body rather than its header; the function itself is defined at `region_completeness.py:170` (`def stale_cells(`).
+Differs from phase0 record: phase0 cited a line inside the function's body rather than its header; the function itself is defined at `region_completeness.py:171` (`def stale_cells(`).
 
 ## S26. dataset.json identity and fingerprint
 
@@ -2500,7 +2500,7 @@ Phase 3 verdict: duplicated.
 
 Must agree: the token the browser echoes is the same token the backend minted for that label file.
 Side A: `packages/tcip-web/src/tcip_web/routes/annotate.py:190` (`"base_mtime": token,`, the token the load route mints; the save route compares the echoed one at `routes/annotate.py:200`).
-Side B: `packages/tcip-web/frontend/src/tabs/AnnotateTab.tsx:415` (`base_mtime: paths.mtime,`).
+Side B: `packages/tcip-web/frontend/src/tabs/AnnotateTab.tsx:422` (`base_mtime: paths.mtime,`).
 Phase 3 verdict: single.
 
 ## S54. Built frontend bundle location  <!-- queued: P5-305 unify -->
@@ -2534,8 +2534,8 @@ Phase 3 verdict: restated-in-test.
 ## S58. Reference-grid geometry
 
 Must agree: the cell name the agent points at and the cell the GUI highlights are the same rectangle.
-Side A: `packages/tcip-mcp/src/tcip_mcp/pipelines/reference_grid.py:57` (`def reference_cells(`, which builds the cells, with `grid_geometry`, line 151, the geometry handed over beside them).
-Side B: `packages/tcip-annotation/src/tcip_annotation/sam_wrapper.py:329` (`def grid_to_rect(`, the one cell-name lookup, with `grid_to_pixel`, line 360, built on it) and `packages/tcip-web/src/tcip_web/routes/coverage.py:128` (`@router.get("/grid")`, `get_grid`, whose cell list the browser consumes verbatim).
+Side A: `packages/tcip-mcp/src/tcip_mcp/pipelines/reference_grid.py:69` (`def reference_cells(`, which builds the cells, with `grid_geometry`, line 151, the geometry handed over beside them).
+Side B: `packages/tcip-annotation/src/tcip_annotation/sam_wrapper.py:329` (`def grid_to_rect(`, the one cell-name lookup, with `grid_to_pixel`, line 360, built on it) and `packages/tcip-web/src/tcip_web/routes/coverage.py:138` (`@router.get("/grid")`, `get_grid`, whose cell list the browser consumes verbatim).
 Phase 3 verdict: single.
 
 ## S59. Path confinement (the derived allow-set)
