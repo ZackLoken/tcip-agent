@@ -76,6 +76,8 @@ cd packages/tcip-web/frontend
 npm install
 ```
 
+`docker build -f packages/tcip-web/Dockerfile` plus `docker run --network host` builds and runs the platform as a container, serving the GUI on loopback only.
+
 ### Developer tooling
 
 `.mcp.json` (repo root) declares only the platform's own `tcip` MCP server; that is what an

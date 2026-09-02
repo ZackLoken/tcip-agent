@@ -1,0 +1,37 @@
+# Build context for packages/tcip-web/Dockerfile is the repo root; trim it to what a build
+# stage actually COPYs, since everything else still gets sent to the daemon otherwise.
+.git/
+.claude/
+.tcip/
+docs/
+tests/
+tcip-projects/
+data/
+references/pdf/
+.review-corpus/
+
+__pycache__/
+*.pyc
+*.egg-info/
+dist/
+build/
+*.whl
+.eggs/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+htmlcov/
+.coverage
+
+node_modules/
+packages/tcip-web/frontend/node_modules/
+packages/tcip-web/frontend/dist/
+packages/tcip-web/static/
+
+*.pt
+*.pth
+*.onnx
+*.safetensors
+*.ckpt
+*.log
+tensorboard_runs/

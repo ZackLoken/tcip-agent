@@ -134,6 +134,32 @@ jobs:
           TCIP_STORE_BACKEND: ${{ matrix.store-backend }}
         run: pytest tests/ -n auto --timeout=300 -q
 
+  # The documented container path (packages/tcip-web/Dockerfile) is built and answers here, so a
+  # broken image reaches CI before an adopter.
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build image
+        run: docker build -f packages/tcip-web/Dockerfile -t tcip-web:ci .
+
+      - name: Import smoke (the system libs the slim base doesn't ship)
+        run: docker run --rm tcip-web:ci python -c "import cv2, rasterio, tcip_annotation"
+
+      - name: Run and poll for the GUI
+        run: |
+          docker run --network host -d --name tcip-web-ci tcip-web:ci
+          for _ in $(seq 1 60); do
+            code=$(curl -s -o response.txt -w "%{http_code}" http://127.0.0.1:8765/ || true)
+            [ "$code" = "200" ] && break
+            sleep 1
+          done
+          echo "status: $code"
+          head -c 200 response.txt
+          docker stop tcip-web-ci
+          [ "$code" = "200" ]
+
   typescript:
     runs-on: ubuntu-latest
     steps:
