@@ -149,6 +149,8 @@ def test_consolidated_tools_present_and_removed_absent():
         "deliver_per_image_counts", "view_gui_state",
         # Method-neutral auto-labeling seam: no longer SAM-specific names.
         "propose_annotations", "stage_proposals", "segment_prompt",
+        # Re-admitted count calibrator, beside its two sibling calibrators.
+        "calibrate_count_operating_point",
     ):
         assert present in registered, f"{present} should be registered"
     removed = {
