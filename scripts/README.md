@@ -148,6 +148,12 @@ reaching for again versus one built narrowly for a specific past investigation.
   distribution and a breeder spot-check. Wraps `tcip_mcp.tools.feedback_tools.triage_predictions`
   with no MCP tool registration; `--project` (or `$TCIP_STATE_ROOT`) is required unconditionally,
   since checkpoint verification always reads the registry under it.
+- `overlay_reference_grid.py` - renders an image with a labeled reference-grid overlay for
+  spatial referencing, and echoes the full grid geometry (`tile_size`, `overlap`, `cols`, `rows`,
+  width, height) so the caller can hand it straight to `segment_prompt(grid_cells=...)`. Wraps
+  `tcip_mcp.tools.vision_tools.overlay_reference_grid` with no MCP tool registration, still
+  `@audited` since it writes an artifact and a platform audit line; `--project` (or
+  `$TCIP_STATE_ROOT`) is required unconditionally.
 - `render_failure_cases.py` - finds and renders the worst predictions for failure analysis,
   ranked by a count-mismatch-plus-low-confidence heuristic; not a substitute for
   `score_predictions(detail=True)`'s IoU-matched TP/FP/FN when mislocalization is the question.

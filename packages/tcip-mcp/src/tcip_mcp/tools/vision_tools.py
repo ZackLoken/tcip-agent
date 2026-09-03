@@ -943,7 +943,6 @@ def capture_live_canvas(
     return result
 
 
-@mcp.tool()
 @audited
 def overlay_reference_grid(
     image_path: str,

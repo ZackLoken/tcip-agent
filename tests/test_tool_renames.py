@@ -200,6 +200,7 @@ DEMOTED = [
     "score_predictions",
     "triage_predictions",
     "compare_experiments",
+    "overlay_reference_grid",
 ]
 
 _TOOL_TABLE_ROW_PATTERN = r"^\|\s*`{}`\s*\|"

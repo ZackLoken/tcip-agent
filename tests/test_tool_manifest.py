@@ -143,7 +143,7 @@ def test_consolidated_tools_present_and_removed_absent():
         "register_model", "load_project_memory",
         # Renamed tools: the new names must register.
         "inspect_project",
-        "overlay_reference_grid", "capture_live_canvas",
+        "capture_live_canvas",
         # Renamed tools: the new names must register.
         "rank_registered_models",
         "deliver_per_image_counts", "view_gui_state",
@@ -204,6 +204,8 @@ def test_consolidated_tools_present_and_removed_absent():
         "triage_predictions",
         # Demoted to a library call: the web compare route calls the function directly.
         "compare_experiments",
+        # Demoted to a library call plus scripts/overlay_reference_grid.py; kept @audited.
+        "overlay_reference_grid",
     }
     assert not (removed & registered), f"removed tools still registered: {removed & registered}"
 

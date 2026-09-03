@@ -157,7 +157,7 @@ Grid cell system:
 |------|------|-------|
 | `propose_annotations` | Propose candidate masks with a chosen engine, whole-frame or `grid_cells`-scoped | Discovery |
 | `stage_proposals(assignments=...)` | Stage classified candidates as predictions | Classification |
-| `overlay_reference_grid` | Spatial reference for corrections | Correction |
+| `vision_tools.overlay_reference_grid` (library call) | Spatial reference for corrections | Correction |
 | `segment_prompt(grid_cells=...)` | Targeted segmentation | Correction |
 | Agent's own image-capable read tool | Agent visual review | All phases |
 

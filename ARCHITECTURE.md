@@ -497,6 +497,7 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | scripts/inspect_compute_resources.py | Report the host's current compute headroom, through the demoted `inspect_compute_resources` function. | 3 | 0 |
 | scripts/inspect_gps_exif.py | Print GPS EXIF for a sample of images per acquisition date. | 1 | 0 |
 | scripts/list_tools.py | Print the live MCP tool registry (count + names). | 1 | 0 |
+| scripts/overlay_reference_grid.py | Render a labeled reference-grid overlay, through the demoted `overlay_reference_grid` function. | 3 | 0 |
 | scripts/plant_aware_group_splits.py | Plant-aware group-key derivation for ``draw_splits``, over per-stem georeferenced rasters. | 6 | 0 |
 | scripts/prove_test_fails_before.py | Prove a test actually fails against the code it was written to catch. | 0 | 0 |
 | scripts/render_candidates_tile.py | Render a tile showing GT (green) and only the FN candidates (numbered red). | 1 | 0 |
@@ -676,6 +677,7 @@ A module counts as zero-importer when no other module in its own scanned tree re
 | scripts | scripts/inspect_compute_resources.py |
 | scripts | scripts/inspect_gps_exif.py |
 | scripts | scripts/list_tools.py |
+| scripts | scripts/overlay_reference_grid.py |
 | scripts | scripts/plant_aware_group_splits.py |
 | scripts | scripts/prove_test_fails_before.py |
 | scripts | scripts/render_candidates_tile.py |
@@ -867,13 +869,12 @@ anything.
 | `cancel_hyperparameter_search` | `training_tools.py:2293` | yes | Request cooperative cancellation of a running HPO sweep. |
 | `evaluate_model` | `training_tools.py:2944` | yes | Evaluate a trained checkpoint on a (held-out) dataset and write test_results.json. |
 
-### vision_tools.py (3 tools)
+### vision_tools.py (2 tools)
 
 | tool | line | audited | docstring first line |
 |---|---|---|---|
 | `visualize` | `vision_tools.py:214` | yes | Render annotations, predictions, a GT-vs-prediction comparison, or a sample grid. |
 | `capture_live_canvas` | `vision_tools.py:730` | yes | Render exactly what the human's GUI canvas shows right now: image, shapes, viewport. |
-| `overlay_reference_grid` | `vision_tools.py:948` | yes | Render image with a labeled reference-grid overlay for spatial referencing. |
 
 ## 2. HTTP routes and WebSocket endpoints
 
