@@ -777,14 +777,15 @@ Docstring is the function's docstring first line, verbatim.
 |---|---|---|---|
 | `ingest_images` | `ingest_tools.py:173` | yes | Copy raw images into a structured project, bucketed by the capture date each file states. |
 
-### meta_tools.py (4 tools)
+### meta_tools.py (5 tools)
 
 | tool | line | audited | docstring first line |
 |---|---|---|---|
 | `report_friction` | `meta_tools.py:237` | yes | Log structured friction when you get stuck, confused, or surprised. |
 | `load_project_memory` | `meta_tools.py:306` | yes | Read one project-memory corpus into context so context isn't lost between sessions. |
-| `write_retrospective` | `meta_tools.py:393` | yes | Write an end-of-project retrospective to markdown. |
-| `record_distillation_pass` | `meta_tools.py:496` | yes | Record that you reviewed this project's friction/retrospectives (e.g. via |
+| `read_audit_log` | `meta_tools.py:348` | yes | Read one audit log's own entries: which door touched a dataset or project, when, with |
+| `write_retrospective` | `meta_tools.py:477` | yes | Write an end-of-project retrospective to markdown. |
+| `record_distillation_pass` | `meta_tools.py:580` | yes | Record that you reviewed this project's friction/retrospectives (e.g. via |
 
 ### knowledge_tools.py (1 tool)
 

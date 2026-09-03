@@ -343,6 +343,90 @@ def load_project_memory(
     return {"error": f"unknown kind '{kind}'", "valid_kinds": ["reports", "retrospectives"]}
 
 
+@mcp.tool()
+@audited
+def read_audit_log(
+    scope: str | None = None,
+    *,
+    tool: str | None = None,
+    since: str | None = None,
+    until: str | None = None,
+    status: str | None = None,
+    limit: int = 200,
+) -> dict:
+    """Read one audit log's own entries: which door touched a dataset or project, when, with
+    what status.
+
+    ``scope`` resolves through ``tcip_mcp.audit.audit_log_key``, the one resolver every audit
+    writer uses: a dataset root, a project root, or the platform default when ``scope`` is
+    ``None``. The whole log is read through ``tcip_store.read_log`` (no cursor: this is a
+    bounded lookback, not a stream a caller resumes), filtered in memory on each entry's own
+    ``tool`` name, ``status``, and ``timestamp`` (``since``/``until`` are ISO-8601 strings
+    compared lexically against the entry's own, inclusive on both ends), then returned newest
+    first, up to ``limit``. ``skipped`` states how many entries this call is not returning,
+    whether filtered out or truncated by ``limit``, so a caller can tell "nothing matched" apart
+    from "more exists".
+
+    A page carrying undecodable or unknown-schema-version entries is refused rather than
+    answered from what did decode: a provenance read that silently dropped rows would be worse
+    than one that says it cannot answer.
+
+    This is a read, not a replacement for the two readers that already scan this log for their
+    own narrow question: the plant-mapping receipt scan (``pipelines.postprocessing.plant_mapping._scan_receipts``)
+    and the refused-experiment-mutation index (``experiments._index_refused_mutations``) each
+    keep their own targeted read, since a general-purpose page here would make them re-filter a
+    result shaped for something else. Like every MCP tool this call is itself ``@audited``, so a
+    read of the record is on the record too, the same as ``load_project_memory``.
+
+    Args:
+        scope: Dataset root, project root, or ``None`` for the platform log.
+        tool: Exact tool-name filter, e.g. 'save_annotations'.
+        since: Only entries whose own timestamp is at or after this ISO-8601 string.
+        until: Only entries whose own timestamp is at or before this ISO-8601 string.
+        status: Exact status filter, e.g. 'ok', 'error', 'exception'.
+        limit: Maximum entries to return (default 200), newest first.
+    """
+    from tcip_mcp.audit import audit_log_key
+
+    key = audit_log_key(scope)
+    page = tcip_store.read_log(key)
+    if page.corrupt or page.version_refused:
+        return {
+            "error": (
+                f"the audit log at {key.root} carries {len(page.corrupt)} undecodable and "
+                f"{len(page.version_refused)} version-refused entr"
+                f"{'y' if (len(page.corrupt) + len(page.version_refused)) == 1 else 'ies'}; "
+                "repair the log before trusting a read of it"
+            ),
+            "scope_resolved": key.root,
+        }
+
+    def _matches(entry: dict) -> bool:
+        if tool is not None and entry.get("tool") != tool:
+            return False
+        if status is not None and entry.get("status") != status:
+            return False
+        entry_timestamp = entry.get("timestamp")
+        if since is not None and (entry_timestamp is None or entry_timestamp < since):
+            return False
+        if until is not None and (entry_timestamp is None or entry_timestamp > until):
+            return False
+        return True
+
+    filtered = [entry for entry in page.records if _matches(entry)]
+    newest_first = list(reversed(filtered))
+    truncated = max(0, len(newest_first) - limit)
+    entries = newest_first[:limit]
+    skipped = (len(page.records) - len(filtered)) + truncated
+
+    return {
+        "entries": entries,
+        "count": len(entries),
+        "skipped": skipped,
+        "scope_resolved": key.root,
+    }
+
+
 def _load_reports(
     project_path: str, limit: int, category: str, filter_substring: str
 ) -> dict:
