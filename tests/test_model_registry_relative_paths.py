@@ -217,8 +217,8 @@ def test_list_registered_models_tool_answers_resolved_absolute(tmp_path: Path):
     assert Path(result["models"][0]["checkpoint_path"]) == Path(ckpt).resolve()
 
 
-def test_select_best_model_tool_answers_resolved_absolute(tmp_path: Path):
-    from tcip_mcp.tools.model_tools import select_best_model
+def test_rank_registered_models_tool_answers_resolved_absolute(tmp_path: Path):
+    from tcip_mcp.tools.model_tools import rank_registered_models
 
     project = tmp_path / "proj"
     ckpt_dir = project / ".tcip" / "experiments" / "exp1"
@@ -229,7 +229,7 @@ def test_select_best_model_tool_answers_resolved_absolute(tmp_path: Path):
         "m", str(ckpt), {}, metrics={"val_map50": 0.9}, metrics_source="trainer",
     )
 
-    result = select_best_model(str(project), metric="val_map50", higher_is_better=True)
+    result = rank_registered_models(str(project), metric="val_map50", higher_is_better=True)
 
     assert "error" not in result, result
     assert Path(result["checkpoint_path"]) == ckpt.resolve()

@@ -222,7 +222,7 @@ class CompareBestPayload(BaseModel):
 def compare_best_route(payload: CompareBestPayload) -> dict:
     """Rank the marked comparison's own registered checkpoints by one metric.
 
-    Wraps the platform's one best-model derivation (``select_best_model``), narrowed to the
+    Wraps the platform's one best-model derivation (``rank_registered_models``), narrowed to the
     marked experiments before anything is derived. Reads the registry index first so a project
     with none never takes the tool's own directory-creating construction: only the reader's own
     empty answer (no index at all) is a 404; a document that exists but will not decode
@@ -239,7 +239,7 @@ def compare_best_route(payload: CompareBestPayload) -> dict:
 
     from tcip_mcp.model_registry import RegistryEntryPredatesMetricsSource, RegistryVersionRefused, read_registry_index
     from tcip_mcp.project_paths import platform_state_root
-    from tcip_mcp.tools.model_tools import select_best_model
+    from tcip_mcp.tools.model_tools import rank_registered_models
 
     try:
         entries = read_registry_index(platform_state_root())
@@ -249,7 +249,7 @@ def compare_best_route(payload: CompareBestPayload) -> dict:
         raise HTTPException(404, "no model registry in this project")
 
     try:
-        result = select_best_model(
+        result = rank_registered_models(
             metric=payload.metric, higher_is_better=payload.higher_is_better,
             include_unverified=payload.include_unverified, experiment_ids=payload.experiment_ids,
         )
