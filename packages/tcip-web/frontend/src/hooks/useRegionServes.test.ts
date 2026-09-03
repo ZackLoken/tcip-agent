@@ -5,10 +5,10 @@ import { useRegionServes } from "@/hooks/useRegionServes";
 import type { GridCell } from "@/lib/coverage";
 import type { LoadedImage } from "@/lib/imageLoader";
 
-const SERVING_CELL: GridCell = { name: "S1", x0: 0, y0: 0, x1: 1000, y1: 600 };
-const A1: GridCell = { name: "A1", x0: 0, y0: 0, x1: 500, y1: 300 };
-const B1: GridCell = { name: "B1", x0: 500, y0: 300, x1: 1000, y1: 600 };
-const STRADDLING: GridCell = { name: "OUT1", x0: 900, y0: 500, x1: 1100, y1: 700 };
+const SERVING_LEFT: GridCell = { name: "S1", x0: 0, y0: 0, x1: 500, y1: 600 };
+const SERVING_RIGHT: GridCell = { name: "S2", x0: 500, y0: 0, x1: 1000, y1: 600 };
+const SMALL: GridCell = { name: "A1", x0: 0, y0: 0, x1: 500, y1: 600 };
+const SPANNING: GridCell = { name: "BIG1", x0: 0, y0: 0, x1: 1000, y1: 600 };
 
 const BASE_FACTS: LoadedImage = {
   ok: true,
@@ -28,9 +28,9 @@ function baseArgs() {
     imgW: 1000,
     imgH: 600,
     view: { scale: 1, offset_x: 0, offset_y: 0 },
-    servingCells: [SERVING_CELL],
-    servingTileSize: 1000,
-    coverageCells: [A1, B1, STRADDLING],
+    servingCells: [SERVING_LEFT, SERVING_RIGHT],
+    servingTileSize: 500,
+    coverageCells: [SMALL, SPANNING],
     baseFacts: BASE_FACTS,
     composite: {},
   };
@@ -63,25 +63,37 @@ afterEach(() => {
 });
 
 describe("useRegionServes served-at-native fold", () => {
-  it("marks only the coverage cells fully inside the served serving cell", () => {
+  it("marks a coverage cell fully inside one serving cell once that cell is served at native", () => {
     const onCellServedAtNative = vi.fn();
     const { result } = renderHook(() => useRegionServes({ ...baseArgs(), onCellServedAtNative }));
-    expect(result.current).toHaveLength(1);
-    expect(result.current[0].key).toBe("S1");
+    expect(result.current).toHaveLength(2);
 
-    result.current[0].onLoaded?.(loadedAtNative(1000, 600));
+    const left = result.current.find((r) => r.key === "S1");
+    left?.onLoaded?.(loadedAtNative(500, 600));
 
     expect(onCellServedAtNative).toHaveBeenCalledWith("A1");
-    expect(onCellServedAtNative).toHaveBeenCalledWith("B1");
-    expect(onCellServedAtNative).not.toHaveBeenCalledWith("OUT1");
-    expect(onCellServedAtNative).toHaveBeenCalledTimes(2);
+    expect(onCellServedAtNative).not.toHaveBeenCalledWith("BIG1");
+  });
+
+  it("marks a coverage cell spanning two serving cells only once both have been served at native", () => {
+    const onCellServedAtNative = vi.fn();
+    const { result } = renderHook(() => useRegionServes({ ...baseArgs(), onCellServedAtNative }));
+
+    const left = result.current.find((r) => r.key === "S1");
+    const right = result.current.find((r) => r.key === "S2");
+
+    left?.onLoaded?.(loadedAtNative(500, 600));
+    expect(onCellServedAtNative).not.toHaveBeenCalledWith("BIG1");
+
+    right?.onLoaded?.(loadedAtNative(500, 600));
+    expect(onCellServedAtNative).toHaveBeenCalledWith("BIG1");
   });
 
   it("marks nothing when the serve does not cover the cell at native resolution", () => {
     const onCellServedAtNative = vi.fn();
     const { result } = renderHook(() => useRegionServes({ ...baseArgs(), onCellServedAtNative }));
 
-    result.current[0].onLoaded?.(loadedAtNative(500, 300));
+    result.current[0].onLoaded?.(loadedAtNative(400, 600));
 
     expect(onCellServedAtNative).not.toHaveBeenCalled();
   });

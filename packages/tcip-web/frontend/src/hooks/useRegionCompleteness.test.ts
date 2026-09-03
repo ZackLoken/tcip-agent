@@ -381,9 +381,17 @@ describe("useRegionCompleteness", () => {
     expect(result.current.workingScale).toBeNull();
   });
 
-  it("names the no-set-zoom reason when the subject is served explicitly null", async () => {
+  it("names the no-set-zoom reason the server sends when the subject is served explicitly null", async () => {
     vi.spyOn(api.coverage, "completeness").mockResolvedValue(
-      response({}, { working_scale: { bush: null } }),
+      response(
+        {},
+        {
+          working_scale: { bush: null },
+          working_scale_reason: {
+            bush: "set the grid zoom to derive a coverage lattice for bush",
+          },
+        },
+      ),
     );
     const { result } = renderHook(() =>
       useRegionCompleteness({
@@ -400,7 +408,7 @@ describe("useRegionCompleteness", () => {
     );
   });
 
-  it("prefers the served per-subject reason over its own composed clause", async () => {
+  it("renders the served per-subject reason verbatim, never composing its own", async () => {
     vi.spyOn(api.coverage, "completeness").mockResolvedValue(
       response(
         {},

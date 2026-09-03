@@ -221,14 +221,39 @@ def _rendered_grid(geometry: dict, derivation: str) -> dict:
 def _subject_zoom(root: str, subject: str) -> Optional[dict]:
     """``subject``'s stored grid-zoom entry (``{zoom, set_by, set_at}``) for the dataset at
     ``root``, or ``None`` when the breeder has not set one: the one read every caller of the
-    ``coverage_grid_zoom`` store shares, so a lookup can never drift from the store's own shape."""
+    ``coverage_grid_zoom`` store shares, so a lookup can never drift from the store's own shape,
+    and the one place a store that will not decode or an entry whose ``zoom`` is not a positive
+    number is refused, rather than each reader re-checking it (or trusting it) its own way. A
+    caller that needs to keep serving beside a failure here (``get_completeness``, whose
+    ``working_scale`` is best-effort next to ``by_subject``) catches the resulting
+    ``HTTPException`` itself."""
     from tcip_mcp.dataset_layout import coverage_grid_zoom_key
 
-    store = tcip_store.read(coverage_grid_zoom_key(root), default={})
+    try:
+        store = tcip_store.read(coverage_grid_zoom_key(root), default={})
+    except tcip_store.DecodeError as exc:
+        raise HTTPException(
+            400, f"{subject}'s coverage grid zoom store under {root} will not decode: {exc}"
+        ) from exc
     if not isinstance(store, dict):
         return None
     entry = store.get(subject)
-    return entry if isinstance(entry, dict) else None
+    if not isinstance(entry, dict):
+        return None
+    zoom = entry.get("zoom")
+    if isinstance(zoom, bool) or not isinstance(zoom, (int, float)) or zoom <= 0:
+        raise HTTPException(
+            400,
+            f"{subject}'s stored grid-zoom entry does not carry a positive zoom: {entry!r}")
+    return entry
+
+
+def _no_zoom_reason(subject: str) -> str:
+    """The one sentence naming why ``subject`` has no coverage lattice yet: no default zoom
+    exists anywhere in this platform, so the grid route's ``reason`` and the completeness read's
+    ``working_scale_reason`` state it identically rather than risking two spellings of the same
+    fact."""
+    return f"set the grid zoom to derive a coverage lattice for {subject}"
 
 
 def _working_scale_of(entry: Optional[dict]) -> Optional[dict]:
@@ -355,19 +380,13 @@ def get_grid(
             existing_record["grid"], "the lattice this image's coverage was recorded on")
         fresh_derivation_differs: Optional[bool] = None
         if zoom_entry is not None and viewport_w is not None and viewport_h is not None:
-            try:
-                fresh_edge = derive_lattice_tile_size(
-                    viewport_w, viewport_h, zoom_entry["zoom"])
-            except (KeyError, ValueError):
-                fresh_derivation_differs = None
-            else:
-                fresh_derivation_differs = fresh_edge != existing_record["grid"].get("tile_size")
+            fresh_edge = derive_lattice_tile_size(viewport_w, viewport_h, zoom_entry["zoom"])
+            fresh_derivation_differs = fresh_edge != existing_record["grid"].get("tile_size")
         return {"grid": grid, "reason": None,
                 "fresh_derivation_differs": fresh_derivation_differs, "serving": serving}
 
     if zoom_entry is None:
-        return {"grid": None,
-                "reason": f"set the grid zoom to derive a coverage lattice for {subject}",
+        return {"grid": None, "reason": _no_zoom_reason(subject),
                 "fresh_derivation_differs": None, "serving": serving}
     if viewport_w is None or viewport_h is None:
         return {"grid": None,
@@ -678,10 +697,15 @@ def get_completeness(
 
     ``working_scale`` (subject -> ``WorkingScale`` or ``null``) is every subject with a
     completeness record on this raster, plus the requested ``subject`` when it has none, each
-    read fresh from ``coverage_grid_zoom`` -- the breeder's own set inspection zoom for that
-    subject, never derived from any annotation or echoed back from the browser. Where no zoom is
-    set, ``working_scale[subject]`` stays null and ``working_scale_reason: dict[str, str]`` names
-    why, per subject: there is no default zoom anywhere in this platform.
+    read fresh through :func:`_subject_zoom` -- the breeder's own set inspection zoom for that
+    subject, never derived from any annotation or echoed back from the browser; the same function
+    the grid route and ``post_completeness`` read a zoom through, so a store that will not decode
+    or an entry whose ``zoom`` is not a positive number is refused the same way everywhere. Where
+    no zoom is set, ``working_scale[subject]`` stays null and ``working_scale_reason: dict[str,
+    str]`` names why, per subject: there is no default zoom anywhere in this platform. Where
+    ``_subject_zoom`` itself refuses for a subject, ``working_scale[subject]`` stays null and
+    ``working_scale_error`` carries the refusal's own message instead, without blocking
+    ``by_subject``, which needs no zoom at all.
 
     ``annotation_counts`` (subject -> cell name -> count) is every subject's saved-annotation
     count per cell, binned against ``counts_grid`` (:func:`_grid_for_raster`, the same
@@ -693,7 +717,6 @@ def get_completeness(
     from tcip_annotation.json_io import UnreadableLabelDocument, read_annotations
     from tcip_mcp.dataset_layout import (
         annotation_path,
-        coverage_grid_zoom_key,
         normalize_region_completeness_store,
         parse_image_path,
         region_completeness_digest_key,
@@ -732,27 +755,24 @@ def get_completeness(
             raise HTTPException(400, str(exc)) from exc
         by_subject[record_subject] = {**record, "stale_cells": stale}
 
-    try:
-        zoom_store = tcip_store.read(coverage_grid_zoom_key(root), default={})
-        working_scale_error: Optional[str] = None
-    except tcip_store.DecodeError as exc:
-        zoom_store = {}
-        working_scale_error = str(exc)
-    if not isinstance(zoom_store, dict):
-        zoom_store = {}
-
     subjects = set(by_subject)
     if subject:
         subjects.add(subject)
     working_scale: dict[str, Optional[dict]] = {}
     working_scale_reason: dict[str, str] = {}
+    working_scale_error: Optional[str] = None
     for subj in sorted(subjects):
-        entry = zoom_store.get(subj)
-        if isinstance(entry, dict) and isinstance(entry.get("zoom"), (int, float)):
+        try:
+            entry = _subject_zoom(root, subj)
+        except HTTPException as exc:
+            working_scale[subj] = None
+            working_scale_error = exc.detail if isinstance(exc.detail, str) else str(exc.detail)
+            continue
+        if entry is not None:
             working_scale[subj] = _working_scale_of(entry)
         else:
             working_scale[subj] = None
-            working_scale_reason[subj] = f"set the grid zoom to derive a coverage lattice for {subj}"
+            working_scale_reason[subj] = _no_zoom_reason(subj)
 
     label_error: Optional[str] = None
     annotations: list = []
@@ -802,9 +822,11 @@ def post_completeness(payload: CompletenessSetPayload) -> dict:
     its own replacement.
 
     An attestation stamps the working scale the breeder actually swept against: the subject's own
-    set grid zoom (``coverage_grid_zoom``), read once ahead of the transaction, never this
-    image's label file or pixel size -- there is no failure mode here to name in the response, an
-    absent zoom simply stamps a null working scale.
+    set grid zoom, read once ahead of the transaction through :func:`_subject_zoom` (never this
+    image's label file or pixel size) -- an absent zoom simply stamps a null working scale, while
+    an entry :func:`_subject_zoom` itself refuses (a store that will not decode, or a ``zoom``
+    that is not a positive number) refuses this write outright, the same way it refuses the grid
+    route and ``get_completeness``, rather than stamping the malformed value.
 
     The audit line is appended after the transaction commits, through the same raising emitter
     ``post_coverage`` uses (``_audit_or_answer_500``): a failed append answers 500, naming

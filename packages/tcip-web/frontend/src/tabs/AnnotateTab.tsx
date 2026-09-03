@@ -218,10 +218,10 @@ export function AnnotateTab() {
   // A tool must always be shown active: when the Map tool is withdrawn and settled (not merely
   // a grid still loading), fall back to a drawing tool rather than leaving the canvas inert.
   useEffect(() => {
-    if (mode === "map" && !coverageMultiCell && !coverageGrid.pending) {
+    if (mode === "map" && !coverageMultiCell && coverageGrid.settled) {
       useStore.getState().setMode("box");
     }
-  }, [mode, coverageMultiCell, coverageGrid.pending]);
+  }, [mode, coverageMultiCell, coverageGrid.settled]);
 
   function jumpToCell(cell: GridCell) {
     const host = measureCanvasHost();
@@ -1387,7 +1387,7 @@ export function AnnotateTab() {
         user: useStore.getState().user,
       })
       .then(
-        () => coverageGrid.rederiveLattice(),
+        () => coverageGrid.refetch(),
         (err: unknown) => {
           const detail = err instanceof Error ? err.message : String(err);
           useStore.getState().pushToast(`Could not set the grid zoom: ${detail}`);

@@ -1,8 +1,9 @@
 """The one place the platform turns a raster's georeferencing tags into a real-world pixel size
-in metres. Every consumer that needs one (the completeness bar's working-scale derivation, the
-block-aware calibration buffer) resolves through :func:`resolve_pixel_size` (or its two thin
-wrappers, :func:`raster_pixel_size` and :func:`raster_pixel_size_reason`) so no second reading of
-the raster's CRS unit can drift from this one.
+in metres. Every consumer that needs one (block calibration's own buffer sizing,
+:func:`~tcip_mcp.pipelines.derivations.derive_block_scale_px`) resolves through
+:func:`resolve_pixel_size` (or its two thin wrappers, :func:`raster_pixel_size` and
+:func:`raster_pixel_size_reason`) so no second reading of the raster's CRS unit can drift from
+this one.
 """
 
 from __future__ import annotations
@@ -32,9 +33,10 @@ too."""
 _ANISOTROPY_REL_TOL = 1e-6
 """Relative tolerance for treating ``pixel_scale_x``/``pixel_scale_y`` as equal: one part in a
 million, so a tag written as ``0.030000001`` beside ``0.03`` reads as equal while any real
-anisotropy still refuses. An anisotropic raster has no single pixel size to convert a longer
-side through, since :func:`~tcip_mcp.pipelines.region_completeness.saved_extents` does not
-record which axis a box's longer side lay along, so it is refused by name rather than averaged."""
+anisotropy still refuses. An anisotropic raster has no single pixel size, and
+:func:`~tcip_mcp.pipelines.derivations.derive_block_scale_px` converts one isotropic distance (a
+planting-grid pitch) through this figure, so an anisotropic raster is refused by name rather than
+averaged into a scalar that would not hold in both axes."""
 
 
 def resolve_pixel_size(source: Path | BandGroupRef) -> tuple[PixelSize | None, str]:

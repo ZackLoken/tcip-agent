@@ -202,10 +202,7 @@ export function useRegionCompleteness(args: {
     if (workingScaleError) return workingScaleError;
     if (!subject) return "no active subject";
     if (!(subject in workingScaleBySubject)) return "the read has not answered yet";
-    return (
-      workingScaleReasonBySubject[subject] ??
-      `set the grid zoom to derive a coverage lattice for ${subject}`
-    );
+    return workingScaleReasonBySubject[subject];
   }, [
     workingScale,
     workingScaleError,
