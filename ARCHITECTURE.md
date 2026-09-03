@@ -812,8 +812,8 @@ Docstring is the function's docstring first line, verbatim.
 | tool | line | audited | docstring first line |
 |---|---|---|---|
 | `build_plant_mapping` | `phenology_tools.py:31` | yes | Assign each geolocated image to a plant, then persist the mapping under this project. |
-| `calibrate_classifier_operating_point` | `phenology_tools.py:408` | yes | Calibrate and validate the trait's positive-class classifier against held-out GT. |
-| `compute_phenology` | `phenology_tools.py:549` | yes | Per-plant phenology milestones from classified predictions + a plant mapping. |  <!-- queued: P5-43 unify -->
+| `calibrate_classifier_operating_point` | `phenology_tools.py:395` | yes | Calibrate and validate the trait's positive-class classifier against held-out GT. |
+| `compute_phenology` | `phenology_tools.py:536` | yes | Per-plant phenology milestones from classified predictions + a plant mapping. |  <!-- queued: P5-43 unify -->
 
 ### project_tools.py (5 tools)
 
@@ -998,18 +998,18 @@ registered at HEAD.
 | method | path | handler | line |
 |---|---|---|---|
 | POST | `/plant_mapping/build` | `build_plant_mapping` | `routes/results.py:177` |
-| POST | `/plant_mapping/load` | `load_plant_mapping` | `routes/results.py:277` |
-| GET | `/plant_mapping/list` | `list_plant_mappings` | `routes/results.py:309` |
-| POST | `/phenology_measurement` | `phenology_measurement` | `routes/results.py:581` |
-| POST | `/export_csv` | `export_csv` | `routes/results.py:637` |
-| GET | `/traits` | `list_traits` | `routes/results.py:1062` |
-| GET | `/operationalization` | `get_operationalization` | `routes/results.py:761` |
-| GET | `/operationalizations` | `list_operationalizations` | `routes/results.py:777` |
-| POST | `/operationalization/confirm` | `confirm_operationalization` | `routes/results.py:815` |
-| GET | `/trait-spec-statement` | `get_trait_spec_statement` | `routes/results.py:917` |
-| GET | `/trait-spec-statements` | `list_trait_spec_statements` | `routes/results.py:933` |
-| POST | `/trait-spec-statement/confirm` | `confirm_trait_spec_statement` | `routes/results.py:975` |
-| GET | `/delivery-events` | `list_delivery_events` | `routes/results.py:1041` |
+| POST | `/plant_mapping/load` | `load_plant_mapping` | `routes/results.py:269` |
+| GET | `/plant_mapping/list` | `list_plant_mappings` | `routes/results.py:303` |
+| POST | `/phenology_measurement` | `phenology_measurement` | `routes/results.py:577` |
+| POST | `/export_csv` | `export_csv` | `routes/results.py:633` |
+| GET | `/traits` | `list_traits` | `routes/results.py:1058` |
+| GET | `/operationalization` | `get_operationalization` | `routes/results.py:757` |
+| GET | `/operationalizations` | `list_operationalizations` | `routes/results.py:773` |
+| POST | `/operationalization/confirm` | `confirm_operationalization` | `routes/results.py:811` |
+| GET | `/trait-spec-statement` | `get_trait_spec_statement` | `routes/results.py:913` |
+| GET | `/trait-spec-statements` | `list_trait_spec_statements` | `routes/results.py:929` |
+| POST | `/trait-spec-statement/confirm` | `confirm_trait_spec_statement` | `routes/results.py:971` |
+| GET | `/delivery-events` | `list_delivery_events` | `routes/results.py:1037` |
 | GET | `/models/registered` | `registered_models` | `routes/results.py:1091` |
 
 ### routes/review.py, prefix `/api/review` (8 routes)
@@ -2156,7 +2156,7 @@ arguments: dict) -> None:`, which calls `record_event` with the dataset root its
 resolved; `routes/annotate.py:150` does the same for its own dataset, `routes/classes.py:63`
 likewise, the one `routes/inference.py:368` imports and calls rather than defining its own);
 `routes/results.py:151` does the same for a project root instead. Reader:
-`pipelines/postprocessing/plant_mapping.py:973` (`_require_receipt`)
+`pipelines/postprocessing/plant_mapping.py:1061` (`_require_receipt`)
 trusts only a `plant_mapping_built` entry it finds in the log under the root its caller holds
 (the MCP tool's pinned platform root, the platform log's own file until adoption makes it a
 project's; the web route's guarded project root), scanned by `_scan_receipts`, line 923, which
@@ -2327,7 +2327,7 @@ Phase 3 verdict: single.
 
 Must agree: the MCP registrar and the GUI model pickers read one registry entry shape.
 Side A: `packages/tcip-mcp/src/tcip_mcp/model_registry.py:132` (`def read_registry_index(`, the read path for everything outside the module; `_register_entry`, line 429, replaces one entry by name inside one `tcip_store.transaction` on the key `registry_index_key`, line 116, mints).
-Side B: `packages/tcip-web/src/tcip_web/routes/results.py:1090` (`@router.get("/models/registered")`, serving `model_tools.list_registered_models`) and the browser's one entry declaration, `packages/tcip-web/frontend/src/api/inference.ts:16` (`export interface RegisteredModel {`), held field by field against an entry the real registrar wrote by `tests/test_registry_entry_shape_agreement.py`.
+Side B: `packages/tcip-web/src/tcip_web/routes/results.py:1086` (`@router.get("/models/registered")`, serving `model_tools.list_registered_models`) and the browser's one entry declaration, `packages/tcip-web/frontend/src/api/inference.ts:16` (`export interface RegisteredModel {`), held field by field against an entry the real registrar wrote by `tests/test_registry_entry_shape_agreement.py`.
 Phase 3 verdict: single.
 
 ## S28. operating_point.json prediction-bucket sidecar
@@ -2377,7 +2377,7 @@ Phase 3 verdict: single. One value is still spelled as a literal rather than bou
 
 Must agree: no delivered result ships an unvalidated parameter without an explicit acknowledgement.
 Side A: `packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py:2567` (`def check_delivery_gate(`, judging each dimension against `_DIMENSION_REFERENCES`, `packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py:2547`, so a reference clears only the dimension whose kind earned it, with `DeliveryGateResult.column_stamp`, `packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py:2504`, as the one derivation of what a deliverable's validity column carries).
-Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py:1857` (`def delivered_tail(`, the one composition every delivered tail's validity columns route through, deriving `own_column` from which of `_DIMENSION_TO_COLUMN`'s columns a door's own column list carries, never a second list stating so). `packages/tcip-mcp/src/tcip_mcp/pipelines/postprocessing/export.py:341` and `pipelines/postprocessing/aggregation.py:544` (`delivered_tail(provenance, operating_point_recon["bindings"], gate,`, each delivery door composing its tail through it rather than stamping the column itself); `packages/tcip-mcp/src/tcip_mcp/pipelines/postprocessing/export.py:368` (`summary = {`, `export_detection_csv`'s own gate-and-reconciliation summary, `tools/inference_tools.py`'s `tabulate_counts` sourcing its `tile_size_validated` response field from that returned summary's own stamp in both regimes that read a bucket, while `operating_point_validated` sources from the delivered tail's own floored cell above instead, neither response field re-deriving its column itself); and `packages/tcip-mcp/src/tcip_mcp/pipelines/postprocessing/phenology.py:606` (`delivered_tail(`, inside `_write_phenology_delivery`, the one writer both phenology delivery doors call through, `tools/phenology_tools.py`'s `compute_phenology` and `packages/tcip-web/src/tcip_web/routes/results.py`'s `export_csv`, rather than stamping the column themselves). The aggregated per-plant door also floors a claim-scope dimension read from each bucket's sidecar (`resolution.reconcile_claim_scope_validity`, whose accepted values, `CLAIM_SCOPE_REFERENCES`, are narrower than `VALIDATED_SHIPPABLE`, so an annotation reference cannot clear a raster-scope claim): a bucket that records no claim scope never acquires the dimension.
+Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py:1857` (`def delivered_tail(`, the one composition every delivered tail's validity columns route through, deriving `own_column` from which of `_DIMENSION_TO_COLUMN`'s columns a door's own column list carries, never a second list stating so). `packages/tcip-mcp/src/tcip_mcp/pipelines/postprocessing/export.py:341` and `pipelines/postprocessing/aggregation.py:556` (`delivered_tail(provenance, operating_point_recon["bindings"], gate,`, each delivery door composing its tail through it rather than stamping the column itself); `packages/tcip-mcp/src/tcip_mcp/pipelines/postprocessing/export.py:368` (`summary = {`, `export_detection_csv`'s own gate-and-reconciliation summary, `tools/inference_tools.py`'s `tabulate_counts` sourcing its `tile_size_validated` response field from that returned summary's own stamp in both regimes that read a bucket, while `operating_point_validated` sources from the delivered tail's own floored cell above instead, neither response field re-deriving its column itself); and `packages/tcip-mcp/src/tcip_mcp/pipelines/postprocessing/phenology.py:613` (`delivered_tail(`, inside `_write_phenology_delivery`, the one writer both phenology delivery doors call through, `tools/phenology_tools.py`'s `compute_phenology` and `packages/tcip-web/src/tcip_web/routes/results.py`'s `export_csv`, rather than stamping the column themselves). The aggregated per-plant door also floors a claim-scope dimension read from each bucket's sidecar (`resolution.reconcile_claim_scope_validity`, whose accepted values, `CLAIM_SCOPE_REFERENCES`, are narrower than `VALIDATED_SHIPPABLE`, so an annotation reference cannot clear a raster-scope claim): a bucket that records no claim scope never acquires the dimension.
 Phase 3 verdict: single.
 
 ## S35. ResolvedParam validation firewall
@@ -2412,7 +2412,7 @@ Phase 3 verdict: single.
 
 Must agree: the delivered CSV's column names derive from the trait spec on every path that writes them.
 Side A: `packages/tcip-mcp/src/tcip_mcp/pipelines/postprocessing/phenology.py:81` (`def majority_crossing_unconfirmed_column(spec) -> str | None:`, the one owner; `phenology_csv_columns` builds the schema through it).
-Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/postprocessing/phenology.py:616` (`majority_crossing_unconfirmed_column(spec)`, called from `_write_phenology_delivery`, the one writer both `tools/phenology_tools.py`'s `compute_phenology` and `packages/tcip-web/src/tcip_web/routes/results.py`'s `export_csv` call through instead of assembling the name themselves).
+Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/postprocessing/phenology.py:626` (`majority_crossing_unconfirmed_column(spec)`, called from `_write_phenology_delivery`, the one writer both `tools/phenology_tools.py`'s `compute_phenology` and `packages/tcip-web/src/tcip_web/routes/results.py`'s `export_csv` call through instead of assembling the name themselves).
 Phase 3 verdict: single.
 
 ## S40. Per-band normalization stats for a non-3-channel detector
