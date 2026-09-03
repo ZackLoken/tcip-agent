@@ -5,8 +5,10 @@ CI adds, drops, or reorders reaches this gate the next time it runs rather than 
 someone to notice the drift. Every stage runs even if an earlier one fails, so one red stage
 does not hide the timing of the rest.
 
-The ``environment`` job is out of scope: it creates the conda environment this gate's own
-process already runs inside, so there is nothing local to run in its place.
+Two jobs are out of scope. ``environment`` creates the conda environment this gate's own
+process already runs inside, so there is nothing local to run in its place; ``docker``
+builds and answers the container image, which needs a Docker daemon this gate does not
+assume, and CI's own build is the proof of that image.
 
 Each step's ``run:`` text goes through bash, never through PowerShell or cmd, since that is the
 shell GitHub's own Linux runners give the same text. On a Linux or macOS host the bash on
@@ -39,8 +41,10 @@ CI_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "ci.yml"
 RECORDED_BASELINE = REPO_ROOT / "docs" / "audit" / "phase0" / "gate-baseline"
 
 PARSED_JOBS = ("mypy", "python", "typescript")
-OUT_OF_SCOPE_JOB = "environment"
-OUT_OF_SCOPE_REASON = "it creates the conda environment this gate's own process already runs inside"
+OUT_OF_SCOPE_JOBS = {
+    "environment": "it creates the conda environment this gate's own process already runs inside",
+    "docker": "it builds the container image, which needs a Docker daemon this gate does not assume",
+}
 
 _SKIP_PREFIXES = ("pip", "npm ci", "conda", "mamba")
 _MATRIX_EXPR = re.compile(r"\$\{\{\s*matrix\.([\w-]+)\s*\}\}")
@@ -287,8 +291,7 @@ def main() -> int:
     summary = {
         "shell": bash,
         "shell_note": "Git Bash on Windows",
-        "out_of_scope_job": OUT_OF_SCOPE_JOB,
-        "out_of_scope_reason": OUT_OF_SCOPE_REASON,
+        "out_of_scope_jobs": OUT_OF_SCOPE_JOBS,
         "mypy_pin": pin,
         # A probe on this caller's own PATH, not read from the mypy stage's own subprocess
         # environment; None both when the probe fails and when the mypy stage did not run.
