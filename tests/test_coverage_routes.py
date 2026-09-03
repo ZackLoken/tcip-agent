@@ -524,7 +524,7 @@ class TestWorkingScale:
         self, client, dated_dataset,
     ):
         """The served pixel-size reason maps read_geotransform's own exception to a short
-        clause (region_completeness.resolve_pixel_size): plot.tif is a plain, unreferenced
+        clause (pixel_size.resolve_pixel_size): plot.tif is a plain, unreferenced
         TIFF, so GeoreferencingError is the branch this exercises, and the served sentence must
         carry no filesystem path (the server's own absolute path stayed in the reader's
         exception message, never the served reason)."""
@@ -1686,12 +1686,12 @@ class TestCompletenessRoute:
     def test_a_failed_pre_transaction_derivation_stamps_a_null_bar_and_returns_the_error(
         self, client, dated_dataset, monkeypatch,
     ):
-        import tcip_mcp.pipelines.region_completeness as region_completeness_module
+        import tcip_mcp.pipelines.pixel_size as pixel_size_module
 
         def _raise(*args, **kwargs):
             raise OSError("disk read failed")
 
-        monkeypatch.setattr(region_completeness_module, "resolve_pixel_size", _raise)
+        monkeypatch.setattr(pixel_size_module, "resolve_pixel_size", _raise)
 
         root, path = dated_dataset
         grid = _grid(client, path, tile_size=64)

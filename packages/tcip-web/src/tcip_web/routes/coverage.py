@@ -469,7 +469,7 @@ def get_completeness(
     browser echoes back. When a subject saved no box or polygon annotation of its own on this
     image, its bar falls back to the dataset's physical median for that subject
     (:func:`tcip_mcp.pipelines.region_completeness.dataset_physical_extent`), expressed through
-    this image's own pixel size (:func:`tcip_mcp.pipelines.region_completeness.raster_pixel_size`)
+    this image's own pixel size (:func:`tcip_mcp.pipelines.pixel_size.raster_pixel_size`)
     when both are known; the served/stored dict's ``from_this_image`` says which branch produced
     it. Where neither exists, ``working_scale[subject]`` stays null and
     ``working_scale_reason: dict[str, str]`` names why, per subject. The label file is read once,
@@ -495,14 +495,13 @@ def get_completeness(
         region_completeness_key,
     )
     from tcip_mcp.pipelines.data.band_groups import BandGroupIncomplete
+    from tcip_mcp.pipelines.pixel_size import PixelSize, resolve_pixel_size
     from tcip_mcp.pipelines.reference_grid import JUDGED_SPAN_PX, reference_cells
     from tcip_mcp.pipelines.region_completeness import (
-        PixelSize,
         annotation_counts_by_cell,
         dataset_physical_extent,
         dataset_working_scale_bar,
         default_working_scale_source,
-        resolve_pixel_size,
         saved_extents,
         stale_cells,
         working_scale_bar,
@@ -664,15 +663,14 @@ def post_completeness(payload: CompletenessSetPayload) -> dict:
         unreadable_completeness_entries,
         view_coverage_key,
     )
+    from tcip_mcp.pipelines.pixel_size import PixelSize, resolve_pixel_size
     from tcip_mcp.pipelines.reference_grid import JUDGED_SPAN_PX, reference_cells
     from tcip_mcp.pipelines.region_completeness import (
         DatasetExtent,
-        PixelSize,
         cell_annotation_digest,
         dataset_physical_extent,
         dataset_working_scale_bar,
         default_working_scale_source,
-        resolve_pixel_size,
         saved_extents,
         working_scale_bar,
     )
