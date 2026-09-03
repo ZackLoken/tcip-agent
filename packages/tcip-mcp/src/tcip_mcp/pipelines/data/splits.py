@@ -1227,7 +1227,7 @@ def label_image_stems(
 ) -> tuple[list[str], dict[str, "Path | BandGroupRef"]]:
     """Stems with a readable per-image label file, one scan shared by every caller.
 
-    ``calibrate_operating_point`` and ``force_redraw_cal_holdout_split`` both call this rather
+    ``calibrate_operating_point`` and ``redraw_calibration_holdout`` both call this rather
     than scanning independently, so they agree on what "the dataset's stems" are: a caller
     passing ``images_dir`` gets the stronger labels-intersect-images stem universe, one that
     only globs labels gets the weaker (and possibly stale, if an image was deleted/renamed)
@@ -1364,7 +1364,7 @@ def resolve_manifest_calibration_universe(
     (:func:`~tcip_mcp.dataset_layout.annotation_date`) must be one the manifest holds members
     under, and the manifest's ``images_root`` for that date must be the door's ``images_dir``,
     each refusing by name. Called from ``calibrate_operating_point``, ``evaluate_model``,
-    ``force_redraw_cal_holdout_split`` and ``scripts/calibrate_operating_point.py`` so none of
+    ``redraw_calibration_holdout`` and ``scripts/calibrate_operating_point.py`` so none of
     the four drift into disagreeing about what a manifest-restricted read reads.
 
     ``min_foreground_groups`` is forwarded to :func:`calibration_universe_from_manifest`
@@ -1434,7 +1434,7 @@ def resolve_locked_cal_holdout_split(
     wasn't actually held out. This locks the split on its first draw for a given
     ``identity_hash``: every later call for the same identity returns the identical split, never a
     silent re-cut, unless the caller explicitly passes ``force_redraw=True`` (the audited admin
-    path, see the ``force_redraw_cal_holdout_split`` MCP tool; never wired to a default kwarg on a
+    path, see the ``redraw_calibration_holdout`` MCP tool; never wired to a default kwarg on a
     high-traffic tool).
 
     The grouping policy is resolved via :func:`resolve_group_key_fn` first, so a malformed
@@ -1490,7 +1490,7 @@ def resolve_locked_cal_holdout_split(
             raise ValueError(
                 f"the cal/holdout lock for identity_hash={identity_hash!r} exists but could not "
                 f"be read/parsed ({exc}). Refusing to silently treat a corrupt lock as 'no lock "
-                "exists' and redraw. Investigate the file, or use force_redraw_cal_holdout_split "
+                "exists' and redraw. Investigate the file, or use redraw_calibration_holdout "
                 "once you've deliberately decided to replace it."
             ) from exc
         logger.warning(
@@ -1517,7 +1517,7 @@ def resolve_locked_cal_holdout_split(
                 f"locked cal/holdout split for identity_hash={identity_hash!r} references "
                 f"{len(stale)} stem(s) no longer present in the current data (image/label "
                 f"deleted or renamed since the split was locked): {preview}{more}. Use "
-                "force_redraw_cal_holdout_split to redraw deliberately, or restore the missing "
+                "redraw_calibration_holdout to redraw deliberately, or restore the missing "
                 "file(s)."
             )
         result = dict(existing)
@@ -1529,7 +1529,7 @@ def resolve_locked_cal_holdout_split(
             logger.warning(
                 "cal/holdout split for identity_hash=%s is locked with a different policy than "
                 "declared (locked=%s, declared=%s); returning the locked split unchanged. Use "
-                "force_redraw_cal_holdout_split to redraw deliberately.",
+                "redraw_calibration_holdout to redraw deliberately.",
                 identity_hash, recorded_policy, declared_policy,
             )
             result["policy_divergence"] = {"requested": declared_policy, "locked": recorded_policy}

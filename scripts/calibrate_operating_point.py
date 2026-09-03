@@ -181,7 +181,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Note: a cal/holdout split for this labels_dir is already locked with a different "
               f"policy than requested; the locked split is used unchanged.\n"
               f"  requested: {div['requested']}\n  locked:    {div['locked']}\n"
-              f"  Use force_redraw_cal_holdout_split to redraw deliberately.", file=sys.stderr)
+              f"  Use redraw_calibration_holdout to redraw deliberately.", file=sys.stderr)
     if locked.get("unlocked_stems"):
         print(f"Note: {len(locked['unlocked_stems'])} stem(s) are new since this split was locked "
               "and are excluded from this calibration (the lock stays authoritative for what it "

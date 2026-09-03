@@ -75,7 +75,7 @@ reuses it, so the delivery gate can't silently pass by drawing a different, weak
 the fact. The lock lives under the dataset root of the labels or records the split was drawn over,
 so it travels with that data and survives adopting a project mid-session. Redrawing a locked split
 is a real, audited decision, never automatic:
-`force_redraw_cal_holdout_split(dataset_root=..., labels_dir=..., reason=...)` is the tool for it,
+`redraw_calibration_holdout(dataset_root=..., labels_dir=..., reason=...)` is the tool for it,
 and `dataset_root` is that same root, so the redraw replaces the lock the calibration reads. `reason` is
 required and non-empty; every redraw is appended to the lock's `redraw_history` with its policy,
 seed and the old/new split's content hashes (not the stems themselves); the old and new split
@@ -83,7 +83,7 @@ membership is recorded in a dataset's audit log alongside the reason, so a redra
 pattern stays visible on review.
 
 `run_inference`, `export_predictions` and `tabulate_counts` (the latter two forward it to
-`run_inference`), `force_redraw_cal_holdout_split` and `evaluate_model` all take
+`run_inference`), `redraw_calibration_holdout` and `evaluate_model` all take
 `split_manifest_dir`: draw the calibration universe from one capture date's `calibration` side of
 a named `split_manifest` record instead of every labelled stem with an image, a side
 `make_splits` drew held out from both training and checkpoint selection (see the `training`
@@ -91,10 +91,10 @@ skill's Dataset Splits section). `evaluate_model` is the one whose purpose is a 
 without `split_manifest_dir` it scores the whole directory, as today; with it, the loader's own
 admitted count is recorded as `evaluated_stem_count`, refused by name when it falls short of the
 universe the manifest drew. The manifest's own subject/attribute must match this call's
-(`force_redraw_cal_holdout_split` takes `subject`/`attribute` directly; `run_inference` and
+(`redraw_calibration_holdout` takes `subject`/`attribute` directly; `run_inference` and
 `evaluate_model` resolve them from the run's own training scope), and `split_manifest_dir`
 conflicts with an explicit `group_by`/`group_key_map`, whose default becomes `None` for this
-reason (resolved to `tile_prefix` when neither was given). `force_redraw_cal_holdout_split`
+reason (resolved to `tile_prefix` when neither was given). `redraw_calibration_holdout`
 additionally requires `labels_dir`, `subject` and `images_dir` alongside `split_manifest_dir`: a
 labels-only universe can include a stem whose image is gone, a lock the redraw exists to fix, so
 it refuses by name without one.
