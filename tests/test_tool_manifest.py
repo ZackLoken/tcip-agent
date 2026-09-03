@@ -24,7 +24,7 @@ def _decorated_tool_names() -> set[str]:
     """Function names decorated with `@mcp.tool(...)` across tools/*.py (via AST).
 
     MCPServer registers a tool under its function name by default, and every tool in this repo
-    uses a bare `@mcp.tool()` except `domain_knowledge`, whose description is composed from the
+    uses a bare `@mcp.tool()` except `serve_domain_knowledge`, whose description is composed from the
     knowledge documents at import time; either form is still matched by `target.attr == "tool"`,
     so the function name is the tool name regardless.
     """

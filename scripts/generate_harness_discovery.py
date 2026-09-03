@@ -6,7 +6,7 @@ skills under `.claude/skills/`, the shared skill form Codex and Antigravity both
 `.agents/skills/`, and a generated block in the repository root's `AGENTS.md` naming the
 documents for a harness with no skill mechanism of its own (Codex reads `AGENTS.md` directly;
 any other client, and a harness with neither a skill nor an instruction-file mechanism, reaches
-the same corpus through the `domain_knowledge` MCP tool). This script renders all three from
+the same corpus through the `serve_domain_knowledge` MCP tool). This script renders all three from
 `tcip_mcp.knowledge.list_documents()`, so there is exactly one place any of it is authored.
 
 Run it after adding, renaming, or re-describing a knowledge document; it rewrites every
@@ -80,7 +80,7 @@ def render_agents_block(documents) -> str:
         lines.append(f"- {document.name}: {document.description} (`{relative_path}`)")
     lines += [
         "",
-        "The `domain_knowledge` MCP tool returns this same index when called without a name, "
+        "The `serve_domain_knowledge` MCP tool returns this same index when called without a name, "
         "and one document's full text when called with a name from it. A harness with no "
         "skill or instruction-file mechanism of its own reaches these documents through that "
         "tool alone.",

@@ -36,7 +36,7 @@ holds one-off logged scripts; domain knowledge lives in `packages/tcip-mcp/src/t
 as repo files, loaded before acting in its domain. Claude Code reaches it through the generated
 skills under `.claude/skills/`; Codex and Antigravity reach it under `.agents/skills/`, and
 Codex also through the generated block in `AGENTS.md`; any other client reaches it through the
-`domain_knowledge` tool. A document is read in full by every route. The registered crops are
+`serve_domain_knowledge` tool. A document is read in full by every route. The registered crops are
 `crops.yml`'s, six today.
 
 ## Operating posture

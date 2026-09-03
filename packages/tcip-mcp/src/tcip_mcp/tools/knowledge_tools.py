@@ -1,4 +1,4 @@
-"""The ``domain_knowledge`` MCP tool: the route to the platform's domain knowledge documents for
+"""The ``serve_domain_knowledge`` MCP tool: the route to the platform's domain knowledge documents for
 a client with no skill or instruction-file mechanism of its own.
 
 Claude Code reaches the same documents through the generated skills under ``.claude/skills/``;
@@ -43,7 +43,7 @@ def _description() -> str:
 
 @mcp.tool(description=_description())
 @audited
-def domain_knowledge(name: str | None = None) -> dict:
+def serve_domain_knowledge(name: str | None = None) -> dict:
     """Read the platform's domain knowledge: trait semantics, workflow patterns, and per-crop
     biology, the same documents Claude Code loads as generated skills. A client without skills
     reaches the identical corpus here.

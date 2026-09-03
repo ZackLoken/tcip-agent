@@ -2,7 +2,7 @@
 
 Every document a client reaches, whether through the generated Claude Code skills under
 ``.claude/skills/``, the shared skill tree Codex and Antigravity read under
-``.agents/skills/``, the generated block in ``AGENTS.md``, or the ``domain_knowledge`` MCP
+``.agents/skills/``, the generated block in ``AGENTS.md``, or the ``serve_domain_knowledge`` MCP
 tool, is a file under :data:`KNOWLEDGE_DIR`:
 the domain documents beside this module and the per-crop documents plus ``crops.yml`` (the
 trait authority) under ``crops/``. The two-field frontmatter (``name``,
@@ -125,7 +125,7 @@ def document_path(name: str) -> Path:
 
 
 def read_document(name: str) -> str:
-    """One document's body, with its frontmatter stripped: what the ``domain_knowledge`` tool
+    """One document's body, with its frontmatter stripped: what the ``serve_domain_knowledge`` tool
     returns for a named document.
 
     Raises ``KeyError`` for a name no document declares.
