@@ -20,6 +20,16 @@ def _never_search(ran: list):
     return fake_search
 
 
+def test_real_hpo_base_config_is_admitted_by_preflight(real_hpo_base_config):
+    """Holds the fixture's own claim: preflight_config, the sweep door's own admissibility
+    check, reports the fixture valid with no issues."""
+    from tcip_mcp.tools.training_tools import preflight_config
+
+    result = preflight_config(real_hpo_base_config)
+    assert result["issues"] == []
+    assert result["valid"] is True
+
+
 # -- refusals --------------------------------------------------------------------
 
 
