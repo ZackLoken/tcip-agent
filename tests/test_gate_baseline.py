@@ -33,11 +33,12 @@ def _workflow_job_names() -> set:
     return set(yaml.safe_load(CI_WORKFLOW.read_text(encoding="utf-8"))["jobs"])
 
 
-def test_parsed_job_set_matches_the_workflows_job_set_with_environment_out_of_scope():
+def test_parsed_job_set_matches_the_workflows_job_set_with_the_out_of_scope_jobs_removed():
     gate_baseline = _load()
     workflow_jobs = _workflow_job_names()
-    assert gate_baseline.OUT_OF_SCOPE_JOB in workflow_jobs
-    assert workflow_jobs - {gate_baseline.OUT_OF_SCOPE_JOB} == set(gate_baseline.PARSED_JOBS)
+    out_of_scope = set(gate_baseline.OUT_OF_SCOPE_JOBS)
+    assert out_of_scope <= workflow_jobs
+    assert workflow_jobs - out_of_scope == set(gate_baseline.PARSED_JOBS)
 
 
 def test_every_declared_step_runs_or_is_skipped_by_the_stated_rule():
