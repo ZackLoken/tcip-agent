@@ -228,26 +228,87 @@ def test_derive_block_scale_px_insufficient_plant_registry_refuses_named():
             tile_size=50, gt_boxes_per_image=[boxes], plants=one_plant, raster_path=None)
 
 
-def test_derive_block_scale_px_plant_pitch_via_projected_geotransform(monkeypatch, tmp_path):
-    from tcip_mcp.pipelines.postprocessing import orthomosaic_mapping
+def test_derive_block_scale_px_plant_pitch_via_projected_geotransform(tmp_path):
     from tcip_mcp.pipelines.postprocessing.plant_mapping import PlantRecord
+    from tests._geotiff_fixtures import write_geotiff
 
-    # Two plants 100m apart (haversine-ish at this latitude close enough for a unit test); a fake
-    # geotransform of 0.5 native units (m) per pixel converts that to a real pixel scale.
+    # Two plants 100m apart (haversine-ish at this latitude close enough for a unit test), on a
+    # real UTM 15N GeoTIFF at the fixture's default 0.5 m/px.
     plants = [
         PlantRecord("p0", "a0", 0, 0, 0, 45.0, -93.0),
         PlantRecord("p1", "a1", 0, 0, 0, 45.000898, -93.0),  # ~100m north
     ]
-    fake_gt = orthomosaic_mapping.GeoTransform(
-        tiepoint_pixel_x=0, tiepoint_pixel_y=0, tiepoint_native_x=0, tiepoint_native_y=0,
-        pixel_scale_x=0.5, pixel_scale_y=0.5, epsg=32615)
-    monkeypatch.setattr(orthomosaic_mapping, "read_geotransform", lambda path: fake_gt)
+    raster_path = tmp_path / "mosaic.tif"
+    write_geotiff(raster_path)
     boxes = [(x, 0, 20, 20) for x in range(0, 40, 20)]  # sparse GT: the plant path must win
     px, source = derive_block_scale_px(
         tile_size=16, gt_boxes_per_image=[boxes], plants=plants,
-        raster_path=str(tmp_path / "mosaic.tif"))
+        raster_path=str(raster_path))
     assert "plant grid pitch" in source
+    assert "EPSG:32615" in source
     assert px == pytest.approx(200, rel=0.05)  # ~100m / 0.5 m-per-px = ~200px
+
+
+def test_derive_block_scale_px_converts_a_foot_unit_raster_through_its_crs(tmp_path):
+    """A raster in US survey feet (EPSG 2264) converts the plant-pitch metres through the CRS's
+    own unit conversion factor, not a naive metre-blind pixel-scale division."""
+    from tcip_mcp.pipelines.postprocessing.plant_mapping import PlantRecord
+    from tests._geotiff_fixtures import write_geotiff
+
+    plants = [
+        PlantRecord("p0", "a0", 0, 0, 0, 45.0, -93.0),
+        PlantRecord("p1", "a1", 0, 0, 0, 45.000898, -93.0),  # ~99.96m north (haversine_m)
+    ]
+    raster_path = tmp_path / "mosaic.tif"
+    write_geotiff(raster_path, pixel_scale=(1.0, 1.0, 0.0), projected_epsg=2264)
+    boxes = [(x, 0, 20, 20) for x in range(0, 40, 20)]  # sparse GT: the plant path must win
+    px, source = derive_block_scale_px(
+        tile_size=16, gt_boxes_per_image=[boxes], plants=plants,
+        raster_path=str(raster_path))
+    assert "plant grid pitch" in source
+    assert px == 328  # 99.96m / 0.3048006 ft-per-m factor; a metre-blind read would give 100
+
+
+def test_derive_block_scale_px_photographic_raster_path_refuses_named(tmp_path):
+    """A ``raster_path`` that is not a raster file at all (a photographic plot image) is refused
+    by name rather than silently downgraded to the GT-object-spacing fallback."""
+    from PIL import Image
+
+    from tcip_mcp.pipelines.postprocessing.plant_mapping import PlantRecord
+
+    plants = [
+        PlantRecord("p0", "a0", 0, 0, 0, 45.0, -93.0),
+        PlantRecord("p1", "a1", 0, 0, 0, 45.000898, -93.0),
+    ]
+    photo_path = tmp_path / "plot.jpg"
+    Image.new("RGB", (8, 8)).save(photo_path)
+    boxes = [(x, 0, 20, 20) for x in range(0, 40, 20)]
+    with pytest.raises(ValueError) as exc_info:
+        derive_block_scale_px(
+            tile_size=16, gt_boxes_per_image=[boxes], plants=plants,
+            raster_path=str(photo_path))
+    assert str(photo_path) in str(exc_info.value)
+
+
+def test_derive_block_scale_px_anisotropic_raster_falls_back_to_gt_spacing(tmp_path):
+    """A raster whose axes carry differing pixel scales has no single pixel size to convert the
+    plant pitch through, so the derivation falls back to GT-object-spacing rather than average
+    the two axes."""
+    from tcip_mcp.pipelines.postprocessing.plant_mapping import PlantRecord
+    from tests._geotiff_fixtures import write_geotiff
+
+    plants = [
+        PlantRecord("p0", "a0", 0, 0, 0, 45.0, -93.0),
+        PlantRecord("p1", "a1", 0, 0, 0, 45.000898, -93.0),
+    ]
+    raster_path = tmp_path / "mosaic.tif"
+    write_geotiff(raster_path, pixel_scale=(0.5, 0.6, 0.0))
+    boxes = [(x, 0, 20, 20) for x in range(0, 1000, 200)]
+    px, source = derive_block_scale_px(
+        tile_size=50, gt_boxes_per_image=[boxes], plants=plants,
+        raster_path=str(raster_path))
+    assert "GT object-spacing" in source  # fell back, not a refusal
+    assert px == 200
 
 
 def test_derive_block_scale_px_unprojected_raster_falls_back_to_gt_spacing(monkeypatch, tmp_path):
@@ -263,10 +324,12 @@ def test_derive_block_scale_px_unprojected_raster_falls_back_to_gt_spacing(monke
         raise orthomosaic_mapping.GeoreferencingError("no geokeys")
 
     monkeypatch.setattr(orthomosaic_mapping, "read_geotransform", _boom)
+    raster_path = tmp_path / "mosaic.tif"
+    raster_path.touch()  # the not-a-raster-file check runs before the mocked reader is reached
     boxes = [(x, 0, 20, 20) for x in range(0, 1000, 200)]
     px, source = derive_block_scale_px(
         tile_size=50, gt_boxes_per_image=[boxes], plants=plants,
-        raster_path=str(tmp_path / "mosaic.tif"))
+        raster_path=str(raster_path))
     assert "GT object-spacing" in source  # fell back, not a refusal
     assert px == 200
 
