@@ -860,9 +860,9 @@ anything.
 | `check_training_status` | `training_tools.py:936` | yes | Check the status of a training run. |
 | `list_training_runs` | `training_tools.py:1079` | yes | List every training run this platform can currently account for. |
 | `cancel_training` | `training_tools.py:1313` | yes | Request graceful cancellation of a running training run. |
-| `run_hpo` | `training_tools.py:1881` | yes | Run hyperparameter optimization on Ray Tune, training each trial for real. |
-| `cancel_hpo` | `training_tools.py:2263` | yes | Request cooperative cancellation of a running HPO sweep. |
-| `evaluate_model` | `training_tools.py:2858` | yes | Evaluate a trained checkpoint on a (held-out) dataset and write test_results.json. |
+| `run_hpo` | `training_tools.py:1885` | yes | Run hyperparameter optimization on Ray Tune, training each trial for real. |
+| `cancel_hpo` | `training_tools.py:2275` | yes | Request cooperative cancellation of a running HPO sweep. |
+| `evaluate_model` | `training_tools.py:2891` | yes | Evaluate a trained checkpoint on a (held-out) dataset and write test_results.json. |
 
 ### vision_tools.py (3 tools)
 
@@ -1198,19 +1198,8 @@ tracked file, so its presence or configuration varies per machine.
 
 `scripts/` (repo root): a non-API surface, not imported by `tcip_mcp`, `tcip_web`, or
 `tcip_annotation` package code; each file is a standalone script invoked directly
-(`python scripts/<name>.py`). 34 files in `scripts/`, excluding `README.md` and
-`__pycache__` (33 `.py` files and one `.ps1` file):
-`_paths.py`, `_store_bootstrap.py`, `adopt_store.py`, `calibrate_operating_point.py`,
-`check_architecture_citations.py`, `check_architecture_doc.py`, `check_dataset_identity.py`,
-`compute_disagreements.py`, `conform_view_coverage_viewing.py`, `cross_family_ask.py`,
-`distill_learnings.py`, `doctor.py`, `drop_trait_spec_provenance.py`, `export_store.py`,
-`foreground_fn_candidates.py`, `gate_baseline.py`, `generate_favicon.ps1`,
-`generate_frontend_routes.py`, `generate_frontend_types.py`, `inspect_baseline_weights.py`,
-`inspect_gps_exif.py`, `list_tools.py`, `plant_aware_group_splits.py`,
-`prove_test_fails_before.py`, `render_candidates_tile.py`, `shp_to_plant_csv.py`,
-`smoke_fence_e2e.py`, `smoke_phenology_e2e.py`, `smoke_terminal_e2e.py`, `verify_citations.py`,
-`verify_claims.py`, `verify_doc_examples.py`, `verify_skill_traits.py`,
-`watch_agent_chat.py`.
+(`python scripts/<name>.py`). `scripts/README.md` names every tracked script here, held to the
+tree by `tests/test_scripts_readme_index.py` rather than a hand-written count or list.
 
 
 ## On-disk formats
@@ -2441,7 +2430,7 @@ Phase 3 verdict: duplicated.
 
 Must agree: a bespoke train(ctx) callable is importable and accepts the TrainContext the envelope hands it.
 Side A: `packages/tcip-mcp/src/tcip_mcp/pipelines/training/envelope.py:434` (`training_source = run.config.get("training_source")`).
-Side B: `packages/tcip-mcp/src/tcip_mcp/tools/training_tools.py:348` (`training_source = config.get("training_source")`).
+Side B: `packages/tcip-mcp/src/tcip_mcp/tools/training_tools.py:351` (`training_source = config.get("training_source")`).
 Phase 3 verdict: duplicated.
 
 ## S43. dataset_source bespoke dataset seam
