@@ -181,13 +181,13 @@ def test_record_artifact_additive_only_when_terminal(exp_store):
     assert arts["predictions"]["path"] == "/preds"
 
 
-# ── R5: make_splits manifest embeds dataset_hash + seed ───────────────────────
+# ── R5: draw_splits manifest embeds dataset_hash + seed ───────────────────────
 
-def test_make_splits_manifest_embeds_hash_and_seed(data_dir, tmp_path):
+def test_draw_splits_manifest_embeds_hash_and_seed(data_dir, tmp_path):
     import tcip_store as ts
     from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
-    from tcip_mcp.tools.data_tools import make_splits, split_manifest_key
+    from tcip_mcp.tools.data_tools import draw_splits, split_manifest_key
 
     # A manifest write needs at least four foreground groups to clear the floor; the fixture's
     # own three (img_001..003) need one more, added here rather than in the shared fixture.
@@ -202,7 +202,7 @@ def test_make_splits_manifest_embeds_hash_and_seed(data_dir, tmp_path):
     )
 
     out = tmp_path / "splits"
-    result = make_splits(str(data_dir), output_path=str(out), seed=7, subject="catkin",
+    result = draw_splits(str(data_dir), output_path=str(out), seed=7, subject="catkin",
                          train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
     assert result["seed"] == 7
     manifest = ts.read(split_manifest_key(out))

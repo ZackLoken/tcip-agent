@@ -130,7 +130,7 @@ Annotation itself happens in the GUI's Annotate tab: a human labels a sample of 
 image with nothing to label is marked done as a negative there, never inferred from an empty
 label file alone.
 
-For a first training run, `make_splits(folder_path, subject=subject, train_ratio=0.7,
+For a first training run, `draw_splits(folder_path, subject=subject, train_ratio=0.7,
 val_ratio=0.15, calibration_ratio=0.15, output_path=<path>)` draws a fresh leakage-free
 train/val/calibration split over the labeled data and writes its manifest, binding a later run
 that reads it to the same partition; `output_path` (or `materialize=True`) and `subject` are both

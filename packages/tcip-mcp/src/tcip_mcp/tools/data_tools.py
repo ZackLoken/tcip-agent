@@ -47,7 +47,7 @@ _SPLIT_MANIFEST_REQUIRED_KEYS = (
     "members", "splits", "admission_counts", "calibration_foreground_groups_by_date",
     "realized_ratios",
 )
-"""Every key ``make_splits``' manifest dict literal writes, kept as one tuple so
+"""Every key ``draw_splits``' manifest dict literal writes, kept as one tuple so
 :func:`read_split_manifest_dir`'s required set can never drift from what the writer actually
 writes: a manifest missing one of them is refused there, before any caller binds to it."""
 
@@ -73,13 +73,13 @@ def _read_split_manifest_dir_or_none(split_dir: str | Path) -> dict | None:
     if not isinstance(manifest, dict):
         raise ValueError(
             f"the split manifest at {split_dir} decodes to a {type(manifest).__name__}, not the "
-            "mapping make_splits writes."
+            "mapping draw_splits writes."
         )
     missing = [k for k in _SPLIT_MANIFEST_REQUIRED_KEYS if k not in manifest]
     if missing:
         raise ValueError(
             f"the split manifest at {split_dir} carries no {missing}: a split_manifest record "
-            "always carries every key make_splits writes."
+            "always carries every key draw_splits writes."
         )
     members = manifest.get("members")
     dates_missing_label_digests = sorted(
@@ -92,7 +92,7 @@ def _read_split_manifest_dir_or_none(split_dir: str | Path) -> dict | None:
             f"the split manifest at {split_dir} carries members under "
             f"{dates_missing_label_digests} with no label_digests: a manifest drawn before the "
             "platform recorded per-stem digests binds nothing here; regenerate it with "
-            "make_splits over the current data."
+            "draw_splits over the current data."
         )
     splits = manifest.get("splits")
     missing_sides = sorted(set(SPLIT_NAMES) - set(splits if isinstance(splits, dict) else {}))
@@ -100,7 +100,7 @@ def _read_split_manifest_dir_or_none(split_dir: str | Path) -> dict | None:
         raise ValueError(
             f"the split manifest at {split_dir} carries no splits.{missing_sides}: a manifest "
             "drawn before the platform held out a calibration side binds nothing here; "
-            "regenerate it with make_splits over the current data, stating all three ratios "
+            "regenerate it with draw_splits over the current data, stating all three ratios "
             "(train_ratio, val_ratio, calibration_ratio)."
         )
     overlaps: dict[tuple[str, str], list[str]] = {}
@@ -139,7 +139,7 @@ def compose_split_manifest(
 ) -> dict:
     """The one place a ``split_manifest`` record is built and written under ``out_dir``.
 
-    ``make_splits``' own draw and ``freeze_split_manifest``'s frozen partition each compose
+    ``draw_splits``' own draw and ``freeze_split_manifest``'s frozen partition each compose
     their own fields into this shape and call this to write it, so the two writers can never
     disagree on what a ``split_manifest`` record carries. ``origin`` is present only for a
     frozen manifest (``{"experiment_id", "frozen_at"}``), absent on a drawn one, so
@@ -172,7 +172,7 @@ def compose_split_manifest(
 
 
 def read_split_manifest_dir(split_dir: str | Path) -> dict:
-    """The ``split_manifest`` record ``make_splits`` wrote under ``split_dir``, the one reader a
+    """The ``split_manifest`` record ``draw_splits`` wrote under ``split_dir``, the one reader a
     run names its ``data.split.manifest_dir`` through.
 
     Refuses with ``ValueError`` naming ``split_dir`` when the record is absent, undecodable, not
@@ -189,7 +189,7 @@ def read_split_manifest_dir(split_dir: str | Path) -> dict:
     """
     manifest = _read_split_manifest_dir_or_none(split_dir)
     if manifest is None:
-        raise ValueError(f"no split manifest recorded under {split_dir}; run make_splits first.")
+        raise ValueError(f"no split manifest recorded under {split_dir}; run draw_splits first.")
     return manifest
 
 
@@ -726,7 +726,7 @@ def _split_date_dirs(folder_path: str | Path) -> list[tuple[str | None, Path, Pa
 
 @mcp.tool()
 @audited
-def make_splits(
+def draw_splits(
     folder_path: str,
     train_ratio: float = 0.8,
     val_ratio: float = 0.2,
@@ -929,7 +929,7 @@ def make_splits(
 
     # Writing a manifest: the draw is the platform's own per-subject admission.
     if not subject:
-        return {"error": "make_splits needs subject to write a split manifest (output_path given, "
+        return {"error": "draw_splits needs subject to write a split manifest (output_path given, "
                          "or materialize=True): pass the object class the run will admit under, "
                          "or drop both output_path and materialize for a stats-only call."}
 
@@ -940,7 +940,7 @@ def make_splits(
     date_dirs = _split_date_dirs(folder_path)
     if not date_dirs:
         return {"error": f"{folder_path} holds no per-image label tree (annotations/<date>/ or a "
-                         "flat annotations/) for make_splits to draw a subject-scoped split from; "
+                         "flat annotations/) for draw_splits to draw a subject-scoped split from; "
                          "a dataset-level assembled COCO at the root is not walked here."}
 
     entries_by_images_dir: dict[Path, list[str]] = {}

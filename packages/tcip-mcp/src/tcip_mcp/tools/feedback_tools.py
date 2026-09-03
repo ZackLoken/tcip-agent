@@ -180,7 +180,7 @@ def materialize_review_dataset(
     Accepted/edited GT boxes become positive name-based labels; rejected-only images become
     empty-label hard negatives (keyed under ``subject``, derived from the verdicts when omitted).
     When ``experiment_id`` is given, records the review session as experiment lineage. Output
-    (``images/`` + ``annotations/``) chains straight into ``make_splits`` / ``launch_training``.
+    (``images/`` + ``annotations/``) chains straight into ``draw_splits`` / ``launch_training``.
 
     Args:
         dataset_root: Root of the dataset the review was recorded against. It scopes the verdict

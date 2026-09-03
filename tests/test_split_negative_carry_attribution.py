@@ -21,7 +21,7 @@ from tcip_mcp.dataset_layout import (
     image_status_key,
     status_bucket,
 )
-from tcip_mcp.tools.data_tools import make_splits
+from tcip_mcp.tools.data_tools import draw_splits
 
 DATE = "2-11-26"
 SUBJECT = "catkin"
@@ -67,7 +67,7 @@ def _dataset_with_one_confirmed_negative(root: Path) -> Path:
 def _materialize(tmp_path: Path, *, subject: str | None) -> tuple[Path, dict]:
     root = _dataset_with_one_confirmed_negative(tmp_path / "ds")
     out = tmp_path / "splits"
-    result = make_splits(
+    result = draw_splits(
         str(root), output_path=str(out), materialize=True, subject=subject,
         train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25, seed=3,
     )
@@ -155,12 +155,12 @@ def test_carried_schema_stamp_is_recorded_per_image_not_per_bucket(tmp_path: Pat
 
 def test_materialize_with_no_subject_is_refused(tmp_path: Path):
     """Materializing with no subject to attribute confirmations to would silently drop every
-    human-confirmed negative from the drawn membership as well as from the carry, so make_splits
+    human-confirmed negative from the drawn membership as well as from the carry, so draw_splits
     refuses rather than materializing an unattributed split tree."""
     root = _dataset_with_one_confirmed_negative(tmp_path / "ds")
     out = tmp_path / "splits"
 
-    result = make_splits(
+    result = draw_splits(
         str(root), output_path=str(out), materialize=True, subject=None,
         train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25, seed=3,
     )
@@ -179,7 +179,7 @@ def test_carried_registry_declares_the_same_document_as_the_source(tmp_path: Pat
     """
     root = _dataset_with_one_confirmed_negative(tmp_path / "ds")
     out = tmp_path / "splits"
-    result = make_splits(
+    result = draw_splits(
         str(root), output_path=str(out), materialize=True, subject=SUBJECT,
         train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25, seed=3,
     )
@@ -203,7 +203,7 @@ def test_a_contradicted_negative_is_excluded_from_the_carry_and_named_in_the_res
     )
     out = tmp_path / "splits"
 
-    result = make_splits(
+    result = draw_splits(
         str(root), output_path=str(out), materialize=True, subject=SUBJECT,
         train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25, seed=3,
     )
@@ -226,7 +226,7 @@ def test_a_failed_carry_computation_writes_no_split_tree(tmp_path: Path, monkeyp
 
     monkeypatch.setattr(data_tools_mod, "_compute_negative_carry", _boom)
     with pytest.raises(RuntimeError, match="boom"):
-        make_splits(str(root), output_path=str(out), materialize=True, subject=SUBJECT,
+        draw_splits(str(root), output_path=str(out), materialize=True, subject=SUBJECT,
                     train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25, seed=3)
 
     assert not (out / "train").exists()
@@ -245,7 +245,7 @@ def test_an_unreadable_confirmed_negative_persists_nothing(tmp_path: Path):
     bad.write_bytes(b"{not json")
     out = tmp_path / "splits"
 
-    result = make_splits(
+    result = draw_splits(
         str(root), output_path=str(out), materialize=True, subject=SUBJECT,
         train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25, seed=3, stratify_foreground=False,
     )

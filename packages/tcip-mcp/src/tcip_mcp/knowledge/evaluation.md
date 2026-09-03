@@ -86,7 +86,7 @@ pattern stays visible on review.
 `run_inference`), `redraw_calibration_holdout` and `evaluate_model` all take
 `split_manifest_dir`: draw the calibration universe from one capture date's `calibration` side of
 a named `split_manifest` record instead of every labelled stem with an image, a side
-`make_splits` drew held out from both training and checkpoint selection (see the `training`
+`draw_splits` drew held out from both training and checkpoint selection (see the `training`
 skill's Dataset Splits section). `evaluate_model` is the one whose purpose is a held-out score:
 without `split_manifest_dir` it scores the whole directory, as today; with it, the loader's own
 admitted count is recorded as `evaluated_stem_count`, refused by name when it falls short of the
@@ -135,7 +135,7 @@ When metrics are poor, investigate systematically:
 ## Comparison Protocol
 
 When comparing models:
-1. Same dataset split: draw one manifest with `make_splits` and name it from every compared run
+1. Same dataset split: draw one manifest with `draw_splits` and name it from every compared run
    with `data.split.manifest_dir`, so each binds to the identical membership rather than each
    redrawing its own from a shared seed
 2. Same evaluation set: the manifest's own `calibration` side (`evaluate_model` with

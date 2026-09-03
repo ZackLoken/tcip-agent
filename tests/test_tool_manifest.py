@@ -139,7 +139,7 @@ def test_consolidated_tools_present_and_removed_absent():
 
     registered = set(list_registered_tools())
     for present in (
-        "make_splits", "focus_human_attention", "get_experiment",
+        "draw_splits", "focus_human_attention", "get_experiment",
         "register_model", "load_project_memory",
         # Renamed tools: the new names must register.
         "inspect_project", "read_annotations",
@@ -184,7 +184,7 @@ def test_consolidated_tools_present_and_removed_absent():
         # Renamed: the docstring stopped denying its own verb under the old name.
         "accept_proposals",
         # Renamed tools: the old names must no longer register.
-        "focus",
+        "focus", "make_splits",
     }
     assert not (removed & registered), f"removed tools still registered: {removed & registered}"
 

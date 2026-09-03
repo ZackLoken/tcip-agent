@@ -164,7 +164,7 @@ run_hyperparameter_search(base_config=config, n_trials=20, search_alg="optuna", 
 
 ## Dataset Splits
 
-Use `make_splits` to create train/val/calibration splits: `make_splits` has no `test_ratio`
+Use `draw_splits` to create train/val/calibration splits: `draw_splits` has no `test_ratio`
 parameter at all, no launch path honours a held-out test list (a separate, within-image
 mechanism, `reserve_calibration_fraction` on the spatial_strip route, not this one). Writing a
 manifest (`output_path` given, or `materialize=True`) requires `subject`: the members are drawn
@@ -189,7 +189,7 @@ side out of the number that later validates it.
 - Reproducible with random seed
 
 A run names the manifest it should train against with `data.split.manifest_dir` (the
-`manifest_dir` `make_splits` returned): detection and instance_seg only, subject and attribute
+`manifest_dir` `draw_splits` returned): detection and instance_seg only, subject and attribute
 must match the manifest's, and it conflicts with `val_images_dir`, `coco_json`/
 `label_format='coco'`, and a drawn split's own parameters (`group_by`, `group_key_map`,
 `val_ratio`, `seed`, `stratify_foreground`, `test_ratio`, `reserve_calibration_fraction`). The

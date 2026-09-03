@@ -82,9 +82,9 @@ def test_backup_original_labels_captures_json(tmp_path):
     assert (d / ".original" / "a.json").is_file()
 
 
-def test_make_splits_counts_json_objects_not_lines(tmp_path):
+def test_draw_splits_counts_json_objects_not_lines(tmp_path):
     """A pretty-printed negative ({annotations: []}) is several text lines; the stratifier sees 0."""
-    from tcip_mcp.tools.data_tools import make_splits
+    from tcip_mcp.tools.data_tools import draw_splits
 
     for i in range(4):
         _img(tmp_path, name=f"img_{i}.JPG")
@@ -99,7 +99,7 @@ def test_make_splits_counts_json_objects_not_lines(tmp_path):
     json_io.write_annotations(labels / "img_2.json", [], 100, 80, keep_empty=True)  # negative
     json_io.write_annotations(labels / "img_3.json", [], 100, 80, keep_empty=True)  # negative
 
-    res = make_splits(str(tmp_path), train_ratio=0.5, val_ratio=0.5, calibration_ratio=0.0,
+    res = draw_splits(str(tmp_path), train_ratio=0.5, val_ratio=0.5, calibration_ratio=0.0,
                       group_by="stem")
     assert "error" not in res
     # foreground_annotations sums per split: true total is 3+1+0+0. Counting raw JSON text

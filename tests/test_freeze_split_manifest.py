@@ -182,11 +182,11 @@ def test_freeze_split_manifest_refuses_no_split_record(tmp_path: Path):
 
 
 def test_freeze_split_manifest_refuses_a_bound_run(tmp_path: Path):
-    from tcip_mcp.tools.data_tools import freeze_split_manifest, make_splits
+    from tcip_mcp.tools.data_tools import freeze_split_manifest, draw_splits
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     bound_manifest_dir = tmp_path / "src-manifest"
-    make_result = make_splits(str(root), output_path=str(bound_manifest_dir), subject=SUBJECT,
+    make_result = draw_splits(str(root), output_path=str(bound_manifest_dir), subject=SUBJECT,
                               seed=2, train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
     assert "error" not in make_result, make_result
 
@@ -208,11 +208,11 @@ def test_freeze_split_manifest_refuses_a_bound_run(tmp_path: Path):
 def test_freeze_split_manifest_refuses_a_redrawn_bound_run_naming_the_reproduction(
     tmp_path: Path,
 ):
-    from tcip_mcp.tools.data_tools import freeze_split_manifest, make_splits
+    from tcip_mcp.tools.data_tools import freeze_split_manifest, draw_splits
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     bound_manifest_dir = tmp_path / "src-manifest"
-    make_result = make_splits(str(root), output_path=str(bound_manifest_dir), subject=SUBJECT,
+    make_result = draw_splits(str(root), output_path=str(bound_manifest_dir), subject=SUBJECT,
                               seed=2, train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
     assert "error" not in make_result, make_result
 

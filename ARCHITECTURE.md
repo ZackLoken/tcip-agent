@@ -495,7 +495,7 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | scripts/inspect_compute_resources.py | Report the host's current compute headroom, through the demoted `inspect_compute_resources` function. | 3 | 0 |
 | scripts/inspect_gps_exif.py | Print GPS EXIF for a sample of images per acquisition date. | 1 | 0 |
 | scripts/list_tools.py | Print the live MCP tool registry (count + names). | 1 | 0 |
-| scripts/plant_aware_group_splits.py | Plant-aware group-key derivation for ``make_splits``, over per-stem georeferenced rasters. | 6 | 0 |
+| scripts/plant_aware_group_splits.py | Plant-aware group-key derivation for ``draw_splits``, over per-stem georeferenced rasters. | 6 | 0 |
 | scripts/prove_test_fails_before.py | Prove a test actually fails against the code it was written to catch. | 0 | 0 |
 | scripts/render_candidates_tile.py | Render a tile showing GT (green) and only the FN candidates (numbered red). | 1 | 0 |
 | scripts/render_failure_cases.py | Find and render the worst predictions for failure analysis, through the demoted `render_failure_cases` function. | 3 | 0 |
@@ -721,7 +721,7 @@ Docstring is the function's docstring first line, verbatim.
 |---|---|---|---|
 | `freeze_split_manifest` | `data_tools.py:222` | yes | Freeze a finished run's own drawn train/val partition into a ``split_manifest`` record, |
 | `validate_data_quality` | `data_tools.py:575` | yes | Run quality checks on a dataset (any supported annotation format). |  <!-- queued: P5-18 unify -->
-| `make_splits` | `data_tools.py:729` | yes | Compute a leakage-free, annotation-stratified train/val/calibration split. |
+| `draw_splits` | `data_tools.py:729` | yes | Compute a leakage-free, annotation-stratified train/val/calibration split. |
 
 ### experiment_tools.py (4 tools)
 
@@ -1951,13 +1951,13 @@ one reader every surface (the picker, `inspect_project`, the doctor) calls, and 
 
 No seam id in `seam-coverage.json`'s 67-entry inventory names `project.json`: the record is new.
 
-## 26. `split_manifest.json`, a partition `make_splits` drew
+## 26. `split_manifest.json`, a partition `draw_splits` drew
 
 Path: `<output_path>/split_manifest.json`, addressed by `split_manifest_key`,
 `packages/tcip-mcp/src/tcip_mcp/tools/data_tools.py:37`, under whatever directory the caller
 asked the partition to be written to; no dataset resolver owns this layout.
 
-Writer: `make_splits`, `data_tools.py:729`, when `output_path` is given or `materialize=True`.
+Writer: `draw_splits`, `data_tools.py:729`, when `output_path` is given or `materialize=True`.
 A finished run's own drawn train/val partition freezes into the identical shape through
 `freeze_split_manifest` (`data_tools.py:222`), the second writer; both compose their fields
 through the one `compose_split_manifest` (`data_tools.py:123`) that builds the dict and writes
@@ -2009,7 +2009,7 @@ dict so the two cannot drift), holds a `members` block whose `label_digests` is 
 non-empty mapping (a manifest drawn before the platform recorded per-stem digests binds nothing
 here), lacks any name in `splits.SPLIT_NAMES` under `splits`, or whose
 sides are not pairwise disjoint; `scripts/plant_aware_group_splits.py` reads no manifest back, it
-only writes one through `make_splits`. `bind_manifest_stems` (`splits.py:662`) reads all three
+only writes one through `draw_splits`. `bind_manifest_stems` (`splits.py:662`) reads all three
 sides for one capture date, its own date-narrowing arithmetic extracted into
 `narrow_manifest_to_date` (`splits.py:446`), which the data picker's own counts (below) call over
 the identical manifest: a `calibration` member is placed on neither loader, whether or not the

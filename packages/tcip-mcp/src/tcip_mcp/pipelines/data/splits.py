@@ -310,7 +310,7 @@ def refuse_insufficient_foreground_groups(
     """Refuses, before any write, a draw whose tree holds fewer foreground groups than the sum
     of the per-side minimums a caller states.
 
-    :func:`~tcip_mcp.tools.data_tools.make_splits` calls this once, over the whole tree, ahead of
+    :func:`~tcip_mcp.tools.data_tools.draw_splits` calls this once, over the whole tree, ahead of
     drawing a manifest, over the three sides a manifest write always draws (a write refuses a
     zero ratio on any of them, so every side named here is always requested);
     :func:`calibration_universe_from_manifest` calls it for its one held-out side in place of its
@@ -378,7 +378,7 @@ def member_identity(date: str | None, stem: str) -> str:
 
     A stem is unique only within one capture date (cameras reuse names across dates), so a
     manifest spanning more than one date needs this to keep two same-named images from two dates
-    apart; :func:`~tcip_mcp.tools.data_tools.make_splits` and
+    apart; :func:`~tcip_mcp.tools.data_tools.draw_splits` and
     ``scripts/plant_aware_group_splits.py`` both key their members this way, through this one
     function.
     """
@@ -522,7 +522,7 @@ def redraw_starved_issue(
     auto_train_val`'s redraw branch counts them at run time (never the manifest's recorded,
     whole-draw ``realized_ratios``), the same ``group_key_fn(s) for s in stems if
     foreground_counts.get(s, 0) > 0`` idiom :func:`refuse_insufficient_foreground_groups`'s own
-    caller (``make_splits``) counts its foreground groups with.
+    caller (``draw_splits``) counts its foreground groups with.
 
     ``None`` when at least two foreground groups are available; the refusal otherwise, naming
     the manifest, the date, the seed, the resolved grouping policy, the foreground group count
@@ -707,7 +707,7 @@ def bind_manifest_stems(
         raise ValueError(
             f"{len(unassigned)} stem(s) this run admits are assigned to no side of the split "
             f"manifest: {preview}{more}. Training would put them on a side the manifest never "
-            "chose; regenerate the split over the current data (make_splits draws through the "
+            "chose; regenerate the split over the current data (draw_splits draws through the "
             "same admission this run does)."
         )
     this_date_train_val = narrowing.train_ids | narrowing.val_ids

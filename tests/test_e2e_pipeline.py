@@ -3,7 +3,7 @@
 Verifies the full workflow using the MCP tool layer:
   init_project → scan_dataset → validate_data_quality →
   read_annotations → save_annotations → score_predictions (image) →
-  score_predictions (dataset) → make_splits → archive_project
+  score_predictions (dataset) → draw_splits → archive_project
 
 Each step asserts filesystem state to prove persistence works.
 """
@@ -23,7 +23,7 @@ from tcip_mcp.tools.project_tools import (
 from tcip_mcp.tools.data_tools import (
     scan_dataset,
     validate_data_quality,
-    make_splits,
+    draw_splits,
 )
 from tcip_mcp.tools.annotation_tools import (
     read_annotations,
@@ -165,7 +165,7 @@ class TestE2EPipeline:
         from tcip_mcp.tools.data_tools import split_manifest_key
 
         split_dir = tmp_path / "splits"
-        split_result = make_splits(root, output_path=str(split_dir), materialize=True,
+        split_result = draw_splits(root, output_path=str(split_dir), materialize=True,
                                    subject="catkin", train_ratio=0.5, val_ratio=0.25,
                                    calibration_ratio=0.25)
         assert split_result["total_stems"] == 5

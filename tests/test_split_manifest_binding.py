@@ -1,6 +1,6 @@
 """Training and tuning binding to a named split manifest (``data.split.manifest_dir``).
 
-The manifest is drawn by ``make_splits`` (see ``test_data_tools.py``); this file covers the
+The manifest is drawn by ``draw_splits`` (see ``test_data_tools.py``); this file covers the
 consumer side: ``bind_manifest_stems``, ``read_split_manifest_dir``, and ``auto_train_val``'s own
 branch that binds a run to one.
 """
@@ -16,7 +16,7 @@ torch = pytest.importorskip("torch")
 from tcip_annotation import json_io
 from tcip_annotation.state import Annotation, BBox
 from tcip_mcp.class_registry import Attribute, ClassRegistry, Subject, write_registry
-from tcip_mcp.tools.data_tools import make_splits
+from tcip_mcp.tools.data_tools import draw_splits
 
 SUBJECT = "leaf"
 OTHER_SUBJECT = "bud"
@@ -80,7 +80,7 @@ def _draw(root: Path, out: Path, *, subject: str = SUBJECT, attribute: str | Non
     import tcip_store as ts
     from tcip_mcp.tools.data_tools import split_manifest_key
 
-    result = make_splits(str(root), output_path=str(out), subject=subject, attribute=attribute,
+    result = draw_splits(str(root), output_path=str(out), subject=subject, attribute=attribute,
                          seed=seed, train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
     assert "error" not in result, result
     return ts.read(split_manifest_key(out))
@@ -253,7 +253,7 @@ def test_read_split_manifest_dir_returns_the_written_manifest(tmp_path: Path):
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
-    result = make_splits(str(root), output_path=str(out), subject=SUBJECT, seed=1,
+    result = draw_splits(str(root), output_path=str(out), subject=SUBJECT, seed=1,
                          train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
     assert "error" not in result, result
 
@@ -313,7 +313,7 @@ def _dataset_with_one_foreground_group_and_negatives(root: Path) -> Path:
     ``DATES[1]``: three foreground groups, each carrying more annotations than ``DATES[0]``'s
     one, so :func:`~tcip_mcp.pipelines.data.splits.group_balanced_split`'s smallest-first
     minimum pass always takes ``DATES[0]``'s smaller group first (into train, the first active
-    side) regardless of seed, and the other two dates' groups alone clear ``make_splits``' own
+    side) regardless of seed, and the other two dates' groups alone clear ``draw_splits``' own
     write-time floor. Verified deterministic across seeds 0-11 by direct draw."""
     from tcip_mcp.dataset_layout import record_image_statuses, status_bucket
 
@@ -541,10 +541,10 @@ def _collapse_date_to_one_group(manifest: dict, date: str) -> dict:
     explicit-map group, the shape a redraw's foreground-groups check refuses by name; the other
     date and calibration are left as drawn.
 
-    A producer cannot draw this shape directly: ``make_splits``' own write-time floor
+    A producer cannot draw this shape directly: ``draw_splits``' own write-time floor
     (:func:`~tcip_mcp.pipelines.data.splits.refuse_insufficient_foreground_groups`) demands four
     foreground groups for a three-sided write (one each for train and val, two for calibration),
-    so a manifest ``make_splits`` agreed to write already carries more groups than one date's
+    so a manifest ``draw_splits`` agreed to write already carries more groups than one date's
     train-plus-val could ever collapse to on its own; the single-group shape only exists by
     mutating a manifest after a normal draw, the way this helper does.
     """
@@ -607,7 +607,7 @@ def test_preflight_config_flags_a_redraw_date_with_only_one_foreground_group(tmp
 
     root = _dataset_with_one_foreground_group_and_negatives(tmp_path / "ds")
     out = tmp_path / "m"
-    manifest = make_splits(str(root), output_path=str(out), subject=SUBJECT, seed=1,
+    manifest = draw_splits(str(root), output_path=str(out), subject=SUBJECT, seed=1,
                            train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
     assert "error" not in manifest, manifest
     manifest = ts.read(split_manifest_key(out))
@@ -681,7 +681,7 @@ def test_auto_train_val_binds_an_explicit_map_manifest_twice_and_persists_its_na
     # share p1, c and d share p2, e and f stand alone.
     stem_groups = (("a", "p1"), ("b", "p1"), ("c", "p2"), ("d", "p2"), ("e", "p3"), ("f", "p4"))
     group_key_map = {f"{date}/{stem}": group for date in DATES for stem, group in stem_groups}
-    result = make_splits(str(root), output_path=str(out), subject=SUBJECT,
+    result = draw_splits(str(root), output_path=str(out), subject=SUBJECT,
                          group_key_map=group_key_map, seed=1,
                          train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
     assert "error" not in result, result
@@ -761,7 +761,7 @@ def test_auto_train_val_binds_an_attribute_scoped_tree(tmp_path: Path):
 
     root = _attribute_scoped_dataset(tmp_path / "ds")
     out = tmp_path / "m"
-    result = make_splits(str(root), output_path=str(out), subject=SUBJECT, attribute="condition",
+    result = draw_splits(str(root), output_path=str(out), subject=SUBJECT, attribute="condition",
                          seed=1, train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
     assert "error" not in result, result
     data_cfg = _run_data_cfg(root, out, DATES[0], attribute="condition")
@@ -1370,7 +1370,7 @@ def test_evaluate_model_reads_confirmed_negatives_under_the_universes_own_date(
                           recorded_by="user:tester")
 
     out = tmp_path / "m"
-    result = make_splits(str(root), output_path=str(out), subject=SUBJECT, seed=1,
+    result = draw_splits(str(root), output_path=str(out), subject=SUBJECT, seed=1,
                          train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
     assert "error" not in result, result
     manifest = ts.read(split_manifest_key(out))

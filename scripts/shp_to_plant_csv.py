@@ -46,7 +46,7 @@ def _field_value(properties: dict, field_name: str | None) -> str:
 
 def _validate_round_trip(csv_path: Path, n_written: int) -> int:
     """Read ``csv_path`` back through ``read_plant_csvs`` and fail loudly, naming the real cause,
-    rather than letting a schema/column mismatch surface later as ``make_splits``' generic
+    rather than letting a schema/column mismatch surface later as ``draw_splits``' generic
     "group_key_map is missing N stems"."""
     from tcip_mcp.pipelines.postprocessing.plant_mapping import read_plant_csvs
 

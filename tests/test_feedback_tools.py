@@ -608,9 +608,9 @@ def _mixed_two_date_dataset(
 
 def _draw_flat(root: Path, out: Path, *, seed: int = 2) -> dict:
     import tcip_store as ts
-    from tcip_mcp.tools.data_tools import make_splits, split_manifest_key
+    from tcip_mcp.tools.data_tools import draw_splits, split_manifest_key
 
-    result = make_splits(str(root), output_path=str(out), subject=_FLAT_SUBJECT, seed=seed,
+    result = draw_splits(str(root), output_path=str(out), subject=_FLAT_SUBJECT, seed=seed,
                          train_ratio=0.4, val_ratio=0.3, calibration_ratio=0.3)
     assert "error" not in result, result
     return ts.read(split_manifest_key(out))

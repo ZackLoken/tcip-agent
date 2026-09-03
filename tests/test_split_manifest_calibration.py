@@ -48,9 +48,9 @@ def _two_date_dataset(root: Path, stems=_STEMS) -> Path:
 def _draw(root: Path, out: Path, *, seed: int = 2) -> dict:
     import tcip_store as ts
 
-    from tcip_mcp.tools.data_tools import make_splits, split_manifest_key
+    from tcip_mcp.tools.data_tools import draw_splits, split_manifest_key
 
-    result = make_splits(str(root), output_path=str(out), subject=SUBJECT, seed=seed,
+    result = draw_splits(str(root), output_path=str(out), subject=SUBJECT, seed=seed,
                          train_ratio=0.4, val_ratio=0.3, calibration_ratio=0.3)
     assert "error" not in result, result
     return ts.read(split_manifest_key(out))
@@ -739,7 +739,7 @@ def test_manifest_calibrations_evidence_earns_a_validated_record_through_export(
 
 
 def test_count_door_round_trip_earns_a_checked_selection_disjointness(tmp_path, monkeypatch):
-    """``make_splits`` draws three sides; a real bound launch binds to the manifest's train/val;
+    """``draw_splits`` draws three sides; a real bound launch binds to the manifest's train/val;
     ``export_predictions`` calibrates under the manifest with that run as producer; the sealed
     row carries ``label_stems.calibration`` and a checked, leak-free ``selection_disjointness``;
     and ``verify_stamp_binding`` verifies the delivered bucket."""

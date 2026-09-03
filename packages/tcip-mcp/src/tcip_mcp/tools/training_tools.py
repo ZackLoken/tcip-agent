@@ -1171,7 +1171,7 @@ def list_split_choices(experiment_id: str) -> dict:
     The listing is thin: the manifest directories other enumerable experiment configs in this
     project bound to (the picked config's own excluded, since it is "As recorded"), plus, when
     ``dataset_root_of(data.images_dir)`` resolves, that root's ``splits`` directory (offered only
-    when something is actually recorded there directly, the ``make_splits`` default materializes
+    when something is actually recorded there directly, the ``draw_splits`` default materializes
     it, it does not always exist) and every directory one level under it holding a manifest
     (where ``freeze_split_manifest`` writes a frozen run's own drawn partition). The own-binding
     exclusion and the candidate dedupe compare each directory by :func:`split_dir_identity`
@@ -1220,7 +1220,7 @@ def list_split_choices(experiment_id: str) -> dict:
         if own_manifest is None:
             as_recorded["compatible"] = False
             as_recorded["reason"] = own_error or (
-                f"no split manifest recorded under {own_manifest_dir}; run make_splits first."
+                f"no split manifest recorded under {own_manifest_dir}; run draw_splits first."
             )
         else:
             own_issues = manifest_compatibility(config, own_manifest, own_manifest_dir)

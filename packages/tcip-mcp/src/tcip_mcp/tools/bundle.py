@@ -10,7 +10,7 @@ writers place (``split_manifest.json``, ``curated_manifest.json``); an anchor fo
 the derivation constraints exclude (the tree root, under ``.tcip``, under a blob home, or under
 or above another derived root) raises :class:`AnchorMisplaced` naming the file, since a
 mislabelled anchor would recruit a directory that is something else. One nesting is admitted
-rather than excluded: a splits root sitting under a curated root, the shape ``make_splits``
+rather than excluded: a splits root sitting under a curated root, the shape ``draw_splits``
 produces when it partitions a ``materialize_review_dataset`` output in place. Classification of
 one file is by precedence, not disjointness: bookkeeping first, then a record or log claimed by
 exactly one derived root's own layout (two derived roots claiming the same file raises
