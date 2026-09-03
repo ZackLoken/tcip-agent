@@ -55,10 +55,10 @@ _RELAUNCH_FIELD_DEFAULTS = {
     "max_concurrent": 1, "warm_start": False, "baseline_params": None, "resources_per_trial": None,
     "param_space": {},
 }
-"""Every ``run_hpo`` argument beside ``n_trials``/``base_config`` a manifest carries by the time
-this family lands, at the values ``run_hpo`` itself defaults to; :func:`_write_sweep` folds
-these in so a hand-written test manifest is complete (as a real one always is) unless a test
-overrides a field, or omits ``base_config`` itself, to exercise a genuinely incomplete one."""
+"""Every ``run_hpo`` argument beside ``n_trials``/``base_config`` a manifest carries, at the
+values ``run_hpo`` itself defaults to; :func:`_write_sweep` folds these in so a hand-written
+test manifest is complete (as a real one always is) unless a test overrides a field, or omits
+``base_config`` itself, to exercise a genuinely incomplete one."""
 
 
 def _write_sweep(root: Path, study: str, **manifest_fields) -> Path:
