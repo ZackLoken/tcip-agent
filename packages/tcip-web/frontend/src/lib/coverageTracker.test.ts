@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 
 import { StructuredRefusalError } from "@/api/http";
-import type { GridCell, GridGeometry, WorkingScaleBar } from "@/lib/coverage";
+import type { GridCell, GridGeometry, WorkingScale } from "@/lib/coverage";
 import { meetsBar } from "@/lib/coverage";
 import {
   CoverageOutbox,
@@ -44,14 +44,8 @@ const NULL_VIEWING = {
   base_served_size: null,
 };
 
-function bar(value: number): WorkingScaleBar {
-  return {
-    value,
-    median_extent_native_px: 46 / value,
-    annotation_count: 1,
-    judged_span_px: 46,
-    source: "s",
-  };
+function bar(value: number): WorkingScale {
+  return { value, source: "s" };
 }
 
 let post: Mock<(body: CoveragePayload) => Promise<CoveragePushResponse>>;

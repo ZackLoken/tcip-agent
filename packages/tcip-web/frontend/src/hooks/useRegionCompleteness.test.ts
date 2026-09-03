@@ -333,14 +333,8 @@ describe("useRegionCompleteness", () => {
     expect(result.current.countsError).toBeNull();
   });
 
-  it("exposes the active subject's served working-scale bar", async () => {
-    const scaleBar = {
-      value: 0.5,
-      median_extent_native_px: 92,
-      annotation_count: 2,
-      judged_span_px: 46,
-      source: "s",
-    };
+  it("exposes the active subject's served working scale", async () => {
+    const scaleBar = { value: 0.5, source: "s" };
     vi.spyOn(api.coverage, "completeness").mockResolvedValue(
       response({}, { working_scale: { bush: scaleBar } }),
     );
@@ -387,7 +381,7 @@ describe("useRegionCompleteness", () => {
     expect(result.current.workingScale).toBeNull();
   });
 
-  it("names the absent-annotation reason when the subject is served explicitly null", async () => {
+  it("names the no-set-zoom reason when the subject is served explicitly null", async () => {
     vi.spyOn(api.coverage, "completeness").mockResolvedValue(
       response({}, { working_scale: { bush: null } }),
     );
@@ -400,7 +394,9 @@ describe("useRegionCompleteness", () => {
       }),
     );
     await waitFor(() =>
-      expect(result.current.workingScaleReason).toBe("no saved box or polygon annotation of bush"),
+      expect(result.current.workingScaleReason).toBe(
+        "set the grid zoom to derive a coverage lattice for bush",
+      ),
     );
   });
 
@@ -437,7 +433,7 @@ describe("useRegionCompleteness", () => {
   it("exposes the active subject's cells_attested_view on the current grid, empty off it", async () => {
     const entry = {
       view_scale: 0.5,
-      working_scale_bar_at_write: null,
+      working_scale_at_write: null,
       seen_on_record: { at_scale: null, grid_matched: false },
     };
     vi.spyOn(api.coverage, "completeness").mockResolvedValue(

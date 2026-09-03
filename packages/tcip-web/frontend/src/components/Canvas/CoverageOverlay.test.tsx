@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { render } from "@testing-library/react";
 
 import {
-  CELL_LABEL_FLOOR_PX,
+  cellLabelFloorPx,
   CoverageOverlay,
   measureLabelWidth,
 } from "@/components/Canvas/CoverageOverlay";
@@ -40,10 +40,17 @@ function cell(name: string, x0: number, y0: number, x1: number, y1: number): Gri
   return { name, x0, y0, x1, y1 };
 }
 
-describe("CELL_LABEL_FLOOR_PX", () => {
-  it("fits the platform's own worst-case label: a 16-division lattice's widest cell name plus a three-digit count", () => {
-    const worstCase = measureLabelWidth("P16 (137)", 10);
-    expect(CELL_LABEL_FLOOR_PX).toBeGreaterThanOrEqual(worstCase + 4);
+describe("cellLabelFloorPx", () => {
+  it("fits the widest name actually present plus a three-digit count, whatever the lattice", () => {
+    const cells = [cell("A1", 0, 0, 1, 1), cell("AB123", 0, 0, 1, 1)];
+    const worstCase = measureLabelWidth("MMMMM (137)", 10);
+    expect(cellLabelFloorPx(cells)).toBeGreaterThanOrEqual(worstCase);
+  });
+
+  it("scales down for a lattice whose names are all short", () => {
+    const shortLattice = [cell("A1", 0, 0, 1, 1), cell("B1", 0, 0, 1, 1)];
+    const longLattice = [cell("A1", 0, 0, 1, 1), cell("AB123", 0, 0, 1, 1)];
+    expect(cellLabelFloorPx(shortLattice)).toBeLessThan(cellLabelFloorPx(longLattice));
   });
 });
 
@@ -83,8 +90,9 @@ describe("CoverageOverlay", () => {
   });
 
   it("draws a cell's name only once its on-screen edge reaches the label floor, with a halo behind it", () => {
-    const bigCell = cell("A1", 0, 0, CELL_LABEL_FLOOR_PX, CELL_LABEL_FLOOR_PX);
-    const smallCell = cell("B1", 200, 0, 200 + CELL_LABEL_FLOOR_PX - 1, CELL_LABEL_FLOOR_PX - 1);
+    const floor = cellLabelFloorPx([{ name: "A1" }, { name: "B1" }]);
+    const bigCell = cell("A1", 0, 0, floor, floor);
+    const smallCell = cell("B1", 200, 0, 200 + floor - 1, floor - 1);
     const { container } = render(
       <CoverageOverlay
         cells={[bigCell, smallCell]}
@@ -106,9 +114,10 @@ describe("CoverageOverlay", () => {
   });
 
   it("shows the saved-annotation count beside a labeled cell's name", () => {
+    const floor = cellLabelFloorPx([{ name: "A1" }]);
     const { container } = render(
       <CoverageOverlay
-        cells={[cell("A1", 0, 0, CELL_LABEL_FLOOR_PX, CELL_LABEL_FLOOR_PX)]}
+        cells={[cell("A1", 0, 0, floor, floor)]}
         viewport={{ x0: 0, y0: 0, x1: 200, y1: 200 }}
         scale={1}
         swept={new Set()}

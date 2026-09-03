@@ -58,17 +58,18 @@ def declared_models() -> list[type[BaseModel]]:
         CoverageViewing,
         GridGeometry,
         StatsSource,
-        WorkingScaleBar,
+        WorkingScale,
     )
-    from tcip_web.routes.coverage import CompletenessSetPayload, CoveragePayload
+    from tcip_web.routes.coverage import CompletenessSetPayload, CoveragePayload, GridZoomPayload
     from tcip_web.routes.review import ActionPayload
     from tcip_web.routes.terminal import TerminalInputFrame, TerminalResizeFrame
     from tcip_web.routes.training import TrainingMetricFrame, TrainingStatusFrame
     from tcip_web.state import GuiVocabulary
 
-    return [GridGeometry, StatsSource, WorkingScaleBar, CoverageViewing, CoverageRecord,
-            CoveragePayload, CompletenessSetPayload, ActionPayload, GuiVocabulary,
-            TrainingMetricFrame, TrainingStatusFrame, TerminalInputFrame, TerminalResizeFrame]
+    return [GridGeometry, StatsSource, WorkingScale, CoverageViewing, CoverageRecord,
+            CoveragePayload, CompletenessSetPayload, GridZoomPayload, ActionPayload,
+            GuiVocabulary, TrainingMetricFrame, TrainingStatusFrame, TerminalInputFrame,
+            TerminalResizeFrame]
 
 
 def render_cache_version() -> int:

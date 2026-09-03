@@ -5,9 +5,9 @@
  * sat fully inside the viewport at some recorded scale -- a union-of-visibility bound, not "the
  * whole cell was on screen at once," which a raster whose cells exceed any working viewport can
  * never satisfy). Whether a seen cell counts as "swept" is a pure derivation against a subject's
- * working-scale bar, served by the completeness read and handed in through
- * `setWorkingScaleBar`, never accumulated from an authoring commit: a commit no longer moves any
- * bar, and an unsaved annotation never does either.
+ * working scale -- the breeder's own set grid zoom, served by the completeness read and handed
+ * in through `setWorkingScaleBar`, never accumulated from an authoring commit: a commit never
+ * moves it, and an unsaved annotation never does either.
  *
  * Facts are pushed with a trailing debounce; merging with the stored record (by the greater
  * value per cell) is the server's job. A push that fails after the tracker has moved on (a
@@ -21,7 +21,7 @@ import type {
   CoveragePayload,
   CoverageRecord,
   CoverageViewing,
-  WorkingScaleBar,
+  WorkingScale,
 } from "@/api/types.generated";
 import {
   meetsBar,
@@ -36,11 +36,11 @@ import {
 import { StructuredRefusalError } from "@/api/http";
 import type { PixelRect } from "@/lib/viewGeometry";
 
-export type { CoveragePayload, CoverageRecord, CoverageViewing, WorkingScaleBar };
+export type { CoveragePayload, CoverageRecord, CoverageViewing, WorkingScale };
 export { meetsBar };
 
-/** The viewing context the tracker accumulates: the caller supplies it whole (the server derives
- *  the working-scale bar from the label file, never from anything echoed back here). */
+/** The viewing context the tracker accumulates: the caller supplies it whole (the working scale
+ *  comes from the subject's own set grid zoom, never from anything echoed back here). */
 export type CoverageViewingInput = CoverageViewing;
 
 /** `post_coverage`'s own answer: the merged record beside its unchanged integer counts. Only the
@@ -55,11 +55,9 @@ export interface CoveragePushResponse {
  * becomes "seen" once every one of its sub-rects has, at some point, been fully on screen.
  * Divisions are derived per cell (`subCellDivisionsFor`) from this target pixel size, not a
  * single fixed division count applied to every cell -- a fixed count scales sub-cell size with
- * the cell, not the viewport, so it stops working the moment a lattice's cells get big (the
- * large-raster lattice's cells run into the tens of thousands of pixels). 128px is a documented
- * default pending a real GUI annotation session to check the target against, the same
- * "ship a plain, documented, revisit-later default" idiom as
- * reference_grid.derive_large_raster_grid_tile_size's own divisions=16.
+ * the cell, not the viewport, so it stops working the moment a lattice's cells get big (a low
+ * set zoom derives a large cell edge). 128px is a documented default pending a real GUI
+ * annotation session to check the target against.
  */
 const SUB_CELL_TARGET_PX = 128;
 
@@ -84,17 +82,10 @@ function sameKeyParts(a: CoverageKeyParts | null, b: CoverageKeyParts | null): b
   );
 }
 
-function sameWorkingScaleBar(a: WorkingScaleBar | null, b: WorkingScaleBar | null): boolean {
+function sameWorkingScaleBar(a: WorkingScale | null, b: WorkingScale | null): boolean {
   if (a === b) return true;
   if (a === null || b === null) return false;
-  return (
-    a.value === b.value &&
-    a.median_extent_native_px === b.median_extent_native_px &&
-    a.annotation_count === b.annotation_count &&
-    a.judged_span_px === b.judged_span_px &&
-    a.source === b.source &&
-    (a.from_this_image ?? null) === (b.from_this_image ?? null)
-  );
+  return a.value === b.value && a.source === b.source;
 }
 
 /** The tracker's own hold: a stored coverage record on a lattice other than the current one
@@ -305,7 +296,7 @@ export class CoverageTracker {
   // The last value the server acknowledged for each cell (from hydrate or a successful push):
   // a cell is pending while its current value exceeds this or it has none here at all.
   private recordedMap = new Map<string, number>();
-  private bar: WorkingScaleBar | null = null;
+  private bar: WorkingScale | null = null;
   private viewing: CoverageViewingInput | null = null;
   private dirty = false;
   private timer: ReturnType<typeof setTimeout> | null = null;
@@ -391,7 +382,7 @@ export class CoverageTracker {
     return this.servedAtNativeSet;
   }
 
-  get workingScaleBar(): WorkingScaleBar | null {
+  get workingScaleBar(): WorkingScale | null {
     return this.bar;
   }
 
@@ -479,7 +470,7 @@ export class CoverageTracker {
    *  object reference from a caller that recomputed rather than genuinely changed) is a no-op:
    *  onChange fires only for a real change, so a caller whose own bar reference is unstable
    *  across renders can never drive this into a render loop through it. */
-  setWorkingScaleBar(bar: WorkingScaleBar | null): void {
+  setWorkingScaleBar(bar: WorkingScale | null): void {
     if (sameWorkingScaleBar(this.bar, bar)) return;
     this.bar = bar;
     this.opts.onChange?.();

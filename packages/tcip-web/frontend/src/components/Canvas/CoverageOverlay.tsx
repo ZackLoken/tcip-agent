@@ -48,20 +48,25 @@ export function measureLabelWidth(text: string, fontPx: number): number {
   return em * fontPx;
 }
 
-/** The widest label this platform's own lattice can produce: `derive_large_raster_grid_tile_size`
- *  (reference_grid.py) caps a large raster's lattice at 16 divisions of the long edge, so the
- *  widest cell name is a single-letter column plus a two-digit row ("P16"); a three-digit
- *  saved-annotation count is the assumed practical ceiling for the parenthesised suffix. */
-const WIDEST_LABEL = "P16 (137)";
-
 const LABEL_INSET_PX = 2;
 
+/** A three-digit saved-annotation count is the assumed practical ceiling for a label's
+ *  parenthesised suffix ("(137)"). */
+const WIDEST_COUNT_SUFFIX = " (137)";
+
 /** Smallest on-screen cell edge, in screen px, at which a cell's name and saved-annotation count
- *  are drawn: the widest label this lattice can produce, measured at the label font, plus the
- *  inset the label is drawn at on each side. Below this a cell's own edge cannot hold its own
- *  worst-case label without overrunning into the next cell. */
-export const CELL_LABEL_FLOOR_PX =
-  Math.ceil(measureLabelWidth(WIDEST_LABEL, LABEL_FONT_PX)) + 2 * LABEL_INSET_PX;
+ *  are drawn: the widest name actually present in `cells` (a set-zoom lattice's own row/column
+ *  extent varies with the zoom and the raster, so no fixed name length bounds every lattice this
+ *  platform can derive), plus the assumed count suffix, measured at the label font, plus the
+ *  inset the label is drawn at on each side. Below this a cell's own edge cannot hold the
+ *  lattice's own worst-case label without overrunning into the next cell. A uniform floor over
+ *  the whole lattice, not a per-cell one, so neighboring cells of the same size never disagree
+ *  on whether a label is shown. */
+export function cellLabelFloorPx(cells: { name: string }[]): number {
+  const widestName = cells.reduce((w, c) => Math.max(w, c.name.length), 1);
+  const widestLabel = "M".repeat(widestName) + WIDEST_COUNT_SUFFIX;
+  return Math.ceil(measureLabelWidth(widestLabel, LABEL_FONT_PX)) + 2 * LABEL_INSET_PX;
+}
 
 /** #C9A24B, tcip-season-3 (tailwind.config.ts): the recorded sweep fill. Off green deliberately:
  *  tcip-accent (the platform's own SI_GREEN) reads against an orchard mosaic's own foliage. */
@@ -94,6 +99,7 @@ export function CoverageOverlay(props: {
   const s = props.scale;
   const strokeW = 1 / s;
   const visible = cellsIntersecting(props.cells, props.viewport);
+  const labelFloorPx = cellLabelFloorPx(props.cells);
 
   return (
     <>
@@ -105,7 +111,7 @@ export function CoverageOverlay(props: {
         const other = !active && !stale && props.otherComplete.has(cell.name);
         const attested = active || stale || other;
         const count = props.annotationCounts[cell.name] ?? 0;
-        const labelFits = w * s >= CELL_LABEL_FLOOR_PX && h * s >= CELL_LABEL_FLOOR_PX;
+        const labelFits = w * s >= labelFloorPx && h * s >= labelFloorPx;
         const dash: [number, number] = [4 * strokeW, 3 * strokeW];
         const pendingDash: [number, number] = [1.5 * strokeW, 1.5 * strokeW];
         const swept = props.swept.has(cell.name);

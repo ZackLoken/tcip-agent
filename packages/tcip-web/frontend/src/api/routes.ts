@@ -60,6 +60,7 @@ export const ROUTES = {
   postClassesSave: "/api/classes/save",
   postCoverage: "/api/coverage",
   postCoverageCompleteness: "/api/coverage/completeness",
+  postCoverageGridZoom: "/api/coverage/grid_zoom",
   postDatasetNav: "/api/dataset/nav",
   postDatasetSelect: "/api/dataset/select",
   postEventsByPanel: (panel: string) => `/api/events/${encodeURIComponent(panel)}`,

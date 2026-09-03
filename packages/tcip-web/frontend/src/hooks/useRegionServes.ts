@@ -1,16 +1,24 @@
 /**
  * The cell-aligned region serves the current viewport needs when the user zooms past the base
  * bitmap's resolution on a large raster. Fetch plans come from planRegionFetches (resolution
- * tiers plus the canvas-derived fan-out caps); the returned regions feed CanvasStage's regions
- * prop. A band-composited serve (a bands param in force, server-derived stretch) takes no
- * region overlay: base and overlay must never be two renderings of the same pixels.
+ * tiers plus the canvas-derived fan-out caps) against the zoom-independent region-serving grid
+ * (`servingCells`), never the coverage lattice: the two lattices are unrelated. A served serving
+ * cell marks as served at native every coverage cell (`coverageCells`) that sits fully inside
+ * it, so the coverage tracker's own facts stay keyed to the lattice the breeder actually sees.
+ * A band-composited serve (a bands param in force, server-derived stretch) takes no region
+ * overlay: base and overlay must never be two renderings of the same pixels.
  */
 
 import { useRef } from "react";
 
 import { api } from "@/api/client";
 import type { CanvasRegion } from "@/components/Canvas/CanvasStage";
-import { planRegionFetches, servedCellAtNative, type GridCell } from "@/lib/coverage";
+import {
+  planRegionFetches,
+  rectFullyInside,
+  servedCellAtNative,
+  type GridCell,
+} from "@/lib/coverage";
 import { measureCanvasHost, computeViewport } from "@/lib/canvasSync";
 import type { LoadedImage } from "@/lib/imageLoader";
 import type { ViewState } from "@/store/types";
@@ -20,8 +28,9 @@ export function useRegionServes(args: {
   imgW: number;
   imgH: number;
   view: ViewState;
-  cells: GridCell[];
-  tileSize: number | null;
+  servingCells: GridCell[];
+  servingTileSize: number | null;
+  coverageCells: GridCell[];
   baseFacts: LoadedImage | null;
   composite: { bands?: string; stretch?: string };
   onCellServedAtNative?: (cellName: string) => void;
@@ -40,8 +49,8 @@ export function useRegionServes(args: {
   const served = args.baseFacts?.ok ? args.baseFacts.servedSize : null;
   if (
     !args.imagePath ||
-    args.cells.length === 0 ||
-    !args.tileSize ||
+    args.servingCells.length === 0 ||
+    !args.servingTileSize ||
     args.composite.bands !== undefined ||
     !served ||
     args.imgW <= 0 ||
@@ -55,7 +64,7 @@ export function useRegionServes(args: {
   if (!viewport) return install("", []);
 
   const plan = planRegionFetches({
-    cells: args.cells,
+    cells: args.servingCells,
     viewport: {
       x0: viewport.x,
       y0: viewport.y,
@@ -65,12 +74,13 @@ export function useRegionServes(args: {
     scale: args.view.scale,
     baseScale: served.w / args.imgW,
     host,
-    tileSize: args.tileSize,
+    tileSize: args.servingTileSize,
   });
   if (!plan || plan.length === 0) return install("", []);
 
   const imagePath = args.imagePath;
   const onServed = args.onCellServedAtNative;
+  const coverageCells = args.coverageCells;
   const regions = plan.map((p) => {
     const { cell } = p;
     const url = api.images.url(imagePath, {
@@ -89,7 +99,10 @@ export function useRegionServes(args: {
       width: cell.x1 - cell.x0,
       height: cell.y1 - cell.y0,
       onLoaded: (facts: LoadedImage) => {
-        if (facts.ok && servedCellAtNative(cell, facts.servedSize)) onServed?.(cell.name);
+        if (!facts.ok || !servedCellAtNative(cell, facts.servedSize)) return;
+        for (const covCell of coverageCells) {
+          if (rectFullyInside(covCell, cell)) onServed?.(covCell.name);
+        }
       },
     };
   });

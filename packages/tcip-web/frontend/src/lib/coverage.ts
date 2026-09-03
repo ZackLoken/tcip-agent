@@ -8,9 +8,10 @@ import type { HostSize, PixelRect } from "@/lib/viewGeometry";
 export type {
   CompletenessSetPayload as CompletenessSetPostBody,
   GridGeometry,
-  WorkingScaleBar,
+  GridZoomPayload,
+  WorkingScale,
 } from "@/api/types.generated";
-import type { GridGeometry, WorkingScaleBar } from "@/api/types.generated";
+import type { GridGeometry, WorkingScale } from "@/api/types.generated";
 
 /** One served cell: a name plus its half-open native-pixel rect, clipped to the image extent. */
 export interface GridCell {
@@ -21,24 +22,39 @@ export interface GridCell {
   y1: number;
 }
 
-export interface CoverageGridResponse extends GridGeometry {
+/** One rendered grid block (`get_grid`'s own `grid` and `serving` fields share this shape):
+ *  geometry, the full cell list, and how the tile size was chosen -- "cells sized to one
+ *  full-resolution screenful", "a chosen cell edge of <n> px" for an explicit tile_size, "one
+ *  screenful at <zoom>x zoom" for the set-zoom lattice, or "the lattice this image's coverage
+ *  was recorded on" for an already-worked image. Not part of GridGeometry; stripped back off
+ *  (see useCoverageGrid) before a grid round-trips into a coverage or completeness payload,
+ *  which forbids extra keys. */
+export interface RenderedGrid extends GridGeometry {
   cells: GridCell[];
-  /** How the tile size was chosen: "the long edge in 16 equal divisions", "cells sized to one
-   *  full-resolution screenful", or "a chosen cell edge of <n> px" for an explicit tile_size. Not
-   *  part of GridGeometry; stripped back off (see useCoverageGrid) before a grid round-trips into
-   *  a coverage or completeness payload, which forbids extra keys. */
   derivation: string;
 }
 
+/** GET /api/coverage/grid's full response: the coverage lattice (`grid`, null with `reason`
+ *  when none can be derived -- no set zoom, or a viewport not yet measured), plus the
+ *  zoom-independent region-serving grid (`serving`, always present). `fresh_derivation_differs`
+ *  is set only when `grid` came from an already-worked image's own recorded lattice and the
+ *  subject's current zoom would derive a different tile size; null otherwise. */
+export interface CoverageGridResponse {
+  grid: RenderedGrid | null;
+  reason: string | null;
+  fresh_derivation_differs: boolean | null;
+  serving: RenderedGrid;
+}
+
 /** One cell's attestation-time scale provenance, stamped by POST /api/coverage/completeness:
- *  the view scale the breeder pressed at (null for a non-GUI caller), the working-scale bar
- *  derived from the label file at write time (which can differ from the bar read on screen if
- *  the label file changed between the read and the press), and whether this image's own
+ *  the view scale the breeder pressed at (null for a non-GUI caller), the working scale (the
+ *  subject's set zoom) in effect at write time (which can differ from the one read on screen if
+ *  the zoom changed between the read and the press), and whether this image's own
  *  view-coverage record shows the cell already seen -- facts only, no verdict; `at_scale` is
  *  null and `grid_matched` false when no coverage record existed yet or its grid disagreed. */
 export interface CellAttestedView {
   view_scale: number | null;
-  working_scale_bar_at_write: WorkingScaleBar | null;
+  working_scale_at_write: WorkingScale | null;
   seen_on_record: { at_scale: number | null; grid_matched: boolean };
 }
 
@@ -68,18 +84,19 @@ export interface CompletenessRecord {
  *  `counts_error` is set (with `annotation_counts` empty and `counts_grid` null) when the grid
  *  could not be derived or the raster could not be read; `by_subject` still serves in that
  *  case. */
-/** `working_scale` (subject -> bar or null) is derived fresh from the label file on every read,
- *  never a value the browser echoes back; `working_scale_error` names why it is empty (a
- *  label-read failure, or a failure in the pixel-size/dataset-extent derivation), distinct from
- *  `counts_error` (a raster-read failure costs only the counts, never the bar).
- *  `working_scale_reason` (subject -> clause) names why a null bar has none, per subject, for
- *  every subject `working_scale` maps to null; absent for a subject whose bar exists. */
+/** `working_scale` (subject -> WorkingScale or null) is read fresh from the subject's set grid
+ *  zoom on every read, never derived from any annotation or echoed back from the browser;
+ *  `working_scale_error` names a store-read failure, distinct from `counts_error` (a
+ *  raster-read failure costs only the counts, never the working scale).
+ *  `working_scale_reason` (subject -> clause) names why a null working scale has none, per
+ *  subject, for every subject `working_scale` maps to null; absent for a subject whose zoom is
+ *  set. */
 export interface CompletenessResponse {
   by_subject: Record<string, CompletenessRecord>;
   annotation_counts: Record<string, Record<string, number>>;
   counts_grid: GridGeometry | null;
   counts_error: string | null;
-  working_scale: Record<string, WorkingScaleBar | null>;
+  working_scale: Record<string, WorkingScale | null>;
   working_scale_error: string | null;
   working_scale_reason: Record<string, string>;
 }
@@ -101,11 +118,11 @@ export function breederReadErrorReason(raw: string): string {
   return raw.slice(0, idx).replace(/[:\s]+$/, "");
 }
 
-/** Whether a cell's recorded scale meets a subject's working-scale bar: the one comparison the
+/** Whether a cell's recorded scale meets a subject's working scale: the one comparison the
  *  tracker, the overlay's derivation and the chrome's attested-view line all call, so "does this
- *  cell meet the bar" is never answered twice. `null` on either side (no recorded scale, or no
- *  bar to judge against) never meets it. */
-export function meetsBar(atScale: number | null, bar: WorkingScaleBar | null): boolean {
+ *  cell meet the working scale" is never answered twice. `null` on either side (no recorded
+ *  scale, or no working scale to judge against) never meets it. */
+export function meetsBar(atScale: number | null, bar: WorkingScale | null): boolean {
   return atScale !== null && bar !== null && atScale >= bar.value;
 }
 

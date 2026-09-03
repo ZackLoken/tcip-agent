@@ -30,14 +30,13 @@
 import { useEffect, useId, useState } from "react";
 
 import { CollapsibleSection } from "@/components/CollapsibleSection";
-import { MAX_SCALE } from "@/components/Canvas/zoom";
 import type { OtherLatticeAttestation } from "@/hooks/useRegionCompleteness";
 import { useDisclosure } from "@/hooks/useDisclosure";
 import {
   breederReadErrorReason,
   meetsBar,
   type CellAttestedView,
-  type WorkingScaleBar,
+  type WorkingScale,
 } from "@/lib/coverage";
 import type { ReplaceRequired } from "@/lib/coverageTracker";
 
@@ -48,19 +47,17 @@ import type { ReplaceRequired } from "@/lib/coverageTracker";
 function attestedViewLine(cell: string, entry: CellAttestedView | undefined): string | null {
   if (!entry) return null;
   const n = entry.view_scale === null ? "an unstated" : `${(entry.view_scale * 100).toFixed(1)}%`;
-  const bar = entry.working_scale_bar_at_write;
+  const workingScale = entry.working_scale_at_write;
   const atScale = entry.seen_on_record.at_scale;
   if (atScale === null || !entry.seen_on_record.grid_matched) {
     return `${cell} attested at ${n} zoom, not seen on record`;
   }
   const s = `${(atScale * 100).toFixed(1)}%`;
-  if (bar === null) {
+  if (workingScale === null) {
     return `${cell} attested at ${n} zoom, seen on record at ${s}, no working scale recorded at attestation`;
   }
-  const met = meetsBar(atScale, bar);
-  const provenance =
-    bar.from_this_image === false ? ", derived from the dataset's georeferenced images" : "";
-  const against = ` against a working scale of ${(bar.value * 100).toFixed(1)}%${provenance}`;
+  const met = meetsBar(atScale, workingScale);
+  const against = ` against a working scale of ${(workingScale.value * 100).toFixed(1)}%`;
   return `${cell} attested at ${n} zoom, seen on record at ${s}${against}${met ? "" : " (below it)"}`;
 }
 
@@ -132,20 +129,10 @@ function replaceNoticeText(replaceRequired: ReplaceRequired): string {
   );
 }
 
-/** The panel's own visible working-scale line: attributes the bar to this image's own
- *  annotations only when it actually is one (`from_this_image !== false`); the dataset-derived
- *  branch names the population it was drawn from instead, the same distinction
- *  `attestedViewLine`'s own provenance clause draws for the stored attestation. */
-function workingScaleLineText(bar: WorkingScaleBar, subject: string): string {
-  const barPct = bar.value * 100;
-  const population =
-    bar.from_this_image === false ? "across the dataset's georeferenced images " : "";
-  const spanWord = bar.from_this_image === false ? "across here" : "across";
-  return (
-    `Working scale ${barPct.toFixed(1)}%: the median saved ${subject} annotation ${population}` +
-    `(${bar.median_extent_native_px.toFixed(0)} px ${spanWord}, from ${bar.annotation_count}) ` +
-    `spans ${bar.judged_span_px} px on screen, a default span`
-  );
+/** The panel's own visible working-scale line: states the set zoom and who set it, read
+ *  verbatim off `WorkingScale.source` rather than reassembled here. */
+function workingScaleLineText(scale: WorkingScale, subject: string): string {
+  return `Working scale for ${subject}: ${(scale.value * 100).toFixed(1)}% (${scale.source})`;
 }
 
 function attestLabel(subject: string, cell: string, complete: boolean, stale: boolean): string {
@@ -196,9 +183,57 @@ function stateLines(props: {
   return lines;
 }
 
+/** The numeric grid-zoom control: screen pixels per native pixel, the same number the status
+ *  bar shows as a percentage. Accepts a positive number only; the caller's own route refuses a
+ *  non-positive one by name, so this control refuses locally rather than sending a request known
+ *  to fail. */
+function GridZoomControl(props: { subject: string; onSet: (zoom: number) => void }) {
+  const [text, setText] = useState("");
+  const parsed = Number(text);
+  const valid = text.trim() !== "" && Number.isFinite(parsed) && parsed > 0;
+
+  return (
+    <div className="flex items-center gap-1.5">
+      <label className="text-tcip-muted" htmlFor="tcip-grid-zoom-input">
+        Grid zoom for {props.subject}
+      </label>
+      <input
+        id="tcip-grid-zoom-input"
+        type="number"
+        step="0.1"
+        min="0"
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        className="w-16 rounded border border-tcip-border bg-tcip-bg px-1.5 py-0.5 text-tcip-fg"
+      />
+      <button
+        type="button"
+        disabled={!valid}
+        onClick={() => {
+          if (valid) props.onSet(parsed);
+        }}
+        className="rounded border border-tcip-border bg-tcip-bg px-2 py-0.5 font-semibold text-tcip-fg hover:border-tcip-border-hover disabled:opacity-50"
+      >
+        Set
+      </button>
+    </div>
+  );
+}
+
 export function CoverageChrome(props: {
   subject: string | null;
   derivation: string;
+  /** Why no coverage lattice could be derived (no subject, no set zoom, or the canvas host not
+   *  yet measured), or null once one is loaded (see `settled` for "not yet answered"). */
+  reason: string | null;
+  /** Whether the grid fetch has answered at all: tells "not yet answered" from "answered, no
+   *  lattice" so the panel never renders `reason` as a fact before the read is done. */
+  settled: boolean;
+  /** Set only when the current grid came from an already-worked image's own recorded lattice and
+   *  the subject's current zoom would derive a different tile size. */
+  freshDerivationDiffers: boolean | null;
+  onRederiveLattice: () => void;
+  onSetGridZoom: (zoom: number) => void;
   gridFetchError: string | null;
   readError: string | null;
   countsError: string | null;
@@ -223,11 +258,11 @@ export function CoverageChrome(props: {
   /** Cells recorded seen but not meeting the current bar (or every recorded cell while there is
    *  no bar): the chrome's own "coarser" remainder line. */
   coarserCount: number;
-  /** The active subject's working-scale bar for this image, or null (see `workingScaleReason`). */
-  workingScale: WorkingScaleBar | null;
+  /** The active subject's working scale (the set grid zoom), or null (see `workingScaleReason`). */
+  workingScale: WorkingScale | null;
   workingScaleReason: string | null;
-  /** The image's own whole-frame fit scale (unclamped), so the panel can state when the bar sits
-   *  coarser than any real view could ever be. */
+  /** The image's own whole-frame fit scale (unclamped), so the panel can state when the working
+   *  scale sits coarser than any real view could ever be. */
   fitScale: number | null;
   activeComplete: ReadonlySet<string>;
   activeStale: ReadonlySet<string>;
@@ -328,7 +363,6 @@ export function CoverageChrome(props: {
   const bar = props.workingScale;
   const barPct = bar ? bar.value * 100 : null;
   const belowFitScale = bar !== null && props.fitScale !== null && bar.value < props.fitScale;
-  const aboveZoomCeiling = bar !== null && bar.value > MAX_SCALE;
   const workingScaleLine =
     bar && props.subject ? workingScaleLineText(bar, props.subject) : props.workingScaleReason;
   const coarserLine =
@@ -396,11 +430,22 @@ export function CoverageChrome(props: {
           whole-image view, so every view meets it.
         </p>
       )}
-      {aboveZoomCeiling && (
-        <p className={`${noticeClass} border-tcip-border text-tcip-warn`}>
-          {props.subject}&apos;s working scale ({barPct!.toFixed(1)}%) is beyond the viewer&apos;s{" "}
-          {(MAX_SCALE * 100).toFixed(0)}% zoom, so no view can sweep a cell.
-        </p>
+      {props.settled && props.reason && (
+        <p className={`${noticeClass} border-tcip-border text-tcip-muted`}>{props.reason}</p>
+      )}
+      {props.freshDerivationDiffers && (
+        <div
+          className={`${noticeClass} flex items-center justify-between gap-1.5 border-tcip-border text-tcip-warn`}
+        >
+          <span>the grid zoom has changed since this image's lattice was recorded.</span>
+          <button
+            type="button"
+            onClick={props.onRederiveLattice}
+            className="rounded border border-tcip-border bg-tcip-bg px-2 py-1 text-[11px] font-semibold text-tcip-fg hover:border-tcip-border-hover"
+          >
+            Re-derive lattice
+          </button>
+        </div>
       )}
       <CollapsibleSection
         className="w-64 rounded-md border border-tcip-border bg-tcip-panel/95 px-3 py-2 text-[11px] text-tcip-fg shadow-lg backdrop-blur"
@@ -428,6 +473,8 @@ export function CoverageChrome(props: {
         onToggle={togglePanel}
       >
         <div className="flex flex-col gap-2">
+          {props.subject && <GridZoomControl subject={props.subject} onSet={props.onSetGridZoom} />}
+
           {props.gridFetchError ? (
             <p className="text-tcip-fp">coverage grid unavailable: {props.gridFetchError}</p>
           ) : props.derivation ? (

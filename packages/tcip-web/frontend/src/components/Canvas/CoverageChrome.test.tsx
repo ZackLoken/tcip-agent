@@ -3,10 +3,6 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 
 import { CoverageChrome } from "@/components/Canvas/CoverageChrome";
 
-// Distinct from both the real MAX_SCALE (10) and the bar under test below (12), so only a
-// genuinely derived notice tracks it, never a hardcoded "1000%" literal.
-vi.mock("@/components/Canvas/zoom", () => ({ MAX_SCALE: 7.5 }));
-
 beforeEach(() => {
   localStorage.clear();
 });
@@ -19,6 +15,11 @@ function baseProps() {
   return {
     subject: "fruit",
     derivation: "cells sized to one full-resolution screenful",
+    reason: null,
+    settled: true,
+    freshDerivationDiffers: null,
+    onRederiveLattice: vi.fn(),
+    onSetGridZoom: vi.fn(),
     gridFetchError: null,
     readError: null,
     countsError: null,
@@ -47,13 +48,7 @@ function baseProps() {
 }
 
 function bar(value: number) {
-  return {
-    value,
-    median_extent_native_px: 46 / value,
-    annotation_count: 3,
-    judged_span_px: 46,
-    source: "a documented default: not a measurement",
-  };
+  return { value, source: "set by user:breeder at 2026-09-03T00:00:00+00:00" };
 }
 
 function openKey() {
@@ -468,34 +463,10 @@ describe("CoverageChrome", () => {
     expect(screen.queryByText(/Turn the overlay on/)).not.toBeInTheDocument();
   });
 
-  it("states the served working-scale bar from the served fields, never a literal", () => {
+  it("states the served working scale from the served fields, never a literal", () => {
     render(<CoverageChrome {...baseProps()} workingScale={bar(0.25)} />);
-    expect(screen.getByText(/Working scale 25\.0%/)).toBeInTheDocument();
-    expect(screen.getByText(/the median saved fruit annotation/)).toBeInTheDocument();
-    expect(screen.getByText(/184 px across, from 3/)).toBeInTheDocument();
-    expect(screen.getByText(/spans 46 px on screen, a default span/)).toBeInTheDocument();
-  });
-
-  it("attributes a dataset-derived bar to the dataset, never this image's own annotations", () => {
-    render(
-      <CoverageChrome {...baseProps()} workingScale={{ ...bar(0.25), from_this_image: false }} />,
-    );
-    expect(screen.getByText(/Working scale 25\.0%/)).toBeInTheDocument();
-    expect(
-      screen.getByText(
-        /the median saved fruit annotation across the dataset's georeferenced images/,
-      ),
-    ).toBeInTheDocument();
-    expect(screen.getByText(/184 px across here, from 3/)).toBeInTheDocument();
-    expect(screen.getByText(/spans 46 px on screen, a default span/)).toBeInTheDocument();
-  });
-
-  it("keeps the own-annotations wording when from_this_image is true", () => {
-    render(
-      <CoverageChrome {...baseProps()} workingScale={{ ...bar(0.25), from_this_image: true }} />,
-    );
-    expect(screen.getByText(/the median saved fruit annotation \(/)).toBeInTheDocument();
-    expect(screen.queryByText(/across the dataset's georeferenced images/)).not.toBeInTheDocument();
+    expect(screen.getByText(/Working scale for fruit: 25\.0%/)).toBeInTheDocument();
+    expect(screen.getByText(/set by user:breeder at/)).toBeInTheDocument();
   });
 
   it("states the reason sentence instead when there is no bar", () => {
@@ -518,14 +489,6 @@ describe("CoverageChrome", () => {
   it("says nothing about the fit scale when the bar sits within it", () => {
     render(<CoverageChrome {...baseProps()} workingScale={bar(0.5)} fitScale={0.1} />);
     expect(screen.queryByText(/coarser than the whole-image view/)).not.toBeInTheDocument();
-  });
-
-  it("notes when the bar sits beyond the viewer's zoom ceiling, derived from MAX_SCALE never a literal", () => {
-    render(<CoverageChrome {...baseProps()} workingScale={bar(12)} />);
-    // 750%, the mocked MAX_SCALE above: a hardcoded "1000%" literal would fail this.
-    expect(
-      screen.getByText(/fruit's working scale \(1200\.0%\) is beyond the viewer's 750% zoom/),
-    ).toBeInTheDocument();
   });
 
   it("states the coarser-cells remainder against the bar, and the no-bar wording without one", () => {
@@ -580,7 +543,7 @@ describe("CoverageChrome", () => {
         activeCellsAttestedView={{
           A1: {
             view_scale: 0.5,
-            working_scale_bar_at_write: bar(0.4),
+            working_scale_at_write: bar(0.4),
             seen_on_record: { at_scale: 0.6, grid_matched: true },
           },
         }}
@@ -591,14 +554,14 @@ describe("CoverageChrome", () => {
     ).toBeInTheDocument();
   });
 
-  it("states no working scale recorded at attestation, with no verdict, when the bar at write is null", () => {
+  it("states no working scale recorded at attestation, with no verdict, when the scale at write is null", () => {
     render(
       <CoverageChrome
         {...baseProps()}
         activeCellsAttestedView={{
           A1: {
             view_scale: 0.5,
-            working_scale_bar_at_write: null,
+            working_scale_at_write: null,
             seen_on_record: { at_scale: 0.6, grid_matched: true },
           },
         }}
@@ -612,24 +575,20 @@ describe("CoverageChrome", () => {
     expect(screen.queryByText(/below it/)).not.toBeInTheDocument();
   });
 
-  it("names the dataset-derived provenance when the stamped bar's from_this_image is false", () => {
+  it("names the working scale the attestation was judged against", () => {
     render(
       <CoverageChrome
         {...baseProps()}
         activeCellsAttestedView={{
           A1: {
             view_scale: 0.5,
-            working_scale_bar_at_write: { ...bar(0.4), from_this_image: false },
+            working_scale_at_write: bar(0.4),
             seen_on_record: { at_scale: 0.6, grid_matched: true },
           },
         }}
       />,
     );
-    expect(
-      screen.getByText(
-        /against a working scale of 40\.0%, derived from the dataset's georeferenced images/,
-      ),
-    ).toBeInTheDocument();
+    expect(screen.getByText(/against a working scale of 40\.0%/)).toBeInTheDocument();
   });
 
   it("states not seen on record when the coverage record never showed the cell", () => {
@@ -639,12 +598,78 @@ describe("CoverageChrome", () => {
         activeCellsAttestedView={{
           A1: {
             view_scale: 0.5,
-            working_scale_bar_at_write: null,
+            working_scale_at_write: null,
             seen_on_record: { at_scale: null, grid_matched: false },
           },
         }}
       />,
     );
     expect(screen.getByText(/A1 attested at 50\.0% zoom, not seen on record/)).toBeInTheDocument();
+  });
+
+  it("shows the no-lattice reason once settled, with the grid-zoom control to set one", () => {
+    render(
+      <CoverageChrome
+        {...baseProps()}
+        derivation=""
+        currentCellName={null}
+        reason="set the grid zoom to derive a coverage lattice for fruit"
+        settled
+      />,
+    );
+    expect(
+      screen.getByText("set the grid zoom to derive a coverage lattice for fruit"),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText("Grid zoom for fruit")).toBeInTheDocument();
+  });
+
+  it("shows no reason line while the grid fetch has not settled yet", () => {
+    render(
+      <CoverageChrome
+        {...baseProps()}
+        derivation=""
+        currentCellName={null}
+        reason="set the grid zoom to derive a coverage lattice for fruit"
+        settled={false}
+      />,
+    );
+    expect(
+      screen.queryByText("set the grid zoom to derive a coverage lattice for fruit"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("the grid-zoom control posts the entered positive zoom", () => {
+    const onSetGridZoom = vi.fn();
+    render(<CoverageChrome {...baseProps()} onSetGridZoom={onSetGridZoom} />);
+    fireEvent.change(screen.getByLabelText("Grid zoom for fruit"), { target: { value: "1.5" } });
+    fireEvent.click(screen.getByRole("button", { name: "Set" }));
+    expect(onSetGridZoom).toHaveBeenCalledWith(1.5);
+  });
+
+  it("the grid-zoom control refuses a non-positive entry, never posting it", () => {
+    const onSetGridZoom = vi.fn();
+    render(<CoverageChrome {...baseProps()} onSetGridZoom={onSetGridZoom} />);
+    fireEvent.change(screen.getByLabelText("Grid zoom for fruit"), { target: { value: "0" } });
+    expect(screen.getByRole("button", { name: "Set" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Set" }));
+    expect(onSetGridZoom).not.toHaveBeenCalled();
+  });
+
+  it("offers a re-derive control once the current zoom would derive a different lattice", () => {
+    const onRederiveLattice = vi.fn();
+    render(
+      <CoverageChrome
+        {...baseProps()}
+        freshDerivationDiffers
+        onRederiveLattice={onRederiveLattice}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Re-derive lattice" }));
+    expect(onRederiveLattice).toHaveBeenCalledTimes(1);
+  });
+
+  it("offers no re-derive control when the recorded lattice still matches the current zoom", () => {
+    render(<CoverageChrome {...baseProps()} freshDerivationDiffers={false} />);
+    expect(screen.queryByRole("button", { name: "Re-derive lattice" })).not.toBeInTheDocument();
   });
 });

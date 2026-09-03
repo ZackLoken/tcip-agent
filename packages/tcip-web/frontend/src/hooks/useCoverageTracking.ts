@@ -1,7 +1,7 @@
 /**
  * Wires the CoverageTracker into the Annotate tab: resets on the (image, subject, date,
  * dataset, grid) identity, hydrates from the stored record, feeds it viewport passes, the
- * viewing context and the subject's working-scale bar (derived server-side, never accumulated
+ * viewing context and the subject's working scale (the set grid zoom, never accumulated
  * from an authoring commit), and exposes the seen/swept/pending sets for the coverage grid
  * overlay plus the Complete warning facts. No active subject means no accumulation and no POST.
  * A stored record on a grid other than the current one hydrates nothing and sets the tracker's
@@ -18,7 +18,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { api } from "@/api/client";
-import type { WorkingScaleBar } from "@/api/types.generated";
+import type { WorkingScale } from "@/api/types.generated";
 import { completeWarningMessage, type GridCell, type GridGeometry } from "@/lib/coverage";
 import {
   CoverageTracker,
@@ -30,7 +30,7 @@ import { useStore } from "@/store";
 import type { ViewState } from "@/store/types";
 
 export interface CoverageTracking {
-  /** Cells whose recorded scale meets the subject's working-scale bar: the derived "swept" set. */
+  /** Cells whose recorded scale meets the subject's working scale: the derived "swept" set. */
   swept: ReadonlySet<string>;
   /** Cells fully seen locally whose facts have not yet been acknowledged by the server. */
   pending: ReadonlySet<string>;
@@ -59,7 +59,7 @@ export function useCoverageTracking(args: {
   imgW: number;
   imgH: number;
   viewing: CoverageViewingInput;
-  workingScale: WorkingScaleBar | null;
+  workingScale: WorkingScale | null;
 }): CoverageTracking {
   // Bumped whenever the tracker's own facts change, purely to give the memo below a dependency
   // to recompute on: nothing reads the count itself.
