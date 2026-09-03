@@ -219,6 +219,24 @@ frames → they accept on the canvas → only then does it become GT. See
   `"complete"` whose label file holds no annotation of the confirmed subject. Never delete
   empty label files without asking.
 
+## The coverage lattice and its grid zoom
+
+The Annotate tab's coverage panel tracks two independent facts over a raster: which cells were
+served to the browser at native resolution, and which cells have sat fully on screen at some
+recorded scale. Neither is a claim about what the breeder actually looked at; whether a seen cell
+counts as swept is judged against the subject's own working scale. That scale is the breeder's own
+set grid zoom for the subject (`POST /api/coverage/grid_zoom`, stored per subject per dataset),
+never derived from any annotation: the zoom a person draws at is not the zoom they inspect at.
+There is no default zoom anywhere in this platform; with none set for a subject, `GET
+/api/coverage/grid` answers `grid: null` with the reason, and the panel offers the control to set
+one. A cell of that lattice is one screenful of native pixels at the set zoom
+(`tcip_mcp.pipelines.reference_grid.derive_lattice_tile_size`), the same rule for a photograph and
+an orthomosaic alike. An image already worked keeps whatever lattice its coverage was recorded on
+until the breeder explicitly re-derives it, so a zoom change never silently invalidates earlier
+sweeps. Region serving (the cell-aligned fetches a zoomed-in viewport streams in above the base
+bitmap) runs on its own display-derived tiling, entirely independent of the coverage lattice or
+its zoom.
+
 ## Active Learning
 
 `prioritize_review_queue` ranks images by model uncertainty/diversity:
