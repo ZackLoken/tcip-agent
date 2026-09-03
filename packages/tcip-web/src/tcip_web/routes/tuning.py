@@ -62,7 +62,7 @@ def _manifest_fields(manifest: dict) -> dict:
     ``base_config`` is the relaunchable marker (:func:`training_tools.run_hpo` writes it
     whenever it creates a manifest); its absence is reported with a reason rather than a
     reconstructed config. ``cancel_requested`` is the manifest's own field, set by
-    ``cancel_hpo`` and never derived from a side file this route cannot see across roots.
+    ``cancel_hyperparameter_search`` and never derived from a side file this route cannot see across roots.
     ``relaunched_from`` projects as ``None`` for a manifest predating the field, the same as
     for one that genuinely was not a relaunch: a relaunch of an older sweep must still work
     (see :func:`_missing_relaunch_fields`, which does not require this key). ``split_draws``
@@ -555,10 +555,10 @@ def relaunch_sweep(payload: RelaunchSweepPayload) -> dict:
 
 @router.post("/sweeps/{sweep_id}/cancel")
 def cancel_sweep_route(sweep_id: str, payload: EmptyBodyPayload) -> dict:
-    """Request cooperative cancellation of a running sweep, wrapping ``cancel_hpo``."""
-    from tcip_mcp.tools.training_tools import cancel_hpo
+    """Request cooperative cancellation of a running sweep, wrapping ``cancel_hyperparameter_search``."""
+    from tcip_mcp.tools.training_tools import cancel_hyperparameter_search
 
-    result = cancel_hpo(sweep_id, root=_sweep_launch_root(sweep_id))
+    result = cancel_hyperparameter_search(sweep_id, root=_sweep_launch_root(sweep_id))
     if result.get("error"):
         raise HTTPException(404, result["error"])
     return result
