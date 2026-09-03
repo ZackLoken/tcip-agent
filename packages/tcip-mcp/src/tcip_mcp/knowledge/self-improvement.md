@@ -84,6 +84,14 @@ the one audited write in this loop, kept out of the script on purpose. It only r
 project's distillation-backlog counters; turning a recurring theme into a skill line, a
 `CLAUDE.md` rule, or a tool change stays your own separate edit, per the scoping above.
 
+## Reading the record back
+
+`read_audit_log(scope=None, tool=None, since=None, until=None, status=None, limit=200)` answers
+a different question than the two memory tools above: not what a session learned, but which
+door touched a dataset, a project, or the platform log, when, and with what status. It reads the
+same log every `@audited` tool and `record_event` call already writes to, filtered in memory,
+newest entries first; a corrupt or unreadable page is refused rather than answered partially.
+
 ## Honesty
 
 Report what you actually did. If you skipped a capture, say so. A learning record that pretends to

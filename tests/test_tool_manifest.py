@@ -140,7 +140,7 @@ def test_consolidated_tools_present_and_removed_absent():
     registered = set(list_registered_tools())
     for present in (
         "draw_splits", "focus_human_attention", "get_experiment",
-        "register_model", "load_project_memory",
+        "register_model", "load_project_memory", "read_audit_log",
         # Renamed tools: the new names must register.
         "inspect_project",
         "capture_live_canvas",
