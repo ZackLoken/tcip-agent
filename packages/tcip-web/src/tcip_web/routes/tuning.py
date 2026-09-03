@@ -254,10 +254,6 @@ def _read_manifest(sweep_id: str, *, root: Path | str | None = None) -> dict | N
     return manifest if isinstance(manifest, dict) else None
 
 
-_STUDY_RESULT_FIELDS = ("all_trials", "search_alg", "scheduler", "warm_start", "baseline_params")
-"""The study result's own fields, absent from the manifest's completion projection."""
-
-
 def _read_study_result(sweep_id: str, *, root: Path | str | None = None) -> dict | None:
     """A finished sweep's full study-result record, or ``None`` when it has none: an old sweep
     from before this record existed, a failed sweep (never written), or one whose record won't
@@ -292,9 +288,11 @@ def _enrich_with_study_result(response: dict, sweep_id: str, *, root: Optional[s
     study_result = _read_study_result(sweep_id, root=root)
     if study_result is None:
         return response
+    from tcip_mcp.tools.training_tools import STUDY_RESULT_FIELDS
+
     response["result"] = {
         **result,
-        **{k: study_result[k] for k in _STUDY_RESULT_FIELDS if k in study_result},
+        **{k: study_result[k] for k in STUDY_RESULT_FIELDS if k in study_result},
     }
     return response
 
@@ -588,9 +586,12 @@ def get_sweep(sweep_id: str) -> dict:
     value; ``relaunched_from`` is a top-level field on both branches too, the manifest's own
     when one exists, else (live branch only, pre-manifest) the job's own in-memory record.
     ``has_manifest`` is always true on the disk branch (a disk sweep has one by definition) and
-    reflects whether ``run_hyperparameter_search`` has written one yet on the live branch."""
+    reflects whether ``run_hyperparameter_search`` has written one yet on the live branch. The
+    disk branch is :func:`training_tools.read_sweep_from_disk`'s own result, so it also carries
+    ``trials``, absent from the live branch (a different question, answered by the trials route)."""
+    from tcip_store import BadKey
     from tcip_web import jobstore
-    from tcip_mcp.tools.training_tools import TCIP_HEARTBEAT_STALE_SECONDS, sweep_state
+    from tcip_mcp.tools.training_tools import read_sweep_from_disk
 
     j = _registry.get(sweep_id)
     if j is not None:
@@ -608,21 +609,13 @@ def get_sweep(sweep_id: str) -> dict:
             manifest.get("relaunched_from") if has_manifest else j.relaunched_from
         )
         return _enrich_with_study_result(response, sweep_id, root=j.platform_root)
-    disk_manifest = _read_manifest(sweep_id)
-    if disk_manifest is None:
+    try:
+        disk = read_sweep_from_disk(sweep_id)
+    except BadKey as exc:
+        raise HTTPException(400, f"invalid sweep_id: {sweep_id}") from exc
+    if disk is None:
         raise HTTPException(404, f"sweep not found: {sweep_id}")
-    response = {
-        "sweep_id": disk_manifest.get("study_name", sweep_id),
-        "status": sweep_state(disk_manifest, stale_seconds=TCIP_HEARTBEAT_STALE_SECONDS,
-                              driver_live=False),
-        "error": disk_manifest.get("error"),
-        "result": disk_manifest.get("result") or {},
-        "manifest": disk_manifest,
-        "relaunched_from": disk_manifest.get("relaunched_from"),
-        "has_manifest": True,
-        "external": True,
-    }
-    return _enrich_with_study_result(response, sweep_id, root=None)
+    return {**disk, "external": True}
 
 
 def _log_holds_anything(page) -> bool:
@@ -633,35 +626,23 @@ def _log_holds_anything(page) -> bool:
 
 @router.get("/sweeps/{sweep_id}/trials")
 def list_trials(sweep_id: str) -> dict:
-    """The trial directories a sweep has produced so far.
+    """The trial directories a sweep has produced so far, from the shared disk reader (see
+    :func:`training_tools.read_sweep_from_disk`), under whichever root the sweep actually
+    launched under.
 
     Ray names its own per-trial directories after the trainable, so only the
     ``trial_<id>`` dirs the platform writes are listed here.
     """
-    from tcip_store import DecodeError, read_log, store
+    from tcip_store import BadKey
+    from tcip_mcp.tools.training_tools import read_sweep_from_disk
 
-    from tcip_mcp.tools.training_tools import trial_config_key, trial_metrics_key
-
-    root = _sweep_root(sweep_id)
-    trials: list[dict] = []
-    for d in sorted(root.iterdir()):
-        if not d.is_dir() or not d.name.startswith(_TRIAL_DIR_PREFIX):
-            continue
-        try:
-            resolved = store.read(trial_config_key(root, d.name), default={})
-        except DecodeError:
-            # A trial whose own record is unreadable is still listed, with no params to show.
-            logger.warning("the resolved config for %s does not decode", d.name, exc_info=True)
-            resolved = {}
-        if not isinstance(resolved, dict):
-            resolved = {}
-        trials.append({
-            "trial_id": d.name[len(_TRIAL_DIR_PREFIX):],
-            "has_metrics": _log_holds_anything(read_log(trial_metrics_key(root, d.name))),
-            "params": resolved.get("trial_params") or {},
-            "unconsumed_params": resolved.get("unconsumed_params") or [],
-        })
-    return {"sweep_id": sweep_id, "trials": trials}
+    try:
+        disk = read_sweep_from_disk(sweep_id, root=_sweep_launch_root(sweep_id))
+    except BadKey as exc:
+        raise HTTPException(400, f"invalid sweep_id: {sweep_id}") from exc
+    if disk is None:
+        raise HTTPException(404, f"sweep not found: {sweep_id}")
+    return {"sweep_id": sweep_id, "trials": disk["trials"]}
 
 
 @router.get("/sweeps/{sweep_id}/trials/{trial_id}/metrics")
