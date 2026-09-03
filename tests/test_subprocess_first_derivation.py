@@ -54,7 +54,7 @@ def _wait_terminal(run_id: str, seconds: float) -> str:
 
     deadline = time.monotonic() + seconds
     while time.monotonic() < deadline:
-        status = training_tools.check_training_status(run_id)
+        status = training_tools.monitor_training(run_id)
         if status.get("status") in ("completed", "failed", "cancelled"):
             return str(status.get("status"))
         time.sleep(0.5)

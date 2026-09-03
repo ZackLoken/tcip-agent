@@ -57,7 +57,7 @@ def test_reconstructed_run_running_vs_interrupted(tmp_path, monkeypatch):
 
 
 def test_configured_stale_window_agrees_across_run_list_compare_and_status(tmp_path, monkeypatch):
-    """list_training_runs, compare_experiments (the tool) and check_training_status must derive
+    """list_training_runs, compare_experiments (the tool) and monitor_training must derive
     "interrupted" the same way under a configured heartbeat window, one accessor
     (``training_tools.TCIP_HEARTBEAT_STALE_SECONDS``) wired through every consumer: a 300s-old
     heartbeat reads stale under a 30s window even though it would read fresh under the 600s
@@ -67,7 +67,7 @@ def test_configured_stale_window_agrees_across_run_list_compare_and_status(tmp_p
     from tcip_mcp.experiments import create_experiment, status_key, update_status
     from tcip_mcp.tools import training_tools
     from tcip_mcp.tools.experiment_tools import compare_experiments as compare_tool
-    from tcip_mcp.tools.training_tools import check_training_status, list_training_runs
+    from tcip_mcp.tools.training_tools import monitor_training, list_training_runs
 
     monkeypatch.setattr(training_tools, "TCIP_HEARTBEAT_STALE_SECONDS", 30.0)
 
@@ -85,5 +85,5 @@ def test_configured_stale_window_agrees_across_run_list_compare_and_status(tmp_p
     cmp = compare_tool(["exp-window"])
     assert cmp["experiments"][0]["state"] == "interrupted"
 
-    status = check_training_status("exp-window")
+    status = monitor_training("exp-window")
     assert status["status"] == "interrupted"

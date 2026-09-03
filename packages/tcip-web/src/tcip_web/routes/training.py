@@ -138,9 +138,9 @@ def list_runs_route() -> dict:
 
 @router.get("/runs/{run_id}")
 def get_run(run_id: str) -> dict:
-    from tcip_mcp.tools.training_tools import check_training_status
+    from tcip_mcp.tools.training_tools import monitor_training
 
-    return check_training_status(run_id)
+    return monitor_training(run_id)
 
 
 @router.post("/runs/{run_id}/tensorboard")
@@ -164,9 +164,9 @@ def launch_run_tensorboard(run_id: str, payload: EmptyBodyPayload) -> dict:
     from pathlib import Path
 
     from tcip_mcp.pipelines.training.tensorboard_manager import launch_tensorboard
-    from tcip_mcp.tools.training_tools import check_training_status
+    from tcip_mcp.tools.training_tools import monitor_training
 
-    status = check_training_status(run_id)
+    status = monitor_training(run_id)
     if "status" not in status:
         raise HTTPException(404, status.get("error") or f"Run not found: {run_id}")
     output_dir = status.get("output_dir")
@@ -291,7 +291,7 @@ class TrainingMetricFrame(BaseModel):
 
 
 class TrainingStatusFrame(BaseModel):
-    """The terminal frame: ``status`` carries ``check_training_status``'s report whole for a
+    """The terminal frame: ``status`` carries ``monitor_training``'s report whole for a
     run this process can still identify, ``error`` is set instead when it cannot."""
 
     type: Literal["status"]
@@ -330,10 +330,10 @@ async def _stream_metrics(
         # Has the run finished (or gone away)? ``error`` with no ``status`` key => unknown run;
         # a cancelled run never reaches completed/failed, so either case ends the stream.
         try:
-            from tcip_mcp.tools.training_tools import check_training_status
+            from tcip_mcp.tools.training_tools import monitor_training
             from tcip_web import jobstore
 
-            status = check_training_status(run_id)
+            status = monitor_training(run_id)
             if status.get("error") or status.get("status") in jobstore.TERMINAL_STATUSES:
                 # A row can land between the read above and this terminal observation; drain
                 # it now so the status frame never precedes the row it terminates on.
@@ -354,7 +354,7 @@ async def _stream_metrics(
                 await ws.send_json(status_frame.model_dump())
                 break
         except Exception:
-            logger.exception("check_training_status failed in stream")
+            logger.exception("monitor_training failed in stream")
 
         await asyncio.sleep(poll_seconds)
 

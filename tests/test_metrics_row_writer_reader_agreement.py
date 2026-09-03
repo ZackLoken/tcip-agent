@@ -90,17 +90,17 @@ def test_stream_drains_a_row_that_lands_between_the_read_and_the_terminal_check(
     create_experiment(run_id, {"model_source": {"builder": "my_models:shell_det"}})
     log_metrics(run_id, 1, {"loss": 0.5})
 
-    real_check_training_status = training_tools.check_training_status
+    real_monitor_training = training_tools.monitor_training
     appended = {"done": False}
 
-    def fake_check_training_status(rid):
+    def fake_monitor_training(rid):
         if not appended["done"]:
             appended["done"] = True
             log_metrics(run_id, 2, {"loss": 0.2})
             update_status(run_id, "completed")
-        return real_check_training_status(rid)
+        return real_monitor_training(rid)
 
-    monkeypatch.setattr(training_tools, "check_training_status", fake_check_training_status)
+    monkeypatch.setattr(training_tools, "monitor_training", fake_monitor_training)
 
     with _client().websocket_connect(
         f"ws://127.0.0.1/api/training/runs/{run_id}/stream?project_root={tmp_path}",

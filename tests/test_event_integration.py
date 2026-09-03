@@ -514,7 +514,7 @@ class TestTrainingToolOutputSchema:
         assert Path(res["output_dir"]) == tmp_path / "runs" / res["run_id"]
         assert res["pid"] == _NoChild.pid
 
-    def test_check_training_status_answers_for_the_run_it_was_asked_about(
+    def test_monitor_training_answers_for_the_run_it_was_asked_about(
         self, tmp_path: Path,
     ) -> None:
         """A status read carries the identifier of the run it describes, plus that run's own
@@ -529,7 +529,7 @@ class TestTrainingToolOutputSchema:
         late = create_run({"seed": 12}, str(tmp_path / "late"))
         late.status, late.current_epoch, late.best_metric = "completed", 9, 0.07
 
-        status = training_tools.check_training_status(late.run_id)
+        status = training_tools.monitor_training(late.run_id)
         assert status["run_id"] == late.run_id
         assert status["run_id"] != early.run_id
         assert status["status"] == "completed"
@@ -537,7 +537,7 @@ class TestTrainingToolOutputSchema:
         assert status["best_metric"] == 0.07
         assert status["output_dir"] == str(tmp_path / "late")
 
-        assert "error" in training_tools.check_training_status("run_that_was_never_created")
+        assert "error" in training_tools.monitor_training("run_that_was_never_created")
 
 
 class TestInferenceToolOutputSchema:

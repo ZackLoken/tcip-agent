@@ -508,14 +508,14 @@ def test_update_status_error_is_keyword_only_and_backward_compatible(tmp_path, m
     assert status["error"] == "boom"
 
 
-# ── check_training_status / list_training_runs disk fallback ───────────────────────
+# ── monitor_training / list_training_runs disk fallback ───────────────────────
 
 
-def test_check_training_status_falls_back_to_disk_for_delegated_run(tmp_path, monkeypatch):
+def test_monitor_training_falls_back_to_disk_for_delegated_run(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     from tcip_mcp.experiments import create_experiment, log_metrics, stamp_run_identity, update_status
     from tcip_mcp.pipelines.training.run_registry import attach_run
-    from tcip_mcp.tools.training_tools import check_training_status
+    from tcip_mcp.tools.training_tools import monitor_training
 
     run = attach_run("run_delegated", {"model_source": {"builder": "x:y"}}, "out_dir")
     run.pid = 999  # subprocess-delegated, in-memory fields below are now stale by design
@@ -525,7 +525,7 @@ def test_check_training_status_falls_back_to_disk_for_delegated_run(tmp_path, mo
     update_status("run_delegated", "running")
     log_metrics("run_delegated", 7, {"loss": 0.2})
 
-    result = check_training_status("run_delegated")
+    result = monitor_training("run_delegated")
     assert result["epoch"] == 7  # not the stale in-memory 0
     assert result["status"] == "running"
 
@@ -711,7 +711,7 @@ def test_max_wall_clock_seconds_terminates_hung_run(tmp_path, monkeypatch):
         assert run.status == "failed"
 
         # The failure reason must land through the real status channel, not only the
-        # in-memory mark check_training_status ignores for a pid-bearing run. Polls the record
+        # in-memory mark monitor_training ignores for a pid-bearing run. Polls the record
         # itself, tolerating a read that lands mid-write, since a Windows AV/indexer can
         # transiently hold the file.
         status: dict = {}
