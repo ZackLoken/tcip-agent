@@ -920,7 +920,13 @@ export function ResultsTab() {
               onChange={(e) => {
                 const name = e.target.value;
                 setMappingName(name);
-                if (mappingNames.includes(name)) void loadMapping(name);
+                if (mappingNames.includes(name)) {
+                  void loadMapping(name);
+                } else {
+                  setBuildSummary(null);
+                  setBuildTolerance(null);
+                  setBuildMaxMatchDistance(null);
+                }
               }}
               placeholder="valley-2026"
               list="plant-mapping-names"

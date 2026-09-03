@@ -184,17 +184,17 @@ from pathlib import Path
 from tcip_mcp.pipelines.postprocessing.plant_mapping import load_mapping
 
 build = load_mapping(project_root, mapping_name)  # from a prior build_plant_mapping call
-by_stem = {a.stem: a for assignments in build.assignments.values() for a in assignments}
+by_stem = {row["stem"]: row for rows in build.rows().values() for row in rows}
 
 def plant_id_fn(image_path: str) -> str | None:
-    a = by_stem.get(Path(image_path).stem)
-    return a.plot_name if a else None
+    row = by_stem.get(Path(image_path).stem)
+    return row["plot_name"] if row else None
 
 image_results = [
     {**r, "image": r["image"],
-     "plant_id_source": (a := by_stem.get(Path(r["image"]).stem)) and a.source,
-     "plant_id_distance_m": a and a.distance_m,
-     "plant_attribution": build.plant_attribution}
+     "plant_id_source": (row := by_stem.get(Path(r["image"]).stem)) and row["source"],
+     "plant_id_distance_m": row and row["distance_m"],
+     "plant_attribution": row and row["plant_attribution"]}
     for r in read_stage_b_preds_as_image_results("stage_b_preds")  # your own per-image count reader
 ]
 

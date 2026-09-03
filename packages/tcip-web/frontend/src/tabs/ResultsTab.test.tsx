@@ -1217,6 +1217,34 @@ describe("ResultsTab delivery events (read-only)", () => {
     ).toBeInTheDocument();
     expect(within(row).getByText(/image-level attribution/)).toBeInTheDocument();
   });
+
+  it("renders the rest of a delivery event whose plant_mapping predates dates_delivered", async () => {
+    const olderShaped: DeliveryEventRecord = {
+      ...DELIVERY_EVENT,
+      event_id: "older-shaped",
+      plant_mapping: {
+        name: "valley",
+        project_root: "C:/proj",
+        dataset_id: "ds-1",
+        dataset_root: "C:/data",
+        built_at: "2026-02-01T00:00:00+00:00",
+        record_sha256: "0".repeat(64),
+        nn_tolerance_m: { value: 3, source: "stated" },
+        capture_identity: {},
+        captures_unverified: [],
+        plant_csvs_unverified: [],
+        images_unattributed_scope: "delivered_dates",
+      },
+    };
+    vi.spyOn(resultsApi, "deliveryEvents").mockResolvedValue({ records: [olderShaped] });
+
+    render(<ResultsTab />);
+    const row = await screen.findByTestId("delivery-older-shaped");
+
+    expect(within(row).getByText("subject_a")).toBeInTheDocument();
+    expect(within(row).getByText("state_crossing_dates")).toBeInTheDocument();
+    expect(within(row).queryByText(/Delivered dates/)).not.toBeInTheDocument();
+  });
 });
 
 describe("ResultsTab plant-mapping build: match-tolerance phrase", () => {
@@ -1405,6 +1433,43 @@ describe("ResultsTab plant-mapping build: match-tolerance phrase", () => {
 
     expect(await screen.findByText(/mapped 4 of 4, 0 attributed to no plant/)).toBeInTheDocument();
     expect(resultsApi.loadPlantMapping).toHaveBeenCalledWith("valley-2026");
+  });
+
+  it("clears the loaded summary once the typed name no longer matches a stored mapping", async () => {
+    vi.spyOn(api.dataset, "tree").mockResolvedValue({
+      dataset_root: "C:/data",
+      dates_with_images: [],
+      subjects: [],
+      model_names: [],
+      subjects_by_date: {},
+      models_by_date: {},
+      prediction_dirs: {},
+      label_problem: null,
+    });
+    vi.spyOn(resultsApi, "listPlantMappings").mockResolvedValue({ names: ["valley-2026"] });
+    vi.spyOn(resultsApi, "loadPlantMapping").mockResolvedValue({
+      mapping: {},
+      summary: {
+        per_date: {
+          "2026-01-01": { n_images: 4, n_mapped: 4, n_unattributed: 0, avg_distance_m: 0.9 },
+        },
+        totals: { n_dates: 1, n_images: 4, n_mapped: 4, n_unattributed: 0 },
+      },
+      nn_tolerance_m: { value: 2, source: "stated" },
+      max_match_distance_m: 6,
+    });
+
+    render(<ResultsTab />);
+    await waitFor(() => expect(resultsApi.listPlantMappings).toHaveBeenCalled());
+    const nameInput = screen.getByPlaceholderText("valley-2026");
+    fireEvent.change(nameInput, { target: { value: "valley-2026" } });
+
+    expect(await screen.findByText(/mapped 4 of 4, 0 attributed to no plant/)).toBeInTheDocument();
+
+    fireEvent.change(nameInput, { target: { value: "valley-2026-draft" } });
+
+    expect(screen.queryByText(/mapped 4 of 4, 0 attributed to no plant/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Match tolerance \d/)).not.toBeInTheDocument();
   });
 });
 

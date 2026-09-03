@@ -431,6 +431,62 @@ def test_deliver_orthomosaic_plant_counts_refuses_unacknowledged_then_admits(tmp
         assert r["delivered_phenotype"] == "stem_count"
 
 
+def test_deliver_orthomosaic_plant_counts_csv_carries_detection_level_attribution(
+    tmp_path, monkeypatch,
+):
+    """Orthomosaic delivery attributes objects to plants at the raw-detection level, never a
+    per-image aggregate: the CSV's plant_attribution column names that granularity."""
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path / "proj"))
+    (tmp_path / "proj" / ".tcip" / "state").mkdir(parents=True, exist_ok=True)
+
+    raster_path = tmp_path / "mosaic.tif"
+    _write_geo_raster(raster_path)
+    bucket_dir, stem = _run_bucket(tmp_path, monkeypatch, raster_path)
+    _replace_boxes(bucket_dir / f"{stem}.json", [(8.0, 8.0, 12.0, 12.0)])
+    plant_csv = _plant_grid_csv(tmp_path, raster_path, _PLANT_PIXELS)
+
+    from tcip_mcp.tools.orthomosaic_tools import deliver_orthomosaic_plant_counts
+
+    out_csv = tmp_path / "counts.csv"
+    result = deliver_orthomosaic_plant_counts(
+        str(bucket_dir), str(raster_path), [str(plant_csv)], str(out_csv),
+        delivered_phenotype="stem_count", acknowledge_unvalidated=True)
+    assert "error" not in result, result
+
+    rows = list(csv.DictReader(out_csv.open(newline="")))
+    assert rows
+    assert all(r["plant_attribution"] == "detection" for r in rows)
+
+
+def test_deliver_orthomosaic_plant_counts_records_exactly_one_delivery_event(tmp_path, monkeypatch):
+    """One orthomosaic export writes exactly one delivery event, carrying this door's own name."""
+    import tcip_store as ts
+
+    from tcip_mcp.pipelines import resolution
+
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path / "proj"))
+    (tmp_path / "proj" / ".tcip" / "state").mkdir(parents=True, exist_ok=True)
+
+    raster_path = tmp_path / "mosaic.tif"
+    _write_geo_raster(raster_path)
+    bucket_dir, stem = _run_bucket(tmp_path, monkeypatch, raster_path)
+    _replace_boxes(bucket_dir / f"{stem}.json", [(8.0, 8.0, 12.0, 12.0)])
+    plant_csv = _plant_grid_csv(tmp_path, raster_path, _PLANT_PIXELS)
+
+    from tcip_mcp.tools.orthomosaic_tools import deliver_orthomosaic_plant_counts
+
+    out_csv = tmp_path / "counts.csv"
+    result = deliver_orthomosaic_plant_counts(
+        str(bucket_dir), str(raster_path), [str(plant_csv)], str(out_csv),
+        delivered_phenotype="stem_count", acknowledge_unvalidated=True)
+    assert "error" not in result, result
+
+    scope = resolution.delivery_events_scope(tmp_path / "proj")
+    events = [ts.read(k) for k in ts.keys(resolution.DELIVERY_EVENTS_STORE, str(scope))]
+    assert len(events) == 1
+    assert events[0]["door"] == "deliver_orthomosaic_plant_counts"
+
+
 def test_deliver_orthomosaic_plant_counts_excludes_a_point_from_the_count(tmp_path, monkeypatch):
     """A Point annotation in a reviewed bucket names no detection to georeference or count
     (bbox_of has no box for one by design): the door must read the bucket through the same

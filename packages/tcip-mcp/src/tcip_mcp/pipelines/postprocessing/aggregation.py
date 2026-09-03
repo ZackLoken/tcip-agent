@@ -26,7 +26,7 @@ import logging
 import statistics
 from collections import Counter, defaultdict
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 logger = logging.getLogger(__name__)
 
@@ -121,12 +121,13 @@ def aggregate_per_plant(
 
 
 def _agreed_statement_field(items: list[dict], key: str, plant_id: str) -> Any:
-    """One plant's own value for a statement field (``measurement_document``/``scale_document``),
-    refusing rather than collapsing when its images disagree: a statement that disagrees with
-    itself is not a statement, so this never collapses to ``"mixed"`` the way ``plant_id_source``
-    does above. Always returns a value (``None`` when every item omits the field), unlike
-    ``plant_id_source``'s conditional presence, since ``export_aggregated_csv`` reads both fields
-    off every result unconditionally.
+    """One plant's own value for a statement field (``measurement_document``, ``scale_document``,
+    or ``plant_attribution``), refusing rather than collapsing when its images disagree: a
+    statement that disagrees with itself is not a statement, so this never collapses to
+    ``"mixed"`` the way ``plant_id_source`` does above. Always returns a value (``None`` when
+    every item omits the field), unlike ``plant_id_source``'s conditional presence, since
+    ``export_aggregated_csv`` reads every one of these three fields off every result
+    unconditionally.
     """
     values = {r.get(key) for r in items}
     if len(values) > 1:
@@ -647,5 +648,5 @@ def _resolve_plant_attribution(results: list[dict]) -> str:
             "objects were attributed to plants at."
         )
     value = values.pop()
-    assert isinstance(value, str)
-    return value
+    # The refusal above already ruled out None and a multi-value set; what remains is one string.
+    return cast(str, value)
