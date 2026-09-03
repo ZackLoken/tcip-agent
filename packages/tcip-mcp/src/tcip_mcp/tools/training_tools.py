@@ -286,8 +286,6 @@ def candidate_config_with_manifest(config: dict, manifest_dir: str) -> dict:
 # Lazy imports of heavy dependencies inside tool functions to keep server startup fast.
 
 
-@mcp.tool()
-@audited
 def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -> dict:
     """Validate a training configuration before launching.
 

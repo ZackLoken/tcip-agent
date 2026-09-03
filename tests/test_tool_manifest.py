@@ -145,7 +145,7 @@ def test_consolidated_tools_present_and_removed_absent():
         "inspect_project", "read_annotations",
         "overlay_reference_grid", "capture_live_canvas",
         # Renamed tools: the new names must register.
-        "preflight_config", "rank_registered_models", "score_predictions",
+        "rank_registered_models", "score_predictions",
         "deliver_per_image_counts", "view_gui_state",
         # Method-neutral auto-labeling seam: no longer SAM-specific names.
         "propose_annotations", "stage_proposals", "segment_prompt",
@@ -195,6 +195,9 @@ def test_consolidated_tools_present_and_removed_absent():
         "list_registered_models",
         # Merged away: stage_proposals(assignments=...) serves the accepted-candidates regime.
         "stage_accepted_proposals",
+        # Demoted to a library call under the admission standard (packages/tcip-mcp/CLAUDE.md):
+        # launch_training and the web /validate route call the function directly.
+        "preflight_config",
     }
     assert not (removed & registered), f"removed tools still registered: {removed & registered}"
 

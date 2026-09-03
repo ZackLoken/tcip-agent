@@ -190,3 +190,34 @@ def test_merged_away_name_survives_nowhere_tracked(old, new):
     files = [f for f in _tracked_files() if _in_scope(f)]
     sites = _old_name_sites(old, files)
     assert not sites, f"{old!r} still appears in: {sites}"
+
+
+# A demotion keeps its identifier as a library call or script name, so it is never swept for
+# whole-tree absence the way a rename's or a merge's old name is; see _demoted_tool_table_sites.
+DEMOTED = [
+    "preflight_config",
+]
+
+_TOOL_TABLE_ROW_PATTERN = r"(?m)^\|\s*`{}`\s*\|"
+
+
+def _demoted_tool_table_sites(name: str, files: list[str]) -> list[str]:
+    """Every file still listing ``name`` as an invocable tool: a table row opening with the
+    backtick-quoted bare name as its first cell, the one shape every "Tools" table (a knowledge
+    document's, ARCHITECTURE.md's own) shares. Ordinary prose quoting the name (a docstring, a
+    sentence naming the library call or script it became) never takes that shape, so it is never
+    flagged the way a rename's or a merge's fully-retired old name would be."""
+    pattern = re.compile(_TOOL_TABLE_ROW_PATTERN.format(re.escape(name)))
+    hits = []
+    for rel in files:
+        text = _read(rel)
+        if text is not None and pattern.search(text):
+            hits.append(rel)
+    return hits
+
+
+@pytest.mark.parametrize("name", DEMOTED)
+def test_demoted_name_has_no_tool_table_row(name):
+    files = [f for f in _tracked_files() if _in_scope(f)]
+    sites = _demoted_tool_table_sites(name, files)
+    assert not sites, f"{name!r} still has a tool-table row in: {sites}"

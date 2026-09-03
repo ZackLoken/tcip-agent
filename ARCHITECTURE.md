@@ -856,11 +856,10 @@ anything.
 |---|---|---|---|
 | `calibrate_physical_scale` | `scale_tools.py:84` | yes | Derive and validate a physical per-pixel scale, and stamp it into ``pred_dir``'s |
 
-### training_tools.py (7 tools)
+### training_tools.py (6 tools)
 
 | tool | line | audited | docstring first line |
 |---|---|---|---|
-| `preflight_config` | `training_tools.py:291` | yes | Validate a training configuration before launching. |
 | `launch_training` | `training_tools.py:705` | yes | Launch a training run in an isolated subprocess from a bespoke ``model_source`` builder. |
 | `monitor_training` | `training_tools.py:939` | yes | Check the status of a training run. |
 | `cancel_training` | `training_tools.py:1323` | yes | Request graceful cancellation of a running training run. |
