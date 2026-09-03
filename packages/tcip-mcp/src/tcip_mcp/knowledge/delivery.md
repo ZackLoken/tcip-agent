@@ -26,6 +26,7 @@ it in `pipelines/postprocessing/aggregation.py` if this table looks stale):
 | n_images | int | Number of source images |
 | pipeline_version | string | Pipeline that produced this result |
 | plant_id_source | string | How the plant identity was resolved for this plant's images (`"mixed"` when they disagree); blank when the records carried no identity provenance |
+| plant_attribution | string | The granularity objects were attributed to plants at (`"image"` for `build_plant_mapping`'s walked-capture mapping, `"detection"` for an orthomosaic's per-detection mapping): distinct from `plant_id_source`, which names the matching method, not the granularity |
 | plant_id_distance_m_max | float | Worst per-image plant-assignment distance, in metres, across this plant's images; the identity-confidence signal `build_plant_mapping` produces |
 | producer_model_sha256 | string | Checkpoint hash of the model that produced the predictions; blank when the bucket names an experiment nothing outside it can corroborate |
 | producing_experiment_id | string | The run that produced the predictions, blank when there was none or nothing corroborates it; never the calibration a claim was earned under |
@@ -131,7 +132,11 @@ only when every dimension it was handed clears, and otherwise refuses (or, with
   `producing_experiment_id`, `validation_record`) is filled from the verified bindings, so a
   bucket whose claim no record answers for delivers those cells blank rather than repeating the
   names its stamp asserted; `produced_at` is always the write's own timestamp, never blank and
-  never read from the bindings.
+  never read from the bindings. Both writers also carry `dates_delivered` and
+  `images_unattributed`, scoped to this delivery's own delivered dates (never the mapping's own
+  `n_dates_missing_images` span, which is delivery-independent), and `plant_attribution`, the
+  granularity `build_plant_mapping` attributed captures to plants at; the curve CSV repeats the
+  same delivery-wide `images_unattributed` count beside its own per-row `n_images`.
 - `tabulate_counts`'s live regime, given a `predictions_dir`, publishes into it through the same
   bracket `export_predictions` publishes with (tile gate, count-claim gate, frozen-lineage-pointer
   refusal, write, lineage link), then hands `export_detection_csv` that bucket; the CSV's own

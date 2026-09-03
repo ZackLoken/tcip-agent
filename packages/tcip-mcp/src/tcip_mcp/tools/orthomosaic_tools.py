@@ -60,7 +60,9 @@ def deliver_orthomosaic_plant_counts(
     so every plant's location), never a fabricated value for a plant this delivery never actually
     covered.  A detection farther than the tolerance from every plant is excluded from any
     plant's count (counted in ``n_unmapped``, never force-assigned to the nearest plant
-    regardless of distance).
+    regardless of distance); this counts detections this delivery could not attribute, a
+    different mechanism from the walked-image mapping's own per-capture unattributed count
+    (``plant_mapping.MappingBuild.unattributed``).
 
     Identity door: the georeferencing that decides which plant each detection belongs to comes
     from the caller's ``raster_path``, so a raster that is not the one the bucket was produced on
@@ -192,6 +194,7 @@ def deliver_orthomosaic_plant_counts(
     detections = {"boxes": boxes}
 
     from tcip_mcp.pipelines.postprocessing.orthomosaic_mapping import (
+        DetectionAssignment,
         GeoreferencingError,
         OrthomosaicGeoreference,
         RotatedRasterError,
@@ -219,26 +222,21 @@ def deliver_orthomosaic_plant_counts(
     records = [
         {"plant_id": a.plot_name, "plant_id_source": a.source,
          "plant_id_distance_m": a.distance_m, _PER_PLANT_VALUE_KEY: 1,
-         "measurement_document": "operating_point"}
+         "measurement_document": "operating_point", "plant_attribution": a.plant_attribution}
         for a in mapped
     ]
     # Every plant the scan covers gets a row: an explicit 0 for a plant that matched no
     # detection, never silently absent from the delivery (see the docstring above).
     records += [{"plant_id": p.plot_name, _PER_PLANT_VALUE_KEY: 0,
-                "measurement_document": "operating_point"}
+                "measurement_document": "operating_point",
+                "plant_attribution": DetectionAssignment.plant_attribution}
                 for p in plants if p.plot_name not in mapped_plant_ids]
 
     agg = aggregate_per_plant(records, strategy="sum", plant_id_key="plant_id",
                               value_key=_PER_PLANT_VALUE_KEY)
 
-    from tcip_mcp.pipelines.resolution import (
-        VALIDATED_FALSE,
-        DeliveryRefused,
-        record_delivery_binding_event,
-        reconcile_operating_point_validity,
-    )
+    from tcip_mcp.pipelines.resolution import VALIDATED_FALSE, DeliveryRefused
 
-    recon = reconcile_operating_point_validity([predictions_dir], trait=trait)
     # The raw asserted identity; export_aggregated_csv's own delivered_tail corroborates it, the
     # one shared derivation, so nothing here re-derives that identity a second time.
     provenance = {"producer_model_sha256": sidecar.get("checkpoint_sha256"),
@@ -250,6 +248,7 @@ def deliver_orthomosaic_plant_counts(
             pipeline_version=pipeline_version, provenance=provenance,
             pred_dirs=[predictions_dir],
             acknowledge_unvalidated=acknowledge_unvalidated,
+            door="deliver_orthomosaic_plant_counts",
         )
     except DeliveryRefused as exc:
         # operating_point_validated is the operating_point dimension's own cleared reference;
@@ -271,14 +270,8 @@ def deliver_orthomosaic_plant_counts(
                 "n_detections": len(assignments), "n_mapped": len(mapped),
                 "n_unmapped": n_unmapped}
 
-    # This door always delivers under the aggregate count kind; trait was already resolved above,
-    # at the meaning-refusal check.
-    delivery_kind = PER_PLANT_COUNT_AGGREGATE
-    record_delivery_binding_event("deliver_orthomosaic_plant_counts", output_csv_path,
-                                  [predictions_dir], recon["bindings"],
-                                  measurement_documents=["operating_point"], scale_document=None,
-                                  trait=trait, delivery_kind=delivery_kind)
-
+    # export_aggregated_csv already recorded the delivery event under this door's own name; this
+    # door does not record a second event for the one CSV it just wrote.
     return {
         "csv_path": csv_path,
         "n_plants": len(agg),

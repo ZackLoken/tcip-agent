@@ -215,9 +215,9 @@ def test_export_aggregated_csv_signature_carries_operating_point_validated_not_m
 def test_export_aggregated_csv(tmp_path):
     results = [
         {"plant_id": "PLANT_001", "value": 7, "observations": 3, "value_key": "count",
-         "measurement_document": "operating_point"},
+         "plant_attribution": "image", "measurement_document": "operating_point"},
         {"plant_id": "PLANT_002", "value": 4, "observations": 2, "value_key": "count",
-         "measurement_document": "operating_point"},
+         "plant_attribution": "image", "measurement_document": "operating_point"},
     ]
     out_path = tmp_path / "out" / "aggregated.csv"
     export_aggregated_csv(
@@ -242,7 +242,7 @@ def test_export_aggregated_csv_header_carries_operating_point_validated_not_meas
     """The delivered per-plant CSV's validity column is operating_point_validated; the retired
     spelling measurement_validated must not reappear in its header."""
     results = [{"plant_id": "PLANT_001", "value": 7, "observations": 3, "value_key": "count",
-               "measurement_document": "operating_point"}]
+               "plant_attribution": "image", "measurement_document": "operating_point"}]
     out_path = tmp_path / "aggregated.csv"
     export_aggregated_csv(results, str(out_path), delivered_phenotype="stem_count",
                           acknowledge_unvalidated=True)
@@ -259,7 +259,7 @@ def test_export_aggregated_csv_units_derived_from_value_key(tmp_path):
     bare linear unit: an area labeled "mm" understates its own dimensionality."""
     results = [
         {"plant_id": "PLANT_001", "value": 12.5, "observations": 1, "value_key": "area_mm2",
-         "measurement_document": "operating_point"},
+         "plant_attribution": "image", "measurement_document": "operating_point"},
     ]
     out_path = tmp_path / "out.csv"
     export_aggregated_csv(
@@ -273,7 +273,7 @@ def test_export_aggregated_csv_units_derived_from_value_key(tmp_path):
 
 def test_export_aggregated_csv_count_trait_has_blank_units(tmp_path):
     results = [{"plant_id": "PLANT_001", "value": 4, "observations": 3, "value_key": "count",
-                "measurement_document": "operating_point"}]
+                "plant_attribution": "image", "measurement_document": "operating_point"}]
     out_path = tmp_path / "out.csv"
     export_aggregated_csv(results, str(out_path), delivered_phenotype="stem_count",
                           acknowledge_unvalidated=True)
@@ -296,7 +296,7 @@ def test_export_aggregated_csv_refuses_unit_mismatch_against_crops_yml(tmp_path)
         pytest.skip("no non-mm trait found in crops.yml to construct a mismatch against")
 
     results = [{"plant_id": "P1", "value": 1.0, "observations": 1, "value_key": "area_mm2",
-                "measurement_document": "operating_point"}]
+                "plant_attribution": "image", "measurement_document": "operating_point"}]
     out_path = tmp_path / "out.csv"
     with pytest.raises(ValueError, match="declared units|refusing"):
         export_aggregated_csv(results, str(out_path), delivered_phenotype=mismatched_trait,
@@ -315,7 +315,7 @@ def test_export_aggregated_csv_never_labels_a_pixel_value_with_crops_yml_units(t
     # implies no physical unit; a scalar head's declared unit may legitimately not appear in value.
     results = [{"plant_id": "P1", "value": 124.0, "observations": 1,
                 "value_key": "principal_axis_extent_px",
-                "measurement_document": "regression_operating_point"}]
+                "plant_attribution": "image", "measurement_document": "regression_operating_point"}]
     out_path = tmp_path / "out.csv"
     export_aggregated_csv(results, str(out_path), delivered_phenotype="bark_thickness",
                           acknowledge_unvalidated=True)
@@ -435,7 +435,7 @@ def test_export_aggregated_csv_writes_value_key_column(tmp_path):
     """value_key is a real CSV column, not just an internal field: it's the one thing that lets a
     reader independently detect a px/mm mismatch themselves."""
     results = [{"plant_id": "P1", "value": 1.0, "observations": 1, "value_key": "area_mm2",
-                "measurement_document": "operating_point"}]
+                "plant_attribution": "image", "measurement_document": "operating_point"}]
     out_path = tmp_path / "out.csv"
     export_aggregated_csv(results, str(out_path), delivered_phenotype="plant_surface_area",
                           acknowledge_unvalidated=True)
@@ -456,7 +456,7 @@ def test_delivery_skill_documents_the_real_csv_schema(tmp_path):
     out_path = tmp_path / "schema.csv"
     export_aggregated_csv(
         [{"plant_id": "P1", "value": 1.0, "observations": 1, "value_key": "count",
-          "measurement_document": "operating_point"}],
+          "plant_attribution": "image", "measurement_document": "operating_point"}],
         str(out_path), delivered_phenotype="stem_count", acknowledge_unvalidated=True)
     with open(out_path, newline="") as f:
         written = next(csv.reader(f))

@@ -17,6 +17,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import ClassVar
 
 # GeoTIFF tag IDs this module reads (see the GeoTIFF spec; tifffile exposes each as a plain
 # TiffTag keyed by these codes, no prior art for any of them elsewhere in this codebase).
@@ -248,6 +249,12 @@ class DetectionAssignment:
     accession_name: str | None
     source: str  # "nearest_neighbour" | "unmapped"
     distance_m: float | None
+
+    plant_attribution: ClassVar[str] = "detection"
+    """The granularity at which this mapper attributes objects to plants: one detection per
+    object, a whole-mosaic frame carrying no capture sequence to attribute at image granularity
+    the way ``plant_mapping.MappingBuild`` does. A class attribute, like that one, so it names one
+    mapper-wide fact rather than a per-assignment value nothing here computes differently."""
 
 
 def assign_detections_to_plants(

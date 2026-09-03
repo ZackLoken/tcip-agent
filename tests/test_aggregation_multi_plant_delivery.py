@@ -98,17 +98,17 @@ def test_delivery_csv_carries_each_plants_own_value_and_image_count(tmp_path):
     n_images and identity columns belong to the plant named in that row. A cohort-wide number in
     n_images tells the breeder a single-image plant was measured from six."""
     results = [
-        {"image": "a1", "plant_id": "PLANT_A", "count": 2, "measurement_document": "operating_point",
+        {"image": "a1", "plant_id": "PLANT_A", "count": 2, "plant_attribution": "image", "measurement_document": "operating_point",
          "plant_id_source": "gnss_sequence", "plant_id_distance_m": 0.4},
-        {"image": "a2", "plant_id": "PLANT_A", "count": 4, "measurement_document": "operating_point",
+        {"image": "a2", "plant_id": "PLANT_A", "count": 4, "plant_attribution": "image", "measurement_document": "operating_point",
          "plant_id_source": "gnss_sequence", "plant_id_distance_m": 1.9},
-        {"image": "a3", "plant_id": "PLANT_A", "count": 9, "measurement_document": "operating_point",
+        {"image": "a3", "plant_id": "PLANT_A", "count": 9, "plant_attribution": "image", "measurement_document": "operating_point",
          "plant_id_source": "gnss_sequence"},
-        {"image": "b1", "plant_id": "PLANT_B", "count": 10, "measurement_document": "operating_point",
+        {"image": "b1", "plant_id": "PLANT_B", "count": 10, "plant_attribution": "image", "measurement_document": "operating_point",
          "plant_id_source": "qr_code"},
-        {"image": "b2", "plant_id": "PLANT_B", "count": 20, "measurement_document": "operating_point",
+        {"image": "b2", "plant_id": "PLANT_B", "count": 20, "plant_attribution": "image", "measurement_document": "operating_point",
          "plant_id_source": "qr_code"},
-        {"image": "c1", "plant_id": "PLANT_C", "count": 7, "measurement_document": "operating_point"},
+        {"image": "c1", "plant_id": "PLANT_C", "count": 7, "plant_attribution": "image", "measurement_document": "operating_point"},
     ]
     summaries = aggregate_per_plant(results, strategy="count", value_key="count")
 
@@ -221,20 +221,20 @@ def test_an_ordinal_delivery_never_clears_the_gate_on_the_count_dimension(tmp_pa
     with pytest.raises(DeliveryRefused, match="unvalidated dimension"):
         export_aggregated_csv(
             [{"plant_id": "PLANT_A", "value": 2, "observations": 3, "value_key": "astringency",
-             "measurement_document": "ordinal_operating_point", "scale_document": None}],
+             "plant_attribution": "image", "measurement_document": "ordinal_operating_point", "scale_document": None}],
             str(tmp_path / "wrong_dimension.csv"), delivered_phenotype="astringency",
             operating_point_validated=VALIDATED_HELD_OUT, pred_dirs=[count_only])
 
     matched_ordinal = tmp_path / "matched_ordinal.csv"
     export_aggregated_csv(
         [{"plant_id": "PLANT_A", "value": 2, "observations": 3, "value_key": "astringency",
-         "measurement_document": "ordinal_operating_point", "scale_document": None}],
+         "plant_attribution": "image", "measurement_document": "ordinal_operating_point", "scale_document": None}],
         str(matched_ordinal), delivered_phenotype="astringency",
         operating_point_validated=VALIDATED_HELD_OUT, pred_dirs=[ordinal_only])
     matched_count = tmp_path / "matched_count.csv"
     export_aggregated_csv(
         [{"plant_id": "PLANT_A", "value": 4, "observations": 3, "value_key": "count",
-         "measurement_document": "operating_point", "scale_document": None}],
+         "plant_attribution": "image", "measurement_document": "operating_point", "scale_document": None}],
         str(matched_count), delivered_phenotype="stem_count",
         operating_point_validated=VALIDATED_HELD_OUT, pred_dirs=[count_only])
 
@@ -251,7 +251,7 @@ def test_a_count_stamp_earned_for_one_trait_floors_a_delivery_of_another(tmp_pat
     with pytest.raises(DeliveryRefused) as exc:
         export_aggregated_csv(
             [{"plant_id": "PLANT_A", "value": 4, "observations": 3, "value_key": "astringency",
-             "measurement_document": "operating_point", "scale_document": None}],
+             "plant_attribution": "image", "measurement_document": "operating_point", "scale_document": None}],
             str(tmp_path / "mismatched_trait.csv"), delivered_phenotype="astringency",
             operating_point_validated=VALIDATED_HELD_OUT, pred_dirs=[bucket])
     message = str(exc.value)
@@ -277,7 +277,7 @@ def test_a_caller_downgrade_floors_a_validated_ordinal_sidecar(tmp_path):
     the delivery, not be overruled by the on-disk stamp."""
     bucket = _ordinal_bucket(tmp_path, "ordinal_preds")
     rows = [{"plant_id": "PLANT_A", "value": 2, "observations": 3, "value_key": "astringency",
-             "measurement_document": "ordinal_operating_point", "scale_document": None}]
+             "plant_attribution": "image", "measurement_document": "ordinal_operating_point", "scale_document": None}]
 
     with pytest.raises(DeliveryRefused, match="unvalidated dimension"):
         export_aggregated_csv(rows, str(tmp_path / "downgraded.csv"),
