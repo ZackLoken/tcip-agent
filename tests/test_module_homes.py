@@ -391,12 +391,12 @@ def test_force_redraw_cal_holdout_split_has_one_home():
 
 
 def test_ordinal_regression_calibration_functions_have_one_home():
-    """``calibrate_ordinal_regression_operating_point`` moved out of
+    """``calibrate_scalar_operating_point`` moved out of
     ``tools/phenology_tools.py`` into ``tools/calibration_tools.py``, name unchanged;
     ``_scalar_predictions`` (its sole helper, no other consumer) travels with it. Decorators
     are not this test's concern (see ``_assert_one_home``)."""
     _assert_one_home(
-        {"calibrate_ordinal_regression_operating_point", "_scalar_predictions"},
+        {"calibrate_scalar_operating_point", "_scalar_predictions"},
         _module_path("tools/phenology_tools.py"),
         _module_path("tools/calibration_tools.py"),
     )

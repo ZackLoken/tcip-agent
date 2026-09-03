@@ -475,7 +475,7 @@ def _scalar_bucket(tmp_path, name, task, *, validated, ref=VALIDATED_HELD_OUT, c
 
 
 def test_export_aggregated_csv_ordinal_trait_ships_when_sidecar_validated(tmp_path):
-    # An ordinal trait with a genuinely validated sidecar (calibrate_ordinal_regression_operating_point's
+    # An ordinal trait with a genuinely validated sidecar (calibrate_scalar_operating_point's
     # producer) ships as validated, not floored to VALIDATED_FALSE by the unconditional no-producer path.
     from tcip_mcp.pipelines.postprocessing.aggregation import export_aggregated_csv
 

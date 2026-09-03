@@ -256,7 +256,7 @@ _ORDINAL_REGRESSION_TASKS = {
 
 @mcp.tool()
 @audited
-def calibrate_ordinal_regression_operating_point(
+def calibrate_scalar_operating_point(
     trait_name: str,
     task: str,
     checkpoint_path: str,

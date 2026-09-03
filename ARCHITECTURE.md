@@ -760,7 +760,7 @@ Docstring is the function's docstring first line, verbatim.
 | tool | line | audited | docstring first line |
 |---|---|---|---|
 | `force_redraw_cal_holdout_split` | `calibration_tools.py:24` | yes | Deliberately redraw a locked calibration/holdout split. |
-| `calibrate_ordinal_regression_operating_point` | `calibration_tools.py:259` | yes | Calibrate and validate a trait's ordinal-rank or continuous-value prediction against a |
+| `calibrate_scalar_operating_point` | `calibration_tools.py:259` | yes | Calibrate and validate a trait's ordinal-rank or continuous-value prediction against a |
 
 ### ingest_tools.py (1 tool)
 
@@ -2057,7 +2057,7 @@ directory otherwise; the lock's own field names do not change with the source.
 
 Readers: six callers draw a lock through this one function -
 `pipelines.calibration.calibrate_operating_point`, `calibration_tools.force_redraw_cal_holdout_split`,
-`calibration_tools.calibrate_ordinal_regression_operating_point`,
+`calibration_tools.calibrate_scalar_operating_point`,
 `measurement.scale_calibration.resolve_physical_scale`,
 `scripts/calibrate_operating_point.py`, and `feedback.review_calibration.
 resolve_operating_point_from_review` - each answering its own identity's lock, so a whole-directory
