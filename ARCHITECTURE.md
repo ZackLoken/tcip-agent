@@ -158,7 +158,7 @@ source file under a covered root that no row names.
 | packages/tcip-mcp/src/tcip_mcp/tools/meta_tools.py | Meta-loop tools for self-improvement. | 6 | 4 |
 | packages/tcip-mcp/src/tcip_mcp/tools/model_tools.py | Model management tools, registry, listing, comparison. | 8 | 3 |
 | packages/tcip-mcp/src/tcip_mcp/tools/operationalization_tools.py | The agent's statement tool for trait operationalizations; it can state, never confirm. | 4 | 1 |
-| packages/tcip-mcp/src/tcip_mcp/tools/trait_spec_authoring_tools.py | The agent's two doors for a trait spec: `author_trait_spec` creates (or restates, when a spec exists with no statement), `update_trait_spec_fields` edits fields on one already on record; neither confirms. | 4 | 1 |
+| packages/tcip-mcp/src/tcip_mcp/tools/trait_spec_authoring_tools.py | The agent's two doors for a trait spec: `author_trait_spec` creates (or restates, when a spec exists with no statement), `revise_trait_spec` edits fields on one already on record; neither confirms. | 4 | 1 |
 | packages/tcip-mcp/src/tcip_mcp/tools/orthomosaic_tools.py | Orthomosaic MCP tools: per-plant delivery from a persisted whole-raster prediction bucket plus a plant-locations CSV. | 12 | 1 |
 | packages/tcip-mcp/src/tcip_mcp/tools/phenology_tools.py | Phenology MCP tools, the agent-facing surface for the per-plant phenology pipeline: plant mapping, the positive-state classifier's own calibration gate, and compute_phenology. | 19 | 5 |
 | packages/tcip-mcp/src/tcip_mcp/tools/project_tools.py | Project management tools. | 19 | 13 |
@@ -802,7 +802,7 @@ Docstring is the function's docstring first line, verbatim.
 | tool | line | audited | docstring first line |
 |---|---|---|---|
 | `author_trait_spec` | `trait_spec_authoring_tools.py:23` | yes | Register a trait that does not yet exist, and record why, in the breeder's terms. |
-| `update_trait_spec_fields` | `trait_spec_authoring_tools.py:128` | yes | Update one or more fields on an already-registered trait's spec. |
+| `revise_trait_spec` | `trait_spec_authoring_tools.py:128` | yes | Update one or more fields on an already-registered trait's spec. |
 
 ### orthomosaic_tools.py (1 tool)
 

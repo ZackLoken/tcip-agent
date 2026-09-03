@@ -120,7 +120,7 @@ def test_an_empty_constituting_field_refuses_and_names_the_field(project: Path):
 
     assert result.state == 4
     assert "milestone_on" in result.message
-    assert "update_trait_spec_fields(" in result.message
+    assert "revise_trait_spec(" in result.message
 
 
 def test_a_value_key_outside_the_confirmed_set_refuses(project: Path):

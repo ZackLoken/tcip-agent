@@ -456,7 +456,7 @@ def resolve_match_criterion(trait_name: str | None, per_image: list[dict], *,
             logger.warning(
                 "trait %r: recorded localization kind %r diverges from what this call's own GT "
                 "would derive (%r), not switched (observation, not permission); re-derive "
-                "explicitly via update_trait_spec_fields if this data is now representative.",
+                "explicitly via revise_trait_spec if this data is now representative.",
                 trait_name, kind, live_derived_kind)
     elif live_derived_kind is not None:
         kind = live_derived_kind

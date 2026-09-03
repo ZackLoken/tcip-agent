@@ -256,13 +256,13 @@ def test_write_trait_spec_fields_refuses_a_spec_still_carrying_the_deleted_prove
     assert "provenance" in errors[0]["reason"]
 
 
-def test_update_trait_spec_fields_tool_end_to_end(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    from tcip_mcp.tools.trait_spec_authoring_tools import update_trait_spec_fields
+def test_revise_trait_spec_tool_end_to_end(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    from tcip_mcp.tools.trait_spec_authoring_tools import revise_trait_spec
 
     specs_dir = tmp_path / "trait_specs"
     monkeypatch.setattr(traits, "_TRAIT_SPECS_RELPATH", specs_dir)
     _write_spec(specs_dir, "leaf", {"delivers": ["leaf_length"], "count_bias_tolerance_frac": 1.0})
-    result = update_trait_spec_fields(str(tmp_path), "leaf", {"count_bias_tolerance_frac": 4.0})
+    result = revise_trait_spec(str(tmp_path), "leaf", {"count_bias_tolerance_frac": 4.0})
     assert result["count_bias_tolerance_frac"] == 4.0
     assert get_trait("leaf").count_bias_tolerance_frac == 4.0
     assert result["superseded"] == []

@@ -156,7 +156,7 @@ def calibrate_physical_scale(
         return {"error": (
             f"trait {trait!r} has no authored scale_tolerance_frac; a physical-scale gate has no "
             "platform default fallback for how much reference disagreement is acceptable. "
-            "Author it via update_trait_spec_fields before calibrating this trait's scale."
+            "Author it via revise_trait_spec before calibrating this trait's scale."
         )}
     length_units = crops_length_units()
     if unit not in length_units:

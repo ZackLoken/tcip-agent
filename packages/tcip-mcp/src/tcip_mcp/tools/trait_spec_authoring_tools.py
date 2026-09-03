@@ -5,7 +5,7 @@ surface, deliberately no more.
 account of why, in the breeder's terms; the breeder confirms it from the web GUI, through a route
 no MCP tool can reach. A single tool doing both authoring and confirmation would put the
 confirmation inside the agent's own tool surface and make honest attribution depend on the agent
-choosing not to fill a field. ``update_trait_spec_fields`` is the other door: it edits fields on a
+choosing not to fill a field. ``revise_trait_spec`` is the other door: it edits fields on a
 spec already on record, never creates one. Authoring creates, field-editing merges, and the one
 documented restatement path (a spec on record whose statement never landed) is where the two
 doors overlap: both then write onto an already-registered spec.
@@ -48,7 +48,7 @@ def author_trait_spec(
     Cross-checked against the crops.yml controlled vocabulary: `delivers` must name at least one
     real phenotype, or this refuses rather than registering a fabricated trait. Refuses when a
     spec and its authoring statement are both already on record for this trait; change an
-    already-registered spec's fields with `update_trait_spec_fields` instead.
+    already-registered spec's fields with `revise_trait_spec` instead.
 
     Ask the breeder what the trait's measurement is, in their own terms, and record their answer
     here. Propose the semantics the breeder actually stated, never a plausible-sounding guess: a
@@ -125,7 +125,7 @@ def author_trait_spec(
 
 @mcp.tool()
 @audited
-def update_trait_spec_fields(
+def revise_trait_spec(
     project_root: str, trait_name: str, fields: dict
 ) -> dict:
     """Update one or more fields on an already-registered trait's spec.

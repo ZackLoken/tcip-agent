@@ -496,7 +496,7 @@ def write_trait_spec_fields(
 
     This is the only write path for updating a trait spec anywhere in the platform: creating a
     new trait is a separate, still-manual authoring step, out of scope here, but once a spec
-    exists, this function is what the ``update_trait_spec_fields`` MCP tool calls, and what the
+    exists, this function is what the ``revise_trait_spec`` MCP tool calls, and what the
     derived localization kind and the recorded count-objective decision both use to persist
     themselves; neither gets its own write implementation.
 
