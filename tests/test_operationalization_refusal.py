@@ -16,15 +16,21 @@ import pytest
 from fastapi.testclient import TestClient
 
 from tcip_mcp import operationalization as op
+from tcip_mcp.pipelines.postprocessing.plant_mapping import MappingBuild
 from tcip_mcp.traits import TraitUnknownError
 from tcip_web.app import app
 from tests import _operationalization_fixtures as fx
 from tests._binding_fixtures import producer_checkpoint_sha256
 from tests.test_tcip_web_results_routes import _expected_validation_record, _phenology_fixture
 
-# A writer-level unit test's own placeholder disclosure: the three keys the writer's cells
-# and the delivery event actually read, with neither test here exercising a real mapping.
-_NO_MAPPING = {"record_sha256": "0" * 16, "captures_unverified": [], "plant_csvs_unverified": []}
+# A writer-level unit test's own placeholder disclosure, built through delivery_disclosure itself
+# so it carries every key the writer's cells read even as that shape grows.
+_NO_MAPPING = MappingBuild(
+    name="none", project_root="", dataset_root="", dataset_id="", built_by="test", built_at="",
+    dates_requested=None, dates=[], nn_tolerance_m={"value": 0.0, "source": "fallback"},
+    plant_csvs=[], capture_identity={}, capture_digests={}, unreadable={}, assignments={},
+    record_sha256="0" * 16,
+).delivery_disclosure({"captures_unverified": [], "plant_csvs_unverified": []}, [])
 
 
 @pytest.fixture
@@ -370,7 +376,10 @@ def delivered_golden(body: dict, produced_at: bytes) -> bytes:
     stamps name rather than against whatever the delivery put there. ``plant_mapping_sha256`` and
     ``captures_unverified`` are likewise read from the mapping itself, for the same reason: the
     fixture's own dataset carries no ``images/`` tree, so every one of the mapping's dates is
-    unverified, in the mapping's own date order.
+    unverified, in the mapping's own date order. ``dates_delivered`` is the same date set (this
+    fixture's delivery always covers every one of the mapping's own dates); ``images_unattributed``
+    is 0, since every assignment the fixture writes carries a ``plot_name``, and
+    ``plant_attribution`` is ``MappingBuild``'s own constant, ``"image"``.
     """
     from tcip_mcp.pipelines.postprocessing import plant_mapping as pm
 
@@ -378,13 +387,14 @@ def delivered_golden(body: dict, produced_at: bytes) -> bytes:
     assert build is not None
     mapping_sha = build.record_sha256.encode()
     captures_unverified = ";".join(build.dates).encode()
+    dates_delivered = captures_unverified
 
     record = _expected_validation_record(body).encode()
     sha = producer_checkpoint_sha256("exp-1").encode()
     row = (b",2,2,0,0,2026-02-24,2026-02-12,2026-02-18,2026-02-24,interpolated,interpolated,"
            b"interpolated,interpolated,true,0.4,held_out_annotations,held_out_annotations,,"
            + sha + b",exp-1," + produced_at + b"," + record + b"," + mapping_sha + b","
-           + captures_unverified + b",\r\n")
+           + captures_unverified + b",," + dates_delivered + b",0,image\r\n")
     return (
         b"plant_id,accession,n_dates,n_observed_dates,n_dates_unclassified,n_dates_missing_images,"
         b"catkin_elongation_date,catkin_05per_date,catkin_50per_date,catkin_95per_date,"
@@ -393,7 +403,8 @@ def delivered_golden(body: dict, produced_at: bytes) -> bytes:
         b"operating_point_validated,positive_state_classifier_validated,unvalidated_dimensions,"
         b"producer_model_sha256,"
         b"producing_experiment_id,produced_at,validation_record,plant_mapping_sha256,"
-        b"captures_unverified,plant_csvs_unverified\r\n"
+        b"captures_unverified,plant_csvs_unverified,dates_delivered,images_unattributed,"
+        b"plant_attribution\r\n"
         + b"PLANT_A,AccA" + row
         + b"PLANT_B,AccB" + row
     )
@@ -818,7 +829,7 @@ def _aggregate_rows(
     value_key: str | None = "count", *, measurement_document: str = "operating_point"
 ) -> list[dict]:
     row = {"plant_id": "p1", "value": 5, "observations": 2,
-          "measurement_document": measurement_document}
+          "measurement_document": measurement_document, "plant_attribution": "image"}
     return [row if value_key is None else {**row, "value_key": value_key}]
 
 

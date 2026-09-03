@@ -27,13 +27,19 @@ if str(_MCP_SRC) not in sys.path:
 from tcip_annotation import json_io  # noqa: E402
 from tcip_annotation.state import Annotation, BBox  # noqa: E402
 from tcip_mcp.pipelines.postprocessing import phenology  # noqa: E402
+from tcip_mcp.pipelines.postprocessing.plant_mapping import MappingBuild  # noqa: E402
 from tcip_mcp.traits import CENTER_MATCH, COUNT_UNBIASED, TraitSpec  # noqa: E402
 from tests._operationalization_fixtures import schema_basis  # noqa: E402
 from tests._trait_fixtures import CATKIN  # noqa: E402
 
-# A writer-level unit test's own placeholder disclosure: the three keys the writer's cells
-# and the delivery event actually read, with none of these tests exercising a real mapping.
-_NO_MAPPING = {"record_sha256": "0" * 16, "captures_unverified": [], "plant_csvs_unverified": []}
+# A writer-level unit test's own placeholder disclosure, built through delivery_disclosure itself
+# so it carries every key the writer's cells read even as that shape grows.
+_NO_MAPPING = MappingBuild(
+    name="none", project_root="", dataset_root="", dataset_id="", built_by="test", built_at="",
+    dates_requested=None, dates=[], nn_tolerance_m={"value": 0.0, "source": "fallback"},
+    plant_csvs=[], capture_identity={}, capture_digests={}, unreadable={}, assignments={},
+    record_sha256="0" * 16,
+).delivery_disclosure({"captures_unverified": [], "plant_csvs_unverified": []}, [])
 
 
 def _sidecar(dir_path: Path, id_map: dict | None) -> None:
@@ -348,11 +354,10 @@ def test_per_plant_series_accepts_dict_assignments(tmp_path):
     _sidecar(d1, {"dormant": 0, "elongated": 1})
     mapping = {"2024-05-01": [{"stem": "P1_a", "plot_name": "P1", "accession_name": "acc-9"}]}
     preds = {"2024-05-01": str(d1)}
-    per_plant, n_unmapped = phenology.per_plant_series(mapping, preds, positive_class_name="elongated")
+    per_plant = phenology.per_plant_series(mapping, preds, positive_class_name="elongated")
     assert "P1" in per_plant
     assert per_plant["P1"]["accession"] == "acc-9"
     assert per_plant["P1"]["series"][0][:3] == ("2024-05-01", 1, 1)  # total=1, positive=1
-    assert n_unmapped == 0
 
 
 # ── resolve_positive_class_id ─────────────────────────────────────────────
@@ -670,8 +675,8 @@ def test_per_plant_series_counts_the_images_the_mapping_names(tmp_path):
         _preds(d, f"IMG{i}", ["elongated", "dormant"])
     mapping = {"2026-02-11": [_Assignment(f"IMG{i}", "P1", "a") for i in range(3)]
                + [_Assignment("GONE", "P1", "a")]}  # named, no prediction file
-    per_plant, _n_unmapped = phenology.per_plant_series(mapping, {"2026-02-11": str(d)},
-                                                         positive_class_name="elongated")
+    per_plant = phenology.per_plant_series(mapping, {"2026-02-11": str(d)},
+                                            positive_class_name="elongated")
     series = per_plant["P1"]["series"]
     (_date, total, positive, unclassified, missing, n_images) = series[0]
     assert (total, positive, unclassified, missing) == (6, 3, 0, 1)
@@ -680,10 +685,10 @@ def test_per_plant_series_counts_the_images_the_mapping_names(tmp_path):
     assert n_images == 4
 
 
-def test_per_plant_series_discloses_unmapped_assignments(tmp_path):
+def test_per_plant_series_excludes_unattributed_assignments_from_coverage(tmp_path):
     """An assignment with no ``plot_name`` (an image the plant-mapping step could not assign) is
-    silently dropped from every plant's coverage; the count of how often that happens must still be
-    disclosed, the same way ``build_plant_mapping`` discloses its own ``n_unmapped``."""
+    silently dropped from every plant's coverage; how often that happens is disclosed once, at
+    delivery scope, by ``plant_mapping.MappingBuild.unattributed``, never recomputed here."""
     d = tmp_path / "2026-02-11"
     _sidecar(d, {"dormant": 0, "elongated": 1})
     _preds(d, "P1_a", ["elongated"])
@@ -691,13 +696,15 @@ def test_per_plant_series_discloses_unmapped_assignments(tmp_path):
         _Assignment("P1_a", "P1", "acc-9"),
         _Assignment("STRAY", None, None),  # no plot_name: never assigned to any plant
     ]}
-    per_plant, n_unmapped = phenology.per_plant_series(
+    per_plant = phenology.per_plant_series(
         mapping, {"2026-02-11": str(d)}, positive_class_name="elongated")
-    assert "P1" in per_plant
-    assert n_unmapped == 1
+    assert list(per_plant) == ["P1"]
 
 
-def test_per_plant_phenology_surfaces_n_images_unmapped(tmp_path):
+def test_per_plant_phenology_excludes_unattributed_assignments_from_rows(tmp_path):
+    """``per_plant_phenology`` never emits a row for an unattributed assignment, and carries no
+    unattributed count of its own: that disclosure is ``plant_mapping.MappingBuild.unattributed``'s,
+    at delivery scope, not a per-call return value."""
     d = tmp_path / "2026-02-11"
     _sidecar(d, {"dormant": 0, "elongated": 1})
     _preds(d, "P1_a", ["elongated"])
@@ -708,7 +715,8 @@ def test_per_plant_phenology_surfaces_n_images_unmapped(tmp_path):
     ]}
     out = phenology.per_plant_phenology(
         mapping, {"2026-02-11": str(d)}, positive_class_name="elongated", spec=CATKIN)
-    assert out["n_images_unmapped"] == 2
+    assert [r["plant_id"] for r in out["rows"]] == ["P1"]
+    assert "n_images_unmapped" not in out
 
 
 def test_write_phenology_csv_carries_n_observed_dates(tmp_path):

@@ -63,16 +63,19 @@ def build_plant_mapping(
     a registered dataset's own ``images/`` directory, and naming ``init_project``/
     ``set_active_project`` when the resolved platform state root carries no project record. A name
     outside ``tcip_store.layout_claims.NAME_SEGMENT`` (lowercase letters, digits, single hyphens)
-    refuses at the door. A receipt that cannot be written fails the call naming the receipt: the
-    record it would have named is left on disk but :func:`~tcip_mcp.pipelines.postprocessing.
-    plant_mapping.load_mapping` refuses to read it until a rebuild replaces it.
+    refuses at the door. No capture at all under the requested dates, or captures that carry no
+    position this door reads (no GPS EXIF, or a raster/band-group capture), also refuses, naming
+    the plant-tag mechanism the platform does not yet have. A receipt that cannot be written fails
+    the call naming the receipt: the record it would have named is left on disk but
+    :func:`~tcip_mcp.pipelines.postprocessing.plant_mapping.load_mapping` refuses to read it until
+    a rebuild replaces it.
 
-    Returns a compact per-date summary (images, mapped count, avg GPS distance) plus totals,
-    the mapping's ``name``, the resolved ``project_root`` and ``dataset_root``,
-    ``nn_tolerance_m`` (the persisted record's own ``{"value": ..., "source": ...}``, never
-    recomputed here), ``max_match_distance_m`` (the tolerance's own loosest accepted distance,
-    derived from it through ``plant_mapping.match_gates``), and ``unreadable`` (per date, the
-    captures PIL could not open), not the full per-image mapping (that lives in the persisted
+    Returns a compact per-date summary (images, mapped count, unattributed count, avg GPS
+    distance) plus totals, the mapping's ``name``, the resolved ``project_root`` and
+    ``dataset_root``, ``nn_tolerance_m`` (the persisted record's own ``{"value": ..., "source":
+    ...}``, never recomputed here), ``max_match_distance_m`` (the tolerance's own loosest accepted
+    distance, derived from it through ``plant_mapping.match_gates``), and ``unreadable`` (per date,
+    the captures PIL could not open), not the full per-image mapping (that lives in the persisted
     record).
     """
     from tcip_store.layout_claims import NAME_SEGMENT
@@ -120,41 +123,25 @@ def build_plant_mapping(
             project_root=platform_root, built_by="build_plant_mapping",
             dates=dates, nn_tolerance_m=nn_tolerance_m,
         )
-    except AmbiguousImageStem as exc:
+    except (AmbiguousImageStem, plant_mapping.UngeoreferencedCaptureRefusal) as exc:
         return {"error": str(exc)}
-    if not build.dates:
-        return {"error": f"no date folders with images under {images_root}"}
 
     try:
         plant_mapping.persist_mapping(build, platform_root, name)
     except AuditEntryNotWritten as exc:
         return {"error": str(exc)}
 
-    per_date: dict[str, dict] = {}
-    total_images = 0
-    total_mapped = 0
-    for date_str, assignments in build.assignments.items():
-        n_images = len(assignments)
-        n_mapped = sum(1 for a in assignments if a.plot_name)
-        dists = [a.distance_m for a in assignments if a.distance_m is not None]
-        per_date[date_str] = {
-            "n_images": n_images,
-            "n_mapped": n_mapped,
-            "avg_distance_m": (round(sum(dists) / len(dists), 2) if dists else None),
-        }
-        total_images += n_images
-        total_mapped += n_mapped
-
+    summary = build.summary()
     return {
         "name": name,
         "project_root": str(platform_root),
         "dataset_root": str(candidate),
         "unreadable": build.unreadable,
-        "n_dates": len(build.dates),
-        "n_images": total_images,
-        "n_mapped": total_mapped,
-        "n_unmapped": total_images - total_mapped,
-        "per_date": per_date,
+        "n_dates": summary["totals"]["n_dates"],
+        "n_images": summary["totals"]["n_images"],
+        "n_mapped": summary["totals"]["n_mapped"],
+        "n_unattributed": summary["totals"]["n_unattributed"],
+        "per_date": summary["per_date"],
         "nn_tolerance_m": build.nn_tolerance_m,
         "max_match_distance_m": plant_mapping.match_gates(
             build.nn_tolerance_m["value"])["max_match_distance_m"],
@@ -656,6 +643,8 @@ def compute_phenology(
         return {"error": str(e), "n_plants": 0}
 
     mapping = mapping_build.rows()
+    dates_delivered = list(predictions_by_date)
+    disclosure = mapping_build.delivery_disclosure(verified, dates_delivered)
 
     positive_class_id, msg = _resolve_positive_class_id(trait, predictions_by_date)
     if positive_class_id is None:
@@ -683,7 +672,8 @@ def compute_phenology(
             ),
             "positive_class_assessed": False,
             "n_plants": len(rows),
-            "n_images_unmapped": result["n_images_unmapped"],
+            "n_images_unattributed": disclosure["images_unattributed"],
+            "dates_delivered": disclosure["dates_delivered"],
         }
 
     # Measurement-integrity gate (the numerator's validity): the phenotype rests on the
@@ -796,7 +786,7 @@ def compute_phenology(
         flags=flags, acknowledge_unvalidated=acknowledge_unvalidated, basis=still_stated.basis,
         operating_point_conf=operating_point_conf, producer=producer, bindings=recon["bindings"],
         pred_dirs=list(predictions_by_date.values()), project_root=platform_state_root(),
-        plant_mapping=mapping_build.delivery_disclosure(verified))
+        plant_mapping=disclosure)
     # Per-milestone summary: report reached-counts for each milestone the spec actually declares.
     n_reached: dict[str, int] = {}
     for key in phenology._milestone_targets(spec):
@@ -811,7 +801,8 @@ def compute_phenology(
         "operating_point_validated": cells["operating_point_validated"],
         "unvalidated_dimensions": cells["unvalidated_dimensions"],
         "tile_size_validated": gate.stamp.get("tile_size"),
-        "n_images_unmapped": result["n_images_unmapped"],
+        "n_images_unattributed": disclosure["images_unattributed"],
+        "dates_delivered": disclosure["dates_delivered"],
         "columns": phenology.phenology_csv_columns(spec),
         "captures_unverified": verified["captures_unverified"],
         "plant_csvs_unverified": verified["plant_csvs_unverified"],

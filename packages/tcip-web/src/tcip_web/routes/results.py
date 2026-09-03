@@ -188,9 +188,11 @@ def build_plant_mapping(payload: BuildMappingPayload, request: Request) -> dict:
     it.
 
     Answers ``{"mapping", "summary", "unreadable", "nn_tolerance_m", "max_match_distance_m"}``;
+    ``summary`` is the mapping's own ``{"per_date": {...}, "totals": {...}}`` (``build.summary()``),
     ``nn_tolerance_m`` is the persisted record's own ``{"value": ..., "source": ...}``, never
     recomputed here, and ``max_match_distance_m`` is that tolerance's own loosest accepted
-    distance, derived from it through ``plant_mapping.match_gates``.
+    distance, derived from it through ``plant_mapping.match_gates``. No capture at all under the
+    requested dates, or captures that carry no position this door reads, refuses with 400.
     """
     from tcip_store.layout_claims import NAME_SEGMENT
 
@@ -230,6 +232,8 @@ def build_plant_mapping(payload: BuildMappingPayload, request: Request) -> dict:
         )
     except AmbiguousImageStem as exc:
         raise HTTPException(400, str(exc)) from exc
+    except plant_mapping.UngeoreferencedCaptureRefusal as exc:
+        raise HTTPException(exc.status, str(exc)) from exc
 
     try:
         plant_mapping.persist_mapping(build, root, payload.name)
@@ -247,21 +251,9 @@ def build_plant_mapping(payload: BuildMappingPayload, request: Request) -> dict:
         },
     )
 
-    summary = {}
-    for date, assignments in build.assignments.items():
-        matched = sum(1 for a in assignments if a.plot_name)
-        summary[date] = {
-            "n_images": len(assignments),
-            "n_mapped": matched,
-            "avg_distance_m": (
-                sum(a.distance_m for a in assignments if a.distance_m is not None)
-                / max(1, sum(1 for a in assignments if a.distance_m is not None))
-            ),
-        }
-
     return {
         "mapping": build.rows(),
-        "summary": summary,
+        "summary": build.summary(),
         "unreadable": build.unreadable,
         "nn_tolerance_m": build.nn_tolerance_m,
         "max_match_distance_m": plant_mapping.match_gates(
@@ -277,9 +269,10 @@ class LoadMappingPayload(BaseModel):
 def load_plant_mapping(payload: LoadMappingPayload) -> dict:
     """The persisted mapping under ``payload.name``, or an empty one when nothing is stored.
 
-    Answers ``{"mapping", "nn_tolerance_m", "max_match_distance_m"}`` when a build is found (the
-    latter two ``None`` otherwise), the same tolerance fields ``build_plant_mapping`` answers, so
-    a reopened mapping states the same radius a fresh build would.
+    Answers ``{"mapping", "summary", "nn_tolerance_m", "max_match_distance_m"}`` when a build is
+    found (``summary`` an empty ``{}``, the other two ``None``, otherwise), the same summary shape
+    and tolerance fields ``build_plant_mapping`` answers, so a reopened mapping states the same
+    counts and radius a fresh build would.
     """
     from tcip_store import StoreError
     from tcip_store.layout_claims import NAME_SEGMENT
@@ -296,9 +289,10 @@ def load_plant_mapping(payload: LoadMappingPayload) -> dict:
     except (StoreError, ValueError) as exc:
         raise HTTPException(409, str(exc)) from exc
     if build is None:
-        return {"mapping": {}, "nn_tolerance_m": None, "max_match_distance_m": None}
+        return {"mapping": {}, "summary": {}, "nn_tolerance_m": None, "max_match_distance_m": None}
     return {
         "mapping": build.rows(),
+        "summary": build.summary(),
         "nn_tolerance_m": build.nn_tolerance_m,
         "max_match_distance_m": plant_mapping.match_gates(
             build.nn_tolerance_m["value"])["max_match_distance_m"],
@@ -505,7 +499,7 @@ def _measure_phenology(payload: PhenologyPayload) -> _PhenologyMeasurement:
     return _PhenologyMeasurement(
         spec, plants, validity, gate, positive_class_id, root, stated.basis,
         recon["bindings"], predictions_by_date, flags,
-        mapping_build.delivery_disclosure(verified))
+        mapping_build.delivery_disclosure(verified, list(predictions_by_date)))
 
 
 def _still_stated(measurement: _PhenologyMeasurement, trait: str) -> None:
@@ -574,6 +568,8 @@ def _disclosure(measurement: _PhenologyMeasurement) -> dict:
         "positive_class_assessed": measurement.positive_class_assessed,
         "captures_unverified": measurement.plant_mapping_disclosure["captures_unverified"],
         "plant_csvs_unverified": measurement.plant_mapping_disclosure["plant_csvs_unverified"],
+        "dates_delivered": measurement.plant_mapping_disclosure["dates_delivered"],
+        "images_unattributed": measurement.plant_mapping_disclosure["images_unattributed"],
     }
 
 
