@@ -621,9 +621,9 @@ def test_list_split_choices_does_not_offer_the_own_manifest_under_a_different_sp
     tmp_path: Path, monkeypatch,
 ):
     """A differently spelled path to the config's own bound directory (a trailing separator,
-    dropped by ``Path(...).absolute()`` but not by a raw string compare) must not be offered as
-    if it were a second, alternative partition: both spellings normalize to the identical store
-    key, the same lexical normalization the listing now compares through."""
+    dropped by ``Path(...).resolve()`` but not by a raw string compare) must not be offered as
+    if it were a second, alternative partition: both spellings normalize to the identical
+    picker identity."""
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     from tcip_mcp.experiments import create_experiment
@@ -647,6 +647,73 @@ def test_list_split_choices_does_not_offer_the_own_manifest_under_a_different_sp
     offered = {m["manifest_dir"] for m in result["manifests"]}
     assert str(elsewhere) not in offered
     assert respelled not in offered
+
+
+def test_list_split_choices_offers_a_symlinked_manifest_directory_once(
+    tmp_path: Path, monkeypatch,
+):
+    """A symlink under the dataset's ``splits/`` directory to a sibling manifest directory
+    resolves to the identical directory the candidate dedupe must fold, or one partition is
+    offered twice under two spellings."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
+    from tcip_mcp.experiments import create_experiment
+    from tcip_mcp.tools.training_tools import list_split_choices
+
+    root = _two_subject_two_date_dataset(tmp_path / "ds")
+    splits_dir = root / "splits"
+    splits_dir.mkdir(parents=True, exist_ok=True)
+    real_dir = splits_dir / "real"
+    _draw(root, real_dir, seed=3)
+
+    link_dir = splits_dir / "link"
+    try:
+        os.symlink(real_dir, link_dir, target_is_directory=True)
+    except OSError as exc:
+        pytest.skip(f"this platform refuses directory symlink creation for this user: {exc}")
+
+    cfg = _bespoke_config(root / "images" / DATES[0], root / "annotations" / DATES[0])
+    create_experiment("exp-symlinked-splits", cfg)
+
+    result = list_split_choices("exp-symlinked-splits")
+
+    offered = [m["manifest_dir"] for m in result["manifests"]]
+    matches = [p for p in offered if Path(p).resolve() == real_dir.resolve()]
+    assert len(matches) == 1
+
+
+def test_list_split_choices_offers_a_case_respelled_duplicate_manifest_once(
+    tmp_path: Path, monkeypatch,
+):
+    """Two candidate experiments bound to the identical directory under different case spelling
+    must be offered once, not twice, on a case-insensitive filesystem."""
+    if os.name != "nt":
+        pytest.skip("case folding only matters on a case-insensitive filesystem")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
+    from tcip_mcp.experiments import create_experiment
+    from tcip_mcp.tools.training_tools import list_split_choices
+
+    root = _two_subject_two_date_dataset(tmp_path / "ds")
+    shared_dir = tmp_path / "shared_manifest"
+    _draw(root, shared_dir, seed=4)
+
+    own_cfg = _bespoke_config(root / "images" / DATES[0], root / "annotations" / DATES[0])
+    create_experiment("exp-picker", own_cfg)
+
+    lower_cfg = _bespoke_config(root / "images" / DATES[0], root / "annotations" / DATES[0])
+    lower_cfg["data"]["split"] = {"manifest_dir": str(shared_dir)}
+    create_experiment("exp-candidate-lower", lower_cfg)
+
+    upper_cfg = _bespoke_config(root / "images" / DATES[0], root / "annotations" / DATES[0])
+    upper_cfg["data"]["split"] = {"manifest_dir": str(shared_dir).upper()}
+    create_experiment("exp-candidate-upper", upper_cfg)
+
+    result = list_split_choices("exp-picker")
+
+    offered = [m["manifest_dir"] for m in result["manifests"]]
+    matches = [p for p in offered if Path(p).resolve() == shared_dir.resolve()]
+    assert len(matches) == 1
 
 
 # -- POST /api/training/runs's split_manifest_dir --------------------------------

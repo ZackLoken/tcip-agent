@@ -385,6 +385,28 @@ def test_preflight_config_training_source_shape_and_importability(tmp_path):
     assert preflight_config(base_cfg)["valid"] is True
 
 
+def test_preflight_config_catches_a_training_source_nested_only_under_training(tmp_path):
+    """training_source can be nested under training (TrainingSection allows extra keys there),
+    and normalize_train_config hoists it onto the top level for the trainer to read; preflight
+    must validate the same hoisted view, not only a top-level training_source, or an
+    unimportable nested one would pass structural validation and only fail once the run starts."""
+    pytest.importorskip("torch")
+    from tcip_mcp.tools.training_tools import preflight_config
+
+    imgs = tmp_path / "images"
+    lbls = tmp_path / "labels"
+    imgs.mkdir()
+    lbls.mkdir()
+    cfg = {
+        "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
+                         "builder_kwargs": {"num_classes": 1}, "task": "detection"},
+        "data": {"images_dir": str(imgs), "labels_dir": str(lbls)},
+        "training": {"batch_size": 2, "training_source": "nonexistent_module:train"},
+    }
+    r = preflight_config(cfg)
+    assert any("training_source not importable" in i for i in r["issues"])
+
+
 # --------------------------------------------------------------------------
 # preflight_config's selection_metric coherence: reject a comparability-only
 # metric for a center-match trait at validation time, not mid-run.
@@ -1099,6 +1121,55 @@ def test_run_hpo_trial_swept_top_level_evaluation_is_not_reported_unconsumed(mon
     assert "evaluation" not in resolved["unconsumed_params"]
 
 
+def test_run_hpo_trial_swept_dotted_selection_metric_is_not_reported_unconsumed(monkeypatch, tmp_path):
+    """A dotted swept key (``evaluation.selection_metric``) is applied by ``_apply_hpo_params``
+    into the nested ``evaluation`` field it names, never as a literal top-level key, so the
+    dotted string itself is never read; it must count as consumed when the top-level segment
+    it lands under (``evaluation``) was read."""
+    pytest.importorskip("torch")
+    from tcip_mcp.tools.training_tools import _run_hpo_trial, trial_config_key
+    from tcip_mcp.pipelines.schemas import evaluation_section
+
+    def fake_train(run, train_loader, val_loader, task="detection",
+                   epoch_callback=None, resume_from=""):
+        evaluation_section(run.config)  # the same read generic_trainer.train() performs
+        run.best_metric = 1.0
+        run.status = "completed"
+        return run
+
+    _patch_hpo_trial_machinery(monkeypatch, fake_train)
+    trial_dir = tmp_path / "trial_0"
+    _run_hpo_trial({"lr": 3e-4, "evaluation.selection_metric": "f1"}, [].append,
+                   _detection_base(), str(trial_dir))
+
+    resolved = ts.read(trial_config_key(trial_dir.parent, trial_dir.name))
+    assert "evaluation.selection_metric" not in resolved["unconsumed_params"]
+
+
+def test_run_hpo_trial_swept_dotted_key_whose_segment_is_unread_is_reported_unconsumed(
+    monkeypatch, tmp_path,
+):
+    """A dotted swept key still counts as unconsumed when nothing reads the top-level segment
+    it lands under, the same as a plain top-level key nothing reads."""
+    pytest.importorskip("torch")
+    from tcip_mcp.tools.training_tools import _run_hpo_trial, trial_config_key
+
+    def fake_train(run, train_loader, val_loader, task="detection",
+                   epoch_callback=None, resume_from=""):
+        run.config.get("lr")  # a known key, consumed -- but "model_source" is never read
+        run.best_metric = 1.0
+        run.status = "completed"
+        return run
+
+    _patch_hpo_trial_machinery(monkeypatch, fake_train)
+    trial_dir = tmp_path / "trial_0"
+    _run_hpo_trial({"lr": 3e-4, "model_source.builder_kwargs.width": 32}, [].append,
+                   _detection_base(), str(trial_dir))
+
+    resolved = ts.read(trial_config_key(trial_dir.parent, trial_dir.name))
+    assert resolved["unconsumed_params"] == ["model_source.builder_kwargs.width"]
+
+
 def test_run_hpo_trial_diverged_run_never_outranks_a_worse_but_alive_config(tmp_path):
     """A trial that trains one real epoch and then diverges must report the losing side as its
     final value, not that epoch's real score, so it can never outrank a config that only scored
@@ -1359,6 +1430,75 @@ def test_an_ordinary_sweep_payload_still_runs_its_search(tmp_path, monkeypatch):
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
                          "builder_kwargs": {"num_classes": 1}, "task": "detection"},
         "data": {"images_dir": str(imgs), "labels_dir": str(lbls)},
+    }
+    result = training_tools.run_hpo(base_config, param_space={"lr": [0.1, 0.01]}, n_trials=1)
+
+    assert result["best_params"] == {"lr": 0.01}
+    assert seen == [{"lr": [0.1, 0.01]}]
+
+
+def test_run_hpo_refuses_a_param_space_axis_naming_the_dotted_selection_metric(
+    tmp_path, monkeypatch,
+):
+    """run_hpo fixes the sweep's selection metric and direction once from base_config and
+    reuses it for every trial; a param_space axis naming ``evaluation.selection_metric``
+    directly would let a trial's own resolution disagree, so it is refused by name before
+    the sweep is minted."""
+    from tcip_mcp.tools import training_tools
+
+    monkeypatch.chdir(tmp_path)
+    result = training_tools.run_hpo(
+        {"model_source": {"builder": "m:f"}},
+        param_space={"evaluation.selection_metric": {
+            "type": "categorical", "choices": ["map", "iou_mean"],
+        }},
+    )
+    assert "error" in result
+    assert "evaluation.selection_metric" in result["error"]
+
+
+def test_run_hpo_refuses_a_param_space_axis_whose_choices_carry_selection_metric(
+    tmp_path, monkeypatch,
+):
+    """The same refusal catches an ``evaluation`` axis whose sampled value is itself a dict
+    naming ``selection_metric``, not only the dotted-key form."""
+    from tcip_mcp.tools import training_tools
+
+    monkeypatch.chdir(tmp_path)
+    result = training_tools.run_hpo(
+        {"model_source": {"builder": "m:f"}},
+        param_space={"evaluation": {
+            "type": "categorical",
+            "choices": [{"selection_metric": "map"}, {"selection_metric": "iou_mean"}],
+        }},
+    )
+    assert "error" in result
+    assert "evaluation" in result["error"]
+
+
+def test_run_hpo_admits_an_lr_sweep_beside_a_base_config_selection_metric(tmp_path, monkeypatch):
+    """The selection-metric refusal targets param_space, never base_config: a config that
+    states its own selection metric still runs an ordinary lr sweep."""
+    from tcip_mcp.pipelines.training import hpo
+    from tcip_mcp.tools import training_tools
+
+    monkeypatch.chdir(tmp_path)
+    seen = []
+
+    def fake_search(*args, **kwargs):
+        seen.append(kwargs.get("param_space", args[1] if len(args) > 1 else None))
+        return {"best_params": {"lr": 0.01}, "best_value": 0.1, "n_trials": 1}
+
+    monkeypatch.setattr(hpo, "tune_search", fake_search)
+
+    imgs, lbls = tmp_path / "images", tmp_path / "labels"
+    imgs.mkdir()
+    lbls.mkdir()
+    base_config = {
+        "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
+                         "builder_kwargs": {"num_classes": 1}, "task": "detection"},
+        "data": {"images_dir": str(imgs), "labels_dir": str(lbls)},
+        "evaluation": {"selection_metric": "map"},
     }
     result = training_tools.run_hpo(base_config, param_space={"lr": [0.1, 0.01]}, n_trials=1)
 

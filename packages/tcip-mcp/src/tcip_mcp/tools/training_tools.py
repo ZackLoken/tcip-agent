@@ -330,8 +330,11 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
     issues: list[str] = list(validate_train_config_schema(config))
     warnings: list[str] = []
 
+    # The trainer's own view: training.* hoisted onto the top level, top-level wins.
+    normalized = normalize_train_config(config)
+
     # model_source presence + builder importability (the one build path).
-    model_source = config.get(MODEL_SOURCE_KEY)
+    model_source = normalized.get(MODEL_SOURCE_KEY)
     if not model_source:
         issues.append("Missing 'model_source' section")
     elif not isinstance(model_source, dict) or not model_source.get("builder"):
@@ -345,7 +348,7 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
 
     # training_source seam (mirrors model_source/dataset_source above), a bare "module:function"
     # string, not a dict.
-    training_source = config.get(TRAINING_SOURCE_KEY)
+    training_source = normalized.get(TRAINING_SOURCE_KEY)
     if training_source is not None:
         if not isinstance(training_source, str) or not training_source:
             issues.append("training_source must be a non-empty 'module:function' string")
@@ -357,7 +360,7 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
                 issues.append(f"training_source not importable: {exc}")
 
     # Data config validation
-    data_cfg = config.get("data")
+    data_cfg = normalized.get("data")
     if not data_cfg:
         issues.append("Missing 'data' section")
     elif data_cfg.get(DATASET_SOURCE_KEY) is not None:
@@ -475,7 +478,7 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
     if manifest_dir:
         from tcip_mcp.tools.data_tools import read_split_manifest_dir
 
-        conflict_issues, task_binds = _manifest_dir_conflicts(config)
+        conflict_issues, task_binds = _manifest_dir_conflicts(normalized)
         issues.extend(conflict_issues)
         if task_binds:
             try:
@@ -483,14 +486,14 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
             except ValueError as exc:
                 issues.append(str(exc))
             else:
-                issues.extend(_manifest_dependent_issues(config, manifest, manifest_dir))
+                issues.extend(_manifest_dependent_issues(normalized, manifest, manifest_dir))
                 if split_cfg_dict.get("redraw_within_manifest"):
                     warnings.append(
                         "data.split.redraw_within_manifest=true: this run redraws train and "
                         "val inside the split manifest's own members for this date and seed; "
                         "the manifest's calibration side stays untouched."
                     )
-                    issues.extend(_redraw_starvation_issues(config, manifest, manifest_dir))
+                    issues.extend(_redraw_starvation_issues(normalized, manifest, manifest_dir))
 
     # Four-way spatial split feasibility (reserve_calibration_fraction, opt-in): must refuse by
     # name when infeasible, not silently degrade to no validation (see the helper's own docstring).
@@ -559,7 +562,6 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
 
     # Training config validation, read through the same top-level hoist train() reads under
     # (a top-level batch_size/stages entry wins over training.batch_size/training.stages).
-    normalized = normalize_train_config(config)
     batch_size = normalized.get("batch_size", 2)
     if not isinstance(batch_size, int) or batch_size < 1:
         issues.append("'training.batch_size' must be a positive integer")
@@ -615,18 +617,16 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
                 check_model_contract, overfit_check, render_overfit_report,
             )
 
-            ms = config.get(MODEL_SOURCE_KEY) or {}
-            task = ms.get("task") or (config.get("data") or {}).get("task", "detection")
-            dims = resolve_contract_dims(config, task)
-            model = build_model(config)
+            ms = normalized.get(MODEL_SOURCE_KEY) or {}
+            task = ms.get("task") or (normalized.get("data") or {}).get("task", "detection")
+            dims = resolve_contract_dims(normalized, task)
+            model = build_model(normalized)
             report = check_model_contract(model, task, **dims)
             batch, why_no_batch = None, None
             if report.get("not_smokeable"):
-                # The contract has no synthetic batch schema for this task. Rather than enumerate
-                # tasks (a taxonomy) or skip the check (a rail made optional), smoke it against a
-                # real batch from the run's own dataset, a better reference than a synthetic one
-                # for every task, and the only one for a task the platform does not enumerate.
-                batch, why_no_batch = _one_real_batch(task, config)
+                # No synthetic batch schema for this task: smoke against a real batch from the
+                # run's own dataset instead, the only reference for a task the platform doesn't enumerate.
+                batch, why_no_batch = _one_real_batch(task, normalized)
                 if batch is not None:
                     report = check_model_contract(model, task, sample_batch=batch, **dims)
             # ``dims`` shape the synthetic batch only, so they describe nothing once a real batch
@@ -1160,10 +1160,10 @@ def list_split_choices(experiment_id: str) -> dict:
     when something is actually recorded there directly, the ``make_splits`` default materializes
     it, it does not always exist) and every directory one level under it holding a manifest
     (where ``freeze_split_manifest`` writes a frozen run's own drawn partition). The own-binding
-    exclusion and the candidate dedupe compare each directory through the same lexical
-    normalization the store key uses (``str(Path(p).absolute())``, no symlink resolution), so a
-    differently spelled path to the identical directory is never offered as if it were a second
-    one.
+    exclusion and the candidate dedupe compare each directory by a normalized identity
+    (``os.path.normcase(str(Path(p).resolve()))``, folding both case and symlinks), so a
+    differently spelled, cased or symlinked path to the identical directory is never offered as
+    if it were a second one.
 
     Returns ``{"error": ...}`` for an unknown ``experiment_id`` (the route's own 404). Otherwise:
     ``{"as_recorded": {"case": "bound"|"drawn", "line": str, "compatible": bool,
@@ -1236,7 +1236,7 @@ def list_split_choices(experiment_id: str) -> dict:
         return {"as_recorded": as_recorded, "manifests": []}
 
     def _norm_dir(p: str) -> str:
-        return str(Path(p).absolute())
+        return os.path.normcase(str(Path(p).resolve()))
 
     own_norm = _norm_dir(own_manifest_dir) if own_manifest_dir else None
     candidate_dirs: list[str] = []
@@ -1855,8 +1855,12 @@ def _run_hpo_trial(config: dict, report, base_config: dict, trial_dir: str) -> N
         logger.warning("HPO trial failed: %s", e)
         report(losing_side)
     finally:
-        # Surface any swept param no consumer touched. Warn-only, never gates the trial.
-        unconsumed = sorted((set(config.keys()) - _HPO_KNOWN_KEYS) - tracked_config.accessed)
+        # Surface any swept param no consumer touched (warn-only); a dotted key counts as
+        # consumed when the top-level segment it lands under, not the dotted string itself, was read.
+        swept = set(config.keys()) - _HPO_KNOWN_KEYS
+        unconsumed = sorted(
+            key for key in swept if key.split(".", 1)[0] not in tracked_config.accessed
+        )
         try:
             # trial_params is the sampled point itself, the only record of which axes this
             # sweep actually varied (the merged config cannot say that).
@@ -2036,6 +2040,14 @@ def run_hpo(
             split_draws, split_draw_seeds, warm_start, baseline_params)
         if draws_refusal is not None:
             return {"error": draws_refusal, "issues": []}
+
+        # The sweep-wide selection metric and direction are resolved once from base_config below
+        # and fixed on the Tuner; a param_space axis naming it would disagree per trial.
+        metric_axis = _swept_selection_metric_axis(param_space)
+        if metric_axis is not None:
+            return {"error": f"param_space sweeps {metric_axis!r}: the sweep's selection metric "
+                              "and its direction are fixed once from base_config, not the param "
+                              "space; move it into base_config.", "issues": []}
 
         # Structural preflight over every point the search space could resolve a trial's
         # builder or data section to, not only the first sampled corner.
@@ -2405,6 +2417,27 @@ def _apply_hpo_params(base_config: dict, params: dict) -> dict:
         else:
             cfg[key] = value
     return cfg
+
+
+def _swept_selection_metric_axis(param_space: dict | None) -> str | None:
+    """The ``param_space`` key, if any, whose sampled value could set a trial's own selection
+    metric: a dotted key naming it directly (``evaluation.selection_metric``,
+    ``training.evaluation.selection_metric``), or an ``evaluation``/``training.evaluation`` axis
+    whose value, or (for a categorical axis) any of its choices, is itself a dict carrying
+    ``selection_metric``. ``None`` when nothing in ``param_space`` reaches it.
+    """
+    direct_keys = ("evaluation.selection_metric", "training.evaluation.selection_metric")
+    for key in direct_keys:
+        if key in (param_space or {}):
+            return key
+    for key in ("evaluation", "training.evaluation"):
+        spec = (param_space or {}).get(key)
+        if not isinstance(spec, dict):
+            continue
+        values = spec.get("choices") or [] if spec.get("type") == "categorical" else [spec]
+        if any(isinstance(v, dict) and "selection_metric" in v for v in values):
+            return key
+    return None
 
 
 def _base_config_for_split_draws(base_config: dict, split_draws: int) -> dict:
