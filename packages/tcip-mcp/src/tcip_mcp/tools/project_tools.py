@@ -580,9 +580,53 @@ def _database_counters(root: Path) -> dict[tuple[str, str], int]:
     return counters
 
 
+def _write_bundle_zip(out: Path, root: Path, members: list[Path]) -> int:
+    """Write ``members`` (each an absolute path under ``root``) into ``out`` as a ZIP.
+
+    Removes ``out`` on any failure, since a partial ZIP is worse than none: a caller reading it
+    back would see a subset of the bundle with no signal that it is incomplete.
+    """
+    files_added = 0
+    try:
+        with zipfile.ZipFile(str(out), "w", zipfile.ZIP_DEFLATED) as zf:
+            for member in sorted(members):
+                zf.write(member, member.relative_to(root))
+                files_added += 1
+    except BaseException:
+        out.unlink(missing_ok=True)
+        raise
+    return files_added
+
+
+def _write_bundle_directory(out_dir: Path, root: Path, members: list[Path]) -> tuple[int, int]:
+    """Write ``members`` (each an absolute path under ``root``) into ``out_dir`` as the identical
+    tree, preserving each member's path relative to ``root``. Returns ``(files_added, size_bytes)``.
+
+    Removes ``out_dir`` on any failure, the directory-tree counterpart of ``_write_bundle_zip``'s
+    own cleanup: a caller must never read a partial bundle as if it were whole.
+    """
+    files_added = 0
+    size_bytes = 0
+    try:
+        for member in sorted(members):
+            target = out_dir / member.relative_to(root)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(member, target)
+            files_added += 1
+            size_bytes += target.stat().st_size
+    except BaseException:
+        shutil.rmtree(out_dir, ignore_errors=True)
+        raise
+    return files_added, size_bytes
+
+
 @audited
-def archive_project(project_path: str, output_path: str = "", include_models: bool = False) -> dict:
-    """Export an annotation project as a portable ZIP archive.
+def archive_project(
+    project_path: str, output_path: str = "", output_dir: str = "",
+    include_models: bool = False,
+) -> dict:
+    """Export an annotation project as a portable bundle: a ZIP file, or, given ``output_dir``
+    instead of ``output_path``, the identical bundle written as a directory tree.
 
     Not an MCP tool: run through ``scripts/archive_project.py``, per the admission standard
     (packages/tcip-mcp/CLAUDE.md), while staying importable for its own tests.
@@ -597,6 +641,12 @@ def archive_project(project_path: str, output_path: str = "", include_models: bo
     or a ``.pt`` file shaped as a run's own under ``.tcip/experiments``); a bespoke run's
     ``model_src/`` snapshot travels regardless, since ``blob_home`` classifies it before either
     checkpoint clause, one membership statement with one producer-side option, not two.
+
+    Exactly one of ``output_path``/``output_dir`` must be given, since each names a different
+    container for the one bundle this door composes: neither is a documented default the door
+    would otherwise guess. ``output_dir`` refuses a destination inside ``project_path`` (a bundle
+    cannot contain the tree it was drawn from) and a destination that already holds anything, the
+    same non-merge rule ``import_project`` holds its own ``destination`` to.
 
     Every database under the tree is exported to its loose files first, through the same
     :func:`tcip_store.export.export_root` ``scripts/export_store.py`` uses, so a project either
@@ -613,15 +663,44 @@ def archive_project(project_path: str, output_path: str = "", include_models: bo
 
     Args:
         project_path: Root directory of the project.
-        output_path: Destination path for the ZIP file. Defaults to ``<project_name>.tcip.zip``
-            beside the project in the workspace; a relative path resolves against the platform
-            state root, which is not necessarily ``project_path``, never the server process's
-            cwd.
+        output_path: Destination path for the ZIP file. A relative path resolves against the
+            platform state root, which is not necessarily ``project_path``, never the server
+            process's cwd.
+        output_dir: Destination directory to write the bundle into as a tree, instead of a ZIP;
+            the same path-resolution rule as ``output_path``.
         include_models: Whether to include model checkpoints (can be large).
     """
+    if output_path and output_dir:
+        return {"error": "give either output_path (a ZIP file) or output_dir (a directory "
+                         "tree), not both"}
+    if not output_path and not output_dir:
+        return {"error": "give either output_path (a ZIP file) or output_dir (a directory "
+                         "tree) to archive into"}
+
     root = Path(project_path).resolve()
     if not root.is_dir():
         return {"error": f"Project directory not found: {project_path}"}
+
+    resolved_output_dir: Path | None = None
+    if output_dir:
+        from tcip_mcp.project_paths import resolve_output_path
+
+        resolved_output_dir = Path(resolve_output_path(output_dir)).resolve()
+        try:
+            resolved_output_dir.relative_to(root)
+        except ValueError:
+            pass
+        else:
+            return {"error": f"output_dir {resolved_output_dir} is inside the project being "
+                             f"archived ({root}); choose a destination outside the project"}
+        if resolved_output_dir.exists():
+            if not resolved_output_dir.is_dir():
+                return {"error": f"output_dir {resolved_output_dir} exists and is not a "
+                                 "directory"}
+            if any(resolved_output_dir.iterdir()):
+                return {"error": f"output_dir {resolved_output_dir} is not empty; "
+                                 "archive_project's directory mode never writes into a "
+                                 "populated directory"}
 
     from tcip_store import StoreError
 
@@ -640,16 +719,6 @@ def archive_project(project_path: str, output_path: str = "", include_models: bo
     except (AnchorMisplaced, RegistryVersionRefused) as exc:
         return {"error": str(exc)}
 
-    if not output_path:
-        output_path = str(root.parent / f"{root.name}.tcip.zip")
-    else:
-        from tcip_mcp.project_paths import resolve_output_path
-
-        output_path = str(resolve_output_path(output_path))
-
-    out = Path(output_path)
-    out.parent.mkdir(parents=True, exist_ok=True)
-
     # A registered checkpoint is not confined to .tcip/models; blob_home is the one recognizer.
     is_checkpoint = {
         p: blob_home(root, p, accounting.registered_checkpoints) == BLOB_CHECKPOINTS
@@ -658,20 +727,28 @@ def archive_project(project_path: str, output_path: str = "", include_models: bo
     members = [entry.path for plan in accounting.plans for entry in plan.entries]
     members += [p for p in accounting.blobs if include_models or not is_checkpoint[p]]
 
-    files_added = 0
-    try:
-        with zipfile.ZipFile(str(out), "w", zipfile.ZIP_DEFLATED) as zf:
-            for member in sorted(members):
-                zf.write(member, member.relative_to(root))
-                files_added += 1
-    except BaseException:
-        out.unlink(missing_ok=True)
-        raise
+    out: Path | None = None
+    if resolved_output_dir is not None:
+        resolved_output_dir.mkdir(parents=True, exist_ok=True)
+        files_added, size_bytes = _write_bundle_directory(resolved_output_dir, root, members)
+    else:
+        from tcip_mcp.project_paths import resolve_output_path
+
+        out = Path(resolve_output_path(output_path))
+        out.parent.mkdir(parents=True, exist_ok=True)
+        files_added = _write_bundle_zip(out, root, members)
+        size_bytes = out.stat().st_size
+
+    def _remove_partial_bundle() -> None:
+        if resolved_output_dir is not None:
+            shutil.rmtree(resolved_output_dir, ignore_errors=True)
+        elif out is not None:
+            out.unlink(missing_ok=True)
 
     try:
         after = _database_counters(root)
     except StoreError as exc:
-        out.unlink(missing_ok=True)
+        _remove_partial_bundle()
         return {"error": f"a store database under {root} became unreadable while this project "
                          f"was being archived, so the bundle cannot be vouched for: {exc}. The "
                          "incomplete archive was removed."}
@@ -681,16 +758,15 @@ def archive_project(project_path: str, output_path: str = "", include_models: bo
         if before.get((db_path, store)) != counter
     )
     if moved:
-        out.unlink(missing_ok=True)
+        _remove_partial_bundle()
         return {"error": "this project changed while it was being archived, so the bundle would "
                          f"hold a mix of before and after: {'; '.join(moved)}. The incomplete "
                          "archive was removed; stop the writers and archive again."}
 
     checkpoints_excluded = 0 if include_models else sum(1 for v in is_checkpoint.values() if v)
-    return {
-        "output_path": str(out),
+    result = {
         "files_added": files_added,
-        "size_bytes": out.stat().st_size,
+        "size_bytes": size_bytes,
         "include_models": include_models,
         "left_behind": {
             "unaccounted": len(accounting.unaccounted),
@@ -698,6 +774,9 @@ def archive_project(project_path: str, output_path: str = "", include_models: bo
             "checkpoints_excluded": checkpoints_excluded,
         },
     }
+    result["output_dir" if resolved_output_dir is not None else "output_path"] = str(
+        resolved_output_dir if resolved_output_dir is not None else out)
+    return result
 
 
 _IMPORTS_DIRNAME = ".imports"
@@ -733,6 +812,27 @@ def _extract_zip(zp: Path, staging: Path) -> int:
                     shutil.copyfileobj(src, dst)
                 files_extracted += 1
     return files_extracted
+
+
+def _stage_bundle(source: Path, staging: Path) -> int:
+    """Stage ``source`` into ``staging``, whichever container it arrived in.
+
+    One bundle layout, two containers: a directory bundle is zipped into a private temporary
+    file and handed to :func:`_extract_zip`, the same walker (and the same zip-slip containment
+    check) a ZIP bundle goes through, rather than a second tree-copying implementation that could
+    drift from it. A directory's own empty subdirectories carry no member either way, matching a
+    ZIP archive built with no directory entries.
+    """
+    if not source.is_dir():
+        return _extract_zip(source, staging)
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_zip = Path(tmp) / "bundle.zip"
+        with zipfile.ZipFile(str(tmp_zip), "w", zipfile.ZIP_DEFLATED) as zf:
+            for member in sorted(p for p in source.rglob("*") if p.is_file()):
+                zf.write(member, member.relative_to(source))
+        return _extract_zip(tmp_zip, staging)
 
 
 def _sweep_free_locked_leftovers(imports_root: Path) -> None:
@@ -813,11 +913,16 @@ class StoreErrorRuntime(RuntimeError):
 
 
 @audited
-def import_project(zip_path: str, destination: str) -> dict:
-    """Import an annotation project from a ZIP archive.
+def import_project(bundle_path: str, destination: str) -> dict:
+    """Import an annotation project from a bundle ``archive_project`` wrote: a ZIP archive, or a
+    directory tree written by its ``output_dir`` mode.
 
     Not an MCP tool: run through ``scripts/import_project.py``, per the admission standard
     (packages/tcip-mcp/CLAUDE.md), while staying importable for its own tests.
+
+    One bundle layout, two containers: a directory bundle is staged through the identical walker
+    a ZIP bundle is (:func:`_stage_bundle`), so the two are read back exactly alike below this
+    point, member-classification, registry conform, and adoption included.
 
     Not a writer of any format but one, the model registry index's own on-disk conform below:
     the door extracts into a private staging directory, classifies every member through the
@@ -861,7 +966,8 @@ def import_project(zip_path: str, destination: str) -> dict:
     and ``files_extracted``.
 
     Args:
-        zip_path: Path to the ``.tcip.zip`` archive.
+        bundle_path: Path to the ``.tcip.zip`` archive, or the directory tree written by
+            ``archive_project``'s ``output_dir`` mode.
         destination: Directory to extract into.
     """
     from filelock import Timeout as _LockTimeout
@@ -869,9 +975,9 @@ def import_project(zip_path: str, destination: str) -> dict:
     from tcip_mcp import workspace
     from tcip_store.file_backend import DEFAULT_LOCK_TIMEOUT_S, lock_file_for, path_lock
 
-    zp = Path(zip_path)
-    if not zp.is_file():
-        return {"error": f"ZIP file not found: {zip_path}"}
+    bp = Path(bundle_path)
+    if not bp.is_file() and not bp.is_dir():
+        return {"error": f"bundle not found: {bundle_path}"}
 
     dest = Path(destination).expanduser().resolve()
     if dest.parent == workspace.workspace_root():
@@ -898,7 +1004,7 @@ def import_project(zip_path: str, destination: str) -> dict:
     try:
         with path_lock(staging, timeout_s=DEFAULT_LOCK_TIMEOUT_S):
             try:
-                result = _run_import_into_staging(zp, staging, dest)
+                result = _run_import_into_staging(bp, staging, dest)
             finally:
                 # A success has already moved staging onto dest; rmtree is then a no-op.
                 if "error" in result or not result:
@@ -910,8 +1016,8 @@ def import_project(zip_path: str, destination: str) -> dict:
     return result
 
 
-def _run_import_into_staging(zp: Path, staging: Path, dest: Path) -> dict:
-    """Everything the import door does while it holds the staging lock: extract, account for,
+def _run_import_into_staging(bp: Path, staging: Path, dest: Path) -> dict:
+    """Everything the import door does while it holds the staging lock: stage, account for,
     decode-preflight, adopt (backend-conditional), then move. Returns the tool's own response
     dict, an ``{"error": ...}`` on any refusal.
     """
@@ -928,9 +1034,9 @@ def _run_import_into_staging(zp: Path, staging: Path, dest: Path) -> dict:
     )
 
     try:
-        files_extracted = _extract_zip(zp, staging)
+        files_extracted = _stage_bundle(bp, staging)
     except (ValueError, zipfile.BadZipFile) as exc:
-        return {"error": f"{zp} is not a readable ZIP archive: {exc}"}
+        return {"error": f"{bp} is not a readable bundle: {exc}"}
 
     try:
         conform_registry_paths_on_disk(staging)
