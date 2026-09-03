@@ -96,7 +96,7 @@ silently corrupts results and compounds across sessions.
   a record naming who and when, scoped to one subject on one image, read only under the bucket its
   writer stated. An empty label file alone is never a negative. Never delete empty label files
   without asking.
-- Never train or evaluate on an unconfirmed format: `read_annotations` refuses rather than guesses.
+- Never train or evaluate on an unconfirmed format: `tcip_annotation.format_io.detect_format` refuses rather than guesses, inherited by `load_annotations_any` and `annotation_tools.read_annotations`.
 - State changes go through `@audited` MCP tools, or an explicit `record_event`/
   `record_event_or_raise` emitter for code that is neither: the record is one store's three
   logs (the platform's, a dataset's own, a project's own; an adopted project's log and the

@@ -25,8 +25,9 @@ directly. An unspecified format resolves to `.json`
 | json | One `.json` per image (canonical) | Pixel coordinates | an `annotations` key, no `images`/`categories` key |
 | coco | Single `.json` for the dataset | Pixel coordinates | an `images`/`categories` key |
 
-Both are read by `format_io.load_annotations` / written by `save_annotations`; the agent-facing
-MCP tool wrapping the read side is `read_annotations` (see Tools below). A missing label file
+Both are read by `format_io.load_annotations` / written by `save_annotations`; the read side is
+wrapped for the agent by `annotation_tools.read_annotations`, a library call, not a tool of its
+own. A missing label file
 reads as no annotations; a present one either reader cannot make sense of raises
 `json_io.UnreadableLabelDocument` naming the file or the malformed record's index, rather than
 reading short. For json, the per-image reader (`json_io._annotations_of`) refuses: undecodable
@@ -69,7 +70,6 @@ applied twice or skipped.
 
 | Tool | Purpose |
 |------|---------|
-| `read_annotations` | Load the ground-truth labels and predictions for a single image (auto-detects format) |
 | `save_annotations` | Write annotations to any supported format |
 | `segment_prompt` | Engine-assisted polygon generation from point/box/grid prompts (`engine='sam'` default) |
 | `score_predictions` | Score predictions vs GT (image file or dataset dir); `detail=True` adds per-detection TP/FP/FN match data |
