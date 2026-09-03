@@ -964,15 +964,17 @@ def monitor_training(run_id: str | None = None, sweep_id: str | None = None) -> 
         run_id: Training run identifier. Exactly one of ``run_id``/``sweep_id`` is required.
         sweep_id: Hyperparameter sweep identifier. Exactly one of ``run_id``/``sweep_id``.
     """
-    if (run_id is None) == (sweep_id is None):
-        return {"error": "exactly one of run_id or sweep_id is required, got "
-                          f"run_id={run_id!r} sweep_id={sweep_id!r}"}
-
     if sweep_id is not None:
+        if run_id is not None:
+            return {"error": "exactly one of run_id or sweep_id is required, got "
+                              f"run_id={run_id!r} sweep_id={sweep_id!r}"}
         disk_sweep = read_sweep_from_disk(sweep_id)
         if disk_sweep is None:
             return {"error": f"sweep not found: {sweep_id}"}
         return disk_sweep
+    if run_id is None:
+        return {"error": "exactly one of run_id or sweep_id is required, got "
+                          "run_id=None sweep_id=None"}
 
     from tcip_mcp.pipelines.training.run_registry import get_run
     run = get_run(run_id)
