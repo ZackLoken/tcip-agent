@@ -197,6 +197,7 @@ def test_merged_away_name_survives_nowhere_tracked(old, new):
 DEMOTED = [
     "preflight_config",
     "read_annotations",
+    "score_predictions",
 ]
 
 _TOOL_TABLE_ROW_PATTERN = r"^\|\s*`{}`\s*\|"

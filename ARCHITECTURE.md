@@ -503,6 +503,7 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | scripts/render_failure_cases.py | Find and render the worst predictions for failure analysis, through the demoted `render_failure_cases` function. | 3 | 0 |
 | scripts/restamp_dataset_fingerprint.py | Restamp a bare legacy dataset fingerprint onto the formula-version-prefixed form, through register_dataset's own path. | 4 | 0 |
 | scripts/scan_dataset.py | Scan a folder for images, labels, and predictions, through the demoted `scan_dataset` function. | 3 | 0 |
+| scripts/score_predictions.py | Score on-disk predictions against on-disk ground truth, through the demoted `score_predictions` function. | 3 | 0 |
 | scripts/shp_to_plant_csv.py | Convert a plant-locations shapefile into ``read_plant_csvs``' CSV schema. | 1 | 0 |
 | scripts/smoke_fence_e2e.py | Live smoke: does the real fenced `claude` refuse to edit platform internals? | 3 | 0 |
 | scripts/smoke_phenology_e2e.py | Live e2e smoke: the agent's phenology pipeline on real geolocated images. | 9 | 0 |
@@ -680,6 +681,7 @@ A module counts as zero-importer when no other module in its own scanned tree re
 | scripts | scripts/render_failure_cases.py |
 | scripts | scripts/restamp_dataset_fingerprint.py |
 | scripts | scripts/scan_dataset.py |
+| scripts | scripts/score_predictions.py |
 | scripts | scripts/shp_to_plant_csv.py |
 | scripts | scripts/smoke_fence_e2e.py |
 | scripts | scripts/smoke_phenology_e2e.py |
@@ -709,12 +711,11 @@ check must match the decorator name rather than the whole line).
 Tables below group by defining module. Column "line" is the `def`/`async def` line.
 Docstring is the function's docstring first line, verbatim.
 
-### annotation_tools.py (3 tools)
+### annotation_tools.py (2 tools)
 
 | tool | line | audited | docstring first line |
 |---|---|---|---|
 | `save_annotations` | `annotation_tools.py:132` | yes | Write an image's annotations to its single per-image label file (all subjects, one file). |
-| `score_predictions` | `annotation_tools.py:434` | yes | Score on-disk predictions against on-disk ground truth (COCOeval). |
 | `write_class_map` | `annotation_tools.py:470` | yes | Author the dataset's nested class registry, a thin wrapper over ``class_registry``. |
 
 ### data_tools.py (3 tools)

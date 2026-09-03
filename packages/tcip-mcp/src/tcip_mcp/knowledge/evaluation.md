@@ -39,7 +39,7 @@ measurement-agreement/method-comparison contexts specifically because of that de
 | Tool | Purpose |
 |------|---------|
 | `evaluate_model` | Evaluate a checkpoint on a held-out dataset, or a named split manifest's `calibration` side (`split_manifest_dir`); writes `test_results.json` |
-| `score_predictions` | Score on-disk predictions vs GT: an image file returns per-box matches (`detail=True` adds a per-detection breakdown); a dataset dir returns aggregate metrics + per-image TP/FP/FN |
+| `annotation_tools.score_predictions` (library call) / `scripts/score_predictions.py` (logged script) | Score on-disk predictions vs GT: an image file returns per-box matches (`detail=True` adds a per-detection breakdown); a dataset dir returns aggregate metrics + per-image TP/FP/FN |
 | `scripts/render_failure_cases.py` (logged script, run with python) | Surface + render the N images with highest triage error |
 | `compare_experiments` | Side-by-side metrics across experiments |
 | `get_experiment` (`view='lineage'`) | Trace data → model → predictions chain |
