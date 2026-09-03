@@ -125,10 +125,11 @@ When metrics are poor, investigate systematically:
 1. Data issues: `python scripts/doctor.py <root>`'s `check_data_quality`, missing labels, format errors, class imbalance
 2. Worst cases: `python scripts/render_failure_cases.py`, surface and visually inspect the worst
    N images
-3. Per-image breakdown: `score_predictions` on a dataset dir; find images with the
-   highest FP/FN counts (no built-in per-class breakdown for detection; use
-   `score_predictions(<image>, detail=True)` per image and aggregate by `class_id` if
-   class-level numbers are needed)
+3. Per-image breakdown: `annotation_tools.score_predictions` (library call, or
+   `scripts/score_predictions.py`) on a dataset dir; find images with the highest FP/FN counts
+   (no built-in per-class breakdown for detection; use
+   `annotation_tools.score_predictions(<image>, detail=True)` per image and aggregate by
+   `class_id` if class-level numbers are needed)
 4. Training dynamics: Check metrics.jsonl; is loss still decreasing? Overfitting?
 5. Architecture: Is the model appropriate for the task and data scale?
 
@@ -147,4 +148,5 @@ When comparing models:
    failures; for ordinal, check quadratic weighted kappa alongside rank accuracy, since exact-rank
    accuracy alone can hide a model that's frequently off by one rank; for detection, check
    per-image FP/FN patterns instead (see Failure Triage above; there's no per-class AP today)
-5. Use `compare_experiments` for side-by-side analysis
+5. Use `experiments.compare_experiments` (library call; the web comparison route calls it too)
+   for side-by-side analysis

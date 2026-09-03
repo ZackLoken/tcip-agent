@@ -167,6 +167,11 @@ reaching for again versus one built narrowly for a specific past investigation.
 - `plant_aware_group_splits.py` - derives a plant-aware group key for `draw_splits` over
   per-stem georeferenced raster datasets, so every capture of one physical plant across every
   date lands in the same split side instead of only grouping by tile prefix.
+- `preflight_config.py` - validates a training configuration before launching: structural checks
+  and a builder import always run; `--smoke` also builds the model and runs
+  `check_model_contract`; `--overfit` (with `--smoke`) additionally runs the voluntary
+  `overfit_check` diagnostic. Wraps `tcip_mcp.tools.training_tools.preflight_config` with no MCP
+  tool registration; `--project` (or `$TCIP_STATE_ROOT`) is required unconditionally.
 - `shp_to_plant_csv.py` - converts a plant-locations shapefile into `read_plant_csvs`' CSV
   schema, handling both point and polygon source geometry and validating its own output by
   reading it back through the same reader before reporting success.

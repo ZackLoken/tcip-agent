@@ -176,9 +176,11 @@ def check_data_quality(root: Path, findings: list) -> None:
             normalize_status_store(read_image_status_store(str(root)))
         )
     except StoreError as exc:
-        findings.append(("warn", f"the image status store will not read ({exc}); the "
-                        "data-quality check cannot verify confirmed negatives against it"))
-        negatives = set()
+        # The same soft-rail posture check_negatives already takes on this file: a reporter
+        # names what it could not verify rather than blocking the whole run over it.
+        findings.append(("warn", f"the image status store will not read ({exc}); confirmed "
+                         "negatives cannot be verified against it"))
+        return
 
     for label_path in scan["labels"]:
         label = Path(label_path)

@@ -259,7 +259,7 @@ def manifest_compatibility(config: dict, manifest: dict, manifest_dir: str) -> l
     both directly, in the same order, so a manifest read failure never suppresses the
     config-only issues; the data picker's :func:`list_split_choices` calls this one composed
     function per candidate manifest, before Start, over a manifest it also read itself. Never
-    calls :func:`preflight_config`: that tool imports the config's builder and scans its
+    calls :func:`preflight_config`: that function imports the config's builder and scans its
     labels, a cost neither caller here means to pay for a compatibility read.
     """
     issues, task_binds = _manifest_dir_conflicts(config)
@@ -289,6 +289,10 @@ def candidate_config_with_manifest(config: dict, manifest_dir: str) -> dict:
 def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -> dict:
     """Validate a training configuration before launching.
 
+    Not an MCP tool: run through ``scripts/preflight_config.py``, per the admission standard
+    (packages/tcip-mcp/CLAUDE.md), while staying importable for its own tests and for
+    ``launch_training``, which calls this function directly before spawning the training thread.
+
     Config structure:
         model_source: {builder, builder_kwargs, task, in_chans}
         data: {images_dir, labels_dir, task}  # known loaders, OR a bespoke
@@ -311,13 +315,13 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
             ``launch_training`` runs this before spawning the training thread. For a task the
             contract has no synthetic batch schema for, one real batch is built from ``data`` and
             used instead; if no batch can be built either, the boundary is unproven and that also
-            blocks. Default False keeps the always-on web ``/validate`` path to structural checks
-            plus a builder import, no model construction and no forward pass.
+            blocks. Default False keeps a plain call to structural checks plus a builder import,
+            no model construction and no forward pass.
         overfit: When True (with ``smoke``), also run the voluntary ``overfit_check`` diagnostic and
             report it under ``overfit_check``, never gating (a noisy-but-valid model can fail it).
             The stored report is already rendered (``model_contract.render_overfit_report``): a
-            diverging model's raw losses may hold ``nan``/``inf``, which this JSON-RPC tool cannot
-            answer with directly.
+            diverging model's raw losses may hold ``nan``/``inf``, which a JSON-RPC caller such as
+            ``launch_training`` cannot answer with directly.
     """
     from tcip_mcp.pipelines.schemas import (
         evaluation_section, normalize_train_config, validate_train_config_schema,
@@ -1141,8 +1145,8 @@ def list_split_choices(experiment_id: str) -> dict:
 
     Not agent-facing (not an ``@mcp.tool()``): a plain reader, importable by the agent's own
     scripts, wrapped by ``GET /api/training/configs/{experiment_id}/splits``. Never calls
-    ``preflight_config`` (an audited tool that imports the picked config's builder and scans its
-    labels): every check here is :func:`manifest_compatibility` over a manifest this reader read
+    ``preflight_config`` (a demoted function that imports the picked config's builder and scans
+    its labels): every check here is :func:`manifest_compatibility` over a manifest this reader read
     itself, through :func:`~tcip_mcp.tools.data_tools.read_split_manifest_dir_checked`, no second
     presence test anywhere. A candidate manifest is checked against the config
     :func:`candidate_config_with_manifest` builds (``data.split`` replaced wholesale,

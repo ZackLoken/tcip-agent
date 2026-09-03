@@ -2,7 +2,7 @@
 
 ``prioritize_review_queue`` builds a method→scorer mapping and enforces a composed-detector
 precondition; factoring both here keeps a future second logit-reading entry point from drifting.
-(The sibling tool ``triage_predictions`` deliberately does not use these: it partitions by
+(The sibling door ``triage_predictions`` deliberately does not use these: it partitions by
 prediction confidence via ``predict_batch``, which is kind-agnostic and reads no logits.)
 """
 

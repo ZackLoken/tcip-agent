@@ -463,15 +463,18 @@ def triage_predictions(
 ) -> dict:
     """Sort a checkpoint's own predictions by confidence into auto-accept, needs-review and unscoreable queues.
 
+    Not an MCP tool: run through ``scripts/triage_predictions.py``, per the admission standard
+    (packages/tcip-mcp/CLAUDE.md), while staying importable for its own tests.
+
     Returns predictions at or above ``auto_threshold`` as the confident set for a caller to accept
-    as ground truth; this tool writes nothing itself. Routes predictions between ``low`` and
+    as ground truth; this door writes nothing itself. Routes predictions between ``low`` and
     ``high`` into the needs-review queue, which can overlap the confident set when
     ``auto_threshold`` sits below ``high``, and separates out predictions with no
     confidence-bearing signal at all (e.g. a regression head's point estimate) into their own
     ``unscoreable_images`` list rather than let them silently vanish from every output. The
     sibling tool ``prioritize_review_queue`` ranks images by active-learning informativeness
-    instead, never surfacing a confident set for acceptance; this tool is the more consequential
-    capability and stays agent-only.
+    instead, never surfacing a confident set for acceptance; this door is the more consequential
+    capability and stays agent/operator-only.
 
     Args:
         checkpoint_path: Trained model checkpoint (drives predictions).
@@ -482,7 +485,7 @@ def triage_predictions(
         skip_reviewed: Exclude already-completed images before triaging.
         low: Lower confidence bound for the needs-review band.
         high: Upper confidence bound for the needs-review band.
-        auto_threshold: Confidence at/above which a prediction joins the confident set this tool
+        auto_threshold: Confidence at/above which a prediction joins the confident set this door
             returns for a caller to accept as ground truth. ``None`` (default) refuses to
             auto-accept: turning predictions into GT at a pinned 0.8 fabricates labels the model
             was never confirmed to get right. Derive this threshold from the model's validated

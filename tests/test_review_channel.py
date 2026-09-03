@@ -325,6 +325,97 @@ def test_stage_proposals_requires_a_shape(tmp_path: Path) -> None:
     assert "error" in res and "boxes/polygons" in res["error"]
 
 
+class _FakeSingleBoxEngine:
+    """One candidate, whole-image proposal only, for the assignments-regime refusal tests below."""
+
+    def propose(self, image_path, **params):
+        return [{"candidate_id": 1, "bbox": [10.0, 10.0, 40.0, 30.0], "area": 1200.0,
+                 "rings": [[(10.0, 10.0), (50.0, 10.0), (50.0, 40.0), (10.0, 40.0)]],
+                 "score": 0.9}]
+
+
+def _staged_assignments_image(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> str:
+    """A real image with a candidate already staged by ``propose_annotations``, the platform's
+    own producer for the assignments regime's admitting call."""
+    from tcip_mcp.pipelines import proposal
+    from tcip_mcp.tools.proposal_tools import propose_annotations
+
+    monkeypatch.setitem(proposal._ENGINES, "fake_single_box", _FakeSingleBoxEngine())
+    root = tmp_path / "proj"
+    date = "2026-02-11"
+    _image(root, date, "IMG_0205", size=(640, 480))
+    image_path = _img_path(root, date, "IMG_0205")
+    proposed = propose_annotations(image_path, engine="fake_single_box")
+    assert proposed["staged"] is True
+    return image_path
+
+
+def test_stage_proposals_refuses_assignments_combined_with_boxes_or_polygons(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    image_path = _staged_assignments_image(tmp_path, monkeypatch)
+    assignments = [{"candidate_id": 1, "subject": "leaf"}]
+    a_box = [{"subject": "leaf", "conf": 0.9, "cx": 0.5, "cy": 0.5, "w": 0.1, "h": 0.1}]
+    a_polygon = [{"subject": "leaf", "conf": 0.9,
+                  "points": [[0.1, 0.1], [0.3, 0.1], [0.3, 0.4]]}]
+
+    res_boxes = stage_proposals(image_path, assignments=assignments, boxes=a_box)
+    assert "error" in res_boxes and "assignments cannot be combined" in res_boxes["error"]
+
+    res_polygons = stage_proposals(image_path, assignments=assignments, polygons=a_polygon)
+    assert "error" in res_polygons and "assignments cannot be combined" in res_polygons["error"]
+
+    # The admit case: assignments alone, the regime the combined calls above tried to pair.
+    admitted = stage_proposals(image_path, assignments=assignments)
+    assert "error" not in admitted and admitted["proposal_count"] == 1
+
+
+def test_stage_proposals_treats_an_empty_boxes_list_beside_assignments_as_no_shapes_given(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An empty ``boxes``/``polygons`` list carries no shape at all, so it is not "combined with
+    boxes/polygons" any more than omitting the argument would be: the assignments regime runs."""
+    image_path = _staged_assignments_image(tmp_path, monkeypatch)
+    assignments = [{"candidate_id": 1, "subject": "leaf"}]
+
+    admitted = stage_proposals(image_path, assignments=assignments, boxes=[])
+    assert "error" not in admitted and admitted["proposal_count"] == 1
+
+
+def test_stage_proposals_refuses_model_name_beside_assignments(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    image_path = _staged_assignments_image(tmp_path, monkeypatch)
+    assignments = [{"candidate_id": 1, "subject": "leaf"}]
+
+    res = stage_proposals(image_path, assignments=assignments, model_name="sam")
+    assert "error" in res and "model_name is refused alongside assignments" in res["error"]
+
+    # The admit case: the identical assignments call with no model_name.
+    admitted = stage_proposals(image_path, assignments=assignments)
+    assert "error" not in admitted and admitted["proposal_count"] == 1
+
+
+def test_stage_proposals_refuses_boxes_or_polygons_without_model_name(tmp_path: Path) -> None:
+    root = tmp_path / "proj"
+    date = "2026-02-11"
+    _image(root, date, "IMG_0206", size=(640, 480))
+    image_path = _img_path(root, date, "IMG_0206")
+    a_box = [{"subject": "leaf", "conf": 0.9, "cx": 0.5, "cy": 0.5, "w": 0.1, "h": 0.1}]
+    a_polygon = [{"subject": "leaf", "conf": 0.9,
+                  "points": [[0.1, 0.1], [0.3, 0.1], [0.3, 0.4]]}]
+
+    res_boxes = stage_proposals(image_path, boxes=a_box)
+    assert "error" in res_boxes and "model_name is required" in res_boxes["error"]
+
+    res_polygons = stage_proposals(image_path, polygons=a_polygon)
+    assert "error" in res_polygons and "model_name is required" in res_polygons["error"]
+
+    # The admit case: the identical boxes call with model_name stated.
+    admitted = stage_proposals(image_path, model_name="sam", boxes=a_box)
+    assert "error" not in admitted and admitted["staged"] == 1
+
+
 # ── Rings: the pixel-frame counterpart of points ─────────────────────────────
 
 

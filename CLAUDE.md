@@ -96,7 +96,9 @@ silently corrupts results and compounds across sessions.
   a record naming who and when, scoped to one subject on one image, read only under the bucket its
   writer stated. An empty label file alone is never a negative. Never delete empty label files
   without asking.
-- Never train or evaluate on an unconfirmed format: `tcip_annotation.format_io.detect_format` refuses rather than guesses, inherited by `load_annotations_any` and `annotation_tools.read_annotations`.
+- Never train or evaluate on an unconfirmed format: `tcip_annotation.format_io.detect_format`
+  refuses rather than guesses, inherited by `load_annotations_any` and
+  `annotation_tools.read_annotations`.
 - State changes go through `@audited` MCP tools, or an explicit `record_event`/
   `record_event_or_raise` emitter for code that is neither: the record is one store's three
   logs (the platform's, a dataset's own, a project's own; an adopted project's log and the
@@ -108,18 +110,17 @@ silently corrupts results and compounds across sessions.
   deliverables); approval for one does not extend to the next.
 - Persisted formats are frozen. `frozen-formats.json`, generated from the store registry by
   `scripts/generate_frozen_manifest.py` and held to it by `tests/test_frozen_manifest.py`, is the
-  commitment: every store's classification and version ceiling, total over the registry. The
-  version field is lazy (absence means the frozen version 1; the first writer of the field is
-  whichever change bumps a format), and the seam refuses, on read and on write, a version it
-  does not know. A bump is a deliberate change landed as its own reviewed family with its
-  obligations stated: the append-only audit log defines a new line shape without rewriting old
-  lines, a content-addressed document (a label, a checkpoint) states its digest-transition plan,
-  an array-topped store wraps into a versioned mapping. Unstable-by-design stores and interop
-  formats (COCO, other tools' formats, browser APIs) stay outside the freeze and are never
-  called legacy. Still no migration paths, fallbacks or shims at runtime: existing dev state and
-  the sample projects are conformed by one-off operator scripts. The manifest pins declarations
-  only; an undeclared shape change inside version 1 is caught by producer-fed round trips and
-  the review shape, not by the manifest.
+  commitment: every store's classification and version ceiling, total over the registry. The version
+  field is lazy (absence means the frozen version 1; the first writer of the field is whichever
+  change bumps a format), and the seam refuses, on read and on write, a version it does not know. A
+  bump is a deliberate change landed as its own reviewed family with its obligations stated: the
+  append-only audit log defines a new line shape without rewriting old lines, a content-addressed
+  document (a label, a checkpoint) states its digest-transition plan, an array-topped store wraps
+  into a versioned mapping. Unstable-by-design stores and interop formats (COCO, other tools'
+  formats, browser APIs) stay outside the freeze and are never called legacy. Still no migration
+  paths, fallbacks or shims at runtime: existing dev state and the sample projects are conformed by
+  one-off operator scripts. The manifest pins declarations only; an undeclared shape change inside
+  version 1 is caught by producer-fed round trips and the review shape, not by the manifest.
 - Enumerate the consumers before deleting anything; an assertion with no new home was a fact.
 - When two code paths must agree, call one from the other; a second implementation of the
   agreement drifts silently and is this repo's most repeated defect. A consistency check whose
@@ -141,19 +142,19 @@ composer or registry (`toolkit-inventory` maps the pieces, the derivations and t
 `model_source`/`training_source`/`dataset_source` seams). A detector at `in_chans != 3` needs
 per-band `image_mean`/`image_std` from `derivations.band_normalization_stats` through
 `builder_kwargs`; `build_detector` refuses without them. You can see images: `tcip_annotation.viz`'s
-renderers, `vision_tools.visualize` and `scripts/visualize.py` write to `.tcip/artifacts/viz/`;
-read the path with your image-capable tool, describe, then recommend. External phenotyping resources (PlantCV and the like) are read for general
-techniques only, never for a per-trait pipeline; the endpoint is a trained model.
+renderers, `vision_tools.visualize` and `scripts/visualize.py` write to `.tcip/artifacts/viz/`; read
+the path with your image-capable tool, describe, then recommend. External phenotyping resources
+(PlantCV and the like) are read for general techniques only, never for a per-trait pipeline; the
+endpoint is a trained model.
 
 ## Working a change
 
 - Every change touching a persisted field, a refusal, an operating-point stamp or a delivery gate
   takes the full review shape: design against the code, an adversarial read of the design, a
-  cross-family round, an implementer in a worktree, land and gate, an adversarial read of the
-  landed commits, a fix-up with the same gates. Relaxing it is the owner's call in a brief. A
-  defect fix that moves no persisted field takes an implementer, a landed read and a fix-up.
-  Readers are briefed to refute, one read workflow at a time, each finding re-run by an
-  independent refuter.
+  cross-family round, an implementer in a worktree, land and gate, an adversarial read of the landed
+  commits, a fix-up with the same gates. Relaxing it is the owner's call in a brief. A defect fix
+  that moves no persisted field takes an implementer, a landed read and a fix-up. Readers are
+  briefed to refute, one read workflow at a time, each finding re-run by an independent refuter.
 - Model tiering, stated per delegation: Fable for design and adjudication, Opus for adversarial
   reads and synthesis, Sonnet for implementation and fail-before proofs, Haiku
   (`claude-haiku-4-5-20251001`) for sweeps. Cross-family review runs `scripts/cross_family_ask.py`
@@ -190,12 +191,11 @@ techniques only, never for a per-trait pipeline; the endpoint is a trained model
 - mypy suppressions are enabled per module as a family touches it, never one global flip.
 - Commits: one concern each, in dependency order, LF endings, messages stating the standing
   constraint the change installs (no session narrative, report ids, batch numbers or dates).
-- Every session ends with `write_retrospective`; when a claude-context server is configured for
-  the session, both its indexes rebuilt and confirmed settled by two `get_indexing_status`
-  readings minutes apart with identical counts (the status string alone is not a signal; chunks
-  equal to files means in flight); and the handoff rewritten: `docs/recent-summary.md`, the open
-  material in `docs/current-task.md`, and the next-session prompt, for a session with none of
-  your context.
+- Every session ends with `write_retrospective`; when a claude-context server is configured for the
+  session, both its indexes rebuilt and confirmed settled by two `get_indexing_status` readings
+  minutes apart with identical counts (the status string alone is not a signal; chunks equal to
+  files means in flight); and the handoff rewritten: `docs/recent-summary.md`, the open material in
+  `docs/current-task.md`, and the next-session prompt, for a session with none of your context.
 
 ## Commands
 

@@ -193,8 +193,8 @@ def test_consolidated_tools_present_and_removed_absent():
         "list_registered_models",
         # Merged away: stage_proposals(assignments=...) serves the accepted-candidates regime.
         "stage_accepted_proposals",
-        # Demoted to a library call under the admission standard (packages/tcip-mcp/CLAUDE.md):
-        # launch_training and the web /validate route call the function directly.
+        # Demoted to a library call plus scripts/preflight_config.py: launch_training calls the
+        # function directly, no web route calls it.
         "preflight_config",
         # Demoted to a library call: the agent reads a label file through it directly.
         "read_annotations",

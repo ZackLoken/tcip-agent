@@ -221,6 +221,9 @@ def visualize(
 ) -> dict:
     """Render annotations, predictions, a GT-vs-prediction comparison, or a sample grid.
 
+    Not an MCP tool: run through ``scripts/visualize.py``, per the admission standard
+    (packages/tcip-mcp/CLAUDE.md), while staying importable for its own tests.
+
     One entry point for the common renders (replaces the former visualize_annotations /
     visualize_predictions / visualize_comparison / visualize_dataset_sample). Saves to
     .tcip/artifacts/viz/ and returns ``image_path`` for the agent's own image-capable read tool.
@@ -949,6 +952,11 @@ def overlay_reference_grid(
     overlap: float = 0.0,
 ) -> dict:
     """Render image with a labeled reference-grid overlay for spatial referencing.
+
+    Not an MCP tool: run through ``scripts/overlay_reference_grid.py``, per the admission standard
+    (packages/tcip-mcp/CLAUDE.md), while staying importable for its own tests and for
+    ``segment_prompt(grid_cells=...)``, which shares its underlying grid geometry
+    (``reference_grid.reference_cells``) without calling this function itself.
 
     The grid lives in the raster's native pixel frame: square cells of ``tile_size``
     native pixels named spreadsheet-style ('A1' top-left; letter columns A-Z then AA,
