@@ -1,10 +1,9 @@
-"""What validate_data_quality reports, and what it must never quietly claim.
+"""scripts/doctor.py's check_data_quality: what it reports, and what it must never quietly claim.
 
-Two standing facts the caller relies on. First, a label store whose format the detector refused
-is a different state from a dataset that simply has no labels, and the report has to keep the two
-apart rather than collapsing them into one reassuring shape. Second, the report's own vocabulary
-is load bearing: a warning and an error are not interchangeable, and the subjects listed are the
-ones present in the label files, not the ones a registry declares.
+Folded in from the retired per-file quality tool. Two standing facts the caller relies on.
+First, a label store whose format the detector refused is a distinct finding from a dataset that
+simply has no labels of that shape. Second, the finding's own vocabulary is load bearing: a
+warning and an error are not interchangeable.
 """
 
 from __future__ import annotations
@@ -15,7 +14,7 @@ from pathlib import Path
 from tcip_annotation import json_io
 from tcip_annotation.state import Annotation, BBox
 
-from tcip_mcp.tools.data_tools import validate_data_quality
+from scripts import doctor
 
 DATE = "2-11-26"
 
@@ -27,10 +26,15 @@ def _write_image(path: Path, width: int, height: int) -> None:
     Image.new("RGB", (width, height), color=(90, 120, 60)).save(path)
 
 
-def test_undetectable_label_store_is_reported_as_labels_present_without_a_format(tmp_path: Path):
-    """Labels present but undetectable reports the labels it found and no format; a dataset with
-    no annotations dir at all reports no format and no labels. The two states stay distinguishable
-    from the report alone."""
+def _check(root: Path) -> list[tuple[str, str]]:
+    findings: list[tuple[str, str]] = []
+    doctor.check_data_quality(root, findings)
+    return findings
+
+
+def test_an_undetectable_label_store_is_an_error_naming_the_format_failure(tmp_path: Path):
+    """Labels present but undetectable is an error per file, naming the detection failure; a
+    dataset with no annotations dir at all yields no finding from this check at all."""
     root = tmp_path / "undetectable"
     labels_dir = root / "annotations" / DATE
     labels_dir.mkdir(parents=True)
@@ -41,24 +45,20 @@ def test_undetectable_label_store_is_reported_as_labels_present_without_a_format
             encoding="utf-8",
         )
 
-    refused = validate_data_quality(str(root))
-    assert refused["format"] is None
-    assert refused["total_labels"] == 2
-    assert refused["total_images"] == 2
-    assert refused["subjects"] == []
+    findings = _check(root)
+    assert len(findings) == 2
+    assert all(level == "error" and "cannot determine annotation format" in msg
+              for level, msg in findings)
 
     bare = tmp_path / "unlabelled"
     for stem in ("plotA_0_0", "plotA_0_1"):
         _write_image(bare / "images" / DATE / f"{stem}.jpg", 96, 64)
 
-    no_labels = validate_data_quality(str(bare))
-    assert no_labels["format"] is None
-    assert no_labels["total_labels"] == 0
-    assert no_labels["total_images"] == 2
+    assert _check(bare) == []
 
 
-def test_a_label_with_no_matching_image_is_an_error_that_denies_validity(tmp_path: Path):
-    """An orphan label is an error-level issue, and an error is what makes the dataset invalid."""
+def test_a_label_with_no_matching_image_is_an_error(tmp_path: Path):
+    """An orphan label is an error-level finding."""
     root = tmp_path / "ds"
     labels_dir = root / "annotations" / DATE
     labels_dir.mkdir(parents=True)
@@ -71,19 +71,15 @@ def test_a_label_with_no_matching_image_is_an_error_that_denies_validity(tmp_pat
             96, 64,
         )
 
-    result = validate_data_quality(str(root))
+    findings = _check(root)
 
-    errors = [i for i in result["issues"] if i["level"] == "error"]
+    errors = [msg for level, msg in findings if level == "error"]
     assert len(errors) == 1
-    assert Path(errors[0]["file"]).stem == "plotZ_9_9"
-    assert result["is_valid"] is False
+    assert "plotZ_9_9" in errors[0] and "no matching image" in errors[0]
 
 
-def test_a_coco_image_missing_from_the_images_dir_is_a_warning_that_leaves_the_dataset_valid(
-    tmp_path: Path,
-):
-    """A COCO entry pointing at an absent image file is reported at warning level, and a warning
-    on its own never denies validity."""
+def test_a_coco_image_missing_from_the_images_dir_is_a_warning(tmp_path: Path):
+    """A COCO entry pointing at an absent image file is a warning, never an error."""
     root = tmp_path / "ds"
     for stem in ("plotA_0_0", "plotB_0_0"):
         _write_image(root / "images" / DATE / f"{stem}.jpg", 96, 64)
@@ -100,23 +96,16 @@ def test_a_coco_image_missing_from_the_images_dir_is_a_warning_that_leaves_the_d
         "categories": [{"id": 1, "name": "catkin"}],
     }), encoding="utf-8")
 
-    result = validate_data_quality(str(root))
+    findings = _check(root)
 
-    assert result["format"] == "coco"
-    warnings = [i for i in result["issues"] if i["level"] == "warning"]
-    assert len(warnings) == 1
-    assert "plotC_0_0.jpg" in warnings[0]["message"]
-    assert [i for i in result["issues"] if i["level"] == "error"] == []
-    assert result["is_valid"] is True
+    assert [level for level, _ in findings] == ["warn"]
+    assert "plotC_0_0.jpg" in findings[0][1]
 
 
-def test_a_store_mixing_shapes_is_reported_invalid_even_when_a_coco_file_sorts_first(
-    tmp_path: Path,
-):
-    """Format is decided per label file, not once for the whole dataset: a COCO-shaped file
-    sorting first must not make every other file in the same directory get silently parsed as
-    COCO too, which would hide a real defect (here, an orphan per-image label) behind a report
-    of nothing wrong."""
+def test_format_is_decided_per_file_not_once_for_the_whole_directory(tmp_path: Path):
+    """A COCO-shaped file sorting first must not make every other file in the same directory get
+    silently parsed as COCO too, which would hide a real defect (here, an orphan per-image label)
+    behind a report of nothing wrong."""
     root = tmp_path / "ds"
     labels_dir = root / "annotations" / DATE
     labels_dir.mkdir(parents=True)
@@ -132,37 +121,30 @@ def test_a_store_mixing_shapes_is_reported_invalid_even_when_a_coco_file_sorts_f
         [Annotation(subject="catkin", geometry=BBox(1, 1, 8, 8))], 100, 100,
     )
 
-    result = validate_data_quality(str(root))
+    findings = _check(root)
 
-    # format names every distinct shape present, not the first-sorted file's shape alone.
-    assert sorted(result["format"]) == ["coco", "json"]
-    errors = [i for i in result["issues"] if i["level"] == "error"]
+    errors = [msg for level, msg in findings if level == "error"]
     assert len(errors) == 1
-    assert Path(errors[0]["file"]).stem == "1_orphan"
-    assert result["is_valid"] is False
+    assert "1_orphan" in errors[0] and "no matching image" in errors[0]
 
 
-def test_an_empty_label_not_confirmed_negative_is_an_error_that_denies_validity(tmp_path: Path):
+def test_an_empty_label_not_confirmed_negative_is_an_error(tmp_path: Path):
     """A platform-written empty document is not a zero-byte file, so a size check never catches
-    it; an empty label with no human confirmation is unannotated, not a negative, and reporting
-    it as a mere warning would let is_valid stay true over exactly the state that corrupts
-    training."""
+    it; an empty label with no human confirmation is unannotated, not a negative."""
     root = tmp_path / "ds"
     labels_dir = root / "annotations" / DATE
     labels_dir.mkdir(parents=True)
     _write_image(root / "images" / DATE / "plotA_0_0.jpg", 96, 64)
     json_io.write_annotations(labels_dir / "plotA_0_0.json", [], 96, 64, keep_empty=True)
 
-    result = validate_data_quality(str(root))
+    findings = _check(root)
 
-    errors = [i for i in result["issues"] if i["level"] == "error"]
+    errors = [msg for level, msg in findings if level == "error"]
     assert len(errors) == 1
-    assert Path(errors[0]["file"]).stem == "plotA_0_0"
-    assert "confirmed negative" in errors[0]["message"]
-    assert result["is_valid"] is False
+    assert "plotA_0_0" in errors[0] and "confirmed negative" in errors[0]
 
 
-def test_a_confirmed_negative_empty_label_stays_valid(tmp_path: Path):
+def test_a_confirmed_negative_empty_label_stays_clean(tmp_path: Path):
     """The rail this suppression exists for: a human's Complete-with-nothing must not be flagged
     as though nobody had looked."""
     from tcip_mcp.dataset_layout import replace_image_status_store, status_bucket, status_records
@@ -177,10 +159,7 @@ def test_a_confirmed_negative_empty_label_stays_valid(tmp_path: Path):
             {"plotA_0_0.jpg": "negative"}, recorded_by="user:breeder"),
     })
 
-    result = validate_data_quality(str(root))
-
-    assert result["issues"] == []
-    assert result["is_valid"] is True
+    assert _check(root) == []
 
 
 def test_a_malformed_root_label_candidate_is_reported_instead_of_discarded(tmp_path: Path):
@@ -191,13 +170,11 @@ def test_a_malformed_root_label_candidate_is_reported_instead_of_discarded(tmp_p
     _write_image(root / "images" / DATE / "plotA_0_0.jpg", 96, 64)
     (root / "annotations.json").write_text(json.dumps({"foo": "bar"}), encoding="utf-8")
 
-    result = validate_data_quality(str(root))
+    findings = _check(root)
 
-    assert result["total_labels"] == 1
-    errors = [i for i in result["issues"] if i["level"] == "error"]
+    errors = [msg for level, msg in findings if level == "error"]
     assert len(errors) == 1
-    assert Path(errors[0]["file"]).name == "annotations.json"
-    assert result["is_valid"] is False
+    assert "annotations.json" in errors[0]
 
 
 def test_a_root_coco_candidate_sits_beside_the_per_image_tree_not_in_place_of_it(tmp_path: Path):
@@ -213,15 +190,14 @@ def test_a_root_coco_candidate_sits_beside_the_per_image_tree_not_in_place_of_it
         "images": [], "annotations": [], "categories": [{"id": 1, "name": "catkin"}],
     }), encoding="utf-8")
 
-    result = validate_data_quality(str(root))
+    findings = _check(root)
 
-    assert result["total_labels"] == 3
-    errors = [i for i in result["issues"] if i["level"] == "error"]
-    assert {Path(e["file"]).stem for e in errors} == {"plotA_0_0", "plotB_0_0"}
-    assert result["is_valid"] is False
+    errors = [msg for level, msg in findings if level == "error"]
+    assert {"plotA_0_0" in e or "plotB_0_0" in e for e in errors} == {True}
+    assert len(errors) == 2
 
 
-def test_an_npz_captures_confirmed_negative_is_recognized(tmp_path: Path):
+def test_an_npz_capture_confirmed_negative_is_recognized(tmp_path: Path):
     """The confirmed-negative name is resolved through the layout's own extension set, not the
     six-extension list an ``.npz`` capture falls outside of."""
     from tcip_mcp.dataset_layout import replace_image_status_store, status_bucket, status_records
@@ -237,11 +213,7 @@ def test_an_npz_captures_confirmed_negative_is_recognized(tmp_path: Path):
             {"plotA_0_0.npz": "negative"}, recorded_by="user:breeder"),
     })
 
-    result = validate_data_quality(str(root))
-
-    assert not any("confirmed negative" in i["message"] for i in result["issues"])
-    assert result["total_images"] == 1
-    assert not any("No matching image" in i["message"] for i in result["issues"])
+    assert _check(root) == []
 
 
 def test_an_undecodable_label_is_a_finding_beside_a_readable_json_and_a_readable_coco_file(
@@ -250,7 +222,7 @@ def test_an_undecodable_label_is_a_finding_beside_a_readable_json_and_a_readable
     """Coverage, not a guard: an undecodable document is already refused by ``detect_format``'s
     own decode before the per-format read this test's fixture exercises is ever reached, so this
     passes unchanged whichever reader the json branch calls. It records that the refusal still
-    surfaces as a per-file error finding beside a readable json and coco candidate in the same
+    surfaces as a per-file finding beside a readable json and coco candidate in the same
     directory, never propagating out of the walk."""
     root = tmp_path / "ds"
     labels_dir = root / "annotations" / DATE
@@ -272,49 +244,9 @@ def test_an_undecodable_label_is_a_finding_beside_a_readable_json_and_a_readable
         "categories": [{"id": 1, "name": "leaf"}],
     }), encoding="utf-8")
 
-    result = validate_data_quality(str(root))
+    findings = _check(root)
 
-    assert result["total_labels"] == 3
-    assert sorted(result["format"]) == ["coco", "json"]
-    errors = [i for i in result["issues"] if i["level"] == "error"]
+    errors = [msg for level, msg in findings if level == "error"]
     assert len(errors) == 1
-    assert Path(errors[0]["file"]).stem == "plotB_0_0"
-    assert "will not read" in errors[0]["message"]
-    assert [i for i in result["issues"] if i["level"] == "warning"] == []
-    assert result["subjects"] == ["catkin", "leaf"]
-    assert result["is_valid"] is False
-
-
-def test_reported_subjects_are_the_ones_present_in_the_label_files(tmp_path: Path):
-    """The subject list is a census of every label file's contents, not a reading of the
-    registry: a subject declared but never annotated is absent, and a subject annotated only in
-    the last file is present."""
-    from tcip_mcp.class_registry import ClassRegistry, Subject, write_registry
-
-    root = tmp_path / "ds"
-    labels_dir = root / "annotations" / DATE
-    labels_dir.mkdir(parents=True)
-    write_registry(root / "classes.json", ClassRegistry(subjects=(
-        Subject(name="catkin", description="a hazelnut catkin"),
-        Subject(name="leaf", description="a leaf"),
-        Subject(name="bush", description="a whole plant"),
-        Subject(name="nut", description="a nut, never annotated here"),
-    )))
-    by_stem = {
-        "plotA_0_0": ["catkin"],
-        "plotB_0_0": ["catkin", "leaf"],
-        "plotC_0_0": ["bush"],
-    }
-    for stem, subjects in by_stem.items():
-        _write_image(root / "images" / DATE / f"{stem}.jpg", 96, 64)
-        json_io.write_annotations(
-            labels_dir / f"{stem}.json",
-            [Annotation(subject=s, geometry=BBox(11, 7, 39, 51)) for s in subjects],
-            96, 64,
-        )
-
-    result = validate_data_quality(str(root))
-
-    assert result["format"] == "json"
-    assert result["subjects"] == ["bush", "catkin", "leaf"]
-    assert result["is_valid"] is True
+    assert "plotB_0_0" in errors[0] and "will not read" in errors[0]
+    assert [level for level, _ in findings if level == "warn"] == []

@@ -47,7 +47,9 @@ reaching for again versus one built narrowly for a specific past investigation.
   recurring themes, for human review before calling `record_distillation_pass`.
 - `doctor.py` - read-only scan of a live project for state inconsistencies code audits can't
   see: status-store vs disk disagreements on negatives, registry entries pointing at
-  missing/test-fixture checkpoints, provenance smells, orphaned labels. Run at session start.
+  missing/test-fixture checkpoints, provenance smells, orphaned labels, and (`check_data_quality`,
+  the retired per-file quality tool folded in there) per-file annotation quality across any
+  supported format. Run at session start.
 - `export_store.py` - writes a root's database-held records and logs back out as files, in
   the layout each store's locator names, so the doctor, an archive and anything else that
   reads state off disk reads what the database currently holds. Refuses rather than writing

@@ -72,6 +72,12 @@ MERGED = [
     ("stage_accepted_proposals", "stage_proposals"),
 ]
 
+# A demotion folded into a script with no single surviving door gets the same whole-tree sweep a
+# merge's old name gets; there is no survivor tool name to check registration of, only "script".
+RETIRED = [
+    ("validate_data_quality", "script"),
+]
+
 _OWN_FILE = str(Path(__file__).relative_to(REPO_ROOT)).replace("\\", "/")
 _EXCLUDED_FILES = {_OWN_FILE, "tests/test_tool_manifest.py"}
 _EXCLUDED_PREFIXES = ("docs/",)
@@ -187,6 +193,13 @@ def test_merge_survivor_is_registered(old, new):
 
 @pytest.mark.parametrize("old,new", MERGED, ids=[f"{o}->{n}" for o, n in MERGED])
 def test_merged_away_name_survives_nowhere_tracked(old, new):
+    files = [f for f in _tracked_files() if _in_scope(f)]
+    sites = _old_name_sites(old, files)
+    assert not sites, f"{old!r} still appears in: {sites}"
+
+
+@pytest.mark.parametrize("old,new", RETIRED, ids=[f"{o}->{n}" for o, n in RETIRED])
+def test_retired_name_survives_nowhere_tracked(old, new):
     files = [f for f in _tracked_files() if _in_scope(f)]
     sites = _old_name_sites(old, files)
     assert not sites, f"{old!r} still appears in: {sites}"

@@ -724,12 +724,11 @@ Docstring is the function's docstring first line, verbatim.
 | `save_annotations` | `annotation_tools.py:132` | yes | Write an image's annotations to its single per-image label file (all subjects, one file). |
 | `write_class_map` | `annotation_tools.py:470` | yes | Author the dataset's nested class registry, a thin wrapper over ``class_registry``. |
 
-### data_tools.py (3 tools)
+### data_tools.py (2 tools)
 
 | tool | line | audited | docstring first line |
 |---|---|---|---|
 | `freeze_split_manifest` | `data_tools.py:222` | yes | Freeze a finished run's own drawn train/val partition into a ``split_manifest`` record, |
-| `validate_data_quality` | `data_tools.py:575` | yes | Run quality checks on a dataset (any supported annotation format). |  <!-- queued: P5-18 unify -->
 | `draw_splits` | `data_tools.py:729` | yes | Compute a leakage-free, annotation-stratified train/val/calibration split. |
 
 ### experiment_tools.py (3 tools)

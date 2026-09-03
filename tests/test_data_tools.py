@@ -9,13 +9,19 @@ from tcip_annotation.state import Annotation, BBox
 
 from pathlib import Path
 
+from scripts import doctor
 from tcip_mcp.tools.data_tools import (
     read_split_manifest_dir,
     scan_dataset,
-    validate_data_quality,
     draw_splits,
     split_manifest_key,
 )
+
+
+def _quality_findings(root) -> list[tuple[str, str]]:
+    findings: list[tuple[str, str]] = []
+    doctor.check_data_quality(Path(root), findings)
+    return findings
 
 
 def test_scan_dataset(data_dir: Path):
@@ -31,44 +37,20 @@ def test_scan_dataset_not_found():
     assert "error" in result
 
 
-def test_validate_data_quality(data_dir: Path):
-    result = validate_data_quality(str(data_dir))
-    assert result["total_images"] == 3
-    assert result["total_labels"] == 3
-    assert result["is_valid"] is True
-    assert "catkin" in result["subjects"]
+def test_doctor_check_data_quality(data_dir: Path):
+    findings = _quality_findings(data_dir)
+    assert not [f for f in findings if f[0] == "error"]
 
 
-def test_validate_data_quality_missing_dir():
-    assert "error" in validate_data_quality("/nonexistent/path/xyz123")
+def test_doctor_check_data_quality_missing_dir(tmp_path: Path):
+    # _scan_dataset's own rglob over a nonexistent path yields nothing rather than raising; a
+    # missing project root is doctor.main()'s own upfront refusal, not this check's job.
+    missing = tmp_path / "nonexistent" / "xyz123"
+    findings = _quality_findings(missing)
+    assert not [f for f in findings if f[0] == "error"]
 
 
-def test_scan_dataset_and_validate_data_quality_count_the_same_labels(tmp_path: Path):
-    """scan_dataset's labels_count and validate_data_quality's total_labels are the same list
-    over one root: the per-image tree plus a present root candidate, a review baseline excluded
-    from both the same way."""
-    root = tmp_path / "ds"
-    images_dir = root / "images" / "2-11-26"
-    images_dir.mkdir(parents=True)
-    labels_dir = root / "annotations" / "2-11-26"
-    labels_dir.mkdir(parents=True)
-    for stem in ("plotA_0_0", "plotB_0_0"):
-        (images_dir / f"{stem}.jpg").write_bytes(b"\xff\xd8\xff")
-        json_io.write_annotations(labels_dir / f"{stem}.json", [], 32, 32, keep_empty=True)
-    baselines = labels_dir / ".original"
-    baselines.mkdir()
-    json_io.write_annotations(baselines / "plotA_0_0.json", [], 32, 32, keep_empty=True)
-    (root / "annotations.json").write_text(
-        '{"images": [], "annotations": [], "categories": []}', encoding="utf-8"
-    )
-
-    scan_result = scan_dataset(str(root))
-    quality_result = validate_data_quality(str(root))
-
-    assert scan_result["labels_count"] == quality_result["total_labels"] == 3
-
-
-def test_scan_and_validate_report_a_reserved_stem_the_census_still_counted(tmp_path: Path):
+def test_scan_dataset_reports_a_reserved_stem_the_census_still_counted(tmp_path: Path):
     """The census walks with a raw glob and counts a label named like a bucket's own provenance
     stamp, unlike every bucket walk through prediction_documents; reserved_name_labels names it so
     a caller does not read the difference as a disagreement."""
@@ -84,13 +66,11 @@ def test_scan_and_validate_report_a_reserved_stem_the_census_still_counted(tmp_p
     reserved_label = str(labels_dir / "operating_point.json")
 
     scan_result = scan_dataset(str(root))
-    quality_result = validate_data_quality(str(root))
 
     assert scan_result["reserved_name_labels"] == [reserved_label]
-    assert quality_result["reserved_name_labels"] == [reserved_label]
 
 
-def test_scan_and_validate_report_a_reserved_stem_image_with_no_label(tmp_path: Path):
+def test_scan_dataset_reports_a_reserved_stem_image_with_no_label(tmp_path: Path):
     """An image whose own stem is reserved for a bucket's own provenance stamp must be named,
     not folded into unlabelled_images with no signal that its label can never be read through
     any bucket walk."""
@@ -102,10 +82,8 @@ def test_scan_and_validate_report_a_reserved_stem_image_with_no_label(tmp_path: 
     reserved_image = str(images_dir / "operating_point.jpg")
 
     scan_result = scan_dataset(str(root))
-    quality_result = validate_data_quality(str(root))
 
     assert scan_result["reserved_name_images"] == [reserved_image]
-    assert quality_result["reserved_name_images"] == [reserved_image]
     assert scan_result["unlabelled_images"] == 2
 
 
@@ -1215,10 +1193,10 @@ def test_draw_splits_materialize_negative_carry_reads_only_the_materializing_dat
     assert record["recorded_by"] == "user:right"
 
 
-def test_validate_data_quality_admits_a_confirmed_negative_under_dated_labels_flat_images(
+def test_doctor_check_data_quality_admits_a_confirmed_negative_under_dated_labels_flat_images(
     tmp_path: Path,
 ):
-    """A human-confirmed negative resolves the same way validate_data_quality reads it as the
+    """A human-confirmed negative resolves the same way the doctor's check reads it as the
     draw that admits it: labels dated, images never split into date buckets."""
     from tcip_mcp.dataset_layout import record_image_statuses, status_bucket
 
@@ -1231,10 +1209,7 @@ def test_validate_data_quality_admits_a_confirmed_negative_under_dated_labels_fl
         root, status_bucket("leaf", "2-11-26"), {"p0.jpg": "negative"}, recorded_by="user:right",
     )
 
-    result = validate_data_quality(str(root))
-
-    assert result["is_valid"] is True
-    assert result["issues"] == []
+    assert _quality_findings(root) == []
 
 
 def test_read_split_manifest_dir_admits_the_writers_own_record(tmp_path: Path):
