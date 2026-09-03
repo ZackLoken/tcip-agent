@@ -85,7 +85,7 @@ function sameKeyParts(a: CoverageKeyParts | null, b: CoverageKeyParts | null): b
 function sameWorkingScaleBar(a: WorkingScale | null, b: WorkingScale | null): boolean {
   if (a === b) return true;
   if (a === null || b === null) return false;
-  return a.value === b.value && a.source === b.source;
+  return a.zoom === b.zoom && a.source === b.source;
 }
 
 /** The tracker's own hold: a stored coverage record on a lattice other than the current one
@@ -547,7 +547,7 @@ export class CoverageTracker {
       (c) => !meetsBar(this.seenAtScaleMap.get(c.name) ?? null, bar),
     ).length;
     if (unsweptCount === 0) return null;
-    return { unsweptCount, total: this.cells.length, bar: bar.value };
+    return { unsweptCount, total: this.cells.length, bar: bar.zoom };
   }
 
   /** Send any owed facts now, at once (called before a reset and on unmount): the identity

@@ -57,7 +57,7 @@ function attestedViewLine(cell: string, entry: CellAttestedView | undefined): st
     return `${cell} attested at ${n} zoom, seen on record at ${s}, no working scale recorded at attestation`;
   }
   const met = meetsBar(atScale, workingScale);
-  const against = ` against a working scale of ${(workingScale.value * 100).toFixed(1)}%`;
+  const against = ` against a working scale of ${(workingScale.zoom * 100).toFixed(1)}%`;
   return `${cell} attested at ${n} zoom, seen on record at ${s}${against}${met ? "" : " (below it)"}`;
 }
 
@@ -132,7 +132,7 @@ function replaceNoticeText(replaceRequired: ReplaceRequired): string {
 /** The panel's own visible working-scale line: states the set zoom and who set it, read
  *  verbatim off `WorkingScale.source` rather than reassembled here. */
 function workingScaleLineText(scale: WorkingScale, subject: string): string {
-  return `Working scale for ${subject}: ${(scale.value * 100).toFixed(1)}% (${scale.source})`;
+  return `Working scale for ${subject}: ${(scale.zoom * 100).toFixed(1)}% (${scale.source})`;
 }
 
 function attestLabel(subject: string, cell: string, complete: boolean, stale: boolean): string {
@@ -361,8 +361,8 @@ export function CoverageChrome(props: {
     "rounded-md border bg-tcip-panel/95 px-3 py-1.5 text-[11px] shadow-lg backdrop-blur";
 
   const bar = props.workingScale;
-  const barPct = bar ? bar.value * 100 : null;
-  const belowFitScale = bar !== null && props.fitScale !== null && bar.value < props.fitScale;
+  const barPct = bar ? bar.zoom * 100 : null;
+  const belowFitScale = bar !== null && props.fitScale !== null && bar.zoom < props.fitScale;
   const workingScaleLine =
     bar && props.subject ? workingScaleLineText(bar, props.subject) : props.workingScaleReason;
   const coarserLine =

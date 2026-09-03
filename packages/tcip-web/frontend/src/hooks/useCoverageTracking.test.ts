@@ -32,8 +32,8 @@ const NULL_VIEWING = {
   base_served_size: null,
 };
 
-function bar(value: number): WorkingScale {
-  return { value, source: "s" };
+function bar(zoom: number): WorkingScale {
+  return { zoom, source: "s" };
 }
 
 function trackingArgs(subject: string | null, workingScale: WorkingScale | null = null) {
