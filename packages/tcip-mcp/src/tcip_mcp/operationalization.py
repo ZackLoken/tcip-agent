@@ -579,7 +579,7 @@ def _state_4_text(spec: TraitSpec, delivery_kind: str, field: str) -> str:
         f"Delivery refused for trait {spec.name!r}: its confirmed operationalization for a "
         f"{delivery_kind} delivery rests on {field}, which this trait's spec leaves empty. Nothing "
         "resolves the call the statement describes, so there is no measurement to deliver. Record "
-        "the breeder's value with update_trait_spec_fields(project_root=..., "
+        "the breeder's value with revise_trait_spec(project_root=..., "
         f"trait_name={spec.name!r}, ...), then restate and re-confirm."
     )
 

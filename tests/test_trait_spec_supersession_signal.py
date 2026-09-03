@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 from tcip_mcp import operationalization as op
-from tcip_mcp.tools.trait_spec_authoring_tools import update_trait_spec_fields
+from tcip_mcp.tools.trait_spec_authoring_tools import revise_trait_spec
 from tests import _operationalization_fixtures as fx
 
 
@@ -30,7 +30,7 @@ def _confirmed_crossing(project: Path) -> dict:
 def test_moving_a_constituting_field_reports_the_superseded_confirmation(project: Path):
     _confirmed_crossing(project)
 
-    result = update_trait_spec_fields(
+    result = revise_trait_spec(
         str(project), fx.CROSSING_TRAIT, {"positive_class_name": "shed"},
     )
 
@@ -44,7 +44,7 @@ def test_moving_a_constituting_field_reports_the_superseded_confirmation(project
 def test_moving_a_field_no_confirmation_rests_on_reports_nothing(project: Path):
     _confirmed_crossing(project)
 
-    result = update_trait_spec_fields(
+    result = revise_trait_spec(
         str(project), fx.CROSSING_TRAIT, {"notes": "the breeder walked the row again"},
     )
 
@@ -54,7 +54,7 @@ def test_moving_a_field_no_confirmation_rests_on_reports_nothing(project: Path):
 def test_an_unconfirmed_statement_is_not_reported_as_superseded(project: Path):
     fx.state_crossing(project)
 
-    result = update_trait_spec_fields(
+    result = revise_trait_spec(
         str(project), fx.CROSSING_TRAIT, {"positive_class_name": "shed"},
     )
 
@@ -67,7 +67,7 @@ def test_only_the_kinds_resting_on_the_moved_field_are_reported(project: Path):
     ordinal = fx.state_aggregate(project, op.PER_PLANT_ORDINAL_AGGREGATE)
     fx.confirm(project, fx.COUNT_TRAIT, op.PER_PLANT_ORDINAL_AGGREGATE, ordinal)
 
-    result = update_trait_spec_fields(
+    result = revise_trait_spec(
         str(project), fx.COUNT_TRAIT, {"ordinal_agreement_floor": 0.8},
     )
 
@@ -81,7 +81,7 @@ def test_the_spec_is_written_to_the_project_the_call_names(project: Path, tmp_pa
     """The pinned platform root is another project, and the edit still lands in the named one."""
     other = fx.seed_project(tmp_path / "other_project")
 
-    update_trait_spec_fields(
+    revise_trait_spec(
         str(project), fx.CROSSING_TRAIT, {"positive_class_name": "shed"},
     )
 
@@ -92,7 +92,7 @@ def test_the_spec_is_written_to_the_project_the_call_names(project: Path, tmp_pa
 def test_the_reported_supersession_is_what_the_delivery_precondition_then_refuses_on(project: Path):
     _confirmed_crossing(project)
 
-    reported = update_trait_spec_fields(
+    reported = revise_trait_spec(
         str(project), fx.CROSSING_TRAIT, {"positive_class_name": "shed"},
     )["superseded"]
     spec, record, _ = fx.resolve(project, fx.CROSSING_TRAIT, op.STATE_CROSSING_DATES)

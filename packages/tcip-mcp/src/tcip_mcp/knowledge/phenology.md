@@ -39,7 +39,7 @@ flower elongation/receptivity call.
 > `state_trait_operationalization`, which confirms `state_crossing_dates`' own fields
 > (`positive_class_name`, `milestone_on`, `milestone_fractions`) and does not touch this
 > mapping; a disagreement over which crossing the majority date means is corrected on the
-> trait spec itself, through `update_trait_spec_fields` (or set at authoring time via
+> trait spec itself, through `revise_trait_spec` (or set at authoring time via
 > `author_trait_spec`), not this file. `positive_onset_date`
 > (first date any elongation appears) remains a separate helper, not the delivered trait.
 
@@ -100,14 +100,14 @@ there; never fork a second copy. So the agent composes tools end to end:
 `build_plant_mapping` → `run_inference` → (elongation call) → `compute_phenology`.
 
 Once a real localization-kind derivation (from actual GT box geometry) or a real breeder-answered
-count objective exists for this trait, persist it with `update_trait_spec_fields(project_root,
+count objective exists for this trait, persist it with `revise_trait_spec(project_root,
 trait_name, fields)`, the one audited write path for a `TraitSpec`'s fields (`count_objective`,
 `localization`, `positive_class_name`, ...; the positive class must be a value one of the measured
 subject's attributes declares in the delivered dataset's own class registry, checked when the
 crossing statement is made and again at every delivery). It refuses if the trait has no existing
 spec file; register one first with `author_trait_spec(project_root, trait, delivers, rationale,
 ...)`, which records the breeder's own account of the trait's measurement for their later
-confirmation in the GUI. `update_trait_spec_fields` re-validates the merged spec against
+confirmation in the GUI. `revise_trait_spec` re-validates the merged spec against
 `crops.yml` before writing. Never hand-write the trait's spec YAML directly.
 
 Don't confuse `score_predictions` (IoU GT-vs-prediction *eval* matching) with plant-GPS

@@ -39,6 +39,7 @@ RENAMES = [
     ("force_redraw_cal_holdout_split", "redraw_calibration_holdout"),
     ("make_splits", "draw_splits"),
     ("push_panel_data", "push_panel_event"),
+    ("update_trait_spec_fields", "revise_trait_spec"),
 ]
 
 _OWN_FILE = str(Path(__file__).relative_to(REPO_ROOT)).replace("\\", "/")
