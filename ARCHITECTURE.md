@@ -484,10 +484,10 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | scripts/export_store.py | Write a root's database-held records and logs back out as files. | 6 | 0 |
 | scripts/foreground_fn_candidates.py | Compute foreground-only high-confidence FN candidates per image. | 2 | 0 |
 | scripts/gate_baseline.py | Parse ci.yml's jobs and run the steps it declares, so a local pass means CI would pass too. | 0 | 0 |
-| scripts/generate_claude_skills.py | Render the thin `.claude/skills/<name>/SKILL.md` files from the canonical knowledge documents. | 1 | 0 |
 | scripts/generate_frontend_routes.py | Generate the browser's route-path module from the backend's registered routes. | 1 | 0 |
 | scripts/generate_frontend_types.py | Generate the browser's coverage-record types from the pydantic models that declare them. | 9 | 0 |
 | scripts/generate_frozen_manifest.py | Render the store registry's freeze classifications into the shipped frozen-formats.json; --check holds CI to the committed edition. | 2 | 0 |
+| scripts/generate_harness_discovery.py | Render the `.claude/skills/` and `.agents/skills/` SKILL.md files plus AGENTS.md's generated block from the canonical knowledge documents. | 1 | 0 |
 | scripts/import_project.py | Import an annotation project from a ZIP archive, through the demoted `import_project` function. | 3 | 0 |
 | scripts/inspect_baseline_weights.py | Print framework / model metadata from the baseline weights.pt. | 1 | 0 |
 | scripts/inspect_compute_resources.py | Report the host's current compute headroom, through the demoted `inspect_compute_resources` function. | 3 | 0 |
@@ -659,10 +659,10 @@ A module counts as zero-importer when no other module in its own scanned tree re
 | scripts | scripts/export_store.py |
 | scripts | scripts/foreground_fn_candidates.py |
 | scripts | scripts/gate_baseline.py |
-| scripts | scripts/generate_claude_skills.py |
 | scripts | scripts/generate_frontend_routes.py |
 | scripts | scripts/generate_frontend_types.py |
 | scripts | scripts/generate_frozen_manifest.py |
+| scripts | scripts/generate_harness_discovery.py |
 | scripts | scripts/import_project.py |
 | scripts | scripts/inspect_baseline_weights.py |
 | scripts | scripts/inspect_compute_resources.py |
@@ -778,7 +778,7 @@ Docstring is the function's docstring first line, verbatim.
 
 | tool | line | audited | docstring first line |
 |---|---|---|---|
-| `domain_knowledge` | `knowledge_tools.py:36` | yes | Read the platform's domain knowledge: trait semantics, workflow patterns, and per-crop |
+| `domain_knowledge` | `knowledge_tools.py:39` | yes | Read the platform's domain knowledge: trait semantics, workflow patterns, and per-crop |
 
 ### model_tools.py (3 tools)
 
