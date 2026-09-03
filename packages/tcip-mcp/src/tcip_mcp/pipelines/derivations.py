@@ -388,14 +388,19 @@ def derive_block_scale_px(
     Two derivation paths:
 
     - Plant-spacing-derived, only attempted when ``plants`` is supplied: this dataset's own
-      planting-grid pitch (``plant_mapping.grid_pitch_m``) converted to pixels via ``raster_path``'s
-      own Projected-CRS geotransform. A raster with no resolvable Projected geotransform (a
-      non-georeferenced source, or one whose CRS this module can't read) is not a refusal for this
-      path, it falls back to the GT-object-spacing path below instead. A ``plants`` list with
-      fewer than two georeferenced plants (``grid_pitch_m`` returns ``0.0``) *is* refused by name:
-      the caller explicitly asked for this derivation and it produced nothing usable, not a case
-      to quietly downgrade to a different mechanism it didn't ask for.
-    - GT-object-spacing-derived (``plants`` omitted, or the raster's geotransform unresolvable):
+      planting-grid pitch (``plant_mapping.grid_pitch_m``) converted to pixels through the
+      raster's own pixel size in metres, resolved by
+      :func:`~tcip_mcp.pipelines.pixel_size.resolve_pixel_size` (the CRS unit read from the EPSG
+      code, so a foot-unit raster converts correctly). A raster the resolver declines on its
+      georeferencing (rotated, incomplete tags, unprojected, a user-defined or compound CRS, a
+      unit other than metre or foot, a zero, negative or anisotropic scale) is not a refusal for
+      this path, it falls back to the GT-object-spacing path below instead, the same as an
+      unresolvable geotransform does. A ``raster_path`` that is not a raster file at all is
+      refused by name, never silently downgraded to the fallback. A ``plants`` list with fewer
+      than two georeferenced plants (``grid_pitch_m`` returns ``0.0``) *is* refused by name: the
+      caller explicitly asked for this derivation and it produced nothing usable, not a case to
+      quietly downgrade to a different mechanism it didn't ask for.
+    - GT-object-spacing-derived (``plants`` omitted, or the raster's pixel size unresolvable):
       the median nearest-neighbor spacing of ``gt_boxes_per_image``'s own box centers, the same
       per-image neighbor-distance primitive :func:`derive_localization_tolerance_frac` pools.
 
@@ -415,20 +420,21 @@ def derive_block_scale_px(
                 "the GT-object-spacing-derived block scale instead of an insufficient registry"
             )
         if raster_path is not None:
-            from tcip_mcp.pipelines.postprocessing.orthomosaic_mapping import (
-                GeoreferencingError, RotatedRasterError, read_geotransform,
-            )
+            from tcip_mcp.pipelines import pixel_size as pixel_size_module
+            from tcip_mcp.pipelines.image_utils import capture_kind
 
-            try:
-                gt = read_geotransform(raster_path)
-            except (GeoreferencingError, RotatedRasterError):
-                gt = None
-            if gt is not None:
-                px_per_m = 2.0 / (abs(gt.pixel_scale_x) + abs(gt.pixel_scale_y))
-                pitch_px = pitch_m * px_per_m
+            raster = Path(raster_path)
+            if not raster.is_file() or capture_kind(raster) != "raster":
+                raise ValueError(
+                    "derive_block_scale_px: raster_path is not a raster file this derivation can "
+                    f"read a pixel size from ({raster}); pass the training raster, or "
+                    "raster_path=None to use the GT-object-spacing-derived block scale")
+            resolved, _reason = pixel_size_module.resolve_pixel_size(raster)
+            if resolved is not None:
+                pitch_px = pitch_m / resolved.metres_per_px
                 return (
                     max(tile_size, round(pitch_px)),
-                    f"plant grid pitch ({pitch_m:.2f}m) via projected geotransform, floored at "
+                    f"plant grid pitch ({pitch_m:.2f}m) via {resolved.source_clause}, floored at "
                     "tile_size",
                 )
 

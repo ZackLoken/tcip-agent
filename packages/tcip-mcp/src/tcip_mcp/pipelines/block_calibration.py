@@ -203,8 +203,9 @@ def resolve_block_calibration_records(
     The block scale (:func:`~tcip_mcp.pipelines.derivations.derive_block_scale_px`) prefers a
     real planting-grid pitch over the GT-object-spacing fallback when the training experiment's
     own ``config.json`` (``data.plant_csv_paths``, a list of plant-locations CSV paths) resolves
-    at least two georeferenced plants and the training raster carries a real geotransform; a
-    ``BandGroupRef`` source (no single file to read tags from) always falls back to GT-spacing.
+    at least two georeferenced plants and the training raster's own pixel size is resolvable
+    (:func:`~tcip_mcp.pipelines.pixel_size.resolve_pixel_size`); a ``BandGroupRef`` source (no
+    single file to read tags from) always falls back to GT-spacing.
 
     ``export_tile_size`` (required, no default) is the edge the caller's own whole-mosaic export
     pass resolved to run at; refused when it differs from the split manifest's own ``tile_size``,
