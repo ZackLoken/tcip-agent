@@ -145,7 +145,7 @@ def test_consolidated_tools_present_and_removed_absent():
         "inspect_project",
         "overlay_reference_grid", "capture_live_canvas",
         # Renamed tools: the new names must register.
-        "rank_registered_models", "score_predictions",
+        "rank_registered_models",
         "deliver_per_image_counts", "view_gui_state",
         # Method-neutral auto-labeling seam: no longer SAM-specific names.
         "propose_annotations", "stage_proposals", "segment_prompt",
@@ -200,6 +200,8 @@ def test_consolidated_tools_present_and_removed_absent():
         "preflight_config",
         # Demoted to a library call: the agent reads a label file through it directly.
         "read_annotations",
+        # Demoted to a library call plus scripts/score_predictions.py.
+        "score_predictions",
     }
     assert not (removed & registered), f"removed tools still registered: {removed & registered}"
 

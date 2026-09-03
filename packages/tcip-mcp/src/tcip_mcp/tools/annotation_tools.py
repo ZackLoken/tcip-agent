@@ -426,8 +426,6 @@ def _evaluate_folder(
     return out
 
 
-@mcp.tool()
-@audited
 def score_predictions(
     path: str,
     iou_threshold: float = 0.5,
