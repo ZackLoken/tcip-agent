@@ -1170,9 +1170,9 @@ class TestCoverageRecord:
     ):
         """``tcip_store`` refuses a log append inside an open transaction, so the state write
         commits before the audit line is attempted; a failed append cannot roll that back. What
-        it still guarantees: the caller is told 500, not a silent 200, so it knows its own retry
-        of this payload is what recovers the missing audit line rather than trusting a change
-        that landed with no trail."""
+        it still guarantees: the caller is told 500, not a silent 200, so it never trusts a
+        change that landed with no trail -- a retry of the same payload recovers neither the
+        write nor the missing line (proven next)."""
         from tcip_mcp.audit import AuditEntryNotWritten
 
         root, path = dated_dataset
@@ -1606,12 +1606,20 @@ class TestCompletenessRoute:
         unraising = TestClient(app, base_url="http://127.0.0.1", raise_server_exceptions=False)
         body = {"image_path": path, "subject": "catkin", "grid": _grid_only(grid), "cell": "A1",
                 "complete": True, "user": "breeder", "view_scale": None}
-        unraising.post("/api/coverage/completeness", json=body)
+        first = unraising.post("/api/coverage/completeness", json=body)
+        assert first.status_code == 500
+        assert first.json()["detail"]["error"] == "audit_entry_not_written"
+        first_record = client.get(
+            "/api/coverage/completeness", params={"path": path}).json()["by_subject"]["catkin"]
 
         resp = unraising.post("/api/coverage/completeness", json=body)
         assert resp.status_code == 500
         assert resp.json()["detail"]["error"] == "audit_entry_not_written"
         assert _audit_entries(root, "gui_set_region_completeness") == []
+
+        second_record = client.get(
+            "/api/coverage/completeness", params={"path": path}).json()["by_subject"]["catkin"]
+        assert second_record["attested_at"] != first_record["attested_at"]
 
     def test_view_scale_is_required(self, client, dated_dataset):
         _root, path = dated_dataset

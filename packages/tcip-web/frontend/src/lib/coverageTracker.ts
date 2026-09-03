@@ -313,6 +313,7 @@ export class CoverageTracker {
   // confirm discarding it; armed is consumed on a successful push, never on send.
   private replaceRequiredState: ReplaceRequired | null = null;
   private armed = false;
+  private disposed = false;
 
   constructor(
     private postFn: (body: CoveragePayload) => Promise<CoveragePushResponse>,
@@ -569,10 +570,9 @@ export class CoverageTracker {
    *  dropped as terminal (the outbox's accepted residual for a payload already queued before the
    *  hold existed, never one this method itself hands it under a live hold).
    *
-   *  The identity this payload was built for is captured before the send: a `reset` can point
-   *  the tracker at a different image before this promise settles, and a rejection reaching the
-   *  handler by then belongs to the identity that built it, never the one the tracker now
-   *  points at, so the hold this failure sets (`setHoldFromError`) must never land on it. */
+   *  The identity this payload was built for is captured before the send (see `staleIdentity`),
+   *  so the hold this failure sets (`setHoldFromError`) never lands on whatever the tracker
+   *  moved on to. */
   flush(): void {
     if (this.timer !== null) {
       clearTimeout(this.timer);
@@ -600,12 +600,15 @@ export class CoverageTracker {
   }
 
   /** Whether `keyParts` (the identity a payload was built under) is no longer the tracker's
-   *  current identity: a `reset` moved the tracker on while that payload's promise was still in
-   *  flight. A response arriving for a stale identity belongs to the image it left, never the one
-   *  the tracker now points at -- the one check both `flush` and `postNow` route their settled
-   *  promises through, so neither can adopt or hold against the wrong image. */
+   *  current identity, or the tracker has since been disposed: a `reset` moved it to a new
+   *  identity, or `dispose` retired it, while that payload's promise was still in flight. Both
+   *  callers capture their own `keyParts` before sending, so a later `reset` never changes which
+   *  identity a settling promise is checked against, and a settled promise for a stale identity
+   *  is routed to the module outbox rather than adopted or held against whatever the tracker
+   *  moved on to (or vanished into) -- the one check both `flush` and `postNow` route their
+   *  settled promises through. */
   private staleIdentity(keyParts: CoverageKeyParts): boolean {
-    return !sameKeyParts(this.keyParts, keyParts);
+    return this.disposed || !sameKeyParts(this.keyParts, keyParts);
   }
 
   /** Set the replace hold from a coverage-lattice-mismatch push failure, marking the tracker
@@ -620,8 +623,13 @@ export class CoverageTracker {
     return true;
   }
 
+  /** Retire the tracker: flush any owed facts first (under its still-live identity), then mark
+   *  it disposed so a post already in flight that settles afterward reads as stale
+   *  (`staleIdentity`) and its rejection goes to the module outbox rather than re-arming a timer
+   *  or reporting an error against a tab that is gone. */
   dispose(): void {
     this.flush();
+    this.disposed = true;
     liveTrackers.delete(this);
   }
 
@@ -656,10 +664,8 @@ export class CoverageTracker {
 
   /** While the replace hold stands and is not armed, nothing is sent (see `flush`'s own note);
    *  `dirty` stays set so the next armed attempt or an eventual `flush` still carries it. The
-   *  identity this payload was built for is captured before the send, exactly as `flush` does:
-   *  a `reset` can point the tracker at a different image before this promise settles, and a
-   *  settled promise reaching either handler by then belongs to the identity that built it,
-   *  never the one the tracker now points at (`staleIdentity`). */
+   *  identity this payload was built for is captured before the send, exactly as `flush` does
+   *  (see `staleIdentity`). */
   private postNow(): void {
     if (!this.dirty || !this.keyParts || !this.grid || !this.viewing) return;
     if (this.replaceRequiredState && !this.armed) return;

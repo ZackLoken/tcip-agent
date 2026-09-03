@@ -9,8 +9,9 @@ Three jobs are out of scope. ``environment`` creates the conda environment this 
 process already runs inside, so there is nothing local to run in its place; ``docker``
 builds and answers the container image, which needs a Docker daemon this gate does not
 assume, and CI's own build is the proof of that image; ``ray-exit-windows`` also creates that
-same conda environment, and its one test file (``tests/test_hpo_ray_detached_exit.py``) already
-runs inside the full local suite on this Windows machine.
+same conda environment, and its one test file (``tests/test_hpo_ray_detached_exit.py``) is
+Windows-only, so a Windows host's own suite already covers it and any other host has nothing
+local to run in its place, the same shape as the ``environment`` job.
 
 Each step's ``run:`` text goes through bash, never through PowerShell or cmd, since that is the
 shell GitHub's own Linux runners give the same text. On a Linux or macOS host the bash on
@@ -48,7 +49,8 @@ OUT_OF_SCOPE_JOBS = {
     "docker": "it builds the container image, which needs a Docker daemon this gate does not assume",
     "ray-exit-windows": (
         "it creates the conda environment this gate's own process already runs inside, and its "
-        "one test file runs inside the full local suite on this Windows machine"
+        "one test file is Windows-only, so a Windows host's own suite already covers it and any "
+        "other host has nothing local to run in its place"
     ),
 }
 

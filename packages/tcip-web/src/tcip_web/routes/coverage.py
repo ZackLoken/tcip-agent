@@ -644,7 +644,9 @@ def post_completeness(payload: CompletenessSetPayload) -> dict:
     (neither reads this image's label file, which stays a single read inside it); a failure there
     (an ``AmbiguousImageStem``, a bad manifest, an ``OSError``) never refuses the cell -- the
     attestation proceeds and stamps a null bar, and the failure is named in the response's
-    ``working_scale_error`` (present only when one occurred).
+    ``working_scale_error`` (present only when one occurred) -- unless the audit line for this
+    same attestation also fails to append, in which case the marked 500 below answers instead of
+    that response, and this failure is not named in it.
 
     The audit line is appended after the transaction commits, through the same raising emitter
     ``post_coverage`` uses (``_audit_or_answer_500``): a failed append answers 500, naming
