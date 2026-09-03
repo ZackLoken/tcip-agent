@@ -121,7 +121,7 @@ def compare_experiments(experiment_ids: list[str]) -> dict:
     naming why, when the project's registry index can't be read or matched), and dataset
     identity; ``same_dataset_fingerprint`` is ``None`` when any compared id is an error entry.
     Reads the heartbeat freshness window from ``$TCIP_HEARTBEAT_STALE_SECONDS`` (600s by
-    default), the same knob ``check_training_status`` and the run enumeration use, so all three
+    default), the same knob ``monitor_training`` and the run enumeration use, so all three
     agree under a configured window. Use this to compare different model architectures or
     hyperparameters.
 

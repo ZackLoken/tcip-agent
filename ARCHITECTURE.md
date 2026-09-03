@@ -861,7 +861,7 @@ anything.
 |---|---|---|---|
 | `preflight_config` | `training_tools.py:291` | yes | Validate a training configuration before launching. |
 | `launch_training` | `training_tools.py:705` | yes | Launch a training run in an isolated subprocess from a bespoke ``model_source`` builder. |
-| `check_training_status` | `training_tools.py:939` | yes | Check the status of a training run. |
+| `monitor_training` | `training_tools.py:939` | yes | Check the status of a training run. |
 | `list_training_runs` | `training_tools.py:1082` | yes | List every training run this platform can currently account for. |
 | `cancel_training` | `training_tools.py:1323` | yes | Request graceful cancellation of a running training run. |
 | `run_hyperparameter_search` | `training_tools.py:1898` | yes | Run hyperparameter optimization on Ray Tune, training each trial for real. |
@@ -2500,7 +2500,7 @@ Phase 3 verdict: duplicated.
 
 Must agree: the status payload the MCP tool returns is renderable by the browser's training view.
 Side A: `packages/tcip-web/src/tcip_web/routes/training.py:362` (`@router.websocket("/runs/{run_id}/stream")`).
-Side B: `packages/tcip-mcp/src/tcip_mcp/tools/training_tools.py` (`check_training_status` supplies the status payload).
+Side B: `packages/tcip-mcp/src/tcip_mcp/tools/training_tools.py` (`monitor_training` supplies the status payload).
 Phase 3 verdict: duplicated.
 
 ## S52. Image-serve response headers  <!-- queued: P5-301 unify -->

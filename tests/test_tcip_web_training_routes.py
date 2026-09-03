@@ -17,12 +17,12 @@ def client() -> TestClient:
 
 
 def _wait_terminal(run_id: str, deadline_s: float = 60) -> dict:
-    from tcip_mcp.tools.training_tools import check_training_status
+    from tcip_mcp.tools.training_tools import monitor_training
 
     deadline = time.monotonic() + deadline_s
     status: dict = {}
     while time.monotonic() < deadline:
-        status = check_training_status(run_id)
+        status = monitor_training(run_id)
         if status.get("status") in ("failed", "completed", "cancelled"):
             return status
         time.sleep(0.2)
@@ -258,7 +258,7 @@ def test_tensorboard_route_launches_under_the_run_output_dir(client: TestClient,
         calls.append((logdir, run_id or ""))
         return {"url": "http://localhost:6006", "port": 6006, "pid": 1, "logdir": logdir}
 
-    monkeypatch.setattr("tcip_mcp.tools.training_tools.check_training_status", fake_status)
+    monkeypatch.setattr("tcip_mcp.tools.training_tools.monitor_training", fake_status)
     monkeypatch.setattr(
         "tcip_mcp.pipelines.training.tensorboard_manager.launch_tensorboard", fake_launch
     )
@@ -278,7 +278,7 @@ def test_tensorboard_route_404s_with_no_logs_for_a_run_with_no_output_dir(
     def fake_status(run_id: str) -> dict:
         return {"run_id": run_id, "status": "failed", "output_dir": "", "error": None}
 
-    monkeypatch.setattr("tcip_mcp.tools.training_tools.check_training_status", fake_status)
+    monkeypatch.setattr("tcip_mcp.tools.training_tools.monitor_training", fake_status)
 
     resp = client.post("/api/training/runs/run-nologs/tensorboard", json={})
     assert resp.status_code == 404
@@ -295,7 +295,7 @@ def test_tensorboard_route_404s_with_no_logs_for_a_stamped_dir_with_no_event_fil
     def fake_status(run_id: str) -> dict:
         return {"run_id": run_id, "status": "failed", "output_dir": str(tmp_path), "error": None}
 
-    monkeypatch.setattr("tcip_mcp.tools.training_tools.check_training_status", fake_status)
+    monkeypatch.setattr("tcip_mcp.tools.training_tools.monitor_training", fake_status)
 
     resp = client.post("/api/training/runs/run-nologs-2/tensorboard", json={})
     assert resp.status_code == 404

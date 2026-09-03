@@ -652,7 +652,7 @@ def test_launch_training_persists_effective_tile_geometry(tmp_path, monkeypatch)
             tiling = ts.read(key).get("data", {}).get("tiling", {})
             if "tile_size" in tiling:
                 break
-        status = training_tools.check_training_status(run_id)
+        status = training_tools.monitor_training(run_id)
         if status.get("status") in ("failed", "cancelled"):
             pytest.fail(f"training subprocess ended early: {status}")
         time.sleep(0.5)
@@ -671,7 +671,7 @@ def test_launch_training_persists_effective_tile_geometry(tmp_path, monkeypatch)
     final_status = None
     deadline = time.monotonic() + 90
     while time.monotonic() < deadline:
-        final_status = training_tools.check_training_status(run_id).get("status")
+        final_status = training_tools.monitor_training(run_id).get("status")
         if final_status in ("completed", "failed", "cancelled"):
             break
         time.sleep(0.5)

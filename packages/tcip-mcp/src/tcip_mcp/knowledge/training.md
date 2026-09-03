@@ -127,7 +127,7 @@ naming why. Whole-frame training and whole-decode sources gain nothing from it; 
 |------|---------|
 | `preflight_config` | Validate config (`smoke=True` also builds + contract-smokes the model) |
 | `launch_training` | Start async training run (smokes the builder first, auto-launches TensorBoard) |
-| `check_training_status` | Check run progress, metrics, and TensorBoard URL |
+| `monitor_training` | Check run progress, metrics, and TensorBoard URL |
 | `list_training_runs` | List all runs in session |
 | `cancel_training` | Request graceful cancellation of a running run; stops at the next batch/epoch boundary, still saves `model_final.pt` |
 | `cancel_hyperparameter_search` | Request cooperative cancellation of a running sweep: the running trial stops at its next batch boundary and reports the losing side, new trials report without training, the manifest records `cancelled`; Ray's hard stop is only the fallback after the heartbeat window |
@@ -139,7 +139,7 @@ naming why. Whole-frame training and whole-decode sources gain nothing from it; 
 
 - `launch_training` automatically starts a TensorBoard process and returns the URL
 - Scalars logged: `train/loss`, `train/lr`, `val/*` per epoch
-- `check_training_status` includes `tensorboard_url` if TB is still running
+- `monitor_training` includes `tensorboard_url` if TB is still running
 - Training panel has an iframe that loads the TensorBoard URL
 
 ## HPO

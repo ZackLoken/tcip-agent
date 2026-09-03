@@ -710,7 +710,7 @@ def launch_training(
 
     The run's actual training body (dataset build, model forward/backward, checkpointing) executes
     in a separate OS process, not this one, a bug/OOM/hang in one run can't take down this
-    process or any other concurrent run's process. Use check_training_status to monitor progress;
+    process or any other concurrent run's process. Use monitor_training to monitor progress;
     it reads the run's own status/metrics from disk, not shared memory.
 
     Watching a launched run's metrics and deciding to stop a poorly performing one is the
@@ -908,7 +908,7 @@ def _watch_wall_clock(proc: subprocess.Popen, run: Any, experiment_id: str,
                       timeout_seconds: float, *, root: Path | str) -> None:
     """Daemon watcher: hard-terminates ``proc`` if it outlives ``timeout_seconds`` and
     records the reason through the same status channel every other terminal state uses, never an
-    in-memory-only mark, since ``check_training_status`` always defers to disk for a pid-bearing
+    in-memory-only mark, since ``monitor_training`` always defers to disk for a pid-bearing
     run and would otherwise never surface it. No cooperative grace period: a hung process isn't
     responding to cooperative signals, so this is a hard kill, not the cancel path.
 
@@ -936,7 +936,7 @@ def _watch_wall_clock(proc: subprocess.Popen, run: Any, experiment_id: str,
 
 @mcp.tool()
 @audited
-def check_training_status(run_id: str) -> dict:
+def monitor_training(run_id: str) -> dict:
     """Check the status of a training run.
 
     Reads the run's own status/metrics from disk whenever its training body runs in a

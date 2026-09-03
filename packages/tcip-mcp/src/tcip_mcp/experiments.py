@@ -819,7 +819,7 @@ def reconstruct_run_status(run_id: str, *, stale_seconds: float = 600.0) -> dict
     subprocess-delegated and the in-memory record is stale by design.
 
     Returns ``None`` when the run can't be resolved on disk at all (an honestly unknown run, not a
-    guess). ``stale_seconds`` lets ``training_tools.py``'s own callers (``check_training_status``,
+    guess). ``stale_seconds`` lets ``training_tools.py``'s own callers (``monitor_training``,
     ``cancel_training``) pass their configured heartbeat window (``TCIP_HEARTBEAT_STALE_SECONDS``)
     rather than being pinned to this module's default. The reconstruction itself is
     :func:`reconstruct_from_status`, over the one record this function resolves ``run_id`` to.
