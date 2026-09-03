@@ -2,7 +2,7 @@
 
 Covers the single ``check_delivery_gate`` helper and its retrofit onto the previously-ungated
 writers/tools: ``export_detection_csv`` / ``export_aggregated_csv`` (writer-level, no MCP wrapper)
-and ``tabulate_counts`` (reads the run's resolved validity, not a caller string). The phenology
+and ``deliver_per_image_counts`` (reads the run's resolved validity, not a caller string). The phenology
 doors' gate behavior is pinned in the Phase-0 measurement goldens; here we pin the doors newly
 gated, plus the escape hatch (acknowledge_unvalidated) that ships an honestly-flagged provisional CSV.
 """
@@ -548,9 +548,9 @@ def test_export_aggregated_csv_rejects_an_unrecognized_measurement_document(tmp_
             operating_point_validated=VALIDATED_HELD_OUT, pred_dirs=[str(bucket)])
 
 
-# ── tabulate_counts reads the run's resolved validity, not a caller string ─
+# ── deliver_per_image_counts reads the run's resolved validity, not a caller string ─
 
-def test_tabulate_counts_refuses_unvalidated_run(tmp_path, monkeypatch):
+def test_deliver_per_image_counts_refuses_unvalidated_run(tmp_path, monkeypatch):
     import tcip_mcp.tools.inference_tools as itools
 
     def _fake_run_inference(*a, **kw):
@@ -559,14 +559,14 @@ def test_tabulate_counts_refuses_unvalidated_run(tmp_path, monkeypatch):
                 "validated": False, "conf_source": "default"}
 
     monkeypatch.setattr(itools, "_run_inference_verified", _fake_run_inference)
-    r = itools.tabulate_counts(_dummy_checkpoint(tmp_path), str(tmp_path), str(tmp_path / "o.csv"),
+    r = itools.deliver_per_image_counts(_dummy_checkpoint(tmp_path), str(tmp_path), str(tmp_path / "o.csv"),
                                trait=fx.COUNT_TRAIT)
     assert "error" in r
     assert r["operating_point_validated"] == VALIDATED_FALSE
     assert not (tmp_path / "o.csv").exists()
 
 
-def test_tabulate_counts_acknowledge_writes_flagged(tmp_path, monkeypatch):
+def test_deliver_per_image_counts_acknowledge_writes_flagged(tmp_path, monkeypatch):
     import tcip_mcp.tools.inference_tools as itools
 
     def _fake_run_inference(*a, **kw):
@@ -576,7 +576,7 @@ def test_tabulate_counts_acknowledge_writes_flagged(tmp_path, monkeypatch):
 
     monkeypatch.setattr(itools, "_run_inference_verified", _fake_run_inference)
     out_csv = tmp_path / "o.csv"
-    r = itools.tabulate_counts(_dummy_checkpoint(tmp_path), str(tmp_path), str(out_csv),
+    r = itools.deliver_per_image_counts(_dummy_checkpoint(tmp_path), str(tmp_path), str(out_csv),
                                trait=fx.COUNT_TRAIT, acknowledge_unvalidated=True)
     assert "error" not in r
     assert r["operating_point_validated"] == VALIDATED_FALSE
@@ -597,7 +597,7 @@ def _fake_run_inference_with(*, conf_ref, tile_size_prov=None):
     return _fake
 
 
-def test_tabulate_counts_refuses_fabricated_tile_size_even_with_validated_conf(tmp_path, monkeypatch):
+def test_deliver_per_image_counts_refuses_fabricated_tile_size_even_with_validated_conf(tmp_path, monkeypatch):
     """A fabricated tile_size must gate the same way an unvalidated conf does: a checkpoint with
     no persisted training geometry must not ship a real count here while run_full_frame_evaluation
     refuses to even measure that regime. A cleanly-validated conf must not paper over an
@@ -610,7 +610,7 @@ def test_tabulate_counts_refuses_fabricated_tile_size_even_with_validated_conf(t
         tile_size_prov={"value": 640, "requires_validation": True,
                         "validation_kind": "geometry", "validated_against": VALIDATED_FALSE}))
     bucket = tmp_path / "ds" / "predictions" / "baseline" / "2026-01-01"
-    r = itools.tabulate_counts(_dummy_checkpoint(tmp_path), str(tmp_path), str(tmp_path / "o.csv"),
+    r = itools.deliver_per_image_counts(_dummy_checkpoint(tmp_path), str(tmp_path), str(tmp_path / "o.csv"),
                                trait=fx.COUNT_TRAIT, calibration_labels_dir=str(tmp_path),
                                predictions_dir=str(bucket))
     assert "error" in r
@@ -619,7 +619,7 @@ def test_tabulate_counts_refuses_fabricated_tile_size_even_with_validated_conf(t
     assert not (tmp_path / "o.csv").exists()
 
 
-def test_tabulate_counts_live_with_bucket_reports_the_written_floored_cell(tmp_path, monkeypatch):
+def test_deliver_per_image_counts_live_with_bucket_reports_the_written_floored_cell(tmp_path, monkeypatch):
     """The live regime, publishing into predictions_dir, must read its response's
     operating_point_validated straight off the CSV cell export_detection_csv actually wrote, never
     the run's own raw conf reference: a fabricated tile_size forecloses the count claim at publish
@@ -638,7 +638,7 @@ def test_tabulate_counts_live_with_bucket_reports_the_written_floored_cell(tmp_p
 
     monkeypatch.setattr(itools, "_run_inference_verified", _fake)
     bucket = tmp_path / "ds" / "predictions" / "baseline" / "2026-01-01"
-    r = itools.tabulate_counts(_dummy_checkpoint(tmp_path), str(tmp_path), str(tmp_path / "o.csv"),
+    r = itools.deliver_per_image_counts(_dummy_checkpoint(tmp_path), str(tmp_path), str(tmp_path / "o.csv"),
                                trait=fx.COUNT_TRAIT, calibration_labels_dir=str(tmp_path),
                                predictions_dir=str(bucket), acknowledge_unvalidated=True)
     assert "error" not in r, r
@@ -649,7 +649,7 @@ def test_tabulate_counts_live_with_bucket_reports_the_written_floored_cell(tmp_p
     assert rows[0]["unvalidated_dimensions"] == r["unvalidated_dimensions"]
 
 
-def test_tabulate_counts_ships_when_tile_size_has_a_real_basis(tmp_path, monkeypatch):
+def test_deliver_per_image_counts_ships_when_tile_size_has_a_real_basis(tmp_path, monkeypatch):
     """The rail must admit valid work, not only reject invalid work: a tile_size genuinely derived
     from the checkpoint's persisted training geometry ships cleanly, same as a validated conf, and
     the CSV's own stamp comes off the real bucket the door published and handed the writer."""
@@ -660,7 +660,7 @@ def test_tabulate_counts_ships_when_tile_size_has_a_real_basis(tmp_path, monkeyp
     monkeypatch.setattr(itools, "_run_inference_verified", lambda *a, **kw: _earned_run_inference_result(
         tmp_path, trait=fx.COUNT_TRAIT, tiled=True, tile_size=224, tile_size_source="derived"))
     bucket = tmp_path / "ds" / "predictions" / "baseline" / "2026-01-01"
-    r = itools.tabulate_counts(_dummy_checkpoint(tmp_path), str(tmp_path), str(tmp_path / "o.csv"),
+    r = itools.deliver_per_image_counts(_dummy_checkpoint(tmp_path), str(tmp_path), str(tmp_path / "o.csv"),
                                trait=fx.COUNT_TRAIT, calibration_labels_dir=str(tmp_path),
                                predictions_dir=str(bucket))
     assert "error" not in r, r
@@ -670,7 +670,7 @@ def test_tabulate_counts_ships_when_tile_size_has_a_real_basis(tmp_path, monkeyp
     assert r["predictions_dir"] == str(bucket)
 
 
-def test_tabulate_counts_never_gates_tile_size_when_untiled(tmp_path, monkeypatch):
+def test_deliver_per_image_counts_never_gates_tile_size_when_untiled(tmp_path, monkeypatch):
     """An untiled run's tile_size is never operative: it must not manufacture a refusal just
     because the run's own bundle happens to carry a non-gating tile_size entry."""
     import tcip_mcp.tools.inference_tools as itools
@@ -678,7 +678,7 @@ def test_tabulate_counts_never_gates_tile_size_when_untiled(tmp_path, monkeypatc
     monkeypatch.setattr(itools, "_run_inference_verified",
                         lambda *a, **kw: _earned_run_inference_result(
                             tmp_path, trait=fx.COUNT_TRAIT, tiled=False))
-    r = itools.tabulate_counts(
+    r = itools.deliver_per_image_counts(
         _dummy_checkpoint(tmp_path), str(tmp_path), str(tmp_path / "o.csv"), trait=fx.COUNT_TRAIT,
         calibration_labels_dir=str(tmp_path),
         predictions_dir=str(tmp_path / "ds" / "predictions" / "baseline" / "2026-01-01"))
@@ -686,7 +686,7 @@ def test_tabulate_counts_never_gates_tile_size_when_untiled(tmp_path, monkeypatc
     assert r["tile_size_validated"] is None  # never entered the gate at all
 
 
-def test_tabulate_counts_without_a_persisted_bucket_cannot_deliver_a_validated_csv(
+def test_deliver_per_image_counts_without_a_persisted_bucket_cannot_deliver_a_validated_csv(
     tmp_path, monkeypatch,
 ):
     """A count read off one in-memory pass rests on nothing a reviewer can re-read, so the CSV is
@@ -699,14 +699,14 @@ def test_tabulate_counts_without_a_persisted_bucket_cannot_deliver_a_validated_c
     monkeypatch.setattr(itools, "_run_inference_verified",
                         lambda *a, **kw: _earned_run_inference_result(
                             tmp_path, trait=fx.COUNT_TRAIT, tiled=False))
-    refused = itools.tabulate_counts(_dummy_checkpoint(tmp_path), str(tmp_path), str(tmp_path / "o.csv"),
+    refused = itools.deliver_per_image_counts(_dummy_checkpoint(tmp_path), str(tmp_path), str(tmp_path / "o.csv"),
                                      trait=fx.COUNT_TRAIT,
                                      calibration_labels_dir=str(tmp_path))
     assert "predictions_dir" in refused["error"]
     assert refused["operating_point_validated"] == VALIDATED_FALSE  # no bucket, nothing on disk
     assert refused["run_conf_validated_against"] == VALIDATED_HELD_OUT  # conf itself was fine
 
-    provisional = itools.tabulate_counts(_dummy_checkpoint(tmp_path), str(tmp_path), str(tmp_path / "o.csv"),
+    provisional = itools.deliver_per_image_counts(_dummy_checkpoint(tmp_path), str(tmp_path), str(tmp_path / "o.csv"),
                                          trait=fx.COUNT_TRAIT,
                                          calibration_labels_dir=str(tmp_path),
                                          acknowledge_unvalidated=True)
@@ -716,7 +716,7 @@ def test_tabulate_counts_without_a_persisted_bucket_cannot_deliver_a_validated_c
     assert provisional["run_conf_validated_against"] == VALIDATED_HELD_OUT
 
 
-def test_tabulate_counts_acknowledge_unvalidated_tile_size_floors_csv_stamp_despite_valid_conf(
+def test_deliver_per_image_counts_acknowledge_unvalidated_tile_size_floors_csv_stamp_despite_valid_conf(
     tmp_path,
 ):
     """A CSV whose conf is genuinely validated but whose tile_size has no real basis must not
@@ -744,7 +744,7 @@ def test_tabulate_counts_acknowledge_unvalidated_tile_size_floors_csv_stamp_desp
              }}
     write_bound_sidecar(bucket, stamp, dataset_root=tmp_path / "ds", experiment_id="exp-tile-floor")
 
-    r = itools.tabulate_counts(predictions_dir=str(bucket), output_path=str(tmp_path / "o.csv"),
+    r = itools.deliver_per_image_counts(predictions_dir=str(bucket), output_path=str(tmp_path / "o.csv"),
                                trait=fx.COUNT_TRAIT, acknowledge_unvalidated=True)
     assert "error" not in r, r
     assert r["operating_point_validated"] == VALIDATED_FALSE     # the column floors across the gate
@@ -788,7 +788,7 @@ def _earned_run_inference_result(tmp_path, *, trait="catkin", **calibration):
 
 def test_export_predictions_refuses_fabricated_tile_size_even_with_validated_conf(tmp_path, monkeypatch):
     """The delivery door that actually persists a prediction bucket must refuse a fabricated tile
-    scale the same way tabulate_counts/deliver_phenology_milestones/export_aggregated_csv already do:
+    scale the same way deliver_per_image_counts/deliver_phenology_milestones/export_aggregated_csv already do:
     run_inference itself never refuses (it is the shared, honestly-stamped raw substrate every
     door builds on, same contract as an uncalibrated conf), so the refusal belongs here."""
     import tcip_mcp.tools.inference_tools as itools
@@ -1659,7 +1659,7 @@ def test_the_count_tool_records_what_it_verified_in_the_bucket_own_dataset_log(t
         tmp_path, trait=fx.COUNT_TRAIT, tiled=False))
     bucket = tmp_path / "ds" / "predictions" / "baseline" / "2026-01-01"
 
-    r = itools.tabulate_counts(_dummy_checkpoint(tmp_path), str(tmp_path), str(tmp_path / "o.csv"),
+    r = itools.deliver_per_image_counts(_dummy_checkpoint(tmp_path), str(tmp_path), str(tmp_path / "o.csv"),
                                trait=fx.COUNT_TRAIT, calibration_labels_dir=str(tmp_path),
                                predictions_dir=str(bucket))
 

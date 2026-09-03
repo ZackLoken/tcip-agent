@@ -109,7 +109,7 @@ def test_export_predictions_refuses_split_manifest_dir_with_raster_path(tmp_path
     assert "error" in result and "split_manifest_dir" in result["error"]
 
 
-def test_tabulate_counts_forwards_split_manifest_dir_to_run_inference(tmp_path, monkeypatch):
+def test_deliver_per_image_counts_forwards_split_manifest_dir_to_run_inference(tmp_path, monkeypatch):
     """A manifest-restricted calibration's evidence can only earn a validation record through
     this door if the door actually forwards split_manifest_dir to run_inference."""
     import tcip_mcp.tools.inference_tools as itools
@@ -129,7 +129,7 @@ def test_tabulate_counts_forwards_split_manifest_dir_to_run_inference(tmp_path, 
         "tcip_mcp.operationalization.check_operationalization",
         lambda spec, record, kind, registry=None: stated)
 
-    itools.tabulate_counts(
+    itools.deliver_per_image_counts(
         _ckpt(tmp_path), str(tmp_path), str(tmp_path / "out.csv"), trait="some_trait",
         split_manifest_dir=str(tmp_path / "m"))
 

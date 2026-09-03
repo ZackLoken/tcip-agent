@@ -82,7 +82,7 @@ seed and the old/new split's content hashes (not the stems themselves); the old 
 membership is recorded in a dataset's audit log alongside the reason, so a redraw-until-it-passes
 pattern stays visible on review.
 
-`run_inference`, `export_predictions` and `tabulate_counts` (the latter two forward it to
+`run_inference`, `export_predictions` and `deliver_per_image_counts` (the latter two forward it to
 `run_inference`), `redraw_calibration_holdout` and `evaluate_model` all take
 `split_manifest_dir`: draw the calibration universe from one capture date's `calibration` side of
 a named `split_manifest` record instead of every labelled stem with an image, a side

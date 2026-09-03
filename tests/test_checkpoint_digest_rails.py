@@ -85,7 +85,7 @@ def test_export_predictions_refuses_an_unregistered_checkpoint_and_writes_nothin
     assert not out.exists()
 
 
-def test_tabulate_counts_refuses_an_unregistered_checkpoint_and_writes_nothing(tmp_path, monkeypatch):
+def test_deliver_per_image_counts_refuses_an_unregistered_checkpoint_and_writes_nothing(tmp_path, monkeypatch):
     from tests import _operationalization_fixtures as fx
 
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
@@ -94,9 +94,9 @@ def test_tabulate_counts_refuses_an_unregistered_checkpoint_and_writes_nothing(t
     images_dir, _ = _images(tmp_path)
     out_csv = tmp_path / "o.csv"
 
-    from tcip_mcp.tools.inference_tools import tabulate_counts
+    from tcip_mcp.tools.inference_tools import deliver_per_image_counts
 
-    r = tabulate_counts(ckpt, str(images_dir), str(out_csv), trait=fx.COUNT_TRAIT)
+    r = deliver_per_image_counts(ckpt, str(images_dir), str(out_csv), trait=fx.COUNT_TRAIT)
     assert "error" in r
     assert "register_model" in r["error"]
     assert not out_csv.exists()

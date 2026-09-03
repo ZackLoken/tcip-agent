@@ -925,13 +925,13 @@ STAMP_EXTENSION_KEYS: dict[str, str] = {
     "overlap": "the web inference worker",
     "overlap_source": "the web inference worker",
     "calibration_curve_path": "the shared per-image bucket publisher behind export_predictions "
-                              "and tabulate_counts's live path, for a calibrated run that "
+                              "and deliver_per_image_counts's live path, for a calibrated run that "
                               "persisted a curve",
     "gate_evidence_summary": "the shared per-image bucket publisher behind export_predictions "
-                             "and tabulate_counts's live path, for a calibrated run that "
+                             "and deliver_per_image_counts's live path, for a calibrated run that "
                              "persisted a curve",
     "image_filenames": "the per-image bucket publishers (the shared image-bucket publisher behind "
-                       "export_predictions and tabulate_counts's live path, and the web inference "
+                       "export_predictions and deliver_per_image_counts's live path, and the web inference "
                        "worker): each prediction document stem mapped to its source image's "
                        "basename with extension",
 }
@@ -2568,7 +2568,7 @@ every reconciler that feeds them resolves through a ``_DOCUMENT_PARAM`` entry de
 ``"operating_point"``. A dimension cleared by nothing (an empty tuple) states a missing
 prerequisite rather than a reference of any kind, see ``check_delivery_gate``'s
 cleared-by-nothing refusal arm; no production dimension reaches that arm today
-(``tabulate_counts``'s in-memory pass with no ``predictions_dir`` now floors through
+(``deliver_per_image_counts``'s in-memory pass with no ``predictions_dir`` now floors through
 ``export_detection_csv``'s own no-``pred_dirs`` operating_point floor instead), so this stays
 documentation of a mechanism a future floor-only dimension can use, not a live assertion."""
 

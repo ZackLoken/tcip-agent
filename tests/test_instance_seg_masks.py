@@ -285,10 +285,10 @@ def test_export_predictions_instance_seg_unset_tile_writes_tiled(instance_seg_ck
     assert (Path(r["output_dir"]) / "img.json").is_file()
 
 
-def test_tabulate_counts_instance_seg_writes_csv_tiled(instance_seg_ckpt, tmp_path):
-    """tabulate_counts must produce a count CSV for a tiled instance_seg run just like any other
+def test_deliver_per_image_counts_instance_seg_writes_csv_tiled(instance_seg_ckpt, tmp_path):
+    """deliver_per_image_counts must produce a count CSV for a tiled instance_seg run just like any other
     detection checkpoint, now that tiled inference carries masks rather than being blocked."""
-    from tcip_mcp.tools.inference_tools import tabulate_counts
+    from tcip_mcp.tools.inference_tools import deliver_per_image_counts
 
     images_dir = tmp_path / "images"
     _image(images_dir)
@@ -297,14 +297,14 @@ def test_tabulate_counts_instance_seg_writes_csv_tiled(instance_seg_ckpt, tmp_pa
 
     _register_instance_seg_ckpt(instance_seg_ckpt, tmp_path)
     fx.seed_confirmed_count(tmp_path)
-    r = tabulate_counts(instance_seg_ckpt, str(images_dir), str(out_path),
+    r = deliver_per_image_counts(instance_seg_ckpt, str(images_dir), str(out_path),
                         trait=fx.COUNT_TRAIT, device="cpu", tile_size=TILE,
                         acknowledge_unvalidated=True)
     assert "error" not in r
     assert out_path.is_file()
 
 
-def test_tabulate_counts_instance_seg_live_and_bucket_regime_agree_on_masks(
+def test_deliver_per_image_counts_instance_seg_live_and_bucket_regime_agree_on_masks(
     instance_seg_ckpt, tmp_path,
 ):
     """The write-side geometry drop (write_predictions_json's geometry_extent_ok on the mask
@@ -315,7 +315,7 @@ def test_tabulate_counts_instance_seg_live_and_bucket_regime_agree_on_masks(
     import csv
     from datetime import datetime
 
-    from tcip_mcp.tools.inference_tools import tabulate_counts
+    from tcip_mcp.tools.inference_tools import deliver_per_image_counts
     from tests import _operationalization_fixtures as fx
 
     images_dir = tmp_path / "images"
@@ -325,13 +325,13 @@ def test_tabulate_counts_instance_seg_live_and_bucket_regime_agree_on_masks(
 
     bucket = tmp_path / "ds" / "predictions" / "baseline" / "2026-01-01"
     csv_a = tmp_path / "a.csv"
-    live = tabulate_counts(instance_seg_ckpt, str(images_dir), str(csv_a), trait=fx.COUNT_TRAIT,
+    live = deliver_per_image_counts(instance_seg_ckpt, str(images_dir), str(csv_a), trait=fx.COUNT_TRAIT,
                            device="cpu", tile_size=TILE, acknowledge_unvalidated=True,
                            predictions_dir=str(bucket))
     assert "error" not in live, live
 
     csv_b = tmp_path / "b.csv"
-    reread = tabulate_counts(predictions_dir=str(bucket), output_path=str(csv_b),
+    reread = deliver_per_image_counts(predictions_dir=str(bucket), output_path=str(csv_b),
                              trait=fx.COUNT_TRAIT, acknowledge_unvalidated=True)
     assert "error" not in reread, reread
 
