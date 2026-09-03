@@ -24,7 +24,8 @@ reason not to change it is the error.
 TCIP is an agentic ML/CV platform for automated phenotyping in tree-crop breeding: a
 PyTorch-native, no-fixed-task-taxonomy pipeline builder, with you as the ML/CV engineer driving
 it. Scope today: 2D imagery (RGB and N-channel), object detection first; instance segmentation is
-real (Mask R-CNN); 3D point clouds are not built and carry no scaffolding. `README.md` has the
+built (one of `build_detector`'s four builders is mask-capable); 3D point clouds are not built and
+carry no scaffolding. `README.md` has the
 pitch, the process diagram and the roadmap. Four packages share one `.tcip/` state directory,
 each with its own `CLAUDE.md` for layout: `packages/tcip-store/` (the storage seam: keyed, locked,
 atomic records, logs and blobs over a database backend and a file backend that must mean the same

@@ -186,7 +186,8 @@ narrower slice; this section keeps the two honest.
 
 Working now: 2D-image detection, instance/semantic segmentation, and classification, end
 to end, via an agent-written `nn.Module` that imports the plain building blocks (necks, heads,
-losses, backbone wrappers, and `build_detector`; `instance_seg` via Mask R-CNN), on RGB and
+losses, backbone wrappers, and `build_detector`, one of whose four builders is mask-capable for
+`instance_seg`), on RGB and
 N-channel imagery (multi-band GeoTIFF/NPZ/grayscale; `num_channels` threads to the backbone's
 `in_chans`, and an `in_chans != 3` detector takes per-band `image_mean`/`image_std` from
 `derivations.band_normalization_stats`), with training that loads the native per-image JSON
