@@ -237,7 +237,9 @@ def seed_catkin_operationalization(tmp_path: Path, seed_catkin_trait_spec):
 def real_hpo_base_config(tmp_path: Path) -> dict:
     """A base config the sweep door's own structural preflight admits: an importable builder and
     a data section whose directories exist, so a sweep test exercises the search itself rather
-    than the door's refusal."""
+    than the door's refusal. Held admitted by
+    test_split_draws.test_real_hpo_base_config_is_admitted_by_preflight, which runs it through
+    preflight_config directly."""
     imgs, lbls = tmp_path / "images", tmp_path / "labels"
     imgs.mkdir(exist_ok=True)
     lbls.mkdir(exist_ok=True)
