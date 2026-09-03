@@ -50,7 +50,7 @@ function fmtDuration(seconds: number): string {
 
 /**
  * Surfaces the agent's meta-loop output so a human can read it: friction
- * reports (from the `claude_reports` MCP tool) and end-of-session
+ * reports (from the `report_friction` MCP tool) and end-of-session
  * retrospectives (from `project_retrospective`). Read-only.
  */
 export function MetaTab() {

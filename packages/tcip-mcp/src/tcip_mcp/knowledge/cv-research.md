@@ -52,7 +52,7 @@ Search discipline:
   way it is.
 
 If a technique lives only behind a paywalled journal the fence can't reach, do not guess its
-internals from a blog summary; file a `claude_reports` note describing the gap rather than
+internals from a blog summary; file a `report_friction` note describing the gap rather than
 implementing a half-understood method.
 
 ## 2. Implement: against the platform toolkit
@@ -99,7 +99,7 @@ The discipline:
    without seeing the evidence.
 
 If validation is impossible because the phenotype itself can't yet be measured validly from pixels,
-that is the finding; surface it with `claude_reports`. Do not manufacture a number so the new
+that is the finding; surface it with `report_friction`. Do not manufacture a number so the new
 method appears to work.
 
 ## The loop, in one line

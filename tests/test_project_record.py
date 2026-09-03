@@ -328,15 +328,15 @@ def test_site_fields_on_an_unadopted_root_names_adopt_store_py(tmp_path: Path):
 def test_site_fields_on_a_bare_directory_that_gained_tcip_with_no_creating_door(
     tmp_path: Path,
 ):
-    """A store write with no door (``claude_reports`` on a directory neither ``init_project`` nor
+    """A store write with no door (``report_friction`` on a directory neither ``init_project`` nor
     ``ingest_images`` ever touched) leaves ``.tcip`` with no project record: a permanent,
     reachable state every reader has to name honestly rather than crash on."""
     from tcip_mcp.project_record import site_fields
-    from tcip_mcp.tools.meta_tools import claude_reports
+    from tcip_mcp.tools.meta_tools import report_friction
 
     project = tmp_path / "bare"
     project.mkdir()
-    result = claude_reports(str(project), category="missing_tool", detail="probe")
+    result = report_friction(str(project), category="missing_tool", detail="probe")
     assert "error" not in result
     assert (project / ".tcip").is_dir()
 

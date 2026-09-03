@@ -43,7 +43,7 @@ reaching for again versus one built narrowly for a specific past investigation.
   adding, renaming, or re-describing a document; `tests/test_harness_discovery_generated.py`
   fails when a checked-in generated file is stale.
 - `distill_learnings.py` - gathers one project's (or, with `--workspace`, every project's)
-  `claude_reports` and `project_retrospective` records into one Markdown worksheet of
+  `report_friction` and `project_retrospective` records into one Markdown worksheet of
   recurring themes, for human review before calling `record_distillation_pass`.
 - `doctor.py` - read-only scan of a live project for state inconsistencies code audits can't
   see: status-store vs disk disagreements on negatives, registry entries pointing at

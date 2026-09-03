@@ -8,7 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from tcip_web.app import app
-from tcip_mcp.tools.meta_tools import claude_reports, project_retrospective
+from tcip_mcp.tools.meta_tools import report_friction, project_retrospective
 
 
 @pytest.fixture
@@ -24,7 +24,7 @@ def test_reports_empty_when_dir_missing(client: TestClient, tmp_path: Path) -> N
 
 
 def test_reports_surfaces_written_report(client: TestClient, tmp_path: Path) -> None:
-    claude_reports(
+    report_friction(
         str(tmp_path),
         category="ambiguous_data",
         detail="two plausible interpretations of the label dir",

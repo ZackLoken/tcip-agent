@@ -1,4 +1,4 @@
-"""Tests for meta-loop tools (claude_reports, project_retrospective, load_project_memory)."""
+"""Tests for meta-loop tools (report_friction, project_retrospective, load_project_memory)."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ import tcip_store as ts
 
 from tcip_mcp.project_status import read_project_status
 from tcip_mcp.tools.meta_tools import (
-    claude_reports,
+    report_friction,
     load_project_memory,
     project_retrospective,
     read_report,
@@ -22,8 +22,8 @@ from tcip_mcp.tools.meta_tools import (
 )
 
 
-def test_claude_reports_writes_one_json_document(tmp_path: Path):
-    result = claude_reports(
+def test_report_friction_writes_one_json_document(tmp_path: Path):
+    result = report_friction(
         str(tmp_path),
         category="missing_tool",
         detail="I needed a way to fetch trait profiles but no such tool exists.",
@@ -49,7 +49,7 @@ def test_a_report_under_the_database_backend_names_its_id_and_no_file(tmp_path: 
     from tcip_store.sqlite_backend import SqliteBackend
 
     ts.bind(SqliteBackend())
-    stored = claude_reports(str(tmp_path), category="missing_tool", detail="x")
+    stored = report_friction(str(tmp_path), category="missing_tool", detail="x")
     assert stored["report_path"] is None
     assert read_report(str(tmp_path), stored["report_id"])["detail"] == "x"
     listed = load_project_memory("reports", str(tmp_path))["reports"][0]
@@ -60,15 +60,15 @@ def test_a_report_under_the_file_backend_names_the_file_it_wrote(tmp_path: Path)
     from tcip_store.file_backend import FileBackend
 
     ts.bind(FileBackend())
-    written = claude_reports(str(tmp_path), category="missing_tool", detail="y")
+    written = report_friction(str(tmp_path), category="missing_tool", detail="y")
     assert Path(written["report_path"]).is_file()
     assert Path(written["report_path"]).stem == written["report_id"]
     listed = load_project_memory("reports", str(tmp_path))["reports"][0]
     assert listed["path"] == written["report_path"]
 
 
-def test_claude_reports_rejects_invalid_category(tmp_path: Path):
-    result = claude_reports(
+def test_report_friction_rejects_invalid_category(tmp_path: Path):
+    result = report_friction(
         str(tmp_path),
         category="not_a_real_category",
         detail="x",
@@ -78,9 +78,9 @@ def test_claude_reports_rejects_invalid_category(tmp_path: Path):
     assert "missing_tool" in result["valid_categories"]
 
 
-def test_claude_reports_one_document_per_report(tmp_path: Path):
+def test_report_friction_one_document_per_report(tmp_path: Path):
     for i in range(3):
-        claude_reports(
+        report_friction(
             str(tmp_path),
             category="unexpected_behavior",
             detail=f"report {i}",
@@ -252,7 +252,7 @@ def test_load_reports_returns_empty_when_none_recorded(tmp_path: Path):
 
 
 def test_load_reports_roundtrips_a_written_report(tmp_path: Path):
-    claude_reports(
+    report_friction(
         str(tmp_path),
         category="missing_tool",
         detail="needed get_trait_profile",
@@ -271,7 +271,7 @@ def test_load_reports_recent_first_and_respects_limit(tmp_path: Path):
     # Each report is stamped from the clock, whose tick is coarser than these calls, so the writes
     # are spaced far enough apart to state four different times rather than one.
     for i in range(4):
-        claude_reports(str(tmp_path), category="unexpected_behavior", detail=f"r{i}")
+        report_friction(str(tmp_path), category="unexpected_behavior", detail=f"r{i}")
         time.sleep(0.05)
 
     result = load_project_memory("reports", str(tmp_path), limit=2)
@@ -294,9 +294,9 @@ def test_reports_come_back_in_the_order_they_state_not_the_order_their_bytes_lan
     from tcip_store.file_backend import FileBackend
 
     ts.bind(FileBackend())
-    earlier = claude_reports(str(tmp_path), category="missing_tool", detail="stated earlier")
+    earlier = report_friction(str(tmp_path), category="missing_tool", detail="stated earlier")
     time.sleep(0.05)
-    claude_reports(str(tmp_path), category="missing_tool", detail="stated later")
+    report_friction(str(tmp_path), category="missing_tool", detail="stated later")
 
     landed_last = time.time() + 60
     os.utime(Path(earlier["report_path"]), (landed_last, landed_last))
@@ -349,8 +349,8 @@ def test_a_retrospective_stating_no_section_sorts_after_every_dated_one_by_name(
 
 
 def test_load_reports_filters_by_category(tmp_path: Path):
-    claude_reports(str(tmp_path), category="missing_tool", detail="a")
-    claude_reports(str(tmp_path), category="ambiguous_data", detail="b")
+    report_friction(str(tmp_path), category="missing_tool", detail="a")
+    report_friction(str(tmp_path), category="ambiguous_data", detail="b")
 
     result = load_project_memory("reports", str(tmp_path), category="ambiguous_data")
     assert result["count"] == 1
@@ -358,24 +358,24 @@ def test_load_reports_filters_by_category(tmp_path: Path):
 
 
 def test_load_reports_filter_substring(tmp_path: Path):
-    claude_reports(str(tmp_path), category="missing_tool", detail="trait profile lookup")
-    claude_reports(str(tmp_path), category="missing_tool", detail="something else entirely")
+    report_friction(str(tmp_path), category="missing_tool", detail="trait profile lookup")
+    report_friction(str(tmp_path), category="missing_tool", detail="something else entirely")
 
     result = load_project_memory("reports", str(tmp_path), filter_substring="trait profile")
     assert result["count"] == 1
     assert result["reports"][0]["detail"] == "trait profile lookup"
 
 
-def test_claude_reports_defaults_user_disagreement_false(tmp_path: Path):
-    result = claude_reports(str(tmp_path), category="missing_tool", detail="x")
+def test_report_friction_defaults_user_disagreement_false(tmp_path: Path):
+    result = report_friction(str(tmp_path), category="missing_tool", detail="x")
     assert result["user_disagreement"] is False
 
     entry = read_report(str(tmp_path), result["report_id"])
     assert entry["user_disagreement"] is False
 
 
-def test_claude_reports_records_user_disagreement(tmp_path: Path):
-    result = claude_reports(
+def test_report_friction_records_user_disagreement(tmp_path: Path):
+    result = report_friction(
         str(tmp_path),
         category="needs_human_judgment",
         detail="Zack pushed back on the tiling default.",
@@ -388,8 +388,8 @@ def test_claude_reports_records_user_disagreement(tmp_path: Path):
 
 
 def test_load_reports_roundtrips_user_disagreement(tmp_path: Path):
-    claude_reports(str(tmp_path), category="missing_tool", detail="a", user_disagreement=False)
-    claude_reports(str(tmp_path), category="needs_human_judgment", detail="b", user_disagreement=True)
+    report_friction(str(tmp_path), category="missing_tool", detail="a", user_disagreement=False)
+    report_friction(str(tmp_path), category="needs_human_judgment", detail="b", user_disagreement=True)
 
     result = load_project_memory("reports", str(tmp_path), limit=10)
     flags = {r["detail"]: r["user_disagreement"] for r in result["reports"]}
@@ -397,15 +397,15 @@ def test_load_reports_roundtrips_user_disagreement(tmp_path: Path):
     assert flags["b"] is True
 
 
-def test_claude_reports_updates_project_status(tmp_path: Path):
-    claude_reports(str(tmp_path), category="missing_tool", detail="a")
+def test_report_friction_updates_project_status(tmp_path: Path):
+    report_friction(str(tmp_path), category="missing_tool", detail="a")
     status = read_project_status(tmp_path)
     assert status["reports_since_last_retrospective"] == 1
     assert status["reports_since_last_distillation"] == 1
 
 
 def test_project_retrospective_updates_project_status(tmp_path: Path):
-    claude_reports(str(tmp_path), category="missing_tool", detail="a")
+    report_friction(str(tmp_path), category="missing_tool", detail="a")
     project_retrospective(str(tmp_path), project_id="p", task="t", worked="w", did_not_work="d")
 
     status = read_project_status(tmp_path)
@@ -416,8 +416,8 @@ def test_project_retrospective_updates_project_status(tmp_path: Path):
 
 
 def test_record_distillation_pass_resets_distillation_counters(tmp_path: Path):
-    claude_reports(str(tmp_path), category="missing_tool", detail="a")
-    claude_reports(str(tmp_path), category="missing_tool", detail="b")
+    report_friction(str(tmp_path), category="missing_tool", detail="a")
+    report_friction(str(tmp_path), category="missing_tool", detail="b")
 
     result = record_distillation_pass(str(tmp_path))
     assert result["status"] == "recorded"
@@ -429,7 +429,7 @@ def test_record_distillation_pass_resets_distillation_counters(tmp_path: Path):
 
 def test_record_distillation_pass_never_touches_reports_or_retrospectives(tmp_path: Path):
     # Bookkeeping only: must never write/modify/delete the underlying records it's counting.
-    claude_reports(str(tmp_path), category="missing_tool", detail="a")
+    report_friction(str(tmp_path), category="missing_tool", detail="a")
     before = report_documents(str(tmp_path))
 
     record_distillation_pass(str(tmp_path))

@@ -32,6 +32,7 @@ RENAMES = [
     ("calibrate_ordinal_regression_operating_point", "calibrate_scalar_operating_point"),
     ("cancel_hpo", "cancel_hyperparameter_search"),
     ("run_hpo", "run_hyperparameter_search"),
+    ("claude_reports", "report_friction"),
 ]
 
 _OWN_FILE = str(Path(__file__).relative_to(REPO_ROOT)).replace("\\", "/")

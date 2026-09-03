@@ -140,13 +140,13 @@ def test_inspect_project(tmp_path: Path, monkeypatch):
 
 def test_inspect_project_folds_in_recent_activity(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("TCIP_WORKSPACE", str(tmp_path / "unused_workspace"))
-    from tcip_mcp.tools.meta_tools import claude_reports
+    from tcip_mcp.tools.meta_tools import report_friction
 
     init_project(str(tmp_path), site="north orchard")
     status = inspect_project(str(tmp_path))
     assert status["recent_activity"] == {}  # no history yet: genuinely empty, not corrupt
 
-    claude_reports(str(tmp_path), category="missing_tool", detail="a")
+    report_friction(str(tmp_path), category="missing_tool", detail="a")
     status = inspect_project(str(tmp_path))
     assert status["recent_activity"]["reports_since_last_retrospective"] == 1
 
@@ -202,7 +202,7 @@ def test_inspect_project_surfaces_version_refused_status_distinctly_from_corrupt
 def test_set_active_project_folds_in_recent_activity(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("TCIP_WORKSPACE", str(tmp_path))
     import tcip_mcp.web_client as web_client
-    from tcip_mcp.tools.meta_tools import claude_reports
+    from tcip_mcp.tools.meta_tools import report_friction
     from tcip_mcp.tools.project_tools import set_active_project
     from tcip_mcp.workspace import project_path
 
@@ -213,7 +213,7 @@ def test_set_active_project_folds_in_recent_activity(tmp_path: Path, monkeypatch
     # A directory made outside the platform (init_project itself now refuses a non-conforming
     # name under the workspace); set_active_project must still adopt it by its existing name.
     (project_path("proj_a") / ".tcip").mkdir(parents=True)
-    claude_reports(str(project_path("proj_a")), category="missing_tool", detail="a")
+    report_friction(str(project_path("proj_a")), category="missing_tool", detail="a")
 
     result = set_active_project("proj_a")
     assert result["recent_activity"]["reports_since_last_retrospective"] == 1
@@ -1185,13 +1185,13 @@ def test_init_project_refuses_an_unadopted_root(tmp_path: Path, monkeypatch):
 def test_init_project_records_the_site_on_a_directory_that_gained_tcip_with_no_creating_door(
     tmp_path: Path, monkeypatch
 ):
-    """The reachable state a store write with no door leaves (``claude_reports`` on a bare
+    """The reachable state a store write with no door leaves (``report_friction`` on a bare
     directory): ``init_project`` on it afterward records the site the same way it would on a
     truly fresh directory, since the writer's create-only write does not distinguish the two."""
     monkeypatch.setenv("TCIP_WORKSPACE", str(tmp_path / "unused_workspace"))
-    from tcip_mcp.tools.meta_tools import claude_reports
+    from tcip_mcp.tools.meta_tools import report_friction
 
-    claude_reports(str(tmp_path), category="missing_tool", detail="a")
+    report_friction(str(tmp_path), category="missing_tool", detail="a")
     assert (tmp_path / ".tcip").is_dir()
 
     result = init_project(str(tmp_path), site="north orchard")
@@ -1204,7 +1204,7 @@ def test_inspect_project_reports_site_fields_across_project_states(tmp_path: Pat
     """A path with no ``.tcip`` carries neither key; a project with a record carries the site; a
     project with ``.tcip`` and no record carries the absent-record problem text."""
     monkeypatch.setenv("TCIP_WORKSPACE", str(tmp_path / "unused_workspace"))
-    from tcip_mcp.tools.meta_tools import claude_reports
+    from tcip_mcp.tools.meta_tools import report_friction
 
     bare = tmp_path / "no_tcip"
     bare.mkdir()
@@ -1214,7 +1214,7 @@ def test_inspect_project_reports_site_fields_across_project_states(tmp_path: Pat
 
     recordless = tmp_path / "recordless"
     recordless.mkdir()
-    claude_reports(str(recordless), category="missing_tool", detail="a")
+    report_friction(str(recordless), category="missing_tool", detail="a")
     status = inspect_project(str(recordless))
     assert status["site"] is None
     assert "init_project" in status["site_problem"]

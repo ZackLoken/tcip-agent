@@ -204,7 +204,7 @@ def test_a_band_group_manifest_lands_as_the_json_the_image_enumerators_parse(tmp
 
 
 def test_a_friction_report_lands_as_the_json_document_every_reader_of_the_corpus_parses(tmp_path):
-    """The write ``claude_reports`` makes: the canonical record codec's bytes, create-only."""
+    """The write ``report_friction`` makes: the canonical record codec's bytes, create-only."""
     from tcip_store.file_backend import FileBackend
 
     from tcip_mcp.tools import meta_tools

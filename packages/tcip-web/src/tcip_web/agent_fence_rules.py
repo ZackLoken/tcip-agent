@@ -87,7 +87,7 @@ PROTECTED_WRITE_MSG = (
     "Writing into platform internals via the shell is blocked, the agent edits projects, not "
     "platform code. If this was a read-only diagnostic that got mis-flagged (e.g. "
     "`python scripts/doctor.py <root>`), that's a fence false-positive: file it with the "
-    "claude_reports tool (category unexpected_behavior; include the exact command) so the fence "
+    "report_friction tool (category unexpected_behavior; include the exact command) so the fence "
     "can be fixed, do not route around it by editing platform files."
 )
 DELETE_MSG = (

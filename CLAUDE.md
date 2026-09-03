@@ -49,9 +49,9 @@ silently corrupts results and compounds across sessions.
   marker names the task's project (`view_gui_state`, cheaply; the marker is written once by
   `set_active_project` and persists across sessions), asking when the task names none; then
   `load_project_memory` (reports and retrospectives), `inspect_project`, and
-  `python scripts/doctor.py <project_root>`, reporting what it finds through `claude_reports`
+  `python scripts/doctor.py <project_root>`, reporting what it finds through `report_friction`
   before acting on the data.
-- Report friction through `claude_reports` the moment you hit it (a missing tool, ambiguous data,
+- Report friction through `report_friction` the moment you hit it (a missing tool, ambiguous data,
   an op that failed twice, a decision needing human judgment, behavior that surprised you); the
   free-text detail matters more than the category. A mandated action that is blocked is itself a
   report, never a silent skip. End substantial work with `project_retrospective`.

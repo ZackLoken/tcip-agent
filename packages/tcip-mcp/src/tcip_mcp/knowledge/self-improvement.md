@@ -1,6 +1,6 @@
 ---
 name: self-improvement
-description: "How the agent turns friction and findings into a durable record that the next session picks up. Load this whenever the user pushes back, corrects you, repeats an annoyance, when you discover machinery you didn't know existed, nearly reinvent something, or hit a missing tool/skill, and at the end of substantial work. Everything lands with the project, via claude_reports and project_retrospective, and load_project_memory reads it back."
+description: "How the agent turns friction and findings into a durable record that the next session picks up. Load this whenever the user pushes back, corrects you, repeats an annoyance, when you discover machinery you didn't know existed, nearly reinvent something, or hit a missing tool/skill, and at the end of substantial work. Everything lands with the project, via report_friction and project_retrospective, and load_project_memory reads it back."
 ---
 
 # Self-improvement: learning that stays with the project
@@ -24,17 +24,17 @@ The loop is three live, audited tools, no separate journal file:
 
 | When | Tool | Lands |
 |---|---|---|
-| The moment friction happens | `claude_reports` | `.tcip/reports/` |
+| The moment friction happens | `report_friction` | `.tcip/reports/` |
 | End of substantial work, even if incomplete | `project_retrospective` | `.tcip/retrospectives/` |
 | Start of the next session | `load_project_memory` (`kind='reports'`, then `'retrospectives'`) | read back into context |
 
 ## Capture: the moment friction happens
 
-Call `claude_reports` when you notice any of these. One line is enough in the moment; the free-text
+Call `report_friction` when you notice any of these. One line is enough in the moment; the free-text
 `detail` matters far more than the category.
 
 - Pushback / correction: "no, do it this way", "don't do X", "actually it's Y". Call
-  `claude_reports` with `user_disagreement=True` for these; it's a separate signal from
+  `report_friction` with `user_disagreement=True` for these; it's a separate signal from
   `category`, so a later distill pass can pull every place the owner and you disagreed out of the
   pile on its own, rather than mixed into general friction.
 - Repetition: you're told the same thing a second time.

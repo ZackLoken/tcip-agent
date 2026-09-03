@@ -18,7 +18,7 @@ follow this arc. Each step links out to the domain skill that owns its detail.
 ## 0. Orient
 
 Start the session with `load_project_memory` (kind='reports' and kind='retrospectives'), then `inspect_project`
-on any project you're handed. Surface friction with `claude_reports` the moment you hit
+on any project you're handed. Surface friction with `report_friction` the moment you hit
 it (ambiguous goal, unconfirmed format).
 
 ## 1. Name the project: `crop_subject_phenotype`
