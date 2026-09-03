@@ -68,9 +68,9 @@ _NO_SCHEDULER = {"none", "fifo", ""}
 _HALVING_SCHEDULERS = {"async_hyperband", "hyperband"}
 
 SPLIT_DRAW_SEED_KEY = "data.split.seed"
-"""The dotted param-space key ``run_hpo``'s ``split_draws`` axis sweeps and ``tune_search``
+"""The dotted param-space key ``run_hyperparameter_search``'s ``split_draws`` axis sweeps and ``tune_search``
 pairs with every sampled point via ``grid_keys``; the one definition every site that names the
-axis (``run_hpo``, ``_split_draws_refusal``, ``group_split_draws``, ``tune_search`` itself)
+axis (``run_hyperparameter_search``, ``_split_draws_refusal``, ``group_split_draws``, ``tune_search`` itself)
 reads, rather than a literal repeated at each site."""
 
 
@@ -115,7 +115,7 @@ def _to_tune_space(
 
     ``grid=True`` enumerates every discrete axis (categorical / int) via ``grid_search``;
     continuous axes stay sampled (a grid can't enumerate a continuous range). ``grid_keys``
-    names axes forced to ``grid_search`` regardless of ``grid`` (``run_hpo``'s own
+    names axes forced to ``grid_search`` regardless of ``grid`` (``run_hyperparameter_search``'s own
     ``data.split.seed`` draw axis, paired with a ``BasicVariantGenerator(constant_grid_search=
     True)`` so every sampled point is trained once per seed whether the sweep's own
     ``search_alg`` is ``random`` or ``grid``).
@@ -577,7 +577,7 @@ def tune_search(
         warm_start: seed the search with ``baseline_params`` (or the default baseline).
         storage_path: where Ray persists trial results (also the TensorBoard logdir root).
             Required: trial results land where the caller says, never Ray's own
-            home-directory default. ``run_hpo`` resolves it for a training sweep (the
+            home-directory default. ``run_hyperparameter_search`` resolves it for a training sweep (the
             project's own ``.tcip/hpo``); a bespoke search names its own directory. Accepts
             a local path today; Ray's ``storage_path`` also takes a cloud URI, the seam a
             central store would use.
@@ -590,7 +590,7 @@ def tune_search(
             still looks unfinished, or (the bounded fallback, for a trial that never polls) once
             a configured staleness window has passed. See :func:`_build_sweep_stopper`.
         split_draws: Above 1, ``param_space`` must already carry a ``SPLIT_DRAW_SEED_KEY`` grid
-            axis (``run_hpo``'s own addition; raises ``ValueError`` naming the axis when it is
+            axis (``run_hyperparameter_search``'s own addition; raises ``ValueError`` naming the axis when it is
             missing, rather than pairing nothing silently) and the search is built as
             ``BasicVariantGenerator(constant_grid_search=True, random_state=seed)`` instead of
             through ``build_search_alg``, so every sampled point is trained once per seed
@@ -609,12 +609,12 @@ def tune_search(
     row carries no params, value or iteration count of its own: ``params``, ``value`` and
     ``iterations`` are all ``None``, ``state`` is ``"ERROR"``, and ``error`` names the
     never-answered death. A sweep in which no trial reported the metric at all raises
-    ``RuntimeError`` out of ``get_best_result``, which ``run_hpo`` records as a failed sweep.
+    ``RuntimeError`` out of ``get_best_result``, which ``run_hyperparameter_search`` records as a failed sweep.
     """
     if not storage_path:
         raise ValueError(
             "tune_search needs storage_path: trial results are persisted where the caller "
-            "says, never Ray's own home-directory default. run_hpo resolves it for a "
+            "says, never Ray's own home-directory default. run_hyperparameter_search resolves it for a "
             "training sweep (the project's own .tcip/hpo via hpo_root/sweep_dir); a bespoke "
             "search names its own directory."
         )
@@ -623,7 +623,7 @@ def tune_search(
         raise ValueError(
             f"tune_search: split_draws={split_draws} pairs {SPLIT_DRAW_SEED_KEY!r} as a grid "
             "axis with every sampled point, and param_space carries no such axis: pass it "
-            "explicitly, or call through run_hpo's own split_draws, which adds it for you."
+            "explicitly, or call through run_hyperparameter_search's own split_draws, which adds it for you."
         )
 
     import ray

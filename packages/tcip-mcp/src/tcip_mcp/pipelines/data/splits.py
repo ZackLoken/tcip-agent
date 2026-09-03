@@ -477,7 +477,7 @@ def manifest_redraw_universe(
 
     Raises ``ValueError`` (:func:`resolve_group_key_fn`'s own) for an unrecognized ``group_by``
     or a ``group_key_map`` missing coverage: the redraw refuses by name rather than falling back
-    to a policy the manifest never recorded. Shared by ``preflight_config`` and ``run_hpo``'s
+    to a policy the manifest never recorded. Shared by ``preflight_config`` and ``run_hyperparameter_search``'s
     pre-mint check, both of which answer this before any admission exists to bind against, so
     the two see the identical universe and grouping a real redraw would.
     """
@@ -514,7 +514,7 @@ def redraw_starved_issue(
     function once did) misses exactly that case: two groups, one of them entirely background,
     reads as enough groups when only one of them can ever satisfy a side's minimum. Checked
     before any run starts (:func:`~tcip_mcp.tools.training_tools.preflight_config`, and
-    ``run_hpo``'s own pre-mint check for ``split_draws``), ahead of the redraw's own refusal
+    ``run_hyperparameter_search``'s own pre-mint check for ``split_draws``), ahead of the redraw's own refusal
     once it has actually drawn a starved side for real.
 
     ``foreground_counts`` is ``stems``' own per-stem annotation count, subject- and

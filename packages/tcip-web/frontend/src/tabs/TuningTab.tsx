@@ -46,7 +46,7 @@ function cellText(value: unknown): string {
 const NO_CANCEL_REASON = "no reason recorded";
 
 /** Shown while the selected sweep's own detail answers with ``has_manifest: false``: the
- * pre-manifest window before ``run_hpo`` writes a sweep's first manifest. The relaunch route
+ * pre-manifest window before ``run_hyperparameter_search`` writes a sweep's first manifest. The relaunch route
  * registers the job before it answers, so this is never a 404; it is the detail itself saying
  * the record is not written yet. A sweep refused before it ever wrote one is served by the
  * listing's own terminal status instead, and never reaches this. */

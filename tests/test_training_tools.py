@@ -1424,12 +1424,12 @@ def test_a_sweep_payload_that_json_cannot_hold_is_refused_before_any_trial_runs(
                                                                     "n_trials": 1})
 
     with pytest.raises(TypeError) as space_refused:
-        training_tools.run_hpo({"model_source": {"builder": "m:f"}},
+        training_tools.run_hyperparameter_search({"model_source": {"builder": "m:f"}},
                                param_space={"lr": Path("lr.txt")})
     assert "param_space.lr" in str(space_refused.value)
 
     with pytest.raises(TypeError) as config_refused:
-        training_tools.run_hpo({"model_source": {"builder": Path("m.py")}},
+        training_tools.run_hyperparameter_search({"model_source": {"builder": Path("m.py")}},
                                param_space={"lr": [0.1, 0.01]})
     assert "base_config.model_source.builder" in str(config_refused.value)
 
@@ -1457,23 +1457,23 @@ def test_an_ordinary_sweep_payload_still_runs_its_search(tmp_path, monkeypatch):
                          "builder_kwargs": {"num_classes": 1}, "task": "detection"},
         "data": {"images_dir": str(imgs), "labels_dir": str(lbls)},
     }
-    result = training_tools.run_hpo(base_config, param_space={"lr": [0.1, 0.01]}, n_trials=1)
+    result = training_tools.run_hyperparameter_search(base_config, param_space={"lr": [0.1, 0.01]}, n_trials=1)
 
     assert result["best_params"] == {"lr": 0.01}
     assert seen == [{"lr": [0.1, 0.01]}]
 
 
-def test_run_hpo_refuses_a_param_space_axis_naming_the_dotted_selection_metric(
+def test_run_hyperparameter_search_refuses_a_param_space_axis_naming_the_dotted_selection_metric(
     tmp_path, monkeypatch,
 ):
-    """run_hpo fixes the sweep's selection metric and direction once from base_config and
+    """run_hyperparameter_search fixes the sweep's selection metric and direction once from base_config and
     reuses it for every trial; a param_space axis naming ``evaluation.selection_metric``
     directly would let a trial's own resolution disagree, so it is refused by name before
     the sweep is minted."""
     from tcip_mcp.tools import training_tools
 
     monkeypatch.chdir(tmp_path)
-    result = training_tools.run_hpo(
+    result = training_tools.run_hyperparameter_search(
         {"model_source": {"builder": "m:f"}},
         param_space={"evaluation.selection_metric": {
             "type": "categorical", "choices": ["map", "iou_mean"],
@@ -1483,7 +1483,7 @@ def test_run_hpo_refuses_a_param_space_axis_naming_the_dotted_selection_metric(
     assert "evaluation.selection_metric" in result["error"]
 
 
-def test_run_hpo_refuses_a_param_space_axis_whose_choices_carry_selection_metric(
+def test_run_hyperparameter_search_refuses_a_param_space_axis_whose_choices_carry_selection_metric(
     tmp_path, monkeypatch,
 ):
     """The same refusal catches an ``evaluation`` axis whose sampled value is itself a dict
@@ -1491,7 +1491,7 @@ def test_run_hpo_refuses_a_param_space_axis_whose_choices_carry_selection_metric
     from tcip_mcp.tools import training_tools
 
     monkeypatch.chdir(tmp_path)
-    result = training_tools.run_hpo(
+    result = training_tools.run_hyperparameter_search(
         {"model_source": {"builder": "m:f"}},
         param_space={"evaluation": {
             "type": "categorical",
@@ -1502,7 +1502,7 @@ def test_run_hpo_refuses_a_param_space_axis_whose_choices_carry_selection_metric
     assert "evaluation" in result["error"]
 
 
-def test_run_hpo_admits_an_lr_sweep_beside_a_base_config_selection_metric(
+def test_run_hyperparameter_search_admits_an_lr_sweep_beside_a_base_config_selection_metric(
     tmp_path, real_hpo_base_config, monkeypatch,
 ):
     """The selection-metric refusal targets param_space, never base_config: a config that
@@ -1520,13 +1520,13 @@ def test_run_hpo_admits_an_lr_sweep_beside_a_base_config_selection_metric(
     monkeypatch.setattr(hpo, "tune_search", fake_search)
 
     base_config = {**real_hpo_base_config, "evaluation": {"selection_metric": "map"}}
-    result = training_tools.run_hpo(base_config, param_space={"lr": [0.1, 0.01]}, n_trials=1)
+    result = training_tools.run_hyperparameter_search(base_config, param_space={"lr": [0.1, 0.01]}, n_trials=1)
 
     assert result["best_params"] == {"lr": 0.01}
     assert seen == [{"lr": [0.1, 0.01]}]
 
 
-def test_run_hpo_refuses_a_param_space_axis_that_changes_the_metrics_own_task_default(
+def test_run_hyperparameter_search_refuses_a_param_space_axis_that_changes_the_metrics_own_task_default(
     tmp_path, real_hpo_base_config, monkeypatch,
 ):
     """A param_space axis with no selection_metric key anywhere can still split the sweep's
@@ -1536,7 +1536,7 @@ def test_run_hpo_refuses_a_param_space_axis_that_changes_the_metrics_own_task_de
     from tcip_mcp.tools import training_tools
 
     monkeypatch.chdir(tmp_path)
-    result = training_tools.run_hpo(
+    result = training_tools.run_hyperparameter_search(
         real_hpo_base_config,
         param_space={"model_source.task": {
             "type": "categorical", "choices": ["detection", "classification"],
@@ -1546,7 +1546,7 @@ def test_run_hpo_refuses_a_param_space_axis_that_changes_the_metrics_own_task_de
     assert "model_source.task" in result["error"]
 
 
-def test_run_hpo_admits_a_categorical_evaluation_axis_naming_the_same_metric_at_every_choice(
+def test_run_hyperparameter_search_admits_a_categorical_evaluation_axis_naming_the_same_metric_at_every_choice(
     tmp_path, real_hpo_base_config, monkeypatch,
 ):
     """The axis-conflict check resolves each point's own selection metric rather than refusing
@@ -1569,7 +1569,7 @@ def test_run_hpo_admits_a_categorical_evaluation_axis_naming_the_same_metric_at_
         "type": "categorical",
         "choices": [{"selection_metric": "map"}, {"selection_metric": "map"}],
     }}
-    result = training_tools.run_hpo(base_config, param_space=param_space, n_trials=1)
+    result = training_tools.run_hyperparameter_search(base_config, param_space=param_space, n_trials=1)
 
     assert "error" not in result, result
     assert seen == [param_space]

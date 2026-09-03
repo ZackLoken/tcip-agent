@@ -1,9 +1,9 @@
 """HPO / Tuning routes: relaunch + cancel + list + per-trial visibility.
 
 Sweeps reach this surface two ways: launched here over HTTP (tracked in memory for as long
-as this process lives), or launched by the agent straight through the ``run_hpo`` MCP tool,
+as this process lives), or launched by the agent straight through the ``run_hyperparameter_search`` MCP tool,
 which this process never sees. The durable source for both is the ``manifest.json`` that
-``run_hpo`` stamps under the sweep's own directory when the sweep starts, so the listing
+``run_hyperparameter_search`` stamps under the sweep's own directory when the sweep starts, so the listing
 below reads disk and overlays the in-memory jobs, the same live-plus-historical merge the
 Training routes do for runs.
 """
@@ -59,7 +59,7 @@ def _manifest_fields(manifest: dict) -> dict:
     (a live sweep's row, read from the manifest under its own launch root), so a sweep reads
     the same fields whichever way it is listed.
 
-    ``base_config`` is the relaunchable marker (:func:`training_tools.run_hpo` writes it
+    ``base_config`` is the relaunchable marker (:func:`training_tools.run_hyperparameter_search` writes it
     whenever it creates a manifest); its absence is reported with a reason rather than a
     reconstructed config. ``cancel_requested`` is the manifest's own field, set by
     ``cancel_hyperparameter_search`` and never derived from a side file this route cannot see across roots.
@@ -67,7 +67,7 @@ def _manifest_fields(manifest: dict) -> dict:
     for one that genuinely was not a relaunch: a relaunch of an older sweep must still work
     (see :func:`_missing_relaunch_fields`, which does not require this key). ``split_draws``
     projects the same way, ``None`` for a manifest predating it (read as 1, no draws, by
-    ``run_hpo``'s own default): the header line only renders it above 1. ``redraws_within_manifest``
+    ``run_hyperparameter_search``'s own default): the header line only renders it above 1. ``redraws_within_manifest``
     reads the recorded ``base_config``'s own ``data.split.redraw_within_manifest``, ``False``
     for a manifest carrying none (predating the flag, or a config that never set it): the
     header's draws line names the bound manifest as what each draw redraws inside only then.
@@ -125,10 +125,10 @@ def _driver_live(sweep_id: str) -> bool:
 def _job_sweep_state(job: HPOJob, manifest: dict) -> str:
     """A live-registry job's derived liveness. The registry's own record wins once ``job.status``
     is itself a recorded done state, so a job the registry knows completed never reads
-    ``interrupted`` off a manifest whose terminal write ``run_hpo`` tolerates failing;
+    ``interrupted`` off a manifest whose terminal write ``run_hyperparameter_search`` tolerates failing;
     otherwise the manifest is the source when one exists, else the registry's own record, the
     only source of truth for a job that never got as far as writing a manifest (a relaunch
-    ``run_hpo`` refused at preflight, or any job that failed before its first manifest write).
+    ``run_hyperparameter_search`` refused at preflight, or any job that failed before its first manifest write).
     Either way the rule is :func:`~tcip_mcp.tools.training_tools.sweep_state`'s own: a recorded
     done state is trusted, a live worker thread reads ``running``, anything else reads
     ``interrupted``."""
@@ -150,7 +150,7 @@ def _summary(job: HPOJob) -> dict:
     persisted ``job.status`` verbatim: the persisted document keeps that (see
     :func:`_persisted_summary`), and gains nothing from this derivation.
 
-    ``has_manifest`` reports whether ``run_hpo`` has written this sweep's first manifest yet,
+    ``has_manifest`` reports whether ``run_hyperparameter_search`` has written this sweep's first manifest yet,
     the fact a caller keys a pre-manifest render on rather than a 404 the relaunch route never
     produces (it registers the job before it answers). ``relaunched_from`` falls back to the
     job's own in-memory record (set at relaunch) only in that same pre-manifest window; once a
@@ -393,7 +393,7 @@ class RelaunchSweepPayload(BaseModel):
 
 @dataclass
 class _RelaunchSpec:
-    """Every ``run_hpo`` argument a relaunchable manifest holds, read once so the worker
+    """Every ``run_hyperparameter_search`` argument a relaunchable manifest holds, read once so the worker
     replays exactly what the manifest recorded rather than trusting untyped dict access at
     the call site."""
 
@@ -416,7 +416,7 @@ _RELAUNCH_FIELDS: tuple[str, ...] = (
     "base_config", "param_space", "n_trials", "search_alg", "scheduler", "grace_period",
     "reduction_factor", "max_concurrent", "warm_start", "baseline_params", "resources_per_trial",
 )
-"""Every ``run_hpo`` argument a relaunch replays. ``run_hpo`` writes every one of these as a
+"""Every ``run_hyperparameter_search`` argument a relaunch replays. ``run_hyperparameter_search`` writes every one of these as a
 key whenever it creates a manifest (a value of ``None`` is a recorded choice, not an absence),
 so only a manifest without the field, or one truncated some other way, names anything as
 missing here."""
@@ -428,11 +428,11 @@ def _missing_relaunch_fields(manifest: dict) -> list[str]:
 
 
 def _relaunch_spec(manifest: dict) -> _RelaunchSpec:
-    """``manifest``'s own ``run_hpo`` arguments, read directly rather than defaulted: a caller
+    """``manifest``'s own ``run_hyperparameter_search`` arguments, read directly rather than defaulted: a caller
     checks :func:`_missing_relaunch_fields` first, so a key absent here would be a programming
     error, never a silently substituted value that was never the sweep's own.
 
-    ``split_draws``/``split_draw_seeds`` are the one exception, read with ``run_hpo``'s own
+    ``split_draws``/``split_draw_seeds`` are the one exception, read with ``run_hyperparameter_search``'s own
     defaults (1, ``None``) rather than required: a manifest without the field carries neither
     key, and must still relaunch."""
     return _RelaunchSpec(
@@ -462,7 +462,7 @@ def _worker(job: HPOJob, spec: _RelaunchSpec, output_dir: str, relaunched_from: 
     carrying the issues, and a returned ``{"status": "cancelled", ...}`` a cancelled one,
     rather than either reading as a completed job with no useful result. ``relaunched_from``
     is the source study's own name, recorded on this sweep's manifest so a listing can show it.
-    Discards ``job.sweep_id``'s own pre-manifest launch mark on every exit, ``run_hpo`` never
+    Discards ``job.sweep_id``'s own pre-manifest launch mark on every exit, ``run_hyperparameter_search`` never
     reached included, so a caller that failed before or inside that call leaves no mark behind.
     """
     from tcip_mcp.tools.training_tools import discard_sweep_launching
@@ -470,9 +470,9 @@ def _worker(job: HPOJob, spec: _RelaunchSpec, output_dir: str, relaunched_from: 
     try:
         job.status = "running"
         _persist()
-        from tcip_mcp.tools.training_tools import run_hpo
+        from tcip_mcp.tools.training_tools import run_hyperparameter_search
 
-        res = run_hpo(
+        res = run_hyperparameter_search(
             base_config=spec.base_config,
             param_space=spec.param_space,
             n_trials=spec.n_trials,
@@ -525,7 +525,7 @@ def relaunch_sweep(payload: RelaunchSweepPayload) -> dict:
     request body's echoed string, so the two names it might resolve to the same record under
     (case, say) never disagree on this sweep's manifest.
     Marks the new sweep id as launching, on this request thread, before the worker starts, so
-    a cancel that arrives before ``run_hpo`` writes its own first manifest still reaches it."""
+    a cancel that arrives before ``run_hyperparameter_search`` writes its own first manifest still reaches it."""
     from tcip_mcp.tools.training_tools import hpo_root, mark_sweep_launching
 
     manifest = _read_manifest(payload.study_name, root=_sweep_launch_root(payload.study_name))
@@ -588,7 +588,7 @@ def get_sweep(sweep_id: str) -> dict:
     value; ``relaunched_from`` is a top-level field on both branches too, the manifest's own
     when one exists, else (live branch only, pre-manifest) the job's own in-memory record.
     ``has_manifest`` is always true on the disk branch (a disk sweep has one by definition) and
-    reflects whether ``run_hpo`` has written one yet on the live branch."""
+    reflects whether ``run_hyperparameter_search`` has written one yet on the live branch."""
     from tcip_web import jobstore
     from tcip_mcp.tools.training_tools import TCIP_HEARTBEAT_STALE_SECONDS, sweep_state
 

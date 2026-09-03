@@ -1,4 +1,4 @@
-"""Cooperative sweep cancel: ``cancel_hyperparameter_search``, ``run_hpo``'s cancelled-manifest exits,
+"""Cooperative sweep cancel: ``cancel_hyperparameter_search``, ``run_hyperparameter_search``'s cancelled-manifest exits,
 ``_run_hpo_trial``'s entry check, and the sweep ``Stopper``'s two stop-all conditions.
 """
 
@@ -14,7 +14,7 @@ def test_cancel_hyperparameter_search_refuses_a_study_neither_manifest_nor_regis
 
 
 def test_mark_sweep_launching_lets_cancel_hyperparameter_search_find_a_study_with_no_manifest_yet(tmp_path) -> None:
-    """The pre-manifest window: a study a caller has marked as launching, but ``run_hpo`` has
+    """The pre-manifest window: a study a caller has marked as launching, but ``run_hyperparameter_search`` has
     not yet reached its first manifest write, is a sweep ``cancel_hyperparameter_search`` can find, not a study
     it refuses as unknown."""
     from tcip_mcp.tools.training_tools import (
@@ -30,15 +30,15 @@ def test_mark_sweep_launching_lets_cancel_hyperparameter_search_find_a_study_wit
     assert (sweep_dir(study_name, str(tmp_path)) / SWEEP_CANCEL_SENTINEL).exists()
 
 
-def test_run_hpo_records_a_cancelled_manifest_for_a_cancel_that_landed_before_it_was_called(
+def test_run_hyperparameter_search_records_a_cancelled_manifest_for_a_cancel_that_landed_before_it_was_called(
     tmp_path, real_hpo_base_config
 ) -> None:
     """A cancel that reaches the sweep in the window the web relaunch route marks before
-    starting its worker (mark, then a cancel, then ``run_hpo`` itself) records the same
-    before-start cancellation ``run_hpo``'s own pre-existing sentinel check already handles;
+    starting its worker (mark, then a cancel, then ``run_hyperparameter_search`` itself) records the same
+    before-start cancellation ``run_hyperparameter_search``'s own pre-existing sentinel check already handles;
     today's refusal is at ``cancel_hyperparameter_search``, proven separately, above."""
     from tcip_mcp.tools.training_tools import (
-        _CANCEL_BEFORE_START_REASON, cancel_hyperparameter_search, mark_sweep_launching, run_hpo, sweep_manifest_key,
+        _CANCEL_BEFORE_START_REASON, cancel_hyperparameter_search, mark_sweep_launching, run_hyperparameter_search, sweep_manifest_key,
     )
 
     study_name = "hpo_racedcancel1"
@@ -46,7 +46,7 @@ def test_run_hpo_records_a_cancelled_manifest_for_a_cancel_that_landed_before_it
     cancelled = cancel_hyperparameter_search(study_name, str(tmp_path))
     assert "error" not in cancelled
 
-    result = run_hpo(base_config=real_hpo_base_config, n_trials=1, output_dir=str(tmp_path),
+    result = run_hyperparameter_search(base_config=real_hpo_base_config, n_trials=1, output_dir=str(tmp_path),
                      study_name=study_name)
     assert result["status"] == "cancelled"
     assert result["error"] == _CANCEL_BEFORE_START_REASON
@@ -56,11 +56,11 @@ def test_run_hpo_records_a_cancelled_manifest_for_a_cancel_that_landed_before_it
     assert manifest["status"] == "cancelled"
 
 
-def test_mark_sweep_launching_is_discarded_once_run_hpo_reaches_its_first_manifest_write(
+def test_mark_sweep_launching_is_discarded_once_run_hyperparameter_search_reaches_its_first_manifest_write(
     tmp_path, real_hpo_base_config, monkeypatch
 ) -> None:
     from tcip_mcp.tools.training_tools import (
-        _sweep_launching, mark_sweep_launching, run_hpo, sweep_dir,
+        _sweep_launching, mark_sweep_launching, run_hyperparameter_search, sweep_dir,
     )
 
     study_name = "hpo_markclear1"
@@ -73,39 +73,39 @@ def test_mark_sweep_launching_is_discarded_once_run_hpo_reaches_its_first_manife
         lambda **kw: {"best_params": {}, "best_value": 0.1, "n_trials": 1,
                      "study_name": kw["study_name"]},
     )
-    run_hpo(base_config=real_hpo_base_config, n_trials=1, output_dir=str(tmp_path),
+    run_hyperparameter_search(base_config=real_hpo_base_config, n_trials=1, output_dir=str(tmp_path),
            study_name=study_name)
 
     assert _sweep_launching(study_name, resolved_root) is False
 
 
 def test_mark_sweep_launching_is_discarded_even_when_preflight_refuses(tmp_path) -> None:
-    """The mark is scoped to the window before run_hpo's first manifest write, refusal
+    """The mark is scoped to the window before run_hyperparameter_search's first manifest write, refusal
     included: a caller's mark for a study whose config fails preflight must not linger forever
-    once run_hpo has already answered for it."""
-    from tcip_mcp.tools.training_tools import _sweep_launching, mark_sweep_launching, run_hpo, sweep_dir
+    once run_hyperparameter_search has already answered for it."""
+    from tcip_mcp.tools.training_tools import _sweep_launching, mark_sweep_launching, run_hyperparameter_search, sweep_dir
 
     study_name = "hpo_markrefuse1"
     resolved_root = sweep_dir(study_name, str(tmp_path)).resolve()
     mark_sweep_launching(study_name, str(tmp_path))
 
-    result = run_hpo(base_config={"model_source": {"builder": "not.a:real_builder"}},
+    result = run_hyperparameter_search(base_config={"model_source": {"builder": "not.a:real_builder"}},
                      n_trials=1, output_dir=str(tmp_path), study_name=study_name)
     assert "error" in result
     assert _sweep_launching(study_name, resolved_root) is False
 
 
 def test_mark_sweep_launching_is_discarded_when_check_json_value_refuses(tmp_path) -> None:
-    """The two ``check_json_value`` refusals sit inside ``run_hpo``'s own try/finally now, not
+    """The two ``check_json_value`` refusals sit inside ``run_hyperparameter_search``'s own try/finally now, not
     ahead of it, so a caller's launch mark is discarded on that exit too."""
-    from tcip_mcp.tools.training_tools import _sweep_launching, mark_sweep_launching, run_hpo, sweep_dir
+    from tcip_mcp.tools.training_tools import _sweep_launching, mark_sweep_launching, run_hyperparameter_search, sweep_dir
 
     study_name = "hpo_badjson1"
     resolved_root = sweep_dir(study_name, str(tmp_path)).resolve()
     mark_sweep_launching(study_name, str(tmp_path))
 
     with pytest.raises(TypeError):
-        run_hpo(base_config={"data": {"not_json": {1, 2, 3}}}, n_trials=1,
+        run_hyperparameter_search(base_config={"data": {"not_json": {1, 2, 3}}}, n_trials=1,
                output_dir=str(tmp_path), study_name=study_name)
 
     assert _sweep_launching(study_name, resolved_root) is False
@@ -113,7 +113,7 @@ def test_mark_sweep_launching_is_discarded_when_check_json_value_refuses(tmp_pat
 
 def test_cancel_hyperparameter_search_under_a_mismatched_root_is_refused_despite_the_launch_mark(tmp_path) -> None:
     """A mark recorded under one resolved root does not let a cancel under another root count
-    the study as found: a cancel that lands where run_hpo will never look is refused, not
+    the study as found: a cancel that lands where run_hyperparameter_search will never look is refused, not
     honoured with a sentinel nothing will ever poll."""
     from tcip_mcp.tools.training_tools import cancel_hyperparameter_search, mark_sweep_launching, sweep_dir
 
@@ -147,12 +147,12 @@ def test_cancel_hyperparameter_search_under_a_non_default_root(tmp_path) -> None
     assert (sweep_root / SWEEP_CANCEL_SENTINEL).exists()
 
 
-def test_run_hpo_records_a_cancelled_manifest_when_the_file_exists_before_preflight_creates_it(
+def test_run_hyperparameter_search_records_a_cancelled_manifest_when_the_file_exists_before_preflight_creates_it(
     tmp_path, real_hpo_base_config, monkeypatch
 ) -> None:
-    """A cancel requested against a study_name a caller already minted (before run_hpo's own
+    """A cancel requested against a study_name a caller already minted (before run_hyperparameter_search's own
     manifest write) records a cancelled manifest rather than being refused."""
-    from tcip_mcp.tools.training_tools import SWEEP_CANCEL_SENTINEL, run_hpo, sweep_dir
+    from tcip_mcp.tools.training_tools import SWEEP_CANCEL_SENTINEL, run_hyperparameter_search, sweep_dir
 
     study_name = "hpo_precancel1"
     sweep_root = sweep_dir(study_name, str(tmp_path))
@@ -167,7 +167,7 @@ def test_run_hpo_records_a_cancelled_manifest_when_the_file_exists_before_prefli
 
     monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", fake_search)
 
-    result = run_hpo(base_config=real_hpo_base_config, n_trials=1, output_dir=str(tmp_path),
+    result = run_hyperparameter_search(base_config=real_hpo_base_config, n_trials=1, output_dir=str(tmp_path),
                      study_name=study_name)
     assert result["status"] == "cancelled"
     assert result["error"]  # the reason travels with the result, not only the manifest
@@ -180,11 +180,11 @@ def test_run_hpo_records_a_cancelled_manifest_when_the_file_exists_before_prefli
     assert manifest["error"] == result["error"]
 
 
-def test_run_hpo_records_a_cancelled_manifest_when_tune_search_returns_after_a_cancel(
+def test_run_hyperparameter_search_records_a_cancelled_manifest_when_tune_search_returns_after_a_cancel(
     tmp_path, real_hpo_base_config, monkeypatch
 ) -> None:
     from tcip_mcp.tools.training_tools import (
-        SWEEP_CANCEL_SENTINEL, run_hpo, sweep_dir, sweep_manifest_key, study_result_key,
+        SWEEP_CANCEL_SENTINEL, run_hyperparameter_search, sweep_dir, sweep_manifest_key, study_result_key,
     )
 
     study_name = "hpo_cancelret1"
@@ -200,7 +200,7 @@ def test_run_hpo_records_a_cancelled_manifest_when_tune_search_returns_after_a_c
 
     monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", fake_search)
 
-    result = run_hpo(base_config=real_hpo_base_config, n_trials=1, output_dir=str(tmp_path),
+    result = run_hyperparameter_search(base_config=real_hpo_base_config, n_trials=1, output_dir=str(tmp_path),
                      study_name=study_name)
     assert result["status"] == "cancelled"
     assert result["error"]
@@ -212,10 +212,10 @@ def test_run_hpo_records_a_cancelled_manifest_when_tune_search_returns_after_a_c
     assert not tcip_store.exists(study_result_key(study_name, str(tmp_path)))
 
 
-def test_run_hpo_records_a_cancelled_manifest_when_tune_search_raises_after_a_cancel(
+def test_run_hyperparameter_search_records_a_cancelled_manifest_when_tune_search_raises_after_a_cancel(
     tmp_path, real_hpo_base_config, monkeypatch
 ) -> None:
-    from tcip_mcp.tools.training_tools import SWEEP_CANCEL_SENTINEL, run_hpo, sweep_dir
+    from tcip_mcp.tools.training_tools import SWEEP_CANCEL_SENTINEL, run_hyperparameter_search, sweep_dir
 
     study_name = "hpo_cancelraise1"
     sweep_root = sweep_dir(study_name, str(tmp_path))
@@ -226,7 +226,7 @@ def test_run_hpo_records_a_cancelled_manifest_when_tune_search_raises_after_a_ca
 
     monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", fake_search)
 
-    result = run_hpo(base_config=real_hpo_base_config, n_trials=1, output_dir=str(tmp_path),
+    result = run_hyperparameter_search(base_config=real_hpo_base_config, n_trials=1, output_dir=str(tmp_path),
                      study_name=study_name)
     assert result["status"] == "cancelled"
     assert result["error"]
@@ -241,11 +241,11 @@ def test_run_hpo_records_a_cancelled_manifest_when_tune_search_raises_after_a_ca
 def test_a_terminal_cancelled_manifest_keeps_cancel_requested(
     tmp_path, real_hpo_base_config, monkeypatch
 ) -> None:
-    """run_hpo re-derives cancel_requested from the sweep's own stop file on every manifest
+    """run_hyperparameter_search re-derives cancel_requested from the sweep's own stop file on every manifest
     write, including its terminal one, rather than writing its stale in-memory copy (which
     never carries a field cancel_hyperparameter_search set on disk out of band) back over it."""
     from tcip_mcp.tools.training_tools import (
-        SWEEP_CANCEL_SENTINEL, run_hpo, sweep_dir, sweep_manifest_key,
+        SWEEP_CANCEL_SENTINEL, run_hyperparameter_search, sweep_dir, sweep_manifest_key,
     )
 
     study_name = "hpo_keepflag1"
@@ -256,7 +256,7 @@ def test_a_terminal_cancelled_manifest_keeps_cancel_requested(
         return {"best_params": {}, "best_value": 0.0, "n_trials": 1, "study_name": study_name}
 
     monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", fake_search)
-    run_hpo(base_config=real_hpo_base_config, n_trials=1, output_dir=str(tmp_path),
+    run_hyperparameter_search(base_config=real_hpo_base_config, n_trials=1, output_dir=str(tmp_path),
            study_name=study_name)
 
     import tcip_store
@@ -450,34 +450,34 @@ def test_sweep_stopper_stop_all_true_after_the_stale_window_elapses_regardless_o
     assert stopper.stop_all() is True  # the bounded fallback: Ray's own stop takes over
 
 
-def test_run_hpo_refuses_a_relaunched_from_naming_no_sweep_manifest_under_this_root(
+def test_run_hyperparameter_search_refuses_a_relaunched_from_naming_no_sweep_manifest_under_this_root(
     tmp_path, real_hpo_base_config
 ) -> None:
     """relaunched_from must name a sweep this root actually holds a manifest for: a name that
     resolves to nothing is refused before anything is minted, rather than recorded verbatim as
     fabricated lineage on a frozen record."""
     import tcip_store
-    from tcip_mcp.tools.training_tools import run_hpo, sweep_manifest_key
+    from tcip_mcp.tools.training_tools import run_hyperparameter_search, sweep_manifest_key
 
-    result = run_hpo(base_config=real_hpo_base_config, n_trials=1, output_dir=str(tmp_path),
+    result = run_hyperparameter_search(base_config=real_hpo_base_config, n_trials=1, output_dir=str(tmp_path),
                      study_name="hpo_refused_relaunch1", relaunched_from="hpo_does_not_exist")
     assert "error" in result
     assert "hpo_does_not_exist" in result["error"]
     assert not tcip_store.exists(sweep_manifest_key("hpo_refused_relaunch1", str(tmp_path)))
 
 
-def test_run_hpo_with_no_relaunched_from_is_unaffected_by_the_new_check(
+def test_run_hyperparameter_search_with_no_relaunched_from_is_unaffected_by_the_new_check(
     tmp_path, real_hpo_base_config, monkeypatch
 ) -> None:
-    """Admits valid work: a direct run_hpo call that never names relaunched_from is not
+    """Admits valid work: a direct run_hyperparameter_search call that never names relaunched_from is not
     touched by the refusal added for the case where it is given."""
-    from tcip_mcp.tools.training_tools import run_hpo
+    from tcip_mcp.tools.training_tools import run_hyperparameter_search
 
     monkeypatch.setattr(
         "tcip_mcp.pipelines.training.hpo.tune_search",
         lambda **kw: {"best_params": {}, "best_value": 0.1, "n_trials": 1,
                      "study_name": kw["study_name"]},
     )
-    result = run_hpo(base_config=real_hpo_base_config, n_trials=1, output_dir=str(tmp_path),
+    result = run_hyperparameter_search(base_config=real_hpo_base_config, n_trials=1, output_dir=str(tmp_path),
                      study_name="hpo_norelaunch1")
     assert "error" not in result

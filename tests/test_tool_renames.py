@@ -6,10 +6,11 @@ test_tool_manifest.py documents every retired tool name in its own removed set, 
 from a landed rename among them; that literal set is the one legitimate place an old name
 survives on purpose, so the whole file is excluded from the sweep rather than the one set.
 
-run_hpo's internal training-loop helpers (``_run_hpo_trial``), the HPO store names,
-``pipelines/training/hpo.py``, and the ``hpo`` state directory are none of them the literal
-token ``run_hpo``: an underscore or another word sits against every one of them, so the
-whole-word pattern below never matches them and no helper needed renaming or a narrower scope.
+run_hyperparameter_search's internal training-loop helper stays named ``_run_hpo_trial``, since
+it is not the tool, and the HPO store names, ``pipelines/training/hpo.py``, and the ``hpo``
+state directory are none of them the literal old token ``run_hpo`` either: an underscore or
+another word sits against every one of them, so the whole-word sweep below would never have
+flagged them, and every other place the old name appeared, tests included, was renamed by hand.
 
 focus is common CSS/DOM vocabulary outside the tool (frontend ``.focus()`` calls, ``autoFocus``
 props, ``:focus`` selectors), so its sweep is scoped to the Python tool surface, the tests, the
@@ -30,6 +31,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 RENAMES = [
     ("calibrate_ordinal_regression_operating_point", "calibrate_scalar_operating_point"),
     ("cancel_hpo", "cancel_hyperparameter_search"),
+    ("run_hpo", "run_hyperparameter_search"),
 ]
 
 _OWN_FILE = str(Path(__file__).relative_to(REPO_ROOT)).replace("\\", "/")

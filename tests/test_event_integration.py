@@ -670,11 +670,11 @@ class TestInferenceToolOutputSchema:
 
 
 class TestHpoToolOutputSchema:
-    def test_run_hpo_exists(self) -> None:
+    def test_run_hyperparameter_search_exists(self) -> None:
         from tcip_mcp.tools import training_tools
 
-        assert hasattr(training_tools, "run_hpo")
-        assert callable(training_tools.run_hpo)
+        assert hasattr(training_tools, "run_hyperparameter_search")
+        assert callable(training_tools.run_hyperparameter_search)
 
 
 # ── Port fallback chain + pytest hermeticity ──────────

@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 STEM_TASKS = frozenset({"detection", "instance_seg", "semantic_seg", "classification"})
 """Tasks ``auto_train_val``'s drawn (step 2) path covers: a run outside this set never reaches
 that branch, so nothing here draws a train/val split for it. Module-level so a caller deciding
-whether a task admits the drawn path (``run_hpo``'s ``split_draws`` refusal) checks the same set
+whether a task admits the drawn path (``run_hyperparameter_search``'s ``split_draws`` refusal) checks the same set
 ``auto_train_val`` itself walks, rather than a second copy that could drift from it."""
 
 

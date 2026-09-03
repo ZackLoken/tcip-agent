@@ -41,7 +41,7 @@ Anthropic by default, and OpenAI plus Google through this developer script.
 
 ## Channel 3: Ray usage statistics, phoning home by default
 
-`run_hpo` starts a Ray cluster whose usage-statistics reporter is enabled by default and posts
+`run_hyperparameter_search` starts a Ray cluster whose usage-statistics reporter is enabled by default and posts
 periodically to `https://usage-stats.ray.io/`. The payload is machine and cluster metadata, not
 project data. It is the platform's one genuine phone-home, and it is disabled with a single
 environment variable, `RAY_USAGE_STATS_ENABLED=0`, which the platform does not set for you. An
