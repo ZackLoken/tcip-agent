@@ -1,9 +1,12 @@
-"""The ``domain_knowledge`` MCP tool: the one non-Claude-Code-skill route to the platform's
-domain knowledge documents.
+"""The ``domain_knowledge`` MCP tool: the route to the platform's domain knowledge documents for
+a client with no skill or instruction-file mechanism of its own.
 
-Claude Code reaches the same documents through the generated skills under ``.claude/skills/``
-(``scripts/generate_claude_skills.py``); any other client reaches them here. Unlike every other
-tool in this package, its client-visible description is composed at import time from the
+Claude Code reaches the same documents through the generated skills under ``.claude/skills/``;
+Codex and Antigravity reach them under ``.agents/skills/`` and, for Codex, the generated block in
+``AGENTS.md`` too (``scripts/generate_harness_discovery.py`` renders all three); any other
+client, and a harness with neither a skill nor an instruction-file mechanism, reaches them here.
+Unlike every other tool in this package, its client-visible description is composed at import
+time from the
 knowledge corpus itself (``tcip_mcp.knowledge.list_documents``) rather than left as its bare
 docstring, so the selection hint a client sees is never a second copy of the corpus to fall out
 of step with it. Composing at import also means a document with malformed or duplicate

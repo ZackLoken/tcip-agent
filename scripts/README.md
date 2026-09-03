@@ -37,10 +37,11 @@ reaching for again versus one built narrowly for a specific past investigation.
   (`tcip_web.state.GuiVocabulary`), so the browser's types are a projection of the backend's
   rather than hand-transcribed. Run after changing a declared model;
   `tests/test_generated_frontend_types.py` fails when the checked-in module is stale.
-- `generate_claude_skills.py` - renders the thin `.claude/skills/<name>/SKILL.md` files from
-  the canonical knowledge documents under `packages/tcip-mcp/src/tcip_mcp/knowledge/`. Run
-  after adding, renaming, or re-describing a document; `tests/test_claude_skills_generated.py`
-  fails when a checked-in generated skill is stale.
+- `generate_harness_discovery.py` - renders the thin `.claude/skills/<name>/SKILL.md` and
+  `.agents/skills/<name>/SKILL.md` files, plus the generated block in `AGENTS.md`, from the
+  canonical knowledge documents under `packages/tcip-mcp/src/tcip_mcp/knowledge/`. Run after
+  adding, renaming, or re-describing a document; `tests/test_harness_discovery_generated.py`
+  fails when a checked-in generated file is stale.
 - `distill_learnings.py` - gathers one project's (or, with `--workspace`, every project's)
   `claude_reports` and `project_retrospective` records into one Markdown worksheet of
   recurring themes, for human review before calling `record_distillation_pass`.
