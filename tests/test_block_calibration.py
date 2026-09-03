@@ -1183,7 +1183,7 @@ def _attest_regions_complete_through_the_coverage_route(
 
     grid_resp = client.get("/api/coverage/grid", params={"path": image_path, "tile_size": TILE})
     assert grid_resp.status_code == 200, grid_resp.text
-    served = grid_resp.json()
+    served = grid_resp.json()["grid"]
     cells = served["cells"]
     grid = {key: value for key, value in served.items() if key not in ("cells", "derivation")}
     all_rects = [tuple(r) for region in regions for r in region]

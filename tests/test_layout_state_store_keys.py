@@ -80,7 +80,8 @@ def test_recording_view_coverage_leaves_the_confirmed_negatives_untouched(
         {"plot.tif": "negative", "other.tif": "complete"}, recorded_by="user:breeder")},
         expect=ts.Version.ABSENT)
 
-    grid = client.get("/api/coverage/grid", params={"path": path, "tile_size": 50}).json()
+    grid = client.get(
+        "/api/coverage/grid", params={"path": path, "tile_size": 50}).json()["grid"]
     cell = grid["cells"][0]["name"]
     resp = client.post("/api/coverage", json={
         "image_path": path,

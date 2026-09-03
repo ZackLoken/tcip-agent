@@ -61,27 +61,16 @@ class StatsSource(BaseModel):
     overview_scale: Optional[float] = None
 
 
-class WorkingScaleBar(BaseModel):
-    """A subject's working-scale bar for one image: the view scale at which the median saved
-    annotation's longer bounding-box side (``median_extent_native_px``, over
-    ``annotation_count`` box/polygon annotations) spans ``judged_span_px`` screen pixels.
-    Derived from the label file alone (:func:`tcip_mcp.pipelines.region_completeness.
-    working_scale_bar`), never echoed back from the browser: ``source`` states in one line that
-    ``judged_span_px`` is a documented default, not a measurement of object legibility.
-
-    ``from_this_image`` is true when the median is over this image's own saved annotations,
-    false when it is the dataset's physical median expressed through this image's own pixel
-    size (:func:`tcip_mcp.pipelines.region_completeness.dataset_physical_extent`); a stored bar
-    written before this field existed carries no key, read as absent, never as false."""
+class WorkingScale(BaseModel):
+    """The scale a coverage sweep is judged against: the breeder's own set inspection zoom for a
+    subject (``coverage_grid_zoom``), never derived from annotation content. ``source`` states
+    who set it and when ("set by user:<name> at <time>"), so a stamped comparison always carries
+    its own provenance rather than a bare number."""
 
     model_config = ConfigDict(extra="forbid")
 
     value: float
-    median_extent_native_px: float
-    annotation_count: int
-    judged_span_px: int
     source: str
-    from_this_image: Optional[bool] = None
 
 
 class CoverageViewing(BaseModel):

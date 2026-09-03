@@ -1,34 +1,40 @@
-"""View-coverage routes: the reference grid over a raster and the per-image record of two
-per-cell facts: which cells were served to the browser at native resolution (a delivery fact)
-and which cells have, at some point this session or an earlier one, sat fully on screen at some
-recorded scale (``cells_seen_at_scale``, a bound). Neither is an attention claim. Whether a seen
-cell counts as "swept" is derived against a subject's working-scale bar -- the view scale at
-which the median saved annotation of that subject on this image spans a documented default
-number of screen pixels (:data:`tcip_mcp.pipelines.reference_grid.JUDGED_SPAN_PX`), served by
-``get_completeness`` below and never stored on this record. The one comparison
-(``lib/coverage.ts``'s ``meetsBar``) lives in the browser; this route never compares a recorded
-scale against a bar.
+"""View-coverage routes: the coverage lattice over a raster, the grid-zoom setting it is derived
+from, and the per-image record of two per-cell facts: which cells were served to the browser at
+native resolution (a delivery fact) and which cells have, at some point this session or an
+earlier one, sat fully on screen at some recorded scale (``cells_seen_at_scale``, a bound).
+Neither is an attention claim. Whether a seen cell counts as "swept" is derived against a
+subject's working scale -- the breeder's own set inspection zoom for that subject
+(:func:`tcip_mcp.dataset_layout.coverage_grid_zoom_key`), served by ``get_completeness`` below
+and never stored on this record. The one comparison (``lib/coverage.ts``'s ``meetsBar``) lives in
+the browser; this route never compares a recorded scale against it.
 
-The grid geometry has one implementation (``tcip_mcp.pipelines.reference_grid``): the
-grid route serves cells computed there and the frontend consumes them verbatim, never
-re-deriving them. The record store is ``view_coverage.json``
-(``dataset_layout.view_coverage_path``), bucketed like ``image_status.json``
-(``status_bucket(subject, date)``, then image name). The store is advisory: training
-never reads it, and unswept cells warn rather than block a Complete. Every write that changes
-the record is audited (``record_event_or_raise``, after the transaction commits, since a log
-append cannot join a record transaction): an append that cannot land still raises
-(``AuditEntryNotWritten``, named by a stable marker in the 500 body) rather than warning, but by
-then the record is already committed, so the missing line stays missing -- a retry of the same
-payload merges to no change and writes and audits nothing. The 500 tells the caller the true
+The grid geometry has one implementation (``tcip_mcp.pipelines.reference_grid``): the grid route
+serves cells computed there and the frontend consumes them verbatim, never re-deriving them. A
+coverage cell is one screenful of native pixels at the breeder's set zoom
+(:func:`tcip_mcp.pipelines.reference_grid.derive_lattice_tile_size`); nothing is inferred from an
+annotation, and no default zoom exists, so a subject with none set has no lattice at all until
+the breeder states one (``POST /api/coverage/grid_zoom``). Region serving is a separate concern
+on its own display-derived tiling (:func:`tcip_mcp.pipelines.reference_grid.
+derive_serving_tile_size`) that never depends on the coverage lattice or the set zoom.
+
+The coverage record store is ``view_coverage.json`` (``dataset_layout.view_coverage_path``),
+bucketed like ``image_status.json`` (``status_bucket(subject, date)``, then image name). The
+store is advisory: training never reads it, and unswept cells warn rather than block a Complete.
+Every write that changes the record is audited (``record_event_or_raise``, after the transaction
+commits, since a log append cannot join a record transaction): an append that cannot land still
+raises (``AuditEntryNotWritten``, named by a stable marker in the 500 body) rather than warning,
+but by then the record is already committed, so the missing line stays missing -- a retry of the
+same payload merges to no change and writes and audits nothing. The 500 tells the caller the true
 guarantee (the change landed, its line did not), never that its own retry is what recovers it.
 
-Also here: region-completeness routes, a different store on the same grid. An attestation ("I
+Also here: the grid-zoom store itself (``coverage_grid_zoom.json``, advisory, one entry per
+subject) and region-completeness routes, a different store on the same grid. An attestation ("I
 found every instance of this subject in these cells") gates a scientific claim (block
 calibration's completeness check), so unlike view coverage it is written with the same discipline
 as ``routes/classes.py``'s image-status store, and a stale attestation (a cell's annotation
 content edited or deleted since it was attested) is detected on every read, not trusted forever.
 An attestation also records its own scale provenance (``cells_attested_view``): the view scale
-the breeder pressed at, the working-scale bar derived from the label file at write time, and
+the breeder pressed at, the working scale (the set zoom) in effect at write time, and
 whether this image's own coverage record shows the cell seen on a matching lattice -- facts
 only, no verdict, since whether an unswept cell should have blocked the attestation stays
 advisory. See ``dataset_layout.region_completeness_path`` and
@@ -57,6 +63,27 @@ _CONFORM_HINT = (
     "run scripts/conform_view_coverage_viewing.py against this dataset to bring it to the "
     "current shape (--plan first to preview the change)"
 )
+
+_OLD_WORKING_SCALE_KEY = "working_scale_bar_at_write"
+_WORKING_SCALE_CONFORM_HINT = (
+    "run scripts/conform_working_scale_at_write.py against this dataset to bring it to the "
+    "current shape (--plan first to preview the change)"
+)
+
+
+def _refuse_old_working_scale_key(image_name: str, record: dict) -> None:
+    """Refuse a stored region-completeness record whose ``cells_attested_view`` still carries
+    the renamed key (``_OLD_WORKING_SCALE_KEY``), naming the conform script rather than serving
+    or merging into a value the current shape no longer reads."""
+    attested_view = record.get("cells_attested_view")
+    if not isinstance(attested_view, dict):
+        return
+    for cell, entry in attested_view.items():
+        if isinstance(entry, dict) and _OLD_WORKING_SCALE_KEY in entry:
+            raise HTTPException(
+                400,
+                f"{image_name}'s stored region-completeness record's cell {cell!r} still "
+                f"carries {_OLD_WORKING_SCALE_KEY!r}; {_WORKING_SCALE_CONFORM_HINT}")
 
 # The stable marker post_coverage's 500 body carries for AuditEntryNotWritten (api/http.ts's
 # decodeRefusal parses detail as an object; coverageTracker.ts's outbox reads it as terminal).
@@ -150,10 +177,12 @@ def _audit_or_answer_500(tool: str, arguments: dict, root: str) -> None:
 
 
 def _grid_for_raster(src: Path, tile_size: int | None) -> tuple[dict, str]:
-    """The reference-grid geometry for the raster at ``src`` and the one-line explanation of how
-    its tile size was chosen, shared by ``get_grid`` and ``get_completeness`` (the latter's own
-    ``annotation_counts`` field) so the grid a breeder sees and the grid a saved-annotation count
-    is binned against can never be two different lattices.
+    """The display-derived reference-grid geometry for the raster at ``src`` and the one-line
+    explanation of how its tile size was chosen, shared by ``get_grid``'s ``serving`` field and
+    ``get_completeness`` (its own ``annotation_counts`` field) so region serving and a
+    saved-annotation count are always binned against the same lattice. ``tile_size`` explicit
+    bypasses the derivation (the agent's own chosen edge); this function never derives the
+    breeder's coverage lattice, which is sized at the set zoom (:func:`_lattice_for_raster`).
 
     Native dims come off the raster header (``image_dimensions``), never a decode. Raises
     ``tcip_mcp.pipelines.data.band_groups.BandGroupIncomplete`` for a band group missing a
@@ -161,61 +190,24 @@ def _grid_for_raster(src: Path, tile_size: int | None) -> tuple[dict, str]:
     field rather than blocking the read.
     """
     from tcip_mcp.pipelines.image_utils import image_dimensions, resolve_image_source
-    from tcip_mcp.pipelines.raster_source import is_georeferenced, opens_windowed
-    from tcip_mcp.pipelines.reference_grid import (
-        derive_coverage_tile_size,
-        derive_large_raster_grid_tile_size,
-        grid_geometry,
-    )
+    from tcip_mcp.pipelines.reference_grid import derive_serving_tile_size, grid_geometry
 
     source = resolve_image_source(src.parent, src.stem)
     width, height = image_dimensions(source)
-    # A stitched orthomosaic carries real per-pixel georeferencing; an ordinary drone/ground
-    # capture (any pixel size) carries at most a single EXIF GPS point, never that.
     if tile_size is not None:
         edge = tile_size
         derivation = f"a chosen cell edge of {tile_size} px"
-    elif opens_windowed(source, 3) and is_georeferenced(source):
-        edge = derive_large_raster_grid_tile_size(width, height)
-        derivation = "the long edge in 16 equal divisions"
     else:
-        edge = derive_coverage_tile_size(width, height)
+        edge = derive_serving_tile_size(width, height)
         derivation = "cells sized to one full-resolution screenful"
     return grid_geometry(width, height, edge, 0.0), derivation
 
 
-@router.get("/grid")
-def get_grid(
-    path: str = Query(..., description="Absolute path to the image file"),
-    tile_size: int | None = Query(None, ge=1, description="Cell edge in native pixels; "
-                                  "omitted derives the coverage lattice edge"),
-    overlap: float = Query(0.0),
-) -> dict:
-    """The reference grid over ``path``'s native frame: geometry plus the full cell list and the
-    ``derivation`` line naming how the tile size was chosen ("the long edge in 16 equal
-    divisions", "cells sized to one full-resolution screenful", or "a chosen cell edge of <n>
-    px" for an explicit ``tile_size``); a cell is never a training tile, a different lattice with
-    a different origin and (by default) a training overlap.
-
-    ``overlap`` other than 0 is refused: the coverage record's exact-partition contract
-    puts every native pixel in exactly one cell, which overlapping cells break. The
-    frontend consumes these cells verbatim and never re-derives them; ``derivation`` is not
-    part of ``GridGeometry`` and is stripped back off before a grid round-trips into a
-    coverage or completeness payload.
-    """
-    from tcip_mcp.pipelines.data.band_groups import BandGroupIncomplete
+def _rendered_grid(geometry: dict, derivation: str) -> dict:
+    """One grid response block (``get_grid``'s own top-level shape, minus its ``cells``/
+    ``derivation``, spelled once so ``grid`` and ``serving`` are always assembled the same way)."""
     from tcip_mcp.pipelines.reference_grid import reference_cells
 
-    src = _checked(path)
-    if overlap != 0.0:
-        raise HTTPException(
-            400,
-            f"the coverage grid requires overlap 0: its exact-partition contract puts every "
-            f"native pixel in exactly one cell, which overlapping cells break; got {overlap}")
-    try:
-        geometry, derivation = _grid_for_raster(src, tile_size)
-    except BandGroupIncomplete as exc:
-        raise HTTPException(409, str(exc)) from exc
     cells = reference_cells(
         geometry["width"], geometry["height"], geometry["tile_size"], 0.0, clamp=True)
     return {
@@ -224,6 +216,227 @@ def get_grid(
         "cells": [{"name": c.name, "x0": c.x0, "y0": c.y0, "x1": c.x1, "y1": c.y1}
                   for c in cells],
     }
+
+
+def _subject_zoom(root: str, subject: str) -> Optional[dict]:
+    """``subject``'s stored grid-zoom entry (``{zoom, set_by, set_at}``) for the dataset at
+    ``root``, or ``None`` when the breeder has not set one: the one read every caller of the
+    ``coverage_grid_zoom`` store shares, so a lookup can never drift from the store's own shape."""
+    from tcip_mcp.dataset_layout import coverage_grid_zoom_key
+
+    store = tcip_store.read(coverage_grid_zoom_key(root), default={})
+    if not isinstance(store, dict):
+        return None
+    entry = store.get(subject)
+    return entry if isinstance(entry, dict) else None
+
+
+def _working_scale_of(entry: Optional[dict]) -> Optional[dict]:
+    """``entry`` (a stored grid-zoom record) rendered as the served/stored ``WorkingScale``
+    shape (``{value, source}``), or ``None`` when there is no entry: the one place a zoom entry
+    becomes a working scale, shared by ``get_completeness`` and ``post_completeness`` so the two
+    can never render the same entry two different ways."""
+    if entry is None:
+        return None
+    return {"value": entry.get("zoom"),
+            "source": f"set by {entry.get('set_by')} at {entry.get('set_at')}"}
+
+
+def _lattice_for_raster(
+    src: Path, viewport_w: int, viewport_h: int, zoom: float,
+) -> tuple[dict, str]:
+    """The coverage-lattice geometry for the raster at ``src`` at ``zoom``, one screenful of
+    native pixels at that zoom on a ``viewport_w`` x ``viewport_h`` canvas host
+    (:func:`tcip_mcp.pipelines.reference_grid.derive_lattice_tile_size`). One rule for a
+    photograph and an orthomosaic; nothing here branches on raster size or georeferencing."""
+    from tcip_mcp.pipelines.image_utils import image_dimensions, resolve_image_source
+    from tcip_mcp.pipelines.reference_grid import derive_lattice_tile_size, grid_geometry
+
+    source = resolve_image_source(src.parent, src.stem)
+    width, height = image_dimensions(source)
+    edge = derive_lattice_tile_size(viewport_w, viewport_h, zoom)
+    return grid_geometry(width, height, edge, 0.0), f"one screenful at {zoom}x zoom"
+
+
+@router.get("/grid")
+def get_grid(
+    path: str = Query(..., description="Absolute path to the image file"),
+    subject: str | None = Query(
+        None, description="Whose set grid zoom derives the coverage lattice; omitted when only "
+                          "an explicit tile_size or the serving grid is wanted"),
+    date: str | None = Query(None),
+    dataset_root: str | None = Query(None),
+    viewport_w: int | None = Query(
+        None, ge=1, description="Canvas host width at fetch time, native-pixel lattice sizing"),
+    viewport_h: int | None = Query(
+        None, ge=1, description="Canvas host height at fetch time, native-pixel lattice sizing"),
+    tile_size: int | None = Query(
+        None, ge=1, description="Explicit cell edge in native pixels; bypasses the set-zoom "
+                                "lattice and the already-worked lattice alike, for a caller "
+                                "(the agent) that wants a specific grid regardless of either"),
+    rederive: bool = Query(
+        False, description="Ignore this image's already-worked lattice and derive fresh at the "
+                           "current zoom, even when a view_coverage record exists"),
+    overlap: float = Query(0.0),
+) -> dict:
+    """The coverage lattice over ``path`` at ``subject``'s set grid zoom, plus the
+    zoom-independent region-serving grid (``serving``) and, when a coverage lattice cannot be
+    derived, the one-line ``reason`` why.
+
+    With ``tile_size`` given, ``grid`` is that explicit lattice regardless of any set zoom or
+    stored record: the one path the agent (or a caller wanting a specific grid) always gets.
+    Without it: when a ``view_coverage`` record already exists for this image and ``subject``
+    and ``rederive`` is not set, ``grid`` is that record's own lattice (``derivation`` "the
+    lattice this image's coverage was recorded on"), so a worked image never has its lattice
+    pulled out from under it by a zoom change; ``fresh_derivation_differs`` then says whether
+    the zoom currently in effect would derive a different tile size, so the chrome can offer
+    "Re-derive lattice" only when it would actually change something. Otherwise ``grid`` is
+    derived fresh from ``subject``'s set zoom and the ``viewport_w``/``viewport_h`` the canvas
+    host measured at fetch time; with no zoom set for ``subject``, or no viewport supplied yet,
+    ``grid`` is ``null`` and ``reason`` names why -- "set the grid zoom to derive a coverage
+    lattice for <subject>" when nothing is set, since no default zoom exists.
+
+    ``serving`` never depends on any of this: it is always the display-derived region-serving
+    grid (:func:`tcip_mcp.pipelines.reference_grid.derive_serving_tile_size`), the cells
+    ``useRegionServes`` fetches against, unaffected by the coverage lattice or its zoom.
+
+    ``overlap`` other than 0 is refused: the coverage record's exact-partition contract
+    puts every native pixel in exactly one cell, which overlapping cells break. The
+    frontend consumes these cells verbatim and never re-derives them; ``derivation`` is not
+    part of ``GridGeometry`` and is stripped back off before a grid round-trips into a
+    coverage or completeness payload.
+    """
+    from tcip_mcp.dataset_layout import parse_image_path, status_bucket, view_coverage_key
+    from tcip_mcp.pipelines.data.band_groups import BandGroupIncomplete
+    from tcip_mcp.pipelines.reference_grid import derive_lattice_tile_size
+
+    src = _checked(path)
+    if overlap != 0.0:
+        raise HTTPException(
+            400,
+            f"the coverage grid requires overlap 0: its exact-partition contract puts every "
+            f"native pixel in exactly one cell, which overlapping cells break; got {overlap}")
+
+    try:
+        serving_geometry, serving_derivation = _grid_for_raster(src, None)
+    except BandGroupIncomplete as exc:
+        raise HTTPException(409, str(exc)) from exc
+    serving = _rendered_grid(serving_geometry, serving_derivation)
+
+    if tile_size is not None:
+        geometry, derivation = _grid_for_raster(src, tile_size)
+        return {"grid": _rendered_grid(geometry, derivation), "reason": None,
+                "fresh_derivation_differs": None, "serving": serving}
+
+    if not subject:
+        return {"grid": None,
+                "reason": "the coverage lattice is scoped to a subject's own set grid zoom; "
+                          "pass a subject",
+                "fresh_derivation_differs": None, "serving": serving}
+
+    root = _resolve_root(path, dataset_root)
+    zoom_entry = _subject_zoom(root, subject)
+
+    existing_record: Optional[dict] = None
+    if not rederive:
+        try:
+            _root_from_image, parsed_date, _stem = parse_image_path(path)
+        except ValueError:
+            parsed_date = date
+        store = tcip_store.read(view_coverage_key(root), default={})
+        if isinstance(store, dict):
+            bucket = store.get(status_bucket(subject, parsed_date))
+            record = bucket.get(Path(path).name) if isinstance(bucket, dict) else None
+            if isinstance(record, dict) and isinstance(record.get("grid"), dict):
+                existing_record = record
+
+    if existing_record is not None:
+        grid = _rendered_grid(
+            existing_record["grid"], "the lattice this image's coverage was recorded on")
+        fresh_derivation_differs: Optional[bool] = None
+        if zoom_entry is not None and viewport_w is not None and viewport_h is not None:
+            try:
+                fresh_edge = derive_lattice_tile_size(
+                    viewport_w, viewport_h, zoom_entry["zoom"])
+            except (KeyError, ValueError):
+                fresh_derivation_differs = None
+            else:
+                fresh_derivation_differs = fresh_edge != existing_record["grid"].get("tile_size")
+        return {"grid": grid, "reason": None,
+                "fresh_derivation_differs": fresh_derivation_differs, "serving": serving}
+
+    if zoom_entry is None:
+        return {"grid": None,
+                "reason": f"set the grid zoom to derive a coverage lattice for {subject}",
+                "fresh_derivation_differs": None, "serving": serving}
+    if viewport_w is None or viewport_h is None:
+        return {"grid": None,
+                "reason": "the canvas host has not been measured yet; the coverage lattice is "
+                          "derived from that measurement",
+                "fresh_derivation_differs": None, "serving": serving}
+
+    geometry, derivation = _lattice_for_raster(src, viewport_w, viewport_h, zoom_entry["zoom"])
+    return {"grid": _rendered_grid(geometry, derivation), "reason": None,
+            "fresh_derivation_differs": None, "serving": serving}
+
+
+class GridZoomPayload(BaseModel):
+    """One breeder-set grid zoom for one subject: screen pixels per native pixel, the same
+    number the status bar shows as a percentage. ``zoom`` must be positive; there is no default
+    zoom anywhere in this platform, so a subject with none set has no coverage lattice at all."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    subject: str
+    zoom: float
+    dataset_root: Optional[str] = None
+    user: Optional[str] = None
+
+
+@router.post("/grid_zoom")
+def post_grid_zoom(payload: GridZoomPayload) -> dict:
+    """Set ``payload.subject``'s coverage-lattice zoom for this dataset, replacing any previous
+    value: the breeder states the inspection zoom once per subject per dataset, and a worked
+    image keeps whatever lattice it was recorded on (see ``get_grid``) until re-derived, so this
+    write never itself touches any stored coverage or completeness record.
+
+    ``zoom`` at or below 0 is refused by name: a zoom is a positive scale (screen px per native
+    px), and there is no legitimate zero or negative reading.
+
+    Audited through the same raising emitter (``record_event_or_raise``) ``post_coverage`` and
+    ``post_completeness`` use: a failed append answers the same marked 500
+    (``AUDIT_ENTRY_NOT_WRITTEN``) after the write has already committed.
+    """
+    from tcip_mcp.dataset_layout import coverage_grid_zoom_key
+    from tcip_web.identity import resolve_user, user_id
+
+    subject = _require_subject(payload.subject)
+    if payload.zoom <= 0:
+        raise HTTPException(
+            400, f"zoom must be positive (screen px per native px), got {payload.zoom}")
+    if not payload.dataset_root:
+        raise HTTPException(400, "the coverage grid zoom is scoped to a dataset; pass "
+                                 "dataset_root")
+    root = _guard_dataset_root(payload.dataset_root)
+    author = user_id(resolve_user(payload.user))
+    now_iso = datetime.now(timezone.utc).isoformat()
+    key = coverage_grid_zoom_key(root)
+
+    with tcip_store.transaction(key) as txn:
+        store = txn.read(key, default={})
+        if not isinstance(store, dict):
+            store = {}
+        store = dict(store)
+        store[subject] = {"zoom": payload.zoom, "set_by": author, "set_at": now_iso}
+        txn.write(key, store)
+
+    _audit_or_answer_500(
+        "gui_set_coverage_grid_zoom",
+        {"subject": subject, "zoom": payload.zoom, "set_by": author},
+        root,
+    )
+    return {"status": "ok", "subject": subject, "zoom": payload.zoom, "set_by": author,
+            "set_at": now_iso}
 
 
 @router.get("")
@@ -449,9 +662,9 @@ def get_completeness(
     path: str = Query(..., description="Absolute path to the image file"),
     dataset_root: Optional[str] = Query(None),
     subject: Optional[str] = Query(
-        None, description="Include this subject's working-scale bar even when it saved no "
-                          "annotation on this image, so a negative or unannotated image still "
-                          "answers for the active subject rather than omitting it"),
+        None, description="Include this subject's working scale even when it has no "
+                          "completeness record on this image, so a negative or unannotated "
+                          "image still answers for the active subject rather than omitting it"),
 ) -> dict:
     """Every subject's region-completeness record for the raster at ``path`` (its own stem), not
     just one subject's: lets the coverage overlay render a cell attested complete for a subject
@@ -463,49 +676,32 @@ def get_completeness(
     records: facts only, no verdict). A label document that will not decode for a subject that
     already holds a record here still refuses (400): staleness cannot be computed without it.
 
-    ``working_scale`` (subject -> bar or ``null``) is every subject present in the raster's
-    label file, plus the requested ``subject`` when absent from it, each derived fresh from that
-    file (:func:`tcip_mcp.pipelines.region_completeness.working_scale_bar`) -- never a value the
-    browser echoes back. When a subject saved no box or polygon annotation of its own on this
-    image, its bar falls back to the dataset's physical median for that subject
-    (:func:`tcip_mcp.pipelines.region_completeness.dataset_physical_extent`), expressed through
-    this image's own pixel size (:func:`tcip_mcp.pipelines.pixel_size.raster_pixel_size`)
-    when both are known; the served/stored dict's ``from_this_image`` says which branch produced
-    it. Where neither exists, ``working_scale[subject]`` stays null and
-    ``working_scale_reason: dict[str, str]`` names why, per subject. The label file is read once,
-    ahead of and outside the raster-grid block, and the same annotations feed
-    ``annotation_counts``: a raster-read failure (a missing file, an incomplete band group) leaves
-    the bar standing and only costs ``counts_error``, while a label-read failure empties both
-    ``working_scale`` and ``annotation_counts``, named in ``working_scale_error``/``counts_error``
-    alike; a failure in the pixel-size/dataset-extent derivation alone (an ``AmbiguousImageStem``,
-    an unreadable label elsewhere in the dataset, an ``OSError``) costs only the bars it would have
-    produced and is named the same way, in ``working_scale_error``.
+    ``working_scale`` (subject -> ``WorkingScale`` or ``null``) is every subject with a
+    completeness record on this raster, plus the requested ``subject`` when it has none, each
+    read fresh from ``coverage_grid_zoom`` -- the breeder's own set inspection zoom for that
+    subject, never derived from any annotation or echoed back from the browser. Where no zoom is
+    set, ``working_scale[subject]`` stays null and ``working_scale_reason: dict[str, str]`` names
+    why, per subject: there is no default zoom anywhere in this platform.
 
     ``annotation_counts`` (subject -> cell name -> count) is every subject's saved-annotation
     count per cell, binned against ``counts_grid`` (:func:`_grid_for_raster`, the same
-    derivation ``get_grid`` uses and served beside ``annotation_counts`` rather than folded into
-    it: a count belongs to the grid, not to any one attestation record.
+    derivation region serving uses) and served beside ``annotation_counts`` rather than folded
+    into it: a count belongs to the grid, not to any one attestation record. A label-read failure
+    empties it, named in ``counts_error``; a raster-read failure (a missing file, an incomplete
+    band group) costs only ``counts_error`` too, since binning needs the raster's own dimensions.
     """
     from tcip_annotation.json_io import UnreadableLabelDocument, read_annotations
     from tcip_mcp.dataset_layout import (
         annotation_path,
+        coverage_grid_zoom_key,
         normalize_region_completeness_store,
         parse_image_path,
         region_completeness_digest_key,
         region_completeness_key,
     )
     from tcip_mcp.pipelines.data.band_groups import BandGroupIncomplete
-    from tcip_mcp.pipelines.pixel_size import PixelSize, resolve_pixel_size
-    from tcip_mcp.pipelines.reference_grid import JUDGED_SPAN_PX, reference_cells
-    from tcip_mcp.pipelines.region_completeness import (
-        annotation_counts_by_cell,
-        dataset_physical_extent,
-        dataset_working_scale_bar,
-        default_working_scale_source,
-        saved_extents,
-        stale_cells,
-        working_scale_bar,
-    )
+    from tcip_mcp.pipelines.reference_grid import reference_cells
+    from tcip_mcp.pipelines.region_completeness import annotation_counts_by_cell, stale_cells
 
     try:
         src = assert_path_allowed(path)
@@ -527,6 +723,7 @@ def get_completeness(
         record_subject = record.get("subject")
         if not isinstance(record_subject, str) or not record_subject:
             continue
+        _refuse_old_working_scale_key(f"{stem} ({record_subject})", record)
         stamped = digests.get(bucket)
         try:
             stale = stale_cells(
@@ -534,6 +731,28 @@ def get_completeness(
         except UnreadableLabelDocument as exc:
             raise HTTPException(400, str(exc)) from exc
         by_subject[record_subject] = {**record, "stale_cells": stale}
+
+    try:
+        zoom_store = tcip_store.read(coverage_grid_zoom_key(root), default={})
+        working_scale_error: Optional[str] = None
+    except tcip_store.DecodeError as exc:
+        zoom_store = {}
+        working_scale_error = str(exc)
+    if not isinstance(zoom_store, dict):
+        zoom_store = {}
+
+    subjects = set(by_subject)
+    if subject:
+        subjects.add(subject)
+    working_scale: dict[str, Optional[dict]] = {}
+    working_scale_reason: dict[str, str] = {}
+    for subj in sorted(subjects):
+        entry = zoom_store.get(subj)
+        if isinstance(entry, dict) and isinstance(entry.get("zoom"), (int, float)):
+            working_scale[subj] = _working_scale_of(entry)
+        else:
+            working_scale[subj] = None
+            working_scale_reason[subj] = f"set the grid zoom to derive a coverage lattice for {subj}"
 
     label_error: Optional[str] = None
     annotations: list = []
@@ -543,61 +762,6 @@ def get_completeness(
         annotations = read_annotations(str(label_path)) if label_path.is_file() else []
     except (UnreadableLabelDocument, ValueError, FileNotFoundError, OSError) as exc:
         label_error = str(exc)
-
-    working_scale_reason: dict[str, str] = {}
-    dataset_error: Optional[str] = None
-    if label_error is not None:
-        working_scale: dict[str, Optional[dict]] = {}
-    else:
-        subjects = {a.subject for a in annotations if a.subject}
-        if subject:
-            subjects.add(subject)
-        own_source = default_working_scale_source(JUDGED_SPAN_PX)
-        working_scale = {}
-        pixel_sizes: dict[Path, tuple[Optional[PixelSize], str]] = {}
-        label_cache: dict[Path, list] = {}
-        this_image_pixel_size: Optional[PixelSize] = None
-        this_image_pixel_size_reason: Optional[str] = None
-        this_image_pixel_size_checked = False
-        for subj in sorted(subjects):
-            own_bar = working_scale_bar(
-                saved_extents(annotations, subj), judged_span_px=JUDGED_SPAN_PX,
-                source=own_source, from_this_image=True)
-            if own_bar is not None:
-                working_scale[subj] = own_bar
-                continue
-            if not this_image_pixel_size_checked:
-                this_image_pixel_size_checked = True
-                if src not in pixel_sizes:
-                    pixel_sizes[src] = resolve_pixel_size(src)
-                this_image_pixel_size, this_image_pixel_size_reason = pixel_sizes[src]
-            if this_image_pixel_size is None:
-                working_scale[subj] = None
-                working_scale_reason[subj] = (
-                    f"no saved box or polygon annotation of {subj} on this image and no known "
-                    f"pixel size ({this_image_pixel_size_reason})")
-                continue
-            if dataset_error is not None:
-                working_scale[subj] = None
-                continue
-            try:
-                extent = dataset_physical_extent(
-                    root, subj, pixel_sizes=pixel_sizes, label_cache=label_cache)
-            except (OSError, ValueError, UnreadableLabelDocument,
-                    tcip_store.SchemaVersionRefused) as exc:
-                dataset_error = str(exc)
-                working_scale[subj] = None
-                continue
-            if extent is None:
-                working_scale[subj] = None
-                working_scale_reason[subj] = (
-                    f"no saved {subj} annotation on any georeferenced image with a known pixel "
-                    "size")
-                continue
-            working_scale[subj] = dataset_working_scale_bar(
-                subj, extent, this_image_pixel_size, JUDGED_SPAN_PX)
-
-    working_scale_error = label_error if label_error is not None else dataset_error
 
     annotation_counts: dict[str, dict[str, int]] = {}
     counts_grid: Optional[dict] = None
@@ -624,11 +788,11 @@ def post_completeness(payload: CompletenessSetPayload) -> dict:
     control's label ("Attest", "Unattest", "Re-attest") always states the write it performs.
     ``complete=True`` stamps the cell's current annotation-content digest, whether or not the
     cell was already complete (a re-attest restamps and clears staleness), and its scale
-    provenance in ``cells_attested_view`` (the pressed ``view_scale``, the working-scale bar
-    derived from the same label-file read at write time, and whether this image's own
-    view-coverage record -- read under ``status_bucket(subject, date)`` by the image's file
-    name, on a matching grid only -- shows the cell already seen); ``complete=False`` clears
-    both the digest stamp and the ``cells_attested_view`` entry.
+    provenance in ``cells_attested_view`` (the pressed ``view_scale``, the subject's working
+    scale in effect at write time, and whether this image's own view-coverage record -- read
+    under ``status_bucket(subject, date)`` by the image's file name, on a matching grid only --
+    shows the cell already seen); ``complete=False`` clears both the digest stamp and the
+    ``cells_attested_view`` entry.
 
     Cell names are validated against the posted grid's own cells, same as ``post_coverage``. A
     stored record whose grid disagrees with the posted one replaces wholesale (cells, digest
@@ -637,16 +801,10 @@ def post_completeness(payload: CompletenessSetPayload) -> dict:
     and cells (``replaced``, null when nothing was discarded), the way ``post_coverage`` states
     its own replacement.
 
-    An attestation stamps the bar the breeder actually swept against: this image's own saved
-    annotations first, the dataset's physical median (:func:`~tcip_mcp.pipelines.
-    region_completeness.dataset_physical_extent`) expressed through this image's own pixel size
-    when the image saved none of its own. Both are resolved once, before the transaction opens
-    (neither reads this image's label file, which stays a single read inside it); a failure there
-    (an ``AmbiguousImageStem``, a bad manifest, an ``OSError``) never refuses the cell -- the
-    attestation proceeds and stamps a null bar, and the failure is named in the response's
-    ``working_scale_error`` (present only when one occurred) -- unless the audit line for this
-    same attestation also fails to append, in which case the marked 500 below answers instead of
-    that response, and this failure is not named in it.
+    An attestation stamps the working scale the breeder actually swept against: the subject's own
+    set grid zoom (``coverage_grid_zoom``), read once ahead of the transaction, never this
+    image's label file or pixel size -- there is no failure mode here to name in the response, an
+    absent zoom simply stamps a null working scale.
 
     The audit line is appended after the transaction commits, through the same raising emitter
     ``post_coverage`` uses (``_audit_or_answer_500``): a failed append answers 500, naming
@@ -665,17 +823,8 @@ def post_completeness(payload: CompletenessSetPayload) -> dict:
         unreadable_completeness_entries,
         view_coverage_key,
     )
-    from tcip_mcp.pipelines.pixel_size import PixelSize, resolve_pixel_size
-    from tcip_mcp.pipelines.reference_grid import JUDGED_SPAN_PX, reference_cells
-    from tcip_mcp.pipelines.region_completeness import (
-        DatasetExtent,
-        cell_annotation_digest,
-        dataset_physical_extent,
-        dataset_working_scale_bar,
-        default_working_scale_source,
-        saved_extents,
-        working_scale_bar,
-    )
+    from tcip_mcp.pipelines.reference_grid import reference_cells
+    from tcip_mcp.pipelines.region_completeness import cell_annotation_digest
     from tcip_web.identity import resolve_user, user_id
 
     subject = _require_completeness_subject(payload.subject)
@@ -692,36 +841,21 @@ def post_completeness(payload: CompletenessSetPayload) -> dict:
             400, f"cell not in this grid: {payload.cell!r}; the grid has {len(cells_by_name)} "
                  f"cells")
 
+    complete = payload.complete
+    if complete:
+        try:
+            assert_path_allowed(payload.image_path)
+        except ValueError as exc:
+            raise HTTPException(403, str(exc)) from exc
+
     bucket = status_bucket(subject, stem)
     completeness_key = region_completeness_key(root)
     digest_key = region_completeness_digest_key(root)
     author = user_id(resolve_user(payload.user))
     now_iso = datetime.now(timezone.utc).isoformat()
-    complete = payload.complete
     image_name = Path(payload.image_path).name
-
-    # Resolved before the transaction opens: neither reads this image's own label file, so the
-    # lock below holds no directory walk and a failure here never refuses the cell.
-    dataset_pixel_size: Optional[PixelSize] = None
-    dataset_extent: Optional[DatasetExtent] = None
-    working_scale_derivation_error: Optional[str] = None
-    if complete:
-        try:
-            img_path = assert_path_allowed(payload.image_path)
-        except ValueError as exc:
-            raise HTTPException(403, str(exc)) from exc
-        try:
-            pixel_sizes: dict[Path, tuple[Optional[PixelSize], str]] = {
-                img_path: resolve_pixel_size(img_path)}
-            dataset_pixel_size, _reason = pixel_sizes[img_path]
-            if dataset_pixel_size is not None:
-                dataset_extent = dataset_physical_extent(
-                    root, subject, pixel_sizes=pixel_sizes)
-        except (OSError, ValueError, UnreadableLabelDocument,
-                tcip_store.SchemaVersionRefused) as exc:
-            working_scale_derivation_error = str(exc)
-            dataset_pixel_size = None
-            dataset_extent = None
+    # The subject's set zoom, never this image's own label file or pixel size: this can't fail.
+    working_scale_at_write = _working_scale_of(_subject_zoom(root, subject)) if complete else None
 
     # Digest key named first, so it is applied first: stale_cells fails closed on a missing
     # digest, so a stamp must never land after the attestation that points at it.
@@ -743,6 +877,8 @@ def post_completeness(payload: CompletenessSetPayload) -> dict:
         store = normalize_region_completeness_store(raw_store)
         existing = store.get(bucket)
         grid_matches = existing is not None and existing.get("grid") == grid
+        if grid_matches and isinstance(existing, dict):
+            _refuse_old_working_scale_key(image_name, existing)
         cells_complete = (
             set(existing.get("cells_complete") or [])
             if grid_matches and existing is not None else set())
@@ -788,16 +924,6 @@ def post_completeness(payload: CompletenessSetPayload) -> dict:
 
         attested_view_entry: Optional[dict] = None
         if complete:
-            own_extents = saved_extents(annotations, subject)
-            if own_extents:
-                bar = working_scale_bar(
-                    own_extents, judged_span_px=JUDGED_SPAN_PX,
-                    source=default_working_scale_source(JUDGED_SPAN_PX), from_this_image=True)
-            elif dataset_pixel_size is not None and dataset_extent is not None:
-                bar = dataset_working_scale_bar(
-                    subject, dataset_extent, dataset_pixel_size, JUDGED_SPAN_PX)
-            else:
-                bar = None
             view_bucket = status_bucket(subject, date)
             view_store = tcip_store.read(view_coverage_key(root), default={})
             view_records = view_store.get(view_bucket) if isinstance(view_store, dict) else None
@@ -809,7 +935,7 @@ def post_completeness(payload: CompletenessSetPayload) -> dict:
                 at_scale = (view_record.get("cells_seen_at_scale") or {}).get(payload.cell)
             attested_view_entry = {
                 "view_scale": payload.view_scale,
-                "working_scale_bar_at_write": bar,
+                "working_scale_at_write": working_scale_at_write,
                 "seen_on_record": {"at_scale": at_scale, "grid_matched": grid_matched},
             }
             cells_attested_view[payload.cell] = attested_view_entry
@@ -835,8 +961,5 @@ def post_completeness(payload: CompletenessSetPayload) -> dict:
          "cells_attested_view": attested_view_entry},
         root,
     )
-    response = {"status": "ok", "complete": complete, "cells_complete": sorted(cells_complete),
-                "replaced": replaced_info}
-    if working_scale_derivation_error is not None:
-        response["working_scale_error"] = working_scale_derivation_error
-    return response
+    return {"status": "ok", "complete": complete, "cells_complete": sorted(cells_complete),
+            "replaced": replaced_info}

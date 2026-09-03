@@ -33,19 +33,6 @@ together, at 40 every label reads but covers most of its cell, and at 46 and abo
 read clearly with most of the cell content visible. The renders are session artifacts,
 not repo files; the procedure above re-derives the value."""
 
-JUDGED_SPAN_PX = 46
-"""A documented default in CSS screen pixels: the span at which a typical annotated object is
-taken as readable on screen, the denominator the working-scale bar
-(:func:`tcip_mcp.pipelines.region_completeness.working_scale_bar`) divides the median saved
-annotation's native-pixel extent by. Its only measured antecedent is
-:data:`POINTING_LEGIBLE_EDGE`, a text-legibility figure in artifact pixels for a different
-surface (the agent's pointing overlay, not a breeder's screen); a re-measurement of either value
-must never silently move the other, so this is its own constant rather than an alias. It is a
-default, not a measurement of object legibility: the procedure that would measure it is a
-session over a sample project's own saved annotations, rendering candidate spans on real
-content and reading back at which span a breeder can tell what the object is."""
-
-
 @dataclass(frozen=True)
 class Cell:
     """One grid cell: its name plus its half-open native-pixel rect (``x0 <= x < x1``,
@@ -110,37 +97,39 @@ def reference_cells(
     return cells
 
 
-def derive_coverage_tile_size(width: int, height: int) -> int:
-    """Cell edge for the view-coverage lattice: the coarsest near-uniform square grid whose
-    every cell, served at native resolution, fits one display-bounded serve.
+def derive_serving_tile_size(width: int, height: int) -> int:
+    """Cell edge for region serving: the coarsest near-uniform square grid whose every cell,
+    served at native resolution, fits one display-bounded serve.
 
     ``n = ceil(long_edge / DISPLAY_MAX_EDGE)`` cells along the long edge, so the returned
     edge is ``ceil(long_edge / n) <= DISPLAY_MAX_EDGE``; an image inside the display bound
     derives one cell spanning it. Deterministic in the image dims and the platform display
-    bound (``display_bounds.DISPLAY_MAX_EDGE``), nothing else.
+    bound (``display_bounds.DISPLAY_MAX_EDGE``), nothing else. This tiling serves region
+    fetches and the completeness read's saved-annotation counts; it does not size the coverage
+    lattice a breeder inspects against (see :func:`derive_lattice_tile_size`), which the two
+    routes that use it keep entirely separate.
     """
     long_edge = max(width, height)
     n = math.ceil(long_edge / DISPLAY_MAX_EDGE)
     return math.ceil(long_edge / n)
 
 
-def derive_large_raster_grid_tile_size(width: int, height: int, divisions: int = 16) -> int:
-    """Cell edge for the view-coverage lattice over a large-raster (windowed) source, a fixed
-    subdivision of the raster's own dimensions rather than :func:`derive_coverage_tile_size`'s
-    display-resolution-derived edge.
+def derive_lattice_tile_size(viewport_w: int, viewport_h: int, zoom: float) -> int:
+    """Cell edge for the coverage lattice at the breeder's own set inspection zoom: one
+    screenful of native pixels at that zoom, on the canvas host as measured when the grid was
+    fetched.
 
-    A large orthomosaic annotates canopy-scale objects (large and sparse), nothing like the dense
-    small-object case the display-derived lattice was built for; applied there it produces far more,
-    far smaller cells than the annotation task needs (an estimated ~2,500 cells inside a real
-    mosaic's reserved calibration/test regions alone). ``divisions=16`` is a plain, documented
-    default (source: docs/superpowers/specs/2026-08-10-region-completeness-batch-attestation-design.md,
-    a fixed subdivision, not derived from object size or GT), kept deliberately open to revisit
-    once real large-orthomosaic annotation sessions exist to check the grain against. At real
-    ValleyFarm dimensions (239921x141130) this derives a 16x10 lattice (160 cells), not the ~8,260
-    the display-derived lattice would produce.
+    ``ceil(min(viewport_w, viewport_h) / zoom)``: the short viewport dimension is what limits
+    how much native content one screen actually holds at that zoom, so the cell edge is sized
+    off it rather than the long one, and the far-edge remainder cell (a viewport that does not
+    divide the raster evenly) is accepted rather than redistributed. One rule for a photograph
+    and an orthomosaic alike: nothing here branches on raster size or georeferencing.
     """
-    long_edge = max(width, height)
-    return math.ceil(long_edge / divisions)
+    if zoom <= 0:
+        raise ValueError(f"zoom must be positive, got {zoom}")
+    if viewport_w < 1 or viewport_h < 1:
+        raise ValueError(f"viewport must be at least 1x1, got {viewport_w}x{viewport_h}")
+    return math.ceil(min(viewport_w, viewport_h) / zoom)
 
 
 def derive_pointing_tile_size(width: int, height: int) -> int:
@@ -166,8 +155,8 @@ def grid_geometry(width: int, height: int, tile_size: int, overlap: float = 0.0)
 
     Cells are recomputed from this dict via :func:`reference_cells` (clamped or not, the
     caller's choice), never shipped between agent tool calls. ``tile_size`` is explicit: three
-    derivations exist (:func:`derive_coverage_tile_size` for the ordinary coverage lattice,
-    :func:`derive_large_raster_grid_tile_size` for a large-raster source,
+    derivations exist (:func:`derive_serving_tile_size` for region serving,
+    :func:`derive_lattice_tile_size` for the coverage lattice at a breeder's set zoom,
     :func:`derive_pointing_tile_size` for the agent overlay), so a caller that has not chosen
     one has not chosen a grid, and a cell name means nothing without its grid.
     """
