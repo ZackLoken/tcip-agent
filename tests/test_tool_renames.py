@@ -201,6 +201,7 @@ DEMOTED = [
     "triage_predictions",
     "compare_experiments",
     "overlay_reference_grid",
+    "visualize",
 ]
 
 _TOOL_TABLE_ROW_PATTERN = r"^\|\s*`{}`\s*\|"

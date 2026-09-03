@@ -515,6 +515,7 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | scripts/verify_doc_examples.py | Verify that code examples in knowledge documents and source docstrings actually work. | 1 | 0 |
 | scripts/verify_skill_tools.py | Guardrail: hold every tool name in agent-facing prose to the registry. | 2 | 0 |
 | scripts/verify_skill_traits.py | Guardrail: flag every trait-like token in a crop/domain knowledge document that is not in crops.yml. | 1 | 0 |
+| scripts/visualize.py | Render annotations, predictions, a comparison, or a sample grid, through the demoted `visualize` function. | 3 | 0 |
 | scripts/watch_agent_chat.py | Read the in-app TCIP agent chat from the orchestrating Claude Code session. | 0 | 0 |
 
 ## Package-level dependency rules holding at HEAD 2670cebf
@@ -695,6 +696,7 @@ A module counts as zero-importer when no other module in its own scanned tree re
 | scripts | scripts/verify_doc_examples.py |
 | scripts | scripts/verify_skill_tools.py |
 | scripts | scripts/verify_skill_traits.py |
+| scripts | scripts/visualize.py |
 | scripts | scripts/watch_agent_chat.py |
 
 
@@ -869,11 +871,10 @@ anything.
 | `cancel_hyperparameter_search` | `training_tools.py:2293` | yes | Request cooperative cancellation of a running HPO sweep. |
 | `evaluate_model` | `training_tools.py:2944` | yes | Evaluate a trained checkpoint on a (held-out) dataset and write test_results.json. |
 
-### vision_tools.py (2 tools)
+### vision_tools.py (1 tool)
 
 | tool | line | audited | docstring first line |
 |---|---|---|---|
-| `visualize` | `vision_tools.py:214` | yes | Render annotations, predictions, a GT-vs-prediction comparison, or a sample grid. |
 | `capture_live_canvas` | `vision_tools.py:730` | yes | Render exactly what the human's GUI canvas shows right now: image, shapes, viewport. |
 
 ## 2. HTTP routes and WebSocket endpoints
