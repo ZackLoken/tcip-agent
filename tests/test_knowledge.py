@@ -18,12 +18,16 @@ def test_list_documents_returns_one_entry_per_markdown_file():
     """Never a hardcoded count: as many entries as there are .md files under KNOWLEDGE_DIR."""
     documents = list_documents()
     on_disk = list(KNOWLEDGE_DIR.rglob("*.md"))
+    assert documents, "the walk found no documents; the count comparison below would prove nothing"
     assert len(documents) == len(on_disk)
     names = [d.name for d in documents]
     assert len(names) == len(set(names)), "document names must be unique"
     for document in documents:
         assert document.name.strip()
         assert document.description.strip()
+        body = read_document(document.name)
+        assert body.strip(), f"{document.name}: body is empty"
+        assert not body.startswith("---"), f"{document.name}: body still carries the frontmatter fence"
 
 
 def test_read_document_strips_the_frontmatter():
@@ -68,6 +72,58 @@ def test_duplicate_document_name_raises_value_error(tmp_path, monkeypatch):
     assert "dup" in str(excinfo.value)
 
 
+def test_non_utf8_document_raises_value_error_naming_the_file(tmp_path, monkeypatch):
+    from tcip_mcp import knowledge
+
+    monkeypatch.setattr(knowledge, "KNOWLEDGE_DIR", tmp_path)
+    bad = tmp_path / "latin1.md"
+    bad.write_bytes("---\nname: latin1\ndescription: caf\xe9\n---\nbody\n".encode("latin-1"))
+    with pytest.raises(ValueError) as excinfo:
+        knowledge.list_documents()
+    assert str(bad) in str(excinfo.value)
+
+
+def test_a_utf8_bom_does_not_defeat_the_frontmatter_check(tmp_path, monkeypatch):
+    from tcip_mcp import knowledge
+
+    monkeypatch.setattr(knowledge, "KNOWLEDGE_DIR", tmp_path)
+    doc = tmp_path / "bommed.md"
+    doc.write_bytes(
+        '---\nname: bommed\ndescription: "has a byte-order mark"\n---\nbody\n'.encode("utf-8-sig")
+    )
+    documents = knowledge.list_documents()
+    assert [d.name for d in documents] == ["bommed"]
+    assert knowledge.read_document("bommed").strip() == "body"
+
+
+def test_a_name_carrying_a_slash_raises_value_error(tmp_path, monkeypatch):
+    from tcip_mcp import knowledge
+
+    monkeypatch.setattr(knowledge, "KNOWLEDGE_DIR", tmp_path)
+    bad = tmp_path / "slashed.md"
+    bad.write_text(
+        '---\nname: "crops/hazelnut"\ndescription: "a name that is not a single segment"\n---\nbody\n',
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError) as excinfo:
+        knowledge.list_documents()
+    assert str(bad) in str(excinfo.value)
+
+
+def test_a_description_carrying_a_newline_raises_value_error(tmp_path, monkeypatch):
+    from tcip_mcp import knowledge
+
+    monkeypatch.setattr(knowledge, "KNOWLEDGE_DIR", tmp_path)
+    bad = tmp_path / "multiline.md"
+    bad.write_text(
+        '---\nname: multiline\ndescription: "first line\\nsecond line"\n---\nbody\n',
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError) as excinfo:
+        knowledge.list_documents()
+    assert str(bad) in str(excinfo.value)
+
+
 def test_crops_yml_path_resolves_under_knowledge_dir():
     path = crops_yml_path()
     assert path == KNOWLEDGE_DIR / "crops" / "crops.yml"
@@ -92,6 +148,10 @@ def test_the_registered_tool_description_names_every_document():
 
     tools = {t.name: t for t in mcp._tool_manager.list_tools()}
     tool = tools["domain_knowledge"]
+    assert (
+        "Without a name it returns the index of names and descriptions below; with a name "
+        "from the lines below it returns that document's content."
+    ) in tool.description
     for document in list_documents():
         assert document.name in tool.description
         assert document.description in tool.description

@@ -19,9 +19,14 @@ from tcip_mcp.server import mcp
 
 
 def _description() -> str:
-    """A lead sentence naming what the tool is, then one ``name: description`` line per
-    knowledge document, so the tool's own description is the selection index."""
-    lines = ["The platform's domain knowledge: the same documents Claude Code sees as skills."]
+    """A lead sentence naming what the tool is, a sentence stating its two call forms, then one
+    ``name: description`` line per knowledge document, so the tool's own description is the
+    selection index."""
+    lines = [
+        "The platform's domain knowledge: the same documents Claude Code sees as skills.",
+        "Without a name it returns the index of names and descriptions below; with a name "
+        "from the lines below it returns that document's content.",
+    ]
     lines += [f"{document.name}: {document.description}" for document in list_documents()]
     return "\n".join(lines)
 

@@ -70,7 +70,6 @@ _PROSE_COPY_SITES = [
     (REPO_ROOT / "CONTRIBUTING.md", 26),
     (REPO_ROOT / "CLAUDE.md", 200),
     (REPO_ROOT / "environment.yml", 4),
-    (REPO_ROOT / "environment.yml", 15),
     (REPO_ROOT / "environment.linux.lock.yml", 3),
     (REPO_ROOT / "environment.linux.lock.yml", 8),
     (REPO_ROOT / "packages" / "tcip-web" / "README.md", 44),

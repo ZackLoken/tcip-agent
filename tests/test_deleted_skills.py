@@ -66,8 +66,8 @@ def _files_containing(needle: str) -> tuple[list[Path], bool]:
 
 
 def test_the_walk_actually_finds_a_reference_known_to_exist():
-    # project-setup/SKILL.md names the annotation skill by this same path shape, so the walk
-    # must find it here, or the main assertion below would prove nothing.
+    # knowledge/project-setup.md names the annotation document by this same path shape, so
+    # the walk must find it here, or the main assertion below would prove nothing.
     hits, _ = _files_containing(LIVE_SKILL_REFERENCE)
     assert hits, f"the walk found no file naming {LIVE_SKILL_REFERENCE!r}; it is broken"
 

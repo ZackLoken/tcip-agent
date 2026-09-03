@@ -1,12 +1,12 @@
 ---
 name: crop-science
-description: "Cross-cutting domain context for TCIP's six perennial tree-crop breeding crops (hazelnut, chestnut, currant, elderberry, persimmon, black locust): their identity and growth form, the phenophase framing that schedules image capture, and the physical sensing reality that bounds what drone RGB / multispectral / LiDAR, ground and proximal RGB, and lab RGB / NIRS can and cannot observe. Load before phenotyping any crop, choosing a sensing modality, scoping whether a trait is measurable from imagery, reasoning about field-imageable versus lab/destructive traits, or planning the collect-at-phenophase then automate-measurement then per-genotype-selection workflow. Frames sensing as physical constraints on per-trait derivation, never a fixed sensor-to-trait or task-to-trait map. Defers per-crop trait lists to the per-crop skills and crops.yml, and bloom-milestone math to the phenology skill."
+description: "Cross-cutting domain context for TCIP's six perennial tree-crop breeding crops (hazelnut, chestnut, currant, elderberry, persimmon, black locust): their identity and growth form, the phenophase framing that schedules image capture, and the physical sensing reality that bounds what drone RGB / multispectral / LiDAR, ground and proximal RGB, and lab RGB / NIRS can and cannot observe. Load before phenotyping any crop, choosing a sensing modality, scoping whether a trait is measurable from imagery, reasoning about field-imageable versus lab/destructive traits, or planning the collect-at-phenophase then automate-measurement then per-genotype-selection workflow. Frames sensing as physical constraints on per-trait derivation, never a fixed sensor-to-trait or task-to-trait map. Defers per-crop trait lists to the per-crop documents and crops.yml, and bloom-milestone math to the phenology skill."
 ---
 
 # Crop science: cross-cutting domain context
 
 General ground for phenotyping the Savanna Institute's six perennial tree crops. This is
-the shared context; per-crop detail lives in the per-crop skills, the trait vocabulary in
+the shared context; per-crop detail lives in the per-crop documents, the trait vocabulary in
 `packages/tcip-mcp/src/tcip_mcp/knowledge/crops/crops.yml` (the authority), and bloom-milestone
 math in the `phenology` skill. This skill exists to answer one recurring question honestly: given the
 physics of the sensor, can this trait even be observed, and if so, at what perspective?
@@ -15,10 +15,10 @@ physics of the sensor, can this trait even be observed, and if so, at what persp
 
 Not a single taxon: two single-trunk trees, one tall hardwood, and three multi-stem
 shrubs. Growth form drives imaging (a hedgerow shrub is not a lone orchard tree), so
-identify the crop before scoping a capture. Each row points to its per-crop skill for
+identify the crop before scoping a capture. Each row points to its per-crop document for
 identity, phenology detail, and the field-imageable-versus-lab partition.
 
-| Crop | Latin / growth form | crops.yml traits | Per-crop skill |
+| Crop | Latin / growth form | crops.yml traits | Per-crop document |
 |------|---------------------|------------------|----------------|
 | Hazelnut | *Corylus americana* × *C. avellana* hybrids, multi-stemmed, clump/thicket-forming shrub (~2–5 m), grown as hedgerow rows | 58 | `packages/tcip-mcp/src/tcip_mcp/knowledge/crops/hazelnut.md` |
 | Chestnut | *Castanea* spp., Chinese chestnut *C. mollissima* and American/hybrid (*C. dentata*) material; single-stem deciduous nut tree, rounded spreading crown | 21 | `packages/tcip-mcp/src/tcip_mcp/knowledge/crops/chestnut.md` |
@@ -136,7 +136,7 @@ the trait, not a modeling preference: canopy geometry and visible disease are
 field-imageable; internal chemistry (`kernel_perc_oil`) and precise mass are not, and
 force- or sensory-based traits (`cluster_detachment_force`, `flavor_rating`) and destructive
 sample counts (`nut_perc_blanks`) are not imaging traits at all; do not force them into a
-pixel pipeline. The exact per-crop partition lives in each per-crop skill; this skill only
+pixel pipeline. The exact per-crop partition lives in each per-crop document; this skill only
 fixes the principle. When a trait can't be validly measured from the available pixels, say
 so: an honest "not observable by this modality" beats a confident, wrong number.
 
