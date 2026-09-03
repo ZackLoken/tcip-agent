@@ -455,3 +455,153 @@ def calibrate_scalar_operating_point(
         "n_holdout_items": len(hold_items),
         "criterion": criterion,
     }
+
+
+@mcp.tool()
+@audited(scope_arg="dataset_root")
+def calibrate_count_operating_point(
+    checkpoint_path: str,
+    trait: str,
+    labels_dir: str,
+    images_dir: str,
+    dataset_root: str,
+    pred_dir: str,
+    *,
+    subject: str | None = None,
+    attribute: str | None = None,
+    experiment_id: str | None = None,
+    group_by: str | None = None,
+    group_key_map: dict[str, str] | None = None,
+    split_manifest_dir: str | None = None,
+    val_ratio: float = 0.5,
+    seed: int = 0,
+    device: str | None = None,
+) -> dict:
+    """Calibrate and validate the count operating point against held-out GT, earning a claim
+    over an already-published prediction bucket.
+
+    Runs :func:`tcip_mcp.pipelines.count_calibration.resolve_count_operating_point` unchanged
+    (the same resolution ``scripts/calibrate_operating_point.py`` prints and writes nothing for):
+    one low-threshold model pass over a disjoint, locked calibration/holdout split of
+    ``labels_dir``, resolved into the count-unbiased conf and its held-out count-bias gate. When
+    the resolved conf clears an accepted annotations reference, this door earns the validation
+    record the same two-phase way the classifier and scalar calibrators do
+    (``resolution.open_validation`` runs the gate over the evidence, ``seal_validation`` files the
+    row and returns the stamp with its pointer merged in) and merges the earned ``conf`` and the
+    pointer into ``pred_dir``'s own ``operating_point.json``, preserving every other field that
+    stamp already carries (``id_map``, ``images_dir``, ``checkpoint``, and the rest of
+    ``operating_point_stamp``'s own shape) since this door publishes no predictions of its own. A
+    calibration that does not clear its gate merges an honest ``conf`` with ``validated=false``
+    and earns nothing.
+
+    ``pred_dir`` must already carry an ``operating_point.json`` stamp (a bucket
+    ``run_inference``/``export_predictions`` already published at this checkpoint) and sit under
+    ``dataset_root``, the same requirement ``seal_validation`` holds every claimed bucket to; a
+    bucket outside ``dataset_root``, with no stamp at all, whose stamped checkpoint disagrees with
+    ``checkpoint_path``, or that already carries a validated stamp all refuse by name rather than
+    writing anything: the last of those because that stamp was earned at the conf its predictions
+    were produced at, and this door never overwrites an earned claim.
+
+    Args:
+        checkpoint_path: The trained checkpoint to calibrate; must be registered under the
+            platform state root (``register_model``) or this door refuses before loading it.
+        trait: The registered trait whose count is being calibrated.
+        labels_dir: Labeled dir (per-image JSON), this calibration's measurement reference.
+        images_dir: Images for ``labels_dir``.
+        dataset_root: The root the cal/holdout split lock is stored under and ``pred_dir`` must
+            sit beneath; the labels' dataset root, or ``labels_dir`` itself when the layout
+            places it under none.
+        pred_dir: The already-published prediction bucket this claim covers.
+        subject / attribute: Scope the labeled reference to one object class / assessed attribute.
+        experiment_id: The checkpoint's own training-run id, if known, gates train-disjointness;
+            ``None`` (a foreign/unregistered checkpoint) skips that check.
+        group_by / group_key_map: The locked cal/holdout split's grouping policy; only the first
+            call for this labels_dir's identity draws the split.
+        split_manifest_dir: Restrict the calibration universe to one capture date's calibration
+            side of a split manifest instead of every labeled stem; requires ``subject``, and
+            conflicts with ``group_by``/``group_key_map``.
+        val_ratio / seed: The locked split's holdout fraction and seed; take effect only on the
+            first draw for this labels_dir's identity.
+        device: cuda / cpu (auto if omitted).
+    """
+    from tcip_mcp.model_registry import UnregisteredCheckpoint
+    from tcip_mcp.pipelines.calibration import gate_evidence_summary
+    from tcip_mcp.pipelines.count_calibration import resolve_count_operating_point
+    from tcip_mcp.pipelines.resolution import (
+        open_validation, read_operating_point_sidecar, seal_validation, write_sidecar,
+    )
+    from tcip_mcp.project_paths import platform_state_root
+
+    root = Path(dataset_root).resolve()
+    bucket = Path(pred_dir).resolve()
+    try:
+        bucket.relative_to(root)
+    except ValueError:
+        return {"error": f"pred_dir {bucket} is not under dataset_root {root}; a count-"
+                         "calibration claim can only be recorded over a bucket beneath the "
+                         "dataset root it is stated against."}
+
+    existing = read_operating_point_sidecar(bucket)
+    if not existing:
+        return {"error": f"{bucket} carries no operating_point.json stamp; "
+                         "calibrate_count_operating_point earns a claim over an already-"
+                         "published inference bucket, never an empty one."}
+    if existing.get("validated"):
+        return {"error": f"{bucket} already carries a validated operating_point.json stamp "
+                         "(earned at the conf its predictions were produced at); "
+                         "calibrate_count_operating_point never overwrites an earned stamp."}
+
+    try:
+        resolved = resolve_count_operating_point(
+            checkpoint_path=checkpoint_path, trait=trait, labels_dir=labels_dir,
+            images_dir=images_dir, dataset_root=dataset_root,
+            project_root=str(platform_state_root()), subject=subject, attribute=attribute,
+            experiment_id=experiment_id, group_by=group_by, group_key_map=group_key_map,
+            split_manifest_dir=split_manifest_dir, val_ratio=val_ratio, seed=seed, device=device,
+        )
+    except (ValueError, UnregisteredCheckpoint) as exc:
+        return {"error": str(exc)}
+
+    existing_sha = existing.get("checkpoint_sha256")
+    if existing_sha and existing_sha != resolved.checkpoint_sha256:
+        return {"error": f"{bucket} was produced by checkpoint {existing_sha!r}, not "
+                         f"{resolved.checkpoint_sha256!r} ({checkpoint_path}); a count-"
+                         "calibration claim covers the checkpoint that produced these "
+                         "predictions."}
+
+    conf = resolved.bundle.get("conf")
+    validated = conf.is_shippable
+
+    new_stamp = dict(existing)
+    new_stamp["operating_point"] = {**(existing.get("operating_point") or {}),
+                                    "conf": conf.to_provenance()}
+    new_stamp["validated"] = validated
+    new_stamp["trait"] = trait
+    new_stamp["gate_evidence_summary"] = gate_evidence_summary(conf)
+
+    if validated:
+        draft = open_validation(
+            document="operating_point",
+            evidence={"resolver": "resolve_operating_point", "inputs": resolved.resolver_inputs},
+            trait=trait, checkpoint_sha256=resolved.checkpoint_sha256,
+            producing_experiment_id=experiment_id,
+            reference_inputs={**resolved.reference_inputs, "dataset_root": str(root)},
+        )
+        _digest, new_stamp = seal_validation(
+            draft, dataset_root=str(root), bucket_dirs=[bucket], stamp_body=new_stamp)
+    else:
+        new_stamp["validated_by"] = None
+
+    write_sidecar(bucket, new_stamp)
+
+    return {
+        "pred_dir": str(bucket),
+        "trait": trait,
+        "dataset_hash": resolved.dataset_hash,
+        "validated": validated,
+        "validated_against": conf.validated_against,
+        "validated_by": new_stamp.get("validated_by"),
+        "n_calibration_images": len(resolved.resolver_inputs["calibration_records"]),
+        "n_holdout_images": len(resolved.resolver_inputs["holdout_records"]),
+        "gate_evidence": new_stamp["gate_evidence_summary"],
+    }
