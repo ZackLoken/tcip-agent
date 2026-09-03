@@ -842,14 +842,13 @@ unaccounted. `archive_project` bundles the record/log and blob classes; `import_
 on any bookkeeping, collided, undecodable or unaccounted member before adopting or moving
 anything.
 
-### proposal_tools.py (4 tools)
+### proposal_tools.py (3 tools)
 
 | tool | line | audited | docstring first line |
 |---|---|---|---|
 | `propose_annotations` | `proposal_tools.py:179` | yes | Propose candidate annotations on an image for review, using a chosen auto-labeling engine. |
-| `stage_accepted_proposals` | `proposal_tools.py:389` | yes | Stage reviewed proposals, each assigned a subject, as predictions for canvas review. |
-| `segment_prompt` | `proposal_tools.py:519` | yes | Turn an interactive prompt (points, a box, or grid cells) into mask polygon rings, via an engine. |
-| `stage_proposals` | `proposal_tools.py:616` | yes | Stage model-/agent-proposed shapes to ``predictions/<model>/<date>/<stem>.json`` for canvas |
+| `segment_prompt` | `proposal_tools.py:498` | yes | Turn an interactive prompt (points, a box, or grid cells) into mask polygon rings, via an engine. |
+| `stage_proposals` | `proposal_tools.py:756` | yes | Stage model-/agent-proposed shapes as predictions for canvas review, the "show on canvas |
 
 ### scale_tools.py (1 tool)
 
@@ -1463,13 +1462,13 @@ when the caller passed one; a call that took the platform default leaves `scope`
 `audited` covers the platform's doors (every MCP tool in `tools/`, plus the script-invoked doors
 demoted from them): bare, a platform event; `@audited(scope_arg=...)` names the argument carrying
 a dataset or project location, resolved via `dataset_scope_of`, line 253 (through the tool's own
-canonicalizer when the declaration passes one as `scope_via`). Eleven doors declare one: nine
+canonicalizer when the declaration passes one as `scope_via`). Ten doors declare one: eight
 dataset-scoped (`save_annotations`, `tools/annotation_tools.py:132`; `write_class_map`, same
 file, line 470; `redraw_calibration_holdout`, `tools/calibration_tools.py:24`;
 `materialize_review_dataset`, `tools/feedback_tools.py:166`; `export_predictions`,
 `tools/inference_tools.py:1326`; `register_dataset`, `tools/project_tools.py:165`;
-`propose_annotations`, `tools/proposal_tools.py:179`; `stage_accepted_proposals`, same file, line
-389; `stage_proposals`, same file, line 616) and two project-scoped
+`propose_annotations`, `tools/proposal_tools.py:179`; `stage_proposals`, same file, line 756)
+and two project-scoped
 (`state_trait_operationalization`, `tools/operationalization_tools.py:19`; `author_trait_spec`,
 `tools/trait_spec_authoring_tools.py:23`; `dataset_scope_of` admits a `project_root` argument the
 same way it admits a dataset root, since both are directories carrying their own `.tcip/`). A
@@ -1758,9 +1757,8 @@ Seam S29 ("Prediction-bucket immutability"), verdict `both-sides-one-implementat
 `phase0_implementation: once, shared`: `tests/test_prediction_bucket_resolution.py:39,48`,
 `tests/test_review_channel.py:287,312,325`, `tests/test_export_predictions_bucket_handling.py:60`,
 `tests/test_orthomosaic_tools.py:241-248`, `tests/test_tcip_web_routes.py:898`. Gap: the seam's
-fourth named caller, `proposal_tools.py:487` inside `stage_accepted_proposals`'s `except
-BucketHasVerdicts` block, has no test coverage; every `stage_accepted_proposals` test writes
-into a fresh, verdict-free bucket.
+fourth named caller, inside `stage_proposals`'s assignments-regime `except BucketHasVerdicts`
+block, has no test coverage; every test of that regime writes into a fresh, verdict-free bucket.
 
 ## 18. `operating_point.json`, prediction-bucket provenance sidecar
 

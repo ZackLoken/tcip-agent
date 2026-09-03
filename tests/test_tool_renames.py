@@ -69,6 +69,7 @@ RENAMES = [
 MERGED = [
     ("list_training_runs", "list_experiments"),
     ("list_registered_models", "rank_registered_models"),
+    ("stage_accepted_proposals", "stage_proposals"),
 ]
 
 _OWN_FILE = str(Path(__file__).relative_to(REPO_ROOT)).replace("\\", "/")

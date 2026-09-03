@@ -412,7 +412,7 @@ class TestWholeFrameDefaultIsUnaffected:
         """A bespoke engine returns its own dicts, so what a segmenter hands back natively
         (an array, a numpy scalar) is named instead of being staged as a repr of itself.
 
-        The staged envelope is what ``stage_accepted_proposals`` turns into real annotations, so a
+        The staged envelope is what ``stage_proposals`` turns into real annotations, so a
         candidate that reached it as a string would become a label nobody could trace back.
         """
         import numpy as np

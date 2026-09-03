@@ -114,8 +114,8 @@ There must be something to train on. Two paths (see
 
 - Agent/MCP path: `propose_annotations` a starter batch with a chosen `engine` (`'sam'` is the
   built-in reference; the agent can bring another) → review the candidates visually (`visualize`,
-  then your client's image-capable read tool on the returned `image_path`) → `stage_accepted_proposals`
-  the good ones. `grid_cells=[...]` restricts a pass to a region of a large or crowded image
+  then your client's image-capable read tool on the returned `image_path`) → `stage_proposals`
+  with `assignments=[...]` for the good ones. `grid_cells=[...]` restricts a pass to a region of a large or crowded image
   instead of the whole frame. Trial engines and keep the one whose high-conf
   proposals survive review. An empty label file is not a negative on its own; it trains as one
   only once the breeder marks that image Complete (`.tcip/state/image_status.json`), so an empty

@@ -860,9 +860,9 @@ class TestProposeAnnotationsTool:
 
 class TestAcceptProposalsTool:
     def test_no_prior_proposals(self, viz_dataset: Path):
-        from tcip_mcp.tools.proposal_tools import stage_accepted_proposals
+        from tcip_mcp.tools.proposal_tools import stage_proposals
 
-        result = stage_accepted_proposals(
+        result = stage_proposals(
             image_path=str(viz_dataset / "images" / "img_003.jpg"),
             assignments=[{"candidate_id": 0, "subject": "catkin"}],
         )
@@ -871,7 +871,7 @@ class TestAcceptProposalsTool:
 
     def test_with_cached_proposals(self, viz_dataset: Path, monkeypatch: pytest.MonkeyPatch):
         from tcip_mcp.pipelines import proposal
-        from tcip_mcp.tools.proposal_tools import stage_accepted_proposals, propose_annotations
+        from tcip_mcp.tools.proposal_tools import stage_proposals, propose_annotations
 
         # The candidates propose_annotations stages, in the neutral engine schema.
         candidates = [
@@ -906,7 +906,7 @@ class TestAcceptProposalsTool:
         assert "error" not in propose_result, propose_result
         assert propose_result["staged"] is True
 
-        result = stage_accepted_proposals(
+        result = stage_proposals(
             image_path=str(viz_dataset / "images" / "img_001.jpg"),
             assignments=[
                 {"candidate_id": 0, "subject": "catkin"},
@@ -1074,7 +1074,7 @@ class TestFullSamPipeline:
         return tmp_path
 
     def test_auto_label_then_accept(self, sam_dataset: Path):
-        from tcip_mcp.tools.proposal_tools import stage_accepted_proposals, propose_annotations
+        from tcip_mcp.tools.proposal_tools import stage_proposals, propose_annotations
 
         img_path = str(sam_dataset / "images" / "e2e.jpg")
 
@@ -1093,7 +1093,7 @@ class TestFullSamPipeline:
 
         # Step 2: accept first two candidates
         cands = auto_result["candidates"][:2]
-        accept_result = stage_accepted_proposals(
+        accept_result = stage_proposals(
             image_path=img_path,
             assignments=[
                 {"candidate_id": c["id"], "subject": subj}
@@ -1212,12 +1212,12 @@ class TestFullPipelineIntegration:
     ):
         """SAM proposals are staged as predictions: pixel geometry, subject names, and score preserved."""
         from tcip_annotation import bbox_of, json_io
-        from tcip_mcp.tools.proposal_tools import stage_accepted_proposals
+        from tcip_mcp.tools.proposal_tools import stage_proposals
 
         img_path = str(pipeline_dataset / "images" / "sample.jpg")
         self._propose(monkeypatch, img_path, MOCK_CANDIDATES)
 
-        result = stage_accepted_proposals(
+        result = stage_proposals(
             image_path=img_path,
             assignments=[
                 {"candidate_id": 0, "subject": "catkin"},
@@ -1246,12 +1246,12 @@ class TestFullPipelineIntegration:
     ):
         """SAM proposals are staged as prediction polygons: pixel vertices, subject, score."""
         from tcip_annotation import json_io
-        from tcip_mcp.tools.proposal_tools import stage_accepted_proposals
+        from tcip_mcp.tools.proposal_tools import stage_proposals
 
         img_path = str(pipeline_dataset / "images" / "sample.jpg")
         self._propose(monkeypatch, img_path, MOCK_CANDIDATES)
 
-        result = stage_accepted_proposals(
+        result = stage_proposals(
             image_path=img_path,
             assignments=[{"candidate_id": 0, "subject": "bud"}],
         )
@@ -1277,12 +1277,12 @@ class TestFullPipelineIntegration:
     ):
         """Box and mask views of the staged predictions cover the same objects (one unified file)."""
         from tcip_annotation import bbox_of, json_io
-        from tcip_mcp.tools.proposal_tools import stage_accepted_proposals
+        from tcip_mcp.tools.proposal_tools import stage_proposals
 
         img_path = str(pipeline_dataset / "images" / "sample.jpg")
         self._propose(monkeypatch, img_path, MOCK_CANDIDATES)
 
-        result = stage_accepted_proposals(
+        result = stage_proposals(
             image_path=img_path,
             assignments=[
                 {"candidate_id": 0, "subject": "catkin"},
@@ -1303,13 +1303,13 @@ class TestFullPipelineIntegration:
         self, pipeline_dataset: Path, monkeypatch: pytest.MonkeyPatch,
     ):
         """Only accepted candidates appear in output; rejected are omitted."""
-        from tcip_mcp.tools.proposal_tools import stage_accepted_proposals
+        from tcip_mcp.tools.proposal_tools import stage_proposals
 
         img_path = str(pipeline_dataset / "images" / "sample.jpg")
         self._propose(monkeypatch, img_path, MOCK_CANDIDATES)
 
         # Accept only candidate 1 out of 3
-        result = stage_accepted_proposals(
+        result = stage_proposals(
             image_path=img_path,
             assignments=[{"candidate_id": 1, "subject": "catkin"}],
         )
@@ -1319,12 +1319,12 @@ class TestFullPipelineIntegration:
         self, pipeline_dataset: Path, monkeypatch: pytest.MonkeyPatch,
     ):
         """Assignments with non-existent candidate_id are ignored."""
-        from tcip_mcp.tools.proposal_tools import stage_accepted_proposals
+        from tcip_mcp.tools.proposal_tools import stage_proposals
 
         img_path = str(pipeline_dataset / "images" / "sample.jpg")
         self._propose(monkeypatch, img_path, MOCK_CANDIDATES)
 
-        result = stage_accepted_proposals(
+        result = stage_proposals(
             image_path=img_path,
             assignments=[
                 {"candidate_id": 999, "subject": "catkin"},  # non-existent
@@ -1338,7 +1338,7 @@ class TestFullPipelineIntegration:
     ):
         """Full render â†’ accept â†’ verify pipeline (sans SAM)."""
         from tcip_annotation.viz import render_candidates, render_grid_overlay
-        from tcip_mcp.tools.proposal_tools import stage_accepted_proposals
+        from tcip_mcp.tools.proposal_tools import stage_proposals
 
         img_path = str(pipeline_dataset / "images" / "sample.jpg")
         pixels, native = _display(img_path)
@@ -1356,7 +1356,7 @@ class TestFullPipelineIntegration:
         self._propose(monkeypatch, img_path, MOCK_CANDIDATES)
 
         # Step 4: Accept with subject assignments
-        result = stage_accepted_proposals(
+        result = stage_proposals(
             image_path=img_path,
             assignments=[
                 {"candidate_id": 0, "subject": "catkin"},
@@ -1505,7 +1505,7 @@ class TestGridCellToSamPrompt:
 
 
 class TestSamPredictionStaging:
-    """stage_accepted_proposals stages engine masks as predictions (predictions/sam), not ground truth."""
+    """stage_proposals stages engine masks as predictions (predictions/sam), not ground truth."""
 
     @pytest.fixture
     def format_dataset(self, tmp_path: Path) -> Path:
@@ -1533,11 +1533,11 @@ class TestSamPredictionStaging:
         self, format_dataset: Path, monkeypatch: pytest.MonkeyPatch,
     ):
         from tcip_annotation import bbox_of, json_io
-        from tcip_mcp.tools.proposal_tools import stage_accepted_proposals
+        from tcip_mcp.tools.proposal_tools import stage_proposals
 
         img_path = str(format_dataset / "images" / "fmt_test.jpg")
         self._propose(monkeypatch, img_path)
-        result = stage_accepted_proposals(
+        result = stage_proposals(
             image_path=img_path,
             assignments=[{"candidate_id": 0, "subject": "catkin"}],
         )
@@ -1557,11 +1557,11 @@ class TestSamPredictionStaging:
         self, format_dataset: Path, monkeypatch: pytest.MonkeyPatch,
     ):
         """Staged SAM output is a prediction: each object has created_by="sam" and a ``score``."""
-        from tcip_mcp.tools.proposal_tools import stage_accepted_proposals
+        from tcip_mcp.tools.proposal_tools import stage_proposals
 
         img_path = str(format_dataset / "images" / "fmt_test.jpg")
         self._propose(monkeypatch, img_path)
-        stage_accepted_proposals(
+        stage_proposals(
             image_path=img_path,
             assignments=[{"candidate_id": 0, "subject": "catkin"}],
         )

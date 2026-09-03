@@ -1,7 +1,7 @@
 """The proposal staging record: an image's staged run is addressed by its place in the dataset
 and carries the content identity of the pixels the engine ran on.
 
-``propose_annotations`` writes the record; ``stage_accepted_proposals`` reads it back through the same
+``propose_annotations`` writes the record; ``stage_proposals`` reads it back through the same
 address and refuses when the image no longer matches the identity that run recorded. Every test
 here drives both tools for real, through a stub engine installed at
 ``tcip_mcp.pipelines.proposal.resolve_proposer``, never a hand-written envelope.
@@ -54,7 +54,7 @@ def test_two_dated_buckets_with_the_same_stem_stage_and_read_back_independently(
     """Two images sharing a stem in different capture-date buckets have their own record: the
     second run's candidates must never answer for the first."""
     from tcip_annotation import json_io
-    from tcip_mcp.tools.proposal_tools import stage_accepted_proposals, propose_annotations
+    from tcip_mcp.tools.proposal_tools import stage_proposals, propose_annotations
 
     first = tmp_path / "images" / "2026-01-01" / "leaf.jpg"
     second = tmp_path / "images" / "2026-02-01" / "leaf.jpg"
@@ -71,7 +71,7 @@ def test_two_dated_buckets_with_the_same_stem_stage_and_read_back_independently(
     assert "error" not in proposed_second, proposed_second
     assert proposed_second["staged"] is True
 
-    accepted = stage_accepted_proposals(
+    accepted = stage_proposals(
         image_path=str(first), assignments=[{"candidate_id": 0, "subject": "catkin"}])
     assert "error" not in accepted, accepted
 
@@ -86,8 +86,8 @@ def test_accept_refuses_when_the_images_content_has_changed_since_the_proposal_r
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A rewrite under the same name after propose_annotations ran means the staged candidates no
-    longer describe what stage_accepted_proposals would be confirming."""
-    from tcip_mcp.tools.proposal_tools import stage_accepted_proposals, propose_annotations
+    longer describe what stage_proposals would be confirming."""
+    from tcip_mcp.tools.proposal_tools import stage_proposals, propose_annotations
 
     img_path = tmp_path / "images" / "changed.jpg"
     _make_image(img_path, fill=(50, 50, 50))
@@ -98,7 +98,7 @@ def test_accept_refuses_when_the_images_content_has_changed_since_the_proposal_r
 
     _make_image(img_path, fill=(200, 10, 10))
 
-    accepted = stage_accepted_proposals(
+    accepted = stage_proposals(
         image_path=str(img_path), assignments=[{"candidate_id": 0, "subject": "catkin"}])
     assert "error" in accepted
     assert str(img_path) in accepted["error"]
@@ -153,7 +153,7 @@ def test_propose_then_accept_stages_a_prediction_at_the_expected_location(
 ) -> None:
     """The flat and the date-nested layout both propose, stage, and accept the same way."""
     from tcip_annotation import json_io
-    from tcip_mcp.tools.proposal_tools import stage_accepted_proposals, propose_annotations
+    from tcip_mcp.tools.proposal_tools import stage_proposals, propose_annotations
 
     images_dir = tmp_path / "images" / "2026-06-01" if dated else tmp_path / "images"
     img_path = images_dir / "sample.jpg"
@@ -164,7 +164,7 @@ def test_propose_then_accept_stages_a_prediction_at_the_expected_location(
     assert "error" not in proposed, proposed
     assert proposed["staged"] is True
 
-    accepted = stage_accepted_proposals(
+    accepted = stage_proposals(
         image_path=str(img_path), assignments=[{"candidate_id": 0, "subject": "catkin"}])
     assert "error" not in accepted, accepted
 
@@ -183,7 +183,7 @@ def test_propose_then_accept_through_a_band_groups_manifest_path(
     import tifffile
     from tcip_annotation import json_io
     from tcip_mcp.pipelines.data.band_groups import write_band_group_manifest
-    from tcip_mcp.tools.proposal_tools import stage_accepted_proposals, propose_annotations
+    from tcip_mcp.tools.proposal_tools import stage_proposals, propose_annotations
 
     images_dir = tmp_path / "images"
     images_dir.mkdir()
@@ -199,7 +199,7 @@ def test_propose_then_accept_through_a_band_groups_manifest_path(
     assert "error" not in proposed, proposed
     assert proposed["staged"] is True
 
-    accepted = stage_accepted_proposals(
+    accepted = stage_proposals(
         image_path=str(manifest), assignments=[{"candidate_id": 0, "subject": "catkin"}])
     assert "error" not in accepted, accepted
 
@@ -211,7 +211,7 @@ def test_propose_on_a_band_groups_member_path_stages_nothing_and_names_the_manif
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Proposing directly on a band-group member's own path (rather than its manifest) is a
-    path ``stage_accepted_proposals`` could never resolve back to the same source, so it must not be
+    path ``stage_proposals`` could never resolve back to the same source, so it must not be
     staged: staging it anyway would leave a record accept can never confirm."""
     import tifffile
     import tcip_store as ts
@@ -244,7 +244,7 @@ def test_a_second_accept_of_the_same_staged_run_succeeds(
 ) -> None:
     """Accepting a second subset of one run's proposals is a legitimate second call, since the
     record stays in place after accept."""
-    from tcip_mcp.tools.proposal_tools import stage_accepted_proposals, propose_annotations
+    from tcip_mcp.tools.proposal_tools import stage_proposals, propose_annotations
 
     img_path = tmp_path / "images" / "twice.jpg"
     _make_image(img_path)
@@ -253,11 +253,11 @@ def test_a_second_accept_of_the_same_staged_run_succeeds(
     proposed = propose_annotations(image_path=str(img_path), engine="sam")
     assert "error" not in proposed, proposed
 
-    first = stage_accepted_proposals(
+    first = stage_proposals(
         image_path=str(img_path), assignments=[{"candidate_id": 0, "subject": "catkin"}])
     assert "error" not in first, first
 
-    second = stage_accepted_proposals(
+    second = stage_proposals(
         image_path=str(img_path), assignments=[{"candidate_id": 1, "subject": "nut"}])
     assert "error" not in second, second
 
@@ -267,7 +267,7 @@ def test_a_second_proposal_run_replaces_the_first_and_accept_reads_the_newest(
 ) -> None:
     """last_writer_wins: a re-run overwrites the previous record rather than merging into it."""
     from tcip_annotation import json_io
-    from tcip_mcp.tools.proposal_tools import stage_accepted_proposals, propose_annotations
+    from tcip_mcp.tools.proposal_tools import stage_proposals, propose_annotations
 
     img_path = tmp_path / "images" / "rerun.jpg"
     _make_image(img_path)
@@ -280,7 +280,7 @@ def test_a_second_proposal_run_replaces_the_first_and_accept_reads_the_newest(
     second = propose_annotations(image_path=str(img_path), engine="sam")
     assert "error" not in second, second
 
-    accepted = stage_accepted_proposals(
+    accepted = stage_proposals(
         image_path=str(img_path), assignments=[{"candidate_id": 0, "subject": "catkin"}])
     assert "error" not in accepted, accepted
 
@@ -294,7 +294,7 @@ def test_a_re_run_finding_nothing_clears_the_previous_runs_record(
 ) -> None:
     """A run that proposes zero candidates must not leave a prior run's record readable: a later
     accept would otherwise stage that stale run's candidates as if this run had proposed them."""
-    from tcip_mcp.tools.proposal_tools import stage_accepted_proposals, propose_annotations
+    from tcip_mcp.tools.proposal_tools import stage_proposals, propose_annotations
 
     img_path = tmp_path / "images" / "goes_empty.jpg"
     _make_image(img_path)
@@ -309,7 +309,7 @@ def test_a_re_run_finding_nothing_clears_the_previous_runs_record(
     assert "error" not in second, second
     assert second["staged"] is False
 
-    accepted = stage_accepted_proposals(
+    accepted = stage_proposals(
         image_path=str(img_path), assignments=[{"candidate_id": 0, "subject": "catkin"}])
     assert "error" in accepted
     assert "propose_annotations" in accepted["error"]
@@ -322,7 +322,7 @@ def test_accept_reports_an_unsampleable_image_as_an_error_dict(
     reach the caller the same way a mismatched or missing record does: a returned ``error``, not
     an uncaught exception out of the tool."""
     from tcip_mcp.pipelines import raster_source
-    from tcip_mcp.tools.proposal_tools import stage_accepted_proposals, propose_annotations
+    from tcip_mcp.tools.proposal_tools import stage_proposals, propose_annotations
 
     img_path = tmp_path / "images" / "unsampleable.jpg"
     _make_image(img_path)
@@ -336,18 +336,18 @@ def test_accept_reports_an_unsampleable_image_as_an_error_dict(
 
     monkeypatch.setattr(raster_source, "raster_content_identity", _raises)
 
-    accepted = stage_accepted_proposals(
+    accepted = stage_proposals(
         image_path=str(img_path), assignments=[{"candidate_id": 0, "subject": "catkin"}])
     assert "error" in accepted
     assert str(img_path) in accepted["error"]
 
 
-def test_stage_accepted_proposals_refuses_a_reserved_stem_with_an_error_dict(
+def test_stage_proposals_refuses_a_reserved_stem_with_an_error_dict(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Accepting proposals for an image whose stem is a bucket stamp name answers the staging
     writer's refusal as an error dict, never a raise through the audited door."""
-    from tcip_mcp.tools.proposal_tools import stage_accepted_proposals, propose_annotations
+    from tcip_mcp.tools.proposal_tools import stage_proposals, propose_annotations
 
     image = tmp_path / "images" / "2026-01-01" / "operating_point.jpg"
     _make_image(image)
@@ -355,7 +355,7 @@ def test_stage_accepted_proposals_refuses_a_reserved_stem_with_an_error_dict(
     proposed = propose_annotations(image_path=str(image), engine="sam")
     assert "error" not in proposed, proposed
 
-    accepted = stage_accepted_proposals(
+    accepted = stage_proposals(
         image_path=str(image), assignments=[{"candidate_id": 0, "subject": "catkin"}])
     assert "error" in accepted
     assert "operating_point" in accepted["error"]

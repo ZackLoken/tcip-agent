@@ -2,7 +2,7 @@
 plus the identity helper.
 
 Web sites (annotate save, review accept/edit) are covered in test_tcip_web_routes.py; the
-proposal engines (stage_accepted_proposals) and stage_proposals in test_vision.py / test_review_channel.py.
+proposal engines (stage_proposals) and stage_proposals in test_vision.py / test_review_channel.py.
 """
 
 from __future__ import annotations

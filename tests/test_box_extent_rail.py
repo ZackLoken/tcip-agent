@@ -381,10 +381,11 @@ def test_stage_proposals_drops_a_degenerate_box_and_reports_the_count(tmp_path):
     from tcip_mcp.tools.proposal_tools import stage_proposals
 
     images_dir = tmp_path / "images" / "2026-01-01"
-    _write_image(images_dir / "img_001.jpg")
+    image = images_dir / "img_001.jpg"
+    _write_image(image)
 
     result = stage_proposals(
-        str(tmp_path), "sam", "2026-01-01", "img_001",
+        str(image), model_name="sam",
         boxes=[
             {"subject": "leaf", "conf": 0.9, "cx": 0.5, "cy": 0.5, "w": 0.2, "h": 0.2},
             {"subject": "leaf", "conf": 0.8, "cx": 0.5, "cy": 0.5, "w": 0.0, "h": 0.2},
