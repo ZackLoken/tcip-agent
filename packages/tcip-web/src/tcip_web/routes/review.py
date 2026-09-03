@@ -851,7 +851,7 @@ def get_generation_conf(pred_dir: str) -> GenerationConfResponse:
 
 # prioritize_review_queue's own ranking (feedback_tools.py) never reached the breeder-facing Review tab, so this surfaces the same tool, never reimplemented, as a browsable queue on a background thread (a forward pass per image can be slow), polled for the result.
 
-# Its sibling tool, triage_predictions, can auto-accept predictions as GT above a breeder-confirmed threshold, a different and more consequential capability deliberately left agent-only for now.
+# Its sibling door, triage_predictions, can auto-accept predictions as GT above a breeder-confirmed threshold, a different and more consequential capability deliberately left agent/operator-only for now.
 
 
 REVIEW_PRIORITY_REGISTRY = jobstore.REVIEW_PRIORITY_JOBS

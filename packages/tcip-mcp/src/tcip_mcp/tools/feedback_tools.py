@@ -449,8 +449,6 @@ def prioritize_review_queue(
     return result
 
 
-@mcp.tool()
-@audited
 def triage_predictions(
     checkpoint_path: str,
     images_dir: str,

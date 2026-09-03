@@ -142,6 +142,12 @@ reaching for again versus one built narrowly for a specific past investigation.
   TP/FP/FN. Wraps `tcip_mcp.tools.annotation_tools.score_predictions` with no MCP tool
   registration; `--trait` requires `--project` (or `$TCIP_STATE_ROOT`), since a trait's derived
   localization criterion reads the project's own trait registry.
+- `triage_predictions.py` - sorts a checkpoint's own predictions by confidence into auto-accept,
+  needs-review and unscoreable queues; writes nothing itself. `--auto-threshold` keeps the door's
+  own refusal to auto-accept anything until derived from the model's validated confidence
+  distribution and a breeder spot-check. Wraps `tcip_mcp.tools.feedback_tools.triage_predictions`
+  with no MCP tool registration; `--project` (or `$TCIP_STATE_ROOT`) is required unconditionally,
+  since checkpoint verification always reads the registry under it.
 - `render_failure_cases.py` - finds and renders the worst predictions for failure analysis,
   ranked by a count-mismatch-plus-low-confidence heuristic; not a substitute for
   `score_predictions(detail=True)`'s IoU-matched TP/FP/FN when mislocalization is the question.
