@@ -716,8 +716,8 @@ Docstring is the function's docstring first line, verbatim.
 | tool | line | audited | docstring first line |
 |---|---|---|---|
 | `freeze_split_manifest` | `data_tools.py:222` | yes | Freeze a finished run's own drawn train/val partition into a ``split_manifest`` record, |
-| `validate_data_quality` | `data_tools.py:572` | yes | Run quality checks on a dataset (any supported annotation format). |  <!-- queued: P5-18 unify -->
-| `make_splits` | `data_tools.py:726` | yes | Compute a leakage-free, annotation-stratified train/val/calibration split. |
+| `validate_data_quality` | `data_tools.py:575` | yes | Run quality checks on a dataset (any supported annotation format). |  <!-- queued: P5-18 unify -->
+| `make_splits` | `data_tools.py:729` | yes | Compute a leakage-free, annotation-stratified train/val/calibration split. |
 
 ### experiment_tools.py (4 tools)
 
@@ -855,14 +855,14 @@ anything.
 
 | tool | line | audited | docstring first line |
 |---|---|---|---|
-| `preflight_config` | `training_tools.py:281` | yes | Validate a training configuration before launching. |
-| `launch_training` | `training_tools.py:692` | yes | Launch a training run in an isolated subprocess from a bespoke ``model_source`` builder. |
-| `check_training_status` | `training_tools.py:926` | yes | Check the status of a training run. |
-| `list_training_runs` | `training_tools.py:1069` | yes | List every training run this platform can currently account for. |
-| `cancel_training` | `training_tools.py:1301` | yes | Request graceful cancellation of a running training run. |
-| `run_hpo` | `training_tools.py:1869` | yes | Run hyperparameter optimization on Ray Tune, training each trial for real. |
-| `cancel_hpo` | `training_tools.py:2249` | yes | Request cooperative cancellation of a running HPO sweep. |
-| `evaluate_model` | `training_tools.py:2837` | yes | Evaluate a trained checkpoint on a (held-out) dataset and write test_results.json. |
+| `preflight_config` | `training_tools.py:291` | yes | Validate a training configuration before launching. |
+| `launch_training` | `training_tools.py:702` | yes | Launch a training run in an isolated subprocess from a bespoke ``model_source`` builder. |
+| `check_training_status` | `training_tools.py:936` | yes | Check the status of a training run. |
+| `list_training_runs` | `training_tools.py:1079` | yes | List every training run this platform can currently account for. |
+| `cancel_training` | `training_tools.py:1313` | yes | Request graceful cancellation of a running training run. |
+| `run_hpo` | `training_tools.py:1881` | yes | Run hyperparameter optimization on Ray Tune, training each trial for real. |
+| `cancel_hpo` | `training_tools.py:2263` | yes | Request cooperative cancellation of a running HPO sweep. |
+| `evaluate_model` | `training_tools.py:2858` | yes | Evaluate a trained checkpoint on a (held-out) dataset and write test_results.json. |
 
 ### vision_tools.py (3 tools)
 
@@ -1335,9 +1335,9 @@ Writers: `set_image_status`,
 (`trainable_stems`) before the split's manifest or file tree is written, then
 attributed to a split by
 `negative_carry = _compute_negative_carry(label_map, bare_parts, image_map, subject, only_date)`
-`packages/tcip-mcp/src/tcip_mcp/tools/data_tools.py:969`, then applied by
+`packages/tcip-mcp/src/tcip_mcp/tools/data_tools.py:972`, then applied by
 `_apply_negative_carry(negative_carry, out_dir, subject)`
-`packages/tcip-mcp/src/tcip_mcp/tools/data_tools.py:1155`).
+`packages/tcip-mcp/src/tcip_mcp/tools/data_tools.py:1158`).
 
 Readers: `tcip_mcp.pipelines.data.label_queries.confirmed_negative_names`,
 `packages/tcip-mcp/src/tcip_mcp/pipelines/data/label_queries.py:424`; `_status_bucket_for`,
@@ -1963,7 +1963,7 @@ Path: `<output_path>/split_manifest.json`, addressed by `split_manifest_key`,
 `packages/tcip-mcp/src/tcip_mcp/tools/data_tools.py:37`, under whatever directory the caller
 asked the partition to be written to; no dataset resolver owns this layout.
 
-Writer: `make_splits`, `data_tools.py:726`, when `output_path` is given or `materialize=True`.
+Writer: `make_splits`, `data_tools.py:729`, when `output_path` is given or `materialize=True`.
 A finished run's own drawn train/val partition freezes into the identical shape through
 `freeze_split_manifest` (`data_tools.py:222`), the second writer; both compose their fields
 through the one `compose_split_manifest` (`data_tools.py:123`) that builds the dict and writes
@@ -2015,7 +2015,7 @@ dict so the two cannot drift), holds a `members` block whose `label_digests` is 
 non-empty mapping (a manifest drawn before the platform recorded per-stem digests binds nothing
 here), lacks any name in `splits.SPLIT_NAMES` under `splits`, or whose
 sides are not pairwise disjoint; `scripts/plant_aware_group_splits.py` reads no manifest back, it
-only writes one through `make_splits`. `bind_manifest_stems` (`splits.py:648`) reads all three
+only writes one through `make_splits`. `bind_manifest_stems` (`splits.py:662`) reads all three
 sides for one capture date, its own date-narrowing arithmetic extracted into
 `narrow_manifest_to_date` (`splits.py:446`), which the data picker's own counts (below) call over
 the identical manifest: a `calibration` member is placed on neither loader, whether or not the
@@ -2028,17 +2028,17 @@ listing calls in place of the raising reader: absence answers `(None, None)`, a 
 exists but will not decode, fails the required-key reading, or is version-refused answers
 `(None, text)`, catching `tcip_store.SchemaVersionRefused` beside the plain-shape `ValueError`
 for that purpose only, since a version refusal must never read as an ordinary absence.
-`training_tools.manifest_compatibility` (`training_tools.py:238`) is every objection a launch
+`training_tools.manifest_compatibility` (`training_tools.py:248`) is every objection a launch
 binding one config to one manifest would raise, checked ahead of that launch: composed from the
 config-only conflict and task checks (computed before any read, so an unreadable manifest never
 suppresses them) and the manifest-dependent checks (subject/attribute, date, images-root
 presence and movement, and an empty train/val side once narrowed to the run's own date).
 `preflight_config` calls both halves directly, in the same order, over a manifest it read
-itself; `training_tools.list_split_choices` (`training_tools.py:1128`), the relaunch data
+itself; `training_tools.list_split_choices` (`training_tools.py:1138`), the relaunch data
 picker's own reader wrapped by `GET /api/training/configs/{experiment_id}/splits`, calls the
 composed function per candidate manifest it read through the checked variant above, and builds
 each candidate's launch config through `training_tools.candidate_config_with_manifest`
-(`training_tools.py:262`), the same function the relaunch route's own launch build calls.
+(`training_tools.py:272`), the same function the relaunch route's own launch build calls.
 
 No seam id in `seam-coverage.json`'s inventory names this record: it is new, and
 `tests/test_split_manifest_binding.py` calls the real writer and the real consumer
@@ -2047,10 +2047,10 @@ No seam id in `seam-coverage.json`'s inventory names this record: it is new, and
 ## 27. `cal_holdout_split_lock`, `.tcip/artifacts/cal_holdout_split_<hash>.json`
 
 Path: named for the identity hash it locks rather than a directory of its own, addressed by
-`cal_holdout_lock_key`, `packages/tcip-mcp/src/tcip_mcp/pipelines/data/splits.py:1163`, under the
+`cal_holdout_lock_key`, `packages/tcip-mcp/src/tcip_mcp/pipelines/data/splits.py:1177`, under the
 scope root the split was drawn over (`cal_holdout_scope_root`).
 
-Writer: `resolve_locked_cal_holdout_split`, `splits.py:1401`, locking on first draw for a given
+Writer: `resolve_locked_cal_holdout_split`, `splits.py:1415`, locking on first draw for a given
 identity hash; every later call for the same identity answers from the lock unchanged unless
 `force_redraw=True`. The record carries `identity_hash`, `calibration`, `holdout`, `group_by`,
 `group_key_map`, `seed`, `holdout_ratio`, `split_manifest_dir` (`null` for a whole-directory draw,
@@ -2441,7 +2441,7 @@ Phase 3 verdict: duplicated.
 
 Must agree: a bespoke train(ctx) callable is importable and accepts the TrainContext the envelope hands it.
 Side A: `packages/tcip-mcp/src/tcip_mcp/pipelines/training/envelope.py:434` (`training_source = run.config.get("training_source")`).
-Side B: `packages/tcip-mcp/src/tcip_mcp/tools/training_tools.py:338` (`training_source = config.get("training_source")`).
+Side B: `packages/tcip-mcp/src/tcip_mcp/tools/training_tools.py:348` (`training_source = config.get("training_source")`).
 Phase 3 verdict: duplicated.
 
 ## S43. dataset_source bespoke dataset seam
