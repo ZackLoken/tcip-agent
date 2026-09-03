@@ -73,6 +73,17 @@ export interface CoverageKeyParts {
 /** The trailing-debounce cadence, matching the nav-index sync. */
 const POST_DEBOUNCE_MS = 400;
 
+function sameKeyParts(a: CoverageKeyParts | null, b: CoverageKeyParts | null): boolean {
+  if (a === b) return true;
+  if (a === null || b === null) return false;
+  return (
+    a.imagePath === b.imagePath &&
+    a.datasetRoot === b.datasetRoot &&
+    a.subject === b.subject &&
+    a.date === b.date
+  );
+}
+
 function sameWorkingScaleBar(a: WorkingScaleBar | null, b: WorkingScaleBar | null): boolean {
   if (a === b) return true;
   if (a === null || b === null) return false;
@@ -86,11 +97,12 @@ function sameWorkingScaleBar(a: WorkingScaleBar | null, b: WorkingScaleBar | nul
   );
 }
 
-/** The tracker's own hold: a stored coverage record on a lattice other than the current one,
- *  seen at least once (`cellsSeen` > 0). Set by `hydrate`'s grid-mismatch disjunct and by a
- *  push's own 409 carrying `COVERAGE_LATTICE_MISMATCH`; cleared by `reset` and by a successful
- *  `armReplace` push. While it stands, no push leaves the tracker (`postNow`/`flush`) until the
- *  breeder confirms the discard through `armReplace`. */
+/** The tracker's own hold: a stored coverage record on a lattice other than the current one
+ *  (`cellsSeen` may be 0, a record that served cells at native resolution but swept none). Set
+ *  by `hydrate`'s grid-mismatch disjunct and by a push's own 409 carrying
+ *  `COVERAGE_LATTICE_MISMATCH`; cleared by `reset` and by a successful `armReplace` push. While
+ *  it stands, no push leaves the tracker (`postNow`/`flush`) until the breeder confirms the
+ *  discard through `armReplace`. */
 export interface ReplaceRequired {
   cols: number;
   rows: number;
@@ -144,17 +156,14 @@ function coverageLatticeMismatchDetail(err: unknown): ReplaceRequired | null {
   return { cols: storedGrid.cols, rows: storedGrid.rows, cellsSeen };
 }
 
-function isCoverageLatticeMismatch(err: unknown): boolean {
-  return coverageLatticeMismatchDetail(err) !== null;
-}
-
 /** Whether a failed push can never succeed by retrying the identical payload: any 4xx (an
- *  unknown cell, an unconformed stored record, a refused subject), the audit-gap 500, or the
- *  lattice-mismatch 409, each by its own marker. A network failure or an ordinary 5xx is not
- *  terminal and stays queued. A live tracker checks `isCoverageLatticeMismatch` ahead of this
- *  one, since that case sets its own hold rather than either dropping or rescheduling. */
+ *  unknown cell, an unconformed stored record, a refused subject, or the lattice-mismatch 409)
+ *  or the audit-gap 500, each terminal by status alone -- the 409 needs no marker check here,
+ *  since a live tracker's own error path (`setHoldFromError`) reads the marker and turns it into
+ *  the replace hold before this function or the outbox ever sees the failure. A network failure
+ *  or an ordinary 5xx is not terminal and stays queued. */
 function isTerminalPushFailure(err: unknown): boolean {
-  if (isAuditEntryNotWritten(err) || isCoverageLatticeMismatch(err)) return true;
+  if (isAuditEntryNotWritten(err)) return true;
   const status = pushErrorStatus(err);
   return status !== null && status >= 400 && status < 500;
 }
@@ -553,7 +562,12 @@ export class CoverageTracker {
    *  stands and is not armed, nothing is sent and `dirty` stays set: a payload built under the
    *  hold must never reach the outbox, where its own retry would draw the identical 409 and be
    *  dropped as terminal (the outbox's accepted residual for a payload already queued before the
-   *  hold existed, never one this method itself hands it under a live hold). */
+   *  hold existed, never one this method itself hands it under a live hold).
+   *
+   *  The identity this payload was built for is captured before the send: a `reset` can point
+   *  the tracker at a different image before this promise settles, and a rejection reaching the
+   *  handler by then belongs to the identity that built it, never the one the tracker now
+   *  points at, so the hold this failure sets (`setHoldFromError`) must never land on it. */
   flush(): void {
     if (this.timer !== null) {
       clearTimeout(this.timer);
@@ -564,11 +578,16 @@ export class CoverageTracker {
       return;
     }
     if (this.replaceRequiredState && !this.armed) return;
-    const body = this.buildPayload(this.keyParts, this.grid, this.viewing);
+    const keyParts = this.keyParts;
+    const body = this.buildPayload(keyParts, this.grid, this.viewing);
     this.dirty = false;
     void this.postFn(body).then(
       () => {},
       (err: unknown) => {
+        if (!sameKeyParts(this.keyParts, keyParts)) {
+          coverageOutbox.enqueue(body);
+          return;
+        }
         if (this.setHoldFromError(err)) return;
         coverageOutbox.enqueue(body);
       },

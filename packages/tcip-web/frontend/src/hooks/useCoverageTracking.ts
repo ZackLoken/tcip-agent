@@ -41,8 +41,8 @@ export interface CoverageTracking {
   /** The Complete warning's wording, or null when the warning does not apply. */
   completeWarning: () => string | null;
   /** The tracker's own replace hold: a stored sweep record on a grid other than the current
-   *  one, seen at least once, or null. Owned by the tracker (`hydrate`'s grid-mismatch disjunct
-   *  and a push's own 409), read here rather than re-derived. */
+   *  one, or null. Owned by the tracker (`hydrate`'s grid-mismatch disjunct and a push's own
+   *  409), read here rather than re-derived. */
   replaceRequired: ReplaceRequired | null;
   /** Confirm discarding the previous lattice's sweeps and post immediately with `replace: true`. */
   armReplace: () => void;

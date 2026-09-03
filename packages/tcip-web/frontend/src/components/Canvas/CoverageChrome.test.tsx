@@ -284,6 +284,18 @@ describe("CoverageChrome", () => {
     ).toBeInTheDocument();
   });
 
+  it("states a replace hold with no cells seen by naming the record itself, never 0 cells", () => {
+    render(
+      <CoverageChrome {...baseProps()} replaceRequired={{ cellsSeen: 0, cols: 6, rows: 6 }} />,
+    );
+    expect(
+      screen.getByText(
+        /a previous lattice's record \(6x6\) with no cells seen; progress on this lattice is not saved/,
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/0 cells seen/)).not.toBeInTheDocument();
+  });
+
   it("renders the replace control with the panel collapsed, the overlay off and no current cell", () => {
     render(
       <CoverageChrome
@@ -462,6 +474,28 @@ describe("CoverageChrome", () => {
     expect(screen.getByText(/the median saved fruit annotation/)).toBeInTheDocument();
     expect(screen.getByText(/184 px across, from 3/)).toBeInTheDocument();
     expect(screen.getByText(/spans 46 px on screen, a default span/)).toBeInTheDocument();
+  });
+
+  it("attributes a dataset-derived bar to the dataset, never this image's own annotations", () => {
+    render(
+      <CoverageChrome {...baseProps()} workingScale={{ ...bar(0.25), from_this_image: false }} />,
+    );
+    expect(screen.getByText(/Working scale 25\.0%/)).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        /the median saved fruit annotation across the dataset's georeferenced images/,
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/184 px across here, from 3/)).toBeInTheDocument();
+    expect(screen.getByText(/spans 46 px on screen, a default span/)).toBeInTheDocument();
+  });
+
+  it("keeps the own-annotations wording when from_this_image is true", () => {
+    render(
+      <CoverageChrome {...baseProps()} workingScale={{ ...bar(0.25), from_this_image: true }} />,
+    );
+    expect(screen.getByText(/the median saved fruit annotation \(/)).toBeInTheDocument();
+    expect(screen.queryByText(/across the dataset's georeferenced images/)).not.toBeInTheDocument();
   });
 
   it("states the reason sentence instead when there is no bar", () => {

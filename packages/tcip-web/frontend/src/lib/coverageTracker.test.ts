@@ -7,6 +7,7 @@ import {
   CoverageOutbox,
   CoverageTracker,
   coverageOutbox,
+  flushAllTrackers,
   type CoveragePayload,
   type CoveragePushResponse,
 } from "@/lib/coverageTracker";
@@ -584,6 +585,21 @@ describe("CoverageTracker replace hold", () => {
     expect(tracker.isDirty).toBe(true);
   });
 
+  it("the unload flush leg (flushAllTrackers) posts nothing while the hold stands", async () => {
+    post.mockRejectedValue(mismatchRefusal(6, 4, 1));
+    tracker.reset(KEY, GRID, CELLS);
+    tracker.setViewing(NULL_VIEWING);
+    tracker.noteServedAtNative("A1");
+    await vi.advanceTimersByTimeAsync(400);
+    expect(tracker.replaceRequired).not.toBeNull();
+    post.mockClear();
+
+    tracker.noteViewport(FULL_VIEW, 1); // a fresh sweep under the hold, dirty again
+    flushAllTrackers(); // App's own pagehide leg, never the tracker's flush() called directly
+    expect(post).not.toHaveBeenCalled();
+    expect(tracker.isDirty).toBe(true);
+  });
+
   it("armReplace posts immediately with replace: true and survives a failed push", async () => {
     post
       .mockRejectedValueOnce(mismatchRefusal(6, 4, 1))
@@ -639,5 +655,30 @@ describe("CoverageTracker replace hold", () => {
 
     tracker.reset(null, null, []);
     expect(tracker.replaceRequired).toBeNull();
+  });
+
+  it("a 409 arriving after reset to another image sets no hold on the new image", async () => {
+    let reject: ((err: unknown) => void) | undefined;
+    post.mockImplementationOnce(
+      () =>
+        new Promise((_resolve, rej) => {
+          reject = rej;
+        }),
+    );
+    tracker.reset(KEY, GRID, CELLS);
+    tracker.setViewing(NULL_VIEWING);
+    tracker.noteServedAtNative("A1");
+    tracker.flush(); // the old identity's push is now in flight, unsettled
+    expect(post).toHaveBeenCalledTimes(1);
+
+    post.mockResolvedValue({ record: { cells_seen_at_scale: {} } });
+    const otherKey = { ...KEY, imagePath: "C:/data/images/2026-01-01/other.tif" };
+    tracker.reset(otherKey, GRID, CELLS); // the tracker moves on before the push settles
+
+    reject!(mismatchRefusal(6, 4, 3)); // the delayed 409 belongs to the old identity's payload
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(tracker.replaceRequired).toBeNull(); // must not land on the new image
+    expect(coverageOutbox.size).toBeGreaterThan(0); // the stale payload still reaches the outbox
   });
 });
