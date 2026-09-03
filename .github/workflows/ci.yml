@@ -134,6 +134,25 @@ jobs:
           TCIP_STORE_BACKEND: ${{ matrix.store-backend }}
         run: pytest tests/ -n auto --timeout=300 -q
 
+  # test_hpo_ray_detached_exit.py's console-signal exit path is Windows-only (skipif everywhere
+  # else), so it never rides the ubuntu python job's matrix; this job is its only CI coverage.
+  ray-exit-windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash -el {0}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: conda-incubator/setup-miniconda@v3
+        with:
+          environment-file: environment.yml
+          activate-environment: tcip-agent
+          auto-activate-base: false
+
+      - name: The detached Ray exit path leaves no daemon behind
+        run: pytest tests/test_hpo_ray_detached_exit.py -q --timeout=600
+
   # The documented container path (packages/tcip-web/Dockerfile) is built and answers here, so a
   # broken image reaches CI before an adopter.
   docker:
