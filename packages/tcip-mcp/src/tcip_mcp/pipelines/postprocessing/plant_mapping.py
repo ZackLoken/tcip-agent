@@ -43,7 +43,7 @@ import statistics
 from dataclasses import dataclass, field, fields
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Iterable, Optional
+from typing import TYPE_CHECKING, ClassVar, Iterable, Optional, Sequence
 
 import tcip_store
 from PIL import ExifTags, Image
@@ -117,6 +117,18 @@ class Assignment:
     distance_m: Optional[float]  # GPS distance to the matched plant (m); None if unmapped
 
 
+def assignment_is_attributed(assignment: object) -> bool:
+    """Whether ``assignment`` (an :class:`Assignment`, or the plain dict row ``MappingBuild.rows``
+    produces) names a real plant: a non-empty ``plot_name``, the one rule a plant CSV's own blank
+    name column and an unmapped capture (``plot_name=None``) both fail by, and nowhere else.
+    ``stems_delivery_reads``, ``verify_mapping_inputs``, ``per_plant_series`` and
+    :meth:`MappingBuild.unattributed` all decide attribution through this one predicate rather than
+    each testing ``plot_name`` truthiness for itself.
+    """
+    plot_name = assignment.get("plot_name") if isinstance(assignment, dict) else assignment.plot_name
+    return isinstance(plot_name, str) and plot_name != ""
+
+
 @dataclass
 class MappingBuild:
     """One build's provenance plus its per-date assignments: the whole persisted record, in
@@ -150,6 +162,13 @@ class MappingBuild:
     Not one of :data:`_PERSISTED_FIELD_NAMES`: it names a fact about how this record was read,
     never a fact ``to_record`` writes or ``load_mapping`` reads back from the document itself."""
 
+    plant_attribution: ClassVar[str] = "image"
+    """The granularity at which this mapping's own assignments attribute objects to plants: one
+    frame per plant, by the capture protocol the platform assumes for a walked, EXIF-geolocated
+    scene. A class attribute, not an instance field, so it is excluded from the dataclass's own
+    ``fields()`` the same way ``record_sha256``'s metadata excludes that field, and carries no
+    per-build value to disagree with itself."""
+
     def to_record(self) -> dict:
         """The exact document ``persist_mapping`` writes and ``load_mapping`` reads back.
 
@@ -170,11 +189,60 @@ class MappingBuild:
         return {date: [a.__dict__ for a in assignments]
                 for date, assignments in self.assignments.items()}
 
-    def delivery_disclosure(self, verified: dict) -> dict:
-        """The ``plant_mapping`` dict a phenology delivery carries: this build's own identity
-        plus ``verify_mapping_inputs``'s disclosure, the one composition every phenology door
-        (``compute_phenology``, both web phenology routes) builds through rather than each
-        assembling its own copy."""
+    def unattributed(self, dates: Optional[Iterable[str]] = None) -> int:
+        """The number of assignments over ``dates`` (every date this mapping holds, when ``None``)
+        for which :func:`assignment_is_attributed` is false: the one place this count is computed,
+        called once per date for a per-date breakdown (:meth:`summary`) and once over a delivery's
+        own delivered dates for its total (:meth:`delivery_disclosure`)."""
+        scope = self.dates if dates is None else dates
+        return sum(
+            1
+            for date in scope
+            for a in self.assignments.get(date, [])
+            if not assignment_is_attributed(a)
+        )
+
+    def summary(self) -> dict:
+        """This build's own per-date and total counts: images, mapped, unattributed, and the mean
+        GPS match distance (``None`` for a date with no recorded distance, never a fabricated
+        zero). The one computation both the build and load routes answer their ``summary`` from,
+        and the tool's own flat ``per_date``/totals fill from."""
+        per_date: dict[str, dict] = {}
+        total_images = 0
+        total_mapped = 0
+        total_unattributed = 0
+        for date in self.dates:
+            assignments = self.assignments.get(date, [])
+            n_images = len(assignments)
+            n_mapped = sum(1 for a in assignments if assignment_is_attributed(a))
+            n_unattributed = n_images - n_mapped
+            dists = [a.distance_m for a in assignments if a.distance_m is not None]
+            per_date[date] = {
+                "n_images": n_images,
+                "n_mapped": n_mapped,
+                "n_unattributed": n_unattributed,
+                "avg_distance_m": (round(sum(dists) / len(dists), 2) if dists else None),
+            }
+            total_images += n_images
+            total_mapped += n_mapped
+            total_unattributed += n_unattributed
+        return {
+            "per_date": per_date,
+            "totals": {
+                "n_dates": len(self.dates),
+                "n_images": total_images,
+                "n_mapped": total_mapped,
+                "n_unattributed": total_unattributed,
+            },
+        }
+
+    def delivery_disclosure(self, verified: dict, dates: Iterable[str]) -> dict:
+        """The ``plant_mapping`` dict a phenology delivery carries: this build's own identity,
+        ``verify_mapping_inputs``'s disclosure, and this delivery's own unattributed-capture count
+        scoped to ``dates`` (a delivery's own delivered dates, never the mapping's full span), the
+        one composition every phenology door (``compute_phenology``, both web phenology routes)
+        builds through rather than each assembling its own copy."""
+        dates_delivered = sorted(dates)
         return {
             "name": self.name,
             "project_root": self.project_root,
@@ -186,6 +254,10 @@ class MappingBuild:
             "capture_identity": self.capture_identity,
             "captures_unverified": verified["captures_unverified"],
             "plant_csvs_unverified": verified["plant_csvs_unverified"],
+            "dates_delivered": dates_delivered,
+            "images_unattributed": self.unattributed(dates_delivered),
+            "images_unattributed_scope": "delivered_dates",
+            "plant_attribution": self.plant_attribution,
         }
 
 
@@ -409,7 +481,7 @@ def stems_delivery_reads(rows: Iterable[object], pred_dir: Path | str) -> set[st
     pred_stems = bucket_stems(pred_dir)
     out: set[str] = set()
     for row in rows:
-        if not _attr(row, "plot_name"):
+        if not assignment_is_attributed(row):
             continue
         stem = _attr(row, "stem")
         if isinstance(stem, str) and stem in pred_stems:
@@ -724,6 +796,8 @@ def build_mapping(
     capture_ids: dict[str, str] = {}
     capture_digests_by_date: dict[str, dict[str, str]] = {}
     unreadable: dict[str, list[str]] = {}
+    n_stamps = 0
+    n_positioned = 0
     if images_root.is_dir():
         for date_dir in sorted(images_root.iterdir()):
             if not date_dir.is_dir():
@@ -734,11 +808,22 @@ def build_mapping(
             dates_walked.append(date)
             logical = list_logical_images(date_dir)
             stamps = _read_date_stamps(logical, date)
+            n_stamps += len(stamps)
+            n_positioned += sum(1 for s in stamps if s.lat is not None and s.lon is not None)
             capture_ids[date] = capture_identity(stamps)
             capture_digests_by_date[date] = capture_digests(stamps)
             unreadable[date] = sorted(
                 s.name for s in stamps if s.kind == "image" and s.readable is False)
             assignments[date] = assign_plants(stamps, plants, nn_tolerance_m=nn_tolerance_m)
+
+    if n_stamps == 0:
+        raise UngeoreferencedCaptureRefusal(
+            f"no capture under {images_root} on the requested dates")
+    if n_positioned == 0:
+        all_unreadable = sorted(
+            {name for date in dates_walked for name in unreadable.get(date, [])})
+        raise UngeoreferencedCaptureRefusal(
+            ungeoreferenced_capture_message(str(images_root), all_unreadable))
 
     return MappingBuild(
         name=name,
@@ -865,7 +950,10 @@ _PERSISTED_FIELD_NAMES: tuple[str, ...] = tuple(
 """Every :class:`MappingBuild` field ``to_record``/``load_mapping`` carry to and from the
 document, derived from the dataclass's own fields (minus ``record_sha256``) so a field added
 there flows into the record shape and the constructor call without a second list to keep in
-step. ``_REQUIRED_TOP_KEYS`` still states each field's own type by hand (a runtime isinstance
+step. Two attributes are excluded from this tuple, each by its own mechanism: ``record_sha256``
+by its own field metadata (``persisted: False``), and ``plant_attribution`` by never being a
+dataclass field at all (a ``ClassVar``, which ``dataclasses.fields()`` never sees).
+``_REQUIRED_TOP_KEYS`` still states each field's own type by hand (a runtime isinstance
 check needs a real type, not the string form ``from __future__ import annotations`` leaves an
 annotation as); the assertion below ties its key set back to this tuple, so the two cannot drift
 apart silently."""
@@ -1147,7 +1235,7 @@ def verify_mapping_inputs(
         present_stems = recorded_stems & enumerated_stems
         read_set = stems_delivery_reads(rows, pred_dir) & present_stems
         unread_stems = present_stems - read_set
-        mapped_stems = {s for s in recorded_stems if recorded_by_stem[s].plot_name}
+        mapped_stems = {s for s in recorded_stems if assignment_is_attributed(recorded_by_stem[s])}
         full_mapped_coverage = not missing_stems and read_set == mapped_stems
 
         unverified_names: set[str] = set()
@@ -1211,6 +1299,39 @@ def verify_mapping_inputs(
     return {"captures_unverified": captures_unverified, "plant_csvs_unverified": plant_csvs_unverified}
 
 
+def ungeoreferenced_capture_message(walked: str, unreadable: Sequence[str] = ()) -> str:
+    """The refusal sentence for a walk whose captures carry no position this door reads.
+
+    ``walked`` names what was walked (the build passes ``images_root``; a delivery passes the
+    mapping's name and dataset root), so the same sentence composer serves both doors this
+    condition can refuse from. ``unreadable``, when given, opens the sentence by naming the
+    captures PIL could not open at all, before the position clause: a capture that could not be
+    read never carried a position to read either, and this says so rather than folding it into
+    "no position" as if it had been opened and found blank.
+    """
+    prefix = ""
+    if unreadable:
+        prefix = f"{', '.join(unreadable)} could not be opened, so their position could not be read; "
+    return (
+        f"{prefix}no capture under {walked} on the requested dates carries a position this door "
+        "reads (a photograph with no GPS position, or a raster or band-group capture, which never "
+        "carries one here), so no capture can be assigned to a plant; per-plant identity for "
+        "ungeoreferenced capture needs a plant-tag mechanism the platform does not have (README's "
+        "roadmap), and a georeferenced orthomosaic delivers per plant through export_predictions's "
+        "raster regime and deliver_orthomosaic_plant_counts instead"
+    )
+
+
+class UngeoreferencedCaptureRefusal(Exception):
+    """A plant mapping cannot be built or delivered from the captures at hand: none carries a
+    position this door reads, or none could be read. ``str(exc)`` is the caller-facing message;
+    ``status`` is the web door's HTTP status for it."""
+
+    def __init__(self, message: str, *, status: int = 400) -> None:
+        super().__init__(message)
+        self.status = status
+
+
 class MappingDeliveryRefusal(Exception):
     """A phenology delivery cannot proceed from a named mapping; ``str(exc)`` is the caller-facing
     message. ``status`` is the web door's HTTP status for it (400 by default, 404 for a mapping
@@ -1230,7 +1351,11 @@ def resolve_delivery_mapping(
     root and require it to carry the mapping's own minted dataset id, then verify the mapping's
     recorded inputs against that resolved root for exactly the captures
     ``predictions_by_date`` reads, so a dataset moved (or copied and the original renamed) after
-    registration still verifies without re-reading a delivery's own unread captures. Returns the
+    registration still verifies without re-reading a delivery's own unread captures. A delivered
+    date recorded with no capture at all refuses by name; a delivery whose delivered dates
+    attribute nothing (:func:`assignment_is_attributed` false for every one of them) refuses on
+    the record's own evidence, before ``verify_mapping_inputs`` re-reads anything, since a
+    delivery that can attribute nothing has nothing for a re-read to disclose about. Returns the
     loaded build and :func:`verify_mapping_inputs`'s disclosure; raises
     :class:`MappingDeliveryRefusal`, naming the remedy, for every case a delivery must not
     proceed from, a ``StoreError`` reading the mapping store included, so a root whose state is
@@ -1271,6 +1396,42 @@ def resolve_delivery_mapping(
             f"the predictions under {delivered_root} belong to a different dataset than the "
             f"mapping {name!r} was built over (mapping dataset_root "
             f"{mapping_build.dataset_root!r}, delivered dataset root {str(delivered_root)!r})")
+
+    empty_dates = sorted(d for d in predictions_by_date if not mapping_build.assignments.get(d))
+    if empty_dates:
+        raise MappingDeliveryRefusal(
+            f"the mapping {name!r} recorded no capture at all for date(s) {empty_dates}: a date "
+            "with no capture cannot be delivered; rebuild the mapping, or drop the date(s)")
+
+    delivered_assignments = [
+        a for date in predictions_by_date for a in mapping_build.assignments.get(date, [])
+    ]
+    if delivered_assignments and not any(
+        assignment_is_attributed(a) for a in delivered_assignments
+    ):
+        # Re-reading captures for a delivery that can attribute nothing would disclose about
+        # nothing; refuse here, before verify_mapping_inputs, on the record's own evidence.
+        paths = [entry["path"] for entry in mapping_build.plant_csvs]
+        n_plants = sum(entry["n_plants"] for entry in mapping_build.plant_csvs)
+        if n_plants == 0:
+            raise MappingDeliveryRefusal(
+                f"the plant CSVs this mapping was built from ({paths}) parsed no plant with "
+                "usable coordinates and a name, so no capture could be assigned; check the "
+                "CSV's column headers against read_plant_csvs's and rebuild the mapping")
+        if all(a.distance_m is None for a in delivered_assignments):
+            raise MappingDeliveryRefusal(
+                ungeoreferenced_capture_message(
+                    f"mapping {name!r} (dataset {mapping_build.dataset_root!r})"))
+        gates = match_gates(mapping_build.nn_tolerance_m["value"])
+        n_unpositioned = sum(1 for a in delivered_assignments if a.distance_m is None)
+        unpositioned_note = (
+            f", and {n_unpositioned} captures carry no position" if n_unpositioned else "")
+        raise MappingDeliveryRefusal(
+            "every positioned capture on the delivered dates lies beyond the accepted match "
+            f"distance ({gates['max_match_distance_m']} m from tolerance "
+            f"{gates['nn_tolerance_m']} m, {mapping_build.nn_tolerance_m['source']}) of every "
+            f"plant in {paths}{unpositioned_note}; check the plant CSV names this block, or "
+            "rebuild the mapping with a stated tolerance")
 
     verified = verify_mapping_inputs(mapping_build, delivered_root, predictions_by_date)
     if "refusal" in verified:

@@ -342,13 +342,16 @@ def test_scan_receipts_still_admits_a_real_receipt_with_no_version_refused_lines
     assert loaded.assignments["2-11-26"][0].plot_name == "PLOT1"
 
 
-def test_build_mapping_empty_dir(tmp_path: Path) -> None:
-    build = build_mapping(
-        tmp_path / "nope", [], name="mapping", dataset_root=tmp_path / "ds",
-        dataset_id="ds-1", project_root=tmp_path, built_by="build_plant_mapping",
-    )
-    assert build.assignments == {}
-    assert build.dates == []
+def test_build_mapping_empty_dir_refuses_naming_no_capture(tmp_path: Path) -> None:
+    """No capture at all under the requested dates refuses by name, rather than returning an
+    empty, uselessly-successful build: an empty or absent images_root can never deliver, so the
+    door refuses at the source instead of a caller discovering it downstream."""
+    with pytest.raises(Exception, match="no capture under") as exc:
+        build_mapping(
+            tmp_path / "nope", [], name="mapping", dataset_root=tmp_path / "ds",
+            dataset_id="ds-1", project_root=tmp_path, built_by="build_plant_mapping",
+        )
+    assert type(exc.value).__name__ == "UngeoreferencedCaptureRefusal"
 
 
 def _one_build() -> MappingBuild:

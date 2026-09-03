@@ -205,7 +205,7 @@ def main() -> int:
             check("3 dates mapped", m.get("n_dates") == 3, str(m.get("n_dates")))
             check("6 images seen", m.get("n_images") == 6, str(m.get("n_images")))
             check("all 6 images mapped to a plant", m.get("n_mapped") == 6,
-                  f"n_mapped={m.get('n_mapped')} n_unmapped={m.get('n_unmapped')}")
+                  f"n_mapped={m.get('n_mapped')} n_unattributed={m.get('n_unattributed')}")
             from tcip_mcp.pipelines.postprocessing import plant_mapping as _plant_mapping
             check("mapping persisted", bool(_plant_mapping.load_mapping(root, mapping_name)))
 

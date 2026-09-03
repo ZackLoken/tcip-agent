@@ -749,7 +749,8 @@ def test_the_curves_csv_carries_the_same_provenance_as_the_milestone_csv(
                   "positive_state_classifier_validated", "unvalidated_dimensions",
                   "producer_model_sha256", "producing_experiment_id", "produced_at",
                   "validation_record", "plant_mapping_sha256", "captures_unverified",
-                  "plant_csvs_unverified"]
+                  "plant_csvs_unverified", "dates_delivered", "images_unattributed",
+                  "plant_attribution"]
     body = _phenology_fixture(tmp_path, validated=True)
     resp = client.post("/api/results/export_csv",
                        json={**body, "payload": "curves", "filename": "c.csv"})

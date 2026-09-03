@@ -49,16 +49,21 @@ def _plant_csv(path: Path) -> None:
 def test_build_plant_mapping_wraps_build_and_persists(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from datetime import datetime
+
     from tcip_mcp.tools.project_tools import init_project, register_dataset
     from tcip_mcp.traits import registered_crops
+
+    from tests.test_plant_mapping_binding import _write_geo_image
 
     # tmp_path sits directly under this test's workspace; point the workspace elsewhere so
     # init_project's naming rail (which only holds under the workspace) doesn't apply here.
     monkeypatch.setenv("TCIP_WORKSPACE", str(tmp_path / "unused_workspace"))
     assert "error" not in init_project(str(tmp_path), site="orchard block")
     images_root = tmp_path / "images"
-    (images_root / "2026-02-11").mkdir(parents=True)
-    Image.new("RGB", (4, 4)).save(images_root / "2026-02-11" / "img1.jpg")
+    _write_geo_image(
+        images_root / "2026-02-11" / "img1.jpg", 43.19670, -90.058000,
+        datetime(2026, 2, 11, 9, 30))
     register_dataset(str(tmp_path), crop=sorted(registered_crops())[0])
     csv_path = tmp_path / "plants.csv"
     _plant_csv(csv_path)
@@ -76,7 +81,7 @@ def test_build_plant_mapping_wraps_build_and_persists(
     assert res["dataset_root"] == str(tmp_path)
     assert res["n_dates"] == 1
     assert res["n_images"] == 1
-    assert res["n_mapped"] + res["n_unmapped"] == 1
+    assert res["n_mapped"] + res["n_unattributed"] == 1
     assert "2026-02-11" in res["per_date"]
     assert res["nn_tolerance_m"] == {"value": NN_TOLERANCE_METERS, "source": "fallback"}
     assert res["max_match_distance_m"] == pytest.approx(NN_TOLERANCE_METERS * NEAREST_MATCH_FACTOR)
@@ -368,11 +373,11 @@ def test_compute_phenology_floors_a_count_stamp_earned_for_a_different_trait(tmp
     assert str(d1) in res["error"] or str(d2) in res["error"]
 
 
-def test_compute_phenology_reports_n_images_unmapped_when_never_assessed(tmp_path: Path) -> None:
+def test_compute_phenology_reports_n_images_unattributed_when_never_assessed(tmp_path: Path) -> None:
     """The measurement-integrity guard's early return (no bucket anywhere classified the trait's
-    positive class) must disclose n_images_unmapped the same way the success path does -- both
-    read it off the same per_plant_phenology result, so an early refusal is not missing a field
-    a later success would have carried."""
+    positive class) must disclose n_images_unattributed the same way the success path does -- both
+    read it off the same delivery disclosure, so an early refusal is not missing a field a later
+    success would have carried."""
     root = _ds_root(tmp_path)
     d1 = _bucket(tmp_path, "2026-02-11")
     d1.mkdir(parents=True)
@@ -397,7 +402,7 @@ def test_compute_phenology_reports_n_images_unmapped_when_never_assessed(tmp_pat
 
     assert "error" in res
     assert res["positive_class_assessed"] is False
-    assert res["n_images_unmapped"] == 1
+    assert res["n_images_unattributed"] == 1
     assert not out_csv.exists()
 
 
