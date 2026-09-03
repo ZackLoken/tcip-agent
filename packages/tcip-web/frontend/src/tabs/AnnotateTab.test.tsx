@@ -6,6 +6,7 @@ import { api } from "@/api/client";
 import type { SaveResult } from "@/api/client";
 import { classesApi, subjectColor } from "@/api/classes";
 import * as CanvasStageMock from "@/components/Canvas/CanvasStage";
+import * as canvasSync from "@/lib/canvasSync";
 import { notifyCanvasStateRequest } from "@/lib/canvasSync";
 import type { CompletenessRecord } from "@/lib/coverage";
 import { sessionsApi } from "@/api/sessions";
@@ -166,6 +167,9 @@ beforeEach(() => {
       { name: "Blue", wavelength_nm: null, dtype: "uint8", min: 0, max: 255 },
     ],
   });
+  // The coverage-grid fetch is gated on a real canvas-host measurement (useCoverageGrid); jsdom's
+  // own getBoundingClientRect is always zero, so every test needing that fetch stubs one here.
+  vi.spyOn(canvasSync, "measureCanvasHost").mockReturnValue({ w: 1000, h: 800 });
 });
 
 afterEach(cleanup);
@@ -1166,6 +1170,17 @@ const BELOW_NATIVE_BASE_FACTS = {
   headerParseError: null,
 };
 
+// A rendered geometry block used for both `grid` and `serving` (get_grid's own nested shape):
+// these tests exercise neither the set-zoom lookup nor the serving grid's own derivation.
+function gridResponse(geometry: typeof MULTI_CELL_GRID, cells: typeof MULTI_CELL_CELLS) {
+  const rendered = {
+    ...geometry,
+    derivation: "cells sized to one full-resolution screenful",
+    cells,
+  };
+  return { grid: rendered, reason: null, fresh_derivation_differs: null, serving: rendered };
+}
+
 function mockMultiCellGrid() {
   // The Map tests below also mount the coverage-tracking hook, which reads and pushes the
   // session sweep record for the same raster; mocked here too so no real fetch is attempted.
@@ -1173,11 +1188,9 @@ function mockMultiCellGrid() {
   vi.spyOn(api.coverage, "push").mockResolvedValue({
     record: { cells_seen_at_scale: {} },
   });
-  return vi.spyOn(api.coverage, "grid").mockResolvedValue({
-    ...MULTI_CELL_GRID,
-    derivation: "cells sized to one full-resolution screenful",
-    cells: MULTI_CELL_CELLS,
-  });
+  return vi
+    .spyOn(api.coverage, "grid")
+    .mockResolvedValue(gridResponse(MULTI_CELL_GRID, MULTI_CELL_CELLS));
 }
 
 // The mock module's own extra export, absent from the real CanvasStage's type: cast once here
@@ -1247,16 +1260,11 @@ describe("AnnotateTab Map tool", () => {
       record: { cells_seen_at_scale: {} },
     });
     // An ordinary raster's own lattice is one cell: settled, never pending, and offers no Map.
-    vi.spyOn(api.coverage, "grid").mockResolvedValue({
-      width: 1000,
-      height: 800,
-      tile_size: 1000,
-      overlap: 0,
-      cols: 1,
-      rows: 1,
-      derivation: "cells sized to one full-resolution screenful",
-      cells: [{ name: "A1", x0: 0, y0: 0, x1: 1000, y1: 800 }],
-    });
+    vi.spyOn(api.coverage, "grid").mockResolvedValue(
+      gridResponse({ width: 1000, height: 800, tile_size: 1000, overlap: 0, cols: 1, rows: 1 }, [
+        { name: "A1", x0: 0, y0: 0, x1: 1000, y1: 800 },
+      ]),
+    );
     vi.spyOn(api.coverage, "completeness").mockResolvedValue({
       by_subject: {},
       annotation_counts: {},
@@ -1339,6 +1347,8 @@ describe("AnnotateTab completeness refresh and attestation control", () => {
       y: 0,
       toJSON: () => "",
     } as DOMRect);
+    // Matches this test's own 200x200 geometry above, so computeViewport's center is the same.
+    vi.spyOn(canvasSync, "measureCanvasHost").mockReturnValue({ w: 200, h: 200 });
     render(<AnnotateTab />);
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
     await flush();
@@ -1427,6 +1437,8 @@ describe("AnnotateTab completeness refresh and attestation control", () => {
       y: 0,
       toJSON: () => "",
     } as DOMRect);
+    // Matches this test's own 200x200 geometry above, so computeViewport's center is the same.
+    vi.spyOn(canvasSync, "measureCanvasHost").mockReturnValue({ w: 200, h: 200 });
     render(<AnnotateTab />);
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
     await flush();
@@ -1462,20 +1474,17 @@ describe("AnnotateTab completeness refresh and attestation control", () => {
       y: 0,
       toJSON: () => "",
     } as DOMRect);
+    // Matches this test's own 200x200 geometry above, so computeViewport's center is the same.
+    vi.spyOn(canvasSync, "measureCanvasHost").mockReturnValue({ w: 200, h: 200 });
     vi.spyOn(api.coverage, "get").mockResolvedValue(null);
     vi.spyOn(api.coverage, "push").mockResolvedValue({
       record: { cells_seen_at_scale: {} },
     });
-    vi.spyOn(api.coverage, "grid").mockResolvedValue({
-      width: 800,
-      height: 600,
-      tile_size: 800,
-      overlap: 0,
-      cols: 1,
-      rows: 1,
-      derivation: "cells sized to one full-resolution screenful",
-      cells: [{ name: "A1", x0: 0, y0: 0, x1: 800, y1: 600 }],
-    });
+    vi.spyOn(api.coverage, "grid").mockResolvedValue(
+      gridResponse({ width: 800, height: 600, tile_size: 800, overlap: 0, cols: 1, rows: 1 }, [
+        { name: "A1", x0: 0, y0: 0, x1: 800, y1: 600 },
+      ]),
+    );
     vi.spyOn(api.coverage, "completeness").mockResolvedValue({
       by_subject: {},
       annotation_counts: {},

@@ -12,6 +12,7 @@ import {
   type ActionPayload,
   type CoveragePayload,
   type CoverageRecord,
+  type GridZoomPayload,
 } from "@/api/types.generated";
 import type { CanvasStateBody } from "@/lib/canvasSync";
 import type {
@@ -273,9 +274,37 @@ export const api = {
   },
 
   coverage: {
-    // The coverage lattice for one raster, cells included. The one geometry implementation lives
-    // server-side: clients index the served cells and never re-derive them.
-    grid: (path: string) => call<CoverageGridResponse>(`${ROUTES.getCoverageGrid}?${q({ path })}`),
+    // The coverage lattice at a subject's set grid zoom, plus the region-serving grid. Clients
+    // index the served cells and never re-derive them.
+    grid: (
+      path: string,
+      args: {
+        subject?: string | null;
+        date?: string | null;
+        datasetRoot?: string | null;
+        viewportW?: number | null;
+        viewportH?: number | null;
+        rederive?: boolean;
+      } = {},
+    ) =>
+      call<CoverageGridResponse>(
+        `${ROUTES.getCoverageGrid}?${q({
+          path,
+          subject: args.subject ?? null,
+          date: args.date ?? null,
+          dataset_root: args.datasetRoot ?? null,
+          viewport_w: args.viewportW ?? null,
+          viewport_h: args.viewportH ?? null,
+          rederive: args.rederive ?? false,
+        })}`,
+      ),
+
+    // Set one subject's coverage-lattice zoom for a dataset; no default exists anywhere.
+    setGridZoom: (body: GridZoomPayload) =>
+      call<{ status: string; subject: string; zoom: number; set_by: string; set_at: string }>(
+        ROUTES.postCoverageGridZoom,
+        { method: "POST", body: JSON.stringify(body) },
+      ),
 
     // The stored per-image record for a (subject, date) bucket; date omitted = dateless bucket.
     // The route wraps the record as {coverage}; unwrapped here so consumers get the bare record.

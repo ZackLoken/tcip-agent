@@ -365,14 +365,20 @@ export function ReviewTab() {
     reviewImgW > 0 &&
     reviewImgH > 0 &&
     (reviewServed.w < reviewImgW || reviewServed.h < reviewImgH);
-  const regionGrid = useCoverageGrid(reviewBelowNative ? imgPath : null);
+  const regionGrid = useCoverageGrid({
+    imagePath: reviewBelowNative ? imgPath : null,
+    subject: null,
+    date: null,
+    datasetRoot: null,
+  });
   const regions = useRegionServes({
     imagePath: imgPath,
     imgW: matches?.img_width ?? 0,
     imgH: matches?.img_height ?? 0,
     view,
-    cells: regionGrid.cells,
-    tileSize: regionGrid.grid?.tile_size ?? null,
+    servingCells: regionGrid.servingCells,
+    servingTileSize: regionGrid.serving?.tile_size ?? null,
+    coverageCells: [],
     baseFacts,
     composite,
   });

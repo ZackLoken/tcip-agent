@@ -2,9 +2,9 @@
  * Wires the region-completeness store into the Annotate tab: fetches every subject's
  * attestation record and saved-annotation count for the open raster, exposes the active
  * subject's own complete/stale cells separate from every other subject's, the active subject's
- * working-scale bar (derived server-side from the label file, never a value the browser echoes
- * back), and posts an explicit attest/unattest/re-attest write. The store itself is the only
- * source of truth, so every write just refetches it.
+ * working scale (the breeder's own set grid zoom, never derived from any annotation or echoed
+ * back from the browser), and posts an explicit attest/unattest/re-attest write. The store
+ * itself is the only source of truth, so every write just refetches it.
  *
  * A record whose grid disagrees with the raster's current grid is never rendered on it (a grid
  * derivation can change between an attestation and now); its cell count and the record's own
@@ -15,7 +15,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { api } from "@/api/client";
-import type { WorkingScaleBar } from "@/api/types.generated";
+import type { WorkingScale } from "@/api/types.generated";
 import {
   effectiveComplete,
   sameGrid,
@@ -52,12 +52,11 @@ export interface RegionCompleteness {
   /** The active subject's saved-annotation count per cell, from the current grid; empty when the
    *  counts were binned on a different lattice than the one now showing (see `countsError`). */
   annotationCounts: Record<string, number>;
-  /** The active subject's working-scale bar for this image, derived fresh from the label file
-   *  on every read; null when there is none (see `workingScaleReason` for why). */
-  workingScale: WorkingScaleBar | null;
+  /** The active subject's working scale (the set grid zoom), read fresh on every read; null
+   *  when none is set (see `workingScaleReason` for why). */
+  workingScale: WorkingScale | null;
   /** Why `workingScale` is null: the read has not answered yet, the read failed (with its own
-   *  text), or no box or polygon annotation of the subject is saved on this image. Null once a
-   *  bar exists. */
+   *  text), or no grid zoom is set for the subject. Null once a working scale exists. */
   workingScaleReason: string | null;
   /** The completeness read's own failure, surfaced rather than read as "nothing attested". */
   error: string | null;
@@ -85,7 +84,7 @@ export function useRegionCompleteness(args: {
   );
   const [countsGrid, setCountsGrid] = useState<GridGeometry | null>(null);
   const [workingScaleBySubject, setWorkingScaleBySubject] = useState<
-    Record<string, WorkingScaleBar | null>
+    Record<string, WorkingScale | null>
   >({});
   const [workingScaleError, setWorkingScaleError] = useState<string | null>(null);
   const [workingScaleReasonBySubject, setWorkingScaleReasonBySubject] = useState<
@@ -204,7 +203,8 @@ export function useRegionCompleteness(args: {
     if (!subject) return "no active subject";
     if (!(subject in workingScaleBySubject)) return "the read has not answered yet";
     return (
-      workingScaleReasonBySubject[subject] ?? `no saved box or polygon annotation of ${subject}`
+      workingScaleReasonBySubject[subject] ??
+      `set the grid zoom to derive a coverage lattice for ${subject}`
     );
   }, [
     workingScale,

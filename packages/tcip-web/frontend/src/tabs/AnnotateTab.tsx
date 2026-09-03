@@ -157,7 +157,12 @@ export function AnnotateTab() {
 
   // ── Coverage: lattice, region serves, session accumulation ────────────────
   const [baseFacts, setBaseFacts] = useState<LoadedImage | null>(null);
-  const coverageGrid = useCoverageGrid(imgPath);
+  const coverageGrid = useCoverageGrid({
+    imagePath: imgPath,
+    subject: activeSubject,
+    date: dataset.date,
+    datasetRoot: dataset.dataset_root,
+  });
   const coverageViewing = useMemo(
     () => ({
       bands: composite.bands,
@@ -192,8 +197,9 @@ export function AnnotateTab() {
     imgW: canvas.imgWidth,
     imgH: canvas.imgHeight,
     view,
-    cells: coverageGrid.cells,
-    tileSize: coverageGrid.grid?.tile_size ?? null,
+    servingCells: coverageGrid.servingCells,
+    servingTileSize: coverageGrid.serving?.tile_size ?? null,
+    coverageCells: coverageGrid.cells,
     baseFacts,
     composite,
     onCellServedAtNative: coverage.noteServedAtNative,
@@ -1365,7 +1371,29 @@ export function AnnotateTab() {
   );
   // Every raster the grid route serves a lattice for, single-cell rasters included, so a
   // one-cell image's own attestation stays reachable; only the Map tool stays multi-cell only.
-  const showCoverageChrome = !!coverageGrid.grid || !!coverageGrid.error || !!completeness.error;
+  const showCoverageChrome =
+    !!coverageGrid.grid ||
+    !!coverageGrid.error ||
+    !!completeness.error ||
+    (coverageGrid.settled && !!coverageGrid.reason);
+
+  function setGridZoom(zoom: number) {
+    if (!activeSubject || !dataset.dataset_root) return;
+    void api.coverage
+      .setGridZoom({
+        subject: activeSubject,
+        zoom,
+        dataset_root: dataset.dataset_root,
+        user: useStore.getState().user,
+      })
+      .then(
+        () => coverageGrid.rederiveLattice(),
+        (err: unknown) => {
+          const detail = err instanceof Error ? err.message : String(err);
+          useStore.getState().pushToast(`Could not set the grid zoom: ${detail}`);
+        },
+      );
+  }
 
   return (
     <div className="flex-1 flex flex-col min-h-0">
@@ -1521,6 +1549,11 @@ export function AnnotateTab() {
           <CoverageChrome
             subject={activeSubject}
             derivation={coverageGrid.derivation ?? ""}
+            reason={coverageGrid.reason}
+            settled={coverageGrid.settled}
+            freshDerivationDiffers={coverageGrid.freshDerivationDiffers}
+            onRederiveLattice={coverageGrid.rederiveLattice}
+            onSetGridZoom={setGridZoom}
             gridFetchError={coverageGrid.error}
             readError={completeness.error}
             countsError={completeness.countsError}

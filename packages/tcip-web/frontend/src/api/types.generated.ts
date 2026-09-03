@@ -41,13 +41,9 @@ export interface StatsSource {
   overview_scale?: number | null;
 }
 
-export interface WorkingScaleBar {
+export interface WorkingScale {
   value: number;
-  median_extent_native_px: number;
-  annotation_count: number;
-  judged_span_px: number;
   source: string;
-  from_this_image?: boolean | null;
 }
 
 export interface CoverageViewing {
@@ -86,6 +82,13 @@ export interface CompletenessSetPayload {
   cell: string;
   complete: boolean;
   view_scale: number | null;
+  user?: string | null;
+}
+
+export interface GridZoomPayload {
+  subject: string;
+  zoom: number;
+  dataset_root?: string | null;
   user?: string | null;
 }
 

@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
 
 import { api } from "@/api/client";
-import type { WorkingScaleBar } from "@/api/types.generated";
+import type { WorkingScale } from "@/api/types.generated";
 import { useCoverageTracking } from "@/hooks/useCoverageTracking";
 import type { GridCell, GridGeometry } from "@/lib/coverage";
 import { resetCoverageOutbox } from "@/test/coverageOutbox";
@@ -32,17 +32,11 @@ const NULL_VIEWING = {
   base_served_size: null,
 };
 
-function bar(value: number): WorkingScaleBar {
-  return {
-    value,
-    median_extent_native_px: 46 / value,
-    annotation_count: 1,
-    judged_span_px: 46,
-    source: "s",
-  };
+function bar(value: number): WorkingScale {
+  return { value, source: "s" };
 }
 
-function trackingArgs(subject: string | null, workingScale: WorkingScaleBar | null = null) {
+function trackingArgs(subject: string | null, workingScale: WorkingScale | null = null) {
   return {
     imagePath: "C:/data/images/2026-01-01/mosaic.tif",
     datasetRoot: "C:/data",
