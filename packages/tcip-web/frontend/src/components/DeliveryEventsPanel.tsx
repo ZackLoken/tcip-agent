@@ -58,6 +58,13 @@ function DeliveryEventRow({ record }: { record: DeliveryEventRecord }) {
           ))}
         </div>
       )}
+      {record.plant_mapping && (
+        <div className="mt-2 text-[11px] text-tcip-muted">
+          {`Delivered dates ${record.plant_mapping.dates_delivered.join(", ")}: ` +
+            `${record.plant_mapping.images_unattributed} attributed to no plant ` +
+            `(${record.plant_mapping.plant_attribution}-level attribution)`}
+        </div>
+      )}
     </li>
   );
 }

@@ -83,8 +83,17 @@ export function openInferenceStream(
   return () => socket.stop();
 }
 
+export interface PlantMappingDateSummary {
+  n_images: number;
+  n_mapped: number;
+  n_unattributed: number;
+  // null on a date with no recorded distance, never a fabricated zero.
+  avg_distance_m: number | null;
+}
+
 export interface PlantMappingSummary {
-  [date: string]: { n_images: number; n_mapped: number; avg_distance_m: number };
+  per_date: { [date: string]: PlantMappingDateSummary };
+  totals: { n_dates: number; n_images: number; n_mapped: number; n_unattributed: number };
 }
 
 // The persisted mapping record's own resolved match radius: never recomputed by a caller, and
@@ -156,6 +165,10 @@ export interface PhenologyMeasurementResponse {
   captures_unverified: string[];
   // A plant CSV the mapping was built from that moved since. Empty when nothing was unverified.
   plant_csvs_unverified: string[];
+  // This delivery's own delivered dates, and its unattributed-capture count scoped to them
+  // (never the mapping's own n_dates_missing_images span).
+  dates_delivered: string[];
+  images_unattributed: number;
 }
 
 /** One entry of what a trait delivers, in the crop vocabulary's own wording, never paraphrased. */
@@ -313,6 +326,25 @@ export function traitSpecAuthoringRefusalOf(e: unknown): TraitSpecAuthoringRefus
   };
 }
 
+// The mapping a phenology delivery attributed detections through, plus this delivery's own
+// unattributed-capture disclosure (MappingBuild.delivery_disclosure).
+export interface PlantMappingDisclosure {
+  name: string;
+  project_root: string;
+  dataset_id: string;
+  dataset_root: string;
+  built_at: string;
+  record_sha256: string;
+  nn_tolerance_m: PlantMappingTolerance;
+  capture_identity: Record<string, string>;
+  captures_unverified: string[];
+  plant_csvs_unverified: string[];
+  dates_delivered: string[];
+  images_unattributed: number;
+  images_unattributed_scope: string;
+  plant_attribution: string;
+}
+
 /** One completed delivery: what shipped, under which trait and kind, and the real per-bucket
  *  verification evidence the delivering door reconciled at the time. Read-only; a delivery event
  *  is a fact recorded after an artifact already shipped, not a statement to confirm. */
@@ -326,7 +358,7 @@ export interface DeliveryEventRecord {
   produced_at: string;
   // The plant mapping this delivery attributed detections through, door-conditional: the
   // phenology doors carry it, every other delivery door carries null.
-  plant_mapping: Record<string, unknown> | null;
+  plant_mapping: PlantMappingDisclosure | null;
 }
 
 export const resultsApi = {
@@ -363,6 +395,7 @@ export const resultsApi = {
   loadPlantMapping: (name: string) =>
     postJson<{
       mapping: unknown;
+      summary: PlantMappingSummary | Record<string, never>;
       nn_tolerance_m: PlantMappingTolerance | null;
       max_match_distance_m: number | null;
     }>(ROUTES.postResultsPlantMappingLoad, { name }),

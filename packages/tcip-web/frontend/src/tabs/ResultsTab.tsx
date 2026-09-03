@@ -354,6 +354,8 @@ export function ResultsTab() {
   // than only in the exported CSV.
   const [capturesUnverified, setCapturesUnverified] = useState<string[]>([]);
   const [plantCsvsUnverified, setPlantCsvsUnverified] = useState<string[]>([]);
+  const [datesDelivered, setDatesDelivered] = useState<string[]>([]);
+  const [imagesUnattributed, setImagesUnattributed] = useState(0);
   const [unvalidatedRefusal, setUnvalidatedRefusal] = useState<string | null>(null);
 
   // Listed rather than selected: records are keyed by trait plus kind, including uncomputed kinds.
@@ -626,6 +628,21 @@ export function ResultsTab() {
     return (model && predictionDirs[date]?.[model]) || "";
   }
 
+  // Selecting an already-built mapping by name shows its own summary and tolerance, the same way
+  // a fresh build does, rather than leaving the picker blind until Compute is clicked.
+  async function loadMapping(name: string) {
+    try {
+      const res = await resultsApi.loadPlantMapping(name);
+      setBuildSummary("per_date" in res.summary ? (res.summary as PlantMappingSummary) : null);
+      setBuildTolerance(res.nn_tolerance_m);
+      setBuildMaxMatchDistance(res.max_match_distance_m);
+    } catch (e) {
+      useStore
+        .getState()
+        .pushToast(`Load mapping failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
   async function buildMapping() {
     if (!datasetRoot) return;
     if (!mappingName) {
@@ -699,6 +716,8 @@ export function ResultsTab() {
       setValidity(res.validated);
       setCapturesUnverified(res.captures_unverified ?? []);
       setPlantCsvsUnverified(res.plant_csvs_unverified ?? []);
+      setDatesDelivered(res.dates_delivered ?? []);
+      setImagesUnattributed(res.images_unattributed ?? 0);
       setUnvalidatedRefusal(null);
       const unclassified = res.positive_class_assessed === false;
       setPositiveClassUnassessed(unclassified);
@@ -898,7 +917,11 @@ export function ResultsTab() {
             <input
               className="tcip-input"
               value={mappingName}
-              onChange={(e) => setMappingName(e.target.value)}
+              onChange={(e) => {
+                const name = e.target.value;
+                setMappingName(name);
+                if (mappingNames.includes(name)) void loadMapping(name);
+              }}
               placeholder="valley-2026"
               list="plant-mapping-names"
             />
@@ -946,11 +969,16 @@ export function ResultsTab() {
                 {`Match tolerance ${buildTolerance.value.toFixed(2)} m (${toleranceSourceText(buildTolerance.source)}); matches accepted out to ${buildMaxMatchDistance.toFixed(2)} m`}
               </div>
             )}
-            {Object.entries(buildSummary).map(([d, s]) => (
+            {Object.entries(buildSummary.per_date).map(([d, s]) => (
               <div key={d}>
-                {d}: {s.n_mapped}/{s.n_images} mapped · avg {s.avg_distance_m.toFixed(1)} m
+                {`${d}: mapped ${s.n_mapped} of ${s.n_images}, ${s.n_unattributed} attributed to no plant · avg ${s.avg_distance_m === null ? "no distances" : `${s.avg_distance_m.toFixed(1)} m`}`}
               </div>
             ))}
+            {buildSummary.totals.n_unattributed > 0 && (
+              <div className="mt-1">
+                {`${buildSummary.totals.n_unattributed} captures across this mapping's dates are attributed to no plant (no readable position, a raster capture, or beyond the accepted match distance)`}
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -1118,6 +1146,11 @@ export function ResultsTab() {
                     >
                       Ask the agent to calibrate this
                     </button>
+                  </div>
+                )}
+                {datesDelivered.length > 0 && (
+                  <div className="text-[11px] text-tcip-muted">
+                    {`Delivered dates ${datesDelivered.join(", ")}: ${imagesUnattributed} attributed to no plant`}
                   </div>
                 )}
                 {(capturesUnverified.length > 0 || plantCsvsUnverified.length > 0) && (
