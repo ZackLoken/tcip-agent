@@ -326,12 +326,13 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
     )
     from tcip_mcp.pipelines.model_build import DATASET_SOURCE_KEY, MODEL_SOURCE_KEY, TRAINING_SOURCE_KEY
 
-    # Pydantic schema: type/structure of data/training.
-    issues: list[str] = list(validate_train_config_schema(config))
-    warnings: list[str] = []
-
     # The trainer's own view: training.* hoisted onto the top level, top-level wins.
     normalized = normalize_train_config(config)
+
+    # Pydantic schema over the same normalized view: a model_source nested under training is
+    # then typed by ModelSourceSchema (extra="forbid") exactly as a top-level one is.
+    issues: list[str] = list(validate_train_config_schema(normalized))
+    warnings: list[str] = []
 
     # model_source presence + builder importability (the one build path).
     model_source = normalized.get(MODEL_SOURCE_KEY)
@@ -363,6 +364,8 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
     data_cfg = normalized.get("data")
     if not data_cfg:
         issues.append("Missing 'data' section")
+    elif not isinstance(data_cfg, dict):
+        issues.append("'data' must be a dict")
     elif data_cfg.get(DATASET_SOURCE_KEY) is not None:
         # Bespoke dataset seam (mirrors model_source): the agent's builder owns loading, so the
         # known-loader images_dir/labels_dir aren't required, only the builder must import.
@@ -381,7 +384,7 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
     # Channel firewall: probe one sample raster and check its band count against the declared
     # in_chans, so a channel-wrong train is caught here rather than deep in the training subprocess.
     # Only fires when a raster is actually readable, never a false-fail on an empty/absent dir.
-    if isinstance(model_source, dict) and data_cfg:
+    if isinstance(model_source, dict) and isinstance(data_cfg, dict) and data_cfg:
         from tcip_mcp.pipelines.model_build import declared_in_chans
         declared = declared_in_chans(model_source)
         images_dir = data_cfg.get("images_dir")
@@ -1135,6 +1138,17 @@ def list_launchable_configs() -> list[dict]:
     return rows
 
 
+def split_dir_identity(path: str) -> str:
+    """The normalized identity of a split-manifest directory: case-folded, symlinks resolved
+    (``os.path.normcase(str(Path(path).resolve()))``), so two differently spelled, cased or
+    symlinked paths to the same directory compare equal. Shared by ``list_split_choices``
+    (excluding a config's own binding from its candidates, deduping the rest) and the relaunch
+    route (checking a client-picked spelling against what was actually offered), so a directory
+    is never refused, or offered twice, over a spelling difference alone.
+    """
+    return os.path.normcase(str(Path(path).resolve()))
+
+
 def list_split_choices(experiment_id: str) -> dict:
     """Every choice this config's own "Data" control offers a relaunch of ``experiment_id``: its
     stored data section as recorded, and every split manifest directory this project's own bound
@@ -1160,10 +1174,9 @@ def list_split_choices(experiment_id: str) -> dict:
     when something is actually recorded there directly, the ``make_splits`` default materializes
     it, it does not always exist) and every directory one level under it holding a manifest
     (where ``freeze_split_manifest`` writes a frozen run's own drawn partition). The own-binding
-    exclusion and the candidate dedupe compare each directory by a normalized identity
-    (``os.path.normcase(str(Path(p).resolve()))``, folding both case and symlinks), so a
-    differently spelled, cased or symlinked path to the identical directory is never offered as
-    if it were a second one.
+    exclusion and the candidate dedupe compare each directory by :func:`split_dir_identity`
+    (folding both case and symlinks), so a differently spelled, cased or symlinked path to the
+    identical directory is never offered as if it were a second one.
 
     Returns ``{"error": ...}`` for an unknown ``experiment_id`` (the route's own 404). Otherwise:
     ``{"as_recorded": {"case": "bound"|"drawn", "line": str, "compatible": bool,
@@ -1235,10 +1248,7 @@ def list_split_choices(experiment_id: str) -> dict:
     if not images_dir or not labels_dir:
         return {"as_recorded": as_recorded, "manifests": []}
 
-    def _norm_dir(p: str) -> str:
-        return os.path.normcase(str(Path(p).resolve()))
-
-    own_norm = _norm_dir(own_manifest_dir) if own_manifest_dir else None
+    own_norm = split_dir_identity(own_manifest_dir) if own_manifest_dir else None
     candidate_dirs: list[str] = []
     seen: set[str] = set()
     for other_id in experiment_ids_with_status():
@@ -1252,7 +1262,7 @@ def list_split_choices(experiment_id: str) -> dict:
         candidate = other_split.get("manifest_dir")
         if not candidate:
             continue
-        candidate_norm = _norm_dir(candidate)
+        candidate_norm = split_dir_identity(candidate)
         if candidate_norm == own_norm or candidate_norm in seen:
             continue
         seen.add(candidate_norm)
@@ -1260,7 +1270,7 @@ def list_split_choices(experiment_id: str) -> dict:
     dataset_root = dataset_root_of(images_dir)
     if dataset_root is not None:
         default_dir = str(dataset_root / "splits")
-        default_norm = _norm_dir(default_dir)
+        default_norm = split_dir_identity(default_dir)
         if default_norm != own_norm and default_norm not in seen:
             seen.add(default_norm)
             candidate_dirs.append(default_dir)
@@ -1268,7 +1278,7 @@ def list_split_choices(experiment_id: str) -> dict:
         splits_dir = Path(default_dir)
         if splits_dir.is_dir():
             for sub in sorted(p for p in splits_dir.iterdir() if p.is_dir()):
-                sub_norm = _norm_dir(str(sub))
+                sub_norm = split_dir_identity(str(sub))
                 if sub_norm == own_norm or sub_norm in seen:
                     continue
                 seen.add(sub_norm)
@@ -1408,8 +1418,11 @@ class _AccessTrackingConfig(dict):
 
     Real, stated limitations (never gates the run, warn-only, so a false positive costs a log
     line, not a failed trial): top-level only (a nested read like
-    ``ctx.config["optimizer"]["custom_key"]`` isn't seen); ``dict(cfg)``/``**cfg`` copies bypass
-    the overrides entirely (CPython copies at the C level); whole-dict iteration
+    ``ctx.config["optimizer"]["custom_key"]`` isn't seen), so a dotted swept key
+    (``"model_source.builder_kwargs.width"``) counts as consumed once its top-level segment
+    (``"model_source"``) is read, whatever its own leaf name; a misspelled leaf under an
+    otherwise-read block is therefore not reported unconsumed. ``dict(cfg)``/``**cfg`` copies
+    bypass the overrides entirely (CPython copies at the C level); whole-dict iteration
     (``.items()``/``.values()``/``.keys()``) isn't tracked per-key.
     """
 
@@ -1935,15 +1948,23 @@ def run_hpo(
     (see :func:`cancel_hpo`); this call discards that mark itself once it no longer needs it.
 
     Refuses (``{"error": ..., "issues": [...]}``, nothing minted) an unimportable builder or
-    training source, or a config with no ``data`` section, at the config a trial would actually
-    train under (``base_config`` with the search space's first sampled point applied), rather
-    than reporting as the losing side in every trial. ``cancel_hpo`` requested against this
-    study before or during the run instead ends the sweep ``{"status": "cancelled", ...}``, the
-    manifest recording the same, rather than a completed result.
+    training source, or a config with no ``data`` section, at every point the search space
+    could resolve a trial's config to (``base_config`` with a sampled point applied, not only
+    the first). Also refuses a ``param_space`` axis whose sampled points would resolve to a
+    different selection metric or ranking direction than ``base_config``'s own resolution,
+    Ray's Tuner taking only one fixed metric/mode for the whole sweep: this catches a dotted or
+    nested-dict axis naming ``selection_metric`` directly, and an axis (``model_source.task``,
+    in particular) that changes the metric's own task-derived default with no
+    ``selection_metric`` key in sight. ``cancel_hpo`` requested against this study before or
+    during the run instead ends the sweep ``{"status": "cancelled", ...}``, the manifest
+    recording the same, rather than a completed result.
 
     Args:
         base_config: Base training config each trial modifies.
         param_space: Param-space dict (see ``hpo.get_default_space``); default when omitted.
+            Every axis is checked against ``base_config``'s own resolved selection metric and
+            direction (see above); an axis that would disagree at any sampled point is refused
+            rather than minted.
         n_trials: Number of trials.
         output_dir: Base output directory for trial results (defaults under ``.tcip/hpo``).
         search_alg: Search algorithm, see the list above; call ``hpo.available_search_algs()``
@@ -2026,28 +2047,36 @@ def run_hpo(
                 return {"error": f"relaunched_from names no sweep manifest under this root: "
                                   f"{relaunched_from!r}", "issues": []}
 
-        from tcip_mcp.pipelines.model_build import MODEL_SOURCE_KEY
-
         # A bound base_config admitted to split_draws redraws inside its manifest from here on.
         base_config = _base_config_for_split_draws(base_config, split_draws)
 
         # Checked ahead of preflight, so its own reason is what a bound/val_images_dir/task
         # refusal reads as, not whatever preflight would have hit first.
-        hpo_task = (base_config.get(MODEL_SOURCE_KEY) or {}).get("task") \
-            or (base_config.get("data") or {}).get("task", "detection")
+        hpo_task = _resolved_task(base_config)
         draws_refusal = _split_draws_refusal(
             base_config, param_space, hpo_task, search_alg, scheduler,
             split_draws, split_draw_seeds, warm_start, baseline_params)
         if draws_refusal is not None:
             return {"error": draws_refusal, "issues": []}
 
-        # The sweep-wide selection metric and direction are resolved once from base_config below
-        # and fixed on the Tuner; a param_space axis naming it would disagree per trial.
-        metric_axis = _swept_selection_metric_axis(param_space)
-        if metric_axis is not None:
-            return {"error": f"param_space sweeps {metric_axis!r}: the sweep's selection metric "
-                              "and its direction are fixed once from base_config, not the param "
-                              "space; move it into base_config.", "issues": []}
+        from tcip_mcp.pipelines.training.evaluation import HIGHER_IS_BETTER_BY_METRIC
+        from tcip_mcp.pipelines.training.generic_trainer import resolve_selection_metric
+        from tcip_mcp.pipelines.schemas import evaluation_section
+
+        # Ray forbids setting metric/mode anywhere but the Tuner, so the direction is resolved
+        # once here, from base_config; every point below is checked against it the same way.
+        hpo_eval_cfg = evaluation_section(base_config)
+        try:
+            hpo_metric = resolve_selection_metric(
+                hpo_task, hpo_eval_cfg.get("trait"), hpo_eval_cfg.get("selection_metric"))
+        except ValueError as exc:
+            return {"error": str(exc), "issues": []}
+        hpo_mode = "max" if HIGHER_IS_BETTER_BY_METRIC[hpo_metric] else "min"
+
+        axis_conflict = _selection_metric_axis_conflict(
+            base_config, param_space, hpo_task, hpo_metric, hpo_mode)
+        if axis_conflict is not None:
+            return {"error": axis_conflict, "issues": []}
 
         # Structural preflight over every point the search space could resolve a trial's
         # builder or data section to, not only the first sampled corner.
@@ -2061,17 +2090,6 @@ def run_hpo(
             if not preflight["valid"]:
                 return {"error": f"the sweep's base config fails preflight at {label}",
                         "issues": preflight["issues"]}
-
-        from tcip_mcp.pipelines.training.evaluation import HIGHER_IS_BETTER_BY_METRIC
-        from tcip_mcp.pipelines.training.generic_trainer import resolve_selection_metric
-        from tcip_mcp.pipelines.schemas import evaluation_section
-
-        # Ray forbids setting metric/mode anywhere but the Tuner, so the direction is resolved
-        # once here, from base_config; every trial's own resolution must agree with it.
-        hpo_eval_cfg = evaluation_section(base_config)
-        hpo_metric = resolve_selection_metric(
-            hpo_task, hpo_eval_cfg.get("trait"), hpo_eval_cfg.get("selection_metric"))
-        hpo_mode = "max" if HIGHER_IS_BETTER_BY_METRIC[hpo_metric] else "min"
 
         search_param_space = param_space
         resolved_draw_seeds: list[int] | None = None
@@ -2419,24 +2437,59 @@ def _apply_hpo_params(base_config: dict, params: dict) -> dict:
     return cfg
 
 
-def _swept_selection_metric_axis(param_space: dict | None) -> str | None:
-    """The ``param_space`` key, if any, whose sampled value could set a trial's own selection
-    metric: a dotted key naming it directly (``evaluation.selection_metric``,
-    ``training.evaluation.selection_metric``), or an ``evaluation``/``training.evaluation`` axis
-    whose value, or (for a categorical axis) any of its choices, is itself a dict carrying
-    ``selection_metric``. ``None`` when nothing in ``param_space`` reaches it.
+def _resolved_task(config: dict) -> str:
+    """The task ``run_hpo`` resolves a config to: ``model_source.task``, else ``data.task``,
+    else ``"detection"``. The one definition both the base config's own resolution and a
+    param_space point's resolution share, so an axis that changes task is judged by the same
+    rule everywhere it is read.
     """
-    direct_keys = ("evaluation.selection_metric", "training.evaluation.selection_metric")
-    for key in direct_keys:
-        if key in (param_space or {}):
-            return key
-    for key in ("evaluation", "training.evaluation"):
-        spec = (param_space or {}).get(key)
-        if not isinstance(spec, dict):
+    from tcip_mcp.pipelines.model_build import MODEL_SOURCE_KEY
+
+    return (config.get(MODEL_SOURCE_KEY) or {}).get("task") \
+        or (config.get("data") or {}).get("task", "detection")
+
+
+def _selection_metric_axis_conflict(
+    base_config: dict, param_space: dict, hpo_task: str, hpo_metric: str, hpo_mode: str,
+) -> str | None:
+    """The refusal reason, if any, when some point ``param_space`` could resolve a trial to
+    picks a different selection metric or ranking direction than ``(hpo_metric, hpo_mode)``,
+    the pair ``run_hpo`` already resolved from ``base_config`` and fixes once on the Tuner (Ray
+    forbids setting metric/mode anywhere else).
+
+    Resolves every :func:`_preflight_points` point through the same
+    ``evaluation_section``/``resolve_selection_metric``/``HIGHER_IS_BETTER_BY_METRIC`` path the
+    sweep itself uses, rather than enumerating the key shapes that could reach
+    ``selection_metric``: this also catches an axis that changes the metric's own task-derived
+    default (``model_source.task``, in particular) with no ``selection_metric`` key in sight.
+    A point whose params fail to apply is left for the structural preflight loop to report.
+    ``None`` when every point agrees with ``base_config``.
+    """
+    from tcip_mcp.pipelines.training.evaluation import HIGHER_IS_BETTER_BY_METRIC
+    from tcip_mcp.pipelines.training.generic_trainer import resolve_selection_metric
+    from tcip_mcp.pipelines.schemas import evaluation_section
+
+    axes = sorted(param_space)
+    for label, point in _preflight_points(param_space):
+        try:
+            point_cfg = _apply_hpo_params(base_config, point)
+        except ValueError:
             continue
-        values = spec.get("choices") or [] if spec.get("type") == "categorical" else [spec]
-        if any(isinstance(v, dict) and "selection_metric" in v for v in values):
-            return key
+        point_task = _resolved_task(point_cfg)
+        point_eval_cfg = evaluation_section(point_cfg)
+        try:
+            point_metric = resolve_selection_metric(
+                point_task, point_eval_cfg.get("trait"), point_eval_cfg.get("selection_metric"))
+        except ValueError as exc:
+            return (f"param_space (axes {axes}) disagrees with base_config's selection metric "
+                    f"at {label}: {exc}")
+        point_mode = "max" if HIGHER_IS_BETTER_BY_METRIC[point_metric] else "min"
+        if (point_metric, point_mode) != (hpo_metric, hpo_mode):
+            return (f"param_space (axes {axes}) sweeps a selection metric or its direction at "
+                    f"{label}: base_config resolves to {hpo_metric!r} ({hpo_mode}), this point "
+                    f"to {point_metric!r} ({point_mode}); the sweep's selection metric and "
+                    "direction are fixed once from base_config, not the param space; move it "
+                    "into base_config.")
     return None
 
 

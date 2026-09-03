@@ -826,6 +826,64 @@ def test_relaunch_route_launches_with_a_chosen_manifest_and_refreshes_the_pristi
     assert "val_images_dir" not in snapshot["data"]
 
 
+def test_relaunch_route_admits_a_symlinked_spelling_of_an_offered_split_directory(
+    tmp_path: Path, monkeypatch, client: TestClient,
+) -> None:
+    """The picker's own dedupe offers one spelling of a symlinked directory; the relaunch route
+    must still admit the other spelling of the identical directory, not just the one string it
+    happened to list. split_dir_identity is the one comparison both sides now share, so a
+    symlinked or differently cased spelling of an offered directory is accepted."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
+    monkeypatch.setattr(
+        "tcip_mcp.pipelines.training.tensorboard_manager.launch_tensorboard", lambda *a, **k: {})
+    import subprocess
+
+    class _StubChild:
+        def __init__(self, *a, **k) -> None:
+            self.pid = 4242
+
+        def __class_getitem__(cls, item):
+            return cls
+
+    monkeypatch.setattr(subprocess, "Popen", _StubChild)
+
+    from tcip_mcp.experiments import config_key, create_experiment, read_member
+    from tcip_mcp.tools.training_tools import list_split_choices
+
+    def identity(p: str) -> str:
+        return os.path.normcase(str(Path(p).resolve()))
+
+    root = _two_subject_two_date_dataset(tmp_path / "ds")
+    splits_dir = root / "splits"
+    splits_dir.mkdir(parents=True, exist_ok=True)
+    real_dir = splits_dir / "real"
+    _draw(root, real_dir, seed=5)
+
+    link_dir = splits_dir / "link"
+    try:
+        os.symlink(real_dir, link_dir, target_is_directory=True)
+    except OSError as exc:
+        pytest.skip(f"this platform refuses directory symlink creation for this user: {exc}")
+
+    cfg = _bespoke_config(root / "images" / DATES[0], root / "annotations" / DATES[0])
+    create_experiment("exp-symlink-relaunch", cfg)
+
+    choices = list_split_choices("exp-symlink-relaunch")
+    offered = next(m["manifest_dir"] for m in choices["manifests"] if m["enabled"])
+    assert offered in (str(real_dir), str(link_dir))
+    other_spelling = str(real_dir) if offered == str(link_dir) else str(link_dir)
+    assert identity(other_spelling) == identity(offered)
+
+    resp = client.post("/api/training/runs", json={
+        "experiment_id": "exp-symlink-relaunch", "split_manifest_dir": other_spelling,
+    })
+    assert resp.status_code == 200, resp.json()
+
+    snapshot = read_member(config_key("exp-symlink-relaunch"))
+    assert snapshot["data"]["split"] == {"manifest_dir": other_spelling}
+
+
 def test_a_chosen_manifest_binds_and_the_runs_own_split_record_names_it(tmp_path: Path) -> None:
     """The candidate config the route builds for a chosen partition, bound the exact way the
     child binds it (auto_train_val then persist_split_manifest, the sequence

@@ -48,6 +48,30 @@ def test_preflight_config_accepts_trainer_canonical_stages(tmp_path):
     assert preflight_config(cfg)["valid"] is True
 
 
+def test_preflight_config_refuses_a_misspelled_model_source_key_nested_under_training():
+    """preflight_config reads model_source off normalize_train_config's hoisted view, so the
+    schema it validates must be the same view: a model_source nested under training (TrainingSection
+    is extra="allow") is otherwise never typed by ModelSourceSchema (extra="forbid") and a
+    misspelling like bulider_kwargs reaches the trainer instead of being refused by name."""
+    from tcip_mcp.tools.training_tools import preflight_config
+
+    cfg = {"training": {"model_source": {
+        "builder": "tests.bespoke_models:build_bespoke_detection",
+        "bulider_kwargs": {"num_classes": 1}, "task": "detection",
+    }}}
+    r = preflight_config(cfg)
+    assert r["valid"] is False
+    assert any("bulider_kwargs" in i for i in r["issues"]), r["issues"]
+
+
+def test_preflight_config_types_a_non_dict_data_section_instead_of_raising():
+    from tcip_mcp.tools.training_tools import preflight_config
+
+    r = preflight_config({"training": {"data": "x"}})
+    assert r["valid"] is False
+    assert any("'data' must be a dict" in i for i in r["issues"]), r["issues"]
+
+
 # preflight_config's overfit branch: reseed-run-restore, never gating
 
 def _frozen_detection_builder(**kwargs):
@@ -1150,13 +1174,15 @@ def test_run_hpo_trial_swept_dotted_key_whose_segment_is_unread_is_reported_unco
     monkeypatch, tmp_path,
 ):
     """A dotted swept key still counts as unconsumed when nothing reads the top-level segment
-    it lands under, the same as a plain top-level key nothing reads."""
+    it lands under, the same as a plain top-level key nothing reads. Coverage: this already
+    passes before and after the axis-conflict fix, since a leaf mismatch under a read block is
+    a separate rule from consumption (see ``_AccessTrackingConfig``'s own docstring)."""
     pytest.importorskip("torch")
     from tcip_mcp.tools.training_tools import _run_hpo_trial, trial_config_key
 
     def fake_train(run, train_loader, val_loader, task="detection",
                    epoch_callback=None, resume_from=""):
-        run.config.get("lr")  # a known key, consumed -- but "model_source" is never read
+        run.config.get("lr")  # a known key, consumed; "model_source" itself is never read
         run.best_metric = 1.0
         run.status = "completed"
         return run
@@ -1476,7 +1502,9 @@ def test_run_hpo_refuses_a_param_space_axis_whose_choices_carry_selection_metric
     assert "evaluation" in result["error"]
 
 
-def test_run_hpo_admits_an_lr_sweep_beside_a_base_config_selection_metric(tmp_path, monkeypatch):
+def test_run_hpo_admits_an_lr_sweep_beside_a_base_config_selection_metric(
+    tmp_path, real_hpo_base_config, monkeypatch,
+):
     """The selection-metric refusal targets param_space, never base_config: a config that
     states its own selection metric still runs an ordinary lr sweep."""
     from tcip_mcp.pipelines.training import hpo
@@ -1491,19 +1519,60 @@ def test_run_hpo_admits_an_lr_sweep_beside_a_base_config_selection_metric(tmp_pa
 
     monkeypatch.setattr(hpo, "tune_search", fake_search)
 
-    imgs, lbls = tmp_path / "images", tmp_path / "labels"
-    imgs.mkdir()
-    lbls.mkdir()
-    base_config = {
-        "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
-                         "builder_kwargs": {"num_classes": 1}, "task": "detection"},
-        "data": {"images_dir": str(imgs), "labels_dir": str(lbls)},
-        "evaluation": {"selection_metric": "map"},
-    }
+    base_config = {**real_hpo_base_config, "evaluation": {"selection_metric": "map"}}
     result = training_tools.run_hpo(base_config, param_space={"lr": [0.1, 0.01]}, n_trials=1)
 
     assert result["best_params"] == {"lr": 0.01}
     assert seen == [{"lr": [0.1, 0.01]}]
+
+
+def test_run_hpo_refuses_a_param_space_axis_that_changes_the_metrics_own_task_default(
+    tmp_path, real_hpo_base_config, monkeypatch,
+):
+    """A param_space axis with no selection_metric key anywhere can still split the sweep's
+    fixed metric from a trial's own: model_source.task changes resolve_selection_metric's
+    task-derived default (objective for detection, loss otherwise), so a categorical task axis
+    is refused exactly like a dotted or nested-dict selection_metric axis."""
+    from tcip_mcp.tools import training_tools
+
+    monkeypatch.chdir(tmp_path)
+    result = training_tools.run_hpo(
+        real_hpo_base_config,
+        param_space={"model_source.task": {
+            "type": "categorical", "choices": ["detection", "classification"],
+        }},
+    )
+    assert "error" in result
+    assert "model_source.task" in result["error"]
+
+
+def test_run_hpo_admits_a_categorical_evaluation_axis_naming_the_same_metric_at_every_choice(
+    tmp_path, real_hpo_base_config, monkeypatch,
+):
+    """The axis-conflict check resolves each point's own selection metric rather than refusing
+    any evaluation-shaped axis outright: a categorical evaluation axis whose every choice
+    resolves to the same metric as base_config's own is admitted."""
+    from tcip_mcp.pipelines.training import hpo
+    from tcip_mcp.tools import training_tools
+
+    monkeypatch.chdir(tmp_path)
+    seen = []
+
+    def fake_search(*args, **kwargs):
+        seen.append(kwargs.get("param_space", args[1] if len(args) > 1 else None))
+        return {"best_params": {}, "best_value": 0.1, "n_trials": 1}
+
+    monkeypatch.setattr(hpo, "tune_search", fake_search)
+
+    base_config = {**real_hpo_base_config, "evaluation": {"selection_metric": "map"}}
+    param_space = {"evaluation": {
+        "type": "categorical",
+        "choices": [{"selection_metric": "map"}, {"selection_metric": "map"}],
+    }}
+    result = training_tools.run_hpo(base_config, param_space=param_space, n_trials=1)
+
+    assert "error" not in result, result
+    assert seen == [param_space]
 
 
 # dataset_identity: a version-refused identity propagates rather than reading as unregistered.
