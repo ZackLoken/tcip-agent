@@ -193,8 +193,9 @@ def test_a_root_coco_candidate_sits_beside_the_per_image_tree_not_in_place_of_it
     findings = _check(root)
 
     errors = [msg for level, msg in findings if level == "error"]
-    assert {"plotA_0_0" in e or "plotB_0_0" in e for e in errors} == {True}
     assert len(errors) == 2
+    assert sum("plotA_0_0" in e for e in errors) == 1
+    assert sum("plotB_0_0" in e for e in errors) == 1
 
 
 def test_an_npz_capture_confirmed_negative_is_recognized(tmp_path: Path):

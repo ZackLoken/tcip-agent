@@ -110,8 +110,8 @@ spec file; register one first with `author_trait_spec(project_root, trait, deliv
 confirmation in the GUI. `revise_trait_spec` re-validates the merged spec against
 `crops.yml` before writing. Never hand-write the trait's spec YAML directly.
 
-Don't confuse `score_predictions` (IoU GT-vs-prediction *eval* matching) with plant-GPS
-mapping; they are unrelated.
+Don't confuse `annotation_tools.score_predictions` (IoU GT-vs-prediction *eval* matching, a
+library call) with plant-GPS mapping; they are unrelated.
 
 ## Plant mapping: why the sequence-anchored matcher
 

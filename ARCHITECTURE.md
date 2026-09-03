@@ -164,7 +164,7 @@ source file under a covered root that no row names.
 | packages/tcip-mcp/src/tcip_mcp/tools/project_tools.py | Project management tools. | 19 | 13 |
 | packages/tcip-mcp/src/tcip_mcp/tools/proposal_tools.py | Proposal-workflow tools: turn a chosen auto-labeling engine's output into predictions for canvas review. | 19 | 2 |
 | packages/tcip-mcp/src/tcip_mcp/tools/scale_tools.py | Physical per-pixel scale calibration: the delivery-gating producer for ``resolve_scale.json``. | 10 | 1 |
-| packages/tcip-mcp/src/tcip_mcp/tools/training_tools.py | Training MCP tools, config validation, launch training, HPO, status. | 31 | 10 |
+| packages/tcip-mcp/src/tcip_mcp/tools/training_tools.py | Training MCP tools, config validation, launch training, HPO, status. | 31 | 11 |
 | packages/tcip-mcp/src/tcip_mcp/tools/vision_tools.py | Vision tools: render annotations and predictions for visual analysis. | 22 | 5 |
 | packages/tcip-mcp/src/tcip_mcp/traits.py | Trait knowledge, the human-defined *semantics* of each measurable trait (Tier C). | 7 | 22 |
 | packages/tcip-mcp/src/tcip_mcp/utils/__init__.py | Shared low-level utilities for tcip-mcp. | 0 | 0 |
@@ -196,7 +196,7 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 |---|---|---|---|
 | packages/tcip-store/src/tcip_store/__init__.py | The storage seam's public surface: keys, errors, store declarations, and the module-level operations. | 6 | 71 |
 | packages/tcip-store/src/tcip_store/adoption.py | Moving a root's existing record and log files into a database, exclusively and atomically, or refusing before it writes, including the stores a database beside them has never held. | 6 | 3 |
-| packages/tcip-store/src/tcip_store/binding.py | Which backend a process binds at its entry point: the database unless `TCIP_STORE_BACKEND` names the file backend, and a refusal for any other name. | 3 | 35 |
+| packages/tcip-store/src/tcip_store/binding.py | Which backend a process binds at its entry point: the database unless `TCIP_STORE_BACKEND` names the file backend, and a refusal for any other name. | 3 | 36 |
 | packages/tcip-store/src/tcip_store/errors.py | Every typed refusal the seam raises, absence and corruption included. | 1 | 17 |
 | packages/tcip-store/src/tcip_store/export.py | Writing a root's database-held records and logs back out as the file layout, and the per-store counters that say when those files are behind. | 4 | 3 |
 | packages/tcip-store/src/tcip_store/file_backend.py | The filesystem backend: identity to path, atomic replace, file locks, append-only logs, blobs, and the conform rail's refusal of record writes, and of a colliding blob write, to a root a database holds. | 5 | 41 |
@@ -461,7 +461,7 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | Module path | Ownership (one line) | In-repo imports | Imported by |
 |---|---|---|---|
 | scripts/_paths.py | Shared path resolution for the one-off analysis scripts: no machine-specific hardcoding. | 0 | 5 |
-| scripts/_script_root.py | Resolve-or-refuse `$TCIP_STATE_ROOT` pinning shared by the demoted-tool scripts. | 1 | 9 |
+| scripts/_script_root.py | Resolve-or-refuse `$TCIP_STATE_ROOT` pinning shared by the demoted-tool scripts. | 1 | 10 |
 | scripts/_store_bootstrap.py | Re-exports the store catalogue from tcip_mcp.store_catalogue, and which roots a project's records live in. | 3 | 2 |
 | scripts/adopt_store.py | Move a root's existing record and log files into a store database. | 6 | 0 |
 | scripts/archive_project.py | Export an annotation project as a portable ZIP archive, through the demoted `archive_project` function. | 4 | 0 |
@@ -499,6 +499,7 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | scripts/list_tools.py | Print the live MCP tool registry (count + names). | 1 | 0 |
 | scripts/overlay_reference_grid.py | Render a labeled reference-grid overlay, through the demoted `overlay_reference_grid` function. | 3 | 0 |
 | scripts/plant_aware_group_splits.py | Plant-aware group-key derivation for ``draw_splits``, over per-stem georeferenced rasters. | 6 | 0 |
+| scripts/preflight_config.py | Validate a training configuration before launching, through the demoted `preflight_config` function. | 3 | 0 |
 | scripts/prove_test_fails_before.py | Prove a test actually fails against the code it was written to catch. | 0 | 0 |
 | scripts/render_candidates_tile.py | Render a tile showing GT (green) and only the FN candidates (numbered red). | 1 | 0 |
 | scripts/render_failure_cases.py | Find and render the worst predictions for failure analysis, through the demoted `render_failure_cases` function. | 3 | 0 |
@@ -680,6 +681,7 @@ A module counts as zero-importer when no other module in its own scanned tree re
 | scripts | scripts/list_tools.py |
 | scripts | scripts/overlay_reference_grid.py |
 | scripts | scripts/plant_aware_group_splits.py |
+| scripts | scripts/preflight_config.py |
 | scripts | scripts/prove_test_fails_before.py |
 | scripts | scripts/render_candidates_tile.py |
 | scripts | scripts/render_failure_cases.py |
@@ -721,8 +723,8 @@ Docstring is the function's docstring first line, verbatim.
 
 | tool | line | audited | docstring first line |
 |---|---|---|---|
-| `save_annotations` | `annotation_tools.py:129` | yes | Write an image's annotations to its single per-image label file (all subjects, one file). |
-| `write_class_map` | `annotation_tools.py:465` | yes | Author the dataset's nested class registry, a thin wrapper over ``class_registry``. |
+| `save_annotations` | `annotation_tools.py:132` | yes | Write an image's annotations to its single per-image label file (all subjects, one file). |
+| `write_class_map` | `annotation_tools.py:471` | yes | Author the dataset's nested class registry, a thin wrapper over ``class_registry``. |
 
 ### data_tools.py (2 tools)
 
@@ -863,18 +865,18 @@ anything.
 
 | tool | line | audited | docstring first line |
 |---|---|---|---|
-| `launch_training` | `training_tools.py:703` | yes | Launch a training run in an isolated subprocess from a bespoke ``model_source`` builder. |
-| `monitor_training` | `training_tools.py:937` | yes | Check the status of a training run. |
-| `cancel_training` | `training_tools.py:1307` | yes | Request graceful cancellation of a running training run. |
-| `run_hyperparameter_search` | `training_tools.py:1882` | yes | Run hyperparameter optimization on Ray Tune, training each trial for real. |
-| `cancel_hyperparameter_search` | `training_tools.py:2277` | yes | Request cooperative cancellation of a running HPO sweep. |
-| `evaluate_model` | `training_tools.py:2928` | yes | Evaluate a trained checkpoint on a (held-out) dataset and write test_results.json. |
+| `launch_training` | `training_tools.py:707` | yes | Launch a training run in an isolated subprocess from a bespoke ``model_source`` builder. |
+| `monitor_training` | `training_tools.py:941` | yes | Check the status of a training run. |
+| `cancel_training` | `training_tools.py:1311` | yes | Request graceful cancellation of a running training run. |
+| `run_hyperparameter_search` | `training_tools.py:1886` | yes | Run hyperparameter optimization on Ray Tune, training each trial for real. |
+| `cancel_hyperparameter_search` | `training_tools.py:2281` | yes | Request cooperative cancellation of a running HPO sweep. |
+| `evaluate_model` | `training_tools.py:2932` | yes | Evaluate a trained checkpoint on a (held-out) dataset and write test_results.json. |
 
 ### vision_tools.py (1 tool)
 
 | tool | line | audited | docstring first line |
 |---|---|---|---|
-| `capture_live_canvas` | `vision_tools.py:729` | yes | Render exactly what the human's GUI canvas shows right now: image, shapes, viewport. |
+| `capture_live_canvas` | `vision_tools.py:732` | yes | Render exactly what the human's GUI canvas shows right now: image, shapes, viewport. |
 
 ## 2. HTTP routes and WebSocket endpoints
 
@@ -1280,7 +1282,7 @@ Path: `<dataset_root>/classes.json`.
 Writer: `tcip_mcp.class_registry.replace_registry`,
 `packages/tcip-mcp/src/tcip_mcp/class_registry.py:346`, the one write both registry doors call
 (the GUI's `save_classes` and the tool's `write_class_map`,
-`packages/tcip-mcp/src/tcip_mcp/tools/annotation_tools.py:465`).
+`packages/tcip-mcp/src/tcip_mcp/tools/annotation_tools.py:471`).
 
 Readers: `tcip_mcp.class_registry.read_registry`, `class_registry.py:213`;
 `tcip_mcp.dataset_layout.list_subjects` (delegates to `class_registry`),
@@ -1368,7 +1370,7 @@ Writers: `_stamp_digest`, `packages/tcip-web/src/tcip_web/routes/classes.py:267`
 `packages/tcip-mcp/src/tcip_mcp/class_registry.py:284`, called through `replace_registry`
 (`packages/tcip-mcp/src/tcip_mcp/class_registry.py:346`) by both registry writers,
 `save_classes` (`packages/tcip-web/src/tcip_web/routes/classes.py:163`) and `write_class_map`
-(`packages/tcip-mcp/src/tcip_mcp/tools/annotation_tools.py:465`), before the new registry lands.
+(`packages/tcip-mcp/src/tcip_mcp/tools/annotation_tools.py:471`), before the new registry lands.
 A status and its stamp are two transactions, status first, so unstamped confirmations
 legitimately exist; the outgoing registry is the last moment their digest is recoverable, so the
 sweep records it there and they read as predating the change instead of as made under the new
@@ -1463,7 +1465,7 @@ when the caller passed one; a call that took the platform default leaves `scope`
 demoted from them): bare, a platform event; `@audited(scope_arg=...)` names the argument carrying
 a dataset or project location, resolved via `dataset_scope_of`, line 253 (through the tool's own
 canonicalizer when the declaration passes one as `scope_via`). Ten doors declare one: eight
-dataset-scoped (`save_annotations`, `tools/annotation_tools.py:129`; `write_class_map`, same
+dataset-scoped (`save_annotations`, `tools/annotation_tools.py:132`; `write_class_map`, same
 file, line 470; `redraw_calibration_holdout`, `tools/calibration_tools.py:24`;
 `materialize_review_dataset`, `tools/feedback_tools.py:166`; `export_predictions`,
 `tools/inference_tools.py:1326`; `register_dataset`, `tools/project_tools.py:165`;
@@ -2028,7 +2030,7 @@ config-only conflict and task checks (computed before any read, so an unreadable
 suppresses them) and the manifest-dependent checks (subject/attribute, date, images-root
 presence and movement, and an empty train/val side once narrowed to the run's own date).
 `preflight_config` calls both halves directly, in the same order, over a manifest it read
-itself; `training_tools.list_split_choices` (`training_tools.py:1136`), the relaunch data
+itself; `training_tools.list_split_choices` (`training_tools.py:1140`), the relaunch data
 picker's own reader wrapped by `GET /api/training/configs/{experiment_id}/splits`, calls the
 composed function per candidate manifest it read through the checked variant above, and builds
 each candidate's launch config through `training_tools.candidate_config_with_manifest`
@@ -2230,7 +2232,7 @@ Phase 3 verdict: single.
 
 Must agree: which root the GUI currently has open, so the push route writes canvas_live.json/canvas_shapes.json under it and capture_live_canvas reads them from that same root rather than trusting its own pinned one to still be live. The filename half is closed (both sides address through one locator pair); the root half used to be open (the writer took the browser payload's own project_root as authority, Part 20's own rejected shape), and is now resolved through the canvas_open_binding record P5-274 added (docs/audit/remediation/batch8/p5-274-canvas-binding-design.md): a pinned-root refusal landed for the old shape and was reverted after a three-family review refuted its anchor (docs/audit/remediation/batch8/xf-canvas-root/), and this binding is the settled replacement.
 Side A: `packages/tcip-mcp/src/tcip_mcp/web_client.py:178` (`def canvas_open_binding_key(`, the one workspace-scoped record `{generation, root, project_name, issued_at}`, declared alongside `canvas_meta_key`/`canvas_geometry_key` at lines 142/153 addressing the two per-project documents the binding's root names) and `packages/tcip-web/src/tcip_web/routes/dataset.py:203` (`def _write_canvas_binding(`, the one writer, called from `select_dataset`, line 229, before the selection is adopted; `generation` bumps only when `root` actually changes).
-Side B: `packages/tcip-web/src/tcip_web/routes/canvas.py:79` (`def push_canvas_state(`, reads the binding, verifies the payload's `binding_generation` against it, and writes both documents under the binding's own `root`, never a client-supplied one) and `packages/tcip-mcp/src/tcip_mcp/tools/vision_tools.py:729` (`def capture_live_canvas(`, reads the same binding beside its own pinned root, through the shared divergence-naming helper `_binding_divergence`, line 697, with a generation fence re-reading the binding after the documents so a switch mid-call cannot render a false live result).
+Side B: `packages/tcip-web/src/tcip_web/routes/canvas.py:79` (`def push_canvas_state(`, reads the binding, verifies the payload's `binding_generation` against it, and writes both documents under the binding's own `root`, never a client-supplied one) and `packages/tcip-mcp/src/tcip_mcp/tools/vision_tools.py:732` (`def capture_live_canvas(`, reads the same binding beside its own pinned root, through the shared divergence-naming helper `_binding_divergence`, line 697, with a generation fence re-reading the binding after the documents so a switch mid-call cannot render a false live result).
 Phase 3 verdict: single. The current generation also rides the GuiState broadcast envelope (`packages/tcip-web/src/tcip_web/app.py:185` `SERVER_EPOCH`, read off `StateStore.binding_generation`, `packages/tcip-web/src/tcip_web/state.py:150`) and is adopted with the dataset in one client-side store update (`packages/tcip-web/frontend/src/store/slices/gui.ts:138` `applyRestoredDataset`, and `mergeSnapshot`), so the push's `binding_generation` and the reader's own comparison never straddle a stale identity.
 
 ## S12. Friction reports and retrospectives under .tcip/
@@ -2293,7 +2295,7 @@ Phase 3 verdict: single.
 
 Must agree: every reader refuses rather than guesses when a file's format is undetermined.
 Side A: `packages/tcip-annotation/src/tcip_annotation/format_io.py:68` (`def detect_format(path: str) -> AnnotFormat:`).
-Side B: `packages/tcip-mcp/src/tcip_mcp/tools/annotation_tools.py:102` (`file_fmt = fmt or detect_format(str(gt_path))`).
+Side B: `packages/tcip-mcp/src/tcip_mcp/tools/annotation_tools.py:105` (`file_fmt = fmt or detect_format(str(gt_path))`).
 Phase 3 verdict: single.
 
 ## S20. classes.json class registry

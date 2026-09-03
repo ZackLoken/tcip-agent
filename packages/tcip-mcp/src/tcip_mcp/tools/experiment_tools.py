@@ -117,6 +117,9 @@ def list_experiments(launched_only: bool = False) -> dict:
 def compare_experiments(experiment_ids: list[str]) -> dict:
     """Side-by-side comparison of multiple experiments.
 
+    Not an MCP tool: no script wraps it, per the admission standard (packages/tcip-mcp/CLAUDE.md);
+    the web comparison route (``POST /api/training/compare``) calls this function directly.
+
     Returns, per experiment: ``recorded_state`` and the heartbeat-derived ``state`` (a launched
     record only; a pre-created experiment never launched reports its ``recorded_state`` instead
     of a heartbeat-derived guess), ``log_locked`` (whether the metrics lock refuses further rows),

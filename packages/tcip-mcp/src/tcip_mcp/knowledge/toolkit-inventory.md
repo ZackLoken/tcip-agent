@@ -156,7 +156,8 @@ built-ins itself, rather than silently substituting one.
 
 `require_composed_detector` (`active_learning.helpers`) is the honest guard the logit-reading
 scorers use: it returns an error rather than reading logits off a non-`nn.Module` model, and
-`triage_predictions` is the kind-agnostic fallback.
+`feedback_tools.triage_predictions` (run through `scripts/triage_predictions.py`) is the
+kind-agnostic fallback.
 
 ## Classical image analysis (OpenCV, scikit-image)
 

@@ -800,7 +800,7 @@ def stage_proposals(
         overwrite: Explicit regime only: write in place even into an existing bucket. Refused if
             the bucket has verdicts.
     """
-    if assignments is not None and (boxes is not None or polygons is not None):
+    if assignments is not None and (boxes or polygons):
         return {"error": "assignments cannot be combined with boxes/polygons: pick one input "
                          "regime per call."}
     if assignments is None and not boxes and not polygons:

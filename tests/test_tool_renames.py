@@ -217,36 +217,24 @@ DEMOTED = [
     "visualize",
 ]
 
-_TOOL_TABLE_ROW_PATTERN = r"^\|\s*`{}`\s*\|"
-_TOOL_TABLE_HEADER_PATTERN = re.compile(r"^\|\s*tool\s*\|", re.IGNORECASE)
-
-
 def _demoted_tool_table_sites(name: str, files: list[str]) -> list[str]:
-    """Every file still listing ``name`` in an actual "Tools" table: a row opening with the
-    backtick-quoted bare name as its first cell, under the nearest table header above it (the
-    contiguous run of lines up to the first blank one) reading "tool" in its own first cell, the
-    shape every such table (a knowledge document's, ARCHITECTURE.md's own) shares. A same-shaped
-    row in an unrelated table (ARCHITECTURE.md's own re-exports or module inventories) has a
-    different header and is not flagged; ordinary prose quoting the name never takes a table
-    shape at all."""
-    row_pattern = re.compile(_TOOL_TABLE_ROW_PATTERN.format(re.escape(name)))
+    """Every file whose Tools table still names ``name`` in its first cell, read through
+    ``scripts.verify_skill_tools``'s own ``tool_table_first_cells``/``extract_tool_name``: the
+    one implementation of "what counts as a Tools table row" and "what name does this cell
+    claim" the fabrication check itself uses, so a documented call signature like
+    ``visualize(source="annotations", path=<image>)`` is caught the same way a bare
+    `` `name` `` cell is. A same-shaped row in an unrelated table (ARCHITECTURE.md's own
+    re-exports or module inventories) has a different header and is not flagged; ordinary prose
+    quoting the name never takes a table shape at all."""
+    from scripts.verify_skill_tools import extract_tool_name, tool_table_first_cells
+
     hits = []
     for rel in files:
         text = _read(rel)
         if text is None:
             continue
-        lines = text.splitlines()
-        found = False
-        for i, line in enumerate(lines):
-            if found or not row_pattern.search(line):
-                continue
-            for j in range(i - 1, -1, -1):
-                if not lines[j].strip():
-                    break
-                if _TOOL_TABLE_HEADER_PATTERN.search(lines[j]):
-                    found = True
-                    break
-        if found:
+        names = {extract_tool_name(cell) for cell in tool_table_first_cells(text)}
+        if name in names:
             hits.append(rel)
     return hits
 
@@ -256,3 +244,19 @@ def test_demoted_name_has_no_tool_table_row(name):
     files = [f for f in _tracked_files() if _in_scope(f)]
     sites = _demoted_tool_table_sites(name, files)
     assert not sites, f"{name!r} still has a tool-table row in: {sites}"
+
+
+def test_demoted_tool_table_sites_catches_a_call_signature_row(tmp_path):
+    """A demoted name surviving in a Tools table as a documented call signature, not a bare
+    backtick-quoted token, is still a stale row: the old bare-name-only regex missed this shape."""
+    fixture = tmp_path / "stale.md"
+    fixture.write_text(
+        "| Tool | Role |\n"
+        "|------|------|\n"
+        '| `visualize(source="annotations", path=<image>)` | Render annotations |\n',
+        encoding="utf-8",
+    )
+
+    sites = _demoted_tool_table_sites("visualize", [str(fixture)])
+
+    assert sites == [str(fixture)]

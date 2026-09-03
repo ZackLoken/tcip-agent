@@ -679,3 +679,30 @@ def test_a_seam_written_confirmation_is_seen_by_check_negatives_and_check_data_q
     quality_findings: list[tuple[str, str]] = []
     doctor.check_data_quality(root, quality_findings)
     assert quality_findings == []
+
+
+def test_an_unreadable_status_store_is_its_own_error_not_a_false_negative_sweep(tmp_path, monkeypatch):
+    """A status store the backend cannot read must surface as its own refusal finding, never as
+    an empty negatives set: falling through with no negatives would report every empty label on
+    the dataset as an unconfirmed negative, a false positive sweep hiding the real failure."""
+    from scripts import doctor
+    from tcip_store import StoreError
+
+    date = "2026-03-04"
+    root = _layout_project(tmp_path, date)
+    Image.new("RGB", (32, 32)).save(image_dir(root, date) / "IMG_S.JPG")
+    json_io.write_annotations(annotation_path(root, date, "IMG_S"), [], 32, 32, keep_empty=True)
+
+    def _raise(*args, **kwargs):
+        raise StoreError("boom")
+
+    monkeypatch.setattr("tcip_mcp.dataset_layout.read_image_status_store", _raise)
+
+    findings: list[tuple[str, str]] = []
+    doctor.check_data_quality(root, findings)
+
+    assert len(findings) == 1, findings
+    level, message = findings[0]
+    assert level == "warn"
+    assert "will not read" in message and "boom" in message
+    assert not any("not a confirmed negative" in msg for _, msg in findings)

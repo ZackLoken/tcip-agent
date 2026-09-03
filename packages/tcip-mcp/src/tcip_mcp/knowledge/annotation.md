@@ -136,14 +136,14 @@ viewport, and unsaved or in-progress shapes), so the agent can comment on work i
 before they save.
 
 Corrective loop (for missed objects):
-1. `overlay_reference_grid(image_path)` → labeled reference grid ('A1' top-left) for spatial reference
+1. `vision_tools.overlay_reference_grid(image_path)` (library call, or `scripts/overlay_reference_grid.py`) → labeled reference grid ('A1' top-left) for spatial reference
 2. Agent reads the grid overlay with its own image-capable read tool → identifies missed regions by grid cell
 3. `segment_prompt(image_path, grid_cells=["B3", "D5"], tile_size=<echoed>)` → the engine segments
    at those locations
 4. Save new annotations via `save_annotations`
 
 Grid cell system:
-- `overlay_reference_grid(image_path, tile_size=, overlap=)` renders square cells of `tile_size`
+- `vision_tools.overlay_reference_grid(image_path, tile_size=, overlap=)` renders square cells of `tile_size`
   native pixels (omitted, it derives a legible default from the image dims) and echoes the full
   grid geometry back in every response: `tile_size`, `overlap`, `cols`, `rows`, `width`, `height`
 - Agent references cells like "B3" or "F5" instead of pixel coordinates
@@ -163,9 +163,10 @@ Grid cell system:
 
 ## Review Protocol
 
-1. Load ground truth with `read_annotations`
+1. Load ground truth with `annotation_tools.read_annotations` (library call, no MCP tool for it)
 2. Load predictions (from inference or prior annotation)
-3. `score_predictions` pairs predictions to GT by IoU (default threshold: 0.5) and returns
+3. `annotation_tools.score_predictions` (library call, or `scripts/score_predictions.py`) pairs
+   predictions to GT by IoU (default threshold: 0.5) and returns
    aggregate TP/FP/FN; `detail=True` adds a per-detection breakdown (each TP/FP/FN tagged with
    its class id, box/polygon, IoU, and confidence)
 4. Review in panel: accept correct predictions, correct errors, add missed objects. The recorded
@@ -178,16 +179,24 @@ Grid cell system:
 The agent must never write ground truth the human hasn't seen. Stage proposals to the
 *predictions* tree and drive the human to review them:
 
-- `stage_proposals(dataset_root, model_name, date, stem, boxes)` writes agent-proposed
-  detections to `predictions/<model>/<date>/<stem>.json` (per-image COCO/JSON), the
-  predictions tree, not `annotations/`. They render on the Review canvas as predictions for
-  the human to accept/reject/edit. `model_name` is stamped as each object's `created_by`, so name
-  the real producer (`sam`, `claude`, `groundingdino`, `model:<run>`), not a generic placeholder.
-  A bucket (the model's own prediction directory just written to, not a score bin) that already
-  carries review verdicts is immutable: a stage into it is redirected to a
-  fresh `<model>@r2` bucket (the response's `bucket` field is the one actually written), so a
-  re-run never overwrites reviewed predictions. Pass `overwrite=True` to force in-place, which is
-  still refused when verdicts exist.
+- `stage_proposals(image_path, *, assignments=None, boxes=None, polygons=None, model_name=None,
+  overwrite=False)` writes model-/agent-proposed shapes to the predictions tree, not
+  `annotations/`, so nothing here becomes ground truth before a human reviews it. Exactly one
+  input regime per call: `assignments` reads back the candidates `propose_annotations` staged
+  for this image, each a `{candidate_id, subject}` mapping, and lands them under
+  `predictions/<engine>/<date>/<task>` with `created_by=<engine>`; `model_name` is refused
+  alongside `assignments`, since the staged record already names the engine. `boxes`/`polygons`
+  are explicit shapes an agent or another model already has in hand, with no cached record to
+  read back; they require `model_name`, stamped as each object's `created_by`, and land under
+  `predictions/<model_name>/<date>/<stem>.json`. Either way they render on the Review canvas as
+  predictions for the human to accept/reject/edit; for the explicit regime, name the real
+  producer in `model_name` (`sam`, `claude`, `groundingdino`, `model:<run>`), not a generic
+  placeholder. A bucket (the prediction directory just written to, named by the engine or by
+  `model_name`, not a score bin) that already carries review verdicts is immutable: a stage
+  into it is redirected to a fresh `<engine>@r2` or `<model_name>@r2` bucket (the response's
+  `bucket` field is the one actually written), so a re-run never overwrites reviewed
+  predictions. Pass `overwrite=True` to force in-place (explicit regime only), which is still
+  refused when verdicts exist.
 - `focus_human_attention(tab='review', project_root, dataset_root, subject, date, model_name, image_index,
   detection_idx, filter_type, iou_threshold, conf_threshold)` drives the live Review tab straight to a model's
   predictions on a frame/detection, so the human sees exactly what you flagged (a false positive, a

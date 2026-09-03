@@ -80,6 +80,9 @@ def _ann_dict(a: Annotation) -> dict:
 def read_annotations(image_path: str, fmt: str | None = None) -> dict:
     """Load the ground-truth labels and predictions for a single image.
 
+    Not an MCP tool: no script wraps it, per the admission standard (packages/tcip-mcp/CLAUDE.md);
+    an agent reads a label file through this function directly.
+
     Both are the name-based per-image schema, one file per image, all subjects. Reads the canonical
     per-image JSON (an ``annotations`` key) or an assembled dataset-level COCO (an
     ``images``/``categories`` key), detected from the file's own keys unless ``fmt`` is given. An
@@ -435,11 +438,14 @@ def score_predictions(
 ) -> dict:
     """Score on-disk predictions against on-disk ground truth (COCOeval).
 
+    Not an MCP tool: run through ``scripts/score_predictions.py``, per the admission standard
+    (packages/tcip-mcp/CLAUDE.md), while staying importable for its own tests.
+
     Dispatches on the input: a single image file returns per-box ``matches`` (plus an optional
     per-detection ``detections`` breakdown with ``img_w`` / ``img_h`` when ``detail=True``) for the
     agent to render for review; a dataset directory returns aggregate metrics plus ``per_image``
-    TP/FP/FN. Both regimes share ``coco_detection_metrics``; no GUI route calls this tool, since the
-    Review tab's own backend route reads ``compute_matches`` directly.
+    TP/FP/FN. Both regimes share ``coco_detection_metrics``; no GUI route calls this function,
+    since the Review tab's own backend route reads ``compute_matches`` directly.
 
     Args:
         path: Absolute path to an image file (single-image match) or a dataset root (aggregate).
