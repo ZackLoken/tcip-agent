@@ -114,8 +114,6 @@ def list_experiments(launched_only: bool = False) -> dict:
     return {"experiments": _list()}
 
 
-@mcp.tool()
-@audited
 def compare_experiments(experiment_ids: list[str]) -> dict:
     """Side-by-side comparison of multiple experiments.
 

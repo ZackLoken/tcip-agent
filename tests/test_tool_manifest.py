@@ -202,6 +202,8 @@ def test_consolidated_tools_present_and_removed_absent():
         "score_predictions",
         # Demoted to a library call plus scripts/triage_predictions.py.
         "triage_predictions",
+        # Demoted to a library call: the web compare route calls the function directly.
+        "compare_experiments",
     }
     assert not (removed & registered), f"removed tools still registered: {removed & registered}"
 
