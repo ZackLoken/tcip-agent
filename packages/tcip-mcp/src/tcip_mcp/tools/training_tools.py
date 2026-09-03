@@ -76,8 +76,10 @@ def _redraw_flag_issue(split_cfg: dict) -> str | None:
     """The one objection ``data.split.redraw_within_manifest`` raises that
     :func:`_split_manifest_drawn_conflicts` cannot: the flag set true with no ``seed`` beside
     it, the redraw's own required pairing (a seed states which partition inside the manifest's
-    train-plus-val members the redraw draws; there is no default to fall back to). ``None`` when
-    the flag is unset, false, or paired with a seed.
+    train-plus-val members the redraw draws; the redraw states its own seed here rather than
+    inheriting one, since ``run_hpo``'s own default of 42 for a bound ``base_config``
+    (:func:`_base_config_for_split_draws`) is that caller's own choice, not a fallback this
+    function reaches for). ``None`` when the flag is unset, false, or paired with a seed.
     """
     if split_cfg.get("redraw_within_manifest") and split_cfg.get("seed") is None:
         return (
@@ -213,13 +215,16 @@ def _redraw_starvation_issues(config: dict, manifest: dict, manifest_dir: str) -
     over ``manifest`` before any run starts: the manifest's own train-plus-val identities for
     this run's date, resolved through its recorded grouping
     (:func:`~tcip_mcp.pipelines.data.splits.manifest_redraw_universe`), named by
-    :func:`~tcip_mcp.pipelines.data.splits.redraw_starved_issue` when fewer than two groups
-    result. An unrecognized ``group_by`` or an incomplete ``group_key_map`` surfaces here too,
-    the redraw's own by-name refusal for that case, phrased under ``data.split`` like the drawn
-    path's own group-policy check above.
+    :func:`~tcip_mcp.pipelines.data.splits.redraw_starved_issue` when fewer than two foreground
+    groups result, over the same subject- and attribute-scoped per-stem annotation counts the
+    child's own redraw counts at run time. An unrecognized ``group_by`` or an incomplete
+    ``group_key_map`` surfaces here too, the redraw's own by-name refusal for that case, phrased
+    under ``data.split`` like the drawn path's own group-policy check above.
     """
     from tcip_mcp.dataset_layout import annotation_date
-    from tcip_mcp.pipelines.data.splits import manifest_redraw_universe, redraw_starved_issue
+    from tcip_mcp.pipelines.data.splits import (
+        count_label_lines, manifest_redraw_universe, redraw_starved_issue,
+    )
 
     data_cfg = config.get("data") or {}
     split_cfg = data_cfg.get("split") or {}
@@ -228,9 +233,14 @@ def _redraw_starvation_issues(config: dict, manifest: dict, manifest_dir: str) -
         stems, group_key_fn = manifest_redraw_universe(manifest, run_date)
     except ValueError as exc:
         return [f"data.split.redraw_within_manifest: {exc}"]
+    labels_dir = data_cfg.get("labels_dir", "")
+    subject, attribute = data_cfg.get("subject"), data_cfg.get("attribute")
+    foreground_counts = {
+        s: count_label_lines(labels_dir, s, subject=subject, attribute=attribute) for s in stems
+    }
     starved = redraw_starved_issue(
-        stems, group_key_fn, manifest_dir=manifest_dir, date=run_date,
-        seed=split_cfg.get("seed"), group_by=manifest.get("group_by"),
+        stems, group_key_fn, foreground_counts=foreground_counts, manifest_dir=manifest_dir,
+        date=run_date, seed=split_cfg.get("seed"), group_by=manifest.get("group_by"),
     )
     return [starved] if starved else []
 
@@ -1186,7 +1196,9 @@ def list_split_choices(experiment_id: str) -> dict:
     split_cfg = data_cfg.get("split")
     split_cfg = split_cfg if isinstance(split_cfg, dict) else {}
     own_manifest_dir = split_cfg.get("manifest_dir")
-    replaced_split_keys = sorted(k for k in split_cfg if k != "manifest_dir")
+    replaced_split_keys = sorted(
+        k for k, v in split_cfg.items() if k != "manifest_dir" and v is not None
+    )
 
     if own_manifest_dir:
         as_recorded = {"case": "bound", "line": "on the partition it bound",
@@ -1960,12 +1972,14 @@ def run_hpo(
             ``BasicVariantGenerator(constant_grid_search=True)`` so each point trains once per
             seed, a blocked comparison of the split's own sensitivity. ``base_config`` bound to
             a split manifest is admitted, not refused: its own copy gains
-            ``data.split.redraw_within_manifest: true``, so every trial redraws train and val
-            inside the manifest's own train-plus-val members at its own seed, calibration
-            untouched, rather than training every trial on the manifest's one recorded
-            partition; refused before minting when the manifest's own train-plus-val members
-            for the base config's date resolve to fewer than two distinct groups (a redraw could
-            only starve a side). Otherwise refused, before minting the sweep, when
+            ``data.split.redraw_within_manifest: true``, defaulting ``data.split.seed`` to 42
+            when the bound config carries none, the same default an unset-seed drawn config
+            uses, so every trial redraws train and val inside the manifest's own train-plus-val
+            members at its own seed, calibration untouched, rather than training every trial on
+            the manifest's one recorded partition; refused before minting when the manifest's
+            own train-plus-val members for the base config's date resolve to fewer than two
+            foreground groups (a redraw could only starve a side). Otherwise refused, before
+            minting the sweep, when
             ``base_config`` names ``data.val_images_dir`` (nothing to redraw), ``data.auto_val``
             is off or ``task`` sits outside the drawn path's own tasks, ``search_alg`` is not a
             native one (``random``/``grid``/``variant_generator``: only the native generator
@@ -2483,13 +2497,15 @@ def _split_draws_refusal(
 def _bound_redraw_starvation_issue(data_cfg: dict, split_cfg: dict) -> str | None:
     """Whether ``run_hpo``'s ``split_draws`` minting a redraw sweep over a bound
     ``base_config``'s manifest would starve every trial the identical way: the manifest's own
-    distinct-groups check (:func:`~tcip_mcp.pipelines.data.splits.manifest_redraw_universe`,
+    foreground-groups check (:func:`~tcip_mcp.pipelines.data.splits.manifest_redraw_universe`,
     :func:`~tcip_mcp.pipelines.data.splits.redraw_starved_issue`), the same one
     ``preflight_config`` runs for one config, run once here over the sweep's shared manifest and
-    date. ``None`` when the manifest reads and holds enough distinct groups.
+    date. ``None`` when the manifest reads and holds enough foreground groups.
     """
     from tcip_mcp.dataset_layout import annotation_date
-    from tcip_mcp.pipelines.data.splits import manifest_redraw_universe, redraw_starved_issue
+    from tcip_mcp.pipelines.data.splits import (
+        count_label_lines, manifest_redraw_universe, redraw_starved_issue,
+    )
     from tcip_mcp.tools.data_tools import read_split_manifest_dir
 
     manifest_dir = split_cfg["manifest_dir"]
@@ -2502,9 +2518,14 @@ def _bound_redraw_starvation_issue(data_cfg: dict, split_cfg: dict) -> str | Non
         stems, group_key_fn = manifest_redraw_universe(manifest, date)
     except ValueError as exc:
         return f"split_draws: {exc}"
+    labels_dir = data_cfg.get("labels_dir", "")
+    subject, attribute = data_cfg.get("subject"), data_cfg.get("attribute")
+    foreground_counts = {
+        s: count_label_lines(labels_dir, s, subject=subject, attribute=attribute) for s in stems
+    }
     return redraw_starved_issue(
-        stems, group_key_fn, manifest_dir=manifest_dir, date=date,
-        seed=split_cfg.get("seed"), group_by=manifest.get("group_by"),
+        stems, group_key_fn, foreground_counts=foreground_counts, manifest_dir=manifest_dir,
+        date=date, seed=split_cfg.get("seed"), group_by=manifest.get("group_by"),
     )
 
 

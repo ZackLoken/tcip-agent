@@ -501,34 +501,48 @@ def manifest_redraw_universe(
 
 
 def redraw_starved_issue(
-    stems: Sequence[str], group_key_fn: Callable[[str], str], *, manifest_dir: str | None,
-    date: str | None, seed: int | None, group_by: str | None,
+    stems: Sequence[str], group_key_fn: Callable[[str], str], *, foreground_counts: dict[str, int],
+    manifest_dir: str | None, date: str | None, seed: int | None, group_by: str | None,
 ) -> str | None:
     """Whether ``stems`` (a bound run's train-plus-val universe for one date) resolves to too
-    few distinct groups under ``group_key_fn`` for a redraw to populate both a train and a val
-    side: fewer than two makes a starved side certain, since :func:`group_balanced_split`'s own
-    per-side minimum needs one foreground group for each active side. Checked before any run
-    starts (:func:`~tcip_mcp.tools.training_tools.preflight_config`, and ``run_hpo``'s own
-    pre-mint check for ``split_draws``), ahead of the redraw's own refusal once it has actually
-    drawn a starved side for real.
+    few *foreground* groups under ``group_key_fn`` for a redraw to populate both a train and a
+    val side: :func:`group_balanced_split`'s own per-side minimum needs one foreground group for
+    each active side, met first from the smallest foreground groups; a background-only group
+    (zero foreground signal, e.g. a confirmed negative) is placed afterwards by tile deficit and
+    can concentrate entirely onto the side that already met its minimum, leaving the other side
+    genuinely empty. Counting every distinct group regardless of foreground signal (as this
+    function once did) misses exactly that case: two groups, one of them entirely background,
+    reads as enough groups when only one of them can ever satisfy a side's minimum. Checked
+    before any run starts (:func:`~tcip_mcp.tools.training_tools.preflight_config`, and
+    ``run_hpo``'s own pre-mint check for ``split_draws``), ahead of the redraw's own refusal
+    once it has actually drawn a starved side for real.
 
-    ``None`` when at least two groups are available; the refusal otherwise, naming the manifest,
-    the date, the seed, the resolved grouping policy, the distinct group count, and the two
-    remedies: drop ``redraw_within_manifest`` and ``seed`` to bind the manifest's recorded
-    partition instead, or regenerate the manifest with a grouping that separates the members.
+    ``foreground_counts`` is ``stems``' own per-stem annotation count, subject- and
+    attribute-scoped the same way :func:`~tcip_mcp.pipelines.data.split_construction.
+    auto_train_val`'s redraw branch counts them at run time (never the manifest's recorded,
+    whole-draw ``realized_ratios``), the same ``group_key_fn(s) for s in stems if
+    foreground_counts.get(s, 0) > 0`` idiom :func:`refuse_insufficient_foreground_groups`'s own
+    caller (``make_splits``) counts its foreground groups with.
+
+    ``None`` when at least two foreground groups are available; the refusal otherwise, naming
+    the manifest, the date, the seed, the resolved grouping policy, the foreground group count
+    among the distinct groups found, and the two remedies: drop ``redraw_within_manifest`` and
+    ``seed`` to bind the manifest's recorded partition instead, or regenerate the manifest with
+    at least two foreground groups across train and val.
     """
     groups = {group_key_fn(s) for s in stems}
-    if len(groups) >= 2:
+    fg_groups = {group_key_fn(s) for s in stems if foreground_counts.get(s, 0) > 0}
+    if len(fg_groups) >= 2:
         return None
     name = f"the split manifest at {manifest_dir!r}" if manifest_dir else "the split manifest"
     return (
         f"redrawing train and val inside {name}'s own members under date {date!r} at seed "
         f"{seed} would starve a side: its {len(stems)} member(s) resolve to only "
-        f"{len(groups)} distinct group(s) under group_by={group_by!r}, short of the two a "
-        "train side and a val side each need at least one of. Drop "
-        "data.split.redraw_within_manifest and data.split.seed to bind the manifest's recorded "
-        "partition instead, or regenerate the manifest with a grouping that separates its "
-        "members."
+        f"{len(fg_groups)} foreground group(s) among {len(groups)} distinct group(s) under "
+        f"group_by={group_by!r}, short of the two a train side and a val side each need at "
+        "least one of. Drop data.split.redraw_within_manifest and data.split.seed to bind the "
+        "manifest's recorded partition instead, or regenerate the manifest with at least two "
+        "foreground groups across train and val."
     )
 
 

@@ -307,6 +307,33 @@ def _dataset_with_a_confirmed_negative(root: Path) -> Path:
     return root
 
 
+def _dataset_with_one_foreground_group_and_negatives(root: Path) -> Path:
+    """``DATES[0]``: one small foreground group (a single annotated stem) beside three
+    confirmed negatives (each its own background group under the default tile-prefix grouping);
+    ``DATES[1]``: three foreground groups, each carrying more annotations than ``DATES[0]``'s
+    one, so :func:`~tcip_mcp.pipelines.data.splits.group_balanced_split`'s smallest-first
+    minimum pass always takes ``DATES[0]``'s smaller group first (into train, the first active
+    side) regardless of seed, and the other two dates' groups alone clear ``make_splits``' own
+    write-time floor. Verified deterministic across seeds 0-11 by direct draw."""
+    from tcip_mcp.dataset_layout import record_image_statuses, status_bucket
+
+    write_registry(root / "classes.json", ClassRegistry(subjects=(Subject(name=SUBJECT),)))
+    images0, labels0 = root / "images" / DATES[0], root / "annotations" / DATES[0]
+    _write_stem(images0, labels0, "fa", [Annotation(subject=SUBJECT, geometry=BBox(4, 4, 20, 20))])
+    negatives = ("na", "nb", "nc")
+    for neg in negatives:
+        _write_stem(images0, labels0, neg, [])
+    record_image_statuses(root, status_bucket(SUBJECT, DATES[0]),
+                          {f"{n}.jpg": "negative" for n in negatives}, recorded_by="user:tester")
+    images1, labels1 = root / "images" / DATES[1], root / "annotations" / DATES[1]
+    for stem in ("x1", "x2", "x3"):
+        _write_stem(images1, labels1, stem, [
+            Annotation(subject=SUBJECT, geometry=BBox(4, 4, 20, 20)),
+            Annotation(subject=SUBJECT, geometry=BBox(30, 30, 44, 44)),
+        ])
+    return root
+
+
 def _single_source_mosaic_dataset(root: Path) -> tuple[Path, Path]:
     """One tileable single-source image with GT spread across its extent, enough for the spatial
     single-source split to derive disjoint regions from one image alone (the same extent and
@@ -374,13 +401,18 @@ def test_auto_train_val_binds_to_the_manifests_own_partition_for_its_date(tmp_pa
     assert binding["date"] == DATES[0]
     assert binding["labels_hash_now"]
     assert "train" not in binding and "val" not in binding
-    assert "redrawn_within_manifest" not in binding
+    assert "redraw" not in binding
 
 
 # -- redraw_within_manifest ------------------------------------------------------
 
 
 def test_auto_train_val_redraws_inside_the_bound_manifests_own_members(tmp_path: Path):
+    """Redrawn at seed 1, this fixture's date differs from the manifest's own recorded
+    partition; a redraw may legitimately reproduce that recorded partition at another seed
+    (seed 4 does, on this same fixture), so the seed here is not a general guard against
+    reproduction, only a demonstration that a redraw can differ. The general guard, over several
+    seeds, is ``test_auto_train_val_redraw_two_seeds_differ_the_same_seed_repeats``."""
     from tcip_mcp.experiments import create_experiment, read_split_manifest
     from tcip_mcp.pipelines.data.split_construction import auto_train_val, persist_split_manifest
 
@@ -409,7 +441,7 @@ def test_auto_train_val_redraws_inside_the_bound_manifests_own_members(tmp_path:
 
     binding = data_cfg["split"]["manifest_binding"]
     assert binding["labels_hash_now"] == plain_labels_hash
-    redrawn = binding["redrawn_within_manifest"]
+    redrawn = binding["redraw"]
     assert redrawn == {"seed": 1, "val_ratio": len(_date_side("val")) / len(union),
                        "stratify_foreground": True}
     assert data_cfg["split"]["resolved_seed"] == 1
@@ -506,8 +538,16 @@ def test_auto_train_val_redraw_refuses_an_unrecognized_group_by_by_name(tmp_path
 
 def _collapse_date_to_one_group(manifest: dict, date: str) -> dict:
     """``manifest``, mutated so ``date``'s own train-plus-val members all resolve to one
-    explicit-map group, the shape a redraw's distinct-groups check refuses by name; the other
-    date and calibration are left as drawn."""
+    explicit-map group, the shape a redraw's foreground-groups check refuses by name; the other
+    date and calibration are left as drawn.
+
+    A producer cannot draw this shape directly: ``make_splits``' own write-time floor
+    (:func:`~tcip_mcp.pipelines.data.splits.refuse_insufficient_foreground_groups`) demands four
+    foreground groups for a three-sided write (one each for train and val, two for calibration),
+    so a manifest ``make_splits`` agreed to write already carries more groups than one date's
+    train-plus-val could ever collapse to on its own; the single-group shape only exists by
+    mutating a manifest after a normal draw, the way this helper does.
+    """
     date_ids = [i for side in ("train", "val") for i in manifest["splits"][side]
                if i.split("/", 1)[0] == date]
     group_key_map = {i: "the_one_group" for i in date_ids}
@@ -549,6 +589,48 @@ def test_preflight_config_flags_a_single_group_redraw_date(tmp_path: Path):
     result = preflight_config(config)
 
     assert any("distinct group" in i for i in result["issues"])
+
+
+def test_preflight_config_flags_a_redraw_date_with_only_one_foreground_group(tmp_path: Path):
+    """A date whose train-plus-val members resolve to two distinct groups, only one of them
+    foreground (the other a confirmed-negative group with zero annotations), used to pass this
+    precheck: counting every distinct group regardless of foreground signal read two as enough,
+    though :func:`~tcip_mcp.pipelines.data.splits.group_balanced_split`'s own per-side minimum
+    needs one *foreground* group for each of train and val, and a background-only group can
+    concentrate entirely onto the side that already met its minimum from the other. The bind
+    itself is unaffected (both original sides are non-empty, so a plain, non-redraw launch
+    admits): only the redraw, drawing fresh over train-plus-val with fewer real foreground
+    groups than the manifest happened to place there, starves."""
+    import tcip_store as ts
+    from tcip_mcp.tools.training_tools import preflight_config
+    from tcip_mcp.tools.data_tools import split_manifest_key
+
+    root = _dataset_with_one_foreground_group_and_negatives(tmp_path / "ds")
+    out = tmp_path / "m"
+    manifest = make_splits(str(root), output_path=str(out), subject=SUBJECT, seed=1,
+                           train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
+    assert "error" not in manifest, manifest
+    manifest = ts.read(split_manifest_key(out))
+    date_ids = [i for side in ("train", "val") for i in manifest["splits"][side]
+               if i.split("/", 1)[0] == DATES[0]]
+    assert date_ids, "the natural draw must place some of this date's own members in train/val"
+    group_key_map = {i: ("fg0" if i.endswith("/fa") else "bg0") for i in date_ids}
+    mutated = {**manifest, "group_by": "explicit_map", "group_key_map": group_key_map}
+    ts.replace(split_manifest_key(out), mutated)
+
+    # The original, unmutated bind is valid: a plain (non-redraw) launch would admit.
+    from tcip_mcp.pipelines.data.splits import empty_side_issue, narrow_manifest_to_date
+
+    narrowing = narrow_manifest_to_date(manifest, DATES[0])
+    assert empty_side_issue(narrowing, DATES[0]) == []
+
+    config = _preflight_config(root, out, DATES[0],
+                               split={"manifest_dir": str(out), "redraw_within_manifest": True,
+                                      "seed": 11})
+
+    result = preflight_config(config)
+
+    assert any("foreground group" in i for i in result["issues"])
 
 
 def test_preflight_config_admits_the_redraw_pair_with_a_warning(tmp_path: Path):

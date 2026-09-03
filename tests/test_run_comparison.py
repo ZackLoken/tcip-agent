@@ -181,7 +181,7 @@ def test_split_reports_a_redrawn_bound_manifest_distinctly(tmp_path, monkeypatch
     persist_split_manifest("exp-bound-redrawn", train_ds, val_ds, {"split": {
         "manifest_binding": {
             "manifest_dir": "splits/2024-01-01",
-            "redrawn_within_manifest": {
+            "redraw": {
                 "seed": 7, "val_ratio": 0.25, "stratify_foreground": True,
             },
         },
@@ -190,9 +190,9 @@ def test_split_reports_a_redrawn_bound_manifest_distinctly(tmp_path, monkeypatch
 
     c = compare_experiments(["exp-bound-plain", "exp-bound-redrawn"])["experiments"]
     plain, redrawn = c[0]["split"], c[1]["split"]
-    assert plain["redrawn_within_manifest"] is False
-    assert redrawn["redrawn_within_manifest"] is True
     assert plain != redrawn
+    assert plain.get("redrawn_within_manifest") is False
+    assert redrawn.get("redrawn_within_manifest") is True
 
 
 def test_split_reports_a_drawn_seed_with_no_binding(tmp_path, monkeypatch):

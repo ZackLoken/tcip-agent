@@ -543,7 +543,7 @@ def test_list_split_choices_reports_the_recorded_split_keys_a_partition_replaces
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     from tcip_mcp.experiments import create_experiment
-    from tcip_mcp.tools.training_tools import list_split_choices
+    from tcip_mcp.tools.training_tools import candidate_config_with_manifest, list_split_choices
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     dataset_default = root / "splits"
@@ -556,7 +556,9 @@ def test_list_split_choices_reports_the_recorded_split_keys_a_partition_replaces
     result = list_split_choices("exp-drawn-policy")
     entry = next(m for m in result["manifests"] if m["manifest_dir"] == str(dataset_default))
 
-    assert entry["replaced_split_keys"] == ["group_by", "seed"]
+    candidate = candidate_config_with_manifest(cfg, str(dataset_default))
+    dropped = sorted(set(cfg["data"]["split"]) - set(candidate["data"]["split"]))
+    assert entry["replaced_split_keys"] == dropped
 
 
 def test_list_split_choices_reports_the_redraw_flag_among_the_keys_a_partition_replaces(
@@ -569,7 +571,7 @@ def test_list_split_choices_reports_the_redraw_flag_among_the_keys_a_partition_r
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     from tcip_mcp.experiments import create_experiment
-    from tcip_mcp.tools.training_tools import list_split_choices
+    from tcip_mcp.tools.training_tools import candidate_config_with_manifest, list_split_choices
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     dataset_default = root / "splits"
@@ -586,7 +588,33 @@ def test_list_split_choices_reports_the_redraw_flag_among_the_keys_a_partition_r
     result = list_split_choices("exp-redrawn-policy")
     entry = next(m for m in result["manifests"] if m["manifest_dir"] == str(dataset_default))
 
-    assert entry["replaced_split_keys"] == ["redraw_within_manifest", "seed"]
+    candidate = candidate_config_with_manifest(cfg, str(dataset_default))
+    dropped = sorted(set(cfg["data"]["split"]) - set(candidate["data"]["split"]))
+    assert entry["replaced_split_keys"] == dropped
+
+
+def test_list_split_choices_never_names_a_null_valued_split_key_as_replaced(
+    tmp_path: Path, monkeypatch,
+):
+    """A recorded ``data.split`` key present with a ``null`` value never configured anything a
+    chosen partition could drop; it must not be named among ``replaced_split_keys``."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
+    from tcip_mcp.experiments import create_experiment
+    from tcip_mcp.tools.training_tools import list_split_choices
+
+    root = _two_subject_two_date_dataset(tmp_path / "ds")
+    dataset_default = root / "splits"
+    _draw(root, dataset_default)
+
+    cfg = _bespoke_config(root / "images" / DATES[0], root / "annotations" / DATES[0])
+    cfg["data"]["split"] = {"seed": 7, "group_by": None}
+    create_experiment("exp-null-policy-key", cfg)
+
+    result = list_split_choices("exp-null-policy-key")
+    entry = next(m for m in result["manifests"] if m["manifest_dir"] == str(dataset_default))
+
+    assert entry["replaced_split_keys"] == ["seed"]
 
 
 def test_list_split_choices_does_not_offer_the_own_manifest_under_a_different_spelling(
