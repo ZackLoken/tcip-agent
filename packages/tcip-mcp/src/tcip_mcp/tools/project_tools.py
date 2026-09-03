@@ -243,7 +243,7 @@ def register_dataset(dataset_root: str, crop: str, project_root: str = "") -> di
 def _scaffold_project(project_path: str, site: str) -> dict:
     """Create ``.tcip/`` with its artifacts and models directories, and record the project's site.
 
-    The internals of :func:`init_project`, factored out so other tools that
+    The internals of :func:`initialize_project`, factored out so other tools that
     stand up a project (e.g. ``ingest_images``) reuse the exact same scaffolding
     instead of re-implementing it. The directories are idempotent: re-running only re-mkdirs.
 
@@ -272,7 +272,7 @@ def _scaffold_project(project_path: str, site: str) -> dict:
 
 @mcp.tool()
 @audited
-def init_project(project_path: str, site: str) -> dict:
+def initialize_project(project_path: str, site: str) -> dict:
     """Initialise a TCIP project directory.
 
     Creates ``.tcip/`` with its artifacts and models directories and records the project's

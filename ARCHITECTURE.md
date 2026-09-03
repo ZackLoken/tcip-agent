@@ -475,7 +475,7 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | scripts/conform_delivery_events.py | Check a project's stored `delivery_events` records against the current `DeliveryEventRecord` shape and name, by event_id, any that no longer validate; rewrites nothing. | 4 | 0 |
 | scripts/conform_metrics_marker.py | Stamp the ``metrics_logged`` marker onto every experiment a root's status record predates. | 3 | 0 |
 | scripts/conform_model_registry_paths.py | Wrap a project's model registry index to schema_version 2 and respell every entry's checkpoint_path relative to its scope root, relocating a moved or replaced checkpoint by content digest. | 3 | 0 |
-| scripts/conform_project_site.py | Write or correct one project's authored site: the record ``init_project``/``ingest_images`` themselves cannot reach for a project whose name does not fit the workspace scheme, and the one deliberate overwrite for a site typed wrong once or a record damaged by hand. | 3 | 0 |
+| scripts/conform_project_site.py | Write or correct one project's authored site: the record ``initialize_project``/``ingest_images`` themselves cannot reach for a project whose name does not fit the workspace scheme, and the one deliberate overwrite for a site typed wrong once or a record damaged by hand. | 3 | 0 |
 | scripts/conform_registry_experiment_id.py | Conform a project's registry entries to carry ``experiment_id``, for an entry registered before the producer-binding field existed. | 4 | 0 |
 | scripts/conform_view_coverage_viewing.py | Conform a dataset's stored `view_coverage` records to the current `CoverageViewing` shape. | 4 | 0 |
 | scripts/cross_family_ask.py | Pose one identical question to several agent harnesses and record comparable answers. | 0 | 0 |
@@ -823,7 +823,7 @@ Docstring is the function's docstring first line, verbatim.
 | tool | line | audited | docstring first line |
 |---|---|---|---|
 | `register_dataset` | `project_tools.py:165` | yes | Record a dataset's identity so a delivered number can be traced to the exact data behind it. |
-| `init_project` | `project_tools.py:275` | yes | Initialise a TCIP project directory. |
+| `initialize_project` | `project_tools.py:275` | yes | Initialise a TCIP project directory. |
 | `set_active_project` | `project_tools.py:309` | yes | Set the workspace's active project so the GUI opens it. |
 | `view_gui_state` | `project_tools.py:398` | yes | The live GUI session the human is looking at: active project, dataset, date, trait, tab, and the |
 | `inspect_project` | `project_tools.py:445` | yes | Get an overview of a TCIP project. |

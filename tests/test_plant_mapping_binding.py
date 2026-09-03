@@ -1,7 +1,7 @@
 """Rails for the plant-mapping binding family: the record is bound to its inputs, to a
 registered dataset by minted id, and to the receipt that proves it was written by the
 platform's own producers, never a hand-filed file. Every scenario is built through the
-platform's own producers (init_project, register_dataset, build_plant_mapping,
+platform's own producers (initialize_project, register_dataset, build_plant_mapping,
 deliver_phenology_milestones), a second registered trait rather than the pilot's, so nothing here
 generalizes from one trait's own vocabulary.
 """
@@ -23,7 +23,7 @@ from tcip_annotation import json_io
 from tcip_annotation.state import Annotation, BBox
 from tcip_mcp.pipelines.postprocessing import plant_mapping
 from tcip_mcp.tools.phenology_tools import build_plant_mapping, deliver_phenology_milestones
-from tcip_mcp.tools.project_tools import init_project, register_dataset
+from tcip_mcp.tools.project_tools import initialize_project, register_dataset
 from tcip_mcp.traits import registered_crops
 
 from tests.test_second_trait_acceptance import _ID_MAP, _seed_currant_bloom_trait
@@ -37,9 +37,9 @@ DATES = ["2026-02-11", "2026-02-25"]
 
 def _init(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     # tmp_path sits directly under this test's workspace; point the workspace elsewhere so
-    # init_project's naming rail (which only holds under the workspace) doesn't apply here.
+    # initialize_project's naming rail (which only holds under the workspace) doesn't apply here.
     monkeypatch.setenv("TCIP_WORKSPACE", str(tmp_path / "unused_workspace"))
-    result = init_project(str(tmp_path), site="orchard block")
+    result = initialize_project(str(tmp_path), site="orchard block")
     assert "error" not in result, result
 
 
@@ -113,12 +113,12 @@ def _write_scene(
 # ── rail 6: no project record ────────────────────────────────────────────
 
 
-def test_build_plant_mapping_under_no_project_record_names_init_project(tmp_path: Path) -> None:
+def test_build_plant_mapping_under_no_project_record_names_initialize_project(tmp_path: Path) -> None:
     images_root = tmp_path / "images"
     (images_root / DATES[0]).mkdir(parents=True)
     res = build_plant_mapping(name="valley", images_root=str(images_root), plant_csv_paths=[])
     assert "error" in res
-    assert "init_project" in res["error"]
+    assert "initialize_project" in res["error"]
 
 
 # ── rail 4: dataset identity, NAME_SEGMENT, variously-spelled roots, dataset mismatch ────
@@ -1043,7 +1043,7 @@ def test_two_projects_mapping_one_dataset_under_the_same_name_each_deliver_throu
     monkeypatch.setenv("TCIP_WORKSPACE", str(tmp_path / "unused_workspace"))
     proj_a, proj_b = tmp_path / "proj_a", tmp_path / "proj_b"
     for proj in (proj_a, proj_b):
-        res = init_project(str(proj), site=f"orchard {proj.name}")
+        res = initialize_project(str(proj), site=f"orchard {proj.name}")
         assert "error" not in res, res
 
     dataset_root = tmp_path / "shared_ds"

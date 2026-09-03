@@ -647,7 +647,7 @@ def test_ingest_refuses_an_unadopted_root(tmp_path, monkeypatch):
     ingest_images's site write there until scripts/adopt_store.py has run. The file backend
     legitimately produces that state (import_project no longer does: it adopts a fresh root
     under the database backend), so the unadopted root here is built by writing through the
-    file backend directly, through init_project, and then judged under the database backend
+    file backend directly, through initialize_project, and then judged under the database backend
     explicitly, since that is a fact about that backend's conform rail, not about whichever
     backend the suite happens to run this file on."""
     import tcip_store
@@ -655,17 +655,17 @@ def test_ingest_refuses_an_unadopted_root(tmp_path, monkeypatch):
     from tcip_store.sqlite_backend import SqliteBackend
     from tcip_store.store import _backend
 
-    from tcip_mcp.tools.project_tools import init_project
+    from tcip_mcp.tools.project_tools import initialize_project
 
     previous = _backend()
     dest = tmp_path / "unadopted"
-    # init_project's own audit entry lands at the platform root, not dest; a throwaway root here
+    # initialize_project's own audit entry lands at the platform root, not dest; a throwaway root here
     # keeps it off tmp_path, which ingest_images's own audit write below needs pristine.
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path / "scratch_platform_root"))
     file_backend = FileBackend()
     tcip_store.bind(file_backend)
     try:
-        init_project(str(dest), site="north orchard")
+        initialize_project(str(dest), site="north orchard")
     finally:
         tcip_store.bind(previous)
         file_backend.close()

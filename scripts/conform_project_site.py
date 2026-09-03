@@ -1,4 +1,4 @@
-"""Write or correct one project's authored site: the record ``init_project``/``ingest_images``
+"""Write or correct one project's authored site: the record ``initialize_project``/``ingest_images``
 themselves cannot reach for a project whose name does not fit the workspace scheme, and the one
 deliberate overwrite for a site typed wrong once or a record damaged by hand.
 

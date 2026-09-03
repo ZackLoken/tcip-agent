@@ -3,7 +3,7 @@
 A locator module in the same spirit as :mod:`tcip_mcp.project_status`: pure identity, read and
 write helpers for a single top-level document, ``<project>/.tcip/project.json``. ``site`` is the
 breeder's own name for the orchard or station the project's plants stand in, given once at
-``init_project``/``ingest_images`` and never guessed from a directory name or a filename. It is
+``initialize_project``/``ingest_images`` and never guessed from a directory name or a filename. It is
 the record's only field, so a field is named for what it holds.
 
 Every project gets exactly one record, written the first time either creating door scaffolds the
@@ -135,7 +135,7 @@ def read_record(project_path: str | Path) -> dict:
     raw = tcip_store.read(project_record_key(project_path), default=None)
     if raw is None:
         raise ProjectRecordMissing(
-            "No site recorded yet: record it with init_project(<path>, site=<site>) or "
+            "No site recorded yet: record it with initialize_project(<path>, site=<site>) or "
             f"scripts/conform_project_site.py, for {project_path}"
         )
     if not isinstance(raw, dict) or not isinstance(raw.get("site"), str) or not raw["site"]:

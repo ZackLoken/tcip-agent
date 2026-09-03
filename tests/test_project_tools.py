@@ -10,7 +10,7 @@ import pytest
 
 import tcip_store
 from tcip_mcp.tools.project_tools import (
-    init_project,
+    initialize_project,
     inspect_project,
     archive_project,
     import_project,
@@ -117,11 +117,11 @@ def test_register_dataset_reconciles_a_move_by_id(tmp_path: Path):
     assert same[0]["fingerprint"] == reg["fingerprint"]  # unchanged content -> same fingerprint
 
 
-def test_init_project(tmp_path: Path, monkeypatch):
+def test_initialize_project(tmp_path: Path, monkeypatch):
     # tmp_path sits directly under this test's workspace; point the workspace elsewhere so
-    # init_project's naming rail (which only holds under the workspace) doesn't apply here.
+    # initialize_project's naming rail (which only holds under the workspace) doesn't apply here.
     monkeypatch.setenv("TCIP_WORKSPACE", str(tmp_path / "unused_workspace"))
-    result = init_project(str(tmp_path), site="north orchard")
+    result = initialize_project(str(tmp_path), site="north orchard")
     assert (tmp_path / ".tcip").is_dir()
     assert (tmp_path / ".tcip" / "artifacts").is_dir()
     assert (tmp_path / ".tcip" / "models").is_dir()
@@ -133,7 +133,7 @@ def test_inspect_project(tmp_path: Path, monkeypatch):
     status = inspect_project(str(tmp_path))
     assert status["initialized"] is False
 
-    init_project(str(tmp_path), site="north orchard")
+    initialize_project(str(tmp_path), site="north orchard")
     status = inspect_project(str(tmp_path))
     assert status["initialized"] is True
 
@@ -142,7 +142,7 @@ def test_inspect_project_folds_in_recent_activity(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("TCIP_WORKSPACE", str(tmp_path / "unused_workspace"))
     from tcip_mcp.tools.meta_tools import report_friction
 
-    init_project(str(tmp_path), site="north orchard")
+    initialize_project(str(tmp_path), site="north orchard")
     status = inspect_project(str(tmp_path))
     assert status["recent_activity"] == {}  # no history yet: genuinely empty, not corrupt
 
@@ -155,7 +155,7 @@ def test_inspect_project_folds_in_last_retrospective_by_id_not_path(tmp_path: Pa
     monkeypatch.setenv("TCIP_WORKSPACE", str(tmp_path / "unused_workspace"))
     from tcip_mcp.tools.meta_tools import write_retrospective
 
-    init_project(str(tmp_path), site="north orchard")
+    initialize_project(str(tmp_path), site="north orchard")
     write_retrospective(
         str(tmp_path), project_id="p", task="t", worked="w", did_not_work="d",
     )
@@ -170,7 +170,7 @@ def test_inspect_project_surfaces_corrupt_status_honestly(tmp_path: Path, monkey
     monkeypatch.setenv("TCIP_WORKSPACE", str(tmp_path / "unused_workspace"))
     from tcip_mcp.project_status import project_status_key, record_report
 
-    init_project(str(tmp_path), site="north orchard")
+    initialize_project(str(tmp_path), site="north orchard")
     record_report(tmp_path)  # seed a real record so a damaged one has somewhere to overwrite
     _damage_record(project_status_key(tmp_path), b"{not valid json")
 
@@ -188,7 +188,7 @@ def test_inspect_project_surfaces_version_refused_status_distinctly_from_corrupt
         PROJECT_STATUS_STORE, project_status_key, record_report,
     )
 
-    init_project(str(tmp_path), site="north orchard")
+    initialize_project(str(tmp_path), site="north orchard")
     record_report(tmp_path)  # seed a real record so a poisoned one has somewhere to overwrite
     poisoned = tcip_store.get_descriptor(PROJECT_STATUS_STORE).codec.encode(
         {"reports_since_last_retrospective": 1, "schema_version": 99})
@@ -210,7 +210,7 @@ def test_set_active_project_folds_in_recent_activity(tmp_path: Path, monkeypatch
     # backend happens to be listening on this machine (matches test_set_active_project.py).
     monkeypatch.setattr(web_client, "post_panel_event", lambda *a, **k: {"delivered": False})
 
-    # A directory made outside the platform (init_project itself now refuses a non-conforming
+    # A directory made outside the platform (initialize_project itself now refuses a non-conforming
     # name under the workspace); set_active_project must still adopt it by its existing name.
     (project_path("proj_a") / ".tcip").mkdir(parents=True)
     report_friction(str(project_path("proj_a")), category="missing_tool", detail="a")
@@ -338,32 +338,32 @@ def test_inspect_project_reports_the_workspace_store_refusal_for_a_loose_marker(
     assert not (ws / ".tcip").exists()
 
 
-def test_init_project_refuses_a_non_conforming_name_under_the_workspace(tmp_path: Path, monkeypatch):
+def test_initialize_project_refuses_a_non_conforming_name_under_the_workspace(tmp_path: Path, monkeypatch):
     ws = tmp_path / "ws"
     monkeypatch.setenv("TCIP_WORKSPACE", str(ws))
 
-    result = init_project(str(ws / "two_segments"), site="north orchard")
+    result = initialize_project(str(ws / "two_segments"), site="north orchard")
 
     assert "error" in result
     assert not (ws / "two_segments").exists()
 
 
-def test_init_project_admits_a_conforming_name_under_the_workspace(tmp_path: Path, monkeypatch):
+def test_initialize_project_admits_a_conforming_name_under_the_workspace(tmp_path: Path, monkeypatch):
     ws = tmp_path / "ws"
     monkeypatch.setenv("TCIP_WORKSPACE", str(ws))
 
-    result = init_project(str(ws / "hazelnut_catkin_elongation"), site="north orchard")
+    result = initialize_project(str(ws / "hazelnut_catkin_elongation"), site="north orchard")
 
     assert "error" not in result
     assert (ws / "hazelnut_catkin_elongation" / ".tcip").is_dir()
 
 
-def test_init_project_admits_a_non_conforming_name_outside_the_workspace(
+def test_initialize_project_admits_a_non_conforming_name_outside_the_workspace(
     tmp_path: Path, monkeypatch
 ):
     monkeypatch.setenv("TCIP_WORKSPACE", str(tmp_path / "unused_workspace"))
 
-    result = init_project(str(tmp_path / "two_segments"), site="north orchard")
+    result = initialize_project(str(tmp_path / "two_segments"), site="north orchard")
 
     assert "error" not in result
     assert (tmp_path / "two_segments" / ".tcip").is_dir()
@@ -375,7 +375,7 @@ def test_import_project_refuses_a_non_conforming_destination_under_the_workspace
     ws = tmp_path / "ws"
     monkeypatch.setenv("TCIP_WORKSPACE", str(ws))
     src = tmp_path / "src_project"
-    init_project(str(src), site="north orchard")
+    initialize_project(str(src), site="north orchard")
     zip_path = tmp_path / "export.zip"
     exported = archive_project(str(src), str(zip_path))
     assert "error" not in exported
@@ -393,7 +393,7 @@ def test_import_project_admits_a_conforming_destination_under_the_workspace(
     ws = tmp_path / "ws"
     monkeypatch.setenv("TCIP_WORKSPACE", str(ws))
     src = tmp_path / "src_project"
-    init_project(str(src), site="north orchard")
+    initialize_project(str(src), site="north orchard")
     zip_path = tmp_path / "export.zip"
     exported = archive_project(str(src), str(zip_path))
     assert "error" not in exported
@@ -415,7 +415,7 @@ def test_export_import_roundtrip(tmp_path: Path):
     labels = src / "annotations" / date
     for d in (images, labels):
         d.mkdir(parents=True)
-    init_project(str(src), site="north orchard")
+    initialize_project(str(src), site="north orchard")
 
     from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
@@ -507,7 +507,7 @@ def test_archive_project_includes_bespoke_model_source(tmp_path: Path):
     travel with the archive, or a published/archived project bundles the provenance manifest
     without the code it describes and can't rerun its own pipeline from the archive alone."""
     src = tmp_path / "src_project"
-    init_project(str(src), site="north orchard")
+    initialize_project(str(src), site="north orchard")
 
     model_src = src / ".tcip" / "experiments" / "exp_001" / "model_src" / "abcd1234"
     model_src.mkdir(parents=True)
@@ -532,7 +532,7 @@ def test_archive_project_reports_checkpoints_excluded_by_default(tmp_path: Path)
     """A checkpoint under .tcip/models/*.pt is dropped by include_models=False; left_behind
     names that count separately from unaccounted and bookkeeping, rather than folding it in."""
     src = tmp_path / "src_project"
-    init_project(str(src), site="north orchard")
+    initialize_project(str(src), site="north orchard")
     (src / ".tcip" / "models" / "m.pt").write_bytes(b"weights")
 
     result = archive_project(str(src), str(tmp_path / "export.zip"))
@@ -564,7 +564,7 @@ def test_archive_project_includes_a_registered_run_checkpoint_outside_tcip_model
     )
 
     src = tmp_path / "src_project"
-    init_project(str(src), site="north orchard")
+    initialize_project(str(src), site="north orchard")
     monkeypatch.setenv("TCIP_STATE_ROOT", str(src))
 
     exp_id = "exp_ckpt_bundle"
@@ -606,7 +606,7 @@ def test_import_project_admits_a_bundle_holding_a_registered_run_checkpoint(
     )
 
     src = tmp_path / "src_project"
-    init_project(str(src), site="north orchard")
+    initialize_project(str(src), site="north orchard")
     monkeypatch.setenv("TCIP_STATE_ROOT", str(src))
 
     exp_id = "exp_roundtrip"
@@ -650,7 +650,7 @@ def test_import_project_admits_a_registered_checkpoint_with_no_disclosure(
     from tcip_mcp.model_registry import ModelRegistry, read_registry_index, registry_index_key
 
     src = tmp_path / "src_project"
-    init_project(str(src), site="north orchard")
+    initialize_project(str(src), site="north orchard")
     monkeypatch.setenv("TCIP_STATE_ROOT", str(src))
 
     exp_id = "exp_disclosure"
@@ -706,7 +706,7 @@ def test_import_project_keeps_a_relative_entry_relative_when_the_archive_carries
     from tcip_mcp.model_registry import read_registry_index, registry_index_key
 
     src = tmp_path / "src_project"
-    init_project(str(src), site="north orchard")
+    initialize_project(str(src), site="north orchard")
     monkeypatch.setenv("TCIP_STATE_ROOT", str(src))
 
     exp_id = "exp_no_checkpoint"
@@ -750,7 +750,7 @@ def test_import_project_conforms_a_genuinely_unconformed_registry_the_archive_ca
     from tcip_mcp.model_registry import ModelRegistry, read_registry_index, registry_index_key
 
     src = tmp_path / "src_project"
-    init_project(str(src), site="north orchard")
+    initialize_project(str(src), site="north orchard")
     ckpt_dir = src / ".tcip" / "models"
     ckpt_dir.mkdir(parents=True, exist_ok=True)
     content = b"weights an archive made before the family carried"
@@ -793,7 +793,7 @@ def test_import_project_discloses_a_designed_external_checkpoint_separately_from
     from tcip_mcp.model_registry import ModelRegistry
 
     src = tmp_path / "src_project"
-    init_project(str(src), site="north orchard")
+    initialize_project(str(src), site="north orchard")
     internal_dir = src / ".tcip" / "models"
     internal_dir.mkdir(parents=True, exist_ok=True)
     internal_ckpt = internal_dir / "internal.pt"
@@ -829,7 +829,7 @@ def test_archive_project_bundles_a_registered_tcip_models_checkpoint_once(tmp_pa
     from tcip_mcp.tools.bundle import account_for
 
     src = tmp_path / "src_project"
-    init_project(str(src), site="north orchard")
+    initialize_project(str(src), site="north orchard")
     ckpt = src / ".tcip" / "models" / "m.pt"
     ckpt.write_bytes(b"weights")
     ModelRegistry(str(src)).register_model("m", str(ckpt), {}, metrics_source=None)
@@ -858,7 +858,7 @@ def test_archive_project_carries_a_registered_checkpoint_inside_model_src_when_m
     from tcip_mcp.model_registry import ModelRegistry
 
     src = tmp_path / "src_project"
-    init_project(str(src), site="north orchard")
+    initialize_project(str(src), site="north orchard")
     model_src = src / ".tcip" / "experiments" / "exp_001" / "model_src" / "abcd1234"
     model_src.mkdir(parents=True)
     ckpt = model_src / "weights.pt"
@@ -1039,9 +1039,9 @@ def test_scaffolding_twice_leaves_what_the_first_run_created(tmp_path: Path):
 # ── the project record's authored site ────────────────────────────────────────
 
 
-def test_init_project_records_the_site(tmp_path: Path, monkeypatch):
+def test_initialize_project_records_the_site(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("TCIP_WORKSPACE", str(tmp_path / "unused_workspace"))
-    result = init_project(str(tmp_path), site="north orchard")
+    result = initialize_project(str(tmp_path), site="north orchard")
 
     assert result["site"] == "north orchard"
     from tcip_mcp.project_record import read_record
@@ -1049,23 +1049,23 @@ def test_init_project_records_the_site(tmp_path: Path, monkeypatch):
     assert read_record(str(tmp_path)) == {"site": "north orchard"}
 
 
-def test_init_project_run_twice_with_the_same_site_is_idempotent(tmp_path: Path, monkeypatch):
+def test_initialize_project_run_twice_with_the_same_site_is_idempotent(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("TCIP_WORKSPACE", str(tmp_path / "unused_workspace"))
-    init_project(str(tmp_path), site="north orchard")
+    initialize_project(str(tmp_path), site="north orchard")
 
-    result = init_project(str(tmp_path), site="north orchard")
+    result = initialize_project(str(tmp_path), site="north orchard")
 
     assert "error" not in result
     assert result["site"] == "north orchard"
 
 
-def test_init_project_refuses_a_different_site_than_the_one_already_recorded(
+def test_initialize_project_refuses_a_different_site_than_the_one_already_recorded(
     tmp_path: Path, monkeypatch
 ):
     monkeypatch.setenv("TCIP_WORKSPACE", str(tmp_path / "unused_workspace"))
-    init_project(str(tmp_path), site="north orchard")
+    initialize_project(str(tmp_path), site="north orchard")
 
-    result = init_project(str(tmp_path), site="south orchard")
+    result = initialize_project(str(tmp_path), site="south orchard")
 
     assert "error" in result
     assert "north orchard" in result["error"]
@@ -1075,10 +1075,10 @@ def test_init_project_refuses_a_different_site_than_the_one_already_recorded(
     assert read_record(str(tmp_path))["site"] == "north orchard"
 
 
-def test_init_project_refuses_an_empty_site(tmp_path: Path, monkeypatch):
+def test_initialize_project_refuses_an_empty_site(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("TCIP_WORKSPACE", str(tmp_path / "unused_workspace"))
 
-    result = init_project(str(tmp_path), site="   ")
+    result = initialize_project(str(tmp_path), site="   ")
 
     assert "error" in result
     from tcip_mcp.project_record import site_fields
@@ -1086,26 +1086,26 @@ def test_init_project_refuses_an_empty_site(tmp_path: Path, monkeypatch):
     assert site_fields(str(tmp_path))["site"] is None
 
 
-def test_init_project_refuses_an_empty_site_leaving_nothing_on_disk(tmp_path: Path, monkeypatch):
+def test_initialize_project_refuses_an_empty_site_leaving_nothing_on_disk(tmp_path: Path, monkeypatch):
     """A refused site is validated before anything is created, the same as the name-scheme
     refusal: the destination is left exactly as it was, not half-scaffolded."""
     monkeypatch.setenv("TCIP_WORKSPACE", str(tmp_path / "unused_workspace"))
     dest = tmp_path / "fresh_project"
 
-    result = init_project(str(dest), site="   ")
+    result = initialize_project(str(dest), site="   ")
 
     assert "error" in result
     assert not dest.exists()
 
 
-def test_init_project_scaffolds_a_relative_path_where_it_resolves(tmp_path: Path, monkeypatch):
+def test_initialize_project_scaffolds_a_relative_path_where_it_resolves(tmp_path: Path, monkeypatch):
     """A relative project_path scaffolds and records at the same absolute location the
     workspace-name check itself resolved, rather than the record write refusing a relative
     root after ``.tcip`` already exists."""
     monkeypatch.setenv("TCIP_WORKSPACE", str(tmp_path / "unused_workspace"))
     monkeypatch.chdir(tmp_path)
 
-    result = init_project("relative_proj", site="north orchard")
+    result = initialize_project("relative_proj", site="north orchard")
 
     assert "error" not in result
     assert (tmp_path / "relative_proj" / ".tcip").is_dir()
@@ -1114,7 +1114,7 @@ def test_init_project_scaffolds_a_relative_path_where_it_resolves(tmp_path: Path
     assert read_record(str(tmp_path / "relative_proj")) == {"site": "north orchard"}
 
 
-def test_init_project_refuses_a_present_but_invalid_record(tmp_path: Path, monkeypatch):
+def test_initialize_project_refuses_a_present_but_invalid_record(tmp_path: Path, monkeypatch):
     """The door surfaces the reader's own refusal rather than the store's raw exception."""
     monkeypatch.setenv("TCIP_WORKSPACE", str(tmp_path / "unused_workspace"))
     from tcip_mcp.project_record import project_record_key
@@ -1122,13 +1122,13 @@ def test_init_project_refuses_a_present_but_invalid_record(tmp_path: Path, monke
     key = project_record_key(str(tmp_path))
     tcip_store.replace(key, {"not_site": "whatever"}, expect=tcip_store.Version.ABSENT)
 
-    result = init_project(str(tmp_path), site="north orchard")
+    result = initialize_project(str(tmp_path), site="north orchard")
 
     assert "error" in result
     assert "does not hold a site" in result["error"]
 
 
-def test_init_project_refuses_an_undecodable_record(tmp_path: Path, monkeypatch):
+def test_initialize_project_refuses_an_undecodable_record(tmp_path: Path, monkeypatch):
     """The store's own DecodeError is a StoreError, caught and returned as the door's error."""
     from tcip_mcp.project_record import project_record_key
     from tests._record_damage_fixtures import damage_record
@@ -1138,15 +1138,15 @@ def test_init_project_refuses_an_undecodable_record(tmp_path: Path, monkeypatch)
     tcip_store.replace(key, {"site": "north orchard"}, expect=tcip_store.Version.ABSENT)
     damage_record(key, b"{not valid json")
 
-    result = init_project(str(tmp_path), site="north orchard")
+    result = initialize_project(str(tmp_path), site="north orchard")
 
     assert "error" in result
     assert "does not decode" in result["error"]
 
 
-def test_init_project_refuses_an_unadopted_root(tmp_path: Path, monkeypatch):
+def test_initialize_project_refuses_an_unadopted_root(tmp_path: Path, monkeypatch):
     """A root whose records are still loose files: the store's conform rail refuses
-    init_project's site write there until scripts/adopt_store.py has run, the same rule every
+    initialize_project's site write there until scripts/adopt_store.py has run, the same rule every
     other record store under that root already obeys. The file backend legitimately produces
     that state (import_project no longer does: it adopts a fresh root under the database
     backend), so the unadopted root here is built by writing through the file backend directly
@@ -1158,13 +1158,13 @@ def test_init_project_refuses_an_unadopted_root(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("TCIP_WORKSPACE", str(tmp_path / "unused_workspace"))
     dest = tmp_path / "unadopted"
     previous = _backend()
-    # init_project's own audit entry lands at the platform root, not dest; a throwaway root here
+    # initialize_project's own audit entry lands at the platform root, not dest; a throwaway root here
     # keeps it off tmp_path, which stage two's own audit write below needs to find pristine.
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path / "scratch_platform_root"))
     file_backend = FileBackend()
     tcip_store.bind(file_backend)
     try:
-        init_project(str(dest), site="north orchard")
+        initialize_project(str(dest), site="north orchard")
     finally:
         tcip_store.bind(previous)
         file_backend.close()
@@ -1173,7 +1173,7 @@ def test_init_project_refuses_an_unadopted_root(tmp_path: Path, monkeypatch):
     backend = SqliteBackend()
     tcip_store.bind(backend)
     try:
-        result = init_project(str(dest), site="north orchard")
+        result = initialize_project(str(dest), site="north orchard")
     finally:
         tcip_store.bind(previous)
         backend.close()
@@ -1182,11 +1182,11 @@ def test_init_project_refuses_an_unadopted_root(tmp_path: Path, monkeypatch):
     assert "scripts/adopt_store.py" in result["error"]
 
 
-def test_init_project_records_the_site_on_a_directory_that_gained_tcip_with_no_creating_door(
+def test_initialize_project_records_the_site_on_a_directory_that_gained_tcip_with_no_creating_door(
     tmp_path: Path, monkeypatch
 ):
     """The reachable state a store write with no door leaves (``report_friction`` on a bare
-    directory): ``init_project`` on it afterward records the site the same way it would on a
+    directory): ``initialize_project`` on it afterward records the site the same way it would on a
     truly fresh directory, since the writer's create-only write does not distinguish the two."""
     monkeypatch.setenv("TCIP_WORKSPACE", str(tmp_path / "unused_workspace"))
     from tcip_mcp.tools.meta_tools import report_friction
@@ -1194,7 +1194,7 @@ def test_init_project_records_the_site_on_a_directory_that_gained_tcip_with_no_c
     report_friction(str(tmp_path), category="missing_tool", detail="a")
     assert (tmp_path / ".tcip").is_dir()
 
-    result = init_project(str(tmp_path), site="north orchard")
+    result = initialize_project(str(tmp_path), site="north orchard")
 
     assert "error" not in result
     assert result["site"] == "north orchard"
@@ -1217,11 +1217,11 @@ def test_inspect_project_reports_site_fields_across_project_states(tmp_path: Pat
     report_friction(str(recordless), category="missing_tool", detail="a")
     status = inspect_project(str(recordless))
     assert status["site"] is None
-    assert "init_project" in status["site_problem"]
+    assert "initialize_project" in status["site_problem"]
 
     recorded = tmp_path / "recorded"
     recorded.mkdir()
-    init_project(str(recorded), site="north orchard")
+    initialize_project(str(recorded), site="north orchard")
     status = inspect_project(str(recorded))
     assert status["site"] == "north orchard"
     assert status["site_problem"] is None
@@ -1231,7 +1231,7 @@ def test_inspect_project_reports_an_invalid_record(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("TCIP_WORKSPACE", str(tmp_path / "unused_workspace"))
     from tcip_mcp.project_record import project_record_key
 
-    init_project(str(tmp_path), site="north orchard")
+    initialize_project(str(tmp_path), site="north orchard")
     key = project_record_key(str(tmp_path))
     current = tcip_store.read_versioned(key).version
     tcip_store.replace(key, {"not_site": "x"}, expect=current)
@@ -1243,13 +1243,13 @@ def test_inspect_project_reports_an_invalid_record(tmp_path: Path, monkeypatch):
 
 
 def test_archive_and_import_carry_the_project_record(tmp_path: Path, monkeypatch):
-    """init_project -> archive_project -> import_project round-trips a project whose record is
+    """initialize_project -> archive_project -> import_project round-trips a project whose record is
     on disk in the archive: the record travels with the project like every other ``.tcip``
     document, and archive_project exports it itself, so no operator step sits between the two
     doors."""
     monkeypatch.setenv("TCIP_WORKSPACE", str(tmp_path / "unused_workspace"))
     src = tmp_path / "src_project"
-    init_project(str(src), site="north orchard")
+    initialize_project(str(src), site="north orchard")
 
     zip_path = tmp_path / "export.zip"
     exported = archive_project(str(src), str(zip_path))

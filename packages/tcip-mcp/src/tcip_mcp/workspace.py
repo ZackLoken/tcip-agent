@@ -119,7 +119,7 @@ def project_path(name: str, *, create: bool = True) -> Path:
     shape (:func:`format_project_name`/:func:`parse_project_name`): every entry point that opens,
     lists or adopts an existing project accepts any safely-named one, since a directory the
     platform did not create is opened by the name it already has. Only the doors that
-    create a workspace directory (``ingest_images``, ``init_project``, ``import_project``)
+    create a workspace directory (``ingest_images``, ``initialize_project``, ``import_project``)
     hold a new name to the shape; the first two also take an authored site, recorded on the
     project's own record (:mod:`tcip_mcp.project_record`).
 

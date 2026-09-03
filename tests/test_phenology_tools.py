@@ -51,15 +51,15 @@ def test_build_plant_mapping_wraps_build_and_persists(
 ) -> None:
     from datetime import datetime
 
-    from tcip_mcp.tools.project_tools import init_project, register_dataset
+    from tcip_mcp.tools.project_tools import initialize_project, register_dataset
     from tcip_mcp.traits import registered_crops
 
     from tests.test_plant_mapping_binding import _write_geo_image
 
     # tmp_path sits directly under this test's workspace; point the workspace elsewhere so
-    # init_project's naming rail (which only holds under the workspace) doesn't apply here.
+    # initialize_project's naming rail (which only holds under the workspace) doesn't apply here.
     monkeypatch.setenv("TCIP_WORKSPACE", str(tmp_path / "unused_workspace"))
-    assert "error" not in init_project(str(tmp_path), site="orchard block")
+    assert "error" not in initialize_project(str(tmp_path), site="orchard block")
     images_root = tmp_path / "images"
     _write_geo_image(
         images_root / "2026-02-11" / "img1.jpg", 43.19670, -90.058000,
@@ -94,10 +94,10 @@ def test_build_plant_mapping_wraps_build_and_persists(
 def test_build_plant_mapping_missing_images_root(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from tcip_mcp.tools.project_tools import init_project
+    from tcip_mcp.tools.project_tools import initialize_project
 
     monkeypatch.setenv("TCIP_WORKSPACE", str(tmp_path / "unused_workspace"))
-    assert "error" not in init_project(str(tmp_path), site="orchard block")
+    assert "error" not in initialize_project(str(tmp_path), site="orchard block")
     res = build_plant_mapping(
         images_root=str(tmp_path / "nope"),
         plant_csv_paths=[str(tmp_path / "plants.csv")],
@@ -110,10 +110,10 @@ def test_build_plant_mapping_missing_images_root(
 def test_build_plant_mapping_missing_csv(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from tcip_mcp.tools.project_tools import init_project
+    from tcip_mcp.tools.project_tools import initialize_project
 
     monkeypatch.setenv("TCIP_WORKSPACE", str(tmp_path / "unused_workspace"))
-    assert "error" not in init_project(str(tmp_path), site="orchard block")
+    assert "error" not in initialize_project(str(tmp_path), site="orchard block")
     images_root = tmp_path / "images"
     (images_root / "2026-02-11").mkdir(parents=True)
     res = build_plant_mapping(

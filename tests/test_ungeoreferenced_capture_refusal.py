@@ -1,6 +1,6 @@
 """No positioned capture refuses a plant-mapping build or delivery by name; a partly positioned
 mapping keeps delivering with its unattributed count disclosed. Reuses the platform's own
-producers (``init_project``, ``register_dataset``, ``build_plant_mapping``, ``deliver_phenology_milestones``)
+producers (``initialize_project``, ``register_dataset``, ``build_plant_mapping``, ``deliver_phenology_milestones``)
 and the binding family's own geolocated-scene writer, a second registered trait rather than the
 pilot's, so nothing here generalizes from one trait's own vocabulary.
 """
@@ -176,7 +176,7 @@ def _delivery_scene(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Pa
     """A registered dataset with one real prediction bucket, and the trait this module's
     deliveries run under; returns ``(dataset_root, predictions_by_date)``.
 
-    ``_init`` points ``TCIP_WORKSPACE`` away from ``tmp_path`` so ``init_project`` does not hold an
+    ``_init`` points ``TCIP_WORKSPACE`` away from ``tmp_path`` so ``initialize_project`` does not hold an
     arbitrary test directory to the workspace naming scheme; a web-route delivery then guards
     ``project_root`` against the allowed roots, so ``TCIP_IMAGE_ROOTS`` names ``tmp_path`` as a
     legitimate root the same way an operator would for a project outside any workspace.

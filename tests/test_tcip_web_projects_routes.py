@@ -222,20 +222,20 @@ def test_list_reports_site_fields_across_four_project_states(client, workspace_d
     from tcip_store.file_backend import database_file
 
     from tcip_mcp.project_record import project_record_key
-    from tcip_mcp.tools.project_tools import init_project
+    from tcip_mcp.tools.project_tools import initialize_project
     from tests._record_damage_fixtures import damage_record
 
     recorded = workspace_dir / "hazelnut_catkin_recorded"
-    init_project(str(recorded), site="north orchard")
+    initialize_project(str(recorded), site="north orchard")
 
     recordless = _make_project(workspace_dir, "hazelnut_catkin_recordless", dates=["2026-02-11"])
 
     undecodable = workspace_dir / "hazelnut_catkin_undecodable"
-    init_project(str(undecodable), site="north orchard")
+    initialize_project(str(undecodable), site="north orchard")
     damage_record(project_record_key(str(undecodable)), b"{not valid json")
 
     invalid = workspace_dir / "hazelnut_catkin_invalid"
-    init_project(str(invalid), site="north orchard")
+    initialize_project(str(invalid), site="north orchard")
     key = project_record_key(str(invalid))
     current = tcip_store.read_versioned(key).version
     tcip_store.replace(key, {"not_site": "x"}, expect=current)
@@ -251,7 +251,7 @@ def test_list_reports_site_fields_across_four_project_states(client, workspace_d
     assert by_name["hazelnut_catkin_recorded"]["site_problem"] is None
 
     assert by_name["hazelnut_catkin_recordless"]["site"] is None
-    assert "init_project" in by_name["hazelnut_catkin_recordless"]["site_problem"]
+    assert "initialize_project" in by_name["hazelnut_catkin_recordless"]["site_problem"]
     assert not database_file(str(recordless)).is_file()
 
     assert by_name["hazelnut_catkin_undecodable"]["site"] is None
@@ -262,13 +262,13 @@ def test_list_reports_site_fields_across_four_project_states(client, workspace_d
 
 
 def test_list_route_reports_the_recorded_site(client, workspace_dir):
-    """Minimal, single-claim sibling of the four-state test above: only ``init_project``, so a
+    """Minimal, single-claim sibling of the four-state test above: only ``initialize_project``, so a
     fail-before run against a tree that predates the ``site`` parameter observes a real
     behavioral gap (the key absent) rather than the whole test file failing to import."""
-    from tcip_mcp.tools.project_tools import init_project
+    from tcip_mcp.tools.project_tools import initialize_project
 
     recorded = workspace_dir / "hazelnut_catkin_recorded"
-    init_project(str(recorded), site="north orchard")
+    initialize_project(str(recorded), site="north orchard")
 
     body = client.get("/api/projects").json()
     by_name = {p["name"]: p for p in body["projects"]}
