@@ -770,7 +770,9 @@ def capture_live_canvas(
     import time as _time
 
     from tcip_mcp import workspace
-    from tcip_mcp.web_client import canvas_geometry_key, canvas_meta_key, canvas_open_binding_key
+    from tcip_mcp.web_client import (
+        canvas_geometry_key, canvas_meta_key, canvas_open_binding_key, gui_binding_matches,
+    )
 
     root = str(platform_state_root())
     meta_doc = canvas_meta_key(root)
@@ -799,7 +801,7 @@ def capture_live_canvas(
 
     for attempt in range(2):
         try:
-            binding = _read_binding()
+            same_root, binding = gui_binding_matches(root)
         except (ts.StoreError, OSError) as exc:
             return {"error": f"Could not read the canvas-open binding: {exc}"}
 
@@ -808,7 +810,6 @@ def capture_live_canvas(
             return {"error": f"No current canvas binding exists under the workspace root "
                               f"{ws_root}; opening a project in the GUI creates one."}
 
-        same_root = ts.canonical_path(binding["root"]) == ts.canonical_path(root)
         if not same_root and not render_last_known:
             return {
                 "error": "The GUI's open project differs from this tool's own pinned project; "

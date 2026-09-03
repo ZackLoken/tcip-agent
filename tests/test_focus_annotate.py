@@ -9,10 +9,25 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from tcip_annotation import json_io
 from tcip_annotation.state import Annotation, BBox, Point, Polygon
 from tcip_mcp.dataset_layout import annotation_dir, image_dir
 from tcip_mcp.tools.gui_tools import focus_human_attention
+
+from tests.test_canvas_liveview import _mint_binding
+
+
+@pytest.fixture(autouse=True)
+def _matching_canvas_binding(tmp_path: Path) -> None:
+    """Every call here drives ``tmp_path / "proj"``; mint the GUI binding it now requires.
+
+    None of these tests are about the live-GUI binding rail, only about frame resolution, so
+    they mint a real matching binding through the store seam rather than exercising the refusal
+    ``focus_human_attention`` now carries.
+    """
+    _mint_binding(tmp_path / "proj")
 
 
 def _scene(root: Path, date: str, images: list[str]) -> None:

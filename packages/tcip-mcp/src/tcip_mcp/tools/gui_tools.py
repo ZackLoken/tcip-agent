@@ -20,6 +20,33 @@ from tcip_mcp.pipelines.resolution import DEFAULT_CONF
 from tcip_mcp.server import mcp
 
 
+def _binding_refusal(binding: dict | None, compared_root: str) -> dict:
+    """Refuse driving the GUI, naming the binding's own project and the root compared against.
+
+    Shared by ``focus_human_attention`` and ``push_panel_event``, the same standing
+    ``web_client.gui_binding_matches`` predicate ``capture_live_canvas`` already refuses under:
+    no binding at all means nothing is open for either root to match, and a binding naming
+    another project means this call would drive a browser that has moved on. Neither driver
+    takes an override; a mismatch, or no binding, refuses every time.
+    """
+    if binding is None:
+        return {
+            "error": f"No current canvas binding exists; nothing is open in the GUI to drive "
+                     f"toward {compared_root}.",
+            "bound_project": None,
+            "bound_root": None,
+            "compared_root": compared_root,
+        }
+    return {
+        "error": f"The GUI's open project ({binding.get('project_name') or binding.get('root')}) "
+                 f"differs from {compared_root}; refusing to drive a browser that has moved to "
+                 "another project.",
+        "bound_project": binding.get("project_name"),
+        "bound_root": binding.get("root"),
+        "compared_root": compared_root,
+    }
+
+
 def _logical_image_names(images_dir) -> list[str]:
     """Every logical image's on-disk display name under ``images_dir``, a plain file's own name,
     or (for a ``.bandgroup``-grouped capture) its manifest's filename, the file every other
@@ -45,6 +72,11 @@ def push_panel_event(
     broadcasts to any connected browsers via WebSocket. If the backend is not running the call
     returns ``{"status": "no_subscribers"}`` so the agent can proceed.
 
+    Refuses before posting anything when the GUI's currently open project (the
+    ``canvas_open_binding`` record) is not this process's own pinned platform root, naming both
+    sides: an agent pinned to one project must not steer a browser that has moved to, or never
+    opened, another one. No override; a mismatch, or no binding at all, refuses every time.
+
     Args:
         panel: Target panel: one per GUI tab, or 'app' for app-level events like annotate_focus /
             review_focus / active_project_changed. See ``web_client.VALID_PANELS`` for the
@@ -55,10 +87,20 @@ def push_panel_event(
             above that tab.
         data: Arbitrary JSON data payload.
     """
-    from tcip_mcp.web_client import VALID_PANELS, post_panel_event
+    from tcip_mcp.project_paths import platform_state_root
+    from tcip_mcp.web_client import VALID_PANELS, gui_binding_matches, post_panel_event
 
     if panel not in VALID_PANELS:
         return {"error": f"Unknown panel: {panel}. Valid: {sorted(VALID_PANELS)}"}
+
+    own_root = str(platform_state_root())
+    matches, binding = gui_binding_matches(own_root)
+    if not matches:
+        refusal = _binding_refusal(binding, own_root)
+        refusal["delivered"] = False
+        refusal.setdefault("panel", panel)
+        refusal.setdefault("event_type", event_type)
+        return refusal
 
     result = post_panel_event(panel, event_type, data)
     result.setdefault("panel", panel)
@@ -92,6 +134,12 @@ def focus_human_attention(
     aborting the call; only the landed-on or explicitly named frame's own unreadable document
     refuses, naming that document's path.
 
+    Refuses before resolving anything when the GUI's currently open project (the
+    ``canvas_open_binding`` record) is not ``project_root``, naming both sides: driving a browser
+    that has moved to, or never opened, another project would land the wrong project's Annotate
+    or Review tab in front of the human. No override; a mismatch, or no binding at all, refuses
+    every time.
+
     Args:
         tab: Which GUI surface to drive, 'annotate' or 'review'.
         project_root: Project root (== dataset_root for workspace projects).
@@ -108,6 +156,12 @@ def focus_human_attention(
         iou_threshold: Review only, IoU cutoff for the TP/FP/FN match classification.
         conf_threshold: Review only, confidence cutoff for showing predictions.
     """
+    from tcip_mcp.web_client import gui_binding_matches
+
+    matches, binding = gui_binding_matches(project_root)
+    if not matches:
+        return _binding_refusal(binding, project_root)
+
     if tab == "annotate":
         return _focus_annotate(project_root, dataset_root, subject, date, mode=mode,
                                image_index=image_index)
