@@ -786,13 +786,12 @@ Docstring is the function's docstring first line, verbatim.
 |---|---|---|---|
 | `serve_domain_knowledge` | `knowledge_tools.py:46` | yes | Read the platform's domain knowledge: trait semantics, workflow patterns, and per-crop |
 
-### model_tools.py (3 tools)
+### model_tools.py (2 tools)
 
 | tool | line | audited | docstring first line |
 |---|---|---|---|
 | `register_model` | `model_tools.py:18` | yes | Register a trained model in the project model registry. |
-| `list_registered_models` | `model_tools.py:78` | yes | List models in the project registry. |
-| `rank_registered_models` | `model_tools.py:126` | yes | Get the best registered model by an explicit metric, no default is assumed. |
+| `rank_registered_models` | `model_tools.py:113` | yes | List the project's registered models, or rank them by an explicit metric. |
 
 ### operationalization_tools.py (1 tool)
 
@@ -2353,7 +2352,7 @@ Phase 3 verdict: single.
 
 Must agree: the MCP registrar and the GUI model pickers read one registry entry shape.
 Side A: `packages/tcip-mcp/src/tcip_mcp/model_registry.py:132` (`def read_registry_index(`, the read path for everything outside the module; `_register_entry`, line 429, replaces one entry by name inside one `tcip_store.transaction` on the key `registry_index_key`, line 116, mints).
-Side B: `packages/tcip-web/src/tcip_web/routes/results.py:1115` (`@router.get("/models/registered")`, serving `model_tools.list_registered_models`) and the browser's one entry declaration, `packages/tcip-web/frontend/src/api/inference.ts:16` (`export interface RegisteredModel {`), held field by field against an entry the real registrar wrote by `tests/test_registry_entry_shape_agreement.py`.
+Side B: `packages/tcip-web/src/tcip_web/routes/results.py:1115` (`@router.get("/models/registered")`, serving `model_tools.rank_registered_models`'s listing view) and the browser's one entry declaration, `packages/tcip-web/frontend/src/api/inference.ts:16` (`export interface RegisteredModel {`), held field by field against an entry the real registrar wrote by `tests/test_registry_entry_shape_agreement.py`.
 Phase 3 verdict: single.
 
 ## S28. operating_point.json prediction-bucket sidecar

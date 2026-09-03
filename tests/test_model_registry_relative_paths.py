@@ -206,13 +206,13 @@ def test_model_registry_list_get_best_all_answer_resolved_absolute(tmp_path: Pat
     assert Path(got) == Path(ckpt).resolve()
 
 
-def test_list_registered_models_tool_answers_resolved_absolute(tmp_path: Path):
-    from tcip_mcp.tools.model_tools import list_registered_models
+def test_rank_registered_models_listing_view_answers_resolved_absolute(tmp_path: Path):
+    from tcip_mcp.tools.model_tools import rank_registered_models
 
     project = tmp_path / "proj"
     _, ckpt = _register_internal_checkpoint(project)
 
-    result = list_registered_models(str(project))
+    result = rank_registered_models(str(project))
 
     assert Path(result["models"][0]["checkpoint_path"]) == Path(ckpt).resolve()
 

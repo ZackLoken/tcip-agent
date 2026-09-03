@@ -1,18 +1,21 @@
 """Registry metric default (``val_map50``, not the never-present ``mAP``) is not silently applied:
-``rank_registered_models`` requires an explicit ``metric``, since ``val_map50`` is a labeled
-comparability metric, not necessarily what governs a trait's phenotype. Also covers the "no model
-has metric X" vs "no models" distinction, lower-is-better ranking, and registered metrics sourced
-from the checkpoint's own epoch rather than the last training epoch."""
+``rank_registered_models`` lists rather than ranking when ``metric`` is left empty, since
+``val_map50`` is a labeled comparability metric, not necessarily what governs a trait's
+phenotype; a stated metric that no model carries is a distinct error from an empty registry.
+Also covers lower-is-better ranking and registered metrics sourced from the checkpoint's own
+epoch rather than the last training epoch."""
 
 
-def test_rank_registered_models_requires_explicit_metric(tmp_path):
+def test_rank_registered_models_lists_rather_than_ranking_on_an_empty_metric(tmp_path):
     from tcip_mcp.model_registry import ModelRegistry
     from tcip_mcp.tools.model_tools import rank_registered_models
 
     project = str(tmp_path)
 
-    # Empty registry → the "no models" message, even with no metric passed.
-    assert rank_registered_models(project)["error"] == "No models registered"
+    # Empty registry, no metric → an empty listing, not a refusal.
+    empty = rank_registered_models(project)
+    assert "error" not in empty
+    assert empty == {"models": [], "count": 0, "available_metrics": []}
 
     reg = ModelRegistry(project)
     ckpt = tmp_path / "m.pt"
@@ -22,14 +25,15 @@ def test_rank_registered_models_requires_explicit_metric(tmp_path):
     reg.register_model("b", str(ckpt), {}, metrics={"val_map50": 0.90}, tags=[],
                        metrics_source="trainer")
 
-    # A populated registry with no metric → required-metric error, not a silent pick.
+    # A populated registry with no metric → the listing, not a required-metric refusal.
     res = rank_registered_models(project)
-    assert "metric is required" in res["error"]
+    assert "error" not in res
+    assert res["count"] == 2
+    assert {m["name"] for m in res["models"]} == {"a", "b"}
     assert res["available_metrics"] == [
         {"metric": "val_map50", "role": "comparability_only", "direction": "higher",
          "sources": ["trainer"]}
     ]
-    assert res["n_models"] == 2
 
     # An explicit, legitimate metric still succeeds: a rail must admit valid work.
     res = rank_registered_models(project, metric="val_map50")
@@ -75,9 +79,9 @@ def test_rank_registered_models_excludes_unverified_entries_by_default(tmp_path)
 
 
 def test_rank_registered_models_refusals_name_no_argument_a_breeder_would_not_pass(tmp_path):
-    """The three refusals a breeder can reach through the GUI (no metric, an undeclared
-    direction, every carrier unverified) read as plain sentences: none of them names this
-    tool's own parameters, since a breeder using the rank control never calls it directly."""
+    """The two ranking refusals a breeder can reach through the GUI (an undeclared direction,
+    every carrier unverified) read as plain sentences: neither names this tool's own
+    parameters, since a breeder using the rank control never calls it directly."""
     from tcip_mcp.model_registry import ModelRegistry
     from tcip_mcp.tools.model_tools import rank_registered_models
 
@@ -88,15 +92,9 @@ def test_rank_registered_models_refusals_name_no_argument_a_breeder_would_not_pa
     reg.register_model("asserted", str(ckpt), {}, metrics={"val_map50": 0.99}, tags=[],
                        metrics_source="caller")
 
-    no_metric = rank_registered_models(project)["error"]
     no_direction = rank_registered_models(project, metric="val_map99")["error"]
     all_unverified = rank_registered_models(project, metric="val_map50")["error"]
 
-    assert no_metric == (
-        "metric is required: there is no default (a labeled comparability metric like "
-        "val_map50 doesn't necessarily govern a trait's phenotype). Pick one of the "
-        "available metrics."
-    )
     assert no_direction == (
         "'val_map99' has no declared ranking direction (evaluation.HIGHER_IS_BETTER_BY_METRIC "
         "names no entry for it). State a direction to rank by it anyway, or pick one of the "
@@ -107,7 +105,7 @@ def test_rank_registered_models_refusals_name_no_argument_a_breeder_would_not_pa
         "'trainer'); include unverified models to rank them, or register a verified run."
     )
 
-    for text in (no_metric, no_direction, all_unverified):
+    for text in (no_direction, all_unverified):
         assert "higher_is_better" not in text
         assert "include_unverified" not in text
         assert "available_metrics" not in text

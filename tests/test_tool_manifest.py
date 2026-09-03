@@ -188,6 +188,8 @@ def test_consolidated_tools_present_and_removed_absent():
         "compute_phenology", "check_training_status", "init_project", "set_active_project",
         # Merged away: list_experiments(launched_only=True) serves the launched-runs view.
         "list_training_runs",
+        # Merged away: rank_registered_models(metric="") serves the listing view.
+        "list_registered_models",
     }
     assert not (removed & registered), f"removed tools still registered: {removed & registered}"
 

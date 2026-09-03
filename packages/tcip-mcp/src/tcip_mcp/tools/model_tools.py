@@ -73,20 +73,6 @@ def register_model(
                                     metrics_source=metrics_source)
 
 
-@mcp.tool()
-@audited
-def list_registered_models(project_path: str = "", tag: str | None = None) -> dict:
-    """List models in the project registry.
-
-    Args:
-        project_path: Project root directory. Empty defaults to the platform state root.
-        tag: Optional tag filter.
-    """
-    registry = ModelRegistry(_registry_root(project_path))
-    models = registry.list_models(tag)
-    return {"models": models, "count": len(models)}
-
-
 def _labeled_available_metrics(models: list[dict]) -> list[dict]:
     """Every metric key any registered model carries, each with what is known about it.
 
@@ -126,61 +112,63 @@ def _labeled_available_metrics(models: list[dict]) -> list[dict]:
 def rank_registered_models(
     project_path: str = "", metric: str = "",
     higher_is_better: bool | None = None, include_unverified: bool = False,
-    experiment_ids: list[str] | None = None,
+    experiment_ids: list[str] | None = None, tag: str | None = None,
 ) -> dict:
-    """Get the best registered model by an explicit metric, no default is assumed.
+    """List the project's registered models, or rank them by an explicit metric.
 
-    map50-family metrics (and, once a center-match trait is in play, the IoU-convention
-    precision/recall/F1 relabeled ``iou_*``) are a labeled comparability convention, not
-    necessarily what governs a trait's phenotype (see the evaluation skill /
-    ``resolve_match_criterion``), silently ranking by ``val_map50`` could promote a model that is
-    worse on the trait's own governing criterion. Call with ``metric=""`` (or an unknown metric) to
-    get ``available_metrics`` instead of guessing, each labeled ``comparability_only`` vs
-    ``unlabeled`` and, now, its declared ``direction`` and the ``metrics_source`` values it
-    appears under.
+    ``metric=""`` (the default) lists rather than ranks: returns ``{"models", "count",
+    "available_metrics"}`` over the registry (optionally ``tag``-filtered and
+    ``experiment_ids``-narrowed), no error, no default ranking assumed. map50-family metrics
+    (and, once a center-match trait is in play, the IoU-convention precision/recall/F1
+    relabeled ``iou_*``) are a labeled comparability convention, not necessarily what governs a
+    trait's phenotype (see the evaluation skill / ``resolve_match_criterion``); silently ranking
+    by ``val_map50`` could promote a model that is worse on the trait's own governing criterion.
+    ``available_metrics`` labels each key ``comparability_only`` vs ``unlabeled``, its declared
+    ``direction``, and the ``metrics_source`` values it appears under, so a caller picks a
+    metric deliberately instead of guessing.
 
-    Ranks only ``metrics_source="trainer"`` entries by default, the platform's own
-    ``default_train`` is the one path anything here measured; ``include_unverified=True`` also
-    ranks ``"training_source"``/``"caller"`` entries, whose numbers were asserted, not verified.
-    Entries the ranking left out for being unverified are named in ``excluded_unverified`` when
-    ``include_unverified`` is false; when true, nothing is left out on that basis, so the list is
-    always empty. The undeclared-direction refusal carries ``needs_direction: True`` and the
-    every-carrier-unverified refusal carries ``all_unverified: True``, so a caller can branch on
-    a field rather than matching the error text.
+    A stated ``metric`` ranks instead: only ``metrics_source="trainer"`` entries by default, the
+    platform's own ``default_train`` is the one path anything here measured;
+    ``include_unverified=True`` also ranks ``"training_source"``/``"caller"`` entries, whose
+    numbers were asserted, not verified. Entries the ranking left out for being unverified are
+    named in ``excluded_unverified`` when ``include_unverified`` is false; when true, nothing is
+    left out on that basis, so the list is always empty. The undeclared-direction refusal carries
+    ``needs_direction: True`` and the every-carrier-unverified refusal carries
+    ``all_unverified: True``, so a caller can branch on a field rather than matching the error
+    text.
 
     Args:
         project_path: Project root directory. Empty defaults to the platform state root.
-        metric: Metric key to rank by, required.
+        metric: Metric key to rank by; empty lists instead of ranking.
         higher_is_better: Overrides the declared direction (``evaluation.HIGHER_IS_BETTER_BY_METRIC``,
             keyed by the ``val_``-stripped name) when given; required when ``metric`` is undeclared.
         include_unverified: Also rank entries whose ``metrics_source`` is not ``"trainer"``.
-        experiment_ids: Narrow ranking to entries produced by one of these experiments (the
-            comparison view's own marked set), applied before ``available_metrics`` or the
-            unverified exclusions are derived, so both describe only the marked set. ``None``
-            (the default) ranks the whole registry, unchanged.
+        experiment_ids: Narrow to entries produced by one of these experiments (the comparison
+            view's own marked set), applied before ``available_metrics`` or the unverified
+            exclusions are derived, so both describe only the marked set. ``None`` (the default)
+            covers the whole registry, unchanged. With ``metric=""``, a narrowing that leaves
+            nothing simply returns an empty listing rather than refusing.
+        tag: Optional tag filter, applied to both the listing and the ranking.
     """
     from tcip_store.values import NOT_FINITE_SUFFIX
 
     from tcip_mcp.pipelines.training.evaluation import HIGHER_IS_BETTER_BY_METRIC, VAL_METRIC_PREFIX
 
     registry = ModelRegistry(_registry_root(project_path))
-    models = registry.list_models()
+    models = registry.list_models(tag)
     if experiment_ids is not None:
         wanted = set(experiment_ids)
         filtered = [m for m in models if m.get("experiment_id") in wanted]
-        if not filtered and models:
+        if metric and not filtered and models:
             return {"error": "none of the marked experiments registered a checkpoint"}
         models = filtered
-    if not models:
-        return {"error": "No models registered"}
     if not metric:
         return {
-            "error": "metric is required: there is no default (a labeled comparability metric "
-                     "like val_map50 doesn't necessarily govern a trait's phenotype). Pick one "
-                     "of the available metrics.",
+            "models": models, "count": len(models),
             "available_metrics": _labeled_available_metrics(models),
-            "n_models": len(models),
         }
+    if not models:
+        return {"error": "No models registered"}
     if metric.endswith(NOT_FINITE_SUFFIX):
         companion = metric[: -len(NOT_FINITE_SUFFIX)]
         return {

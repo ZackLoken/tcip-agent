@@ -68,6 +68,7 @@ RENAMES = [
 # argument), so the whole-word sweep applies exactly as it does for a rename's old name.
 MERGED = [
     ("list_training_runs", "list_experiments"),
+    ("list_registered_models", "rank_registered_models"),
 ]
 
 _OWN_FILE = str(Path(__file__).relative_to(REPO_ROOT)).replace("\\", "/")
