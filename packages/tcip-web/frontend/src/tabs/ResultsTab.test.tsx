@@ -23,6 +23,8 @@ const VALIDATED = {
   positive_class_assessed: true,
   captures_unverified: [],
   plant_csvs_unverified: [],
+  dates_delivered: [],
+  images_unattributed: 0,
 };
 
 function setupDataset() {
@@ -235,6 +237,8 @@ describe("ResultsTab evidence gate", () => {
     positive_class_assessed: true,
     captures_unverified: [],
     plant_csvs_unverified: [],
+    dates_delivered: [],
+    images_unattributed: 0,
   };
 
   function mockTree() {
@@ -309,6 +313,24 @@ describe("ResultsTab evidence gate", () => {
     expect(screen.getByRole("button", { name: /curves csv/i })).toBeEnabled();
     expect(screen.getByRole("button", { name: /milestones csv/i })).toBeEnabled();
     expect(screen.getByText("valid")).toBeInTheDocument();
+  });
+
+  it("renders the delivery-scoped unattributed count beside the measurement", async () => {
+    mockTree();
+    vi.spyOn(resultsApi, "phenologyMeasurement").mockResolvedValue({
+      curves: { rows: [CURVE_ROW], n_plants: 1, positive_class_id: 1 },
+      milestones: { rows: [ONSET_ROW] },
+      ...VALIDATED,
+      dates_delivered: ["2026-01-01"],
+      images_unattributed: 3,
+    });
+
+    await renderAndCompute();
+    await waitFor(() => expect(screen.getByText("P1")).toBeInTheDocument());
+
+    expect(
+      await screen.findByText(/Delivered dates 2026-01-01: 3 attributed to no plant/),
+    ).toBeInTheDocument();
   });
 });
 
@@ -718,6 +740,8 @@ describe("ResultsTab operationalization records", () => {
       positive_class_assessed: true,
       captures_unverified: [],
       plant_csvs_unverified: [],
+      dates_delivered: [],
+      images_unattributed: 0,
     };
     vi.spyOn(api.dataset, "tree").mockResolvedValue({
       dataset_root: "C:/data",
@@ -1161,6 +1185,38 @@ describe("ResultsTab delivery events (read-only)", () => {
 
     expect(screen.getByText(/nothing has shipped from this project yet/i)).toBeInTheDocument();
   });
+
+  it("renders the plant mapping's dates_delivered, images_unattributed and plant_attribution", async () => {
+    const withMapping: DeliveryEventRecord = {
+      ...DELIVERY_EVENT,
+      event_id: "with-mapping",
+      plant_mapping: {
+        name: "valley",
+        project_root: "C:/proj",
+        dataset_id: "ds-1",
+        dataset_root: "C:/data",
+        built_at: "2026-02-01T00:00:00+00:00",
+        record_sha256: "0".repeat(64),
+        nn_tolerance_m: { value: 3, source: "stated" },
+        capture_identity: {},
+        captures_unverified: [],
+        plant_csvs_unverified: [],
+        dates_delivered: ["2026-01-01", "2026-01-08"],
+        images_unattributed: 2,
+        images_unattributed_scope: "delivered_dates",
+        plant_attribution: "image",
+      },
+    };
+    vi.spyOn(resultsApi, "deliveryEvents").mockResolvedValue({ records: [withMapping] });
+
+    render(<ResultsTab />);
+    const row = await screen.findByTestId("delivery-with-mapping");
+
+    expect(
+      within(row).getByText(/Delivered dates 2026-01-01, 2026-01-08: 2 attributed to no plant/),
+    ).toBeInTheDocument();
+    expect(within(row).getByText(/image-level attribution/)).toBeInTheDocument();
+  });
 });
 
 describe("ResultsTab plant-mapping build: match-tolerance phrase", () => {
@@ -1183,7 +1239,12 @@ describe("ResultsTab plant-mapping build: match-tolerance phrase", () => {
     vi.spyOn(resultsApi, "buildPlantMapping").mockResolvedValue({
       mapping: {},
       unreadable: {},
-      summary: { "2026-01-01": { n_images: 3, n_mapped: 2, avg_distance_m: 1.4 } },
+      summary: {
+        per_date: {
+          "2026-01-01": { n_images: 3, n_mapped: 2, n_unattributed: 1, avg_distance_m: 1.4 },
+        },
+        totals: { n_dates: 1, n_images: 3, n_mapped: 2, n_unattributed: 1 },
+      },
       nn_tolerance_m,
       max_match_distance_m: nn_tolerance_m.value * 3,
     });
@@ -1229,6 +1290,121 @@ describe("ResultsTab plant-mapping build: match-tolerance phrase", () => {
   it("renders a source this map does not know as its own raw string", async () => {
     await buildWithTolerance({ value: 5, source: "future_branch" });
     expect(await screen.findByText(/future_branch/)).toBeInTheDocument();
+  });
+
+  function buildMappingWith(
+    perDate: Record<
+      string,
+      {
+        n_images: number;
+        n_mapped: number;
+        n_unattributed: number;
+        avg_distance_m: number | null;
+      }
+    >,
+    totalsUnattributed: number,
+  ) {
+    const totalImages = Object.values(perDate).reduce((sum, d) => sum + d.n_images, 0);
+    const totalMapped = Object.values(perDate).reduce((sum, d) => sum + d.n_mapped, 0);
+    vi.spyOn(resultsApi, "buildPlantMapping").mockResolvedValue({
+      mapping: {},
+      unreadable: {},
+      summary: {
+        per_date: perDate,
+        totals: {
+          n_dates: Object.keys(perDate).length,
+          n_images: totalImages,
+          n_mapped: totalMapped,
+          n_unattributed: totalsUnattributed,
+        },
+      },
+      nn_tolerance_m: { value: 3, source: "stated" },
+      max_match_distance_m: 9,
+    });
+  }
+
+  async function buildFromInputs() {
+    render(<ResultsTab />);
+    await waitFor(() => expect(resultsApi.listPlantMappings).toHaveBeenCalled());
+    fireEvent.change(screen.getByPlaceholderText("valley-2026"), {
+      target: { value: "valley-2026" },
+    });
+    fireEvent.change(screen.getByPlaceholderText("…/plants_block_A.csv"), {
+      target: { value: "C:/plants.csv" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /build \+ save mapping/i }));
+  }
+
+  it("renders the mapping-wide unattributed line when the total is nonzero", async () => {
+    mockTreeAndMappings();
+    buildMappingWith(
+      { "2026-01-01": { n_images: 3, n_mapped: 2, n_unattributed: 1, avg_distance_m: 1.4 } },
+      1,
+    );
+    await buildFromInputs();
+
+    expect(
+      await screen.findByText(/1 captures across this mapping's dates are attributed to no plant/),
+    ).toBeInTheDocument();
+  });
+
+  it("renders no mapping-wide line when the total is zero", async () => {
+    mockTreeAndMappings();
+    buildMappingWith(
+      { "2026-01-01": { n_images: 2, n_mapped: 2, n_unattributed: 0, avg_distance_m: 1.4 } },
+      0,
+    );
+    await buildFromInputs();
+
+    await waitFor(() => expect(resultsApi.buildPlantMapping).toHaveBeenCalled());
+    expect(
+      screen.queryByText(/attributed to no plant \(no readable position/),
+    ).not.toBeInTheDocument();
+  });
+
+  it("renders 'no distances' for a date with no recorded mean", async () => {
+    mockTreeAndMappings();
+    buildMappingWith(
+      { "2026-01-01": { n_images: 2, n_mapped: 0, n_unattributed: 2, avg_distance_m: null } },
+      2,
+    );
+    await buildFromInputs();
+
+    expect(await screen.findByText(/avg no distances/)).toBeInTheDocument();
+  });
+
+  it("loading an already-built mapping by name shows its own summary", async () => {
+    vi.spyOn(api.dataset, "tree").mockResolvedValue({
+      dataset_root: "C:/data",
+      dates_with_images: [],
+      subjects: [],
+      model_names: [],
+      subjects_by_date: {},
+      models_by_date: {},
+      prediction_dirs: {},
+      label_problem: null,
+    });
+    vi.spyOn(resultsApi, "listPlantMappings").mockResolvedValue({ names: ["valley-2026"] });
+    vi.spyOn(resultsApi, "loadPlantMapping").mockResolvedValue({
+      mapping: {},
+      summary: {
+        per_date: {
+          "2026-01-01": { n_images: 4, n_mapped: 4, n_unattributed: 0, avg_distance_m: 0.9 },
+        },
+        totals: { n_dates: 1, n_images: 4, n_mapped: 4, n_unattributed: 0 },
+      },
+      nn_tolerance_m: { value: 2, source: "stated" },
+      max_match_distance_m: 6,
+    });
+
+    render(<ResultsTab />);
+    await waitFor(() => expect(resultsApi.listPlantMappings).toHaveBeenCalled());
+    fireEvent.change(screen.getByPlaceholderText("valley-2026"), {
+      target: { value: "valley-2026" },
+    });
+
+    expect(await screen.findByText(/mapped 4 of 4, 0 attributed to no plant/)).toBeInTheDocument();
+    expect(resultsApi.loadPlantMapping).toHaveBeenCalledWith("valley-2026");
   });
 });
 
