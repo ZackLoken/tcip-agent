@@ -20,7 +20,7 @@ from pathlib import Path
 import tcip_store
 from tcip_annotation.state import Annotation, BBox, Point, Polygon, bbox_of
 
-from tcip_mcp.pipelines import pixel_size
+from tcip_mcp.pipelines import pixel_size as pixel_size_module
 from tcip_mcp.pipelines.pixel_size import PixelSize
 from tcip_mcp.pipelines.reference_grid import Cell
 
@@ -386,7 +386,7 @@ def dataset_physical_extent(
                 continue
             assert isinstance(source, Path)
             if source not in pixel_sizes:
-                pixel_sizes[source] = pixel_size.resolve_pixel_size(source)
+                pixel_sizes[source] = pixel_size_module.resolve_pixel_size(source)
             resolved_size, _reason = pixel_sizes[source]
             if resolved_size is None:
                 continue

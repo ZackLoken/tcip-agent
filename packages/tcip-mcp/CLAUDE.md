@@ -19,16 +19,16 @@ src/tcip_mcp/
                   # measurement, postprocessing, training (submodules), plus:
     derivations.py        # Tier-A derivations: compute a parameter (channels, num_classes,
                            # anchor ratios) from the artifact in hand instead of pinning it
-    pixel_size.py           # the one raster-georeferencing-to-metres-per-pixel resolver, shared
-                             # by the completeness bar and the block-scale derivation
-    model_build.py         # build_model: the one seam from a model_source config to an nn.Module
-    model_contract.py       # the measurement boundary a bespoke model must pass
-                             # (check_model_contract, overfit_check)
-    proposal.py              # auto-labeling engine seam: built-in SAM, or a bespoke Proposer
-    resolution.py             # ResolvedParam: the derive-don't-pin currency and the
-                               # unvalidated-value firewall
-    operating_point.py         # resolves conf/NMS/max_dets/tile per dataset, the one place all
-                                # consumers (train-eval, test-eval, inference, export) agree
+    pixel_size.py          # the one raster-georeferencing-to-metres-per-pixel resolver, shared
+                            # by the completeness bar and the block-scale derivation
+    model_build.py          # build_model: the one seam from a model_source config to an nn.Module
+    model_contract.py        # the measurement boundary a bespoke model must pass
+                              # (check_model_contract, overfit_check)
+    proposal.py               # auto-labeling engine seam: built-in SAM, or a bespoke Proposer
+    resolution.py              # ResolvedParam: the derive-don't-pin currency and the
+                                # unvalidated-value firewall
+    operating_point.py          # resolves conf/NMS/max_dets/tile per dataset, the one place all
+                                 # consumers (train-eval, test-eval, inference, export) agree
     schemas.py, image_utils.py
   dataset_layout.py      # the single path resolver: where an image's labels/predictions live on disk
   class_registry.py      # classes.json: subjects, attributes, the name<->id assignment
