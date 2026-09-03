@@ -274,7 +274,10 @@ def freeze_split_manifest(experiment_id: str, output_path: str | None = None) ->
             return {"error": f"{experiment_id!r} redrew train and val inside the split manifest "
                              f"at {bound_dir!r} already: reproduce it by binding a later run to "
                              "that same manifest with the same seed and "
-                             "data.split.redraw_within_manifest=true, never by freezing."}
+                             "data.split.redraw_within_manifest=true, with the labels this run's "
+                             "own split.json recorded (label_digests.at_run) unchanged since "
+                             "(the redraw reads per-stem annotation counts at run time, not "
+                             "only the manifest's fixed membership), never by freezing."}
         return {"error": f"{experiment_id!r} was bound to a split manifest already "
                          f"({bound_dir!r}): bind a later run "
                          "to that manifest directly instead of freezing this one's."}

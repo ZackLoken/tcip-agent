@@ -202,13 +202,15 @@ member lists).
 `data.split.redraw_within_manifest: true` beside `manifest_dir` and `seed` admits `seed` (the one
 conflict key it lifts) and redraws train and val fresh inside the manifest's own train-plus-val
 members for the run's date, at that seed, instead of binding the manifest's recorded partition;
-`calibration` stays untouched and is never redrawn. A starved side (too few distinct groups under
-the manifest's own grouping) refuses by name rather than retrying or degrading. `run_hpo` with
-`split_draws` above 1 on a manifest-bound `base_config` sets this flag on its own copy, so a
-sweep's seed grid redraws inside the manifest instead of every trial training on its one recorded
-partition; `freeze_split_manifest` still refuses a bound run, redrawn or not, naming the
-reproduction (bind a later run to the same manifest with the same seed and the flag) rather than
-a fresh freeze.
+`calibration` stays untouched and is never redrawn. A starved side (too few foreground groups
+under the manifest's own grouping to give both train and val one) refuses by name rather than
+retrying or degrading. `run_hpo` with `split_draws` above 1 on a manifest-bound `base_config`
+sets this flag on its own copy, so a sweep's seed grid redraws inside the manifest instead of
+every trial training on its one recorded partition; `freeze_split_manifest` still refuses a
+bound run, redrawn or not, naming the reproduction for a redrawn one (bind a later run to the
+same manifest with the same seed and the flag, with the labels this run's own `split.json`
+recorded unchanged, since the redraw reads per-stem annotation counts at run time) rather than a
+fresh freeze.
 
 Feeding review-corrected labels back into training? `materialize_review_dataset` (see the
 `annotation` skill) builds the curated dataset from review verdicts before you split/train.

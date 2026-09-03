@@ -142,7 +142,7 @@ def persist_split_manifest(experiment_id: str, train_ds, val_ds, data_cfg: dict,
         if binding_block:
             # A run bound to a named split manifest: its counts and hashes ride here too.
             manifest["manifest_binding"] = binding_block
-            if binding_block.get("redrawn_within_manifest"):
+            if binding_block.get("redraw"):
                 manifest["redrawn_within_manifest"] = True
         if label_digests:
             manifest["label_digests"] = label_digests
@@ -459,7 +459,7 @@ def auto_train_val(task: str, data_cfg: dict, transforms):
     from tcip_annotation.json_io import UnreadableLabelDocument
     from tcip_mcp.pipelines.data.datasets import build_dataset
     from tcip_mcp.pipelines.data.splits import (
-        draw_train_val, count_label_lines, resolve_group_key_fn,
+        draw_train_val, count_label_lines, manifest_redraw_universe, resolve_group_key_fn,
     )
     from tcip_mcp.tools.training_tools import (
         _dataset_source_kwargs, _redraw_flag_issue, _split_manifest_drawn_conflicts,
@@ -615,10 +615,12 @@ def auto_train_val(task: str, data_cfg: dict, transforms):
         train_stems, val_stems = binding.train, binding.val
         if split_cfg_raw.get("redraw_within_manifest"):
             redraw_seed = int(split_cfg_raw["seed"])
-            universe = binding.train + binding.val
-            group_key_fn = resolve_group_key_fn(
-                split_cfg["resolved_group_by"], universe,
-                group_key_map=split_cfg.get("resolved_group_key_map"),
+            universe, group_key_fn = manifest_redraw_universe(manifest, date)
+            assert set(universe) == set(binding.train) | set(binding.val), (
+                f"manifest_redraw_universe's stems for date {date!r} disagree with this run's "
+                "own bound train-plus-val membership: the manifest read for the starvation "
+                "precheck and the manifest read for this run's own binding must agree on which "
+                "members a redraw draws over."
             )
             val_ratio = len(binding.val) / (len(binding.train) + len(binding.val))
             redraw_annotation_counts = {
@@ -632,18 +634,23 @@ def auto_train_val(task: str, data_cfg: dict, transforms):
             if not train_stems or not val_stems:
                 starved_side = "train" if not train_stems else "val"
                 distinct = len({group_key_fn(s) for s in universe})
+                fg_groups = len({
+                    group_key_fn(s) for s in universe
+                    if redraw_annotation_counts.get(s, 0) > 0
+                })
                 raise ValueError(
                     f"redrawing train and val inside the split manifest at {manifest_dir!r}'s "
                     f"own members under date {date!r} at seed {redraw_seed} starved "
                     f"{starved_side} (train={len(train_stems)}, val={len(val_stems)}) over "
-                    f"{len(universe)} member(s) resolving to {distinct} distinct group(s) under "
+                    f"{len(universe)} member(s) resolving to {fg_groups} foreground group(s) "
+                    f"among {distinct} distinct group(s) under "
                     f"group_by={split_cfg['resolved_group_by']!r}. Drop "
                     "data.split.redraw_within_manifest and data.split.seed to bind the "
-                    "manifest's recorded partition instead, or regenerate the manifest with a "
-                    "grouping that separates the members."
+                    "manifest's recorded partition instead, or regenerate the manifest with at "
+                    "least two foreground groups across train and val."
                 )
             split_cfg["resolved_seed"] = redraw_seed
-            split_cfg["manifest_binding"]["redrawn_within_manifest"] = {
+            split_cfg["manifest_binding"]["redraw"] = {
                 "seed": redraw_seed, "val_ratio": val_ratio, "stratify_foreground": True,
             }
 

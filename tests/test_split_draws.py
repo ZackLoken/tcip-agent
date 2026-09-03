@@ -33,7 +33,9 @@ def test_run_hpo_refuses_split_draws_when_a_bound_manifest_would_starve_a_side(
     import tcip_mcp.tools.training_tools as tt
     from tcip_mcp.tools.data_tools import make_splits, split_manifest_key
 
-    from tests.test_split_manifest_binding import DATES, SUBJECT, _two_subject_two_date_dataset
+    from tests.test_split_manifest_binding import (
+        DATES, SUBJECT, _collapse_date_to_one_group, _two_subject_two_date_dataset,
+    )
 
     ran = []
     monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", _never_search(ran))
@@ -44,12 +46,7 @@ def test_run_hpo_refuses_split_draws_when_a_bound_manifest_would_starve_a_side(
                               seed=2, train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
     assert "error" not in make_result, make_result
     manifest = ts.read(split_manifest_key(manifest_dir))
-    date_ids = [i for side in ("train", "val") for i in manifest["splits"][side]
-               if i.split("/", 1)[0] == DATES[0]]
-    ts.replace(split_manifest_key(manifest_dir), {
-        **manifest, "group_by": "explicit_map",
-        "group_key_map": {i: "the_one_group" for i in date_ids},
-    })
+    ts.replace(split_manifest_key(manifest_dir), _collapse_date_to_one_group(manifest, DATES[0]))
 
     cfg = {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
