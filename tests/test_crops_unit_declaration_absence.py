@@ -89,9 +89,9 @@ def test_a_count_valued_delivery_ships_with_a_blank_units_column(tmp_path: Path)
     that is a tally."""
     results = [
         {"plant_id": "PLANT_001", "value": 7, "observations": 3, "value_key": "detections_count",
-         "measurement_document": "operating_point"},
+         "plant_attribution": "image", "measurement_document": "operating_point"},
         {"plant_id": "PLANT_014", "value": 2, "observations": 1, "value_key": "detections_count",
-         "measurement_document": "operating_point"},
+         "plant_attribution": "image", "measurement_document": "operating_point"},
     ]
     out_path = tmp_path / "counts.csv"
     export_aggregated_csv(results, str(out_path), delivered_phenotype="stem_count",
@@ -107,7 +107,7 @@ def test_a_dimensional_value_ships_for_a_trait_crops_yml_declares_no_unit_for(tm
     that the measurement is refused: an mm-keyed area still resolves to its own squared label. A
     stand-in unit in the mapping would turn this legitimate delivery into a mismatch refusal."""
     results = [{"plant_id": "PLANT_001", "value": 812.5, "observations": 2,
-                "value_key": "area_mm2", "measurement_document": "operating_point"}]
+                "value_key": "area_mm2", "plant_attribution": "image", "measurement_document": "operating_point"}]
     assert _resolve_units("plant_surface_area", results, "operating_point") == ("mm2", "mm")
 
     out_path = tmp_path / "area.csv"
@@ -122,7 +122,7 @@ def test_a_declared_unit_still_cross_checks_the_value_keys_own_unit(tmp_path: Pa
     """The absence rule above must not cost the check it exists to serve: a trait crops.yml does
     declare a unit for still refuses a value whose own key implies a different one."""
     results = [{"plant_id": "PLANT_001", "value": 3.4, "observations": 1,
-                "value_key": "thickness_cm", "measurement_document": "operating_point"}]
+                "value_key": "thickness_cm", "plant_attribution": "image", "measurement_document": "operating_point"}]
     assert crops_units()["bark_thickness"] == "mm"
     with pytest.raises(ValueError, match="declared units"):
         export_aggregated_csv(results, str(tmp_path / "mismatch.csv"),

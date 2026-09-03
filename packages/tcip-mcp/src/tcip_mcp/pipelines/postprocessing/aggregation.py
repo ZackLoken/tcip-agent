@@ -58,7 +58,11 @@ def aggregate_per_plant(
     produced it. Both are carried onto the per-plant summary and a plant whose own images disagree on
     either refuses (see :func:`_agreed_statement_field`): a statement that disagrees with itself is
     not a statement, and ``export_aggregated_csv`` reads these fields to decide which validity
-    dimension it reconciles, never a caller-supplied task string.
+    dimension it reconciles, never a caller-supplied task string. A record's own ``plant_attribution``
+    (the granularity objects were attributed to plants at, e.g. ``plant_mapping.MappingBuild``'s
+    ``"image"`` or ``orthomosaic_mapping.DetectionAssignment``'s ``"detection"``) is carried the
+    same disagreement-refusing way, never collapsed to ``"mixed"`` the way ``plant_id_source`` is,
+    since a granularity cannot mix.
 
     Args:
         image_results: List of dicts, each with at least an 'image' key, a plant_id_key or a value
@@ -102,6 +106,8 @@ def aggregate_per_plant(
         summary["measurement_document"] = _agreed_statement_field(
             items, "measurement_document", plant_id)
         summary["scale_document"] = _agreed_statement_field(items, "scale_document", plant_id)
+        summary["plant_attribution"] = _agreed_statement_field(
+            items, "plant_attribution", plant_id)
         sources = {r["plant_id_source"] for r in items if r.get("plant_id_source") is not None}
         if sources:
             summary["plant_id_source"] = sources.pop() if len(sources) == 1 else "mixed"
@@ -287,12 +293,13 @@ def export_aggregated_csv(
     images_dir: str | None = None,
     scale_capture_id: str | None = None,
     acknowledge_unvalidated: bool = False,
+    door: str = "export_aggregated_csv",
 ) -> tuple[str, dict]:
     """Export per-plant aggregated results to a delivery CSV.
 
     Follows the per-plant CSV schema from the delivery skill, the ``fieldnames`` list below is the
     authority for it: plant_id, crop, delivered_phenotype, value, units, value_key, measurement_document,
-    scale_document, confidence, n_images, pipeline_version, plant_id_source,
+    scale_document, confidence, n_images, pipeline_version, plant_id_source, plant_attribution,
     plant_id_distance_m_max, then ``_PROVENANCE_COLUMNS`` (producer_model_sha256,
     producing_experiment_id, produced_at, operating_point_validated, unvalidated_dimensions,
     validation_record) so the final per-plant value is traceable to the exact model that produced
@@ -391,6 +398,10 @@ def export_aggregated_csv(
         scale_capture_id: The capture this delivery's physical scale must match, when the scale is
             capture-scoped; a bucket's sidecar recording a different capture floors to unvalidated.
         acknowledge_unvalidated: Write an unvalidated phenotype as a flagged provisional CSV.
+        door: The name the recorded delivery event carries. A caller with its own door name (e.g.
+            ``deliver_orthomosaic_plant_counts``, which composes this CSV rather than calling it
+            directly) passes it here instead of also recording its own event for the same export,
+            which would otherwise record one CSV as two shipments.
 
     Returns:
         ``(path, tail)``: the path to the written CSV, and the ``_PROVENANCE_COLUMNS`` tail
@@ -422,6 +433,7 @@ def export_aggregated_csv(
     )
 
     measurement_document, scale_document = _resolve_statement(results, MEASUREMENT_DOCUMENTS)
+    plant_attribution = _resolve_plant_attribution(results)
     units, linear_basis = _resolve_units(delivered_phenotype, results, measurement_document)
 
     from tcip_mcp.traits import crops_units
@@ -547,7 +559,7 @@ def export_aggregated_csv(
         "plant_id", "crop", "delivered_phenotype", "value", "units", "value_key",
         "measurement_document", "scale_document",
         "confidence", "n_images", "pipeline_version",
-        "plant_id_source", "plant_id_distance_m_max",
+        "plant_id_source", "plant_attribution", "plant_id_distance_m_max",
     ] + _PROVENANCE_COLUMNS
 
     with open(output_path, "w", newline="") as f:
@@ -568,11 +580,12 @@ def export_aggregated_csv(
                 "n_images": r.get("observations", 0),
                 "pipeline_version": pipeline_version,
                 "plant_id_source": r.get("plant_id_source", ""),
+                "plant_attribution": plant_attribution,
                 "plant_id_distance_m_max": r.get("plant_id_distance_m_max", ""),
                 **stamp,
             })
 
-    record_delivery_binding_event("export_aggregated_csv", output_path, pred_dirs,
+    record_delivery_binding_event(door, output_path, pred_dirs,
                                   operating_point_recon["bindings"],
                                   measurement_documents=[measurement_document],
                                   scale_document=scale_document,
@@ -618,3 +631,21 @@ def _resolve_statement(
             f"{scale_document!r}."
         )
     return measurement_document, scale_document
+
+
+def _resolve_plant_attribution(results: list[dict]) -> str:
+    """The delivery's own ``plant_attribution``, read off ``results`` the way
+    :func:`_resolve_statement` reads ``measurement_document``: every row states one, and they
+    agree. Never collapses to ``"mixed"`` on disagreement (:func:`aggregate_per_plant` already
+    refuses there, per plant), since a granularity is a statement, not an identity signal that can
+    legitimately vary within one delivery."""
+    values = {r.get("plant_attribution") for r in results}
+    if len(values) > 1 or None in values:
+        raise ValueError(
+            f"export_aggregated_csv: results disagree on or omit plant_attribution "
+            f"({sorted(str(v) for v in values)}); every record must state the granularity "
+            "objects were attributed to plants at."
+        )
+    value = values.pop()
+    assert isinstance(value, str)
+    return value

@@ -193,7 +193,8 @@ def plant_id_fn(image_path: str) -> str | None:
 image_results = [
     {**r, "image": r["image"],
      "plant_id_source": (a := by_stem.get(Path(r["image"]).stem)) and a.source,
-     "plant_id_distance_m": a and a.distance_m}
+     "plant_id_distance_m": a and a.distance_m,
+     "plant_attribution": build.plant_attribution}
     for r in read_stage_b_preds_as_image_results("stage_b_preds")  # your own per-image count reader
 ]
 

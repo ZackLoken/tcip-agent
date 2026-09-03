@@ -30,6 +30,8 @@ report it as blank rather than omitting the row.
 - `unvalidated_dimensions`:
 - `plant_mapping_sha256` (phenology deliveries only):
 - `captures_unverified` / `plant_csvs_unverified` (phenology deliveries only):
+- `dates_delivered` / `images_unattributed` (phenology deliveries only):
+- `plant_attribution`:
 
 ## What is wrong
 
