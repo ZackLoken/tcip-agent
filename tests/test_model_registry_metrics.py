@@ -1,18 +1,18 @@
 """Registry metric default (``val_map50``, not the never-present ``mAP``) is not silently applied:
-``select_best_model`` requires an explicit ``metric``, since ``val_map50`` is a labeled
+``rank_registered_models`` requires an explicit ``metric``, since ``val_map50`` is a labeled
 comparability metric, not necessarily what governs a trait's phenotype. Also covers the "no model
 has metric X" vs "no models" distinction, lower-is-better ranking, and registered metrics sourced
 from the checkpoint's own epoch rather than the last training epoch."""
 
 
-def test_select_best_model_requires_explicit_metric(tmp_path):
+def test_rank_registered_models_requires_explicit_metric(tmp_path):
     from tcip_mcp.model_registry import ModelRegistry
-    from tcip_mcp.tools.model_tools import select_best_model
+    from tcip_mcp.tools.model_tools import rank_registered_models
 
     project = str(tmp_path)
 
     # Empty registry → the "no models" message, even with no metric passed.
-    assert select_best_model(project)["error"] == "No models registered"
+    assert rank_registered_models(project)["error"] == "No models registered"
 
     reg = ModelRegistry(project)
     ckpt = tmp_path / "m.pt"
@@ -23,7 +23,7 @@ def test_select_best_model_requires_explicit_metric(tmp_path):
                        metrics_source="trainer")
 
     # A populated registry with no metric → required-metric error, not a silent pick.
-    res = select_best_model(project)
+    res = rank_registered_models(project)
     assert "metric is required" in res["error"]
     assert res["available_metrics"] == [
         {"metric": "val_map50", "role": "comparability_only", "direction": "higher",
@@ -32,7 +32,7 @@ def test_select_best_model_requires_explicit_metric(tmp_path):
     assert res["n_models"] == 2
 
     # An explicit, legitimate metric still succeeds: a rail must admit valid work.
-    res = select_best_model(project, metric="val_map50")
+    res = rank_registered_models(project, metric="val_map50")
     assert res["name"] == "b"
     assert res["ranking_basis"] == "val_map50"
     assert res["higher_is_better"] is True
@@ -40,22 +40,22 @@ def test_select_best_model_requires_explicit_metric(tmp_path):
     assert res["excluded_unverified"] == []
 
     # A declared metric no model carries → a distinct error that lists what's actually available.
-    res = select_best_model(project, metric="val_loss")
+    res = rank_registered_models(project, metric="val_loss")
     assert "No registered model has metric" in res["error"]
     assert res["available_metrics"][0]["metric"] == "val_map50"
     assert res["n_models"] == 2
 
     # A metric with no declared ranking direction → refused before ever looking for it.
-    res = select_best_model(project, metric="val_map99")
+    res = rank_registered_models(project, metric="val_map99")
     assert "no declared ranking direction" in res["error"]
     assert res["available_metrics"][0]["metric"] == "val_map50"
 
 
-def test_select_best_model_excludes_unverified_entries_by_default(tmp_path):
+def test_rank_registered_models_excludes_unverified_entries_by_default(tmp_path):
     """A caller-asserted metric is not silently trusted: it is ranked only when the caller
     explicitly says to consider unverified numbers."""
     from tcip_mcp.model_registry import ModelRegistry
-    from tcip_mcp.tools.model_tools import select_best_model
+    from tcip_mcp.tools.model_tools import rank_registered_models
 
     project = str(tmp_path)
     reg = ModelRegistry(project)
@@ -64,22 +64,22 @@ def test_select_best_model_excludes_unverified_entries_by_default(tmp_path):
     reg.register_model("asserted", str(ckpt), {}, metrics={"val_map50": 0.99}, tags=[],
                        metrics_source="caller")
 
-    res = select_best_model(project, metric="val_map50")
+    res = rank_registered_models(project, metric="val_map50")
     assert "unverified" in res["error"]
     assert res["excluded_unverified"] == [{"name": "asserted", "metrics_source": "caller"}]
 
-    res = select_best_model(project, metric="val_map50", include_unverified=True)
+    res = rank_registered_models(project, metric="val_map50", include_unverified=True)
     assert res["name"] == "asserted"
     assert res["unverified_included"] is True
     assert res["excluded_unverified"] == []
 
 
-def test_select_best_model_refusals_name_no_argument_a_breeder_would_not_pass(tmp_path):
+def test_rank_registered_models_refusals_name_no_argument_a_breeder_would_not_pass(tmp_path):
     """The three refusals a breeder can reach through the GUI (no metric, an undeclared
     direction, every carrier unverified) read as plain sentences: none of them names this
     tool's own parameters, since a breeder using the rank control never calls it directly."""
     from tcip_mcp.model_registry import ModelRegistry
-    from tcip_mcp.tools.model_tools import select_best_model
+    from tcip_mcp.tools.model_tools import rank_registered_models
 
     project = str(tmp_path)
     reg = ModelRegistry(project)
@@ -88,9 +88,9 @@ def test_select_best_model_refusals_name_no_argument_a_breeder_would_not_pass(tm
     reg.register_model("asserted", str(ckpt), {}, metrics={"val_map50": 0.99}, tags=[],
                        metrics_source="caller")
 
-    no_metric = select_best_model(project)["error"]
-    no_direction = select_best_model(project, metric="val_map99")["error"]
-    all_unverified = select_best_model(project, metric="val_map50")["error"]
+    no_metric = rank_registered_models(project)["error"]
+    no_direction = rank_registered_models(project, metric="val_map99")["error"]
+    all_unverified = rank_registered_models(project, metric="val_map50")["error"]
 
     assert no_metric == (
         "metric is required: there is no default (a labeled comparability metric like "
@@ -111,7 +111,7 @@ def test_select_best_model_refusals_name_no_argument_a_breeder_would_not_pass(tm
         assert "higher_is_better" not in text
         assert "include_unverified" not in text
         assert "available_metrics" not in text
-        assert "select_best_model" not in text
+        assert "rank_registered_models" not in text
 
 
 def test_register_model_refuses_nonexistent_checkpoint(tmp_path):

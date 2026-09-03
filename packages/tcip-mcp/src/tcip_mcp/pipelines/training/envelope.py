@@ -325,7 +325,7 @@ class TrainContext:
         A ``metrics`` key in ``state`` becomes the registered entry's ``metrics``, with
         ``metrics_source="training_source"``: the platform wrote it into the artifact but never
         measured it, since it is whatever this loop chose to put there. Registering by
-        ``metrics_source`` this way ranks only on request (``select_best_model(...,
+        ``metrics_source`` this way ranks only on request (``rank_registered_models(...,
         include_unverified=True)``), never by default alongside the platform's own
         ``default_train`` runs.
 

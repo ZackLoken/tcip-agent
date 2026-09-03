@@ -145,7 +145,7 @@ def test_consolidated_tools_present_and_removed_absent():
         "inspect_project", "read_annotations",
         "overlay_reference_grid", "capture_live_canvas",
         # Renamed tools: the new names must register.
-        "preflight_config", "select_best_model", "score_predictions",
+        "preflight_config", "rank_registered_models", "score_predictions",
         "deliver_per_image_counts", "view_gui_state",
         # Method-neutral auto-labeling seam: no longer SAM-specific names.
         "propose_annotations", "stage_accepted_proposals", "segment_prompt",
@@ -184,7 +184,7 @@ def test_consolidated_tools_present_and_removed_absent():
         # Renamed: the docstring stopped denying its own verb under the old name.
         "accept_proposals",
         # Renamed tools: the old names must no longer register.
-        "focus", "make_splits", "tabulate_counts",
+        "focus", "make_splits", "tabulate_counts", "select_best_model",
     }
     assert not (removed & registered), f"removed tools still registered: {removed & registered}"
 

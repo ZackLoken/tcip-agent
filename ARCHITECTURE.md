@@ -789,7 +789,7 @@ Docstring is the function's docstring first line, verbatim.
 |---|---|---|---|
 | `register_model` | `model_tools.py:18` | yes | Register a trained model in the project model registry. |
 | `list_registered_models` | `model_tools.py:78` | yes | List models in the project registry. |
-| `select_best_model` | `model_tools.py:126` | yes | Get the best registered model by an explicit metric, no default is assumed. |
+| `rank_registered_models` | `model_tools.py:126` | yes | Get the best registered model by an explicit metric, no default is assumed. |
 
 ### operationalization_tools.py (1 tool)
 
@@ -1701,7 +1701,7 @@ it: `ModelRegistry.list_models`, line 826; `get_model`, line 837; `best_model`, 
 `verify_model`, line 800. `best_model` takes `metric_key` and `higher_is_better` as required
 keywords, no default and no name heuristic, and by default ranks only entries whose
 `metrics_source` is `"trainer"` (`include_unverified=True` also ranks the rest). The
-`select_best_model` tool (`tools/model_tools.py:123`) resolves `higher_is_better` from
+`rank_registered_models` tool (`tools/model_tools.py:123`) resolves `higher_is_better` from
 `evaluation.HIGHER_IS_BETTER_BY_METRIC` (`pipelines/training/evaluation.py:62` (`HIGHER_IS_BETTER_BY_METRIC: dict[str, bool] = {`)) when the caller
 states none, the single declared-direction mapping `resolve_selection_metric`
 (`pipelines/training/generic_trainer.py`) also reads for the trainer's own checkpoint selection.

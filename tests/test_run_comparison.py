@@ -360,7 +360,7 @@ def test_all_training_runs_takes_the_disk_overlays_id_when_the_live_row_has_none
     assert row["experiment_id"] == "exp-disk-2"
 
 
-# ── experiment_ids filter: select_best_model / ModelRegistry.best_model ────────────────────
+# ── experiment_ids filter: rank_registered_models / ModelRegistry.best_model ────────────────────
 
 
 def _register(tmp_path, experiment_id: str, metric_value: float, *, metric: str = "val_map50"):
@@ -383,32 +383,32 @@ def test_available_metrics_excludes_an_unmarked_experiments_metric(tmp_path, mon
     """Before this change, experiment_ids narrowed nothing: available_metrics (and every other
     derivation) was built from the whole registry regardless of the marked set."""
     monkeypatch.chdir(tmp_path)
-    from tcip_mcp.tools.model_tools import select_best_model
+    from tcip_mcp.tools.model_tools import rank_registered_models
 
     _register(tmp_path, "exp-marked", 0.7, metric="val_map50")
     _register(tmp_path, "exp-other", 0.9, metric="val_loss")
 
-    res = select_best_model(str(tmp_path), experiment_ids=["exp-marked"])
+    res = rank_registered_models(str(tmp_path), experiment_ids=["exp-marked"])
     metric_names = {m["metric"] for m in res["available_metrics"]}
     assert metric_names == {"val_map50"}
     assert "val_loss" not in metric_names
 
 
-def test_select_best_model_ranks_only_within_the_marked_set(tmp_path, monkeypatch):
+def test_rank_registered_models_ranks_only_within_the_marked_set(tmp_path, monkeypatch):
     """Admits valid work: the filter selects within a marked set through entries
     register_model_from_experiment wrote on real completed runs."""
     monkeypatch.chdir(tmp_path)
-    from tcip_mcp.tools.model_tools import select_best_model
+    from tcip_mcp.tools.model_tools import rank_registered_models
 
     _register(tmp_path, "exp-low", 0.5)
     _register(tmp_path, "exp-high", 0.9)
 
-    res = select_best_model(str(tmp_path), metric="val_map50", experiment_ids=["exp-low"])
+    res = rank_registered_models(str(tmp_path), metric="val_map50", experiment_ids=["exp-low"])
     assert res["name"] == "exp-low"
     assert res["experiment_id"] == "exp-low"
 
 
-def test_select_best_model_names_the_marked_set_when_the_filter_empties_a_non_empty_listing(
+def test_rank_registered_models_names_the_marked_set_when_the_filter_empties_a_non_empty_listing(
     tmp_path, monkeypatch,
 ):
     """The registry is not empty (exp-other registered a checkpoint); the filter just names no
@@ -416,11 +416,11 @@ def test_select_best_model_names_the_marked_set_when_the_filter_empties_a_non_em
     text: "No models registered" would mislead a breeder into thinking nothing was ever
     trained, when the real gap is which experiments were marked."""
     monkeypatch.chdir(tmp_path)
-    from tcip_mcp.tools.model_tools import select_best_model
+    from tcip_mcp.tools.model_tools import rank_registered_models
 
     _register(tmp_path, "exp-other", 0.7)
 
-    res = select_best_model(str(tmp_path), metric="val_map50", experiment_ids=["exp-marked"])
+    res = rank_registered_models(str(tmp_path), metric="val_map50", experiment_ids=["exp-marked"])
     assert res["error"] == "none of the marked experiments registered a checkpoint"
 
 
@@ -459,7 +459,7 @@ def test_compare_best_route_404s_with_no_registry(client: TestClient, tmp_path, 
 def test_compare_best_route_404_leaves_the_registry_directory_uncreated(
     client: TestClient, tmp_path, monkeypatch,
 ):
-    """The route reads the index through read_registry_index before select_best_model's own
+    """The route reads the index through read_registry_index before rank_registered_models's own
     ModelRegistry construction ever runs, so a project with no registry never gets one just for
     asking whether it has one."""
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
@@ -510,7 +510,7 @@ def test_compare_best_route_422s_on_the_tools_own_error(client: TestClient, tmp_
 def test_compare_best_route_422s_when_the_marked_set_registered_nothing(
     client: TestClient, tmp_path, monkeypatch,
 ):
-    """select_best_model's own distinct text for an experiment_ids filter that empties a
+    """rank_registered_models's own distinct text for an experiment_ids filter that empties a
     non-empty listing, not the generic "No models registered" a project with an empty registry
     would carry."""
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))

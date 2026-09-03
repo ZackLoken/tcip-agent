@@ -25,7 +25,7 @@ import {
 } from "@/tabs/trainingMetrics";
 
 /** One marked run: the id the tab tracks it by, and the experiment id compare_experiments
- * and select_best_model take. Only a run with a resolved experiment_id is ever marked. */
+ * and rank_registered_models take. Only a run with a resolved experiment_id is ever marked. */
 export interface MarkedRun {
   runId: string;
   experimentId: string;
@@ -308,7 +308,7 @@ export function RunComparison({
       setRankResult(null);
       setRankedMetric("");
       // Branches on the tool's own refusal fields, never on matching the error text: the route
-      // now carries select_best_model's whole error dict as the refusal's structured detail.
+      // now carries rank_registered_models's whole error dict as the refusal's structured detail.
       if (e instanceof StructuredRefusalError) {
         setRankError(typeof e.detail.error === "string" ? e.detail.error : e.message);
         if (e.detail.all_unverified === true) setNeedsUnverifiedOption(true);

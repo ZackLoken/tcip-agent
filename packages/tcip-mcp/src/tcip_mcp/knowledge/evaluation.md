@@ -44,7 +44,7 @@ measurement-agreement/method-comparison contexts specifically because of that de
 | `compare_experiments` | Side-by-side metrics across experiments |
 | `get_experiment` (`view='lineage'`) | Trace data → model → predictions chain |
 | `list_experiments` | Enumerate every experiment on record, including one no other tool can rediscover (a calibration experiment, a pre-created one never launched) |
-| `select_best_model` | Rank registered models by a stated metric, direction and verification status |
+| `rank_registered_models` | Rank registered models by a stated metric, direction and verification status |
 
 `evaluate_model` accepts an optional `trait=`: when set, the trait's own governing criterion
 (not the IoU@0.5 comparability convention) determines detection counts/F1, matching what governs
@@ -59,7 +59,7 @@ state root (`register_model`, explicit mode for a foreign or bespoke checkpoint)
 refuses
 before loading an unregistered one.
 
-`select_best_model` requires a `metric` (no default) and resolves its ranking direction from
+`rank_registered_models` requires a `metric` (no default) and resolves its ranking direction from
 `evaluation.HIGHER_IS_BETTER_BY_METRIC` (keyed by the metric with any `val_` prefix stripped);
 `higher_is_better` overrides the declaration when a caller states one, required for a metric the
 declaration does not name. It ranks only `metrics_source="trainer"` entries by default (the
