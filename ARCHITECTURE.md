@@ -857,13 +857,13 @@ anything.
 | tool | line | audited | docstring first line |
 |---|---|---|---|
 | `preflight_config` | `training_tools.py:291` | yes | Validate a training configuration before launching. |
-| `launch_training` | `training_tools.py:702` | yes | Launch a training run in an isolated subprocess from a bespoke ``model_source`` builder. |
-| `check_training_status` | `training_tools.py:936` | yes | Check the status of a training run. |
-| `list_training_runs` | `training_tools.py:1079` | yes | List every training run this platform can currently account for. |
-| `cancel_training` | `training_tools.py:1313` | yes | Request graceful cancellation of a running training run. |
-| `run_hpo` | `training_tools.py:1885` | yes | Run hyperparameter optimization on Ray Tune, training each trial for real. |
-| `cancel_hpo` | `training_tools.py:2275` | yes | Request cooperative cancellation of a running HPO sweep. |
-| `evaluate_model` | `training_tools.py:2891` | yes | Evaluate a trained checkpoint on a (held-out) dataset and write test_results.json. |
+| `launch_training` | `training_tools.py:705` | yes | Launch a training run in an isolated subprocess from a bespoke ``model_source`` builder. |
+| `check_training_status` | `training_tools.py:939` | yes | Check the status of a training run. |
+| `list_training_runs` | `training_tools.py:1082` | yes | List every training run this platform can currently account for. |
+| `cancel_training` | `training_tools.py:1323` | yes | Request graceful cancellation of a running training run. |
+| `run_hpo` | `training_tools.py:1898` | yes | Run hyperparameter optimization on Ray Tune, training each trial for real. |
+| `cancel_hpo` | `training_tools.py:2293` | yes | Request cooperative cancellation of a running HPO sweep. |
+| `evaluate_model` | `training_tools.py:2944` | yes | Evaluate a trained checkpoint on a (held-out) dataset and write test_results.json. |
 
 ### vision_tools.py (3 tools)
 
@@ -1050,14 +1050,14 @@ registered at HEAD.
 | GET | `/configs` | `list_configs_route` | `routes/training.py:49` |
 | GET | `/configs/{experiment_id}/splits` | `list_split_choices_route` | `routes/training.py:57` |
 | POST | `/runs` | `relaunch_config_route` | `routes/training.py:76` |
-| GET | `/runs` | `list_runs_route` | `routes/training.py:124` |
-| GET | `/runs/{run_id}` | `get_run` | `routes/training.py:137` |
-| POST | `/runs/{run_id}/tensorboard` | `launch_run_tensorboard` | `routes/training.py:144` |
-| POST | `/runs/{run_id}/cancel` | `cancel_run_route` | `routes/training.py:185` |
-| POST | `/compare` | `compare_runs_route` | `routes/training.py:205` |
-| POST | `/compare/best` | `compare_best_route` | `routes/training.py:219` |
-| GET | `/metric-directions` | `metric_directions_route` | `routes/training.py:270` |
-| WS | `/runs/{run_id}/stream` (full path `/api/training/runs/{run_id}/stream`) | `training_stream_ws` | `routes/training.py:360` |
+| GET | `/runs` | `list_runs_route` | `routes/training.py:127` |
+| GET | `/runs/{run_id}` | `get_run` | `routes/training.py:140` |
+| POST | `/runs/{run_id}/tensorboard` | `launch_run_tensorboard` | `routes/training.py:147` |
+| POST | `/runs/{run_id}/cancel` | `cancel_run_route` | `routes/training.py:188` |
+| POST | `/compare` | `compare_runs_route` | `routes/training.py:208` |
+| POST | `/compare/best` | `compare_best_route` | `routes/training.py:222` |
+| GET | `/metric-directions` | `metric_directions_route` | `routes/training.py:273` |
+| WS | `/runs/{run_id}/stream` (full path `/api/training/runs/{run_id}/stream`) | `training_stream_ws` | `routes/training.py:363` |
 
 ### routes/tuning.py, prefix `/api/tuning` (10 routes)
 
@@ -2025,7 +2025,7 @@ config-only conflict and task checks (computed before any read, so an unreadable
 suppresses them) and the manifest-dependent checks (subject/attribute, date, images-root
 presence and movement, and an empty train/val side once narrowed to the run's own date).
 `preflight_config` calls both halves directly, in the same order, over a manifest it read
-itself; `training_tools.list_split_choices` (`training_tools.py:1138`), the relaunch data
+itself; `training_tools.list_split_choices` (`training_tools.py:1152`), the relaunch data
 picker's own reader wrapped by `GET /api/training/configs/{experiment_id}/splits`, calls the
 composed function per candidate manifest it read through the checked variant above, and builds
 each candidate's launch config through `training_tools.candidate_config_with_manifest`
@@ -2185,7 +2185,7 @@ Phase 3 verdict: single.
 
 Must agree: the writer's row shape is what the reader and the stream consumer expect.
 Side A: `packages/tcip-mcp/src/tcip_mcp/experiments.py:948` (`def log_metrics(`, the one writer; the trainer and the envelope hand rows to the context's epoch sink instead of opening the file).
-Side B: `packages/tcip-web/src/tcip_web/routes/training.py:320` (`read_log(key, after=cursor)`, the training stream's incremental tail, pushed as a `TrainingMetricFrame` per row) and `routes/tuning.py:660` (`read_log(trial_metrics_key`, answered in the shape `_metrics_common.metrics_response` builds).
+Side B: `packages/tcip-web/src/tcip_web/routes/training.py:323` (`read_log(key, after=cursor)`, the training stream's incremental tail, pushed as a `TrainingMetricFrame` per row) and `routes/tuning.py:660` (`read_log(trial_metrics_key`, answered in the shape `_metrics_common.metrics_response` builds).
 Phase 3 verdict: single. An HPO trial with no experiment record still appends to its own trial log, one declared site in the epoch sink, pending the HPO store migration.
 
 ## S09. Web job registries persisted to .tcip/state/<name>.json  <!-- queued: P5-325 unify -->
@@ -2433,7 +2433,7 @@ Phase 3 verdict: duplicated.
 
 Must agree: a bespoke train(ctx) callable is importable and accepts the TrainContext the envelope hands it.
 Side A: `packages/tcip-mcp/src/tcip_mcp/pipelines/training/envelope.py:434` (`training_source = run.config.get("training_source")`).
-Side B: `packages/tcip-mcp/src/tcip_mcp/tools/training_tools.py:351` (`training_source = config.get("training_source")`).
+Side B: `packages/tcip-mcp/src/tcip_mcp/tools/training_tools.py:352` (`training_source = normalized.get(TRAINING_SOURCE_KEY)`).
 Phase 3 verdict: duplicated.
 
 ## S43. dataset_source bespoke dataset seam
@@ -2496,7 +2496,7 @@ Phase 3 verdict: duplicated.
 ## S51. Training run stream WebSocket  <!-- queued: P5-297 unify -->
 
 Must agree: the status payload the MCP tool returns is renderable by the browser's training view.
-Side A: `packages/tcip-web/src/tcip_web/routes/training.py:359` (`@router.websocket("/runs/{run_id}/stream")`).
+Side A: `packages/tcip-web/src/tcip_web/routes/training.py:362` (`@router.websocket("/runs/{run_id}/stream")`).
 Side B: `packages/tcip-mcp/src/tcip_mcp/tools/training_tools.py` (`check_training_status` supplies the status payload).
 Phase 3 verdict: duplicated.
 
