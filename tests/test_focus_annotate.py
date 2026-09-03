@@ -1,4 +1,4 @@
-"""Tests for the focus(tab='annotate') MCP tool (drives the live Annotate tab).
+"""Tests for the focus_human_attention(tab='annotate') MCP tool (drives the live Annotate tab).
 
 The tool resolves the first *annotated* image and the mode its labels imply, then posts an
 ``annotate_focus`` event. With no GUI running, delivery is a soft miss (``delivered=False``),
@@ -12,7 +12,7 @@ from pathlib import Path
 from tcip_annotation import json_io
 from tcip_annotation.state import Annotation, BBox, Point, Polygon
 from tcip_mcp.dataset_layout import annotation_dir, image_dir
-from tcip_mcp.tools.gui_tools import focus
+from tcip_mcp.tools.gui_tools import focus_human_attention
 
 
 def _scene(root: Path, date: str, images: list[str]) -> None:
@@ -25,7 +25,7 @@ def _scene(root: Path, date: str, images: list[str]) -> None:
 def _label(root: Path, subject: str, date: str, task: str, stem: str, count: int) -> None:
     # Write the one per-image JSON label (all subjects, name-based). count==0 writes a present
     # {"annotations": []} (confirmed negative); count>0 writes `count` shapes of `subject`, with the
-    # geometry `task` names ('segment' -> polygon, 'point' -> point, else box), so focus infers the
+    # geometry `task` names ('segment' -> polygon, 'point' -> point, else box), so focus_human_attention infers the
     # mode from the frame's own geometry.
     d = Path(annotation_dir(root, date))
     geoms = {"segment": Polygon([[(10.0, 10.0), (20.0, 10.0), (20.0, 20.0)]]),
@@ -46,7 +46,7 @@ def test_focus_annotate_lands_on_first_annotated_polygon_frame(tmp_path: Path) -
     _label(root, "bush", date, "segment", "IMG_0002", 1)
     _label(root, "bush", date, "segment", "IMG_0003", 1)
 
-    res = focus("annotate", str(root), str(root), "bush", date)
+    res = focus_human_attention("annotate", str(root), str(root), "bush", date)
 
     assert "error" not in res
     assert res["image_index"] == 2  # first non-empty label
@@ -72,7 +72,7 @@ def test_focus_annotate_scopes_annotated_to_the_requested_subject(tmp_path: Path
     _label(root, "catkin", date, "detect", "IMG_0002", 1)
     _label(root, "leaf", date, "segment", "IMG_0001", 1)
 
-    res = focus("annotate", str(root), str(root), "leaf", date)
+    res = focus_human_attention("annotate", str(root), str(root), "leaf", date)
     assert res["image_index"] == 1  # leaf's frame, not catkin's
     assert res["mode"] == "polygon"  # from leaf's polygon geometry on that frame
     assert res["subject"] == "leaf"
@@ -89,7 +89,7 @@ def test_focus_annotate_mode_follows_the_explicit_index_not_the_first_frame(tmp_
     _label(root, "bush", date, "segment", "IMG_0002", 1)
     _label(root, "bush", date, "detect", "IMG_0007", 1)
 
-    res = focus("annotate", str(root), str(root), "bush", date, image_index=7)
+    res = focus_human_attention("annotate", str(root), str(root), "bush", date, image_index=7)
     assert res["image_index"] == 7
     assert res["mode"] == "box"  # from frame 7's detect label, not frame 2's segment
     assert res["subject"] == "bush"
@@ -107,7 +107,7 @@ def test_focus_annotate_index_matches_frontend_listing_ignoring_non_files(tmp_pa
     (idir / "IMG_0002.JPG").write_bytes(b"x")
     _label(root, "bush", date, "segment", "IMG_0002", 1)
 
-    res = focus("annotate", str(root), str(root), "bush", date)
+    res = focus_human_attention("annotate", str(root), str(root), "bush", date)
     assert res["n_images"] == 2  # the directory is not counted
     assert res["image"] == "IMG_0002.JPG"
     assert res["image_index"] == 1  # index into [IMG_0000, IMG_0002]
@@ -120,7 +120,7 @@ def test_focus_annotate_infers_box_mode_from_detect_labels(tmp_path: Path) -> No
     _scene(root, date, imgs)
     _label(root, "catkin", date, "detect", "IMG_0001", 1)
 
-    res = focus("annotate", str(root), str(root), "catkin", date)
+    res = focus_human_attention("annotate", str(root), str(root), "catkin", date)
     assert res["image_index"] == 1
     assert res["mode"] == "box"
 
@@ -137,7 +137,7 @@ def test_focus_annotate_sends_a_point_only_frame_in_point_mode(tmp_path: Path) -
     _scene(root, date, imgs)
     _label(root, "catkin", date, "point", "IMG_0001", 2)
 
-    res = focus("annotate", str(root), str(root), "catkin", date)
+    res = focus_human_attention("annotate", str(root), str(root), "catkin", date)
     assert "error" not in res
     assert res["image_index"] == 1
     assert res["mode"] == "point"
@@ -150,7 +150,7 @@ def test_focus_annotate_accepts_an_explicit_point_mode(tmp_path: Path) -> None:
     _scene(root, date, ["IMG_0000.JPG"])
     _label(root, "catkin", date, "detect", "IMG_0000", 1)
 
-    res = focus("annotate", str(root), str(root), "catkin", date, mode="point")
+    res = focus_human_attention("annotate", str(root), str(root), "catkin", date, mode="point")
     assert "error" not in res
     assert res["mode"] == "point"  # honored over the frame's own box geometry
 
@@ -161,7 +161,7 @@ def test_focus_annotate_still_rejects_a_mode_the_gui_has_no_tool_for(tmp_path: P
     _scene(root, date, ["IMG_0000.JPG"])
     _label(root, "catkin", date, "detect", "IMG_0000", 1)
 
-    res = focus("annotate", str(root), str(root), "catkin", date, mode="lasso")
+    res = focus_human_attention("annotate", str(root), str(root), "catkin", date, mode="lasso")
     assert "error" in res and "lasso" in res["error"]
 
 
@@ -175,7 +175,7 @@ def test_focus_annotate_rejects_a_mode_the_gui_has_no_tool_for_naming_the_real_v
     _scene(root, date, ["IMG_0000.JPG"])
     _label(root, "catkin", date, "detect", "IMG_0000", 1)
 
-    res = focus("annotate", str(root), str(root), "catkin", date, mode="lasso")
+    res = focus_human_attention("annotate", str(root), str(root), "catkin", date, mode="lasso")
     assert "error" in res
     for name in ANNOTATE_MODES:
         assert name in res["error"]
@@ -187,7 +187,7 @@ def test_focus_annotate_accepts_the_map_mode(tmp_path: Path) -> None:
     _scene(root, date, ["IMG_0000.JPG"])
     _label(root, "catkin", date, "detect", "IMG_0000", 1)
 
-    res = focus("annotate", str(root), str(root), "catkin", date, mode="map")
+    res = focus_human_attention("annotate", str(root), str(root), "catkin", date, mode="map")
     assert "error" not in res
     assert res["mode"] == "map"
 
@@ -201,7 +201,7 @@ def test_focus_annotate_empty_label_is_not_a_focus_target(tmp_path: Path) -> Non
     _label(root, "bush", date, "segment", "IMG_0000", 0)  # empty negative ({"annotations": []})
     _label(root, "bush", date, "segment", "IMG_0002", 1)
 
-    res = focus("annotate", str(root), str(root), "bush", date)
+    res = focus_human_attention("annotate", str(root), str(root), "bush", date)
     assert res["image_index"] == 2  # skipped the empty-negative frame 0
     assert res["n_annotated"] == 1
 
@@ -213,7 +213,7 @@ def test_focus_annotate_explicit_mode_and_index_override(tmp_path: Path) -> None
     _scene(root, date, imgs)
     _label(root, "bush", date, "segment", "IMG_0003", 1)
 
-    res = focus("annotate", str(root), str(root), "bush", date, mode="box", image_index=1)
+    res = focus_human_attention("annotate", str(root), str(root), "bush", date, mode="box", image_index=1)
     assert res["image_index"] == 1  # explicit override
     assert res["mode"] == "box"  # explicit override
 
@@ -221,7 +221,7 @@ def test_focus_annotate_explicit_mode_and_index_override(tmp_path: Path) -> None
 def test_focus_annotate_no_images(tmp_path: Path) -> None:
     root = tmp_path / "proj"
     (Path(image_dir(root, "2026-03-02"))).mkdir(parents=True)
-    res = focus("annotate", str(root), str(root), "bush", "2026-03-02")
+    res = focus_human_attention("annotate", str(root), str(root), "bush", "2026-03-02")
     assert "error" in res
 
 
@@ -238,7 +238,7 @@ def test_focus_annotate_navigates_past_an_unreadable_label_on_another_frame(tmp_
     bad.write_bytes(b"{not json")
     _label(root, "bush", date, "segment", "IMG_0002", 1)
 
-    res = focus("annotate", str(root), str(root), "bush", date)
+    res = focus_human_attention("annotate", str(root), str(root), "bush", date)
     assert "error" not in res
     assert res["image"] == "IMG_0002.JPG"
     assert res["unreadable"] == ["IMG_0000.JPG"]
@@ -257,6 +257,6 @@ def test_focus_annotate_refuses_when_the_landed_frame_itself_is_unreadable(tmp_p
     bad.write_bytes(b"{not json")
     _label(root, "bush", date, "segment", "IMG_0002", 1)
 
-    res = focus("annotate", str(root), str(root), "bush", date, image_index=0)
+    res = focus_human_attention("annotate", str(root), str(root), "bush", date, image_index=0)
     assert "error" in res
     assert str(bad) in res["error"]

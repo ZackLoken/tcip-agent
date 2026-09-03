@@ -11,8 +11,8 @@ each side would be two stores wearing one name, and whichever imported first wou
 the documents land.
 
 The tab vocabulary (``ActiveTab``/``TAB_NAMES``) lives here for the same reason: the agent's own
-``focus`` tool takes a tab name over the wire, so the vocabulary is the protocol's, and
-``tcip_web.state`` imports it rather than declaring its own.
+``focus_human_attention`` tool takes a tab name over the wire, so the vocabulary is the protocol's,
+and ``tcip_web.state`` imports it rather than declaring its own.
 
 Port discovery order:
   1. The port record under the workspace root: the port actually bound, so a substituted port
@@ -202,7 +202,7 @@ AnnotateMode = Literal["box", "polygon", "point", "map"]
 """The Annotate canvas's tool modes: the vocabulary ``tcip_web.state.GuiState.mode`` holds. The
 first three draw; ``map`` navigates the coverage lattice (a click opens a cell's tile) and
 authors nothing. Declared here, not in ``tcip_web``, for the same reason as ``ActiveTab``: the
-agent's own ``focus`` tool validates a caller-supplied mode against this vocabulary and cannot
+agent's own ``focus_human_attention`` tool validates a caller-supplied mode against this vocabulary and cannot
 import ``tcip_web``, so the vocabulary is the protocol's, and ``tcip_web.state`` imports it."""
 
 ANNOTATE_MODES = get_args(AnnotateMode)

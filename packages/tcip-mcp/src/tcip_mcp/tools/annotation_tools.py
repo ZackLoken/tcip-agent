@@ -1,6 +1,6 @@
 """Annotation tools: load, save, and evaluate name-based annotations via MCP.
 
-The GUI-driving tools (push_panel_data, focus) live in gui_tools.py; the proposal-workflow tools
+The GUI-driving tools (push_panel_data, focus_human_attention) live in gui_tools.py; the proposal-workflow tools
 (segment_prompt and stage_proposals, moved out of here, beside propose_annotations and
 stage_accepted_proposals, moved out of vision_tools.py) all live in proposal_tools.py. This
 module keeps label I/O and scoring.

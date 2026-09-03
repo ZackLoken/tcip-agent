@@ -139,7 +139,7 @@ def test_consolidated_tools_present_and_removed_absent():
 
     registered = set(list_registered_tools())
     for present in (
-        "make_splits", "focus", "get_experiment",
+        "make_splits", "focus_human_attention", "get_experiment",
         "register_model", "load_project_memory",
         # Renamed tools: the new names must register.
         "inspect_project", "read_annotations",
@@ -164,7 +164,7 @@ def test_consolidated_tools_present_and_removed_absent():
         "recommend_model", "list_components", "validate_model_spec",
         "validate_pipeline_spec", "compose_and_summarize",
         "get_worst_predictions", "run_pipeline",
-        # focus_annotate + focus_review merged into focus(tab=).
+        # focus_annotate + focus_review merged into focus_human_attention(tab=).
         "focus_annotate", "focus_review",
         # get_experiment_lineage merged into get_experiment(view='lineage').
         "get_experiment_lineage",
@@ -183,6 +183,8 @@ def test_consolidated_tools_present_and_removed_absent():
         "export_results_csv", "get_active_context",
         # Renamed: the docstring stopped denying its own verb under the old name.
         "accept_proposals",
+        # Renamed tools: the old names must no longer register.
+        "focus",
     }
     assert not (removed & registered), f"removed tools still registered: {removed & registered}"
 

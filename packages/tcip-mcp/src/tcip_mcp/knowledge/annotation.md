@@ -190,13 +190,13 @@ The agent must never write ground truth the human hasn't seen. Stage proposals t
   fresh `<model>@r2` bucket (the response's `bucket` field is the one actually written), so a
   re-run never overwrites reviewed predictions. Pass `overwrite=True` to force in-place, which is
   still refused when verdicts exist.
-- `focus(tab='review', project_root, dataset_root, subject, date, model_name, image_index,
+- `focus_human_attention(tab='review', project_root, dataset_root, subject, date, model_name, image_index,
   detection_idx, filter_type, iou_threshold, conf_threshold)` drives the live Review tab straight to a model's
   predictions on a frame/detection, so the human sees exactly what you flagged (a false positive, a
-  missed catkin) without hunting. The Review analog of `focus(tab='annotate')`; a soft no-op if no
+  missed catkin) without hunting. The Review analog of `focus_human_attention(tab='annotate')`; a soft no-op if no
   GUI is running.
 
-Flow: run inference (or `stage_proposals`) → `focus(tab='review')` the human to the weakest/flagged
+Flow: run inference (or `stage_proposals`) → `focus_human_attention(tab='review')` the human to the weakest/flagged
 frames → they accept on the canvas → only then does it become GT. See
 `packages/tcip-mcp/src/tcip_mcp/knowledge/delivery.md` for what ships after sign-off.
 

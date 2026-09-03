@@ -295,15 +295,16 @@ def test_annotation_side_proposal_tools_have_one_home():
 
 
 def test_gui_driving_tools_have_one_home():
-    """``push_panel_data``, ``focus`` and their private drivers ``_focus_annotate``/
-    ``_focus_review`` moved out of ``annotation_tools.py`` into ``tools/gui_tools.py``, with the
-    helpers only they used (``_subject_task``, ``_logical_image_names``). The elsewhere-scan
-    widens to ``tcip_web`` for this one check, not the default two packages: the GUI's own route
-    modules are where a by-name reader most plausibly re-derives image naming inline instead of
-    calling the shared one, the way ``routes/dataset.py`` once did before it was pointed at the
-    same primitive gui_tools calls."""
+    """``push_panel_data``, ``focus_human_attention`` and their private drivers
+    ``_focus_annotate``/``_focus_review`` moved out of ``annotation_tools.py`` into
+    ``tools/gui_tools.py``, with the helpers only they used (``_subject_task``,
+    ``_logical_image_names``). The private drivers keep their old names, since neither is the
+    tool. The elsewhere-scan widens to ``tcip_web`` for this one check, not the default two
+    packages: the GUI's own route modules are where a by-name reader most plausibly re-derives
+    image naming inline instead of calling the shared one, the way ``routes/dataset.py`` once
+    did before it was pointed at the same primitive gui_tools calls."""
     _assert_one_home(
-        {"push_panel_data", "focus", "_focus_annotate", "_focus_review",
+        {"push_panel_data", "focus_human_attention", "_focus_annotate", "_focus_review",
          "_subject_task", "_logical_image_names"},
         _module_path("tools/annotation_tools.py"),
         _module_path("tools/gui_tools.py"),
