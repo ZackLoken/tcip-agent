@@ -1,4 +1,4 @@
-"""The tcip_mcp.knowledge reader and the domain_knowledge tool built on it.
+"""The tcip_mcp.knowledge reader and the serve_domain_knowledge tool built on it.
 
 One canonical directory (`packages/tcip-mcp/src/tcip_mcp/knowledge/`) backs both the generated
 Claude Code skills and this tool; these tests hold the reader's contract (every document
@@ -139,17 +139,17 @@ def test_the_vocabulary_still_loads_through_the_relocated_path():
     assert records, "crops.yml must still load real trait records from the relocated path"
 
 
-def test_import_tcip_mcp_server_succeeds_and_registers_domain_knowledge():
+def test_import_tcip_mcp_server_succeeds_and_registers_serve_domain_knowledge():
     import tcip_mcp.server as server
 
-    assert "domain_knowledge" in server.list_registered_tools()
+    assert "serve_domain_knowledge" in server.list_registered_tools()
 
 
 def test_the_registered_tool_description_names_every_document():
     from tcip_mcp.server import mcp
 
     tools = {t.name: t for t in mcp._tool_manager.list_tools()}
-    tool = tools["domain_knowledge"]
+    tool = tools["serve_domain_knowledge"]
     assert (
         "Without a name it returns the index of names and descriptions below; with a name "
         "from the lines below it returns that document's content."
@@ -159,10 +159,10 @@ def test_the_registered_tool_description_names_every_document():
         assert document.description in tool.description
 
 
-def test_domain_knowledge_with_no_name_returns_the_index():
-    from tcip_mcp.tools.knowledge_tools import domain_knowledge
+def test_serve_domain_knowledge_with_no_name_returns_the_index():
+    from tcip_mcp.tools.knowledge_tools import serve_domain_knowledge
 
-    result = domain_knowledge()
+    result = serve_domain_knowledge()
     names = {d["name"] for d in result["documents"]}
     assert names == {d.name for d in list_documents()}
     for entry in result["documents"]:
@@ -170,17 +170,17 @@ def test_domain_knowledge_with_no_name_returns_the_index():
         assert not Path(entry["path"]).is_absolute(), f"{entry['name']}: path is not repo-relative"
 
 
-def test_domain_knowledge_with_a_name_returns_that_documents_body():
-    from tcip_mcp.tools.knowledge_tools import domain_knowledge
+def test_serve_domain_knowledge_with_a_name_returns_that_documents_body():
+    from tcip_mcp.tools.knowledge_tools import serve_domain_knowledge
 
-    result = domain_knowledge("delivery")
+    result = serve_domain_knowledge("delivery")
     assert result["name"] == "delivery"
     assert result["content"] == read_document("delivery")
 
 
-def test_domain_knowledge_with_an_unknown_name_names_the_available_names():
-    from tcip_mcp.tools.knowledge_tools import domain_knowledge
+def test_serve_domain_knowledge_with_an_unknown_name_names_the_available_names():
+    from tcip_mcp.tools.knowledge_tools import serve_domain_knowledge
 
-    result = domain_knowledge("not-a-real-document")
+    result = serve_domain_knowledge("not-a-real-document")
     assert "error" in result
     assert "delivery" in result["valid_names"]

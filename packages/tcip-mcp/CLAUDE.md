@@ -11,7 +11,7 @@ src/tcip_mcp/
   knowledge/      # the canonical domain-knowledge directory (the domain documents plus
                   # crops/<crop>.md, crops/crops.yml), read through __init__.py; source
                   # for the generated Claude Code, Codex and Antigravity skills, AGENTS.md's
-                  # generated block, and the domain_knowledge tool
+                  # generated block, and the serve_domain_knowledge tool
   tools/          # domain tools, one module per area: annotation, data, experiment, feedback,
                   # gui, inference, ingest, knowledge, meta, model, operationalization,
                   # orthomosaic, phenology, project, proposal, training, vision
@@ -45,7 +45,7 @@ src/tcip_mcp/
   audit.py, project_status.py, web_client.py
 ```
 
-Every MCP tool in `tools/` is decorated `@mcp.tool()` + `@audited`, except `domain_knowledge`,
+Every MCP tool in `tools/` is decorated `@mcp.tool()` + `@audited`, except `serve_domain_knowledge`,
 whose `@mcp.tool(description=...)` composes its client-visible description from the knowledge
 corpus at import time rather than leaving it as the bare docstring. A door demoted from tool
 status (run only through its own `scripts/` entry point) keeps `@audited` without registering.

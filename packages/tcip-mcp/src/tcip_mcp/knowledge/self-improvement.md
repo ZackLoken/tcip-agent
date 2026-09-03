@@ -18,7 +18,7 @@ becomes a platform change.
 
 This document is itself one of the platform's domain knowledge documents. Claude Code reaches it
 as a generated skill; a client without generated skills reaches the identical text through the
-`domain_knowledge` tool.
+`serve_domain_knowledge` tool.
 
 The loop is three live, audited tools, no separate journal file:
 
