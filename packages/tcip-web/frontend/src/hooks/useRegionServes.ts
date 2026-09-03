@@ -2,11 +2,13 @@
  * The cell-aligned region serves the current viewport needs when the user zooms past the base
  * bitmap's resolution on a large raster. Fetch plans come from planRegionFetches (resolution
  * tiers plus the canvas-derived fan-out caps) against the zoom-independent region-serving grid
- * (`servingCells`), never the coverage lattice: the two lattices are unrelated. A served serving
- * cell marks as served at native every coverage cell (`coverageCells`) that sits fully inside
- * it, so the coverage tracker's own facts stay keyed to the lattice the breeder actually sees.
- * A band-composited serve (a bands param in force, server-derived stretch) takes no region
- * overlay: base and overlay must never be two renderings of the same pixels.
+ * (`servingCells`), never the coverage lattice: the two lattices are unrelated. A coverage cell
+ * (`coverageCells`) marks as served at native once every serving cell that intersects it has
+ * itself been served at native, so a coverage cell larger than a serving cell (a low set zoom)
+ * still marks, never only one sized to fit inside a single serving cell, and the coverage
+ * tracker's own facts stay keyed to the lattice the breeder actually sees. A band-composited
+ * serve (a bands param in force, server-derived stretch) takes no region overlay: base and
+ * overlay must never be two renderings of the same pixels.
  */
 
 import { useRef } from "react";
@@ -14,8 +16,8 @@ import { useRef } from "react";
 import { api } from "@/api/client";
 import type { CanvasRegion } from "@/components/Canvas/CanvasStage";
 import {
+  cellsIntersecting,
   planRegionFetches,
-  rectFullyInside,
   servedCellAtNative,
   type GridCell,
 } from "@/lib/coverage";
@@ -39,6 +41,15 @@ export function useRegionServes(args: {
     signature: "",
     regions: [],
   });
+  // Serving cells (by name) served at native resolution so far for the open image: reset
+  // whenever the image changes, since the serving grid itself is per-image.
+  const nativeServingRef = useRef<{ imagePath: string | null; served: Set<string> }>({
+    imagePath: null,
+    served: new Set(),
+  });
+  if (nativeServingRef.current.imagePath !== args.imagePath) {
+    nativeServingRef.current = { imagePath: args.imagePath, served: new Set() };
+  }
 
   const install = (signature: string, regions: CanvasRegion[]): CanvasRegion[] => {
     if (prevRef.current.signature === signature) return prevRef.current.regions;
@@ -81,6 +92,8 @@ export function useRegionServes(args: {
   const imagePath = args.imagePath;
   const onServed = args.onCellServedAtNative;
   const coverageCells = args.coverageCells;
+  const servingCells = args.servingCells;
+  const nativeServing = nativeServingRef.current.served;
   const regions = plan.map((p) => {
     const { cell } = p;
     const url = api.images.url(imagePath, {
@@ -100,8 +113,13 @@ export function useRegionServes(args: {
       height: cell.y1 - cell.y0,
       onLoaded: (facts: LoadedImage) => {
         if (!facts.ok || !servedCellAtNative(cell, facts.servedSize)) return;
+        if (nativeServing.has(cell.name)) return;
+        nativeServing.add(cell.name);
         for (const covCell of coverageCells) {
-          if (rectFullyInside(covCell, cell)) onServed?.(covCell.name);
+          const intersecting = cellsIntersecting(servingCells, covCell);
+          if (intersecting.length > 0 && intersecting.every((sc) => nativeServing.has(sc.name))) {
+            onServed?.(covCell.name);
+          }
         }
       },
     };

@@ -29,13 +29,16 @@ export interface CoverageGridState {
   /** The grid fetch's own refusal, or null; a failure must read as an error, never as "no
    *  grid needed here". */
   error: string | null;
-  /** True while the fetch for the open image has not yet settled (neither a grid, a reason, nor
-   *  an error has landed). Tells "still unknown" apart from "settled, and there is no lattice". */
-  pending: boolean;
   /** True once the fetch has answered (a grid, a reason, or an error), false while still
-   *  pending: the Map fallback and the chrome tell "not yet answered" from "no lattice". */
+   *  unknown: the Map fallback and the chrome tell "not yet answered" from "no lattice". */
   settled: boolean;
-  /** Ignore this image's already-worked lattice and derive fresh at the current zoom. */
+  /** Refetch the grid at the currently open image/subject, keeping any already-worked lattice
+   *  (``rederive`` stays false): a set-zoom write calls this, so a worked image's own lattice
+   *  survives the change and ``freshDerivationDiffers`` is what offers a re-derive. */
+  refetch: () => void;
+  /** Ignore this image's already-worked lattice and derive fresh at the current zoom, for
+   *  exactly the one fetch this triggers: consumed by that fetch alone, never sticky, and
+   *  cleared outright by a change of image or subject. */
   rederiveLattice: () => void;
 }
 
@@ -75,7 +78,14 @@ export function useCoverageGrid(args: {
   const [state, setState] = useState<FetchedState>(EMPTY_FETCHED);
   const fetchingKeyRef = useRef<string | null>(null);
   const viewportRef = useRef<{ w: number; h: number } | null>(null);
-  const [rederiveNonce, setRederiveNonce] = useState(0);
+  const [refetchNonce, setRefetchNonce] = useState(0);
+  // One-shot: true only for the fetch a rederiveLattice() press triggers, consumed the moment
+  // that fetch fires, never sticky across later fetches or a plain refetch().
+  const rederiveOnceRef = useRef(false);
+
+  useEffect(() => {
+    rederiveOnceRef.current = false;
+  }, [imagePath, subject]);
 
   useEffect(() => {
     const path = imagePath;
@@ -91,9 +101,11 @@ export function useCoverageGrid(args: {
         return;
       }
       viewportRef.current = host;
-      const key = `${path}|${subject ?? ""}|${date ?? ""}|${datasetRoot ?? ""}|${rederiveNonce}`;
+      const key = `${path}|${subject ?? ""}|${date ?? ""}|${datasetRoot ?? ""}|${refetchNonce}`;
       if (fetchingKeyRef.current === key) return;
       fetchingKeyRef.current = key;
+      const rederive = rederiveOnceRef.current;
+      rederiveOnceRef.current = false;
       void api.coverage
         .grid(path, {
           subject,
@@ -101,7 +113,7 @@ export function useCoverageGrid(args: {
           datasetRoot,
           viewportW: Math.round(host.w),
           viewportH: Math.round(host.h),
-          rederive: rederiveNonce > 0,
+          rederive,
         })
         .then(
           (res) => {
@@ -133,10 +145,9 @@ export function useCoverageGrid(args: {
       cancelled = true;
       if (raf !== null) cancelAnimationFrame(raf);
     };
-  }, [imagePath, subject, date, datasetRoot, rederiveNonce]);
+  }, [imagePath, subject, date, datasetRoot, refetchNonce]);
 
   const current = state.path === imagePath && imagePath ? state : EMPTY_FETCHED;
-  const pending = !!imagePath && !current.answered;
   return {
     grid: current.grid,
     cells: current.cells,
@@ -146,8 +157,11 @@ export function useCoverageGrid(args: {
     serving: current.serving,
     servingCells: current.servingCells,
     error: current.error,
-    pending,
     settled: current.answered,
-    rederiveLattice: () => setRederiveNonce((n) => n + 1),
+    refetch: () => setRefetchNonce((n) => n + 1),
+    rederiveLattice: () => {
+      rederiveOnceRef.current = true;
+      setRefetchNonce((n) => n + 1);
+    },
   };
 }

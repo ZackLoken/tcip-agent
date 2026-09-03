@@ -277,6 +277,112 @@ class TestGridZoomRoute:
         assert "dataset_root" in resp.json()["detail"]
 
 
+class TestPinnedLattice:
+    """Coverage: the grid route's pinned-lattice branch (``get_grid``'s ``existing_record``): a
+    worked image keeps the lattice its coverage was recorded on, ``fresh_derivation_differs``
+    names whether the current zoom would derive a different one, and ``rederive=true`` derives
+    fresh anyway. This branch did not exist at the family's own baseline."""
+
+    def _record_a_lattice(self, client, root, path, zoom: float) -> dict:
+        client.post("/api/coverage/grid_zoom", json={
+            "subject": "catkin", "zoom": zoom, "dataset_root": str(root)})
+        body = _grid_full(
+            client, path, subject="catkin", dataset_root=str(root),
+            viewport_w=1416, viewport_h=903)
+        client.post("/api/coverage", json=_post_body(path, [], body["grid"], subject="catkin"))
+        return body["grid"]
+
+    def test_a_worked_image_serves_its_recorded_lattice_with_fresh_derivation_differs_false(
+        self, client, dated_dataset,
+    ):
+        root, path = dated_dataset
+        recorded = self._record_a_lattice(client, root, path, 1.5)
+
+        served = _grid_full(
+            client, path, subject="catkin", dataset_root=str(root),
+            viewport_w=1416, viewport_h=903)
+        assert served["grid"]["tile_size"] == recorded["tile_size"]
+        assert served["grid"]["derivation"] == "the lattice this image's coverage was recorded on"
+        assert served["fresh_derivation_differs"] is False
+
+    def test_a_changed_zoom_names_fresh_derivation_differs_but_keeps_the_recorded_lattice(
+        self, client, dated_dataset,
+    ):
+        root, path = dated_dataset
+        recorded = self._record_a_lattice(client, root, path, 1.5)
+
+        client.post("/api/coverage/grid_zoom", json={
+            "subject": "catkin", "zoom": 3.0, "dataset_root": str(root)})
+        served = _grid_full(
+            client, path, subject="catkin", dataset_root=str(root),
+            viewport_w=1416, viewport_h=903)
+        assert served["grid"]["tile_size"] == recorded["tile_size"]
+        assert served["grid"]["derivation"] == "the lattice this image's coverage was recorded on"
+        assert served["fresh_derivation_differs"] is True
+
+    def test_rederive_true_returns_the_freshly_derived_edge(self, client, dated_dataset):
+        from tcip_mcp.pipelines.reference_grid import derive_lattice_tile_size
+
+        root, path = dated_dataset
+        self._record_a_lattice(client, root, path, 1.5)
+
+        client.post("/api/coverage/grid_zoom", json={
+            "subject": "catkin", "zoom": 3.0, "dataset_root": str(root)})
+        rederived = _grid_full(
+            client, path, subject="catkin", dataset_root=str(root),
+            viewport_w=1416, viewport_h=903, rederive=True)
+        assert rederived["grid"]["tile_size"] == derive_lattice_tile_size(1416, 903, 3.0)
+        assert rederived["grid"]["derivation"] == "one screenful at 3.0x zoom"
+        assert rederived["fresh_derivation_differs"] is None
+
+
+class TestMalformedZoomEntry:
+    """Coverage: every reader of a subject's stored grid-zoom entry shares one validation
+    (``_subject_zoom``), so a malformed entry (here a non-numeric ``zoom``) is refused the same
+    way from every route rather than crashing one and silently misreading another. This shared
+    validation did not exist at the family's own baseline."""
+
+    @staticmethod
+    def _seed(root, subject: str, zoom: object) -> None:
+        import tcip_store as ts
+        from tcip_mcp.dataset_layout import coverage_grid_zoom_key
+
+        ts.replace(coverage_grid_zoom_key(root), {
+            subject: {"zoom": zoom, "set_by": "user:z", "set_at": "2026-01-01T00:00:00+00:00"}},
+                  expect=ts.Version.ABSENT)
+
+    def test_get_grid_refuses_a_malformed_zoom_entry(self, client, dated_dataset):
+        root, path = dated_dataset
+        self._seed(root, "catkin", None)
+        resp = client.get("/api/coverage/grid", params={
+            "path": path, "subject": "catkin", "dataset_root": str(root),
+            "viewport_w": 1000, "viewport_h": 800})
+        assert resp.status_code == 400
+        assert "catkin" in resp.json()["detail"]
+
+    def test_get_completeness_refuses_a_malformed_zoom_entry_naming_it_in_working_scale_error(
+        self, client, dated_dataset,
+    ):
+        root, path = dated_dataset
+        self._seed(root, "catkin", "bad")
+        resp = client.get("/api/coverage/completeness", params={
+            "path": path, "dataset_root": str(root), "subject": "catkin"})
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["working_scale"]["catkin"] is None
+        assert "catkin" in body["working_scale_error"]
+
+    def test_post_completeness_refuses_a_malformed_zoom_entry(self, client, dated_dataset):
+        root, path = dated_dataset
+        self._seed(root, "catkin", -1)
+        grid = _grid(client, path, tile_size=64)
+        resp = client.post("/api/coverage/completeness", json={
+            "image_path": path, "subject": "catkin", "grid": _grid_only(grid), "cell": "A1",
+            "complete": True, "user": "breeder", "view_scale": None})
+        assert resp.status_code == 400
+        assert "catkin" in resp.json()["detail"]
+
+
 class TestAnnotationCounts:
     """The completeness read's ``annotation_counts`` field: one implementation
     (``annotation_counts_by_cell``/``_grid_for_raster``) shared with the digest and the grid

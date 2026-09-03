@@ -646,6 +646,11 @@ describe("CoverageChrome", () => {
     expect(onSetGridZoom).toHaveBeenCalledWith(1.5);
   });
 
+  it("seeds the grid-zoom control from the subject's served working scale", () => {
+    render(<CoverageChrome {...baseProps()} workingScale={bar(1.5)} />);
+    expect(screen.getByLabelText("Grid zoom for fruit")).toHaveValue(1.5);
+  });
+
   it("the grid-zoom control refuses a non-positive entry, never posting it", () => {
     const onSetGridZoom = vi.fn();
     render(<CoverageChrome {...baseProps()} onSetGridZoom={onSetGridZoom} />);

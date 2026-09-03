@@ -364,7 +364,7 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | packages/tcip-web/frontend/src/hooks/useRegionCompleteness.test.ts | (none found) | 5 | 0 |
 | packages/tcip-web/frontend/src/hooks/useRegionCompleteness.ts | Wires the region-completeness store into the Annotate tab: fetches every subject's attestation record and saved-annotation count for the open raster, exposes the active subject's own complete/stale cells separate from every other subject's, and posts an explicit attest/unattest/re-attest write. | 4 | 3 |
 | packages/tcip-web/frontend/src/hooks/useRegionServes.test.ts | (none found) | 3 | 0 |
-| packages/tcip-web/frontend/src/hooks/useRegionServes.ts | The cell-aligned region serves the current viewport needs when the user zooms past the base bitmap's resolution on a large raster. | 5 | 3 |
+| packages/tcip-web/frontend/src/hooks/useRegionServes.ts | The cell-aligned region serves the current viewport needs when the user zooms past the base bitmap's resolution on a large raster. | 6 | 3 |
 | packages/tcip-web/frontend/src/index.css.test.ts | Compiles index.css through PostCSS + Tailwind (same pipeline as the real build) and asserts the keyboard focus-visible ring rules exist on the shared component classes. | 1 | 0 |
 | packages/tcip-web/frontend/src/lib/annotateFocus.test.ts | (none found) | 3 | 0 |
 | packages/tcip-web/frontend/src/lib/annotateFocus.ts | Drive the Annotate tab to a specific (subject, date, image, mode) in response to the agent's `annotate_focus` event. | 4 | 2 |
@@ -373,7 +373,7 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | packages/tcip-web/frontend/src/lib/canvasSync.test.ts | (none found) | 3 | 0 |
 | packages/tcip-web/frontend/src/lib/canvasSync.ts | Live canvas-state sync: lets the agent see exactly what the canvas shows. | 3 | 9 |
 | packages/tcip-web/frontend/src/lib/coverage.test.ts | (none found) | 0 | 0 |
-| packages/tcip-web/frontend/src/lib/coverage.ts | Pure helpers over the coverage lattice a raster's grid route serves. | 2 | 12 |
+| packages/tcip-web/frontend/src/lib/coverage.ts | Pure helpers over the coverage lattice a raster's grid route serves. | 2 | 13 |
 | packages/tcip-web/frontend/src/lib/coverageTracker.test.ts | (none found) | 3 | 0 |
 | packages/tcip-web/frontend/src/lib/coverageTracker.ts | Session accumulator for the per-image view-coverage record. | 2 | 7 |
 | packages/tcip-web/frontend/src/lib/ctrlWheelGuard.test.ts | (none found) | 1 | 0 |
@@ -947,12 +947,12 @@ registered at HEAD.
 
 | method | path | handler | line |
 |---|---|---|---|
-| GET | `/grid` | `get_grid` | `routes/coverage.py:262` |
-| POST | `/grid_zoom` | `post_grid_zoom` | `routes/coverage.py:397` |
-| GET | `` (root) | `get_coverage` | `routes/coverage.py:443` |
-| POST | `` (root) | `post_coverage` | `routes/coverage.py:493` |
-| GET | `/completeness` | `get_completeness` | `routes/coverage.py:661` |
-| POST | `/completeness` | `post_completeness` | `routes/coverage.py:786` |
+| GET | `/grid` | `get_grid` | `routes/coverage.py:287` |
+| POST | `/grid_zoom` | `post_grid_zoom` | `routes/coverage.py:416` |
+| GET | `` (root) | `get_coverage` | `routes/coverage.py:462` |
+| POST | `` (root) | `post_coverage` | `routes/coverage.py:512` |
+| GET | `/completeness` | `get_completeness` | `routes/coverage.py:680` |
+| POST | `/completeness` | `post_completeness` | `routes/coverage.py:806` |
 
 ### routes/dataset.py, prefix `/api/dataset` (3 routes)
 
@@ -2076,9 +2076,10 @@ No seam id in `seam-coverage.json`'s inventory names this record.
 
 ## 28. `coverage_grid_zoom.json`, breeder-set inspection zoom, advisory
 
-Path: `<dataset_root>/.tcip/state/coverage_grid_zoom.json`, addressed by `coverage_grid_zoom_key`,
-`packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:76` (`_STATE_DOC` locator, `frozen: false`, the
-same declared classification `view_coverage.json` carries).
+Path: `<dataset_root>/.tcip/state/coverage_grid_zoom.json`, addressed by `coverage_grid_zoom_key`
+(`packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:666`), built on
+`packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:76` (`_STATE_DOC` locator), `frozen: false`, the
+same declared classification `view_coverage.json` carries.
 
 Path/shape definition: `tcip_mcp.dataset_layout.coverage_grid_zoom_path`, `dataset_layout.py:638`.
 Shape: `{subject: {zoom, set_by, set_at}}`, one entry per subject, no default anywhere: a subject
@@ -2572,7 +2573,7 @@ Phase 3 verdict: restated-in-test.
 
 Must agree: the cell name the agent points at and the cell the GUI highlights are the same rectangle.
 Side A: `packages/tcip-mcp/src/tcip_mcp/pipelines/reference_grid.py:56` (`def reference_cells(`, which builds the cells, with `grid_geometry`, line 151, the geometry handed over beside them).
-Side B: `packages/tcip-annotation/src/tcip_annotation/sam_wrapper.py:329` (`def grid_to_rect(`, the one cell-name lookup, with `grid_to_pixel`, line 360, built on it) and `packages/tcip-web/src/tcip_web/routes/coverage.py:261` (`@router.get("/grid")`, `get_grid`, whose cell list the browser consumes verbatim).
+Side B: `packages/tcip-annotation/src/tcip_annotation/sam_wrapper.py:329` (`def grid_to_rect(`, the one cell-name lookup, with `grid_to_pixel`, line 360, built on it) and `packages/tcip-web/src/tcip_web/routes/coverage.py:286` (`@router.get("/grid")`, `get_grid`, whose cell list the browser consumes verbatim).
 Phase 3 verdict: single.
 
 ## S59. Path confinement (the derived allow-set)

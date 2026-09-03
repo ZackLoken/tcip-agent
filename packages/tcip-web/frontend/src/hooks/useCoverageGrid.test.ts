@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 
 import { api } from "@/api/client";
 import { useCoverageGrid } from "@/hooks/useCoverageGrid";
@@ -31,12 +31,13 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("useCoverageGrid pending", () => {
-  it("is never pending with no image path: there is nothing to fetch yet", () => {
+describe("useCoverageGrid", () => {
+  it("fetches nothing with no image path: there is nothing to fetch yet", () => {
+    const grid = vi.spyOn(api.coverage, "grid");
     const { result } = renderHook(() =>
       useCoverageGrid({ imagePath: null, subject: null, date: null, datasetRoot: null }),
     );
-    expect(result.current.pending).toBe(false);
+    expect(grid).not.toHaveBeenCalled();
     expect(result.current.grid).toBeNull();
   });
 
@@ -79,7 +80,7 @@ describe("useCoverageGrid pending", () => {
         datasetRoot: "C:/data",
       }),
     );
-    expect(result.current.pending).toBe(true);
+    expect(result.current.settled).toBe(false);
     await waitFor(() =>
       expect(grid).toHaveBeenCalledWith("C:/data/images/2026-01-01/small.jpg", {
         subject: "bush",
@@ -92,11 +93,10 @@ describe("useCoverageGrid pending", () => {
     );
     await waitFor(() => expect(result.current.grid).not.toBeNull());
     expect(result.current.cells).toEqual([{ name: "A1", x0: 0, y0: 0, x1: 800, y1: 600 }]);
-    expect(result.current.pending).toBe(false);
     expect(result.current.settled).toBe(true);
   });
 
-  it("stays pending while a fetch is genuinely in flight", async () => {
+  it("stays unsettled while a fetch is genuinely in flight", async () => {
     vi.spyOn(canvasSync, "measureCanvasHost").mockReturnValue({ w: 1000, h: 800 });
     let resolveGrid: (v: CoverageGridResponse) => void = () => {};
     vi.spyOn(api.coverage, "grid").mockReturnValue(
@@ -113,15 +113,13 @@ describe("useCoverageGrid pending", () => {
       }),
     );
     await waitFor(() => expect(api.coverage.grid).toHaveBeenCalled());
-    expect(result.current.pending).toBe(true);
     expect(result.current.settled).toBe(false);
 
     resolveGrid(response());
     await waitFor(() => expect(result.current.settled).toBe(true));
-    expect(result.current.pending).toBe(false);
   });
 
-  it("settles not-pending on a fetch failure too", async () => {
+  it("settles on a fetch failure too", async () => {
     vi.spyOn(canvasSync, "measureCanvasHost").mockReturnValue({ w: 1000, h: 800 });
     vi.spyOn(api.coverage, "grid").mockRejectedValue(new Error("refused"));
     const { result } = renderHook(() =>
@@ -133,7 +131,6 @@ describe("useCoverageGrid pending", () => {
       }),
     );
     await waitFor(() => expect(result.current.error).toBe("refused"));
-    expect(result.current.pending).toBe(false);
     expect(result.current.settled).toBe(true);
   });
 
@@ -155,5 +152,81 @@ describe("useCoverageGrid pending", () => {
     expect(result.current.reason).toBe("set the grid zoom to derive a coverage lattice for bush");
     expect(result.current.serving).not.toBeNull();
     expect(result.current.servingCells.length).toBeGreaterThan(0);
+  });
+});
+
+describe("useCoverageGrid refetch and rederiveLattice", () => {
+  it("refetch() re-fetches without ever setting rederive, so a set-zoom write keeps the recorded lattice", async () => {
+    vi.spyOn(canvasSync, "measureCanvasHost").mockReturnValue({ w: 1000, h: 800 });
+    const grid = vi.spyOn(api.coverage, "grid").mockResolvedValue(response());
+    const { result } = renderHook(() =>
+      useCoverageGrid({
+        imagePath: "C:/data/images/2026-01-01/mosaic.tif",
+        subject: "bush",
+        date: "2026-01-01",
+        datasetRoot: "C:/data",
+      }),
+    );
+    await waitFor(() => expect(grid).toHaveBeenCalledTimes(1));
+    expect(grid.mock.calls[0][1]).toMatchObject({ rederive: false });
+
+    act(() => result.current.refetch());
+    await waitFor(() => expect(grid).toHaveBeenCalledTimes(2));
+    expect(grid.mock.calls[1][1]).toMatchObject({ rederive: false });
+  });
+
+  it("rederiveLattice() sends rederive true for exactly the one fetch it triggers, never sticky", async () => {
+    vi.spyOn(canvasSync, "measureCanvasHost").mockReturnValue({ w: 1000, h: 800 });
+    const grid = vi.spyOn(api.coverage, "grid").mockResolvedValue(response());
+    const { result } = renderHook(() =>
+      useCoverageGrid({
+        imagePath: "C:/data/images/2026-01-01/mosaic.tif",
+        subject: "bush",
+        date: "2026-01-01",
+        datasetRoot: "C:/data",
+      }),
+    );
+    await waitFor(() => expect(grid).toHaveBeenCalledTimes(1));
+
+    act(() => result.current.rederiveLattice());
+    await waitFor(() => expect(grid).toHaveBeenCalledTimes(2));
+    expect(grid.mock.calls[1][1]).toMatchObject({ rederive: true });
+
+    act(() => result.current.refetch());
+    await waitFor(() => expect(grid).toHaveBeenCalledTimes(3));
+    expect(grid.mock.calls[2][1]).toMatchObject({ rederive: false });
+  });
+
+  it("a subject change while a rederive is armed but not yet fetched clears the flag", async () => {
+    let host: { w: number; h: number } | null = null;
+    vi.spyOn(canvasSync, "measureCanvasHost").mockImplementation(() => host);
+    const grid = vi.spyOn(api.coverage, "grid").mockResolvedValue(response());
+
+    const { result, rerender } = renderHook(
+      (props: { subject: string }) =>
+        useCoverageGrid({
+          imagePath: "C:/data/images/2026-01-01/mosaic.tif",
+          subject: props.subject,
+          date: "2026-01-01",
+          datasetRoot: "C:/data",
+        }),
+      { initialProps: { subject: "bush" } },
+    );
+    expect(grid).not.toHaveBeenCalled();
+
+    act(() => result.current.rederiveLattice());
+    rerender({ subject: "leaf" });
+    host = { w: 1000, h: 800 };
+
+    await waitFor(() =>
+      expect(grid).toHaveBeenCalledWith("C:/data/images/2026-01-01/mosaic.tif", {
+        subject: "leaf",
+        date: "2026-01-01",
+        datasetRoot: "C:/data",
+        viewportW: 1000,
+        viewportH: 800,
+        rederive: false,
+      }),
+    );
   });
 });

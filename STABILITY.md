@@ -11,8 +11,9 @@ registry and held to it by `tests/test_frozen_manifest.py`, is the freeze commit
 store this platform registers, with a `frozen` classification and a `schema_version` ceiling.
 A store's documents carry no version field until that store's first bump; absence means the
 frozen version 1. A store the manifest marks `frozen: false` is unstable by design (view-state
-and canvas records the GUI itself owns: `canvas_geometry`, `canvas_meta`, `view_coverage`, and
-`backend_port`, the runtime handshake state naming which port the web backend bound to) or a
+and canvas records the GUI itself owns: `canvas_geometry`, `canvas_meta`, `view_coverage`,
+`coverage_grid_zoom`, and `backend_port`, the runtime handshake state naming which port the web
+backend bound to) or a
 genuine interop format (`coco_documents`, other tools' formats); neither carries this commitment.
 Read `frozen-formats.json` itself for which store is which and its current ceiling; this document
 describes the commitment, not a copy of the list that will drift out of date beside the source of

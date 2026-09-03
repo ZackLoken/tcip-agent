@@ -186,22 +186,28 @@ function stateLines(props: {
 /** The numeric grid-zoom control: screen pixels per native pixel, the same number the status
  *  bar shows as a percentage. Accepts a positive number only; the caller's own route refuses a
  *  non-positive one by name, so this control refuses locally rather than sending a request known
- *  to fail. */
-function GridZoomControl(props: { subject: string; onSet: (zoom: number) => void }) {
-  const [text, setText] = useState("");
+ *  to fail. Seeded from `zoom` (the subject's served working scale) so a breeder revisiting an
+ *  already-set subject sees the current value rather than a blank field. */
+function GridZoomControl(props: {
+  subject: string;
+  zoom: number | null;
+  onSet: (zoom: number) => void;
+}) {
+  const [text, setText] = useState(props.zoom !== null ? String(props.zoom) : "");
+  const inputId = useId();
   const parsed = Number(text);
   const valid = text.trim() !== "" && Number.isFinite(parsed) && parsed > 0;
 
   return (
     <div className="flex items-center gap-1.5">
-      <label className="text-tcip-muted" htmlFor="tcip-grid-zoom-input">
+      <label className="text-tcip-muted" htmlFor={inputId}>
         Grid zoom for {props.subject}
       </label>
       <input
-        id="tcip-grid-zoom-input"
+        id={inputId}
         type="number"
         step="0.1"
-        min="0"
+        min="0.1"
         value={text}
         onChange={(e) => setText(e.target.value)}
         className="w-16 rounded border border-tcip-border bg-tcip-bg px-1.5 py-0.5 text-tcip-fg"
@@ -473,7 +479,14 @@ export function CoverageChrome(props: {
         onToggle={togglePanel}
       >
         <div className="flex flex-col gap-2">
-          {props.subject && <GridZoomControl subject={props.subject} onSet={props.onSetGridZoom} />}
+          {props.subject && (
+            <GridZoomControl
+              key={props.subject}
+              subject={props.subject}
+              zoom={props.workingScale?.zoom ?? null}
+              onSet={props.onSetGridZoom}
+            />
+          )}
 
           {props.gridFetchError ? (
             <p className="text-tcip-fp">coverage grid unavailable: {props.gridFetchError}</p>
