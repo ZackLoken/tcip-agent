@@ -92,13 +92,15 @@ reaching for again versus one built narrowly for a specific past investigation.
   standalone script.
 - `archive_project.py` - exports an annotation project (images, ground truth, class registry,
   `.tcip` state, experiments and their claimed manifests, every recognized blob home) as a
-  portable ZIP an `import_project.py` run can restore from elsewhere. Wraps
-  `tcip_mcp.tools.project_tools.archive_project` with no MCP tool registration.
-- `import_project.py` - imports an annotation project from a ZIP `archive_project.py` bundled:
-  extracts into private staging, refuses on any bookkeeping, collided, undecodable, or
-  unaccounted member, adopts into a database when this process is bound to that backend, then
-  moves the staged tree onto the destination. Wraps `tcip_mcp.tools.project_tools.import_project`
-  with no MCP tool registration.
+  portable bundle an `import_project.py` run can restore from elsewhere: a ZIP (`--output-path`)
+  or, with `--output-dir`, the identical bundle written as a directory tree; exactly one of the
+  two is required. Wraps `tcip_mcp.tools.project_tools.archive_project` with no MCP tool
+  registration.
+- `import_project.py` - imports an annotation project from a bundle `archive_project.py` wrote,
+  a ZIP or a directory tree alike: stages it into private staging, refuses on any bookkeeping,
+  collided, undecodable, or unaccounted member, adopts into a database when this process is
+  bound to that backend, then moves the staged tree onto the destination. Wraps
+  `tcip_mcp.tools.project_tools.import_project` with no MCP tool registration.
 - `build_module_inventory.py` - builds a module inventory and real import graph for the repo's
   Python and TypeScript source trees, so `check_architecture_doc.py` can cross-check
   ARCHITECTURE.md's module-ownership tables against the tree it actually describes.

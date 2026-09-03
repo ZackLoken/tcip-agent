@@ -465,7 +465,7 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | scripts/_script_root.py | Resolve-or-refuse `$TCIP_STATE_ROOT` pinning shared by the demoted-tool scripts. | 1 | 10 |
 | scripts/_store_bootstrap.py | Re-exports the store catalogue from tcip_mcp.store_catalogue, and which roots a project's records live in. | 3 | 2 |
 | scripts/adopt_store.py | Move a root's existing record and log files into a store database. | 6 | 0 |
-| scripts/archive_project.py | Export an annotation project as a portable ZIP archive, through the demoted `archive_project` function. | 4 | 0 |
+| scripts/archive_project.py | Export an annotation project as a portable bundle, a ZIP or, with `--output-dir`, a directory tree, through the demoted `archive_project` function. | 4 | 0 |
 | scripts/build_module_inventory.py | Builds a module inventory and real import graph for the repo's Python and TypeScript source trees. | 0 | 0 |
 | scripts/calibrate_operating_point.py | Calibrate + held-out validate a detection operating point over a labeled split. | 3 | 0 |
 | scripts/check_architecture_citations.py | Verify ARCHITECTURE.md's file:line citations against the code they quote, for CI. | 0 | 0 |
@@ -493,7 +493,7 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | scripts/generate_frontend_types.py | Generate the browser's coverage-record types from the pydantic models that declare them. | 9 | 0 |
 | scripts/generate_frozen_manifest.py | Render the store registry's freeze classifications into the shipped frozen-formats.json; --check holds CI to the committed edition. | 2 | 0 |
 | scripts/generate_harness_discovery.py | Render the `.claude/skills/` and `.agents/skills/` SKILL.md files plus AGENTS.md's generated block from the canonical knowledge documents. | 1 | 0 |
-| scripts/import_project.py | Import an annotation project from a ZIP archive, through the demoted `import_project` function. | 3 | 0 |
+| scripts/import_project.py | Import an annotation project from a bundle, a ZIP or a directory tree alike, through the demoted `import_project` function. | 3 | 0 |
 | scripts/inspect_baseline_weights.py | Print framework / model metadata from the baseline weights.pt. | 1 | 0 |
 | scripts/inspect_compute_resources.py | Report the host's current compute headroom, through the demoted `inspect_compute_resources` function. | 3 | 0 |
 | scripts/inspect_gps_exif.py | Print GPS EXIF for a sample of images per acquisition date. | 1 | 0 |
