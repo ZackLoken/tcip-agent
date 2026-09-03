@@ -173,6 +173,8 @@ class TestPostPanelEventRoute:
         from tcip_mcp import web_client
         from tcip_mcp.tools.gui_tools import focus_human_attention
 
+        from tests.test_canvas_liveview import _mint_binding
+
         posted: dict = {}
 
         def _capture(panel: str, event_type: str, data: dict) -> dict:
@@ -180,6 +182,7 @@ class TestPostPanelEventRoute:
             return {"delivered": True, "status": "ok"}
 
         monkeypatch.setattr(web_client, "post_panel_event", _capture)
+        _mint_binding(data_dir)
         res = focus_human_attention("annotate", str(data_dir), str(data_dir), "catkin", "2-11-26",
                                     mode="point", image_index=2)
         assert "error" not in res, res

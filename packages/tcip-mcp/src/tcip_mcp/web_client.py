@@ -192,6 +192,24 @@ def canvas_open_binding_key(*, create: bool = True) -> Key:
     return Key(CANVAS_OPEN_BINDING_STORE, str(workspace.workspace_root(create=create)), _BINDING_PARTS)
 
 
+def gui_binding_matches(root: str | Path) -> tuple[bool, dict[str, Any] | None]:
+    """Whether the GUI's currently open project is ``root``, and the binding compared against.
+
+    The one comparison every caller that drives the live GUI shares: ``capture_live_canvas``,
+    ``focus_human_attention`` and ``push_panel_event`` all refuse when the GUI has moved to
+    another project, and a second, separately-written comparison in each would be the drift
+    ``CLAUDE.md`` warns against. Returns ``(False, None)`` when no binding record exists at all
+    (nothing is open for any root to match); otherwise ``(matches, binding)``, so a caller
+    refusing a mismatch can name the binding's own project straight from the second element
+    without a re-read.
+    """
+    binding = tcip_store.read(canvas_open_binding_key(create=False), default=None)
+    if binding is None:
+        return False, None
+    matches = tcip_store.canonical_path(binding["root"]) == tcip_store.canonical_path(str(root))
+    return matches, binding
+
+
 ActiveTab = Literal["annotate", "review", "training", "tuning", "inference", "results", "meta"]
 """The GUI's tabs: the vocabulary ``GuiState.active_tab`` holds and ``POST /api/state/tab``
 validates against."""

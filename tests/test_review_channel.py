@@ -19,6 +19,8 @@ from tcip_mcp.dataset_layout import image_dir, prediction_dir
 from tcip_mcp.tools.gui_tools import focus_human_attention
 from tcip_mcp.tools.proposal_tools import stage_proposals
 
+from tests.test_canvas_liveview import _mint_binding
+
 
 @pytest.fixture(autouse=True)
 def _stub_gui(monkeypatch):
@@ -38,6 +40,13 @@ def _project_root(tmp_path: Path) -> Path:
     root = tmp_path / "workspace" / "proj"
     root.mkdir(parents=True, exist_ok=True)
     return root
+
+
+@pytest.fixture(autouse=True)
+def _matching_canvas_binding(tmp_path: Path) -> None:
+    """These tests are about frame resolution, not the live-GUI binding rail
+    ``focus_human_attention`` now enforces; mint a real matching binding so it never fires here."""
+    _mint_binding(_project_root(tmp_path))
 
 
 def _images(root: Path, date: str, names: list[str]) -> None:
