@@ -186,6 +186,11 @@ fresh root predates another change, not a capability to build on.
   `viewing` sub-object to the current `CoverageViewing` shape, mapping the old string forms of
   `stats_source` and `display_bounds` to the new structured ones. `--plan` previews; a `viewing`
   it cannot parse is refused by image name and the dataset left untouched.
+- `conform_working_scale_at_write.py` - renames a dataset's stored `region_completeness`
+  attestations' `working_scale_bar_at_write` key to `working_scale_at_write` and nulls the
+  value, since the annotation-derived bar it once held cannot be reconstructed as the
+  breeder-set zoom the new key carries. `--plan` previews; refuses a root with no `.tcip`
+  directory by name.
 - `restamp_dataset_fingerprint.py` - restamps a bare legacy dataset fingerprint onto the
   formula-version-prefixed form `dataset_fingerprint` now returns, refusing rather than papering
   over a fingerprint mismatch it cannot explain.
