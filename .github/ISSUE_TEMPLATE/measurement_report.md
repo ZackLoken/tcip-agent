@@ -1,7 +1,7 @@
 ---
 name: Measurement report
 about: A delivered phenotype (a CSV row from tabulate_counts, export_aggregated_csv,
-  compute_phenology, or deliver_orthomosaic_plant_counts) is wrong or overclaims
+  deliver_phenology_milestones, or deliver_orthomosaic_plant_counts) is wrong or overclaims
 title: "[measurement] "
 labels: measurement
 ---

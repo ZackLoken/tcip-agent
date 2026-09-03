@@ -4,7 +4,7 @@ Builds a synthetic scene: geolocated JPEGs (real EXIF GPS + capture time) across
 dates plus a plant-locations CSV, then runs the exact two tools the agent composes:
 
     build_plant_mapping   images + CSV                 → a named mapping under the project
-    compute_phenology     mapping + classified preds   → <trait>_phenology.csv
+    deliver_phenology_milestones     mapping + classified preds   → <trait>_phenology.csv
 
 and asserts the delivered CSV has the canonical columns and plausible, correctly-ordered
 milestone dates. Then it confirms the measurement-integrity guard refuses to write a CSV when
@@ -41,7 +41,7 @@ from tcip_annotation.state import Annotation, BBox  # noqa: E402
 from tcip_mcp.pipelines.resolution import write_sidecar  # noqa: E402
 from tcip_mcp.tools.phenology_tools import (  # noqa: E402
     build_plant_mapping,
-    compute_phenology,
+    deliver_phenology_milestones,
 )
 
 # Two plants ~3 m apart in one row (1 deg lon ≈ 81 km at 43°N, so 3.7e-5 deg ≈ 3 m).
@@ -54,7 +54,7 @@ DATES = ["2026-02-11", "2026-02-25", "2026-03-11"]
 FRACTIONS = {"2026-02-11": 0.0, "2026-02-25": 0.4, "2026-03-11": 1.0}
 # The bucket's own recorded id_map (the positive class is resolved from this, on disk, never a
 # pinned integer, so this is the production id_map a real export_predictions run would have
-# stamped, not a magic constant compute_phenology reads directly).
+# stamped, not a magic constant deliver_phenology_milestones reads directly).
 ID_MAP = {"dormant": 0, "elongated": 1}
 N_DETECTIONS = 10
 
@@ -141,7 +141,7 @@ def main() -> int:
 
     backend = bind_default()
 
-    print("Phenology e2e smoke: build_plant_mapping -> compute_phenology\n")
+    print("Phenology e2e smoke: build_plant_mapping -> deliver_phenology_milestones\n")
     with tempfile.TemporaryDirectory() as td:
         root = Path(td)
         dataset_root = root / "dataset"        # a registered dataset the mapping is built over
@@ -209,14 +209,14 @@ def main() -> int:
             from tcip_mcp.pipelines.postprocessing import plant_mapping as _plant_mapping
             check("mapping persisted", bool(_plant_mapping.load_mapping(root, mapping_name)))
 
-            # 3. compute_phenology: the real coverage rule and classifier gate are both live. The
+            # 3. deliver_phenology_milestones: the real coverage rule and classifier gate are both live. The
             # positive class is resolved from each bucket's own recorded id_map (never a pinned
             # int), and every image is classified (no bare single-class-detector buckets here), so the
             # elongation split is valid; this script is the delivery path's acceptance artifact,
             # proving the delivery path genuinely produces a curve+milestones end to end, not just
             # refuses.
-            print("\nStep 2: compute_phenology delivers a real bloom curve + milestones")
-            r = compute_phenology(
+            print("\nStep 2: deliver_phenology_milestones delivers a real bloom curve + milestones")
+            r = deliver_phenology_milestones(
                 trait="catkin",
                 mapping_name=mapping_name,
                 predictions_by_date=preds_by_date,

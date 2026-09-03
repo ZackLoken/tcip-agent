@@ -14,7 +14,7 @@ Rails pinned here (one section each):
   4. the currently divergent NMS / max_dets defaults across the three modules
   5. IoU-matching eval metrics at iou_threshold=0.5 (current criterion, to be replaced by a
      derived center-match tolerance)
-  6. compute_phenology gate behavior (refuses without an elongation class; requires validated flags)
+  6. deliver_phenology_milestones gate behavior (refuses without an elongation class; requires validated flags)
 """
 
 from __future__ import annotations
@@ -514,7 +514,7 @@ def test_golden_coco_matching_is_iou_threshold_sensitive():
 
 
 # ══════════════════════════════════════════════════════════════════════════
-# 6. compute_phenology gate behavior
+# 6. deliver_phenology_milestones gate behavior
 # ══════════════════════════════════════════════════════════════════════════
 
 def _write_stamp_bypassing_claim_rail(d: Path, stamp: dict, document: str) -> None:
@@ -532,7 +532,7 @@ def _write_op_sidecar(d: Path, *, dataset_root: Path, validated: bool, conf: flo
                       checkpoint_sha256: str | None = None,
                       experiment_id: str | None = "exp-golden") -> None:
     """The operating_point.json stamp export_predictions writes beside a bucket's labels: the
-    on-disk validity compute_phenology reconciles against, including id_map and
+    on-disk validity deliver_phenology_milestones reconciles against, including id_map and
     producer identity (the real writer always stamps checkpoint_sha256/experiment_id
     at the top level; a fixture that omitted them blessed a shape the platform never produces).
 
@@ -600,12 +600,12 @@ def _pheno_setup(tmp_path: Path, *, elongated: bool, op_validated: bool | None =
     return mapping_name, d1, d2
 
 
-def test_golden_compute_phenology_refuses_without_elongation_class(tmp_path: Path):
-    from tcip_mcp.tools.phenology_tools import compute_phenology
+def test_golden_deliver_phenology_milestones_refuses_without_elongation_class(tmp_path: Path):
+    from tcip_mcp.tools.phenology_tools import deliver_phenology_milestones
 
     mapping_name, d1, d2 = _pheno_setup(tmp_path, elongated=False, op_validated=True)  # bare detector
     out_csv = tmp_path / "out" / "catkin_phenology.csv"
-    res = compute_phenology(
+    res = deliver_phenology_milestones(
         trait="catkin",
         mapping_name=mapping_name,
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
@@ -615,12 +615,12 @@ def test_golden_compute_phenology_refuses_without_elongation_class(tmp_path: Pat
     assert not out_csv.exists()
 
 
-def test_golden_compute_phenology_requires_both_validated_flags(tmp_path: Path):
-    from tcip_mcp.tools.phenology_tools import compute_phenology
+def test_golden_deliver_phenology_milestones_requires_both_validated_flags(tmp_path: Path):
+    from tcip_mcp.tools.phenology_tools import deliver_phenology_milestones
 
     mapping_name, d1, d2 = _pheno_setup(tmp_path, elongated=True)  # no operating_point.json sidecars
     out_csv = tmp_path / "out" / "catkin_phenology.csv"
-    res = compute_phenology(
+    res = deliver_phenology_milestones(
         trait="catkin",
         mapping_name=mapping_name,
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
@@ -630,15 +630,15 @@ def test_golden_compute_phenology_requires_both_validated_flags(tmp_path: Path):
     assert not out_csv.exists()
 
 
-def test_golden_compute_phenology_asserted_op_validity_floored_by_missing_sidecar(tmp_path: Path):
+def test_golden_deliver_phenology_milestones_asserted_op_validity_floored_by_missing_sidecar(tmp_path: Path):
     # An asserted validity string is floored by the on-disk sidecar's real (false) state:
     # never trusted. The predictions are classified (a real id_map is on disk), but the sidecar's
     # own conf.validated_against is "false"; a caller asserting "held_out_annotations" cannot override it.
-    from tcip_mcp.tools.phenology_tools import compute_phenology
+    from tcip_mcp.tools.phenology_tools import deliver_phenology_milestones
 
     mapping_name, d1, d2 = _pheno_setup(tmp_path, elongated=True, op_validated=False)
     out_csv = tmp_path / "out" / "catkin_phenology.csv"
-    res = compute_phenology(
+    res = deliver_phenology_milestones(
         trait="catkin",
         mapping_name=mapping_name,
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
@@ -651,15 +651,15 @@ def test_golden_compute_phenology_asserted_op_validity_floored_by_missing_sideca
     assert not out_csv.exists()
 
 
-def test_golden_compute_phenology_delivers_when_both_validated(tmp_path: Path):
-    from tcip_mcp.tools.phenology_tools import compute_phenology
+def test_golden_deliver_phenology_milestones_delivers_when_both_validated(tmp_path: Path):
+    from tcip_mcp.tools.phenology_tools import deliver_phenology_milestones
 
     # The positive-state fraction is now produced, so a fully-validated call (classifier + count
     # operating point both validated on disk) delivers a real phenology CSV.
     mapping_name, d1, d2 = _pheno_setup(tmp_path, elongated=True, op_validated=True)
     _write_classifier_sidecar(d1, dataset_root=tmp_path / "ds", validated=True)
     out_csv = tmp_path / "out" / "catkin_phenology.csv"
-    res = compute_phenology(
+    res = deliver_phenology_milestones(
         trait="catkin",
         mapping_name=mapping_name,
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},

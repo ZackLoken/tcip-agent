@@ -1706,7 +1706,7 @@ REGISTERED = {
     # one completed delivery, carrying the real per-bucket StampBinding evidence it shipped under
     "delivery_events": Registered(
         {"event_id": EVENT_ID_UNDER_TEST, "trait": TRAIT_UNDER_TEST,
-         "delivery_kind": DELIVERY_KIND_UNDER_TEST, "door": "compute_phenology",
+         "delivery_kind": DELIVERY_KIND_UNDER_TEST, "door": "deliver_phenology_milestones",
          "output_path": "büsch_phenology.csv",
          "measurement_documents": ["operating_point", "classifier_operating_point"],
          "scale_document": None,

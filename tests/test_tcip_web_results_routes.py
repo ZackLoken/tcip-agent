@@ -351,7 +351,7 @@ def test_every_phenology_door_delivers_on_real_bucket_evidence(client: TestClien
 def test_acknowledge_reveals_provisional_numbers_on_screen_but_never_in_a_file(
     client: TestClient, tmp_path: Path,
 ) -> None:
-    # The non-stranding escape, mirroring compute_phenology's acknowledge_unvalidated: a breeder
+    # The non-stranding escape, mirroring deliver_phenology_milestones's acknowledge_unvalidated: a breeder
     # whose operating point is not yet calibrated can LOOK at what they have, clearly marked. A file
     # leaving the platform has no such escape, so the same flag must not open the CSV door.
     body = _phenology_fixture(tmp_path, validated=False)
@@ -455,7 +455,7 @@ def test_acknowledge_shows_a_fabricated_tile_scale_on_screen_but_never_in_a_file
 
 
 def test_export_refuses_when_nothing_was_ever_classified(client: TestClient, tmp_path: Path) -> None:
-    # The same refusal compute_phenology makes: with no positive-class axis anywhere, the fraction
+    # The same refusal deliver_phenology_milestones makes: with no positive-class axis anywhere, the fraction
     # is not a measurement. Previously only the frontend guarded this on the web side.
     body = _phenology_fixture(tmp_path, validated=True, id_map={"catkin": 0})
     resp = _export(client, body, "milestones")
@@ -593,15 +593,15 @@ def test_phenology_measurement_response_carries_every_field_the_two_deleted_door
 
 
 def test_web_and_mcp_phenology_doors_agree_on_validity(client: TestClient, tmp_path: Path) -> None:
-    # The web route's phenology_measurement and the MCP tool's compute_phenology read the same
+    # The web route's phenology_measurement and the MCP tool's deliver_phenology_milestones read the same
     # on-disk evidence through the identical tcip_mcp.pipelines.resolution reconciliation.
-    from tcip_mcp.tools.phenology_tools import compute_phenology
+    from tcip_mcp.tools.phenology_tools import deliver_phenology_milestones
 
     body = _phenology_fixture(tmp_path, validated=True, detections=100)
     web_validated = client.post(
         "/api/results/phenology_measurement", json=body).json()["validated"]
 
-    mcp_result = compute_phenology(
+    mcp_result = deliver_phenology_milestones(
         trait=body["trait"], mapping_name=body["mapping_name"],
         predictions_by_date=body["predictions_by_date"], output_csv_path=str(tmp_path / "out.csv"),
         classifier_pred_dirs=list(body["predictions_by_date"].values()),
@@ -637,7 +637,7 @@ def _rewrite_classifier_sidecars(body: dict, **overrides) -> None:
 def test_a_classifier_calibrated_for_another_trait_does_not_validate_this_delivery(
     client: TestClient, tmp_path: Path,
 ) -> None:
-    # compute_phenology binds the classifier stamp to the delivery: a sidecar recorded against a
+    # deliver_phenology_milestones binds the classifier stamp to the delivery: a sidecar recorded against a
     # different trait, or against a run that did not produce these predictions, is not trusted. The
     # web door reconciled without that binding, so it accepted a stamp the MCP door rejects, and
     # then wrote it into the delivered CSV as positive_state_classifier_validated. Both doors now
@@ -770,7 +770,7 @@ def test_the_curves_csv_carries_the_same_provenance_as_the_milestone_csv(
 def test_export_refuses_a_bucket_whose_id_map_never_carried_the_positive_class(
     client: TestClient, tmp_path: Path,
 ) -> None:
-    # compute_phenology's first guard is that the positive class id resolves from some bucket's own
+    # deliver_phenology_milestones's first guard is that the positive class id resolves from some bucket's own
     # recorded id_map. per_plant_phenology's positive_class_assessed flag is not a substitute: a date
     # with ZERO detections is trivially "fully classified", so an axis-less bucket with no
     # detections read as classified and the export door had nothing left to refuse on.

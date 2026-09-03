@@ -76,7 +76,7 @@ def load_vocab() -> tuple[set[str], dict[str, set[str]]]:
 # gets added here; the friction is intentional, it forces a human to confirm it isn't a
 # fabricated trait.
 NON_TRAIT_ALLOW = {
-    "plant_mapping", "plant_id", "accession_name", "compute_phenology", "build_plant_mapping",
+    "plant_mapping", "plant_id", "accession_name", "deliver_phenology_milestones", "build_plant_mapping",
     "run_inference", "run_matching", "tile_size", "class_id", "positive_class_assessed",
     "catkin_phenology", "plant_mapping.json", "load_annotations",
     "save_annotations", "in_chans", "num_channels", "num_classes",

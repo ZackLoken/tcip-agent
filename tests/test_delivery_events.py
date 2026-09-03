@@ -1,8 +1,8 @@
 """``record_delivery_binding_event``'s project-scoped document axis (``delivery_events``).
 
-``compute_phenology`` already writes an audit-log line naming which buckets stood behind a
+``deliver_phenology_milestones`` already writes an audit-log line naming which buckets stood behind a
 delivery (``test_phenology_tools.py``'s own
-``test_compute_phenology_records_what_verification_found_in_the_datasets_own_log``); this
+``test_deliver_phenology_milestones_records_what_verification_found_in_the_datasets_own_log``); this
 persistence step is a second, enumerable write beside that unchanged one, carrying the real
 per-bucket ``StampBinding`` evidence the door already computed rather than a coarse gate stamp.
 """
@@ -16,7 +16,7 @@ import pytest
 import tcip_store as ts
 from tcip_mcp.operationalization import STATE_CROSSING_DATES
 from tcip_mcp.pipelines import resolution
-from tcip_mcp.tools.phenology_tools import compute_phenology
+from tcip_mcp.tools.phenology_tools import deliver_phenology_milestones
 
 from tests._binding_fixtures import record_producing_run
 from tests.test_phenology_tools import _delivery_setup, _ds_root
@@ -38,7 +38,7 @@ def test_a_completed_crossing_delivery_writes_a_delivery_events_record_with_the_
         tmp_path, experiment_id="exp-producer", checkpoint_sha256=sha)
     out_csv = tmp_path / "out" / "catkin_phenology.csv"
 
-    res = compute_phenology(
+    res = deliver_phenology_milestones(
         trait="catkin", mapping_name=mapping_name,
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv), classifier_pred_dirs=[str(d1)],
@@ -51,11 +51,11 @@ def test_a_completed_crossing_delivery_writes_a_delivery_events_record_with_the_
 
     page = ts.read_log(audit_log_key(_ds_root(tmp_path)))
     audit_events = [e for e in page.records
-                    if e["tool"] == "compute_phenology" and "verified_buckets" in e]
+                    if e["tool"] == "deliver_phenology_milestones" and "verified_buckets" in e]
     assert len(audit_events) == 1, page.records
 
     # The new project-scoped delivery_events record lands beside it.
-    records = [r for r in _delivery_event_records() if r["door"] == "compute_phenology"]
+    records = [r for r in _delivery_event_records() if r["door"] == "deliver_phenology_milestones"]
     assert len(records) == 1, records
     record = records[0]
     assert record["trait"] == "catkin"
@@ -85,7 +85,7 @@ def test_two_deliveries_of_the_same_trait_and_kind_both_enumerate_distinctly(
     first_csv = tmp_path / "out" / "first.csv"
     second_csv = tmp_path / "out" / "second.csv"
     for out_csv in (first_csv, second_csv):
-        res = compute_phenology(
+        res = deliver_phenology_milestones(
             trait="catkin", mapping_name=mapping_name,
             predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
             output_csv_path=str(out_csv), classifier_pred_dirs=[str(d1)],
@@ -93,7 +93,7 @@ def test_two_deliveries_of_the_same_trait_and_kind_both_enumerate_distinctly(
         )
         assert "error" not in res, res
 
-    records = [r for r in _delivery_event_records() if r["door"] == "compute_phenology"]
+    records = [r for r in _delivery_event_records() if r["door"] == "deliver_phenology_milestones"]
     assert len(records) == 2, records
     assert records[0]["event_id"] != records[1]["event_id"]
     assert {r["output_path"] for r in records} == {str(first_csv), str(second_csv)}

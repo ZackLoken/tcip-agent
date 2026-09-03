@@ -20,7 +20,7 @@ Reach, stated plainly, two gaps: the fabrication check only reads Tools tables, 
 or retired name in running prose outside a table is invisible to it; and a table documenting
 tools under another header is also invisible to it, since header text is how a table is
 recognized as one at all. The phenology skill's piece inventory (headed "Piece", not "Tool") is
-that second case: it names real tools (`build_plant_mapping`, `compute_phenology`) alongside
+that second case: it names real tools (`build_plant_mapping`, `deliver_phenology_milestones`) alongside
 internal module names in the same first column, and a fabricated or retired name there would go
 unchecked. Matching by content instead of header (treating a table as a tool table once any data
 row's first cell names a registered tool) would flag that table's module-name rows as

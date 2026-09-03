@@ -77,7 +77,7 @@ reaching for again versus one built narrowly for a specific past investigation.
   `~/.claude/projects/.../<session>.jsonl` transcript so an orchestrating session can see
   that chat without a copy-paste round trip.
 - `smoke_phenology_e2e.py` - offline end-to-end smoke: builds synthetic geolocated imagery,
-  runs `build_plant_mapping` + `compute_phenology`, and asserts the delivered CSV and the
+  runs `build_plant_mapping` + `deliver_phenology_milestones`, and asserts the delivered CSV and the
   measurement-integrity refusal both behave correctly.
 - `smoke_terminal_e2e.py` - live smoke exercising the in-app agent terminal against the real
   `claude` CLI end to end (spawn, websocket attach, prompt, response). Costs one model turn.

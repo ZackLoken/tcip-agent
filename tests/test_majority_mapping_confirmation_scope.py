@@ -16,7 +16,7 @@ from pathlib import Path
 import pytest
 
 import tcip_store as ts
-from tcip_mcp.tools.phenology_tools import compute_phenology
+from tcip_mcp.tools.phenology_tools import deliver_phenology_milestones
 
 CATKIN_SPEC = {
     "name": "catkin",
@@ -127,7 +127,7 @@ def _deliver(tmp_path: Path, spec: dict, *, validated: bool) -> dict:
         _stamp_classifier(first, spec["name"], spec["positive_class_name"], dataset_root=root)
         classifier_dirs = [first]
     out_csv = root / f"{spec['phenology_prefix']}_phenology.csv"
-    res = compute_phenology(
+    res = deliver_phenology_milestones(
         trait=spec["name"],
         mapping_name=mapping_name,
         predictions_by_date=dirs,

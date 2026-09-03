@@ -71,15 +71,15 @@ def test_the_web_and_mcp_deliveries_agree_on_the_majority_marker(
     client: TestClient, tmp_path: Path,
 ) -> None:
     """Two delivery doors, one trait registry: the CSV the Results tab downloads and the CSV
-    ``compute_phenology`` writes must carry the same marker under the same column name for the same
+    ``deliver_phenology_milestones`` writes must carry the same marker under the same column name for the same
     trait, rather than each door deciding for itself what the reading's status is."""
-    from tcip_mcp.tools.phenology_tools import compute_phenology
+    from tcip_mcp.tools.phenology_tools import deliver_phenology_milestones
 
     body = _phenology_fixture(tmp_path, validated=True, detections=100)
     web_row = _export_row(client, body)
 
     out_csv = tmp_path / "mcp_delivery.csv"
-    result = compute_phenology(
+    result = deliver_phenology_milestones(
         trait=body["trait"], mapping_name=body["mapping_name"],
         predictions_by_date=body["predictions_by_date"], output_csv_path=str(out_csv),
         classifier_pred_dirs=list(body["predictions_by_date"].values()),

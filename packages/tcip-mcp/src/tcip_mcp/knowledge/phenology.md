@@ -1,6 +1,6 @@
 ---
 name: phenology
-description: "Compute and deliver bloom phenology: the catkin/pistillate 05/50/95-per-date milestones, as one row per plant, by composing existing pieces instead of re-scripting. Covers the operationalization (dates a plant's validated elongated fraction crosses 5/50/95%, never a bbox-height proxy), the end-to-end pattern, the pieces to compose (compute_phenology tool, phenology module, plant mapping), and the measurement-integrity guard. Load when computing bloom milestones, building plant mapping, delivering a per-plant phenology CSV, or handling hazelnut catkin or pistillate bloom timing."
+description: "Compute and deliver bloom phenology: the catkin/pistillate 05/50/95-per-date milestones, as one row per plant, by composing existing pieces instead of re-scripting. Covers the operationalization (dates a plant's validated elongated fraction crosses 5/50/95%, never a bbox-height proxy), the end-to-end pattern, the pieces to compose (deliver_phenology_milestones tool, phenology module, plant mapping), and the measurement-integrity guard. Load when computing bloom milestones, building plant mapping, delivering a per-plant phenology CSV, or handling hazelnut catkin or pistillate bloom timing."
 ---
 
 # Bloom phenology: the 05/50/95-per-date trait
@@ -88,7 +88,7 @@ across dates: plant mapping (image → plant_id) ─► per (plant, date) elonga
 | Piece | Where | Role |
 |-------|-------|------|
 | `build_plant_mapping` (MCP tool) | `tools/phenology_tools.py` | agent entry point (step 1): geolocated images (a registered dataset's own `images/` root) + plant CSVs → a named mapping persisted under the project |
-| `compute_phenology` (MCP tool) | `tools/phenology_tools.py` | agent entry point (step 2): a named mapping + classified preds → delivered `catkin_phenology.csv`; refuses to write when `positive_class_assessed` is false |
+| `deliver_phenology_milestones` (MCP tool) | `tools/phenology_tools.py` | agent entry point (step 2): a named mapping + classified preds → delivered `catkin_phenology.csv`; refuses to write when `positive_class_assessed` is false |
 | `phenology` module | `tcip-mcp .../pipelines/postprocessing/phenology.py` | the one canonical milestone implementation: `count_by_class`, `per_plant_phenology`, `crossing_date`, `positive_onset_date`, `plant_milestones`, and the gated delivery doors `write_phenology_csv` / `write_phenology_curve_csv` (both refuse without a passing operationalization basis) |
 | `plant_mapping` module | `tcip-mcp .../pipelines/postprocessing/plant_mapping.py` | image → `plant_id` via sequence-anchored GPS matching; `build_mapping`, `persist_mapping`, `load_mapping`, `verify_mapping_inputs`, `plant_mapping_names`. A mapping is project state, named and bound to the dataset it was built over and to its own build receipt: `load_mapping` refuses a record no receipt names, and `verify_mapping_inputs` re-checks the record's dates and plant CSVs at delivery time |
 | Web Results routes (phenology-specific) | `tcip-web .../routes/results.py` | `/plant_mapping/build`, `/plant_mapping/load`, `/plant_mapping/list`, `/phenology_measurement` (both projections, curve and milestone, from one measurement), `/export_csv` (the door that writes): the human UI; delegates to the same shared modules. Lists only this router's phenology routes; it also carries trait-general routes (operationalization records, trait-spec statements, delivery events, registered models) not enumerated here |
@@ -97,7 +97,7 @@ Milestone math lives once, in the `phenology` module; plant mapping lives once, 
 `plant_mapping` module. The MCP tools and the web routes all call them, so a mapping and a
 milestone date mean the same thing on both surfaces. If you change a definition, change it
 there; never fork a second copy. So the agent composes tools end to end:
-`build_plant_mapping` → `run_inference` → (elongation call) → `compute_phenology`.
+`build_plant_mapping` → `run_inference` → (elongation call) → `deliver_phenology_milestones`.
 
 Once a real localization-kind derivation (from actual GT box geometry) or a real breeder-answered
 count objective exists for this trait, persist it with `revise_trait_spec(project_root,

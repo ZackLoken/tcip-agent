@@ -2471,7 +2471,7 @@ def bind_classifier_validity(
     breeder-readable ``note`` naming which sidecar failed and why (empty when nothing was floored).
 
     Every delivery door must call this after reconciling, not just the one that first needed it:
-    ``compute_phenology`` and the web Results doors share it rather than each composing the flag,
+    ``deliver_phenology_milestones`` and the web Results doors share it rather than each composing the flag,
     so the two surfaces cannot disagree about what a classifier stamp means.
     """
     if classifier_state in (None, VALIDATED_FALSE):

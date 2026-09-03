@@ -60,7 +60,7 @@ Examples use real `crops.yml` trait names; verify any trait against `crops.yml` 
 | logged `scripts/` script | Produces the Per-Plant CSV Schema above by chaining `launch_training` + `run_inference` then the importable postprocessing libs `aggregate_per_plant` / `export_aggregated_csv`; see `pipeline-design` skill for the chaining mechanics |
 | `export_predictions` | Export predictions as per-image JSON (COCO-shaped). A bucket (`output_dir`, the run's own prediction directory, not a score bin) with review verdicts is immutable; the export redirects to a fresh `<dir>@r2` bucket (see the response's `output_dir`); `overwrite=True` forces in-place but is refused when verdicts exist |
 | `run_inference` | Run batch inference on images |
-| `compute_phenology` | Per-plant bloom CSV (05/50/95-per-date) from classified preds + plant mapping; its own column schema; see `phenology` skill |
+| `deliver_phenology_milestones` | Per-plant bloom CSV (05/50/95-per-date) from classified preds + plant mapping; its own column schema; see `phenology` skill |
 | `deliver_orthomosaic_plant_counts` | Per-plant detection counts from a persisted whole-raster prediction bucket plus plant-locations CSV(s); georeferences the boxes, assigns them to plants, and delivers through `export_aggregated_csv`, so it inherits the same gate and provenance columns; refuses a bucket that cannot vouch for the caller's raster |
 | `calibrate_scalar_operating_point` | Calibrate and validate a continuous or ordinal trait's prediction against a disjoint held-out split; stamps `ordinal_operating_point.json` / `regression_operating_point.json`, the on-disk producer `export_aggregated_csv` reconciles against |
 | `calibrate_physical_scale` | Derive and validate a per-pixel physical scale against a breeder-supplied reference, and stamp it into a bucket's `resolve_scale.json`, the `scale_document` cell's producer |
@@ -121,7 +121,7 @@ one of the five measurement-document kinds a bucket can carry (`operating_point.
 only when every dimension it was handed clears, and otherwise refuses (or, with
 `acknowledge_unvalidated=True`, stamps the unvalidated dimension(s) false).
 
-- `compute_phenology` and the web `/export_csv` phenology branch both reconcile the positive-state
+- `deliver_phenology_milestones` and the web `/export_csv` phenology branch both reconcile the positive-state
   classifier (from `classifier_operating_point.json`, see `calibrate_classifier_operating_point`)
   and the count operating point, then hand the reconciled state to `write_phenology_csv` /
   `write_phenology_curve_csv` (`phenology.py`), the one writer both doors share: it runs the gate

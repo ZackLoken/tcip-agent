@@ -788,7 +788,7 @@ def _earned_run_inference_result(tmp_path, *, trait="catkin", **calibration):
 
 def test_export_predictions_refuses_fabricated_tile_size_even_with_validated_conf(tmp_path, monkeypatch):
     """The delivery door that actually persists a prediction bucket must refuse a fabricated tile
-    scale the same way tabulate_counts/compute_phenology/export_aggregated_csv already do:
+    scale the same way tabulate_counts/deliver_phenology_milestones/export_aggregated_csv already do:
     run_inference itself never refuses (it is the shared, honestly-stamped raw substrate every
     door builds on, same contract as an uncalibrated conf), so the refusal belongs here."""
     import tcip_mcp.tools.inference_tools as itools

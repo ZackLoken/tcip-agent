@@ -1,5 +1,5 @@
 """Canonical phenology measurement, the one implementation of a trait's positive-fraction milestones.
-Every surface (the tcip-web Results route, the MCP ``compute_phenology`` tool) routes through here,
+Every surface (the tcip-web Results route, the MCP ``deliver_phenology_milestones`` tool) routes through here,
 so a phenology date always means the same thing, for whichever registered trait it's computed for.
 
 Trait definition (authoritative; see the ``phenology`` skill + the CLAUDE.md measurement-
@@ -517,7 +517,7 @@ def phenology_delivery_flags(
 ) -> dict[str, str | None]:
     """The ``check_delivery_gate`` flags dict a phenology delivery gates on.
 
-    Both delivery doors (``compute_phenology``, the web ``export_csv``) reconcile the classifier and
+    Both delivery doors (``deliver_phenology_milestones``, the web ``export_csv``) reconcile the classifier and
     the count operating point themselves, from evidence that differs per door (a caller-supplied
     bucket list for the classifier there, the delivery's own buckets here), and hand the reconciled
     states here rather than assembling the flags dict a second time each. ``tile_size`` enters only
@@ -589,7 +589,7 @@ def _write_phenology_delivery(
     if not isinstance(basis, OperationalizationBasis):
         raise ValueError(
             "a phenology delivery requires the basis a passing check_operationalization returned "
-            "for this trait's state_crossing_dates delivery. compute_phenology and export_csv "
+            "for this trait's state_crossing_dates delivery. deliver_phenology_milestones and export_csv "
             "produce one and are the primitives to call; this writer cannot read the record itself, "
             "because it is given a trait spec rather than a project to read from."
         )

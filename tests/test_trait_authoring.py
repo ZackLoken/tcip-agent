@@ -447,7 +447,7 @@ def test_resolve_positive_class_id_no_map_is_none(tmp_path: Path):
     assert cid is None
 
 
-# ── end-to-end through compute_phenology ────────────────────────────
+# ── end-to-end through deliver_phenology_milestones ────────────────────────────
 
 def _pheno_fixture(tmp_path: Path, *, classified: bool):
     from tcip_annotation import json_io
@@ -475,9 +475,9 @@ def _pheno_fixture(tmp_path: Path, *, classified: bool):
 
 
 @pytest.mark.usefixtures("seed_catkin_operationalization")
-def test_compute_phenology_derives_class_id_and_delivers(tmp_path: Path):
+def test_deliver_phenology_milestones_derives_class_id_and_delivers(tmp_path: Path):
     from tcip_mcp.pipelines.postprocessing import phenology
-    from tcip_mcp.tools.phenology_tools import compute_phenology
+    from tcip_mcp.tools.phenology_tools import deliver_phenology_milestones
 
     mapping_name, d1, d2 = _pheno_fixture(tmp_path, classified=True)
     out_csv = tmp_path / "out.csv"
@@ -491,7 +491,7 @@ def test_compute_phenology_derives_class_id_and_delivers(tmp_path: Path):
                         dataset_root=tmp_path / "ds", experiment_id="exp-classifier-derives-id",
                         producing_experiment_id="exp-trait-authoring", trait="catkin")
 
-    res = compute_phenology(
+    res = deliver_phenology_milestones(
         trait="catkin",
         mapping_name=mapping_name,
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
@@ -508,11 +508,11 @@ def test_compute_phenology_derives_class_id_and_delivers(tmp_path: Path):
 
 
 @pytest.mark.usefixtures("seed_catkin_operationalization")
-def test_compute_phenology_refuses_when_class_id_unresolvable(tmp_path: Path):
-    from tcip_mcp.tools.phenology_tools import compute_phenology
+def test_deliver_phenology_milestones_refuses_when_class_id_unresolvable(tmp_path: Path):
+    from tcip_mcp.tools.phenology_tools import deliver_phenology_milestones
 
     mapping_name, d1, d2 = _pheno_fixture(tmp_path, classified=False)  # no 'elongated' anywhere
-    res = compute_phenology(
+    res = deliver_phenology_milestones(
         trait="catkin",
         mapping_name=mapping_name,
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
