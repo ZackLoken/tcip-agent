@@ -940,11 +940,11 @@ registered at HEAD.
 
 | method | path | handler | line |
 |---|---|---|---|
-| GET | `/grid` | `get_grid` | `routes/coverage.py:171` |
-| GET | `` (root) | `get_coverage` | `routes/coverage.py:213` |
-| POST | `` (root) | `post_coverage` | `routes/coverage.py:263` |
-| GET | `/completeness` | `get_completeness` | `routes/coverage.py:433` |
-| POST | `/completeness` | `post_completeness` | `routes/coverage.py:618` |
+| GET | `/grid` | `get_grid` | `routes/coverage.py:173` |
+| GET | `` (root) | `get_coverage` | `routes/coverage.py:215` |
+| POST | `` (root) | `post_coverage` | `routes/coverage.py:265` |
+| GET | `/completeness` | `get_completeness` | `routes/coverage.py:438` |
+| POST | `/completeness` | `post_completeness` | `routes/coverage.py:613` |
 
 ### routes/dataset.py, prefix `/api/dataset` (3 routes)
 
@@ -2554,7 +2554,7 @@ Phase 3 verdict: restated-in-test.
 
 Must agree: the cell name the agent points at and the cell the GUI highlights are the same rectangle.
 Side A: `packages/tcip-mcp/src/tcip_mcp/pipelines/reference_grid.py:69` (`def reference_cells(`, which builds the cells, with `grid_geometry`, line 151, the geometry handed over beside them).
-Side B: `packages/tcip-annotation/src/tcip_annotation/sam_wrapper.py:329` (`def grid_to_rect(`, the one cell-name lookup, with `grid_to_pixel`, line 360, built on it) and `packages/tcip-web/src/tcip_web/routes/coverage.py:170` (`@router.get("/grid")`, `get_grid`, whose cell list the browser consumes verbatim).
+Side B: `packages/tcip-annotation/src/tcip_annotation/sam_wrapper.py:329` (`def grid_to_rect(`, the one cell-name lookup, with `grid_to_pixel`, line 360, built on it) and `packages/tcip-web/src/tcip_web/routes/coverage.py:172` (`@router.get("/grid")`, `get_grid`, whose cell list the browser consumes verbatim).
 Phase 3 verdict: single.
 
 ## S59. Path confinement (the derived allow-set)
