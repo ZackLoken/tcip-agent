@@ -18,10 +18,10 @@ from tcip_mcp.dataset_layout import (
     region_completeness_path,
     normalize_region_completeness_store,
 )
+from tcip_mcp.pipelines.pixel_size import PixelSize, raster_pixel_size, raster_pixel_size_reason
 from tcip_mcp.pipelines.reference_grid import reference_cells
 from tcip_mcp.pipelines.region_completeness import (
     DatasetExtent,
-    PixelSize,
     annotation_counts_by_cell,
     annotations_by_cell,
     cell_annotation_digest,
@@ -30,8 +30,6 @@ from tcip_mcp.pipelines.region_completeness import (
     dataset_physical_extent,
     dataset_working_scale_bar,
     default_working_scale_source,
-    raster_pixel_size,
-    raster_pixel_size_reason,
     saved_extents,
     stale_cells,
     working_scale_bar,

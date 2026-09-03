@@ -18,6 +18,8 @@ src/tcip_mcp/
                   # measurement, postprocessing, training (submodules), plus:
     derivations.py        # Tier-A derivations: compute a parameter (channels, num_classes,
                            # anchor ratios) from the artifact in hand instead of pinning it
+    pixel_size.py           # the one raster-georeferencing-to-metres-per-pixel resolver, shared
+                             # by the completeness bar and the block-scale derivation
     model_build.py         # build_model: the one seam from a model_source config to an nn.Module
     model_contract.py       # the measurement boundary a bespoke model must pass
                              # (check_model_contract, overfit_check)
