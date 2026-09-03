@@ -4,7 +4,7 @@
 A deliberate one-off operator script, per this repo's no-backward-compatibility boundary
 (CLAUDE.md), modelled on ``conform_view_coverage_viewing.py``: the coverage lattice now derives
 from the breeder's own set grid zoom rather than an annotation-derived bar, so an attestation's
-scale provenance carries the working scale (``WorkingScale {value, source}``) in effect at write
+scale provenance carries the working scale (``WorkingScale {zoom, source}``) in effect at write
 time under the new key name, never the old annotation-derived bar. The old bar cannot be mapped
 forward to a working scale (they measure different things: a documented default span over saved
 annotations, versus a breeder-stated zoom), so this script renames the key and nulls the value on

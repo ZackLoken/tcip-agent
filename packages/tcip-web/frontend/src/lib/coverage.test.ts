@@ -307,13 +307,7 @@ describe("effectiveComplete", () => {
 });
 
 describe("meetsBar", () => {
-  const bar = {
-    value: 0.5,
-    median_extent_native_px: 92,
-    annotation_count: 2,
-    judged_span_px: 46,
-    source: "s",
-  };
+  const bar = { zoom: 0.5, source: "s" };
 
   it("is exactly the equality boundary: a scale equal to the bar meets it", () => {
     expect(meetsBar(0.5, bar)).toBe(true);

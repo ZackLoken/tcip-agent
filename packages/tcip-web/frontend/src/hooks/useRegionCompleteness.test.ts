@@ -334,7 +334,7 @@ describe("useRegionCompleteness", () => {
   });
 
   it("exposes the active subject's served working scale", async () => {
-    const scaleBar = { value: 0.5, source: "s" };
+    const scaleBar = { zoom: 0.5, source: "s" };
     vi.spyOn(api.coverage, "completeness").mockResolvedValue(
       response({}, { working_scale: { bush: scaleBar } }),
     );

@@ -42,7 +42,7 @@ export interface StatsSource {
 }
 
 export interface WorkingScale {
-  value: number;
+  zoom: number;
   source: string;
 }
 

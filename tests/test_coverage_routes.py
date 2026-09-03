@@ -557,7 +557,7 @@ class TestWorkingScale:
                 "path": path, "dataset_root": str(root), "subject": "catkin"})
         body = got.json()
         scale = body["working_scale"]["catkin"]
-        assert scale["value"] == 1.5
+        assert scale["zoom"] == 1.5
         assert "set by user:breeder at" in scale["source"]
         assert body["working_scale_reason"] == {}
 
@@ -1447,7 +1447,7 @@ class TestCompletenessRoute:
         ).json()["by_subject"]["catkin"]
         entry = record["cells_attested_view"]["A1"]
         assert entry["view_scale"] == 0.75
-        assert entry["working_scale_at_write"]["value"] == 1.5
+        assert entry["working_scale_at_write"]["zoom"] == 1.5
         assert entry["seen_on_record"] == {"at_scale": None, "grid_matched": False}
 
     def test_attesting_with_no_set_zoom_stamps_a_null_working_scale(

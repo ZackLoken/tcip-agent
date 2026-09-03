@@ -47,8 +47,8 @@ function baseProps() {
   };
 }
 
-function bar(value: number) {
-  return { value, source: "set by user:breeder at 2026-09-03T00:00:00+00:00" };
+function bar(zoom: number) {
+  return { zoom, source: "set by user:breeder at 2026-09-03T00:00:00+00:00" };
 }
 
 function openKey() {

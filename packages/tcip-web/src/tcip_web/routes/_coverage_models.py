@@ -63,13 +63,14 @@ class StatsSource(BaseModel):
 
 class WorkingScale(BaseModel):
     """The scale a coverage sweep is judged against: the breeder's own set inspection zoom for a
-    subject (``coverage_grid_zoom``), never derived from annotation content. ``source`` states
-    who set it and when ("set by user:<name> at <time>"), so a stamped comparison always carries
-    its own provenance rather than a bare number."""
+    subject (``coverage_grid_zoom``), never derived from annotation content. ``zoom`` names what
+    the number is (the grid zoom the breeder set, not a bar derived from anything); ``source``
+    states who set it and when ("set by user:<name> at <time>"), so a stamped comparison always
+    carries its own provenance rather than a bare number."""
 
     model_config = ConfigDict(extra="forbid")
 
-    value: float
+    zoom: float
     source: str
 
 

@@ -233,12 +233,12 @@ def _subject_zoom(root: str, subject: str) -> Optional[dict]:
 
 def _working_scale_of(entry: Optional[dict]) -> Optional[dict]:
     """``entry`` (a stored grid-zoom record) rendered as the served/stored ``WorkingScale``
-    shape (``{value, source}``), or ``None`` when there is no entry: the one place a zoom entry
+    shape (``{zoom, source}``), or ``None`` when there is no entry: the one place a zoom entry
     becomes a working scale, shared by ``get_completeness`` and ``post_completeness`` so the two
     can never render the same entry two different ways."""
     if entry is None:
         return None
-    return {"value": entry.get("zoom"),
+    return {"zoom": entry.get("zoom"),
             "source": f"set by {entry.get('set_by')} at {entry.get('set_at')}"}
 
 

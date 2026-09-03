@@ -123,7 +123,7 @@ export function breederReadErrorReason(raw: string): string {
  *  cell meet the working scale" is never answered twice. `null` on either side (no recorded
  *  scale, or no working scale to judge against) never meets it. */
 export function meetsBar(atScale: number | null, bar: WorkingScale | null): boolean {
-  return atScale !== null && bar !== null && atScale >= bar.value;
+  return atScale !== null && bar !== null && atScale >= bar.zoom;
 }
 
 export function sameGrid(a: GridGeometry, b: GridGeometry): boolean {
