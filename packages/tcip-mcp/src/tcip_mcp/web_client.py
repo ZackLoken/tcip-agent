@@ -211,7 +211,7 @@ ANNOTATE_MODES = get_args(AnnotateMode)
 # The pusher and the receiver both validate against this one set, so neither drifts apart.
 VALID_PANELS = frozenset(TAB_NAMES) | {"app"}
 
-# The event types the platform's own tool-driven emitters send; ``push_panel_data`` accepts any
+# The event types the platform's own tool-driven emitters send; ``push_panel_event`` accepts any
 # caller-supplied type beyond this set, so this is not the full panel-event vocabulary.
 PANEL_EVENT_LABELS_WRITTEN = "labels_written"
 PANEL_EVENT_ANNOTATE_FOCUS = "annotate_focus"

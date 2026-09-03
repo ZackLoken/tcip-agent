@@ -1,6 +1,6 @@
-"""Integration tests for the push_panel_data HTTP bridge and tool output schemas.
+"""Integration tests for the push_panel_event HTTP bridge and tool output schemas.
 
-The legacy ``.tcip/events/`` file bridge has been retired. ``push_panel_data``
+The legacy ``.tcip/events/`` file bridge has been retired. ``push_panel_event``
 now POSTs to the tcip-web FastAPI backend; the backend broadcasts to any
 subscribed WebSocket clients.
 """
@@ -291,11 +291,11 @@ class TestPushPanelDataTool:
 
     def test_no_subscribers_when_backend_down(self, tmp_path: Path, monkeypatch) -> None:
         """Backend not running → graceful 'no_subscribers' status."""
-        from tcip_mcp.tools.gui_tools import push_panel_data
+        from tcip_mcp.tools.gui_tools import push_panel_event
 
         # Point port discovery at an unused port in an isolated project root
         monkeypatch.setenv("TCIP_WEB_PORT", "59999")  # very unlikely to be bound
-        result = push_panel_data(
+        result = push_panel_event(
             panel="training",
             event_type="metrics_update",
             data={"epoch": 1},
@@ -308,9 +308,9 @@ class TestPushPanelDataTool:
 
     def test_invalid_panel_rejected(self) -> None:
         """Unknown panel names return an error before any HTTP call."""
-        from tcip_mcp.tools.gui_tools import push_panel_data
+        from tcip_mcp.tools.gui_tools import push_panel_event
 
-        result = push_panel_data(panel="bogus", event_type="test", data={})
+        result = push_panel_event(panel="bogus", event_type="test", data={})
         assert "error" in result
 
 

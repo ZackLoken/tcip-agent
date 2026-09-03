@@ -2,7 +2,7 @@
 
 Both routes go through the tcip-web event channel (:mod:`tcip_mcp.web_client`), a soft miss with
 ``delivered: false`` if no GUI answers. Neither reads or writes an annotation or prediction file
-itself beyond what it needs to resolve where to land: push_panel_data forwards an arbitrary
+itself beyond what it needs to resolve where to land: push_panel_event forwards an arbitrary
 payload; focus_human_attention resolves a (subject, date) frame through read_annotations' own reader and posts
 the event the GUI honors with local view setters.
 """
@@ -34,7 +34,7 @@ def _logical_image_names(images_dir) -> list[str]:
 
 @mcp.tool()
 @audited
-def push_panel_data(
+def push_panel_event(
     panel: str,
     event_type: str,
     data: dict,
