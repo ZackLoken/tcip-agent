@@ -1115,6 +1115,6 @@ def list_traits(project_root: str) -> dict:
 @router.get("/models/registered")
 def registered_models(project_path: str, tag: Optional[str] = None) -> dict:
     root = _guarded_project_root(project_path)
-    from tcip_mcp.tools.model_tools import list_registered_models
+    from tcip_mcp.tools.model_tools import rank_registered_models
 
-    return list_registered_models(str(root), tag)
+    return rank_registered_models(str(root), tag=tag)

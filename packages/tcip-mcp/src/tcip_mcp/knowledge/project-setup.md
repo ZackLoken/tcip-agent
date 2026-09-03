@@ -174,11 +174,11 @@ data, and the platform's own audit log is now this project's own, one file at on
 adoption; `python
 scripts/archive_project.py` bundles everything; `python scripts/import_project.py` restores that
 ZIP into a destination dir, round-tripping back to a `inspect_project`-visible project). After
-adoption, `inspect_project`, `rank_registered_models`, `list_registered_models`,
-and `register_model` all default (`project_path=""`) to that project, and a
+adoption, `inspect_project`, `rank_registered_models` (listing with `metric=""` or ranking with
+one stated) and `register_model` all default (`project_path=""`) to that project, and a
 training run auto-registers there, so the model you trained is the one you retrieve. Pass an
 explicit `project_path` only to reach a *different* project's registry: that holds for
-`inspect_project`, `rank_registered_models`, `list_registered_models`, and `register_model`'s explicit
+`inspect_project`, `rank_registered_models`, and `register_model`'s explicit
 mode. `register_model`'s experiment mode binds only in the experiment's own root; a
 `project_path` there must name that same root or the call refuses by name. The repin is a
 deliberate action and reaches only the calling process, so a training run in flight keeps
