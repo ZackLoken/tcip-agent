@@ -29,6 +29,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 RENAMES = [
     ("calibrate_ordinal_regression_operating_point", "calibrate_scalar_operating_point"),
+    ("cancel_hpo", "cancel_hyperparameter_search"),
 ]
 
 _OWN_FILE = str(Path(__file__).relative_to(REPO_ROOT)).replace("\\", "/")

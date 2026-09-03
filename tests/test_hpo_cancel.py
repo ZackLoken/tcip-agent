@@ -1,4 +1,4 @@
-"""Cooperative sweep cancel: ``cancel_hpo``, ``run_hpo``'s cancelled-manifest exits,
+"""Cooperative sweep cancel: ``cancel_hyperparameter_search``, ``run_hpo``'s cancelled-manifest exits,
 ``_run_hpo_trial``'s entry check, and the sweep ``Stopper``'s two stop-all conditions.
 """
 
@@ -6,25 +6,25 @@ from __future__ import annotations
 
 import pytest
 
-def test_cancel_hpo_refuses_a_study_neither_manifest_nor_registry_names(tmp_path) -> None:
-    from tcip_mcp.tools.training_tools import cancel_hpo
+def test_cancel_hyperparameter_search_refuses_a_study_neither_manifest_nor_registry_names(tmp_path) -> None:
+    from tcip_mcp.tools.training_tools import cancel_hyperparameter_search
 
-    result = cancel_hpo("hpo_totally_unknown", root=str(tmp_path))
+    result = cancel_hyperparameter_search("hpo_totally_unknown", root=str(tmp_path))
     assert "error" in result
 
 
-def test_mark_sweep_launching_lets_cancel_hpo_find_a_study_with_no_manifest_yet(tmp_path) -> None:
+def test_mark_sweep_launching_lets_cancel_hyperparameter_search_find_a_study_with_no_manifest_yet(tmp_path) -> None:
     """The pre-manifest window: a study a caller has marked as launching, but ``run_hpo`` has
-    not yet reached its first manifest write, is a sweep ``cancel_hpo`` can find, not a study
+    not yet reached its first manifest write, is a sweep ``cancel_hyperparameter_search`` can find, not a study
     it refuses as unknown."""
     from tcip_mcp.tools.training_tools import (
-        SWEEP_CANCEL_SENTINEL, cancel_hpo, mark_sweep_launching, sweep_dir,
+        SWEEP_CANCEL_SENTINEL, cancel_hyperparameter_search, mark_sweep_launching, sweep_dir,
     )
 
     study_name = "hpo_marked001"
     mark_sweep_launching(study_name, str(tmp_path))
 
-    result = cancel_hpo(study_name, str(tmp_path))
+    result = cancel_hyperparameter_search(study_name, str(tmp_path))
     assert "error" not in result
     assert result == {"study_name": study_name, "status": "running", "cancel_requested": True}
     assert (sweep_dir(study_name, str(tmp_path)) / SWEEP_CANCEL_SENTINEL).exists()
@@ -36,14 +36,14 @@ def test_run_hpo_records_a_cancelled_manifest_for_a_cancel_that_landed_before_it
     """A cancel that reaches the sweep in the window the web relaunch route marks before
     starting its worker (mark, then a cancel, then ``run_hpo`` itself) records the same
     before-start cancellation ``run_hpo``'s own pre-existing sentinel check already handles;
-    today's refusal is at ``cancel_hpo``, proven separately, above."""
+    today's refusal is at ``cancel_hyperparameter_search``, proven separately, above."""
     from tcip_mcp.tools.training_tools import (
-        _CANCEL_BEFORE_START_REASON, cancel_hpo, mark_sweep_launching, run_hpo, sweep_manifest_key,
+        _CANCEL_BEFORE_START_REASON, cancel_hyperparameter_search, mark_sweep_launching, run_hpo, sweep_manifest_key,
     )
 
     study_name = "hpo_racedcancel1"
     mark_sweep_launching(study_name, str(tmp_path))
-    cancelled = cancel_hpo(study_name, str(tmp_path))
+    cancelled = cancel_hyperparameter_search(study_name, str(tmp_path))
     assert "error" not in cancelled
 
     result = run_hpo(base_config=real_hpo_base_config, n_trials=1, output_dir=str(tmp_path),
@@ -111,28 +111,28 @@ def test_mark_sweep_launching_is_discarded_when_check_json_value_refuses(tmp_pat
     assert _sweep_launching(study_name, resolved_root) is False
 
 
-def test_cancel_hpo_under_a_mismatched_root_is_refused_despite_the_launch_mark(tmp_path) -> None:
+def test_cancel_hyperparameter_search_under_a_mismatched_root_is_refused_despite_the_launch_mark(tmp_path) -> None:
     """A mark recorded under one resolved root does not let a cancel under another root count
     the study as found: a cancel that lands where run_hpo will never look is refused, not
     honoured with a sentinel nothing will ever poll."""
-    from tcip_mcp.tools.training_tools import cancel_hpo, mark_sweep_launching, sweep_dir
+    from tcip_mcp.tools.training_tools import cancel_hyperparameter_search, mark_sweep_launching, sweep_dir
 
     study_name = "hpo_wrongroot1"
     root_a = tmp_path / "root_a"
     root_b = tmp_path / "root_b"
     mark_sweep_launching(study_name, root=root_a)
 
-    result = cancel_hpo(study_name, root=str(root_b))
+    result = cancel_hyperparameter_search(study_name, root=str(root_b))
     assert "error" in result
     assert not sweep_dir(study_name, root=root_b).exists()
 
 
-def test_cancel_hpo_under_a_non_default_root(tmp_path) -> None:
+def test_cancel_hyperparameter_search_under_a_non_default_root(tmp_path) -> None:
     import tcip_store
     from datetime import datetime, timezone
 
     from tcip_mcp.tools.training_tools import (
-        SWEEP_CANCEL_SENTINEL, cancel_hpo, sweep_dir, sweep_manifest_key,
+        SWEEP_CANCEL_SENTINEL, cancel_hyperparameter_search, sweep_dir, sweep_manifest_key,
     )
 
     other_root = tmp_path / "other_project"
@@ -142,7 +142,7 @@ def test_cancel_hpo_under_a_non_default_root(tmp_path) -> None:
                        {"study_name": "hpo_other01", "status": "running", "n_trials": 1,
                         "heartbeat": datetime.now(timezone.utc).isoformat()})
 
-    result = cancel_hpo("hpo_other01", root=str(other_root))
+    result = cancel_hyperparameter_search("hpo_other01", root=str(other_root))
     assert result == {"study_name": "hpo_other01", "status": "running", "cancel_requested": True}
     assert (sweep_root / SWEEP_CANCEL_SENTINEL).exists()
 
@@ -243,7 +243,7 @@ def test_a_terminal_cancelled_manifest_keeps_cancel_requested(
 ) -> None:
     """run_hpo re-derives cancel_requested from the sweep's own stop file on every manifest
     write, including its terminal one, rather than writing its stale in-memory copy (which
-    never carries a field cancel_hpo set on disk out of band) back over it."""
+    never carries a field cancel_hyperparameter_search set on disk out of band) back over it."""
     from tcip_mcp.tools.training_tools import (
         SWEEP_CANCEL_SENTINEL, run_hpo, sweep_dir, sweep_manifest_key,
     )
@@ -265,13 +265,13 @@ def test_a_terminal_cancelled_manifest_keeps_cancel_requested(
     assert manifest["cancel_requested"] is True
 
 
-def test_cancel_hpo_leaves_a_terminal_manifest_terminal(tmp_path) -> None:
-    """cancel_hpo never writes over a manifest already in a terminal status: the sentinel
+def test_cancel_hyperparameter_search_leaves_a_terminal_manifest_terminal(tmp_path) -> None:
+    """cancel_hyperparameter_search never writes over a manifest already in a terminal status: the sentinel
     files still get written (a stray straggler process still stops), but the manifest's own
     status and content are not disturbed by a cancel arriving after the sweep already ended."""
     import tcip_store
     from tcip_mcp.tools.training_tools import (
-        SWEEP_CANCEL_SENTINEL, cancel_hpo, sweep_dir, sweep_manifest_key,
+        SWEEP_CANCEL_SENTINEL, cancel_hyperparameter_search, sweep_dir, sweep_manifest_key,
     )
 
     study_name = "hpo_alreadydone1"
@@ -283,7 +283,7 @@ def test_cancel_hpo_leaves_a_terminal_manifest_terminal(tmp_path) -> None:
          "result": {"best_value": 0.1}},
     )
 
-    result = cancel_hpo(study_name, root=str(tmp_path))
+    result = cancel_hyperparameter_search(study_name, root=str(tmp_path))
     assert result["status"] == "completed"
     assert (sweep_root / SWEEP_CANCEL_SENTINEL).exists()  # the sentinel is still written
 
@@ -313,17 +313,17 @@ def test_run_hpo_trial_reports_the_losing_side_without_training_when_the_sweep_i
     assert not tcip_store.exists(trial_config_key(sweep_root, trial_dir.name))
 
 
-def test_cancel_hpo_writes_every_sentinel_beside_a_trial_whose_record_will_not_decode(
+def test_cancel_hyperparameter_search_writes_every_sentinel_beside_a_trial_whose_record_will_not_decode(
     tmp_path
 ) -> None:
     """A trial whose resolved-config record exists but will not decode means the trial wrote
-    it, so it reads as not-running (the same call ``cancel_hpo`` and the Tune ``Stopper`` share)
+    it, so it reads as not-running (the same call ``cancel_hyperparameter_search`` and the Tune ``Stopper`` share)
     rather than raising and half-applying the cancel to every other trial."""
     import tcip_store
     from tcip_mcp.pipelines.training.hpo import _build_sweep_stopper
     from tcip_mcp.pipelines.training.run_registry import CANCEL_SENTINEL
     from tcip_mcp.tools.training_tools import (
-        SWEEP_CANCEL_SENTINEL, cancel_hpo, sweep_dir, sweep_manifest_key, trial_config_key,
+        SWEEP_CANCEL_SENTINEL, cancel_hyperparameter_search, sweep_dir, sweep_manifest_key, trial_config_key,
     )
     from tests._record_damage_fixtures import damage_record
 
@@ -346,7 +346,7 @@ def test_cancel_hpo_writes_every_sentinel_beside_a_trial_whose_record_will_not_d
         {"study_name": study_name, "status": "running", "n_trials": 3},
     )
 
-    result = cancel_hpo(study_name, root=str(tmp_path))
+    result = cancel_hyperparameter_search(study_name, root=str(tmp_path))
     assert result["cancel_requested"] is True
     assert (sweep_root / SWEEP_CANCEL_SENTINEL).exists()
     assert (running_trial / CANCEL_SENTINEL).exists()

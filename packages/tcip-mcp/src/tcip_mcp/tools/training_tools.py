@@ -1471,7 +1471,7 @@ def sweep_dir(study_name: str, output_dir: str = "", *, root: Path | str | None 
 
 SWEEP_CANCEL_SENTINEL = ".sweep_cancel_requested"
 """The sweep-level cooperative-cancel stop file's name, written at a sweep's own root by
-:func:`cancel_hpo` and polled by ``run_hpo``, ``_run_hpo_trial`` and the sweep
+:func:`cancel_hyperparameter_search` and polled by ``run_hpo``, ``_run_hpo_trial`` and the sweep
 :class:`~tcip_mcp.pipelines.training.hpo.Stopper`. Distinct from the run-level
 ``run_registry.CANCEL_SENTINEL`` (written per trial directory): one name per protocol, since a
 sweep-wide stop and one run's own stop answer different questions."""
@@ -1562,7 +1562,7 @@ def _running_trial_dirs(sweep_root: Path) -> list[Path]:
     exactly once, at the very end of the trial, success or failure, so its absence means the
     trial has not reached that point yet.
 
-    Used by :func:`cancel_hpo` to decide which trial directories still need the run-level
+    Used by :func:`cancel_hyperparameter_search` to decide which trial directories still need the run-level
     cancel sentinel written into them; a sentinel dropped into a trial that already wrote its
     resolved config is inert. The sweep :class:`~tcip_mcp.pipelines.training.hpo.Stopper`'s own
     ``stop_all`` no longer reads this: a trial Ray killed outright may never reach its own
@@ -1663,7 +1663,7 @@ def sweep_manifest_key(
     Two writers share this record. ``run_hpo`` holds the manifest in memory for the whole sweep
     and replaces the whole document at each state change; it re-derives ``cancel_requested`` from
     the sweep's own stop file on every one of those writes, so it never overwrites a cancel
-    ``cancel_hpo`` recorded in between. ``cancel_hpo`` itself, reached from a different request
+    ``cancel_hyperparameter_search`` recorded in between. ``cancel_hyperparameter_search`` itself, reached from a different request
     (a cancel this process is not running the sweep for), read-modify-writes only
     ``cancel_requested`` through the store's compare-and-set (``read_versioned`` plus
     ``replace(..., expect=version)``) and never over a manifest already in a terminal status, so a
@@ -1945,7 +1945,7 @@ def run_hpo(
     (see ``sweep_state``); a restamp a store or OS error interrupts costs one beat, not the
     rest of the sweep. A caller that calls :func:`mark_sweep_launching` for ``study_name``
     before this call keeps a cancel reachable in the window before the first manifest write
-    (see :func:`cancel_hpo`); this call discards that mark itself once it no longer needs it.
+    (see :func:`cancel_hyperparameter_search`); this call discards that mark itself once it no longer needs it.
 
     Refuses (``{"error": ..., "issues": [...]}``, nothing minted) an unimportable builder or
     training source, or a config with no ``data`` section, at every point the search space
@@ -1955,7 +1955,7 @@ def run_hpo(
     Ray's Tuner taking only one fixed metric/mode for the whole sweep: this catches a dotted or
     nested-dict axis naming ``selection_metric`` directly, and an axis (``model_source.task``,
     in particular) that changes the metric's own task-derived default with no
-    ``selection_metric`` key in sight. ``cancel_hpo`` requested against this study before or
+    ``selection_metric`` key in sight. ``cancel_hyperparameter_search`` requested against this study before or
     during the run instead ends the sweep ``{"status": "cancelled", ...}``, the manifest
     recording the same, rather than a completed result.
 
@@ -2290,7 +2290,7 @@ def _path_under(path: Path, root: Path) -> bool:
 
 @mcp.tool()
 @audited
-def cancel_hpo(study_name: str, output_dir: str = "", *, root: str | None = None) -> dict:
+def cancel_hyperparameter_search(study_name: str, output_dir: str = "", *, root: str | None = None) -> dict:
     """Request cooperative cancellation of a running HPO sweep.
 
     Writes the sweep's own stop file (``SWEEP_CANCEL_SENTINEL``) at the sweep's root: ``run_hpo``

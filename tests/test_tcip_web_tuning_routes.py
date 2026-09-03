@@ -1055,7 +1055,7 @@ def test_cancel_reaches_a_relaunch_before_run_hpo_writes_its_own_manifest(
     """The relaunch route marks the new sweep id as launching, on the request thread, before
     starting the worker: a cancel that arrives once the route has answered but before run_hpo's
     own worker call has written a manifest still reaches the sweep, rather than the 404
-    ``cancel_hpo`` used to answer in that window."""
+    ``cancel_hyperparameter_search`` used to answer in that window."""
     import threading
 
     from tcip_web.routes import tuning
@@ -1123,7 +1123,7 @@ def test_worker_discards_the_launch_mark_when_it_fails_before_reaching_run_hpo(
     hpo_root, monkeypatch
 ) -> None:
     """A worker that fails before it ever calls ``run_hpo`` must still discard the launch mark
-    the route recorded for it, so ``cancel_hpo`` does not keep finding a study that will never
+    the route recorded for it, so ``cancel_hyperparameter_search`` does not keep finding a study that will never
     exist."""
     from tcip_mcp.tools.training_tools import _LAUNCHING_SWEEPS, mark_sweep_launching
     from tcip_web.routes.tuning import HPOJob, _RelaunchSpec, _persist, _worker

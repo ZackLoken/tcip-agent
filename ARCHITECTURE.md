@@ -865,7 +865,7 @@ anything.
 | `list_training_runs` | `training_tools.py:1082` | yes | List every training run this platform can currently account for. |
 | `cancel_training` | `training_tools.py:1323` | yes | Request graceful cancellation of a running training run. |
 | `run_hpo` | `training_tools.py:1898` | yes | Run hyperparameter optimization on Ray Tune, training each trial for real. |
-| `cancel_hpo` | `training_tools.py:2293` | yes | Request cooperative cancellation of a running HPO sweep. |
+| `cancel_hyperparameter_search` | `training_tools.py:2293` | yes | Request cooperative cancellation of a running HPO sweep. |
 | `evaluate_model` | `training_tools.py:2944` | yes | Evaluate a trained checkpoint on a (held-out) dataset and write test_results.json. |
 
 ### vision_tools.py (3 tools)
