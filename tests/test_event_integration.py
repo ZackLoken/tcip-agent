@@ -618,7 +618,7 @@ class TestInferenceToolOutputSchema:
                    for p in out.glob("*.json") if p.name != "operating_point.json"}
         assert written == counts
 
-    def test_tabulate_counts_writes_each_images_own_count_into_the_csv(
+    def test_deliver_per_image_counts_writes_each_images_own_count_into_the_csv(
         self, tmp_path: Path, monkeypatch,
     ) -> None:
         """The delivered CSV carries the count measured for each image, one row each.
@@ -651,7 +651,7 @@ class TestInferenceToolOutputSchema:
         fx.seed_confirmed_count(tmp_path)
         out_csv = tmp_path / "block_counts.csv"
         # No predictions_dir: the CSV is the provisional one but still carries each measured count.
-        res = itools.tabulate_counts(str(ckpt), str(tmp_path), str(out_csv),
+        res = itools.deliver_per_image_counts(str(ckpt), str(tmp_path), str(out_csv),
                                      trait=fx.COUNT_TRAIT,
                                      calibration_labels_dir=str(tmp_path),
                                      acknowledge_unvalidated=True)

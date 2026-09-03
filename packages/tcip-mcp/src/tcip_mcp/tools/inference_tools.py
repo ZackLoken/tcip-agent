@@ -1,4 +1,4 @@
-"""Inference MCP tools: run_inference, export_predictions and tabulate_counts, sharing one
+"""Inference MCP tools: run_inference, export_predictions and deliver_per_image_counts, sharing one
 verified body (``_run_inference_verified``) so the firewalled operating point (conf/NMS/tiling/
 max_dets) resolves identically for every entry point that runs a model over images."""
 
@@ -889,7 +889,7 @@ def _publish_image_predictions(out: Path, result: dict, *, checkpoint_path: str,
                                ) -> tuple[list[str], int, dict]:
     """Write one prediction file per image, then earn and stamp over exactly what landed.
 
-    The steps ``export_predictions`` and ``tabulate_counts`` share once each has resolved its own
+    The steps ``export_predictions`` and ``deliver_per_image_counts`` share once each has resolved its own
     bucket and run its own gate: both persist the same run's per-image detections into a bucket and
     both stamp it, so the file naming, the producer string, the claim payload and the write order
     are one implementation rather than two that agree today. ``draft`` present is exactly the
@@ -949,7 +949,7 @@ def _publish_bucket_bracket(result: dict, *, out: Path, checkpoint_path: str, tr
     """Publish a live run's predictions into ``out``, gated and linked exactly as
     ``export_predictions`` does: the authoritative post-inference tile gate, the count claim's own
     gate, the frozen-lineage-pointer refusal, the write, and the post-write lineage link. Shared so
-    ``tabulate_counts``' live-with-``predictions_dir`` path publishes under the identical contract
+    ``deliver_per_image_counts``' live-with-``predictions_dir`` path publishes under the identical contract
     rather than a second implementation.
 
     Returns a dict: ``refusal`` (the door's own error dict, or ``None``), ``written``,
@@ -1386,7 +1386,7 @@ def export_predictions(
     refusal belongs: a tiled run whose tile_size has no real basis (no persisted training geometry,
     no recoverable native-frame edge, no explicit override) refuses to write here unless
     ``acknowledge_unvalidated=True``, the same
-    gate ``tabulate_counts``/``deliver_phenology_milestones``/the web results routes/``export_aggregated_csv``
+    gate ``deliver_per_image_counts``/``deliver_phenology_milestones``/the web results routes/``export_aggregated_csv``
     already apply, via the same shared :func:`tcip_mcp.pipelines.resolution.tile_size_gate_flag`.
     Both regimes gate before the (expensive) pass runs: the ``raster_path`` regime uses the
     predictor that pass then reuses; the ``images_dir`` regime sniffs the checkpoint's own stamped
@@ -1608,7 +1608,7 @@ _TABULATE_COUNTS_LIVE_ONLY_DEFAULTS = {
     "calibration_images_dir": None, "split_manifest_dir": None, "experiment_id": None,
     "postprocess": "nms", "tile_batch_size": 96,
 }
-"""``tabulate_counts`` parameters meaningful only for its live regime, mapped to the documented
+"""``deliver_per_image_counts`` parameters meaningful only for its live regime, mapped to the documented
 default a bucket-regime call is judged against. A non-``None`` default (``postprocess``,
 ``tile_batch_size``) makes stated-at-default indistinguishable from stating nothing, so a call
 naming one at its own default is honestly admitted rather than refused; every other parameter
@@ -1618,7 +1618,7 @@ statement and refuses."""
 
 @mcp.tool()
 @audited
-def tabulate_counts(
+def deliver_per_image_counts(
     checkpoint_path: str | None = None,
     images_dir: str | None = None,
     output_path: str = "",
@@ -1831,7 +1831,7 @@ def tabulate_counts(
         return {"error": stated.message}
 
     if not live:
-        return _tabulate_counts_from_bucket(
+        return _deliver_per_image_counts_from_bucket(
             predictions_dir, output_path, trait=trait, acknowledge_unvalidated=acknowledge_unvalidated,
             stated_basis=stated.basis)
 
@@ -2058,9 +2058,9 @@ def _image_filename_fallback_note(
     return None
 
 
-def _tabulate_counts_from_bucket(predictions_dir: str, output_path: str, *, trait: str,
+def _deliver_per_image_counts_from_bucket(predictions_dir: str, output_path: str, *, trait: str,
                                  acknowledge_unvalidated: bool, stated_basis) -> dict:
-    """``tabulate_counts``'s bucket regime: an existing, reviewed prediction bucket in, no GPU.
+    """``deliver_per_image_counts``'s bucket regime: an existing, reviewed prediction bucket in, no GPU.
 
     No writable-bucket resolution and no verdict redirect: nothing is written, and reading a
     reviewed bucket is the point. Refuses on the bucket's own mandatory stamp shape before
@@ -2078,7 +2078,7 @@ def _tabulate_counts_from_bucket(predictions_dir: str, output_path: str, *, trai
     if sidecar is None:
         return {"error": (
             f"{bucket_path} carries no readable operating_point.json: a bucket regime call reads "
-            "a stamp a platform producer wrote (export_predictions, tabulate_counts's own "
+            "a stamp a platform producer wrote (export_predictions, deliver_per_image_counts's own "
             "live-with-predictions_dir path, or the web inference worker), never a directory of "
             "label JSON with no stamp."
         )}
@@ -2106,7 +2106,7 @@ def _tabulate_counts_from_bucket(predictions_dir: str, output_path: str, *, trai
         return {"error": (
             f"{bucket_path}'s stamp's image_filenames is not a mapping (got "
             f"{type(filename_map).__name__}): a bucket regime call expects the stem-to-filename "
-            "map export_predictions, tabulate_counts's live-with-predictions_dir path, or the web "
+            "map export_predictions, deliver_per_image_counts's live-with-predictions_dir path, or the web "
             "inference worker writes there, or nothing at all."
         )}
     image_results, fallback_stems = _bucket_csv_rows(bucket_path, filename_map)

@@ -66,7 +66,7 @@ Examples use real `crops.yml` trait names; verify any trait against `crops.yml` 
 | `calibrate_physical_scale` | Derive and validate a per-pixel physical scale against a breeder-supplied reference, and stamp it into a bucket's `resolve_scale.json`, the `scale_document` cell's producer |
 | `materialize_review_dataset` | Turn human review verdicts into a curated training set for re-delivery after correction; see `annotation` skill |
 
-`tabulate_counts` produces a different, per-image `image, detection_count,
+`deliver_per_image_counts` produces a different, per-image `image, detection_count,
 avg_confidence` CSV, not the per-plant schema above (the `image` cell is the source basename with
 its extension, this platform's image identity everywhere else). The bucket regime resolves it from
 the stamp's `image_filenames` map (each prediction document's stem mapped to its source image's
@@ -87,8 +87,8 @@ one nobody confirmed, or one whose spec fields moved since, and the door refuses
 primitive that fixes it. `acknowledge_unvalidated` does not reach this: it says a number's error is
 uncharacterized, which is a claim about a quantity that has been defined.
 
-- `export_detection_csv` and `tabulate_counts` take a required, keyword-only `trait` and rest on
-  its `per_image_count` record, in either of `tabulate_counts`'s two source regimes. That record
+- `export_detection_csv` and `deliver_per_image_counts` take a required, keyword-only `trait` and rest on
+  its `per_image_count` record, in either of `deliver_per_image_counts`'s two source regimes. That record
   names no delivered phenotype, because the per-image CSV carries no phenotype column; what it
   names is the counted subject, checked against the recorded `id_map` of every bucket that
   recorded one. A bucket-regime call also refuses a bucket whose own stamp names a different,
@@ -137,7 +137,7 @@ only when every dimension it was handed clears, and otherwise refuses (or, with
   `n_dates_missing_images` span, which is delivery-independent), and `plant_attribution`, the
   granularity `build_plant_mapping` attributed captures to plants at; the curve CSV repeats the
   same delivery-wide `images_unattributed` count beside its own per-row `n_images`.
-- `tabulate_counts`'s live regime, given a `predictions_dir`, publishes into it through the same
+- `deliver_per_image_counts`'s live regime, given a `predictions_dir`, publishes into it through the same
   bracket `export_predictions` publishes with (tile gate, count-claim gate, frozen-lineage-pointer
   refusal, write, lineage link), then hands `export_detection_csv` that bucket; the CSV's own
   delivery gate then runs exactly once, inside the writer, never a second time at the door. Without

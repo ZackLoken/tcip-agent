@@ -1,6 +1,6 @@
 """The NMS/detection-cap parameters of the public inference tools: unset means derive.
 
-``run_inference``/``export_predictions``/``tabulate_counts`` decide whether the caller stated a cap
+``run_inference``/``export_predictions``/``deliver_per_image_counts`` decide whether the caller stated a cap
 by the ``None`` sentinel, so a stated value is honored as an override at every value it can take,
 including the one the platform would otherwise have fallen back to. The resolver stays the only
 thing that derives an unstated cap.
@@ -205,9 +205,9 @@ def test_a_stated_cap_on_the_raw_path_stamps_explicit_even_at_the_platform_defau
 def test_the_public_inference_tools_agree_that_an_unstated_cap_is_none():
     """One sentinel across the door: a concrete default on any one of them would erase the stated
     versus unstated distinction for every caller of that door."""
-    from tcip_mcp.tools.inference_tools import export_predictions, run_inference, tabulate_counts
+    from tcip_mcp.tools.inference_tools import export_predictions, run_inference, deliver_per_image_counts
 
-    for tool in (run_inference, export_predictions, tabulate_counts):
+    for tool in (run_inference, export_predictions, deliver_per_image_counts):
         params = inspect.signature(tool).parameters
         assert params["global_nms_iou"].default is None, tool.__name__
         assert params["max_dets"].default is None, tool.__name__

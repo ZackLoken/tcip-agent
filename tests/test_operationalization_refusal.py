@@ -876,7 +876,7 @@ def test_the_count_tool_refuses_before_it_has_any_counts_to_return(
     # gate, which sits ahead of the registry check, so this must never reach that check either.
     ckpt = tmp_path / "m.pt"
     ckpt.write_bytes(b"x")
-    res = itools.tabulate_counts(str(ckpt), str(tmp_path), str(tmp_path / "o.csv"),
+    res = itools.deliver_per_image_counts(str(ckpt), str(tmp_path), str(tmp_path / "o.csv"),
                                  trait=fx.COUNT_TRAIT)
 
     assert "no operationalization is recorded" in res["error"]
@@ -1053,7 +1053,7 @@ def test_the_count_tool_no_longer_tabulates_under_no_trait_at_all(
     out_csv = tmp_path / "o.csv"
 
     with pytest.raises(TypeError):
-        itools.tabulate_counts("m.pt", str(tmp_path), str(out_csv), acknowledge_unvalidated=True)
+        itools.deliver_per_image_counts("m.pt", str(tmp_path), str(out_csv), acknowledge_unvalidated=True)
 
     assert not out_csv.exists()
 

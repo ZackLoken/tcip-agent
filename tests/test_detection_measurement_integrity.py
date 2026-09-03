@@ -1219,9 +1219,9 @@ def test_export_predictions_validated_from_bundle(tmp_path, monkeypatch, seed_ca
     assert r["validated"] is True and r["conf_source"] == "calibration"
 
 
-def _tabulate_counts_over(monkeypatch, tmp_path, op, *, validated, captured=None,
+def _deliver_per_image_counts_over(monkeypatch, tmp_path, op, *, validated, captured=None,
                           acknowledge=False):
-    """Run tabulate_counts against a stubbed run_inference returning ``op``/``validated``.
+    """Run deliver_per_image_counts against a stubbed run_inference returning ``op``/``validated``.
 
     The dimension under test here is which reference the conf param itself recorded. With no
     ``predictions_dir`` these counts rest on no bucket anyone can re-read, so a caller wanting the
@@ -1247,16 +1247,16 @@ def _tabulate_counts_over(monkeypatch, tmp_path, op, *, validated, captured=None
     monkeypatch.setattr(itools, "_run_inference_verified", _fake_run_inference_verified)
     monkeypatch.setattr(model_registry_mod, "load_registered_checkpoint",
                         lambda *a, **kw: _stub_checkpoint(str(ckpt)))
-    return itools.tabulate_counts(str(ckpt), str(tmp_path), str(tmp_path / "o.csv"),
+    return itools.deliver_per_image_counts(str(ckpt), str(tmp_path), str(tmp_path / "o.csv"),
                                   trait=fx.COUNT_TRAIT,
                                   calibration_labels_dir=str(tmp_path),
                                   acknowledge_unvalidated=acknowledge)
 
 
-def test_tabulate_counts_carries_operating_point(tmp_path, monkeypatch):
+def test_deliver_per_image_counts_carries_operating_point(tmp_path, monkeypatch):
     captured: dict = {}
     op = {"conf": {"value": 0.6, "validated_against": "held_out_annotations"}}
-    r = _tabulate_counts_over(monkeypatch, tmp_path, op, validated=True, captured=captured,
+    r = _deliver_per_image_counts_over(monkeypatch, tmp_path, op, validated=True, captured=captured,
                               acknowledge=True)
     from tests import _operationalization_fixtures as fx
 
@@ -1266,7 +1266,7 @@ def test_tabulate_counts_carries_operating_point(tmp_path, monkeypatch):
     assert r["operating_point"] == op
 
 
-def test_tabulate_counts_never_launders_a_bare_validated_bool_into_a_reference(tmp_path, monkeypatch):
+def test_deliver_per_image_counts_never_launders_a_bare_validated_bool_into_a_reference(tmp_path, monkeypatch):
     """The count CSV door reads the reference conf itself recorded, never the run's bare bool.
 
     A run whose conf param records no (or a wrong-kind) reference is unvalidated for this dimension
@@ -1281,13 +1281,13 @@ def test_tabulate_counts_never_launders_a_bare_validated_bool_into_a_reference(t
                       {"value": 0.6, "validated_against": "make-believe"},
                       # a real reference, but for the wrong validation kind (physical, not annotations)
                       {"value": 0.6, "validated_against": VALIDATED_PHYSICAL_MEASUREMENT}):
-        r = _tabulate_counts_over(monkeypatch, tmp_path, {"conf": conf_prov}, validated=True)
+        r = _deliver_per_image_counts_over(monkeypatch, tmp_path, {"conf": conf_prov}, validated=True)
         assert "error" in r, conf_prov
         assert r["operating_point_validated"] == VALIDATED_FALSE
         assert r["validated"] is False
     # ...and the rail still admits the legitimate case: a real annotations reference delivers,
     # reported under its own name; the CSV-facing column still floors with no bucket to back it.
-    ok = _tabulate_counts_over(
+    ok = _deliver_per_image_counts_over(
         monkeypatch, tmp_path,
         {"conf": {"value": 0.6, "validated_against": "reviewer_confirmed_annotations"}},
         validated=True, acknowledge=True)

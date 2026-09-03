@@ -1,6 +1,6 @@
 ---
 name: Measurement report
-about: A delivered phenotype (a CSV row from tabulate_counts, export_aggregated_csv,
+about: A delivered phenotype (a CSV row from deliver_per_image_counts, export_aggregated_csv,
   deliver_phenology_milestones, or deliver_orthomosaic_plant_counts) is wrong or overclaims
 title: "[measurement] "
 labels: measurement
