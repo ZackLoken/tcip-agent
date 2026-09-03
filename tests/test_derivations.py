@@ -266,6 +266,7 @@ def test_derive_block_scale_px_converts_a_foot_unit_raster_through_its_crs(tmp_p
         tile_size=16, gt_boxes_per_image=[boxes], plants=plants,
         raster_path=str(raster_path))
     assert "plant grid pitch" in source
+    assert "EPSG:2264" in source
     assert px == 328  # 99.96m / 0.3048006 ft-per-m factor; a metre-blind read would give 100
 
 
@@ -314,6 +315,7 @@ def test_derive_block_scale_px_anisotropic_raster_falls_back_to_gt_spacing(tmp_p
 def test_derive_block_scale_px_unprojected_raster_falls_back_to_gt_spacing(monkeypatch, tmp_path):
     from tcip_mcp.pipelines.postprocessing import orthomosaic_mapping
     from tcip_mcp.pipelines.postprocessing.plant_mapping import PlantRecord
+    from tests._geotiff_fixtures import write_geotiff
 
     plants = [
         PlantRecord("p0", "a0", 0, 0, 0, 45.0, -93.0),
@@ -325,13 +327,33 @@ def test_derive_block_scale_px_unprojected_raster_falls_back_to_gt_spacing(monke
 
     monkeypatch.setattr(orthomosaic_mapping, "read_geotransform", _boom)
     raster_path = tmp_path / "mosaic.tif"
-    raster_path.touch()  # the not-a-raster-file check runs before the mocked reader is reached
+    # a real georeferenced raster: without the stub above the plant path would win, so this
+    # test exercises the GeoreferencingError fallback rather than an empty file's own decline
+    write_geotiff(raster_path)
     boxes = [(x, 0, 20, 20) for x in range(0, 1000, 200)]
     px, source = derive_block_scale_px(
         tile_size=50, gt_boxes_per_image=[boxes], plants=plants,
         raster_path=str(raster_path))
     assert "GT object-spacing" in source  # fell back, not a refusal
     assert px == 200
+
+
+def test_derive_block_scale_px_truncated_raster_refuses_named(tmp_path):
+    """A raster_path with a raster suffix that cannot be opened at all (truncated/corrupt) is a
+    file-level problem, refused by name rather than falling back to GT-object-spacing."""
+    from tcip_mcp.pipelines.postprocessing.plant_mapping import PlantRecord
+
+    plants = [
+        PlantRecord("p0", "a0", 0, 0, 0, 45.0, -93.0),
+        PlantRecord("p1", "a1", 0, 0, 0, 45.000898, -93.0),
+    ]
+    raster_path = tmp_path / "mosaic.tif"
+    raster_path.write_bytes(b"not a real tiff")
+    boxes = [(x, 0, 20, 20) for x in range(0, 1000, 200)]
+    with pytest.raises(ValueError, match="could not be opened as a raster"):
+        derive_block_scale_px(
+            tile_size=50, gt_boxes_per_image=[boxes], plants=plants,
+            raster_path=str(raster_path))
 
 
 def test_write_class_map(tmp_path):

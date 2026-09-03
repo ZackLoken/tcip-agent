@@ -33,8 +33,8 @@ _ANISOTROPY_REL_TOL = 1e-6
 """Relative tolerance for treating ``pixel_scale_x``/``pixel_scale_y`` as equal: one part in a
 million, so a tag written as ``0.030000001`` beside ``0.03`` reads as equal while any real
 anisotropy still refuses. An anisotropic raster has no single pixel size to convert a longer
-side through, since :func:`saved_extents` does not record which axis a box's longer side lay
-along, so it is refused by name rather than averaged."""
+side through, since :func:`~tcip_mcp.pipelines.region_completeness.saved_extents` does not
+record which axis a box's longer side lay along, so it is refused by name rather than averaged."""
 
 
 def resolve_pixel_size(source: Path | BandGroupRef) -> tuple[PixelSize | None, str]:
