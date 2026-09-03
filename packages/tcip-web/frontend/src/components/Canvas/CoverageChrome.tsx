@@ -114,6 +114,40 @@ function CoverageKey(props: { panelOpen: boolean }) {
   );
 }
 
+/** The replace-hold notice's own sentence: at `cellsSeen` 0 the record served cells at native
+ *  resolution but swept none, so "0 cells seen" would read as a measurement rather than the
+ *  absence it is; the zero case names the record itself instead. The server's 409 stays the
+ *  authority on whether a hold applies at all, this only picks the wording once it does. */
+function replaceNoticeText(replaceRequired: ReplaceRequired): string {
+  const { cellsSeen, cols, rows } = replaceRequired;
+  if (cellsSeen === 0) {
+    return (
+      `a previous lattice's record (${cols}x${rows}) with no cells seen; progress on this ` +
+      "lattice is not saved until you replace it"
+    );
+  }
+  return (
+    `${cellsSeen} cell${cellsSeen === 1 ? "" : "s"} seen on a previous lattice (${cols}x${rows}); ` +
+    "progress on this lattice is not saved until you replace it"
+  );
+}
+
+/** The panel's own visible working-scale line: attributes the bar to this image's own
+ *  annotations only when it actually is one (`from_this_image !== false`); the dataset-derived
+ *  branch names the population it was drawn from instead, the same distinction
+ *  `attestedViewLine`'s own provenance clause draws for the stored attestation. */
+function workingScaleLineText(bar: WorkingScaleBar, subject: string): string {
+  const barPct = bar.value * 100;
+  const population =
+    bar.from_this_image === false ? "across the dataset's georeferenced images " : "";
+  const spanWord = bar.from_this_image === false ? "across here" : "across";
+  return (
+    `Working scale ${barPct.toFixed(1)}%: the median saved ${subject} annotation ${population}` +
+    `(${bar.median_extent_native_px.toFixed(0)} px ${spanWord}, from ${bar.annotation_count}) ` +
+    `spans ${bar.judged_span_px} px on screen, a default span`
+  );
+}
+
 function attestLabel(subject: string, cell: string, complete: boolean, stale: boolean): string {
   if (!complete) return `Attest ${cell} complete for ${subject}`;
   if (stale) return `Re-attest ${cell} for ${subject} (changed since attested)`;
@@ -179,8 +213,8 @@ export function CoverageChrome(props: {
   currentCellStale: boolean;
   otherLattice: OtherLatticeAttestation | null;
   /** The tracker's own replace hold: a view-coverage sweep record for this image/subject on a
-   *  grid other than the current one, seen at least once, or null. While it stands no further
-   *  sweep is posted until `onArmReplace` confirms discarding it. */
+   *  grid other than the current one, or null. While it stands no further sweep is posted until
+   *  `onArmReplace` confirms discarding it. */
   replaceRequired: ReplaceRequired | null;
   onArmReplace: () => void;
   swept: ReadonlySet<string>;
@@ -295,11 +329,8 @@ export function CoverageChrome(props: {
   const barPct = bar ? bar.value * 100 : null;
   const belowFitScale = bar !== null && props.fitScale !== null && bar.value < props.fitScale;
   const aboveZoomCeiling = bar !== null && bar.value > MAX_SCALE;
-  const workingScaleLine = bar
-    ? `Working scale ${barPct!.toFixed(1)}%: the median saved ${props.subject} annotation ` +
-      `(${bar.median_extent_native_px.toFixed(0)} px across, from ${bar.annotation_count}) spans ` +
-      `${bar.judged_span_px} px on screen, a default span`
-    : props.workingScaleReason;
+  const workingScaleLine =
+    bar && props.subject ? workingScaleLineText(bar, props.subject) : props.workingScaleReason;
   const coarserLine =
     props.coarserCount === 0
       ? null
@@ -330,12 +361,7 @@ export function CoverageChrome(props: {
       )}
       {props.replaceRequired && (
         <div className={`${noticeClass} flex flex-col gap-1.5 border-tcip-border text-tcip-warn`}>
-          <p>
-            {props.replaceRequired.cellsSeen} cell
-            {props.replaceRequired.cellsSeen === 1 ? "" : "s"} seen on a previous lattice (
-            {props.replaceRequired.cols}x{props.replaceRequired.rows}); progress on this lattice is
-            not saved until you replace it.
-          </p>
+          <p>{replaceNoticeText(props.replaceRequired)}.</p>
           <div className="flex gap-1.5">
             <button
               type="button"

@@ -20,56 +20,14 @@ from tcip_mcp.pipelines.postprocessing.orthomosaic_mapping import (
 )
 from tcip_mcp.pipelines.raster_source import open_raster
 
-# UTM zone 15N: real projected CRS the confirmed orthomosaic uses. Central meridian is
-# -93 degrees exactly, which gives an independently hand-verifiable reference point below.
-UTM_15N_EPSG = 32615
-TIEPOINT_NATIVE_X = 500_000.0  # UTM zone 15N's own false easting = the central meridian
-TIEPOINT_NATIVE_Y = 4_800_000.0
-PIXEL_SCALE = 0.5  # native-CRS units (m) per pixel
-
-
-def _geokeys(*, model_type: int = 1, projected_epsg: int | None = UTM_15N_EPSG) -> tuple[int, ...]:
-    entries: list[int] = [1024, 0, 1, model_type]
-    if projected_epsg is not None:
-        entries += [3072, 0, 1, projected_epsg]
-    num_keys = len(entries) // 4
-    return (1, 1, 0, num_keys, *entries)
-
-
-def _write_geotiff(
-    path: Path,
-    *,
-    pixel_scale: tuple[float, float, float] = (PIXEL_SCALE, PIXEL_SCALE, 0.0),
-    tiepoint: tuple[float, ...] = (0.0, 0.0, 0.0, TIEPOINT_NATIVE_X, TIEPOINT_NATIVE_Y, 0.0),
-    geokeys: tuple[int, ...] | None = None,
-    include_transformation_tag: bool = False,
-    shape: tuple[int, int, int] = (5, 5, 4),
-) -> None:
-    if geokeys is None:
-        geokeys = _geokeys()
-    arr = np.zeros(shape, dtype=np.uint8)
-    extratags = [
-        (33550, "d", 3, pixel_scale, False),
-        (33922, "d", len(tiepoint), tiepoint, False),
-        (34735, "H", len(geokeys), geokeys, False),
-    ]
-    if include_transformation_tag:
-        # Identity-ish 4x4 model transformation matrix (row-major, 16 doubles): present at
-        # all is what this module refuses on, regardless of the values it carries.
-        transform = (
-            pixel_scale[0], 0.0, 0.0, tiepoint[3],
-            0.0, -pixel_scale[1], 0.0, tiepoint[4],
-            0.0, 0.0, 1.0, 0.0,
-            0.0, 0.0, 0.0, 1.0,
-        )
-        extratags.append((34264, "d", 16, transform, False))
-    tifffile.imwrite(
-        str(path),
-        arr,
-        photometric="rgb",
-        extrasamples=["unassalpha"] * (shape[-1] - 3),
-        extratags=extratags,
-    )
+from tests._geotiff_fixtures import (
+    PIXEL_SCALE,
+    TIEPOINT_NATIVE_X,
+    TIEPOINT_NATIVE_Y,
+    UTM_15N_EPSG,
+    build_geokeys as _geokeys,
+    write_geotiff as _write_geotiff,
+)
 
 
 # ── Pixel -> native affine (including the y-axis flip) ────────────────────

@@ -263,7 +263,7 @@ def saved_extents(annotations: list[Annotation], subject: str) -> list[float]:
 
 
 def working_scale_bar(
-    extents: list[float], *, judged_span_px: int, source: str,
+    extents: list[float], *, judged_span_px: int, source: str, from_this_image: bool,
 ) -> dict | None:
     """The view scale at which the median of ``extents`` spans ``judged_span_px`` screen pixels,
     or ``None`` for no extents at all.
@@ -275,6 +275,11 @@ def working_scale_bar(
     silently bending it back into range. A single whole-frame annotation on an otherwise
     unannotated image yields a bar every ordinary view meets, an accepted consequence for a large
     object: the median moves as more annotations are saved, never adjusted here to soften that.
+
+    ``from_this_image`` is set on the built dict directly, a required keyword rather than a
+    caller-side mutation after the call: true for this image's own saved annotations, false for
+    the dataset-derived branch (:func:`dataset_working_scale_bar`), so the served and stored
+    shapes always carry it consistently.
     """
     if not extents:
         return None
@@ -285,6 +290,7 @@ def working_scale_bar(
         "annotation_count": len(extents),
         "judged_span_px": judged_span_px,
         "source": source,
+        "from_this_image": from_this_image,
     }
 
 
@@ -311,7 +317,7 @@ side through, since :func:`saved_extents` does not record which axis a box's lon
 along, so it is refused by name rather than averaged."""
 
 
-def _resolve_pixel_size(source: Path | BandGroupRef) -> tuple[PixelSize | None, str]:
+def resolve_pixel_size(source: Path | BandGroupRef) -> tuple[PixelSize | None, str]:
     """The shared implementation behind :func:`raster_pixel_size` and
     :func:`raster_pixel_size_reason`, so the two can never disagree about why a raster carries no
     metres-per-pixel figure: returns ``(pixel_size, reason)``, ``reason`` the empty string on
@@ -320,10 +326,13 @@ def _resolve_pixel_size(source: Path | BandGroupRef) -> tuple[PixelSize | None, 
     1. ``source`` is a raster at all (:func:`~tcip_mcp.pipelines.image_utils.capture_kind`); a
        photographic capture or a band group is never opened here.
     2. :func:`~tcip_mcp.pipelines.postprocessing.orthomosaic_mapping.read_geotransform` returns.
-       Its own :class:`RotatedRasterError`/:class:`GeoreferencingError` messages are used as the
-       reason verbatim (the geographic case is refused there by the model-type check); a
+       Its own exceptions are mapped to a short clause never carrying the server's absolute path
+       (the geographic case is refused there by the model-type check, which reads as
+       :class:`GeoreferencingError` here): :class:`RotatedRasterError` -> "it is rotated or
+       sheared", :class:`GeoreferencingError` -> "its georeferencing tags are incomplete"; a
        :class:`ValueError` from ``tifffile`` on a container that is not a TIFF (``.npy``/``.npz``,
-       which ``capture_kind`` also calls rasters) and an ``OSError`` are reasons too.
+       which ``capture_kind`` also calls rasters) -> "it is not a TIFF"; ``OSError`` -> "it could
+       not be read".
     3. ``pyproj.CRS.from_epsg(epsg)`` resolves (a :class:`pyproj.exceptions.CRSError` -- a
        user-defined or unknown code -- is the reason).
     4. The CRS is not compound, checked before any unit code: a compound CRS reports an empty
@@ -331,7 +340,9 @@ def _resolve_pixel_size(source: Path | BandGroupRef) -> tuple[PixelSize | None, 
     5. The CRS is projected.
     6. Every axis reports the same ``unit_code`` from ``{"9001", "9002", "9003"}`` (metre, foot,
        US survey foot); the factor to metres is that axis's own ``unit_conversion_factor``.
-    7. ``pixel_scale_x`` and ``pixel_scale_y`` agree within :data:`_ANISOTROPY_REL_TOL`.
+    7. ``pixel_scale_x`` and ``pixel_scale_y`` are both positive: a zero or negative tag admits no
+       real pixel size and would otherwise divide cleanly by zero downstream.
+    8. ``pixel_scale_x`` and ``pixel_scale_y`` agree within :data:`_ANISOTROPY_REL_TOL`.
     """
     from tcip_mcp.pipelines.image_utils import capture_kind
 
@@ -349,14 +360,14 @@ def _resolve_pixel_size(source: Path | BandGroupRef) -> tuple[PixelSize | None, 
 
     try:
         gt = read_geotransform(source)
-    except RotatedRasterError as exc:
-        return None, str(exc)
-    except GeoreferencingError as exc:
-        return None, str(exc)
+    except RotatedRasterError:
+        return None, "it is rotated or sheared"
+    except GeoreferencingError:
+        return None, "its georeferencing tags are incomplete"
     except ValueError:
         return None, "it is not a TIFF"
-    except OSError as exc:
-        return None, str(exc)
+    except OSError:
+        return None, "it could not be read"
 
     try:
         crs = pyproj.CRS.from_epsg(gt.epsg)
@@ -369,6 +380,8 @@ def _resolve_pixel_size(source: Path | BandGroupRef) -> tuple[PixelSize | None, 
     codes = {axis.unit_code for axis in crs.axis_info}
     if len(codes) != 1 or next(iter(codes)) not in _UNIT_CODES_TO_METRES:
         return None, f"its CRS EPSG:{gt.epsg}'s units are not metre, foot or US survey foot"
+    if gt.pixel_scale_x <= 0 or gt.pixel_scale_y <= 0:
+        return None, "its pixel scale is zero or negative"
     if not math.isclose(gt.pixel_scale_x, gt.pixel_scale_y, rel_tol=_ANISOTROPY_REL_TOL):
         return None, "its pixel scales differ by axis"
 
@@ -381,7 +394,7 @@ def _resolve_pixel_size(source: Path | BandGroupRef) -> tuple[PixelSize | None, 
 def raster_pixel_size(source: Path | BandGroupRef) -> PixelSize | None:
     """``source``'s own real-world pixel size, from its georeferencing tags alone, or ``None``
     when ``source`` is not a raster this module can resolve one for (see
-    :func:`_resolve_pixel_size` for the checks, in order); call
+    :func:`resolve_pixel_size` for the checks, in order); call
     :func:`raster_pixel_size_reason` for why. Calls
     :func:`~tcip_mcp.pipelines.postprocessing.orthomosaic_mapping.read_geotransform` directly,
     never :func:`~tcip_mcp.pipelines.raster_source.is_georeferenced`, which swallows the reason.
@@ -389,14 +402,14 @@ def raster_pixel_size(source: Path | BandGroupRef) -> PixelSize | None:
     A photographic capture is never opened, and a ``band_group`` manifest is excluded: neither
     is a single raster this module reads georeferencing tags off of.
     """
-    pixel_size, _reason = _resolve_pixel_size(source)
+    pixel_size, _reason = resolve_pixel_size(source)
     return pixel_size
 
 
 def raster_pixel_size_reason(source: Path | BandGroupRef) -> str | None:
     """The one-clause reason :func:`raster_pixel_size` returned ``None`` for ``source``, or
     ``None`` when it did not (a pixel size was resolved)."""
-    pixel_size, reason = _resolve_pixel_size(source)
+    pixel_size, reason = resolve_pixel_size(source)
     return None if pixel_size is not None else reason
 
 
@@ -430,7 +443,8 @@ class DatasetExtent:
 
 
 def dataset_physical_extent(
-    dataset_root: str | Path, subject: str, *, pixel_sizes: dict[Path, PixelSize | None],
+    dataset_root: str | Path, subject: str, *,
+    pixel_sizes: dict[Path, tuple[PixelSize | None, str]],
     label_cache: dict[Path, list[Annotation]] | None = None,
 ) -> DatasetExtent | None:
     """``subject``'s saved box/polygon annotations, pooled in physical units across every
@@ -442,11 +456,15 @@ def dataset_physical_extent(
     derivation with that reason, since the dataset does not enumerate), reads every label file in
     the matching ``annotations/<date>/`` directory once, and resolves each labelled image's own
     raster source's pixel size once. ``pixel_sizes`` and ``label_cache`` are caches the caller
-    owns and shares across every subject one request derives a bar for, so a raster's tags and a
-    label file's bytes are each read at most once per request regardless of how many subjects
-    consult them; a caller deriving for one subject alone passes neither and gets a fresh cache of
-    each. A raster whose pixel size cannot be resolved is cached as ``None`` and skipped, never
-    ending the walk; a photographic capture or a band group is never opened.
+    owns and shares across every subject one request derives a bar for, and ``pixel_sizes``
+    carries the ``(pixel_size, reason)`` pair :func:`resolve_pixel_size` returns (the walk itself
+    only ever needs the size, but the pair is the one cache format a caller resolving this
+    image's own pixel size for a served reason -- ``get_completeness``, ``post_completeness`` --
+    shares with the walk, so a raster is opened at most once per request regardless of which
+    caller needed it first). A caller deriving for one subject alone passes neither and gets a
+    fresh cache of each. A raster whose pixel size cannot be resolved is cached as ``(None,
+    reason)`` and skipped, never ending the walk; a photographic capture or a band group is
+    never opened.
 
     Each annotation's physical extent is its native-pixel extent (:func:`saved_extents`) times
     its own raster's ``metres_per_px``: the metres conversion is the admission rule for which
@@ -485,8 +503,8 @@ def dataset_physical_extent(
                 continue
             assert isinstance(source, Path)
             if source not in pixel_sizes:
-                pixel_sizes[source] = raster_pixel_size(source)
-            pixel_size = pixel_sizes[source]
+                pixel_sizes[source] = resolve_pixel_size(source)
+            pixel_size, _reason = pixel_sizes[source]
             if pixel_size is None:
                 continue
             for extent_px in image_extents:
@@ -507,23 +525,60 @@ def dataset_physical_extent(
     )
 
 
+def _format_dates(dates: tuple[str | None, ...]) -> str:
+    """``dates`` as a plain English list ("2026-02-11 and 2026-03-02",
+    "2026-02-11, 2026-03-02 and 2026-04-01"): the contributing capture dates a dataset-derived
+    bar's source sentence names, so the breeder sees which captures the pooled median came from.
+    The dateless bucket (``None``) reads as "an undated capture", the one case a real dataset
+    walk can produce alongside real dates (:func:`dataset_physical_extent` always sorts it
+    first)."""
+    labels = [d if d is not None else "an undated capture" for d in dates]
+    if len(labels) == 1:
+        return labels[0]
+    return ", ".join(labels[:-1]) + " and " + labels[-1]
+
+
 def dataset_extent_source(
-    subject: str, extent: DatasetExtent, this_image_metres_per_px: float, judged_span_px: int,
+    subject: str, extent: DatasetExtent, pixel_size: PixelSize, judged_span_px: int,
 ) -> str:
     """The one sentence a dataset-derived working-scale bar's ``source`` field carries, wherever a
     route serves or stores one, so a caller on either side of the route boundary reads the same
     disclosure :func:`default_working_scale_source` gives the own-annotations case: the dataset
-    median in physical units, the georeferenced population it was drawn from, and this image's own
-    pixel size it was expressed through.
+    median in physical units, the georeferenced population and capture dates it was drawn from,
+    and this image's own pixel size (``pixel_size``, its ``source_clause`` named) it was
+    expressed through.
     """
     return (
         f"the median of {extent.annotation_count} saved {subject} annotations across "
-        f"{extent.image_count} georeferenced images ({_format_length_m(extent.median_extent_m)}; "
-        f"pixel sizes from {_format_length_m(extent.metres_per_px_min)} to "
+        f"{extent.image_count} georeferenced images under {_format_dates(extent.dates)} "
+        f"({_format_length_m(extent.median_extent_m)}; pixel sizes from "
+        f"{_format_length_m(extent.metres_per_px_min)} to "
         f"{_format_length_m(extent.metres_per_px_max)} per px), expressed through this image's "
-        f"{_format_length_m(this_image_metres_per_px)} per px; the {judged_span_px} px span is a "
-        "documented default"
+        f"{_format_length_m(pixel_size.metres_per_px)} per px ({pixel_size.source_clause}); the "
+        f"{judged_span_px} px span is a documented default"
     )
+
+
+def dataset_working_scale_bar(
+    subject: str, extent: DatasetExtent, pixel_size: PixelSize, judged_span_px: int,
+) -> dict:
+    """The dataset-derived working-scale bar for ``subject``: ``extent``'s pooled physical median
+    expressed through ``pixel_size`` (this image's own), with its ``source`` sentence
+    (:func:`dataset_extent_source`) and its ``annotation_count`` overridden to the dataset's own
+    count rather than the single-value list :func:`working_scale_bar` was called over.
+
+    The one recipe both coverage routes call for this branch, so the divide, the bar, the source
+    sentence and the annotation-count override live in exactly one place instead of being
+    duplicated at each call site; ``from_this_image`` is always ``False`` here.
+    """
+    native_extent_px = extent.median_extent_m / pixel_size.metres_per_px
+    bar = working_scale_bar(
+        [native_extent_px], judged_span_px=judged_span_px,
+        source=dataset_extent_source(subject, extent, pixel_size, judged_span_px),
+        from_this_image=False)
+    assert bar is not None
+    bar["annotation_count"] = extent.annotation_count
+    return bar
 
 
 def incomplete_cells_for_rect(

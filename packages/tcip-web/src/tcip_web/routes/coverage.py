@@ -89,9 +89,11 @@ def _require_date_matches_path(image_path: str, date: Optional[str]) -> None:
             f"two buckets")
 
 
-def _validated_record(image_name: str, record: dict) -> None:
+def _validated_record(image_name: str, record: object) -> None:
     """Refuse rather than serve or merge into a stored record that no longer validates as
-    ``CoverageRecord``, naming the conform script instead of silently coercing or dropping it."""
+    ``CoverageRecord``, naming the conform script instead of silently coercing or dropping it.
+    ``record`` need not be a dict at all: a stored document in some other shape is exactly as
+    unmergeable as a dict missing a required key, and validates the same way."""
     try:
         CoverageRecord.model_validate(record)
     except ValidationError as exc:
@@ -326,7 +328,11 @@ def post_coverage(payload: CoveragePayload) -> dict:
         seen_added = dict(seen)
         viewing_changed = True
         grid_matches = isinstance(existing, dict) and existing.get("grid") == grid
-        if not grid_matches and isinstance(existing, dict) and not payload.replace:
+        # Only a confirmed replace across a grid mismatch has nothing to merge into; every other
+        # existing record, dict or not, must validate before the mismatch branch below.
+        if existing is not None and not (payload.replace and not grid_matches):
+            _validated_record(image_name, existing)
+        if not grid_matches and existing is not None and not payload.replace:
             stored_grid = existing.get("grid") or {}
             raise HTTPException(409, {
                 "error": COVERAGE_LATTICE_MISMATCH,
@@ -339,7 +345,6 @@ def post_coverage(payload: CoveragePayload) -> dict:
                 "cells_seen": len(existing.get("cells_seen_at_scale") or {}),
             })
         if grid_matches and isinstance(existing, dict):
-            _validated_record(image_name, existing)
             prior_served = set(existing.get("cells_served_at_native") or [])
             prior_seen = dict(existing.get("cells_seen_at_scale") or {})
             served_added = sorted(served - prior_served)
@@ -484,11 +489,10 @@ def get_completeness(
     from tcip_mcp.pipelines.region_completeness import (
         PixelSize,
         annotation_counts_by_cell,
-        dataset_extent_source,
         dataset_physical_extent,
+        dataset_working_scale_bar,
         default_working_scale_source,
-        raster_pixel_size,
-        raster_pixel_size_reason,
+        resolve_pixel_size,
         saved_extents,
         stale_cells,
         working_scale_bar,
@@ -541,7 +545,7 @@ def get_completeness(
             subjects.add(subject)
         own_source = default_working_scale_source(JUDGED_SPAN_PX)
         working_scale = {}
-        pixel_sizes: dict[Path, Optional[PixelSize]] = {}
+        pixel_sizes: dict[Path, tuple[Optional[PixelSize], str]] = {}
         label_cache: dict[Path, list] = {}
         this_image_pixel_size: Optional[PixelSize] = None
         this_image_pixel_size_reason: Optional[str] = None
@@ -549,18 +553,15 @@ def get_completeness(
         for subj in sorted(subjects):
             own_bar = working_scale_bar(
                 saved_extents(annotations, subj), judged_span_px=JUDGED_SPAN_PX,
-                source=own_source)
+                source=own_source, from_this_image=True)
             if own_bar is not None:
-                own_bar["from_this_image"] = True
                 working_scale[subj] = own_bar
                 continue
             if not this_image_pixel_size_checked:
                 this_image_pixel_size_checked = True
                 if src not in pixel_sizes:
-                    pixel_sizes[src] = raster_pixel_size(src)
-                this_image_pixel_size = pixel_sizes[src]
-                if this_image_pixel_size is None:
-                    this_image_pixel_size_reason = raster_pixel_size_reason(src)
+                    pixel_sizes[src] = resolve_pixel_size(src)
+                this_image_pixel_size, this_image_pixel_size_reason = pixel_sizes[src]
             if this_image_pixel_size is None:
                 working_scale[subj] = None
                 working_scale_reason[subj] = (
@@ -573,7 +574,8 @@ def get_completeness(
             try:
                 extent = dataset_physical_extent(
                     root, subj, pixel_sizes=pixel_sizes, label_cache=label_cache)
-            except (OSError, ValueError, UnreadableLabelDocument) as exc:
+            except (OSError, ValueError, UnreadableLabelDocument,
+                    tcip_store.SchemaVersionRefused) as exc:
                 dataset_error = str(exc)
                 working_scale[subj] = None
                 continue
@@ -583,15 +585,8 @@ def get_completeness(
                     f"no saved {subj} annotation on any georeferenced image with a known pixel "
                     "size")
                 continue
-            native_extent_px = extent.median_extent_m / this_image_pixel_size.metres_per_px
-            dataset_bar = working_scale_bar(
-                [native_extent_px], judged_span_px=JUDGED_SPAN_PX,
-                source=dataset_extent_source(
-                    subj, extent, this_image_pixel_size.metres_per_px, JUDGED_SPAN_PX))
-            assert dataset_bar is not None
-            dataset_bar["annotation_count"] = extent.annotation_count
-            dataset_bar["from_this_image"] = False
-            working_scale[subj] = dataset_bar
+            working_scale[subj] = dataset_working_scale_bar(
+                subj, extent, this_image_pixel_size, JUDGED_SPAN_PX)
 
     working_scale_error = label_error if label_error is not None else dataset_error
 
@@ -659,10 +654,10 @@ def post_completeness(payload: CompletenessSetPayload) -> dict:
         DatasetExtent,
         PixelSize,
         cell_annotation_digest,
-        dataset_extent_source,
         dataset_physical_extent,
+        dataset_working_scale_bar,
         default_working_scale_source,
-        raster_pixel_size,
+        resolve_pixel_size,
         saved_extents,
         working_scale_bar,
     )
@@ -697,13 +692,18 @@ def post_completeness(payload: CompletenessSetPayload) -> dict:
     working_scale_derivation_error: Optional[str] = None
     if complete:
         try:
-            img_path = Path(payload.image_path)
-            pixel_sizes: dict[Path, Optional[PixelSize]] = {img_path: raster_pixel_size(img_path)}
-            dataset_pixel_size = pixel_sizes[img_path]
+            img_path = assert_path_allowed(payload.image_path)
+        except ValueError as exc:
+            raise HTTPException(403, str(exc)) from exc
+        try:
+            pixel_sizes: dict[Path, tuple[Optional[PixelSize], str]] = {
+                img_path: resolve_pixel_size(img_path)}
+            dataset_pixel_size, _reason = pixel_sizes[img_path]
             if dataset_pixel_size is not None:
                 dataset_extent = dataset_physical_extent(
                     root, subject, pixel_sizes=pixel_sizes)
-        except (OSError, ValueError, UnreadableLabelDocument) as exc:
+        except (OSError, ValueError, UnreadableLabelDocument,
+                tcip_store.SchemaVersionRefused) as exc:
             working_scale_derivation_error = str(exc)
             dataset_pixel_size = None
             dataset_extent = None
@@ -728,9 +728,12 @@ def post_completeness(payload: CompletenessSetPayload) -> dict:
         store = normalize_region_completeness_store(raw_store)
         existing = store.get(bucket)
         grid_matches = existing is not None and existing.get("grid") == grid
-        matched_existing = existing if grid_matches and existing is not None else None
-        cells_complete = set((matched_existing or {}).get("cells_complete") or [])
-        cells_attested_view = dict((matched_existing or {}).get("cells_attested_view") or {})
+        cells_complete = (
+            set(existing.get("cells_complete") or [])
+            if grid_matches and existing is not None else set())
+        cells_attested_view = (
+            dict(existing.get("cells_attested_view") or {})
+            if grid_matches and existing is not None else {})
 
         if not complete and payload.cell not in cells_complete:
             # Nothing to unattest here, whether from no record, a different lattice, or a
@@ -774,19 +777,10 @@ def post_completeness(payload: CompletenessSetPayload) -> dict:
             if own_extents:
                 bar = working_scale_bar(
                     own_extents, judged_span_px=JUDGED_SPAN_PX,
-                    source=default_working_scale_source(JUDGED_SPAN_PX))
-                assert bar is not None
-                bar["from_this_image"] = True
+                    source=default_working_scale_source(JUDGED_SPAN_PX), from_this_image=True)
             elif dataset_pixel_size is not None and dataset_extent is not None:
-                native_extent_px = dataset_extent.median_extent_m / dataset_pixel_size.metres_per_px
-                bar = working_scale_bar(
-                    [native_extent_px], judged_span_px=JUDGED_SPAN_PX,
-                    source=dataset_extent_source(
-                        subject, dataset_extent, dataset_pixel_size.metres_per_px,
-                        JUDGED_SPAN_PX))
-                assert bar is not None
-                bar["annotation_count"] = dataset_extent.annotation_count
-                bar["from_this_image"] = False
+                bar = dataset_working_scale_bar(
+                    subject, dataset_extent, dataset_pixel_size, JUDGED_SPAN_PX)
             else:
                 bar = None
             view_bucket = status_bucket(subject, date)

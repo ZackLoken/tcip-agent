@@ -8,7 +8,6 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-import tifffile
 from PIL import Image
 
 from tcip_annotation import json_io
@@ -21,11 +20,15 @@ from tcip_mcp.dataset_layout import (
 )
 from tcip_mcp.pipelines.reference_grid import reference_cells
 from tcip_mcp.pipelines.region_completeness import (
+    DatasetExtent,
+    PixelSize,
     annotation_counts_by_cell,
     annotations_by_cell,
     cell_annotation_digest,
     cell_annotation_digests,
+    dataset_extent_source,
     dataset_physical_extent,
+    dataset_working_scale_bar,
     default_working_scale_source,
     raster_pixel_size,
     raster_pixel_size_reason,
@@ -33,35 +36,20 @@ from tcip_mcp.pipelines.region_completeness import (
     stale_cells,
     working_scale_bar,
 )
-
-# UTM zone 15N: the real projected CRS the fixtures below default to (the same one
-# test_orthomosaic_mapping.py's own fixtures use).
-_UTM_15N_EPSG = 32615
-
-
-def _geokeys(*, model_type: int = 1, projected_epsg: int | None = _UTM_15N_EPSG) -> tuple:
-    entries: list = [1024, 0, 1, model_type]
-    if projected_epsg is not None:
-        entries += [3072, 0, 1, projected_epsg]
-    return (1, 1, 0, len(entries) // 4, *entries)
+from tests._geotiff_fixtures import UTM_15N_EPSG as _UTM_15N_EPSG
+from tests._geotiff_fixtures import write_geotiff as _write_shared_geotiff
 
 
 def _write_geotiff(
     path: Path, *, pixel_scale: tuple = (0.5, 0.5, 0.0), projected_epsg: int | None = _UTM_15N_EPSG,
     model_type: int = 1, include_transformation_tag: bool = False,
 ) -> None:
-    """A striped GeoTIFF written the way tests/test_orthomosaic_mapping.py's own fixtures are
-    (verified this session against pyproj 3.7.2 and tifffile's own reader)."""
-    arr = np.zeros((5, 5, 3), dtype=np.uint8)
-    geokeys = _geokeys(model_type=model_type, projected_epsg=projected_epsg)
-    extratags = [
-        (33550, "d", 3, pixel_scale, False),
-        (33922, "d", 6, (0.0, 0.0, 0.0, 500_000.0, 4_800_000.0, 0.0), False),
-        (34735, "H", len(geokeys), geokeys, False),
-    ]
-    if include_transformation_tag:
-        extratags.append((34264, "d", 16, tuple(1.0 for _ in range(16)), False))
-    tifffile.imwrite(str(path), arr, photometric="rgb", extratags=extratags)
+    """A striped GeoTIFF written the way tests/test_orthomosaic_mapping.py's own fixtures are,
+    through the shared writer every GeoTIFF-fixture-needing suite calls."""
+    _write_shared_geotiff(
+        path, width=5, height=5, shape=(5, 5, 3), pixel_scale=pixel_scale,
+        projected_epsg=projected_epsg, model_type=model_type,
+        include_transformation_tag=include_transformation_tag)
 
 
 def test_region_completeness_path_locator(tmp_path):
@@ -368,24 +356,26 @@ class TestSavedExtents:
 
 class TestWorkingScaleBar:
     def test_no_extents_yields_no_bar(self):
-        assert working_scale_bar([], judged_span_px=46, source="s") is None
+        assert working_scale_bar([], judged_span_px=46, source="s", from_this_image=True) is None
 
     def test_one_extent_is_the_exact_quotient(self):
-        bar = working_scale_bar([100.0], judged_span_px=46, source="s")
+        bar = working_scale_bar([100.0], judged_span_px=46, source="s", from_this_image=True)
         assert bar == {
             "value": 46 / 100.0, "median_extent_native_px": 100.0, "annotation_count": 1,
-            "judged_span_px": 46, "source": "s",
+            "judged_span_px": 46, "source": "s", "from_this_image": True,
         }
 
     def test_an_odd_count_takes_the_middle_value(self):
-        bar = working_scale_bar([10.0, 100.0, 30.0], judged_span_px=46, source="s")
+        bar = working_scale_bar(
+            [10.0, 100.0, 30.0], judged_span_px=46, source="s", from_this_image=True)
         assert bar is not None
         assert bar["median_extent_native_px"] == 30.0
         assert bar["value"] == 46 / 30.0
         assert bar["annotation_count"] == 3
 
     def test_an_even_count_averages_the_two_middle_values(self):
-        bar = working_scale_bar([10.0, 20.0, 30.0, 40.0], judged_span_px=46, source="s")
+        bar = working_scale_bar(
+            [10.0, 20.0, 30.0, 40.0], judged_span_px=46, source="s", from_this_image=True)
         assert bar is not None
         assert bar["median_extent_native_px"] == 25.0
         assert bar["value"] == 46 / 25.0
@@ -393,15 +383,74 @@ class TestWorkingScaleBar:
     def test_a_single_whole_frame_annotation_yields_a_bar_every_ordinary_view_meets(self):
         # A 4000px-wide annotation spanning nearly the whole frame yields a tiny scale value,
         # below any real zoom level: the accepted consequence for a large object.
-        bar = working_scale_bar([4000.0], judged_span_px=46, source="s")
+        bar = working_scale_bar([4000.0], judged_span_px=46, source="s", from_this_image=True)
         assert bar is not None
         assert bar["value"] < 0.05
+
+    def test_from_this_image_is_set_false_on_the_dataset_branch(self):
+        bar = working_scale_bar([100.0], judged_span_px=46, source="s", from_this_image=False)
+        assert bar is not None
+        assert bar["from_this_image"] is False
 
 
 def test_default_working_scale_source_names_the_span_and_disclaims_measurement():
     source = default_working_scale_source(46)
     assert "46" in source
     assert "not a measurement" in source
+
+
+class TestDatasetExtentSource:
+    def _extent(self, **overrides) -> DatasetExtent:
+        fields = {
+            "median_extent_m": 5.0, "annotation_count": 3, "image_count": 2,
+            "metres_per_px_min": 0.5, "metres_per_px_max": 1.0,
+            "dates": ("2026-02-11", "2026-03-02"),
+        }
+        fields.update(overrides)
+        return DatasetExtent(**fields)
+
+    def test_names_the_contributing_dates(self):
+        extent = self._extent()
+        pixel_size = PixelSize(metres_per_px=0.5, source_clause="a projected geotransform "
+                                "(EPSG:32615, 0.5 m/px)")
+        source = dataset_extent_source("catkin", extent, pixel_size, 46)
+        assert "2026-02-11 and 2026-03-02" in source
+        assert "46" in source
+
+    def test_uses_the_pixel_sizes_own_source_clause(self):
+        extent = self._extent()
+        pixel_size = PixelSize(metres_per_px=0.5, source_clause="a projected geotransform "
+                                "(EPSG:32615, 0.5 m/px)")
+        source = dataset_extent_source("catkin", extent, pixel_size, 46)
+        assert pixel_size.source_clause in source
+
+    def test_a_single_contributing_date_carries_no_conjunction(self):
+        extent = self._extent(dates=("2026-02-11",))
+        pixel_size = PixelSize(metres_per_px=0.5, source_clause="a projected geotransform "
+                                "(EPSG:32615, 0.5 m/px)")
+        source = dataset_extent_source("catkin", extent, pixel_size, 46)
+        assert "2026-02-11" in source
+        assert " and 2026-02-11" not in source
+
+    def test_a_dateless_contributor_reads_as_an_undated_capture(self):
+        extent = self._extent(dates=(None,))
+        pixel_size = PixelSize(metres_per_px=0.5, source_clause="a projected geotransform "
+                                "(EPSG:32615, 0.5 m/px)")
+        source = dataset_extent_source("catkin", extent, pixel_size, 46)
+        assert "an undated capture" in source
+
+
+class TestDatasetWorkingScaleBar:
+    def test_divides_the_median_through_this_images_pixel_size(self):
+        extent = DatasetExtent(
+            median_extent_m=5.0, annotation_count=2, image_count=2,
+            metres_per_px_min=0.5, metres_per_px_max=0.5, dates=("2026-01-01",))
+        pixel_size = PixelSize(metres_per_px=0.5, source_clause="a projected geotransform "
+                                "(EPSG:32615, 0.5 m/px)")
+        bar = dataset_working_scale_bar("catkin", extent, pixel_size, 46)
+        assert bar["median_extent_native_px"] == pytest.approx(10.0)  # 5.0m / 0.5 m/px
+        assert bar["from_this_image"] is False
+        assert bar["annotation_count"] == 2
 
 
 class TestRasterPixelSize:
@@ -430,7 +479,38 @@ class TestRasterPixelSize:
         path = tmp_path / "rotated.tif"
         _write_geotiff(path, include_transformation_tag=True)
         assert raster_pixel_size(path) is None
-        assert "ModelTransformationTag" in raster_pixel_size_reason(path)
+        assert raster_pixel_size_reason(path) == "it is rotated or sheared"
+
+    def test_missing_georeferencing_tags_names_a_short_clause_never_the_server_path(
+        self, tmp_path,
+    ):
+        path = tmp_path / "plain.tif"
+        Image.fromarray(np.zeros((5, 5, 3), dtype=np.uint8)).save(path)
+        reason = raster_pixel_size_reason(path)
+        assert reason == "its georeferencing tags are incomplete"
+        assert str(path.parent) not in reason
+        assert "\\" not in reason and "/" not in reason
+
+    def test_a_geographic_model_type_is_refused_by_read_geotransforms_own_check(self, tmp_path):
+        """Distinct from the projected-model-type-but-geographic-CRS case above: here
+        GTModelTypeGeoKey itself names the geographic model type (2), so read_geotransform
+        refuses before this module ever reaches pyproj."""
+        path = tmp_path / "geographic_model_type.tif"
+        _write_geotiff(path, model_type=2)
+        assert raster_pixel_size(path) is None
+        assert raster_pixel_size_reason(path) == "its georeferencing tags are incomplete"
+
+    def test_a_zero_pixel_scale_has_no_pixel_size(self, tmp_path):
+        path = tmp_path / "zero.tif"
+        _write_geotiff(path, pixel_scale=(0.0, 0.0, 0.0))
+        assert raster_pixel_size(path) is None
+        assert raster_pixel_size_reason(path) == "its pixel scale is zero or negative"
+
+    def test_a_negative_pixel_scale_has_no_pixel_size(self, tmp_path):
+        path = tmp_path / "negative.tif"
+        _write_geotiff(path, pixel_scale=(-0.5, 0.5, 0.0))
+        assert raster_pixel_size(path) is None
+        assert raster_pixel_size_reason(path) == "its pixel scale is zero or negative"
 
     def test_a_geographic_crs_under_a_projected_model_type_has_no_pixel_size(self, tmp_path):
         """The raster's own GTModelTypeGeoKey says Projected (read_geotransform admits it), but
@@ -519,6 +599,24 @@ class TestDatasetPhysicalExtent:
         assert extent.metres_per_px_max == pytest.approx(1.0)
         assert extent.dates == ("2026-01-01",)
 
+    def test_a_zero_pixel_scale_contributor_is_skipped_and_the_median_is_unaffected(
+        self, tmp_path,
+    ):
+        root, img_dir, ann_dir = self._dataset(tmp_path)
+        _write_geotiff(img_dir / "a.tif", pixel_scale=(0.5, 0.5, 0.0))
+        json_io.write_annotations(
+            ann_dir / "a.json", [Annotation(subject="leaf", geometry=BBox(0, 0, 10, 4))], 5, 5)
+        _write_geotiff(img_dir / "zero.tif", pixel_scale=(0.0, 0.0, 0.0))
+        json_io.write_annotations(
+            ann_dir / "zero.json",
+            [Annotation(subject="leaf", geometry=BBox(0, 0, 1000, 4))], 5, 5)
+
+        extent = dataset_physical_extent(root, "leaf", pixel_sizes={})
+        assert extent is not None
+        assert extent.annotation_count == 1
+        assert extent.image_count == 1
+        assert extent.median_extent_m == pytest.approx(5.0)  # 10px * 0.5 m/px, the zero one skipped
+
     def test_a_contributor_with_no_known_pixel_size_does_not_contribute(self, tmp_path):
         root, img_dir, ann_dir = self._dataset(tmp_path)
         _write_geotiff(img_dir / "a.tif", pixel_scale=(0.5, 0.5, 0.0))
@@ -528,6 +626,24 @@ class TestDatasetPhysicalExtent:
         json_io.write_annotations(
             ann_dir / "photo.json",
             [Annotation(subject="leaf", geometry=BBox(0, 0, 40, 4))], 5, 5)
+
+        extent = dataset_physical_extent(root, "leaf", pixel_sizes={})
+        assert extent is not None
+        assert extent.annotation_count == 1
+        assert extent.image_count == 1
+        assert extent.median_extent_m == pytest.approx(5.0)
+
+    def test_a_npy_raster_is_skipped_while_the_walk_continues(self, tmp_path):
+        """A ``.npy`` container is a raster by ``capture_kind`` but carries no TIFF tags to read a
+        pixel size from (:func:`raster_pixel_size` names it "it is not a TIFF"); its own
+        annotation must not contribute, and the walk must still reach the sibling that does."""
+        root, img_dir, ann_dir = self._dataset(tmp_path)
+        _write_geotiff(img_dir / "a.tif", pixel_scale=(0.5, 0.5, 0.0))
+        json_io.write_annotations(
+            ann_dir / "a.json", [Annotation(subject="leaf", geometry=BBox(0, 0, 10, 4))], 5, 5)
+        np.save(img_dir / "b.npy", np.zeros((5, 5, 3), dtype=np.uint8))
+        json_io.write_annotations(
+            ann_dir / "b.json", [Annotation(subject="leaf", geometry=BBox(0, 0, 40, 4))], 5, 5)
 
         extent = dataset_physical_extent(root, "leaf", pixel_sizes={})
         assert extent is not None

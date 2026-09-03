@@ -484,7 +484,7 @@ describe("AnnotateToolbar Complete toggle coverage warning", () => {
   it("toasts the completeWarning wording when unswept cells remain", async () => {
     seedImageDataset({ subject: "subject_a" });
     setCanvasBoxSubjects(["subject_a"]);
-    vi.spyOn(classesApi, "setImageStatus").mockResolvedValue({});
+    const setStatus = vi.spyOn(classesApi, "setImageStatus").mockResolvedValue({});
     renderToolbar(undefined, undefined, {
       completeWarning: () => "Complete: 2 of 6 grid cells have not had every part on screen",
       workingScaleReason: null,
@@ -500,12 +500,13 @@ describe("AnnotateToolbar Complete toggle coverage warning", () => {
         .getState()
         .toasts.some((t) => t.message.includes("2 of 6 grid cells have not had every part")),
     ).toBe(true);
+    expect(setStatus).toHaveBeenCalled(); // the warning is advisory: Complete still writes the status
   });
 
   it("toasts the no-working-scale sentence, naming the subject the reason was computed for", async () => {
     seedImageDataset({ subject: "subject_a" });
     setCanvasBoxSubjects([]);
-    vi.spyOn(classesApi, "setImageStatus").mockResolvedValue({});
+    const setStatus = vi.spyOn(classesApi, "setImageStatus").mockResolvedValue({});
     renderToolbar(undefined, undefined, {
       completeWarning: () => null,
       workingScaleReason: "no saved box or polygon annotation of subject_a",
@@ -523,12 +524,13 @@ describe("AnnotateToolbar Complete toggle coverage warning", () => {
     expect(toast).toBeTruthy();
     expect(toast!.message).toContain("no saved box or polygon annotation of subject_a");
     expect(toast!.message).toContain("so coverage was not checked");
+    expect(setStatus).toHaveBeenCalled();
   });
 
   it("names the reason's own subject, never dataset.subject, when the two differ", async () => {
     seedImageDataset({ subject: "subject_a" });
     setCanvasBoxSubjects([]);
-    vi.spyOn(classesApi, "setImageStatus").mockResolvedValue({});
+    const setStatus = vi.spyOn(classesApi, "setImageStatus").mockResolvedValue({});
     renderToolbar(undefined, undefined, {
       completeWarning: () => null,
       workingScaleReason: "no saved box or polygon annotation of other_subject",
@@ -547,12 +549,13 @@ describe("AnnotateToolbar Complete toggle coverage warning", () => {
     expect(
       useStore.getState().toasts.some((t) => t.message.includes("no working scale for subject_a")),
     ).toBe(false);
+    expect(setStatus).toHaveBeenCalled();
   });
 
   it("states no active subject, rather than a literal null, when there is none", async () => {
     seedImageDataset({ subject: "subject_a" });
     setCanvasBoxSubjects([]);
-    vi.spyOn(classesApi, "setImageStatus").mockResolvedValue({});
+    const setStatus = vi.spyOn(classesApi, "setImageStatus").mockResolvedValue({});
     renderToolbar(undefined, undefined, {
       completeWarning: () => null,
       workingScaleReason: "no active subject",
@@ -567,12 +570,13 @@ describe("AnnotateToolbar Complete toggle coverage warning", () => {
     const toast = useStore.getState().toasts.find((t) => t.message.includes("no active subject"));
     expect(toast).toBeTruthy();
     expect(toast!.message).not.toContain("null");
+    expect(setStatus).toHaveBeenCalled();
   });
 
   it("skips the no-bar toast on a single-cell raster with no coverage tracking", async () => {
     seedImageDataset({ subject: "subject_a" });
     setCanvasBoxSubjects([]);
-    vi.spyOn(classesApi, "setImageStatus").mockResolvedValue({});
+    const setStatus = vi.spyOn(classesApi, "setImageStatus").mockResolvedValue({});
     const toastsBefore = useStore.getState().toasts.length;
     renderToolbar(undefined, undefined, {
       completeWarning: () => null,
@@ -586,12 +590,13 @@ describe("AnnotateToolbar Complete toggle coverage warning", () => {
     });
 
     expect(useStore.getState().toasts.length).toBe(toastsBefore);
+    expect(setStatus).toHaveBeenCalled();
   });
 
   it("stays silent when the warning is null and a bar exists (every cell already swept)", async () => {
     seedImageDataset({ subject: "subject_a" });
     setCanvasBoxSubjects(["subject_a"]);
-    vi.spyOn(classesApi, "setImageStatus").mockResolvedValue({});
+    const setStatus = vi.spyOn(classesApi, "setImageStatus").mockResolvedValue({});
     const toastsBefore = useStore.getState().toasts.length;
     renderToolbar(undefined, undefined, {
       completeWarning: () => null,
@@ -604,12 +609,13 @@ describe("AnnotateToolbar Complete toggle coverage warning", () => {
     });
 
     expect(useStore.getState().toasts.length).toBe(toastsBefore);
+    expect(setStatus).toHaveBeenCalled();
   });
 
   it("adds the replace hold's sentence beside the completeWarning wording", async () => {
     seedImageDataset({ subject: "subject_a" });
     setCanvasBoxSubjects(["subject_a"]);
-    vi.spyOn(classesApi, "setImageStatus").mockResolvedValue({});
+    const setStatus = vi.spyOn(classesApi, "setImageStatus").mockResolvedValue({});
     renderToolbar(undefined, undefined, {
       completeWarning: () => "Complete: 2 of 6 grid cells have not had every part on screen",
       workingScaleReason: null,
@@ -626,12 +632,13 @@ describe("AnnotateToolbar Complete toggle coverage warning", () => {
       .toasts.find((t) => t.message.includes("2 of 6 grid cells have not had every part"));
     expect(toast).toBeTruthy();
     expect(toast!.message).toContain("3 cells seen on a previous lattice");
+    expect(setStatus).toHaveBeenCalled(); // Complete stays advisory even beside the hold
   });
 
   it("toasts the replace hold's sentence alone when nothing else would have fired", async () => {
     seedImageDataset({ subject: "subject_a" });
     setCanvasBoxSubjects(["subject_a"]);
-    vi.spyOn(classesApi, "setImageStatus").mockResolvedValue({});
+    const setStatus = vi.spyOn(classesApi, "setImageStatus").mockResolvedValue({});
     renderToolbar(undefined, undefined, {
       completeWarning: () => null,
       workingScaleReason: null,
@@ -647,6 +654,7 @@ describe("AnnotateToolbar Complete toggle coverage warning", () => {
       .getState()
       .toasts.find((t) => t.message.includes("1 cell seen on a previous lattice"));
     expect(toast).toBeTruthy();
+    expect(setStatus).toHaveBeenCalled();
   });
 });
 
