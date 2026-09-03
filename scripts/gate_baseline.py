@@ -5,10 +5,12 @@ CI adds, drops, or reorders reaches this gate the next time it runs rather than 
 someone to notice the drift. Every stage runs even if an earlier one fails, so one red stage
 does not hide the timing of the rest.
 
-Two jobs are out of scope. ``environment`` creates the conda environment this gate's own
+Three jobs are out of scope. ``environment`` creates the conda environment this gate's own
 process already runs inside, so there is nothing local to run in its place; ``docker``
 builds and answers the container image, which needs a Docker daemon this gate does not
-assume, and CI's own build is the proof of that image.
+assume, and CI's own build is the proof of that image; ``ray-exit-windows`` also creates that
+same conda environment, and its one test file (``tests/test_hpo_ray_detached_exit.py``) already
+runs inside the full local suite on this Windows machine.
 
 Each step's ``run:`` text goes through bash, never through PowerShell or cmd, since that is the
 shell GitHub's own Linux runners give the same text. On a Linux or macOS host the bash on
@@ -44,6 +46,10 @@ PARSED_JOBS = ("mypy", "python", "typescript")
 OUT_OF_SCOPE_JOBS = {
     "environment": "it creates the conda environment this gate's own process already runs inside",
     "docker": "it builds the container image, which needs a Docker daemon this gate does not assume",
+    "ray-exit-windows": (
+        "it creates the conda environment this gate's own process already runs inside, and its "
+        "one test file runs inside the full local suite on this Windows machine"
+    ),
 }
 
 _SKIP_PREFIXES = ("pip", "npm ci", "conda", "mamba")
