@@ -18,7 +18,7 @@ returned by :func:`root_binding`, since no process in this repo configures loggi
 line would otherwise reach nothing; ``inspect_project`` and the workspace projects list route
 report it.
 
-Adopting a project (``workspace.set_active_project``) *repins* the adopting process's own
+Adopting a project (``workspace.activate_project``) *repins* the adopting process's own
 variable to ``<workspace>/<project>`` through :func:`repin_platform_root`, so the platform's own
 audit log (now this project's, one file at one key), experiments, and registry all land under
 that project from then on; a training run in flight
@@ -143,7 +143,7 @@ _binding: Optional[RootBinding] = None
 
 def root_binding() -> Optional[RootBinding]:
     """This process's :class:`RootBinding`, or ``None`` before either :func:`pin_platform_root`
-    or :func:`repin_platform_root` has run: every test (until it calls ``set_active_project``,
+    or :func:`repin_platform_root` has run: every test (until it calls ``activate_project``,
     which repins) and any other standalone use, since none of those call either."""
     return _binding
 
@@ -164,7 +164,7 @@ def repin_platform_root(root: Path) -> None:
     :class:`RootBinding`.
 
     The one writer of the variable: :func:`pin_platform_root`'s startup bind,
-    ``workspace.set_active_project``'s adopt, and the web backend's repin on the agent's
+    ``workspace.activate_project``'s adopt, and the web backend's repin on the agent's
     adopt signal all go through here, so there is one place that changes it, and
     :func:`root_binding` reports the current root immediately after any of them.
     """

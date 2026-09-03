@@ -208,7 +208,7 @@ class TestActiveProjectChangedRoute:
 
         proj = workspace.project_path("chestnut_burr_valley")
         (proj / ".tcip").mkdir(parents=True)
-        workspace.set_active_project("chestnut_burr_valley")  # also repins this process, for now
+        workspace.activate_project("chestnut_burr_valley")  # also repins this process, for now
 
         stale = tmp_path / "stale"
         stale.mkdir()
@@ -231,7 +231,7 @@ class TestActiveProjectChangedRoute:
 
         proj = workspace.project_path("chestnut_burr_valley")
         (proj / ".tcip").mkdir(parents=True)
-        workspace.set_active_project("chestnut_burr_valley")
+        workspace.activate_project("chestnut_burr_valley")
 
         resp = client.post(
             "/api/events/app",
@@ -254,7 +254,7 @@ class TestActiveProjectChangedRoute:
 
         proj = workspace.project_path("chestnut_burr_valley")
         (proj / ".tcip").mkdir(parents=True)
-        workspace.set_active_project("chestnut_burr_valley")
+        workspace.activate_project("chestnut_burr_valley")
         shutil.rmtree(proj / ".tcip")
 
         with client.websocket_connect("ws://127.0.0.1/ws/panel/app") as ws:

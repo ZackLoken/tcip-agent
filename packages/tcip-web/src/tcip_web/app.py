@@ -178,7 +178,7 @@ def bind_startup_root() -> None:
     script) never calls this and pins nothing.
 
     Checks :func:`tcip_mcp.project_paths.root_binding` rather than a flag of its own: a
-    ``set_active_project`` repin that lands before the first request already leaves a
+    ``activate_project`` repin that lands before the first request already leaves a
     binding in place, and this must not replace it with a fresh marker read.
 
     Raises :class:`WorkspaceUnsetUnderTest` first, before either check, when this process is

@@ -261,7 +261,7 @@ def test_resolve_locked_cal_holdout_split_force_redraw_records_history(tmp_path)
 def test_lock_survives_an_active_project_repin(tmp_path, monkeypatch):
     """A locked split belongs to the dataset it was drawn over, not to the adopted project.
 
-    ``set_active_project`` repins the platform state root inside a live process. A lock scoped to
+    ``activate_project`` repins the platform state root inside a live process. A lock scoped to
     that root reads as absent once it moves, and the next call cuts a fresh split for the same
     identity, which is the silent re-cut this lock exists to prevent.
     """

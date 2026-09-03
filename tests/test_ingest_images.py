@@ -83,16 +83,16 @@ def test_active_marker_round_trip(_isolate_workspace):
     (workspace.project_path("chestnut_burr_site-b") / ".tcip").mkdir(parents=True)
 
     assert workspace.read_active_project() is None
-    workspace.set_active_project("hazelnut_catkin_valley-farm")
+    workspace.activate_project("hazelnut_catkin_valley-farm")
     assert workspace.read_active_project() == "hazelnut_catkin_valley-farm"
     # Second writer wins cleanly (no torn file).
-    workspace.set_active_project("chestnut_burr_site-b")
+    workspace.activate_project("chestnut_burr_site-b")
     assert workspace.read_active_project() == "chestnut_burr_site-b"
 
 
-def test_set_active_project_rejects_bad_name():
+def test_activate_project_rejects_bad_name():
     with pytest.raises(ValueError):
-        workspace.set_active_project("../evil")
+        workspace.activate_project("../evil")
 
 
 # ── dataset_layout builders ─────────────────────────────────────────────

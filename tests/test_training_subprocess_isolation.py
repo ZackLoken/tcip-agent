@@ -759,7 +759,7 @@ def test_max_wall_clock_seconds_writes_to_the_launch_root_after_an_adopt(tmp_pat
     )
     try:
         _watch_wall_clock(proc, run, "exp_timeout_other_root", 0.2, root=launch_root)
-        workspace.set_active_project("chestnut_burr_other")  # repins this process elsewhere
+        workspace.activate_project("chestnut_burr_other")  # repins this process elsewhere
 
         deadline = time.monotonic() + 10
         while proc.poll() is None and time.monotonic() < deadline:

@@ -76,7 +76,7 @@ def test_pin_from_marker_prefers_the_marker_over_an_inherited_root(
 
     proj_root = workspace.project_path("chestnut_demo")
     (proj_root / ".tcip").mkdir(parents=True)
-    workspace.set_active_project("chestnut_demo")  # also repins the variable to proj_root
+    workspace.activate_project("chestnut_demo")  # also repins the variable to proj_root
 
     inherited = tmp_path.parent / "elsewhere"
     inherited.mkdir()
@@ -107,7 +107,7 @@ def test_pin_from_marker_records_a_dangling_marker_and_keeps_the_inherited_root(
 
     proj_root = workspace.project_path("chestnut_demo")
     (proj_root / ".tcip").mkdir(parents=True)
-    workspace.set_active_project("chestnut_demo")
+    workspace.activate_project("chestnut_demo")
     shutil.rmtree(proj_root / ".tcip")  # the marker now names a project with nothing there
 
     inherited = tmp_path.parent / "elsewhere"
@@ -150,7 +150,7 @@ def test_pin_from_marker_keeps_a_transient_read_failure_even_when_a_retry_would_
 
     proj_root = workspace.project_path("chestnut_demo")
     (proj_root / ".tcip").mkdir(parents=True)
-    workspace.set_active_project("chestnut_demo")
+    workspace.activate_project("chestnut_demo")
 
     real_active = workspace.active_project_if_present
     calls = {"n": 0}

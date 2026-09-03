@@ -645,7 +645,7 @@ def test_a_launched_sweep_stays_reachable_after_the_backend_repins(
 
     other_proj = workspace.project_path("chestnut_burr_other")
     (other_proj / ".tcip").mkdir(parents=True)
-    workspace.set_active_project("chestnut_burr_other")
+    workspace.activate_project("chestnut_burr_other")
 
     body = client.get(f"/api/tuning/sweeps/{sweep_id}").json()
     assert body["sweep_id"] == sweep_id
@@ -782,7 +782,7 @@ def test_relaunch_reads_the_source_manifest_under_the_sweeps_own_launch_root(
 
     other_proj = workspace.project_path("chestnut_burr_other_relaunch")
     (other_proj / ".tcip").mkdir(parents=True)
-    workspace.set_active_project("chestnut_burr_other_relaunch")
+    workspace.activate_project("chestnut_burr_other_relaunch")
 
     resp2 = client.post("/api/tuning/sweeps", json={"study_name": sweep_id})
     assert resp2.status_code == 200

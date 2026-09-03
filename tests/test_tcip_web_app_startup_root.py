@@ -41,7 +41,7 @@ def test_importing_the_app_alone_pins_nothing(tmp_path, monkeypatch):
     proj = ws / "elderberry_cyme_bloom"
     (proj / ".tcip").mkdir(parents=True)
     monkeypatch.setenv("TCIP_WORKSPACE", str(ws))
-    workspace.set_active_project("elderberry_cyme_bloom")
+    workspace.activate_project("elderberry_cyme_bloom")
 
     env = dict(os.environ)
     env.pop("TCIP_STATE_ROOT", None)
@@ -243,7 +243,7 @@ def test_first_request_pins_from_the_marker(tmp_path, monkeypatch):
 
 
 def test_a_binding_set_before_the_first_request_is_not_replaced(tmp_path, monkeypatch):
-    """``set_active_project`` (source ``adopted``) can run before this process has served
+    """``activate_project`` (source ``adopted``) can run before this process has served
     its first request; the middleware's own bind must leave that binding alone rather than
     resolving the marker itself and overwriting it with source ``marker``."""
     ws = tmp_path / "ws"
@@ -253,7 +253,7 @@ def test_a_binding_set_before_the_first_request_is_not_replaced(tmp_path, monkey
     monkeypatch.delenv("TCIP_STATE_ROOT", raising=False)
     project_paths.restore_binding(None)
 
-    workspace.set_active_project("elderberry_cyme_bloom")
+    workspace.activate_project("elderberry_cyme_bloom")
     assert project_paths.root_binding().source == "adopted"
 
     resp = TestClient(app, base_url="http://127.0.0.1").get("/health")

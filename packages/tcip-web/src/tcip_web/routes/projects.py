@@ -4,7 +4,7 @@ The front door: instead of browsing the filesystem for a project root and a data
 root, the GUI lists the projects the agent built under the workspace
 (``TCIP_WORKSPACE``, default ``~/tcip-projects/``) and opens one. The workspace and the
 active-project marker are resolved through :mod:`tcip_mcp.workspace`: the single source
-of truth shared with the ``ingest_images`` tool and the ``set_active_project`` tool, so a
+of truth shared with the ``ingest_images`` tool and the ``activate_project`` tool, so a
 project the agent creates is exactly the project this route lists.
 
 Trust boundary: same as every other REST route (``tcip_web.trust_boundary``). Listing is
@@ -102,7 +102,7 @@ def list_projects() -> dict:
 
     Carries ``platform_root``/``platform_root_source`` when this backend has bound one
     (:func:`tcip_mcp.project_paths.root_binding`, populated once the app has served its first
-    request or repinned via ``set_active_project``, never merely imported): the backend's own
+    request or repinned via ``activate_project``, never merely imported): the backend's own
     platform-state root, so the GUI can show it disagreeing with ``active``/``active_path`` in
     the window before a repin lands.
     """
@@ -139,7 +139,7 @@ class SetActiveRequest(BaseModel):
 
 
 @router.post("/active")
-def set_active_project(req: SetActiveRequest) -> ActiveProject:
+def activate_project(req: SetActiveRequest) -> ActiveProject:
     """Set the active project (the marker the GUI auto-opens). Name must be a workspace
     project; traversal/separators are rejected, and its ``.tcip`` must already exist."""
     try:
@@ -147,7 +147,7 @@ def set_active_project(req: SetActiveRequest) -> ActiveProject:
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     try:
-        workspace.set_active_project(req.name)
+        workspace.activate_project(req.name)
     except ValueError as exc:
         raise HTTPException(404, str(exc)) from exc
     return ActiveProject(name=req.name, path=str(path))

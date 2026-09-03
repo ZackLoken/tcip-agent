@@ -55,7 +55,7 @@ def _workspace(tmp_path: Path, monkeypatch, *, reports=0, retros=0) -> str:
 
     from tcip_mcp import workspace
 
-    workspace.set_active_project("hazelnut_demo")
+    workspace.activate_project("hazelnut_demo")
     return str(proj)
 
 
@@ -76,8 +76,8 @@ def test_session_start_no_active_project_covers_create_and_resume(tmp_path, monk
     out = _run(monkeypatch, capsys, '{"source":"startup"}')
     ctx = json.loads(out)["hookSpecificOutput"]["additionalContext"]
     assert "No active project" in ctx
-    # Both paths must be offered: creating a project is initialize_project, then set_active_project.
-    assert "initialize_project" in ctx and "set_active_project" in ctx
+    # Both paths must be offered: creating a project is initialize_project, then activate_project.
+    assert "initialize_project" in ctx and "activate_project" in ctx
 
 
 def test_session_start_skips_on_compact(tmp_path, monkeypatch, capsys):
@@ -128,7 +128,7 @@ def test_session_start_hook_runs_as_a_real_subprocess(tmp_path, monkeypatch):
 
     from tcip_mcp import workspace
 
-    workspace.set_active_project("hazelnut_demo")
+    workspace.activate_project("hazelnut_demo")
 
     result = subprocess.run(
         [sys.executable, hook.__file__],
@@ -144,7 +144,7 @@ def test_session_start_hook_runs_as_a_real_subprocess(tmp_path, monkeypatch):
 
 
 def test_session_start_reads_a_marker_written_through_the_store(tmp_path, monkeypatch, capsys):
-    """The marker is written through workspace.set_active_project, not a hand-written file; a
+    """The marker is written through workspace.activate_project, not a hand-written file; a
     hook that assumed a loose file rather than reading through the seam would miss it.
     """
     _workspace(tmp_path, monkeypatch)
@@ -171,7 +171,7 @@ def test_session_start_reads_the_loose_file_when_bound_to_the_file_backend(
     from tcip_store.file_backend import FileBackend
 
     tcip_store.bind(FileBackend())
-    workspace.set_active_project("hazelnut_demo")
+    workspace.activate_project("hazelnut_demo")
 
     out = _run(monkeypatch, capsys, '{"source":"startup"}')
     ctx = json.loads(out)["hookSpecificOutput"]["additionalContext"]
@@ -197,7 +197,7 @@ def test_session_start_names_the_store_refusal_for_a_loose_file_only_workspace(
     monkeypatch.setenv("TCIP_STORE_BACKEND", "file")
     file_backend = FileBackend()
     tcip_store.bind(file_backend)
-    workspace.set_active_project("hazelnut_demo")
+    workspace.activate_project("hazelnut_demo")
     file_backend.close()
     monkeypatch.delenv("TCIP_STORE_BACKEND", raising=False)
 
@@ -224,7 +224,7 @@ def test_session_start_notes_which_processes_bind_from_the_marker(
     assert proj in ctx
     assert "web backend" in ctx and "its own startup" in ctx
     assert "next start" in ctx
-    assert "set_active_project" in ctx
+    assert "activate_project" in ctx
 
 
 def test_session_start_reports_a_traversal_marker_through_the_shared_fold(

@@ -2,7 +2,7 @@
 
 A locator module in the same spirit as :mod:`tcip_mcp.dataset_layout`: pure path/read/write
 helpers, no business logic elsewhere duplicates. Read back by ``inspect_project`` and
-``set_active_project`` so one call gives the picture that today takes 2-3 separate reads
+``activate_project`` so one call gives the picture that today takes 2-3 separate reads
 (``inspect_project``'s live counts, plus ``load_project_memory`` once per kind).
 
 Deliberately persists status/history only, never a "next step" or plan. A retrospective's

@@ -166,7 +166,7 @@ right now: `active_project`, `project_root`, `subject`, `date`, `active_tab`, an
 one I'm on" without a path. The nav index is persisted debounced as they page through
 frames, so it lags a beat; treat it as "roughly where they are," not a frame-exact cursor.
 
-Adopt the project with `set_active_project` before doing project work. Adoption writes the
+Adopt the project with `activate_project` before doing project work. Adoption writes the
 active marker *and* repins the platform-state root to `<workspace>/<project>`, so from then on
 the experiment store and the model registry live under that one project's `.tcip/` alongside its
 data, and the platform's own audit log is now this project's own, one file at one key

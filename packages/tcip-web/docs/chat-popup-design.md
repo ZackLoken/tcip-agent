@@ -13,7 +13,7 @@ whose failure mode is silence. What survives from this design: the trust boundar
 (loopback + Origin-checked WS), one-session-attach semantics, replay-then-tail
 delivery, kill-on-shutdown, the two-MCP-instance concurrency invariant
 (`tests/test_concurrent_audit_appends.py`), and the agent→GUI channel (panel events +
-`set_active_project`), which is independent of how the conversation renders.
+`activate_project`), which is independent of how the conversation renders.
 End-to-end check: `scripts/smoke_terminal_e2e.py` (drives the real CLI).
 
 The remainder of this document is the original chat-popup design, kept for the
