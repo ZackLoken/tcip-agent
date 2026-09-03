@@ -136,7 +136,7 @@ source file under a covered root that no row names.
 | packages/tcip-mcp/src/tcip_mcp/pipelines/training/subprocess_worker.py | The subprocess entry point ``launch_training`` spawns to run one bespoke training run's actual body, dataset/loader construction, the audited envelope, ``run_training_envelope()``, in an isolated OS process, so a leak/OOM/hang in one run can't take down the launching process or any other concurrent run's process. | 14 | 0 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/training/tensorboard_manager.py | TensorBoard process management for training and HPO runs. | 0 | 3 |
 | packages/tcip-mcp/src/tcip_mcp/prediction_buckets.py | Prediction-bucket immutability: never silently overwrite predictions a human reviewed. | 7 | 9 |
-| packages/tcip-mcp/src/tcip_mcp/project_paths.py | Stable resolution of the platform state root, independent of a process's cwd. | 1 | 27 |
+| packages/tcip-mcp/src/tcip_mcp/project_paths.py | Stable resolution of the platform state root, independent of a process's cwd. | 1 | 28 |
 | packages/tcip-mcp/src/tcip_mcp/project_record.py | The project record: the one document every project carries, holding its authored site. | 2 | 6 |
 | packages/tcip-mcp/src/tcip_mcp/project_status.py | Per-project status pointer: a small, persisted summary of recent activity. | 2 | 3 |
 | packages/tcip-mcp/src/tcip_mcp/registry_paths.py | The containment core and grammar-aware external test the checkpoint and dataset registries share, plus the resolver every stored registry path becomes an absolute one through. | 0 | 5 |
@@ -153,7 +153,7 @@ source file under a covered root that no row names.
 | packages/tcip-mcp/src/tcip_mcp/tools/gui_tools.py | GUI-driving tools: push data to a panel, or drive the live Annotate/Review tab to a frame. | 9 | 1 |
 | packages/tcip-mcp/src/tcip_mcp/tools/inference_tools.py | Inference MCP tools: run_inference, export_predictions and tabulate_counts, sharing one verified body (``_run_inference_verified``) so the firewalled operating point (conf/NMS/tiling/max_dets) resolves identically for every entry point that runs a model over images; export_predictions and tabulate_counts's live-with-predictions_dir path also share one publish bracket (tile gate, count-claim gate, frozen-lineage refusal, write, lineage link), and tabulate_counts alone gains a second, bucket-only source regime reading an existing prediction bucket with no pass at all. | 22 | 5 |
 | packages/tcip-mcp/src/tcip_mcp/tools/ingest_tools.py | Image ingestion: turn a raw folder of photos into a structured TCIP project. | 10 | 1 |
-| packages/tcip-mcp/src/tcip_mcp/tools/knowledge_tools.py | The domain_knowledge MCP tool, the one non-Claude-Code-skill route to the knowledge documents; its description is composed at import time from the corpus itself. | 3 | 1 |
+| packages/tcip-mcp/src/tcip_mcp/tools/knowledge_tools.py | The domain_knowledge MCP tool, the one non-Claude-Code-skill route to the knowledge documents; its description is composed at import time from the corpus itself. | 4 | 1 |
 | packages/tcip-mcp/src/tcip_mcp/tools/meta_tools.py | Meta-loop tools for self-improvement. | 6 | 4 |
 | packages/tcip-mcp/src/tcip_mcp/tools/model_tools.py | Model management tools, registry, listing, comparison. | 8 | 3 |
 | packages/tcip-mcp/src/tcip_mcp/tools/operationalization_tools.py | The agent's statement tool for trait operationalizations; it can state, never confirm. | 4 | 1 |
@@ -778,7 +778,7 @@ Docstring is the function's docstring first line, verbatim.
 
 | tool | line | audited | docstring first line |
 |---|---|---|---|
-| `domain_knowledge` | `knowledge_tools.py:39` | yes | Read the platform's domain knowledge: trait semantics, workflow patterns, and per-crop |
+| `domain_knowledge` | `knowledge_tools.py:46` | yes | Read the platform's domain knowledge: trait semantics, workflow patterns, and per-crop |
 
 ### model_tools.py (3 tools)
 
@@ -2397,7 +2397,7 @@ Phase 3 verdict: single.
 ## S37. traits.py trait specs against crops.yml controlled vocabulary
 
 Must agree: a registered trait's delivered phenotypes and units exist in the crops.yml vocabulary.
-Side A: `packages/tcip-mcp/src/tcip_mcp/knowledge/__init__.py:135` (`def crops_yml_path(`, the one placement of `packages/tcip-mcp/src/tcip_mcp/knowledge/crops/crops.yml`), reached through `packages/tcip-mcp/src/tcip_mcp/traits.py:229` (`def crops_yml_path(`, delegating), loaded once for every reader of it by `_crops_traits`, line 236.
+Side A: `packages/tcip-mcp/src/tcip_mcp/knowledge/__init__.py:137` (`def crops_yml_path(`, the one placement of `packages/tcip-mcp/src/tcip_mcp/knowledge/crops/crops.yml`), reached through `packages/tcip-mcp/src/tcip_mcp/traits.py:229` (`def crops_yml_path(`, delegating), loaded once for every reader of it by `_crops_traits`, line 236.
 Side B: `packages/tcip-mcp/src/tcip_mcp/traits.py:300` (`_spec_from_config` cross-checks each spec against `_crops_vocab`, line 241) and `scripts/verify_skill_traits.py:46` (`load_vocab` checks a skill's trait tokens through that same read, and refuses an empty vocabulary rather than reporting a clean skill).
 Phase 3 verdict: single.
 
