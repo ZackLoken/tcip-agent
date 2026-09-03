@@ -538,17 +538,17 @@ def test_run_inference_refuses_split_manifest_dir_without_calibration_labels_dir
     assert "error" in result and "split_manifest_dir" in result["error"]
 
 
-# -- force_redraw_cal_holdout_split with a manifest --------------------------------
+# -- redraw_calibration_holdout with a manifest --------------------------------
 
 
 def test_force_redraw_binds_to_the_manifest_and_records_its_dir(tmp_path: Path):
-    from tcip_mcp.tools.calibration_tools import force_redraw_cal_holdout_split
+    from tcip_mcp.tools.calibration_tools import redraw_calibration_holdout
 
     root = _two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
     manifest = _draw(root, out)
 
-    result = force_redraw_cal_holdout_split(
+    result = redraw_calibration_holdout(
         dataset_root=str(root), labels_dir=str(root / "annotations" / DATES[0]),
         images_dir=str(root / "images" / DATES[0]), split_manifest_dir=str(out),
         subject=SUBJECT, reason="test redraw",
@@ -564,13 +564,13 @@ def test_force_redraw_binds_to_the_manifest_and_records_its_dir(tmp_path: Path):
 
 
 def test_force_redraw_manifest_requires_subject(tmp_path: Path):
-    from tcip_mcp.tools.calibration_tools import force_redraw_cal_holdout_split
+    from tcip_mcp.tools.calibration_tools import redraw_calibration_holdout
 
     root = _two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
     _draw(root, out)
 
-    result = force_redraw_cal_holdout_split(
+    result = redraw_calibration_holdout(
         dataset_root=str(root), labels_dir=str(root / "annotations" / DATES[0]),
         images_dir=str(root / "images" / DATES[0]), split_manifest_dir=str(out),
         reason="test redraw",
@@ -582,13 +582,13 @@ def test_force_redraw_manifest_requires_subject(tmp_path: Path):
 def test_force_redraw_manifest_requires_images_dir(tmp_path: Path):
     """A labels-only universe can include a stem whose image is gone, a lock the redraw would
     address that no manifest-restricted calibration ever draws; refuse rather than address it."""
-    from tcip_mcp.tools.calibration_tools import force_redraw_cal_holdout_split
+    from tcip_mcp.tools.calibration_tools import redraw_calibration_holdout
 
     root = _two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
     _draw(root, out)
 
-    result = force_redraw_cal_holdout_split(
+    result = redraw_calibration_holdout(
         dataset_root=str(root), labels_dir=str(root / "annotations" / DATES[0]),
         split_manifest_dir=str(out), subject=SUBJECT, reason="test redraw",
     )
@@ -597,7 +597,7 @@ def test_force_redraw_manifest_requires_images_dir(tmp_path: Path):
 
 
 def test_force_redraw_refuses_a_moved_images_root_by_name(tmp_path: Path):
-    from tcip_mcp.tools.calibration_tools import force_redraw_cal_holdout_split
+    from tcip_mcp.tools.calibration_tools import redraw_calibration_holdout
 
     root = _two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
@@ -605,7 +605,7 @@ def test_force_redraw_refuses_a_moved_images_root_by_name(tmp_path: Path):
     moved = tmp_path / "elsewhere"
     (root / "images" / DATES[0]).rename(moved)
 
-    result = force_redraw_cal_holdout_split(
+    result = redraw_calibration_holdout(
         dataset_root=str(root), labels_dir=str(root / "annotations" / DATES[0]),
         images_dir=str(moved), split_manifest_dir=str(out),
         subject=SUBJECT, reason="test redraw",
@@ -620,7 +620,7 @@ def test_force_redraw_manifest_addresses_the_same_lock_when_an_image_is_missing(
     addresses that same lock rather than a second, unreachable one."""
     from tcip_mcp.pipelines.data.splits import calibration_universe_from_manifest, label_image_stems
     from tcip_mcp.pipelines.resolution import dataset_hash
-    from tcip_mcp.tools.calibration_tools import force_redraw_cal_holdout_split
+    from tcip_mcp.tools.calibration_tools import redraw_calibration_holdout
 
     root = _two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
@@ -635,7 +635,7 @@ def test_force_redraw_manifest_addresses_the_same_lock_when_an_image_is_missing(
         manifest, DATES[0], present)
     expected_hash = dataset_hash(str(root / "annotations" / DATES[0]), stems=expected_universe)
 
-    result = force_redraw_cal_holdout_split(
+    result = redraw_calibration_holdout(
         dataset_root=str(root), labels_dir=str(root / "annotations" / DATES[0]),
         images_dir=str(root / "images" / DATES[0]), split_manifest_dir=str(out),
         subject=SUBJECT, reason="test redraw",

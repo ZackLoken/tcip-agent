@@ -759,7 +759,7 @@ Docstring is the function's docstring first line, verbatim.
 
 | tool | line | audited | docstring first line |
 |---|---|---|---|
-| `force_redraw_cal_holdout_split` | `calibration_tools.py:24` | yes | Deliberately redraw a locked calibration/holdout split. |
+| `redraw_calibration_holdout` | `calibration_tools.py:24` | yes | Deliberately redraw a locked calibration/holdout split. |
 | `calibrate_scalar_operating_point` | `calibration_tools.py:259` | yes | Calibrate and validate a trait's ordinal-rank or continuous-value prediction against a |
 
 ### ingest_tools.py (1 tool)
@@ -1463,7 +1463,7 @@ demoted from them): bare, a platform event; `@audited(scope_arg=...)` names the 
 a dataset or project location, resolved via `dataset_scope_of`, line 253 (through the tool's own
 canonicalizer when the declaration passes one as `scope_via`). Eleven doors declare one: nine
 dataset-scoped (`save_annotations`, `tools/annotation_tools.py:132`; `write_class_map`, same
-file, line 470; `force_redraw_cal_holdout_split`, `tools/calibration_tools.py:24`;
+file, line 470; `redraw_calibration_holdout`, `tools/calibration_tools.py:24`;
 `materialize_review_dataset`, `tools/feedback_tools.py:166`; `export_predictions`,
 `tools/inference_tools.py:1326`; `register_dataset`, `tools/project_tools.py:165`;
 `propose_annotations`, `tools/proposal_tools.py:179`; `stage_accepted_proposals`, same file, line
@@ -1490,7 +1490,7 @@ Dataset-scoped: three GUI route writers passing the dataset root their own guard
 `routes/review.py`'s `_audit`, `:93`), `resolution.py`'s `record_delivery_binding_event`
 (`:1941`, dataset-scoped when a
 delivery's buckets share one dataset root, platform-scoped otherwise), and
-`calibration_tools.py`'s redraw event (`force_redraw_cal_holdout_split_result`, `:214`).
+`calibration_tools.py`'s redraw event (`redraw_calibration_holdout_result`, `:214`).
 Project-scoped: `routes/results.py`'s `_audit` (`:151`, its delivery and confirmation routes) and
 `pipelines/postprocessing/plant_mapping.py`'s `persist_mapping` (`:795`), whose two callers file
 its receipt under two different categories: the MCP tool `build_plant_mapping` passes the
@@ -2056,7 +2056,7 @@ given: the manifest's own `calibration` side under a manifest-restricted draw, t
 directory otherwise; the lock's own field names do not change with the source.
 
 Readers: six callers draw a lock through this one function -
-`pipelines.calibration.calibrate_operating_point`, `calibration_tools.force_redraw_cal_holdout_split`,
+`pipelines.calibration.calibrate_operating_point`, `calibration_tools.redraw_calibration_holdout`,
 `calibration_tools.calibrate_scalar_operating_point`,
 `measurement.scale_calibration.resolve_physical_scale`,
 `scripts/calibrate_operating_point.py`, and `feedback.review_calibration.

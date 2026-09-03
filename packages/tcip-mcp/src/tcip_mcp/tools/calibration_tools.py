@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 @mcp.tool()
 @audited(scope_arg="dataset_root")
-def force_redraw_cal_holdout_split(
+def redraw_calibration_holdout(
     dataset_root: str,
     labels_dir: str | None = None,
     images_dir: str | None = None,
@@ -212,7 +212,7 @@ def force_redraw_cal_holdout_split(
 
     # A distinct tool name under the same scope: @audited logs the call, this logs what it made.
     record_event(
-        "force_redraw_cal_holdout_split_result",
+        "redraw_calibration_holdout_result",
         {"identity_hash": identity_hash, "group_by": group_by, "group_key_map": group_key_map,
          "seed": seed, "holdout_ratio": holdout_ratio, "reason": reason,
          "split_manifest_dir": split_manifest_dir},

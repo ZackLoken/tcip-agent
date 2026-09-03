@@ -657,16 +657,16 @@ def test_calibrate_operating_point_lock_balances_on_the_checkpoints_own_subject(
 
 
 def test_force_redraw_shares_the_labels_intersect_images_scan(tmp_path):
-    """force_redraw_cal_holdout_split(images_dir=...) must use the same labels-intersect-images
+    """redraw_calibration_holdout(images_dir=...) must use the same labels-intersect-images
     scan calibrate_operating_point uses, not a second independent labels-only glob: a stem
     with no image on disk must not enter the redraw's stem universe."""
-    from tcip_mcp.tools.calibration_tools import force_redraw_cal_holdout_split
+    from tcip_mcp.tools.calibration_tools import redraw_calibration_holdout
 
     stems = ["a_0_0", "a_0_1", "b_0_0", "b_0_1"]
     images_dir, labels_dir = _detection_dataset(tmp_path / "ds", stems)
     (images_dir / "b_0_1.png").unlink()  # labeled but no image
 
-    result = force_redraw_cal_holdout_split(
+    result = redraw_calibration_holdout(
         dataset_root=str(tmp_path / "ds"), labels_dir=str(labels_dir),
         images_dir=str(images_dir), seed=1,
         reason="labels-intersect-images coverage test")

@@ -281,7 +281,7 @@ def run_inference(
             beside ``split_manifest_dir`` conflicts with the manifest's own grouping policy and
             refuses, naming both. Only the first calibration call for a given calibration-labels
             identity draws the split; later calls return the same locked split regardless of this
-            argument (see ``force_redraw_cal_holdout_split`` to redraw deliberately).
+            argument (see ``redraw_calibration_holdout`` to redraw deliberately).
         group_key_map: An agent-derived ``{stem: group_key}`` map overriding ``group_by`` for the
             locked calibration/holdout split, must cover every stem in ``calibration_labels_dir``.
             Conflicts with ``split_manifest_dir`` the same way ``group_by`` does.

@@ -380,12 +380,12 @@ def test_calibration_sweep_functions_have_one_home():
     )
 
 
-def test_force_redraw_cal_holdout_split_has_one_home():
-    """``force_redraw_cal_holdout_split`` moved out of ``tools/inference_tools.py`` into
+def test_redraw_calibration_holdout_has_one_home():
+    """``redraw_calibration_holdout`` moved out of ``tools/inference_tools.py`` into
     ``tools/calibration_tools.py``, name unchanged. Decorators are not this test's concern:
     ``_assert_one_home`` reads def names only, never a decorator list."""
     _assert_one_home(
-        {"force_redraw_cal_holdout_split"},
+        {"redraw_calibration_holdout"},
         _module_path("tools/inference_tools.py"),
         _module_path("tools/calibration_tools.py"),
     )

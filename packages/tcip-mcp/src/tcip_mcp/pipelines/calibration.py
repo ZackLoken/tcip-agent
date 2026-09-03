@@ -48,7 +48,7 @@ def calibrate_operating_point(predictor, trait, labels_dir, images_dir, *,
     ships through, not an untiled full-frame model pass. ``seed``/``holdout_ratio`` only take effect
     on the first (locking) draw for this labeled dir's identity hash. That lock is scoped to the
     labeled dir's own root (``cal_holdout_scope_root``), so it is still the same lock after a
-    project adoption repins the platform root, and ``force_redraw_cal_holdout_split`` addresses it
+    project adoption repins the platform root, and ``redraw_calibration_holdout`` addresses it
     by stating that root.
 
     Raises ``ValueError`` (propagated from ``resolve_locked_cal_holdout_split``) when the lock
@@ -138,7 +138,7 @@ def calibrate_operating_point(predictor, trait, labels_dir, images_dir, *,
             # No try/except: resolve_registry_id_map's only exception is its own deliberate
             # ValueError, which must reach the caller rather than degrade to a single-class read.
             _reg, _cal_id_map = resolve_registry_id_map(labels_dir, _subject, _attribute)
-    # The shared labels-intersect-images scan force_redraw_cal_holdout_split also uses: a stem
+    # The shared labels-intersect-images scan redraw_calibration_holdout also uses: a stem
     # whose image was deleted/renamed never enters the split universe here.
     stems, stem_to_image = label_image_stems(labels_dir, images_dir)
     excluded = None
