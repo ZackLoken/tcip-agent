@@ -79,6 +79,12 @@
       "schema_version": 2,
       "cannot_carry_field": null
     },
+    "coverage_grid_zoom": {
+      "kind": "record",
+      "frozen": false,
+      "schema_version": 1,
+      "cannot_carry_field": null
+    },
     "curated_manifest": {
       "kind": "record",
       "frozen": true,
