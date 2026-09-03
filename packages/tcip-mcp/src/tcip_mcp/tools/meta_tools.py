@@ -2,7 +2,7 @@
 
 Tools that let Claude sessions leave the system smarter than they started:
 - report_friction: structured friction logging when Claude hits a problem
-- project_retrospective: end-of-project reflection written to markdown
+- write_retrospective: end-of-project reflection written to markdown
 - load_project_memory: read recent reports or retrospectives at session start (closes the loop)
 
 See docs/vision.md §6 for the design rationale.
@@ -104,7 +104,7 @@ def retrospective_key(project_path: str, project_id: str) -> Key:
     """One project's retrospective document.
 
     ``cas``: a retrospective is appended to by reading the stored text and writing the
-    concatenation, so :func:`project_retrospective` writes against the version it read and
+    concatenation, so :func:`write_retrospective` writes against the version it read and
     re-merges on conflict rather than dropping a section.
     """
     return Key(RETROSPECTIVE_STORE, str(project_path), (project_id,))
@@ -203,7 +203,7 @@ def report_documents(project_path: str) -> list[MemoryDocument]:
 
 
 _RETROSPECTIVE_SECTION = re.compile(r"^## Retrospective: (.+)$", re.MULTILINE)
-"""The section header :func:`project_retrospective` writes, which is where a retrospective's
+"""The section header :func:`write_retrospective` writes, which is where a retrospective's
 own dates are recorded."""
 
 
@@ -316,7 +316,7 @@ def load_project_memory(
     selector, not an aggregator: one honest read of the chosen store):
     ``'reports'`` reads the friction reports (the counterpart to ``report_friction``);
     ``'retrospectives'`` reads the retrospectives (the counterpart to
-    ``project_retrospective``). Call it early, once per kind, to pick up problems and
+    ``write_retrospective``). Call it early, once per kind, to pick up problems and
     context a previous session surfaced but did not resolve. Entries come back newest
     first, by the timestamp each one states rather than by when its bytes landed.
 
@@ -390,7 +390,7 @@ def _load_reports(
 
 @mcp.tool()
 @audited
-def project_retrospective(
+def write_retrospective(
     project_path: str,
     project_id: str,
     task: str,

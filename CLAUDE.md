@@ -54,7 +54,7 @@ silently corrupts results and compounds across sessions.
 - Report friction through `report_friction` the moment you hit it (a missing tool, ambiguous data,
   an op that failed twice, a decision needing human judgment, behavior that surprised you); the
   free-text detail matters more than the category. A mandated action that is blocked is itself a
-  report, never a silent skip. End substantial work with `project_retrospective`.
+  report, never a silent skip. End substantial work with `write_retrospective`.
 - Never state a fact about this codebase, a domain, or a workflow that you have not executed or
   read this session. One docstring, one sample project, one capture rig describes that instance,
   not the platform's general case; ask before generalizing. A claim about purpose is checked by
@@ -190,7 +190,7 @@ techniques only, never for a per-trait pipeline; the endpoint is a trained model
 - mypy suppressions are enabled per module as a family touches it, never one global flip.
 - Commits: one concern each, in dependency order, LF endings, messages stating the standing
   constraint the change installs (no session narrative, report ids, batch numbers or dates).
-- Every session ends with `project_retrospective`; when a claude-context server is configured for
+- Every session ends with `write_retrospective`; when a claude-context server is configured for
   the session, both its indexes rebuilt and confirmed settled by two `get_indexing_status`
   readings minutes apart with identical counts (the status string alone is not a signal; chunks
   equal to files means in flight); and the handoff rewritten: `docs/recent-summary.md`, the open

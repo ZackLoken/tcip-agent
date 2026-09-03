@@ -151,7 +151,7 @@ def record_report(project_path: str | Path) -> None:
 
 
 def record_retrospective(project_path: str | Path, project_id: str) -> None:
-    """Call after a ``project_retrospective`` write: reset the report counter, bump the
+    """Call after a ``write_retrospective`` write: reset the report counter, bump the
     distillation-retrospective counter, and point at the retrospective by its project_id (no
     cached text, no path: a path is backend-dependent and the database backend keeps no file)."""
     now = datetime.now(timezone.utc).isoformat()

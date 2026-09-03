@@ -1,6 +1,6 @@
 ---
 name: self-improvement
-description: "How the agent turns friction and findings into a durable record that the next session picks up. Load this whenever the user pushes back, corrects you, repeats an annoyance, when you discover machinery you didn't know existed, nearly reinvent something, or hit a missing tool/skill, and at the end of substantial work. Everything lands with the project, via report_friction and project_retrospective, and load_project_memory reads it back."
+description: "How the agent turns friction and findings into a durable record that the next session picks up. Load this whenever the user pushes back, corrects you, repeats an annoyance, when you discover machinery you didn't know existed, nearly reinvent something, or hit a missing tool/skill, and at the end of substantial work. Everything lands with the project, via report_friction and write_retrospective, and load_project_memory reads it back."
 ---
 
 # Self-improvement: learning that stays with the project
@@ -25,7 +25,7 @@ The loop is three live, audited tools, no separate journal file:
 | When | Tool | Lands |
 |---|---|---|
 | The moment friction happens | `report_friction` | `.tcip/reports/` |
-| End of substantial work, even if incomplete | `project_retrospective` | `.tcip/retrospectives/` |
+| End of substantial work, even if incomplete | `write_retrospective` | `.tcip/retrospectives/` |
 | Start of the next session | `load_project_memory` (`kind='reports'`, then `'retrospectives'`) | read back into context |
 
 ## Capture: the moment friction happens
@@ -53,7 +53,7 @@ Over-report. A report is cheap; a silent guess is not.
 
 ## Record: what the retrospective should contain
 
-At the end of substantial work, call `project_retrospective`. Write what a future session working
+At the end of substantial work, call `write_retrospective`. Write what a future session working
 this project would need, and be honest about what failed; that is the most useful part.
 
 - What you measured about this dataset: object scale and elongation from the GT, capture

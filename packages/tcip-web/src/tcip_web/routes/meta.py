@@ -1,7 +1,7 @@
 """Meta-loop routes: surface Claude's friction reports and retrospectives.
 
 Read-only views over the friction reports (written by the ``report_friction`` MCP tool) and the
-retrospectives (written by ``project_retrospective``). Both corpora are enumerated, ordered and
+retrospectives (written by ``write_retrospective``). Both corpora are enumerated, ordered and
 decoded by the module that owns their stores, so the panel and the agent's own memory tool
 cannot present the same project in two different orders. These close the loop on the
 meta-tools: the agent writes friction/retrospectives, the human can read them in the GUI.

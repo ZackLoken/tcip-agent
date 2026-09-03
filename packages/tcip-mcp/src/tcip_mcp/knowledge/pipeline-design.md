@@ -212,7 +212,7 @@ mechanics are identical for one stage or four, and there is no fixed phase vocab
 
 - Start with the simplest thing that could measure the trait, and add complexity only when the
   data or the metrics justify it (CLAUDE.md's progressive-disclosure rail).
-- Write a retrospective (`project_retrospective`) when you finish. Record what you measured
+- Write a retrospective (`write_retrospective`) when you finish. Record what you measured
   about *this* dataset and what it implied: object scale, capture cadence, class imbalance, where
   the operating point resolved and why. Not a reusable pipeline shape: the next dataset re-derives
   its own decomposition, and a shape recorded here would become a recipe for a problem it was never

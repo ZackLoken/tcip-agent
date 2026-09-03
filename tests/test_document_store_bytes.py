@@ -220,7 +220,7 @@ def test_a_friction_report_lands_as_the_json_document_every_reader_of_the_corpus
 
 
 def test_a_retrospective_lands_as_the_markdown_text_and_nothing_around_it(tmp_path):
-    """The first section ``project_retrospective`` writes: the text itself, no envelope."""
+    """The first section ``write_retrospective`` writes: the text itself, no envelope."""
     from tcip_store.file_backend import FileBackend
 
     from tcip_mcp.tools import meta_tools
