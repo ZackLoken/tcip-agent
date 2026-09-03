@@ -7,9 +7,9 @@ import pytest
 
 from tcip_mcp.pipelines.display_bounds import DISPLAY_MAX_EDGE, VIZ_ARTIFACT_MAX_EDGE
 from tcip_mcp.pipelines.reference_grid import (
-    derive_coverage_tile_size,
-    derive_large_raster_grid_tile_size,
+    derive_lattice_tile_size,
     derive_pointing_tile_size,
+    derive_serving_tile_size,
     grid_geometry,
     reference_cells,
 )
@@ -69,27 +69,27 @@ class TestReferenceCells:
 
 
 class TestDerivations:
-    def test_coverage_tile_fits_one_display_serve(self):
+    def test_serving_tile_fits_one_display_serve(self):
         for dims in [(141130, 239921), (4000, 3000), (5000, 64), (640, 480)]:
-            tile = derive_coverage_tile_size(*dims)
+            tile = derive_serving_tile_size(*dims)
             assert 1 <= tile <= DISPLAY_MAX_EDGE
 
     def test_image_inside_display_bound_is_one_cell(self):
-        tile = derive_coverage_tile_size(4096, 3000)
+        tile = derive_serving_tile_size(4096, 3000)
         assert tile == 4096
         assert len(reference_cells(4096, 3000, tile, clamp=True)) == 1
 
     def test_mosaic_scale_geometry(self):
         """The real-mosaic numeric case: 141130 x 239921 derives tile 4067, a 35 x 59
-        coverage grid."""
-        tile = derive_coverage_tile_size(141130, 239921)
+        serving grid."""
+        tile = derive_serving_tile_size(141130, 239921)
         assert tile == 4067
         geometry = grid_geometry(141130, 239921, tile)
         assert geometry["cols"] == 35
         assert geometry["rows"] == 59
 
     def test_derivations_are_deterministic(self):
-        assert derive_coverage_tile_size(7000, 5000) == derive_coverage_tile_size(7000, 5000)
+        assert derive_serving_tile_size(7000, 5000) == derive_serving_tile_size(7000, 5000)
         assert derive_pointing_tile_size(7000, 5000) == derive_pointing_tile_size(7000, 5000)
 
     def test_pointing_grain_is_fixed_in_render_space(self):
@@ -111,38 +111,41 @@ class TestDerivations:
         chosen against its own long edge: 640 splits into 14 cells of edge 46."""
         assert derive_pointing_tile_size(640, 480) == 46
 
-    def test_large_raster_grid_does_not_touch_the_display_derived_one(self):
-        """Adding the large-raster derivation must not change a single value
-        derive_coverage_tile_size (the display-derived lattice) returns for any caller: this is a
-        new, additive branch, not a replacement, and shares no code path with it. Hardcoded
+    def test_serving_tile_is_a_fixed_derivation_regardless_of_zoom(self):
+        """The serving grid never depends on a set zoom or the coverage lattice: hardcoded
         expected values, not a self-comparison, so a shared-code-path regression would actually
         be caught."""
-        assert derive_coverage_tile_size(141130, 239921) == 4067
-        assert derive_coverage_tile_size(4000, 3000) == 4000
-        assert derive_coverage_tile_size(5000, 64) == 2500
-        assert derive_coverage_tile_size(640, 480) == 640
-        assert derive_coverage_tile_size(4096, 3000) == 4096
+        assert derive_serving_tile_size(141130, 239921) == 4067
+        assert derive_serving_tile_size(4000, 3000) == 4000
+        assert derive_serving_tile_size(5000, 64) == 2500
+        assert derive_serving_tile_size(640, 480) == 640
+        assert derive_serving_tile_size(4096, 3000) == 4096
 
-    def test_large_raster_grid_real_mosaic_scale_is_tens_to_low_hundreds_of_cells(self):
-        """The real ValleyFarm numeric case: at 239921x141130 the display-derived lattice is
-        roughly 118x70 (~8,260 cells); the large-raster derivation must instead produce a lattice
-        in the tens-to-low-hundreds, not thousands."""
-        tile = derive_large_raster_grid_tile_size(239921, 141130)
-        geometry = grid_geometry(239921, 141130, tile)
-        total_cells = geometry["cols"] * geometry["rows"]
-        assert 100 <= total_cells <= 300
-        assert geometry["cols"] == 16
-
-    def test_large_raster_grid_tile_size_formula(self):
+    def test_lattice_tile_is_one_screenful_at_the_set_zoom(self):
+        """One screenful of native pixels at the zoom, off the short viewport dimension: at 1.5x
+        zoom on a 1416x903 viewport (the render's own mockup numbers), the short dimension (903)
+        derives a 602 px cell edge."""
         import math
 
-        assert derive_large_raster_grid_tile_size(3200, 1600) == math.ceil(3200 / 16)
-        assert derive_large_raster_grid_tile_size(1600, 3200) == math.ceil(3200 / 16)
+        assert derive_lattice_tile_size(1416, 903, 1.5) == math.ceil(903 / 1.5)
+        assert derive_lattice_tile_size(1416, 903, 1.5) == 602
 
-    def test_large_raster_grid_divisions_is_overridable(self):
-        import math
+    def test_lattice_tile_uses_the_short_viewport_dimension(self):
+        assert derive_lattice_tile_size(2000, 500, 1.0) == 500
+        assert derive_lattice_tile_size(500, 2000, 1.0) == 500
 
-        assert derive_large_raster_grid_tile_size(3200, 1600, divisions=8) == math.ceil(3200 / 8)
+    def test_lattice_tile_scales_inversely_with_zoom(self):
+        assert derive_lattice_tile_size(1000, 800, 2.0) < derive_lattice_tile_size(1000, 800, 1.0)
+
+    def test_lattice_tile_refuses_a_non_positive_zoom(self):
+        with pytest.raises(ValueError, match="zoom"):
+            derive_lattice_tile_size(1000, 800, 0)
+        with pytest.raises(ValueError, match="zoom"):
+            derive_lattice_tile_size(1000, 800, -1.5)
+
+    def test_lattice_tile_refuses_a_sub_pixel_viewport(self):
+        with pytest.raises(ValueError, match="viewport"):
+            derive_lattice_tile_size(0, 800, 1.0)
 
 
 class TestGridGeometry:
