@@ -129,7 +129,12 @@ function pushErrorStatus(err: unknown): number | null {
   return err instanceof StructuredRefusalError ? err.status : null;
 }
 
-function isAuditEntryNotWritten(err: unknown): boolean {
+/** Whether `err` is the marked 500 a route answers when a write committed but its audit line
+ *  could not be appended (see `AUDIT_ENTRY_NOT_WRITTEN`): terminal like a 4xx, never retried
+ *  like an ordinary 5xx, since the write already landed and a retry recovers nothing. The one
+ *  place either caller of this module -- this file's own outbox and `useRegionCompleteness`'s
+ *  completeness write -- reads the marker, so both name the same failure the same way. */
+export function isAuditEntryNotWritten(err: unknown): boolean {
   return (
     err instanceof StructuredRefusalError &&
     err.status === 500 &&
@@ -584,7 +589,7 @@ export class CoverageTracker {
     void this.postFn(body).then(
       () => {},
       (err: unknown) => {
-        if (!sameKeyParts(this.keyParts, keyParts)) {
+        if (this.staleIdentity(keyParts)) {
           coverageOutbox.enqueue(body);
           return;
         }
@@ -592,6 +597,15 @@ export class CoverageTracker {
         coverageOutbox.enqueue(body);
       },
     );
+  }
+
+  /** Whether `keyParts` (the identity a payload was built under) is no longer the tracker's
+   *  current identity: a `reset` moved the tracker on while that payload's promise was still in
+   *  flight. A response arriving for a stale identity belongs to the image it left, never the one
+   *  the tracker now points at -- the one check both `flush` and `postNow` route their settled
+   *  promises through, so neither can adopt or hold against the wrong image. */
+  private staleIdentity(keyParts: CoverageKeyParts): boolean {
+    return !sameKeyParts(this.keyParts, keyParts);
   }
 
   /** Set the replace hold from a coverage-lattice-mismatch push failure, marking the tracker
@@ -641,15 +655,27 @@ export class CoverageTracker {
   }
 
   /** While the replace hold stands and is not armed, nothing is sent (see `flush`'s own note);
-   *  `dirty` stays set so the next armed attempt or an eventual `flush` still carries it. */
+   *  `dirty` stays set so the next armed attempt or an eventual `flush` still carries it. The
+   *  identity this payload was built for is captured before the send, exactly as `flush` does:
+   *  a `reset` can point the tracker at a different image before this promise settles, and a
+   *  settled promise reaching either handler by then belongs to the identity that built it,
+   *  never the one the tracker now points at (`staleIdentity`). */
   private postNow(): void {
     if (!this.dirty || !this.keyParts || !this.grid || !this.viewing) return;
     if (this.replaceRequiredState && !this.armed) return;
+    const keyParts = this.keyParts;
     this.dirty = false;
-    const body = this.buildPayload(this.keyParts, this.grid, this.viewing);
+    const body = this.buildPayload(keyParts, this.grid, this.viewing);
     void this.postFn(body).then(
-      (res) => this.adoptRecorded(res.record.cells_seen_at_scale),
+      (res) => {
+        if (this.staleIdentity(keyParts)) return;
+        this.adoptRecorded(res.record.cells_seen_at_scale);
+      },
       (err: unknown) => {
+        if (this.staleIdentity(keyParts)) {
+          coverageOutbox.enqueue(body);
+          return;
+        }
         this.dirty = true;
         if (this.setHoldFromError(err)) return;
         this.opts.onPushError?.(err instanceof Error ? err.message : String(err));

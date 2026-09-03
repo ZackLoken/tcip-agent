@@ -681,4 +681,54 @@ describe("CoverageTracker replace hold", () => {
     expect(tracker.replaceRequired).toBeNull(); // must not land on the new image
     expect(coverageOutbox.size).toBeGreaterThan(0); // the stale payload still reaches the outbox
   });
+
+  it("a 409 arriving after reset during a debounced postNow sets no hold on the new image", async () => {
+    let reject: ((err: unknown) => void) | undefined;
+    post.mockImplementationOnce(
+      () =>
+        new Promise((_resolve, rej) => {
+          reject = rej;
+        }),
+    );
+    tracker.reset(KEY, GRID, CELLS);
+    tracker.setViewing(NULL_VIEWING);
+    tracker.noteServedAtNative("A1"); // markDirty schedules postNow after the debounce
+    await vi.advanceTimersByTimeAsync(400); // the debounce fires postNow, whose push is now in flight
+    expect(post).toHaveBeenCalledTimes(1);
+
+    post.mockResolvedValue({ record: { cells_seen_at_scale: {} } });
+    const otherKey = { ...KEY, imagePath: "C:/data/images/2026-01-01/other.tif" };
+    tracker.reset(otherKey, GRID, CELLS); // the tracker moves on before postNow's push settles
+
+    reject!(mismatchRefusal(6, 4, 3)); // the delayed 409 belongs to the old identity's payload
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(tracker.replaceRequired).toBeNull(); // must not land on the new image
+    expect(coverageOutbox.size).toBeGreaterThan(0); // the stale payload still reaches the outbox
+  });
+
+  it("a resolved postNow arriving after reset adopts none of its cells into the new image", async () => {
+    let resolve: ((res: CoveragePushResponse) => void) | undefined;
+    post.mockImplementationOnce(
+      () =>
+        new Promise((res) => {
+          resolve = res;
+        }),
+    );
+    tracker.reset(KEY, GRID, CELLS);
+    tracker.setViewing(NULL_VIEWING);
+    tracker.noteServedAtNative("A1"); // markDirty schedules postNow after the debounce
+    await vi.advanceTimersByTimeAsync(400); // the debounce fires postNow, whose push is now in flight
+    expect(post).toHaveBeenCalledTimes(1);
+
+    const otherKey = { ...KEY, imagePath: "C:/data/images/2026-01-01/other.tif" };
+    tracker.reset(otherKey, GRID, CELLS); // the tracker moves on before postNow's push settles
+    tracker.setViewing(NULL_VIEWING);
+
+    resolve!({ record: { cells_seen_at_scale: { A1: 1, B1: 0.8 } } }); // the old identity's own record
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(tracker.seenAtScale.size).toBe(0); // the new identity adopted none of it
+    expect(tracker.pending.size).toBe(0);
+  });
 });
