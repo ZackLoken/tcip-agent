@@ -1553,6 +1553,66 @@ class TestCompletenessRoute:
         assert args["cells_attested_view"]["seen_on_record"] == {
             "at_scale": None, "grid_matched": False}
 
+    def test_completeness_audit_append_failure_still_answers_500_though_the_write_already_landed(
+        self, client, dated_dataset, monkeypatch,
+    ):
+        """The completeness write commits before its audit line is attempted, the same
+        discipline post_coverage's own audit-gap test proves: a failed append cannot roll the
+        write back, so the route answers 500 rather than a silent 200, naming the gap."""
+        from tcip_mcp.audit import AuditEntryNotWritten
+
+        root, path = dated_dataset
+        grid = _grid(client, path, tile_size=64)
+
+        def _raise(*args, **kwargs):
+            raise AuditEntryNotWritten("gui_set_region_completeness", RuntimeError("disk full"))
+
+        import tcip_mcp.audit as audit_module
+
+        monkeypatch.setattr(audit_module, "record_event_or_raise", _raise)
+
+        unraising = TestClient(app, base_url="http://127.0.0.1", raise_server_exceptions=False)
+        resp = unraising.post("/api/coverage/completeness", json={
+            "image_path": path, "subject": "catkin", "grid": _grid_only(grid), "cell": "A1",
+            "complete": True, "user": "breeder", "view_scale": None})
+        assert resp.status_code == 500
+        detail = resp.json()["detail"]
+        assert detail["error"] == "audit_entry_not_written"
+        assert "disk full" in detail["message"]
+
+        record = client.get(
+            "/api/coverage/completeness", params={"path": path}).json()["by_subject"]["catkin"]
+        assert record["cells_complete"] == ["A1"]
+        assert _audit_entries(root, "gui_set_region_completeness") == []
+
+    def test_a_retry_of_the_same_attestation_after_the_audit_gap_answers_the_same_way(
+        self, client, dated_dataset, monkeypatch,
+    ):
+        """Unlike post_coverage's own merge, a repeat attest is never a no-op: it always
+        restamps the digest and scale provenance and always attempts to audit, so a retry under
+        the same standing audit gap answers 500 again, not the 200 an unchanged post_coverage
+        push gets -- the retry never recovers the missing line by itself."""
+        from tcip_mcp.audit import AuditEntryNotWritten
+
+        root, path = dated_dataset
+        grid = _grid(client, path, tile_size=64)
+
+        def _raise(*args, **kwargs):
+            raise AuditEntryNotWritten("gui_set_region_completeness", RuntimeError("disk full"))
+
+        import tcip_mcp.audit as audit_module
+
+        monkeypatch.setattr(audit_module, "record_event_or_raise", _raise)
+        unraising = TestClient(app, base_url="http://127.0.0.1", raise_server_exceptions=False)
+        body = {"image_path": path, "subject": "catkin", "grid": _grid_only(grid), "cell": "A1",
+                "complete": True, "user": "breeder", "view_scale": None}
+        unraising.post("/api/coverage/completeness", json=body)
+
+        resp = unraising.post("/api/coverage/completeness", json=body)
+        assert resp.status_code == 500
+        assert resp.json()["detail"]["error"] == "audit_entry_not_written"
+        assert _audit_entries(root, "gui_set_region_completeness") == []
+
     def test_view_scale_is_required(self, client, dated_dataset):
         _root, path = dated_dataset
         grid = _grid(client, path, tile_size=64)

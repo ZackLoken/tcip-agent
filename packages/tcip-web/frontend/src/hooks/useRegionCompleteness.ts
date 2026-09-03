@@ -23,6 +23,7 @@ import {
   type CompletenessRecord,
   type GridGeometry,
 } from "@/lib/coverage";
+import { isAuditEntryNotWritten } from "@/lib/coverageTracker";
 import { useStore } from "@/store";
 
 export interface OtherLatticeAttestation {
@@ -233,7 +234,11 @@ export function useRegionCompleteness(args: {
           const detail = err instanceof Error ? err.message : String(err);
           useStore
             .getState()
-            .pushToast(`Could not update completeness for cell ${cell}: ${detail}`);
+            .pushToast(
+              isAuditEntryNotWritten(err)
+                ? `completeness for cell ${cell} was saved without its audit line: ${detail}`
+                : `Could not update completeness for cell ${cell}: ${detail}`,
+            );
           reload();
         });
     },

@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
 
 import { api } from "@/api/client";
+import { StructuredRefusalError } from "@/api/http";
 import { useRegionCompleteness } from "@/hooks/useRegionCompleteness";
 import type { CompletenessRecord, CompletenessResponse } from "@/lib/coverage";
 import { useStore } from "@/store";
@@ -215,6 +216,37 @@ describe("useRegionCompleteness", () => {
     );
     // A failure reloads too, the same as a success, rather than trusting a stale local guess.
     await waitFor(() => expect(get).toHaveBeenCalledTimes(2));
+  });
+
+  it("the audit-entry-not-written 500 says the write landed without its audit line", async () => {
+    vi.spyOn(api.coverage, "completeness").mockResolvedValue(response({}));
+    vi.spyOn(api.coverage, "setCompleteness").mockRejectedValue(
+      new StructuredRefusalError(
+        { error: "audit_entry_not_written", message: "append failed" },
+        500,
+        "append failed",
+      ),
+    );
+    const { result } = renderHook(() =>
+      useRegionCompleteness({
+        imagePath: "C:/data/images/2026-01-01/mosaic.tif",
+        datasetRoot: "C:/data",
+        subject: "bush",
+        grid: GRID,
+      }),
+    );
+    await waitFor(() => expect(api.coverage.completeness).toHaveBeenCalledTimes(1));
+
+    result.current.write("A1", GRID, true, 0.5);
+    await waitFor(() =>
+      expect(
+        useStore
+          .getState()
+          .toasts.some(
+            (t) => t.message.includes("A1") && t.message.includes("without its audit line"),
+          ),
+      ).toBe(true),
+    );
   });
 
   it("a read failure surfaces as error, never silently read as nothing attested", async () => {
