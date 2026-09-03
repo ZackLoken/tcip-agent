@@ -644,13 +644,13 @@ def test_ps_guard_allows_reads(cmd):
     assert r.stdout.strip() == ""
 
 
-def test_deny_reason_points_to_claude_reports():
+def test_deny_reason_points_to_report_friction():
     # Requirement (c): a blocked protected-write self-documents: it tells the agent to file the
-    # false-positive with claude_reports rather than route around the fence.
+    # false-positive with report_friction rather than route around the fence.
     r = _run_guard("echo x > packages/tcip-mcp/y.py")
-    assert r.returncode == 2 and "claude_reports" in r.stdout
+    assert r.returncode == 2 and "report_friction" in r.stdout
     r = _run_ps_guard('Set-Content packages\\tcip-mcp\\y.py "x"')
-    assert r.returncode == 2 and "claude_reports" in r.stdout
+    assert r.returncode == 2 and "report_friction" in r.stdout
 
 
 def test_ps_guard_fails_open_on_garbage_stdin():

@@ -78,7 +78,7 @@ def _platform_rows(tool: str) -> list[dict]:
 
 
 def _report_call(tmp_path: Path, detail: str) -> tuple[str, dict]:
-    return ("claude_reports", {"project_path": str(tmp_path), "category": "unexpected_behavior",
+    return ("report_friction", {"project_path": str(tmp_path), "category": "unexpected_behavior",
                                "detail": detail})
 
 
@@ -90,7 +90,7 @@ def test_an_audited_call_through_a_handshake_records_the_declared_harness_and_a_
 ) -> None:
     call_through_handshake([_report_call(tmp_path, "first"), _report_call(tmp_path, "second")])
 
-    rows = _platform_rows("claude_reports")
+    rows = _platform_rows("report_friction")
     assert [row["arguments"]["detail"] for row in rows] == ["first", "second"]
     for row in rows:
         assert row["agent_client_name"] == "reviewing-harness"
@@ -106,7 +106,7 @@ def test_the_terminal_session_rides_along_only_when_the_launcher_declared_one(
     monkeypatch.setenv("TCIP_TERMINAL_SESSION", "term_abc123")
     call_through_handshake([_report_call(tmp_path, "under a terminal")])
 
-    (row,) = _platform_rows("claude_reports")
+    (row,) = _platform_rows("report_friction")
     assert row["terminal_session"] == "term_abc123"
 
 
@@ -114,18 +114,18 @@ def test_two_handshakes_in_two_runs_mint_two_sessions(tmp_path: Path) -> None:
     call_through_handshake([_report_call(tmp_path, "run one")])
     call_through_handshake([_report_call(tmp_path, "run two")])
 
-    first, second = _platform_rows("claude_reports")
+    first, second = _platform_rows("report_friction")
     assert first["agent_session"] != second["agent_session"]
 
 
 def test_a_call_with_no_handshake_records_no_identity(tmp_path: Path) -> None:
     """The control: the web backend, a script and this test process import the tools without a
     handshake, and their lines keep the shape they always had."""
-    from tcip_mcp.tools.meta_tools import claude_reports
+    from tcip_mcp.tools.meta_tools import report_friction
 
-    claude_reports(str(tmp_path), "unexpected_behavior", "no handshake")
+    report_friction(str(tmp_path), "unexpected_behavior", "no handshake")
 
-    (row,) = _platform_rows("claude_reports")
+    (row,) = _platform_rows("report_friction")
     assert not set(IDENTITY_FIELDS) & set(row)
 
 
@@ -141,7 +141,7 @@ def test_what_claude_code_exports_about_itself_rides_on_its_lines_and_nothing_el
     call_through_handshake([_report_call(tmp_path, "from claude code")], declared=claude)
     call_through_handshake([_report_call(tmp_path, "from another harness")])
 
-    claude_row, other_row = _platform_rows("claude_reports")
+    claude_row, other_row = _platform_rows("report_friction")
     assert claude_row["harness_session"] == "0b56e764-5533-408a-bb5d-d5dd17b4e6b9"
     assert claude_row["harness_effort_at_connect"] == "high"
     assert "harness_session" not in other_row and "harness_effort_at_connect" not in other_row

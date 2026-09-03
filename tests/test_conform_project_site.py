@@ -22,11 +22,11 @@ def _run_script(*args: str) -> subprocess.CompletedProcess:
 
 
 def test_conform_script_writes_a_fresh_site_for_a_project_with_no_record(tmp_path: Path):
-    from tcip_mcp.tools.meta_tools import claude_reports
+    from tcip_mcp.tools.meta_tools import report_friction
 
     project = tmp_path / "bare"
     project.mkdir()
-    claude_reports(str(project), category="missing_tool", detail="probe")
+    report_friction(str(project), category="missing_tool", detail="probe")
 
     result = _run_script(str(project), "north orchard")
 

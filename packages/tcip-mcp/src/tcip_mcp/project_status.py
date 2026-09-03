@@ -135,7 +135,7 @@ def _update(project_path: str | Path, mutate: Callable[[dict[str, Any]], None]) 
 
 
 def record_report(project_path: str | Path) -> None:
-    """Call after a ``claude_reports`` write: bump both since-last-X counters."""
+    """Call after a ``report_friction`` write: bump both since-last-X counters."""
     now = datetime.now(timezone.utc).isoformat()
 
     def mutate(data: dict[str, Any]) -> None:

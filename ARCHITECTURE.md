@@ -772,7 +772,7 @@ Docstring is the function's docstring first line, verbatim.
 
 | tool | line | audited | docstring first line |
 |---|---|---|---|
-| `claude_reports` | `meta_tools.py:237` | yes | Log structured friction when you get stuck, confused, or surprised. |
+| `report_friction` | `meta_tools.py:237` | yes | Log structured friction when you get stuck, confused, or surprised. |
 | `load_project_memory` | `meta_tools.py:306` | yes | Read one project-memory corpus into context so context isn't lost between sessions. |
 | `project_retrospective` | `meta_tools.py:393` | yes | Write an end-of-project retrospective to markdown. |
 | `record_distillation_pass` | `meta_tools.py:496` | yes | Record that you reviewed this project's friction/retrospectives (e.g. via |

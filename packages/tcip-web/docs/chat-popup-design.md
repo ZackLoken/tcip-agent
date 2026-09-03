@@ -236,7 +236,7 @@ earlier ones.
   a *transport* for the human↔agent conversation, not a new mutation path.
 - Two `tcip-mcp` instances (terminal + sidecar) writing `.tcip/` concurrently:
   audit log is append-only JSONL (atomic-enough line appends), experiments are new
-  directories per run. Phase C2 must add a test for concurrent `claude_reports` /
+  directories per run. Phase C2 must add a test for concurrent `report_friction` /
   `audit` appends before shipping.
 - Feature flag discipline: exactly one flag (`CHAT_POPUP_ENABLED`), removed
   (not inverted, not layered) when C2 ships. No parallel legacy path at any phase.

@@ -26,7 +26,7 @@ def _load_distill():
 
 
 def _seed_report(project_root: Path, report_id: str, entry: dict) -> None:
-    """Record one friction report through the seam, the way ``claude_reports`` does."""
+    """Record one friction report through the seam, the way ``report_friction`` does."""
     import tcip_store as ts
 
     from tcip_mcp.tools.meta_tools import friction_report_key

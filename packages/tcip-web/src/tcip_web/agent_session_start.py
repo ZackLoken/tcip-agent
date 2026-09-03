@@ -126,7 +126,7 @@ def _active_context(proj: str) -> str:
         "If the user's task is to create or switch to a different project, do that first "
         "(init_project(<path>, site=<site>) then set_active_project), then run the ritual on the "
         "project you end up in, do not run it on a stale active project.\n"
-        "If any mandated action is blocked or errors, that itself is a claude_reports, never a silent skip."
+        "If any mandated action is blocked or errors, that itself is a report_friction, never a silent skip."
     )
 
 
@@ -139,7 +139,7 @@ def _no_project_context() -> str:
         "  • Resume existing work → set_active_project(<name>) (or open it in the GUI).\n"
         "Once a project is active, run the ritual: load_project_memory (kind='reports' and "
         "kind='retrospectives') + inspect_project, then python scripts/doctor.py <project_root>.\n"
-        "If any mandated action is blocked or errors, that itself is a claude_reports, never a silent skip."
+        "If any mandated action is blocked or errors, that itself is a report_friction, never a silent skip."
     )
 
 
@@ -147,7 +147,7 @@ def _unreadable_context(detail: str) -> str:
     return (
         "[TCIP session-start ritual, auto-injected by the SessionStart hook]\n"
         f"The active-project marker could not be adopted: {detail}\n"
-        "This is a mandated action that failed, so file it with claude_reports once an MCP client "
+        "This is a mandated action that failed, so file it with report_friction once an MCP client "
         "is available, rather than treating it as no active project. If the detail names a "
         "workspace holding loose files with no database, conform it with "
         "python scripts/adopt_store.py before trusting the marker again."
@@ -159,7 +159,7 @@ def _import_error_context(detail: str) -> str:
         "[TCIP session-start ritual, auto-injected by the SessionStart hook]\n"
         f"The active-project marker could not be read from this interpreter: {detail}\n"
         "This session cannot see whether a project is active; do not assume there is none. "
-        "File this with claude_reports once an MCP client is available."
+        "File this with report_friction once an MCP client is available."
     )
 
 

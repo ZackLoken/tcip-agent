@@ -1,7 +1,7 @@
 """Distill worksheet: gather one project's learning record in one place.
 
 Learning lands with the project (see the `self-improvement` skill): friction goes to the friction
-reports via ``claude_reports``, and end-of-work findings to the retrospectives via
+reports via ``report_friction``, and end-of-work findings to the retrospectives via
 ``project_retrospective``. This gathers both, plus the SessionEnd capture backstop, so a review is
 cheap and nothing is dropped.
 

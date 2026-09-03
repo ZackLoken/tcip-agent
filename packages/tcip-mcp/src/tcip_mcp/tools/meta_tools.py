@@ -1,7 +1,7 @@
 """Meta-loop tools for self-improvement.
 
 Tools that let Claude sessions leave the system smarter than they started:
-- claude_reports: structured friction logging when Claude hits a problem
+- report_friction: structured friction logging when Claude hits a problem
 - project_retrospective: end-of-project reflection written to markdown
 - load_project_memory: read recent reports or retrospectives at session start (closes the loop)
 
@@ -234,7 +234,7 @@ def retrospective_documents(project_path: str) -> list[MemoryDocument]:
 
 @mcp.tool()
 @audited
-def claude_reports(
+def report_friction(
     project_path: str,
     category: str,
     detail: str,
@@ -314,7 +314,7 @@ def load_project_memory(
 
     The read side of the session-start ritual. ``kind`` selects a single corpus (a
     selector, not an aggregator: one honest read of the chosen store):
-    ``'reports'`` reads the friction reports (the counterpart to ``claude_reports``);
+    ``'reports'`` reads the friction reports (the counterpart to ``report_friction``);
     ``'retrospectives'`` reads the retrospectives (the counterpart to
     ``project_retrospective``). Call it early, once per kind, to pick up problems and
     context a previous session surfaced but did not resolve. Entries come back newest
@@ -327,7 +327,7 @@ def load_project_memory(
             flow (load_project_memory + inspect_project) needs no path.
         limit: Maximum number of entries to return (default 5).
         category: Reports only, optional exact category filter (e.g. 'missing_tool'),
-            one of the ``claude_reports`` categories; empty means all. Ignored for
+            one of the ``report_friction`` categories; empty means all. Ignored for
             retrospectives.
         filter_substring: Optional case-insensitive substring matched against each
             entry's filename or its text.
