@@ -48,7 +48,7 @@ import tcip_store
 
 from tcip_web.paths import assert_path_allowed
 from tcip_web.routes._coverage_models import CoverageRecord, CoverageViewing, GridGeometry
-from tcip_web.routes.classes import _audit_dataset_write, _guard_dataset_root
+from tcip_web.routes.classes import _guard_dataset_root
 from tcip_web.routes.images import _checked
 
 router = APIRouter(prefix="/api/coverage", tags=["coverage"])
@@ -132,6 +132,21 @@ def _require_completeness_subject(subject: Optional[str]) -> str:
                                  "region done' with no subject would silently clear a different "
                                  "subject's calibration; pass a subject")
     return subject
+
+
+def _audit_or_answer_500(tool: str, arguments: dict, root: str) -> None:
+    """Emit one audit line through the raising emitter (``record_event_or_raise``), after a
+    write has already committed, and turn a failed append into the marked 500
+    (``AUDIT_ENTRY_NOT_WRITTEN``) both ``post_coverage`` and ``post_completeness`` answer with:
+    the write landed, its line did not, and a retry of the same payload recovers neither. The
+    one place either route appends its audit line, so the two can never drift on how a failed
+    append is reported."""
+    from tcip_mcp.audit import AuditEntryNotWritten, record_event_or_raise
+
+    try:
+        record_event_or_raise(tool, arguments, source="gui", scope=root)
+    except AuditEntryNotWritten as exc:
+        raise HTTPException(500, {"error": AUDIT_ENTRY_NOT_WRITTEN, "message": str(exc)}) from exc
 
 
 def _grid_for_raster(src: Path, tile_size: int | None) -> tuple[dict, str]:
@@ -292,7 +307,6 @@ def post_coverage(payload: CoveragePayload) -> dict:
     guarantee: the record is committed, its line is not, and a retry of this same payload merges
     to no change and writes and audits nothing, never recovering it.
     """
-    from tcip_mcp.audit import AuditEntryNotWritten, record_event_or_raise
     from tcip_mcp.dataset_layout import status_bucket, view_coverage_key
     from tcip_mcp.pipelines.reference_grid import reference_cells
 
@@ -382,19 +396,15 @@ def post_coverage(payload: CoveragePayload) -> dict:
 
     # A log append cannot join a record transaction; see the docstring for what a failed
     # append means at this position, after the write above has already committed.
-    try:
-        record_event_or_raise(
-            "gui_view_coverage",
-            {"image_name": image_name, "subject": subject, "date": payload.date, "grid": grid,
-             "cells_seen_added": seen_added, "cells_served_at_native_added": served_added,
-             "viewing_changed": viewing_changed,
-             "viewing": viewing_dict if viewing_changed else None, "replaced": replaced,
-             "replace_confirmed": payload.replace},
-            source="gui", scope=root,
-        )
-    except AuditEntryNotWritten as exc:
-        raise HTTPException(
-            500, {"error": AUDIT_ENTRY_NOT_WRITTEN, "message": str(exc)}) from exc
+    _audit_or_answer_500(
+        "gui_view_coverage",
+        {"image_name": image_name, "subject": subject, "date": payload.date, "grid": grid,
+         "cells_seen_added": seen_added, "cells_served_at_native_added": served_added,
+         "viewing_changed": viewing_changed,
+         "viewing": viewing_dict if viewing_changed else None, "replaced": replaced,
+         "replace_confirmed": payload.replace},
+        root,
+    )
 
     return {
         "status": "ok",
@@ -405,8 +415,8 @@ def post_coverage(payload: CoveragePayload) -> dict:
     }
 
 
-# Region completeness gates a scientific claim; its write also audits after the commit, above,
-# through the best-effort record_event emitter, so a failed append there warns, never raises.
+# Region completeness gates a scientific claim: its write below audits through the same
+# raising emitter post_coverage uses (_audit_or_answer_500), never the best-effort one.
 
 
 class CompletenessSetPayload(BaseModel):
@@ -636,6 +646,11 @@ def post_completeness(payload: CompletenessSetPayload) -> dict:
     (an ``AmbiguousImageStem``, a bad manifest, an ``OSError``) never refuses the cell -- the
     attestation proceeds and stamps a null bar, and the failure is named in the response's
     ``working_scale_error`` (present only when one occurred).
+
+    The audit line is appended after the transaction commits, through the same raising emitter
+    ``post_coverage`` uses (``_audit_or_answer_500``): a failed append answers 500, naming
+    ``AUDIT_ENTRY_NOT_WRITTEN``, since this write gates a scientific claim and a missing line
+    behind it must never pass as silently recorded.
     """
     from tcip_annotation.json_io import UnreadableLabelDocument, read_annotations
 
@@ -813,11 +828,12 @@ def post_completeness(payload: CompletenessSetPayload) -> dict:
         }
         txn.write(completeness_key, store)
 
-    _audit_dataset_write(
-        root, "gui_set_region_completeness",
+    _audit_or_answer_500(
+        "gui_set_region_completeness",
         {"image_name": image_name, "subject": subject, "cell": payload.cell,
          "complete": complete, "stem": stem, "date": date, "replaced": replaced_info,
          "cells_attested_view": attested_view_entry},
+        root,
     )
     response = {"status": "ok", "complete": complete, "cells_complete": sorted(cells_complete),
                 "replaced": replaced_info}
