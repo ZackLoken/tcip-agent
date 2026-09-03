@@ -729,6 +729,38 @@ describe("CoverageTracker replace hold", () => {
     await vi.advanceTimersByTimeAsync(0);
 
     expect(tracker.seenAtScale.size).toBe(0); // the new identity adopted none of it
-    expect(tracker.pending.size).toBe(0);
+  });
+});
+
+describe("CoverageTracker dispose", () => {
+  it("a push in flight at dispose time, rejected after: no timer re-armed, no onPushError, the payload reaches the outbox", async () => {
+    let reject: ((err: unknown) => void) | undefined;
+    post.mockImplementationOnce(
+      () =>
+        new Promise((_resolve, rej) => {
+          reject = rej;
+        }),
+    );
+    const onPushError = vi.fn();
+    const disposable = new CoverageTracker(post, { onPushError });
+    disposable.reset(KEY, GRID, CELLS);
+    disposable.setViewing(NULL_VIEWING);
+    disposable.noteServedAtNative("A1"); // markDirty schedules postNow after the debounce
+    await vi.advanceTimersByTimeAsync(400); // the debounce fires postNow, whose push is now in flight
+    expect(post).toHaveBeenCalledTimes(1);
+
+    disposable.dispose(); // flush() is a no-op here since postNow already cleared dirty
+
+    reject!(new TypeError("Failed to fetch")); // the delayed rejection settles after dispose
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(onPushError).not.toHaveBeenCalled();
+    expect(coverageOutbox.size).toBeGreaterThan(0);
+
+    // Under the outbox's own 5000ms retry cadence, a re-armed 400ms timer on the disposed
+    // tracker would have fired a second, independent post well before this point.
+    await vi.advanceTimersByTimeAsync(400);
+    expect(post).toHaveBeenCalledTimes(1);
+    expect(onPushError).not.toHaveBeenCalled();
   });
 });

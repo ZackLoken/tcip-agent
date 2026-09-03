@@ -151,7 +151,17 @@ jobs:
           auto-activate-base: false
 
       - name: The detached Ray exit path leaves no daemon behind
-        run: pytest tests/test_hpo_ray_detached_exit.py -q --timeout=600
+        run: |
+          set -o pipefail
+          pytest tests/test_hpo_ray_detached_exit.py -q --timeout=600 | tee ray-exit-windows-output.txt
+
+      - name: Prove the file's one Windows-only test actually ran and passed, not skipped away
+        run: |
+          grep -qE "^1 passed" ray-exit-windows-output.txt || {
+            echo "the file's one test did not pass (skipped, or none selected): a widened skip"
+            echo "condition would leave this job green with nothing proven; failing it instead"
+            exit 1
+          }
 
   # The documented container path (packages/tcip-web/Dockerfile) is built and answers here, so a
   # broken image reaches CI before an adopter.

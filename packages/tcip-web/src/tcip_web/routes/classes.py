@@ -61,12 +61,14 @@ def _resolve_dataset_root(dataset_root: str | None, annotations_dir: str | None)
 
 
 def _audit_dataset_write(dataset_root: str, tool: str, arguments: dict) -> None:
-    """Record a dataset-native GUI mutation in that dataset's own audit log.
+    """Record a dataset-native GUI mutation in that dataset's own audit log: this module's own
+    ``image_status.json`` and ``classes.json`` writes, and ``inference.py``'s prediction writes.
 
-    ``image_status.json`` and ``classes.json`` are dataset-native, not project-private (a dataset can
-    be opened by more than one project, see ``dataset_layout.image_status_path``), so there is no
-    single project's audit log a write here unambiguously belongs to. Colocating the trail with the
-    state it describes, rather than guessing a project, is deliberate.
+    All three are dataset-native, not project-private (a dataset can be opened by more than one
+    project, see ``dataset_layout.image_status_path`` and ``dataset_layout.dataset_root_of``), so
+    there is no single project's audit log a write here unambiguously belongs to. Colocating the
+    trail with the state it describes, rather than guessing a project, is deliberate. Best-effort:
+    it never fails the request that triggered the write.
     """
     if not dataset_root:
         return

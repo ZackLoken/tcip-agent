@@ -139,20 +139,6 @@ _registry = jobstore.JobRegistry(
 the shared home review.py's priority queue and tuning.py's sweeps adopt too."""
 
 
-def _audit_dataset_write(dataset_root: str, tool: str, arguments: dict) -> None:
-    """Record a GUI inference mutation in that dataset's own audit log.
-
-    Predictions are dataset-native, not project-private (a dataset can be opened by more than one
-    project, see ``dataset_layout.dataset_root_of``), so there is no single project's audit log a
-    prediction write here unambiguously belongs to. Never fails the request.
-    """
-    if not dataset_root:
-        return
-    from tcip_mcp.audit import record_event
-
-    record_event(tool, arguments, source="gui", scope=dataset_root)
-
-
 def _persist() -> None:
     _registry.persist()
 
@@ -375,6 +361,7 @@ def _worker(job: InferenceJob) -> None:
         job.error = str(exc)
     finally:
         from tcip_mcp.dataset_layout import dataset_root_of
+        from tcip_web.routes.classes import _audit_dataset_write
 
         dataset_root = dataset_root_of(job.output_dir)
         if dataset_root is not None:
