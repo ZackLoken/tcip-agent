@@ -1990,6 +1990,12 @@ def record_delivery_binding_event(
     roots, the record's digest, its per-date capture identity, and the two unverified
     disclosures), door-conditional: the phenology doors pass it, every other delivery door
     passes ``None`` since none reads a mapping.
+
+    The assembled record is validated against ``DeliveryEventRecord``
+    (``delivery_events_schema.py``, the same shape ``list_delivery_events`` reads back through)
+    before the write; a record that fails validation falls into this call's own best-effort
+    warning path above rather than a distinct one, since an invalid record and an unwritable one
+    are the same fact to a later reader: neither left a usable line behind.
     """
     from tcip_mcp.audit import record_event
 
@@ -2032,6 +2038,9 @@ def record_delivery_binding_event(
             },
             "produced_at": now,
         }
+        from tcip_mcp.pipelines.delivery_events_schema import DeliveryEventRecord
+
+        DeliveryEventRecord.model_validate(record)
         key = delivery_event_key(delivery_events_scope(project_root), event_id)
         tcip_store.replace(key, record)
     except Exception:

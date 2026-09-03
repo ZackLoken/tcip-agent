@@ -167,6 +167,12 @@ fresh root predates another change, not a capability to build on.
   migration.
 - `conform_dataset_registry_paths.py` - conforms a project's dataset registry entries onto the
   relative-path row `register_dataset` now writes, for a project registered before that change.
+- `conform_delivery_events.py` - checks a project's stored `delivery_events` records against the
+  current `DeliveryEventRecord` shape and names, by `event_id`, any that no longer validate.
+  Never rewrites: none of the three `plant_mapping` disclosure keys a refused record lacks was
+  ever computed for that delivery, so there is no old shape to map forward. `--plan` is accepted
+  for CLI parity with the other conform scripts but changes nothing, since this script never
+  writes either way.
 - `conform_metrics_marker.py` - stamps the `metrics_logged` marker onto every experiment a
   root's status record predates, so `is_pristine` reads the marker instead of scanning the
   metrics log.

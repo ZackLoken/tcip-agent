@@ -163,6 +163,34 @@ def test_phenology_measurement_records_onset_dates_only_when_the_positive_class_
     assert "results.onset_dates" not in doors
 
 
+def test_record_delivery_binding_event_writes_nothing_when_plant_mapping_fails_validation(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Coverage: a caller's ``plant_mapping`` missing a required disclosure key never reaches
+    storage. The write follows this function's own existing best-effort warning path (the same
+    path a storage failure already takes) rather than raising into the delivering door."""
+    import logging
+
+    bad_mapping = {
+        "name": "valley", "project_root": str(tmp_path), "dataset_id": "ds-1",
+        "dataset_root": "C:/data", "built_at": "2026-02-01T00:00:00+00:00",
+        "record_sha256": "0" * 64, "nn_tolerance_m": {"value": 3, "source": "stated"},
+        "capture_identity": {}, "captures_unverified": [], "plant_csvs_unverified": [],
+        "images_unattributed_scope": "delivered_dates",
+        # dates_delivered, images_unattributed and plant_attribution are missing.
+    }
+
+    with caplog.at_level(logging.WARNING):
+        resolution.record_delivery_binding_event(
+            "test_door", None, [], {}, measurement_documents=["operating_point"],
+            scale_document=None, trait="astringency", delivery_kind=STATE_CROSSING_DATES,
+            project_root=tmp_path, plant_mapping=bad_mapping,
+        )
+
+    assert "Failed to write delivery_events record" in caplog.text
+    assert _delivery_event_records(tmp_path) == []
+
+
 def test_phenology_measurement_records_onset_dates_when_the_positive_class_was_assessed(
     tmp_path: Path,
 ) -> None:
