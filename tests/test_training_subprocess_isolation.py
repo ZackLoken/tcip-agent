@@ -508,7 +508,7 @@ def test_update_status_error_is_keyword_only_and_backward_compatible(tmp_path, m
     assert status["error"] == "boom"
 
 
-# ── monitor_training / list_training_runs disk fallback ───────────────────────
+# ── monitor_training / list_experiments(launched_only=True) disk fallback ─────
 
 
 def test_monitor_training_falls_back_to_disk_for_delegated_run(tmp_path, monkeypatch):
@@ -530,7 +530,7 @@ def test_monitor_training_falls_back_to_disk_for_delegated_run(tmp_path, monkeyp
     assert result["status"] == "running"
 
 
-def test_list_training_runs_reconstructs_without_the_full_scan_resolver(tmp_path, monkeypatch):
+def test_launched_runs_view_reconstructs_without_the_full_scan_resolver(tmp_path, monkeypatch):
     """Each row is reconstructed from the record the enumeration already holds; it must never
     round-trip a custom-named (id != run_id) experiment through resolve_experiment_for_run's
     full-scan fallback the way the old per-run reconstruct_run_status call did."""
@@ -538,7 +538,7 @@ def test_list_training_runs_reconstructs_without_the_full_scan_resolver(tmp_path
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     import tcip_mcp.experiments as exp_mod
     from tcip_mcp.experiments import create_experiment, update_status
-    from tcip_mcp.tools.training_tools import list_training_runs
+    from tcip_mcp.tools.experiment_tools import list_experiments
 
     create_experiment("exp-001-chestnut-burr-det", {"model_source": {"builder": "my_models:burr_det"}})
     update_status("exp-001-chestnut-burr-det", "running")
@@ -552,28 +552,28 @@ def test_list_training_runs_reconstructs_without_the_full_scan_resolver(tmp_path
 
     monkeypatch.setattr(exp_mod, "resolve_experiment_for_run", _counting)
 
-    runs = list_training_runs()["runs"]
+    runs = list_experiments(launched_only=True)["runs"]
     assert any(r["run_id"] == "exp-001-chestnut-burr-det" for r in runs)
     assert calls["n"] == 0
 
 
-def test_list_training_runs_lists_a_launched_experiment_this_process_never_held(tmp_path, monkeypatch):
+def test_launched_runs_view_lists_a_launched_experiment_this_process_never_held(tmp_path, monkeypatch):
     """A run another process launched (never in this process's _RUNS at all, not merely
     pid-bearing) still lists, reconstructed straight from its own disk record."""
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     from tcip_mcp.experiments import create_experiment, update_status
-    from tcip_mcp.tools.training_tools import list_training_runs
+    from tcip_mcp.tools.experiment_tools import list_experiments
 
     create_experiment("exp-no-stamp", {"model_source": {"builder": "my_models:chestnut_burr_det"}})
     update_status("exp-no-stamp", "running")
 
-    by_id = {r["run_id"]: r for r in list_training_runs()["runs"]}
+    by_id = {r["run_id"]: r for r in list_experiments(launched_only=True)["runs"]}
     assert "exp-no-stamp" in by_id
     assert by_id["exp-no-stamp"]["external"] is True
 
 
-def test_list_training_runs_overlays_a_pid_bearing_entry_from_disk(tmp_path, monkeypatch):
+def test_launched_runs_view_overlays_a_pid_bearing_entry_from_disk(tmp_path, monkeypatch):
     """A pid-bearing in-memory entry (subprocess-delegated) takes the disk overlay for its
     status/current_epoch: its own in-memory copy is a stale launch-time placeholder once the
     child starts mutating its own separate copy on disk. The status/current_epoch overlay is
@@ -583,7 +583,7 @@ def test_list_training_runs_overlays_a_pid_bearing_entry_from_disk(tmp_path, mon
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     from tcip_mcp.experiments import create_experiment, log_metrics, stamp_run_identity, update_status
     from tcip_mcp.pipelines.training.run_registry import attach_run
-    from tcip_mcp.tools.training_tools import list_training_runs
+    from tcip_mcp.tools.experiment_tools import list_experiments
 
     run = attach_run("run_pid_overlay", {"model_source": {"builder": "my_models:burr_det"}}, "out_dir")
     run.pid = 4242
@@ -593,24 +593,24 @@ def test_list_training_runs_overlays_a_pid_bearing_entry_from_disk(tmp_path, mon
     update_status("run_pid_overlay", "running")
     log_metrics("run_pid_overlay", 9, {"loss": 0.1})
 
-    by_id = {r["run_id"]: r for r in list_training_runs()["runs"]}
+    by_id = {r["run_id"]: r for r in list_experiments(launched_only=True)["runs"]}
     assert by_id["run_pid_overlay"]["status"] == "running"
     assert by_id["run_pid_overlay"]["current_epoch"] == 9
     assert by_id["run_pid_overlay"]["external"] is False
 
 
-def test_list_training_runs_leaves_in_process_runs_untouched(tmp_path, monkeypatch):
+def test_launched_runs_view_leaves_in_process_runs_untouched(tmp_path, monkeypatch):
     """A run with no pid (every existing synchronous test) is reported from the live in-memory
     record exactly as before. The disk overlay must never touch it."""
     monkeypatch.chdir(tmp_path)
     from tcip_mcp.pipelines.training.run_registry import create_run
-    from tcip_mcp.tools.training_tools import list_training_runs
+    from tcip_mcp.tools.experiment_tools import list_experiments
 
     run = create_run({"model_source": {"builder": "x:y"}}, "out_dir")
     run.status = "running"
     run.current_epoch = 5
 
-    runs = list_training_runs()["runs"]
+    runs = list_experiments(launched_only=True)["runs"]
     entry = next(r for r in runs if r["run_id"] == run.run_id)
     assert entry["status"] == "running"
     assert entry["current_epoch"] == 5
@@ -831,7 +831,8 @@ def test_inspect_compute_resources_reports_gpu_free_memory(monkeypatch):
 
 def test_inspect_compute_resources_counts_subprocess_delegated_running_runs(tmp_path, monkeypatch):
     """active_training_runs must count from the disk-aware _all_training_runs() (the internal
-    function list_training_runs() and inspect_compute_resources() both build on), not the raw
+    function list_experiments(launched_only=True) and inspect_compute_resources() both build
+    on), not the raw
     in-memory run_registry.list_runs(): a subprocess-delegated run's parent-side
     TrainRun.status never leaves its create_run-time "created" default once the child starts
     mutating its own separate copy, so the raw call always reports 0 for it. This is the common

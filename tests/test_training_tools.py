@@ -1616,7 +1616,8 @@ def test_list_launchable_configs_state_agrees_with_the_runs_list_for_a_crashed_r
     tmp_path, monkeypatch
 ) -> None:
     """A launched-but-heartbeat-stale record reads 'interrupted' here the identical way
-    list_training_runs's own derivation reads it (the runs list beside this picker); a
+    list_experiments(launched_only=True)'s own derivation reads it (the runs list beside this
+    picker); a
     never-launched pristine record reads its recorded 'created', not a heartbeat-derived
     guess implying a crash that never happened."""
     monkeypatch.chdir(tmp_path)

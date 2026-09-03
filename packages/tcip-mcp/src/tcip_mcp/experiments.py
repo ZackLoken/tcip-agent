@@ -1514,8 +1514,9 @@ def list_experiments() -> list[dict[str, Any]]:
 
     Covers a calibration experiment (id derived from a claim's content, unreconstructable any
     other way), a review-feedback lineage, a pre-created experiment never launched, and a
-    launched one whose ``run_id`` stamp was lost, none of which :func:`list_training_runs` (a
-    launched record only) lists. The ids come from the same status-record enumeration
+    launched one whose ``run_id`` stamp was lost, none of which the tool door's
+    ``launched_only=True`` view (a launched record only) lists. The ids come from the same
+    status-record enumeration
     :func:`resolve_experiment_for_run` resolves against, so a record the resolver finds is a
     record this lists. ``run_id`` is the stamp :func:`stamp_run_identity` recorded, or ``None``
     when a launch never reached it or the record was never launched at all;
