@@ -45,6 +45,7 @@ RENAMES = [
     ("select_best_model", "rank_registered_models"),
     ("check_training_status", "monitor_training"),
     ("init_project", "initialize_project"),
+    ("set_active_project", "activate_project"),
 ]
 
 _OWN_FILE = str(Path(__file__).relative_to(REPO_ROOT)).replace("\\", "/")

@@ -127,7 +127,7 @@ def pytest_collection_modifyitems(config, items):
 def _restore_platform_root_env():
     """Keep the process-global platform-state root hermetic across tests.
 
-    ``set_active_project`` repins ``TCIP_STATE_ROOT`` in-process (so a project's audit /
+    ``activate_project`` repins ``TCIP_STATE_ROOT`` in-process (so a project's audit /
     experiments / registry co-locate under it). Since pytest runs in one process, a test
     that adopts a tmp project would otherwise leak that now-deleted root, and the
     :class:`~tcip_mcp.project_paths.RootBinding` naming it, into later tests. Snapshot and
@@ -157,7 +157,7 @@ def tmp_path(tmp_path_factory: pytest.TempPathFactory, request: pytest.FixtureRe
     The web layer's path guard admits only the workspace, the roots registered to its projects,
     and ``TCIP_IMAGE_ROOTS``. Laying ``tmp_path`` out as ``<workspace>/project`` gives every test
     the production topology (a workspace root distinct from the project under it, and the
-    platform-state pin below on the project, as ``workspace.set_active_project`` leaves it) with
+    platform-state pin below on the project, as ``workspace.activate_project`` leaves it) with
     no fixture naming the layout. A refusal case uses a directory beside the workspace
     (``tmp_path_factory.mktemp``); a test of the additive roots sets ``TCIP_IMAGE_ROOTS`` itself.
     """

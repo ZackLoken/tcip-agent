@@ -161,7 +161,7 @@ register_store(
 def active_project_key(*, create: bool = True) -> Key:
     """The workspace's active-project marker.
 
-    ``last_writer_wins``: ``set_active_project`` writes the name it was given and reads
+    ``last_writer_wins``: ``activate_project`` writes the name it was given and reads
     nothing first, so adopting a project is a whole replacement rather than an edit.
     ``create`` threads through to :func:`workspace_root`.
     """
@@ -189,7 +189,7 @@ def adoptable_project_root(name: str) -> Path:
     Raises ``ValueError``, naming which check failed: an unsafe name (path separators, ``..``,
     empty) or a safely-named path whose ``.tcip`` is not a directory (nothing there to open).
     The one predicate every reader that must tell "no marker" apart from "the marker names a
-    project that is not adoptable" calls: :func:`set_active_project`, :func:`
+    project that is not adoptable" calls: :func:`activate_project`, :func:`
     active_project_if_present` (folding the raise to ``None``), and
     ``tcip_mcp.project_paths.pin_platform_root`` when binding from the marker.
     """
@@ -288,7 +288,7 @@ def workspace_project_name(root: Path) -> Optional[str]:
     return name
 
 
-def set_active_project(name: str) -> Path:
+def activate_project(name: str) -> Path:
     """Adopt a workspace project: write the marker atomically and repin platform state to it.
 
     ``name`` must name an existing workspace project (its ``.tcip`` must already be a

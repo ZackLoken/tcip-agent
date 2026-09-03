@@ -199,7 +199,7 @@ def test_wrong_encoding_marker_does_not_break_the_front_door(client, workspace_d
 
 
 def test_active_returns_null_when_marker_names_a_traversal(client, workspace_dir):
-    """set_active_project refuses a traversal name, so this writes the marker directly
+    """activate_project refuses a traversal name, so this writes the marker directly
     through the store, the shape a corrupted or hand-edited marker would take. A real
     .tcip sits where the traversal points, so an unsafe reader would actually find it."""
     import tcip_store
@@ -283,7 +283,7 @@ def test_list_reports_the_current_platform_root_after_a_repin(client, workspace_
 
     proj = _make_project(workspace_dir, "hazelnut_catkin_valley", dates=["2026-02-11"])
 
-    workspace.set_active_project("hazelnut_catkin_valley")
+    workspace.activate_project("hazelnut_catkin_valley")
     after = client.get("/api/projects").json()
     assert after["platform_root"] == str(proj.resolve())
     assert after["platform_root_source"] == "adopted"
@@ -293,7 +293,7 @@ def test_active_returns_null_when_marker_points_at_missing_project(client, works
     from tcip_mcp import workspace
 
     _make_project(workspace_dir, "temp_project_site", dates=["2026-02-11"])
-    workspace.set_active_project("temp_project_site")
+    workspace.activate_project("temp_project_site")
     # Now remove the project's .tcip so the marker dangles.
     import shutil
 

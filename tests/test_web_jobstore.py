@@ -174,7 +174,7 @@ def test_inference_jobs_persist_list_and_rehydrate_per_root_across_a_repin(tmp_p
 
     proj_b = workspace.project_path("chestnut_burr_other")
     (proj_b / ".tcip").mkdir(parents=True)
-    workspace.set_active_project("chestnut_burr_other")
+    workspace.activate_project("chestnut_burr_other")
 
     job_b = _job("b1")
     inference._register(job_b)
@@ -238,7 +238,7 @@ def test_review_priority_queue_persists_lists_and_rehydrates_per_root_across_a_r
 
     proj_b = workspace.project_path("chestnut_burr_other")
     (proj_b / ".tcip").mkdir(parents=True)
-    workspace.set_active_project("chestnut_burr_other")
+    workspace.activate_project("chestnut_burr_other")
 
     job_b = _job("pq-b1")
     review._pq_register(job_b)
@@ -320,7 +320,7 @@ def test_tuning_sweeps_persist_list_and_rehydrate_per_root_across_a_repin(tmp_pa
 
     proj_b = workspace.project_path("chestnut_burr_other")
     (proj_b / ".tcip").mkdir(parents=True)
-    workspace.set_active_project("chestnut_burr_other")
+    workspace.activate_project("chestnut_burr_other")
 
     job_b = tuning.HPOJob(sweep_id="hpo-b1")
     with tuning._lock:
@@ -409,7 +409,7 @@ def test_inference_cancel_reaches_a_job_launched_under_a_previous_root(tmp_path,
     try:
         proj_b = workspace.project_path("chestnut_burr_other")
         (proj_b / ".tcip").mkdir(parents=True)
-        workspace.set_active_project("chestnut_burr_other")
+        workspace.activate_project("chestnut_burr_other")
 
         assert _get("launched-under-a") is job
 
@@ -447,7 +447,7 @@ def test_rehydrate_bounds_the_whole_dict_across_every_root_it_adopts(tmp_path, m
     inference._registry.jobs.clear()
     try:
         for name in names:
-            workspace.set_active_project(name)
+            workspace.activate_project(name)
             inference.rehydrate_for_current_root()
         assert len(inference._registry.jobs) <= MAX_JOBS
     finally:
@@ -474,7 +474,7 @@ def test_priority_queue_by_id_reaches_a_job_launched_under_a_previous_root(tmp_p
     try:
         proj_b = workspace.project_path("chestnut_burr_other")
         (proj_b / ".tcip").mkdir(parents=True)
-        workspace.set_active_project("chestnut_burr_other")
+        workspace.activate_project("chestnut_burr_other")
 
         assert _pq_get("pq-under-a") is job
         assert get_priority_queue_job("pq-under-a")["job_id"] == "pq-under-a"
@@ -504,7 +504,7 @@ def test_rehydrate_never_displaces_a_job_still_live_from_another_root(tmp_path, 
     try:
         proj_b = workspace.project_path("chestnut_burr_other")
         (proj_b / ".tcip").mkdir(parents=True)
-        workspace.set_active_project("chestnut_burr_other")
+        workspace.activate_project("chestnut_burr_other")
 
         job_b = inference.InferenceJob(
             job_id="done-b", checkpoint_path="c", images_dir="i", output_dir="o",

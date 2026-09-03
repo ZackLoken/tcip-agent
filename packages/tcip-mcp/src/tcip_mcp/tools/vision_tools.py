@@ -697,7 +697,7 @@ def _viz_dataset_sample(
 def _binding_divergence(binding: dict, own_root: str) -> dict:
     """Name both sides of a binding mismatch and the step that converges them.
 
-    ``set_active_project`` can only adopt a named workspace project, so a binding on a
+    ``activate_project`` can only adopt a named workspace project, so a binding on a
     non-workspace root (a registered dataset or a ``TCIP_IMAGE_ROOTS`` entry) has no name for
     it to converge on; the GUI's own reselection is the only route back to agreement then.
     """
@@ -708,12 +708,12 @@ def _binding_divergence(binding: dict, own_root: str) -> dict:
     own_name = workspace.workspace_project_name(Path(own_root))
     if bound_name:
         converge = (
-            f"set_active_project({bound_name!r}) repins this process to the GUI's open project "
+            f"activate_project({bound_name!r}) repins this process to the GUI's open project "
             "and steers the GUI through the panel-event chain"
         )
     else:
         converge = (
-            f"the GUI's open root ({bound_root}) has no workspace name for set_active_project "
+            f"the GUI's open root ({bound_root}) has no workspace name for activate_project "
             "to adopt; reselect this project in the GUI instead"
         )
     return {

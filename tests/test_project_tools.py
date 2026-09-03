@@ -199,23 +199,23 @@ def test_inspect_project_surfaces_version_refused_status_distinctly_from_corrupt
     assert status["initialized"] is True
 
 
-def test_set_active_project_folds_in_recent_activity(tmp_path: Path, monkeypatch):
+def test_activate_project_folds_in_recent_activity(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("TCIP_WORKSPACE", str(tmp_path))
     import tcip_mcp.web_client as web_client
     from tcip_mcp.tools.meta_tools import report_friction
-    from tcip_mcp.tools.project_tools import set_active_project
+    from tcip_mcp.tools.project_tools import activate_project
     from tcip_mcp.workspace import project_path
 
     # Stub the GUI notification so the result is deterministic regardless of whether a tcip-web
-    # backend happens to be listening on this machine (matches test_set_active_project.py).
+    # backend happens to be listening on this machine (matches test_activate_project.py).
     monkeypatch.setattr(web_client, "post_panel_event", lambda *a, **k: {"delivered": False})
 
     # A directory made outside the platform (initialize_project itself now refuses a non-conforming
-    # name under the workspace); set_active_project must still adopt it by its existing name.
+    # name under the workspace); activate_project must still adopt it by its existing name.
     (project_path("proj_a") / ".tcip").mkdir(parents=True)
     report_friction(str(project_path("proj_a")), category="missing_tool", detail="a")
 
-    result = set_active_project("proj_a")
+    result = activate_project("proj_a")
     assert result["recent_activity"]["reports_since_last_retrospective"] == 1
 
 
@@ -229,7 +229,7 @@ def test_inspect_project_reports_platform_root_divergence_from_marker(tmp_path: 
     proj = ws / "hazelnut_catkin_valley"
     (proj / ".tcip").mkdir(parents=True)
     monkeypatch.setenv("TCIP_WORKSPACE", str(ws))
-    workspace.set_active_project("hazelnut_catkin_valley")
+    workspace.activate_project("hazelnut_catkin_valley")
 
     stale_root = tmp_path / "stale"
     stale_root.mkdir()
@@ -239,7 +239,7 @@ def test_inspect_project_reports_platform_root_divergence_from_marker(tmp_path: 
     divergence = status["platform_root_diverges_from_marker"]
     assert divergence["marker_project"] == str(proj)
     assert divergence["platform_root"] == str(stale_root)
-    assert divergence["action"] == "set_active_project"
+    assert divergence["action"] == "activate_project"
 
 
 def test_inspect_project_reports_no_divergence_when_root_matches_the_marker(
@@ -251,7 +251,7 @@ def test_inspect_project_reports_no_divergence_when_root_matches_the_marker(
     proj = ws / "hazelnut_catkin_valley"
     (proj / ".tcip").mkdir(parents=True)
     monkeypatch.setenv("TCIP_WORKSPACE", str(ws))
-    workspace.set_active_project("hazelnut_catkin_valley")  # also repins TCIP_STATE_ROOT
+    workspace.activate_project("hazelnut_catkin_valley")  # also repins TCIP_STATE_ROOT
 
     status = inspect_project(str(proj))
     assert "platform_root_diverges_from_marker" not in status
@@ -269,7 +269,7 @@ def test_inspect_project_reports_the_current_platform_root_binding_after_a_repin
     (proj / ".tcip").mkdir(parents=True)
     monkeypatch.setenv("TCIP_WORKSPACE", str(ws))
 
-    workspace.set_active_project("hazelnut_catkin_valley")
+    workspace.activate_project("hazelnut_catkin_valley")
     status = inspect_project(str(proj))
 
     binding = status["platform_root_binding"]
@@ -281,7 +281,7 @@ def test_inspect_project_reports_marker_problem_for_a_dangling_marker(
     tmp_path: Path, monkeypatch
 ):
     """A marker naming a project whose ``.tcip`` is gone is not adoptable: the divergence
-    report must say so rather than naming ``set_active_project`` as if adopting it would work."""
+    report must say so rather than naming ``activate_project`` as if adopting it would work."""
     import shutil
 
     from tcip_mcp import workspace
@@ -290,7 +290,7 @@ def test_inspect_project_reports_marker_problem_for_a_dangling_marker(
     proj = ws / "chestnut_burr_valley"
     (proj / ".tcip").mkdir(parents=True)
     monkeypatch.setenv("TCIP_WORKSPACE", str(ws))
-    workspace.set_active_project("chestnut_burr_valley")
+    workspace.activate_project("chestnut_burr_valley")
     shutil.rmtree(proj / ".tcip")
 
     status = inspect_project(str(tmp_path / "elsewhere"))

@@ -426,14 +426,14 @@ def test_capture_live_canvas_no_binding_names_the_consulted_workspace_root(tmp_p
 
 def test_capture_live_canvas_binding_present_but_no_state_pushed_yet(tmp_path, monkeypatch):
     """The binding already names this same pinned root, so the message must not suggest
-    set_active_project toward a project it has already confirmed is the open one."""
+    activate_project toward a project it has already confirmed is the open one."""
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     _mint_binding(tmp_path)
     from tcip_mcp.tools.vision_tools import capture_live_canvas
     res = capture_live_canvas(refresh=False)
     assert "error" in res
     assert "no live canvas state" in res["error"].lower()
-    assert "set_active_project" not in res["error"]
+    assert "activate_project" not in res["error"]
 
 
 def test_capture_live_canvas_renders_pushed_state(tmp_path, monkeypatch):
@@ -586,8 +586,8 @@ def test_capture_live_canvas_render_last_known_with_nothing_pushed_names_the_div
     tmp_path, monkeypatch, tmp_path_factory,
 ):
     """render_last_known=True with nothing ever pushed under this pinned root: the message must
-    not drop the divergence already in hand, nor tell the caller to set_active_project toward a
-    nameless root set_active_project cannot converge."""
+    not drop the divergence already in hand, nor tell the caller to activate_project toward a
+    nameless root activate_project cannot converge."""
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     other = tmp_path_factory.mktemp("elsewhere")
     _mint_binding(other, generation=3, project_name=None)
@@ -595,7 +595,7 @@ def test_capture_live_canvas_render_last_known_with_nothing_pushed_names_the_div
     from tcip_mcp.tools.vision_tools import capture_live_canvas
     res = capture_live_canvas(refresh=False, render_last_known=True)
     assert "error" in res
-    assert "set_active_project" not in res["error"]
+    assert "activate_project" not in res["error"]
     assert res["divergence"]["bound_root"] == str(other)
     assert "reselect this project in the GUI" in res["divergence"]["converge"]
 

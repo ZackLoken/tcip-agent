@@ -1,7 +1,7 @@
 /**
  * Opening a workspace project = pointing the GUI at it (project root = dataset root) via
  * /dataset/select. Shared by the ProjectPicker (human clicks Open) and App's agent→GUI
- * channel (the agent calls set_active_project → "app" panel event → open it here), so the
+ * channel (the agent calls activate_project → "app" panel event → open it here), so the
  * two paths can't drift.
  */
 

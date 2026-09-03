@@ -1,6 +1,6 @@
 """Adopting a project unifies platform state under one ``<project>/.tcip/``.
 
-``set_active_project`` repins ``TCIP_STATE_ROOT`` so the platform's own audit log (now the
+``activate_project`` repins ``TCIP_STATE_ROOT`` so the platform's own audit log (now the
 project's, one file at one key), the experiment store, and the model registry all resolve under
 the adopted project (self-contained + portable).
 The conftest ``_restore_platform_root_env`` autouse fixture keeps the in-process repin from
@@ -20,7 +20,7 @@ def _adopt(tmp_path, monkeypatch, name="hazelnut_catkin_valley") -> Path:
     (proj / ".tcip").mkdir(parents=True)
     from tcip_mcp import workspace
 
-    workspace.set_active_project(name)
+    workspace.activate_project(name)
     return proj
 
 

@@ -74,7 +74,7 @@ def main() -> None:
 
     bind_default()
     # Pin before any tool resolves a .tcip path: inside the agent terminal this binds from
-    # the marker, elsewhere it keeps the historical setdefault; set_active_project repins later.
+    # the marker, elsewhere it keeps the historical setdefault; activate_project repins later.
     from tcip_mcp.project_paths import pin_platform_root
 
     pin_platform_root(from_marker=binds_from_marker(os.environ))

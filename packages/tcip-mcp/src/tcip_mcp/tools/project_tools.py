@@ -306,7 +306,7 @@ def initialize_project(project_path: str, site: str) -> dict:
 
 @mcp.tool()
 @audited
-def set_active_project(name: str) -> dict:
+def activate_project(name: str) -> dict:
     """Set the workspace's active project so the GUI opens it.
 
     Writes the workspace active-project marker (``<workspace>/.active``) and notifies a
@@ -328,7 +328,7 @@ def set_active_project(name: str) -> dict:
     from tcip_mcp.web_client import PANEL_EVENT_ACTIVE_PROJECT_CHANGED, post_panel_event
 
     try:
-        marker = workspace.set_active_project(name)
+        marker = workspace.activate_project(name)
         proj = workspace.project_path(name)
     except ValueError as exc:
         return {"error": str(exc)}
@@ -360,7 +360,7 @@ def _root_divergence_report() -> dict[str, str] | None:
     active-project marker.
 
     Adopting a project repins the *adopting process's own* ``TCIP_STATE_ROOT`` at once
-    (``workspace.set_active_project``); a separate process converges only when it itself binds
+    (``workspace.activate_project``); a separate process converges only when it itself binds
     from the marker, at its own startup or (the web backend) on the agent's adopt signal, so
     this process's root can keep naming a stale or different project until then.
     ``None`` when there is no marker, the marker names an adoptable project this process's
@@ -389,7 +389,7 @@ def _root_divergence_report() -> dict[str, str] | None:
     return {
         "platform_root": str(root),
         "marker_project": str(marker_project),
-        "action": "set_active_project",
+        "action": "activate_project",
     }
 
 
@@ -407,7 +407,7 @@ def view_gui_state() -> dict:
     name = workspace.read_active_project()
     if not name:
         return {"active_project": None,
-                "note": "no active project; open one in the GUI or call set_active_project"}
+                "note": "no active project; open one in the GUI or call activate_project"}
     project_root = workspace.project_path(name)
     ctx: dict = {"active_project": name, "project_root": str(project_root)}
     try:
@@ -452,7 +452,7 @@ def inspect_project(project_path: str = "") -> dict:
     ``platform_root_binding``, this process's own :class:`tcip_mcp.project_paths.RootBinding`
     as a dict, when either :func:`tcip_mcp.project_paths.pin_platform_root` or
     :func:`tcip_mcp.project_paths.repin_platform_root` has run: absent under pytest until a
-    ``set_active_project`` call repins, and absent for any other standalone use, since none of
+    ``activate_project`` call repins, and absent for any other standalone use, since none of
     those call either.
 
     For a project with ``.tcip``, carries ``site`` and ``site_problem`` from

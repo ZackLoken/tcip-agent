@@ -824,7 +824,7 @@ Docstring is the function's docstring first line, verbatim.
 |---|---|---|---|
 | `register_dataset` | `project_tools.py:165` | yes | Record a dataset's identity so a delivered number can be traced to the exact data behind it. |
 | `initialize_project` | `project_tools.py:275` | yes | Initialise a TCIP project directory. |
-| `set_active_project` | `project_tools.py:309` | yes | Set the workspace's active project so the GUI opens it. |
+| `activate_project` | `project_tools.py:309` | yes | Set the workspace's active project so the GUI opens it. |
 | `view_gui_state` | `project_tools.py:398` | yes | The live GUI session the human is looking at: active project, dataset, date, trait, tab, and the |
 | `inspect_project` | `project_tools.py:445` | yes | Get an overview of a TCIP project. |
 
@@ -994,7 +994,7 @@ registered at HEAD.
 | method | path | handler | line |
 |---|---|---|---|
 | GET | `` (root) | `list_projects` | `routes/projects.py:100` |
-| POST | `/active` | `set_active_project` | `routes/projects.py:142` |  <!-- queued: P5-90 move-to-gui-or-automatic -->
+| POST | `/active` | `activate_project` | `routes/projects.py:142` |  <!-- queued: P5-90 move-to-gui-or-automatic -->
 
 ### routes/results.py, prefix `/api/results` (14 routes)
 
@@ -1904,13 +1904,13 @@ No seam id in `seam-coverage.json`'s 67-entry inventory names `.tcip/datasets.js
 
 Path: `<workspace_root>/.active`, a workspace-root sibling, not inside `.tcip/`.
 
-Writer: `set_active_project`, `packages/tcip-mcp/src/tcip_mcp/workspace.py:291`.
+Writer: `activate_project`, `packages/tcip-mcp/src/tcip_mcp/workspace.py:291`.
 
 Readers: `read_active_project`, `workspace.py:171`; `resolve_project_path`, `workspace.py:252`.
 
 Seam S02 ("Workspace root and the .active project marker"), verdict `both-sides-restated`,
 `phase0_implementation: mixed`: `tests/test_tcip_web_projects_routes.py:160`,
-`tests/test_ingest_images.py:77,82`, `tests/test_set_active_project.py:16`,
+`tests/test_ingest_images.py:77,82`, `tests/test_activate_project.py:16`,
 `tests/test_agent_fence.py:142`, `tests/test_agent_ritual_hooks.py:41`,
 `tests/test_active_context.py:33`. `agent_session_start.py`'s `_resolve_active` reads through
 `workspace.py` itself, not a re-implementation:
@@ -1918,7 +1918,7 @@ Seam S02 ("Workspace root and the .active project marker"), verdict `both-sides-
 imports it lazily inside the function, and
 `packages/tcip-web/src/tcip_web/agent_session_start.py:75`
 (`workspace.active_project_if_present(create=False)`) reads the marker through the same seam
-`set_active_project` writes. Its tests write the marker through `workspace.set_active_project`,
+`activate_project` writes. Its tests write the marker through `workspace.activate_project`,
 `tests/test_agent_ritual_hooks.py:58`; `test_session_start_hook_runs_as_a_real_subprocess`,
 `tests/test_agent_ritual_hooks.py:115`, runs the hook as a real subprocess against a marker
 written that way, so the fresh-interpreter claim is measured rather than inferred.
