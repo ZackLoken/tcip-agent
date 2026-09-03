@@ -1602,7 +1602,7 @@ def export_predictions(
     return response
 
 
-_TABULATE_COUNTS_LIVE_ONLY_DEFAULTS = {
+_DELIVER_PER_IMAGE_COUNTS_LIVE_ONLY_DEFAULTS = {
     "conf_threshold": None, "device": None, "tile": None, "tile_size": None, "overlap": None,
     "global_nms_iou": None, "max_dets": None, "calibration_labels_dir": None,
     "calibration_images_dir": None, "split_manifest_dir": None, "experiment_id": None,
@@ -1805,7 +1805,7 @@ def deliver_per_image_counts(
                 ("calibration_images_dir", calibration_images_dir),
                 ("split_manifest_dir", split_manifest_dir), ("experiment_id", experiment_id),
                 ("postprocess", postprocess), ("tile_batch_size", tile_batch_size),
-            ) if value != _TABULATE_COUNTS_LIVE_ONLY_DEFAULTS[name])
+            ) if value != _DELIVER_PER_IMAGE_COUNTS_LIVE_ONLY_DEFAULTS[name])
         if stated_live_only:
             return {"error": (
                 f"{stated_live_only} only apply to the live regime (checkpoint_path + "
@@ -2059,7 +2059,7 @@ def _image_filename_fallback_note(
 
 
 def _deliver_per_image_counts_from_bucket(predictions_dir: str, output_path: str, *, trait: str,
-                                 acknowledge_unvalidated: bool, stated_basis) -> dict:
+                                          acknowledge_unvalidated: bool, stated_basis) -> dict:
     """``deliver_per_image_counts``'s bucket regime: an existing, reviewed prediction bucket in, no GPU.
 
     No writable-bucket resolution and no verdict redirect: nothing is written, and reading a

@@ -13,9 +13,22 @@ another word sits against every one of them, so the whole-word sweep below would
 flagged them, and every other place the old name appeared, tests included, was renamed by hand.
 
 focus is common CSS/DOM vocabulary outside the tool (frontend ``.focus()`` calls, ``autoFocus``
-props, ``:focus`` selectors), so its sweep is scoped to the Python tool surface, the tests, the
-knowledge documents and ARCHITECTURE.md, and matches only the patterns that could plausibly
-name the tool rather than every use of the English word.
+props, ``:focus`` selectors, ``onFocus`` handlers, ``focus-`` Tailwind variants), so its
+patterns match only what could plausibly name the tool: ``def focus(``, a bare ``focus(`` call,
+``import focus``, or the quoted literal ``focus``. Each pattern carves out a DOM or CSS use by
+the character immediately before the match rather than by scoping the check to a directory, so
+it runs over the same tracked-file scope as every other rename.
+
+A record a project stored under an old door name before that door was renamed is real history,
+not a leftover to fix: a line trailing the marker ``# a stored value written before the
+rename`` is skipped by every sweep below, the one way a fixture may reproduce a record's actual
+historical shape without being read as a missed rename.
+
+Every sweep checks a tracked path itself, not only the text inside it, and matches an old name
+case-insensitively; the whole-word boundary still treats an underscore as a word character, so
+a legitimately renamed file or identifier that merely contains the old token as a substring
+(``test_tabulate_counts_bucket_regime.py`` before its own rename, say) is not itself proof the
+sweep would have caught it.
 """
 
 from __future__ import annotations
@@ -50,19 +63,21 @@ RENAMES = [
 
 _OWN_FILE = str(Path(__file__).relative_to(REPO_ROOT)).replace("\\", "/")
 _EXCLUDED_FILES = {_OWN_FILE, "tests/test_tool_manifest.py"}
-_EXCLUDED_PREFIXES = ("docs/", ".claude/worktrees/", "packages/tcip-web/static/assets/")
+_EXCLUDED_PREFIXES = ("docs/",)
 # Extensions a text read would corrupt or fail on; skipped rather than reported.
 _BINARY_SUFFIXES = {
     ".png", ".jpg", ".jpeg", ".gif", ".ico", ".woff", ".woff2", ".ttf", ".eot",
     ".pdf", ".zip", ".pyc", ".db", ".sqlite", ".onnx", ".pt", ".pth",
 }
 
-_FOCUS_SCOPE_PREFIXES = ("packages/tcip-mcp/", "tests/")
-_FOCUS_SCOPE_FILES = {"ARCHITECTURE.md"}
+# Skips a line reproducing a real record's shape from before a door's own rename.
+_HISTORICAL_VALUE_MARKER = "# a stored value written before the rename"
+
 _FOCUS_PATTERNS = [
     re.compile(r"\bdef focus\("),
-    re.compile(r"\.focus\("),
+    re.compile(r"(?<![.\w:-])focus\("),
     re.compile(r"[`\"']focus[`\"']"),
+    re.compile(r"\bimport focus\b"),
 ]
 
 
@@ -91,28 +106,44 @@ def _read(rel: str) -> str | None:
 
 
 def _whole_word_sites(name: str, files: list[str]) -> list[str]:
-    """Every file in ``files`` naming ``name`` as its own token, never a hyphenated or
-    underscored continuation of a longer identifier."""
-    pattern = re.compile(r"(?<![\w-])" + re.escape(name) + r"(?![\w-])")
+    """Every tracked path or line of file content in ``files`` naming ``name`` as its own token,
+    case-insensitively, never a hyphenated or underscored continuation of a longer identifier. A
+    line carrying ``_HISTORICAL_VALUE_MARKER`` is skipped."""
+    pattern = re.compile(r"(?<![\w-])" + re.escape(name) + r"(?![\w-])", re.IGNORECASE)
     hits = []
     for rel in files:
-        text = _read(rel)
-        if text is not None and pattern.search(text):
+        if pattern.search(rel):
             hits.append(rel)
-    return hits
-
-
-def _focus_sites(files: list[str]) -> list[str]:
-    """Sites of the scoped focus patterns, restricted to the files the docstring above names."""
-    hits = []
-    for rel in files:
-        if not (rel in _FOCUS_SCOPE_FILES or any(rel.startswith(p) for p in _FOCUS_SCOPE_PREFIXES)):
             continue
         text = _read(rel)
         if text is None:
             continue
-        if any(p.search(text) for p in _FOCUS_PATTERNS):
+        for line in text.splitlines():
+            if _HISTORICAL_VALUE_MARKER in line:
+                continue
+            if pattern.search(line):
+                hits.append(rel)
+                break
+    return hits
+
+
+def _focus_sites(files: list[str]) -> list[str]:
+    """Sites of the scoped focus patterns, over every tracked path and line of file content. A
+    line carrying ``_HISTORICAL_VALUE_MARKER`` is skipped."""
+    hits = []
+    for rel in files:
+        if any(p.search(rel) for p in _FOCUS_PATTERNS):
             hits.append(rel)
+            continue
+        text = _read(rel)
+        if text is None:
+            continue
+        for line in text.splitlines():
+            if _HISTORICAL_VALUE_MARKER in line:
+                continue
+            if any(p.search(line) for p in _FOCUS_PATTERNS):
+                hits.append(rel)
+                break
     return hits
 
 

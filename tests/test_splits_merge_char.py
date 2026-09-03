@@ -19,7 +19,7 @@ from tcip_annotation.state import Annotation, BBox
 
 # 4 source prefixes (srcA..srcD) x 3 tiles x 1 GT box each: 4 leakage groups, uniform density,
 # exactly meeting the manifest floor (one group each for train/val, two for calibration).
-GOLDEN_MAKE_SPLITS = {
+GOLDEN_DRAW_SPLITS = {
     "splits": {"train": 3, "val": 3, "calibration": 6},
     "foreground_annotations": {"train": 3, "val": 3, "calibration": 6},
     "total_stems": 12,
@@ -89,7 +89,7 @@ def test_draw_splits_stats_golden(tmp_path: Path):
     assert result.pop("calibration_foreground_groups_by_date") == \
         GOLDEN_CALIBRATION_FOREGROUND_GROUPS_BY_DATE
     assert result.pop("realized_ratios") == GOLDEN_REALIZED_RATIOS
-    assert result == GOLDEN_MAKE_SPLITS
+    assert result == GOLDEN_DRAW_SPLITS
 
 
 def test_draw_splits_materialize_tree_golden(tmp_path: Path):

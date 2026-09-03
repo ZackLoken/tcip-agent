@@ -9,7 +9,7 @@ the web Results tab):
     calibrate_classifier_operating_point   the positive-state classifier's own held-out
                                            validation gate, distinct from the count operating
                                            point export_predictions calibrates
-    deliver_phenology_milestones                      that mapping + classified predictions →
+    deliver_phenology_milestones           that mapping + classified predictions →
                                            <phenology_prefix>_phenology.csv
 
 See the ``phenology`` skill for the whole pattern (isolate → detect → classify state →
