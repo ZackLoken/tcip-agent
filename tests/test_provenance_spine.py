@@ -252,7 +252,7 @@ def test_export_aggregated_csv_carries_provenance(tmp_path):
     # No pred_dirs means no on-disk validity source, so the provisional delivery is acknowledged.
     export_aggregated_csv(
         [{"plant_id": "p1", "value": 5, "observations": 2, "value_key": "count",
-          "measurement_document": "operating_point"}],
+          "measurement_document": "operating_point", "plant_attribution": "image"}],
         str(out), delivered_phenotype="stem_count",
         provenance={"producer_model_sha256": sha, "producing_experiment_id": "expA"},
         operating_point_validated="held_out_annotations", acknowledge_unvalidated=True)
@@ -288,7 +288,7 @@ def test_export_aggregated_csvs_produced_at_is_the_write_time_never_a_buckets_ow
 
     export_aggregated_csv(
         [{"plant_id": "p1", "value": 5, "observations": 2, "value_key": "count",
-          "measurement_document": "operating_point"}],
+          "measurement_document": "operating_point", "plant_attribution": "image"}],
         str(out), delivered_phenotype="stem_count", pred_dirs=[str(bucket)])
 
     rows = list(__import__("csv").DictReader(out.open()))
