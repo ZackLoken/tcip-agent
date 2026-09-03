@@ -655,11 +655,13 @@ def test_review_baselines_are_not_counted_as_label_records(tmp_path):
     assert ".original" not in res.stdout
 
 
-def test_a_seam_written_confirmation_is_seen_by_the_doctor_and_the_validator_alike(tmp_path):
+def test_a_seam_written_confirmation_is_seen_by_check_negatives_and_check_data_quality_alike(
+    tmp_path,
+):
     """One confirmation written through replace_image_status_store is the single fact both the
-    doctor's negatives check and validate_data_quality read, on one root under the same backend."""
+    doctor's negatives check and its data-quality check read, on one root under the same
+    backend."""
     from scripts import doctor
-    from tcip_mcp.tools.data_tools import validate_data_quality
 
     date = "2026-03-04"
     root = _layout_project(tmp_path, date)
@@ -674,6 +676,6 @@ def test_a_seam_written_confirmation_is_seen_by_the_doctor_and_the_validator_ali
     doctor.check_negatives(root, findings)
     assert not any("not a confirmed negative" in msg for _, msg in findings)
 
-    result = validate_data_quality(str(root))
-    assert result["issues"] == []
-    assert result["is_valid"] is True
+    quality_findings: list[tuple[str, str]] = []
+    doctor.check_data_quality(root, quality_findings)
+    assert quality_findings == []

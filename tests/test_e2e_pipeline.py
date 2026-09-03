@@ -1,7 +1,7 @@
-"""End-to-end integration test: agent pipeline through MCP tools.
+"""End-to-end integration test: agent pipeline through MCP tools and the demoted library calls.
 
-Verifies the full workflow using the MCP tool layer:
-  initialize_project → scan_dataset → validate_data_quality →
+Verifies the full workflow:
+  initialize_project → scan_dataset → the doctor's check_data_quality →
   read_annotations → save_annotations → score_predictions (image) →
   score_predictions (dataset) → draw_splits → archive_project
 
@@ -15,6 +15,7 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
+from scripts import doctor
 from tcip_mcp.tools.project_tools import (
     initialize_project,
     inspect_project,
@@ -22,7 +23,6 @@ from tcip_mcp.tools.project_tools import (
 )
 from tcip_mcp.tools.data_tools import (
     scan_dataset,
-    validate_data_quality,
     draw_splits,
 )
 from tcip_mcp.tools.annotation_tools import (
@@ -107,10 +107,9 @@ class TestE2EPipeline:
         assert ds["unlabelled_images"] == 0
 
         # ── Step 4: Validate data quality ────────────────────────────
-        quality = validate_data_quality(root)
-        assert quality["total_images"] == 5
-        assert quality["is_valid"] is True
-        assert "catkin" in quality["subjects"]
+        findings: list[tuple[str, str]] = []
+        doctor.check_data_quality(Path(root), findings)
+        assert not [f for f in findings if f[0] == "error"]
 
         # ── Step 5: Load annotations for one image ───────────────────
         img_path = str(project_dir / "images" / "2-11-26" / "img_000.jpg")

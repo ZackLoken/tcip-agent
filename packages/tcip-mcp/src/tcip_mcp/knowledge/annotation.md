@@ -210,7 +210,7 @@ frames → they accept on the canvas → only then does it become GT. See
   empty file that is not in that set, treating it as unannotated. You cannot manufacture
   negatives; writing empty label files does not create them; only the human's Complete does.
   `python scripts/doctor.py <root>` runs separate checks bound to what each one reads:
-  `check_negatives` reads the status store through the same seam `validate_data_quality` does,
+  `check_negatives` reads the status store through the same seam `check_data_quality` does,
   and on a store that will not read, emits one warning and reports negatives unverified rather
   than walking any label file; `check_status_tokens` reads the raw store file directly and
   walks it regardless, flagging a status entry in a shape it cannot read and a stored

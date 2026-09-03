@@ -1,4 +1,5 @@
-"""Data management tools: load datasets, validate quality, split data."""
+"""Data management tools: census a dataset, split data. Per-file quality checks live in
+scripts/doctor.py's ``check_data_quality``, the retired per-file quality tool folded in there."""
 
 from __future__ import annotations
 
@@ -405,7 +406,8 @@ def freeze_split_manifest(experiment_id: str, output_path: str | None = None) ->
 ROOT_LABEL_CANDIDATES = ("annotations.json", "labels.json", "instances.json")
 """Candidate filenames for one assembled dataset-level label document at a dataset's root,
 checked in this order; the first one present on disk is the dataset's label store. Shared by
-:func:`_scan_dataset` and :func:`validate_data_quality` so both name the same three candidates."""
+:func:`_scan_dataset` and the doctor's own ``check_data_quality`` so both name the same three
+candidates."""
 
 
 def _scan_dataset(root: str) -> dict:
@@ -421,8 +423,8 @@ def _scan_dataset(root: str) -> dict:
     :class:`~tcip_annotation.json_io.UnreadableLabelDocument` rather than being folded into "format
     undetectable": the caller reports it as the named file it is, not a guess. ``format`` is an
     informational best guess (the per-image tree's first-sorted label's shape, or the root
-    candidate's when there is no per-image tree), not a claim every label file shares it;
-    :func:`validate_data_quality` decides format per file instead.
+    candidate's when there is no per-image tree), not a claim every label file shares it; the
+    doctor's own ``check_data_quality`` decides format per file instead.
 
     ``labels`` is a raw ``rglob``, so it counts a file whose name is reserved for a prediction
     bucket's own provenance stamp the way :func:`~tcip_mcp.dataset_layout.subjects_on_date` and
@@ -569,127 +571,6 @@ def _root_label_candidate(folder_path: str, already_present: set) -> str | None:
             return None if str(cpath) in already_present else str(cpath)
     return None
 
-
-@mcp.tool()
-@audited
-def validate_data_quality(folder_path: str) -> dict:
-    """Run quality checks on a dataset (any supported annotation format).
-
-    Checks, decided per label file rather than once for the whole dataset (a store mixing shapes
-    cannot report valid because one file's shape happened to be detected first): stem matching
-    between images and labels (a label with no matching image, or for COCO, a referenced image
-    file not found in the images dir), an empty per-image label with no human confirmation that
-    the image is a negative, a file whose format cannot be determined, and a file present but
-    unreadable. Class consistency against a subject registry and coordinate-range validation are
-    not implemented.
-
-    ``total_labels`` counts exactly the files ``scan_dataset``'s own ``labels_count`` counts (the
-    per-image tree, a review baseline excluded, plus a present root candidate): the two are the
-    same list. ``format`` is the distinct shapes actually found among the label files this call
-    could classify: one shape's name when every file agrees, the shapes sorted when they do not,
-    and ``None`` when no label file's format could be determined at all (labels present but
-    undetectable, or no labels present). ``reserved_name_labels`` names every one of those files
-    whose filename is reserved for a prediction bucket's own provenance stamp, the same
-    ``scan_dataset`` field: this scan's per-file checks still run on it (it is a present file the
-    census counted), but no bucket walk elsewhere in the platform would ever read it as a label.
-    ``reserved_name_images`` is the same ``scan_dataset`` field for an image whose own stem is
-    reserved.
-
-    Args:
-        folder_path: Path to the dataset root directory.
-    """
-    if not Path(folder_path).is_dir():
-        return {"error": f"Directory not found: {folder_path}"}
-
-    from tcip_annotation.format_io import detect_format
-    from tcip_annotation.json_io import UnreadableLabelDocument, load_json_document, read_annotations
-    from tcip_mcp.dataset_layout import (
-        annotation_date, confirmed_negative_names_any_subject, normalize_status_store,
-        read_image_status_store, resolve_image_name,
-    )
-
-    try:
-        scan = _scan_dataset(folder_path)
-    except UnreadableLabelDocument as exc:
-        return {"error": str(exc)}
-    issues: list[dict] = []
-
-    image_stems = {Path(p).stem for p in scan["images"]}
-    label_paths = list(scan["labels"])
-
-    negatives = confirmed_negative_names_any_subject(
-        normalize_status_store(read_image_status_store(folder_path))
-    )
-
-    subjects: set[str] = set()
-    shapes_found: set[str] = set()
-    for label_path in label_paths:
-        stem = Path(label_path).stem
-        try:
-            file_fmt = detect_format(label_path)
-        except ValueError as exc:
-            issues.append({"level": "error", "file": label_path,
-                          "message": f"cannot determine annotation format: {exc}"})
-            continue
-        except UnreadableLabelDocument as exc:
-            issues.append({"level": "error", "file": label_path,
-                          "message": f"label file will not read: {exc}"})
-            continue
-        shapes_found.add(file_fmt)
-
-        if file_fmt == "json":
-            if stem not in image_stems:
-                issues.append({"level": "error", "file": label_path, "message": "No matching image"})
-            try:
-                anns = read_annotations(label_path)
-            except UnreadableLabelDocument as exc:
-                issues.append({"level": "error", "file": label_path,
-                              "message": f"label file will not read: {exc}"})
-                continue
-            for a in anns:
-                subjects.add(a.subject)
-            if not anns:
-                name = resolve_image_name(folder_path, annotation_date(label_path), stem)
-                if name is None or name not in negatives:
-                    issues.append({"level": "error", "file": label_path,
-                                  "message": "empty label file, not a confirmed negative for any "
-                                  "subject; excluded from training"})
-        elif file_fmt == "coco":
-            try:
-                # load_json_document is the same shared decode format_io.load_annotations itself runs a
-                # coco document through; this call needs the raw document (categories, images list), not one image's parsed records.
-                coco = load_json_document(label_path)
-                for c in coco.get("categories", []):
-                    if c.get("name"):
-                        subjects.add(str(c["name"]))
-                coco_fnames = {img.get("file_name", "") for img in coco.get("images", [])}
-                for fn in coco_fnames:
-                    if Path(fn).stem not in image_stems:
-                        issues.append({"level": "warning", "file": label_path,
-                                      "message": f"COCO image '{fn}' not found in images dir"})
-            except Exception as e:
-                issues.append({"level": "error", "file": label_path, "message": f"COCO parse error: {e}"})
-
-    report_format: str | list[str] | None
-    if not shapes_found:
-        report_format = None
-    elif len(shapes_found) == 1:
-        report_format = next(iter(shapes_found))
-    else:
-        report_format = sorted(shapes_found)
-
-    return {
-        "path": folder_path,
-        "format": report_format,
-        "total_images": len(scan["images"]),
-        "total_labels": len(label_paths),
-        "subjects": sorted(subjects),
-        "issues": issues,
-        "issue_count": len(issues),
-        "is_valid": all(i["level"] != "error" for i in issues),
-        "reserved_name_labels": scan["reserved_name_labels"],
-        "reserved_name_images": scan["reserved_name_images"],
-    }
 
 
 def _split_date_dirs(folder_path: str | Path) -> list[tuple[str | None, Path, Path]]:

@@ -122,7 +122,7 @@ manifest, seals all four keys `null`.
 
 When metrics are poor, investigate systematically:
 
-1. Data issues: `validate_data_quality`, check for missing labels, format errors, class imbalance
+1. Data issues: `python scripts/doctor.py <root>`'s `check_data_quality`, missing labels, format errors, class imbalance
 2. Worst cases: `python scripts/render_failure_cases.py`, surface and visually inspect the worst
    N images
 3. Per-image breakdown: `score_predictions` on a dataset dir; find images with the

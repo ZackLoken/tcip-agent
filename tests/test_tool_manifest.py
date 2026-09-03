@@ -208,6 +208,8 @@ def test_consolidated_tools_present_and_removed_absent():
         "overlay_reference_grid",
         # Demoted to a library call plus scripts/visualize.py; kept @audited.
         "visualize",
+        # Folded into scripts/doctor.py's check_data_quality; its own function is deleted.
+        "validate_data_quality",
     }
     assert not (removed & registered), f"removed tools still registered: {removed & registered}"
 

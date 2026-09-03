@@ -61,7 +61,7 @@ def check_negatives(root: Path, findings: list) -> None:
     image-level record (a subject with no geometry) counts as content for that subject, the same
     rule ``annotations_hold_subject`` applies everywhere else this question is asked.
 
-    Reads the status store through the same seam ``validate_data_quality`` reads it through, so
+    Reads the status store through the same seam ``check_data_quality`` reads it through, so
     the two agree on one root under whichever backend the process is bound to; not gated in
     ``gated_stores`` for that reason, the same as any check reading entirely through the seam.
     """
@@ -135,6 +135,87 @@ def check_negatives(root: Path, findings: list) -> None:
         if not det:
             findings.append(("warn", f"status says {name} is negative but no label file exists "
                             "(a confirmed negative should have an empty label file)"))
+
+
+def check_data_quality(root: Path, findings: list) -> None:
+    """Per-file annotation quality, any supported format, folded in from the retired per-file
+    quality tool: stem matching between images and labels, an empty per-image
+    label with no human confirmation the image is a negative, a file whose format cannot be
+    determined, and a file present but unreadable. Format is decided per label file, never once
+    for the whole dataset, so a store mixing shapes cannot report clean because one file's shape
+    happened to be detected first.
+
+    Reuses ``data_tools._scan_dataset``'s own image/label census and root-candidate walk rather
+    than re-deriving them, so this check and ``scan_dataset`` can never silently disagree on what
+    counts as a label. Some overlap with ``check_negatives`` is expected (an orphan or
+    unconfirmed-empty per-image label can be named by both); this check's own value is the
+    per-file format decision and COCO-aware validation neither ``check_negatives`` nor
+    ``check_reserved_names`` carries.
+    """
+    from tcip_annotation.format_io import detect_format
+    from tcip_annotation.json_io import (
+        UnreadableLabelDocument, load_json_document, read_annotations as read_labels,
+    )
+    from tcip_mcp.dataset_layout import (
+        annotation_date, confirmed_negative_names_any_subject, normalize_status_store,
+        read_image_status_store, resolve_image_name,
+    )
+    from tcip_mcp.tools.data_tools import _scan_dataset
+    from tcip_store import StoreError
+
+    try:
+        scan = _scan_dataset(str(root))
+    except UnreadableLabelDocument as exc:
+        findings.append(("error", f"data quality scan: {exc}"))
+        return
+
+    image_stems = {Path(p).stem for p in scan["images"]}
+
+    try:
+        negatives = confirmed_negative_names_any_subject(
+            normalize_status_store(read_image_status_store(str(root)))
+        )
+    except StoreError as exc:
+        findings.append(("warn", f"the image status store will not read ({exc}); the "
+                        "data-quality check cannot verify confirmed negatives against it"))
+        negatives = set()
+
+    for label_path in scan["labels"]:
+        label = Path(label_path)
+        rel = label.relative_to(root) if root in label.parents else label
+        try:
+            file_fmt = detect_format(label_path)
+        except ValueError as exc:
+            findings.append(("error", f"{rel}: cannot determine annotation format: {exc}"))
+            continue
+        except UnreadableLabelDocument as exc:
+            findings.append(("error", f"{rel}: label file will not read: {exc}"))
+            continue
+
+        if file_fmt == "json":
+            stem = label.stem
+            if stem not in image_stems:
+                findings.append(("error", f"{rel}: no matching image"))
+            try:
+                anns = read_labels(label_path)
+            except UnreadableLabelDocument as exc:
+                findings.append(("error", f"{rel}: label file will not read: {exc}"))
+                continue
+            if not anns:
+                name = resolve_image_name(str(root), annotation_date(label_path), stem)
+                if name is None or name not in negatives:
+                    findings.append(("error", f"{rel}: empty label file, not a confirmed "
+                                    "negative for any subject; excluded from training"))
+        elif file_fmt == "coco":
+            try:
+                coco = load_json_document(label_path)
+                coco_fnames = {img.get("file_name", "") for img in coco.get("images", [])}
+                for fn in coco_fnames:
+                    if Path(fn).stem not in image_stems:
+                        findings.append(("warn", f"{rel}: COCO image {fn!r} not found in "
+                                        "images dir"))
+            except Exception as exc:  # noqa: BLE001 - a malformed COCO document, named and moved past
+                findings.append(("error", f"{rel}: COCO parse error: {exc}"))
 
 
 def check_reserved_names(root: Path, findings: list) -> None:
@@ -487,6 +568,7 @@ def gated_stores(root: Path) -> dict[str, tuple[tuple[Path, str], ...]]:
     """
     return {
         "check_negatives": ((root, "image_status"),),
+        "check_data_quality": ((root, "image_status"),),
         "check_status_tokens": ((root, "image_status"),),
         "check_region_completeness": (
             (root, "region_completeness"),
@@ -547,9 +629,9 @@ def main() -> int:
 
     findings: list[tuple[str, str]] = []
     invalid = staleness_findings(root)
-    for check in (check_negatives, check_status_tokens, check_reserved_names, check_registry,
-                 check_provenance, check_state, check_region_completeness, check_trait_specs,
-                 check_trait_spec_statements, check_project_record):
+    for check in (check_negatives, check_data_quality, check_status_tokens, check_reserved_names,
+                 check_registry, check_provenance, check_state, check_region_completeness,
+                 check_trait_specs, check_trait_spec_statements, check_project_record):
         reason = invalid.get(check.__name__)
         if reason:
             findings.append(("error", f"{check.__name__} reads state as files and those files "
