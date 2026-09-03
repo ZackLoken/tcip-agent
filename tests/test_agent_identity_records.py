@@ -252,7 +252,7 @@ def captured_requests(monkeypatch: pytest.MonkeyPatch) -> list:
 
 
 def test_the_push_through_a_handshake_sends_the_identity_as_headers(captured_requests: list) -> None:
-    call_through_handshake([("push_panel_data", {
+    call_through_handshake([("push_panel_event", {
         "panel": "meta", "event_type": "identity_probe", "data": {"n": 1},
     })])
 

@@ -744,7 +744,7 @@ Docstring is the function's docstring first line, verbatim.
 
 | tool | line | audited | docstring first line |
 |---|---|---|---|
-| `push_panel_data` | `gui_tools.py:37` | yes | Push structured data to a TCIP GUI panel via the tcip-web backend. |
+| `push_panel_event` | `gui_tools.py:37` | yes | Push structured data to a TCIP GUI panel via the tcip-web backend. |
 | `focus_human_attention` | `gui_tools.py:71` | yes | Drive the live GUI to a (subject, date) frame, the Annotate tab or the Review tab. |
 
 ### inference_tools.py (3 tools)
