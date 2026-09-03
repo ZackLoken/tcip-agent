@@ -198,7 +198,7 @@ CSV export, including a percentile-crossing phenology-milestone deliverable (per
 objects crosses 5/50/95%; the positive state is a validated per-object classifier call, never a
 geometric proxy). Ordinal and regression are also trainable and evaluable, through the same
 model/training machinery and their own heads, losses, and metrics, and calibrate through their
-own door (`calibrate_ordinal_regression_operating_point`), but neither has an annotation/review
+own door (`calibrate_scalar_operating_point`), but neither has an annotation/review
 surface built for it: both read labels from a hand-authored external CSV of image stem plus rank
 or value rather than the platform's own annotation/review UI, and both are excluded from the
 platform's automatic train/val split. The agent composes the

@@ -208,7 +208,7 @@ def test_calibrate_operating_point_script_refuses_an_unregistered_checkpoint(tmp
     assert rc == 2
 
 
-def test_calibrate_ordinal_regression_operating_point_refuses_an_unregistered_checkpoint(
+def test_calibrate_scalar_operating_point_refuses_an_unregistered_checkpoint(
     tmp_path, monkeypatch,
 ):
     """The checkpoint load runs before the cal/holdout split is locked, so a refused calibration
@@ -225,9 +225,9 @@ def test_calibrate_ordinal_regression_operating_point_refuses_an_unregistered_ch
 
     from tcip_mcp.pipelines.data.splits import cal_holdout_lock_key, cal_holdout_scope_root
     from tcip_mcp.pipelines.resolution import csv_dataset_hash
-    from tcip_mcp.tools.calibration_tools import calibrate_ordinal_regression_operating_point
+    from tcip_mcp.tools.calibration_tools import calibrate_scalar_operating_point
 
-    r = calibrate_ordinal_regression_operating_point(
+    r = calibrate_scalar_operating_point(
         trait_name="catkin", task="ordinal", checkpoint_path=ckpt,
         images_dir=str(images_dir), csv_path=str(csv_path),
         criterion="quadratic_weighted_kappa", output_dir=str(out),

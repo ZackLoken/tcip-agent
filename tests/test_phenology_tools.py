@@ -1482,12 +1482,12 @@ def test_classification_items_scopes_gt_to_the_run_subject(tmp_path: Path) -> No
 
 
 # --------------------------------------------------------------------------
-# calibrate_ordinal_regression_operating_point: an end-to-end run against a real trained
+# calibrate_scalar_operating_point: an end-to-end run against a real trained
 # checkpoint, no pre-staged files (there is no staging mechanism for a CSV-sourced scalar trait,
 # unlike calibrate_classifier_operating_point's paired GT/prediction dirs).
 # --------------------------------------------------------------------------
 
-def test_calibrate_ordinal_regression_operating_point_ordinal_e2e(
+def test_calibrate_scalar_operating_point_ordinal_e2e(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     pytest.importorskip("torch")
@@ -1498,7 +1498,7 @@ def test_calibrate_ordinal_regression_operating_point_ordinal_e2e(
     from tcip_mcp.pipelines.training.generic_trainer import train
     from tcip_mcp.pipelines.training.collation import task_collate
     from tcip_mcp.pipelines.training.run_registry import create_run
-    from tcip_mcp.tools.calibration_tools import calibrate_ordinal_regression_operating_point
+    from tcip_mcp.tools.calibration_tools import calibrate_scalar_operating_point
     from tests.test_e2e_tasktypes import _model_source, _save_png, _train_config, _write_csv
 
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
@@ -1525,7 +1525,7 @@ def test_calibrate_ordinal_regression_operating_point_ordinal_e2e(
                          project_path=str(tmp_path))
     assert "error" not in reg, reg
 
-    result = calibrate_ordinal_regression_operating_point(
+    result = calibrate_scalar_operating_point(
         trait_name="catkin", task="ordinal",
         checkpoint_path=str(tmp_path / "out" / "model_best.pt"),
         images_dir=str(images_dir), csv_path=str(csv_path),
@@ -1552,7 +1552,7 @@ def test_calibrate_ordinal_regression_operating_point_ordinal_e2e(
         (tmp_path / "out" / "model_best.pt").read_bytes()).hexdigest()
 
 
-def test_calibrate_ordinal_regression_operating_point_regression_e2e(
+def test_calibrate_scalar_operating_point_regression_e2e(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     pytest.importorskip("torch")
@@ -1563,7 +1563,7 @@ def test_calibrate_ordinal_regression_operating_point_regression_e2e(
     from tcip_mcp.pipelines.training.generic_trainer import train
     from tcip_mcp.pipelines.training.collation import task_collate
     from tcip_mcp.pipelines.training.run_registry import create_run
-    from tcip_mcp.tools.calibration_tools import calibrate_ordinal_regression_operating_point
+    from tcip_mcp.tools.calibration_tools import calibrate_scalar_operating_point
     from tests.test_e2e_tasktypes import _model_source, _save_png, _train_config, _write_csv
 
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
@@ -1589,7 +1589,7 @@ def test_calibrate_ordinal_regression_operating_point_regression_e2e(
                          config={}, project_path=str(tmp_path))
     assert "error" not in reg, reg
 
-    result = calibrate_ordinal_regression_operating_point(
+    result = calibrate_scalar_operating_point(
         trait_name="catkin", task="regression",
         checkpoint_path=str(tmp_path / "out" / "model_best.pt"),
         images_dir=str(images_dir), csv_path=str(csv_path),
@@ -1612,10 +1612,10 @@ def test_calibrate_ordinal_regression_operating_point_regression_e2e(
     assert "gate_evidence" in sidecar and sidecar["gate_evidence"]["criterion"] == "r_squared"
 
 
-def test_calibrate_ordinal_regression_operating_point_unknown_task_returns_error(tmp_path: Path) -> None:
-    from tcip_mcp.tools.calibration_tools import calibrate_ordinal_regression_operating_point
+def test_calibrate_scalar_operating_point_unknown_task_returns_error(tmp_path: Path) -> None:
+    from tcip_mcp.tools.calibration_tools import calibrate_scalar_operating_point
 
-    result = calibrate_ordinal_regression_operating_point(
+    result = calibrate_scalar_operating_point(
         trait_name="catkin", task="classification", checkpoint_path="m.pt",
         images_dir=str(tmp_path), csv_path=str(tmp_path / "x.csv"), criterion="r_squared",
         output_dir=str(tmp_path / "calib"), dataset_root=str(tmp_path),
@@ -1628,7 +1628,7 @@ def _rank_csv(csv_path: Path, ranks: dict[str, int]) -> None:
                         encoding="utf-8")
 
 
-def test_calibrate_ordinal_regression_operating_point_admits_a_loose_images_directory(
+def test_calibrate_scalar_operating_point_admits_a_loose_images_directory(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A CSV over an images directory the dataset layout cannot place is legitimate bespoke work:
@@ -1646,7 +1646,7 @@ def test_calibrate_ordinal_regression_operating_point_admits_a_loose_images_dire
         reconcile_ordinal_validity,
         verify_stamp_binding,
     )
-    from tcip_mcp.tools.calibration_tools import calibrate_ordinal_regression_operating_point
+    from tcip_mcp.tools.calibration_tools import calibrate_scalar_operating_point
 
     frames, out = tmp_path / "frames", tmp_path / "calib"
     frames.mkdir()
@@ -1675,7 +1675,7 @@ def test_calibrate_ordinal_regression_operating_point_admits_a_loose_images_dire
     monkeypatch.setattr("tcip_mcp.pipelines.inference.predictor.build_predictor",
                         lambda *a, **kw: _RecordedRanks())
 
-    res = calibrate_ordinal_regression_operating_point(
+    res = calibrate_scalar_operating_point(
         trait_name="catkin", task="ordinal", checkpoint_path=str(checkpoint),
         images_dir=str(frames), csv_path=str(csv_path),
         criterion="quadratic_weighted_kappa", output_dir=str(out),
@@ -1704,19 +1704,19 @@ def test_calibrate_ordinal_regression_operating_point_admits_a_loose_images_dire
     assert row["selection_disjointness"] is not None
 
 
-def test_calibrate_ordinal_regression_operating_point_refuses_a_dataset_root_its_images_contradict(
+def test_calibrate_scalar_operating_point_refuses_a_dataset_root_its_images_contradict(
     tmp_path: Path,
 ) -> None:
     """The images directory places itself under a dataset root, so a stated root that disagrees
     would record the reference against a dataset it does not live under."""
-    from tcip_mcp.tools.calibration_tools import calibrate_ordinal_regression_operating_point
+    from tcip_mcp.tools.calibration_tools import calibrate_scalar_operating_point
 
     ds, stated = tmp_path / "ds", tmp_path / "elsewhere"
     (ds / "images").mkdir(parents=True)
     csv_path = tmp_path / "ranks.csv"
     _rank_csv(csv_path, {f"img{i}": i % 3 for i in range(4)})
 
-    res = calibrate_ordinal_regression_operating_point(
+    res = calibrate_scalar_operating_point(
         trait_name="catkin", task="ordinal", checkpoint_path=str(tmp_path / "model_best.pt"),
         images_dir=str(ds / "images"), csv_path=str(csv_path),
         criterion="quadratic_weighted_kappa", output_dir=str(tmp_path / "calib"),

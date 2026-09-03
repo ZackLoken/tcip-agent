@@ -62,7 +62,7 @@ Examples use real `crops.yml` trait names; verify any trait against `crops.yml` 
 | `run_inference` | Run batch inference on images |
 | `compute_phenology` | Per-plant bloom CSV (05/50/95-per-date) from classified preds + plant mapping; its own column schema; see `phenology` skill |
 | `deliver_orthomosaic_plant_counts` | Per-plant detection counts from a persisted whole-raster prediction bucket plus plant-locations CSV(s); georeferences the boxes, assigns them to plants, and delivers through `export_aggregated_csv`, so it inherits the same gate and provenance columns; refuses a bucket that cannot vouch for the caller's raster |
-| `calibrate_ordinal_regression_operating_point` | Calibrate and validate a continuous or ordinal trait's prediction against a disjoint held-out split; stamps `ordinal_operating_point.json` / `regression_operating_point.json`, the on-disk producer `export_aggregated_csv` reconciles against |
+| `calibrate_scalar_operating_point` | Calibrate and validate a continuous or ordinal trait's prediction against a disjoint held-out split; stamps `ordinal_operating_point.json` / `regression_operating_point.json`, the on-disk producer `export_aggregated_csv` reconciles against |
 | `calibrate_physical_scale` | Derive and validate a per-pixel physical scale against a breeder-supplied reference, and stamp it into a bucket's `resolve_scale.json`, the `scale_document` cell's producer |
 | `materialize_review_dataset` | Turn human review verdicts into a curated training set for re-delivery after correction; see `annotation` skill |
 
@@ -160,7 +160,7 @@ only when every dimension it was handed clears, and otherwise refuses (or, with
   `operating_point_validated` to unvalidated regardless of what the caller asserted; there is no
   carve-out. A continuous or
   ordinal trait's on-disk measurement-validity producer is
-  `calibrate_ordinal_regression_operating_point`, which stamps `ordinal_operating_point.json` /
+  `calibrate_scalar_operating_point`, which stamps `ordinal_operating_point.json` /
   `regression_operating_point.json`; `export_aggregated_csv` reconciles against it the same way it
   reconciles a count trait's `operating_point.json`, keyed off each result's own
   `measurement_document`.

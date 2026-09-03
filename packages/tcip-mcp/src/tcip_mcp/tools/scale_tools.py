@@ -34,7 +34,7 @@ class ReferenceCsvError(ValueError):
 def _read_reference_csv(csv_path: str) -> dict[str, dict[str, float | str]]:
     """``stem -> {"physical_extent": float, "unit": str}`` from the breeder's reference CSV
     (``image_stem, physical_extent, unit``, one row per reference image), the same standing a
-    ground-truth CSV has for ``calibrate_ordinal_regression_operating_point``.
+    ground-truth CSV has for ``calibrate_scalar_operating_point``.
 
     The header is read by name, not by position, so a reordered or extended CSV still resolves the
     three columns this reads. A row with a missing or non-numeric ``physical_extent``, or a stem
