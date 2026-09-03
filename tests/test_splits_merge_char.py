@@ -1,8 +1,8 @@
 """Characterization goldens for the splits merge.
 
-Freezes ``make_splits`` stats and ``split_dataset`` on-disk tree/return against current code, so
-folding materialization into ``make_splits(materialize=...)`` is provably behavior-preserving:
-``make_splits(materialize=False)`` reproduces the stats and ``make_splits(materialize=True)``
+Freezes ``draw_splits`` stats and ``split_dataset`` on-disk tree/return against current code, so
+folding materialization into ``draw_splits(materialize=...)`` is provably behavior-preserving:
+``draw_splits(materialize=False)`` reproduces the stats and ``draw_splits(materialize=True)``
 reproduces the tree plus ``output_dir``/``structure``.
 """
 
@@ -32,7 +32,7 @@ GOLDEN_MAKE_SPLITS = {
 GOLDEN_CALIBRATION_FOREGROUND_GROUPS_BY_DATE = {"2-11-26": 2}
 GOLDEN_REALIZED_RATIOS = {"train": 0.25, "val": 0.25, "calibration": 0.5}
 
-# split_dataset (seed=1) and make_splits (seed=1) assign the same groups per split.
+# split_dataset (seed=1) and draw_splits (seed=1) assign the same groups per split.
 GOLDEN_TREE = sorted([
     "split_manifest.json",
     "train/images/srcD_0_0.jpg", "train/images/srcD_1_0.jpg", "train/images/srcD_2_0.jpg",
@@ -72,12 +72,12 @@ def _tree(out_dir: Path) -> list[str]:
     )
 
 
-def test_make_splits_stats_golden(tmp_path: Path):
-    from tcip_mcp.tools.data_tools import make_splits
+def test_draw_splits_stats_golden(tmp_path: Path):
+    from tcip_mcp.tools.data_tools import draw_splits
 
     root = _multi_source_dataset(tmp_path / "ds")
     out = tmp_path / "m"
-    result = make_splits(str(root), output_path=str(out), seed=1, subject="catkin",
+    result = draw_splits(str(root), output_path=str(out), seed=1, subject="catkin",
                          train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
     result.pop("manifest_dir")
     assert result.pop("subject") == "catkin"
@@ -92,18 +92,18 @@ def test_make_splits_stats_golden(tmp_path: Path):
     assert result == GOLDEN_MAKE_SPLITS
 
 
-def test_make_splits_materialize_tree_golden(tmp_path: Path):
+def test_draw_splits_materialize_tree_golden(tmp_path: Path):
     """Bound to the file backend on purpose: the golden lists the split's own record document
     (split_manifest.json) as a sibling file, a fact about the file layout a database backend
     does not reproduce."""
     from tcip_store.file_backend import FileBackend
 
-    from tcip_mcp.tools.data_tools import make_splits, split_manifest_key
+    from tcip_mcp.tools.data_tools import draw_splits, split_manifest_key
 
     ts.bind(FileBackend())
     root = _multi_source_dataset(tmp_path / "ds")
     out = tmp_path / "s"
-    result = make_splits(str(root), output_path=str(out), seed=1, materialize=True, subject="catkin",
+    result = draw_splits(str(root), output_path=str(out), seed=1, materialize=True, subject="catkin",
                          train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
     assert result["splits"] == {"train": 3, "val": 3, "calibration": 6}
     assert result["total_stems"] == 12

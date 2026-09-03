@@ -125,9 +125,9 @@ There must be something to train on. Two paths (see
 Never train or evaluate on an unconfirmed format: if `read_annotations` returns
 the format cannot be determined, `read_annotations` returns an error rather than a guess.
 
-## 5. Split: `make_splits`
+## 5. Split: `draw_splits`
 
-Create leakage-free train/val/calibration splits with `make_splits` (group-aware, keeps sibling
+Create leakage-free train/val/calibration splits with `draw_splits` (group-aware, keeps sibling
 tiles of one source image in the same split; there is no held-out test list, and no launch path
 honours one). Non-destructive by default (writes a manifest + stats); pass
 `materialize=True` to also lay out a `{train,val,calibration}/{images,labels}/` tree, with the

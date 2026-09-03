@@ -596,7 +596,7 @@ def dataset_hash_and_label_digests(
 ) -> tuple[str, dict[str, str]]:
     """:func:`dataset_hash` and :func:`label_digests` over the same stem set, in one pass: each
     label's bytes read once and folded into both the combined hash and its own per-stem digest,
-    rather than through two separate calls that would each open every file. ``make_splits`` calls
+    rather than through two separate calls that would each open every file. ``draw_splits`` calls
     this for a members block's ``dataset_hash``/``label_digests`` pair.
     """
     labels_dir = Path(labels_dir)

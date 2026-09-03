@@ -74,7 +74,7 @@ def main(argv: list[str] | None = None) -> int:
                              "of --subject.")
     parser.add_argument("--split-manifest-dir", default=None,
                         help="Restrict the calibration universe to one capture date's "
-                             "calibration side of a split manifest (make_splits' output "
+                             "calibration side of a split manifest (draw_splits' output "
                              "directory) instead of every labeled stem, the same restriction "
                              "run_inference applies. Conflicts with --group-by/--group-key-map; "
                              "requires --subject.")

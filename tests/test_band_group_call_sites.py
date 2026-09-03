@@ -304,10 +304,10 @@ def test_materialize_dataset_dims_from_the_grouped_capture(tmp_path):
     assert (box.x1, box.y1, box.x2, box.y2) == (6.0, 6.0, 10.0, 10.0)
 
 
-# ── tools/data_tools.py: make_splits(materialize=True) ───────────────────────────────────
+# ── tools/data_tools.py: draw_splits(materialize=True) ───────────────────────────────────
 
 
-def test_make_splits_materialize_resolves_a_grouped_capture(grouped_dataset):
+def test_draw_splits_materialize_resolves_a_grouped_capture(grouped_dataset):
     """A materialized split places every sibling band a group names plus its manifest, not the
     manifest alone: the manifest resolves to nothing once its siblings are absent."""
     from PIL import Image
@@ -315,7 +315,7 @@ def test_make_splits_materialize_resolves_a_grouped_capture(grouped_dataset):
     from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.pipelines.data.band_groups import BandGroupRef
     from tcip_mcp.pipelines.image_utils import resolve_image_source
-    from tcip_mcp.tools.data_tools import make_splits
+    from tcip_mcp.tools.data_tools import draw_splits
 
     # The fixture's own two groups (capture_001, plain_002) need two more to clear a manifest
     # write's foreground floor, added here rather than in the shared fixture.
@@ -329,7 +329,7 @@ def test_make_splits_materialize_resolves_a_grouped_capture(grouped_dataset):
         )
 
     out = grouped_dataset / "splits"
-    result = make_splits(str(grouped_dataset), output_path=str(out), materialize=True,
+    result = draw_splits(str(grouped_dataset), output_path=str(out), materialize=True,
                          subject="catkin", train_ratio=0.5, val_ratio=0.25,
                          calibration_ratio=0.25)
     assert "error" not in result, result

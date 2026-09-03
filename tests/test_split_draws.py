@@ -41,7 +41,7 @@ def test_run_hyperparameter_search_refuses_split_draws_when_a_bound_manifest_wou
     preflight_config runs for one config."""
     import tcip_store as ts
     import tcip_mcp.tools.training_tools as tt
-    from tcip_mcp.tools.data_tools import make_splits, split_manifest_key
+    from tcip_mcp.tools.data_tools import draw_splits, split_manifest_key
 
     from tests.test_split_manifest_binding import (
         DATES, SUBJECT, _collapse_date_to_one_group, _two_subject_two_date_dataset,
@@ -52,7 +52,7 @@ def test_run_hyperparameter_search_refuses_split_draws_when_a_bound_manifest_wou
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     manifest_dir = tmp_path / "m"
-    make_result = make_splits(str(root), output_path=str(manifest_dir), subject=SUBJECT,
+    make_result = draw_splits(str(root), output_path=str(manifest_dir), subject=SUBJECT,
                               seed=2, train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
     assert "error" not in make_result, make_result
     manifest = ts.read(split_manifest_key(manifest_dir))
@@ -259,13 +259,13 @@ def test_run_hyperparameter_search_admits_split_draws_bound_to_a_manifest_and_se
     inside the manifest's own members instead of the manifest's one recorded partition, and the
     recorded sweep manifest's own base_config carries the claim."""
     import tcip_mcp.tools.training_tools as tt
-    from tcip_mcp.tools.data_tools import make_splits
+    from tcip_mcp.tools.data_tools import draw_splits
 
     from tests.test_split_manifest_binding import DATES, SUBJECT, _two_subject_two_date_dataset
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     manifest_dir = tmp_path / "m"
-    make_result = make_splits(str(root), output_path=str(manifest_dir), subject=SUBJECT,
+    make_result = draw_splits(str(root), output_path=str(manifest_dir), subject=SUBJECT,
                               seed=2, train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
     assert "error" not in make_result, make_result
 
@@ -299,13 +299,13 @@ def test_run_hyperparameter_search_admits_split_draws_bound_with_auto_val_false(
     """A bound base_config reads neither val_images_dir nor auto_val (the manifest branch binds
     ahead of both), so auto_val=False no longer refuses it the way it refuses a drawn config."""
     import tcip_mcp.tools.training_tools as tt
-    from tcip_mcp.tools.data_tools import make_splits
+    from tcip_mcp.tools.data_tools import draw_splits
 
     from tests.test_split_manifest_binding import DATES, SUBJECT, _two_subject_two_date_dataset
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     manifest_dir = tmp_path / "m"
-    make_result = make_splits(str(root), output_path=str(manifest_dir), subject=SUBJECT,
+    make_result = draw_splits(str(root), output_path=str(manifest_dir), subject=SUBJECT,
                               seed=2, train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
     assert "error" not in make_result, make_result
 

@@ -70,9 +70,9 @@ def _dataset(root: Path, stems=_STEMS) -> Path:
 def _draw(root: Path, out: Path, *, seed: int = 2) -> dict:
     import tcip_store as ts
 
-    from tcip_mcp.tools.data_tools import make_splits, split_manifest_key
+    from tcip_mcp.tools.data_tools import draw_splits, split_manifest_key
 
-    result = make_splits(str(root), output_path=str(out), subject=SUBJECT, seed=seed,
+    result = draw_splits(str(root), output_path=str(out), subject=SUBJECT, seed=seed,
                          train_ratio=0.4, val_ratio=0.3, calibration_ratio=0.3)
     assert "error" not in result, result
     return ts.read(split_manifest_key(out))
@@ -511,7 +511,7 @@ def test_an_unbound_run_calibrated_under_a_caller_named_manifest_seals_null_keys
 def test_read_split_manifest_dir_refuses_a_members_block_without_label_digests(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A manifest ``make_splits`` itself wrote, stripped of one date's ``label_digests`` the way
+    """A manifest ``draw_splits`` itself wrote, stripped of one date's ``label_digests`` the way
     an old, pre-family manifest would carry it: every other required key present, so the refusal
     is provably about this key, not a stand-in shaped so loosely it would refuse for any reason."""
     import tcip_store as ts
@@ -538,7 +538,7 @@ def test_read_split_manifest_dir_refuses_a_members_block_with_an_empty_label_dig
 ) -> None:
     """An empty (or null) ``label_digests`` is not merely absent, and admitting it would let
     ``_resolve_label_movement`` read an empty ``at_split`` as "checked, nothing moved" rather
-    than "not checked": ``make_splits`` never writes a members block for a date with no admitted
+    than "not checked": ``draw_splits`` never writes a members block for a date with no admitted
     stems, so a legitimate block's ``label_digests`` is never empty either."""
     import tcip_store as ts
 
@@ -555,7 +555,7 @@ def test_read_split_manifest_dir_refuses_a_members_block_with_an_empty_label_dig
         read_split_manifest_dir(out)
 
 
-def test_read_split_manifest_dir_admits_a_manifest_make_splits_wrote(
+def test_read_split_manifest_dir_admits_a_manifest_draw_splits_wrote(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from tcip_mcp.tools.data_tools import read_split_manifest_dir
@@ -637,7 +637,7 @@ def test_manifest_digest_is_the_one_function_the_bind_write_and_the_calibration_
 def test_dataset_hash_and_label_digests_reads_each_label_once_and_agrees_with_the_apart_calls(
     tmp_path: Path,
 ) -> None:
-    """The pair ``make_splits`` actually calls, ``dataset_hash_and_label_digests``, reads every
+    """The pair ``draw_splits`` actually calls, ``dataset_hash_and_label_digests``, reads every
     label's bytes once (not twice, once per digest, the way calling ``dataset_hash`` and
     ``label_digests`` apart would) and returns the same values those two calls would have: the
     earlier spy above proves only ``label_digests`` alone reads once, and says nothing about the
@@ -669,7 +669,7 @@ def test_dataset_hash_and_label_digests_reads_each_label_once_and_agrees_with_th
     assert opened.count(labels_dir / "present.json") == 1
 
 
-def test_make_splits_calls_the_combined_helper_not_dataset_hash_and_label_digests_apart(
+def test_draw_splits_calls_the_combined_helper_not_dataset_hash_and_label_digests_apart(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The draw calls ``dataset_hash_and_label_digests`` once per date, the single-pass helper,

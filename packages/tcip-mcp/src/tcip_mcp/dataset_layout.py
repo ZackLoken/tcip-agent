@@ -167,7 +167,7 @@ def resolve_image_name(dataset_root: str | Path, date: Optional[str], stem: str)
     """The on-disk display name of the logical image at ``stem`` for one capture date.
 
     Resolves through :func:`resolve_images_dir`, the same directory a subject-scoped draw
-    (``make_splits``, a training run's own admission) reads that date's images from, so a label
+    (``draw_splits``, a training run's own admission) reads that date's images from, so a label
     dated while its images were never split into date buckets resolves here the way it is
     admitted there, instead of naming a different directory than the draw does. Within that
     directory, the same resolution :func:`~tcip_mcp.pipelines.image_utils.resolve_image_source`
@@ -282,7 +282,7 @@ def annotation_date(path: str | Path) -> Optional[str]:
 
 
 #: The top-level segments under a dataset root; a path under any of them locates the root.
-#: ``labels`` covers a split-materialized tree (``make_splits(materialize=True)`` writes
+#: ``labels`` covers a split-materialized tree (``draw_splits(materialize=True)`` writes
 #: ``{split}/labels/*.json`` rather than ``annotations/``) so the same locator resolves both shapes.
 _DATASET_SEGMENTS = ("annotations", "predictions", "images", "labels")
 
@@ -428,7 +428,7 @@ def image_status_path(dataset_root: str | Path) -> Path:
     Sibling of ``classes_path``/``dataset_identity_path``: a Complete is a fact about the dataset's
     content (what actually trains), so it travels with the dataset rather than living in whichever
     project's private ``.tcip/`` happens to be an ancestor. The single locator every writer
-    (the GUI's review flow, ``materialize_dataset``, ``make_splits``) and every reader
+    (the GUI's review flow, ``materialize_dataset``, ``draw_splits``) and every reader
     (``confirmed_negative_names``, ``doctor.py``) must call; never reconstruct this path locally.
     """
     return _entry_path(_STATE_DOC, dataset_root, _IMAGE_STATUS_PARTS)

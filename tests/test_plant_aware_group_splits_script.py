@@ -1,10 +1,10 @@
-"""``scripts/plant_aware_group_splits.py``: plant/plot-identity group keys for ``make_splits``.
+"""``scripts/plant_aware_group_splits.py``: plant/plot-identity group keys for ``draw_splits``.
 
 Builds synthetic per-stem georeferenced GeoTIFFs (the same tiepoint + pixel-scale + GeoKeyDirectory
 tag pattern ``test_orthomosaic_mapping.py`` uses) at known real-world offsets from two plants, and
 checks the derived ``{stem: group_key}`` map: same physical plant -> same group key regardless of
 which "date" (source raster) the stem came from, a plant far outside tolerance -> a named refusal,
-an ungeoreferenced source -> a named refusal, and the map ``make_splits(group_key_map=...)`` actually
+an ungeoreferenced source -> a named refusal, and the map ``draw_splits(group_key_map=...)`` actually
 accepts, keeping every group's stems on one split side.
 """
 
@@ -191,7 +191,7 @@ def test_refuses_on_empty_plant_list(tmp_path: Path) -> None:
         derive_plant_group_key_map({"r1": r1}, [])
 
 
-# ── make_splits(group_key_map=...) admits the derived map (rail-admits-valid-work) ─────────────
+# ── draw_splits(group_key_map=...) admits the derived map (rail-admits-valid-work) ─────────────
 
 
 SUBJECT = "leaf"
@@ -212,12 +212,12 @@ def _write_dataset_stem(dataset_root: Path, date: str, stem: str, tiepoint: tupl
     )
 
 
-def test_make_splits_keeps_every_plants_stems_on_one_split_side(
+def test_draw_splits_keeps_every_plants_stems_on_one_split_side(
     tmp_path: Path, four_plant_csv: Path,
 ) -> None:
     from tcip_mcp.dataset_layout import parse_image_path
     from tcip_mcp.pipelines.data.splits import member_identity
-    from tcip_mcp.tools.data_tools import _scan_dataset, make_splits, split_manifest_key
+    from tcip_mcp.tools.data_tools import _scan_dataset, draw_splits, split_manifest_key
 
     dataset_root = tmp_path / "dataset"
     # Four plants, two capture dates each: eight stems total, four groups of two, exactly the
@@ -236,7 +236,7 @@ def test_make_splits_keeps_every_plants_stems_on_one_split_side(
     group_key_map = derive_plant_group_key_map(stem_to_raster, _plants(four_plant_csv))
 
     out_dir = tmp_path / "splits_out"
-    result = make_splits(
+    result = draw_splits(
         folder_path=str(dataset_root), train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25,
         seed=0, group_key_map=group_key_map, output_path=str(out_dir), subject=SUBJECT,
     )

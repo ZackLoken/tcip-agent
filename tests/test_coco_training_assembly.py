@@ -670,7 +670,7 @@ def test_a_confirmation_does_not_leak_across_subjects(tmp_path):
 def test_unresolvable_subject_refuses_rather_than_dropping_negatives(tmp_path):
     """Silently returning nothing would discard every hard negative the review loop harvested.
 
-    A flat ``labels/`` dir (the shape ``make_splits(materialize=True)`` emits) can't name its
+    A flat ``labels/`` dir (the shape ``draw_splits(materialize=True)`` emits) can't name its
     subject from its path; the confirmations live dataset-native, a sibling of ``labels/``'s own
     resolved root, not found by walking arbitrarily far up an ancestor chain.
     """
@@ -703,10 +703,10 @@ def test_a_derived_tree_without_negatives_does_not_refuse(tmp_path):
 
 
 def test_split_tree_carries_its_confirmed_negatives(tmp_path):
-    """make_splits(materialize=True) emits {train,val,test}/labels, which cannot name its subject,
+    """draw_splits(materialize=True) emits {train,val,test}/labels, which cannot name its subject,
     so it must carry the confirmations rather than inherit them by accident."""
     from tcip_mcp.pipelines.data.label_queries import confirmed_negative_names
-    from tcip_mcp.tools.data_tools import make_splits
+    from tcip_mcp.tools.data_tools import draw_splits
 
     images = tmp_path / "images"
     labels = tmp_path / "annotations"
@@ -721,7 +721,7 @@ def test_split_tree_carries_its_confirmed_negatives(tmp_path):
                           recorded_by="user:breeder")
 
     out = tmp_path / "splits"
-    make_splits(str(tmp_path), output_path=str(out), materialize=True, subject="catkin",
+    draw_splits(str(tmp_path), output_path=str(out), materialize=True, subject="catkin",
                train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
 
     carried = set()
@@ -739,7 +739,7 @@ def test_split_tree_carries_a_quarantine_capable_stamp(tmp_path):
     from tcip_mcp import class_registry
     from tcip_mcp.class_registry import write_registry
     from tcip_mcp.dataset_layout import image_status_digest_key
-    from tcip_mcp.tools.data_tools import make_splits
+    from tcip_mcp.tools.data_tools import draw_splits
 
     images = tmp_path / "images"
     labels = tmp_path / "annotations"
@@ -763,7 +763,7 @@ def test_split_tree_carries_a_quarantine_capable_stamp(tmp_path):
     stamp_image_status_digests(tmp_path, status_bucket("catkin", None), neg_names, expected_digest)
 
     out = tmp_path / "splits"
-    make_splits(str(tmp_path), output_path=str(out), materialize=True, subject="catkin",
+    draw_splits(str(tmp_path), output_path=str(out), materialize=True, subject="catkin",
                train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
 
     found = False

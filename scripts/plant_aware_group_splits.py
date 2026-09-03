@@ -1,6 +1,6 @@
-"""Plant-aware group-key derivation for ``make_splits``, over per-stem georeferenced rasters.
+"""Plant-aware group-key derivation for ``draw_splits``, over per-stem georeferenced rasters.
 
-A train/val split that groups only by tile prefix (``make_splits``' default) never notices
+A train/val split that groups only by tile prefix (``draw_splits``' default) never notices
 that two differently-named images from two different capture dates are photos of the *same*
 physical plant: nothing in either stem says so. When a dataset's images are themselves individually
 georeferenced rasters (e.g. per-plant/per-region GeoTIFF chips cut from a larger orthomosaic, which
@@ -12,12 +12,12 @@ split side.
 Composes three existing pieces without reimplementing any of them: ``read_plant_csvs`` (the plant
 CSV parser), ``OrthomosaicGeoreference.pixel_to_wgs84`` (GeoTIFF pixel -> WGS84), and
 ``_nearest_plant`` (GPS nearest-neighbour match) -- then hands the resulting ``{identity:
-group_key}`` map to ``make_splits(group_key_map=...)``, which already refuses loudly (via
+group_key}`` map to ``draw_splits(group_key_map=...)``, which already refuses loudly (via
 ``resolve_group_key_fn``) if the map doesn't cover every member it needs. ``identity`` is
 ``<date>/<stem>`` (:func:`~tcip_mcp.pipelines.data.splits.member_identity`, the same identity
-``make_splits`` keys its own members by), since a stem is unique only within one capture date.
+``draw_splits`` keys its own members by), since a stem is unique only within one capture date.
 
-``--subject`` is required: ``make_splits`` draws its members through the platform's own
+``--subject`` is required: ``draw_splits`` draws its members through the platform's own
 per-subject admission and refuses to write a manifest without one.
 
 Usage:
@@ -71,7 +71,7 @@ def derive_plant_group_key_map(
 
     Every stem must resolve: a stem whose raster can't be georeferenced, or whose nearest plant
     falls outside tolerance, is a real gap in this map, not something to silently drop and let
-    ``make_splits``' generic "group_key_map is missing N stems" surface downstream instead. Raises
+    ``draw_splits``' generic "group_key_map is missing N stems" surface downstream instead. Raises
     ``ValueError`` naming every such stem and its specific cause once all stems have been checked,
     rather than stopping at the first.
     """
@@ -151,13 +151,13 @@ def main(argv: list[str] | None = None) -> int:
                          help="Max GPS distance (m) to the nearest plant. Defaults to "
                               "grid_pitch_m(plants)/6, the same derivation build_mapping/"
                               "assign_detections_to_plants already use.")
-    parser.add_argument("--output-path", default=None, help="Where make_splits writes manifests.")
+    parser.add_argument("--output-path", default=None, help="Where draw_splits writes manifests.")
     parser.add_argument("--materialize", action="store_true",
                          help="Also lay out a {train,val,calibration}/{images,labels}/ tree.")
     parser.add_argument("--no-copy", action="store_true",
                          help="Symlink instead of copy when materializing.")
     parser.add_argument("--subject", required=True,
-                         help="The object class make_splits draws its members for and the "
+                         help="The object class draw_splits draws its members for and the "
                               "confirmed negatives are keyed under.")
     parser.add_argument("--attribute", default=None,
                          help="Scope the draw to instances already assessed for this attribute "
@@ -170,7 +170,7 @@ def main(argv: list[str] | None = None) -> int:
     from tcip_mcp.dataset_layout import parse_image_path
     from tcip_mcp.pipelines.data.splits import member_identity
     from tcip_mcp.pipelines.postprocessing.plant_mapping import read_plant_csvs
-    from tcip_mcp.tools.data_tools import _scan_dataset, make_splits
+    from tcip_mcp.tools.data_tools import _scan_dataset, draw_splits
 
     bind_default()
 
@@ -199,7 +199,7 @@ def main(argv: list[str] | None = None) -> int:
     n_groups = len(set(group_key_map.values()))
     print(f"Resolved {len(group_key_map)} stem(s) to {n_groups} plant/plot group(s).")
 
-    result = make_splits(
+    result = draw_splits(
         folder_path=args.dataset_root,
         train_ratio=args.train_ratio,
         val_ratio=args.val_ratio,
@@ -213,7 +213,7 @@ def main(argv: list[str] | None = None) -> int:
         attribute=args.attribute,
     )
     if "error" in result:
-        print(f"error: make_splits refused: {result['error']}", file=sys.stderr)
+        print(f"error: draw_splits refused: {result['error']}", file=sys.stderr)
         return 1
 
     print(json.dumps(result, indent=2))

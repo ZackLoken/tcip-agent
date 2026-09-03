@@ -37,6 +37,7 @@ RENAMES = [
     ("domain_knowledge", "serve_domain_knowledge"),
     ("focus", "focus_human_attention"),
     ("force_redraw_cal_holdout_split", "redraw_calibration_holdout"),
+    ("make_splits", "draw_splits"),
 ]
 
 _OWN_FILE = str(Path(__file__).relative_to(REPO_ROOT)).replace("\\", "/")

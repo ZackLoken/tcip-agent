@@ -404,7 +404,7 @@ def test_image_extent_from_labels(tmp_path):
 
 
 def _leaf_dataset(root, *, date: str | None):
-    """A minimal ``leaf``-labeled tree ``make_splits`` can draw from: a dated
+    """A minimal ``leaf``-labeled tree ``draw_splits`` can draw from: a dated
     ``images/<date>/`` + ``annotations/<date>/`` pair when ``date`` is given, a flat
     ``images/`` + ``annotations/`` pair otherwise."""
     from PIL import Image
@@ -427,9 +427,9 @@ def _leaf_dataset(root, *, date: str | None):
 
 
 def _draw_leaf_manifest(root, out, *, date: str | None):
-    from tcip_mcp.tools.data_tools import make_splits, split_manifest_key
+    from tcip_mcp.tools.data_tools import draw_splits, split_manifest_key
 
-    result = make_splits(str(root), output_path=str(out), subject="leaf", seed=1,
+    result = draw_splits(str(root), output_path=str(out), subject="leaf", seed=1,
                          train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
     assert "error" not in result, result
     return ts.read(split_manifest_key(out))
@@ -485,7 +485,7 @@ def test_manifest_scope_issues_names_the_manifest_directory_when_given(tmp_path)
     assert any(i.startswith(f"split manifest at {str(out)!r} holds no members") for i in named)
 
 
-def test_manifest_scope_issues_admits_a_make_splits_manifest_dated_and_flat(tmp_path):
+def test_manifest_scope_issues_admits_a_draw_splits_manifest_dated_and_flat(tmp_path):
     from tcip_mcp.pipelines.data.splits import manifest_scope_issues
 
     dated_root = tmp_path / "dated"

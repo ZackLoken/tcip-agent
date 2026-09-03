@@ -4,7 +4,7 @@ Torch-free. Turns review verdicts (per-image shards under ``.tcip/state/review/`
   - accepted / edited GT boxes  -> positive name-based per-image JSON labels (the canonical format)
   - rejected-only images        -> confirmed-negative JSON (``{"annotations": []}``) backgrounds
 plus a ``curated_manifest.json`` for provenance. The output layout (``images/`` + ``annotations/``)
-matches ``data_tools._scan_dataset`` so the loop chains straight into ``make_splits`` /
+matches ``data_tools._scan_dataset`` so the loop chains straight into ``draw_splits`` /
 ``launch_training`` with no glue.
 
 The verdict log stores normalized center-form boxes (``[cx, cy, w, h]``) plus the class *name*

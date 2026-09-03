@@ -140,7 +140,7 @@ reaching for again versus one built narrowly for a specific past investigation.
 - `render_failure_cases.py` - finds and renders the worst predictions for failure analysis,
   ranked by a count-mismatch-plus-low-confidence heuristic; not a substitute for
   `score_predictions(detail=True)`'s IoU-matched TP/FP/FN when mislocalization is the question.
-- `plant_aware_group_splits.py` - derives a plant-aware group key for `make_splits` over
+- `plant_aware_group_splits.py` - derives a plant-aware group key for `draw_splits` over
   per-stem georeferenced raster datasets, so every capture of one physical plant across every
   date lands in the same split side instead of only grouping by tile prefix.
 - `shp_to_plant_csv.py` - converts a plant-locations shapefile into `read_plant_csvs`' CSV

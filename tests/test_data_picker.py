@@ -72,9 +72,9 @@ def test_narrow_manifest_to_date_matches_bind_manifest_stems_own_arithmetic(tmp_
 
 
 def _manifest_missing_images_root(root: Path, out: Path, date: str) -> dict:
-    """A real ``make_splits`` draw, hand-mutated to drop one date's ``images_root``: the shape a
+    """A real ``draw_splits`` draw, hand-mutated to drop one date's ``images_root``: the shape a
     hand-edited or pre-images_root manifest would read as. Every other required field stays
-    exactly what ``make_splits`` wrote, so this exercises only the one field under test."""
+    exactly what ``draw_splits`` wrote, so this exercises only the one field under test."""
     from tcip_mcp.pipelines.data.splits import manifest_date_key
     from tcip_mcp.tools.data_tools import split_manifest_key
 
@@ -143,9 +143,9 @@ def test_preflight_names_the_manifest_directory_in_the_date_block_message(tmp_pa
 
 
 def _manifest_empty_val_side(root: Path, out: Path, date: str) -> dict:
-    """A real ``make_splits`` draw, hand-mutated to drop one date's ``val`` members: the shape a
+    """A real ``draw_splits`` draw, hand-mutated to drop one date's ``val`` members: the shape a
     manifest binds to as leaving a run's own date with an empty side. Every other required field
-    stays exactly what ``make_splits`` wrote, so this exercises only the one refusal under test."""
+    stays exactly what ``draw_splits`` wrote, so this exercises only the one refusal under test."""
     from tcip_mcp.pipelines.data.splits import member_identity_parts
     from tcip_mcp.tools.data_tools import split_manifest_key
 
@@ -190,10 +190,10 @@ def test_preflight_config_flags_a_manifest_that_leaves_an_empty_side_under_this_
     assert any("empty side" in i for i in result["issues"])
 
 
-def test_manifest_compatibility_admits_a_make_splits_manifest_with_no_empty_side(
+def test_manifest_compatibility_admits_a_draw_splits_manifest_with_no_empty_side(
     tmp_path: Path,
 ):
-    """A manifest make_splits itself drew, never hand-mutated: valid work still passes once the
+    """A manifest draw_splits itself drew, never hand-mutated: valid work still passes once the
     empty-side check lives in the shared function."""
     from tcip_mcp.tools.training_tools import manifest_compatibility
 
@@ -231,7 +231,7 @@ def test_manifest_compatibility_scope_check_reaches_the_picker(tmp_path: Path, m
 
 def test_preflight_config_flags_a_manifest_with_no_images_root_recorded(tmp_path: Path):
     """The same refusal, reached through preflight_config: a stated root must be positively
-    carried, and make_splits always writes one, so only a hand-edited manifest ever trips it."""
+    carried, and draw_splits always writes one, so only a hand-edited manifest ever trips it."""
     from tcip_mcp.tools.training_tools import preflight_config
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
@@ -347,7 +347,7 @@ def test_list_split_choices_route_404s_for_an_unknown_experiment(
 def test_list_split_choices_offers_every_recorded_partition_with_the_bindings_own_counts(
     tmp_path: Path, monkeypatch,
 ):
-    """Through the platform's own producers: a manifest ``make_splits`` writes under the
+    """Through the platform's own producers: a manifest ``draw_splits`` writes under the
     dataset's own ``splits`` directory, a second one elsewhere that a run bound to through
     ``launch_training``, a third for another subject reached through a bound run (listed
     disabled with the compatibility text), and a directory whose record will not decode (listed
