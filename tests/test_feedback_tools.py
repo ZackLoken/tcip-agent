@@ -798,4 +798,3 @@ def test_feedback_tools_register_in_manifest():
     names = list_registered_tools()
     assert "materialize_review_dataset" in names
     assert "prioritize_review_queue" in names
-    assert "triage_predictions" in names

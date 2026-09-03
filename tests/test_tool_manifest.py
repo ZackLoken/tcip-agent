@@ -149,8 +149,6 @@ def test_consolidated_tools_present_and_removed_absent():
         "deliver_per_image_counts", "view_gui_state",
         # Method-neutral auto-labeling seam: no longer SAM-specific names.
         "propose_annotations", "stage_proposals", "segment_prompt",
-        # Split from prioritize_review_queue's own confidence-triage strategy.
-        "triage_predictions",
     ):
         assert present in registered, f"{present} should be registered"
     removed = {
@@ -202,6 +200,8 @@ def test_consolidated_tools_present_and_removed_absent():
         "read_annotations",
         # Demoted to a library call plus scripts/score_predictions.py.
         "score_predictions",
+        # Demoted to a library call plus scripts/triage_predictions.py.
+        "triage_predictions",
     }
     assert not (removed & registered), f"removed tools still registered: {removed & registered}"
 

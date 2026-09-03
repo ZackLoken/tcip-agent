@@ -508,6 +508,7 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | scripts/smoke_fence_e2e.py | Live smoke: does the real fenced `claude` refuse to edit platform internals? | 3 | 0 |
 | scripts/smoke_phenology_e2e.py | Live e2e smoke: the agent's phenology pipeline on real geolocated images. | 9 | 0 |
 | scripts/smoke_terminal_e2e.py | One-shot smoke: the embedded agent terminal against the real `claude` CLI. | 2 | 0 |
+| scripts/triage_predictions.py | Sort a checkpoint's own predictions by confidence, through the demoted `triage_predictions` function. | 3 | 0 |
 | scripts/verify_citations.py | Check that literature citations point at real code, real papers, and real sentences. | 0 | 0 |
 | scripts/verify_claims.py | List every claim-shaped sentence this change *adds* to comments and docstrings. | 0 | 0 |
 | scripts/verify_doc_examples.py | Verify that code examples in knowledge documents and source docstrings actually work. | 1 | 0 |
@@ -686,6 +687,7 @@ A module counts as zero-importer when no other module in its own scanned tree re
 | scripts | scripts/smoke_fence_e2e.py |
 | scripts | scripts/smoke_phenology_e2e.py |
 | scripts | scripts/smoke_terminal_e2e.py |
+| scripts | scripts/triage_predictions.py |
 | scripts | scripts/verify_citations.py |
 | scripts | scripts/verify_claims.py |
 | scripts | scripts/verify_doc_examples.py |
@@ -735,13 +737,12 @@ Docstring is the function's docstring first line, verbatim.
 | `list_experiments` | `experiment_tools.py:83` | yes | Enumerate every experiment the store holds a status record for. |
 | `compare_experiments` | `experiment_tools.py:106` | yes | Side-by-side comparison of multiple experiments. |
 
-### feedback_tools.py (3 tools)
+### feedback_tools.py (2 tools)
 
 | tool | line | audited | docstring first line |
 |---|---|---|---|
 | `materialize_review_dataset` | `feedback_tools.py:166` | yes | Build a curated detection dataset from human review verdicts. |
 | `prioritize_review_queue` | `feedback_tools.py:341` | yes | Rank un-reviewed images by active-learning informativeness for the next review batch. |
-| `triage_predictions` | `feedback_tools.py:454` | yes | Sort a checkpoint's own predictions by confidence into auto-accept, needs-review and unscoreable queues (the first two can overlap). |
 
 ### gui_tools.py (2 tools)
 

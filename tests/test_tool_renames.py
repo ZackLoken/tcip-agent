@@ -198,6 +198,7 @@ DEMOTED = [
     "preflight_config",
     "read_annotations",
     "score_predictions",
+    "triage_predictions",
 ]
 
 _TOOL_TABLE_ROW_PATTERN = r"^\|\s*`{}`\s*\|"
