@@ -867,12 +867,12 @@ anything.
 
 | tool | line | audited | docstring first line |
 |---|---|---|---|
-| `launch_training` | `training_tools.py:707` | yes | Launch a training run in an isolated subprocess from a bespoke ``model_source`` builder. |
-| `monitor_training` | `training_tools.py:941` | yes | Check the status of a training run. |
-| `cancel_training` | `training_tools.py:1311` | yes | Request graceful cancellation of a running training run. |
-| `run_hyperparameter_search` | `training_tools.py:1886` | yes | Run hyperparameter optimization on Ray Tune, training each trial for real. |
-| `cancel_hyperparameter_search` | `training_tools.py:2281` | yes | Request cooperative cancellation of a running HPO sweep. |
-| `evaluate_model` | `training_tools.py:2932` | yes | Evaluate a trained checkpoint on a (held-out) dataset and write test_results.json. |
+| `launch_training` | `training_tools.py:703` | yes | Launch a training run in an isolated subprocess from a bespoke ``model_source`` builder. |
+| `monitor_training` | `training_tools.py:937` | yes | Check the status of a training run, or of a hyperparameter sweep. |
+| `cancel_training` | `training_tools.py:1332` | yes | Request graceful cancellation of a running training run. |
+| `run_hyperparameter_search` | `training_tools.py:1993` | yes | Run hyperparameter optimization on Ray Tune, training each trial for real. |
+| `cancel_hyperparameter_search` | `training_tools.py:2388` | yes | Request cooperative cancellation of a running HPO sweep. |
+| `evaluate_model` | `training_tools.py:3039` | yes | Evaluate a trained checkpoint on a (held-out) dataset and write test_results.json. |
 
 ### vision_tools.py (1 tool)
 
@@ -1071,16 +1071,16 @@ registered at HEAD.
 
 | method | path | handler | line |
 |---|---|---|---|
-| POST | `/sweeps` | `relaunch_sweep` | `routes/tuning.py:517` |
-| POST | `/sweeps/{sweep_id}/cancel` | `cancel_sweep_route` | `routes/tuning.py:557` |
-| GET | `/sweeps` | `list_sweeps` | `routes/tuning.py:568` |
-| GET | `/sweeps/{sweep_id}` | `get_sweep` | `routes/tuning.py:584` |
-| GET | `/sweeps/{sweep_id}/trials` | `list_trials` | `routes/tuning.py:635` |
-| GET | `/sweeps/{sweep_id}/trials/{trial_id}/metrics` | `get_trial_metrics` | `routes/tuning.py:668` |
-| GET | `/ray-dashboard` | `get_ray_dashboard` | `routes/tuning.py:695` |
-| POST | `/sweeps/{sweep_id}/tensorboard` | `launch_sweep_tensorboard` | `routes/tuning.py:781` |
-| POST | `/sweeps/{sweep_id}/trials/{trial_id}/tensorboard` | `launch_trial_tensorboard` | `routes/tuning.py:798` |
-| POST | `/sweeps/{sweep_id}/trials/{trial_id}/tensorboard/stop` | `stop_trial_tensorboard` | `routes/tuning.py:812` |
+| POST | `/sweeps` | `relaunch_sweep` | `routes/tuning.py:515` |
+| POST | `/sweeps/{sweep_id}/cancel` | `cancel_sweep_route` | `routes/tuning.py:555` |
+| GET | `/sweeps` | `list_sweeps` | `routes/tuning.py:566` |
+| GET | `/sweeps/{sweep_id}` | `get_sweep` | `routes/tuning.py:582` |
+| GET | `/sweeps/{sweep_id}/trials` | `list_trials` | `routes/tuning.py:628` |
+| GET | `/sweeps/{sweep_id}/trials/{trial_id}/metrics` | `get_trial_metrics` | `routes/tuning.py:649` |
+| GET | `/ray-dashboard` | `get_ray_dashboard` | `routes/tuning.py:676` |
+| POST | `/sweeps/{sweep_id}/tensorboard` | `launch_sweep_tensorboard` | `routes/tuning.py:762` |
+| POST | `/sweeps/{sweep_id}/trials/{trial_id}/tensorboard` | `launch_trial_tensorboard` | `routes/tuning.py:779` |
+| POST | `/sweeps/{sweep_id}/trials/{trial_id}/tensorboard/stop` | `stop_trial_tensorboard` | `routes/tuning.py:793` |
 
 ### routes/validation.py, prefix `/api/review` (1 route)
 
@@ -2032,7 +2032,7 @@ config-only conflict and task checks (computed before any read, so an unreadable
 suppresses them) and the manifest-dependent checks (subject/attribute, date, images-root
 presence and movement, and an empty train/val side once narrowed to the run's own date).
 `preflight_config` calls both halves directly, in the same order, over a manifest it read
-itself; `training_tools.list_split_choices` (`training_tools.py:1140`), the relaunch data
+itself; `training_tools.list_split_choices` (`training_tools.py:1161`), the relaunch data
 picker's own reader wrapped by `GET /api/training/configs/{experiment_id}/splits`, calls the
 composed function per candidate manifest it read through the checked variant above, and builds
 each candidate's launch config through `training_tools.candidate_config_with_manifest`
@@ -2212,7 +2212,7 @@ Phase 3 verdict: single.
 
 Must agree: the writer's row shape is what the reader and the stream consumer expect.
 Side A: `packages/tcip-mcp/src/tcip_mcp/experiments.py:948` (`def log_metrics(`, the one writer; the trainer and the envelope hand rows to the context's epoch sink instead of opening the file).
-Side B: `packages/tcip-web/src/tcip_web/routes/training.py:324` (`read_log(key, after=cursor)`, the training stream's incremental tail, pushed as a `TrainingMetricFrame` per row) and `routes/tuning.py:660` (`read_log(trial_metrics_key`, answered in the shape `_metrics_common.metrics_response` builds).
+Side B: `packages/tcip-web/src/tcip_web/routes/training.py:324` (`read_log(key, after=cursor)`, the training stream's incremental tail, pushed as a `TrainingMetricFrame` per row) and `routes/tuning.py:662` (`read_log(trial_metrics_key`, answered in the shape `_metrics_common.metrics_response` builds).
 Phase 3 verdict: single. An HPO trial with no experiment record still appends to its own trial log, one declared site in the epoch sink, pending the HPO store migration.
 
 ## S09. Web job registries persisted to .tcip/state/<name>.json  <!-- queued: P5-325 unify -->

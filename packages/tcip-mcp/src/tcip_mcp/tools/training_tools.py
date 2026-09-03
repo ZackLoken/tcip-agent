@@ -938,17 +938,42 @@ def _watch_wall_clock(proc: subprocess.Popen, run: Any, experiment_id: str,
 
 @mcp.tool()
 @audited
-def monitor_training(run_id: str) -> dict:
-    """Check the status of a training run.
+def monitor_training(run_id: str | None = None, sweep_id: str | None = None) -> dict:
+    """Check the status of a training run, or of a hyperparameter sweep.
 
-    Reads the run's own status/metrics from disk whenever its training body runs in a
-    subprocess, the in-memory record for a subprocess-delegated run is a launch-time placeholder
-    only, since the subprocess mutates its own separate copy in its own process memory, or when
-    this process never held the run in memory at all (a different process launched it).
+    Exactly one of ``run_id`` and ``sweep_id`` names what to check; both or neither refuses by
+    name. The two return different shapes.
+
+    ``run_id``: reads the run's own status/metrics from disk whenever its training body runs in
+    a subprocess, the in-memory record for a subprocess-delegated run is a launch-time
+    placeholder only, since the subprocess mutates its own separate copy in its own process
+    memory, or when this process never held the run in memory at all (a different process
+    launched it). Returns ``{"run_id", "status", "epoch", "best_metric", "output_dir", "error",
+    "tensorboard_url"}``.
+
+    ``sweep_id``: reads the sweep's own manifest and trial directories from disk under this
+    process's own pinned platform root, through :func:`read_sweep_from_disk`, the same reader
+    ``routes.tuning``'s disk-only paths call: an agent on a host with no browser open answers the
+    same "how is this sweep doing" question the Tuning tab reads. This is a disk read only, so a
+    sweep a live web session just launched over HTTP but has not yet written a manifest for
+    reads as not found. Returns ``read_sweep_from_disk``'s own shape (``{"sweep_id", "status",
+    "error", "result", "manifest", "relaunched_from", "has_manifest", "trials"}``), or
+    ``{"error": ...}`` when no manifest exists.
 
     Args:
-        run_id: Training run identifier.
+        run_id: Training run identifier. Exactly one of ``run_id``/``sweep_id`` is required.
+        sweep_id: Hyperparameter sweep identifier. Exactly one of ``run_id``/``sweep_id``.
     """
+    if (run_id is None) == (sweep_id is None):
+        return {"error": "exactly one of run_id or sweep_id is required, got "
+                          f"run_id={run_id!r} sweep_id={sweep_id!r}"}
+
+    if sweep_id is not None:
+        disk_sweep = read_sweep_from_disk(sweep_id)
+        if disk_sweep is None:
+            return {"error": f"sweep not found: {sweep_id}"}
+        return disk_sweep
+
     from tcip_mcp.pipelines.training.run_registry import get_run
     run = get_run(run_id)
 
@@ -1663,6 +1688,10 @@ def sweep_manifest_key(
                (_sweep_name(study_name), "manifest"))
 
 
+STUDY_RESULT_FIELDS = ("all_trials", "search_alg", "scheduler", "warm_start", "baseline_params")
+"""The study result's own fields, absent from the manifest's completion projection."""
+
+
 def study_result_key(
     study_name: str, output_dir: str = "", *, root: Path | str | None = None
 ) -> Key:
@@ -1722,6 +1751,88 @@ def trial_metrics_key_for_dir(trial_dir: Path | str) -> Key:
     """
     path = Path(trial_dir).resolve()
     return trial_metrics_key(path.parent, path.name)
+
+
+def read_sweep_from_disk(sweep_id: str, *, root: Path | str | None = None) -> dict[str, Any] | None:
+    """One sweep's manifest-derived summary plus every trial directory it has produced, read
+    from the sweep's own store records alone, with no in-memory job registry consulted.
+
+    Returns ``None`` when no manifest exists under ``root`` (the current platform root when
+    ``root`` is ``None``): the "sweep not found" case ``routes.tuning.get_sweep``'s disk branch
+    and ``routes.tuning.list_trials`` already answer this way, and ``monitor_training``'s own
+    caller answers the same. Otherwise: ``{"sweep_id", "status", "error", "result", "manifest",
+    "relaunched_from", "has_manifest": True, "trials"}``. ``status`` is the derived liveness
+    (:func:`sweep_state`, ``driver_live=False``: no process reading from disk alone can vouch
+    for a sweep's driver). ``result`` gains the study result's own fields
+    (:const:`STUDY_RESULT_FIELDS`) once the sweep is ``"completed"`` and its manifest result does
+    not already carry them. ``trials`` is one entry per ``trial_<id>`` directory under the
+    sweep's own root: its resolved params, unconsumed params, and whether it has logged any
+    metrics yet (rows, a torn tail, undecodable bytes, or an unknown schema_version all count as
+    "yes").
+
+    This is the one reader ``routes.tuning``'s disk-only paths and ``monitor_training(sweep_id=)``
+    both call rather than each re-implementing it: the web route's own live/jobstore branch (an
+    in-memory job this process is still running) is a different question this function does not
+    answer, and stays the route's own code.
+    """
+    from tcip_store import read_log
+
+    # BadKey from an invalid sweep_id propagates uncaught, matching cancel_hyperparameter_search.
+    manifest_key = sweep_manifest_key(sweep_id, root=root)
+    try:
+        manifest = store.read(manifest_key, default=None)
+    except DecodeError:
+        logger.warning("the manifest for sweep %s does not decode", sweep_id, exc_info=True)
+        manifest = None
+    if not isinstance(manifest, dict):
+        return None
+
+    result = manifest.get("result") or {}
+    status = sweep_state(manifest, stale_seconds=TCIP_HEARTBEAT_STALE_SECONDS, driver_live=False)
+    if status == "completed" and "all_trials" not in result:
+        try:
+            study_result = store.read(study_result_key(sweep_id, root=root), default=None)
+        except DecodeError:
+            study_result = None
+        if isinstance(study_result, dict):
+            result = {
+                **result,
+                **{k: study_result[k] for k in STUDY_RESULT_FIELDS if k in study_result},
+            }
+
+    trials: list[dict[str, Any]] = []
+    sweep_directory = sweep_dir(sweep_id, root=root)
+    if sweep_directory.is_dir():
+        for d in sorted(sweep_directory.iterdir()):
+            if not d.is_dir() or not d.name.startswith(_TRIAL_DIR_PREFIX):
+                continue
+            try:
+                resolved = store.read(trial_config_key(sweep_directory, d.name), default={})
+            except DecodeError:
+                logger.warning("the resolved config for %s does not decode", d.name, exc_info=True)
+                resolved = {}
+            if not isinstance(resolved, dict):
+                resolved = {}
+            page = read_log(trial_metrics_key(sweep_directory, d.name))
+            trials.append({
+                "trial_id": d.name[len(_TRIAL_DIR_PREFIX):],
+                "has_metrics": bool(
+                    page.records or page.torn_tail or page.corrupt or page.version_refused
+                ),
+                "params": resolved.get("trial_params") or {},
+                "unconsumed_params": resolved.get("unconsumed_params") or [],
+            })
+
+    return {
+        "sweep_id": manifest.get("study_name", sweep_id),
+        "status": status,
+        "error": manifest.get("error"),
+        "result": result,
+        "manifest": manifest,
+        "relaunched_from": manifest.get("relaunched_from"),
+        "has_manifest": True,
+        "trials": trials,
+    }
 
 
 def _run_hpo_trial(config: dict, report, base_config: dict, trial_dir: str) -> None:
