@@ -58,7 +58,7 @@ function DeliveryEventRow({ record }: { record: DeliveryEventRecord }) {
           ))}
         </div>
       )}
-      {record.plant_mapping && record.plant_mapping.dates_delivered && (
+      {record.plant_mapping && (
         <div className="mt-2 text-[11px] text-tcip-muted">
           {`Delivered dates ${record.plant_mapping.dates_delivered.join(", ")}: ` +
             `${record.plant_mapping.images_unattributed} attributed to no plant ` +

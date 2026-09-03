@@ -1217,34 +1217,6 @@ describe("ResultsTab delivery events (read-only)", () => {
     ).toBeInTheDocument();
     expect(within(row).getByText(/image-level attribution/)).toBeInTheDocument();
   });
-
-  it("renders the rest of a delivery event whose plant_mapping predates dates_delivered", async () => {
-    const olderShaped: DeliveryEventRecord = {
-      ...DELIVERY_EVENT,
-      event_id: "older-shaped",
-      plant_mapping: {
-        name: "valley",
-        project_root: "C:/proj",
-        dataset_id: "ds-1",
-        dataset_root: "C:/data",
-        built_at: "2026-02-01T00:00:00+00:00",
-        record_sha256: "0".repeat(64),
-        nn_tolerance_m: { value: 3, source: "stated" },
-        capture_identity: {},
-        captures_unverified: [],
-        plant_csvs_unverified: [],
-        images_unattributed_scope: "delivered_dates",
-      },
-    };
-    vi.spyOn(resultsApi, "deliveryEvents").mockResolvedValue({ records: [olderShaped] });
-
-    render(<ResultsTab />);
-    const row = await screen.findByTestId("delivery-older-shaped");
-
-    expect(within(row).getByText("subject_a")).toBeInTheDocument();
-    expect(within(row).getByText("state_crossing_dates")).toBeInTheDocument();
-    expect(within(row).queryByText(/Delivered dates/)).not.toBeInTheDocument();
-  });
 });
 
 describe("ResultsTab plant-mapping build: match-tolerance phrase", () => {

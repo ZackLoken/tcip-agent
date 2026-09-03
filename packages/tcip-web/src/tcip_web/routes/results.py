@@ -1033,6 +1033,13 @@ def confirm_trait_spec_statement(payload: ConfirmTraitSpecPayload) -> dict:
 # ── What has shipped: the delivery-event record, read-only ─────────────
 
 
+_DELIVERY_EVENTS_CONFORM_HINT = (
+    "run scripts/conform_delivery_events.py against this project to see which stored events do "
+    "not validate and why (--plan previews; nothing here is auto-rewritable, since the missing "
+    "keys were never computed for an older delivery)"
+)
+
+
 @router.get("/delivery-events")
 def list_delivery_events(project_root: str) -> dict:
     """Every delivery event this project holds: what shipped, under which trait and kind, and the
@@ -1041,13 +1048,31 @@ def list_delivery_events(project_root: str) -> dict:
     Read-only, no confirmation action: a delivery event is a fact recorded after an artifact
     already shipped under a meaning the breeder already confirmed elsewhere, not a statement of
     its own to confirm.
+
+    Every stored record is validated against ``DeliveryEventRecord`` before it is served. A
+    record that does not validate refuses the whole listing (400, naming the offending
+    ``event_id`` and the conform script) rather than serving a partial list silently: the Results
+    tab has no way to tell "this project shipped nothing else" from "one record was dropped",
+    and a delivery event is exactly the audit trail that must not go quietly missing.
     """
     import tcip_store as ts
+    from pydantic import ValidationError
+    from tcip_mcp.pipelines.delivery_events_schema import DeliveryEventRecord
     from tcip_mcp.pipelines.resolution import DELIVERY_EVENTS_STORE, delivery_events_scope
 
     root = _guarded_project_root(project_root)
     scope = delivery_events_scope(root)
     records = [ts.read(key) for key in ts.keys(DELIVERY_EVENTS_STORE, str(scope))]
+    for record in records:
+        event_id = record.get("event_id") if isinstance(record, dict) else None
+        try:
+            DeliveryEventRecord.model_validate(record)
+        except ValidationError as exc:
+            raise HTTPException(
+                400,
+                f"delivery event {event_id!r} does not validate against the current "
+                f"delivery_events shape: {exc}; {_DELIVERY_EVENTS_CONFORM_HINT}",
+            ) from exc
     return {"records": records}
 
 

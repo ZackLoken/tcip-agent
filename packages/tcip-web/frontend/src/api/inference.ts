@@ -339,11 +339,10 @@ export interface PlantMappingDisclosure {
   capture_identity: Record<string, string>;
   captures_unverified: string[];
   plant_csvs_unverified: string[];
-  // Absent on a delivery event recorded before this disclosure carried these three fields.
-  dates_delivered?: string[];
-  images_unattributed?: number;
+  dates_delivered: string[];
+  images_unattributed: number;
   images_unattributed_scope: string;
-  plant_attribution?: string;
+  plant_attribution: string;
 }
 
 /** One completed delivery: what shipped, under which trait and kind, and the real per-bucket

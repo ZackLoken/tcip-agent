@@ -846,3 +846,92 @@ def test_delivery_events_route_confines_project_root_to_allowed_roots(
     resp = client.get(DELIVERY_EVENTS_ROUTE, params={"project_root": str(outside)})
 
     assert resp.status_code == 403
+
+
+def test_delivery_events_route_refuses_a_stored_event_whose_plant_mapping_predates_the_disclosure(
+    client: TestClient, tmp_path: Path,
+) -> None:
+    """A record written before ``plant_mapping`` carried ``dates_delivered``,
+    ``images_unattributed`` and ``plant_attribution`` cannot be read back as if those keys meant
+    nothing: none of the three is reconstructable from the rest of the record, so the route
+    refuses the whole listing by event_id rather than serving it with the gap silently absent."""
+    from tcip_mcp.pipelines import resolution
+
+    event_id = "old-shaped"
+    key = resolution.delivery_event_key(resolution.delivery_events_scope(tmp_path), event_id)
+    ts.replace(
+        key,
+        {
+            "event_id": event_id,
+            "trait": STATEMENT_TRAIT,
+            "delivery_kind": "state_crossing_dates",
+            "door": "compute_phenology",
+            "output_path": None,
+            "measurement_documents": ["operating_point"],
+            "scale_document": None,
+            "plant_mapping": {
+                "name": "valley",
+                "project_root": str(tmp_path),
+                "dataset_id": "ds-1",
+                "dataset_root": "C:/data",
+                "built_at": "2026-02-01T00:00:00+00:00",
+                "record_sha256": "0" * 64,
+                "nn_tolerance_m": {"value": 3, "source": "stated"},
+                "capture_identity": {},
+                "captures_unverified": [],
+                "plant_csvs_unverified": [],
+                "images_unattributed_scope": "delivered_dates",
+            },
+            "documents": {},
+            "produced_at": "2026-02-03T12:00:00+00:00",
+        },
+        expect=ts.Version.ABSENT,
+    )
+
+    resp = client.get(DELIVERY_EVENTS_ROUTE, params={"project_root": str(tmp_path)})
+
+    assert resp.status_code == 400
+    detail = resp.json()["detail"]
+    assert event_id in detail
+    assert "scripts/conform_delivery_events.py" in detail
+
+
+def test_delivery_events_route_serves_a_real_plant_mapping_disclosure_with_all_three_keys(
+    client: TestClient, tmp_path: Path,
+) -> None:
+    """A ``plant_mapping`` built the way a real delivery builds it (``MappingBuild.
+    delivery_disclosure``) carries all three keys, and the route serves them through unchanged."""
+    from datetime import datetime, timezone
+
+    from tcip_mcp.pipelines.postprocessing.plant_mapping import MappingBuild
+    from tcip_mcp.pipelines.resolution import record_delivery_binding_event
+
+    dates = ["2026-01-01", "2026-01-08"]
+    build = MappingBuild(
+        name="valley", project_root=str(tmp_path), dataset_root=str(tmp_path / "data"),
+        dataset_id="ds-1", built_by="build_plant_mapping",
+        built_at=datetime.now(timezone.utc).isoformat(),
+        dates_requested=None, dates=dates,
+        nn_tolerance_m={"value": 3.0, "source": "stated"}, plant_csvs=[],
+        capture_identity={d: "0" * 16 for d in dates},
+        capture_digests={d: {} for d in dates}, unreadable={d: [] for d in dates},
+        assignments={}, record_sha256="0" * 64,
+    )
+    disclosure = build.delivery_disclosure(
+        {"captures_unverified": [], "plant_csvs_unverified": []}, dates)
+
+    record_delivery_binding_event(
+        "test_door", None, [], {}, measurement_documents=["operating_point"],
+        scale_document=None, trait=STATEMENT_TRAIT, delivery_kind="state_crossing_dates",
+        project_root=tmp_path, plant_mapping=disclosure,
+    )
+
+    resp = client.get(DELIVERY_EVENTS_ROUTE, params={"project_root": str(tmp_path)})
+
+    assert resp.status_code == 200
+    records = resp.json()["records"]
+    assert len(records) == 1
+    mapping = records[0]["plant_mapping"]
+    assert mapping["dates_delivered"] == dates
+    assert mapping["images_unattributed"] == 0
+    assert mapping["plant_attribution"] == "image"
