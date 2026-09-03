@@ -209,7 +209,7 @@ def _aggregated(tmp_path, bucket: Path, *, name: str = "counts.csv"):
 
     path, _tail = export_aggregated_csv(
         [{"plant_id": "plot0", "value": 3, "observations": 1, "value_key": "count",
-          "measurement_document": "operating_point"}],
+          "measurement_document": "operating_point", "plant_attribution": "detection"}],
         str(tmp_path / name),
         delivered_phenotype="stem_count", operating_point_validated=VALIDATED_HELD_OUT,
         pred_dirs=[str(bucket)])
