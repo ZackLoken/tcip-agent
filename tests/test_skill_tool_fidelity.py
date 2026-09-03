@@ -94,7 +94,7 @@ def test_fabricated_tool_names_extracts_the_name_from_a_call_signature(tmp_path)
         "## Tools\n\n"
         "| Tool | Purpose |\n"
         "|------|---------|\n"
-        "| `visualize(source=\"annotations\", path=<image>)` | a real tool, whole call shown |\n",
+        "| `get_experiment(experiment_id, view='lineage')` | a real tool, whole call shown |\n",
         encoding="utf-8",
     )
     assert guardrail.fabricated_tool_names([fixture]) == {}
