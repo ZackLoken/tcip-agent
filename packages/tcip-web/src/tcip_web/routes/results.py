@@ -330,7 +330,7 @@ class PhenologyPayload(BaseModel):
     predictions_by_date: dict[str, str]
     trait: str
     # Show provisional numbers on screen rather than refusing outright: the same escape
-    # ``compute_phenology`` offers, so a breeder whose operating point is not yet calibrated can see
+    # ``deliver_phenology_milestones`` offers, so a breeder whose operating point is not yet calibrated can see
     # what they have instead of a dead end. It never applies to a file leaving the platform.
     acknowledge_unvalidated: bool = False
 
@@ -364,7 +364,7 @@ class _PhenologyMeasurement:
     def positive_class_assessed(self) -> bool:
         """Whether the trait's positive-class axis was assessed at all.
 
-        Requires the bucket-level fact ``compute_phenology`` refuses on: some bucket's recorded
+        Requires the bucket-level fact ``deliver_phenology_milestones`` refuses on: some bucket's recorded
         ``id_map`` actually contains the trait's positive class, as well as a fully-classified date.
         ``per_plant_phenology``'s flag alone reads True for a date with zero detections even in a
         bucket that never had the axis, because zero detections are trivially "all classified".
@@ -385,7 +385,7 @@ class _PhenologyMeasurement:
 def _delivered_registry(pred_dirs: Sequence[str]) -> "ClassRegistry | None":
     """The class registry for the single dataset this delivery's prediction buckets belong to.
 
-    Resolved from the buckets themselves, the way ``compute_phenology`` resolves it, never from the
+    Resolved from the buckets themselves, the way ``deliver_phenology_milestones`` resolves it, never from the
     open project's own root: a project's dataset commonly lives outside its own tree. ``None`` when
     ``pred_dirs`` is empty: with no bucket named yet there is no delivered dataset to check against,
     the same case a caller-supplied ``predictions_by_date`` of ``{}`` reaches the mapping-not-found
@@ -418,7 +418,7 @@ def _measure_phenology(payload: PhenologyPayload) -> _PhenologyMeasurement:
     read in one place from the buckets' own sidecars: the curve and milestone doors share the same
     gate as CSV, so a breeder never sees an unvalidated phenology date on screen only to have the
     refusal surface later on Download. Rows come from the canonical ``per_plant_phenology`` (the same
-    function ``compute_phenology`` delivers from) rather than a second aggregation loop, so the two
+    function ``deliver_phenology_milestones`` delivers from) rather than a second aggregation loop, so the two
     surfaces cannot diverge.
 
     The spec and the operationalization record come from one call against the guarded root, so the
@@ -467,7 +467,7 @@ def _measure_phenology(payload: PhenologyPayload) -> _PhenologyMeasurement:
     pred_dirs = list(predictions_by_date.values())
     recon = reconcile_operating_point_validity(pred_dirs, trait=payload.trait)
     classifier_recon = reconcile_classifier_validity(pred_dirs)
-    # The same binding compute_phenology applies, from the same shared owner rather than a second
+    # The same binding deliver_phenology_milestones applies, from the same shared owner rather than a second
     # copy: a classifier stamp calibrated for another trait or against a run that did not produce
     # these predictions does not validate this delivery. Without it the web door accepted a stamp
     # the MCP door rejects, and this route writes that stamp into the delivered CSV.
@@ -641,7 +641,7 @@ def export_csv(payload: ExportCsvPayload) -> Response:
     always called with ``acknowledge_unvalidated=False``.
 
     Delegates to ``write_phenology_csv``/``write_phenology_curve_csv``, the same writer(s)
-    ``compute_phenology`` calls: the gate, the provenance cells and the recorded delivery event are
+    ``deliver_phenology_milestones`` calls: the gate, the provenance cells and the recorded delivery event are
     all theirs, so a web-delivered CSV and the MCP door's cannot disagree about what a phenology
     delivery carries. The response body is the file read back as bytes, never a second composition
     of the same rows.
@@ -649,7 +649,7 @@ def export_csv(payload: ExportCsvPayload) -> Response:
     measurement = _measure_phenology(payload)
     if measurement.gate.unvalidated:
         raise HTTPException(400, _refusal(measurement))
-    # The same refusal compute_phenology makes: if no bucket anywhere ever assessed the trait's
+    # The same refusal deliver_phenology_milestones makes: if no bucket anywhere ever assessed the trait's
     # positive-class axis, the fraction is not a measurement and there is nothing valid to deliver.
     if not measurement.positive_class_assessed:
         raise HTTPException(

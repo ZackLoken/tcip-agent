@@ -428,9 +428,9 @@ def _delivery(tmp_path: Path, **kwargs) -> dict:
 
 
 def _compute(body: dict, out_csv: Path, **kwargs) -> dict:
-    from tcip_mcp.tools.phenology_tools import compute_phenology
+    from tcip_mcp.tools.phenology_tools import deliver_phenology_milestones
 
-    return compute_phenology(
+    return deliver_phenology_milestones(
         trait=body["trait"],
         mapping_name=body["mapping_name"],
         predictions_by_date=body["predictions_by_date"],
@@ -664,7 +664,7 @@ def test_write_phenology_csv_refuses_without_a_basis(tmp_path: Path):
             basis=None, operating_point_conf=None, producer={}, bindings={}, pred_dirs=[],
             project_root=tmp_path, plant_mapping=_NO_MAPPING)
 
-    assert "compute_phenology and export_csv produce one" in str(excinfo.value)
+    assert "deliver_phenology_milestones and export_csv produce one" in str(excinfo.value)
     assert not (tmp_path / "out.csv").exists()
 
 

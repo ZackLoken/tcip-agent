@@ -263,7 +263,7 @@ def test_delivered_csv_marks_a_milestone_the_first_capture_only_bounds(tmp_path)
     breeder reading the CSV can tell an upper bound from a date the observations measured. The later
     dip below the target does not move the delivered date to the re-crossing.
     """
-    from tcip_mcp.tools.phenology_tools import compute_phenology
+    from tcip_mcp.tools.phenology_tools import deliver_phenology_milestones
 
     root = tmp_path / "ds"
     counts = {"2026-03-01": (1, 1), "2026-03-05": (1, 4), "2026-03-09": (4, 1)}
@@ -283,7 +283,7 @@ def test_delivered_csv_marks_a_milestone_the_first_capture_only_bounds(tmp_path)
     }, dataset_root=root)
     out_csv = tmp_path / "out" / "catkin_phenology.csv"
 
-    res = compute_phenology(
+    res = deliver_phenology_milestones(
         trait="catkin",
         mapping_name=mapping_name,
         predictions_by_date={d: str(buckets[d]) for d in counts},

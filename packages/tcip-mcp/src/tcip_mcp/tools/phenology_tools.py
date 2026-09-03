@@ -9,7 +9,7 @@ the web Results tab):
     calibrate_classifier_operating_point   the positive-state classifier's own held-out
                                            validation gate, distinct from the count operating
                                            point export_predictions calibrates
-    compute_phenology                      that mapping + classified predictions →
+    deliver_phenology_milestones                      that mapping + classified predictions →
                                            <phenology_prefix>_phenology.csv
 
 See the ``phenology`` skill for the whole pattern (isolate → detect → classify state →
@@ -43,7 +43,7 @@ def build_plant_mapping(
     jumps, and assigns along the row, falling back to nearest-neighbour when the sequence
     signal is weak. Each assignment records its ``source`` and GPS ``distance_m`` (no
     fabricated "confidence"). The mapping is project state, persisted under the resolved
-    platform state root by ``name``; ``compute_phenology`` reads it back the same way. See the
+    platform state root by ``name``; ``deliver_phenology_milestones`` reads it back the same way. See the
     ``phenology`` skill.
 
     Args:
@@ -533,7 +533,7 @@ def calibrate_classifier_operating_point(
 
 @mcp.tool()
 @audited
-def compute_phenology(
+def deliver_phenology_milestones(
     trait: str,
     mapping_name: str,
     predictions_by_date: dict[str, str],
@@ -782,7 +782,7 @@ def compute_phenology(
     # write_phenology_csv re-runs the same gate over these flags, composes every provenance cell
     # (including the majority crossing-unconfirmed marker) and records the delivery.
     cells = phenology.write_phenology_csv(
-        "compute_phenology", rows, Path(output_csv_path), spec,
+        "deliver_phenology_milestones", rows, Path(output_csv_path), spec,
         flags=flags, acknowledge_unvalidated=acknowledge_unvalidated, basis=still_stated.basis,
         operating_point_conf=operating_point_conf, producer=producer, bindings=recon["bindings"],
         pred_dirs=list(predictions_by_date.values()), project_root=platform_state_root(),

@@ -484,7 +484,7 @@ def test_write_phenology_csv_floors_operating_point_when_tile_size_is_operative_
 
 def test_write_phenology_csv_records_the_delivery_event_without_a_door_calling_it(tmp_path):
     """The delivery event is recorded inside the writer itself: a caller that calls the writer
-    directly, never through ``compute_phenology``, still leaves the record behind."""
+    directly, never through ``deliver_phenology_milestones``, still leaves the record behind."""
     import tcip_store as ts
     from tcip_mcp.pipelines import resolution
 

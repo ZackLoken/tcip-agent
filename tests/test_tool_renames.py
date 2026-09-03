@@ -40,6 +40,7 @@ RENAMES = [
     ("make_splits", "draw_splits"),
     ("push_panel_data", "push_panel_event"),
     ("update_trait_spec_fields", "revise_trait_spec"),
+    ("compute_phenology", "deliver_phenology_milestones"),
 ]
 
 _OWN_FILE = str(Path(__file__).relative_to(REPO_ROOT)).replace("\\", "/")

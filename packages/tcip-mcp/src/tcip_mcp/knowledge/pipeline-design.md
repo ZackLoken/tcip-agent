@@ -169,7 +169,7 @@ When a trait's decomposition needs more than one training phase, write a logged 
 Each training phase calls `launch_training` (full audited envelope, leakage-free split,
 tiling persistence) against a `model_source` builder; run each stage's model with
 `run_inference`; then aggregate with the importable postprocessing libs
-(`aggregate_per_plant` / `export_aggregated_csv`, or `compute_phenology` for milestone dates):
+(`aggregate_per_plant` / `export_aggregated_csv`, or `deliver_phenology_milestones` for milestone dates):
 
 ```python
 # scripts/<trait>_pipeline.py: chain the primitives; each launch_training goes

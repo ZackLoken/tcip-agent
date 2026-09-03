@@ -2,7 +2,7 @@
 a plant-locations CSV.
 
 The map-and-deliver half of the same detect-and-persist / map-and-deliver shape
-``phenology_tools``'s ``build_plant_mapping``/``compute_phenology`` already use for the
+``phenology_tools``'s ``build_plant_mapping``/``deliver_phenology_milestones`` already use for the
 per-image-EXIF case: the detect-and-persist half (tiled inference over a raster too large to load
 whole) lives in ``inference_tools.export_predictions`` (its ``raster_path`` regime), so a breeder
 can review the persisted predictions (or simply trust a tens-of-minutes tiled run once) before

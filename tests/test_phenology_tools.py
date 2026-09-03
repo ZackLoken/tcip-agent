@@ -1,8 +1,8 @@
-"""Tests for the phenology MCP tools (build_plant_mapping + compute_phenology).
+"""Tests for the phenology MCP tools (build_plant_mapping + deliver_phenology_milestones).
 
 The tools are the agent-facing surface for the per-plant phenology pipeline. These tests pin:
 (1) build_plant_mapping wraps build + persist and reports a compact summary + error paths;
-(2) compute_phenology writes the canonical column schema from classified predictions + a
+(2) deliver_phenology_milestones writes the canonical column schema from classified predictions + a
 persisted plant mapping, resolving the positive class id from the prediction buckets' own
 recorded id_map and gating both the classifier (reconciled from
 classifier_operating_point.json) and the count operating point; and (3) its measurement-
@@ -30,7 +30,7 @@ from tcip_mcp.tools.phenology_tools import (
     _classification_items,
     build_plant_mapping,
     calibrate_classifier_operating_point,
-    compute_phenology,
+    deliver_phenology_milestones,
 )
 from tests._binding_fixtures import write_bound_sidecar
 
@@ -222,7 +222,7 @@ def _write_classifier_sidecar(dir_path: Path, *, dataset_root: Path, validated: 
 ID_MAP = {"dormant": 0, "elongated": 1}
 
 
-def test_compute_phenology_delivers_when_both_validated(tmp_path: Path) -> None:
+def test_deliver_phenology_milestones_delivers_when_both_validated(tmp_path: Path) -> None:
     root = _ds_root(tmp_path)
     d1, d2 = _bucket(tmp_path, "2026-02-11"), _bucket(tmp_path, "2026-03-09")
     _write_preds(d1, "P1_a", ["dormant"])
@@ -237,7 +237,7 @@ def test_compute_phenology_delivers_when_both_validated(tmp_path: Path) -> None:
     })
     out_csv = tmp_path / "out" / "catkin_phenology.csv"
 
-    res = compute_phenology(
+    res = deliver_phenology_milestones(
         trait="catkin",
         mapping_name=mapping_name,
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
@@ -252,7 +252,7 @@ def test_compute_phenology_delivers_when_both_validated(tmp_path: Path) -> None:
     assert out_csv.exists()
 
 
-def test_compute_phenology_reports_an_unreadable_prediction_by_name(tmp_path: Path) -> None:
+def test_deliver_phenology_milestones_reports_an_unreadable_prediction_by_name(tmp_path: Path) -> None:
     """A present, unreadable prediction document is an error naming the file, never a raise
     through the tool boundary and never silently read as this plant's date contributing nothing."""
     root = _ds_root(tmp_path)
@@ -271,7 +271,7 @@ def test_compute_phenology_reports_an_unreadable_prediction_by_name(tmp_path: Pa
     })
     out_csv = tmp_path / "out" / "catkin_phenology.csv"
 
-    res = compute_phenology(
+    res = deliver_phenology_milestones(
         trait="catkin",
         mapping_name=mapping_name,
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
@@ -285,7 +285,7 @@ def test_compute_phenology_reports_an_unreadable_prediction_by_name(tmp_path: Pa
     assert str(bad) in res["error"]
 
 
-def test_compute_phenology_re_reads_the_registry_at_the_second_check(
+def test_deliver_phenology_milestones_re_reads_the_registry_at_the_second_check(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The registry is re-resolved immediately before the write, not reused from the first check:
@@ -324,7 +324,7 @@ def test_compute_phenology_re_reads_the_registry_at_the_second_check(
 
     monkeypatch.setattr("tcip_mcp.class_registry.registry_for_pred_dirs", racing_registry)
 
-    res = compute_phenology(
+    res = deliver_phenology_milestones(
         trait="catkin",
         mapping_name=mapping_name,
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
@@ -340,7 +340,7 @@ def test_compute_phenology_re_reads_the_registry_at_the_second_check(
     assert not out_csv.exists()
 
 
-def test_compute_phenology_floors_a_count_stamp_earned_for_a_different_trait(tmp_path: Path) -> None:
+def test_deliver_phenology_milestones_floors_a_count_stamp_earned_for_a_different_trait(tmp_path: Path) -> None:
     """A count stamp validated for one trait must not answer for a phenology delivery under a
     different trait: the refusal names the sidecar and both traits."""
     root = _ds_root(tmp_path)
@@ -357,7 +357,7 @@ def test_compute_phenology_floors_a_count_stamp_earned_for_a_different_trait(tmp
     })
     out_csv = tmp_path / "out" / "catkin_phenology.csv"
 
-    res = compute_phenology(
+    res = deliver_phenology_milestones(
         trait="catkin",
         mapping_name=mapping_name,
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
@@ -373,7 +373,7 @@ def test_compute_phenology_floors_a_count_stamp_earned_for_a_different_trait(tmp
     assert str(d1) in res["error"] or str(d2) in res["error"]
 
 
-def test_compute_phenology_reports_n_images_unattributed_when_never_assessed(tmp_path: Path) -> None:
+def test_deliver_phenology_milestones_reports_n_images_unattributed_when_never_assessed(tmp_path: Path) -> None:
     """The measurement-integrity guard's early return (no bucket anywhere classified the trait's
     positive class) must disclose n_images_unattributed the same way the success path does -- both
     read it off the same delivery disclosure, so an early refusal is not missing a field a later
@@ -393,7 +393,7 @@ def test_compute_phenology_reports_n_images_unattributed_when_never_assessed(tmp
     })
     out_csv = tmp_path / "out" / "catkin_phenology.csv"
 
-    res = compute_phenology(
+    res = deliver_phenology_milestones(
         trait="catkin",
         mapping_name=mapping_name,
         predictions_by_date={"2026-02-11": str(d1)},
@@ -406,7 +406,7 @@ def test_compute_phenology_reports_n_images_unattributed_when_never_assessed(tmp
     assert not out_csv.exists()
 
 
-def test_compute_phenology_rejects_classifier_stamp_from_unrelated_run(tmp_path: Path) -> None:
+def test_deliver_phenology_milestones_rejects_classifier_stamp_from_unrelated_run(tmp_path: Path) -> None:
     """A genuinely-validated classifier_operating_point.json calibrated for a
     different trait/experiment must not validate an unrelated delivery -- classifier_pred_dirs is a
     separate, caller-supplied list, so reconcile_classifier_validity's own on-disk check alone can't
@@ -429,7 +429,7 @@ def test_compute_phenology_rejects_classifier_stamp_from_unrelated_run(tmp_path:
     })
     out_csv = tmp_path / "out" / "catkin_phenology.csv"
 
-    res = compute_phenology(
+    res = deliver_phenology_milestones(
         trait="catkin",
         mapping_name=mapping_name,
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
@@ -444,7 +444,7 @@ def test_compute_phenology_rejects_classifier_stamp_from_unrelated_run(tmp_path:
     assert not out_csv.exists()
 
 
-def test_compute_phenology_rejects_classifier_stamp_with_no_trait_recorded(tmp_path: Path) -> None:
+def test_deliver_phenology_milestones_rejects_classifier_stamp_with_no_trait_recorded(tmp_path: Path) -> None:
     """The real writer (calibrate_classifier_operating_point) always
     records a real trait name -- unlike experiment_id, there is no legitimate producer path that
     omits it. A sidecar with trait=None (a hand-edited or foreign file, not one the real writer could
@@ -466,7 +466,7 @@ def test_compute_phenology_rejects_classifier_stamp_with_no_trait_recorded(tmp_p
     })
     out_csv = tmp_path / "out" / "catkin_phenology.csv"
 
-    res = compute_phenology(
+    res = deliver_phenology_milestones(
         trait="catkin",
         mapping_name=mapping_name,
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
@@ -481,7 +481,7 @@ def test_compute_phenology_rejects_classifier_stamp_with_no_trait_recorded(tmp_p
     assert not out_csv.exists()
 
 
-def test_compute_phenology_refuses_unvalidated_classifier(tmp_path: Path) -> None:
+def test_deliver_phenology_milestones_refuses_unvalidated_classifier(tmp_path: Path) -> None:
     root = _ds_root(tmp_path)
     d1, d2 = _bucket(tmp_path, "2026-02-11"), _bucket(tmp_path, "2026-03-09")
     _write_preds(d1, "P1_a", ["dormant"])
@@ -495,7 +495,7 @@ def test_compute_phenology_refuses_unvalidated_classifier(tmp_path: Path) -> Non
         "2026-03-09": [{"stem": "P1_b", "plot_name": "P1", "accession_name": "acc-9"}],
     })
     out_csv = tmp_path / "out" / "catkin_phenology.csv"
-    res = compute_phenology(
+    res = deliver_phenology_milestones(
         trait="catkin",
         mapping_name=mapping_name,
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
@@ -506,7 +506,7 @@ def test_compute_phenology_refuses_unvalidated_classifier(tmp_path: Path) -> Non
     assert not out_csv.exists()
 
 
-def test_compute_phenology_acknowledge_unvalidated_stamps_false(tmp_path: Path) -> None:
+def test_deliver_phenology_milestones_acknowledge_unvalidated_stamps_false(tmp_path: Path) -> None:
     root = _ds_root(tmp_path)
     d1, d2 = _bucket(tmp_path, "2026-02-11"), _bucket(tmp_path, "2026-03-09")
     _write_preds(d1, "P1_a", ["dormant"])
@@ -519,7 +519,7 @@ def test_compute_phenology_acknowledge_unvalidated_stamps_false(tmp_path: Path) 
         "2026-03-09": [{"stem": "P1_b", "plot_name": "P1", "accession_name": "acc-9"}],
     })
     out_csv = tmp_path / "out" / "catkin_phenology.csv"
-    res = compute_phenology(
+    res = deliver_phenology_milestones(
         trait="catkin",
         mapping_name=mapping_name,
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
@@ -531,7 +531,7 @@ def test_compute_phenology_acknowledge_unvalidated_stamps_false(tmp_path: Path) 
     assert out_csv.exists()
 
 
-def test_compute_phenology_refuses_asymmetric_validation(tmp_path: Path) -> None:
+def test_deliver_phenology_milestones_refuses_asymmetric_validation(tmp_path: Path) -> None:
     # Classifier validated but the count operating point isn't. The gate requires both.
     root = _ds_root(tmp_path)
     d1, d2 = _bucket(tmp_path, "2026-02-11"), _bucket(tmp_path, "2026-03-09")
@@ -546,7 +546,7 @@ def test_compute_phenology_refuses_asymmetric_validation(tmp_path: Path) -> None
         "2026-03-09": [{"stem": "P1_b", "plot_name": "P1", "accession_name": "acc-9"}],
     })
     out_csv = tmp_path / "out" / "catkin_phenology.csv"
-    res = compute_phenology(
+    res = deliver_phenology_milestones(
         trait="catkin",
         mapping_name=mapping_name,
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
@@ -557,7 +557,7 @@ def test_compute_phenology_refuses_asymmetric_validation(tmp_path: Path) -> None
     assert not out_csv.exists()
 
 
-def test_compute_phenology_acknowledge_stamps_each_dimension_independently(tmp_path: Path) -> None:
+def test_deliver_phenology_milestones_acknowledge_stamps_each_dimension_independently(tmp_path: Path) -> None:
     root = _ds_root(tmp_path)
     d1, d2 = _bucket(tmp_path, "2026-02-11"), _bucket(tmp_path, "2026-03-09")
     _write_preds(d1, "P1_a", ["dormant"])
@@ -571,7 +571,7 @@ def test_compute_phenology_acknowledge_stamps_each_dimension_independently(tmp_p
         "2026-03-09": [{"stem": "P1_b", "plot_name": "P1", "accession_name": "acc-9"}],
     })
     out_csv = tmp_path / "out" / "catkin_phenology.csv"
-    res = compute_phenology(
+    res = deliver_phenology_milestones(
         trait="catkin",
         mapping_name=mapping_name,
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
@@ -608,41 +608,41 @@ def _tile_gate_fixture(tmp_path: Path, tile_size_prov: dict | None) -> dict:
     }
 
 
-def test_compute_phenology_refuses_a_fabricated_tile_size(tmp_path: Path) -> None:
+def test_deliver_phenology_milestones_refuses_a_fabricated_tile_size(tmp_path: Path) -> None:
     """A phenology fraction is built from per-image counts, and the tile edge scales those counts.
     A tiled bucket whose tile_size fell back to the fabricated default, with no persisted training
     geometry and no explicit caller override, must refuse here even though the classifier and the
     conf beside it are both genuinely validated."""
     args = _tile_gate_fixture(tmp_path, _tiled("false"))
-    res = compute_phenology(**args)
+    res = deliver_phenology_milestones(**args)
     assert "error" in res
     assert res["tile_size_validated"] == "false"
     assert res["operating_point_validated"] == "held_out_annotations"  # conf is not what refused
     assert not Path(args["output_csv_path"]).exists()
 
 
-def test_compute_phenology_delivers_when_the_tile_scale_has_a_real_basis(tmp_path: Path) -> None:
+def test_deliver_phenology_milestones_delivers_when_the_tile_scale_has_a_real_basis(tmp_path: Path) -> None:
     """The rail must admit valid work: a tile edge derived from the checkpoint's own persisted
     training geometry delivers cleanly."""
     args = _tile_gate_fixture(tmp_path, _tiled("persisted_training_geometry", 224))
-    res = compute_phenology(**args)
+    res = deliver_phenology_milestones(**args)
     assert "error" not in res, res
     assert res["tile_size_validated"] == "persisted_training_geometry"
     assert Path(args["output_csv_path"]).exists()
 
 
-def test_compute_phenology_never_gates_an_untiled_delivery_on_tile_size(tmp_path: Path) -> None:
+def test_deliver_phenology_milestones_never_gates_an_untiled_delivery_on_tile_size(tmp_path: Path) -> None:
     """Buckets from untiled runs carry a non-gating tile_size entry; it must not manufacture a
     refusal over a dimension that was never operative."""
     args = _tile_gate_fixture(tmp_path, {"value": None, "requires_validation": False,
                                          "validation_kind": None, "validated_against": None})
-    res = compute_phenology(**args)
+    res = deliver_phenology_milestones(**args)
     assert "error" not in res, res
     assert res["tile_size_validated"] is None
     assert Path(args["output_csv_path"]).exists()
 
 
-def test_compute_phenology_acknowledged_tile_size_floors_the_csv_operating_point_stamp(
+def test_deliver_phenology_milestones_acknowledged_tile_size_floors_the_csv_operating_point_stamp(
     tmp_path: Path,
 ) -> None:
     """The CSV's operating_point_validated column is the count operating point's only count-side
@@ -651,14 +651,14 @@ def test_compute_phenology_acknowledged_tile_size_floors_the_csv_operating_point
     import csv
 
     args = _tile_gate_fixture(tmp_path, _tiled("false"))
-    res = compute_phenology(**args, acknowledge_unvalidated=True)
+    res = deliver_phenology_milestones(**args, acknowledge_unvalidated=True)
     assert "error" not in res, res
     assert res["operating_point_validated"] == "false"
     rows = list(csv.DictReader(Path(args["output_csv_path"]).open(encoding="utf-8")))
     assert rows and all(r["operating_point_validated"] == "false" for r in rows)
 
 
-def test_compute_phenology_acknowledged_tile_size_floors_the_csv_classifier_stamp(
+def test_deliver_phenology_milestones_acknowledged_tile_size_floors_the_csv_classifier_stamp(
     tmp_path: Path,
 ) -> None:
     """The classifier column has no less claim on the tile scale's floor than the count operating
@@ -667,14 +667,14 @@ def test_compute_phenology_acknowledged_tile_size_floors_the_csv_classifier_stam
     import csv
 
     args = _tile_gate_fixture(tmp_path, _tiled("false"))
-    res = compute_phenology(**args, acknowledge_unvalidated=True)
+    res = deliver_phenology_milestones(**args, acknowledge_unvalidated=True)
     assert "error" not in res, res
     assert res["positive_state_classifier_validated"] == "false"
     rows = list(csv.DictReader(Path(args["output_csv_path"]).open(encoding="utf-8")))
     assert rows and all(r["positive_state_classifier_validated"] == "false" for r in rows)
 
 
-def test_compute_phenology_refuses_unclassified_predictions(tmp_path: Path) -> None:
+def test_deliver_phenology_milestones_refuses_unclassified_predictions(tmp_path: Path) -> None:
     # Predictions from a bare detector (no elongation axis at all) must refuse,
     # never report full coverage.
     root = _ds_root(tmp_path)
@@ -687,7 +687,7 @@ def test_compute_phenology_refuses_unclassified_predictions(tmp_path: Path) -> N
     })
     out_csv = tmp_path / "out" / "catkin_phenology.csv"
 
-    res = compute_phenology(
+    res = deliver_phenology_milestones(
         trait="catkin",
         mapping_name=mapping_name,
         predictions_by_date={"2026-02-11": str(d1)},
@@ -698,8 +698,8 @@ def test_compute_phenology_refuses_unclassified_predictions(tmp_path: Path) -> N
     assert not out_csv.exists()
 
 
-def test_compute_phenology_missing_mapping(tmp_path: Path) -> None:
-    res = compute_phenology(
+def test_deliver_phenology_milestones_missing_mapping(tmp_path: Path) -> None:
+    res = deliver_phenology_milestones(
         trait="catkin",
         mapping_name="nope",
         predictions_by_date={},
@@ -709,8 +709,8 @@ def test_compute_phenology_missing_mapping(tmp_path: Path) -> None:
     assert "not found" in res["error"]
 
 
-def test_compute_phenology_unknown_trait_refuses(tmp_path: Path) -> None:
-    res = compute_phenology(
+def test_deliver_phenology_milestones_unknown_trait_refuses(tmp_path: Path) -> None:
+    res = deliver_phenology_milestones(
         trait="not-a-real-trait",
         mapping_name="nope",
         predictions_by_date={},
@@ -1769,7 +1769,7 @@ def _delivered_rows(out_csv: Path) -> list[dict]:
         return list(_csv.DictReader(f))
 
 
-def test_compute_phenology_names_the_record_and_producer_a_bound_bucket_earned(tmp_path: Path) -> None:
+def test_deliver_phenology_milestones_names_the_record_and_producer_a_bound_bucket_earned(tmp_path: Path) -> None:
     """A delivery every bucket of which is bound names the records that bound it and the producing
     run those records were earned under, rather than leaving a reader to trust the stamps."""
     from tests._binding_fixtures import record_producing_run
@@ -1779,7 +1779,7 @@ def test_compute_phenology_names_the_record_and_producer_a_bound_bucket_earned(t
         tmp_path, experiment_id="exp-producer", checkpoint_sha256=sha)
     out_csv = tmp_path / "out" / "catkin_phenology.csv"
 
-    res = compute_phenology(
+    res = deliver_phenology_milestones(
         trait="catkin", mapping_name=mapping_name,
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv), classifier_pred_dirs=[str(d1)],
@@ -1797,7 +1797,7 @@ def test_compute_phenology_names_the_record_and_producer_a_bound_bucket_earned(t
         assert row["producing_experiment_id"] == "exp-producer"
 
 
-def test_compute_phenology_delivers_a_forged_stamp_provisionally_with_no_producer_names(
+def test_deliver_phenology_milestones_delivers_a_forged_stamp_provisionally_with_no_producer_names(
     tmp_path: Path,
 ) -> None:
     """A stamp claiming validation no record answers for floors the count, and the acknowledged
@@ -1816,7 +1816,7 @@ def test_compute_phenology_delivers_a_forged_stamp_provisionally_with_no_produce
         update_sidecar(d, _forge, "operating_point")
     out_csv = tmp_path / "out" / "catkin_phenology.csv"
 
-    res = compute_phenology(
+    res = deliver_phenology_milestones(
         trait="catkin", mapping_name=mapping_name,
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv), classifier_pred_dirs=[str(d1)],
@@ -1833,7 +1833,7 @@ def test_compute_phenology_delivers_a_forged_stamp_provisionally_with_no_produce
         assert row["validation_record"] == ""
 
 
-def test_compute_phenology_records_what_verification_found_in_the_datasets_own_log(
+def test_deliver_phenology_milestones_records_what_verification_found_in_the_datasets_own_log(
     tmp_path: Path,
 ) -> None:
     """The delivery's audited arguments say what was asked for; this says which buckets stood behind
@@ -1845,7 +1845,7 @@ def test_compute_phenology_records_what_verification_found_in_the_datasets_own_l
         tmp_path, experiment_id="exp-producer", checkpoint_sha256=sha)
     out_csv = tmp_path / "out" / "catkin_phenology.csv"
 
-    res = compute_phenology(
+    res = deliver_phenology_milestones(
         trait="catkin", mapping_name=mapping_name,
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv), classifier_pred_dirs=[str(d1)],
@@ -1857,7 +1857,7 @@ def test_compute_phenology_records_what_verification_found_in_the_datasets_own_l
 
     page = ts.read_log(audit_log_key(_ds_root(tmp_path)))
     assert page.records, "the delivery wrote nothing to the log of the dataset its buckets sit in"
-    events = [e for e in page.records if e["tool"] == "compute_phenology" and "verified_buckets" in e]
+    events = [e for e in page.records if e["tool"] == "deliver_phenology_milestones" and "verified_buckets" in e]
     assert len(events) == 1, page.records
     verified = events[0]["verified_buckets"]
     assert set(verified) == {str(d1), str(d2)}

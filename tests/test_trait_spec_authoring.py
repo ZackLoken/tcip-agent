@@ -233,9 +233,9 @@ def test_a_trait_authored_and_confirmed_through_this_surface_delivers_end_to_end
 ) -> None:
     """Author, confirm, operationalize and deliver a real trait with no hand-authored file
     anywhere in the path: the proof this authoring path produces a spec
-    state_trait_operationalization/check_operationalization/compute_phenology can all use exactly
+    state_trait_operationalization/check_operationalization/deliver_phenology_milestones can all use exactly
     as if it had been hand-authored."""
-    from tcip_mcp.tools.phenology_tools import compute_phenology
+    from tcip_mcp.tools.phenology_tools import deliver_phenology_milestones
     from tests._operationalization_fixtures import seed_confirmed_crossing
     from tests._trait_fixtures import CATKIN
     from tests.test_phenology_tools import _delivery_setup
@@ -265,7 +265,7 @@ def test_a_trait_authored_and_confirmed_through_this_surface_delivers_end_to_end
     mapping_name, d1, d2 = _delivery_setup(tmp_path, experiment_id=None, checkpoint_sha256=None)
     out_csv = tmp_path / "out" / "catkin_phenology.csv"
 
-    res = compute_phenology(
+    res = deliver_phenology_milestones(
         trait="catkin", mapping_name=mapping_name,
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv), classifier_pred_dirs=[str(d1)],

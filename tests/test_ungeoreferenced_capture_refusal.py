@@ -1,6 +1,6 @@
 """No positioned capture refuses a plant-mapping build or delivery by name; a partly positioned
 mapping keeps delivering with its unattributed count disclosed. Reuses the platform's own
-producers (``init_project``, ``register_dataset``, ``build_plant_mapping``, ``compute_phenology``)
+producers (``init_project``, ``register_dataset``, ``build_plant_mapping``, ``deliver_phenology_milestones``)
 and the binding family's own geolocated-scene writer, a second registered trait rather than the
 pilot's, so nothing here generalizes from one trait's own vocabulary.
 """
@@ -19,7 +19,7 @@ from tcip_annotation import json_io
 from tcip_annotation.state import Annotation, BBox
 from tcip_mcp.pipelines.postprocessing import plant_mapping
 from tcip_mcp.pipelines.postprocessing.plant_mapping import Assignment, MappingBuild
-from tcip_mcp.tools.phenology_tools import build_plant_mapping, compute_phenology
+from tcip_mcp.tools.phenology_tools import build_plant_mapping, deliver_phenology_milestones
 
 from tests.test_plant_mapping_binding import PLANTS, _dataset, _init, _write_geo_image, _write_scene
 from tests.test_second_trait_acceptance import _seed_currant_bloom_trait
@@ -204,7 +204,7 @@ def _assert_all_doors_refuse(
     from tcip_web.state import store
 
     out_csv = tmp_path / "out.csv"
-    res = compute_phenology(
+    res = deliver_phenology_milestones(
         trait="currant_bloom", mapping_name=mapping_name, predictions_by_date=preds_by_date,
         output_csv_path=str(out_csv), acknowledge_unvalidated=True)
     assert "error" in res
@@ -315,7 +315,7 @@ def test_a_partly_positioned_scene_builds_and_delivers_with_the_count_disclosed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Two images positioned, one not: both doors build, ``summary()`` reports one unattributed
-    per date and in total, the load route returns the same summary, and ``compute_phenology``
+    per date and in total, the load route returns the same summary, and ``deliver_phenology_milestones``
     delivers with ``images_unattributed == 1`` and ``dates_delivered`` in the tool's return, the
     CSV's own row and the delivery event's block."""
     from fastapi.testclient import TestClient
@@ -345,7 +345,7 @@ def test_a_partly_positioned_scene_builds_and_delivers_with_the_count_disclosed(
 
     _seed_currant_bloom_trait(tmp_path)
     out_csv = tmp_path / "out.csv"
-    res = compute_phenology(
+    res = deliver_phenology_milestones(
         trait="currant_bloom", mapping_name="valley", predictions_by_date=preds_by_date,
         output_csv_path=str(out_csv), acknowledge_unvalidated=True)
     assert "error" not in res, res
@@ -360,7 +360,7 @@ def test_a_partly_positioned_scene_builds_and_delivers_with_the_count_disclosed(
 
     scope = resolution.delivery_events_scope(tmp_path)
     keys = ts.keys(resolution.DELIVERY_EVENTS_STORE, str(scope))
-    events = [ts.read(k) for k in keys if ts.read(k)["door"] == "compute_phenology"]
+    events = [ts.read(k) for k in keys if ts.read(k)["door"] == "deliver_phenology_milestones"]
     pm = events[-1]["plant_mapping"]
     assert pm["images_unattributed"] == 1
     assert pm["dates_delivered"] == [DATE]
@@ -388,7 +388,7 @@ def test_a_delivery_naming_one_of_two_mapping_dates_carries_the_delivered_scope(
 
     _seed_currant_bloom_trait(tmp_path)
     out_csv = tmp_path / "out.csv"
-    res = compute_phenology(
+    res = deliver_phenology_milestones(
         trait="currant_bloom", mapping_name="valley",
         predictions_by_date={dates[0]: preds_by_date[dates[0]]},
         output_csv_path=str(out_csv), acknowledge_unvalidated=True)
@@ -419,7 +419,7 @@ def test_a_date_recorded_with_no_capture_still_delivers_beside_an_attributed_one
 
     _seed_currant_bloom_trait(tmp_path)
     out_csv = tmp_path / "out.csv"
-    res = compute_phenology(
+    res = deliver_phenology_milestones(
         trait="currant_bloom", mapping_name="valley",
         predictions_by_date={**preds_by_date, empty_date: str(empty_bucket)},
         output_csv_path=str(out_csv), acknowledge_unvalidated=True)
@@ -438,7 +438,7 @@ def test_a_fully_positioned_scene_keeps_delivering_with_zero_unattributed(
     assert build_res["n_unattributed"] == 0
 
     out_csv = tmp_path / "out.csv"
-    res = compute_phenology(
+    res = deliver_phenology_milestones(
         trait="currant_bloom", mapping_name="valley", predictions_by_date=preds_by_date,
         output_csv_path=str(out_csv), acknowledge_unvalidated=True)
     assert "error" not in res, res
@@ -459,7 +459,7 @@ def test_a_raster_beside_positioned_photographs_still_delivers(
     _seed_currant_bloom_trait(tmp_path)
 
     out_csv = tmp_path / "out.csv"
-    res = compute_phenology(
+    res = deliver_phenology_milestones(
         trait="currant_bloom", mapping_name="valley", predictions_by_date=preds_by_date,
         output_csv_path=str(out_csv), acknowledge_unvalidated=True)
     assert "error" not in res, res

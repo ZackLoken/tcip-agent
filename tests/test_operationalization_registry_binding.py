@@ -298,14 +298,14 @@ def test_registry_for_pred_dirs_refuses_directories_spanning_two_dataset_roots(
         cr.registry_for_pred_dirs([str(bucket_a), str(bucket_b)])
 
 
-def test_registry_for_pred_dirs_resolves_the_registry_through_compute_phenologys_own_path(
+def test_registry_for_pred_dirs_resolves_the_registry_through_deliver_phenology_milestoness_own_path(
     tmp_path: Path,
 ) -> None:
-    """compute_phenology resolves its registry from the buckets it delivers
+    """deliver_phenology_milestones resolves its registry from the buckets it delivers
     (registry_for_pred_dirs), not from the project root: a registry written where the buckets
     actually resolve to is what a crossing delivery's positive-class check reads."""
     from tcip_mcp.dataset_layout import classes_path
-    from tcip_mcp.tools.phenology_tools import compute_phenology
+    from tcip_mcp.tools.phenology_tools import deliver_phenology_milestones
     from tests.test_phenology_tools import _bucket, _ds_root, _write_op_sidecar, _write_preds
 
     fx.seed_project(tmp_path)
@@ -329,7 +329,7 @@ def test_registry_for_pred_dirs_resolves_the_registry_through_compute_phenologys
         "2026-02-11": [{"stem": "PLANT_A_2026-02-11", "plot_name": "P1", "accession_name": "acc-9"}],
     }, dataset_root=ds_root)
 
-    res = compute_phenology(
+    res = deliver_phenology_milestones(
         trait=fx.CROSSING_TRAIT,
         mapping_name=mapping_name,
         predictions_by_date={"2026-02-11": str(bucket)},
@@ -349,7 +349,7 @@ def test_registry_for_pred_dirs_resolves_the_registry_through_compute_phenologys
             cr.Attribute(name="state", type="categorical", values=("closed",)),
         )),
     )))
-    refused = compute_phenology(
+    refused = deliver_phenology_milestones(
         trait=fx.CROSSING_TRAIT,
         mapping_name=mapping_name,
         predictions_by_date={"2026-02-11": str(bucket)},

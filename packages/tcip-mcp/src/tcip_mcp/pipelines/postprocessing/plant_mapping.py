@@ -244,7 +244,7 @@ class MappingBuild:
         """The ``plant_mapping`` dict a phenology delivery carries: this build's own identity,
         ``verify_mapping_inputs``'s disclosure, and this delivery's own unattributed-capture count
         scoped to ``dates`` (a delivery's own delivered dates, never the mapping's full span), the
-        one composition every phenology door (``compute_phenology``, both web phenology routes)
+        one composition every phenology door (``deliver_phenology_milestones``, both web phenology routes)
         builds through rather than each assembling its own copy."""
         dates_delivered = sorted(dates)
         return {

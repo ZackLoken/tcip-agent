@@ -2,7 +2,7 @@
 registered dataset by minted id, and to the receipt that proves it was written by the
 platform's own producers, never a hand-filed file. Every scenario is built through the
 platform's own producers (init_project, register_dataset, build_plant_mapping,
-compute_phenology), a second registered trait rather than the pilot's, so nothing here
+deliver_phenology_milestones), a second registered trait rather than the pilot's, so nothing here
 generalizes from one trait's own vocabulary.
 """
 
@@ -22,7 +22,7 @@ import tcip_store as ts
 from tcip_annotation import json_io
 from tcip_annotation.state import Annotation, BBox
 from tcip_mcp.pipelines.postprocessing import plant_mapping
-from tcip_mcp.tools.phenology_tools import build_plant_mapping, compute_phenology
+from tcip_mcp.tools.phenology_tools import build_plant_mapping, deliver_phenology_milestones
 from tcip_mcp.tools.project_tools import init_project, register_dataset
 from tcip_mcp.traits import registered_crops
 
@@ -165,7 +165,7 @@ def test_build_plant_mapping_admits_the_dataset_images_root_spelled_variously(
     assert "error" not in res, res
 
 
-def test_compute_phenology_refuses_predictions_from_a_different_dataset(
+def test_deliver_phenology_milestones_refuses_predictions_from_a_different_dataset(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _init(tmp_path, monkeypatch)
@@ -179,14 +179,14 @@ def test_compute_phenology_refuses_predictions_from_a_different_dataset(
     other_root = _dataset(tmp_path, name="ds2")
     _, _, other_preds = _write_scene(other_root)
 
-    res = compute_phenology(
+    res = deliver_phenology_milestones(
         trait="currant_bloom", mapping_name="valley", predictions_by_date=other_preds,
         output_csv_path=str(tmp_path / "out.csv"), acknowledge_unvalidated=True)
     assert "error" in res
     assert "different dataset" in res["error"]
 
 
-def test_compute_phenology_refuses_predictions_under_no_dataset_root_naming_the_remedy(
+def test_deliver_phenology_milestones_refuses_predictions_under_no_dataset_root_naming_the_remedy(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Rail 4's missing clause: a delivery whose prediction buckets resolve to no dataset root at
@@ -208,7 +208,7 @@ def test_compute_phenology_refuses_predictions_under_no_dataset_root_naming_the_
         bucket.mkdir(parents=True, exist_ok=True)
         orphan_preds[date] = str(bucket)
 
-    res = compute_phenology(
+    res = deliver_phenology_milestones(
         trait="currant_bloom", mapping_name="valley", predictions_by_date=orphan_preds,
         output_csv_path=str(tmp_path / "out.csv"), acknowledge_unvalidated=True)
     assert "error" in res
@@ -219,7 +219,7 @@ def test_compute_phenology_refuses_predictions_under_no_dataset_root_naming_the_
 # ── rail 5: an extra predictions_by_date date the mapping does not name ─────────────────
 
 
-def test_compute_phenology_refuses_a_date_the_mapping_does_not_cover(
+def test_deliver_phenology_milestones_refuses_a_date_the_mapping_does_not_cover(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _init(tmp_path, monkeypatch)
@@ -241,7 +241,7 @@ def test_compute_phenology_refuses_a_date_the_mapping_does_not_cover(
     write_sidecar(extra, {"id_map": _ID_MAP}, "operating_point")
     preds_by_date[extra_date] = str(extra)
 
-    res = compute_phenology(
+    res = deliver_phenology_milestones(
         trait="currant_bloom", mapping_name="valley", predictions_by_date=preds_by_date,
         output_csv_path=str(tmp_path / "out.csv"), acknowledge_unvalidated=True)
     assert "error" in res
@@ -251,7 +251,7 @@ def test_compute_phenology_refuses_a_date_the_mapping_does_not_cover(
 # ── rail 1: a hand-written record refuses, missing provenance or missing receipt ────────
 
 
-def test_compute_phenology_refuses_a_hand_written_record_missing_provenance(
+def test_deliver_phenology_milestones_refuses_a_hand_written_record_missing_provenance(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _init(tmp_path, monkeypatch)
@@ -263,7 +263,7 @@ def test_compute_phenology_refuses_a_hand_written_record_missing_provenance(
         "assignments": {d: [] for d in DATES},
     })
     out_csv = tmp_path / "out.csv"
-    res = compute_phenology(
+    res = deliver_phenology_milestones(
         trait="currant_bloom", mapping_name="forged", predictions_by_date=preds_by_date,
         output_csv_path=str(out_csv), acknowledge_unvalidated=True)
     assert "error" in res
@@ -271,7 +271,7 @@ def test_compute_phenology_refuses_a_hand_written_record_missing_provenance(
     assert not out_csv.exists()
 
 
-def test_compute_phenology_refuses_a_record_with_provenance_and_no_receipt(
+def test_deliver_phenology_milestones_refuses_a_record_with_provenance_and_no_receipt(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _init(tmp_path, monkeypatch)
@@ -292,7 +292,7 @@ def test_compute_phenology_refuses_a_record_with_provenance_and_no_receipt(
     }
     ts.replace(plant_mapping.plant_mapping_key(tmp_path, "forged"), record)
     out_csv = tmp_path / "out.csv"
-    res = compute_phenology(
+    res = deliver_phenology_milestones(
         trait="currant_bloom", mapping_name="forged", predictions_by_date=preds_by_date,
         output_csv_path=str(out_csv), acknowledge_unvalidated=True)
     assert "error" in res
@@ -303,7 +303,7 @@ def test_compute_phenology_refuses_a_record_with_provenance_and_no_receipt(
 # ── rail 3: a plant CSV rewritten in place refuses, naming the file ─────────────────────
 
 
-def test_compute_phenology_refuses_a_plant_csv_rewritten_in_place(
+def test_deliver_phenology_milestones_refuses_a_plant_csv_rewritten_in_place(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _init(tmp_path, monkeypatch)
@@ -319,7 +319,7 @@ def test_compute_phenology_refuses_a_plant_csv_rewritten_in_place(
         "P1,acc-Z,-90.058000,43.19670\n", encoding="utf-8")
 
     out_csv = tmp_path / "out.csv"
-    res = compute_phenology(
+    res = deliver_phenology_milestones(
         trait="currant_bloom", mapping_name="valley", predictions_by_date=preds_by_date,
         output_csv_path=str(out_csv), acknowledge_unvalidated=True)
     assert "error" in res
@@ -349,7 +349,7 @@ def test_an_unread_captures_bytes_going_bad_is_disclosed_never_opened(
     (images_root / DATES[0] / f"{p2_stem}.jpg").write_bytes(b"not a real jpeg any more")
 
     out_csv = tmp_path / "out.csv"
-    res = compute_phenology(
+    res = deliver_phenology_milestones(
         trait="currant_bloom", mapping_name="valley", predictions_by_date=preds_by_date,
         output_csv_path=str(out_csv), acknowledge_unvalidated=True)
     assert "error" not in res, res
@@ -359,7 +359,7 @@ def test_an_unread_captures_bytes_going_bad_is_disclosed_never_opened(
 
     scope = resolution.delivery_events_scope(tmp_path)
     keys = ts.keys(resolution.DELIVERY_EVENTS_STORE, str(scope))
-    events = [ts.read(k) for k in keys if ts.read(k)["door"] == "compute_phenology"]
+    events = [ts.read(k) for k in keys if ts.read(k)["door"] == "deliver_phenology_milestones"]
     pm = events[-1]["plant_mapping"]
     assert pm["captures_unverified"] == [f"{DATES[0]}/{p2_stem}.jpg"]
 
@@ -385,7 +385,7 @@ def test_an_unread_captures_bytes_changing_in_place_no_longer_refuses(
         datetime(2026, 2, 11, 10, 45))
 
     out_csv = tmp_path / "out.csv"
-    res = compute_phenology(
+    res = deliver_phenology_milestones(
         trait="currant_bloom", mapping_name="valley", predictions_by_date=preds_by_date,
         output_csv_path=str(out_csv), acknowledge_unvalidated=True)
     assert "error" not in res, res
@@ -395,7 +395,7 @@ def test_an_unread_captures_bytes_changing_in_place_no_longer_refuses(
 
     scope = resolution.delivery_events_scope(tmp_path)
     keys = ts.keys(resolution.DELIVERY_EVENTS_STORE, str(scope))
-    events = [ts.read(k) for k in keys if ts.read(k)["door"] == "compute_phenology"]
+    events = [ts.read(k) for k in keys if ts.read(k)["door"] == "deliver_phenology_milestones"]
     pm = events[-1]["plant_mapping"]
     assert pm["captures_unverified"] == [f"{DATES[0]}/{p2_stem}.jpg"]
 
@@ -418,7 +418,7 @@ def test_a_non_delivered_mapping_date_is_never_walked(
 
     delivered_preds = {DATES[0]: preds_by_date[DATES[0]]}
     out_csv = tmp_path / "out.csv"
-    res = compute_phenology(
+    res = deliver_phenology_milestones(
         trait="currant_bloom", mapping_name="valley", predictions_by_date=delivered_preds,
         output_csv_path=str(out_csv), acknowledge_unvalidated=True)
     assert "error" not in res, res
@@ -428,7 +428,7 @@ def test_a_non_delivered_mapping_date_is_never_walked(
 
     scope = resolution.delivery_events_scope(tmp_path)
     keys = ts.keys(resolution.DELIVERY_EVENTS_STORE, str(scope))
-    events = [ts.read(k) for k in keys if ts.read(k)["door"] == "compute_phenology"]
+    events = [ts.read(k) for k in keys if ts.read(k)["door"] == "deliver_phenology_milestones"]
     pm = events[-1]["plant_mapping"]
     assert pm["captures_unverified"] == [DATES[1]]
 
@@ -452,7 +452,7 @@ def test_a_moved_read_capture_refuses_naming_the_file(
         target, PLANTS[0]["lat"], PLANTS[0]["lon"] + 0.0002, datetime(2026, 2, 11, 9, 30))
 
     out_csv = tmp_path / "out.csv"
-    res = compute_phenology(
+    res = deliver_phenology_milestones(
         trait="currant_bloom", mapping_name="valley", predictions_by_date=preds_by_date,
         output_csv_path=str(out_csv), acknowledge_unvalidated=True)
     assert "error" in res
@@ -480,7 +480,7 @@ def test_full_coverage_still_catches_an_in_place_exif_timestamp_change(
     _write_geo_image(target, PLANTS[0]["lat"], PLANTS[0]["lon"], datetime(2026, 2, 11, 11, 0))
 
     out_csv = tmp_path / "out.csv"
-    res = compute_phenology(
+    res = deliver_phenology_milestones(
         trait="currant_bloom", mapping_name="valley", predictions_by_date=preds_by_date,
         output_csv_path=str(out_csv), acknowledge_unvalidated=True)
     assert "error" in res
@@ -510,7 +510,7 @@ def test_an_unmapped_raster_no_longer_blocks_the_whole_date_digest_from_catching
     _write_geo_image(target, PLANTS[0]["lat"], PLANTS[0]["lon"], datetime(2026, 2, 11, 11, 0))
 
     out_csv = tmp_path / "out.csv"
-    res = compute_phenology(
+    res = deliver_phenology_milestones(
         trait="currant_bloom", mapping_name="valley", predictions_by_date=preds_by_date,
         output_csv_path=str(out_csv), acknowledge_unvalidated=True)
     assert "error" in res
@@ -535,7 +535,7 @@ def test_an_unmapped_raster_beside_a_full_mapped_read_delivers_with_nothing_disc
     _seed_currant_bloom_trait(tmp_path)
 
     out_csv = tmp_path / "out.csv"
-    res = compute_phenology(
+    res = deliver_phenology_milestones(
         trait="currant_bloom", mapping_name="valley", predictions_by_date=preds_by_date,
         output_csv_path=str(out_csv), acknowledge_unvalidated=True)
     assert "error" not in res, res
@@ -545,7 +545,7 @@ def test_an_unmapped_raster_beside_a_full_mapped_read_delivers_with_nothing_disc
 
     scope = resolution.delivery_events_scope(tmp_path)
     keys = ts.keys(resolution.DELIVERY_EVENTS_STORE, str(scope))
-    events = [ts.read(k) for k in keys if ts.read(k)["door"] == "compute_phenology"]
+    events = [ts.read(k) for k in keys if ts.read(k)["door"] == "deliver_phenology_milestones"]
     pm = events[-1]["plant_mapping"]
     assert pm["captures_unverified"] == [], pm
 
@@ -566,7 +566,7 @@ def test_a_partial_delivery_delivers_with_disclosures_naming_exactly_what_it_did
 
     delivered_preds = {DATES[0]: preds_by_date[DATES[0]]}
     out_csv = tmp_path / "out.csv"
-    res = compute_phenology(
+    res = deliver_phenology_milestones(
         trait="currant_bloom", mapping_name="valley", predictions_by_date=delivered_preds,
         output_csv_path=str(out_csv), acknowledge_unvalidated=True)
     assert "error" not in res, res
@@ -576,7 +576,7 @@ def test_a_partial_delivery_delivers_with_disclosures_naming_exactly_what_it_did
 
     scope = resolution.delivery_events_scope(tmp_path)
     keys = ts.keys(resolution.DELIVERY_EVENTS_STORE, str(scope))
-    events = [ts.read(k) for k in keys if ts.read(k)["door"] == "compute_phenology"]
+    events = [ts.read(k) for k in keys if ts.read(k)["door"] == "deliver_phenology_milestones"]
     pm = events[-1]["plant_mapping"]
     assert pm["captures_unverified"] == [f"{DATES[0]}/{p2_stem}.jpg", DATES[1]]
 
@@ -597,7 +597,7 @@ def test_a_capture_readable_at_build_and_unreadable_at_verify_refuses(
     target.write_bytes(b"corrupted after the build")
 
     out_csv = tmp_path / "out.csv"
-    res = compute_phenology(
+    res = deliver_phenology_milestones(
         trait="currant_bloom", mapping_name="valley", predictions_by_date=preds_by_date,
         output_csv_path=str(out_csv), acknowledge_unvalidated=True)
     assert "error" in res
@@ -640,7 +640,7 @@ def test_a_capture_unreadable_at_build_is_never_read_so_replacing_it_only_disclo
     (Path(preds_by_date[DATES[0]]) / f"{p2_stem}.json").unlink()
 
     out_csv = tmp_path / "out.csv"
-    res = compute_phenology(
+    res = deliver_phenology_milestones(
         trait="currant_bloom", mapping_name="valley", predictions_by_date=preds_by_date,
         output_csv_path=str(out_csv), acknowledge_unvalidated=True)
     assert "error" not in res, res
@@ -650,7 +650,7 @@ def test_a_capture_unreadable_at_build_is_never_read_so_replacing_it_only_disclo
 
     scope = resolution.delivery_events_scope(tmp_path)
     keys = ts.keys(resolution.DELIVERY_EVENTS_STORE, str(scope))
-    events = [ts.read(k) for k in keys if ts.read(k)["door"] == "compute_phenology"]
+    events = [ts.read(k) for k in keys if ts.read(k)["door"] == "deliver_phenology_milestones"]
     pm = events[-1]["plant_mapping"]
     assert f"{DATES[0]}/{stem}.jpg" in pm["captures_unverified"]
 
@@ -770,7 +770,7 @@ def test_full_round_trip_delivers_and_a_rebuild_reads_back(
 
     _seed_currant_bloom_trait(tmp_path)
     out_csv = tmp_path / "out" / "bloom_phenology.csv"
-    res = compute_phenology(
+    res = deliver_phenology_milestones(
         trait="currant_bloom", mapping_name="valley", predictions_by_date=preds_by_date,
         output_csv_path=str(out_csv), acknowledge_unvalidated=True)
     assert "error" not in res, res
@@ -780,7 +780,7 @@ def test_full_round_trip_delivers_and_a_rebuild_reads_back(
 
     scope = resolution.delivery_events_scope(tmp_path)
     keys = ts.keys(resolution.DELIVERY_EVENTS_STORE, str(scope))
-    events = [ts.read(k) for k in keys if ts.read(k)["door"] == "compute_phenology"]
+    events = [ts.read(k) for k in keys if ts.read(k)["door"] == "deliver_phenology_milestones"]
     assert len(events) == 1, events
     pm = events[0]["plant_mapping"]
     assert pm["name"] == "valley"
@@ -793,7 +793,7 @@ def test_full_round_trip_delivers_and_a_rebuild_reads_back(
         name="valley", images_root=str(images_root), plant_csv_paths=[str(plant_csv)])
     assert "error" not in build_res2, build_res2
     out_csv2 = tmp_path / "out2" / "bloom_phenology.csv"
-    res2 = compute_phenology(
+    res2 = deliver_phenology_milestones(
         trait="currant_bloom", mapping_name="valley", predictions_by_date=preds_by_date,
         output_csv_path=str(out_csv2), acknowledge_unvalidated=True)
     assert "error" not in res2, res2
@@ -817,7 +817,7 @@ def test_the_delivery_events_plant_mapping_block_carries_the_tolerance_dict(
 
     _seed_currant_bloom_trait(tmp_path)
     out_csv = tmp_path / "out" / "bloom_phenology.csv"
-    res = compute_phenology(
+    res = deliver_phenology_milestones(
         trait="currant_bloom", mapping_name="valley", predictions_by_date=preds_by_date,
         output_csv_path=str(out_csv), acknowledge_unvalidated=True)
     assert "error" not in res, res
@@ -826,7 +826,7 @@ def test_the_delivery_events_plant_mapping_block_carries_the_tolerance_dict(
 
     scope = resolution.delivery_events_scope(tmp_path)
     keys = ts.keys(resolution.DELIVERY_EVENTS_STORE, str(scope))
-    events = [ts.read(k) for k in keys if ts.read(k)["door"] == "compute_phenology"]
+    events = [ts.read(k) for k in keys if ts.read(k)["door"] == "deliver_phenology_milestones"]
     assert len(events) == 1, events
     assert events[0]["plant_mapping"]["nn_tolerance_m"] == build.nn_tolerance_m
 
@@ -850,7 +850,7 @@ def test_a_moved_plant_csv_and_an_archived_date_deliver_with_disclosures(
     shutil.rmtree(images_root / DATES[0])
 
     out_csv = tmp_path / "out.csv"
-    res = compute_phenology(
+    res = deliver_phenology_milestones(
         trait="currant_bloom", mapping_name="valley", predictions_by_date=preds_by_date,
         output_csv_path=str(out_csv), acknowledge_unvalidated=True)
     assert "error" not in res, res
@@ -860,7 +860,7 @@ def test_a_moved_plant_csv_and_an_archived_date_deliver_with_disclosures(
 
     scope = resolution.delivery_events_scope(tmp_path)
     keys = ts.keys(resolution.DELIVERY_EVENTS_STORE, str(scope))
-    events = [ts.read(k) for k in keys if ts.read(k)["door"] == "compute_phenology"]
+    events = [ts.read(k) for k in keys if ts.read(k)["door"] == "deliver_phenology_milestones"]
     pm = events[-1]["plant_mapping"]
     assert str(plant_csv) in pm["plant_csvs_unverified"]
     assert DATES[0] in pm["captures_unverified"]
@@ -893,7 +893,7 @@ def test_a_read_capture_whose_plants_own_csv_is_missing_discloses_rather_than_re
     per_plant_csvs[1].unlink()
 
     out_csv = tmp_path / "out.csv"
-    res = compute_phenology(
+    res = deliver_phenology_milestones(
         trait="currant_bloom", mapping_name="valley", predictions_by_date=preds_by_date,
         output_csv_path=str(out_csv), acknowledge_unvalidated=True)
     assert "error" not in res, res
@@ -903,7 +903,7 @@ def test_a_read_capture_whose_plants_own_csv_is_missing_discloses_rather_than_re
 
     scope = resolution.delivery_events_scope(tmp_path)
     keys = ts.keys(resolution.DELIVERY_EVENTS_STORE, str(scope))
-    events = [ts.read(k) for k in keys if ts.read(k)["door"] == "compute_phenology"]
+    events = [ts.read(k) for k in keys if ts.read(k)["door"] == "deliver_phenology_milestones"]
     pm = events[-1]["plant_mapping"]
     assert str(per_plant_csvs[1]) in pm["plant_csvs_unverified"]
     p2_stem = f"{PLANTS[1]['plot']}_{DATES[0].replace('-', '')}"
@@ -947,7 +947,7 @@ def test_a_moved_capture_whose_own_csv_is_missing_is_disclosed_under_a_partial_r
     (Path(preds_by_date[DATES[0]]) / f"{p3_stem}.json").unlink()
 
     out_csv = tmp_path / "out.csv"
-    res = compute_phenology(
+    res = deliver_phenology_milestones(
         trait="currant_bloom", mapping_name="valley", predictions_by_date=preds_by_date,
         output_csv_path=str(out_csv), acknowledge_unvalidated=True)
     assert "error" not in res, res
@@ -957,7 +957,7 @@ def test_a_moved_capture_whose_own_csv_is_missing_is_disclosed_under_a_partial_r
 
     scope = resolution.delivery_events_scope(tmp_path)
     keys = ts.keys(resolution.DELIVERY_EVENTS_STORE, str(scope))
-    events = [ts.read(k) for k in keys if ts.read(k)["door"] == "compute_phenology"]
+    events = [ts.read(k) for k in keys if ts.read(k)["door"] == "deliver_phenology_milestones"]
     pm = events[-1]["plant_mapping"]
     assert f"{DATES[0]}/{p2_stem}.jpg" in pm["captures_unverified"]
 
@@ -988,7 +988,7 @@ def test_a_moved_and_re_registered_dataset_still_delivers_through_the_earlier_ma
 
     moved_preds = {d: str(moved_root / "predictions" / "live" / d) for d in preds_by_date}
     out_csv = tmp_path / "out.csv"
-    res = compute_phenology(
+    res = deliver_phenology_milestones(
         trait="currant_bloom", mapping_name="valley", predictions_by_date=moved_preds,
         output_csv_path=str(out_csv), acknowledge_unvalidated=True)
     assert "error" not in res, res
@@ -998,7 +998,7 @@ def test_a_moved_and_re_registered_dataset_still_delivers_through_the_earlier_ma
     # alone): the check must resolve against delivered_root, not the recorded dataset_root.
     shutil.rmtree(str(images_root))
     out_csv2 = tmp_path / "out2.csv"
-    res2 = compute_phenology(
+    res2 = deliver_phenology_milestones(
         trait="currant_bloom", mapping_name="valley", predictions_by_date=moved_preds,
         output_csv_path=str(out_csv2), acknowledge_unvalidated=True)
     assert "error" not in res2, res2
@@ -1007,7 +1007,7 @@ def test_a_moved_and_re_registered_dataset_still_delivers_through_the_earlier_ma
 
     scope = resolution.delivery_events_scope(tmp_path)
     keys = ts.keys(resolution.DELIVERY_EVENTS_STORE, str(scope))
-    events = [ts.read(k) for k in keys if ts.read(k)["door"] == "compute_phenology"]
+    events = [ts.read(k) for k in keys if ts.read(k)["door"] == "deliver_phenology_milestones"]
     pm = events[-1]["plant_mapping"]
     assert pm["captures_unverified"] == [], pm
 
@@ -1075,7 +1075,7 @@ def test_two_projects_mapping_one_dataset_under_the_same_name_each_deliver_throu
 
     monkeypatch.setenv("TCIP_STATE_ROOT", str(proj_a))
     out_csv_a = proj_a / "out.csv"
-    res_a = compute_phenology(
+    res_a = deliver_phenology_milestones(
         trait="currant_bloom", mapping_name="valley",
         predictions_by_date={DATES[0]: preds_by_date[DATES[0]]},
         output_csv_path=str(out_csv_a), acknowledge_unvalidated=True)
@@ -1084,7 +1084,7 @@ def test_two_projects_mapping_one_dataset_under_the_same_name_each_deliver_throu
 
     monkeypatch.setenv("TCIP_STATE_ROOT", str(proj_b))
     out_csv_b = proj_b / "out.csv"
-    res_b = compute_phenology(
+    res_b = deliver_phenology_milestones(
         trait="currant_bloom", mapping_name="valley", predictions_by_date=preds_by_date,
         output_csv_path=str(out_csv_b), acknowledge_unvalidated=True)
     assert "error" not in res_b, res_b
@@ -1094,7 +1094,7 @@ def test_two_projects_mapping_one_dataset_under_the_same_name_each_deliver_throu
     # record, unaffected by proj_b's wider mapping under the identical name.
     monkeypatch.setenv("TCIP_STATE_ROOT", str(proj_a))
     out_csv_a2 = proj_a / "out2.csv"
-    res_a2 = compute_phenology(
+    res_a2 = deliver_phenology_milestones(
         trait="currant_bloom", mapping_name="valley", predictions_by_date=preds_by_date,
         output_csv_path=str(out_csv_a2), acknowledge_unvalidated=True)
     assert "error" in res_a2
@@ -1129,7 +1129,7 @@ def test_an_image_ingested_under_a_mapped_date_refuses_the_delivery_naming_the_d
     assert res["buckets"].get(DATES[0]) == 1
 
     out_csv = tmp_path / "out.csv"
-    res = compute_phenology(
+    res = deliver_phenology_milestones(
         trait="currant_bloom", mapping_name="valley", predictions_by_date=preds_by_date,
         output_csv_path=str(out_csv), acknowledge_unvalidated=True)
     assert "error" in res
@@ -1166,7 +1166,7 @@ def test_a_band_group_written_under_a_mapped_date_refuses_the_delivery_the_same_
     assert grouped["formed"], grouped
 
     out_csv = tmp_path / "out.csv"
-    res = compute_phenology(
+    res = deliver_phenology_milestones(
         trait="currant_bloom", mapping_name="valley", predictions_by_date=preds_by_date,
         output_csv_path=str(out_csv), acknowledge_unvalidated=True)
     assert "error" in res
@@ -1228,7 +1228,7 @@ def test_build_mapping_persists_and_reads_back_capture_digests(
     assert receipts[-1] == recomputed
 
     out_csv = tmp_path / "out.csv"
-    res = compute_phenology(
+    res = deliver_phenology_milestones(
         trait="currant_bloom", mapping_name="valley", predictions_by_date=preds_by_date,
         output_csv_path=str(out_csv), acknowledge_unvalidated=True)
     assert "error" not in res, res
@@ -1268,7 +1268,7 @@ def test_a_band_group_manifest_rewritten_in_place_refuses_the_delivery_naming_th
     manifest_path.write_text(manifest_path.read_text(encoding="utf-8") + "\n", encoding="utf-8")
 
     out_csv = tmp_path / "out.csv"
-    res = compute_phenology(
+    res = deliver_phenology_milestones(
         trait="currant_bloom", mapping_name="valley", predictions_by_date=preds_by_date,
         output_csv_path=str(out_csv), acknowledge_unvalidated=True)
     assert "error" in res
@@ -1325,7 +1325,7 @@ def test_a_date_with_an_unreadable_image_a_raster_and_a_band_group_builds_and_de
     assert by_stem["aux"].source == "unmapped"
 
     out_csv = tmp_path / "out.csv"
-    res = compute_phenology(
+    res = deliver_phenology_milestones(
         trait="currant_bloom", mapping_name="valley", predictions_by_date=preds_by_date,
         output_csv_path=str(out_csv), acknowledge_unvalidated=True)
     assert "error" not in res, res

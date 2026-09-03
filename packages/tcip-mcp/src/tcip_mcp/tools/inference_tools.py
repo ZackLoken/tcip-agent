@@ -1386,7 +1386,7 @@ def export_predictions(
     refusal belongs: a tiled run whose tile_size has no real basis (no persisted training geometry,
     no recoverable native-frame edge, no explicit override) refuses to write here unless
     ``acknowledge_unvalidated=True``, the same
-    gate ``tabulate_counts``/``compute_phenology``/the web results routes/``export_aggregated_csv``
+    gate ``tabulate_counts``/``deliver_phenology_milestones``/the web results routes/``export_aggregated_csv``
     already apply, via the same shared :func:`tcip_mcp.pipelines.resolution.tile_size_gate_flag`.
     Both regimes gate before the (expensive) pass runs: the ``raster_path`` regime uses the
     predictor that pass then reuses; the ``images_dir`` regime sniffs the checkpoint's own stamped

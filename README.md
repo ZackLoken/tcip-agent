@@ -202,7 +202,7 @@ own door (`calibrate_scalar_operating_point`), but neither has an annotation/rev
 surface built for it: both read labels from a hand-authored external CSV of image stem plus rank
 or value rather than the platform's own annotation/review UI, and both are excluded from the
 platform's automatic train/val split. The agent composes the
-working slice end to end via `build_plant_mapping` → tiled inference → `compute_phenology`, and
+working slice end to end via `build_plant_mapping` → tiled inference → `deliver_phenology_milestones`, and
 the same milestone code backs the Results tab, so a milestone date means one thing on both
 surfaces. Phase 1's own shipped example is hazelnut catkin bloom phenology
 (`catkin_05/50/95per_date`, elongation as the positive state).
@@ -220,7 +220,7 @@ full-raster-sized array per detection). Each detection resolves to a real-world 
 matched to the nearest plant in a plant-locations CSV (`assign_detections_to_plants`, honest
 `source`/`distance_m`, no fabricated confidence, an unmatched detection stays unmatched rather than
 being forced onto the nearest plant regardless of distance). Two MCP tools compose the whole path
-end to end the same way `build_plant_mapping` → `compute_phenology` do for the per-photo case:
+end to end the same way `build_plant_mapping` → `deliver_phenology_milestones` do for the per-photo case:
 `export_predictions`'s `raster_path` regime (tile, persist a prediction bucket) and
 `deliver_orthomosaic_plant_counts` (map detections to plants, aggregate, deliver through the same
 measurement-integrity gate every other per-plant CSV goes through). Not yet built: a composed

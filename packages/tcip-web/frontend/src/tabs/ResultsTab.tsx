@@ -774,7 +774,7 @@ export function ResultsTab() {
   }
 
   // Measurement-integrity guard: never export a phenology CSV built on predictions that carry no
-  // positive-state class, or on provisional evidence. Mirrors compute_phenology, which
+  // positive-state class, or on provisional evidence. Mirrors deliver_phenology_milestones, which
   // hard-refuses both, so the GUI and the agent surface behave identically (see CLAUDE.md
   // invariant). The server refuses either case regardless; these keep the button from promising
   // what it can't do.
