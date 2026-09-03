@@ -176,4 +176,4 @@ If no existing piece fits, write the primitive: a new head, a bespoke `train(ctx
 proposal engine, a novel acquisition scorer, and register or import it. When the plain blocks and
 your own primitives both plateau on a trait, research the literature (see `cv-research`) and prove
 the new method beats the baseline on the measured phenotype before trusting it. Capture what you
-built in a `project_retrospective` so the next session finds it on the map.
+built in a `write_retrospective` so the next session finds it on the map.

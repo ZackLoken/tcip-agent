@@ -8,7 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from tcip_web.app import app
-from tcip_mcp.tools.meta_tools import report_friction, project_retrospective
+from tcip_mcp.tools.meta_tools import report_friction, write_retrospective
 
 
 @pytest.fixture
@@ -48,7 +48,7 @@ def test_retrospectives_empty_when_dir_missing(client: TestClient, tmp_path: Pat
 
 
 def test_retrospectives_surfaces_written_retro(client: TestClient, tmp_path: Path) -> None:
-    project_retrospective(
+    write_retrospective(
         str(tmp_path),
         project_id="elderberry-cluster",
         task="count fruit clusters",

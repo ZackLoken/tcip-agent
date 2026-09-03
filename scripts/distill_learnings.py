@@ -2,7 +2,7 @@
 
 Learning lands with the project (see the `self-improvement` skill): friction goes to the friction
 reports via ``report_friction``, and end-of-work findings to the retrospectives via
-``project_retrospective``. This gathers both, plus the SessionEnd capture backstop, so a review is
+``write_retrospective``. This gathers both, plus the SessionEnd capture backstop, so a review is
 cheap and nothing is dropped.
 
     conda activate tcip-agent

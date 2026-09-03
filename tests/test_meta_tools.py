@@ -1,4 +1,4 @@
-"""Tests for meta-loop tools (report_friction, project_retrospective, load_project_memory)."""
+"""Tests for meta-loop tools (report_friction, write_retrospective, load_project_memory)."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from tcip_mcp.project_status import read_project_status
 from tcip_mcp.tools.meta_tools import (
     report_friction,
     load_project_memory,
-    project_retrospective,
+    write_retrospective,
     read_report,
     read_retrospective,
     record_distillation_pass,
@@ -89,8 +89,8 @@ def test_report_friction_one_document_per_report(tmp_path: Path):
     assert len(report_documents(str(tmp_path))) == 3
 
 
-def test_project_retrospective_creates_new_file(tmp_path: Path):
-    result = project_retrospective(
+def test_write_retrospective_creates_new_file(tmp_path: Path):
+    result = write_retrospective(
         str(tmp_path),
         project_id="chestnut-bur-phase0",
         task="Bootstrap bur detection from scratch",
@@ -114,15 +114,15 @@ def test_project_retrospective_creates_new_file(tmp_path: Path):
     assert "Burs cluster near canopy edges" in content
 
 
-def test_project_retrospective_appends_to_existing(tmp_path: Path):
-    project_retrospective(
+def test_write_retrospective_appends_to_existing(tmp_path: Path):
+    write_retrospective(
         str(tmp_path),
         project_id="chestnut-bur-phase0",
         task="First pass",
         worked="a",
         did_not_work="b",
     )
-    project_retrospective(
+    write_retrospective(
         str(tmp_path),
         project_id="chestnut-bur-phase0",
         task="Second pass after three days",
@@ -149,7 +149,7 @@ def test_concurrent_retrospectives_all_survive(tmp_path: Path):
 
     def _call(index: int):
         barrier.wait()  # maximize actual overlap, not just "started around the same time"
-        project_retrospective(
+        write_retrospective(
             str(tmp_path),
             project_id="project-under-test",
             task=f"pass {index}",
@@ -170,8 +170,8 @@ def test_concurrent_retrospectives_all_survive(tmp_path: Path):
     assert not missing, f"sections lost: {missing}"
 
 
-def test_project_retrospective_handles_empty_optional_fields(tmp_path: Path):
-    project_retrospective(
+def test_write_retrospective_handles_empty_optional_fields(tmp_path: Path):
+    write_retrospective(
         str(tmp_path),
         project_id="minimal",
         task="t",
@@ -191,11 +191,11 @@ def test_load_retrospectives_returns_empty_when_none_recorded(tmp_path: Path):
 def test_load_retrospectives_returns_recent_first(tmp_path: Path):
     # Each section is stamped from the clock, whose tick is coarser than these calls, so the writes
     # are spaced far enough apart to state three different times rather than one.
-    project_retrospective(str(tmp_path), project_id="first", task="t", worked="w", did_not_work="d")
+    write_retrospective(str(tmp_path), project_id="first", task="t", worked="w", did_not_work="d")
     time.sleep(0.05)
-    project_retrospective(str(tmp_path), project_id="second", task="t", worked="w", did_not_work="d")
+    write_retrospective(str(tmp_path), project_id="second", task="t", worked="w", did_not_work="d")
     time.sleep(0.05)
-    project_retrospective(str(tmp_path), project_id="third", task="t", worked="w", did_not_work="d")
+    write_retrospective(str(tmp_path), project_id="third", task="t", worked="w", did_not_work="d")
 
     result = load_project_memory("retrospectives", str(tmp_path), limit=10)
     assert result["count"] == 3
@@ -205,7 +205,7 @@ def test_load_retrospectives_returns_recent_first(tmp_path: Path):
 
 def test_load_retrospectives_respects_limit(tmp_path: Path):
     for i in range(5):
-        project_retrospective(
+        write_retrospective(
             str(tmp_path),
             project_id=f"project-{i}",
             task="t",
@@ -219,14 +219,14 @@ def test_load_retrospectives_respects_limit(tmp_path: Path):
 
 
 def test_load_retrospectives_filter_substring(tmp_path: Path):
-    project_retrospective(
+    write_retrospective(
         str(tmp_path),
         project_id="hazelnut-efb",
         task="EFB severity",
         worked="w",
         did_not_work="d",
     )
-    project_retrospective(
+    write_retrospective(
         str(tmp_path),
         project_id="chestnut-bur",
         task="Bur detection",
@@ -317,10 +317,10 @@ def test_retrospectives_come_back_by_their_stated_sections_not_by_when_bytes_lan
     from tcip_store.file_backend import FileBackend
 
     ts.bind(FileBackend())
-    earlier = project_retrospective(
+    earlier = write_retrospective(
         str(tmp_path), project_id="earlier", task="t", worked="w", did_not_work="d")
     time.sleep(0.05)
-    project_retrospective(
+    write_retrospective(
         str(tmp_path), project_id="later", task="t", worked="w", did_not_work="d")
 
     landed_last = time.time() + 60
@@ -333,7 +333,7 @@ def test_retrospectives_come_back_by_their_stated_sections_not_by_when_bytes_lan
 
 def test_a_retrospective_stating_no_section_sorts_after_every_dated_one_by_name(tmp_path: Path):
     """A document that states no time is never given one, and lands in one fixed place by name."""
-    project_retrospective(
+    write_retrospective(
         str(tmp_path), project_id="dated", task="t", worked="w", did_not_work="d")
     for project_id in ("zzz-undated", "aaa-undated"):
         ts.replace(
@@ -404,9 +404,9 @@ def test_report_friction_updates_project_status(tmp_path: Path):
     assert status["reports_since_last_distillation"] == 1
 
 
-def test_project_retrospective_updates_project_status(tmp_path: Path):
+def test_write_retrospective_updates_project_status(tmp_path: Path):
     report_friction(str(tmp_path), category="missing_tool", detail="a")
-    project_retrospective(str(tmp_path), project_id="p", task="t", worked="w", did_not_work="d")
+    write_retrospective(str(tmp_path), project_id="p", task="t", worked="w", did_not_work="d")
 
     status = read_project_status(tmp_path)
     assert status["reports_since_last_retrospective"] == 0

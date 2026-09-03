@@ -143,7 +143,7 @@ def test_record_distillation_resets_both_distillation_counters_only(tmp_path: Pa
 
 def test_record_functions_are_best_effort_on_a_corrupt_file(tmp_path: Path):
     # A pre-existing corrupt status record must not crash a record_* call: it's best-effort and
-    # attached to a write (report_friction/project_retrospective) that must not fail because of it.
+    # attached to a write (report_friction/write_retrospective) that must not fail because of it.
     record_report(tmp_path)  # seed a real record so a damaged one has somewhere to overwrite
     _damage_project_status(tmp_path, b"{not valid json")
 
