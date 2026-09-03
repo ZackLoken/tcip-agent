@@ -34,6 +34,11 @@ def test_ci_activate_environment_key_matches():
     assert line.strip() == f"activate-environment: {_environment_name()}"
 
 
+def test_ci_ray_exit_windows_activate_environment_key_matches():
+    line = _line(REPO_ROOT / ".github" / "workflows" / "ci.yml", 150)
+    assert line.strip() == f"activate-environment: {_environment_name()}"
+
+
 def test_mcp_json_launch_argument_matches():
     data = json.loads((REPO_ROOT / ".mcp.json").read_text(encoding="utf-8"))
     args = data["mcpServers"]["tcip"]["args"]
@@ -98,6 +103,7 @@ _SOURCE_SITE = (REPO_ROOT / "environment.yml", 15)
 # line-content comparison.
 _STRUCTURED_SITES = [
     (REPO_ROOT / ".github" / "workflows" / "ci.yml", 27),
+    (REPO_ROOT / ".github" / "workflows" / "ci.yml", 150),
     (REPO_ROOT / ".mcp.json", 8),
 ]
 

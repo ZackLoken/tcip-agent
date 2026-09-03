@@ -9,6 +9,8 @@ the same corpus at import time).
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from tcip_mcp.knowledge import KNOWLEDGE_DIR, crops_yml_path, document_path, list_documents, read_document
@@ -163,6 +165,9 @@ def test_domain_knowledge_with_no_name_returns_the_index():
     result = domain_knowledge()
     names = {d["name"] for d in result["documents"]}
     assert names == {d.name for d in list_documents()}
+    for entry in result["documents"]:
+        assert entry["path"], f"{entry['name']}: index entry carries no path"
+        assert not Path(entry["path"]).is_absolute(), f"{entry['name']}: path is not repo-relative"
 
 
 def test_domain_knowledge_with_a_name_returns_that_documents_body():

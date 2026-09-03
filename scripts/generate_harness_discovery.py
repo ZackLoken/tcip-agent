@@ -33,9 +33,10 @@ AGENTS_BLOCK_END = "<!-- tcip:harness-discovery:end -->"
 AGENTS_BLOCK_MAX_BYTES = 16 * 1024
 
 
-def render_skill(name: str, description: str, document_path: Path) -> str:
-    """The generated Claude Code SKILL.md text for one knowledge document: its own frontmatter,
-    verbatim, plus a body that points at the canonical content instead of duplicating it."""
+def _render_skill_md(name: str, description: str, document_path: Path, read_instruction: str) -> str:
+    """One knowledge document's SKILL.md text: its own frontmatter, verbatim, plus a body that
+    points at the canonical content instead of duplicating it, phrased per `read_instruction`
+    for the harness the tree is generated for."""
     import yaml
 
     front = yaml.safe_dump(
@@ -43,26 +44,23 @@ def render_skill(name: str, description: str, document_path: Path) -> str:
         sort_keys=False, allow_unicode=True, default_flow_style=False, width=float("inf"),
     )
     relative_path = document_path.resolve().relative_to(REPO_ROOT).as_posix()
-    body = (
-        f"The content is at `{relative_path}`. Read it in full with Read before acting in "
-        "its domain.\n"
-    )
+    body = f"The content is at `{relative_path}`. {read_instruction}\n"
     return f"---\n{front}---\n\n{body}"
+
+
+def render_skill(name: str, description: str, document_path: Path) -> str:
+    """The generated Claude Code SKILL.md text for one knowledge document."""
+    return _render_skill_md(
+        name, description, document_path, "Read it in full with Read before acting in its domain."
+    )
 
 
 def render_agents_skill(name: str, description: str, document_path: Path) -> str:
-    """The generated Codex/Antigravity SKILL.md text for one knowledge document: the same
-    frontmatter as the Claude Code form, and a body phrased for a harness with its own file
-    reader rather than a Claude tool."""
-    import yaml
-
-    front = yaml.safe_dump(
-        {"name": name, "description": description},
-        sort_keys=False, allow_unicode=True, default_flow_style=False, width=float("inf"),
+    """The generated Codex/Antigravity SKILL.md text for one knowledge document, phrased for a
+    harness with its own file reader rather than a Claude tool."""
+    return _render_skill_md(
+        name, description, document_path, "Read it in full before acting in its domain."
     )
-    relative_path = document_path.resolve().relative_to(REPO_ROOT).as_posix()
-    body = f"The content is at `{relative_path}`. Read it in full before acting in its domain.\n"
-    return f"---\n{front}---\n\n{body}"
 
 
 def render_agents_block(documents) -> str:
@@ -89,6 +87,30 @@ def render_agents_block(documents) -> str:
         AGENTS_BLOCK_END,
     ]
     return "\n".join(lines) + "\n"
+
+
+def stale_skills(skills_dir: Path, render, documents) -> list[str]:
+    """Document names whose generated `SKILL.md` under `skills_dir` is missing, or does not
+    equal `render(name, description, path)`: the one staleness comparison every check on a
+    skill tree, live or perturbed, runs against."""
+    stale = []
+    for document in documents:
+        skill_path = skills_dir / document.name / "SKILL.md"
+        if not skill_path.is_file():
+            stale.append(document.name)
+            continue
+        expected = render(document.name, document.description, document.path)
+        if skill_path.read_text(encoding="utf-8") != expected:
+            stale.append(document.name)
+    return stale
+
+
+def stray_skill_directories(skills_dir: Path, documents) -> set[str]:
+    """Directory names directly under `skills_dir` that name no document in `documents`: the
+    one stray-directory comparison every check on a skill tree, live or perturbed, runs against."""
+    documented_names = {document.name for document in documents}
+    on_disk = {entry.name for entry in skills_dir.iterdir() if entry.is_dir()}
+    return on_disk - documented_names
 
 
 def _write_skill_tree(skills_dir: Path, render, documents) -> list[Path]:
@@ -126,8 +148,8 @@ def write_agents_block(documents=None, path: Path = AGENTS_MD_PATH) -> Path:
     leaving any text outside the markers untouched.
 
     Raises `ValueError` when the rendered block exceeds the byte budget Codex's combined
-    `AGENTS.md` reader allows, and when the file carries a start marker with no matching end
-    marker (a malformed hand-edit) or the reverse.
+    `AGENTS.md` reader allows, when the file carries a start marker with no matching end marker
+    or the reverse, and when both markers are present but the end marker sits above the start.
     """
     from tcip_mcp.knowledge import list_documents
 
@@ -143,7 +165,9 @@ def write_agents_block(documents=None, path: Path = AGENTS_MD_PATH) -> Path:
     if start == -1 and end == -1:
         prefix = text.rstrip("\n")
         new_text = (prefix + "\n\n" if prefix else "") + block
-    elif start != -1 and end != -1 and end > start:
+    elif start != -1 and end != -1:
+        if end <= start:
+            raise ValueError(f"{path}: end marker appears above the start marker, malformed")
         # block carries the newline after its own end marker; drop the file's copy of that
         # same newline so repeated regeneration does not grow the file by one line each run.
         after = end + len(AGENTS_BLOCK_END)
@@ -151,7 +175,7 @@ def write_agents_block(documents=None, path: Path = AGENTS_MD_PATH) -> Path:
             after += 1
         new_text = text[:start] + block + text[after:]
     else:
-        raise ValueError(f"{path}: carries a start or end marker but not both, malformed")
+        raise ValueError(f"{path}: carries a start marker or an end marker but not both, malformed")
     path.write_text(new_text, encoding="utf-8", newline="\n")
     return path
 

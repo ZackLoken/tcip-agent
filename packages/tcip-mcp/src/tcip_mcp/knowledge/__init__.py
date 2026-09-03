@@ -1,7 +1,9 @@
 """The one canonical domain-knowledge directory and its one reader.
 
 Every document a client reaches, whether through the generated Claude Code skills under
-``.claude/skills/`` or the ``domain_knowledge`` MCP tool, is a file under :data:`KNOWLEDGE_DIR`:
+``.claude/skills/``, the shared skill tree Codex and Antigravity read under
+``.agents/skills/``, the generated block in ``AGENTS.md``, or the ``domain_knowledge`` MCP
+tool, is a file under :data:`KNOWLEDGE_DIR`:
 the domain documents beside this module and the per-crop documents plus ``crops.yml`` (the
 trait authority) under ``crops/``. The two-field frontmatter (``name``,
 ``description``) each document carries is its selection hint, read once here rather than
