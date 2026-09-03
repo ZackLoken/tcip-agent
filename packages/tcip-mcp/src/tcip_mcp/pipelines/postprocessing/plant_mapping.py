@@ -185,8 +185,12 @@ class MappingBuild:
         return record
 
     def rows(self) -> dict[str, list[dict]]:
-        """The assignments as plain per-date dict rows, the shape ``per_plant_phenology`` reads."""
-        return {date: [a.__dict__ for a in assignments]
+        """The assignments as plain per-date dict rows, the shape ``per_plant_phenology`` reads,
+        each carrying this build's own ``plant_attribution`` so a caller composing image-
+        granularity aggregation off these rows never hand-copies it from the build separately. A
+        fresh dict per row, never ``a.__dict__`` itself, so this never leaks the extra key into
+        what ``to_record`` persists."""
+        return {date: [{**a.__dict__, "plant_attribution": self.plant_attribution} for a in assignments]
                 for date, assignments in self.assignments.items()}
 
     def unattributed(self, dates: Optional[Iterable[str]] = None) -> int:
@@ -462,9 +466,10 @@ def haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
 
 def stems_delivery_reads(rows: Iterable[object], pred_dir: Path | str) -> set[str]:
     """Stems of ``rows`` (one date's assignment rows, :class:`Assignment` objects or the plain
-    dict rows :meth:`MappingBuild.rows` produces) whose ``plot_name`` is truthy and whose stem
-    carries a prediction document under ``pred_dir``: the one predicate for "which prediction
-    documents this delivery reads," never whether the underlying image still exists on disk.
+    dict rows :meth:`MappingBuild.rows` produces) :func:`assignment_is_attributed` calls
+    attributed, whose stem also carries a prediction document under ``pred_dir``: the one
+    predicate for "which prediction documents this delivery reads," never whether the underlying
+    image still exists on disk.
 
     Both :func:`verify_mapping_inputs` (which of those stems it may re-check a fresh stamp for)
     and :func:`~tcip_mcp.pipelines.postprocessing.phenology.per_plant_series` (which of those
@@ -758,6 +763,11 @@ def build_mapping(
     enumeration raises :class:`~tcip_mcp.pipelines.image_utils.AmbiguousImageStem` when a
     standalone file's stem collides with a band group's; this function lets it propagate, and
     the calling door catches it and refuses in its own error shape.
+
+    Raises :class:`UngeoreferencedCaptureRefusal`: naming ``images_root`` when the requested
+    dates carry no capture at all, and with :func:`ungeoreferenced_capture_message` (naming any
+    capture PIL could not open before the position clause) when every capture that was read
+    carries no position this door reads.
     """
     from tcip_mcp.pipelines.image_utils import list_logical_images
 
@@ -1149,17 +1159,17 @@ def verify_mapping_inputs(
     when this mapping was built and unreadable now refuses by name (the reverse cannot occur: an
     unreadable capture carries no GPS, so ``assign_plants`` never mapped it, and an unmapped
     capture is never among what a delivery reads through predictions). A row that recorded a
-    plant position (a truthy ``plot_name`` with a ``distance_m``) refuses by name when the
-    capture's fresh GPS position no longer sits ``distance_m`` from any plant of that name in the
-    plant CSVs whose bytes this same call just verified, or when the fresh capture carries no GPS
+    plant position (:func:`assignment_is_attributed` true, with a ``distance_m``) refuses by
+    name when the capture's fresh GPS position no longer sits ``distance_m`` from any plant of
+    that name in the plant CSVs whose bytes this same call just verified, or when the fresh capture carries no GPS
     position at all. When no verified plant CSV can answer for this capture's own recorded plant
     (that plant's own CSV is itself among ``plant_csvs_unverified``), the position is disclosed
     rather than compared against nothing: the recorded fact stands unrechecked, not confirmed
     unchanged.
 
     When every mapped capture of a date was read (``missing_stems`` empty and ``read_set`` equal
-    to the recorded stems whose row carries a truthy ``plot_name``), the whole date's identity
-    (:func:`capture_identity`) is recomputed over every capture the date enumerates, the unmapped
+    to the recorded stems :func:`assignment_is_attributed` calls attributed), the whole date's
+    identity (:func:`capture_identity`) is recomputed over every capture the date enumerates, the unmapped
     ones (a raster, a band group) included, and compared against the record, refusing on a
     mismatch; a capture verified only this way is not also listed in ``captures_unverified``, since
     the digest just re-checked it. The refusal names the capture(s) whose own
@@ -1255,7 +1265,7 @@ def verify_mapping_inputs(
                     return {"refusal": (
                         f"{s.name} (date {date}) was readable when this mapping was built and "
                         "could not be read now: retry, or rebuild if it is gone")}
-            if row.plot_name and row.distance_m is not None:
+            if assignment_is_attributed(row) and row.distance_m is not None:
                 if s.lat is None or s.lon is None:
                     return {"refusal": (
                         f"{s.name} (date {date}) recorded a plant position when this mapping was "
@@ -1351,12 +1361,15 @@ def resolve_delivery_mapping(
     root and require it to carry the mapping's own minted dataset id, then verify the mapping's
     recorded inputs against that resolved root for exactly the captures
     ``predictions_by_date`` reads, so a dataset moved (or copied and the original renamed) after
-    registration still verifies without re-reading a delivery's own unread captures. A delivered
-    date recorded with no capture at all refuses by name; a delivery whose delivered dates
-    attribute nothing (:func:`assignment_is_attributed` false for every one of them) refuses on
-    the record's own evidence, before ``verify_mapping_inputs`` re-reads anything, since a
-    delivery that can attribute nothing has nothing for a re-read to disclose about. Returns the
-    loaded build and :func:`verify_mapping_inputs`'s disclosure; raises
+    registration still verifies without re-reading a delivery's own unread captures. A delivery
+    whose delivered dates attribute nothing (:func:`assignment_is_attributed` false for every one
+    of them, a date recorded with no capture at all included) refuses on the record's own
+    evidence, before ``verify_mapping_inputs`` re-reads anything, since a delivery that can
+    attribute nothing has nothing for a re-read to disclose about; the no-capture-at-all reason is
+    named only inside that same nothing-attributed scope, so a delivery naming a fully attributed
+    date beside an empty one still ships: the empty date names no plant at all, so it is simply
+    absent from every plant's own per-plant_phenology series rather than blocking the delivery.
+    Returns the loaded build and :func:`verify_mapping_inputs`'s disclosure; raises
     :class:`MappingDeliveryRefusal`, naming the remedy, for every case a delivery must not
     proceed from, a ``StoreError`` reading the mapping store included, so a root whose state is
     still in the file layout refuses with the store's own sentence rather than escaping as an
@@ -1397,18 +1410,19 @@ def resolve_delivery_mapping(
             f"mapping {name!r} was built over (mapping dataset_root "
             f"{mapping_build.dataset_root!r}, delivered dataset root {str(delivered_root)!r})")
 
-    empty_dates = sorted(d for d in predictions_by_date if not mapping_build.assignments.get(d))
-    if empty_dates:
-        raise MappingDeliveryRefusal(
-            f"the mapping {name!r} recorded no capture at all for date(s) {empty_dates}: a date "
-            "with no capture cannot be delivered; rebuild the mapping, or drop the date(s)")
-
     delivered_assignments = [
         a for date in predictions_by_date for a in mapping_build.assignments.get(date, [])
     ]
-    if delivered_assignments and not any(
+    if not delivered_assignments or not any(
         assignment_is_attributed(a) for a in delivered_assignments
     ):
+        # A no-capture-at-all date is named below only inside this nothing-attributed scope.
+        empty_dates = sorted(d for d in predictions_by_date if not mapping_build.assignments.get(d))
+        if empty_dates:
+            raise MappingDeliveryRefusal(
+                f"the mapping {name!r} recorded no capture at all for date(s) {empty_dates}: a "
+                "date with no capture cannot be delivered; rebuild the mapping, or drop the "
+                "date(s)")
         # Re-reading captures for a delivery that can attribute nothing would disclose about
         # nothing; refuse here, before verify_mapping_inputs, on the record's own evidence.
         paths = [entry["path"] for entry in mapping_build.plant_csvs]

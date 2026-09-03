@@ -236,6 +236,28 @@ def test_export_aggregated_csv(tmp_path):
     assert rows[0]["n_images"] == "3"
 
 
+def test_export_aggregated_csv_refuses_a_record_set_with_no_plant_attribution(tmp_path):
+    results = [{"plant_id": "PLANT_001", "value": 7, "observations": 3, "value_key": "count",
+               "measurement_document": "operating_point"}]
+    out_path = tmp_path / "out.csv"
+    with pytest.raises(ValueError, match="disagree on or omit plant_attribution"):
+        export_aggregated_csv(results, str(out_path), delivered_phenotype="stem_count",
+                              acknowledge_unvalidated=True)
+
+
+def test_export_aggregated_csv_refuses_when_records_disagree_on_plant_attribution(tmp_path):
+    results = [
+        {"plant_id": "PLANT_001", "value": 7, "observations": 3, "value_key": "count",
+         "plant_attribution": "image", "measurement_document": "operating_point"},
+        {"plant_id": "PLANT_002", "value": 4, "observations": 2, "value_key": "count",
+         "plant_attribution": "detection", "measurement_document": "operating_point"},
+    ]
+    out_path = tmp_path / "out.csv"
+    with pytest.raises(ValueError, match="disagree on or omit plant_attribution"):
+        export_aggregated_csv(results, str(out_path), delivered_phenotype="stem_count",
+                              acknowledge_unvalidated=True)
+
+
 def test_export_aggregated_csv_header_carries_operating_point_validated_not_measurement_validated(
     tmp_path,
 ):

@@ -33,6 +33,12 @@ def _write_ungeoreferenced_image(path: Path) -> None:
     Image.new("RGB", (8, 8)).save(path)
 
 
+def _write_corrupt_image(path: Path) -> None:
+    """A few bytes no decoder can open: unreadable, never a stamp with a position to miss."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"not a jpeg")
+
+
 def _write_plant_csv(path: Path, plants: list[dict]) -> None:
     with path.open("w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
@@ -47,8 +53,8 @@ def _write_plant_csv(path: Path, plants: list[dict]) -> None:
 def test_build_plant_mapping_refuses_when_every_capture_carries_no_position(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """On HEAD, this scenario builds and persists a mapping with ``n_mapped == 0``, the recorded
-    failure this test's fail-before proof names."""
+    """A build over captures none of which carry a position this door reads refuses rather than
+    persisting a mapping with ``n_mapped == 0``."""
     _init(tmp_path, monkeypatch)
     dataset_root = _dataset(tmp_path)
     images_root = dataset_root / "images"
@@ -59,6 +65,26 @@ def test_build_plant_mapping_refuses_when_every_capture_carries_no_position(
     res = build_plant_mapping(
         name="valley", images_root=str(images_root), plant_csv_paths=[str(plant_csv)])
     assert "error" in res
+    assert "plant-tag mechanism" in res["error"]
+    assert not ts.exists(plant_mapping.plant_mapping_key(tmp_path, "valley"))
+
+
+def test_build_plant_mapping_names_the_unreadable_capture_before_the_position_clause(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A capture PIL cannot open at all is named as unreadable, not folded into the no-position
+    sentence as if it had been opened and found blank."""
+    _init(tmp_path, monkeypatch)
+    dataset_root = _dataset(tmp_path)
+    images_root = dataset_root / "images"
+    _write_corrupt_image(images_root / DATE / "P1_corrupt.jpg")
+    plant_csv = dataset_root.parent / f"{dataset_root.name}_plants.csv"
+    _write_plant_csv(plant_csv, PLANTS)
+
+    res = build_plant_mapping(
+        name="valley", images_root=str(images_root), plant_csv_paths=[str(plant_csv)])
+    assert "error" in res
+    assert "P1_corrupt.jpg could not be opened" in res["error"]
     assert "plant-tag mechanism" in res["error"]
     assert not ts.exists(plant_mapping.plant_mapping_key(tmp_path, "valley"))
 
@@ -90,8 +116,9 @@ def test_build_route_refuses_when_every_capture_carries_no_position(
 def test_build_route_refuses_a_selected_date_with_no_captures_never_persisting_an_empty_mapping(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """On HEAD the route persisted an empty mapping for a selected date with no captures; the
-    refusal now lives in the shared builder, so both doors refuse it the same way."""
+    """A selected date with no captures at all refuses in the shared builder, so both the build
+    door and this route refuse it the same way rather than the route persisting an empty
+    mapping."""
     from fastapi.testclient import TestClient
     from tcip_web.app import app
     from tcip_web.state import store
@@ -199,6 +226,19 @@ def _assert_all_doors_refuse(
     resp = client.post("/api/results/phenology_measurement", json=payload)
     assert resp.status_code == 400, resp.text
     assert expected_fragment in resp.json()["detail"]
+
+
+def test_delivery_refuses_naming_a_date_recorded_with_no_capture_at_all(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    dataset_root, preds_by_date = _delivery_scene(tmp_path, monkeypatch)
+    plant_csv = tmp_path / "plants.csv"
+    _write_plant_csv(plant_csv, PLANTS)
+    plant_csvs = [{"path": str(plant_csv), "sha256": "0" * 64, "n_plants": len(PLANTS)}]
+    _persist_synthetic_mapping(
+        tmp_path, dataset_root, "valley", plant_csvs=plant_csvs, assignments={DATE: []})
+
+    _assert_all_doors_refuse(tmp_path, preds_by_date, "valley", "recorded no capture at all")
 
 
 def test_delivery_refuses_naming_the_plant_csvs_when_none_parsed_a_plant(
@@ -355,6 +395,36 @@ def test_a_delivery_naming_one_of_two_mapping_dates_carries_the_delivered_scope(
     assert "error" not in res, res
     assert res["n_images_unattributed"] == 0
     assert res["dates_delivered"] == [dates[0]]
+
+
+def test_a_date_recorded_with_no_capture_still_delivers_beside_an_attributed_one(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The no-capture-at-all refusal fires only when nothing across the delivered dates
+    attributes: a delivery naming a fully attributed date beside a date recorded with no
+    capture at all still ships."""
+    _init(tmp_path, monkeypatch)
+    dataset_root = _dataset(tmp_path)
+    images_root, plant_csv, preds_by_date = _write_scene(dataset_root, dates=[DATE])
+    empty_date = "2026-02-25"
+    (images_root / empty_date).mkdir()
+    empty_bucket = dataset_root / "predictions" / "live" / empty_date
+    empty_bucket.mkdir(parents=True)
+
+    build_res = build_plant_mapping(
+        name="valley", images_root=str(images_root), plant_csv_paths=[str(plant_csv)],
+        dates=[DATE, empty_date])
+    assert "error" not in build_res, build_res
+    assert build_res["per_date"][empty_date]["n_images"] == 0
+
+    _seed_currant_bloom_trait(tmp_path)
+    out_csv = tmp_path / "out.csv"
+    res = compute_phenology(
+        trait="currant_bloom", mapping_name="valley",
+        predictions_by_date={**preds_by_date, empty_date: str(empty_bucket)},
+        output_csv_path=str(out_csv), acknowledge_unvalidated=True)
+    assert "error" not in res, res
+    assert sorted(res["dates_delivered"]) == sorted([DATE, empty_date])
 
 
 def test_a_fully_positioned_scene_keeps_delivering_with_zero_unattributed(
