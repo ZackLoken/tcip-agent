@@ -154,6 +154,11 @@ reaching for again versus one built narrowly for a specific past investigation.
   `tcip_mcp.tools.vision_tools.overlay_reference_grid` with no MCP tool registration, still
   `@audited` since it writes an artifact and a platform audit line; `--project` (or
   `$TCIP_STATE_ROOT`) is required unconditionally.
+- `visualize.py` - one entry point for the common renders (annotations, predictions, a
+  GT-vs-prediction comparison, or a dataset sample grid), saved to `.tcip/artifacts/viz/`. Wraps
+  `tcip_mcp.tools.vision_tools.visualize` with no MCP tool registration, still `@audited` since
+  it writes an artifact and a platform audit line; `--project` (or `$TCIP_STATE_ROOT`) is
+  required unconditionally.
 - `render_failure_cases.py` - finds and renders the worst predictions for failure analysis,
   ranked by a count-mismatch-plus-low-confidence heuristic; not a substitute for
   `score_predictions(detail=True)`'s IoU-matched TP/FP/FN when mislocalization is the question.

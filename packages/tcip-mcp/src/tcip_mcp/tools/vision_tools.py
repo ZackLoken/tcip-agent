@@ -209,7 +209,6 @@ def _poly_dict(a: Annotation, index: Callable[[str], int]) -> dict:
             "class_id": index(a.subject)}
 
 
-@mcp.tool()
 @audited
 def visualize(
     source: str,

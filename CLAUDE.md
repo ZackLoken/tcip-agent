@@ -140,9 +140,9 @@ proven by `check_model_contract`/`overfit_check`, run through the audited envelo
 composer or registry (`toolkit-inventory` maps the pieces, the derivations and the
 `model_source`/`training_source`/`dataset_source` seams). A detector at `in_chans != 3` needs
 per-band `image_mean`/`image_std` from `derivations.band_normalization_stats` through
-`builder_kwargs`; `build_detector` refuses without them. You can see images: `visualize` and the
-renderers write to `.tcip/artifacts/viz/`; read the path with your image-capable tool, describe,
-then recommend. External phenotyping resources (PlantCV and the like) are read for general
+`builder_kwargs`; `build_detector` refuses without them. You can see images: `tcip_annotation.viz`'s
+renderers, `vision_tools.visualize` and `scripts/visualize.py` write to `.tcip/artifacts/viz/`;
+read the path with your image-capable tool, describe, then recommend. External phenotyping resources (PlantCV and the like) are read for general
 techniques only, never for a per-trait pipeline; the endpoint is a trained model.
 
 ## Working a change

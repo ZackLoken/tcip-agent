@@ -206,6 +206,8 @@ def test_consolidated_tools_present_and_removed_absent():
         "compare_experiments",
         # Demoted to a library call plus scripts/overlay_reference_grid.py; kept @audited.
         "overlay_reference_grid",
+        # Demoted to a library call plus scripts/visualize.py; kept @audited.
+        "visualize",
     }
     assert not (removed & registered), f"removed tools still registered: {removed & registered}"
 
