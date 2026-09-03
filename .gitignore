@@ -45,7 +45,7 @@ packages/tcip-vscode/out/
 # ── platform uses at runtime) ────────────────────────────────────────────────
 .claude/*
 # The generated skills are a build product of the knowledge documents (see
-# scripts/generate_claude_skills.py) and are tracked, unlike the rest of .claude/.
+# scripts/generate_harness_discovery.py) and are tracked, unlike the rest of .claude/.
 !.claude/skills/
 
 # ── Refactor process docs (current-task/recent-summary/decisions/grounding: dev-process ──

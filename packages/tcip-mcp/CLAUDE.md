@@ -10,7 +10,8 @@ src/tcip_mcp/
   server.py, __main__.py   # MCP entry point; registers all tool modules
   knowledge/      # the canonical domain-knowledge directory (the domain documents plus
                   # crops/<crop>.md, crops/crops.yml), read through __init__.py; source
-                  # for both the generated Claude Code skills and the domain_knowledge tool
+                  # for the generated Claude Code, Codex and Antigravity skills, AGENTS.md's
+                  # generated block, and the domain_knowledge tool
   tools/          # domain tools, one module per area: annotation, data, experiment, feedback,
                   # gui, inference, ingest, knowledge, meta, model, operationalization,
                   # orthomosaic, phenology, project, proposal, training, vision

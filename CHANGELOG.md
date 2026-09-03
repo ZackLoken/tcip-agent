@@ -36,9 +36,10 @@ form. No release has been tagged yet (see VERSIONING.md), so everything below is
   `pipelines/resolution.py`'s `VALIDATED_SHIPPABLE` appears in some `_DIMENSION_REFERENCES`
   tuple, the invariant the delivery gate's dimension table depends on.
 - The `domain_knowledge` MCP tool, composing its client-visible description from the knowledge
-  corpus at import time, and generated `.claude/skills/<name>/SKILL.md` files rendered from that
-  same corpus by `scripts/generate_claude_skills.py`, so Claude Code and any other MCP client
-  read the same domain knowledge through the surface each can reach.
+  corpus at import time, and generated skill files under `.claude/skills/<name>/SKILL.md` and
+  `.agents/skills/<name>/SKILL.md` plus a generated block in `AGENTS.md`, all rendered from that
+  same corpus by `scripts/generate_harness_discovery.py`, so Claude Code, Codex, Antigravity and
+  any other MCP client read the same domain knowledge through the surface each can reach.
 - README's roadmap now names plant-tag identity (a QR or barcode physically tied to the plant)
   as future work for capture with no georeferencing, distinct from the geolocated-capture and
   orthomosaic paths already built.

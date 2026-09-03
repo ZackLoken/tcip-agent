@@ -33,8 +33,10 @@ thing; bottom of the stack), `packages/tcip-annotation/` (headless annotation an
 `packages/tcip-web/` (FastAPI plus Vite/React/TS/Konva; the breeder's only surface). `scripts/`
 holds one-off logged scripts; domain knowledge lives in `packages/tcip-mcp/src/tcip_mcp/knowledge/`
 as repo files, loaded before acting in its domain. Claude Code reaches it through the generated
-skills under `.claude/skills/`; any other client reaches it through the `domain_knowledge` tool;
-a document is read in full either way. The registered crops are `crops.yml`'s, six today.
+skills under `.claude/skills/`; Codex and Antigravity reach it under `.agents/skills/`, and
+Codex also through the generated block in `AGENTS.md`; any other client reaches it through the
+`domain_knowledge` tool. A document is read in full either way. The registered crops are
+`crops.yml`'s, six today.
 
 ## Operating posture
 
