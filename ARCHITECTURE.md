@@ -62,7 +62,7 @@ source file under a covered root that no row names.
 | packages/tcip-mcp/src/tcip_mcp/__init__.py | TCIP MCP Server: domain tools for the phenotyping platform. | 0 | 0 |
 | packages/tcip-mcp/src/tcip_mcp/__main__.py | Entry point: ``python -m tcip_mcp``. | 1 | 0 |
 | packages/tcip-mcp/src/tcip_mcp/agent_identity.py | Which agent harness this MCP server process serves, declared at the handshake, and the session it minted; projected onto every audit line, statement record and HTTP push. | 0 | 7 |
-| packages/tcip-mcp/src/tcip_mcp/audit.py | Audit logging decorator for MCP tools, the log each event's scope routes it to, and the refusal a call raises when its own entry cannot be appended. | 5 | 34 |
+| packages/tcip-mcp/src/tcip_mcp/audit.py | Audit logging decorator for MCP tools, the log each event's scope routes it to, and the refusal a call raises when its own entry cannot be appended. | 5 | 33 |
 | packages/tcip-mcp/src/tcip_mcp/class_registry.py | The dataset's class registry, subjects, their attributes, and the deterministic name→id assignment a training run uses (and records, so predictions stay decodable). | 2 | 12 |
 | packages/tcip-mcp/src/tcip_mcp/dataset_layout.py | Canonical dataset-layout resolver: the single source of truth for where an image's ground-truth labels and model predictions live on disk. | 6 | 42 |
 | packages/tcip-mcp/src/tcip_mcp/experiments.py | Experiment tracking for ML training runs. | 11 | 18 |
@@ -229,7 +229,7 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | packages/tcip-web/src/tcip_web/routes/_metrics_common.py | The shape the tuning trial-metrics route serves, from the log the caller resolved. | 0 | 1 |
 | packages/tcip-web/src/tcip_web/routes/annotate.py | Annotation label CRUD routes for the Annotate tab. | 9 | 1 |
 | packages/tcip-web/src/tcip_web/routes/canvas.py | Live canvas-state bridge: the GUI pushes what it is rendering; the agent reads it back. | 3 | 2 |
-| packages/tcip-web/src/tcip_web/routes/classes.py | Class registry routes. | 8 | 2 |
+| packages/tcip-web/src/tcip_web/routes/classes.py | Class registry routes. | 8 | 3 |
 | packages/tcip-web/src/tcip_web/routes/coverage.py | View-coverage routes: the reference grid over a raster and the per-image record of two per-cell facts: which cells were served to the browser at native resolution (a delivery fact) and which cells were swept in the viewport at or above the breeder's own working scale (a sweep fact). | 15 | 2 |
 | packages/tcip-web/src/tcip_web/routes/dataset.py | Dataset discovery + selection routes. | 9 | 2 |
 | packages/tcip-web/src/tcip_web/routes/fs.py | Local-filesystem directory browsing for the frontend's folder picker. | 1 | 1 |
@@ -930,12 +930,12 @@ registered at HEAD.
 
 | method | path | handler | line |
 |---|---|---|---|
-| GET | `/load` | `load_classes` | `routes/classes.py:97` |
-| POST | `/save` | `save_classes` | `routes/classes.py:161` |
-| GET | `/image_status` | `get_image_status` | `routes/classes.py:295` |
-| POST | `/image_status` | `set_image_status` | `routes/classes.py:305` |
-| POST | `/image_status/bulk` | `set_image_status_bulk` | `routes/classes.py:336` |
-| POST | `/image_status/derive` | `derive_image_status` | `routes/classes.py:366` |
+| GET | `/load` | `load_classes` | `routes/classes.py:99` |
+| POST | `/save` | `save_classes` | `routes/classes.py:163` |
+| GET | `/image_status` | `get_image_status` | `routes/classes.py:297` |
+| POST | `/image_status` | `set_image_status` | `routes/classes.py:307` |
+| POST | `/image_status/bulk` | `set_image_status_bulk` | `routes/classes.py:338` |
+| POST | `/image_status/derive` | `derive_image_status` | `routes/classes.py:368` |
 
 ### routes/coverage.py, prefix `/api/coverage` (5 routes)
 
@@ -974,10 +974,10 @@ registered at HEAD.
 
 | method | path | handler | line |
 |---|---|---|---|
-| POST | `/launch` | `launch_inference` | `routes/inference.py:431` |
-| GET | `/jobs` | `list_jobs` | `routes/inference.py:530` |
-| POST | `/jobs/{job_id}/cancel` | `cancel_job` | `routes/inference.py:535` |
-| WS | `/jobs/{job_id}/stream` | `stream_job` | `routes/inference.py:545` |
+| POST | `/launch` | `launch_inference` | `routes/inference.py:418` |
+| GET | `/jobs` | `list_jobs` | `routes/inference.py:517` |
+| POST | `/jobs/{job_id}/cancel` | `cancel_job` | `routes/inference.py:522` |
+| WS | `/jobs/{job_id}/stream` | `stream_job` | `routes/inference.py:532` |
 
 ### routes/meta.py, prefix `/api/meta` (2 routes)
 
@@ -1319,8 +1319,8 @@ named third consumer, `scripts/check_dataset_identity.py`, is never executed by 
 Path: `<dataset_root>/.tcip/state/image_status.json`.
 
 Writers: `set_image_status`,
-`packages/tcip-web/src/tcip_web/routes/classes.py:305`; `set_image_status_bulk`,
-`routes/classes.py:336`; `tcip_mcp.tools.data_tools._apply_negative_carry`
+`packages/tcip-web/src/tcip_web/routes/classes.py:307`; `set_image_status_bulk`,
+`routes/classes.py:338`; `tcip_mcp.tools.data_tools._apply_negative_carry`
 (split-materialized copy; every confirmed negative is read by the admission
 (`trainable_stems`) before the split's manifest or file tree is written, then
 attributed to a split by
@@ -1358,12 +1358,12 @@ has not been re-verified; MCP-side readers test membership through
 
 Path: `<dataset_root>/.tcip/state/image_status_digest.json`.
 
-Writers: `_stamp_digest`, `packages/tcip-web/src/tcip_web/routes/classes.py:265`, called from
+Writers: `_stamp_digest`, `packages/tcip-web/src/tcip_web/routes/classes.py:267`, called from
 `set_image_status`/`set_image_status_bulk` at confirmation time; and
 `tcip_mcp.class_registry._sweep_schema_change`,
 `packages/tcip-mcp/src/tcip_mcp/class_registry.py:284`, called through `replace_registry`
 (`packages/tcip-mcp/src/tcip_mcp/class_registry.py:346`) by both registry writers,
-`save_classes` (`packages/tcip-web/src/tcip_web/routes/classes.py:161`) and `write_class_map`
+`save_classes` (`packages/tcip-web/src/tcip_web/routes/classes.py:163`) and `write_class_map`
 (`packages/tcip-mcp/src/tcip_mcp/tools/annotation_tools.py:470`), before the new registry lands.
 A status and its stamp are two transactions, status first, so unstamped confirmations
 legitimately exist; the outgoing registry is the last moment their digest is recoverable, so the
@@ -1481,10 +1481,11 @@ carry a `scope` equal to the platform root, the presence-never-means-non-platfor
 `routes/terminal.py`'s one line per agent-terminal launch (`:83`). The `@audited(scope_arg=...)`
 doors span every category by whatever root their declared argument resolves; this paragraph
 names the explicit-emitter files, not a closed census of the decorator's doors.
-Dataset-scoped: four GUI route writers passing the dataset root their own guard resolved
+Dataset-scoped: three GUI route writers passing the dataset root their own guard resolved
 (`routes/annotate.py`'s `_audit_gui_write`, `:150`; `routes/classes.py`'s `_audit_dataset_write`,
-`:63`; `routes/inference.py`'s `_audit_dataset_write`, `:142`; `routes/review.py`'s `_audit`,
-`:93`), `resolution.py`'s `record_delivery_binding_event` (`:1941`, dataset-scoped when a
+`:63`, which `routes/inference.py`'s own prediction writer calls too, at `:368`;
+`routes/review.py`'s `_audit`, `:93`), `resolution.py`'s `record_delivery_binding_event`
+(`:1941`, dataset-scoped when a
 delivery's buckets share one dataset root, platform-scoped otherwise), and
 `calibration_tools.py`'s redraw event (`force_redraw_cal_holdout_split_result`, `:214`).
 Project-scoped: `routes/results.py`'s `_audit` (`:151`, its delivery and confirmation routes) and
@@ -2152,9 +2153,10 @@ raises `AuditEntryNotWritten`; the decorator refuses (`MutationCommittedWithoutA
 its append runs after the tool body.
 Side B: `packages/tcip-web/src/tcip_web/routes/review.py:93` (`def _audit(scope: str, tool: str,
 arguments: dict) -> None:`, which calls `record_event` with the dataset root its own guard
-resolved; `routes/annotate.py:150` and `routes/inference.py:142` do the same for their own
-datasets, `routes/classes.py:63` likewise); `routes/results.py:151` does the same for a project
-root instead. Reader: `pipelines/postprocessing/plant_mapping.py:973` (`_require_receipt`)
+resolved; `routes/annotate.py:150` does the same for its own dataset, `routes/classes.py:63`
+likewise, the one `routes/inference.py:368` imports and calls rather than defining its own);
+`routes/results.py:151` does the same for a project root instead. Reader:
+`pipelines/postprocessing/plant_mapping.py:973` (`_require_receipt`)
 trusts only a `plant_mapping_built` entry it finds in the log under the root its caller holds
 (the MCP tool's pinned platform root, the platform log's own file until adoption makes it a
 project's; the web route's guarded project root), scanned by `_scan_receipts`, line 923, which
@@ -2275,7 +2277,7 @@ Phase 3 verdict: single.
 
 Must agree: the GUI editor, the path resolver, and the training loader read one registry shape.
 Side A: `packages/tcip-mcp/src/tcip_mcp/class_registry.py:4` (`The on-disk registry (`` `<dataset_root>/classes.json` ``) is self-describing and name-based::`).
-Side B: `packages/tcip-web/src/tcip_web/routes/classes.py:176` (`from tcip_mcp.dataset_layout import classes_path`).
+Side B: `packages/tcip-web/src/tcip_web/routes/classes.py:178` (`from tcip_mcp.dataset_layout import classes_path`).
 Phase 3 verdict: single.
 
 ## S21. Training name-to-id assignment versus inference decode map
@@ -2487,7 +2489,7 @@ Phase 3 verdict: duplicated.
 ## S50. Inference job stream WebSocket  <!-- queued: P5-304 unify -->
 
 Must agree: the browser recognizes the terminal frame and the status vocabulary the backend uses.
-Side A: `packages/tcip-web/src/tcip_web/routes/inference.py:544` (`@router.websocket("/jobs/{job_id}/stream")`).
+Side A: `packages/tcip-web/src/tcip_web/routes/inference.py:531` (`@router.websocket("/jobs/{job_id}/stream")`).
 Side B: `packages/tcip-web/src/tcip_web/jobstore.py:101` (`TERMINAL_STATUSES = frozenset({"completed", "failed", "cancelled", "interrupted"})`).
 Phase 3 verdict: duplicated.
 
