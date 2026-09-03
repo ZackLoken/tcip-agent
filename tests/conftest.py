@@ -94,8 +94,8 @@ def _discard_leftover_launch_marks():
     """Leave no pre-manifest sweep-launch mark behind for the next test.
 
     A test that calls ``mark_sweep_launching`` directly, or drives a relaunch whose worker
-    never reaches ``run_hpo``, can leave a study name in the process-global mark set; the next
-    test's ``cancel_hyperparameter_search`` call must not find it. Discarded through the same call ``run_hpo``
+    never reaches ``run_hyperparameter_search``, can leave a study name in the process-global mark set; the next
+    test's ``cancel_hyperparameter_search`` call must not find it. Discarded through the same call ``run_hyperparameter_search``
     and the relaunch worker use, not by reaching into the dict directly. The module is looked
     up in ``sys.modules`` rather than imported, so a session that never touched it pays nothing.
     """

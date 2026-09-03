@@ -77,7 +77,7 @@ def _redraw_flag_issue(split_cfg: dict) -> str | None:
     :func:`_split_manifest_drawn_conflicts` cannot: the flag set true with no ``seed`` beside
     it, the redraw's own required pairing (a seed states which partition inside the manifest's
     train-plus-val members the redraw draws; the redraw states its own seed here rather than
-    inheriting one, since ``run_hpo``'s own default of 42 for a bound ``base_config``
+    inheriting one, since ``run_hyperparameter_search``'s own default of 42 for a bound ``base_config``
     (:func:`_base_config_for_split_draws`) is that caller's own choice, not a fallback this
     function reaches for). ``None`` when the flag is unset, false, or paired with a seed.
     """
@@ -750,7 +750,7 @@ def launch_training(
         return {"error": "Invalid config", "issues": validation["issues"]}
 
     # GUI schema nests stages/mixed_precision/batch_size under ``training``, but the trainer reads them top-level; without this hoist a GUI-launched run silently trains the default single stage.
-    # run_hpo normalizes separately, inside _apply_hpo_params.
+    # run_hyperparameter_search normalizes separately, inside _apply_hpo_params.
     from tcip_mcp.pipelines.schemas import normalize_train_config
     config = normalize_train_config(config)
 
@@ -1471,7 +1471,7 @@ def sweep_dir(study_name: str, output_dir: str = "", *, root: Path | str | None 
 
 SWEEP_CANCEL_SENTINEL = ".sweep_cancel_requested"
 """The sweep-level cooperative-cancel stop file's name, written at a sweep's own root by
-:func:`cancel_hyperparameter_search` and polled by ``run_hpo``, ``_run_hpo_trial`` and the sweep
+:func:`cancel_hyperparameter_search` and polled by ``run_hyperparameter_search``, ``_run_hpo_trial`` and the sweep
 :class:`~tcip_mcp.pipelines.training.hpo.Stopper`. Distinct from the run-level
 ``run_registry.CANCEL_SENTINEL`` (written per trial directory): one name per protocol, since a
 sweep-wide stop and one run's own stop answer different questions."""
@@ -1482,7 +1482,7 @@ _CANCEL_DURING_RUN_REASON = "the sweep was cancelled by request before it could 
 _TRIAL_DIR_PREFIX = "trial_"
 
 def sweep_heartbeat_seconds() -> float:
-    """How often ``run_hpo``'s driver thread restamps the sweep manifest's ``heartbeat`` while
+    """How often ``run_hyperparameter_search``'s driver thread restamps the sweep manifest's ``heartbeat`` while
     ``tune_search`` runs: :data:`TCIP_HEARTBEAT_STALE_SECONDS` read fresh on every call (not
     frozen at import) and divided by ten, so a live driver stamps ten times within one
     staleness window whatever that window is set to while the heartbeat loop is running.
@@ -1491,21 +1491,21 @@ def sweep_heartbeat_seconds() -> float:
 
 _LAUNCHING_SWEEPS: dict[str, Path] = {}
 _LAUNCHING_SWEEPS_LOCK = threading.Lock()
-"""Every sweep a caller has minted a ``study_name`` for and is about to hand to ``run_hpo``,
+"""Every sweep a caller has minted a ``study_name`` for and is about to hand to ``run_hyperparameter_search``,
 before that call's own manifest exists: the pre-manifest window in which a cancel request
 would otherwise find nothing on disk and nothing in ``run_registry._RUNS`` to act on."""
 
 
 def mark_sweep_launching(study_name: str, output_dir: str = "", *, root: Path | str | None = None) -> None:
     """Record that ``study_name`` is about to become a sweep at this resolved root, closing
-    the window between a caller minting the id and ``run_hpo`` writing its first manifest.
+    the window between a caller minting the id and ``run_hyperparameter_search`` writing its first manifest.
 
-    ``run_hpo`` itself discards the mark, in a ``finally`` around everything from its own
+    ``run_hyperparameter_search`` itself discards the mark, in a ``finally`` around everything from its own
     entry through its first manifest write, so the mark is live for exactly that window; a
-    caller that marks a study and never actually calls ``run_hpo`` for it (a request that
+    caller that marks a study and never actually calls ``run_hyperparameter_search`` for it (a request that
     errored before starting the worker) leaves an entry this module cannot itself clean up,
     which is why the web relaunch route's worker also discards it, in its own ``finally``, on
-    every exit that never reached ``run_hpo`` (see :func:`discard_sweep_launching`).
+    every exit that never reached ``run_hyperparameter_search`` (see :func:`discard_sweep_launching`).
     """
     resolved = sweep_dir(study_name, output_dir, root=root).resolve()
     with _LAUNCHING_SWEEPS_LOCK:
@@ -1524,7 +1524,7 @@ def discard_sweep_launching(study_name: str | None) -> None:
 def _sweep_launching(study_name: str, resolved_root: Path) -> bool:
     """Whether ``study_name`` is in its pre-manifest window right now, at ``resolved_root``.
 
-    A mark recorded under a different resolved root names a study ``run_hpo`` will never look
+    A mark recorded under a different resolved root names a study ``run_hyperparameter_search`` will never look
     for at this location, so it does not count as found here: the caller's own resolved sweep
     root is what must match the mark's, not the study name alone.
     """
@@ -1660,14 +1660,14 @@ def sweep_manifest_key(
     Keyed off the HPO root, the scope every sweep-level record hangs off, and declared here
     because ``hpo_root``/``sweep_dir`` already answer where a sweep lives.
 
-    Two writers share this record. ``run_hpo`` holds the manifest in memory for the whole sweep
+    Two writers share this record. ``run_hyperparameter_search`` holds the manifest in memory for the whole sweep
     and replaces the whole document at each state change; it re-derives ``cancel_requested`` from
     the sweep's own stop file on every one of those writes, so it never overwrites a cancel
     ``cancel_hyperparameter_search`` recorded in between. ``cancel_hyperparameter_search`` itself, reached from a different request
     (a cancel this process is not running the sweep for), read-modify-writes only
     ``cancel_requested`` through the store's compare-and-set (``read_versioned`` plus
     ``replace(..., expect=version)``) and never over a manifest already in a terminal status, so a
-    ``run_hpo`` write racing ahead of it is never reverted back to a stale ``"running"``.
+    ``run_hyperparameter_search`` write racing ahead of it is never reverted back to a stale ``"running"``.
     ``concurrency="last_writer_wins"`` names the store's own policy; the two writers avoid
     clobbering each other by these rules, not by the store enforcing one.
     """
@@ -1895,7 +1895,7 @@ def _run_hpo_trial(config: dict, report, base_config: dict, trial_dir: str) -> N
 
 @mcp.tool()
 @audited
-def run_hpo(
+def run_hyperparameter_search(
     base_config: dict,
     param_space: dict | None = None,
     n_trials: int = 5,
@@ -2237,7 +2237,7 @@ def run_hpo(
     result["tensorboard"] = tb_info
 
     if split_draws > 1:
-        # The best is run_hpo's own choice by mean over each point's draws (all_trials),
+        # The best is run_hyperparameter_search's own choice by mean over each point's draws (all_trials),
         # never Ray's get_best_result; split_sensitivity keeps every point's own block.
         groups = group_split_draws(result.get("all_trials") or [], resolved_draw_seeds or [])
         eligible = [g for g in groups if g["eligible"]]
@@ -2293,7 +2293,7 @@ def _path_under(path: Path, root: Path) -> bool:
 def cancel_hyperparameter_search(study_name: str, output_dir: str = "", *, root: str | None = None) -> dict:
     """Request cooperative cancellation of a running HPO sweep.
 
-    Writes the sweep's own stop file (``SWEEP_CANCEL_SENTINEL``) at the sweep's root: ``run_hpo``
+    Writes the sweep's own stop file (``SWEEP_CANCEL_SENTINEL``) at the sweep's root: ``run_hyperparameter_search``
     checks it after preflight and before minting the manifest, ``_run_hpo_trial`` checks it at
     the start of every trial, and the sweep's own Tune ``Stopper`` polls it to end each trial's
     report and, once no trial directory still looks unfinished (or the heartbeat stale window has
@@ -2305,13 +2305,13 @@ def cancel_hyperparameter_search(study_name: str, output_dir: str = "", *, root:
     Refuses when the study names no sweep this process can find: no manifest under the resolved
     root, no live trial of this study registered in this process's own run registry, and no
     ``mark_sweep_launching`` entry for it at this same resolved root either (the last covers
-    the narrow window between a caller minting the id and ``run_hpo`` writing its first
+    the narrow window between a caller minting the id and ``run_hyperparameter_search`` writing its first
     manifest; a marked study with no manifest yet answers ``"running"`` with
     ``cancel_requested`` set. A mark recorded under a different root does not count: that study
-    is one ``run_hpo`` will never look for here).
+    is one ``run_hyperparameter_search`` will never look for here).
 
     The manifest's own ``cancel_requested`` (read by the Tuning listing) is written through the
-    store's compare-and-set, and never over a manifest already in a terminal status: ``run_hpo``
+    store's compare-and-set, and never over a manifest already in a terminal status: ``run_hyperparameter_search``
     is the other writer of this record, and a terminal write of its own must never be reverted
     back to ``"running"`` by a cancel that read the manifest just before it (see
     :func:`sweep_manifest_key`). The sentinel files below are the authoritative signal either
@@ -2319,7 +2319,7 @@ def cancel_hyperparameter_search(study_name: str, output_dir: str = "", *, root:
 
     Args:
         study_name: The sweep to cancel.
-        output_dir: Where the sweep's own directory lives, as given to ``run_hpo``; empty
+        output_dir: Where the sweep's own directory lives, as given to ``run_hyperparameter_search``; empty
             resolves the same ``.tcip/hpo`` default, under ``root``.
         root: The platform root this sweep launched under, for a caller (the Tuning cancel
             route) that already knows it; omitted resolves under this process's own root.
@@ -2359,7 +2359,7 @@ def cancel_hyperparameter_search(study_name: str, output_dir: str = "", *, root:
         try:
             store.replace(manifest_key, working, expect=versioned.version)
         except VersionConflict:
-            # Another of run_hpo's own writes (start, a heartbeat restamp, or terminal)
+            # Another of run_hyperparameter_search's own writes (start, a heartbeat restamp, or terminal)
             # landed first; losing this costs nothing, since each re-derives cancel_requested.
             refreshed = store.read(manifest_key, default=manifest)
             state_manifest = refreshed if isinstance(refreshed, dict) else manifest
@@ -2438,7 +2438,7 @@ def _apply_hpo_params(base_config: dict, params: dict) -> dict:
 
 
 def _resolved_task(config: dict) -> str:
-    """The task ``run_hpo`` resolves a config to: ``model_source.task``, else ``data.task``,
+    """The task ``run_hyperparameter_search`` resolves a config to: ``model_source.task``, else ``data.task``,
     else ``"detection"``. The one definition both the base config's own resolution and a
     param_space point's resolution share, so an axis that changes task is judged by the same
     rule everywhere it is read.
@@ -2454,7 +2454,7 @@ def _selection_metric_axis_conflict(
 ) -> str | None:
     """The refusal reason, if any, when some point ``param_space`` could resolve a trial to
     picks a different selection metric or ranking direction than ``(hpo_metric, hpo_mode)``,
-    the pair ``run_hpo`` already resolved from ``base_config`` and fixes once on the Tuner (Ray
+    the pair ``run_hyperparameter_search`` already resolved from ``base_config`` and fixes once on the Tuner (Ray
     forbids setting metric/mode anywhere else).
 
     Resolves every :func:`_preflight_points` point through the same
@@ -2494,7 +2494,7 @@ def _selection_metric_axis_conflict(
 
 
 def _base_config_for_split_draws(base_config: dict, split_draws: int) -> dict:
-    """``base_config`` as ``run_hpo`` mints the sweep from: unchanged unless ``split_draws`` is
+    """``base_config`` as ``run_hyperparameter_search`` mints the sweep from: unchanged unless ``split_draws`` is
     above 1 and the config is bound to a split manifest, in which case a copy carries
     ``data.split.redraw_within_manifest: true`` (defaulting ``data.split.seed`` to 42 when
     absent, the same default every unset-seed config draws from), so every trial redraws train
@@ -2518,11 +2518,11 @@ def _split_draws_refusal(
     split_draws: int, split_draw_seeds: list[int] | None, warm_start: bool,
     baseline_params: dict | None,
 ) -> str | None:
-    """Every reason ``run_hpo`` refuses ``split_draws`` above 1, checked before minting the
+    """Every reason ``run_hyperparameter_search`` refuses ``split_draws`` above 1, checked before minting the
     sweep. ``None`` when nothing here objects; every call at ``split_draws=1`` is one of them,
     since split_draws itself governs nothing at its default.
 
-    ``base_config`` bound to a split manifest is admitted rather than refused: ``run_hpo`` has
+    ``base_config`` bound to a split manifest is admitted rather than refused: ``run_hyperparameter_search`` has
     already set ``data.split.redraw_within_manifest`` on its own copy
     (:func:`_base_config_for_split_draws`) before this call, so every trial redraws train and
     val inside the manifest's own train-plus-val members instead of running on its one recorded
@@ -2581,7 +2581,7 @@ def _split_draws_refusal(
 
 
 def _bound_redraw_starvation_issue(data_cfg: dict, split_cfg: dict) -> str | None:
-    """Whether ``run_hpo``'s ``split_draws`` minting a redraw sweep over a bound
+    """Whether ``run_hyperparameter_search``'s ``split_draws`` minting a redraw sweep over a bound
     ``base_config``'s manifest would starve every trial the identical way: the manifest's own
     foreground-groups check (:func:`~tcip_mcp.pipelines.data.splits.manifest_redraw_universe`,
     :func:`~tcip_mcp.pipelines.data.splits.redraw_starved_issue`), the same one
@@ -2711,7 +2711,7 @@ def _first_sampled_point(param_space: dict) -> dict:
 
 
 def _preflight_points(param_space: dict) -> list[tuple[str, dict]]:
-    """Every point ``run_hpo``'s preflight must check: the first sampled corner, plus one variant
+    """Every point ``run_hyperparameter_search``'s preflight must check: the first sampled corner, plus one variant
     per categorical choice and one per numeric bound, each holding every other axis at its first
     sampled value.
 

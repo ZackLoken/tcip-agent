@@ -142,7 +142,7 @@ Three seams make bespoke work first-class, and the platform guarantees integrity
   registered as the run's deliverable unless you call `ctx.set_final_weights(path)` yourself. A
   "completed" run with no discoverable weights and no `set_final_weights` call is marked `failed`
   rather than registering a nonexistent path; audit/provenance are unconditional, registration
-  is not. Under `run_hpo`, a bespoke loop whose own metrics don't share the stock trainer's key
+  is not. Under `run_hyperparameter_search`, a bespoke loop whose own metrics don't share the stock trainer's key
   names (`selection`/`val_objective`/`val_loss`, the only ones the automatic per-epoch pruning
   signal recognizes) can call `ctx.report_objective(value)` directly to report trial progress for
   pruning, a no-op outside HPO, safe to call unconditionally.

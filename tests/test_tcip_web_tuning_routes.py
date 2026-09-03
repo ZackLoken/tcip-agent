@@ -55,8 +55,8 @@ _RELAUNCH_FIELD_DEFAULTS = {
     "max_concurrent": 1, "warm_start": False, "baseline_params": None, "resources_per_trial": None,
     "param_space": {},
 }
-"""Every ``run_hpo`` argument beside ``n_trials``/``base_config`` a manifest carries, at the
-values ``run_hpo`` itself defaults to; :func:`_write_sweep` folds these in so a hand-written
+"""Every ``run_hyperparameter_search`` argument beside ``n_trials``/``base_config`` a manifest carries, at the
+values ``run_hyperparameter_search`` itself defaults to; :func:`_write_sweep` folds these in so a hand-written
 test manifest is complete (as a real one always is) unless a test overrides a field, or omits
 ``base_config`` itself, to exercise a genuinely incomplete one."""
 
@@ -187,7 +187,7 @@ def test_disk_sweep_with_a_fresh_heartbeat_lists_running(client, hpo_root) -> No
 def test_a_job_the_registry_recorded_done_lists_that_state_despite_a_stale_manifest(
     client, hpo_root, monkeypatch
 ) -> None:
-    """A job the registry itself recorded completed (``run_hpo`` tolerates its own terminal
+    """A job the registry itself recorded completed (``run_hyperparameter_search`` tolerates its own terminal
     manifest write failing) must not read interrupted off a manifest still saying running with
     a stale heartbeat: the registry's own recorded done state wins over the manifest's."""
     from datetime import datetime, timedelta, timezone
@@ -618,7 +618,7 @@ def test_a_launched_sweep_stays_reachable_after_the_backend_repins(
 
     launch_root = tmp_path
 
-    def fake_run_hpo(*, study_name, **kwargs):
+    def fake_run_hyperparameter_search(*, study_name, **kwargs):
         import tcip_store
         from tcip_mcp.tools.training_tools import sweep_manifest_key
 
@@ -632,7 +632,7 @@ def test_a_launched_sweep_stays_reachable_after_the_backend_repins(
         )
         return {"study_name": study_name}
 
-    monkeypatch.setattr("tcip_mcp.tools.training_tools.run_hpo", fake_run_hpo)
+    monkeypatch.setattr("tcip_mcp.tools.training_tools.run_hyperparameter_search", fake_run_hyperparameter_search)
     _write_sweep(hpo_root, "hpo_seed00003",
                  base_config={"model_source": {"builder": "x:y"}, "data": {}, "training": {}},
                  param_space={"training.batch_size": [2, 4]})
@@ -664,7 +664,7 @@ def test_a_launched_sweep_stays_reachable_after_the_backend_repins(
 def test_a_web_launched_sweep_runs_only_the_routes_own_tensorboard(
     client, hpo_root, real_hpo_base_config, monkeypatch, tb_launches
 ) -> None:
-    """The real run_hpo, driven through the launch route, must not auto-launch a TensorBoard
+    """The real run_hyperparameter_search, driven through the launch route, must not auto-launch a TensorBoard
     of its own: the route serves its own per-sweep view on demand (the sweep-detail call
     below), so a second, unaddressable process over the same trials would be pure waste."""
     from tcip_web.routes import tuning
@@ -688,7 +688,7 @@ def test_a_web_launched_sweep_runs_only_the_routes_own_tensorboard(
     assert resp.status_code == 200
     sweep_id = resp.json()["sweep_id"]
     assert tuning.wait_for_workers(timeout_s=_worker_join_bound()) == ()
-    assert tb_launches == []  # run_hpo's own auto-launch stayed off for this caller
+    assert tb_launches == []  # run_hyperparameter_search's own auto-launch stayed off for this caller
 
     tb_resp = client.post(f"/api/tuning/sweeps/{sweep_id}/tensorboard", json={})
     assert tb_resp.status_code == 200
@@ -725,7 +725,7 @@ def test_relaunch_route_409s_when_the_manifest_holds_no_base_config(client: Test
 def test_relaunch_route_409s_naming_a_field_missing_from_the_manifest_rather_than_defaulting_it(
     client: TestClient, hpo_root
 ) -> None:
-    """A manifest carrying base_config but missing another run_hpo argument (an old manifest
+    """A manifest carrying base_config but missing another run_hyperparameter_search argument (an old manifest
     from before this field existed) refuses by name, rather than silently substituting a
     default that was never the sweep's own choice."""
     import tcip_store
@@ -737,7 +737,7 @@ def test_relaunch_route_409s_naming_a_field_missing_from_the_manifest_rather_tha
         "param_space": {}, "search_alg": "random", "grace_period": 5, "reduction_factor": 3,
         "max_concurrent": 1, "warm_start": False, "baseline_params": None,
         "resources_per_trial": None,
-        # scheduler deliberately omitted: an old manifest from before run_hpo recorded it.
+        # scheduler deliberately omitted: an old manifest from before run_hyperparameter_search recorded it.
     }
     (hpo_root / "hpo_partial001").mkdir(parents=True)
     tcip_store.replace(sweep_manifest_key("hpo_partial001"), manifest)
@@ -758,7 +758,7 @@ def test_relaunch_reads_the_source_manifest_under_the_sweeps_own_launch_root(
 
     launch_root = tmp_path
 
-    def fake_run_hpo(*, study_name, **kwargs):
+    def fake_run_hyperparameter_search(*, study_name, **kwargs):
         import tcip_store
         from tcip_mcp.tools.training_tools import sweep_manifest_key
 
@@ -770,7 +770,7 @@ def test_relaunch_reads_the_source_manifest_under_the_sweeps_own_launch_root(
         )
         return {"study_name": study_name}
 
-    monkeypatch.setattr("tcip_mcp.tools.training_tools.run_hpo", fake_run_hpo)
+    monkeypatch.setattr("tcip_mcp.tools.training_tools.run_hyperparameter_search", fake_run_hyperparameter_search)
     _write_sweep(hpo_root, "hpo_launchroot1",
                  base_config={"model_source": {"builder": "x:y"}, "data": {}, "training": {}})
 
@@ -798,11 +798,11 @@ def test_relaunch_ignores_any_path_the_manifest_itself_carries(
 
     captured: dict = {}
 
-    def fake_run_hpo(*, output_dir, **kwargs):
+    def fake_run_hyperparameter_search(*, output_dir, **kwargs):
         captured["output_dir"] = output_dir
         return {"study_name": kwargs["study_name"]}
 
-    monkeypatch.setattr("tcip_mcp.tools.training_tools.run_hpo", fake_run_hpo)
+    monkeypatch.setattr("tcip_mcp.tools.training_tools.run_hyperparameter_search", fake_run_hyperparameter_search)
     elsewhere = tmp_path / "elsewhere"
     _write_sweep(hpo_root, "hpo_path0001",
                  base_config={"model_source": {"builder": "x:y"}, "data": {}, "training": {}},
@@ -814,20 +814,20 @@ def test_relaunch_ignores_any_path_the_manifest_itself_carries(
     assert captured["output_dir"] == str(hpo_root)
 
 
-def test_relaunch_replays_every_manifest_field_run_hpo_was_given(
+def test_relaunch_replays_every_manifest_field_run_hyperparameter_search_was_given(
     client: TestClient, hpo_root, monkeypatch
 ) -> None:
-    """A relaunch reads every run_hpo argument the manifest holds, not only base_config, so a
+    """A relaunch reads every run_hyperparameter_search argument the manifest holds, not only base_config, so a
     sweep started with a non-default search shape replays that shape exactly."""
     from tcip_web.routes import tuning
 
     captured: dict = {}
 
-    def fake_run_hpo(**kwargs):
+    def fake_run_hyperparameter_search(**kwargs):
         captured.update(kwargs)
         return {"study_name": kwargs["study_name"]}
 
-    monkeypatch.setattr("tcip_mcp.tools.training_tools.run_hpo", fake_run_hpo)
+    monkeypatch.setattr("tcip_mcp.tools.training_tools.run_hyperparameter_search", fake_run_hyperparameter_search)
     base_config = {"model_source": {"builder": "x:y"}, "data": {}, "training": {}}
     _write_sweep(hpo_root, "hpo_fields001", base_config=base_config,
                  param_space={"lr": {"type": "loguniform", "low": 1e-6, "high": 1e-1}},
@@ -859,16 +859,16 @@ def test_relaunch_of_a_manifest_predating_split_draws_still_relaunches(
     client: TestClient, hpo_root, monkeypatch
 ) -> None:
     """A manifest without the field carries neither split_draws nor split_draw_seeds; the
-    relaunch route reads them as run_hpo's own defaults (1, None) rather than refusing."""
+    relaunch route reads them as run_hyperparameter_search's own defaults (1, None) rather than refusing."""
     from tcip_web.routes import tuning
 
     captured: dict = {}
 
-    def fake_run_hpo(**kwargs):
+    def fake_run_hyperparameter_search(**kwargs):
         captured.update(kwargs)
         return {"study_name": kwargs["study_name"]}
 
-    monkeypatch.setattr("tcip_mcp.tools.training_tools.run_hpo", fake_run_hpo)
+    monkeypatch.setattr("tcip_mcp.tools.training_tools.run_hyperparameter_search", fake_run_hyperparameter_search)
     base_config = {"model_source": {"builder": "x:y"}, "data": {}, "training": {}}
     _write_sweep(hpo_root, "hpo_predraws01", base_config=base_config)
 
@@ -893,11 +893,11 @@ def test_relaunch_passes_through_a_manifests_own_split_draws(
 
     captured: dict = {}
 
-    def fake_run_hpo(**kwargs):
+    def fake_run_hyperparameter_search(**kwargs):
         captured.update(kwargs)
         return {"study_name": kwargs["study_name"]}
 
-    monkeypatch.setattr("tcip_mcp.tools.training_tools.run_hpo", fake_run_hpo)
+    monkeypatch.setattr("tcip_mcp.tools.training_tools.run_hyperparameter_search", fake_run_hyperparameter_search)
     base_config = {"model_source": {"builder": "x:y"}, "data": {}, "training": {}}
     _write_sweep(hpo_root, "hpo_draws001", base_config=base_config,
                  split_draws=3, split_draw_seeds=[1, 2, 3])
@@ -913,8 +913,8 @@ def test_relaunch_passes_through_a_manifests_own_split_draws(
 def test_relaunch_records_the_source_study_as_relaunched_from_on_the_new_manifest(
     client: TestClient, hpo_root, real_hpo_base_config, monkeypatch
 ) -> None:
-    """A relaunch through the route, driving the platform's own run_hpo (only the Ray Tune
-    search itself faked, run_hpo unstubbed), leaves a manifest whose relaunched_from names the
+    """A relaunch through the route, driving the platform's own run_hyperparameter_search (only the Ray Tune
+    search itself faked, run_hyperparameter_search unstubbed), leaves a manifest whose relaunched_from names the
     sweep it replayed."""
     monkeypatch.setattr(
         "tcip_mcp.pipelines.training.hpo.tune_search",
@@ -949,11 +949,11 @@ def test_relaunch_records_the_source_manifests_own_study_name_not_the_requests(
 
     captured: dict = {}
 
-    def fake_run_hpo(**kwargs):
+    def fake_run_hyperparameter_search(**kwargs):
         captured.update(kwargs)
         return {"study_name": kwargs["study_name"]}
 
-    monkeypatch.setattr("tcip_mcp.tools.training_tools.run_hpo", fake_run_hpo)
+    monkeypatch.setattr("tcip_mcp.tools.training_tools.run_hyperparameter_search", fake_run_hyperparameter_search)
 
     base_config = {"model_source": {"builder": "x:y"}, "data": {}, "training": {}}
     source_manifest = {
@@ -1049,11 +1049,11 @@ def test_cancel_route_writes_the_sweep_and_run_level_sentinels(client: TestClien
     assert entry["cancel_requested"] is True
 
 
-def test_cancel_reaches_a_relaunch_before_run_hpo_writes_its_own_manifest(
+def test_cancel_reaches_a_relaunch_before_run_hyperparameter_search_writes_its_own_manifest(
     client: TestClient, hpo_root, monkeypatch
 ) -> None:
     """The relaunch route marks the new sweep id as launching, on the request thread, before
-    starting the worker: a cancel that arrives once the route has answered but before run_hpo's
+    starting the worker: a cancel that arrives once the route has answered but before run_hyperparameter_search's
     own worker call has written a manifest still reaches the sweep, rather than the 404
     ``cancel_hyperparameter_search`` used to answer in that window."""
     import threading
@@ -1062,11 +1062,11 @@ def test_cancel_reaches_a_relaunch_before_run_hpo_writes_its_own_manifest(
 
     release = threading.Event()
 
-    def fake_run_hpo(*, study_name, **kwargs):
+    def fake_run_hyperparameter_search(*, study_name, **kwargs):
         release.wait(timeout=5)
         return {"status": "cancelled", "study_name": study_name, "error": "stood down for the test"}
 
-    monkeypatch.setattr("tcip_mcp.tools.training_tools.run_hpo", fake_run_hpo)
+    monkeypatch.setattr("tcip_mcp.tools.training_tools.run_hyperparameter_search", fake_run_hyperparameter_search)
     _write_sweep(hpo_root, "hpo_precancel1",
                 base_config={"model_source": {"builder": "x:y"}, "data": {}, "training": {}})
 
@@ -1088,7 +1088,7 @@ def test_worker_marks_an_error_dict_failed_not_completed(hpo_root, monkeypatch) 
     from tcip_web.routes.tuning import HPOJob, _RelaunchSpec, _worker
 
     monkeypatch.setattr(
-        "tcip_mcp.tools.training_tools.run_hpo",
+        "tcip_mcp.tools.training_tools.run_hyperparameter_search",
         lambda **kwargs: {"error": "the sweep's base config fails preflight", "issues": ["bad"]},
     )
     job = HPOJob(sweep_id="hpo-worker-err")
@@ -1106,7 +1106,7 @@ def test_worker_marks_a_cancelled_result_cancelled_with_its_reason(hpo_root, mon
     from tcip_web.routes.tuning import HPOJob, _RelaunchSpec, _worker
 
     monkeypatch.setattr(
-        "tcip_mcp.tools.training_tools.run_hpo",
+        "tcip_mcp.tools.training_tools.run_hyperparameter_search",
         lambda **kwargs: {"status": "cancelled", "study_name": kwargs.get("study_name"),
                           "error": "the sweep was cancelled by request before it could finish"},
     )
@@ -1119,10 +1119,10 @@ def test_worker_marks_a_cancelled_result_cancelled_with_its_reason(hpo_root, mon
     assert job.error == "the sweep was cancelled by request before it could finish"
 
 
-def test_worker_discards_the_launch_mark_when_it_fails_before_reaching_run_hpo(
+def test_worker_discards_the_launch_mark_when_it_fails_before_reaching_run_hyperparameter_search(
     hpo_root, monkeypatch
 ) -> None:
-    """A worker that fails before it ever calls ``run_hpo`` must still discard the launch mark
+    """A worker that fails before it ever calls ``run_hyperparameter_search`` must still discard the launch mark
     the route recorded for it, so ``cancel_hyperparameter_search`` does not keep finding a study that will never
     exist."""
     from tcip_mcp.tools.training_tools import _LAUNCHING_SWEEPS, mark_sweep_launching
@@ -1134,7 +1134,7 @@ def test_worker_discards_the_launch_mark_when_it_fails_before_reaching_run_hpo(
     def flaky_persist():
         calls["n"] += 1
         if calls["n"] == 1:
-            raise RuntimeError("the registry write failed before the worker reached run_hpo")
+            raise RuntimeError("the registry write failed before the worker reached run_hyperparameter_search")
         real_persist()
 
     monkeypatch.setattr("tcip_web.routes.tuning._persist", flaky_persist)
@@ -1153,7 +1153,7 @@ def test_worker_discards_the_launch_mark_when_it_fails_before_reaching_run_hpo(
 def test_relaunch_refused_at_preflight_reads_failed_not_interrupted(
     client: TestClient, hpo_root
 ) -> None:
-    """A relaunch run_hpo refuses at preflight (an unimportable builder) never mints a
+    """A relaunch run_hyperparameter_search refuses at preflight (an unimportable builder) never mints a
     manifest; the registry's own record is the only account of it, so both the listing row
     and the sweep detail must read failed with the refusal's own words, not the interrupted an
     empty, heartbeat-less manifest would otherwise derive to."""
@@ -1186,7 +1186,7 @@ def test_manifest_fields_agree_between_a_live_and_a_disk_row(
     manifest shape."""
     from tcip_web.routes import tuning
 
-    def fake_run_hpo(*, study_name, **kwargs):
+    def fake_run_hyperparameter_search(*, study_name, **kwargs):
         import tcip_store
         from tcip_mcp.tools.training_tools import sweep_manifest_key
 
@@ -1197,7 +1197,7 @@ def test_manifest_fields_agree_between_a_live_and_a_disk_row(
         tcip_store.replace(sweep_manifest_key(study_name), manifest)
         return {"study_name": study_name}
 
-    monkeypatch.setattr("tcip_mcp.tools.training_tools.run_hpo", fake_run_hpo)
+    monkeypatch.setattr("tcip_mcp.tools.training_tools.run_hyperparameter_search", fake_run_hyperparameter_search)
     _write_sweep(hpo_root, "hpo_agree001", n_trials=3,
                  base_config={"model_source": {"builder": "x:y"}, "data": {}, "training": {}},
                  search_alg="random", scheduler="asha",
@@ -1236,7 +1236,7 @@ def test_persisted_summary_carries_no_manifest_field(
     from tcip_web import jobstore
     from tcip_web.routes import tuning
 
-    def fake_run_hpo(*, study_name, **kwargs):
+    def fake_run_hyperparameter_search(*, study_name, **kwargs):
         import tcip_store
         from tcip_mcp.tools.training_tools import sweep_manifest_key
 
@@ -1248,7 +1248,7 @@ def test_persisted_summary_carries_no_manifest_field(
         )
         return {"study_name": study_name}
 
-    monkeypatch.setattr("tcip_mcp.tools.training_tools.run_hpo", fake_run_hpo)
+    monkeypatch.setattr("tcip_mcp.tools.training_tools.run_hyperparameter_search", fake_run_hyperparameter_search)
     _write_sweep(hpo_root, "hpo_persist001",
                  base_config={"model_source": {"builder": "x:y"}, "data": {}, "training": {}})
 
@@ -1269,7 +1269,7 @@ def test_get_sweep_live_branch_carries_no_manifest_field(
     be added to the response body."""
     from tcip_web.routes import tuning
 
-    def fake_run_hpo(*, study_name, **kwargs):
+    def fake_run_hyperparameter_search(*, study_name, **kwargs):
         import tcip_store
         from tcip_mcp.tools.training_tools import sweep_manifest_key
 
@@ -1281,7 +1281,7 @@ def test_get_sweep_live_branch_carries_no_manifest_field(
         )
         return {"study_name": study_name}
 
-    monkeypatch.setattr("tcip_mcp.tools.training_tools.run_hpo", fake_run_hpo)
+    monkeypatch.setattr("tcip_mcp.tools.training_tools.run_hyperparameter_search", fake_run_hyperparameter_search)
     _write_sweep(hpo_root, "hpo_nomanifest1",
                  base_config={"model_source": {"builder": "x:y"}, "data": {}, "training": {}})
 
@@ -1301,7 +1301,7 @@ def test_get_sweep_live_branch_exposes_relaunched_from_top_level(
     test_get_sweep_live_branch_carries_no_manifest_field)."""
     from tcip_web.routes import tuning
 
-    def fake_run_hpo(*, study_name, **kwargs):
+    def fake_run_hyperparameter_search(*, study_name, **kwargs):
         import tcip_store
         from tcip_mcp.tools.training_tools import sweep_manifest_key
 
@@ -1314,7 +1314,7 @@ def test_get_sweep_live_branch_exposes_relaunched_from_top_level(
         )
         return {"study_name": study_name}
 
-    monkeypatch.setattr("tcip_mcp.tools.training_tools.run_hpo", fake_run_hpo)
+    monkeypatch.setattr("tcip_mcp.tools.training_tools.run_hyperparameter_search", fake_run_hyperparameter_search)
     _write_sweep(hpo_root, "hpo_relsrc_top1",
                  base_config={"model_source": {"builder": "x:y"}, "data": {}, "training": {}})
 

@@ -379,13 +379,13 @@ def test_tune_search_warm_start_and_optimizes(tmp_path):
     assert result["best_params"]["x"] == pytest.approx(2.0)
 
 
-def test_run_hpo_exposes_agent_search_choices_not_pinned():
-    """run_hpo lets the agent choose search_alg + scheduler; the old Optuna/pruner pins
+def test_run_hyperparameter_search_exposes_agent_search_choices_not_pinned():
+    """run_hyperparameter_search lets the agent choose search_alg + scheduler; the old Optuna/pruner pins
     are gone (capability-not-method)."""
     import inspect
 
-    from tcip_mcp.tools.training_tools import run_hpo
-    params = inspect.signature(run_hpo).parameters
+    from tcip_mcp.tools.training_tools import run_hyperparameter_search
+    params = inspect.signature(run_hyperparameter_search).parameters
     assert "search_alg" in params and "scheduler" in params
     assert "pruner" not in params and "direction" not in params
     assert params["search_alg"].default == "random"

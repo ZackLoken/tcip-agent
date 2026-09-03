@@ -5,7 +5,7 @@ cap: the platform doesn't cap memory/CPU per run, it reports the real numbers (C
 free bytes, and how many training runs this host already has active) and leaves the judgment
 call to whoever launches the next one. Wraps
 ``tcip_mcp.tools.training_tools.inspect_compute_resources`` with no MCP tool registration; run
-it before ``launch_training``/``run_hpo`` when compute headroom is the open question.
+it before ``launch_training``/``run_hyperparameter_search`` when compute headroom is the open question.
 
     python scripts/inspect_compute_resources.py --project <project_root>
 

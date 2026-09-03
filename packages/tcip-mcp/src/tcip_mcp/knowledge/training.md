@@ -131,7 +131,7 @@ naming why. Whole-frame training and whole-decode sources gain nothing from it; 
 | `list_training_runs` | List all runs in session |
 | `cancel_training` | Request graceful cancellation of a running run; stops at the next batch/epoch boundary, still saves `model_final.pt` |
 | `cancel_hyperparameter_search` | Request cooperative cancellation of a running sweep: the running trial stops at its next batch boundary and reports the losing side, new trials report without training, the manifest records `cancelled`; Ray's hard stop is only the fallback after the heartbeat window |
-| `run_hpo` | HPO on Ray Tune, you pick the search algorithm + trial scheduler |
+| `run_hyperparameter_search` | HPO on Ray Tune, you pick the search algorithm + trial scheduler |
 | `scripts/render_failure_cases.py` (logged script, run with python) | Surface + render images ranked by count-mismatch (not IoU-matched, see evaluation skill) |
 | `create_experiment` | Track training run with full lineage |
 
@@ -144,12 +144,12 @@ naming why. Whole-frame training and whole-decode sources gain nothing from it; 
 
 ## HPO
 
-`run_hpo` runs a Ray Tune sweep that trains each trial for real (minimizing the composite
+`run_hyperparameter_search` runs a Ray Tune sweep that trains each trial for real (minimizing the composite
 selection objective). The search *algorithm* and trial *scheduler* are yours to choose per
 task/data; match them to the space and budget; the defaults are a starting point, not a rule:
 
 ```python
-run_hpo(base_config=config, n_trials=20, search_alg="optuna", scheduler="asha",
+run_hyperparameter_search(base_config=config, n_trials=20, search_alg="optuna", scheduler="asha",
         output_dir="runs/hpo_1")
 ```
 - `search_alg`: `random`/`grid` (native), plus `optuna`, `bayesopt`, `hyperopt`, `nevergrad`,
@@ -204,7 +204,7 @@ conflict key it lifts) and redraws train and val fresh inside the manifest's own
 members for the run's date, at that seed, instead of binding the manifest's recorded partition;
 `calibration` stays untouched and is never redrawn. A starved side (too few foreground groups
 under the manifest's own grouping to give both train and val one) refuses by name rather than
-retrying or degrading. `run_hpo` with `split_draws` above 1 on a manifest-bound `base_config`
+retrying or degrading. `run_hyperparameter_search` with `split_draws` above 1 on a manifest-bound `base_config`
 sets this flag on its own copy, so a sweep's seed grid redraws inside the manifest instead of
 every trial training on its one recorded partition; `freeze_split_manifest` still refuses a
 bound run, redrawn or not, naming the reproduction for a redrawn one (bind a later run to the

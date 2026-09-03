@@ -51,7 +51,7 @@ def test_sweep_state_driver_live_never_overrides_a_recorded_done_state():
                            driver_live=True) == status
 
 
-def test_run_hpo_stamps_a_fresh_heartbeat_at_or_after_started_at(
+def test_run_hyperparameter_search_stamps_a_fresh_heartbeat_at_or_after_started_at(
     tmp_path, real_hpo_base_config, monkeypatch
 ):
     import tcip_store as ts
@@ -63,7 +63,7 @@ def test_run_hpo_stamps_a_fresh_heartbeat_at_or_after_started_at(
 
     monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", fake_search)
 
-    result = tt.run_hpo(base_config=real_hpo_base_config, n_trials=1, output_dir=str(tmp_path))
+    result = tt.run_hyperparameter_search(base_config=real_hpo_base_config, n_trials=1, output_dir=str(tmp_path))
     manifest = ts.read(tt.sweep_manifest_key(result["study_name"], str(tmp_path)))
 
     started_at = datetime.fromisoformat(manifest["started_at"])
@@ -72,11 +72,11 @@ def test_run_hpo_stamps_a_fresh_heartbeat_at_or_after_started_at(
     assert manifest["status"] == "completed"
 
 
-def test_run_hpo_heartbeat_thread_stops_before_the_terminal_write(
+def test_run_hyperparameter_search_heartbeat_thread_stops_before_the_terminal_write(
     tmp_path, real_hpo_base_config, monkeypatch
 ):
-    """The heartbeat thread is stopped and joined before run_hpo's own terminal manifest write,
-    so nothing restamps the manifest again once run_hpo has returned: a listing reading it
+    """The heartbeat thread is stopped and joined before run_hyperparameter_search's own terminal manifest write,
+    so nothing restamps the manifest again once run_hyperparameter_search has returned: a listing reading it
     afterward sees a status that stands, not one a straggling heartbeat write could revert."""
     import time
 
@@ -101,20 +101,20 @@ def test_run_hpo_heartbeat_thread_stops_before_the_terminal_write(
 
     monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", fake_search)
 
-    tt.run_hpo(base_config=real_hpo_base_config, n_trials=1, output_dir=str(tmp_path))
+    tt.run_hyperparameter_search(base_config=real_hpo_base_config, n_trials=1, output_dir=str(tmp_path))
     count_at_return = len(writes)
     assert count_at_return >= 3  # the initial write, at least one restamp, the terminal write
     assert writes[-1]["status"] == "completed"
 
     time.sleep(0.06)  # well past the heartbeat interval
-    assert len(writes) == count_at_return  # nothing wrote again after run_hpo returned
+    assert len(writes) == count_at_return  # nothing wrote again after run_hyperparameter_search returned
 
 
 def test_heartbeat_loop_survives_a_store_error_and_keeps_restamping(
     tmp_path, real_hpo_base_config, monkeypatch, caplog
 ):
     """A store error on one heartbeat restamp costs one beat, not the rest of the sweep: the
-    loop keeps stamping afterward, and ``run_hpo`` still returns its normal result rather than
+    loop keeps stamping afterward, and ``run_hyperparameter_search`` still returns its normal result rather than
     a live sweep silently losing its heartbeat for good."""
     import threading
 
@@ -150,9 +150,9 @@ def test_heartbeat_loop_survives_a_store_error_and_keeps_restamping(
     monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", fake_search)
 
     with caplog.at_level("WARNING", logger=tt.logger.name):
-        result = tt.run_hpo(base_config=real_hpo_base_config, n_trials=1, output_dir=str(tmp_path))
+        result = tt.run_hyperparameter_search(base_config=real_hpo_base_config, n_trials=1, output_dir=str(tmp_path))
 
-    assert result["best_value"] == 0.25  # run_hpo returned normally past the failed restamp
+    assert result["best_value"] == 0.25  # run_hyperparameter_search returned normally past the failed restamp
     manifest = tt.store.read(tt.sweep_manifest_key(result["study_name"], str(tmp_path)))
     assert manifest["status"] == "completed"
     assert any("could not restamp the heartbeat" in r.getMessage() for r in caplog.records)

@@ -1,8 +1,8 @@
-"""Split sensitivity as a run_hpo sweep factor: split_draws pairs data.split.seed as a grid
+"""Split sensitivity as a run_hyperparameter_search sweep factor: split_draws pairs data.split.seed as a grid
 axis with every sampled point through Ray's own BasicVariantGenerator(constant_grid_search=
-True); run_hpo groups the resulting trials by point and picks the best by mean over each
-point's draws. tune_search is faked throughout run_hpo's own tests (as test_hpo_durable.py
-does), so these exercise run_hpo's own refusal, seed-derivation and grouping logic without a
+True); run_hyperparameter_search groups the resulting trials by point and picks the best by mean over each
+point's draws. tune_search is faked throughout run_hyperparameter_search's own tests (as test_hpo_durable.py
+does), so these exercise run_hyperparameter_search's own refusal, seed-derivation and grouping logic without a
 real Ray/training cost; one test calls tune_search's own guard directly, before Ray is touched.
 """
 
@@ -33,7 +33,7 @@ def test_real_hpo_base_config_is_admitted_by_preflight(real_hpo_base_config):
 # -- refusals --------------------------------------------------------------------
 
 
-def test_run_hpo_refuses_split_draws_when_a_bound_manifest_would_starve_a_side(
+def test_run_hyperparameter_search_refuses_split_draws_when_a_bound_manifest_would_starve_a_side(
     tmp_path, monkeypatch,
 ):
     """A manifest whose date's train-plus-val members resolve to only one group under its own
@@ -67,7 +67,7 @@ def test_run_hpo_refuses_split_draws_when_a_bound_manifest_would_starve_a_side(
             "subject": SUBJECT, "split": {"manifest_dir": str(manifest_dir)},
         },
     }
-    result = tt.run_hpo(base_config=cfg, n_trials=1, output_dir=str(tmp_path),
+    result = tt.run_hyperparameter_search(base_config=cfg, n_trials=1, output_dir=str(tmp_path),
                         scheduler="none", split_draws=2)
 
     assert "error" in result and "would starve" in result["error"]
@@ -75,7 +75,7 @@ def test_run_hpo_refuses_split_draws_when_a_bound_manifest_would_starve_a_side(
     assert list(tmp_path.glob("hpo_*")) == []
 
 
-def test_run_hpo_refuses_split_draws_with_val_images_dir(tmp_path, real_hpo_base_config, monkeypatch):
+def test_run_hyperparameter_search_refuses_split_draws_with_val_images_dir(tmp_path, real_hpo_base_config, monkeypatch):
     import tcip_mcp.tools.training_tools as tt
 
     ran = []
@@ -83,14 +83,14 @@ def test_run_hpo_refuses_split_draws_with_val_images_dir(tmp_path, real_hpo_base
 
     cfg = dict(real_hpo_base_config)
     cfg["data"] = {**cfg["data"], "val_images_dir": str(tmp_path / "val")}
-    result = tt.run_hpo(base_config=cfg, n_trials=1, output_dir=str(tmp_path),
+    result = tt.run_hyperparameter_search(base_config=cfg, n_trials=1, output_dir=str(tmp_path),
                         scheduler="none", split_draws=2)
 
     assert "error" in result and "val_images_dir" in result["error"]
     assert not ran
 
 
-def test_run_hpo_refuses_split_draws_when_auto_val_is_off(tmp_path, real_hpo_base_config, monkeypatch):
+def test_run_hyperparameter_search_refuses_split_draws_when_auto_val_is_off(tmp_path, real_hpo_base_config, monkeypatch):
     import tcip_mcp.tools.training_tools as tt
 
     ran = []
@@ -98,14 +98,14 @@ def test_run_hpo_refuses_split_draws_when_auto_val_is_off(tmp_path, real_hpo_bas
 
     cfg = dict(real_hpo_base_config)
     cfg["data"] = {**cfg["data"], "auto_val": False}
-    result = tt.run_hpo(base_config=cfg, n_trials=1, output_dir=str(tmp_path),
+    result = tt.run_hyperparameter_search(base_config=cfg, n_trials=1, output_dir=str(tmp_path),
                         scheduler="none", split_draws=2)
 
     assert "error" in result and "auto_val" in result["error"]
     assert not ran
 
 
-def test_run_hpo_refuses_split_draws_for_a_task_outside_the_drawn_path(
+def test_run_hyperparameter_search_refuses_split_draws_for_a_task_outside_the_drawn_path(
     tmp_path, real_hpo_base_config, monkeypatch,
 ):
     import tcip_mcp.tools.training_tools as tt
@@ -115,14 +115,14 @@ def test_run_hpo_refuses_split_draws_for_a_task_outside_the_drawn_path(
 
     cfg = dict(real_hpo_base_config)
     cfg["model_source"] = {**cfg["model_source"], "task": "ordinal"}
-    result = tt.run_hpo(base_config=cfg, n_trials=1, output_dir=str(tmp_path),
+    result = tt.run_hyperparameter_search(base_config=cfg, n_trials=1, output_dir=str(tmp_path),
                         scheduler="none", split_draws=2)
 
     assert "error" in result and "ordinal" in result["error"]
     assert not ran
 
 
-def test_run_hpo_refuses_split_draws_with_a_non_native_search_alg(
+def test_run_hyperparameter_search_refuses_split_draws_with_a_non_native_search_alg(
     tmp_path, real_hpo_base_config, monkeypatch,
 ):
     import tcip_mcp.tools.training_tools as tt
@@ -130,14 +130,14 @@ def test_run_hpo_refuses_split_draws_with_a_non_native_search_alg(
     ran = []
     monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", _never_search(ran))
 
-    result = tt.run_hpo(base_config=real_hpo_base_config, n_trials=1, output_dir=str(tmp_path),
+    result = tt.run_hyperparameter_search(base_config=real_hpo_base_config, n_trials=1, output_dir=str(tmp_path),
                         search_alg="bayesopt", scheduler="none", split_draws=2)
 
     assert "error" in result and "search_alg" in result["error"]
     assert not ran
 
 
-def test_run_hpo_refuses_split_draws_with_a_pruning_scheduler(
+def test_run_hyperparameter_search_refuses_split_draws_with_a_pruning_scheduler(
     tmp_path, real_hpo_base_config, monkeypatch,
 ):
     import tcip_mcp.tools.training_tools as tt
@@ -145,14 +145,14 @@ def test_run_hpo_refuses_split_draws_with_a_pruning_scheduler(
     ran = []
     monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", _never_search(ran))
 
-    result = tt.run_hpo(base_config=real_hpo_base_config, n_trials=1, output_dir=str(tmp_path),
+    result = tt.run_hyperparameter_search(base_config=real_hpo_base_config, n_trials=1, output_dir=str(tmp_path),
                         scheduler="asha", split_draws=2)
 
     assert "error" in result and "scheduler" in result["error"]
     assert not ran
 
 
-def test_run_hpo_refuses_split_draw_seeds_of_the_wrong_length(
+def test_run_hyperparameter_search_refuses_split_draw_seeds_of_the_wrong_length(
     tmp_path, real_hpo_base_config, monkeypatch,
 ):
     import tcip_mcp.tools.training_tools as tt
@@ -160,14 +160,14 @@ def test_run_hpo_refuses_split_draw_seeds_of_the_wrong_length(
     ran = []
     monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", _never_search(ran))
 
-    result = tt.run_hpo(base_config=real_hpo_base_config, n_trials=1, output_dir=str(tmp_path),
+    result = tt.run_hyperparameter_search(base_config=real_hpo_base_config, n_trials=1, output_dir=str(tmp_path),
                         scheduler="none", split_draws=3, split_draw_seeds=[1, 2])
 
     assert "error" in result and "split_draw_seeds" in result["error"]
     assert not ran
 
 
-def test_run_hpo_refuses_split_draws_when_param_space_already_sweeps_the_seed(
+def test_run_hyperparameter_search_refuses_split_draws_when_param_space_already_sweeps_the_seed(
     tmp_path, real_hpo_base_config, monkeypatch,
 ):
     import tcip_mcp.tools.training_tools as tt
@@ -175,7 +175,7 @@ def test_run_hpo_refuses_split_draws_when_param_space_already_sweeps_the_seed(
     ran = []
     monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", _never_search(ran))
 
-    result = tt.run_hpo(
+    result = tt.run_hyperparameter_search(
         base_config=real_hpo_base_config,
         param_space={"data.split.seed": {"type": "categorical", "choices": [1, 2]}},
         n_trials=1, output_dir=str(tmp_path), scheduler="none", split_draws=2,
@@ -185,7 +185,7 @@ def test_run_hpo_refuses_split_draws_when_param_space_already_sweeps_the_seed(
     assert not ran
 
 
-def test_run_hpo_refuses_split_draws_when_warm_start_baseline_names_the_seed(
+def test_run_hyperparameter_search_refuses_split_draws_when_warm_start_baseline_names_the_seed(
     tmp_path, real_hpo_base_config, monkeypatch,
 ):
     import tcip_mcp.tools.training_tools as tt
@@ -193,7 +193,7 @@ def test_run_hpo_refuses_split_draws_when_warm_start_baseline_names_the_seed(
     ran = []
     monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", _never_search(ran))
 
-    result = tt.run_hpo(
+    result = tt.run_hyperparameter_search(
         base_config=real_hpo_base_config, n_trials=1, output_dir=str(tmp_path),
         scheduler="none", split_draws=2, warm_start=True,
         baseline_params={"lr": 0.01, "data.split.seed": 7},
@@ -203,7 +203,7 @@ def test_run_hpo_refuses_split_draws_when_warm_start_baseline_names_the_seed(
     assert not ran
 
 
-def test_run_hpo_refuses_split_draws_when_param_space_sweeps_another_data_axis(
+def test_run_hyperparameter_search_refuses_split_draws_when_param_space_sweeps_another_data_axis(
     tmp_path, real_hpo_base_config, monkeypatch,
 ):
     import tcip_mcp.tools.training_tools as tt
@@ -211,7 +211,7 @@ def test_run_hpo_refuses_split_draws_when_param_space_sweeps_another_data_axis(
     ran = []
     monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", _never_search(ran))
 
-    result = tt.run_hpo(
+    result = tt.run_hyperparameter_search(
         base_config=real_hpo_base_config,
         param_space={"data.split.val_ratio": {"type": "uniform", "low": 0.1, "high": 0.3}},
         n_trials=1, output_dir=str(tmp_path), scheduler="none", split_draws=2,
@@ -222,7 +222,7 @@ def test_run_hpo_refuses_split_draws_when_param_space_sweeps_another_data_axis(
 
 
 def test_tune_search_refuses_split_draws_without_the_axis_in_param_space(tmp_path):
-    """tune_search itself, called directly (not through run_hpo's own axis-adding), raises
+    """tune_search itself, called directly (not through run_hyperparameter_search's own axis-adding), raises
     rather than pairing nothing: a caller building the space by hand must include the axis."""
     from tcip_mcp.pipelines.training.hpo import tune_search
 
@@ -251,10 +251,10 @@ def _bound_hpo_config(root, manifest_dir, date, subject, *, auto_val: bool | Non
     }
 
 
-def test_run_hpo_admits_split_draws_bound_to_a_manifest_and_sets_the_redraw_flag(
+def test_run_hyperparameter_search_admits_split_draws_bound_to_a_manifest_and_sets_the_redraw_flag(
     tmp_path, monkeypatch,
 ):
-    """A base_config bound to a split manifest is no longer refused: run_hpo sets
+    """A base_config bound to a split manifest is no longer refused: run_hyperparameter_search sets
     data.split.redraw_within_manifest on its own copy, so every trial redraws train and val
     inside the manifest's own members instead of the manifest's one recorded partition, and the
     recorded sweep manifest's own base_config carries the claim."""
@@ -279,7 +279,7 @@ def test_run_hpo_admits_split_draws_bound_to_a_manifest_and_sets_the_redraw_flag
     monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", fake_search)
 
     cfg = _bound_hpo_config(root, manifest_dir, DATES[0], SUBJECT)
-    result = tt.run_hpo(base_config=cfg, n_trials=1, output_dir=str(tmp_path),
+    result = tt.run_hyperparameter_search(base_config=cfg, n_trials=1, output_dir=str(tmp_path),
                         scheduler="none", split_draws=2)
 
     assert "error" not in result, result
@@ -295,7 +295,7 @@ def test_run_hpo_admits_split_draws_bound_to_a_manifest_and_sets_the_redraw_flag
     assert recorded_split["seed"] == 42
 
 
-def test_run_hpo_admits_split_draws_bound_with_auto_val_false(tmp_path, monkeypatch):
+def test_run_hyperparameter_search_admits_split_draws_bound_with_auto_val_false(tmp_path, monkeypatch):
     """A bound base_config reads neither val_images_dir nor auto_val (the manifest branch binds
     ahead of both), so auto_val=False no longer refuses it the way it refuses a drawn config."""
     import tcip_mcp.tools.training_tools as tt
@@ -316,13 +316,13 @@ def test_run_hpo_admits_split_draws_bound_with_auto_val_false(tmp_path, monkeypa
     monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", fake_search)
 
     cfg = _bound_hpo_config(root, manifest_dir, DATES[0], SUBJECT, auto_val=False)
-    result = tt.run_hpo(base_config=cfg, n_trials=1, output_dir=str(tmp_path),
+    result = tt.run_hyperparameter_search(base_config=cfg, n_trials=1, output_dir=str(tmp_path),
                         scheduler="none", split_draws=2)
 
     assert "error" not in result, result
 
 
-def test_run_hpo_admits_split_draws_and_derives_seeds_from_the_base_config(
+def test_run_hyperparameter_search_admits_split_draws_and_derives_seeds_from_the_base_config(
     tmp_path, real_hpo_base_config, monkeypatch,
 ):
     """The default draw seeds are the base config's own data.split.seed (else 42) plus the
@@ -338,7 +338,7 @@ def test_run_hpo_admits_split_draws_and_derives_seeds_from_the_base_config(
 
     monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", fake_search)
 
-    result = tt.run_hpo(base_config=real_hpo_base_config, n_trials=2, output_dir=str(tmp_path),
+    result = tt.run_hyperparameter_search(base_config=real_hpo_base_config, n_trials=2, output_dir=str(tmp_path),
                         scheduler="none", split_draws=3)
 
     assert "error" not in result
@@ -354,7 +354,7 @@ def test_run_hpo_admits_split_draws_and_derives_seeds_from_the_base_config(
     assert "data.split.seed" not in manifest["param_space"]  # the caller's own axes, unaugmented
 
 
-def test_run_hpo_admits_split_draws_with_explicit_seeds(tmp_path, real_hpo_base_config, monkeypatch):
+def test_run_hyperparameter_search_admits_split_draws_with_explicit_seeds(tmp_path, real_hpo_base_config, monkeypatch):
     import tcip_mcp.tools.training_tools as tt
 
     captured: dict = {}
@@ -366,7 +366,7 @@ def test_run_hpo_admits_split_draws_with_explicit_seeds(tmp_path, real_hpo_base_
 
     monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", fake_search)
 
-    result = tt.run_hpo(base_config=real_hpo_base_config, n_trials=1, output_dir=str(tmp_path),
+    result = tt.run_hyperparameter_search(base_config=real_hpo_base_config, n_trials=1, output_dir=str(tmp_path),
                         scheduler="none", split_draws=2, split_draw_seeds=[7, 99])
 
     assert "error" not in result
@@ -374,7 +374,7 @@ def test_run_hpo_admits_split_draws_with_explicit_seeds(tmp_path, real_hpo_base_
 
 
 @pytest.mark.parametrize("search_alg", ["grid", "variant_generator"])
-def test_run_hpo_admits_split_draws_with_a_native_search_alg(
+def test_run_hyperparameter_search_admits_split_draws_with_a_native_search_alg(
     tmp_path, real_hpo_base_config, monkeypatch, search_alg,
 ):
     """Every native search_alg (random, grid, variant_generator) builds the paired
@@ -390,14 +390,14 @@ def test_run_hpo_admits_split_draws_with_a_native_search_alg(
 
     monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", fake_search)
 
-    result = tt.run_hpo(base_config=real_hpo_base_config, n_trials=1, output_dir=str(tmp_path),
+    result = tt.run_hyperparameter_search(base_config=real_hpo_base_config, n_trials=1, output_dir=str(tmp_path),
                         search_alg=search_alg, scheduler="none", split_draws=2)
 
     assert "error" not in result
     assert captured["search_alg"] == search_alg
 
 
-def test_run_hpo_admits_split_draws_for_instance_seg(tmp_path, real_hpo_base_config, monkeypatch):
+def test_run_hyperparameter_search_admits_split_draws_for_instance_seg(tmp_path, real_hpo_base_config, monkeypatch):
     """instance_seg sits in STEM_TASKS beside detection; split_draws admits it the same way."""
     import tcip_mcp.tools.training_tools as tt
 
@@ -410,13 +410,13 @@ def test_run_hpo_admits_split_draws_for_instance_seg(tmp_path, real_hpo_base_con
 
     monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", fake_search)
 
-    result = tt.run_hpo(base_config=cfg, n_trials=1, output_dir=str(tmp_path),
+    result = tt.run_hyperparameter_search(base_config=cfg, n_trials=1, output_dir=str(tmp_path),
                         scheduler="none", split_draws=2)
 
     assert "error" not in result
 
 
-def test_run_hpo_admits_split_draws_with_explicit_auto_val_true(
+def test_run_hyperparameter_search_admits_split_draws_with_explicit_auto_val_true(
     tmp_path, real_hpo_base_config, monkeypatch,
 ):
     """data.auto_val=True explicitly stated (not merely defaulted) admits the same as omitting
@@ -432,13 +432,13 @@ def test_run_hpo_admits_split_draws_with_explicit_auto_val_true(
 
     monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", fake_search)
 
-    result = tt.run_hpo(base_config=cfg, n_trials=1, output_dir=str(tmp_path),
+    result = tt.run_hyperparameter_search(base_config=cfg, n_trials=1, output_dir=str(tmp_path),
                         scheduler="none", split_draws=2)
 
     assert "error" not in result
 
 
-def test_run_hpo_admits_split_draws_with_a_warm_start_not_naming_the_seed(
+def test_run_hyperparameter_search_admits_split_draws_with_a_warm_start_not_naming_the_seed(
     tmp_path, real_hpo_base_config, monkeypatch,
 ):
     """warm_start's baseline_params is only refused when it names data.split.seed itself; a
@@ -454,7 +454,7 @@ def test_run_hpo_admits_split_draws_with_a_warm_start_not_naming_the_seed(
 
     monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", fake_search)
 
-    result = tt.run_hpo(
+    result = tt.run_hyperparameter_search(
         base_config=real_hpo_base_config, n_trials=1, output_dir=str(tmp_path),
         scheduler="none", split_draws=2, warm_start=True, baseline_params={"lr": 0.01},
     )
@@ -463,7 +463,7 @@ def test_run_hpo_admits_split_draws_with_a_warm_start_not_naming_the_seed(
     assert captured["warm_start"] is True
 
 
-def test_run_hpo_admits_a_bare_seed_axis_beside_split_draws(
+def test_run_hyperparameter_search_admits_a_bare_seed_axis_beside_split_draws(
     tmp_path, real_hpo_base_config, monkeypatch,
 ):
     """The bare 'seed' axis (the run seed) is a different key from data.split.seed and stays
@@ -479,7 +479,7 @@ def test_run_hpo_admits_a_bare_seed_axis_beside_split_draws(
 
     monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", fake_search)
 
-    result = tt.run_hpo(
+    result = tt.run_hyperparameter_search(
         base_config=real_hpo_base_config,
         param_space={"seed": {"type": "int", "low": 1, "high": 3}},
         n_trials=1, output_dir=str(tmp_path), scheduler="none", split_draws=2,
@@ -490,7 +490,7 @@ def test_run_hpo_admits_a_bare_seed_axis_beside_split_draws(
     assert "data.split.seed" in captured["param_space"]
 
 
-def test_run_hpo_admits_a_sampled_split_seed_axis_when_split_draws_is_1(
+def test_run_hyperparameter_search_admits_a_sampled_split_seed_axis_when_split_draws_is_1(
     tmp_path, real_hpo_base_config, monkeypatch,
 ):
     """With split_draws at 1 (the default), a caller-sampled data.split.seed axis is untouched,
@@ -501,7 +501,7 @@ def test_run_hpo_admits_a_sampled_split_seed_axis_when_split_draws_is_1(
     monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search",
                         lambda **kw: (captured.update(kw), {"study_name": kw["study_name"]})[1])
 
-    result = tt.run_hpo(
+    result = tt.run_hyperparameter_search(
         base_config=real_hpo_base_config,
         param_space={"data.split.seed": {"type": "categorical", "choices": [1, 2]}},
         n_trials=1, output_dir=str(tmp_path),
@@ -522,7 +522,7 @@ def _all_trials_row(lr: float, seed: int, value: float | None, state: str = "COM
     return row
 
 
-def test_run_hpo_groups_trials_by_point_and_picks_the_best_by_mean(
+def test_run_hyperparameter_search_groups_trials_by_point_and_picks_the_best_by_mean(
     tmp_path, real_hpo_base_config, monkeypatch,
 ):
     """Two points, two draws each; real_hpo_base_config's own metric is lower=better (mode
@@ -540,7 +540,7 @@ def test_run_hpo_groups_trials_by_point_and_picks_the_best_by_mean(
 
     monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", fake_search)
 
-    result = tt.run_hpo(base_config=real_hpo_base_config, n_trials=2, output_dir=str(tmp_path),
+    result = tt.run_hyperparameter_search(base_config=real_hpo_base_config, n_trials=2, output_dir=str(tmp_path),
                         scheduler="none", split_draws=2)
 
     assert result["best_params"] == {"lr": 0.2}
@@ -562,7 +562,7 @@ def test_run_hpo_groups_trials_by_point_and_picks_the_best_by_mean(
     assert manifest["result"]["split_draws"] == 2
 
 
-def test_run_hpo_marks_a_group_with_an_errored_draw_ineligible(
+def test_run_hyperparameter_search_marks_a_group_with_an_errored_draw_ineligible(
     tmp_path, real_hpo_base_config, monkeypatch,
 ):
     import tcip_mcp.tools.training_tools as tt
@@ -578,7 +578,7 @@ def test_run_hpo_marks_a_group_with_an_errored_draw_ineligible(
 
     monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", fake_search)
 
-    result = tt.run_hpo(base_config=real_hpo_base_config, n_trials=2, output_dir=str(tmp_path),
+    result = tt.run_hyperparameter_search(base_config=real_hpo_base_config, n_trials=2, output_dir=str(tmp_path),
                         scheduler="none", split_draws=2)
 
     # The lr=0.1 point never became eligible, so lr=0.2 wins even though 0.9 alone looked worse.
@@ -586,7 +586,7 @@ def test_run_hpo_marks_a_group_with_an_errored_draw_ineligible(
     assert result["best_value"] == pytest.approx(0.45)
 
 
-def test_run_hpo_never_picks_a_repeated_point_that_never_completed_every_planned_seed(
+def test_run_hyperparameter_search_never_picks_a_repeated_point_that_never_completed_every_planned_seed(
     tmp_path, real_hpo_base_config, monkeypatch,
 ):
     """Ray can repeat a point across grid cells (grid search repeats every point per sample; a
@@ -609,14 +609,14 @@ def test_run_hpo_never_picks_a_repeated_point_that_never_completed_every_planned
 
     monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", fake_search)
 
-    result = tt.run_hpo(base_config=real_hpo_base_config, n_trials=2, output_dir=str(tmp_path),
+    result = tt.run_hyperparameter_search(base_config=real_hpo_base_config, n_trials=2, output_dir=str(tmp_path),
                         scheduler="none", split_draws=2)
 
     assert result["best_params"] == {"lr": 0.2}
     assert result["best_value"] == pytest.approx(0.85)
 
 
-def test_run_hpo_records_a_null_best_when_no_point_is_eligible(
+def test_run_hyperparameter_search_records_a_null_best_when_no_point_is_eligible(
     tmp_path, real_hpo_base_config, monkeypatch,
 ):
     import tcip_mcp.tools.training_tools as tt
@@ -631,7 +631,7 @@ def test_run_hpo_records_a_null_best_when_no_point_is_eligible(
 
     monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", fake_search)
 
-    result = tt.run_hpo(base_config=real_hpo_base_config, n_trials=1, output_dir=str(tmp_path),
+    result = tt.run_hyperparameter_search(base_config=real_hpo_base_config, n_trials=1, output_dir=str(tmp_path),
                         scheduler="none", split_draws=2)
 
     assert result["best_params"] is None
@@ -639,7 +639,7 @@ def test_run_hpo_records_a_null_best_when_no_point_is_eligible(
     assert "no eligible point" in result["best_value_state"]
 
 
-def test_run_hpo_result_and_manifest_explain_their_own_point_and_draw_counts(
+def test_run_hyperparameter_search_result_and_manifest_explain_their_own_point_and_draw_counts(
     tmp_path, real_hpo_base_config, monkeypatch,
 ):
     """split_sensitivity keeps every point's own block, not only the winner's, and n_points/
@@ -658,7 +658,7 @@ def test_run_hpo_result_and_manifest_explain_their_own_point_and_draw_counts(
 
     monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", fake_search)
 
-    result = tt.run_hpo(base_config=real_hpo_base_config, n_trials=2, output_dir=str(tmp_path),
+    result = tt.run_hyperparameter_search(base_config=real_hpo_base_config, n_trials=2, output_dir=str(tmp_path),
                         scheduler="none", split_draws=2)
 
     assert result["n_points"] == 2
