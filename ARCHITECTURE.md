@@ -728,14 +728,13 @@ Docstring is the function's docstring first line, verbatim.
 | `validate_data_quality` | `data_tools.py:575` | yes | Run quality checks on a dataset (any supported annotation format). |  <!-- queued: P5-18 unify -->
 | `draw_splits` | `data_tools.py:729` | yes | Compute a leakage-free, annotation-stratified train/val/calibration split. |
 
-### experiment_tools.py (4 tools)
+### experiment_tools.py (3 tools)
 
 | tool | line | audited | docstring first line |
 |---|---|---|---|
 | `create_experiment` | `experiment_tools.py:11` | yes | Create a new experiment to track a training run. |
 | `get_experiment` | `experiment_tools.py:41` | yes | Read an experiment record. |
 | `list_experiments` | `experiment_tools.py:83` | yes | Enumerate every experiment the store holds a status record for. |
-| `compare_experiments` | `experiment_tools.py:106` | yes | Side-by-side comparison of multiple experiments. |
 
 ### feedback_tools.py (2 tools)
 
