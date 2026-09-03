@@ -1,5 +1,5 @@
-# Build context for packages/tcip-web/Dockerfile is the repo root; trim it to what a build
-# stage actually COPYs, since everything else still gets sent to the daemon otherwise.
+# Build context for packages/tcip-web/Dockerfile is the repo root; this Dockerfile-specific ignore file (read by
+# BuildKit beside the Dockerfile, never at the root, where a root .dockerignore also hides tests/ from code indexers) trims it to what a build stage COPYs.
 .git/
 .claude/
 .tcip/
