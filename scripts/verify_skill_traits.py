@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Guardrail: flag every trait-like token in a crop/domain SKILL.md that is not in crops.yml.
+"""Guardrail: flag every trait-like token in a crop/domain knowledge document that is not in crops.yml.
 
 The crop skills' failure mode was asserting trait names that don't exist in the breeder-defined
 controlled vocabulary. This is the deterministic backstop: LLM reviewers approved drafts that

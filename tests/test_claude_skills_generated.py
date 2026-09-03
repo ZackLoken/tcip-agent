@@ -56,6 +56,25 @@ def test_no_stray_generated_skill_directories():
     assert on_disk == documented_names
 
 
+def test_no_file_sits_directly_under_claude_skills():
+    """.claude/skills/ holds only per-document subdirectories: a hand-added file at its top
+    level would otherwise go unchecked by the directory-name comparison above."""
+    generator = _generator()
+    stray_files = [p for p in generator.CLAUDE_SKILLS_DIR.iterdir() if p.is_file()]
+    assert not stray_files, f"file(s) directly under .claude/skills/: {stray_files}"
+
+
+def test_each_generated_skill_directory_holds_only_skill_md():
+    """A hand-added resource file beside a generated SKILL.md would otherwise go unchecked:
+    each skill directory holds exactly one entry, SKILL.md."""
+    generator = _generator()
+    for skill_dir in generator.CLAUDE_SKILLS_DIR.iterdir():
+        if not skill_dir.is_dir():
+            continue
+        entries = sorted(p.name for p in skill_dir.iterdir())
+        assert entries == ["SKILL.md"], f"{skill_dir.relative_to(REPO_ROOT)}: found {entries}"
+
+
 def test_the_generator_writes_lf_line_endings():
     generator = _generator()
     for skill_dir in generator.CLAUDE_SKILLS_DIR.iterdir():

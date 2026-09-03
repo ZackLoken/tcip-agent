@@ -2,8 +2,8 @@
 
 Every document a client reaches, whether through the generated Claude Code skills under
 ``.claude/skills/`` or the ``domain_knowledge`` MCP tool, is a file under :data:`KNOWLEDGE_DIR`:
-the eleven domain documents beside this module and the six per-crop documents plus
-``crops.yml`` (the trait authority) under ``crops/``. The two-field frontmatter (``name``,
+the domain documents beside this module and the per-crop documents plus ``crops.yml`` (the
+trait authority) under ``crops/``. The two-field frontmatter (``name``,
 ``description``) each document carries is its selection hint, read once here rather than
 re-parsed by every consumer.
 """
@@ -11,9 +11,12 @@ re-parsed by every consumer.
 from __future__ import annotations
 
 import dataclasses
+import re
 from pathlib import Path
 
 KNOWLEDGE_DIR = Path(__file__).resolve().parent
+
+_NAME_SEGMENT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]*$")
 
 
 @dataclasses.dataclass(frozen=True)
@@ -33,15 +36,21 @@ def _iter_markdown_paths() -> list[Path]:
 def _parse_frontmatter(path: Path) -> tuple[dict, str]:
     """A document's frontmatter mapping and its body, the text after the closing ``---``.
 
-    Raises ``ValueError`` naming the file for anything that does not parse: a missing or
-    unclosed frontmatter block, a non-mapping result, or a missing/blank ``name`` or
-    ``description``. A document this rejects is never silently skipped; every reader of the
-    knowledge corpus (the generated skills, the tool description, the guardrails) needs every
-    document accounted for.
+    Raises ``ValueError`` naming the file for anything that does not parse: a document that is
+    not valid UTF-8, a missing or unclosed frontmatter block, a non-mapping result, a
+    missing/blank ``name`` or ``description``, a ``name`` that is not a single safe path
+    segment (letters, digits, hyphen), or a ``description`` carrying a newline (the composed
+    tool description is one line per document). A document this rejects is never silently
+    skipped; every reader of the knowledge corpus (the generated skills, the tool description,
+    the guardrails) needs every document accounted for.
     """
     import yaml
 
-    raw = path.read_text(encoding="utf-8")
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except UnicodeDecodeError as exc:
+        raise ValueError(f"{path}: not valid UTF-8: {exc}") from exc
+    raw = raw.removeprefix("﻿")
     if not raw.startswith("---"):
         raise ValueError(f"{path}: no YAML frontmatter")
     _, _, rest = raw.partition("---")
@@ -58,8 +67,15 @@ def _parse_frontmatter(path: Path) -> tuple[dict, str]:
     description = data.get("description")
     if not isinstance(name, str) or not name.strip():
         raise ValueError(f"{path}: frontmatter has no non-empty 'name'")
+    if not _NAME_SEGMENT.match(name):
+        raise ValueError(
+            f"{path}: 'name' {name!r} is not a single safe path segment "
+            "(letters, digits, hyphen only)"
+        )
     if not isinstance(description, str) or not description.strip():
         raise ValueError(f"{path}: frontmatter has no non-empty 'description'")
+    if "\n" in description:
+        raise ValueError(f"{path}: 'description' carries a newline; it must be one line")
     return {"name": name, "description": description}, body.lstrip("\n")
 
 

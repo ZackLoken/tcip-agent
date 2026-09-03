@@ -8,7 +8,7 @@ operating posture, and pipeline/model rules there apply here and aren't restated
 ```
 src/tcip_mcp/
   server.py, __main__.py   # MCP entry point; registers all tool modules
-  knowledge/      # the canonical domain-knowledge directory (eleven documents plus
+  knowledge/      # the canonical domain-knowledge directory (the domain documents plus
                   # crops/<crop>.md, crops/crops.yml), read through __init__.py; source
                   # for both the generated Claude Code skills and the domain_knowledge tool
   tools/          # domain tools, one module per area: annotation, data, experiment, feedback,

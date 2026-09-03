@@ -1,4 +1,4 @@
-"""Verify that code examples in skills and source docstrings actually work.
+"""Verify that code examples in knowledge documents and source docstrings actually work.
 
 A worked example that does not run is worse than no example: the agent follows it, gets a
 TypeError, and learns to distrust the surface it came from. Both a skill table and a source
@@ -225,7 +225,7 @@ def main() -> int:
         if args.list and not found:
             print(f"  ok   {ex.origin}")
 
-    print(f"\nchecked {len(examples)} code examples in skills and source docstrings")
+    print(f"\nchecked {len(examples)} code examples in knowledge documents and source docstrings")
     if not problems:
         print("all examples parse, import, and bind against the real signatures")
         return 0

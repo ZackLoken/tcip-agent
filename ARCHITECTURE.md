@@ -504,9 +504,9 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | scripts/smoke_terminal_e2e.py | One-shot smoke: the embedded agent terminal against the real `claude` CLI. | 2 | 0 |
 | scripts/verify_citations.py | Check that literature citations point at real code, real papers, and real sentences. | 0 | 0 |
 | scripts/verify_claims.py | List every claim-shaped sentence this change *adds* to comments and docstrings. | 0 | 0 |
-| scripts/verify_doc_examples.py | Verify that code examples in skills and source docstrings actually work. | 1 | 0 |
+| scripts/verify_doc_examples.py | Verify that code examples in knowledge documents and source docstrings actually work. | 1 | 0 |
 | scripts/verify_skill_tools.py | Guardrail: hold every tool name in agent-facing prose to the registry. | 2 | 0 |
-| scripts/verify_skill_traits.py | Guardrail: flag every trait-like token in a crop/domain SKILL.md that is not in crops.yml. | 1 | 0 |
+| scripts/verify_skill_traits.py | Guardrail: flag every trait-like token in a crop/domain knowledge document that is not in crops.yml. | 1 | 0 |
 | scripts/watch_agent_chat.py | Read the in-app TCIP agent chat from the orchestrating Claude Code session. | 0 | 0 |
 
 ## Package-level dependency rules holding at HEAD 2670cebf
@@ -777,7 +777,7 @@ Docstring is the function's docstring first line, verbatim.
 
 | tool | line | audited | docstring first line |
 |---|---|---|---|
-| `domain_knowledge` | `knowledge_tools.py:31` | yes | Read the platform's domain knowledge: trait semantics, workflow patterns, and per-crop |
+| `domain_knowledge` | `knowledge_tools.py:36` | yes | Read the platform's domain knowledge: trait semantics, workflow patterns, and per-crop |
 
 ### model_tools.py (3 tools)
 
@@ -2405,7 +2405,7 @@ Phase 3 verdict: single.
 ## S37. traits.py trait specs against crops.yml controlled vocabulary
 
 Must agree: a registered trait's delivered phenotypes and units exist in the crops.yml vocabulary.
-Side A: `packages/tcip-mcp/src/tcip_mcp/knowledge/__init__.py:119` (`def crops_yml_path(`, the one placement of `packages/tcip-mcp/src/tcip_mcp/knowledge/crops/crops.yml`), reached through `packages/tcip-mcp/src/tcip_mcp/traits.py:229` (`def crops_yml_path(`, delegating), loaded once for every reader of it by `_crops_traits`, line 236.
+Side A: `packages/tcip-mcp/src/tcip_mcp/knowledge/__init__.py:135` (`def crops_yml_path(`, the one placement of `packages/tcip-mcp/src/tcip_mcp/knowledge/crops/crops.yml`), reached through `packages/tcip-mcp/src/tcip_mcp/traits.py:229` (`def crops_yml_path(`, delegating), loaded once for every reader of it by `_crops_traits`, line 236.
 Side B: `packages/tcip-mcp/src/tcip_mcp/traits.py:300` (`_spec_from_config` cross-checks each spec against `_crops_vocab`, line 241) and `scripts/verify_skill_traits.py:46` (`load_vocab` checks a skill's trait tokens through that same read, and refuses an empty vocabulary rather than reporting a clean skill).
 Phase 3 verdict: single.
 
