@@ -43,15 +43,11 @@ def test_every_generated_claude_skill_matches_the_canonical_frontmatter():
     documents = _documents()
     assert documents, "no knowledge documents found; the generator has nothing to check"
 
-    for document in documents:
-        skill_path = generator.CLAUDE_SKILLS_DIR / document.name / "SKILL.md"
-        assert skill_path.is_file(), f"missing generated skill: {skill_path}"
-        expected = generator.render_skill(document.name, document.description, document.path)
-        actual = skill_path.read_text(encoding="utf-8")
-        assert actual == expected, (
-            f"{skill_path.relative_to(REPO_ROOT)} is out of date; "
-            "run python scripts/generate_harness_discovery.py"
-        )
+    stale = generator.stale_skills(generator.CLAUDE_SKILLS_DIR, generator.render_skill, documents)
+    assert not stale, (
+        f"{stale} out of date under {generator.CLAUDE_SKILLS_DIR}; "
+        "run python scripts/generate_harness_discovery.py"
+    )
 
 
 def test_every_generated_agents_skill_matches_the_canonical_frontmatter():
@@ -60,25 +56,21 @@ def test_every_generated_agents_skill_matches_the_canonical_frontmatter():
     generator = _generator()
     documents = _documents()
 
-    for document in documents:
-        skill_path = generator.AGENTS_SKILLS_DIR / document.name / "SKILL.md"
-        assert skill_path.is_file(), f"missing generated skill: {skill_path}"
-        expected = generator.render_agents_skill(document.name, document.description, document.path)
-        actual = skill_path.read_text(encoding="utf-8")
-        assert actual == expected, (
-            f"{skill_path.relative_to(REPO_ROOT)} is out of date; "
-            "run python scripts/generate_harness_discovery.py"
-        )
+    stale = generator.stale_skills(generator.AGENTS_SKILLS_DIR, generator.render_agents_skill, documents)
+    assert not stale, (
+        f"{stale} out of date under {generator.AGENTS_SKILLS_DIR}; "
+        "run python scripts/generate_harness_discovery.py"
+    )
 
 
 def test_no_stray_generated_skill_directories():
     """Every directory under either skills tree names a real knowledge document: a document
     deleted or renamed without regenerating would otherwise leave an orphaned skill behind."""
     generator = _generator()
-    documented_names = {d.name for d in _documents()}
+    documents = _documents()
     for skills_dir in (generator.CLAUDE_SKILLS_DIR, generator.AGENTS_SKILLS_DIR):
-        on_disk = {p.name for p in skills_dir.iterdir() if p.is_dir()}
-        assert on_disk == documented_names, f"{skills_dir}: {on_disk} != {documented_names}"
+        stray = generator.stray_skill_directories(skills_dir, documents)
+        assert not stray, f"{skills_dir}: stray directories {stray}"
 
 
 def test_no_file_sits_directly_under_a_generated_skills_tree():
@@ -154,6 +146,25 @@ def test_agents_md_block_round_trips_through_surrounding_text(tmp_path):
     assert "Hand-written text below the block." in text
 
 
+def test_write_agents_block_is_idempotent_on_a_fixture_with_surrounding_text(tmp_path):
+    """Regenerating a fixture AGENTS.md a second time produces byte-identical output to the
+    first regeneration: the block does not grow or reflow the surrounding text run after run."""
+    generator = _generator()
+    documents = _documents()
+    fixture = tmp_path / "AGENTS.md"
+    fixture.write_text(
+        "# Before\n\nHand-written text above the block.\n\n"
+        + generator.render_agents_block(documents)
+        + "\nHand-written text below the block.\n",
+        encoding="utf-8",
+    )
+    generator.write_agents_block(documents, path=fixture)
+    first = fixture.read_bytes()
+    generator.write_agents_block(documents, path=fixture)
+    second = fixture.read_bytes()
+    assert first == second
+
+
 def test_write_agents_block_creates_the_file_when_absent(tmp_path):
     generator = _generator()
     fixture = tmp_path / "AGENTS.md"
@@ -182,11 +193,34 @@ def test_write_agents_block_refuses_an_oversized_block(tmp_path):
         generator.write_agents_block(huge_documents, path=fixture)
 
 
+def test_write_agents_block_refuses_a_lone_marker(tmp_path):
+    """A start marker with no matching end marker (or the reverse) is a malformed hand-edit,
+    refused by name rather than silently rewritten around."""
+    generator = _generator()
+    fixture = tmp_path / "AGENTS.md"
+    fixture.write_text(generator.AGENTS_BLOCK_START + "\nstray text, no end marker\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="start marker or an end marker but not both"):
+        generator.write_agents_block(_documents(), path=fixture)
+
+
+def test_write_agents_block_refuses_an_end_marker_above_the_start(tmp_path):
+    """Both markers present but in the wrong order is a distinct malformation from a lone
+    marker, and gets its own message naming that case."""
+    generator = _generator()
+    fixture = tmp_path / "AGENTS.md"
+    fixture.write_text(
+        generator.AGENTS_BLOCK_END + "\nstray text\n" + generator.AGENTS_BLOCK_START + "\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="end marker appears above the start marker"):
+        generator.write_agents_block(_documents(), path=fixture)
+
+
 def test_a_deleted_agents_skill_is_caught_on_a_perturbed_copy(tmp_path):
     """Proves the staleness check actually fires on a missing file: delete one generated skill
-    from a temporary copy of the checked-in tree and confirm exactly that document goes
-    missing, rather than trusting the equality assertion above on a tree that has never held a
-    deletion."""
+    from a temporary copy of the checked-in tree and confirm `stale_skills`, the same helper the
+    main staleness test calls, names exactly that document, rather than trusting the equality
+    assertion above on a tree that has never held a deletion."""
     generator = _generator()
     documents = _documents()
     copy_dir = tmp_path / "agents-skills"
@@ -194,13 +228,13 @@ def test_a_deleted_agents_skill_is_caught_on_a_perturbed_copy(tmp_path):
     victim = documents[0]
     (copy_dir / victim.name / "SKILL.md").unlink()
 
-    missing = [d for d in documents if not (copy_dir / d.name / "SKILL.md").is_file()]
-    assert missing == [victim]
+    stale = generator.stale_skills(copy_dir, generator.render_agents_skill, documents)
+    assert stale == [victim.name]
 
 
 def test_an_edited_agents_skill_is_caught_on_a_perturbed_copy(tmp_path):
     """Proves the staleness check actually fires on a hand-edit: append text to one generated
-    skill in a temporary copy and confirm its content no longer equals the render."""
+    skill in a temporary copy and confirm `stale_skills` names exactly that document."""
     generator = _generator()
     documents = _documents()
     copy_dir = tmp_path / "agents-skills"
@@ -211,22 +245,54 @@ def test_an_edited_agents_skill_is_caught_on_a_perturbed_copy(tmp_path):
         victim_path.read_text(encoding="utf-8") + "\nhand-edited\n", encoding="utf-8"
     )
 
-    expected = generator.render_agents_skill(victim.name, victim.description, victim.path)
-    assert victim_path.read_text(encoding="utf-8") != expected
+    stale = generator.stale_skills(copy_dir, generator.render_agents_skill, documents)
+    assert stale == [victim.name]
 
 
 def test_an_extra_agents_skill_directory_is_caught_on_a_perturbed_copy(tmp_path):
     """Proves the stray-directory check actually fires: add a directory naming no real document
-    to a temporary copy and confirm the on-disk set no longer equals the documented set."""
+    to a temporary copy and confirm `stray_skill_directories`, the same helper the main
+    stray-directory test calls, names it."""
     generator = _generator()
     documents = _documents()
     copy_dir = tmp_path / "agents-skills"
     shutil.copytree(generator.AGENTS_SKILLS_DIR, copy_dir)
-    stray = copy_dir / "not-a-real-document"
-    stray.mkdir()
-    (stray / "SKILL.md").write_text("stray\n", encoding="utf-8")
+    stray_dir = copy_dir / "not-a-real-document"
+    stray_dir.mkdir()
+    (stray_dir / "SKILL.md").write_text("stray\n", encoding="utf-8")
 
-    documented_names = {d.name for d in documents}
-    on_disk = {p.name for p in copy_dir.iterdir() if p.is_dir()}
-    assert on_disk != documented_names
-    assert "not-a-real-document" in (on_disk - documented_names)
+    stray = generator.stray_skill_directories(copy_dir, documents)
+    assert stray == {"not-a-real-document"}
+
+
+def test_the_live_tree_is_unchanged_by_running_the_generator_twice():
+    """Running every writer against the real checked-in tree twice in a row produces the same
+    bytes both times: the promised idempotency, checked against the rendered files rather than
+    by shelling out to `git status` (a checked-in tree that already matches the documents, as
+    the staleness tests above confirm, means neither run should change anything)."""
+    generator = _generator()
+    documents = _documents()
+
+    def _snapshot() -> dict[Path, bytes]:
+        snapshot: dict[Path, bytes] = {}
+        for skills_dir, render in (
+            (generator.CLAUDE_SKILLS_DIR, generator.render_skill),
+            (generator.AGENTS_SKILLS_DIR, generator.render_agents_skill),
+        ):
+            for document in documents:
+                path = skills_dir / document.name / "SKILL.md"
+                snapshot[path] = path.read_bytes()
+        snapshot[generator.AGENTS_MD_PATH] = generator.AGENTS_MD_PATH.read_bytes()
+        return snapshot
+
+    generator.write_claude_skills(documents)
+    generator.write_agents_skills(documents)
+    generator.write_agents_block(documents)
+    first = _snapshot()
+
+    generator.write_claude_skills(documents)
+    generator.write_agents_skills(documents)
+    generator.write_agents_block(documents)
+    second = _snapshot()
+
+    assert first == second
