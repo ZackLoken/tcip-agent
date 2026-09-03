@@ -208,8 +208,8 @@ def test_record_site_replace_overwrites_an_invalid_record_naming_the_problem(tmp
 def test_read_record_raises_missing_and_publishes_no_database_for_a_root_with_no_store(
     tmp_path: Path,
 ):
-    """Names both doors: ``init_project`` for a project whose name fits the workspace scheme,
-    and the operator script for any project, since ``init_project`` cannot serve one that
+    """Names both doors: ``initialize_project`` for a project whose name fits the workspace scheme,
+    and the operator script for any project, since ``initialize_project`` cannot serve one that
     doesn't (``gui-smoke-scratch``-shaped names). The no-database assertion holds the store's
     own guarantee at this surface: a read of an absent record never publishes a database,
     which ``read_record`` relies on rather than re-checking itself."""
@@ -217,7 +217,7 @@ def test_read_record_raises_missing_and_publishes_no_database_for_a_root_with_no
 
     from tcip_mcp.project_record import ProjectRecordMissing, read_record
 
-    with pytest.raises(ProjectRecordMissing, match="init_project") as raised:
+    with pytest.raises(ProjectRecordMissing, match="initialize_project") as raised:
         read_record(str(tmp_path))
     assert "scripts/conform_project_site.py" in str(raised.value)
 
@@ -249,7 +249,7 @@ def test_site_fields_names_the_absent_record(tmp_path: Path):
     fields = site_fields(str(tmp_path))
 
     assert fields["site"] is None
-    assert "init_project" in fields["site_problem"]
+    assert "initialize_project" in fields["site_problem"]
     assert "scripts/conform_project_site.py" in fields["site_problem"]
 
 
@@ -309,14 +309,14 @@ def test_site_fields_on_an_unadopted_root_names_adopt_store_py(tmp_path: Path):
     """A root whose records are still loose files: ``scripts/adopt_store.py`` is the state it
     conforms. The file backend legitimately produces that state (``import_project`` no longer
     does: it adopts a fresh root under the database backend), so the unadopted root here is
-    built by writing through the file backend directly, through ``init_project``, never by
+    built by writing through the file backend directly, through ``initialize_project``, never by
     hand-writing ``project.json``."""
     from tcip_mcp.project_record import site_fields
-    from tcip_mcp.tools.project_tools import init_project
+    from tcip_mcp.tools.project_tools import initialize_project
 
     dest = tmp_path / "unadopted"
     with bound(FileBackend()):
-        init_project(str(dest), site="north orchard")
+        initialize_project(str(dest), site="north orchard")
 
     with bound(SqliteBackend()):
         fields = site_fields(str(dest))
@@ -328,7 +328,7 @@ def test_site_fields_on_an_unadopted_root_names_adopt_store_py(tmp_path: Path):
 def test_site_fields_on_a_bare_directory_that_gained_tcip_with_no_creating_door(
     tmp_path: Path,
 ):
-    """A store write with no door (``report_friction`` on a directory neither ``init_project`` nor
+    """A store write with no door (``report_friction`` on a directory neither ``initialize_project`` nor
     ``ingest_images`` ever touched) leaves ``.tcip`` with no project record: a permanent,
     reachable state every reader has to name honestly rather than crash on."""
     from tcip_mcp.project_record import site_fields
@@ -343,4 +343,4 @@ def test_site_fields_on_a_bare_directory_that_gained_tcip_with_no_creating_door(
     fields = site_fields(str(project))
 
     assert fields["site"] is None
-    assert "init_project" in fields["site_problem"]
+    assert "initialize_project" in fields["site_problem"]

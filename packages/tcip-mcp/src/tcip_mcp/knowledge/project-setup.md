@@ -27,7 +27,7 @@ Projects live under the workspace (`TCIP_WORKSPACE`, default `~/tcip-projects/`)
 folder per project. The shape is declared once, in `workspace.format_project_name`/
 `parse_project_name`: three lowercase segments joined by underscores, hyphens allowed
 within a segment. Neither function checks a segment against a vocabulary (tentative,
-per the owner's naming ruling); `ingest_images`, `init_project` and
+per the owner's naming ruling); `ingest_images`, `initialize_project` and
 `scripts/import_project.py` refuse a non-conforming name when the directory they create lands
 under the workspace.
 
@@ -40,7 +40,7 @@ under the workspace.
   `packages/tcip-mcp/src/tcip_mcp/knowledge/crop-science.md`), never a `crops.yml` trait name.
 
 The site (field/orchard) is no longer part of the name: it is a required argument of
-`init_project` and `ingest_images`, recorded once on the project's own record
+`initialize_project` and `ingest_images`, recorded once on the project's own record
 (`tcip_mcp.project_record`) and shown in the picker. Ask the human for it rather than
 guessing it from a path or filename; a project that already records a different site
 refuses the call rather than silently overwriting it.
@@ -74,7 +74,7 @@ next steps do. After it, `inspect_project` reports the capture dates and image c
 
 `ingest_images` scaffolds `.tcip/` (`artifacts/`, `models/`) as a side effect of
 structuring images. If you need that scaffold before there are images to ingest, call
-`init_project(project_path, site=<site>)` directly; it creates the identical layout without
+`initialize_project(project_path, site=<site>)` directly; it creates the identical layout without
 touching image files. Both share the same internal scaffolding, so calling one after the other
 with the same site is idempotent, not additive; calling either with a different site than the
 one already recorded refuses rather than silently changing it.

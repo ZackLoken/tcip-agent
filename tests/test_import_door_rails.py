@@ -475,7 +475,7 @@ def test_a_splits_root_nested_under_a_curated_root_archives_and_round_trips(tmp_
 
 
 def test_the_full_round_trip_reads_back_at_once_with_no_hand_adoption(tmp_path, monkeypatch):
-    """init_project, register_dataset, a confirmed operationalization, an experiment's members,
+    """initialize_project, register_dataset, a confirmed operationalization, an experiment's members,
     an HPO sweep's members and a project-relative splits manifest, all through their own real
     producers; archived, imported into a fresh destination, and read back through the store
     under the default backend with no adopt_store.py run.
@@ -488,7 +488,7 @@ def test_the_full_round_trip_reads_back_at_once_with_no_hand_adoption(tmp_path, 
     from tcip_mcp.operationalization import PER_IMAGE_COUNT, resolve_trait_and_record
     from tcip_mcp.tools.data_tools import draw_splits, split_manifest_key
     from tcip_mcp.tools.project_tools import (
-        dataset_entry_path, init_project, read_datasets, register_dataset,
+        dataset_entry_path, initialize_project, read_datasets, register_dataset,
     )
 
     from tests._operationalization_fixtures import COUNT_TRAIT, seed_confirmed_count
@@ -496,7 +496,7 @@ def test_the_full_round_trip_reads_back_at_once_with_no_hand_adoption(tmp_path, 
     root = tmp_path / "source"
     monkeypatch.setenv("TCIP_STATE_ROOT", str(root))
     _annotated_dataset(root, 4)
-    assert "error" not in init_project(str(root), site="north orchard")
+    assert "error" not in initialize_project(str(root), site="north orchard")
     assert "error" not in register_dataset(str(root), crop="hazelnut", project_root=str(root))
     confirmed = seed_confirmed_count(root)
     assert confirmed["confirmed_by"]

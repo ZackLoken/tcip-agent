@@ -64,9 +64,9 @@ def test_bundle_propagates_the_refusal_rather_than_reading_an_unconformed_regist
 ):
     from tcip_mcp.tools.bundle import account_for
 
-    from tcip_mcp.tools.project_tools import init_project
+    from tcip_mcp.tools.project_tools import initialize_project
 
-    init_project(str(tmp_path), site="north orchard")
+    initialize_project(str(tmp_path), site="north orchard")
     _seed_v1(tmp_path, [{"name": "legacy", "checkpoint_path": "x.pt"}])
 
     with pytest.raises(RegistryVersionRefused):
@@ -74,9 +74,9 @@ def test_bundle_propagates_the_refusal_rather_than_reading_an_unconformed_regist
 
 
 def test_archive_project_refuses_loudly_on_an_unconformed_registry(tmp_path: Path):
-    from tcip_mcp.tools.project_tools import archive_project, init_project
+    from tcip_mcp.tools.project_tools import archive_project, initialize_project
 
-    init_project(str(tmp_path), site="north orchard")
+    initialize_project(str(tmp_path), site="north orchard")
     _seed_v1(tmp_path, [{"name": "legacy", "checkpoint_path": "x.pt"}])
 
     result = archive_project(str(tmp_path), str(tmp_path.parent / "out.zip"))
@@ -88,9 +88,9 @@ def test_archive_project_refuses_loudly_on_an_unconformed_registry(tmp_path: Pat
 def test_doctor_reports_the_refusal_as_its_own_finding(tmp_path: Path):
     import importlib.util
 
-    from tcip_mcp.tools.project_tools import init_project
+    from tcip_mcp.tools.project_tools import initialize_project
 
-    init_project(str(tmp_path), site="north orchard")
+    initialize_project(str(tmp_path), site="north orchard")
     _seed_v1(tmp_path, [{"name": "legacy", "checkpoint_path": "x.pt"}])
 
     doctor_path = Path(__file__).resolve().parent.parent / "scripts" / "doctor.py"
@@ -254,10 +254,10 @@ def test_register_model_from_experiment_checkpoint_field_is_resolved_absolute(
         complete_run, create_experiment, experiment_dir, register_model_from_experiment,
         update_status,
     )
-    from tcip_mcp.tools.project_tools import init_project
+    from tcip_mcp.tools.project_tools import initialize_project
 
     project = tmp_path / "proj"
-    init_project(str(project), site="north orchard")
+    initialize_project(str(project), site="north orchard")
     monkeypatch.setenv("TCIP_STATE_ROOT", str(project))
     create_experiment("exp1", {"model_source": {"builder": "x:y"}})
     update_status("exp1", "running")

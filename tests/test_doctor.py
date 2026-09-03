@@ -558,7 +558,7 @@ def test_doctor_warns_on_a_project_with_no_record(tmp_path):
     res = _run(root)
 
     assert res.returncode == 1, res.stdout
-    assert "init_project" in res.stdout
+    assert "initialize_project" in res.stdout
 
 
 def test_doctor_errors_on_a_project_whose_record_does_not_decode(tmp_path):

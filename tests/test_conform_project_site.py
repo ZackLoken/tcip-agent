@@ -35,10 +35,10 @@ def test_conform_script_writes_a_fresh_site_for_a_project_with_no_record(tmp_pat
 
 
 def test_conform_script_reports_already_recorded_the_same(tmp_path: Path):
-    from tcip_mcp.tools.project_tools import init_project
+    from tcip_mcp.tools.project_tools import initialize_project
 
     project = tmp_path / "proj"
-    init_project(str(project), site="north orchard")
+    initialize_project(str(project), site="north orchard")
 
     result = _run_script(str(project), "north orchard")
 
@@ -48,10 +48,10 @@ def test_conform_script_reports_already_recorded_the_same(tmp_path: Path):
 
 def test_conform_script_refuses_a_conflicting_site_without_replace(tmp_path: Path):
     from tcip_mcp.project_record import read_record
-    from tcip_mcp.tools.project_tools import init_project
+    from tcip_mcp.tools.project_tools import initialize_project
 
     project = tmp_path / "proj"
-    init_project(str(project), site="north orchard")
+    initialize_project(str(project), site="north orchard")
 
     result = _run_script(str(project), "south orchard")
 
@@ -62,10 +62,10 @@ def test_conform_script_refuses_a_conflicting_site_without_replace(tmp_path: Pat
 
 def test_conform_script_replaces_a_conflicting_site(tmp_path: Path):
     from tcip_mcp.project_record import read_record
-    from tcip_mcp.tools.project_tools import init_project
+    from tcip_mcp.tools.project_tools import initialize_project
 
     project = tmp_path / "proj"
-    init_project(str(project), site="north orchard")
+    initialize_project(str(project), site="north orchard")
 
     result = _run_script(str(project), "south orchard", "--replace")
 
@@ -82,10 +82,10 @@ def test_conform_script_replaces_a_damaged_record_naming_it_replaced_not_written
     import tcip_store
 
     from tcip_mcp.project_record import project_record_key, read_record
-    from tcip_mcp.tools.project_tools import init_project
+    from tcip_mcp.tools.project_tools import initialize_project
 
     project = tmp_path / "proj"
-    init_project(str(project), site="north orchard")
+    initialize_project(str(project), site="north orchard")
     key = project_record_key(str(project))
     current = tcip_store.read_versioned(key).version
     tcip_store.replace(key, {"not_site": "x"}, expect=current)

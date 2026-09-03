@@ -158,9 +158,9 @@ def main() -> int:
         os.environ["TCIP_STATE_ROOT"] = str(root)
         try:
             from tcip_mcp.traits import registered_crops
-            from tcip_mcp.tools.project_tools import init_project, register_dataset
+            from tcip_mcp.tools.project_tools import initialize_project, register_dataset
 
-            init_project(str(root), site="smoke test orchard")
+            initialize_project(str(root), site="smoke test orchard")
             _author_catkin_trait_spec(root)
 
             # 1. Scene: geolocated images + per-image classified predictions.

@@ -1,7 +1,7 @@
 """End-to-end integration test: agent pipeline through MCP tools.
 
 Verifies the full workflow using the MCP tool layer:
-  init_project → scan_dataset → validate_data_quality →
+  initialize_project → scan_dataset → validate_data_quality →
   read_annotations → save_annotations → score_predictions (image) →
   score_predictions (dataset) → draw_splits → archive_project
 
@@ -16,7 +16,7 @@ import pytest
 from PIL import Image
 
 from tcip_mcp.tools.project_tools import (
-    init_project,
+    initialize_project,
     inspect_project,
     archive_project,
 )
@@ -91,7 +91,7 @@ class TestE2EPipeline:
         root = str(project_dir)
 
         # ── Step 1: Init project ─────────────────────────────────────
-        init_project(root, site="north orchard")
+        initialize_project(root, site="north orchard")
         assert (project_dir / ".tcip").is_dir()
         assert (project_dir / ".tcip" / "artifacts").is_dir()
 

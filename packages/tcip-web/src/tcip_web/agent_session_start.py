@@ -124,7 +124,7 @@ def _active_context(proj: str) -> str:
         "If this session continues work on that project, run the ritual first: load_project_memory "
         "(kind='reports' and kind='retrospectives'), inspect_project, then python scripts/doctor.py <project_root>.\n"
         "If the user's task is to create or switch to a different project, do that first "
-        "(init_project(<path>, site=<site>) then set_active_project), then run the ritual on the "
+        "(initialize_project(<path>, site=<site>) then set_active_project), then run the ritual on the "
         "project you end up in, do not run it on a stale active project.\n"
         "If any mandated action is blocked or errors, that itself is a report_friction, never a silent skip."
     )
@@ -134,7 +134,7 @@ def _no_project_context() -> str:
     return (
         "[TCIP session-start ritual, auto-injected by the SessionStart hook]\n"
         "No active project yet (.active marker absent). Resolve by the user's intent:\n"
-        "  • New project  → init_project(<path>, site=<site>) then set_active_project(<name>) to "
+        "  • New project  → initialize_project(<path>, site=<site>) then set_active_project(<name>) to "
         "make it active (set_active_project sets the marker the GUI + ritual read).\n"
         "  • Resume existing work → set_active_project(<name>) (or open it in the GUI).\n"
         "Once a project is active, run the ritual: load_project_memory (kind='reports' and "

@@ -226,10 +226,10 @@ def test_conform_over_a_real_import_produced_registry(tmp_path: Path, monkeypatc
         complete_run, create_experiment, experiment_dir, register_model_from_experiment,
         update_status,
     )
-    from tcip_mcp.tools.project_tools import archive_project, import_project, init_project
+    from tcip_mcp.tools.project_tools import archive_project, import_project, initialize_project
 
     src = tmp_path / "src_project"
-    init_project(str(src), site="north orchard")
+    initialize_project(str(src), site="north orchard")
     monkeypatch.setenv("TCIP_STATE_ROOT", str(src))
     create_experiment("exp1", {"model_source": {"builder": "x:y"}})
     update_status("exp1", "running")

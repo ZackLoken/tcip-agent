@@ -60,7 +60,7 @@ def build_plant_mapping(
             explicit value is honored but still capped at that pitch-derived ceiling.
 
     Refuses (a plain ``{"error": ...}``) naming ``register_dataset`` when ``images_root`` is not
-    a registered dataset's own ``images/`` directory, and naming ``init_project``/
+    a registered dataset's own ``images/`` directory, and naming ``initialize_project``/
     ``set_active_project`` when the resolved platform state root carries no project record. A name
     outside ``tcip_store.layout_claims.NAME_SEGMENT`` (lowercase letters, digits, single hyphens)
     refuses at the door. No capture at all under the requested dates, or captures that carry no

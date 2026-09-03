@@ -76,8 +76,8 @@ def test_session_start_no_active_project_covers_create_and_resume(tmp_path, monk
     out = _run(monkeypatch, capsys, '{"source":"startup"}')
     ctx = json.loads(out)["hookSpecificOutput"]["additionalContext"]
     assert "No active project" in ctx
-    # Both paths must be offered: creating a project is init_project, then set_active_project.
-    assert "init_project" in ctx and "set_active_project" in ctx
+    # Both paths must be offered: creating a project is initialize_project, then set_active_project.
+    assert "initialize_project" in ctx and "set_active_project" in ctx
 
 
 def test_session_start_skips_on_compact(tmp_path, monkeypatch, capsys):
