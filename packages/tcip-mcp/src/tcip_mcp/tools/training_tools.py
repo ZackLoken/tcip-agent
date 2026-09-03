@@ -1033,9 +1033,9 @@ def _launched_training_runs(*, read_progress: bool) -> list[dict[str, Any]]:
 
 def _all_training_runs(*, read_progress: bool) -> list[dict[str, Any]]:
     """This process's in-memory registry merged with every launched run's own disk record: the
-    one implementation :func:`list_training_runs` and :func:`inspect_compute_resources` both
-    build on, so a subprocess-delegated run's real status is visible to both and neither
-    reimplements the merge.
+    one implementation :func:`tcip_mcp.tools.experiment_tools.list_experiments` (with
+    ``launched_only=True``) and :func:`inspect_compute_resources` both build on, so a
+    subprocess-delegated run's real status is visible to both and neither reimplements the merge.
 
     A live in-memory entry (HPO trials excluded) wins by ``run_id`` over its own disk row: a
     ``pid``-bearing one takes the disk overlay for ``status``/``current_epoch``/``error`` and
@@ -1075,20 +1075,6 @@ def _all_training_runs(*, read_progress: bool) -> list[dict[str, Any]]:
     live_run_ids = {r["run_id"] for r in live}
     disk_only = [r for r in disk if r["run_id"] not in live_run_ids]
     return merged + disk_only
-
-
-@mcp.tool()
-@audited
-def list_training_runs() -> dict:
-    """List every training run this platform can currently account for.
-
-    Merges this process's own in-memory registry with every launched run's own record on disk
-    (a run this session launched, another process launched, or one that survived a restart); see
-    :func:`_all_training_runs` for the merge rule. HPO trials are excluded (they belong to the
-    Tuning view). Cost: one status read and one config read per experiment record on disk, plus
-    one metrics-log read per launched record for its current epoch.
-    """
-    return {"runs": _all_training_runs(read_progress=True)}
 
 
 def list_launchable_configs() -> list[dict]:

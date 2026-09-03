@@ -329,7 +329,7 @@ def test_tensorboard_route_404s_with_no_logs_carrying_the_recorded_error(
 
 def test_list_runs_reconstructs_from_experiments(tmp_path, monkeypatch) -> None:
     """No live entry for either experiment (this process never held them in ``_RUNS``): the
-    route's own rows now come from ``list_training_runs``'s unified disk enumeration with no
+    route's own rows now come from ``_all_training_runs``'s unified disk enumeration with no
     patch needed. A genuine training experiment left 'running' by a crash resurfaces as
     'interrupted'; a review-feedback experiment (no model_source) is not a training run and is
     excluded.
@@ -356,18 +356,19 @@ def test_list_runs_reconstructs_from_experiments(tmp_path, monkeypatch) -> None:
 
 
 def test_list_runs_route_is_a_pure_pass_through_to_the_tool(tmp_path, monkeypatch) -> None:
-    """Post-unification the route adds nothing of its own: its rows equal the tool's rows,
-    exactly. Before unification the route's own reconstruction added rows the tool lacked."""
+    """Post-unification the route adds nothing of its own: its rows equal the tool's
+    ``launched_only=True`` view, exactly. Before unification the route's own reconstruction
+    added rows the tool lacked."""
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     from tcip_mcp.experiments import create_experiment, update_status
-    from tcip_mcp.tools.training_tools import list_training_runs
+    from tcip_mcp.tools.experiment_tools import list_experiments
     from tcip_web.routes.training import list_runs_route
 
     create_experiment("exp-route-parity", {"model_source": {"builder": "my_models:chestnut_burr_det"}})
     update_status("exp-route-parity", "running")
 
-    assert list_runs_route()["runs"] == list_training_runs()["runs"]
+    assert list_runs_route()["runs"] == list_experiments(launched_only=True)["runs"]
 
 
 def test_never_launched_experiment_is_absent_from_the_route(tmp_path, monkeypatch) -> None:

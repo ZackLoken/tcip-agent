@@ -80,22 +80,35 @@ def get_experiment(
 
 @mcp.tool()
 @audited
-def list_experiments() -> dict:
+def list_experiments(launched_only: bool = False) -> dict:
     """Enumerate every experiment the store holds a status record for.
 
     Covers every experiment, not only a training run: a calibration experiment (its id is
     derived from a claim's content and cannot otherwise be reconstructed), a review-feedback
     lineage, a pre-created experiment never launched, and a launched one whose ``run_id`` stamp
     was lost. Use this to rediscover what the store holds after a session is lost, before
-    reaching for ``list_training_runs`` (launched runs only) or ``get_experiment`` (one record's
-    full detail).
+    reaching for ``get_experiment`` (one record's full detail).
+
+    ``launched_only=True`` switches to the other view this door serves: every training run this
+    platform can currently account for, merging this process's own in-memory registry with every
+    launched run's own record on disk (a run this session launched, another process launched, or
+    one that survived a restart), HPO trials excluded (they belong to the Tuning view). Costs one
+    status read and one config read per experiment record on disk, plus one metrics-log read per
+    launched record for its current epoch; the default view costs one status read total.
 
     Returns:
-        ``experiments``: a list of ``{experiment_id, state, created, run_id, has_model_source}``,
-        one per experiment. ``run_id`` is ``None`` when no launch stamped one;
-        ``has_model_source`` is whether the config carries a ``model_source`` (a training run)
-        versus an experiment tracking something else.
+        With ``launched_only=False`` (default), ``experiments``: a list of
+        ``{experiment_id, state, created, run_id, has_model_source}``, one per experiment.
+        ``run_id`` is ``None`` when no launch stamped one; ``has_model_source`` is whether the
+        config carries a ``model_source`` (a training run) versus an experiment tracking
+        something else. With ``launched_only=True``, ``runs``: the launched-run rows themselves,
+        see :func:`tcip_mcp.tools.training_tools._all_training_runs`.
     """
+    if launched_only:
+        from tcip_mcp.tools.training_tools import _all_training_runs
+
+        return {"runs": _all_training_runs(read_progress=True)}
+
     from tcip_mcp.experiments import list_experiments as _list
 
     return {"experiments": _list()}

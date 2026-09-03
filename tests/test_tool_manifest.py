@@ -142,15 +142,12 @@ def test_consolidated_tools_present_and_removed_absent():
         "draw_splits", "focus_human_attention", "get_experiment",
         "register_model", "load_project_memory",
         # Renamed tools: the new names must register.
-        "inspect_project", "read_annotations",
-        "overlay_reference_grid", "capture_live_canvas",
+        "inspect_project", "capture_live_canvas",
         # Renamed tools: the new names must register.
-        "preflight_config", "rank_registered_models", "score_predictions",
+        "rank_registered_models",
         "deliver_per_image_counts", "view_gui_state",
         # Method-neutral auto-labeling seam: no longer SAM-specific names.
-        "propose_annotations", "stage_accepted_proposals", "segment_prompt",
-        # Split from prioritize_review_queue's own confidence-triage strategy.
-        "triage_predictions",
+        "propose_annotations", "stage_proposals", "segment_prompt",
     ):
         assert present in registered, f"{present} should be registered"
     removed = {
@@ -189,6 +186,8 @@ def test_consolidated_tools_present_and_removed_absent():
         "claude_reports", "project_retrospective", "domain_knowledge",
         "force_redraw_cal_holdout_split", "push_panel_data", "update_trait_spec_fields",
         "compute_phenology", "check_training_status", "init_project", "set_active_project",
+        # Merged away: list_experiments(launched_only=True) serves the launched-runs view.
+        "list_training_runs",
     }
     assert not (removed & registered), f"removed tools still registered: {removed & registered}"
 

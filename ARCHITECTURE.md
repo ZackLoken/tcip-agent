@@ -858,14 +858,13 @@ anything.
 |---|---|---|---|
 | `calibrate_physical_scale` | `scale_tools.py:84` | yes | Derive and validate a physical per-pixel scale, and stamp it into ``pred_dir``'s |
 
-### training_tools.py (8 tools)
+### training_tools.py (7 tools)
 
 | tool | line | audited | docstring first line |
 |---|---|---|---|
 | `preflight_config` | `training_tools.py:291` | yes | Validate a training configuration before launching. |
 | `launch_training` | `training_tools.py:705` | yes | Launch a training run in an isolated subprocess from a bespoke ``model_source`` builder. |
 | `monitor_training` | `training_tools.py:939` | yes | Check the status of a training run. |
-| `list_training_runs` | `training_tools.py:1082` | yes | List every training run this platform can currently account for. |
 | `cancel_training` | `training_tools.py:1323` | yes | Request graceful cancellation of a running training run. |
 | `run_hyperparameter_search` | `training_tools.py:1898` | yes | Run hyperparameter optimization on Ray Tune, training each trial for real. |
 | `cancel_hyperparameter_search` | `training_tools.py:2293` | yes | Request cooperative cancellation of a running HPO sweep. |

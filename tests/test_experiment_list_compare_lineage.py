@@ -126,6 +126,29 @@ def test_list_experiments_tool_carries_run_id_and_has_model_source(tmp_path, mon
     assert listed["exp-precreated"]["has_model_source"] is False
 
 
+def test_list_experiments_launched_only_serves_the_absorbed_runs_view(tmp_path, monkeypatch):
+    """launched_only=True switches list_experiments to the view the door it absorbed used to
+    serve: launched runs only, keyed by run_id, in the shape _all_training_runs builds."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
+    from tcip_mcp.experiments import create_experiment, update_status
+    from tcip_mcp.tools.experiment_tools import list_experiments
+    from tcip_mcp.tools.training_tools import _all_training_runs
+
+    create_experiment("exp-launched-view", {"model_source": {"builder": "my_models:chestnut_burr_det"}})
+    update_status("exp-launched-view", "running")
+    create_experiment("exp-not-a-run", {"a": 1})
+
+    default_view = list_experiments()
+    assert "experiments" in default_view and "runs" not in default_view
+
+    launched_view = list_experiments(launched_only=True)
+    assert launched_view == {"runs": _all_training_runs(read_progress=True)}
+    by_id = {r["run_id"]: r for r in launched_view["runs"]}
+    assert "exp-launched-view" in by_id
+    assert "exp-not-a-run" not in by_id
+
+
 # ── compare_experiments: derived state, log lock, last row, post-end rows, refusals ────
 
 

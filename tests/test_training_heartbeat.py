@@ -34,7 +34,7 @@ def test_reconstructed_run_running_vs_interrupted(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)  # EXPERIMENTS_DIR is .tcip/experiments (cwd-relative)
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     from tcip_mcp.experiments import create_experiment, log_metrics, status_key, update_status
-    from tcip_mcp.tools.training_tools import list_training_runs
+    from tcip_mcp.tools.experiment_tools import list_experiments
 
     # Live run: marked running, heartbeat refreshed by a fresh metric log.
     create_experiment("live", {"model_source": {"builder": "x:y"}}, data_source="imgs")
@@ -50,14 +50,15 @@ def test_reconstructed_run_running_vs_interrupted(tmp_path, monkeypatch):
         s["heartbeat"] = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()
         txn.write(key, s)
 
-    by_id = {r["run_id"]: r for r in list_training_runs()["runs"]}
+    by_id = {r["run_id"]: r for r in list_experiments(launched_only=True)["runs"]}
     assert by_id["live"]["status"] == "running"
     assert by_id["live"]["external"] is True
     assert by_id["dead"]["status"] == "interrupted"
 
 
 def test_configured_stale_window_agrees_across_run_list_compare_and_status(tmp_path, monkeypatch):
-    """list_training_runs, compare_experiments (the tool) and monitor_training must derive
+    """list_experiments(launched_only=True), compare_experiments (the tool) and monitor_training
+    must derive
     "interrupted" the same way under a configured heartbeat window, one accessor
     (``training_tools.TCIP_HEARTBEAT_STALE_SECONDS``) wired through every consumer: a 300s-old
     heartbeat reads stale under a 30s window even though it would read fresh under the 600s
@@ -67,7 +68,8 @@ def test_configured_stale_window_agrees_across_run_list_compare_and_status(tmp_p
     from tcip_mcp.experiments import create_experiment, status_key, update_status
     from tcip_mcp.tools import training_tools
     from tcip_mcp.tools.experiment_tools import compare_experiments as compare_tool
-    from tcip_mcp.tools.training_tools import monitor_training, list_training_runs
+    from tcip_mcp.tools.experiment_tools import list_experiments
+    from tcip_mcp.tools.training_tools import monitor_training
 
     monkeypatch.setattr(training_tools, "TCIP_HEARTBEAT_STALE_SECONDS", 30.0)
 
@@ -79,7 +81,7 @@ def test_configured_stale_window_agrees_across_run_list_compare_and_status(tmp_p
         s["heartbeat"] = (datetime.now(timezone.utc) - timedelta(seconds=300)).isoformat()
         txn.write(key, s)
 
-    by_id = {r["run_id"]: r for r in list_training_runs()["runs"]}
+    by_id = {r["run_id"]: r for r in list_experiments(launched_only=True)["runs"]}
     assert by_id["exp-window"]["status"] == "interrupted"
 
     cmp = compare_tool(["exp-window"])

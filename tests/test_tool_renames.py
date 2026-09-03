@@ -29,6 +29,9 @@ case-insensitively; the whole-word boundary still treats an underscore as a word
 a legitimately renamed file or identifier that merely contains the old token as a substring
 (``test_tabulate_counts_bucket_regime.py`` before its own rename, say) is not itself proof the
 sweep would have caught it.
+A merge retires the absorbed door's own name outright: the surviving door serves its view under
+an argument, so the merged-away name gets the identical whole-word, whole-tree sweep a rename's
+old name gets, with no scoping needed.
 """
 
 from __future__ import annotations
@@ -59,6 +62,12 @@ RENAMES = [
     ("check_training_status", "monitor_training"),
     ("init_project", "initialize_project"),
     ("set_active_project", "activate_project"),
+]
+
+# A merge retires the absorbed door's name outright (the surviving door serves its view under an
+# argument), so the whole-word sweep applies exactly as it does for a rename's old name.
+MERGED = [
+    ("list_training_runs", "list_experiments"),
 ]
 
 _OWN_FILE = str(Path(__file__).relative_to(REPO_ROOT)).replace("\\", "/")
@@ -162,6 +171,20 @@ def test_new_tool_name_is_registered(old, new):
 
 @pytest.mark.parametrize("old,new", RENAMES, ids=[f"{o}->{n}" for o, n in RENAMES])
 def test_old_tool_name_survives_nowhere_tracked(old, new):
+    files = [f for f in _tracked_files() if _in_scope(f)]
+    sites = _old_name_sites(old, files)
+    assert not sites, f"{old!r} still appears in: {sites}"
+
+
+@pytest.mark.parametrize("old,new", MERGED, ids=[f"{o}->{n}" for o, n in MERGED])
+def test_merge_survivor_is_registered(old, new):
+    from tcip_mcp.server import list_registered_tools
+
+    assert new in set(list_registered_tools())
+
+
+@pytest.mark.parametrize("old,new", MERGED, ids=[f"{o}->{n}" for o, n in MERGED])
+def test_merged_away_name_survives_nowhere_tracked(old, new):
     files = [f for f in _tracked_files() if _in_scope(f)]
     sites = _old_name_sites(old, files)
     assert not sites, f"{old!r} still appears in: {sites}"

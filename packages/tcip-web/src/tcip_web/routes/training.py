@@ -127,13 +127,14 @@ def relaunch_config_route(payload: RelaunchConfigPayload) -> dict:
 def list_runs_route() -> dict:
     """Every training run the platform can currently account for.
 
-    A pass-through to ``list_training_runs``, which already merges this process's live runs
-    with every launched run's own record on disk (surviving a restart with no second
-    persistence file) and excludes HPO trials (they stay in the Tuning view).
+    A pass-through to ``_all_training_runs``, which merges this process's live runs with every
+    launched run's own record on disk (surviving a restart with no second persistence file) and
+    excludes HPO trials (they stay in the Tuning view); the same rows
+    ``list_experiments(launched_only=True)`` returns to the agent.
     """
-    from tcip_mcp.tools.training_tools import list_training_runs
+    from tcip_mcp.tools.training_tools import _all_training_runs
 
-    return list_training_runs()
+    return {"runs": _all_training_runs(read_progress=True)}
 
 
 @router.get("/runs/{run_id}")
