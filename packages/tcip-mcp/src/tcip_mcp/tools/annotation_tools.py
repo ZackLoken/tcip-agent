@@ -77,8 +77,6 @@ def _ann_dict(a: Annotation) -> dict:
     return d
 
 
-@mcp.tool()
-@audited
 def read_annotations(image_path: str, fmt: str | None = None) -> dict:
     """Load the ground-truth labels and predictions for a single image.
 

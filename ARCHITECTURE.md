@@ -709,11 +709,10 @@ check must match the decorator name rather than the whole line).
 Tables below group by defining module. Column "line" is the `def`/`async def` line.
 Docstring is the function's docstring first line, verbatim.
 
-### annotation_tools.py (4 tools)
+### annotation_tools.py (3 tools)
 
 | tool | line | audited | docstring first line |
 |---|---|---|---|
-| `read_annotations` | `annotation_tools.py:83` | yes | Load the ground-truth labels and predictions for a single image. |
 | `save_annotations` | `annotation_tools.py:132` | yes | Write an image's annotations to its single per-image label file (all subjects, one file). |
 | `score_predictions` | `annotation_tools.py:434` | yes | Score on-disk predictions against on-disk ground truth (COCOeval). |
 | `write_class_map` | `annotation_tools.py:470` | yes | Author the dataset's nested class registry, a thin wrapper over ``class_registry``. |

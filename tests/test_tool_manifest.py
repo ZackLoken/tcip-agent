@@ -142,7 +142,7 @@ def test_consolidated_tools_present_and_removed_absent():
         "draw_splits", "focus_human_attention", "get_experiment",
         "register_model", "load_project_memory",
         # Renamed tools: the new names must register.
-        "inspect_project", "read_annotations",
+        "inspect_project",
         "overlay_reference_grid", "capture_live_canvas",
         # Renamed tools: the new names must register.
         "rank_registered_models", "score_predictions",
@@ -198,6 +198,8 @@ def test_consolidated_tools_present_and_removed_absent():
         # Demoted to a library call under the admission standard (packages/tcip-mcp/CLAUDE.md):
         # launch_training and the web /validate route call the function directly.
         "preflight_config",
+        # Demoted to a library call: the agent reads a label file through it directly.
+        "read_annotations",
     }
     assert not (removed & registered), f"removed tools still registered: {removed & registered}"
 

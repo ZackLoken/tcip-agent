@@ -196,22 +196,39 @@ def test_merged_away_name_survives_nowhere_tracked(old, new):
 # whole-tree absence the way a rename's or a merge's old name is; see _demoted_tool_table_sites.
 DEMOTED = [
     "preflight_config",
+    "read_annotations",
 ]
 
-_TOOL_TABLE_ROW_PATTERN = r"(?m)^\|\s*`{}`\s*\|"
+_TOOL_TABLE_ROW_PATTERN = r"^\|\s*`{}`\s*\|"
+_TOOL_TABLE_HEADER_PATTERN = re.compile(r"^\|\s*tool\s*\|", re.IGNORECASE)
 
 
 def _demoted_tool_table_sites(name: str, files: list[str]) -> list[str]:
-    """Every file still listing ``name`` as an invocable tool: a table row opening with the
-    backtick-quoted bare name as its first cell, the one shape every "Tools" table (a knowledge
-    document's, ARCHITECTURE.md's own) shares. Ordinary prose quoting the name (a docstring, a
-    sentence naming the library call or script it became) never takes that shape, so it is never
-    flagged the way a rename's or a merge's fully-retired old name would be."""
-    pattern = re.compile(_TOOL_TABLE_ROW_PATTERN.format(re.escape(name)))
+    """Every file still listing ``name`` in an actual "Tools" table: a row opening with the
+    backtick-quoted bare name as its first cell, under the nearest table header above it (the
+    contiguous run of lines up to the first blank one) reading "tool" in its own first cell, the
+    shape every such table (a knowledge document's, ARCHITECTURE.md's own) shares. A same-shaped
+    row in an unrelated table (ARCHITECTURE.md's own re-exports or module inventories) has a
+    different header and is not flagged; ordinary prose quoting the name never takes a table
+    shape at all."""
+    row_pattern = re.compile(_TOOL_TABLE_ROW_PATTERN.format(re.escape(name)))
     hits = []
     for rel in files:
         text = _read(rel)
-        if text is not None and pattern.search(text):
+        if text is None:
+            continue
+        lines = text.splitlines()
+        found = False
+        for i, line in enumerate(lines):
+            if found or not row_pattern.search(line):
+                continue
+            for j in range(i - 1, -1, -1):
+                if not lines[j].strip():
+                    break
+                if _TOOL_TABLE_HEADER_PATTERN.search(lines[j]):
+                    found = True
+                    break
+        if found:
             hits.append(rel)
     return hits
 
