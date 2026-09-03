@@ -14,9 +14,9 @@ name rather than silently accepted and later misread.
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Literal, Optional
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, ValidationError
 
 
 class PlantMappingDisclosure(BaseModel):
@@ -45,7 +45,7 @@ class PlantMappingDisclosure(BaseModel):
     plant_csvs_unverified: list[str]
     dates_delivered: list[str]
     images_unattributed: int
-    images_unattributed_scope: str
+    images_unattributed_scope: Literal["delivered_dates"]
     plant_attribution: str
 
 
@@ -82,3 +82,13 @@ class DeliveryEventRecord(BaseModel):
     plant_mapping: Optional[PlantMappingDisclosure]
     documents: dict[str, DocumentBinding]
     produced_at: str
+
+
+def validation_error_detail(exc: ValidationError) -> str:
+    """``exc``'s errors rendered as one line, the one rendering both the results route's refusal
+    and ``scripts/conform_delivery_events.py``'s outcome lines share, so a record's shape errors
+    never break a caller's one-line-per-outcome rendering with pydantic's own multi-line dump."""
+    return "; ".join(
+        f"{'.'.join(str(p) for p in error['loc']) or 'record'}: {error['msg']}"
+        for error in exc.errors()
+    )

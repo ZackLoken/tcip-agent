@@ -19,8 +19,9 @@ write for it to preview a difference against.
     python scripts/conform_delivery_events.py --plan <project_root>
 
 Exit codes: 0 when every stored record in every named root validates (or a root holds none); 2 if
-any record in any root is refused. Every root named on the command line is still checked and
-reported, even after another root's refusal.
+any record in any root is refused, or a named root does not exist or holds no ``.tcip`` directory
+to check. Every root named on the command line is still checked and reported, even after another
+root's refusal.
 """
 
 from __future__ import annotations
@@ -34,20 +35,15 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "packages" / "tcip-store" 
 
 import tcip_store as ts  # noqa: E402
 from pydantic import ValidationError  # noqa: E402
-from tcip_mcp.pipelines.delivery_events_schema import DeliveryEventRecord  # noqa: E402
+from tcip_mcp.pipelines.delivery_events_schema import (  # noqa: E402
+    DeliveryEventRecord,
+    validation_error_detail,
+)
 from tcip_mcp.pipelines.resolution import (  # noqa: E402
     DELIVERY_EVENTS_STORE,
     delivery_events_scope,
 )
 from tcip_store.binding import bind_default  # noqa: E402
-
-
-def _validation_detail(exc: ValidationError) -> str:
-    """``exc``'s errors rendered as one line, so an outcome line never breaks across lines."""
-    return "; ".join(
-        f"{'.'.join(str(p) for p in error['loc']) or 'record'}: {error['msg']}"
-        for error in exc.errors()
-    )
 
 
 def _check_record(record: object) -> tuple[bool, str]:
@@ -56,7 +52,7 @@ def _check_record(record: object) -> tuple[bool, str]:
         DeliveryEventRecord.model_validate(record)
     except ValidationError as exc:
         return False, (
-            f"refused, {_validation_detail(exc)}; the disclosure this record lacks was never "
+            f"refused, {validation_error_detail(exc)}; the disclosure this record lacks was never "
             "computed for this delivery and cannot be reconstructed from it; re-deliver, or "
             "remove the record by hand"
         )
@@ -65,7 +61,14 @@ def _check_record(record: object) -> tuple[bool, str]:
 
 def check_root(root: Path) -> tuple[list[str], bool]:
     """Every outcome line for ``root``'s stored ``delivery_events`` records, and whether any of
-    them was refused."""
+    them was refused.
+
+    A ``root`` holding no ``.tcip`` directory is refused by name rather than reported as a project
+    with nothing stored: a mistyped path and a real, empty project would otherwise print the same
+    "nothing stored" line, and the stated root is a claim the data must positively carry.
+    """
+    if not (root / ".tcip").is_dir():
+        return ["refused, no .tcip directory found; not a project root"], True
     scope = delivery_events_scope(root)
     outcomes: list[str] = []
     refused = False

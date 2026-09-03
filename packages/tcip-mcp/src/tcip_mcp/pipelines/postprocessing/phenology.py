@@ -577,10 +577,8 @@ def _write_phenology_delivery(
     the caller-stated ``door`` and the explicit ``project_root``, so a delivered phenology CSV
     cannot exist without both the gate having run and the delivery having been recorded.
 
-    ``plant_mapping`` is the mapping this delivery attributed detections through: ``{"name",
-    "project_root", "dataset_id", "dataset_root", "built_at", "record_sha256", "nn_tolerance_m",
-    "capture_identity", "captures_unverified", "plant_csvs_unverified", "dates_delivered",
-    "images_unattributed", "images_unattributed_scope", "plant_attribution"}``, the caller's own
+    ``plant_mapping`` is the mapping this delivery attributed detections through, shaped exactly
+    as ``delivery_events_schema.PlantMappingDisclosure`` declares and produced by the caller's own
     ``MappingBuild.delivery_disclosure``. Required, never defaulted: a phenology delivery always
     reads a mapping, so there is no legitimate case with nothing to thread through. Its
     ``captures_unverified``/``plant_csvs_unverified``/``dates_delivered`` fill the CSV's own

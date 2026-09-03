@@ -43,6 +43,7 @@ from tcip_mcp import (
     workspace,
 )
 from tcip_mcp.pipelines import image_utils, model_build, resolution
+from tcip_mcp.pipelines.delivery_events_schema import DeliveryEventRecord
 from tcip_mcp.pipelines.data import band_groups, splits
 from tcip_mcp.pipelines.feedback import materialize
 from tcip_mcp.pipelines.postprocessing import plant_mapping
@@ -1707,6 +1708,16 @@ REGISTERED = {
         {"event_id": EVENT_ID_UNDER_TEST, "trait": TRAIT_UNDER_TEST,
          "delivery_kind": DELIVERY_KIND_UNDER_TEST, "door": "compute_phenology",
          "output_path": "büsch_phenology.csv",
+         "measurement_documents": ["operating_point", "classifier_operating_point"],
+         "scale_document": None,
+         "plant_mapping": {
+             "name": "valley", "project_root": "P:/valley", "dataset_id": "ds-1",
+             "dataset_root": "dü", "built_at": "2026-03-04T12:00:00+00:00",
+             "record_sha256": "0" * 64, "nn_tolerance_m": {"value": 3.0, "source": "stated"},
+             "capture_identity": {"2026-03-04": "0" * 16}, "captures_unverified": [],
+             "plant_csvs_unverified": [], "dates_delivered": ["2026-03-04"],
+             "images_unattributed": 0, "images_unattributed_scope": "delivered_dates",
+             "plant_attribution": "image"},
          "documents": {"predictions/live/2026-03-04": {
              "ok": True, "claimed": True, "experiment_id": EXPERIMENT,
              "producing_experiment_id": EXPERIMENT, "checkpoint_sha256": "0" * 64,
@@ -1742,6 +1753,13 @@ def test_every_registered_store_has_a_byte_and_path_identity_case():
         if not ts.get_descriptor(name).declared_in.startswith(("tests", "test_"))
     }
     assert declared == set(REGISTERED)
+
+
+def test_the_delivery_events_golden_sample_validates_against_its_declared_shape():
+    """The registered golden here and ``DeliveryEventRecord`` (``delivery_events_schema.py``) are
+    two statements of the same shape; a golden the model refuses would mean the two had already
+    drifted apart without either side's own tests catching it."""
+    DeliveryEventRecord.model_validate(REGISTERED["delivery_events"].golden)
 
 
 def test_every_json_store_encodes_through_the_one_codec_its_kind_declares():

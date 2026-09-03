@@ -1991,11 +1991,11 @@ def record_delivery_binding_event(
     disclosures), door-conditional: the phenology doors pass it, every other delivery door
     passes ``None`` since none reads a mapping.
 
-    The assembled record is validated against ``DeliveryEventRecord``
-    (``delivery_events_schema.py``, the same shape ``list_delivery_events`` reads back through)
-    before the write; a record that fails validation falls into this call's own best-effort
-    warning path above rather than a distinct one, since an invalid record and an unwritable one
-    are the same fact to a later reader: neither left a usable line behind.
+    The assembled record is validated against ``DeliveryEventRecord`` (``delivery_events_schema.py``,
+    the same shape ``list_delivery_events`` reads back through) before the write. A shape violation
+    is a deterministic defect in the caller, never an environmental failure the way an unwritable
+    disk is, so it raises ``pydantic.ValidationError`` to the caller instead of falling into this
+    call's own best-effort warning path below, which covers the store write alone.
     """
     from tcip_mcp.audit import record_event
 
@@ -2015,33 +2015,33 @@ def record_delivery_binding_event(
                                if b.ok and b.claimed and b.record_digest}),
     )
 
-    try:
-        now = datetime.now(timezone.utc).isoformat()
-        event_id = _delivery_event_id(door, output_path, now)
-        record = {
-            "event_id": event_id,
-            "trait": trait,
-            "delivery_kind": delivery_kind,
-            "door": door,
-            "output_path": output_path,
-            "measurement_documents": list(measurement_documents),
-            "scale_document": scale_document,
-            "plant_mapping": plant_mapping,
-            "documents": {
-                bucket: {
-                    "ok": b.ok, "claimed": b.claimed, "experiment_id": b.experiment_id,
-                    "producing_experiment_id": b.producing_experiment_id,
-                    "checkpoint_sha256": b.checkpoint_sha256, "record_digest": b.record_digest,
-                    "note": b.note,
-                }
-                for bucket, b in bindings.items()
-            },
-            "produced_at": now,
-        }
-        from tcip_mcp.pipelines.delivery_events_schema import DeliveryEventRecord
+    now = datetime.now(timezone.utc).isoformat()
+    event_id = _delivery_event_id(door, output_path, now)
+    record = {
+        "event_id": event_id,
+        "trait": trait,
+        "delivery_kind": delivery_kind,
+        "door": door,
+        "output_path": output_path,
+        "measurement_documents": list(measurement_documents),
+        "scale_document": scale_document,
+        "plant_mapping": plant_mapping,
+        "documents": {
+            bucket: {
+                "ok": b.ok, "claimed": b.claimed, "experiment_id": b.experiment_id,
+                "producing_experiment_id": b.producing_experiment_id,
+                "checkpoint_sha256": b.checkpoint_sha256, "record_digest": b.record_digest,
+                "note": b.note,
+            }
+            for bucket, b in bindings.items()
+        },
+        "produced_at": now,
+    }
+    from tcip_mcp.pipelines.delivery_events_schema import DeliveryEventRecord
 
-        DeliveryEventRecord.model_validate(record)
-        key = delivery_event_key(delivery_events_scope(project_root), event_id)
+    DeliveryEventRecord.model_validate(record)
+    key = delivery_event_key(delivery_events_scope(project_root), event_id)
+    try:
         tcip_store.replace(key, record)
     except Exception:
         logger.warning("Failed to write delivery_events record for door %r", door, exc_info=True)
