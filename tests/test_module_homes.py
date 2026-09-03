@@ -258,14 +258,15 @@ def _literal_loads(tree: ast.AST, literal: str) -> list[ast.AST]:
 
 
 def test_vision_side_proposal_tools_have_one_home():
-    """``propose_annotations`` and ``stage_accepted_proposals`` (renamed from
-    ``accept_proposals``), plus the staging primitives beneath them
+    """``propose_annotations`` and ``stage_proposals`` (the latter renamed from
+    ``accept_proposals``, later merged with the explicit-shapes door of the same final name),
+    plus the staging primitives beneath them
     (``proposal_staging_key``, ``_staging_key_for``, ``_unresolvable_staging_source``,
     ``_region_rect_from_cells``, ``_write_region_crop``, ``_offset_candidates``), moved out of
     ``vision_tools.py`` into ``tools/proposal_tools.py``, beside the annotation-side pair below.
     ``StagingAddress`` (checked separately below, it is a class) moved with them."""
     _assert_one_home(
-        {"propose_annotations", "stage_accepted_proposals", "proposal_staging_key",
+        {"propose_annotations", "stage_proposals", "proposal_staging_key",
          "_staging_key_for", "_unresolvable_staging_source", "_region_rect_from_cells",
          "_write_region_crop", "_offset_candidates"},
         _module_path("tools/vision_tools.py"),

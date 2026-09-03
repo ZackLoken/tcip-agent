@@ -64,6 +64,13 @@ def _image(root: Path, date: str, stem: str, size: tuple[int, int] = (640, 480))
     Image.new("RGB", size, color=(90, 110, 70)).save(idir / f"{stem}.jpg")
 
 
+def _img_path(root: Path, date: str, stem: str) -> str:
+    """The path ``_image`` wrote ``stem`` at, for the explicit regime's own ``image_path``
+    argument, which now resolves the dataset root, date and stem in place of the three
+    positional path fragments the door used to take."""
+    return str(Path(image_dir(root, date)) / f"{stem}.jpg")
+
+
 def test_focus_review_lands_on_first_frame_with_predictions(tmp_path: Path) -> None:
     root = tmp_path / "proj"
     date = "2026-02-11"
@@ -154,7 +161,7 @@ def test_stage_proposals_writes_prediction_format_not_gt(tmp_path: Path) -> None
         {"subject": "catkin", "conf": 0.8, "cx": 0.5, "cy": 0.5, "w": 0.1, "h": 0.1},
         {"subject": "leaf", "conf": 0.6, "cx": 0.25, "cy": 0.25, "w": 0.05, "h": 0.05},
     ]
-    res = stage_proposals(str(root), "claude", date, "IMG_0001", boxes)
+    res = stage_proposals(_img_path(root, date, "IMG_0001"), model_name="claude", boxes=boxes)
     assert res["staged"] == 2
 
     out = Path(prediction_dir(root, "claude", date)) / "IMG_0001.json"
@@ -182,23 +189,28 @@ def test_stage_proposals_writes_prediction_format_not_gt(tmp_path: Path) -> None
 
 def test_stage_proposals_rejects_unnormalized_coords(tmp_path: Path) -> None:
     root = tmp_path / "proj"
+    date = "2026-02-11"
+    _image(root, date, "IMG_0001")
     # pixel coords (>1) must be caught, not written off-canvas.
     boxes = [{"subject": "catkin", "conf": 0.9, "cx": 320.0, "cy": 240.0, "w": 40.0, "h": 40.0}]
-    res = stage_proposals(str(root), "agent_proposals", "2026-02-11", "IMG_0001", boxes)
+    res = stage_proposals(_img_path(root, date, "IMG_0001"), model_name="agent_proposals", boxes=boxes)
     assert "error" in res and "normal" in res["error"].lower()
 
 
 def test_stage_proposals_rejects_path_traversal_into_gt(tmp_path: Path) -> None:
+    """A malformed model_name must never escape predictions/ into the GT tree; date and stem are
+    no longer caller-supplied strings to traverse with (image_path resolves them structurally
+    through the same parser propose_annotations uses)."""
     root = tmp_path / "proj"
+    date = "2026-02-11"
+    _image(root, date, "IMG_0001")
+    image_path = _img_path(root, date, "IMG_0001")
     good = [{"subject": "catkin", "conf": 0.9, "cx": 0.5, "cy": 0.5, "w": 0.1, "h": 0.1}]
-    # A malformed model_name/date/stem must never escape predictions/ into the GT tree. Include a
-    # backslash segment (a Windows separator: "predictions\..\annotations" would escape) and a
-    # whitespace/empty segment, both of which is_valid_name rejects.
+    # Include a backslash segment (a Windows separator: "predictions\..\annotations" would
+    # escape) and a whitespace/empty segment, both of which is_valid_name rejects.
     for bad_model in ("../annotations/catkin", "..", "a/b", "D:/evil", "a\\b", " ", ""):
-        res = stage_proposals(str(root), bad_model, "2026-02-11", "IMG_0001", good)
+        res = stage_proposals(image_path, model_name=bad_model, boxes=good)
         assert "error" in res
-    res = stage_proposals(str(root), "agent_proposals", "2026-02-11", "../../annotations/x/IMG", good)
-    assert "error" in res
     assert not (root / "annotations").exists()  # nothing leaked into ground truth
 
 
@@ -217,8 +229,10 @@ def test_focus_review_rejects_path_traversal(tmp_path: Path) -> None:
 
 def test_stage_proposals_rejects_box_missing_subject(tmp_path: Path) -> None:
     root = tmp_path / "proj"
+    date = "2026-02-11"
+    _image(root, date, "IMG_0001")
     boxes = [{"conf": 0.9, "cx": 0.5, "cy": 0.5, "w": 0.1, "h": 0.1}]  # no subject name
-    res = stage_proposals(str(root), "agent_proposals", "2026-02-11", "IMG_0001", boxes)
+    res = stage_proposals(_img_path(root, date, "IMG_0001"), model_name="agent_proposals", boxes=boxes)
     assert "error" in res  # returns cleanly, doesn't crash the audited tool
 
 
@@ -230,7 +244,7 @@ def test_stage_proposals_writes_polygon_prediction(tmp_path: Path) -> None:
     polygons = [
         {"subject": "leaf", "conf": 0.91, "points": [[0.1, 0.1], [0.3, 0.1], [0.3, 0.4], [0.1, 0.4]]},
     ]
-    res = stage_proposals(str(root), "sam", date, "IMG_0132", polygons=polygons)
+    res = stage_proposals(_img_path(root, date, "IMG_0132"), model_name="sam", polygons=polygons)
     assert res["staged"] == 1 and res["n_segment"] == 1 and res["n_detect"] == 0
 
     out = Path(prediction_dir(root, "sam", date)) / "IMG_0132.json"
@@ -264,7 +278,8 @@ def test_stage_proposals_stages_boxes_and_polygons_together(tmp_path: Path) -> N
     _image(root, date, "IMG_0001", size=(640, 480))
     boxes = [{"subject": "catkin", "conf": 0.7, "cx": 0.5, "cy": 0.5, "w": 0.1, "h": 0.1}]
     polygons = [{"subject": "leaf", "conf": 0.8, "points": [[0.1, 0.1], [0.2, 0.1], [0.15, 0.2]]}]
-    res = stage_proposals(str(root), "claude", date, "IMG_0001", boxes, polygons)
+    res = stage_proposals(_img_path(root, date, "IMG_0001"), model_name="claude",
+                          boxes=boxes, polygons=polygons)
     assert res["n_detect"] == 1 and res["n_segment"] == 1 and res["staged"] == 2
     # Boxes and polygons alike land in the one per-image prediction file now.
     out = Path(prediction_dir(root, "claude", date)) / "IMG_0001.json"
@@ -286,15 +301,16 @@ def test_stage_proposals_rejects_bad_polygon(tmp_path: Path) -> None:
     root = tmp_path / "proj"
     date = "2026-02-11"
     _image(root, date, "IMG_0001")
+    image_path = _img_path(root, date, "IMG_0001")
     # Fewer than 3 points is not a polygon.
     res = stage_proposals(
-        str(root), "sam", date, "IMG_0001",
+        image_path, model_name="sam",
         polygons=[{"subject": "leaf", "conf": 0.9, "points": [[0.1, 0.1], [0.2, 0.2]]}],
     )
     assert "error" in res and "3 points" in res["error"]
     # Un-normalized (pixel) points must be caught.
     res = stage_proposals(
-        str(root), "sam", date, "IMG_0001",
+        image_path, model_name="sam",
         polygons=[{"subject": "leaf", "conf": 0.9, "points": [[100, 100], [200, 100], [150, 200]]}],
     )
     assert "error" in res and "normal" in res["error"].lower()
@@ -303,8 +319,10 @@ def test_stage_proposals_rejects_bad_polygon(tmp_path: Path) -> None:
 
 
 def test_stage_proposals_requires_a_shape(tmp_path: Path) -> None:
-    res = stage_proposals(str(tmp_path / "proj"), "sam", "2026-02-11", "IMG_0001")
-    assert "error" in res and "at least one" in res["error"]
+    """Neither input regime named: refused before ever touching the image, naming both regimes
+    rather than guessing which one was meant."""
+    res = stage_proposals(str(tmp_path / "proj" / "images" / "2026-02-11" / "IMG_0001.jpg"))
+    assert "error" in res and "boxes/polygons" in res["error"]
 
 
 # ── Rings: the pixel-frame counterpart of points ─────────────────────────────
@@ -313,7 +331,7 @@ def test_stage_proposals_requires_a_shape(tmp_path: Path) -> None:
 class _FakeMultiRingEngine:
     """An engine whose one object always splits into the same two disjoint pixel rings, for both
     the prompted-segment seam (``segment_prompt``) and the whole-image proposal seam
-    (``propose_annotations``/``stage_accepted_proposals``)."""
+    (``propose_annotations``/``stage_proposals``)."""
 
     _RINGS = [[(10.0, 10.0), (50.0, 10.0), (50.0, 40.0), (10.0, 40.0)],
               [(100.0, 100.0), (140.0, 100.0), (120.0, 140.0)]]
@@ -335,7 +353,7 @@ def test_stage_proposals_admits_a_two_ring_pixel_proposal_with_pair_vertices(tmp
     rings = [[[10.0, 10.0], [50.0, 10.0], [50.0, 40.0], [10.0, 40.0]],
              [[100.0, 100.0], [140.0, 100.0], [120.0, 140.0]]]
 
-    res = stage_proposals(str(root), "sam", date, "IMG_0200",
+    res = stage_proposals(_img_path(root, date, "IMG_0200"), model_name="sam",
                           polygons=[{"subject": "leaf", "conf": 0.9, "rings": rings}])
 
     assert res["staged"] == 1 and "error" not in res
@@ -353,7 +371,7 @@ def test_stage_proposals_admits_segment_prompts_own_mapping_vertex_rings(
     """The admit case is the platform's own segmenter's actual return, not a hand-built shape."""
     from tcip_mcp.pipelines import proposal
     from tcip_mcp.tools.annotation_tools import read_annotations
-    from tcip_mcp.tools.proposal_tools import stage_accepted_proposals, propose_annotations, segment_prompt
+    from tcip_mcp.tools.proposal_tools import stage_proposals, propose_annotations, segment_prompt
 
     monkeypatch.setitem(proposal._ENGINES, "fake_multi_ring", _FakeMultiRingEngine())
 
@@ -367,7 +385,7 @@ def test_stage_proposals_admits_segment_prompts_own_mapping_vertex_rings(
     assert prompted["ring_count"] == 2
     assert all(isinstance(v, dict) for ring in prompted["rings"] for v in ring)  # {"x":, "y":} vertices
 
-    res = stage_proposals(str(root), "sam", date, "IMG_0201",
+    res = stage_proposals(image_path, model_name="sam",
                           polygons=[{"subject": "leaf", "conf": 0.85, "rings": prompted["rings"]}])
     assert res["staged"] == 1 and "error" not in res
 
@@ -389,7 +407,7 @@ def test_stage_proposals_admits_segment_prompts_own_mapping_vertex_rings(
     proposed = propose_annotations(accept_image_path, engine="fake_multi_ring")
     assert proposed["staged"] is True and proposed["candidate_count"] == 1
 
-    accepted = stage_accepted_proposals(accept_image_path, [{"candidate_id": 1, "subject": "leaf"}])
+    accepted = stage_proposals(accept_image_path, assignments=[{"candidate_id": 1, "subject": "leaf"}])
     assert "error" not in accepted
 
     read_back = read_annotations(accept_image_path)
@@ -402,7 +420,7 @@ def test_stage_proposals_refuses_both_points_and_rings(tmp_path: Path) -> None:
     date = "2026-02-11"
     _image(root, date, "IMG_0202", size=(640, 480))
 
-    res = stage_proposals(str(root), "sam", date, "IMG_0202", polygons=[{
+    res = stage_proposals(_img_path(root, date, "IMG_0202"), model_name="sam", polygons=[{
         "subject": "leaf", "conf": 0.9,
         "points": [[0.1, 0.1], [0.3, 0.1], [0.3, 0.4]],
         "rings": [[[10.0, 10.0], [50.0, 10.0], [50.0, 40.0]]],
@@ -417,7 +435,7 @@ def test_stage_proposals_refuses_neither_points_nor_rings(tmp_path: Path) -> Non
     date = "2026-02-11"
     _image(root, date, "IMG_0203", size=(640, 480))
 
-    res = stage_proposals(str(root), "sam", date, "IMG_0203",
+    res = stage_proposals(_img_path(root, date, "IMG_0203"), model_name="sam",
                           polygons=[{"subject": "leaf", "conf": 0.9}])
 
     assert "error" in res and "exactly one of 'points' or 'rings'" in res["error"]
@@ -428,7 +446,7 @@ def test_stage_proposals_refuses_a_short_ring_under_rings(tmp_path: Path) -> Non
     date = "2026-02-11"
     _image(root, date, "IMG_0204", size=(640, 480))
 
-    res = stage_proposals(str(root), "sam", date, "IMG_0204", polygons=[{
+    res = stage_proposals(_img_path(root, date, "IMG_0204"), model_name="sam", polygons=[{
         "subject": "leaf", "conf": 0.9,
         "rings": [[[10.0, 10.0], [50.0, 10.0]]],
     }])
@@ -442,7 +460,7 @@ def test_stage_proposals_refuses_a_pixel_vertex_outside_the_image_bounds(tmp_pat
     date = "2026-02-11"
     _image(root, date, "IMG_0205", size=(640, 480))
 
-    res = stage_proposals(str(root), "sam", date, "IMG_0205", polygons=[{
+    res = stage_proposals(_img_path(root, date, "IMG_0205"), model_name="sam", polygons=[{
         "subject": "leaf", "conf": 0.9,
         "rings": [[[10.0, 10.0], [50.0, 10.0], [5000.0, 40.0]]],
     }])
@@ -458,7 +476,7 @@ def test_stage_proposals_refuses_an_out_of_range_coordinate_under_rings(tmp_path
     date = "2026-02-11"
     _image(root, date, "IMG_0206")
 
-    res = stage_proposals(str(root), "sam", date, "IMG_0206", polygons=[{
+    res = stage_proposals(_img_path(root, date, "IMG_0206"), model_name="sam", polygons=[{
         "subject": "leaf", "conf": 0.9,
         "rings": [[[-50.0, -50.0], [50.0, -50.0], [50.0, 40.0]]],
     }])
@@ -474,7 +492,7 @@ def test_stage_proposals_refuses_a_normalized_ring_handed_under_rings(tmp_path: 
     date = "2026-02-11"
     _image(root, date, "IMG_0207")
 
-    res = stage_proposals(str(root), "sam", date, "IMG_0207", polygons=[{
+    res = stage_proposals(_img_path(root, date, "IMG_0207"), model_name="sam", polygons=[{
         "subject": "leaf", "conf": 0.9,
         "rings": [[[0.1, 0.1], [0.3, 0.1], [0.3, 0.4]]],
     }])
@@ -514,13 +532,14 @@ def test_stage_proposals_redirects_when_bucket_has_verdicts(tmp_path: Path) -> N
     date = "2026-02-11"
     _image(root, date, "IMG_0001", size=(640, 480))
 
-    first = stage_proposals(str(root), "claude", date, "IMG_0001", _BOX)
+    image_path = _img_path(root, date, "IMG_0001")
+    first = stage_proposals(image_path, model_name="claude", boxes=_BOX)
     assert first["bucket"] == "claude" and first["bucket_redirected"] is False
 
     _record_verdict(root, "claude", date, "IMG_0001.jpg")  # a human reviews claude's prediction
 
     # The reviewed bucket is now immutable: a re-stage lands in a fresh @r2 bucket and says so.
-    second = stage_proposals(str(root), "claude", date, "IMG_0001", _BOX)
+    second = stage_proposals(image_path, model_name="claude", boxes=_BOX)
     assert second["bucket"] == "claude@r2"
     assert second["bucket_redirected"] is True
     assert second["path"] == str(
@@ -538,10 +557,11 @@ def test_stage_proposals_overwrite_refused_when_bucket_has_verdicts(tmp_path: Pa
     root = tmp_path / "proj"
     date = "2026-02-11"
     _image(root, date, "IMG_0001", size=(640, 480))
-    stage_proposals(str(root), "claude", date, "IMG_0001", _BOX)
+    image_path = _img_path(root, date, "IMG_0001")
+    stage_proposals(image_path, model_name="claude", boxes=_BOX)
     _record_verdict(root, "claude", date, "IMG_0001.jpg")
 
-    res = stage_proposals(str(root), "claude", date, "IMG_0001", _BOX, overwrite=True)
+    res = stage_proposals(image_path, model_name="claude", boxes=_BOX, overwrite=True)
     assert "error" in res
     assert res["verdict_count"] == 1
     assert res["suggested_bucket"] == "claude@r2"
@@ -551,10 +571,11 @@ def test_stage_proposals_overwrite_in_place_when_no_verdicts(tmp_path: Path) -> 
     root = tmp_path / "proj"
     date = "2026-02-11"
     _image(root, date, "IMG_0001", size=(640, 480))
-    stage_proposals(str(root), "claude", date, "IMG_0001", _BOX)
+    image_path = _img_path(root, date, "IMG_0001")
+    stage_proposals(image_path, model_name="claude", boxes=_BOX)
 
     # No verdicts recorded -> overwrite writes in place, no redirect.
-    res = stage_proposals(str(root), "claude", date, "IMG_0001", _BOX, overwrite=True)
+    res = stage_proposals(image_path, model_name="claude", boxes=_BOX, overwrite=True)
     assert "error" not in res
     assert res["bucket"] == "claude" and res["bucket_redirected"] is False
 
@@ -566,26 +587,9 @@ def test_stage_proposals_refuses_a_reserved_stem_with_an_error_dict(tmp_path: Pa
     date = "2026-02-11"
     _image(root, date, "operating_point", size=(640, 480))
     boxes = [{"subject": "catkin", "conf": 0.8, "cx": 0.5, "cy": 0.5, "w": 0.1, "h": 0.1}]
-    res = stage_proposals(str(root), "claude", date, "operating_point", boxes)
+    res = stage_proposals(_img_path(root, date, "operating_point"), model_name="claude", boxes=boxes)
     assert "error" in res
     assert "operating_point" in res["error"]
     assert not (Path(prediction_dir(root, "claude", date)) / "operating_point.json").exists()
 
 
-def test_stage_proposals_refuses_a_stem_at_the_flat_root_beside_a_dated_bucket(
-    tmp_path: Path,
-) -> None:
-    """A stem living at the flat images/ root while a dated bucket for the same date also
-    exists on disk is refused, naming the directory searched and a remedy, rather than
-    silently falling back to the flat root."""
-    root = tmp_path / "proj"
-    date = "2026-02-11"
-    _image(root, date, "IMG_0001", size=(640, 480))  # a real dated bucket exists
-    (root / "images" / "flat_only.jpg").write_bytes(b"\xff\xd8\xff")
-
-    boxes = [{"subject": "catkin", "conf": 0.8, "cx": 0.5, "cy": 0.5, "w": 0.1, "h": 0.1}]
-    res = stage_proposals(str(root), "claude", date, "flat_only", boxes)
-
-    assert "error" in res
-    assert str(Path(image_dir(root, date))) in res["error"]
-    assert "move it" in res["error"]

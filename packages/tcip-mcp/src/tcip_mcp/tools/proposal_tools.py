@@ -3,9 +3,9 @@ canvas review.
 
 propose_annotations and segment_prompt each ask an engine (the built-in SAM reference, or a
 bespoke 'module:factory' the agent brings) to look at pixels and offer candidates or a prompted
-mask. stage_accepted_proposals and stage_proposals each land shapes in the predictions tree
-through the same verdict-guarded staging door, for a human to accept, reject or edit on the
-Review canvas. Neither ever writes ground truth.
+mask. stage_proposals lands either an engine's reviewed candidates or explicit boxes/polygons in
+the predictions tree through one verdict-guarded staging door, for a human to accept, reject or
+edit on the Review canvas. It never writes ground truth.
 """
 
 from __future__ import annotations
@@ -51,7 +51,8 @@ ts.register_store(
 
 
 def proposal_staging_key(dataset_root: str | Path, date: str | None, stem: str) -> ts.Key:
-    """The proposals one run staged for one dataset image, for ``stage_accepted_proposals`` to read back.
+    """The proposals one run staged for one dataset image, for ``stage_proposals``'s assignments
+    regime to read back.
 
     ``last_writer_wins``: a run writes the whole envelope from the candidates it just
     produced, so a re-run replaces the previous one rather than merging into it. Scoped to the
@@ -73,8 +74,9 @@ class StagingAddress(NamedTuple):
     """The :func:`proposal_staging_key` for a dataset image, plus the dataset root and date
     :func:`~tcip_mcp.dataset_layout.parse_image_path` derived to reach it.
 
-    ``stage_accepted_proposals`` needs the root and date too, to stage the accepted predictions at the
-    same address; carrying them here means that address is derived once, not twice.
+    ``stage_proposals`` needs the root and date too, whichever regime it runs, to stage the
+    predictions at the same address; carrying them here means that address is derived once, not
+    twice.
     """
 
     key: ts.Key
@@ -86,7 +88,7 @@ def _staging_key_for(image_path: str) -> StagingAddress:
     """The :class:`StagingAddress` for the dataset image at ``image_path``.
 
     Runs :func:`~tcip_mcp.dataset_layout.parse_image_path` once, so ``propose_annotations`` and
-    ``stage_accepted_proposals`` never derive two different addresses for the same image. Raises
+    ``stage_proposals`` never derive two different addresses for the same image. Raises
     ``ValueError``, the resolver's own message, for a path outside any dataset's ``images/`` tree.
     """
     from tcip_mcp.dataset_layout import parse_image_path
@@ -98,7 +100,7 @@ def _staging_key_for(image_path: str) -> StagingAddress:
 def _unresolvable_staging_source(img: Path, exc: Exception) -> str:
     """A reason for ``propose_annotations`` to decline staging ``img``, when
     :func:`~tcip_mcp.pipelines.image_utils.resolve_image_source` raised ``exc`` for it (the same
-    call ``stage_accepted_proposals`` will make on this path).
+    call ``stage_proposals``'s assignments regime will make on this path).
 
     A band-group member's own path (``capture_Red.tif`` when ``capture.bandgroup`` claims it)
     resolves to nothing: the resolver's own ``FileNotFoundError`` for it reads the same as one for
@@ -159,9 +161,10 @@ def _offset_candidates(candidates: list[dict], origin: tuple[float, float]) -> l
     """Candidates proposed against a region crop's own pixels, translated into the source image's
     full-frame native coordinates by the crop's own origin.
 
-    Both consumers downstream (``render_candidates``, and ``stage_accepted_proposals`` reading the cached
-    envelope back later) expect ``bbox``/``rings`` in the source image's native frame, never
-    crop-local pixels, so this runs before either sees the candidates.
+    Both consumers downstream (``render_candidates``, and ``stage_proposals``'s assignments
+    regime reading the cached envelope back later) expect ``bbox``/``rings`` in the source
+    image's native frame, never crop-local pixels, so this runs before either sees the
+    candidates.
     """
     ox, oy = origin
     shifted = []
@@ -188,23 +191,23 @@ def propose_annotations(
 
     Runs the engine's whole-image proposal pass, renders the numbered candidates, and returns the
     render path and neutral candidate data. Read the render with your own image-capable read
-    tool, then call stage_accepted_proposals to assign subjects and stage the accepted ones as
+    tool, then call stage_proposals with subject assignments to stage the accepted ones as
     predictions.
 
     Each candidate renders as a colored, semi-transparent filled polygon (every ring of an
     occlusion-split candidate drawn, not just the largest) with a large numbered label at its
     centroid, colors cycling through the shared class palette; the candidate id in that number is
-    the same id ``stage_accepted_proposals``' ``assignments`` parameter names.
+    the same id ``stage_proposals``' ``assignments`` parameter names.
 
     On an image under a dataset's ``images/`` tree, the candidates are staged keyed by the
     dataset, capture date and stem, alongside the content identity of the pixels the engine ran
-    on: ``stage_accepted_proposals`` reads the record back by that same address and refuses if the
-    image's content no longer matches it. On a path outside any dataset's ``images/`` tree, or a
-    dataset path ``stage_accepted_proposals`` would itself fail to resolve (a band-group member's own
-    path when its manifest claims it), the engine still runs and the render and candidates are
-    returned the same way, but nothing is staged (the response's ``staged`` is ``false``, naming
-    why): there is no address ``stage_accepted_proposals`` could ever read the record back by, so such a
-    call cannot later be accepted.
+    on: ``stage_proposals``'s assignments regime reads the record back by that same address and
+    refuses if the image's content no longer matches it. On a path outside any dataset's
+    ``images/`` tree, or a dataset path that regime would itself fail to resolve (a band-group
+    member's own path when its manifest claims it), the engine still runs and the render and
+    candidates are returned the same way, but nothing is staged (the response's ``staged`` is
+    ``false``, naming why): there is no address the assignments regime could ever read the
+    record back by, so such a call cannot later be accepted.
 
     The engine is a capability, not a fixed method: 'sam' is the built-in SAM2 reference; the agent
     can register another engine (``register_proposal_engine``) or pass a dotted 'module:factory' it
@@ -331,7 +334,8 @@ def propose_annotations(
     read = _display_for_path(image_path)
     out = render_candidates(read.pixels, candidates, native_size=read.native_size)
 
-    # The envelope records the engine so stage_accepted_proposals stamps the right producer.
+    # The envelope records the engine so stage_proposals's assignments regime stamps the right
+    # producer.
     envelope: dict = {"engine": engine, "candidates": candidates}
     if region_info is not None:
         envelope["region"] = region_info
@@ -345,8 +349,8 @@ def propose_annotations(
         from tcip_mcp.pipelines import image_utils
 
         try:
-            # The same resolution stage_accepted_proposals will make on this path: staging over a
-            # source accept could never reread would leave a record it can never confirm.
+            # The same resolution the assignments regime will make: staging over an unrereadable
+            # source would leave a record it can never confirm.
             source = image_utils.resolve_image_source(img.parent, img.stem)
         except (FileNotFoundError, image_utils.BandGroupIncomplete) as exc:
             staged = False
@@ -368,7 +372,7 @@ def propose_annotations(
         "image_path": out,
         "engine": engine,
         "summary": f"Engine {engine!r} proposed {len(candidates)} candidates{region_note}."
-                   f"{stage_note} Review the numbered overlay, then call stage_accepted_proposals "
+                   f"{stage_note} Review the numbered overlay, then call stage_proposals "
                    f"with subject assignments.",
         "candidate_count": len(candidates),
         "staged": staged,
@@ -384,42 +388,17 @@ def propose_annotations(
     }
 
 
-@mcp.tool()
-@audited(scope_arg="image_path")
-def stage_accepted_proposals(
-    image_path: str,
-    assignments: list[dict],
-) -> dict:
-    """Stage reviewed proposals, each assigned a subject, as predictions for canvas review.
+def _stage_assignments_regime(image_path: str, img: Path, address: StagingAddress,
+                               assignments: list[dict]) -> dict:
+    """The reviewed-candidates regime :func:`stage_proposals` runs when ``assignments`` is given.
 
-    After reviewing propose_annotations output, the agent calls this tool with a mapping from
-    candidate IDs to subjects; rejected candidates are simply omitted from the assignments list.
-    The masks land in the predictions tree (``predictions/<engine>/<date>/<task>``) as per-image
-    COCO/JSON with ``created_by=<engine>`` and ``score`` = the engine's proposal score: model
-    output for a human to accept, reject or edit on the Review canvas, staged through the
-    prediction-bucket verdict guard so a re-run never overwrites reviewed predictions or orphans
-    their verdicts. It never writes ground truth.
-
-    Reads back the record propose_annotations staged for this exact image (dataset, capture date
-    and stem) and refuses if the image's content no longer matches the content identity that run
-    recorded: the proposals it staged were candidates over those pixels, not whatever now sits at
-    this path. That check decodes sample windows of the image (the bound ``CONTENT_IDENTITY_*``
-    constants in ``raster_source.py`` set how many and how large), never the whole frame.
-
-    Args:
-        image_path: Absolute path to the image (same as propose_annotations).
-        assignments: List of dicts, each with 'candidate_id' (int) and 'subject' (name).
-            Only listed candidates are staged.
+    Reads back the record ``propose_annotations`` staged for this exact image (dataset, capture
+    date and stem) and refuses if the image's content no longer matches the content identity
+    that run recorded: the proposals it staged were candidates over those pixels, not whatever
+    now sits at this path. That check decodes sample windows of the image (the bound
+    ``CONTENT_IDENTITY_*`` constants in ``raster_source.py`` set how many and how large), never
+    the whole frame.
     """
-    img = Path(image_path)
-    if not img.is_file():
-        return {"error": f"Image not found: {image_path}"}
-
-    try:
-        address = _staging_key_for(image_path)
-    except ValueError as exc:
-        return {"error": str(exc)}
-
     from tcip_mcp.pipelines.image_utils import (
         BandGroupIncomplete, image_dimensions, resolve_image_source,
     )
@@ -611,59 +590,27 @@ def segment_prompt(
     }
 
 
-@mcp.tool()
-@audited(scope_arg="dataset_root")
-def stage_proposals(
-    dataset_root: str,
-    model_name: str,
-    date: str,
-    stem: str,
-    boxes: list[dict] | None = None,
-    polygons: list[dict] | None = None,
-    overwrite: bool = False,
-) -> dict:
-    """Stage model-/agent-proposed shapes to ``predictions/<model>/<date>/<stem>.json`` for canvas
-    review, the "show on canvas before writing ground truth" guardrail.
+def _stage_explicit_regime(image_path: str, img: Path, address: StagingAddress,
+                            model_name: str, boxes: list[dict], polygons: list[dict],
+                            overwrite: bool) -> dict:
+    """The explicit-shapes regime :func:`stage_proposals` runs when ``boxes``/``polygons`` is
+    given: model-/agent-proposed shapes staged to
+    ``predictions/<model>/<date>/<stem>.json`` for canvas review, the "show on canvas before
+    writing ground truth" guardrail.
 
     Anything a model produces (a SAM mask, a baseline detection, a shape the agent wants a human to
     vet) goes to the predictions tree, never ``annotations/``, so the human reviews it on the Review
     canvas and accepts/rejects/edits before it becomes GT. Boxes and polygons alike land in the one
-    per-image prediction file, each carrying a ``subject`` name. This never writes ground truth. Pair
-    with ``focus_human_attention(tab='review')`` to send the human straight to them.
-
-    A prediction bucket that already carries review verdicts is immutable: by default a stage into it
-    is redirected to a fresh run-scoped bucket (``<model>@r2``, next free), and the bucket actually
-    written is returned as ``bucket``. Pass ``overwrite=True`` to write in place only when the bucket
-    has zero verdicts; with verdicts present it is refused.
-
-    Args:
-        dataset_root: Dataset root holding ``predictions/``.
-        model_name: Predictions bucket to stage under, the real producer (stamped as created_by).
-        date: Capture-date bucket (e.g. "2026-02-11").
-        stem: Image stem (filename without extension).
-        boxes: ``[{subject, conf, cx, cy, w, h}]`` with cx/cy/w/h normalized to [0, 1].
-        polygons: ``[{subject, conf, points|rings}]``, exactly one of two frames per proposal:
-            ``points``, one ring of ``[x, y]`` pairs normalized to [0, 1], the frame a proposer
-            reasoning over the rendered image works in; or ``rings``, a list of rings in pixel
-            coordinates, each vertex an ``[x, y]`` pair or an ``{"x":, "y":}`` mapping, the frame
-            the platform's own segmenter (``segment_prompt``) returns. Both build the same
-            ``Polygon`` through the ground-truth door's own vertex parser.
-        overwrite: Write in place even into an existing bucket. Refused if the bucket has verdicts.
+    per-image prediction file, each carrying a ``subject`` name. This never writes ground truth.
     """
     from tcip_annotation.json_io import ring_vertex
 
-    from tcip_mcp.dataset_layout import resolve_images_dir
     from tcip_mcp.prediction_buckets import BucketHasVerdicts, stage_prediction_shapes
     from tcip_mcp.workspace import is_valid_name
 
-    for label, val in (("model_name", model_name), ("date", date), ("stem", stem)):
-        if not is_valid_name(val):
-            return {"error": f"{label} must be a single safe path segment (no separators/'..'), got {val!r}"}
-
-    boxes = boxes or []
-    polygons = polygons or []
-    if not boxes and not polygons:
-        return {"error": "provide at least one of boxes or polygons to stage"}
+    if not is_valid_name(model_name):
+        return {"error": f"model_name must be a single safe path segment (no separators/'..'), "
+                         f"got {model_name!r}"}
 
     def _unnormalized(vals) -> bool:
         return any(v < -0.01 or v > 1.5 for v in vals)
@@ -682,17 +629,12 @@ def stage_proposals(
             return {"error": f"box {i} coords {(cx, cy, w, h)} look un-normalized; cx/cy/w/h must be in [0,1]"}
         norm_boxes.append((subject, conf, cx, cy, w, h))
 
-    idir = resolve_images_dir(dataset_root, date)
     try:
-        img_source = resolve_image_source(idir, stem)
-    except (FileNotFoundError, BandGroupIncomplete):
-        img_source = None
-    if img_source is None:
-        return {"error": f"no image found for stem {stem!r} under {idir}: an image at a "
-                         "different images/ location (the flat root, or another capture "
-                         "date's bucket) is not resolved for this date; move it into this "
-                         "directory, or ingest it here."}
+        img_source = resolve_image_source(img.parent, img.stem)
+    except (FileNotFoundError, BandGroupIncomplete) as exc:
+        return {"error": str(exc)}
     img_w, img_h = image_dimensions(img_source)
+    dataset_root, date, stem = str(address.root), address.date, img.stem
 
     # A rounding-slop margin in pixels, not a fraction of the image size: a fractional margin
     # admits a normalized [0,1] ring at every real image size, the bug this check exists to refuse.
@@ -801,3 +743,87 @@ def stage_proposals(
         "model_name": model_name, "bucket": bucket, "bucket_redirected": staged["redirected"],
         "date": date, "stem": stem, "note": note,
     }
+
+
+@mcp.tool()
+@audited(scope_arg="image_path")
+def stage_proposals(
+    image_path: str,
+    *,
+    assignments: list[dict] | None = None,
+    boxes: list[dict] | None = None,
+    polygons: list[dict] | None = None,
+    model_name: str | None = None,
+    overwrite: bool = False,
+) -> dict:
+    """Stage model-/agent-proposed shapes as predictions for canvas review, the "show on canvas
+    before writing ground truth" guardrail. Never writes ground truth.
+
+    Exactly one input regime per call:
+
+    - ``assignments``: candidates ``propose_annotations`` staged for this image, reviewed and
+      each assigned a subject; a mapping from candidate id to subject, rejected candidates simply
+      omitted. Reads back the record staged at this exact image (dataset, capture date and stem)
+      and refuses if the image's content no longer matches the content identity that run
+      recorded. The masks land under ``predictions/<engine>/<date>/<task>`` with
+      ``created_by=<engine>`` and ``score`` = the engine's proposal score; ``model_name`` is
+      refused alongside ``assignments``, since the staged record's own engine names the bucket.
+    - ``boxes``/``polygons``: explicit shapes an agent or another model already has in hand, with
+      no cached record to read back. Land under
+      ``predictions/<model_name>/<date>/<stem>.json``. ``model_name`` is required, the real
+      producer stamped as ``created_by``. ``boxes`` is ``[{subject, conf, cx, cy, w, h}]`` with
+      cx/cy/w/h normalized to [0, 1]; ``polygons`` is ``[{subject, conf, points|rings}]``, exactly
+      one of two frames per proposal: ``points``, one ring of ``[x, y]`` pairs normalized to
+      [0, 1]; or ``rings``, a list of rings in pixel coordinates, each vertex an ``[x, y]`` pair
+      or an ``{"x":, "y":}`` mapping, the frame ``segment_prompt`` returns. Both build the same
+      ``Polygon`` through the ground-truth door's own vertex parser. ``overwrite=True`` writes in
+      place even into an existing bucket, refused if the bucket has verdicts; the default
+      redirects to a fresh run-scoped bucket (``<model_name>@r2``, next free) instead, returned as
+      ``bucket``.
+
+    Either regime resolves the dataset root, capture date and stem from ``image_path`` itself
+    (the same resolver ``propose_annotations`` uses), so the explicit regime no longer takes
+    path fragments a caller must keep consistent with the image. Both write through the one
+    verdict-guarded staging door (``prediction_buckets.stage_prediction_shapes``), so a re-run
+    never overwrites reviewed predictions or orphans their verdicts. Pair with
+    ``focus_human_attention(tab='review')`` to send the human straight to the result.
+
+    Args:
+        image_path: Absolute path to the dataset image (same as propose_annotations, for the
+            assignments regime).
+        assignments: List of dicts, each with 'candidate_id' (int) and 'subject' (name). Refused
+            alongside boxes/polygons or model_name.
+        boxes: Explicit boxes; see above. Refused alongside assignments.
+        polygons: Explicit polygons; see above. Refused alongside assignments.
+        model_name: Predictions bucket to stage the explicit regime under. Required with
+            boxes/polygons, refused with assignments.
+        overwrite: Explicit regime only: write in place even into an existing bucket. Refused if
+            the bucket has verdicts.
+    """
+    if assignments is not None and (boxes is not None or polygons is not None):
+        return {"error": "assignments cannot be combined with boxes/polygons: pick one input "
+                         "regime per call."}
+    if assignments is None and not boxes and not polygons:
+        return {"error": "provide assignments (propose_annotations's staged candidates), or "
+                         "boxes/polygons (explicit shapes) with model_name."}
+
+    img = Path(image_path)
+    if not img.is_file():
+        return {"error": f"Image not found: {image_path}"}
+
+    try:
+        address = _staging_key_for(image_path)
+    except ValueError as exc:
+        return {"error": str(exc)}
+
+    if assignments is not None:
+        if model_name is not None:
+            return {"error": "model_name is refused alongside assignments: the staged record's "
+                             "own engine names the bucket."}
+        return _stage_assignments_regime(image_path, img, address, assignments)
+
+    if model_name is None:
+        return {"error": "model_name is required with boxes/polygons: the real producer, "
+                         "stamped as created_by."}
+    return _stage_explicit_regime(image_path, img, address, model_name, boxes or [],
+                                  polygons or [], overwrite)

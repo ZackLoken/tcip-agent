@@ -888,10 +888,10 @@ def prediction_producer(checkpoint_path: str, sha256: str) -> str:
     resolves a checkpoint's identity before it writes anything, so the hash is always in hand by
     the time this is called; the parameter is required rather than defaulted so the bare,
     hash-less form cannot be spelled through it, and a caller that reaches here without the hash
-    is refused by name rather than stamping a producer with no identity. ``stage_proposals`` and
-    ``stage_accepted_proposals`` write their own producer strings (the caller's model name, or the
-    proposal engine) and are outside this helper by design: neither is backed by a resolved
-    checkpoint.
+    is refused by name rather than stamping a producer with no identity. ``stage_proposals``
+    writes its own producer strings, in either input regime (the caller's model name, or the
+    proposal engine), and is outside this helper by design: neither regime is backed by a
+    resolved checkpoint.
     """
     if not sha256:
         raise ValueError(

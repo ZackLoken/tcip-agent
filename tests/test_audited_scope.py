@@ -86,7 +86,7 @@ def test_label_write_records_in_the_dataset_holding_the_image_it_names(
 def test_propose_annotations_records_in_the_dataset_named_by_the_image_it_ran_against(
     platform_root: Path, dataset_root: Path
 ) -> None:
-    """A proposal run is scoped like its sibling ``stage_accepted_proposals``: to the dataset the image
+    """A proposal run is scoped like its sibling ``stage_proposals``: to the dataset the image
     belongs to, not the platform log, driven through a dotted ``module:factory`` engine so the
     test needs no torch."""
     from tcip_mcp.tools.proposal_tools import propose_annotations
