@@ -79,17 +79,19 @@ def relaunch_config_route(payload: RelaunchConfigPayload) -> dict:
     run's config launches as a new experiment id with the picked one as parent.
 
     An optional ``split_manifest_dir`` names a partition the browser picked instead of the
-    snapshot's own "As recorded" data section: verified as a string against this same config's
-    own :func:`~tcip_mcp.tools.training_tools.list_split_choices` listing, an enabled offer or
-    409, never resolved as a path the server follows. The launch config then carries
-    ``data.split`` replaced wholesale by ``{"manifest_dir": chosen}`` with any
+    snapshot's own "As recorded" data section: checked against this same config's own
+    :func:`~tcip_mcp.tools.training_tools.list_split_choices` listing (an enabled offer or 409)
+    through :func:`~tcip_mcp.tools.training_tools.split_dir_identity`, so a symlinked or
+    differently cased spelling of an offered directory is admitted, not just an exact string
+    match; the path itself is never resolved as one the server follows. The launch config then
+    carries ``data.split`` replaced wholesale by ``{"manifest_dir": chosen}`` with any
     ``data.val_images_dir`` removed; ``auto_train_val`` clears the previous binding's own stamps
     on its way to a fresh one.
     """
     from tcip_mcp.experiments import config_key, read_member, status_key
     from tcip_mcp.pipelines.model_build import MODEL_SOURCE_KEY
     from tcip_mcp.tools.training_tools import (
-        candidate_config_with_manifest, launch_training, list_split_choices,
+        candidate_config_with_manifest, launch_training, list_split_choices, split_dir_identity,
     )
 
     config = read_member(config_key(payload.experiment_id), None)
@@ -104,8 +106,9 @@ def relaunch_config_route(payload: RelaunchConfigPayload) -> dict:
     config = {**config, "experiment_id": payload.experiment_id}
     if payload.split_manifest_dir:
         choices = list_split_choices(payload.experiment_id)
-        enabled = {m["manifest_dir"] for m in choices.get("manifests", []) if m.get("enabled")}
-        if payload.split_manifest_dir not in enabled:
+        enabled = {split_dir_identity(m["manifest_dir"])
+                   for m in choices.get("manifests", []) if m.get("enabled")}
+        if split_dir_identity(payload.split_manifest_dir) not in enabled:
             raise HTTPException(
                 409, f"{payload.split_manifest_dir!r} is not an offered partition for "
                      f"{payload.experiment_id}",
