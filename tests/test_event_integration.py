@@ -163,14 +163,15 @@ class TestPostPanelEventRoute:
     def test_the_focus_tools_own_annotate_event_reaches_the_advisory_state(
         self, client: TestClient, data_dir: Path, monkeypatch,
     ) -> None:
-        """The state an agent reads back is driven by the event the focus tool really posts.
+        """The state an agent reads back is driven by the event the focus_human_attention tool
+        really posts.
 
         The payload is taken from the producer rather than written here, so the two halves of the
         bridge are held to the same key names: a producer and a consumer that stop agreeing on
         what a field is called cannot both keep passing.
         """
         from tcip_mcp import web_client
-        from tcip_mcp.tools.gui_tools import focus
+        from tcip_mcp.tools.gui_tools import focus_human_attention
 
         posted: dict = {}
 
@@ -179,7 +180,7 @@ class TestPostPanelEventRoute:
             return {"delivered": True, "status": "ok"}
 
         monkeypatch.setattr(web_client, "post_panel_event", _capture)
-        res = focus("annotate", str(data_dir), str(data_dir), "catkin", "2-11-26",
+        res = focus_human_attention("annotate", str(data_dir), str(data_dir), "catkin", "2-11-26",
                     mode="point", image_index=2)
         assert "error" not in res, res
         assert posted["event_type"] == "annotate_focus"
@@ -685,7 +686,7 @@ def test_post_panel_event_suppressed_under_pytest(monkeypatch):
     from tcip_mcp.web_client import post_panel_event
 
     monkeypatch.delenv("TCIP_ALLOW_PANEL_EVENTS", raising=False)
-    res = post_panel_event("annotate", "focus", {"stem": "IMG_X"})
+    res = post_panel_event("annotate", "focus_human_attention", {"stem": "IMG_X"})
     assert res == {"status": "suppressed_under_pytest", "delivered": False, "url": ""}
 
 
@@ -694,7 +695,7 @@ def test_post_panel_event_opt_in_bypasses_suppression(monkeypatch):
 
     monkeypatch.setenv("TCIP_ALLOW_PANEL_EVENTS", "1")
     monkeypatch.setenv("TCIP_WEB_PORT", "1")        # nothing listens on port 1
-    res = post_panel_event("annotate", "focus", {})
+    res = post_panel_event("annotate", "focus_human_attention", {})
     assert res["delivered"] is False
     assert res["status"] != "suppressed_under_pytest"   # it really attempted the send
 

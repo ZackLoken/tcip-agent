@@ -629,7 +629,7 @@ def stage_proposals(
     vet) goes to the predictions tree, never ``annotations/``, so the human reviews it on the Review
     canvas and accepts/rejects/edits before it becomes GT. Boxes and polygons alike land in the one
     per-image prediction file, each carrying a ``subject`` name. This never writes ground truth. Pair
-    with ``focus(tab='review')`` to send the human straight to them.
+    with ``focus_human_attention(tab='review')`` to send the human straight to them.
 
     A prediction bucket that already carries review verdicts is immutable: by default a stage into it
     is redirected to a fresh run-scoped bucket (``<model>@r2``, next free), and the bucket actually
@@ -788,7 +788,7 @@ def stage_proposals(
     bucket = staged["bucket"]
 
     note = ("staged to predictions/ for canvas review, not committed as ground truth; the human "
-            "accepts on the Review tab before it becomes GT (focus tab='review' to send them)")
+            "accepts on the Review tab before it becomes GT (focus_human_attention tab='review' to send them)")
     if staged["redirected"]:
         note = (f"bucket {model_name!r} has {staged['verdict_count']} review verdict(s), staged to a "
                 f"fresh bucket {bucket!r} instead so the reviewed predictions stay intact; " + note)

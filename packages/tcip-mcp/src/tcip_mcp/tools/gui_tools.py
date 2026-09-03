@@ -3,7 +3,7 @@
 Both routes go through the tcip-web event channel (:mod:`tcip_mcp.web_client`), a soft miss with
 ``delivered: false`` if no GUI answers. Neither reads or writes an annotation or prediction file
 itself beyond what it needs to resolve where to land: push_panel_data forwards an arbitrary
-payload; focus resolves a (subject, date) frame through read_annotations' own reader and posts
+payload; focus_human_attention resolves a (subject, date) frame through read_annotations' own reader and posts
 the event the GUI honors with local view setters.
 """
 
@@ -68,7 +68,7 @@ def push_panel_data(
 
 @mcp.tool()
 @audited
-def focus(
+def focus_human_attention(
     tab: str,
     project_root: str,
     dataset_root: str,

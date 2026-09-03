@@ -35,6 +35,7 @@ RENAMES = [
     ("claude_reports", "report_friction"),
     ("project_retrospective", "write_retrospective"),
     ("domain_knowledge", "serve_domain_knowledge"),
+    ("focus", "focus_human_attention"),
 ]
 
 _OWN_FILE = str(Path(__file__).relative_to(REPO_ROOT)).replace("\\", "/")

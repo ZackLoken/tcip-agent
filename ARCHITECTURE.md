@@ -745,7 +745,7 @@ Docstring is the function's docstring first line, verbatim.
 | tool | line | audited | docstring first line |
 |---|---|---|---|
 | `push_panel_data` | `gui_tools.py:37` | yes | Push structured data to a TCIP GUI panel via the tcip-web backend. |
-| `focus` | `gui_tools.py:71` | yes | Drive the live GUI to a (subject, date) frame, the Annotate tab or the Review tab. |
+| `focus_human_attention` | `gui_tools.py:71` | yes | Drive the live GUI to a (subject, date) frame, the Annotate tab or the Review tab. |
 
 ### inference_tools.py (3 tools)
 
@@ -2138,7 +2138,7 @@ Phase 3 verdict: duplicated.
 Must agree: the Python poster, the FastAPI hub, and the browser handler use the same event_type strings.
 Side A: `packages/tcip-mcp/src/tcip_mcp/tools/gui_tools.py:220` (`result = post_panel_event("app", "annotate_focus", payload)`).
 Side B: `packages/tcip-web/src/tcip_web/app.py:518` (`if event.event_type == PANEL_EVENT_REVIEW_FOCUS:`).
-Phase 3 verdict: single. The posted payload carries `active_subject` beside `subject` (`packages/tcip-mcp/src/tcip_mcp/tools/gui_tools.py:217`), the key both readers take (`packages/tcip-web/src/tcip_web/app.py:296`, `frontend/src/lib/annotateFocus.ts:21,54`), held by `tests/test_event_integration.py`'s producer-driven test, which posts the focus tool's own event and asserts the advisory state's `active_subject`.
+Phase 3 verdict: single. The posted payload carries `active_subject` beside `subject` (`packages/tcip-mcp/src/tcip_mcp/tools/gui_tools.py:217`), the key both readers take (`packages/tcip-web/src/tcip_web/app.py:296`, `frontend/src/lib/annotateFocus.ts:21,54`), held by `tests/test_event_integration.py`'s producer-driven test, which posts the focus_human_attention tool's own event and asserts the advisory state's `active_subject`.
 
 ## S06. `audit_log`, one append-only store under three kinds of root
 
