@@ -1005,7 +1005,7 @@ registered at HEAD.
 | GET | `/plant_mapping/list` | `list_plant_mappings` | `routes/results.py:303` |
 | POST | `/phenology_measurement` | `phenology_measurement` | `routes/results.py:577` |
 | POST | `/export_csv` | `export_csv` | `routes/results.py:633` |
-| GET | `/traits` | `list_traits` | `routes/results.py:1083` |
+| GET | `/traits` | `list_traits` | `routes/results.py:1087` |
 | GET | `/operationalization` | `get_operationalization` | `routes/results.py:757` |
 | GET | `/operationalizations` | `list_operationalizations` | `routes/results.py:773` |
 | POST | `/operationalization/confirm` | `confirm_operationalization` | `routes/results.py:811` |
@@ -1013,7 +1013,7 @@ registered at HEAD.
 | GET | `/trait-spec-statements` | `list_trait_spec_statements` | `routes/results.py:929` |
 | POST | `/trait-spec-statement/confirm` | `confirm_trait_spec_statement` | `routes/results.py:971` |
 | GET | `/delivery-events` | `list_delivery_events` | `routes/results.py:1044` |
-| GET | `/models/registered` | `registered_models` | `routes/results.py:1112` |
+| GET | `/models/registered` | `registered_models` | `routes/results.py:1116` |
 
 ### routes/review.py, prefix `/api/review` (8 routes)
 
@@ -2330,7 +2330,7 @@ Phase 3 verdict: single.
 
 Must agree: the MCP registrar and the GUI model pickers read one registry entry shape.
 Side A: `packages/tcip-mcp/src/tcip_mcp/model_registry.py:132` (`def read_registry_index(`, the read path for everything outside the module; `_register_entry`, line 429, replaces one entry by name inside one `tcip_store.transaction` on the key `registry_index_key`, line 116, mints).
-Side B: `packages/tcip-web/src/tcip_web/routes/results.py:1111` (`@router.get("/models/registered")`, serving `model_tools.list_registered_models`) and the browser's one entry declaration, `packages/tcip-web/frontend/src/api/inference.ts:16` (`export interface RegisteredModel {`), held field by field against an entry the real registrar wrote by `tests/test_registry_entry_shape_agreement.py`.
+Side B: `packages/tcip-web/src/tcip_web/routes/results.py:1115` (`@router.get("/models/registered")`, serving `model_tools.list_registered_models`) and the browser's one entry declaration, `packages/tcip-web/frontend/src/api/inference.ts:16` (`export interface RegisteredModel {`), held field by field against an entry the real registrar wrote by `tests/test_registry_entry_shape_agreement.py`.
 Phase 3 verdict: single.
 
 ## S28. operating_point.json prediction-bucket sidecar
@@ -2380,7 +2380,7 @@ Phase 3 verdict: single. One value is still spelled as a literal rather than bou
 
 Must agree: no delivered result ships an unvalidated parameter without an explicit acknowledgement.
 Side A: `packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py:2576` (`def check_delivery_gate(`, judging each dimension against `_DIMENSION_REFERENCES`, `packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py:2556`, so a reference clears only the dimension whose kind earned it, with `DeliveryGateResult.column_stamp`, `packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py:2513`, as the one derivation of what a deliverable's validity column carries).
-Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py:1857` (`def delivered_tail(`, the one composition every delivered tail's validity columns route through, deriving `own_column` from which of `_DIMENSION_TO_COLUMN`'s columns a door's own column list carries, never a second list stating so). `packages/tcip-mcp/src/tcip_mcp/pipelines/postprocessing/export.py:341` and `pipelines/postprocessing/aggregation.py:557` (`delivered_tail(provenance, operating_point_recon["bindings"], gate,`, each delivery door composing its tail through it rather than stamping the column itself); `packages/tcip-mcp/src/tcip_mcp/pipelines/postprocessing/export.py:368` (`summary = {`, `export_detection_csv`'s own gate-and-reconciliation summary, `tools/inference_tools.py`'s `tabulate_counts` sourcing its `tile_size_validated` response field from that returned summary's own stamp in both regimes that read a bucket, while `operating_point_validated` sources from the delivered tail's own floored cell above instead, neither response field re-deriving its column itself); and `packages/tcip-mcp/src/tcip_mcp/pipelines/postprocessing/phenology.py:613` (`delivered_tail(`, inside `_write_phenology_delivery`, the one writer both phenology delivery doors call through, `tools/phenology_tools.py`'s `compute_phenology` and `packages/tcip-web/src/tcip_web/routes/results.py`'s `export_csv`, rather than stamping the column themselves). The aggregated per-plant door also floors a claim-scope dimension read from each bucket's sidecar (`resolution.reconcile_claim_scope_validity`, whose accepted values, `CLAIM_SCOPE_REFERENCES`, are narrower than `VALIDATED_SHIPPABLE`, so an annotation reference cannot clear a raster-scope claim): a bucket that records no claim scope never acquires the dimension.
+Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py:1857` (`def delivered_tail(`, the one composition every delivered tail's validity columns route through, deriving `own_column` from which of `_DIMENSION_TO_COLUMN`'s columns a door's own column list carries, never a second list stating so). `packages/tcip-mcp/src/tcip_mcp/pipelines/postprocessing/export.py:341` and `pipelines/postprocessing/aggregation.py:557` (`delivered_tail(provenance, operating_point_recon["bindings"], gate,`, each delivery door composing its tail through it rather than stamping the column itself); `packages/tcip-mcp/src/tcip_mcp/pipelines/postprocessing/export.py:368` (`summary = {`, `export_detection_csv`'s own gate-and-reconciliation summary, `tools/inference_tools.py`'s `tabulate_counts` sourcing its `tile_size_validated` response field from that returned summary's own stamp in both regimes that read a bucket, while `operating_point_validated` sources from the delivered tail's own floored cell above instead, neither response field re-deriving its column itself); and `packages/tcip-mcp/src/tcip_mcp/pipelines/postprocessing/phenology.py:611` (`delivered_tail(`, inside `_write_phenology_delivery`, the one writer both phenology delivery doors call through, `tools/phenology_tools.py`'s `compute_phenology` and `packages/tcip-web/src/tcip_web/routes/results.py`'s `export_csv`, rather than stamping the column themselves). The aggregated per-plant door also floors a claim-scope dimension read from each bucket's sidecar (`resolution.reconcile_claim_scope_validity`, whose accepted values, `CLAIM_SCOPE_REFERENCES`, are narrower than `VALIDATED_SHIPPABLE`, so an annotation reference cannot clear a raster-scope claim): a bucket that records no claim scope never acquires the dimension.
 Phase 3 verdict: single.
 
 ## S35. ResolvedParam validation firewall
@@ -2415,7 +2415,7 @@ Phase 3 verdict: single.
 
 Must agree: the delivered CSV's column names derive from the trait spec on every path that writes them.
 Side A: `packages/tcip-mcp/src/tcip_mcp/pipelines/postprocessing/phenology.py:81` (`def majority_crossing_unconfirmed_column(spec) -> str | None:`, the one owner; `phenology_csv_columns` builds the schema through it).
-Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/postprocessing/phenology.py:626` (`majority_crossing_unconfirmed_column(spec)`, called from `_write_phenology_delivery`, the one writer both `tools/phenology_tools.py`'s `compute_phenology` and `packages/tcip-web/src/tcip_web/routes/results.py`'s `export_csv` call through instead of assembling the name themselves).
+Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/postprocessing/phenology.py:624` (`majority_crossing_unconfirmed_column(spec)`, called from `_write_phenology_delivery`, the one writer both `tools/phenology_tools.py`'s `compute_phenology` and `packages/tcip-web/src/tcip_web/routes/results.py`'s `export_csv` call through instead of assembling the name themselves).
 Phase 3 verdict: single.
 
 ## S40. Per-band normalization stats for a non-3-channel detector

@@ -1057,7 +1057,10 @@ def list_delivery_events(project_root: str) -> dict:
     """
     import tcip_store as ts
     from pydantic import ValidationError
-    from tcip_mcp.pipelines.delivery_events_schema import DeliveryEventRecord
+    from tcip_mcp.pipelines.delivery_events_schema import (
+        DeliveryEventRecord,
+        validation_error_detail,
+    )
     from tcip_mcp.pipelines.resolution import DELIVERY_EVENTS_STORE, delivery_events_scope
 
     root = _guarded_project_root(project_root)
@@ -1071,7 +1074,8 @@ def list_delivery_events(project_root: str) -> dict:
             raise HTTPException(
                 400,
                 f"delivery event {event_id!r} does not validate against the current "
-                f"delivery_events shape: {exc}; {_DELIVERY_EVENTS_CONFORM_HINT}",
+                f"delivery_events shape: {validation_error_detail(exc)}; "
+                f"{_DELIVERY_EVENTS_CONFORM_HINT}",
             ) from exc
     return {"records": records}
 

@@ -81,11 +81,34 @@ def _write_old_shaped_event(root: Path, event_id: str = "old-shaped") -> None:
 def test_a_root_with_nothing_stored_reports_no_outcomes_and_is_not_refused(tmp_path: Path):
     bind_default()
     module = _load_script()
+    (tmp_path / ".tcip").mkdir()
 
     outcomes, refused = module.check_root(tmp_path)
 
     assert outcomes == []
     assert refused is False
+
+
+def test_a_root_holding_no_tcip_directory_is_refused_by_name(tmp_path: Path):
+    bind_default()
+    module = _load_script()
+
+    outcomes, refused = module.check_root(tmp_path)
+
+    assert refused is True
+    assert len(outcomes) == 1
+    assert "no .tcip directory" in outcomes[0]
+
+
+def test_a_nonexistent_root_is_refused_the_same_way_as_one_missing_tcip(tmp_path: Path):
+    bind_default()
+    module = _load_script()
+    missing = tmp_path / "does-not-exist"
+
+    outcomes, refused = module.check_root(missing)
+
+    assert refused is True
+    assert "no .tcip directory" in outcomes[0]
 
 
 def test_check_root_names_a_valid_record_and_refuses_an_old_shaped_one(tmp_path: Path):
@@ -109,6 +132,7 @@ def test_main_over_an_empty_root_exits_zero_and_reports_nothing_stored(
 ) -> None:
     bind_default()
     module = _load_script()
+    (tmp_path / ".tcip").mkdir()
 
     monkeypatch.setattr(sys, "argv", ["conform_delivery_events.py", str(tmp_path)])
     exit_code = module.main()
@@ -116,6 +140,21 @@ def test_main_over_an_empty_root_exits_zero_and_reports_nothing_stored(
 
     assert exit_code == 0
     assert f"{tmp_path.resolve()}: nothing stored" in output
+
+
+def test_main_over_a_root_with_no_tcip_directory_exits_two_and_names_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    bind_default()
+    module = _load_script()
+    missing = tmp_path / "does-not-exist"
+
+    monkeypatch.setattr(sys, "argv", ["conform_delivery_events.py", str(missing)])
+    exit_code = module.main()
+    output = capsys.readouterr().out
+
+    assert exit_code == 2
+    assert f"{missing.resolve()}: refused, no .tcip directory found" in output
 
 
 def test_main_plan_mode_over_a_mixed_root_prints_both_lines_exits_two_and_rewrites_nothing(

@@ -1186,6 +1186,23 @@ describe("ResultsTab delivery events (read-only)", () => {
     expect(screen.getByText(/nothing has shipped from this project yet/i)).toBeInTheDocument();
   });
 
+  it("renders only the load error when the listing is refused, not the empty state", async () => {
+    vi.spyOn(resultsApi, "deliveryEvents").mockRejectedValue(
+      new Error(
+        "delivery event 'old-shaped' does not validate against the current delivery_events shape",
+      ),
+    );
+
+    render(<ResultsTab />);
+
+    await waitFor(() =>
+      expect(screen.getByText(/could not load what this project has shipped/i)).toBeInTheDocument(),
+    );
+    expect(
+      screen.queryByText(/nothing has shipped from this project yet/i),
+    ).not.toBeInTheDocument();
+  });
+
   it("renders the plant mapping's dates_delivered, images_unattributed and plant_attribution", async () => {
     const withMapping: DeliveryEventRecord = {
       ...DELIVERY_EVENT,

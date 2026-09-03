@@ -84,8 +84,9 @@ export function DeliveryEventsPanel({
         delivering door reconciled at the time. A delivery event is a fact, not a statement: there
         is nothing here to confirm.
       </p>
-      {loadError && <div className="mb-3 text-[11px] text-tcip-fp">{loadError}</div>}
-      {records.length === 0 ? (
+      {loadError ? (
+        <div className="text-[11px] text-tcip-fp">{loadError}</div>
+      ) : records.length === 0 ? (
         <div className="text-[11px] text-tcip-muted">
           Nothing has shipped from this project yet.
         </div>
