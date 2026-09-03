@@ -635,6 +635,43 @@ register_store(
 )
 
 
+def coverage_grid_zoom_path(dataset_root: str | Path) -> Path:
+    """``<dataset_root>/.tcip/state/coverage_grid_zoom.json``: the breeder-set inspection zoom
+    the coverage lattice's cell size is derived from, one entry per subject.
+
+    Shape: ``{subject: {zoom, set_by, set_at}}``. Advisory, like :func:`view_coverage_path`: no
+    default zoom exists, and a subject absent from this store simply has no coverage lattice yet.
+    Sibling of ``view_coverage_path``: it travels with the dataset rather than a project's own
+    ``.tcip/``, since a lattice zoom is a fact about how this dataset's imagery is inspected, not
+    about any one project's session.
+    """
+    return _entry_path(_STATE_DOC, dataset_root, _COVERAGE_GRID_ZOOM_PARTS)
+
+
+COVERAGE_GRID_ZOOM_STORE = "coverage_grid_zoom"
+_COVERAGE_GRID_ZOOM_PARTS = _document_of("coverage_grid_zoom.json")
+register_store(
+    StoreDescriptor(
+        name=COVERAGE_GRID_ZOOM_STORE,
+        kind="record",
+        key_fields=("document",),
+        frozen=False,
+        codec=RECORD_JSON,
+        concurrency="cas",
+        locator=_STATE_DOC,
+    )
+)
+
+
+def coverage_grid_zoom_key(dataset_root: str | Path) -> Key:
+    """The dataset's per-subject coverage-lattice zoom.
+
+    ``cas``: the grid-zoom route sets one subject's entry inside an existing document under a
+    lock, so an unconditional write would drop another subject's zoom set moments earlier.
+    """
+    return Key(COVERAGE_GRID_ZOOM_STORE, str(dataset_root), _COVERAGE_GRID_ZOOM_PARTS)
+
+
 def region_completeness_digest_key(dataset_root: str | Path) -> Key:
     """The content stamps beside the region-completeness attestations.
 

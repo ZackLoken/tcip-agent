@@ -1401,6 +1401,9 @@ REGISTERED = {
                                            "cells_served_at_native": ["r1c1"],
                                            "cells_seen_at_scale": {"r1c1": 1.0}}}},
         dataset_layout.view_coverage_key, ".tcip/state/view_coverage.json"),
+    "coverage_grid_zoom": Registered(
+        {"catkin": {"zoom": 1.5, "set_by": "user:ü", "set_at": "2026-03-04T00:00:00+00:00"}},
+        dataset_layout.coverage_grid_zoom_key, ".tcip/state/coverage_grid_zoom.json"),
     "region_completeness": Registered(
         {"catkin/orthö": {"grid": {"rows": 2, "cols": 2}, "cells_complete": ["r1c1"],
                           "stem": "orthö"}},

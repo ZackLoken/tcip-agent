@@ -261,6 +261,9 @@ PLATFORM_CLAIMS: Mapping[str, Claim] = {
         ROOT, (_named(".tcip", "state", name="image_status_digest", suffix=".json"),)
     ),
     "view_coverage": Claim(ROOT, (_named(".tcip", "state", name="view_coverage", suffix=".json"),)),
+    "coverage_grid_zoom": Claim(
+        ROOT, (_named(".tcip", "state", name="coverage_grid_zoom", suffix=".json"),)
+    ),
     "region_completeness": Claim(
         ROOT, (_named(".tcip", "state", name="region_completeness", suffix=".json"),)
     ),
