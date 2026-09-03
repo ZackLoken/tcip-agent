@@ -181,7 +181,7 @@ class TestPostPanelEventRoute:
 
         monkeypatch.setattr(web_client, "post_panel_event", _capture)
         res = focus_human_attention("annotate", str(data_dir), str(data_dir), "catkin", "2-11-26",
-                    mode="point", image_index=2)
+                                    mode="point", image_index=2)
         assert "error" not in res, res
         assert posted["event_type"] == "annotate_focus"
 
@@ -686,7 +686,7 @@ def test_post_panel_event_suppressed_under_pytest(monkeypatch):
     from tcip_mcp.web_client import post_panel_event
 
     monkeypatch.delenv("TCIP_ALLOW_PANEL_EVENTS", raising=False)
-    res = post_panel_event("annotate", "focus_human_attention", {"stem": "IMG_X"})
+    res = post_panel_event("annotate", "annotate_focus", {"stem": "IMG_X"})
     assert res == {"status": "suppressed_under_pytest", "delivered": False, "url": ""}
 
 
@@ -695,7 +695,7 @@ def test_post_panel_event_opt_in_bypasses_suppression(monkeypatch):
 
     monkeypatch.setenv("TCIP_ALLOW_PANEL_EVENTS", "1")
     monkeypatch.setenv("TCIP_WEB_PORT", "1")        # nothing listens on port 1
-    res = post_panel_event("annotate", "focus_human_attention", {})
+    res = post_panel_event("annotate", "annotate_focus", {})
     assert res["delivered"] is False
     assert res["status"] != "suppressed_under_pytest"   # it really attempted the send
 

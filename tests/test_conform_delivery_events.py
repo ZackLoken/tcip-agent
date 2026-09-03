@@ -54,7 +54,7 @@ def _write_old_shaped_event(root: Path, event_id: str = "old-shaped") -> None:
             "event_id": event_id,
             "trait": "astringency",
             "delivery_kind": "state_crossing_dates",
-            "door": "deliver_phenology_milestones",
+            "door": "compute_phenology",  # a stored value written before the rename
             "output_path": None,
             "measurement_documents": ["operating_point"],
             "scale_document": None,

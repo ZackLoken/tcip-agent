@@ -865,7 +865,7 @@ def test_delivery_events_route_refuses_a_stored_event_whose_plant_mapping_predat
             "event_id": event_id,
             "trait": STATEMENT_TRAIT,
             "delivery_kind": "state_crossing_dates",
-            "door": "deliver_phenology_milestones",
+            "door": "compute_phenology",  # a stored value written before the rename
             "output_path": None,
             "measurement_documents": ["operating_point"],
             "scale_document": None,

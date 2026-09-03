@@ -185,6 +185,10 @@ def test_consolidated_tools_present_and_removed_absent():
         "accept_proposals",
         # Renamed tools: the old names must no longer register.
         "focus", "make_splits", "tabulate_counts", "select_best_model",
+        "calibrate_ordinal_regression_operating_point", "cancel_hpo", "run_hpo",
+        "claude_reports", "project_retrospective", "domain_knowledge",
+        "force_redraw_cal_holdout_split", "push_panel_data", "update_trait_spec_fields",
+        "compute_phenology", "check_training_status", "init_project", "set_active_project",
     }
     assert not (removed & registered), f"removed tools still registered: {removed & registered}"
 

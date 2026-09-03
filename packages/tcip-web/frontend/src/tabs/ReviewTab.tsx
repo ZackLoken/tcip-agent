@@ -239,7 +239,7 @@ export function ReviewTab() {
 
   // ── Active-learning priority queue ──────────────────────────────────
   // prioritize_review_queue's ranking otherwise never reaches the breeder; the only path was the
-  // agent manually steering focus() one image at a time. Session-local (like generationConf/
+  // agent manually steering focus_human_attention() one image at a time. Session-local (like generationConf/
   // validationResult above): nothing else in the app needs to know the computed order.
   const [pqModels, setPqModels] = useState<RegisteredModel[]>([]);
   const [pqModelPath, setPqModelPath] = useState("");
@@ -1493,7 +1493,7 @@ export function ReviewTab() {
 
             <span aria-hidden className="mx-2 h-4 w-px bg-tcip-border" />
             {/* prioritize_review_queue's ranking, otherwise reachable only one image at a
-                time via the agent's own focus() calls; surfaced here as a real browsable order. */}
+                time via the agent's own focus_human_attention() calls; surfaced here as a real browsable order. */}
             <span
               className="text-[10px] font-semibold uppercase tracking-wide text-tcip-muted"
               title="Rank unreviewed images by how much the model would learn from your input on them, so you look at the most useful ones first"
