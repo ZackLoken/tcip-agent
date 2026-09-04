@@ -70,8 +70,8 @@ def orthomosaic_plant_counts(
     persisted (never re-runs the expensive tiled pass), resolves each detection's box centroid
     to a real-world coordinate via the raster's own georeferencing tags, and, absent
     ``canopy_subject``, matches it to the nearest plant (:func:`assign_detections_to_plants`).
-    Every in-frame geolocated plant ``plant_registry`` names (its own projected position inside
-    the raster's own recorded frame, :func:`~tcip_mcp.pipelines.postprocessing.
+    Absent ``canopy_subject``, every in-frame geolocated plant ``plant_registry`` names (its own
+    projected position inside the raster's own recorded frame, :func:`~tcip_mcp.pipelines.postprocessing.
     orthomosaic_mapping.plants_in_frame`) gets exactly one row in the delivered CSV: a plant with
     one or more assigned detections gets their sum, a plant the scan covered but matched no
     detection near gets an explicit ``0`` (a real measured absence, not a missing observation,
@@ -95,9 +95,13 @@ def orthomosaic_plant_counts(
     nothing but the disclosed clearance
     (:class:`~tcip_mcp.pipelines.postprocessing.segment_attribution.TiedSegment.clearance_m`), so
     a position displaced by more than its clearance places the plant in a neighbour's canopy with
-    every check here passing. The canopy document is resolved from the verified raster alone,
-    under a registered dataset the bucket shares (see the refusal below), never named by the
-    caller; a tied plant whose segment's own detection also lies in another segment gets no row,
+    every check here passing. The canopy document's own location is derived from the caller's
+    ``raster_path`` itself (its canonical position under a registered dataset the bucket shares,
+    via :func:`~tcip_mcp.dataset_layout.annotation_path_for_image`), never a path the caller
+    names directly; the document's identity is bound to the raster's own content, geotransform
+    and dataset id (the checks below), so two content-identical rasters registered at different
+    canonical positions under the same dataset resolve to two different label documents. A tied
+    plant whose segment's own detection also lies in another segment gets no row,
     since its count would be an undisclosed lower bound, and is disclosed by name
     (``plants_with_ambiguous_detections``); a tied plant whose segment holds no detection at all
     gets an explicit ``0``; an in-frame plant inside no segment gets no row and is disclosed by
@@ -142,11 +146,17 @@ def orthomosaic_plant_counts(
     ``register_plant_registry`` recorded for it (:func:`~tcip_mcp.pipelines.postprocessing.
     plant_mapping.verify_registry_csv_bytes`), and a missing or rewritten file refuses by name
     before any plant or prediction is read, so every CSV this delivery reads is verified or the
-    delivery never happens. The delivery event this door's own ``export_aggregated_csv`` call
-    records carries a ``PlantRegistryDisclosure`` (``delivery_events_schema.py``): the registry it
-    read, the raster identity every count is attributed through, the matched tolerance and its
-    source, and this delivery's own unattributed-detection count, the whole-raster counterpart of
-    the walked mapping's own ``PlantMappingDisclosure`` the phenology doors record.
+    delivery never happens. Absent ``canopy_subject``, the delivery event this door's own
+    ``export_aggregated_csv`` call records carries a ``PlantRegistryDisclosure``
+    (``delivery_events_schema.py``): the registry it read, the raster identity every count is
+    attributed through, the matched tolerance and its source, and this delivery's own
+    unattributed-detection count, the whole-raster counterpart of the walked mapping's own
+    ``PlantMappingDisclosure`` the phenology doors record. Under ``canopy_subject``, the event
+    carries a ``CanopySegmentDisclosure`` instead: the same registry and raster identity, the
+    canopy document read and every segment tie resolved from it (each with its own clearance,
+    never a match tolerance), and the three plant-name lists this door's own response also
+    carries (``plants_outside_raster``, ``plants_without_segment``,
+    ``plants_with_ambiguous_detections``).
 
     Args:
         predictions_dir: The bucket ``run_inference``'s ``raster_path`` regime persisted.
