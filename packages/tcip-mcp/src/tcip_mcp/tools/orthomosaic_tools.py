@@ -149,7 +149,7 @@ def deliver_orthomosaic_plant_counts(
             f"plant registry not found: {plant_registry!r}; register it with "
             "register_plant_registry before deliver_orthomosaic_plant_counts reads it")}
     registry_entries = registry_csv_entries(registry_record)
-    missing, rewritten_fact = verify_registry_csv_bytes(registry_entries)
+    missing, rewritten_fact, verified_csv_bytes = verify_registry_csv_bytes(registry_entries)
     if missing:
         return {"error": f"plant CSV(s) not found: {missing}"}
     if rewritten_fact:
@@ -228,14 +228,19 @@ def deliver_orthomosaic_plant_counts(
         assign_detections_to_plants,
         resolve_nn_tolerance_m,
     )
-    from tcip_mcp.pipelines.postprocessing.plant_mapping import read_plant_csvs
+    from tcip_mcp.pipelines.postprocessing.plant_mapping import read_plant_csv_bytes
 
     try:
         georef = OrthomosaicGeoreference.from_file(raster_path)
     except (GeoreferencingError, RotatedRasterError) as exc:
         return {"error": str(exc)}
 
-    plants = read_plant_csvs([Path(p) for p in plant_csv_paths])
+    # Parsed from the bytes verify_registry_csv_bytes already read and hashed, never a second open.
+    plants = [
+        plant
+        for entry in registry_entries
+        for plant in read_plant_csv_bytes(verified_csv_bytes[entry["path"]])
+    ]
     if not plants:
         return {"error": f"no georeferenced plants parsed from {plant_csv_paths}"}
 
