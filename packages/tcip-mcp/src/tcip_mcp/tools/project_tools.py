@@ -661,6 +661,12 @@ def archive_project(
     file mid-write), and ``checkpoints_excluded`` (every checkpoint blob ``blob_home`` recognizes,
     dropped by ``include_models=False``), so the narrowing is disclosed rather than silent.
 
+    ``size_bytes`` in the response means one thing under ``output_path`` (the written ZIP's own
+    compressed byte count, ``stat().st_size`` on the archive) and a different thing under
+    ``output_dir`` (the sum of the copied members' own uncompressed byte counts, since a
+    directory tree has no single file to size); which one the caller is reading is decided by
+    which of ``output_dir``/``output_path`` the response carries.
+
     Args:
         project_path: Root directory of the project.
         output_path: Destination path for the ZIP file. A relative path resolves against the
@@ -728,7 +734,9 @@ def archive_project(
     members += [p for p in accounting.blobs if include_models or not is_checkpoint[p]]
 
     out: Path | None = None
+    created_output_dir = False
     if resolved_output_dir is not None:
+        created_output_dir = not resolved_output_dir.exists()
         resolved_output_dir.mkdir(parents=True, exist_ok=True)
         files_added, size_bytes = _write_bundle_directory(resolved_output_dir, root, members)
     else:
@@ -740,8 +748,13 @@ def archive_project(
         size_bytes = out.stat().st_size
 
     def _remove_partial_bundle() -> None:
+        # Only what this door itself wrote: the members it copied, and the directory only if it
+        # created that directory (an empty one the caller already owned is admitted above).
         if resolved_output_dir is not None:
-            shutil.rmtree(resolved_output_dir, ignore_errors=True)
+            for member in members:
+                (resolved_output_dir / member.relative_to(root)).unlink(missing_ok=True)
+            if created_output_dir:
+                shutil.rmtree(resolved_output_dir, ignore_errors=True)
         elif out is not None:
             out.unlink(missing_ok=True)
 
@@ -817,11 +830,12 @@ def _extract_zip(zp: Path, staging: Path) -> int:
 def _stage_bundle(source: Path, staging: Path) -> int:
     """Stage ``source`` into ``staging``, whichever container it arrived in.
 
-    One bundle layout, two containers: a directory bundle is zipped into a private temporary
-    file and handed to :func:`_extract_zip`, the same walker (and the same zip-slip containment
-    check) a ZIP bundle goes through, rather than a second tree-copying implementation that could
-    drift from it. A directory's own empty subdirectories carry no member either way, matching a
-    ZIP archive built with no directory entries.
+    One bundle layout, two containers: a directory bundle's whole tree is copied, member by
+    member, into a ZIP written to the system temp directory (``tempfile.TemporaryDirectory``,
+    removed once this call returns), then handed to :func:`_extract_zip`, the same walker (and
+    the same zip-slip containment check) a ZIP bundle goes through, rather than a second
+    tree-copying implementation that could drift from it. A directory's own empty subdirectories
+    carry no member either way, matching a ZIP archive built with no directory entries.
     """
     if not source.is_dir():
         return _extract_zip(source, staging)

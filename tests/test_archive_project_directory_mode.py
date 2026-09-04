@@ -11,6 +11,7 @@ from tcip_mcp.tools.project_tools import archive_project, import_project
 
 def _project(tmp_path: Path) -> Path:
     """A minimal project: one image, one label, and the registry that decodes it."""
+    from tcip_annotation import json_io
     from tcip_mcp import class_registry
     from tcip_mcp.class_registry import ClassRegistry, Subject
 
@@ -18,9 +19,8 @@ def _project(tmp_path: Path) -> Path:
     (root / "images" / "2026-03-04").mkdir(parents=True)
     (root / "images" / "2026-03-04" / "a_1.jpg").write_bytes(b"\xff\xd8\xff")
     (root / "annotations" / "2026-03-04").mkdir(parents=True)
-    (root / "annotations" / "2026-03-04" / "a_1.json").write_text(
-        '{"annotations": []}', encoding="utf-8"
-    )
+    json_io.write_annotations(
+        str(root / "annotations" / "2026-03-04" / "a_1.json"), [], 10, 10, keep_empty=True)
     class_registry.write_registry(
         root / "classes.json", ClassRegistry(subjects=(Subject(name="catkin"),))
     )
@@ -85,13 +85,14 @@ def test_archive_project_directory_mode_admits_valid_work(tmp_path):
 
 
 def test_directory_bundle_round_trip_yields_the_same_records_as_the_zip_round_trip(tmp_path):
-    """archive_project(output_dir=...) -> import_project recovers a project exactly the way
-    the ZIP round trip does (tests/test_project_tools.py::test_export_import_roundtrip)."""
+    """archive_project(output_dir=...) -> import_project recovers a project the way the ZIP
+    round trip does (tests/test_project_tools.py::test_export_import_roundtrip), including its
+    band-group manifest and its multi-band-file capture, not only the single-band image."""
     from tcip_mcp.tools.project_tools import initialize_project, inspect_project, register_dataset
 
     src = tmp_path / "src_project"
     initialize_project(str(src), site="north orchard")
-    _populate_project(src)
+    manifest, npz_image = _populate_project(src)
     reg = register_dataset(str(src), crop="hazelnut")
     assert "error" not in reg, reg
 
@@ -117,6 +118,19 @@ def test_directory_bundle_round_trip_yields_the_same_records_as_the_zip_round_tr
     assert status["initialized"] is True
     assert (dest / "annotations" / "2026-03-04" / "a_1.json").is_file()
 
+    date = "2026-03-04"
+    restored_images = dest / "images" / date
+    restored_manifest = restored_images / manifest.name
+    assert restored_manifest.is_file()
+    assert restored_manifest.read_bytes() == manifest.read_bytes()
+    assert (restored_images / npz_image.name).read_bytes() == npz_image.read_bytes()
+
+    from tcip_mcp.pipelines.image_utils import list_logical_images
+
+    assert sorted(list_logical_images(restored_images)) == sorted(
+        list_logical_images(src / "images" / date)
+    ) == ["a_1", "cap_001", "cap_002"]
+
     from tcip_mcp import class_registry
 
     restored = class_registry.read_registry(dest / "classes.json")
@@ -128,9 +142,12 @@ def test_directory_bundle_round_trip_yields_the_same_records_as_the_zip_round_tr
     assert restored_id == {"crop": "hazelnut", "id": reg["id"], "fingerprint": reg["fingerprint"]}
 
 
-def _populate_project(src: Path) -> None:
-    """Populate an already-initialized project with a minimal image/label/registry, without
-    re-creating ``.tcip``."""
+def _populate_project(src: Path) -> tuple[Path, Path]:
+    """Populate an already-initialized project with a minimal image/label/registry, a
+    multispectral capture's band-group manifest, and a sensor's own multi-band file, without
+    re-creating ``.tcip``. Returns the manifest path and the multi-band file path, the two
+    ``test_export_import_roundtrip`` also asserts a bundle carries whole.
+    """
     from PIL import Image
 
     from tcip_annotation import json_io
@@ -148,6 +165,26 @@ def _populate_project(src: Path) -> None:
         str(labels / "a_1.json"), [Annotation(subject="catkin", geometry=BBox(1, 1, 9, 9))], 32, 32)
     class_registry.write_registry(
         src / "classes.json", ClassRegistry(subjects=(Subject(name="catkin"),)))
+
+    # A multispectral capture written one file per band: the manifest beside the bands is what
+    # makes those files one logical image, so a directory bundle has to carry all of them too.
+    from tcip_mcp.pipelines.data.band_groups import write_band_group_manifest
+
+    bands = {}
+    for band, wavelength in (("green", 560.0), ("red", 668.0)):
+        band_file = images / f"cap_001_{band}.tif"
+        Image.new("L", (32, 32)).save(band_file)
+        bands[band] = band_file
+    manifest = write_band_group_manifest(
+        images, "cap_001", bands, central_wavelength_nm={"green": 560.0, "red": 668.0},
+        source="explicit-manifest",
+    )
+    # A sensor that writes one multi-band file per capture instead of one file per band.
+    import numpy as np
+
+    npz_image = images / "cap_002.npz"
+    np.savez(npz_image, bands=np.zeros((2, 32, 32), dtype=np.uint16))
+    return manifest, npz_image
 
 
 def test_import_project_refuses_a_bundle_path_that_does_not_exist(tmp_path):

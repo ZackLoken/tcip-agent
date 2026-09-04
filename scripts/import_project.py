@@ -7,9 +7,9 @@ unaccounted member, adopts what is left into a database when this process is bou
 database backend, then moves the staged tree onto ``destination``. Wraps
 ``tcip_mcp.tools.project_tools.import_project`` with no MCP tool registration.
 
-    python scripts/import_project.py <zip_path> <destination>
+    python scripts/import_project.py <bundle_path> <destination>
 
-``zip_path`` names either container. This run's audit line is recorded under
+``bundle_path`` names either container. This run's audit line is recorded under
 ``<destination>/.tcip``, the project being restored, not the process cwd.
 """
 
@@ -27,7 +27,9 @@ from _script_root import require_platform_root  # noqa: E402
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("zip_path", help="Path to the .tcip.zip archive.")
+    parser.add_argument("bundle_path", help="Path to the bundle archive_project wrote: a ZIP "
+                                            "file, or a directory tree written by its "
+                                            "--output-dir mode.")
     parser.add_argument("destination", help="Directory to extract into; must not already exist, "
                                              "or must be an empty directory. Also where this "
                                              "run's audit line is recorded.")
@@ -42,7 +44,7 @@ def main(argv: list[str] | None = None) -> int:
 
     bind_default()
 
-    result = import_project(args.zip_path, args.destination)
+    result = import_project(args.bundle_path, args.destination)
     if "error" in result:
         print(f"error: {result['error']}", file=sys.stderr)
         return 1
