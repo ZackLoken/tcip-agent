@@ -146,7 +146,7 @@ def test_consolidated_tools_present_and_removed_absent():
         "capture_live_canvas",
         # Renamed tools: the new names must register.
         "rank_registered_models",
-        "deliver_per_image_counts", "view_gui_state",
+        "deliver_per_image_counts", "deliver_per_plant_csv", "view_gui_state",
         # Method-neutral auto-labeling seam: no longer SAM-specific names.
         "propose_annotations", "stage_proposals", "segment_prompt",
         # Re-admitted count calibrator, beside its two sibling calibrators.
