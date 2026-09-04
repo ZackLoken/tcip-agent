@@ -42,6 +42,7 @@ from tcip_mcp.pipelines.resolution import write_sidecar  # noqa: E402
 from tcip_mcp.tools.phenology_tools import (  # noqa: E402
     build_plant_mapping,
     deliver_phenology_milestones,
+    register_plant_registry,
 )
 
 # Two plants ~3 m apart in one row (1 deg lon ≈ 81 km at 43°N, so 3.7e-5 deg ≈ 3 m).
@@ -194,12 +195,18 @@ def main() -> int:
 
             preds_by_date = {d: str(preds_root / d) for d in DATES}
 
+            registry_name = "smoke-valley-plants"
+            reg = register_plant_registry(
+                name=registry_name, csv_paths=[str(plant_csv)], crop=crop,
+                site="smoke test orchard")
+            check("no error", "error" not in reg, reg.get("error", ""))
+
             # 2. build_plant_mapping: real EXIF GPS → plant assignments.
             print("Step 1: build_plant_mapping")
             m = build_plant_mapping(
                 name=mapping_name,
                 images_root=str(images_root),
-                plant_csv_paths=[str(plant_csv)],
+                plant_registry=registry_name,
             )
             check("no error", "error" not in m, m.get("error", ""))
             check("3 dates mapped", m.get("n_dates") == 3, str(m.get("n_dates")))
