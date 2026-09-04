@@ -78,6 +78,34 @@ def _write_old_shaped_event(root: Path, event_id: str = "old-shaped") -> None:
     )
 
 
+def _write_event_missing_output_sha256(root: Path, event_id: str = "no-digest") -> None:
+    """A ``delivery_events`` record written before ``output_sha256`` existed: every other key
+    present, that one alone missing, so the refusal names exactly this gap."""
+    key = resolution.delivery_event_key(resolution.delivery_events_scope(root), event_id)
+    ts.replace(
+        key,
+        {
+            "event_id": event_id, "trait": "astringency", "delivery_kind": "state_crossing_dates",
+            "door": "test_door", "output_path": None, "measurement_documents": ["operating_point"],
+            "scale_document": None, "plant_mapping": None, "documents": {},
+            "produced_at": datetime.now(timezone.utc).isoformat(),
+        },
+        expect=ts.Version.ABSENT,
+    )
+
+
+def test_check_root_names_the_gap_when_output_sha256_predates_this_record(tmp_path: Path):
+    bind_default()
+    module = _load_script()
+    _write_event_missing_output_sha256(tmp_path)
+
+    outcomes, refused = module.check_root(tmp_path)
+
+    assert refused is True
+    assert "output_sha256" in outcomes[0]
+    assert "re-deliver, or remove the record by hand" in outcomes[0]
+
+
 def test_a_root_with_nothing_stored_reports_no_outcomes_and_is_not_refused(tmp_path: Path):
     bind_default()
     module = _load_script()

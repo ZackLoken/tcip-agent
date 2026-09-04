@@ -1683,6 +1683,22 @@ REGISTERED = {
                          "accession_name": "ü", "source": "sequence", "distance_m": 1.25}]},
         lambda root: plant_mapping.plant_mapping_key(root, "valley"),
         ".tcip/state/plant_mappings/valley.json", root_of=_plant_mapping_dir),
+    "plant_registries": Registered(
+        {"name": "valley-plants", "crop": "hazelnut", "site": "north orchard",
+         "csvs": [{"path": "dü/plants.csv", "sha256": "0" * 64, "n_plants": 2}],
+         "n_plants": 2, "digest": "0" * 64, "registered_by": "agent:register_plant_registry",
+         "registered_at": "2026-03-04T12:00:00+00:00"},
+        lambda root: plant_mapping.plant_registry_key(root, "valley-plants"),
+        ".tcip/state/plant_registries/valley-plants.json", root_of=_plant_mapping_dir),
+    "delivery_supersessions": Registered(
+        {"superseded_event_id": EVENT_ID_UNDER_TEST, "output_sha256": "0" * 64,
+         "replacement_event_id": None, "reason": "a mis-stated crop was corrected upstream",
+         "superseded_by": "agent:supersede_delivery",
+         "superseded_at": "2026-03-04T12:00:00+00:00"},
+        lambda root: resolution.delivery_supersession_key(
+            resolution.delivery_events_scope(root), EVENT_ID_UNDER_TEST),
+        f".tcip/state/delivery_supersessions/{EVENT_ID_UNDER_TEST}.json",
+        root_of=lambda root: resolution.delivery_events_scope(root)),
     # the experiment record's validation member
     "experiment_validations": Registered(
         {"document": "operating_point", "trait": "catkin_50per_date",
@@ -1724,7 +1740,7 @@ REGISTERED = {
     "delivery_events": Registered(
         {"event_id": EVENT_ID_UNDER_TEST, "trait": TRAIT_UNDER_TEST,
          "delivery_kind": DELIVERY_KIND_UNDER_TEST, "door": "deliver_phenology_milestones",
-         "output_path": "büsch_phenology.csv",
+         "output_path": "büsch_phenology.csv", "output_sha256": "0" * 64,
          "measurement_documents": ["operating_point", "classifier_operating_point"],
          "scale_document": None,
          "plant_mapping": {
