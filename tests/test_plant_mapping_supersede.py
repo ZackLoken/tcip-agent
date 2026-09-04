@@ -107,6 +107,60 @@ def test_a_cited_rebuild_with_supersede_archives_the_old_record_and_keeps_it_rea
     assert "error" not in res2, res2
 
 
+def test_resolved_mapping_key_for_citation_names_the_archive_once_superseded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Coverage: a delivery event's own cited digest resolves to the current name while
+    unmoved, and to the archived key once a supersede rebuild has moved the name on."""
+    images_root, _ = _cited_mapping(tmp_path, monkeypatch)
+    before = plant_mapping.load_mapping(tmp_path, "valley")
+    assert before is not None
+
+    assert plant_mapping.resolved_mapping_key_for_citation(
+        tmp_path, "valley", before.record_sha256) == "valley"
+
+    res = build_plant_mapping(
+        name="valley", images_root=images_root, plant_registry=before.plant_registry["name"],
+        supersede=True)
+    assert "error" not in res, res
+
+    archived_name = f"valley@{before.record_sha256[:12]}"
+    assert plant_mapping.resolved_mapping_key_for_citation(
+        tmp_path, "valley", before.record_sha256) == archived_name
+
+
+def test_the_delivery_events_route_resolves_a_superseded_citation_to_the_archive(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The panel route's own plant_mapping_resolved_key names the archive once a supersede
+    rebuild has moved the cited name on, and the plain name while it has not."""
+    from fastapi.testclient import TestClient
+    from tcip_web.app import app
+    from tcip_web.state import store
+
+    images_root, _ = _cited_mapping(tmp_path, monkeypatch)
+    before = plant_mapping.load_mapping(tmp_path, "valley")
+    assert before is not None
+
+    monkeypatch.setenv("TCIP_IMAGE_ROOTS", str(tmp_path))
+    store.open_project(tmp_path.resolve())
+    client = TestClient(app, base_url="http://127.0.0.1")
+    resp = client.get("/api/results/delivery-events", params={"project_root": str(tmp_path)})
+    assert resp.status_code == 200, resp.text
+    record = next(r for r in resp.json()["records"] if r.get("plant_mapping"))
+    assert record["plant_mapping_resolved_key"] == "valley"
+
+    res = build_plant_mapping(
+        name="valley", images_root=images_root, plant_registry=before.plant_registry["name"],
+        supersede=True)
+    assert "error" not in res, res
+
+    resp2 = client.get("/api/results/delivery-events", params={"project_root": str(tmp_path)})
+    assert resp2.status_code == 200, resp2.text
+    record2 = next(r for r in resp2.json()["records"] if r.get("plant_mapping"))
+    assert record2["plant_mapping_resolved_key"] == f"valley@{before.record_sha256[:12]}"
+
+
 def test_an_uncited_rebuild_replaces_as_today_recording_nothing_extra(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

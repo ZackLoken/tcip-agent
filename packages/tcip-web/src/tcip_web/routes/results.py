@@ -1076,7 +1076,10 @@ def list_delivery_events(project_root: str) -> dict:
 
     Each record carries its own ``superseded`` key: the ``delivery_supersessions`` record
     ``supersede_delivery`` filed against its ``event_id`` (naming the reason and any replacement
-    event), or ``None`` when nothing supersedes it.
+    event), or ``None`` when nothing supersedes it. A record naming a ``plant_mapping`` also
+    carries ``plant_mapping_resolved_key``: the name to load to see exactly the record this event
+    cites, its own name when a rebuild has not moved past it, the archived key
+    (``resolved_mapping_key_for_citation``) when a superseding rebuild has.
     """
     import tcip_store as ts
     from pydantic import ValidationError
@@ -1085,6 +1088,7 @@ def list_delivery_events(project_root: str) -> dict:
         validation_error_detail,
         with_supersessions,
     )
+    from tcip_mcp.pipelines.postprocessing.plant_mapping import resolved_mapping_key_for_citation
     from tcip_mcp.pipelines.resolution import (
         DELIVERY_EVENTS_STORE,
         delivery_events_scope,
@@ -1105,6 +1109,10 @@ def list_delivery_events(project_root: str) -> dict:
                 f"delivery_events shape: {validation_error_detail(exc)}; "
                 f"{_DELIVERY_EVENTS_CONFORM_HINT}",
             ) from exc
+        pm = record.get("plant_mapping")
+        if isinstance(pm, dict):
+            record["plant_mapping_resolved_key"] = resolved_mapping_key_for_citation(
+                root, pm["name"], pm["record_sha256"])
     return {"records": with_supersessions(records, load_delivery_supersessions(root))}
 
 

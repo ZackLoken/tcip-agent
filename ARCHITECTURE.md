@@ -1020,7 +1020,7 @@ registered at HEAD.
 | GET | `/plant_mapping/list` | `list_plant_mappings` | `routes/results.py:322` |
 | POST | `/phenology_measurement` | `phenology_measurement` | `routes/results.py:596` |
 | POST | `/export_csv` | `export_csv` | `routes/results.py:652` |
-| GET | `/traits` | `list_traits` | `routes/results.py:1115` |
+| GET | `/traits` | `list_traits` | `routes/results.py:1123` |
 | GET | `/operationalization` | `get_operationalization` | `routes/results.py:776` |
 | GET | `/operationalizations` | `list_operationalizations` | `routes/results.py:792` |
 | POST | `/operationalization/confirm` | `confirm_operationalization` | `routes/results.py:830` |
@@ -1028,7 +1028,7 @@ registered at HEAD.
 | GET | `/trait-spec-statements` | `list_trait_spec_statements` | `routes/results.py:948` |
 | POST | `/trait-spec-statement/confirm` | `confirm_trait_spec_statement` | `routes/results.py:990` |
 | GET | `/delivery-events` | `list_delivery_events` | `routes/results.py:1063` |
-| GET | `/models/registered` | `registered_models` | `routes/results.py:1144` |
+| GET | `/models/registered` | `registered_models` | `routes/results.py:1152` |
 
 ### routes/review.py, prefix `/api/review` (8 routes)
 
@@ -2366,7 +2366,7 @@ Phase 3 verdict: single.
 
 Must agree: the MCP registrar and the GUI model pickers read one registry entry shape.
 Side A: `packages/tcip-mcp/src/tcip_mcp/model_registry.py:132` (`def read_registry_index(`, the read path for everything outside the module; `_register_entry`, line 429, replaces one entry by name inside one `tcip_store.transaction` on the key `registry_index_key`, line 116, mints).
-Side B: `packages/tcip-web/src/tcip_web/routes/results.py:1143` (`@router.get("/models/registered")`, serving `model_tools.rank_registered_models`'s listing view) and the browser's one entry declaration, `packages/tcip-web/frontend/src/api/inference.ts:16` (`export interface RegisteredModel {`), held field by field against an entry the real registrar wrote by `tests/test_registry_entry_shape_agreement.py`.
+Side B: `packages/tcip-web/src/tcip_web/routes/results.py:1151` (`@router.get("/models/registered")`, serving `model_tools.rank_registered_models`'s listing view) and the browser's one entry declaration, `packages/tcip-web/frontend/src/api/inference.ts:16` (`export interface RegisteredModel {`), held field by field against an entry the real registrar wrote by `tests/test_registry_entry_shape_agreement.py`.
 Phase 3 verdict: single.
 
 ## S28. operating_point.json prediction-bucket sidecar
