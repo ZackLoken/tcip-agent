@@ -825,7 +825,7 @@ Docstring is the function's docstring first line, verbatim.
 
 | tool | line | audited | docstring first line |
 |---|---|---|---|
-| `deliver_orthomosaic_plant_counts` | `orthomosaic_tools.py:557` | yes | Per-plant detection counts from a persisted orthomosaic prediction bucket plus plant CSV(s). |
+| `deliver_orthomosaic_plant_counts` | `orthomosaic_tools.py:586` | yes | Per-plant detection counts from a persisted orthomosaic prediction bucket plus plant CSV(s). |
 
 ### delivery_tools.py (2 tools)
 
@@ -1547,8 +1547,8 @@ unknown `schema_version`. `experiments._index_refused_mutations`,
 compares in one call; `page.corrupt`/`page.version_refused` both fail the whole call (`None`, not
 a partial index), so a caller who cannot see behind an unreadable entry never reports "no
 refusals" in its place. `plant_mapping._scan_receipts`
-(`pipelines/postprocessing/plant_mapping.py:1377`) and `_require_receipt`
-(`pipelines/postprocessing/plant_mapping.py:1404`), the hard receipt gate `load_mapping` runs
+(`pipelines/postprocessing/plant_mapping.py:1402`) and `_require_receipt`
+(`pipelines/postprocessing/plant_mapping.py:1429`), the hard receipt gate `load_mapping` runs
 before trusting a persisted mapping record:
 every `plant_mapping_built` entry in the record's own project log is scanned for a receipt naming
 the record's digest, and a page reporting `page.corrupt` or `page.version_refused` raises rather
@@ -2203,11 +2203,11 @@ arguments: dict) -> None:`, which calls `record_event` with the dataset root its
 resolved; `routes/annotate.py:150` does the same for its own dataset, `routes/classes.py:63`
 likewise, the one `routes/inference.py:368` imports and calls rather than defining its own);
 `routes/results.py:151` does the same for a project root instead. Reader:
-`pipelines/postprocessing/plant_mapping.py:1404` (`_require_receipt`)
+`pipelines/postprocessing/plant_mapping.py:1429` (`_require_receipt`)
 trusts only a `plant_mapping_built` entry it finds in the log under the root its caller holds
 (the MCP tool's pinned platform root, the platform log's own file until adoption makes it a
 project's; the web route's guarded project root), scanned by `_scan_receipts`
-(`pipelines/postprocessing/plant_mapping.py:1377`), which refuses (never scans past) a page
+(`pipelines/postprocessing/plant_mapping.py:1402`), which refuses (never scans past) a page
 reporting corruption or an unknown `schema_version`.
 Phase 3 verdict: single. Each writer is exercised through a real append and checked for its own
 tool name landing in the log its own scope names: `tests/test_tcip_web_routes.py:766,1193,1229`
