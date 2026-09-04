@@ -36,7 +36,7 @@ _PER_PLANT_VALUE_KEY = "count"
 def deliver_orthomosaic_plant_counts(
     predictions_dir: str,
     raster_path: str,
-    plant_csv_paths: list[str],
+    plant_registry: str,
     output_csv_path: str,
     delivered_phenotype: str,
     crop: str = "",
@@ -53,7 +53,7 @@ def deliver_orthomosaic_plant_counts(
     persisted (never re-runs the expensive tiled pass), resolves each detection's box centroid
     to a real-world coordinate via the raster's own georeferencing tags, and matches it to the
     nearest plant
-    (:func:`assign_detections_to_plants`). Every geolocated plant in ``plant_csv_paths`` gets
+    (:func:`assign_detections_to_plants`). Every geolocated plant ``plant_registry`` names gets
     exactly one row in the delivered CSV: a plant with one or more assigned detections gets their
     sum, a plant the scan covered but matched no detection near gets an explicit ``0`` (a real
     measured absence, not a missing observation, since the tiled scan covers the whole raster and
@@ -102,8 +102,8 @@ def deliver_orthomosaic_plant_counts(
             by the caller rather than taken from the sidecar's recorded ``raster_path``, which
             names a location that may hold a different file by now, and checked against the
             bucket's recorded raster identity before anything is resolved through it.
-        plant_csv_paths: One or more plant-locations CSVs (columns ``plot_name``,
-            ``accession_name``, ``WGS84_centroid_x/y``, …).
+        plant_registry: The name of a plant registry already registered under this project by
+            ``register_plant_registry``.
         output_csv_path: Where to write the delivered per-plant CSV. A relative path resolves
             against the platform state root, never the server process's cwd.
         delivered_phenotype: The crop-vocabulary delivered phenotype this CSV ships under, resolved
@@ -127,6 +127,16 @@ def deliver_orthomosaic_plant_counts(
         return {"error": f"predictions_dir not found: {predictions_dir}"}
     if not Path(raster_path).is_file():
         return {"error": f"raster_path not found: {raster_path}"}
+
+    from tcip_mcp.pipelines.postprocessing.plant_mapping import load_registry, registry_csv_entries
+    from tcip_mcp.project_paths import platform_state_root
+
+    registry_record = load_registry(platform_state_root(), plant_registry)
+    if registry_record is None:
+        return {"error": (
+            f"plant registry not found: {plant_registry!r}; register it with "
+            "register_plant_registry before deliver_orthomosaic_plant_counts reads it")}
+    plant_csv_paths = [e["path"] for e in registry_csv_entries(registry_record)]
     missing = [p for p in plant_csv_paths if not Path(p).is_file()]
     if missing:
         return {"error": f"plant CSV(s) not found: {missing}"}

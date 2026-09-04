@@ -151,11 +151,21 @@ class MappingBuild:
     dates_requested: Optional[list[str]]
     dates: list[str]
     nn_tolerance_m: dict
-    plant_csvs: list[dict]
+    plant_registry: dict
+    """The named :data:`PLANT_REGISTRY_STORE` record this build's plants were read from:
+    ``{"name": ..., "digest": ...}``, resolved once by the calling door (``register_plant_registry``
+    mints the record; this cell only names which one) and stored here rather than the CSV paths
+    and hashes themselves, which the registry now holds. :func:`verify_mapping_inputs` and
+    :func:`resolve_delivery_mapping`'s no-plant-count refusal both read the registry back through
+    :func:`load_registry` using this name, never a copy of its own."""
     capture_identity: dict[str, str]
     capture_digests: dict[str, dict[str, str]]
     unreadable: dict[str, list[str]]
     assignments: dict[str, list[Assignment]] = field(default_factory=dict)
+    supersedes: Optional[str] = None
+    """The archived digest this record replaced, when a same-name rebuild was told to
+    ``supersede`` a record a delivery event still cited (:func:`persist_mapping`); ``None`` for
+    an ordinary build or an uncited rebuild, which replaces as it always has."""
     record_sha256: str = field(default="", metadata={"persisted": False})
     """The digest ``load_mapping`` verified this record's receipt against; blank on a build not
     yet read back through ``load_mapping`` (a fresh ``build_mapping`` result before persisting).
@@ -451,6 +461,140 @@ def _maybe_float(x: Optional[str]) -> Optional[float]:
         return None
 
 
+def registry_content_digest(plants: list[PlantRecord]) -> str:
+    """sha256 over ``plants``' own fields, order-independent, so two registrations of the same
+    plants under two paths (or a different row order in one file) are told apart from a real
+    edit: :func:`register_plant_registry_record` compares this digest against a name already
+    taken, and returns the existing record when it matches rather than refusing a harmless
+    re-registration."""
+    from dataclasses import asdict
+
+    rows = sorted(
+        (asdict(p) for p in plants), key=lambda r: json.dumps(r, sort_keys=True))
+    return hashlib.sha256(json.dumps(rows, sort_keys=True).encode("utf-8")).hexdigest()
+
+
+class NoGeoreferencedPlantsRefusal(Exception):
+    """A registration names a CSV that parsed no georeferenced, named plant. ``paths`` lists
+    every file that failed the parse, so the caller's refusal names them all at once."""
+
+    def __init__(self, message: str, *, paths: list[str]) -> None:
+        super().__init__(message)
+        self.paths = paths
+
+
+class PlantRegistryNameConflict(Exception):
+    """A registration's name is already taken by a different set of plants."""
+
+
+PLANT_REGISTRY_STORE = "plant_registries"
+_REGISTRY_DOC = RootedFileLocator(prefix=("plant_registries",), suffix=".json")
+register_store(
+    StoreDescriptor(
+        name=PLANT_REGISTRY_STORE,
+        kind="record",
+        key_fields=("name",),
+        frozen=True,
+        codec=RECORD_JSON,
+        concurrency="cas",
+        enumerable=True,
+        locator=_REGISTRY_DOC,
+    )
+)
+
+
+def plant_registry_key(project_root: Path | str, name: str) -> Key:
+    """One project's named plant registry: identity state for a plant-locations CSV set, the
+    same ``.tcip/state``-scoped shape :func:`plant_mapping_key` uses, so a registry travels with
+    the project that registered it rather than the dataset it happens to describe."""
+    root = Path(project_root).absolute() / ".tcip" / "state"
+    return Key(PLANT_REGISTRY_STORE, str(root), (name,))
+
+
+def load_registry(project_root: Path | str, name: str) -> Optional[dict]:
+    """The named registry record, or ``None`` when nothing is stored under that name (including
+    a name that was never registered, or one deleted since a mapping recorded it)."""
+    return tcip_store.read(plant_registry_key(project_root, name), default=None)
+
+
+def registry_csv_entries(record: Optional[dict]) -> list[dict]:
+    """The ``{path, sha256, n_plants}`` entries a loaded registry record carries, or an empty
+    list when ``record`` is ``None``: a mapping whose named registry has vanished has nothing
+    left to verify, the same as a mapping that recorded no CSVs at all."""
+    return list(record["csvs"]) if record else []
+
+
+def register_plant_registry_record(
+    project_root: Path | str,
+    name: str,
+    csv_paths: list[Path],
+    *,
+    crop: str,
+    site: str,
+    registered_by: str,
+) -> dict:
+    """Register ``csv_paths`` under ``name`` in this project's plant registry, and return the
+    stored record.
+
+    Reads every path through :func:`read_plant_csvs`, one file at a time, so a refusal names
+    exactly which file parsed no georeferenced, named plant
+    (:class:`NoGeoreferencedPlantsRefusal`); the record holds the same ``{path, sha256,
+    n_plants}`` entries the mapping record held before this door existed, plus ``crop``, ``site``,
+    ``registered_by``, ``registered_at`` and :func:`registry_content_digest` over every parsed
+    row. The read-then-write is one transaction (:func:`tcip_store.transaction`, this store's own
+    ``concurrency="cas"``): a second registration under a taken name returns the existing record
+    unchanged when the digest matches (the same plants again, read from a different path or in a
+    different row order), and raises :class:`PlantRegistryNameConflict` otherwise, naming the two
+    digests, since overwriting a taken name would silently move what every mapping already citing
+    it means.
+    """
+    failed: list[str] = []
+    csvs_meta: list[dict] = []
+    all_plants: list[PlantRecord] = []
+    for p in csv_paths:
+        records = read_plant_csvs([p])
+        if not records:
+            failed.append(str(p))
+            continue
+        all_plants.extend(records)
+        csvs_meta.append({
+            "path": str(p),
+            "sha256": hashlib.sha256(p.read_bytes()).hexdigest(),
+            "n_plants": len(records),
+        })
+    if failed:
+        raise NoGeoreferencedPlantsRefusal(
+            f"{failed} parsed no georeferenced, named plant (need columns plot_name, "
+            "WGS84_centroid_x, WGS84_centroid_y with usable values); register only files that "
+            "carry at least one",
+            paths=failed,
+        )
+
+    digest = registry_content_digest(all_plants)
+    key = plant_registry_key(project_root, name)
+    with tcip_store.transaction(key) as txn:
+        existing = txn.read(key, default=None)
+        if existing is not None:
+            if existing.get("digest") == digest:
+                return existing
+            raise PlantRegistryNameConflict(
+                f"plant registry {name!r} under {project_root} already names different plants "
+                f"(digest {existing.get('digest')!r}, this registration would write "
+                f"{digest!r}); register under a new name")
+        record = {
+            "name": name,
+            "crop": crop,
+            "site": site,
+            "csvs": csvs_meta,
+            "n_plants": len(all_plants),
+            "digest": digest,
+            "registered_by": registered_by,
+            "registered_at": datetime.now(timezone.utc).isoformat(),
+        }
+        txn.write(key, record)
+    return record
+
+
 # ── Geometry helpers ───────────────────────────────────────────────────
 
 
@@ -741,6 +885,7 @@ def build_mapping(
     dataset_id: str,
     project_root: Path | str,
     built_by: str,
+    plant_registry: dict,
     dates: Optional[list[str]] = None,
     nn_tolerance_m: Optional[float] = None,
 ) -> MappingBuild:
@@ -749,7 +894,11 @@ def build_mapping(
 
     ``name``/``dataset_root``/``dataset_id``/``project_root``/``built_by`` are the caller's own
     resolved facts (the door already checked the dataset identity and the project record before
-    calling here); this function does not re-derive them.
+    calling here); this function does not re-derive them. ``plant_csv_paths`` are the files this
+    build actually reads the plants from (resolved by the caller from ``plant_registry``'s own
+    ``name``); ``plant_registry`` is the ``{"name": ..., "digest": ...}`` reference stored on the
+    record in their place, so a later read finds the files through the registry rather than a
+    copy of the paths and hashes here.
 
     ``nn_tolerance_m`` is derived from the plot's ``grid_pitch_m`` when the caller does not pin it
     (not a pinned 10 m): pitch/6, so assign_plants' loosest ``NEAREST_MATCH_FACTOR``-times gate
@@ -773,14 +922,6 @@ def build_mapping(
 
     plant_csv_paths = [Path(p) for p in plant_csv_paths]
     plants = read_plant_csvs(plant_csv_paths)
-    plant_csv_meta = [
-        {
-            "path": str(p),
-            "sha256": hashlib.sha256(p.read_bytes()).hexdigest(),
-            "n_plants": len(read_plant_csvs([p])),
-        }
-        for p in plant_csv_paths if p.is_file()
-    ]
 
     # The ceiling: assign_plants' loosest gate is NEAREST_MATCH_FACTOR x nn_tolerance, so pitch/6
     # -> effective radius <= pitch/2; derive the tolerance from the layout, cap only an override.
@@ -845,7 +986,7 @@ def build_mapping(
         dates_requested=list(dates) if dates is not None else None,
         dates=sorted(dates_walked),
         nn_tolerance_m={"value": nn_tolerance_m, "source": tolerance_source},
-        plant_csvs=plant_csv_meta,
+        plant_registry=plant_registry,
         capture_identity=capture_ids,
         capture_digests=capture_digests_by_date,
         unreadable=unreadable,
@@ -910,7 +1051,38 @@ def record_digest(record: dict) -> str:
     return hashlib.sha256(RECORD_JSON.encode(record)).hexdigest()
 
 
-def persist_mapping(build: MappingBuild, project_root: Path | str, name: str) -> None:
+class MappingRebuildRefusal(Exception):
+    """A same-name rebuild would replace a mapping record a delivery event under this project
+    still cites. ``event_ids`` names every citing event; ``status`` is the web door's HTTP status
+    for it."""
+
+    def __init__(self, message: str, *, event_ids: list[str], status: int = 409) -> None:
+        super().__init__(message)
+        self.event_ids = event_ids
+        self.status = status
+
+
+def _citing_delivery_event_ids(project_root: Path | str, name: str, digest: str) -> list[str]:
+    """Every delivery event under this project whose own ``plant_mapping`` disclosure names
+    (``name``, ``digest``): the events a same-name rebuild would strand by silently replacing the
+    record they cite, sorted for a stable refusal message."""
+    from tcip_mcp.pipelines.resolution import DELIVERY_EVENTS_STORE, delivery_events_scope
+
+    scope = delivery_events_scope(project_root)
+    ids: list[str] = []
+    for key in tcip_store.keys(DELIVERY_EVENTS_STORE, str(scope)):
+        record = tcip_store.read(key, default=None)
+        if not isinstance(record, dict):
+            continue
+        pm = record.get("plant_mapping")
+        if isinstance(pm, dict) and pm.get("name") == name and pm.get("record_sha256") == digest:
+            ids.append(record.get("event_id") or key.parts[-1])
+    return sorted(ids)
+
+
+def persist_mapping(
+    build: MappingBuild, project_root: Path | str, name: str, *, supersede: bool = False,
+) -> None:
     """Write the mapping record, then the receipt that binds it to this build.
 
     The record is committed before the receipt (a log append cannot join a record transaction):
@@ -924,8 +1096,54 @@ def persist_mapping(build: MappingBuild, project_root: Path | str, name: str) ->
     project's, once that root is an adopted project); the web build route passes its own guarded
     project root instead, which can differ from the process's pin when the browser has a
     different project open.
+
+    A rebuild under ``name`` whose current record is still cited by a delivery event under this
+    project raises :class:`MappingRebuildRefusal`, naming the citing events, unless
+    ``supersede=True``. In that case the current record is archived first, under
+    ``plant_mapping_key(project_root, f"{name}@{digest[:12]}")`` (a name :func:`plant_mapping_names`
+    never lists, since it carries ``@`` and fails ``NAME_SEGMENT``), with a fresh
+    ``plant_mapping_built`` receipt appended under that archived name so :func:`load_mapping` can
+    still read it back; ``build.supersedes`` is set to the archived digest before this writes the
+    new record, and the new record's own receipt names both digests. An uncited rebuild replaces
+    as it always has, and records nothing extra.
     """
     from tcip_mcp.audit import record_event_or_raise
+
+    existing_raw = tcip_store.read(plant_mapping_key(project_root, name), default=None)
+    archived_digest: Optional[str] = None
+    if existing_raw is not None:
+        try:
+            existing_record = _validated_record(existing_raw, project_root, name)
+            existing_digest: Optional[str] = record_digest(existing_record)
+        except ValueError:
+            existing_digest = None
+        citing = (
+            _citing_delivery_event_ids(project_root, name, existing_digest)
+            if existing_digest is not None else []
+        )
+        if citing and not supersede:
+            raise MappingRebuildRefusal(
+                f"plant mapping {name!r} under {project_root} is cited by delivery event(s) "
+                f"{citing}: rebuilding under this name would strand them. Pass supersede=True to "
+                "archive the current record and rebuild.",
+                event_ids=citing,
+            )
+        if citing:
+            archived_name = f"{name}@{existing_digest[:12]}"
+            tcip_store.replace(plant_mapping_key(project_root, archived_name), existing_record)
+            record_event_or_raise(
+                "plant_mapping_built",
+                {
+                    "name": archived_name,
+                    "project_root": str(project_root),
+                    "dataset_root": existing_record.get("dataset_root"),
+                    "built_at": existing_record.get("built_at"),
+                    "record_sha256": existing_digest,
+                },
+                scope=project_root,
+            )
+            archived_digest = existing_digest
+            build.supersedes = archived_digest
 
     record = build.to_record()
     tcip_store.replace(plant_mapping_key(project_root, name), record)
@@ -938,6 +1156,7 @@ def persist_mapping(build: MappingBuild, project_root: Path | str, name: str) ->
             "dataset_root": build.dataset_root,
             "built_at": build.built_at,
             "record_sha256": record_sha256,
+            "supersedes": archived_digest,
         },
         scope=project_root,
     )
@@ -978,11 +1197,12 @@ _REQUIRED_TOP_KEYS: dict[str, type | tuple[type, ...]] = {
     "dates_requested": (list, type(None)),
     "dates": list,
     "nn_tolerance_m": dict,
-    "plant_csvs": list,
+    "plant_registry": dict,
     "capture_identity": dict,
     "capture_digests": dict,
     "unreadable": dict,
     "assignments": dict,
+    "supersedes": (str, type(None)),
 }
 assert set(_REQUIRED_TOP_KEYS) == set(_PERSISTED_FIELD_NAMES), (
     "MappingBuild's own fields and _REQUIRED_TOP_KEYS's key set have drifted apart")
@@ -1196,8 +1416,12 @@ def verify_mapping_inputs(
     remedy = "rebuild with build_plant_mapping"
 
     # Plant CSVs first: the per-capture moved-position check below trusts only verified bytes.
+    # Read through the registry build.plant_registry names, never a copy embedded on this record.
+    registry_name = (build.plant_registry or {}).get("name")
+    registry_entries = registry_csv_entries(
+        load_registry(build.project_root, registry_name) if registry_name else None)
     plant_csvs_unverified: list[str] = []
-    for entry in build.plant_csvs:
+    for entry in registry_entries:
         p = Path(entry["path"])
         if not p.is_file():
             plant_csvs_unverified.append(entry["path"])
@@ -1208,7 +1432,7 @@ def verify_mapping_inputs(
                 f"plant CSV {entry['path']} was rewritten since this mapping was built; "
                 "rebuild")}
     verified_plants = read_plant_csvs(
-        Path(entry["path"]) for entry in build.plant_csvs
+        Path(entry["path"]) for entry in registry_entries
         if entry["path"] not in plant_csvs_unverified
     )
 
@@ -1425,8 +1649,11 @@ def resolve_delivery_mapping(
                 "date(s)")
         # Re-reading captures for a delivery that can attribute nothing would disclose about
         # nothing; refuse here, before verify_mapping_inputs, on the record's own evidence.
-        paths = [entry["path"] for entry in mapping_build.plant_csvs]
-        n_plants = sum(entry["n_plants"] for entry in mapping_build.plant_csvs)
+        registry_name = (mapping_build.plant_registry or {}).get("name")
+        registry_entries = registry_csv_entries(
+            load_registry(project_root, registry_name) if registry_name else None)
+        paths = [entry["path"] for entry in registry_entries]
+        n_plants = sum(entry["n_plants"] for entry in registry_entries)
         if n_plants == 0:
             raise MappingDeliveryRefusal(
                 f"the plant CSVs this mapping was built from ({paths}) parsed no plant with "
