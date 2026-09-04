@@ -206,18 +206,22 @@ def supersede_delivery(
         replacement_event_id: A fresh delivery event that replaces this one, when one already
             exists. Refuses naming the id when it does not resolve to a stored event.
 
-    Refuses (``{"error": ...}``) when ``event_id`` names no stored delivery event, when
-    ``reason`` is empty, when ``replacement_event_id`` is given but does not resolve, and when
-    ``event_id`` already carries a supersession (a withdrawal is not rewritten; a correction
+    Refuses (``{"error": ...}``) when ``event_id`` names no stored delivery event, when either
+    the superseded or the replacement event is stored but does not validate against
+    ``DeliveryEventRecord`` (the same shape check the Results tab's panel route runs, so this
+    door never supersedes, or names as a replacement, a record the panel would refuse to list),
+    when ``reason`` is empty, when ``replacement_event_id`` is given but does not resolve, and
+    when ``event_id`` already carries a supersession (a withdrawal is not rewritten; a correction
     is a fresh statement naming this one's own remedy: none exists yet, so the caller removes the
     stored record by hand and asks for one, on the same conservative footing the rewritten-CSV
     refusal takes elsewhere).
     """
     from tcip_mcp.pipelines.delivery_events_schema import DeliverySupersessionRecord
     from tcip_mcp.pipelines.resolution import (
-        delivery_event_key,
+        DeliveryEventShapeError,
         delivery_events_scope,
         delivery_supersession_key,
+        read_one_delivery_event,
     )
     from tcip_mcp.project_paths import platform_state_root
 
@@ -227,12 +231,18 @@ def supersede_delivery(
     platform_root = platform_state_root()
     scope = delivery_events_scope(platform_root)
 
-    event = tcip_store.read(delivery_event_key(scope, event_id), default=None)
+    try:
+        event = read_one_delivery_event(platform_root, event_id)
+    except DeliveryEventShapeError as exc:
+        return {"error": str(exc)}
     if event is None:
         return {"error": f"delivery event {event_id!r} not found under {scope}"}
 
     if replacement_event_id is not None:
-        replacement = tcip_store.read(delivery_event_key(scope, replacement_event_id), default=None)
+        try:
+            replacement = read_one_delivery_event(platform_root, replacement_event_id)
+        except DeliveryEventShapeError as exc:
+            return {"error": str(exc)}
         if replacement is None:
             return {"error": f"replacement_event_id {replacement_event_id!r} not found under {scope}"}
 

@@ -827,7 +827,7 @@ Docstring is the function's docstring first line, verbatim.
 | tool | line | audited | docstring first line |
 |---|---|---|---|
 | `deliver_per_plant_csv` | `delivery_tools.py:30` | yes | The general per-plant CSV door: `aggregate_per_plant`'s own output plus the existing |
-| `supersede_delivery` | `delivery_tools.py:187` | yes | Record that a delivered file's number is withdrawn or replaced, without touching the file |
+| `supersede_delivery` | `delivery_tools.py:188` | yes | Record that a delivered file's number is withdrawn or replaced, without touching the file |
 
 ### phenology_tools.py (4 tools)
 

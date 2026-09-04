@@ -2027,6 +2027,35 @@ class DeliveryEventShapeError(ValueError):
         self.event_id = event_id
 
 
+def _validated_delivery_event(record: Any, event_id: str | None, scope: Path) -> None:
+    """Validate one stored ``delivery_events`` record against
+    :class:`~tcip_mcp.pipelines.delivery_events_schema.DeliveryEventRecord`, raising
+    :class:`DeliveryEventShapeError` naming ``event_id`` and the conform-script remedy on a shape
+    error. The one check :func:`read_delivery_events` and :func:`read_one_delivery_event` both
+    run, so a record either reader meets refuses the same way rather than one tolerating what the
+    other would refuse."""
+    from pydantic import ValidationError
+
+    from tcip_mcp.pipelines.delivery_events_schema import (
+        DeliveryEventRecord,
+        validation_error_detail,
+    )
+
+    try:
+        DeliveryEventRecord.model_validate(record)
+    except ValidationError as exc:
+        raise DeliveryEventShapeError(
+            f"delivery event {event_id!r} under {scope} does not validate against the "
+            f"current delivery_events shape: {validation_error_detail(exc)}; run "
+            "scripts/conform_delivery_events.py against this project to see which stored "
+            "events do not validate and why (--plan previews; a record missing only "
+            "acknowledged_by and acknowledgement_reason is write-forwarded to null, their "
+            "true value for a delivery predating those keys; every other missing key is "
+            "named, never rewritten, since its value was never computed for that delivery)",
+            event_id=event_id,
+        ) from exc
+
+
 def read_delivery_events(project_root: str | Path | None = None) -> list[dict]:
     """Every ``delivery_events`` record stored under this project, each validated against
     :class:`~tcip_mcp.pipelines.delivery_events_schema.DeliveryEventRecord`.
@@ -2040,33 +2069,32 @@ def read_delivery_events(project_root: str | Path | None = None) -> list[dict]:
     function, so a shape refusal reads the same wherever it is met, and a rebuild's own citing-
     events check can never silently skip a record it cannot decode.
     """
-    from pydantic import ValidationError
-
-    from tcip_mcp.pipelines.delivery_events_schema import (
-        DeliveryEventRecord,
-        validation_error_detail,
-    )
-
     scope = delivery_events_scope(project_root)
     records: list[dict] = []
     for key in tcip_store.keys(DELIVERY_EVENTS_STORE, str(scope)):
         record = tcip_store.read(key, default=None)
         event_id = record.get("event_id") if isinstance(record, dict) else None
-        try:
-            DeliveryEventRecord.model_validate(record)
-        except ValidationError as exc:
-            raise DeliveryEventShapeError(
-                f"delivery event {event_id!r} under {scope} does not validate against the "
-                f"current delivery_events shape: {validation_error_detail(exc)}; run "
-                "scripts/conform_delivery_events.py against this project to see which stored "
-                "events do not validate and why (--plan previews; a record missing only "
-                "acknowledged_by and acknowledgement_reason is write-forwarded to null, their "
-                "true value for a delivery predating those keys; every other missing key is "
-                "named, never rewritten, since its value was never computed for that delivery)",
-                event_id=event_id,
-            ) from exc
+        _validated_delivery_event(record, event_id, scope)
         records.append(record)
     return records
+
+
+def read_one_delivery_event(project_root: str | Path | None, event_id: str) -> dict | None:
+    """One ``delivery_events`` record by its own id, validated against
+    :class:`~tcip_mcp.pipelines.delivery_events_schema.DeliveryEventRecord` the same way
+    :func:`read_delivery_events` validates every record it lists.
+
+    ``None`` when nothing is stored under ``event_id``; raises :class:`DeliveryEventShapeError`
+    when a stored record does not validate. ``supersede_delivery`` reads the event it supersedes
+    and any replacement event through this, so it never quietly supersedes a record the Results
+    tab's panel would refuse to list.
+    """
+    scope = delivery_events_scope(project_root)
+    record = tcip_store.read(delivery_event_key(scope, event_id), default=None)
+    if record is None:
+        return None
+    _validated_delivery_event(record, event_id, scope)
+    return record
 
 
 def _delivery_event_id(door: str, output_path: str | None, now: str) -> str:
