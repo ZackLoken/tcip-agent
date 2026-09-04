@@ -326,7 +326,7 @@ def bucket_id_map(pred_dir: Path) -> dict | None:
     """The bucket's recorded ``id_map`` (name -> int), or ``None`` if absent/malformed.
 
     Read from ``operating_point.json``, the same sidecar every prediction-bucket writer
-    (``export_predictions``, the GUI worker) stamps ``id_map`` into, never re-derived. A non-dict
+    (``run_inference``, the GUI worker) stamps ``id_map`` into, never re-derived. A non-dict
     ``id_map`` (a malformed/foreign sidecar) is treated the same as absent, fail closed, never
     duck-typed.
     """

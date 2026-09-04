@@ -1327,7 +1327,7 @@ def ungeoreferenced_capture_message(walked: str, unreadable: Sequence[str] = ())
         "reads (a photograph with no GPS position, or a raster or band-group capture, which never "
         "carries one here), so no capture can be assigned to a plant; per-plant identity for "
         "ungeoreferenced capture needs a plant-tag mechanism the platform does not have (README's "
-        "roadmap), and a georeferenced orthomosaic delivers per plant through export_predictions's "
+        "roadmap), and a georeferenced orthomosaic delivers per plant through run_inference's "
         "raster regime and deliver_orthomosaic_plant_counts instead"
     )
 

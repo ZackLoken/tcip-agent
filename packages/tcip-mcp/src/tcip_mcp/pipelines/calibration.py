@@ -30,7 +30,7 @@ def calibrate_operating_point(predictor, trait, labels_dir, images_dir, *,
     ``evaluation.py``'s ``n_excluded_incomplete_attribute`` for the same exclusion. It is a separate
     return value, not a field on the bundle: ``run_inference`` surfaces it on its own response dict,
     and it does not travel into the persisted ``operating_point.json`` sidecar that
-    ``export_predictions`` writes.
+    ``run_inference`` writes.
 
     ``evidence`` is what a delivery door needs to earn the validation record behind a validated
     count: the name of the resolver this function just ran, the arguments it ran it over, and the

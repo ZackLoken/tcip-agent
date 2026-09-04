@@ -11,7 +11,7 @@ The operating point (conf / NMS IoU / tiling / max_dets) is resolved through the
 ``raw_operating_point`` bundle as the MCP door and its provenance is stamped alongside the
 predictions, so a GUI run and an agent run can't diverge on the count or hide an unvalidated
 operating point. A run whose tile scale has no real basis at all is refused by the shared delivery
-gate before anything is written, the same refusal ``export_predictions`` makes.
+gate before anything is written, the same refusal ``run_inference`` makes.
 """
 
 from __future__ import annotations
@@ -253,7 +253,7 @@ def _worker(job: InferenceJob) -> None:
             conf_stated=job.conf_stated, max_dets_stated=job.max_dets_stated,
         )
 
-        # Refuse an ungrounded tile scale before the pass, the same gate export_predictions applies.
+        # Refuse an ungrounded tile scale before the pass, the same gate run_inference applies.
         from tcip_mcp.pipelines.resolution import check_delivery_gate, tile_size_gate_flag
 
         tile_ref = tile_size_gate_flag(op_bundle.to_provenance()["operating_point"])

@@ -52,7 +52,7 @@ def _reserved_spatial_regions(split: dict) -> dict | None:
 def reserved_calibration_region_available(experiment_id: str) -> bool:
     """Whether ``experiment_id``'s own persisted split is a spatial-strip split with a non-empty
     reserved ``calibration`` region: the cheap, dataset-free precondition check
-    ``export_predictions`` runs before deciding whether a ``trait`` + ``raster_path`` export may
+    ``run_inference`` runs before deciding whether a ``trait`` + ``raster_path`` export may
     proceed into block calibration at all, rather than the unconditional refusal it used to be.
     """
     from tcip_mcp.experiments import read_split_manifest

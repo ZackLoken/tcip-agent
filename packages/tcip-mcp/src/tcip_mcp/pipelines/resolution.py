@@ -933,16 +933,16 @@ STAMP_EXTENSION_KEYS: dict[str, str] = {
     "raster_content_identity": "the raster-export door, recorded for every run of that regime",
     "overlap": "the web inference worker",
     "overlap_source": "the web inference worker",
-    "calibration_curve_path": "the shared per-image bucket publisher behind export_predictions "
+    "calibration_curve_path": "the shared per-image bucket publisher behind run_inference "
                               "and deliver_per_image_counts's live path, for a calibrated run that "
                               "persisted a curve",
-    "gate_evidence_summary": "the shared per-image bucket publisher behind export_predictions "
+    "gate_evidence_summary": "the shared per-image bucket publisher behind run_inference "
                              "and deliver_per_image_counts's live path, for a calibrated run that "
                              "persisted a curve, and calibration_tools.calibrate_count_operating_point, "
                              "which earns a claim over an already-published bucket rather than "
                              "publishing one",
     "image_filenames": "the per-image bucket publishers (the shared image-bucket publisher behind "
-                       "export_predictions and deliver_per_image_counts's live path, and the web inference "
+                       "run_inference and deliver_per_image_counts's live path, and the web inference "
                        "worker): each prediction document stem mapped to its source image's "
                        "basename with extension",
 }
@@ -2260,7 +2260,7 @@ def tile_size_gate_flag(operating_point: dict | None) -> str | None:
     """The tile-geometry dimension's delivery-gate flag for one resolved operating point.
 
     ``operating_point`` is a bundle's ``to_provenance()["operating_point"]`` mapping, the same shape
-    a run returns in-memory and ``export_predictions`` persists into ``operating_point.json``.
+    a run returns in-memory and ``run_inference`` persists into ``operating_point.json``.
     Returns ``None`` when tiling was not operative for that run (``resolve_tile_size_param`` only
     sets ``requires_validation`` when ``tiled``), so an untiled run's tile_size never manufactures a
     refusal over a dimension that was never operative. Otherwise it returns the reference the tile
