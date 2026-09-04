@@ -548,8 +548,10 @@ def render_failure_cases(
     """
     # Auto-detect images_dir
     if not images_dir:
+        from tcip_mcp.dataset_layout import image_root
+
         labels_path = Path(labels_dir)
-        candidate = labels_path.parent.parent / "images"
+        candidate = image_root(labels_path.parent.parent)
         if candidate.is_dir():
             images_dir = str(candidate)
         else:

@@ -18,6 +18,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Query, Request
 
+from tcip_mcp.dataset_layout import image_root
 from tcip_web.paths import allowed_roots, assert_path_allowed, exposed_arrival
 
 router = APIRouter(prefix="/api/fs", tags=["fs"])
@@ -42,7 +43,7 @@ def _is_noise_dir(name: str, st: os.stat_result) -> bool:
 def _entry(p: Path) -> dict:
     # ``is_dataset_root`` marks folders that contain an ``images/`` subdir, so the picker
     # can hint which ones are directly selectable as a dataset root.
-    return {"name": p.name or str(p), "path": str(p), "is_dataset_root": (p / "images").is_dir()}
+    return {"name": p.name or str(p), "path": str(p), "is_dataset_root": image_root(p).is_dir()}
 
 
 def _windows_drives() -> list[dict]:
