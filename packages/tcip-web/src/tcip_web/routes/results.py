@@ -1137,7 +1137,7 @@ def list_delivery_events(project_root: str) -> dict:
     own ``PlantRegistryDisclosure``, which names no mapping to resolve) carries no
     ``plant_mapping_resolved_key`` at all.
     """
-    from tcip_mcp.pipelines.delivery_events_schema import with_supersessions
+    from tcip_mcp.pipelines.delivery_events_schema import is_mapping_disclosure, with_supersessions
     from tcip_mcp.pipelines.postprocessing.plant_mapping import resolved_mapping_key_for_citation
     from tcip_mcp.pipelines.resolution import (
         DeliveryEventShapeError,
@@ -1152,7 +1152,7 @@ def list_delivery_events(project_root: str) -> dict:
         raise HTTPException(400, str(exc)) from exc
     for record in records:
         pm = record.get("plant_mapping")
-        if isinstance(pm, dict) and "name" in pm and "record_sha256" in pm:
+        if is_mapping_disclosure(pm):
             record["plant_mapping_resolved_key"] = resolved_mapping_key_for_citation(
                 root, pm["name"], pm["record_sha256"])
     return {"records": with_supersessions(records, load_delivery_supersessions(root))}

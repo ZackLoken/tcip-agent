@@ -566,24 +566,26 @@ def verify_registry_csv_bytes(registry_entries: list[dict]) -> tuple[list[str], 
     """Check each of ``registry_entries``'s (:func:`registry_csv_entries`'s own ``{path, sha256,
     n_plants}`` shape) recorded bytes against what is on disk now.
 
-    Returns the missing paths and the rewritten-file refusal, naming the file, or ``None`` when
-    every present path's bytes still match what was registered; a caller decides for itself what a
-    missing path means (:func:`verify_mapping_inputs` discloses it,
-    :func:`~tcip_mcp.tools.orthomosaic_tools.deliver_orthomosaic_plant_counts` refuses on it too),
-    this function only reports the bytes fact both read.
+    Returns every missing path (the loop runs to completion rather than stopping at the first
+    rewritten file) and the fact that the first rewritten file was rewritten, naming it, or
+    ``None`` when every present path's bytes still match what was registered. This function
+    reports the bytes facts only, never a remedy: a caller decides for itself what a missing path
+    means and composes its own wording for a rewritten one
+    (:func:`verify_mapping_inputs` and
+    :func:`~tcip_mcp.tools.orthomosaic_tools.deliver_orthomosaic_plant_counts` each refuse under a
+    different remedy, since one can rebuild a mapping against a new registry and the other cannot).
     """
     missing: list[str] = []
+    rewritten: Optional[str] = None
     for entry in registry_entries:
         p = Path(entry["path"])
         if not p.is_file():
             missing.append(entry["path"])
             continue
         digest = hashlib.sha256(p.read_bytes()).hexdigest()
-        if digest != entry["sha256"]:
-            return missing, (
-                f"plant CSV {entry['path']} was rewritten since it was registered: "
-                "re-register the plant registry against its current bytes, or restore the file")
-    return missing, None
+        if digest != entry["sha256"] and rewritten is None:
+            rewritten = f"plant CSV {entry['path']} was rewritten since it was registered"
+    return missing, rewritten
 
 
 def parse_plant_registry_csvs(csv_paths: list[Path]) -> tuple[list[dict], str, int]:
@@ -1144,13 +1146,14 @@ def _citing_delivery_event_ids(project_root: Path | str, name: str, digest: str)
     this project that does not validate refuses the whole call rather than being silently skipped
     from a citing list a rebuild refusal must be complete to trust.
     """
+    from tcip_mcp.pipelines.delivery_events_schema import is_mapping_disclosure
     from tcip_mcp.pipelines.resolution import read_delivery_events
 
     ids = [
         record["event_id"] for record in read_delivery_events(project_root)
-        if isinstance(record.get("plant_mapping"), dict)
-        and record["plant_mapping"].get("name") == name
-        and record["plant_mapping"].get("record_sha256") == digest
+        if is_mapping_disclosure(record.get("plant_mapping"))
+        and record["plant_mapping"]["name"] == name
+        and record["plant_mapping"]["record_sha256"] == digest
     ]
     return sorted(ids)
 
@@ -1516,8 +1519,11 @@ def verify_mapping_inputs(
 
     Never raises: returns ``{"refusal": str}`` for any of the above; otherwise
     ``{"captures_unverified": [...], "plant_csvs_unverified": [...]}``, entries in ``build.dates``
-    order and, within a date, sorted by name. A plant CSV missing or rewritten in place
-    disclose/refuse exactly as before.
+    order and, within a date, sorted by name. A missing plant CSV is still disclosed in
+    ``plant_csvs_unverified`` as before; a rewritten one now refuses under this function's own
+    remedy (restore the file's registered bytes, or register the current file under a new
+    registry name, rebuild the mapping against it, and deliver under that name), composed here
+    rather than read from :func:`verify_registry_csv_bytes`, which reports the bytes fact only.
     """
     from tcip_mcp.dataset_layout import image_dir
     from tcip_mcp.pipelines.image_utils import (
@@ -1533,9 +1539,12 @@ def verify_mapping_inputs(
     registry_entries, registry_refusal = registry_entries_or_refusal(build, build.project_root)
     if registry_refusal:
         return {"refusal": registry_refusal}
-    plant_csvs_unverified, rewritten_refusal = verify_registry_csv_bytes(registry_entries)
-    if rewritten_refusal:
-        return {"refusal": rewritten_refusal}
+    plant_csvs_unverified, rewritten_fact = verify_registry_csv_bytes(registry_entries)
+    if rewritten_fact:
+        return {"refusal": (
+            f"{rewritten_fact}: restore the file's registered bytes, or register the current "
+            "file under a new registry name, rebuild the mapping against it, and deliver under "
+            "that name")}
     verified_plants = read_plant_csvs(
         Path(entry["path"]) for entry in registry_entries
         if entry["path"] not in plant_csvs_unverified
