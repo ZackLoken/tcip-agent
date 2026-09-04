@@ -61,12 +61,13 @@ _UNAVAILABLE_REASON = (
 
 
 def _absolutize_guard_command(command: str, python: str, guard_dir: str) -> str:
-    """Rewrite ``python <rel>/agent_*.py`` → ``"<python>" "<guard_dir>/<script>"``.
+    """Rewrite ``python <path>/agent_*.py`` → ``"<python>" "<guard_dir>/<script>"``.
 
-    Only rewrites a command that invokes an ``agent_*.py`` script under the fence directory (the
-    PreToolUse guards, the SessionEnd learning-capture hook, and the SessionStart ritual-injection
-    hook); anything else is returned unchanged. Quoted, forward-slashed paths parse under both
-    cmd.exe and POSIX sh.
+    Matches on basename alone (an ``agent_`` prefix, a ``.py`` suffix), the shape of the
+    PreToolUse guards, the SessionEnd learning-capture hook, and the SessionStart
+    ritual-injection hook; a match is rewritten to ``guard_dir/<basename>`` regardless of the
+    directory the original token pointed at. Anything that doesn't match is returned unchanged.
+    Quoted, forward-slashed paths parse under both cmd.exe and POSIX sh.
     """
     for tok in command.split():
         name = tok.rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
