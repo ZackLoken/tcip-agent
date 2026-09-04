@@ -408,6 +408,9 @@ PLATFORM_CLAIMS: Mapping[str, Claim] = {
     "resolve_scale_sidecar": Claim(
         PREDICTION_BUCKET, (_named(name="resolve_scale", suffix=".json"),)
     ),
+    "raster_pass_progress": Claim(
+        PREDICTION_BUCKET, (_rooted(".tcip", "raster_pass_progress", suffix=".json"),)
+    ),
 }
 """One row per record and log store the platform declares, keyed by store name.
 
