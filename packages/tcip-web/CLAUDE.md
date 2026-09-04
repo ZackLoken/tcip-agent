@@ -32,16 +32,20 @@ Use the `frontend-design` skill for IA/visual work.
 
 `terminal.py` spawns a real `claude` process for the browser-facing "Agent" terminal, with
 `--settings` pointing at a spawn-time materialized copy of the committed
-`packages/tcip-web/src/tcip_web/agent_terminal.settings.json` (absolute hook paths; the committed
-file itself only if materialization fails), a permission fence (an explicit deny list over
-platform internals plus a narrow allowlist, `Bash`/`PowerShell` guards, a `SessionStart`
+`packages/tcip-web/src/tcip_web/agent_terminal.settings.json` (absolute hook paths; the
+committed file itself only if materialization fails), a permission fence (an explicit deny list
+over platform internals plus a narrow allowlist, `Bash`/`PowerShell` guards, a `SessionStart`
 ritual-injection hook, `SessionEnd` learning capture) scoped to that breeder-facing session; a
 write that is neither denied nor allow-listed reaches a human approval prompt rather than being
-auto-denied. `--settings` merges its permission lists (union) with the repo root's own
-`.claude/settings.json` and the user's own settings rather than replacing them; the developer's
-own `claude` session (this one, launched with no `--settings` flag at all) is simply a different
-process, unaffected by the fence file by design. Don't extend or edit that fence file without calling it out
-explicitly; it's a security boundary, not incidental config.
+auto-denied. `--settings` merges its permission lists (union) with the repo root's own,
+gitignored, developer-local `.claude/settings.json` and the user's own settings rather than
+replacing them (Claude Code's own configuration documentation,
+code.claude.com/docs/en/configuration, states that list-valued settings keys merge across
+sources); a broad allow entry in the developer's own user settings therefore widens the
+breeder-lane fence too, which is why the fence is deny-list first. The developer's own `claude`
+session (this one, launched with no `--settings` flag at all) is simply a different process,
+unaffected by the fence file by design. Don't extend or edit that fence file without calling it
+out explicitly; it's a security boundary, not incidental config.
 
 Each launch records what it ran: the session answers `launched` (the executable, `argv[0]`, and
 the version it declares to `--version`, probed once per process on the resolved CLI only and never
