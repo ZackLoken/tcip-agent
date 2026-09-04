@@ -146,6 +146,19 @@ def test_load_canopy_segments_refuses_a_point_naming_the_record(tmp_path: Path) 
             data, subject="canopy", raster_stem=raster_path.stem, raster_identity=identity)
 
 
+def test_load_canopy_segments_refuses_a_geometry_less_annotation(tmp_path: Path) -> None:
+    """An image-level label of the stated subject (a subject with no geometry at all) names no
+    region, same as a Point, and must not reach the box-to-polygon conversion."""
+    _, raster_path, _georef, identity = _setup(tmp_path)
+    data = _write_document(raster_path, [
+        Annotation(subject="canopy", geometry=None, created_by="user:breeder"),
+    ])
+
+    with pytest.raises(CanopySegmentRefusal, match="no geometry"):
+        load_canopy_segments(
+            data, subject="canopy", raster_stem=raster_path.stem, raster_identity=identity)
+
+
 def test_load_canopy_segments_refuses_a_scored_polygon(tmp_path: Path) -> None:
     _, raster_path, _georef, identity = _setup(tmp_path)
     data = _write_document(raster_path, [
