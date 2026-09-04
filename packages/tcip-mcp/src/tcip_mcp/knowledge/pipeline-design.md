@@ -176,7 +176,7 @@ tiling persistence) against a `model_source` builder; run each stage's model wit
 # through the audited envelope, so provenance and immutability hold across the whole run.
 stage_a = launch_training(config={"model_source": {...}, "data": {...}})
 stage_b = launch_training(config={"model_source": {...}, "data": {...}})
-export_predictions(checkpoint_path=stage_b_best, images_dir=images_dir, output_dir="stage_b_preds")
+run_inference(checkpoint_path=stage_b_best, images_dir=images_dir, output_dir="stage_b_preds")
 
 # aggregate_per_plant never guesses plant identity from a filename; supply a real plant_id_fn.
 # build_plant_mapping (a GNSS + capture-sequence resolver) is the real mechanism.

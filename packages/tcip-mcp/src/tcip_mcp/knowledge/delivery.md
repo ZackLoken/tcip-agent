@@ -58,8 +58,7 @@ Examples use real `crops.yml` trait names; verify any trait against `crops.yml` 
 | Tool | Purpose |
 |------|---------|
 | logged `scripts/` script | Produces the Per-Plant CSV Schema above by chaining `launch_training` + `run_inference` then the importable postprocessing libs `aggregate_per_plant` / `export_aggregated_csv`; see `pipeline-design` skill for the chaining mechanics |
-| `export_predictions` | Export predictions as per-image JSON (COCO-shaped). A bucket (`output_dir`, the run's own prediction directory, not a score bin) with review verdicts is immutable; the export redirects to a fresh `<dir>@r2` bucket (see the response's `output_dir`); `overwrite=True` forces in-place but is refused when verdicts exist |
-| `run_inference` | Run batch inference on images |
+| `run_inference` | Run a checkpoint over images or a raster and persist predictions as per-image JSON (COCO-shaped) or, for a raster, one whole-mosaic prediction file. A bucket (`output_dir`, the run's own prediction directory, not a score bin) with review verdicts is immutable; the run redirects to a fresh `<dir>@r2` bucket (see the response's `output_dir`); `overwrite=True` forces in-place but is refused when verdicts exist |
 | `deliver_phenology_milestones` | Per-plant bloom CSV (05/50/95-per-date) from classified preds + plant mapping; its own column schema; see `phenology` skill |
 | `deliver_orthomosaic_plant_counts` | Per-plant detection counts from a persisted whole-raster prediction bucket plus plant-locations CSV(s); georeferences the boxes, assigns them to plants, and delivers through `export_aggregated_csv`, so it inherits the same gate and provenance columns; refuses a bucket that cannot vouch for the caller's raster |
 | `calibrate_scalar_operating_point` | Calibrate and validate a continuous or ordinal trait's prediction against a disjoint held-out split; stamps `ordinal_operating_point.json` / `regression_operating_point.json`, the on-disk producer `export_aggregated_csv` reconciles against |
@@ -74,9 +73,9 @@ the stamp's `image_filenames` map (each prediction document's stem mapped to its
 filename, recorded at publication) and falls back to the bare stem, disclosed in the response's
 `image_note`, for a bucket stamped before that map existed or for a stem the map does not name.
 Don't reach for it when the per-plant schema is what's wanted. Two source regimes: live (`checkpoint_path` +
-`images_dir`, routing through `run_inference`, optionally persisting the counted predictions into
-`predictions_dir` under `export_predictions`'s own publish contract) or bucket (`predictions_dir`
-alone, no GPU, reading an existing reviewed bucket's own stamp), exactly one stated.
+`images_dir`, routing through the same verified pass `run_inference` runs, optionally persisting the
+counted predictions into `predictions_dir` under `run_inference`'s own publish contract) or bucket
+(`predictions_dir` alone, no GPU, reading an existing reviewed bucket's own stamp), exactly one stated.
 
 ## The meaning door (what the number is)
 
@@ -139,7 +138,7 @@ only when every dimension it was handed clears, and otherwise refuses (or, with
   granularity `build_plant_mapping` attributed captures to plants at; the curve CSV repeats the
   same delivery-wide `images_unattributed` count beside its own per-row `n_images`.
 - `deliver_per_image_counts`'s live regime, given a `predictions_dir`, publishes into it through the same
-  bracket `export_predictions` publishes with (tile gate, count-claim gate, frozen-lineage-pointer
+  bracket `run_inference` publishes with (tile gate, count-claim gate, frozen-lineage-pointer
   refusal, write, lineage link), then hands `export_detection_csv` that bucket; the CSV's own
   delivery gate then runs exactly once, inside the writer, never a second time at the door. Without
   a `predictions_dir`, the door calls the writer with no bucket at all, and the writer's own
@@ -183,13 +182,14 @@ only when every dimension it was handed clears, and otherwise refuses (or, with
   all has no value to ship provisionally either, so `acknowledge_unvalidated` cannot admit that case:
   it refuses unconditionally.
 
-`run_inference` stays fully ungated but honestly stamped: the review loop must be able to produce
-unvalidated predictions to *reach* a validated measurement, so it never refuses on conf; it does
-refuse (unconditionally, no `acknowledge_unvalidated`) when tiling is requested and the checkpoint's
-tile scale has no real basis at all, since there is no number to tile at. `export_predictions`, the
-door that actually persists a prediction bucket other doors treat as ground truth, applies the same
-tile_size gate on top, which any of the three bases clears. Conf itself is never gated at either
-writer; the measurement gate lives at the final phenotype door.
+The private pass beneath `run_inference` stays fully ungated but honestly stamped: the review loop
+must be able to produce unvalidated predictions to *reach* a validated measurement, so it never
+refuses on conf; it does refuse (unconditionally, no `acknowledge_unvalidated`) when tiling is
+requested and the checkpoint's tile scale has no real basis at all, since there is no number to tile
+at. `run_inference` itself, the door that actually persists a prediction bucket other doors treat as
+ground truth, applies a further tile_size gate on top of that pass' own result: a real-but-unvalidated
+scale (any of the three bases) still refuses the write unless `acknowledge_unvalidated=True`. Conf
+itself is never gated at either layer; the measurement gate lives at the final phenotype door.
 
 ## Quality Control
 

@@ -153,7 +153,7 @@ source file under a covered root that no row names.
 | packages/tcip-mcp/src/tcip_mcp/tools/experiment_tools.py | Experiment tracking MCP tools: create, log, compare, and trace experiments. | 4 | 2 |
 | packages/tcip-mcp/src/tcip_mcp/tools/feedback_tools.py | Review -> retrain feedback MCP tools. | 15 | 3 |
 | packages/tcip-mcp/src/tcip_mcp/tools/gui_tools.py | GUI-driving tools: push data to a panel, or drive the live Annotate/Review tab to a frame. | 10 | 1 |
-| packages/tcip-mcp/src/tcip_mcp/tools/inference_tools.py | Inference MCP tools: run_inference, export_predictions and deliver_per_image_counts, sharing one verified body (``_run_inference_verified``) so the firewalled operating point (conf/NMS/tiling/max_dets) resolves identically for every entry point that runs a model over images; export_predictions and deliver_per_image_counts's live-with-predictions_dir path also share one publish bracket (tile gate, count-claim gate, frozen-lineage refusal, write, lineage link), and deliver_per_image_counts alone gains a second, bucket-only source regime reading an existing prediction bucket with no pass at all. | 22 | 5 |
+| packages/tcip-mcp/src/tcip_mcp/tools/inference_tools.py | Inference MCP tools: run_inference and deliver_per_image_counts, sharing one verified body (``_run_inference_verified``) so the firewalled operating point (conf/NMS/tiling/max_dets) resolves identically for every entry point that runs a model over images; run_inference and deliver_per_image_counts's live-with-predictions_dir path also share one publish bracket (tile gate, count-claim gate, frozen-lineage refusal, write, lineage link), and deliver_per_image_counts alone gains a second, bucket-only source regime reading an existing prediction bucket with no pass at all. run_inference's raster_path regime also resumes an interrupted tiled pass, from progress it records as it runs. | 23 | 5 |
 | packages/tcip-mcp/src/tcip_mcp/tools/ingest_tools.py | Image ingestion: turn a raw folder of photos into a structured TCIP project. | 10 | 1 |
 | packages/tcip-mcp/src/tcip_mcp/tools/knowledge_tools.py | The serve_domain_knowledge MCP tool, the one non-Claude-Code-skill route to the knowledge documents; its description is composed at import time from the corpus itself. | 4 | 1 |
 | packages/tcip-mcp/src/tcip_mcp/tools/meta_tools.py | Meta-loop tools for self-improvement. | 6 | 4 |
@@ -756,12 +756,11 @@ Docstring is the function's docstring first line, verbatim.
 | `push_panel_event` | `gui_tools.py:67` | yes | Push structured data to a TCIP GUI panel via the tcip-web backend. |
 | `focus_human_attention` | `gui_tools.py:120` | yes | Drive the live GUI to a (subject, date) frame, the Annotate tab or the Review tab. |
 
-### inference_tools.py (3 tools)
+### inference_tools.py (2 tools)
 
 | tool | line | audited | docstring first line |
 |---|---|---|---|
-| `run_inference` | `inference_tools.py:195` | yes | Run a trained model on images. |
-| `export_predictions` | `inference_tools.py:1326` | yes | Run inference and save predictions as COCO/JSON prediction file(s). |  <!-- queued: P5-36 unify -->
+| `run_inference` | `inference_tools.py:222` | yes | Run a trained model over images or a raster, and persist the predictions as a bucket. |
 | `deliver_per_image_counts` | `inference_tools.py:1621` | yes | Export a CSV summary of detection counts per image, from a live run or a persisted bucket. |
 
 ### calibration_tools.py (3 tools)
@@ -1470,8 +1469,8 @@ a dataset or project location, resolved via `dataset_scope_of`, line 253 (throug
 canonicalizer when the declaration passes one as `scope_via`). Ten doors declare one: eight
 dataset-scoped (`save_annotations`, `tools/annotation_tools.py:132`; `write_class_map`, same
 file, line 470; `redraw_calibration_holdout`, `tools/calibration_tools.py:25`;
-`materialize_review_dataset`, `tools/feedback_tools.py:166`; `export_predictions`,
-`tools/inference_tools.py:1326`; `register_dataset`, `tools/project_tools.py:165`;
+`materialize_review_dataset`, `tools/feedback_tools.py:166`; `run_inference`,
+`tools/inference_tools.py:222`; `register_dataset`, `tools/project_tools.py:165`;
 `propose_annotations`, `tools/proposal_tools.py:182`; `stage_proposals`, same file, line 756)
 and two project-scoped
 (`state_trait_operationalization`, `tools/operationalization_tools.py:19`; `author_trait_spec`,
@@ -1760,7 +1759,7 @@ to `tcip_annotation.review_engine.ReviewEngine.verdict_count_for_images` against
 
 Seam S29 ("Prediction-bucket immutability"), verdict `both-sides-one-implementation`,
 `phase0_implementation: once, shared`: `tests/test_prediction_bucket_resolution.py:39,48`,
-`tests/test_review_channel.py:287,312,325`, `tests/test_export_predictions_bucket_handling.py:60`,
+`tests/test_review_channel.py:287,312,325`, `tests/test_run_inference_bucket_handling.py:60`,
 `tests/test_orthomosaic_tools.py:241-248`, `tests/test_tcip_web_routes.py:898`. Gap: the seam's
 fourth named caller, inside `stage_proposals`'s assignments-regime `except BucketHasVerdicts`
 block, has no test coverage; every test of that regime writes into a fresh, verdict-free bucket.
@@ -2400,7 +2399,7 @@ Phase 3 verdict: single.
 
 Must agree: the MCP entry point and the GUI entry point start from the same unresolved defaults, and both read a caller's unstated parameter off the `None` sentinel rather than off equality with the default, so a caller who states the default value is honored as an override instead of being resolved as if they had stated nothing.
 Side A: `packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py:159` (`DEFAULT_CONF = 0.5`, with `DEFAULT_NMS_IOU`, `DEFAULT_OVERLAP` and `DEFAULT_MAX_DETS` declared beside it).
-Side B: `packages/tcip-web/src/tcip_web/routes/inference.py:32` (import; the sentinel form is `resolved_iou = DEFAULT_NMS_IOU if payload.iou is None else payload.iou`, line 444) and `packages/tcip-mcp/src/tcip_mcp/pipelines/training/eval_runners.py:15` (the delivery-grade evaluation binds the same constants, so the point a run is selected at starts where the point it ships at does). `packages/tcip-mcp/src/tcip_mcp/tools/inference_tools.py:582` is the same form for `run_inference`, `export_predictions` and `deliver_per_image_counts`, whose cap parameters default to `None`: the shared constant supplies the pass, and the unstated parameter travels to the resolver as unstated so it can derive one from the data.
+Side B: `packages/tcip-web/src/tcip_web/routes/inference.py:32` (import; the sentinel form is `resolved_iou = DEFAULT_NMS_IOU if payload.iou is None else payload.iou`, line 444) and `packages/tcip-mcp/src/tcip_mcp/pipelines/training/eval_runners.py:15` (the delivery-grade evaluation binds the same constants, so the point a run is selected at starts where the point it ships at does). `packages/tcip-mcp/src/tcip_mcp/tools/inference_tools.py:582` is the same form for `run_inference` and `deliver_per_image_counts`, whose cap parameters default to `None`: the shared constant supplies the pass, and the unstated parameter travels to the resolver as unstated so it can derive one from the data.
 Phase 3 verdict: single. One value is still spelled as a literal rather than bound: `predict_tiled`'s overlap default, `packages/tcip-mcp/src/tcip_mcp/pipelines/inference/generic_predictor.py:422`.
 
 ## S34. check_delivery_gate behind every delivery path
