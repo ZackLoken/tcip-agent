@@ -161,8 +161,8 @@ positive state, such as a phenology milestone, instead calibrates through the
 
 Read the `delivery` skill before choosing between `deliver_per_image_counts` and `run_inference`
 (and the per-plant aggregation tools built on top of a prediction bucket): they answer different
-questions and carry different CSV schemas, and neither ships a bare unvalidated number without
-`acknowledge_unvalidated=True` making the provisional shipment explicit.
+questions and carry different CSV schemas, and neither MCP tool ships a bare unvalidated phenotype;
+only the Results tab's own delivering route can, through the breeder's own acknowledged act.
 
 ## Conventions
 

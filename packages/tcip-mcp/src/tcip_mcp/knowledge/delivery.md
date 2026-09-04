@@ -86,7 +86,7 @@ what the delivered number means, recorded per project and confirmed by the breed
 gives a field criterion, which is not something a model can realize on its own, so the record says
 what the number means, what decides it in the imagery, and which subject it is about. No record, or
 one nobody confirmed, or one whose spec fields moved since, and the door refuses and names the
-primitive that fixes it. `acknowledge_unvalidated` does not reach this: it says a number's error is
+primitive that fixes it. An acknowledgement does not reach this: it says a number's error is
 uncharacterized, which is a claim about a quantity that has been defined.
 
 - `export_detection_csv` and `deliver_per_image_counts` take a required, keyword-only `trait` and rest on
@@ -119,9 +119,15 @@ physical measurement, and no kind stands in for another), reading the prediction
 one of the five measurement-document kinds a bucket can carry (`operating_point.json`,
 `classifier_operating_point.json`, `ordinal_operating_point.json`, `regression_operating_point.json`,
 `resolve_scale.json`), rather than trusting a caller-asserted string, then hands the resolved states to one shared
-`check_delivery_gate`, which does no I/O of its own: it judges the already-resolved dict, ships
-only when every dimension it was handed clears, and otherwise refuses (or, with
-`acknowledge_unvalidated=True`, stamps the unvalidated dimension(s) false).
+`check_delivery_gate`, which does no I/O of its own: it judges the already-resolved dict and ships
+only when every dimension it was handed clears, or two independent escapes cover what didn't. An
+`Acknowledgement` (a real name and a non-empty reason, built only by the web delivering route)
+clears any dimension, stamped false so the un-trustworthiness travels with the CSV; today only the
+phenology writer ever takes one, since it is the one delivery kind a web door serves.
+`allow_unvalidated_staging` clears only `tile_size`/`claim_scope`, the pre-pass gate a raw
+prediction bucket is written under, and can never clear a phenotype's own delivered dimension
+(`operating_point`, `classifier`, `scale`). `export_detection_csv`/`export_aggregated_csv` take
+neither: an unvalidated dimension always refuses on them.
 
 - `deliver_phenology_milestones` and the web `/export_csv` phenology branch both reconcile the positive-state
   classifier (from `classifier_operating_point.json`, see `calibrate_classifier_operating_point`)
@@ -141,11 +147,12 @@ only when every dimension it was handed clears, and otherwise refuses (or, with
   same delivery-wide `images_unattributed` count beside its own per-row `n_images`.
 - `deliver_per_image_counts`'s live regime, given a `predictions_dir`, publishes into it through the same
   bracket `run_inference` publishes with (tile gate, count-claim gate, frozen-lineage-pointer
-  refusal, write, lineage link), then hands `export_detection_csv` that bucket; the CSV's own
-  delivery gate then runs exactly once, inside the writer, never a second time at the door. Without
-  a `predictions_dir`, the door calls the writer with no bucket at all, and the writer's own
-  no-`pred_dirs` floor is what refuses (or ships provisionally under `acknowledge_unvalidated`);
-  the door's own response then reports the live run's own narrowed conf reference honestly under
+  refusal, write, lineage link, gated only by `allow_unvalidated_staging`, never a route to ship
+  the CSV unvalidated), then hands `export_detection_csv` that bucket; the CSV's own delivery gate
+  then runs exactly once, inside the writer, never a second time at the door. Without a
+  `predictions_dir`, the door calls the writer with no bucket at all, and the writer's own
+  no-`pred_dirs` floor always refuses, since this writer takes no acknowledgement; the door's own
+  response then reports the live run's own narrowed conf reference honestly under
   `run_conf_validated_against` (accepted-or-false by construction), a different fact from
   `operating_point_validated`, which floors false on this path since nothing on disk backs it
   without a bucket for a second gate call to reconcile against. With a bucket (either regime),
@@ -178,21 +185,23 @@ only when every dimension it was handed clears, and otherwise refuses (or, with
   one, the native frame) does not contradict, every tiling door refuses outright when it does,
   naming both edges. A delivery that mixes buckets across tiers travels under the weakest
   tier present. An untiled run is never gated on it.
-- To ship a provisional result, pass `acknowledge_unvalidated=True`: the door writes but stamps
-  `operating_point_validated=false` so the un-trustworthiness travels with the CSV. This is for an honest
-  provisional delivery, never for silently shipping a bare number. A tile scale with no real basis at
-  all has no value to ship provisionally either, so `acknowledge_unvalidated` cannot admit that case:
-  it refuses unconditionally.
+- To ship a provisional phenology result, the web `/export_csv` route builds a real `Acknowledgement`
+  from the breeder's own reason and identity; the door writes but stamps
+  `operating_point_validated=false` so the un-trustworthiness travels with the CSV. This is for an
+  honest, breeder-attested provisional delivery, never for silently shipping a bare number. No MCP
+  tool builds an `Acknowledgement` itself.
 
 The private pass beneath `run_inference` stays fully ungated but honestly stamped: the review loop
 must be able to produce unvalidated predictions to *reach* a validated measurement, so it never
-refuses on conf; it does refuse (unconditionally, no `acknowledge_unvalidated`) when tiling is
-requested and the checkpoint's tile scale has no real basis at all, since there is no number to tile
-at. `run_inference` itself, the door that actually persists a prediction bucket other doors treat as
-ground truth, applies a further tile_size gate on top of that pass' own result, which any of the
-three bases clears; the pass beneath it has already refused unconditionally when no basis exists
-at all, so this gate never actually sees that case for a tiled run. Conf itself is never gated at
-either layer; the measurement gate lives at the final phenotype door.
+refuses on conf; it does refuse (unconditionally, no staging escape) when tiling is requested and
+the checkpoint's tile scale has no real basis at all, since there is no number to tile at.
+`run_inference` itself, the door that actually persists a prediction bucket other doors treat as
+ground truth, applies a further gate on top of that pass' own result over the two staging
+dimensions, tile_size and claim_scope: any of the three tile-size bases clears the first, and a
+raster pass whose training mosaic identity matches clears the second. A dimension the gate reads
+as unvalidated refuses the write unless `allow_unvalidated_staging=True`, which stamps only the
+raw bucket unvalidated and is never a route to a delivered phenotype. Conf itself is never gated
+at either layer; the measurement gate lives at the final phenotype door.
 
 ## Quality Control
 
