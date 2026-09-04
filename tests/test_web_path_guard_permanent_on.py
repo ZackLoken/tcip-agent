@@ -212,6 +212,33 @@ def test_a_registry_that_will_not_decode_raises_rather_than_admitting_nothing(
         allowed_roots()
 
 
+def test_a_registry_carrying_a_bare_fingerprint_raises_naming_the_one_project(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The ValueError read_datasets raises for a bare pre-prefix fingerprint is wrapped the
+    same way DecodeError is, naming the one project whose registry carries it, rather than
+    propagating as a plain ValueError a caller's own ``except ValueError`` would misread as a
+    403 against every project in the workspace."""
+    from tcip_mcp.tools import project_tools
+    from tcip_web.paths import allowed_roots
+
+    ws = tmp_path.parent
+    _project(tmp_path)
+    bad = _project(ws / "bad_project")
+    real_read_datasets = project_tools.read_datasets
+
+    def flaky(root):
+        if Path(root).resolve() == bad.resolve():
+            raise ValueError(
+                f"dataset registry entry 'x' under {root} carries a fingerprint 'deadbeef' "
+                "that names no formula version; run scripts/restamp_dataset_fingerprint.py")
+        return real_read_datasets(root)
+
+    monkeypatch.setattr(project_tools, "read_datasets", flaky)
+    with pytest.raises(RuntimeError, match=f"dataset registry of project.*{bad.name}"):
+        allowed_roots()
+
+
 # ── dataset, sessions, review, annotate: the choke points ─────────────────
 
 
