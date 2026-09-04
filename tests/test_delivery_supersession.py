@@ -188,6 +188,63 @@ def test_supersede_delivery_refuses_a_second_supersession_of_the_same_event(
     assert "already carries a supersession" in res["error"]
 
 
+def test_supersede_delivery_refuses_an_event_missing_the_acknowledgement_keys(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A record stored before ``acknowledged_by``/``acknowledgement_reason`` existed does not
+    validate against ``DeliveryEventRecord``, the same shape the Results tab's panel route
+    refuses to list; ``supersede_delivery`` reads the event it supersedes through the identical
+    check, so it refuses too rather than quietly superseding a record the panel would reject."""
+    scope = resolution.delivery_events_scope(tmp_path)
+    event_id = "pre-acknowledgement-event"
+    ts.replace(resolution.delivery_event_key(scope, event_id), {
+        "event_id": event_id, "trait": "currant_bloom", "delivery_kind": "state_crossing_dates",
+        "door": "deliver_phenology_milestones", "output_path": str(tmp_path / "out.csv"),
+        "output_sha256": "0" * 64, "measurement_documents": ["operating_point"],
+        "scale_document": None, "plant_mapping": None, "documents": {},
+        "produced_at": "2026-02-11T00:00:00+00:00",
+    })
+
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
+    res = supersede_delivery(event_id, "some reason")
+
+    assert "error" in res
+    assert "does not validate" in res["error"]
+    assert "conform_delivery_events.py" in res["error"]
+    assert not ts.exists(resolution.delivery_supersession_key(scope, event_id))
+
+
+def test_supersede_delivery_refuses_a_replacement_event_missing_the_acknowledgement_keys(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The replacement event is read through the identical validating check as the superseded
+    one, so a malformed replacement refuses by name rather than being cited unread."""
+    preds_by_date = _delivered_scene(tmp_path, monkeypatch)
+    out_csv = tmp_path / "out.csv"
+    assert "error" not in deliver_phenology_milestones(
+        trait="currant_bloom", mapping_name="valley", predictions_by_date=preds_by_date,
+        output_csv_path=str(out_csv), classifier_pred_dirs=list(preds_by_date.values()))
+    event = _one_event(tmp_path)
+
+    scope = resolution.delivery_events_scope(tmp_path)
+    replacement_id = "pre-acknowledgement-replacement"
+    ts.replace(resolution.delivery_event_key(scope, replacement_id), {
+        "event_id": replacement_id, "trait": "currant_bloom",
+        "delivery_kind": "state_crossing_dates", "door": "deliver_phenology_milestones",
+        "output_path": str(tmp_path / "out2.csv"), "output_sha256": "1" * 64,
+        "measurement_documents": ["operating_point"], "scale_document": None,
+        "plant_mapping": None, "documents": {}, "produced_at": "2026-02-11T00:00:00+00:00",
+    })
+
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
+    res = supersede_delivery(
+        event["event_id"], "some reason", replacement_event_id=replacement_id)
+
+    assert "error" in res
+    assert "does not validate" in res["error"]
+    assert not ts.exists(resolution.delivery_supersession_key(scope, event["event_id"]))
+
+
 def test_with_supersessions_attaches_only_the_matching_events_own_record() -> None:
     events = [{"event_id": "a"}, {"event_id": "b"}]
     supersessions = {"a": {"reason": "withdrawn"}}
