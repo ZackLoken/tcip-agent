@@ -753,8 +753,8 @@ Docstring is the function's docstring first line, verbatim.
 
 | tool | line | audited | docstring first line |
 |---|---|---|---|
-| `push_panel_event` | `gui_tools.py:64` | yes | Push structured data to a TCIP GUI panel via the tcip-web backend. |
-| `focus_human_attention` | `gui_tools.py:113` | yes | Drive the live GUI to a (subject, date) frame, the Annotate tab or the Review tab. |
+| `push_panel_event` | `gui_tools.py:67` | yes | Push structured data to a TCIP GUI panel via the tcip-web backend. |
+| `focus_human_attention` | `gui_tools.py:120` | yes | Drive the live GUI to a (subject, date) frame, the Annotate tab or the Review tab. |
 
 ### inference_tools.py (3 tools)
 
@@ -784,9 +784,9 @@ Docstring is the function's docstring first line, verbatim.
 |---|---|---|---|
 | `report_friction` | `meta_tools.py:237` | yes | Log structured friction when you get stuck, confused, or surprised. |
 | `load_project_memory` | `meta_tools.py:306` | yes | Read one project-memory corpus into context so context isn't lost between sessions. |
-| `read_audit_log` | `meta_tools.py:348` | yes | Read one audit log's own entries: which door touched a dataset or project, when, with |
-| `write_retrospective` | `meta_tools.py:477` | yes | Write an end-of-project retrospective to markdown. |
-| `record_distillation_pass` | `meta_tools.py:580` | yes | Record that you reviewed this project's friction/retrospectives (e.g. via |
+| `read_audit_log` | `meta_tools.py:384` | yes | Read one audit log's own entries: which door touched a dataset or project, when, with |
+| `write_retrospective` | `meta_tools.py:566` | yes | Write an end-of-project retrospective to markdown. |
+| `record_distillation_pass` | `meta_tools.py:669` | yes | Record that you reviewed this project's friction/retrospectives (e.g. via |
 
 ### knowledge_tools.py (1 tool)
 
@@ -870,10 +870,10 @@ anything.
 |---|---|---|---|
 | `launch_training` | `training_tools.py:707` | yes | Launch a training run in an isolated subprocess from a bespoke ``model_source`` builder. |
 | `monitor_training` | `training_tools.py:941` | yes | Check the status of a training run, or of a hyperparameter sweep. |
-| `cancel_training` | `training_tools.py:1338` | yes | Request graceful cancellation of a running training run. |
-| `run_hyperparameter_search` | `training_tools.py:1999` | yes | Run hyperparameter optimization on Ray Tune, training each trial for real. |
-| `cancel_hyperparameter_search` | `training_tools.py:2394` | yes | Request cooperative cancellation of a running HPO sweep. |
-| `evaluate_model` | `training_tools.py:3045` | yes | Evaluate a trained checkpoint on a (held-out) dataset and write test_results.json. |
+| `cancel_training` | `training_tools.py:1343` | yes | Request graceful cancellation of a running training run. |
+| `run_hyperparameter_search` | `training_tools.py:2039` | yes | Run hyperparameter optimization on Ray Tune, training each trial for real. |
+| `cancel_hyperparameter_search` | `training_tools.py:2434` | yes | Request cooperative cancellation of a running HPO sweep. |
+| `evaluate_model` | `training_tools.py:3085` | yes | Evaluate a trained checkpoint on a (held-out) dataset and write test_results.json. |
 
 ### vision_tools.py (1 tool)
 
@@ -1072,16 +1072,16 @@ registered at HEAD.
 
 | method | path | handler | line |
 |---|---|---|---|
-| POST | `/sweeps` | `relaunch_sweep` | `routes/tuning.py:515` |
-| POST | `/sweeps/{sweep_id}/cancel` | `cancel_sweep_route` | `routes/tuning.py:555` |
-| GET | `/sweeps` | `list_sweeps` | `routes/tuning.py:566` |
-| GET | `/sweeps/{sweep_id}` | `get_sweep` | `routes/tuning.py:582` |
-| GET | `/sweeps/{sweep_id}/trials` | `list_trials` | `routes/tuning.py:628` |
-| GET | `/sweeps/{sweep_id}/trials/{trial_id}/metrics` | `get_trial_metrics` | `routes/tuning.py:649` |
-| GET | `/ray-dashboard` | `get_ray_dashboard` | `routes/tuning.py:676` |
-| POST | `/sweeps/{sweep_id}/tensorboard` | `launch_sweep_tensorboard` | `routes/tuning.py:762` |
-| POST | `/sweeps/{sweep_id}/trials/{trial_id}/tensorboard` | `launch_trial_tensorboard` | `routes/tuning.py:779` |
-| POST | `/sweeps/{sweep_id}/trials/{trial_id}/tensorboard/stop` | `stop_trial_tensorboard` | `routes/tuning.py:793` |
+| POST | `/sweeps` | `relaunch_sweep` | `routes/tuning.py:472` |
+| POST | `/sweeps/{sweep_id}/cancel` | `cancel_sweep_route` | `routes/tuning.py:512` |
+| GET | `/sweeps` | `list_sweeps` | `routes/tuning.py:523` |
+| GET | `/sweeps/{sweep_id}` | `get_sweep` | `routes/tuning.py:539` |
+| GET | `/sweeps/{sweep_id}/trials` | `list_trials` | `routes/tuning.py:580` |
+| GET | `/sweeps/{sweep_id}/trials/{trial_id}/metrics` | `get_trial_metrics` | `routes/tuning.py:601` |
+| GET | `/ray-dashboard` | `get_ray_dashboard` | `routes/tuning.py:628` |
+| POST | `/sweeps/{sweep_id}/tensorboard` | `launch_sweep_tensorboard` | `routes/tuning.py:714` |
+| POST | `/sweeps/{sweep_id}/trials/{trial_id}/tensorboard` | `launch_trial_tensorboard` | `routes/tuning.py:731` |
+| POST | `/sweeps/{sweep_id}/trials/{trial_id}/tensorboard/stop` | `stop_trial_tensorboard` | `routes/tuning.py:745` |
 
 ### routes/validation.py, prefix `/api/review` (1 route)
 
@@ -2033,7 +2033,7 @@ config-only conflict and task checks (computed before any read, so an unreadable
 suppresses them) and the manifest-dependent checks (subject/attribute, date, images-root
 presence and movement, and an empty train/val side once narrowed to the run's own date).
 `preflight_config` calls both halves directly, in the same order, over a manifest it read
-itself; `training_tools.list_split_choices` (`training_tools.py:1167`), the relaunch data
+itself; `training_tools.list_split_choices` (`training_tools.py:1172`), the relaunch data
 picker's own reader wrapped by `GET /api/training/configs/{experiment_id}/splits`, calls the
 composed function per candidate manifest it read through the checked variant above, and builds
 each candidate's launch config through `training_tools.candidate_config_with_manifest`
@@ -2156,16 +2156,16 @@ Phase 3 verdict: single.
 ## S04. Panel-event panel vocabulary (VALID_PANELS)  <!-- queued: P5-324 unify -->
 
 Must agree: sender and receiver accept the same set of panel names.
-Side A: `packages/tcip-mcp/src/tcip_mcp/web_client.py:230` (`VALID_PANELS = frozenset(`).
+Side A: `packages/tcip-mcp/src/tcip_mcp/web_client.py:245` (`VALID_PANELS = frozenset(`).
 Side B: `packages/tcip-web/src/tcip_web/app.py:38` (`VALID_PANELS,`).
 Phase 3 verdict: duplicated.
 
 ## S05. Panel event_type vocabulary  <!-- queued: P5-272 unify -->
 
 Must agree: the Python poster, the FastAPI hub, and the browser handler use the same event_type strings.
-Side A: `packages/tcip-mcp/src/tcip_mcp/tools/gui_tools.py:274` (`result = post_panel_event("app", "annotate_focus", payload)`).
+Side A: `packages/tcip-mcp/src/tcip_mcp/tools/gui_tools.py:284` (`result = post_panel_event("app", "annotate_focus", payload)`).
 Side B: `packages/tcip-web/src/tcip_web/app.py:518` (`if event.event_type == PANEL_EVENT_REVIEW_FOCUS:`).
-Phase 3 verdict: single. The posted payload carries `active_subject` beside `subject` (`packages/tcip-mcp/src/tcip_mcp/tools/gui_tools.py:211`), the key both readers take (`packages/tcip-web/src/tcip_web/app.py:296`, `frontend/src/lib/annotateFocus.ts:21,54`), held by `tests/test_event_integration.py`'s producer-driven test, which posts the focus_human_attention tool's own event and asserts the advisory state's `active_subject`.
+Phase 3 verdict: single. The posted payload carries `subject` beside `active_subject` (`packages/tcip-mcp/src/tcip_mcp/tools/gui_tools.py:282`), the key both readers take (`packages/tcip-web/src/tcip_web/app.py:296`, `frontend/src/lib/annotateFocus.ts:21,54`), held by `tests/test_event_integration.py`'s producer-driven test, which posts the focus_human_attention tool's own event and asserts the advisory state's `active_subject`.
 
 ## S06. `audit_log`, one append-only store under three kinds of root
 
@@ -2215,7 +2215,7 @@ Phase 3 verdict: single.
 
 Must agree: the writer's row shape is what the reader and the stream consumer expect.
 Side A: `packages/tcip-mcp/src/tcip_mcp/experiments.py:948` (`def log_metrics(`, the one writer; the trainer and the envelope hand rows to the context's epoch sink instead of opening the file).
-Side B: `packages/tcip-web/src/tcip_web/routes/training.py:324` (`read_log(key, after=cursor)`, the training stream's incremental tail, pushed as a `TrainingMetricFrame` per row) and `routes/tuning.py:662` (`read_log(trial_metrics_key`, answered in the shape `_metrics_common.metrics_response` builds).
+Side B: `packages/tcip-web/src/tcip_web/routes/training.py:324` (`read_log(key, after=cursor)`, the training stream's incremental tail, pushed as a `TrainingMetricFrame` per row) and `routes/tuning.py:614` (`read_log(trial_metrics_key`, answered in the shape `_metrics_common.metrics_response` builds).
 Phase 3 verdict: single. An HPO trial with no experiment record still appends to its own trial log, one declared site in the epoch sink, pending the HPO store migration.
 
 ## S09. Web job registries persisted to .tcip/state/<name>.json  <!-- queued: P5-325 unify -->
@@ -2561,7 +2561,7 @@ Phase 3 verdict: duplicated. The prefix literals still stand on their own, but `
 ## S56. Tab-name vocabulary  <!-- queued: P5-290 unify -->
 
 Must agree: the tab a panel event targets, the tab the browser can restore, and the tab the backend persists are the same set of names.
-Side A: `packages/tcip-mcp/src/tcip_mcp/web_client.py:213` (`ActiveTab = Literal["annotate", "review", "training", "tuning", "inference", "results", "meta"]`, with `TAB_NAMES = get_args(ActiveTab)` beside it, `tcip_web.state` importing both).
+Side A: `packages/tcip-mcp/src/tcip_mcp/web_client.py:228` (`ActiveTab = Literal["annotate", "review", "training", "tuning", "inference", "results", "meta"]`, with `TAB_NAMES = get_args(ActiveTab)` beside it, `tcip_web.state` importing both).
 Side B: `packages/tcip-web/frontend/src/api/types.generated.ts:14` (`export const TAB_NAMES = [`, generated from the same declaration).
 Phase 3 verdict: duplicated.
 

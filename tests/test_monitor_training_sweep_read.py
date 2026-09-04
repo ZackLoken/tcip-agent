@@ -31,6 +31,9 @@ def hpo_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 def test_monitor_training_refuses_both_run_id_and_sweep_id() -> None:
+    """Coverage, not GUARDS: a baseline missing ``sweep_id`` from the signature entirely fails on
+    the call itself (a ``TypeError``), not on the assertions below, so this cannot have guarded
+    that signature into existence."""
     from tcip_mcp.tools.training_tools import monitor_training
 
     res = monitor_training(run_id="run-1", sweep_id="sweep-1")
@@ -40,6 +43,7 @@ def test_monitor_training_refuses_both_run_id_and_sweep_id() -> None:
 
 
 def test_monitor_training_refuses_neither_run_id_nor_sweep_id() -> None:
+    """Coverage, not GUARDS: same basis as the both-given case above."""
     from tcip_mcp.tools.training_tools import monitor_training
 
     res = monitor_training()
@@ -49,6 +53,10 @@ def test_monitor_training_refuses_neither_run_id_nor_sweep_id() -> None:
 
 
 def test_monitor_training_sweep_id_matches_the_tuning_route_disk_read(client, hpo_root) -> None:
+    """Wiring, not independent agreement: the tool and the route's disk branch both call
+    ``training_tools.read_sweep_from_disk`` and then ``training_tools.enrich_with_study_result``,
+    so this checks the tool is actually wired to the shared implementation, not that two
+    separately-written answers happen to agree."""
     from tcip_mcp.tools.training_tools import monitor_training
 
     sweep = _write_sweep(hpo_root, "hpo_sweep0001", status="completed",
@@ -73,3 +81,14 @@ def test_monitor_training_sweep_id_not_found_names_the_sweep() -> None:
     res = monitor_training(sweep_id="no-such-sweep")
     assert "error" in res
     assert "no-such-sweep" in res["error"]
+
+
+def test_monitor_training_invalid_sweep_id_returns_a_named_refusal(hpo_root) -> None:
+    """A sweep_id carrying a path separator would address a record outside the HPO store; the
+    route answers a 400 for the same shape, and the tool has no HTTP status to raise, so it
+    returns the refusal as a named dict instead of letting BadKey propagate."""
+    from tcip_mcp.tools.training_tools import monitor_training
+
+    res = monitor_training(sweep_id="../escape")
+    assert "error" in res
+    assert "escape" in res["error"]
