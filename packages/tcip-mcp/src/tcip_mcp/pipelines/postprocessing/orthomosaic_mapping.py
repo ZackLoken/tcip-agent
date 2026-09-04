@@ -257,6 +257,30 @@ class DetectionAssignment:
     mapper-wide fact rather than a per-assignment value nothing here computes differently."""
 
 
+def resolve_nn_tolerance_m(
+    plants: list[PlantRecord], nn_tolerance_m: float | None = None,
+) -> dict:
+    """The match tolerance (metres) :func:`assign_detections_to_plants` matches a detection to a
+    plant within, and where it came from: ``{"value": float, "source": str}``.
+
+    ``source`` is ``"stated"`` when the caller names a tolerance, ``"grid_pitch"`` when it is
+    derived from the plant layout's own spacing (``grid_pitch_m(plants) / 6``), or ``"fallback"``
+    (:data:`NN_TOLERANCE_METERS`) when the layout carries too few georeferenced plants (< 2) to
+    derive a pitch from.
+
+    A single-detection-per-object mosaic frame accepts a match at the tolerance itself, never
+    ``plant_mapping.build_mapping``'s own sequence-anchored ceiling (a stated override capped at
+    the grid pitch): the two doors' match semantics differ enough that a stated override is never
+    capped here, so this stays its own derivation rather than sharing ``build_mapping``'s.
+    """
+    if nn_tolerance_m is not None:
+        return {"value": nn_tolerance_m, "source": "stated"}
+    pitch = grid_pitch_m(plants)
+    if pitch > 0:
+        return {"value": pitch / 6, "source": "grid_pitch"}
+    return {"value": NN_TOLERANCE_METERS, "source": "fallback"}
+
+
 def assign_detections_to_plants(
     detections: dict,
     georeference: OrthomosaicGeoreference,
@@ -272,23 +296,19 @@ def assign_detections_to_plants(
     detector's own geometry most directly stands for, resolved to (lat, lon) via
     ``georeference.pixel_to_wgs84``, then matched to the nearest plant in ``plants``.
 
-    ``nn_tolerance_m`` defaults to the same derivation ``plant_mapping.build_mapping`` already
-    uses for its own ``nn_tolerance_m`` (mirrored exactly rather than a second formula for the same
-    idea): ``grid_pitch_m(plants) / 6``, or the honest ``NN_TOLERANCE_METERS`` fallback when the
-    plant layout has too few georeferenced plants to derive a pitch from (< 2). A detection farther
-    than the tolerance from every plant is unmapped rather than force-assigned to the nearest one.
+    ``nn_tolerance_m`` resolves through :func:`resolve_nn_tolerance_m`; ``None`` (the default)
+    derives it from the plant layout rather than pinning a constant. A detection farther than the
+    tolerance from every plant is unmapped rather than force-assigned to the nearest one.
     """
     boxes = detections.get("boxes") or []
-    if nn_tolerance_m is None:
-        pitch = grid_pitch_m(plants)
-        nn_tolerance_m = (pitch / 6) if pitch > 0 else NN_TOLERANCE_METERS
+    tolerance_m = resolve_nn_tolerance_m(plants, nn_tolerance_m)["value"]
 
     out: list[DetectionAssignment] = []
     for i, (x1, y1, x2, y2) in enumerate(boxes):
         cx, cy = (x1 + x2) / 2.0, (y1 + y2) / 2.0
         lat, lon = georeference.pixel_to_wgs84(cx, cy)
         plant, distance_m = _nearest_plant(lat, lon, plants) if plants else (None, None)
-        if plant is not None and distance_m is not None and distance_m <= nn_tolerance_m:
+        if plant is not None and distance_m is not None and distance_m <= tolerance_m:
             out.append(DetectionAssignment(
                 detection_index=i, pixel_x=cx, pixel_y=cy, lat=lat, lon=lon,
                 plot_name=plant.plot_name, accession_name=plant.accession_name,
