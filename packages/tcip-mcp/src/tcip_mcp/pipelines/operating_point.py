@@ -1,8 +1,10 @@
-"""Resolve the detection operating point (conf/NMS/max_dets/tile) per dataset, at runtime.
+"""Resolve the calibrated operating points (detection conf/NMS/max_dets/tile, and the classifier,
+ordinal and regression points) per dataset, at runtime.
 
-This is the single place all four consumers, train-eval, test-eval, inference, export, get the
-operating point, so the same model + images can't yield different counts by entry point (the audit's
-divergent-defaults bug). The confidence threshold requires validation against an annotations
+This is the single place the calibrated consumers, train-eval, test-eval, inference, export and the
+phenology delivery's classifier gate, get an operating point, so the same model + images can't yield
+different counts by entry point (the audit's divergent-defaults bug); the raw and
+block-calibrated-export regimes live in ``resolution.py`` and share ``resolve_tile_size_param``. The confidence threshold requires validation against an annotations
 reference: derived by a center-match count-unbiased sweep over a reference sized to the trait,
 and validated on a disjoint held-out split of that reference, GT annotations
 (``VALIDATED_HELD_OUT``) OR a breeder-confirmed sample of the model's own outputs
