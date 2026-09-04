@@ -117,16 +117,18 @@ def _test_file_relative_to_repo(raw: str) -> tuple[str | None, str]:
     Accepts a relative path as always, or an absolute one naming a file inside this repository;
     either way the return is a tree-relative path, so pytest collects the target inside whichever
     tree gets materialized rather than an absolute path that names the working checkout's file
-    regardless of ``cwd``. Returns ``(None, reason)`` when ``raw`` resolves outside ``tests/``.
+    regardless of ``cwd``. A relative path is resolved against the repository root, never the
+    caller's ``cwd``, and either spelling's ``..`` segments are collapsed before the ``tests/``
+    check, so a path that only reads as inside ``tests/`` before normalizing (``tests/../scripts/
+    x.py``) is refused rather than admitted. Returns ``(None, reason)`` when ``raw`` resolves
+    outside ``tests/``.
     """
     path = Path(raw)
-    if path.is_absolute():
-        try:
-            rel = path.resolve().relative_to(REPO.resolve())
-        except ValueError:
-            return None, f"{raw} is outside this repository ({REPO})."
-    else:
-        rel = path
+    anchored = path if path.is_absolute() else REPO / path
+    try:
+        rel = anchored.resolve().relative_to(REPO.resolve())
+    except ValueError:
+        return None, f"{raw} is outside this repository ({REPO})."
     rel_str = str(rel).replace("\\", "/")
     if not rel_str.startswith(f"{TEST_TREE}/"):
         return None, f"{raw} resolves to {rel_str}, outside {TEST_TREE}/."

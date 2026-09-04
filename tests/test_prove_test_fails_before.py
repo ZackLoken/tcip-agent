@@ -52,3 +52,19 @@ def test_a_path_outside_tests_is_refused_by_name():
     assert "REFUSED" in result.stdout
     assert "prove_test_fails_before.py" in result.stdout
     assert "outside tests/" in result.stdout
+
+
+def test_a_relative_and_absolute_dotdot_path_outside_tests_are_both_refused():
+    """A relative spelling that reads as inside tests/ before its ".." segments collapse
+    (tests/../scripts/x.py) must refuse the same way its absolute spelling does, not be
+    materialized as if it were a real tests/ path."""
+    relative = "tests/../scripts/prove_test_fails_before.py"
+    absolute = str(REPO / "tests" / ".." / "scripts" / "prove_test_fails_before.py")
+    for spelling in (relative, absolute):
+        result = subprocess.run(
+            [sys.executable, str(SCRIPT), spelling],
+            cwd=str(REPO), capture_output=True, text=True, timeout=60,
+        )
+        assert result.returncode == 3, result.stdout + result.stderr
+        assert "REFUSED" in result.stdout
+        assert "outside tests/" in result.stdout
