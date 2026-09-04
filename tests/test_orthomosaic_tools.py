@@ -87,6 +87,12 @@ def _pixel_to_wgs84(raster_path: Path, px: float, py: float) -> tuple[float, flo
     return OrthomosaicGeoreference.from_file(raster_path).pixel_to_wgs84(px, py)
 
 
+def _plant_registry(plant_csv: Path, *, name: str = "reg") -> str:
+    from tests._binding_fixtures import register_plant_registry_for
+
+    return register_plant_registry_for([plant_csv], name=name)
+
+
 def _write_plant_csv(path: Path, rows: list[dict]) -> None:
     fieldnames = ["plot_name", "accession_name", "plot_number", "row_number", "col_number",
                   "WGS84_centroid_y", "WGS84_centroid_x"]
@@ -398,7 +404,7 @@ def test_deliver_orthomosaic_plant_counts_refuses_unacknowledged_then_admits(tmp
 
     out_csv = tmp_path / "counts.csv"
     refused = deliver_orthomosaic_plant_counts(
-        str(bucket_dir), str(raster_path), [str(plant_csv)], str(out_csv), delivered_phenotype="stem_count")
+        str(bucket_dir), str(raster_path), _plant_registry(plant_csv), str(out_csv), delivered_phenotype="stem_count")
     assert "error" in refused
     assert refused["unvalidated_dimensions"] == "operating_point"
     assert refused["operating_point_validated"] == "false"
@@ -406,7 +412,7 @@ def test_deliver_orthomosaic_plant_counts_refuses_unacknowledged_then_admits(tmp
     assert not out_csv.exists()
 
     admitted = deliver_orthomosaic_plant_counts(
-        str(bucket_dir), str(raster_path), [str(plant_csv)], str(out_csv), delivered_phenotype="stem_count",
+        str(bucket_dir), str(raster_path), _plant_registry(plant_csv), str(out_csv), delivered_phenotype="stem_count",
         acknowledge_unvalidated=True)
     assert "error" not in admitted
     assert admitted["operating_point_validated"] == "false"
@@ -449,7 +455,7 @@ def test_deliver_orthomosaic_plant_counts_csv_carries_detection_level_attributio
 
     out_csv = tmp_path / "counts.csv"
     result = deliver_orthomosaic_plant_counts(
-        str(bucket_dir), str(raster_path), [str(plant_csv)], str(out_csv),
+        str(bucket_dir), str(raster_path), _plant_registry(plant_csv), str(out_csv),
         delivered_phenotype="stem_count", acknowledge_unvalidated=True)
     assert "error" not in result, result
 
@@ -477,7 +483,7 @@ def test_deliver_orthomosaic_plant_counts_records_exactly_one_delivery_event(tmp
 
     out_csv = tmp_path / "counts.csv"
     result = deliver_orthomosaic_plant_counts(
-        str(bucket_dir), str(raster_path), [str(plant_csv)], str(out_csv),
+        str(bucket_dir), str(raster_path), _plant_registry(plant_csv), str(out_csv),
         delivered_phenotype="stem_count", acknowledge_unvalidated=True)
     assert "error" not in result, result
 
@@ -516,7 +522,7 @@ def test_deliver_orthomosaic_plant_counts_excludes_a_point_from_the_count(tmp_pa
 
     out_csv = tmp_path / "counts.csv"
     delivered = deliver_orthomosaic_plant_counts(
-        str(bucket_dir), str(raster_path), [str(plant_csv)], str(out_csv),
+        str(bucket_dir), str(raster_path), _plant_registry(plant_csv), str(out_csv),
         delivered_phenotype="stem_count", acknowledge_unvalidated=True)
 
     assert "error" not in delivered, delivered
@@ -565,7 +571,7 @@ def test_deliver_orthomosaic_plant_counts_floors_a_stamp_earned_for_a_different_
 
     out_csv = tmp_path / "counts.csv"
     refused = deliver_orthomosaic_plant_counts(
-        str(bucket_dir), str(raster_path), [str(plant_csv)], str(out_csv), delivered_phenotype="stem_count")
+        str(bucket_dir), str(raster_path), _plant_registry(plant_csv), str(out_csv), delivered_phenotype="stem_count")
     assert "error" in refused
     assert not out_csv.exists()
     assert str(bucket_dir) in refused["error"]
@@ -615,7 +621,7 @@ def test_deliver_orthomosaic_plant_counts_sibling_tile_floor_despite_valid_conf(
 
     out_csv = tmp_path / "counts.csv"
     delivered = deliver_orthomosaic_plant_counts(
-        str(bucket_dir), str(raster_path), [str(plant_csv)], str(out_csv),
+        str(bucket_dir), str(raster_path), _plant_registry(plant_csv), str(out_csv),
         delivered_phenotype="stem_count", acknowledge_unvalidated=True)
     assert "error" not in delivered, delivered
     assert delivered["operating_point_validated"] == VALIDATED_FALSE
@@ -626,7 +632,7 @@ def test_deliver_orthomosaic_plant_counts_sibling_tile_floor_despite_valid_conf(
     assert rows[0]["unvalidated_dimensions"] == "tile_size"
 
     refused = deliver_orthomosaic_plant_counts(
-        str(bucket_dir), str(raster_path), [str(plant_csv)], str(tmp_path / "refused.csv"),
+        str(bucket_dir), str(raster_path), _plant_registry(plant_csv), str(tmp_path / "refused.csv"),
         delivered_phenotype="stem_count")
     assert "error" in refused
     # The refusal arm's own recorded semantics: the operating_point dimension's own cleared
@@ -653,7 +659,7 @@ def test_deliver_orthomosaic_plant_counts_far_detection_is_unmapped(tmp_path, mo
 
     out_csv = tmp_path / "counts.csv"
     result = deliver_orthomosaic_plant_counts(
-        str(bucket_dir), str(raster_path), [str(plant_csv)], str(out_csv), delivered_phenotype="stem_count",
+        str(bucket_dir), str(raster_path), _plant_registry(plant_csv), str(out_csv), delivered_phenotype="stem_count",
         acknowledge_unvalidated=True)
     assert "error" not in result
     assert result["n_detections"] == 2
@@ -728,7 +734,7 @@ def test_deliver_orthomosaic_plant_counts_rotated_raster_refuses_cleanly(tmp_pat
     from tcip_mcp.tools.orthomosaic_tools import deliver_orthomosaic_plant_counts
 
     result = deliver_orthomosaic_plant_counts(
-        str(bucket_dir), str(raster_path), [str(plant_csv)], str(tmp_path / "counts.csv"),
+        str(bucket_dir), str(raster_path), _plant_registry(plant_csv), str(tmp_path / "counts.csv"),
         delivered_phenotype="stem_count", acknowledge_unvalidated=True)
     assert "error" in result
     assert "ModelTransformationTag" in result["error"]
@@ -751,7 +757,7 @@ def test_deliver_orthomosaic_keeps_a_bespoke_producer_checkpoint(tmp_path, monke
 
     out_csv = tmp_path / "counts.csv"
     result = deliver_orthomosaic_plant_counts(
-        str(bucket_dir), str(raster_path), [str(plant_csv)], str(out_csv),
+        str(bucket_dir), str(raster_path), _plant_registry(plant_csv), str(out_csv),
         delivered_phenotype="stem_count", acknowledge_unvalidated=True)
 
     from tcip_mcp.pipelines.resolution import read_operating_point_sidecar
@@ -799,7 +805,7 @@ def test_deliver_orthomosaic_drops_a_producer_no_experiment_answers_for(tmp_path
 
     out_csv = tmp_path / "counts.csv"
     result = deliver_orthomosaic_plant_counts(
-        str(bucket_dir), str(raster_path), [str(plant_csv)], str(out_csv),
+        str(bucket_dir), str(raster_path), _plant_registry(plant_csv), str(out_csv),
         delivered_phenotype="stem_count", acknowledge_unvalidated=True)
 
     assert "error" not in result

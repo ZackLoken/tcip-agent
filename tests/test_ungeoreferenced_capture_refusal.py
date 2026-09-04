@@ -21,6 +21,7 @@ from tcip_mcp.pipelines.postprocessing import plant_mapping
 from tcip_mcp.pipelines.postprocessing.plant_mapping import Assignment, MappingBuild
 from tcip_mcp.tools.phenology_tools import build_plant_mapping, deliver_phenology_milestones
 
+from tests._binding_fixtures import register_plant_registry_for
 from tests.test_plant_mapping_binding import PLANTS, _dataset, _init, _write_geo_image, _write_scene
 from tests.test_second_trait_acceptance import _seed_currant_bloom_trait
 
@@ -61,9 +62,10 @@ def test_build_plant_mapping_refuses_when_every_capture_carries_no_position(
     _write_ungeoreferenced_image(images_root / DATE / "P1_a.jpg")
     plant_csv = dataset_root.parent / f"{dataset_root.name}_plants.csv"
     _write_plant_csv(plant_csv, PLANTS)
+    registry = register_plant_registry_for([plant_csv])
 
     res = build_plant_mapping(
-        name="valley", images_root=str(images_root), plant_csv_paths=[str(plant_csv)])
+        name="valley", images_root=str(images_root), plant_registry=registry)
     assert "error" in res
     assert "plant-tag mechanism" in res["error"]
     assert not ts.exists(plant_mapping.plant_mapping_key(tmp_path, "valley"))
@@ -80,9 +82,10 @@ def test_build_plant_mapping_names_the_unreadable_capture_before_the_position_cl
     _write_corrupt_image(images_root / DATE / "P1_corrupt.jpg")
     plant_csv = dataset_root.parent / f"{dataset_root.name}_plants.csv"
     _write_plant_csv(plant_csv, PLANTS)
+    registry = register_plant_registry_for([plant_csv])
 
     res = build_plant_mapping(
-        name="valley", images_root=str(images_root), plant_csv_paths=[str(plant_csv)])
+        name="valley", images_root=str(images_root), plant_registry=registry)
     assert "error" in res
     assert "P1_corrupt.jpg could not be opened" in res["error"]
     assert "plant-tag mechanism" in res["error"]
@@ -102,11 +105,12 @@ def test_build_route_refuses_when_every_capture_carries_no_position(
     _write_ungeoreferenced_image(images_root / DATE / "P1_a.jpg")
     plant_csv = dataset_root.parent / f"{dataset_root.name}_plants.csv"
     _write_plant_csv(plant_csv, PLANTS)
+    registry = register_plant_registry_for([plant_csv])
     store.open_project(tmp_path.resolve())
 
     client = TestClient(app, base_url="http://127.0.0.1")
     resp = client.post("/api/results/plant_mapping/build", json={
-        "name": "valley", "images_root": str(images_root), "plant_csv_paths": [str(plant_csv)],
+        "name": "valley", "images_root": str(images_root), "plant_registry": registry,
     })
     assert resp.status_code == 400
     assert "plant-tag mechanism" in resp.json()["detail"]
@@ -127,11 +131,12 @@ def test_build_route_refuses_a_selected_date_with_no_captures_never_persisting_a
     dataset_root = _dataset(tmp_path)
     images_root, plant_csv, _ = _write_scene(dataset_root, dates=[DATE])
     (images_root / "2099-01-01").mkdir()
+    registry = register_plant_registry_for([plant_csv])
     store.open_project(tmp_path.resolve())
 
     client = TestClient(app, base_url="http://127.0.0.1")
     resp = client.post("/api/results/plant_mapping/build", json={
-        "name": "valley", "images_root": str(images_root), "plant_csv_paths": [str(plant_csv)],
+        "name": "valley", "images_root": str(images_root), "plant_registry": registry,
         "dates": ["2099-01-01"],
     })
     assert resp.status_code == 400
@@ -153,12 +158,23 @@ def _persist_synthetic_mapping(
     from tcip_mcp.dataset_layout import require_dataset_identity
 
     dataset_id = require_dataset_identity(dataset_root)["id"]
+    registry_name, registry_digest = f"{name}-registry", "0" * 64
+    ts.replace(
+        plant_mapping.plant_registry_key(project_root, registry_name),
+        {
+            "name": registry_name, "crop": "hazelnut", "site": "test", "csvs": plant_csvs,
+            "n_plants": sum(e["n_plants"] for e in plant_csvs), "digest": registry_digest,
+            "registered_by": "agent:test", "registered_at": "2026-02-11T00:00:00+00:00",
+        },
+        expect=ts.Version.ABSENT,
+    )
     build = MappingBuild(
         name=name, project_root=str(project_root), dataset_root=str(dataset_root),
         dataset_id=dataset_id, built_by="build_plant_mapping",
         built_at="2026-02-11T00:00:00+00:00", dates_requested=None,
         dates=sorted(assignments), nn_tolerance_m={"value": 10.0, "source": "fallback"},
-        plant_csvs=plant_csvs, capture_identity={d: "0" * 16 for d in assignments},
+        plant_registry={"name": registry_name, "digest": registry_digest},
+        capture_identity={d: "0" * 16 for d in assignments},
         capture_digests={d: {} for d in assignments}, unreadable={d: [] for d in assignments},
         assignments=assignments,
     )
@@ -297,7 +313,8 @@ def test_a_blank_plant_name_is_unattributed_by_the_one_predicate(tmp_path: Path)
     build = MappingBuild(
         name="m", project_root="/p", dataset_root="/p/ds", dataset_id="ds-1",
         built_by="test", built_at="2026-02-11T00:00:00+00:00", dates_requested=None,
-        dates=[DATE], nn_tolerance_m={"value": 10.0, "source": "fallback"}, plant_csvs=[],
+        dates=[DATE], nn_tolerance_m={"value": 10.0, "source": "fallback"},
+        plant_registry={"name": "unregistered", "digest": "0" * 64},
         capture_identity={DATE: "0" * 16}, capture_digests={DATE: {}}, unreadable={DATE: []},
         assignments={DATE: [blank, named]},
     )
@@ -330,8 +347,9 @@ def test_a_partly_positioned_scene_builds_and_delivers_with_the_count_disclosed(
         Path(preds_by_date[DATE]) / "P3_extra.json",
         [Annotation(subject="open", geometry=BBox(1.0, 1.0, 3.0, 3.0), score=0.9)], 8, 8)
 
+    registry = register_plant_registry_for([plant_csv])
     build_res = build_plant_mapping(
-        name="valley", images_root=str(images_root), plant_csv_paths=[str(plant_csv)])
+        name="valley", images_root=str(images_root), plant_registry=registry)
     assert "error" not in build_res, build_res
     assert build_res["per_date"][DATE]["n_unattributed"] == 1
     assert build_res["n_unattributed"] == 1
@@ -381,8 +399,9 @@ def test_a_delivery_naming_one_of_two_mapping_dates_carries_the_delivered_scope(
         Path(preds_by_date[dates[1]]) / "P3_extra.json",
         [Annotation(subject="open", geometry=BBox(1.0, 1.0, 3.0, 3.0), score=0.9)], 8, 8)
 
+    registry = register_plant_registry_for([plant_csv])
     build_res = build_plant_mapping(
-        name="valley", images_root=str(images_root), plant_csv_paths=[str(plant_csv)])
+        name="valley", images_root=str(images_root), plant_registry=registry)
     assert "error" not in build_res, build_res
     assert build_res["n_unattributed"] == 1
 
@@ -411,8 +430,9 @@ def test_a_date_recorded_with_no_capture_still_delivers_beside_an_attributed_one
     empty_bucket = dataset_root / "predictions" / "live" / empty_date
     empty_bucket.mkdir(parents=True)
 
+    registry = register_plant_registry_for([plant_csv])
     build_res = build_plant_mapping(
-        name="valley", images_root=str(images_root), plant_csv_paths=[str(plant_csv)],
+        name="valley", images_root=str(images_root), plant_registry=registry,
         dates=[DATE, empty_date])
     assert "error" not in build_res, build_res
     assert build_res["per_date"][empty_date]["n_images"] == 0
@@ -432,8 +452,9 @@ def test_a_fully_positioned_scene_keeps_delivering_with_zero_unattributed(
 ) -> None:
     dataset_root, preds_by_date = _delivery_scene(tmp_path, monkeypatch)
     images_root, plant_csv, _ = _write_scene(dataset_root, dates=[DATE])
+    registry = register_plant_registry_for([plant_csv])
     build_res = build_plant_mapping(
-        name="valley", images_root=str(images_root), plant_csv_paths=[str(plant_csv)])
+        name="valley", images_root=str(images_root), plant_registry=registry)
     assert "error" not in build_res, build_res
     assert build_res["n_unattributed"] == 0
 
@@ -453,8 +474,9 @@ def test_a_raster_beside_positioned_photographs_still_delivers(
     images_root, plant_csv, preds_by_date = _write_scene(dataset_root, dates=[DATE])
     (images_root / DATE / "orthomosaic_block.tif").write_bytes(b"")
 
+    registry = register_plant_registry_for([plant_csv])
     build_res = build_plant_mapping(
-        name="valley", images_root=str(images_root), plant_csv_paths=[str(plant_csv)])
+        name="valley", images_root=str(images_root), plant_registry=registry)
     assert "error" not in build_res, build_res
     _seed_currant_bloom_trait(tmp_path)
 
@@ -478,7 +500,8 @@ def test_a_capture_at_the_origin_is_admitted_as_positioned(
     plant_csv = tmp_path / "plants.csv"
     _write_plant_csv(plant_csv, [{"plot": "P1", "accession": "acc-A", "lat": 0.0, "lon": 0.0}])
 
+    registry = register_plant_registry_for([plant_csv])
     res = build_plant_mapping(
-        name="valley", images_root=str(images_root), plant_csv_paths=[str(plant_csv)])
+        name="valley", images_root=str(images_root), plant_registry=registry)
     assert "error" not in res, res
     assert res["n_mapped"] == 1

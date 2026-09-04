@@ -192,6 +192,22 @@ def record_producing_run(weights_dir: str | Path, experiment_id: str) -> str:
     return registered["sha256"]
 
 
+def register_plant_registry_for(
+    csv_paths: list[str | Path], *, name: str = "reg", crop: str = "hazelnut", site: str = "orchard",
+) -> str:
+    """Register ``csv_paths`` under ``name`` in whichever project the process is pinned to
+    (``register_plant_registry``'s own resolution, the one ``build_plant_mapping`` and
+    ``deliver_orthomosaic_plant_counts`` share), and return ``name``. Idempotent under the same
+    content: a second call with the same paths under the same name is a no-op.
+    """
+    from tcip_mcp.tools.phenology_tools import register_plant_registry
+
+    res = register_plant_registry(
+        name=name, csv_paths=[str(p) for p in csv_paths], crop=crop, site=site)
+    assert "error" not in res, res
+    return name
+
+
 def write_plant_mapping(
     project_root: str | Path, name: str, mapping: dict[str, list[dict]],
     *, dataset_root: str | Path,
@@ -227,7 +243,8 @@ def write_plant_mapping(
         name=name, project_root=str(project_root), dataset_root=str(root), dataset_id=reg["id"],
         built_by="build_plant_mapping", built_at=datetime.now(timezone.utc).isoformat(),
         dates_requested=None, dates=sorted(mapping),
-        nn_tolerance_m={"value": 10.0, "source": "fallback"}, plant_csvs=[],
+        nn_tolerance_m={"value": 10.0, "source": "fallback"},
+        plant_registry={"name": "unregistered", "digest": "0" * 64},
         capture_identity={d: "0" * 16 for d in mapping},
         capture_digests={d: {} for d in mapping}, unreadable={d: [] for d in mapping},
         assignments={d: [_row(row, d) for row in rows] for d, rows in mapping.items()},

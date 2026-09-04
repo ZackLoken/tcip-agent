@@ -28,7 +28,8 @@ from tests.test_tcip_web_results_routes import _expected_validation_record, _phe
 _NO_MAPPING = MappingBuild(
     name="none", project_root="", dataset_root="", dataset_id="", built_by="test", built_at="",
     dates_requested=None, dates=[], nn_tolerance_m={"value": 0.0, "source": "fallback"},
-    plant_csvs=[], capture_identity={}, capture_digests={}, unreadable={}, assignments={},
+    plant_registry={"name": "unregistered", "digest": "0" * 64},
+    capture_identity={}, capture_digests={}, unreadable={}, assignments={},
     record_sha256="0" * 16,
 ).delivery_disclosure({"captures_unverified": [], "plant_csvs_unverified": []}, [])
 

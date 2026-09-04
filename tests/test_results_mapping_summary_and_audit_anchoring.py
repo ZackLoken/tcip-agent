@@ -82,9 +82,17 @@ def _capture_fixture(root: Path) -> dict:
     from tcip_mcp.traits import registered_crops
 
     register_dataset(str(root), crop=sorted(registered_crops())[0])
+    from tests._binding_fixtures import register_plant_registry_for
+
+    registry = register_plant_registry_for([csv_path])
     # The mapping doors build for the project the GUI has open, the one these captures belong to.
     store.open_project(root.resolve())
-    return {"name": "valley", "images_root": str(images), "plant_csv_paths": [str(csv_path)]}
+    return {
+        "name": "valley", "images_root": str(images), "plant_registry": registry,
+        # Not a BuildMappingPayload field (ignored by the route); carried for a test that needs
+        # the registry's own source file, e.g. to prove it may live outside the project.
+        "csv_path": str(csv_path),
+    }
 
 
 def test_build_reports_image_count_mapped_count_and_mean_distance_as_three_answers(
