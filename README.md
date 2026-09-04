@@ -157,9 +157,9 @@ positive state, such as a phenology milestone, instead calibrates through the
 | `author_trait_spec(project_root, trait, delivers, rationale)` | Registers a trait that does not yet exist, recording the agent's account of why, in the breeder's own terms; the breeder confirms it from the web GUI before it can back a delivery. |
 | `state_trait_operationalization(project_root, trait, delivery_kind, statement, mechanism, measured_subject, delivered_phenotypes)` | Records what the trait's delivered number means, in the breeder's own terms, for one delivery kind. Writing this does not itself clear the delivery gate; the breeder confirms it in the Results tab, and only that confirmation lets a delivery door proceed. |
 | `deliver_per_image_counts` | Delivers a per-image `image, detection_count, avg_confidence` CSV, gated on the confirmed operationalization and the validated operating point. |
-| `export_predictions` | Persists a prediction bucket other doors (including a per-plant CSV built from it) treat as ground truth. |
+| `run_inference` | Runs a checkpoint and persists a prediction bucket other doors (including a per-plant CSV built from it) treat as ground truth. |
 
-Read the `delivery` skill before choosing between `deliver_per_image_counts` and `export_predictions`
+Read the `delivery` skill before choosing between `deliver_per_image_counts` and `run_inference`
 (and the per-plant aggregation tools built on top of a prediction bucket): they answer different
 questions and carry different CSV schemas, and neither ships a bare unvalidated number without
 `acknowledge_unvalidated=True` making the provisional shipment explicit.
@@ -221,7 +221,7 @@ matched to the nearest plant in a plant-locations CSV (`assign_detections_to_pla
 `source`/`distance_m`, no fabricated confidence, an unmatched detection stays unmatched rather than
 being forced onto the nearest plant regardless of distance). Two MCP tools compose the whole path
 end to end the same way `build_plant_mapping` → `deliver_phenology_milestones` do for the per-photo case:
-`export_predictions`'s `raster_path` regime (tile, persist a prediction bucket) and
+`run_inference`'s `raster_path` regime (tile, persist a prediction bucket) and
 `deliver_orthomosaic_plant_counts` (map detections to plants, aggregate, deliver through the same
 measurement-integrity gate every other per-plant CSV goes through). Not yet built: a composed
 pipeline for a dimensional (not count) trait measured this way, and an automated smoke test against
