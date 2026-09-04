@@ -236,6 +236,8 @@ class GenericPredictor:
         postprocess: str, *, require_masks: bool = True,
         tile_resize: tuple[int, int] | None = None,
         band_interpretations: "tuple[str, ...] | None" = None,
+        prior: dict | None = None,
+        progress: "Callable[[int, int, dict], None] | None" = None,
     ) -> dict:
         """Shared tiling/batching/reconstruction loop behind :meth:`predict_tiled`'s two source
         kinds (a fully decoded in-memory image, or a windowed raster reader): build tile positions
@@ -272,6 +274,19 @@ class GenericPredictor:
         to :meth:`_tile_model_input` for the windowed-reader caller only (the whole-decode caller's
         tiles are already the type ``load_image`` resolved them to, with its own real signal).
 
+        ``prior`` (default ``None``) seeds the accumulators with tiles a caller already has, from
+        an earlier, interrupted run of this same pass: a mapping with ``tile_info``/``boxes``/
+        ``scores``/``labels``, one entry per already-done tile, in the shape a batch record from
+        ``progress`` below carries. Every position in ``prior["tile_info"]`` is skipped in the live
+        loop, so this resumes rather than repeats it; the merge (reconstruction, cross-tile NMS or
+        NMM, the ``max_dets`` cap) runs over ``prior`` and the live tiles together, and ``tiles``
+        still reports the whole grid's count either way. ``progress`` (default ``None``), when
+        given, is called once per flushed live batch with that batch's own first and last tile
+        index into the full position grid and a mapping of its own new ``tile_info``/``boxes``/
+        ``scores``/``labels`` (never ``masks``, whatever ``require_masks`` says: resuming a
+        mask-bearing pass is a caller's own decision to refuse, this loop stays generic), so a
+        caller can persist it and resume from it later. Neither seeds nor reports mask patches.
+
         Returns ``width``/``height``/``boxes``/``scores``/``labels``/``count``/``tiles`` (``masks``
         when applicable); the caller stamps its own ``image`` field (a display path or a windowed
         reader's own label).
@@ -295,9 +310,19 @@ class GenericPredictor:
 
         per_tile_boxes, per_tile_scores, per_tile_labels, tile_info = [], [], [], []
         per_tile_masks: list = [] if collect_masks else None
+        if prior is not None:
+            for info, b, s, l in zip(
+                prior["tile_info"], prior["boxes"], prior["scores"], prior["labels"]):
+                tile_info.append(info)
+                per_tile_boxes.append(np.asarray(b, dtype=np.float32).reshape(-1, 4))
+                per_tile_scores.append(np.asarray(s, dtype=np.float32))
+                per_tile_labels.append(np.asarray(l, dtype=np.int64))
+        done_positions = {(info["tile_x"], info["tile_y"]) for info in tile_info}
+
         batch_tiles: list = []
         batch_meta: list = []
         batch_scales: list = []
+        batch_pos_indices: list = []
 
         def _flush() -> None:
             if not batch_tiles:
@@ -323,12 +348,23 @@ class GenericPredictor:
                             mode="bilinear", align_corners=False).squeeze(1)
                     per_tile_masks.append(m.cpu().numpy())
                 tile_info.append(meta)
+            n_new = len(batch_meta)
+            if progress is not None and n_new:
+                progress(batch_pos_indices[0], batch_pos_indices[-1], {
+                    "tile_info": tile_info[-n_new:],
+                    "boxes": [b.tolist() for b in per_tile_boxes[-n_new:]],
+                    "scores": [s.tolist() for s in per_tile_scores[-n_new:]],
+                    "labels": [l.tolist() for l in per_tile_labels[-n_new:]],
+                })
             batch_tiles.clear()
             batch_meta.clear()
             batch_scales.clear()
+            batch_pos_indices.clear()
 
         resize_applied = True
-        for tile_x, tile_y in positions:
+        for pos_index, (tile_x, tile_y) in enumerate(positions):
+            if (tile_x, tile_y) in done_positions:
+                continue
             raw = get_tile(tile_x, tile_y)
             crop, scale_x, scale_y = self._tile_model_input(
                 raw, tile_resize, band_interpretations=band_interpretations)
@@ -337,6 +373,7 @@ class GenericPredictor:
             batch_scales.append((scale_x, scale_y))
             batch_meta.append({"tile_x": tile_x, "tile_y": tile_y,
                                "original_width": width, "original_height": height})
+            batch_pos_indices.append(pos_index)
             if len(batch_tiles) >= tile_batch_size:
                 _flush()
         _flush()
@@ -415,6 +452,8 @@ class GenericPredictor:
         overlap: float = 0.2, tile_batch_size: int = 96, global_nms_iou: float = DEFAULT_NMS_IOU,
         postprocess: str = "nms", *, require_masks: bool = True, source_label: str = "",
         tile_resize: tuple[int, int] | None = None,
+        prior: dict | None = None,
+        progress: "Callable[[int, int, dict], None] | None" = None,
     ) -> dict:
         """Tiled (SAHI-style) detection: sliding-window tiles -> per-tile predict ->
         core-region reconstruction -> cross-tile merge -> full-image detections.
@@ -466,6 +505,12 @@ class GenericPredictor:
         patch plus its full-image-space offset (``{"mask_patch", "offset_x", "offset_y"}``, see
         :meth:`_tiled_infer_core`), the shape a source too large to hold one full-size mask per
         detection requires; a consumer must not assume the two ``masks`` shapes are interchangeable.
+
+        ``prior``/``progress`` (both default ``None``) forward to :meth:`_tiled_infer_core` for the
+        windowed-reader source only, the resume seam a raster too large to decode whole needs; see
+        that method's own docstring. The whole-decode source never resumes (a plain directory-of-
+        images pass writes its files all at the end, unchanged), so a caller of that path leaves
+        both unset.
         """
         if hasattr(source, "read_window"):
             if self.task not in _DETECTION_TASKS:
@@ -485,7 +530,8 @@ class GenericPredictor:
             result = self._tiled_infer_core(
                 source.height, source.width, _windowed_tile, edge, overlap, tile_batch_size,
                 global_nms_iou, postprocess, require_masks=require_masks, tile_resize=tile_resize,
-                band_interpretations=getattr(source, "band_interpretations", None))
+                band_interpretations=getattr(source, "band_interpretations", None),
+                prior=prior, progress=progress)
             result["image"] = source_label
             return result
 
