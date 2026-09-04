@@ -111,6 +111,28 @@ def pytest_sessionfinish(session, exitstatus):
 '''
 
 
+def _test_file_relative_to_repo(raw: str) -> tuple[str | None, str]:
+    """``raw`` normalized to a repo-relative, forward-slash path under ``tests/``.
+
+    Accepts a relative path as always, or an absolute one naming a file inside this repository;
+    either way the return is a tree-relative path, so pytest collects the target inside whichever
+    tree gets materialized rather than an absolute path that names the working checkout's file
+    regardless of ``cwd``. Returns ``(None, reason)`` when ``raw`` resolves outside ``tests/``.
+    """
+    path = Path(raw)
+    if path.is_absolute():
+        try:
+            rel = path.resolve().relative_to(REPO.resolve())
+        except ValueError:
+            return None, f"{raw} is outside this repository ({REPO})."
+    else:
+        rel = path
+    rel_str = str(rel).replace("\\", "/")
+    if not rel_str.startswith(f"{TEST_TREE}/"):
+        return None, f"{raw} resolves to {rel_str}, outside {TEST_TREE}/."
+    return rel_str, ""
+
+
 def git_output(*args: str) -> str:
     proc = subprocess.run(["git", *args], cwd=REPO, capture_output=True, text=True)
     if proc.returncode != 0:
@@ -382,6 +404,12 @@ def main() -> int:
     record: dict = {"test_file": args.test_file, "k": args.expr, "verdict": None,
                     "test_tree_from": args.test_rev or "the working tree"}
 
+    test_file, refusal = _test_file_relative_to_repo(args.test_file)
+    if test_file is None:
+        record.update(verdict=REFUSED, why=refusal)
+        return _report(record, args.json_out)
+    record["test_file"] = test_file
+
     if args.test_rev and not args.baseline:
         record.update(verdict=REFUSED, why=(
             "--test-rev needs an explicit --baseline. The commit before a test is inside the change "
@@ -390,12 +418,12 @@ def main() -> int:
         return _report(record, args.json_out)
 
     if args.test_rev:
-        listed = git_output("ls-tree", "--name-only", "-r", args.test_rev, "--", args.test_file).strip()
+        listed = git_output("ls-tree", "--name-only", "-r", args.test_rev, "--", test_file).strip()
         if not listed:
-            record.update(verdict=REFUSED, why=f"{args.test_file} does not exist at {args.test_rev}.")
+            record.update(verdict=REFUSED, why=f"{test_file} does not exist at {args.test_rev}.")
             return _report(record, args.json_out)
-    elif not (REPO / args.test_file).is_file():
-        record.update(verdict=REFUSED, why=f"{args.test_file} does not exist in the working tree.")
+    elif not (REPO / test_file).is_file():
+        record.update(verdict=REFUSED, why=f"{test_file} does not exist in the working tree.")
         return _report(record, args.json_out)
 
     rev, how, unusable = _resolve_baseline(args.baseline, args.integration)
@@ -433,7 +461,7 @@ def main() -> int:
 
         try:
             proc, observed = run_capturing_outcome(
-                tree, [args.test_file], args.expr, env, outcome_json, args.timeout)
+                tree, [test_file], args.expr, env, outcome_json, args.timeout)
         except subprocess.TimeoutExpired:
             record.update(verdict=REFUSED, why=f"pytest did not finish within {args.timeout}s.")
             return _report(record, args.json_out)
