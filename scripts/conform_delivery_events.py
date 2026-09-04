@@ -5,22 +5,25 @@
 This script conforms almost entirely by checking and naming, never by rewriting: it is a one-off
 operator tool per this repo's no-backward-compatibility boundary (CLAUDE.md), and unlike
 ``conform_view_coverage_viewing.py`` it has almost nothing to reshape. A ``delivery_events`` record
-predating the three ``plant_mapping`` disclosure keys (``dates_delivered``, ``images_unattributed``,
-``plant_attribution``) or the delivered file's own ``output_sha256`` carries no value for them
-anywhere on the record: they were never computed for that delivery, so there is no old shape to
-map forward, only a gap to name. A refused record is left exactly as stored; the only remedy is a
-fresh delivery through the door that writes this record, or removing the record by hand.
+predating the three walked-mapping ``plant_mapping`` disclosure keys (``dates_delivered``,
+``images_unattributed``, ``plant_attribution``) or the delivered file's own ``output_sha256``
+carries no value for them anywhere on the record: they were never computed for that delivery, so
+there is no old shape to map forward, only a gap to name. A refused record is left exactly as
+stored; the only remedy is a fresh delivery through the door that writes this record, or removing
+the record by hand.
 
-``plant_mapping`` carries one of two disclosure shapes, or ``null`` (``delivery_events_schema.py``):
-a walked capture mapping's, or ``deliver_orthomosaic_plant_counts``'s own whole-raster registry
-disclosure. Every stored record written so far still validates against the shape it always
-carried, so neither disclosure shape needs a write-forward here.
-
-The one exception is ``acknowledged_by``/``acknowledgement_reason``: a record written before this
+``plant_mapping`` carries one of three disclosure shapes, or ``null`` (``delivery_events_schema.py``):
+a walked capture mapping's, or ``deliver_orthomosaic_plant_counts``'s own whole-raster registry or
+canopy-segment disclosure. Two write-forwards exist, both applied together when both gaps are
+present. The first is ``acknowledged_by``/``acknowledgement_reason``: a record written before this
 pair existed carries no acknowledgement of any kind, so ``null`` on both is not a guess but the
-true value, derivable from the record's own age rather than from anything it states. A record
-missing exactly this pair (and nothing else) is write-forwarded to carry both as ``null``, in
-place, under the store's own transaction; every other gap is still only named.
+true value, derivable from the record's own age rather than from anything it states. The second is
+a registry disclosure's ``plants_outside_raster``, added after that form already shipped: its true
+value is derivable from the event's own registry (name and digest) and raster identity (width,
+height and geotransform) through :func:`~tcip_mcp.pipelines.postprocessing.orthomosaic_mapping.
+plants_in_frame`, recomputed here rather than guessed, and refused by name when the named registry
+no longer loads or its digest has moved (the value cannot be reconstructed from a registry that is
+not the one the delivery read). Every other gap is still only named.
 
 ``--plan`` previews what would be written without writing it; without it, an applicable record's
 write-forward runs. Every other refused record is unaffected by either mode.
@@ -73,25 +76,117 @@ def _check_record(record: object) -> tuple[bool, str]:
     return True, "validates, unchanged"
 
 
-def _forward_acknowledgement(record: object) -> dict | None:
-    """``record`` with ``acknowledged_by``/``acknowledgement_reason`` forwarded to ``null``, or
-    ``None`` when there is nothing to forward.
+def _ack_gap(record: dict) -> bool:
+    """Whether ``record`` is missing both acknowledgement keys outright: a delivery from before
+    this pair existed, for which ``null`` on both is the true, derivable value."""
+    return not any(key in record for key in _ACKNOWLEDGEMENT_KEYS)
 
-    Applies only to a record missing both keys outright (a delivery from before this pair
-    existed, for which ``null`` is the true, derivable value) and only when adding them is
-    sufficient to validate: a record with some other gap is left to :func:`_check_record`'s own
-    refusal, never guessed at here.
+
+def _forward_acknowledgement(record: dict) -> dict:
+    """``record`` with ``acknowledged_by``/``acknowledgement_reason`` forwarded to ``null``.
+    Call only when :func:`_ack_gap` is true."""
+    return {**record, "acknowledged_by": None, "acknowledgement_reason": None}
+
+
+def _plants_outside_raster_gap(record: dict) -> bool:
+    """Whether ``record`` carries a registry (never a canopy-segment) ``plant_mapping``
+    disclosure missing ``plants_outside_raster``: the one key that pair predates."""
+    pm = record.get("plant_mapping")
+    return (
+        isinstance(pm, dict) and "plant_registry" in pm and "canopy_segments" not in pm
+        and "plants_outside_raster" not in pm
+    )
+
+
+class _RegistryUnrecoverable(Exception):
+    """A registry disclosure's ``plants_outside_raster`` gap is real but cannot be recomputed:
+    the registry it names no longer loads, or has moved, since this delivery read it."""
+
+
+def _forward_plants_outside_raster(record: dict, project_root: Path) -> dict:
+    """``record`` with its registry disclosure's ``plants_outside_raster`` forwarded, recomputed
+    through :func:`~tcip_mcp.pipelines.postprocessing.orthomosaic_mapping.plants_in_frame` from
+    the event's own registry (name and digest) and raster identity (width, height and
+    geotransform). Call only when :func:`_plants_outside_raster_gap` is true.
+
+    Raises :class:`_RegistryUnrecoverable`, naming why, when the named registry no longer loads,
+    when its digest has moved, or when the event's own raster identity carries no geotransform or
+    dimensions to project through: the value cannot be reconstructed from a registry, or an
+    identity, that is not the one this delivery read.
+    """
+    from tcip_mcp.pipelines.postprocessing.orthomosaic_mapping import (
+        GeoTransform, OrthomosaicGeoreference, plants_in_frame,
+    )
+    from tcip_mcp.pipelines.postprocessing.plant_mapping import (
+        load_registry, read_plant_csvs, registry_csv_entries,
+    )
+
+    pm = record["plant_mapping"]
+    registry_ref = pm.get("plant_registry") or {}
+    name = registry_ref.get("name")
+    stored_registry = load_registry(project_root, name) if name else None
+    if stored_registry is None:
+        raise _RegistryUnrecoverable(
+            f"plant registry {name!r} named by this event's plant_mapping no longer loads; "
+            "plants_outside_raster cannot be recomputed from a registry that is not the one "
+            "this delivery read"
+        )
+    if stored_registry.get("digest") != registry_ref.get("digest"):
+        raise _RegistryUnrecoverable(
+            f"plant registry {name!r} named by this event's plant_mapping has moved (delivered "
+            f"against digest {registry_ref.get('digest')!r}, now "
+            f"{stored_registry.get('digest')!r}); plants_outside_raster cannot be recomputed "
+            "from a registry that is not the one this delivery read"
+        )
+    identity = pm.get("raster_identity") or {}
+    geotransform = identity.get("geotransform")
+    width, height = identity.get("width"), identity.get("height")
+    if not geotransform or width is None or height is None:
+        raise _RegistryUnrecoverable(
+            "this event's raster_identity carries no geotransform or no dimensions; "
+            "plants_outside_raster cannot be recomputed without them"
+        )
+    plants = read_plant_csvs(Path(e["path"]) for e in registry_csv_entries(stored_registry))
+    georef = OrthomosaicGeoreference(GeoTransform(**geotransform))
+    _in_frame, outside = plants_in_frame(plants, georef, width=int(width), height=int(height))
+    names = sorted(p.plot_name for p in outside)
+    return {**record, "plant_mapping": {**pm, "plants_outside_raster": names}}
+
+
+def _write_forward(
+    record: object, project_root: Path,
+) -> tuple[dict | None, list[tuple[str, str]], str | None]:
+    """Every applicable write-forward composed onto ``record``: ``(forwarded, changes, refusal)``.
+
+    ``changes`` names each applied gap as ``(gap_name, applied_phrase)``, in application order;
+    both write-forwards apply together when both gaps are present, since a record can predate
+    both. ``forwarded`` is ``None`` when nothing applies or the composed result still does not
+    validate; ``refusal`` names why a derivable-in-principle gap (a stored registry disclosure's
+    ``plants_outside_raster``) could not be filled.
     """
     if not isinstance(record, dict):
-        return None
-    if any(key in record for key in _ACKNOWLEDGEMENT_KEYS):
-        return None
-    forwarded = {**record, "acknowledged_by": None, "acknowledgement_reason": None}
+        return None, [], None
+    working = record
+    changes: list[tuple[str, str]] = []
+    if _ack_gap(working):
+        working = _forward_acknowledgement(working)
+        changes.append((
+            "acknowledged_by/acknowledgement_reason",
+            "acknowledged_by/acknowledgement_reason to null",
+        ))
+    if _plants_outside_raster_gap(working):
+        try:
+            working = _forward_plants_outside_raster(working, project_root)
+        except _RegistryUnrecoverable as exc:
+            return None, [], str(exc)
+        changes.append(("plants_outside_raster", "plants_outside_raster"))
+    if not changes:
+        return None, [], None
     try:
-        DeliveryEventRecord.model_validate(forwarded)
+        DeliveryEventRecord.model_validate(working)
     except ValidationError:
-        return None
-    return forwarded
+        return None, [], None
+    return working, changes, None
 
 
 def check_root(root: Path, *, plan: bool = False) -> tuple[list[str], bool]:
@@ -114,29 +209,33 @@ def check_root(root: Path, *, plan: bool = False) -> tuple[list[str], bool]:
         if ok:
             outcomes.append(f"{event_id}: {message}")
             continue
-        forwarded = _forward_acknowledgement(stored)
+        forwarded, changes, refusal = _write_forward(stored, root)
+        if refusal is not None:
+            outcomes.append(f"{event_id}: refused, {message} {refusal}")
+            refused = True
+            continue
         if forwarded is None:
             outcomes.append(f"{event_id}: {message}")
             refused = True
             continue
+        names = ", ".join(name for name, _applied in changes)
         if plan:
             outcomes.append(
-                f"{event_id}: refused as stored (missing acknowledged_by/acknowledgement_reason); "
-                "would write-forward both to null and validate"
+                f"{event_id}: refused as stored (missing {names}); would write-forward and "
+                "validate"
             )
             refused = True
             continue
         with ts.transaction(key) as txn:
             current = txn.read(key, default=None)
-            current_forwarded = _forward_acknowledgement(current)
-            if current_forwarded is None:
+            current_forwarded, current_changes, current_refusal = _write_forward(current, root)
+            if current_refusal is not None or current_forwarded is None:
                 outcomes.append(f"{event_id}: {message}")
                 refused = True
                 continue
             txn.write(key, current_forwarded)
-        outcomes.append(
-            f"{event_id}: write-forwarded acknowledged_by/acknowledgement_reason to null, validates"
-        )
+        applied = ", ".join(phrase for _name, phrase in changes)
+        outcomes.append(f"{event_id}: write-forwarded {applied}, validates")
     return outcomes, refused
 
 

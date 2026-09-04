@@ -266,6 +266,109 @@ def test_main_over_a_root_with_no_tcip_directory_exits_two_and_names_it(
     assert f"{missing.resolve()}: refused, no .tcip directory found" in output
 
 
+def _geo_transform_dict() -> dict:
+    return {
+        "tiepoint_pixel_x": 0.0, "tiepoint_pixel_y": 0.0,
+        "tiepoint_native_x": 500_000.0, "tiepoint_native_y": 4_800_000.0,
+        "pixel_scale_x": 0.5, "pixel_scale_y": 0.5, "epsg": 32615,
+    }
+
+
+def _register_two_plants(tmp_path: Path, *, name: str = "reg") -> tuple[dict, tuple[float, float]]:
+    """A real registered plant registry, one plant inside a 64x64 raster frame and one outside
+    it, projected through :func:`_geo_transform_dict`'s own affine; returns the registered record
+    and the (lat, lon) an in-frame detection's own projected position would resolve to."""
+    from tcip_mcp.pipelines.postprocessing.orthomosaic_mapping import (
+        GeoTransform, OrthomosaicGeoreference,
+    )
+    from tcip_mcp.pipelines.postprocessing.plant_mapping import register_plant_registry_record
+
+    georef = OrthomosaicGeoreference(GeoTransform(**_geo_transform_dict()))
+    in_lat, in_lon = georef.pixel_to_wgs84(10.0, 10.0)
+    out_lat, out_lon = georef.pixel_to_wgs84(200.0, 10.0)  # column 200 >= width 64: outside
+
+    plant_csv = tmp_path / "plants.csv"
+    plant_csv.write_text(
+        "plot_name,accession_name,WGS84_centroid_x,WGS84_centroid_y\n"
+        f"plot_in,acc_in,{in_lon},{in_lat}\n"
+        f"plot_out,acc_out,{out_lon},{out_lat}\n",
+        encoding="utf-8",
+    )
+    registry = register_plant_registry_record(
+        tmp_path, name, [plant_csv], crop="chestnut", site="orchard", registered_by="test")
+    return registry, (in_lat, in_lon)
+
+
+def _write_registry_event_missing_plants_outside_raster(
+    tmp_path: Path, *, event_id: str, registry_digest: str,
+) -> None:
+    key = resolution.delivery_event_key(resolution.delivery_events_scope(tmp_path), event_id)
+    ts.replace(
+        key,
+        {
+            "event_id": event_id, "trait": "astringency", "delivery_kind": "state_crossing_dates",
+            "door": "deliver_orthomosaic_plant_counts", "output_path": None, "output_sha256": None,
+            "measurement_documents": ["operating_point"], "scale_document": None,
+            "acknowledged_by": None, "acknowledgement_reason": None,
+            "plant_mapping": {
+                "plant_registry": {"name": "reg", "digest": registry_digest},
+                "project_root": str(tmp_path),
+                "raster_identity": {"width": 64, "height": 64, "geotransform": _geo_transform_dict()},
+                "nn_tolerance_m": {"value": 1.0, "source": "stated"},
+                "detections_unattributed": 0,
+                "detections_unattributed_scope": "delivered_raster",
+                "plant_attribution": "detection",
+            },
+            "documents": {},
+            "produced_at": datetime.now(timezone.utc).isoformat(),
+        },
+        expect=ts.Version.ABSENT,
+    )
+
+
+def test_check_root_write_forwards_plants_outside_raster_for_a_registry_event_lacking_it(
+    tmp_path: Path,
+) -> None:
+    bind_default()
+    module = _load_script()
+    registry, _in_position = _register_two_plants(tmp_path)
+    _write_registry_event_missing_plants_outside_raster(
+        tmp_path, event_id="registry-no-outside", registry_digest=registry["digest"])
+
+    outcomes, refused = module.check_root(tmp_path)
+
+    assert refused is False
+    assert "write-forwarded plants_outside_raster, validates" in outcomes[0]
+    stored = _events(tmp_path)["registry-no-outside"]
+    assert stored["plant_mapping"]["plants_outside_raster"] == ["plot_out"]
+
+
+def test_check_root_refuses_a_registry_event_whose_registry_moved(tmp_path: Path) -> None:
+    bind_default()
+    module = _load_script()
+    _register_two_plants(tmp_path)
+    _write_registry_event_missing_plants_outside_raster(
+        tmp_path, event_id="registry-moved", registry_digest="0" * 64)
+
+    outcomes, refused = module.check_root(tmp_path)
+
+    assert refused is True
+    assert "has moved" in outcomes[0]
+    assert "plants_outside_raster" in outcomes[0]
+
+
+def test_check_root_refuses_a_registry_event_whose_registry_no_longer_loads(tmp_path: Path) -> None:
+    bind_default()
+    module = _load_script()
+    _write_registry_event_missing_plants_outside_raster(
+        tmp_path, event_id="registry-gone", registry_digest="0" * 64)
+
+    outcomes, refused = module.check_root(tmp_path)
+
+    assert refused is True
+    assert "no longer loads" in outcomes[0]
+
+
 def test_main_plan_mode_over_a_mixed_root_prints_both_lines_exits_two_and_rewrites_nothing(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
 ) -> None:
