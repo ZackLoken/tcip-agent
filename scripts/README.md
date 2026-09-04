@@ -210,9 +210,17 @@ fresh root predates another change, not a capability to build on.
   facts), adds `supersedes: null`, and appends a fresh `plant_mapping_built` receipt naming each
   rewritten record's new digest; prints the delivery events whose cited mapping digest the
   rewrite strands. `--plan` previews and writes nothing.
+- `conform_job_registry_roots.py` - stamps a job-registry document's own root (inference, review
+  priority queue, HPO) onto every summary it holds that predates the `platform_root` field,
+  since a document lives at the key that root is stored under, not a value to guess at
+  rehydrate time. `--plan` previews and writes nothing.
 - `conform_metrics_marker.py` - stamps the `metrics_logged` marker onto every experiment a
   root's status record predates, so `is_pristine` reads the marker instead of scanning the
   metrics log.
+- `conform_region_completeness_attested_view.py` - write-forwards an empty `cells_attested_view`
+  map onto a dataset's stored `region_completeness` records written before the key existed, since
+  a record from before it predates any scale provenance to carry. `--plan` previews and writes
+  nothing; the write happens inside the same lock the completeness route itself takes.
 - `conform_registry_experiment_id.py` - conforms a project's registry entries to carry
   `experiment_id` (the run whose completion bound an entry, `null` for one no run bound), for an
   entry registered before the producer-binding field existed. `--plan` previews; an entry
