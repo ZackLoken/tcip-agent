@@ -1335,6 +1335,30 @@ def load_mapping(project_root: Path | str, name: str) -> Optional[MappingBuild]:
     return MappingBuild(**kwargs, assignments=assignments, record_sha256=record_sha256)
 
 
+def resolved_mapping_key_for_citation(
+    project_root: Path | str, name: str, record_sha256: str,
+) -> str:
+    """The name a reader loads to see exactly the record a delivery event's own
+    ``plant_mapping.record_sha256`` cites: ``name`` itself when the record currently stored
+    under it still hashes to ``record_sha256``, or the archived key a superseding rebuild moved
+    it to (``f"{name}@{record_sha256[:12]}"``) otherwise, so a cited record stays reachable even
+    after its name has moved on.
+
+    For a delivery-event reader (the Results tab's panel route) to call, never for
+    :func:`resolve_delivery_mapping`: a delivery resolves the mapping it is about to read by
+    name, against the mapping's current inputs, not a historical record it may already have
+    superseded.
+    """
+    current = tcip_store.read(plant_mapping_key(project_root, name), default=None)
+    if isinstance(current, dict):
+        try:
+            if record_digest(_validated_record(current, project_root, name)) == record_sha256:
+                return name
+        except ValueError:
+            pass
+    return f"{name}@{record_sha256[:12]}"
+
+
 def _describe_capture(stamps_by_stem: dict[str, ImageStamp], stem: str) -> str:
     """Name one capture for a refusal message: its kind and file name when a fresh stamp for
     ``stem`` was read this call, else the bare stem (a capture that vanished between the record
