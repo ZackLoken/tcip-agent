@@ -1431,8 +1431,8 @@ def open_validation(
         raise ValueError(
             f"{name} reported {param_key} validated_against={reported!r} for trait {trait!r}, which "
             f"clears nothing for a {validation_kind} claim; a {document} claim is earned only "
-            f"against {list(accepted_references(validation_kind))}. Deliver provisionally with "
-            "acknowledge_unvalidated=True, or calibrate against a reference sized to the trait."
+            f"against {list(accepted_references(validation_kind))}. Deliver provisionally through "
+            "an acknowledged delivery, or calibrate against a reference sized to the trait."
         )
 
     import secrets
@@ -1915,7 +1915,9 @@ def delivered_tail(
     validated column means. An ``unvalidated_dimensions`` named in ``columns`` carries
     :meth:`DeliveryGateResult.unvalidated_cell`, every gated dimension that did not validate (blank
     when none), so a reader can always recover the gate's full outcome behind a floored validity
-    column without a second spelling of it.
+    column without a second spelling of it. ``acknowledged_by``/``acknowledgement_reason`` named in
+    ``columns`` carry ``gate.acknowledged_by``/``gate.acknowledgement_reason`` verbatim (``None``
+    when nothing was acknowledged), the phenology door's own column list today, no other door's.
     """
     if asserted and asserted.get("produced_at") is not None:
         raise ValueError(
@@ -1930,6 +1932,10 @@ def delivered_tail(
         values[_DIMENSION_TO_COLUMN[dim]] = gate.column_stamp(dim, own_column=owned)
     if "unvalidated_dimensions" in columns:
         values["unvalidated_dimensions"] = gate.unvalidated_cell()
+    if "acknowledged_by" in columns:
+        values["acknowledged_by"] = gate.acknowledged_by
+    if "acknowledgement_reason" in columns:
+        values["acknowledgement_reason"] = gate.acknowledgement_reason
     return values
 
 
@@ -2088,6 +2094,7 @@ def record_delivery_binding_event(
     *,
     measurement_documents: Sequence[str],
     scale_document: str | None,
+    acknowledgement: Acknowledgement | None,
     trait: str | None = None,
     delivery_kind: str | None = None,
     project_root: str | Path | None = None,
@@ -2123,6 +2130,14 @@ def record_delivery_binding_event(
     ``"resolve_scale"`` when the delivery also rests on a physical scale, ``None`` otherwise. Both
     are required, never defaulted, so a caller cannot silently omit what its own gate actually
     reconciled.
+
+    ``acknowledgement`` is the breeder's own act of shipping this delivery unvalidated (the same
+    ``Acknowledgement`` a passing ``check_delivery_gate`` call may have taken), or ``None`` when
+    nothing needed acknowledging. Required, never defaulted, for the same reason
+    ``measurement_documents`` is: a caller cannot silently omit whether this delivery rests on a
+    breeder's acknowledgement. Recorded as the record's own ``acknowledged_by``/
+    ``acknowledgement_reason`` fields, both present and null together when ``acknowledgement`` is
+    ``None``.
 
     ``plant_mapping`` is the delivery's own plant-mapping binding (name, project and dataset
     roots, the record's digest, its per-date capture identity, and the two unverified
@@ -2164,6 +2179,8 @@ def record_delivery_binding_event(
         "output_sha256": _delivered_file_sha256(output_path),
         "measurement_documents": list(measurement_documents),
         "scale_document": scale_document,
+        "acknowledged_by": acknowledgement.acknowledged_by if acknowledgement is not None else None,
+        "acknowledgement_reason": acknowledgement.reason if acknowledgement is not None else None,
         "plant_mapping": plant_mapping,
         "documents": {
             bucket: {
@@ -2641,6 +2658,21 @@ def bind_classifier_validity(
 # --- the delivery gate (one refuse-or-stamp check shared by every phenotype-delivery door) ---
 
 @dataclass(frozen=True)
+class Acknowledgement:
+    """The breeder's own act of shipping an unvalidated delivery, built only by the web delivering
+    route (``tcip_web.routes.results.export_csv``) once a request names a real user.
+
+    Never constructed by an MCP tool or a pipeline: an agent acknowledging its own unvalidated
+    output would be attesting to a breeder's judgment it never obtained. ``reason`` is required
+    non-empty (the one thing the record carries that says why), and ``acknowledged_by`` is the
+    ``user:<name>`` identity resolved from the request that made the act, never a server identity.
+    """
+
+    acknowledged_by: str
+    reason: str
+
+
+@dataclass(frozen=True)
 class DeliveryGateResult:
     """Outcome of the delivery gate: whether the deliverable may be written, and how to stamp it."""
 
@@ -2648,17 +2680,20 @@ class DeliveryGateResult:
     unvalidated: tuple[str, ...]  # dimensions whose validity is not a shippable reference
     stamp: dict[str, str]  # per-dimension validity to stamp onto the deliverable
     reason: str = ""  # generic refusal message when not ok
+    acknowledged_by: str | None = None  # who acknowledged, when an Acknowledgement cleared this gate
+    acknowledgement_reason: str | None = None  # why, from that same Acknowledgement
 
     def column_stamp(self, dimension: str, *, own_column: tuple[str, ...] = ()) -> str:
         """The value the deliverable's column for ``dimension`` carries.
 
         Not the same thing as ``stamp[dimension]``, which is only that one dimension's own cleared
-        reference. A column stands for the trustworthiness of the number beside it, and with
-        ``acknowledge_unvalidated`` an ungrounded dimension still reaches the writer, so stamping
-        this dimension's own (possibly real) reference alone would report a partly acknowledged
-        provisional delivery as fully validated. Every gated dimension without a column of its own
-        therefore floors this one. Name in ``own_column`` the dimensions the deliverable does stamp
-        into columns of their own; those report themselves and never floor this one.
+        reference. A column stands for the trustworthiness of the number beside it, and an
+        acknowledgement (or a staging escape) still lets an ungrounded dimension reach the writer,
+        so stamping this dimension's own (possibly real) reference alone would report a partly
+        acknowledged provisional delivery as fully validated. Every gated dimension without a
+        column of its own therefore floors this one. Name in ``own_column`` the dimensions the
+        deliverable does stamp into columns of their own; those report themselves and never floor
+        this one.
 
         Owned here rather than re-derived per door so the doors cannot drift into disagreeing about
         what a validated column means.
@@ -2692,6 +2727,15 @@ class DeliveryRefused(ValueError):
         self.notes = notes
 
 
+STAGING_DIMENSIONS: tuple[str, ...] = ("tile_size", "claim_scope")
+"""The dimensions ``allow_unvalidated_staging`` may clear on their own, with no breeder
+acknowledgement: the two ``run_inference`` (and the doors that share its publish bracket) gates
+before an expensive tiled pass, never a dimension a phenotype's own delivered value rests on
+directly. Persisting a raw, honestly-stamped bucket at an unproven tile scale or claim scope is a
+different act from delivering a phenotype from one; the flag exists for the former and never
+reaches ``export_detection_csv``/``export_aggregated_csv``/the phenology writer, whose own
+dimensions clear only through a real reference or a breeder's ``Acknowledgement``."""
+
 _DIMENSION_REFERENCES: dict[str, tuple[str, ...]] = {
     "operating_point": _ACCEPTED_REFERENCES["annotations"],
     "classifier": _ACCEPTED_REFERENCES["annotations"],
@@ -2713,7 +2757,9 @@ documentation of a mechanism a future floor-only dimension can use, not a live a
 
 
 def check_delivery_gate(
-    flags: dict[str, str | None], *, acknowledge_unvalidated: bool = False,
+    flags: dict[str, str | None], *,
+    acknowledgement: Acknowledgement | None = None,
+    allow_unvalidated_staging: bool = False,
 ) -> DeliveryGateResult:
     """Refuse-or-stamp a phenotype delivery against the validity of each dimension it rests on.
 
@@ -2727,11 +2773,21 @@ def check_delivery_gate(
     Read the on-disk state before calling; the gate does not trust a caller-asserted string on
     its own.
 
-    Every dimension validated -> the gate passes. Any not -> it refuses unless
-    ``acknowledge_unvalidated=True``, the escape hatch that ships a clearly-flagged provisional
-    deliverable and stamps every unvalidated dimension ``false`` so the un-trustworthiness travels
-    downstream. The refusal targets a *silent bare number*, not an honestly-acknowledged provisional
-    CSV. ``stamp`` records, per dimension, the reference it cleared (or ``false``).
+    Every dimension validated -> the gate passes. Any not -> two independent escapes, neither
+    trusting the other's dimension:
+
+    - ``acknowledgement``, a real :class:`Acknowledgement` naming who and why, clears every
+      unvalidated dimension: the breeder's own act of shipping a clearly-flagged phenotype
+      unvalidated, stamped ``false`` so the un-trustworthiness travels downstream, and recorded on
+      the result's own ``acknowledged_by``/``acknowledgement_reason``.
+    - ``allow_unvalidated_staging=True`` clears only :data:`STAGING_DIMENSIONS` (``tile_size``,
+      ``claim_scope``): the pre-pass gate a raw prediction bucket is written under, never a
+      phenotype's own delivered dimensions (``operating_point``, ``classifier``, ``scale``), which
+      it cannot clear no matter what the caller states.
+
+    Any dimension neither escape covers still refuses. The refusal targets a *silent bare number*,
+    not an honestly-acknowledged provisional deliverable. ``stamp`` records, per dimension, the
+    reference it cleared (or ``false``), regardless of which escape (if any) let the gate pass.
     """
     unknown = sorted(name for name in flags if name not in _DIMENSION_REFERENCES)
     if unknown:
@@ -2744,23 +2800,33 @@ def check_delivery_gate(
              for name, st in flags.items()}
     unvalidated = tuple(name for name, st in flags.items()
                         if st not in _DIMENSION_REFERENCES[name])
-    if unvalidated and not acknowledge_unvalidated:
+    covered: set[str] = set()
+    if allow_unvalidated_staging:
+        covered |= {name for name in unvalidated if name in STAGING_DIMENSIONS}
+    if acknowledgement is not None:
+        covered |= set(unvalidated)
+    blocking = tuple(name for name in unvalidated if name not in covered)
+    if blocking:
         clears = "; ".join(
             f"{name} is cleared by {list(_DIMENSION_REFERENCES[name])}"
             if _DIMENSION_REFERENCES[name]
             else f"{name} is cleared by nothing (it states a missing prerequisite)"
-            for name in unvalidated)
+            for name in blocking)
         return DeliveryGateResult(
             ok=False, unvalidated=unvalidated, stamp=stamp,
             reason=(
-                f"delivery refused: unvalidated dimension(s) {list(unvalidated)}. A "
+                f"delivery refused: unvalidated dimension(s) {list(blocking)}. A "
                 "phenotype deliverable requires each dimension validated against a reference of "
-                f"its own kind ({clears}); validate it, or pass "
-                "acknowledge_unvalidated=True to write a clearly-flagged provisional result stamped "
-                "validated=false."
+                f"its own kind ({clears}); validate it, or ship it through an acknowledged "
+                "delivery."
             ),
         )
-    return DeliveryGateResult(ok=True, unvalidated=unvalidated, stamp=stamp)
+    acknowledged_by = acknowledgement.acknowledged_by if (unvalidated and acknowledgement) else None
+    acknowledgement_reason = acknowledgement.reason if (unvalidated and acknowledgement) else None
+    return DeliveryGateResult(
+        ok=True, unvalidated=unvalidated, stamp=stamp,
+        acknowledged_by=acknowledged_by, acknowledgement_reason=acknowledgement_reason,
+    )
 
 
 # --- validation (returns list[str] of problems, empty = valid) ---
