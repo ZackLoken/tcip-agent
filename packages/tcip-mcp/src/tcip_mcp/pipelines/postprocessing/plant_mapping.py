@@ -562,6 +562,30 @@ def registry_entries_or_refusal(
     return registry_csv_entries(record), None
 
 
+def verify_registry_csv_bytes(registry_entries: list[dict]) -> tuple[list[str], Optional[str]]:
+    """Check each of ``registry_entries``'s (:func:`registry_csv_entries`'s own ``{path, sha256,
+    n_plants}`` shape) recorded bytes against what is on disk now.
+
+    Returns the missing paths and the rewritten-file refusal, naming the file, or ``None`` when
+    every present path's bytes still match what was registered; a caller decides for itself what a
+    missing path means (:func:`verify_mapping_inputs` discloses it,
+    :func:`~tcip_mcp.tools.orthomosaic_tools.deliver_orthomosaic_plant_counts` refuses on it too),
+    this function only reports the bytes fact both read.
+    """
+    missing: list[str] = []
+    for entry in registry_entries:
+        p = Path(entry["path"])
+        if not p.is_file():
+            missing.append(entry["path"])
+            continue
+        digest = hashlib.sha256(p.read_bytes()).hexdigest()
+        if digest != entry["sha256"]:
+            return missing, (
+                f"plant CSV {entry['path']} was rewritten since it was registered: "
+                "re-register the plant registry against its current bytes, or restore the file")
+    return missing, None
+
+
 def parse_plant_registry_csvs(csv_paths: list[Path]) -> tuple[list[dict], str, int]:
     """Parse ``csv_paths`` into the registry's own ``{path, sha256, n_plants}`` entries, the
     content digest over every parsed row and the total plant count: the read-only half of
@@ -1509,17 +1533,9 @@ def verify_mapping_inputs(
     registry_entries, registry_refusal = registry_entries_or_refusal(build, build.project_root)
     if registry_refusal:
         return {"refusal": registry_refusal}
-    plant_csvs_unverified: list[str] = []
-    for entry in registry_entries:
-        p = Path(entry["path"])
-        if not p.is_file():
-            plant_csvs_unverified.append(entry["path"])
-            continue
-        digest = hashlib.sha256(p.read_bytes()).hexdigest()
-        if digest != entry["sha256"]:
-            return {"refusal": (
-                f"plant CSV {entry['path']} was rewritten since this mapping was built; "
-                "rebuild")}
+    plant_csvs_unverified, rewritten_refusal = verify_registry_csv_bytes(registry_entries)
+    if rewritten_refusal:
+        return {"refusal": rewritten_refusal}
     verified_plants = read_plant_csvs(
         Path(entry["path"]) for entry in registry_entries
         if entry["path"] not in plant_csvs_unverified
