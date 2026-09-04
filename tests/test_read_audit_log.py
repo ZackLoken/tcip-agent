@@ -1,8 +1,10 @@
 """``read_audit_log``: the one tool reading a scope's own audit log back, on the record itself.
 
 Coverage, not GUARDS: the tool is wholly new, so there is no prior behavior to prove absent.
-Every entry read here comes from a real ``@audited`` call, never a hand-built dict, and the
-corrupt-page case plants bytes no writer through the seam could have produced, the same shape
+Every entry read here comes from a real ``@audited`` call, never a hand-built dict, except the
+corrupt-page, version-refused-page and torn-tail cases, each of which appends malformed bytes by
+hand directly to the log file at the seam's own path (bypassing the store's append entirely,
+never something a writer through the seam could produce), the same technique
 ``tests/test_experiment_log_version_refused.py`` uses for its own log reader.
 """
 
@@ -108,4 +110,127 @@ def test_read_audit_log_refuses_on_a_page_carrying_an_undecodable_entry(
 
     assert "error" in result
     assert "undecodable" in result["error"]
+    assert "entries" not in result
+
+
+def test_read_audit_log_refuses_on_a_page_carrying_a_version_refused_entry(
+    platform_root: Path, dataset_root: Path,
+) -> None:
+    """Same shape as ``tests/test_experiment_log_version_refused.py``: the poisoned line is
+    appended by hand, directly to the log file at the seam's own path, never through the store's
+    own append (no writer through the seam could produce a schema_version this reader refuses)."""
+    from tcip_store.file_backend import FileBackend
+    from tcip_mcp.tools.annotation_tools import write_class_map
+
+    ts.bind(FileBackend())
+    try:
+        assert "error" not in write_class_map(str(dataset_root), subjects=_subjects())
+        key = audit_module.audit_log_key(dataset_root)
+        descriptor = ts.get_descriptor(key.store)
+        poisoned = descriptor.codec.encode({"tool": "write_class_map", "schema_version": 99})
+        with open(FileBackend().path_for(key), "ab") as handle:
+            handle.write(poisoned + b"\n")
+
+        result = read_audit_log(scope=str(dataset_root))
+    finally:
+        ts.unbind()
+
+    assert "error" in result
+    assert "version-refused" in result["error"]
+    assert "entries" not in result
+
+
+def test_read_audit_log_refuses_on_a_page_with_a_torn_tail(
+    platform_root: Path, dataset_root: Path,
+) -> None:
+    """The tail bytes are appended by hand, directly to the log file, with no trailing newline:
+    the shape an appender dying mid-write leaves behind, never one this store's own append could
+    produce (append always durably terminates its own line)."""
+    from tcip_store.file_backend import FileBackend
+    from tcip_mcp.tools.annotation_tools import write_class_map
+
+    ts.bind(FileBackend())
+    try:
+        assert "error" not in write_class_map(str(dataset_root), subjects=_subjects())
+        key = audit_module.audit_log_key(dataset_root)
+        with open(FileBackend().path_for(key), "ab") as handle:
+            handle.write(b'{"tool": "write_class_map", "status": "ok"')
+
+        result = read_audit_log(scope=str(dataset_root))
+    finally:
+        ts.unbind()
+
+    assert "error" in result
+    assert "torn tail" in result["error"]
+    assert "entries" not in result
+
+
+def test_read_audit_log_refuses_a_scope_naming_no_dataset_or_project(
+    platform_root: Path, tmp_path: Path,
+) -> None:
+    stray = tmp_path / "not_a_dataset_or_project"
+    stray.mkdir()
+
+    result = read_audit_log(scope=str(stray))
+
+    assert "error" in result
+    assert str(stray) in result["error"]
+    assert "entries" not in result
+
+
+def test_read_audit_log_resolves_an_inner_path_to_its_dataset_root(
+    platform_root: Path, dataset_root: Path,
+) -> None:
+    from tcip_mcp.tools.annotation_tools import write_class_map
+
+    assert "error" not in write_class_map(str(dataset_root), subjects=_subjects())
+
+    inner = str(dataset_root / "annotations" / "2026-03-02")
+    result = read_audit_log(scope=inner, tool="write_class_map")
+
+    assert "error" not in result, result
+    assert result["count"] == 1
+    assert result["scope_resolved"] == str(dataset_root.resolve())
+
+
+def test_read_audit_log_treats_a_date_only_until_as_the_end_of_that_day(
+    platform_root: Path, dataset_root: Path,
+) -> None:
+    key = audit_module.audit_log_key(dataset_root)
+    ts.append(key, {"tool": "write_class_map", "status": "ok",
+                     "timestamp": "2026-03-02T23:59:59+00:00"})
+    ts.append(key, {"tool": "write_class_map", "status": "ok",
+                     "timestamp": "2026-03-03T00:00:01+00:00"})
+
+    result = read_audit_log(scope=str(dataset_root), until="2026-03-02")
+
+    assert result["count"] == 1
+    assert result["entries"][0]["timestamp"] == "2026-03-02T23:59:59+00:00"
+
+
+def test_read_audit_log_accepts_a_z_suffixed_bound(
+    platform_root: Path, dataset_root: Path,
+) -> None:
+    key = audit_module.audit_log_key(dataset_root)
+    ts.append(key, {"tool": "write_class_map", "status": "ok",
+                     "timestamp": "2026-03-02T10:00:00+00:00"})
+
+    result = read_audit_log(
+        scope=str(dataset_root), since="2026-03-02T00:00:00Z", until="2026-03-02T23:59:59Z",
+    )
+
+    assert result["count"] == 1
+
+
+def test_read_audit_log_refuses_an_unparseable_since_bound(
+    platform_root: Path, dataset_root: Path,
+) -> None:
+    key = audit_module.audit_log_key(dataset_root)
+    ts.append(key, {"tool": "write_class_map", "status": "ok",
+                     "timestamp": "2026-03-02T10:00:00+00:00"})
+
+    result = read_audit_log(scope=str(dataset_root), since="not-a-timestamp")
+
+    assert "error" in result
+    assert "since" in result["error"]
     assert "entries" not in result
