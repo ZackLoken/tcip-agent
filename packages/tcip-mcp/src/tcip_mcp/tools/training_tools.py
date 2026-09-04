@@ -953,12 +953,14 @@ def monitor_training(run_id: str | None = None, sweep_id: str | None = None) -> 
 
     ``sweep_id``: reads the sweep's own manifest and trial directories from disk under this
     process's own pinned platform root, through :func:`read_sweep_from_disk`, the same reader
-    ``routes.tuning``'s disk-only paths call: an agent on a host with no browser open answers the
-    same "how is this sweep doing" question the Tuning tab reads. This is a disk read only, so a
-    sweep a live web session just launched over HTTP but has not yet written a manifest for
-    reads as not found. Returns ``read_sweep_from_disk``'s own shape (``{"sweep_id", "status",
-    "error", "result", "manifest", "relaunched_from", "has_manifest", "trials"}``), or
-    ``{"error": ...}`` when no manifest exists.
+    ``routes.tuning``'s disk-only paths call, then layers the study result's own fields onto a
+    completed sweep through :func:`enrich_with_study_result`, the same rule that route applies:
+    an agent on a host with no browser open answers the same "how is this sweep doing" question
+    the Tuning tab reads. This is a disk read only, so a sweep a live web session just launched
+    over HTTP but has not yet written a manifest for reads as not found. Returns
+    ``read_sweep_from_disk``'s own shape, enriched (``{"sweep_id", "status", "error", "result",
+    "manifest", "relaunched_from", "has_manifest", "trials"}``), or ``{"error": ...}`` when no
+    manifest exists or ``sweep_id`` would address a record outside the HPO store.
 
     Args:
         run_id: Training run identifier. Exactly one of ``run_id``/``sweep_id`` is required.
@@ -968,10 +970,13 @@ def monitor_training(run_id: str | None = None, sweep_id: str | None = None) -> 
         if run_id is not None:
             return {"error": "exactly one of run_id or sweep_id is required, got "
                               f"run_id={run_id!r} sweep_id={sweep_id!r}"}
-        disk_sweep = read_sweep_from_disk(sweep_id)
+        try:
+            disk_sweep = read_sweep_from_disk(sweep_id)
+        except BadKey:
+            return {"error": f"invalid sweep_id: {sweep_id}"}
         if disk_sweep is None:
             return {"error": f"sweep not found: {sweep_id}"}
-        return disk_sweep
+        return enrich_with_study_result(disk_sweep, sweep_id)
     if run_id is None:
         return {"error": "exactly one of run_id or sweep_id is required, got "
                           "run_id=None sweep_id=None"}
@@ -1755,6 +1760,53 @@ def trial_metrics_key_for_dir(trial_dir: Path | str) -> Key:
     return trial_metrics_key(path.parent, path.name)
 
 
+def log_holds_anything(page: Any) -> bool:
+    """Whether a metrics log holds anything at all: rows, a torn tail, undecodable bytes, or
+    entries at a schema_version this reader does not accept.
+
+    One predicate: ``read_sweep_from_disk``'s per-trial ``has_metrics`` flag and
+    ``routes.tuning.get_trial_metrics``'s own ``exists`` answer share this, rather than each
+    restating what a log with nothing readable back looks like.
+    """
+    return bool(page.records or page.torn_tail or page.corrupt or page.version_refused)
+
+
+def enrich_with_study_result(
+    response: dict[str, Any], sweep_id: str, *, root: Path | str | None = None
+) -> dict[str, Any]:
+    """Layer the study result's own fields onto ``response["result"]`` for a completed sweep,
+    read through the store and never fabricated: a sweep whose study result is absent (or
+    already carries these fields, the common case for a sweep this process just ran) is served
+    exactly as it already was.
+
+    The one place this rule is written: ``read_sweep_from_disk`` answers the manifest-and-trials
+    question only, and both ``routes.tuning.get_sweep``'s disk branch and
+    ``monitor_training(sweep_id=)`` call this afterward on a completed sweep rather than each
+    layering the study result on their own.
+    """
+    if response.get("status") != "completed":
+        return response
+    result = response.get("result") or {}
+    if "all_trials" in result:
+        return response
+    try:
+        key = study_result_key(sweep_id, root=root)
+    except BadKey:
+        return response
+    try:
+        study_result = store.read(key, default=None)
+    except DecodeError:
+        logger.warning("the study result for sweep %s does not decode", sweep_id, exc_info=True)
+        study_result = None
+    if not isinstance(study_result, dict):
+        return response
+    response["result"] = {
+        **result,
+        **{k: study_result[k] for k in STUDY_RESULT_FIELDS if k in study_result},
+    }
+    return response
+
+
 def read_sweep_from_disk(sweep_id: str, *, root: Path | str | None = None) -> dict[str, Any] | None:
     """One sweep's manifest-derived summary plus every trial directory it has produced, read
     from the sweep's own store records alone, with no in-memory job registry consulted.
@@ -1765,12 +1817,12 @@ def read_sweep_from_disk(sweep_id: str, *, root: Path | str | None = None) -> di
     caller answers the same. Otherwise: ``{"sweep_id", "status", "error", "result", "manifest",
     "relaunched_from", "has_manifest": True, "trials"}``. ``status`` is the derived liveness
     (:func:`sweep_state`, ``driver_live=False``: no process reading from disk alone can vouch
-    for a sweep's driver). ``result`` gains the study result's own fields
-    (:const:`STUDY_RESULT_FIELDS`) once the sweep is ``"completed"`` and its manifest result does
-    not already carry them. ``trials`` is one entry per ``trial_<id>`` directory under the
-    sweep's own root: its resolved params, unconsumed params, and whether it has logged any
-    metrics yet (rows, a torn tail, undecodable bytes, or an unknown schema_version all count as
-    "yes").
+    for a sweep's driver). ``result`` is the manifest's own, exactly as written: layering the
+    study result's own fields onto a completed sweep's result is :func:`enrich_with_study_result`'s
+    own separate question, so a caller that only wants the manifest and trials never pays for a
+    study-result read it does not need. ``trials`` is one entry per ``trial_<id>`` directory
+    under the sweep's own root: its resolved params, unconsumed params, and whether it has
+    logged any metrics yet (:func:`log_holds_anything`).
 
     This is the one reader ``routes.tuning``'s disk-only paths and ``monitor_training(sweep_id=)``
     both call rather than each re-implementing it: the web route's own live/jobstore branch (an
@@ -1791,16 +1843,6 @@ def read_sweep_from_disk(sweep_id: str, *, root: Path | str | None = None) -> di
 
     result = manifest.get("result") or {}
     status = sweep_state(manifest, stale_seconds=TCIP_HEARTBEAT_STALE_SECONDS, driver_live=False)
-    if status == "completed" and "all_trials" not in result:
-        try:
-            study_result = store.read(study_result_key(sweep_id, root=root), default=None)
-        except DecodeError:
-            study_result = None
-        if isinstance(study_result, dict):
-            result = {
-                **result,
-                **{k: study_result[k] for k in STUDY_RESULT_FIELDS if k in study_result},
-            }
 
     trials: list[dict[str, Any]] = []
     sweep_directory = sweep_dir(sweep_id, root=root)
@@ -1818,9 +1860,7 @@ def read_sweep_from_disk(sweep_id: str, *, root: Path | str | None = None) -> di
             page = read_log(trial_metrics_key(sweep_directory, d.name))
             trials.append({
                 "trial_id": d.name[len(_TRIAL_DIR_PREFIX):],
-                "has_metrics": bool(
-                    page.records or page.torn_tail or page.corrupt or page.version_refused
-                ),
+                "has_metrics": log_holds_anything(page),
                 "params": resolved.get("trial_params") or {},
                 "unconsumed_params": resolved.get("unconsumed_params") or [],
             })

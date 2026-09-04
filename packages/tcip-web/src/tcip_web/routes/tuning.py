@@ -254,49 +254,6 @@ def _read_manifest(sweep_id: str, *, root: Path | str | None = None) -> dict | N
     return manifest if isinstance(manifest, dict) else None
 
 
-def _read_study_result(sweep_id: str, *, root: Path | str | None = None) -> dict | None:
-    """A finished sweep's full study-result record, or ``None`` when it has none: an old sweep
-    from before this record existed, a failed sweep (never written), or one whose record won't
-    decode. ``sweep_id`` is untrusted; a name that would address a record outside the HPO store
-    is answered the same way, absent rather than raised."""
-    from tcip_store import BadKey, DecodeError, store
-
-    from tcip_mcp.tools.training_tools import study_result_key
-
-    try:
-        key = study_result_key(sweep_id, root=root)
-    except BadKey:
-        return None
-    try:
-        result = store.read(key, default=None)
-    except DecodeError:
-        logger.warning("the study result for sweep %s does not decode", sweep_id, exc_info=True)
-        return None
-    return result if isinstance(result, dict) else None
-
-
-def _enrich_with_study_result(response: dict, sweep_id: str, *, root: Optional[str]) -> dict:
-    """Layer the study result's own fields onto ``response["result"]`` for a completed sweep,
-    read through the store and never fabricated: a sweep whose study result is absent (or
-    already carries these fields, the common case for a sweep this process just ran) is served
-    exactly as it already was."""
-    if response.get("status") != "completed":
-        return response
-    result = response.get("result") or {}
-    if "all_trials" in result:
-        return response
-    study_result = _read_study_result(sweep_id, root=root)
-    if study_result is None:
-        return response
-    from tcip_mcp.tools.training_tools import STUDY_RESULT_FIELDS
-
-    response["result"] = {
-        **result,
-        **{k: study_result[k] for k in STUDY_RESULT_FIELDS if k in study_result},
-    }
-    return response
-
-
 def _terminal_response(job: HPOJob) -> dict:
     """The live-registry response for a job already in a terminal status.
 
@@ -591,7 +548,7 @@ def get_sweep(sweep_id: str) -> dict:
     ``trials``, absent from the live branch (a different question, answered by the trials route)."""
     from tcip_store import BadKey
     from tcip_web import jobstore
-    from tcip_mcp.tools.training_tools import read_sweep_from_disk
+    from tcip_mcp.tools.training_tools import enrich_with_study_result, read_sweep_from_disk
 
     j = _registry.get(sweep_id)
     if j is not None:
@@ -608,20 +565,15 @@ def get_sweep(sweep_id: str) -> dict:
         response["relaunched_from"] = (
             manifest.get("relaunched_from") if has_manifest else j.relaunched_from
         )
-        return _enrich_with_study_result(response, sweep_id, root=j.platform_root)
+        return enrich_with_study_result(response, sweep_id, root=j.platform_root)
     try:
         disk = read_sweep_from_disk(sweep_id)
     except BadKey as exc:
         raise HTTPException(400, f"invalid sweep_id: {sweep_id}") from exc
     if disk is None:
         raise HTTPException(404, f"sweep not found: {sweep_id}")
+    disk = enrich_with_study_result(disk, sweep_id)
     return {**disk, "external": True}
-
-
-def _log_holds_anything(page) -> bool:
-    """Whether a metrics log holds anything at all: rows, a torn tail, undecodable bytes, or
-    entries at a schema_version this reader does not accept."""
-    return bool(page.records or page.torn_tail or page.corrupt or page.version_refused)
 
 
 @router.get("/sweeps/{sweep_id}/trials")
@@ -655,7 +607,7 @@ def get_trial_metrics(sweep_id: str, trial_id: str) -> dict:
     """
     from tcip_store import BadKey, read_log
 
-    from tcip_mcp.tools.training_tools import trial_metrics_key
+    from tcip_mcp.tools.training_tools import log_holds_anything, trial_metrics_key
 
     root = _sweep_root(sweep_id)
     try:
@@ -669,7 +621,7 @@ def get_trial_metrics(sweep_id: str, trial_id: str) -> dict:
         logger.warning("trial %s has %d metrics rows at a schema_version this reader does "
                        "not accept", trial_id, len(page.version_refused))
     rows = [dict(row) for row in page.records]
-    return metrics_response(rows, exists=_log_holds_anything(page))
+    return metrics_response(rows, exists=log_holds_anything(page))
 
 
 @router.get("/ray-dashboard")
