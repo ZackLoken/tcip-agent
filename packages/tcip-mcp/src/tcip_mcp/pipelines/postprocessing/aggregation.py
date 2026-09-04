@@ -294,6 +294,7 @@ def export_aggregated_csv(
     images_dir: str | None = None,
     scale_capture_id: str | None = None,
     door: str = "export_aggregated_csv",
+    plant_mapping: dict | None = None,
 ) -> tuple[str, dict]:
     """Export per-plant aggregated results to a delivery CSV.
 
@@ -401,6 +402,13 @@ def export_aggregated_csv(
             ``deliver_orthomosaic_plant_counts``, which composes this CSV rather than calling it
             directly) passes it here instead of also recording its own event for the same export,
             which would otherwise record one CSV as two shipments.
+        plant_mapping: The delivery's own plant-mapping binding, exactly the shape
+            ``plant_mapping.MappingBuild.delivery_disclosure`` composes (the mapping's identity, its
+            unverified-input disclosures, and this delivery's own unattributed-capture count),
+            recorded onto the delivery event unchanged; ``None`` when the caller names no mapping
+            or has not verified one against the buckets this delivery reads. Never a bare name or
+            digest on its own, since the stored record's own schema (``PlantMappingDisclosure``)
+            validates the whole shape or nothing.
 
     Returns:
         ``(path, tail)``: the path to the written CSV, and the ``_PROVENANCE_COLUMNS`` tail
@@ -588,7 +596,8 @@ def export_aggregated_csv(
                                   operating_point_recon["bindings"],
                                   measurement_documents=[measurement_document],
                                   scale_document=scale_document, acknowledgement=None,
-                                  trait=trait, delivery_kind=delivery_kind)
+                                  trait=trait, delivery_kind=delivery_kind,
+                                  plant_mapping=plant_mapping)
     return output_path, stamp
 
 

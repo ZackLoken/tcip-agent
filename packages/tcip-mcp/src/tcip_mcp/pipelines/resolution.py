@@ -2142,8 +2142,9 @@ def record_delivery_binding_event(
 
     ``plant_mapping`` is the delivery's own plant-mapping binding (name, project and dataset
     roots, the record's digest, its per-date capture identity, and the two unverified
-    disclosures), door-conditional: the phenology doors pass it, every other delivery door
-    passes ``None`` since none reads a mapping.
+    disclosures), door-conditional: the phenology doors always pass it, ``deliver_per_plant_csv``
+    passes it only when its own caller verified a named mapping against the buckets this delivery
+    reads, and every other delivery door passes ``None`` since none reads a mapping.
 
     The assembled record is validated against ``DeliveryEventRecord`` (``delivery_events_schema.py``,
     the same shape ``list_delivery_events`` reads back through) before the write. A shape violation

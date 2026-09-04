@@ -172,12 +172,14 @@ def test_deliver_per_plant_csv_refuses_unvalidated_then_delivers_once_validated(
 
     delivered = deliver_per_plant_csv(
         results, str(out_csv), delivered_phenotype="stem_count", crop="hazelnut",
-        pipeline_version="v1", plant_mapping=mapping_name, pred_dirs=[str(pred_dir)])
+        pipeline_version="v1", plant_mapping=mapping_name, pred_dirs=[str(pred_dir)],
+        dataset_root=str(dataset_root), predictions_by_date={date: str(pred_dir)})
     assert "error" not in delivered, delivered
     assert delivered["operating_point_validated"] == VALIDATED_HELD_OUT
     assert delivered["unvalidated_dimensions"] == ""
     assert delivered["n_plants"] == 2
     assert delivered["plant_mapping"] == mapping_name
+    assert delivered["plant_mapping_record_sha256"] == mapping_build.record_sha256
     assert out_csv.exists()
 
     rows_out = {r["plant_id"]: r for r in csv.DictReader(out_csv.open(newline=""))}
@@ -195,6 +197,40 @@ def test_deliver_per_plant_csv_refuses_unvalidated_then_delivers_once_validated(
     door_rows = [r for r in page.records if r["tool"] == "deliver_per_plant_csv"]
     assert len(door_rows) == 1, page.records
     assert door_rows[0]["verified_buckets"][str(pred_dir)]["verified"] is True
+
+    from tcip_mcp.pipelines.resolution import DELIVERY_EVENTS_STORE, delivery_events_scope
+
+    scope = delivery_events_scope(tmp_path)
+    events = [
+        tcip_store.read(key, default=None)
+        for key in tcip_store.keys(DELIVERY_EVENTS_STORE, str(scope))
+    ]
+    event = next(e for e in events if e and e["door"] == "deliver_per_plant_csv")
+    assert event["plant_mapping"]["name"] == mapping_name
+    assert event["plant_mapping"]["record_sha256"] == mapping_build.record_sha256
+
+
+def test_deliver_per_plant_csv_refuses_an_unknown_plant_mapping_by_name(tmp_path):
+    """A stated ``plant_mapping`` is a claim the data must positively carry: naming one with no
+    stored record refuses by name, before the writer ever runs, the way
+    ``deliver_phenology_milestones`` refuses a mapping it cannot load."""
+    from tcip_mcp.pipelines.postprocessing.aggregation import aggregate_per_plant
+    from tcip_mcp.tools.delivery_tools import deliver_per_plant_csv
+
+    records = [
+        {"plant_id": "PLANT_A", "count": 3, "plant_attribution": "image",
+         "measurement_document": "operating_point"},
+    ]
+    results = aggregate_per_plant(records, strategy="count", value_key="count")
+    out_csv = tmp_path / "o.csv"
+
+    res = deliver_per_plant_csv(
+        results, str(out_csv), delivered_phenotype="stem_count", crop="hazelnut",
+        pipeline_version="v1", plant_mapping="no-such-mapping")
+    assert "error" in res
+    assert "no-such-mapping" in res["error"]
+    assert "build_plant_mapping" in res["error"]
+    assert not out_csv.exists()
 
 
 def test_deliver_per_plant_csv_refuses_a_malformed_record_through_the_writer(tmp_path):
