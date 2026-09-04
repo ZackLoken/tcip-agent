@@ -50,9 +50,8 @@ DEFAULT_CLI = "claude"
 DEFAULT_ROWS = 30
 DEFAULT_COLS = 100
 
-# The committed permission fence for the in-app (breeder-lane) agent. Passed via
-# --settings, which merges at CLI precedence, so the developer's own `claude`
-# sessions (no --settings) stay unrestricted.
+# The committed permission fence for the in-app (breeder-lane) agent. Passed via --settings,
+# whose permissions.allow/deny lists merge (union) with the repo's own and the user's own settings; a `claude` session with no --settings flag (this one) is unaffected by the fence file itself.
 _FENCE_SETTINGS = Path(__file__).resolve().parent / "agent_terminal.settings.json"
 
 _UNAVAILABLE_REASON = (
@@ -65,8 +64,9 @@ def _absolutize_guard_command(command: str, python: str, guard_dir: str) -> str:
     """Rewrite ``python <rel>/agent_*.py`` → ``"<python>" "<guard_dir>/<script>"``.
 
     Only rewrites a command that invokes an ``agent_*.py`` script under the fence directory (the
-    PreToolUse guards and the SessionEnd learning-capture hook); anything else is returned
-    unchanged. Quoted, forward-slashed paths parse under both cmd.exe and POSIX sh.
+    PreToolUse guards, the SessionEnd learning-capture hook, and the SessionStart ritual-injection
+    hook); anything else is returned unchanged. Quoted, forward-slashed paths parse under both
+    cmd.exe and POSIX sh.
     """
     for tok in command.split():
         name = tok.rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
@@ -99,8 +99,8 @@ def _materialize_fence_settings() -> Optional[Path]:
         return None
     guard_dir = _FENCE_SETTINGS.parent.as_posix()
     python = Path(sys.executable).as_posix()
-    # Absolutize every agent_*.py hook across all events (PreToolUse guards + SessionEnd capture),
-    # so none depends on cwd: the same reason the guards must be absolute.
+    # Absolutize every agent_*.py hook across all events (PreToolUse guards, SessionEnd capture,
+    # SessionStart ritual injection): none should depend on cwd, same as the guards themselves.
     for event_groups in cfg.get("hooks", {}).values():
         for group in event_groups:
             for hook in group.get("hooks", []):
