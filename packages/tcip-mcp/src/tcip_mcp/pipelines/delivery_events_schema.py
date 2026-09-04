@@ -8,17 +8,18 @@ A sibling module to ``resolution.py`` rather than a class inside it, the same sp
 own dependency surface as storage-seam-and-stdlib only, and a pydantic import belongs with the
 other schema-only module instead of widening that statement.
 
-``DeliveryEventRecord.plant_mapping`` carries one of two disclosure shapes, or ``None``: a walked
-capture mapping's :class:`PlantMappingDisclosure` (the phenology doors, and
-``deliver_per_plant_csv`` when its caller verified one), or a whole-raster frame's
-:class:`PlantRegistryDisclosure` (``deliver_orthomosaic_plant_counts`` alone, which has no walked
-mapping build to name). The two declare different required key sets, neither a subset of the
-other (they do share ``project_root``, ``nn_tolerance_m`` and ``plant_attribution``), so with an
-extra key forbidden on both a stored dict validates against at most one: pydantic resolves it with
-no discriminator field added to either.
+``DeliveryEventRecord.plant_mapping`` carries one of three disclosure shapes, or ``None``: a
+walked capture mapping's :class:`PlantMappingDisclosure` (the phenology doors, and
+``deliver_per_plant_csv`` when its caller verified one), a whole-raster frame's
+:class:`PlantRegistryDisclosure` (``deliver_orthomosaic_plant_counts``'s nearest-neighbour
+regime, which has no walked mapping build to name), or that same door's canopy-segment regime's
+:class:`CanopySegmentDisclosure`. No two of the three declare the same required key set (the
+registry form has ``nn_tolerance_m``, the canopy form ``canopy_segments``, the mapping form
+``name``), so with an extra key forbidden on every one a stored dict validates against at most
+one: pydantic resolves it with no discriminator field added to any of them.
 
-Both models forbid an undeclared key, so a stored record or disclosure carrying one is refused by
-name rather than silently accepted and later misread.
+Every model forbids an undeclared key, so a stored record or disclosure carrying one is refused
+by name rather than silently accepted and later misread.
 """
 
 from __future__ import annotations
@@ -59,14 +60,16 @@ class PlantMappingDisclosure(BaseModel):
 
 
 class PlantRegistryDisclosure(BaseModel):
-    """The ``plant_mapping`` an orthomosaic delivery attributed detections through, exactly as
-    ``deliver_orthomosaic_plant_counts`` (``orthomosaic_tools.py``) composes it.
+    """The ``plant_mapping`` an orthomosaic delivery's nearest-neighbour regime attributed
+    detections through, exactly as ``deliver_orthomosaic_plant_counts`` (``orthomosaic_tools.py``)
+    composes it.
 
     A whole-mosaic frame carries no walked capture sequence to build a
     :class:`MappingBuild`-shaped mapping from, so this names only what that door verifies or
     computes itself: the plant registry it read, the raster identity every count in the delivery
-    is attributed through, the tolerance it matched detections under, and this delivery's own
-    unattributed-detection count. Every key is required, the same reasoning
+    is attributed through, the tolerance it matched detections under, this delivery's own
+    unattributed-detection count, and the registry plants the raster's own frame does not
+    picture at all, by name. Every key is required, the same reasoning
     :class:`PlantMappingDisclosure` states: none is reconstructable from a record that lacks it.
     """
 
@@ -77,6 +80,75 @@ class PlantRegistryDisclosure(BaseModel):
     raster_identity: dict
     nn_tolerance_m: dict
     detections_unattributed: int
+    detections_unattributed_scope: Literal["delivered_raster"]
+    plant_attribution: str
+    plants_outside_raster: list[str]
+
+
+class CanopySegmentsDocument(BaseModel):
+    """The label document a canopy-segment delivery read its boundaries from, named and hashed
+    over the bytes it actually parsed."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    path: str
+    sha256: str
+    subject: str
+    n_segments: int
+
+
+class SegmentTieDisclosure(BaseModel):
+    """One resolved segment-to-plant tie: the attribution claim itself, and the derived margin
+    (:class:`~tcip_mcp.pipelines.postprocessing.segment_attribution.TiedSegment.clearance_m``) a
+    displaced registry position would have to exceed to leave this segment."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    segment_index: int
+    plot_name: str
+    clearance_m: float
+
+
+class UnattributedDetectionsBySource(BaseModel):
+    """A canopy-segment delivery's own unattributed-detection count, broken out by the
+    :class:`~tcip_mcp.pipelines.postprocessing.segment_attribution.SegmentAssignment.source`
+    that left each one unattributed; ``detections_unattributed`` on the enclosing disclosure is
+    the sum of these three, stated there as derived, never independent evidence."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    outside_segments: int
+    overlapping_segments: int
+    segment_without_plant: int
+
+
+class CanopySegmentDisclosure(BaseModel):
+    """The ``plant_mapping`` an orthomosaic delivery's canopy-segment regime attributed
+    detections through, exactly as ``deliver_orthomosaic_plant_counts``'s ``canopy_subject``
+    argument composes it.
+
+    Names the registry and raster identity the same way :class:`PlantRegistryDisclosure` does,
+    plus the canopy document this delivery read its boundaries from, the resolved segment-to-plant
+    ties, and every plant this delivery's own rows do not cover, by name and by reason: outside
+    the raster's frame, inside no segment, or inside a segment whose own detection was ambiguous
+    (:data:`~tcip_mcp.pipelines.postprocessing.segment_attribution.SegmentAssignment`'s
+    ``"overlapping_segments"`` source). Every key is required, the same reasoning
+    :class:`PlantMappingDisclosure` states: none is reconstructable from a record that lacks it.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    plant_registry: dict
+    project_root: str
+    raster_identity: dict
+    canopy_segments: CanopySegmentsDocument
+    segment_ties: list[SegmentTieDisclosure]
+    segments_without_plant: int
+    plants_outside_raster: list[str]
+    plants_without_segment: list[str]
+    plants_with_ambiguous_detections: list[str]
+    detections_unattributed: int
+    detections_unattributed_by_source: UnattributedDetectionsBySource
     detections_unattributed_scope: Literal["delivered_raster"]
     plant_attribution: str
 
@@ -125,7 +197,9 @@ class DeliveryEventRecord(BaseModel):
     # acknowledged, the same pair DeliveryGateResult carries.
     acknowledged_by: Optional[str]
     acknowledgement_reason: Optional[str]
-    plant_mapping: Optional[Union[PlantMappingDisclosure, PlantRegistryDisclosure]]
+    plant_mapping: Optional[
+        Union[PlantMappingDisclosure, PlantRegistryDisclosure, CanopySegmentDisclosure]
+    ]
     documents: dict[str, DocumentBinding]
     produced_at: str
 
