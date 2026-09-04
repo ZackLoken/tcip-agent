@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from tcip_annotation.state import BBox, Polygon
+    from tcip_mcp.pipelines.resolution import Acknowledgement
 
 logger = logging.getLogger(__name__)
 
@@ -191,7 +192,7 @@ def _mask_geometry_for_export(
 
 _PROVENANCE_COLUMNS = ["producer_model_sha256", "producing_experiment_id", "operating_point_conf",
                        "produced_at", "operating_point_validated", "unvalidated_dimensions",
-                       "validation_record"]
+                       "validation_record", "acknowledged_by", "acknowledgement_reason"]
 
 _MEASUREMENT_DOCUMENT = "operating_point"
 """What this CSV's counts always rest on: a per-image detection count is always the count
@@ -208,7 +209,9 @@ def export_detection_csv(
     trait: str,
     operating_point_validated: str | None = None,
     pred_dirs: list[str] | None = None,
-) -> tuple[str, dict, dict]:
+    acknowledgement: Acknowledgement | None = None,
+    project_root: str | Path | None = None,
+) -> tuple[str, dict, dict, bool]:
     """Export per-image detection counts to CSV.
 
     The count is the phenotype for count traits, so this is a delivery door: it refuses a *bare*
@@ -227,17 +230,23 @@ def export_detection_csv(
     this CSV's own shape for a physical scale to have produced, so gating on it would manufacture a
     refusal over a dimension that can't apply to a count. Without ``pred_dirs`` there is no on-disk
     source for the count's validity, so the operating_point dimension floors to unvalidated
-    regardless of the caller's string, mirroring ``export_aggregated_csv``. This door takes no
-    acknowledgement: no surface delivers a per-image count provisionally today (the no-re-run route
-    is to promote the underlying bucket through the review validation route, then re-deliver
-    through the bucket regime), so a bare unvalidated write here always refuses. The ``provenance``
+    regardless of the caller's string, mirroring ``export_aggregated_csv``. ``acknowledgement`` is
+    the breeder's own act of shipping this delivery unvalidated (the web results route's per-image
+    count export is the one surface that builds one), or ``None`` for every MCP-tool call, which
+    still refuses a bare unvalidated write here exactly as before; the promotion route (through the
+    review validation door, then a re-delivery) still applies with no acknowledgement at hand. The
+    ``provenance``
     stamp (producing checkpoint sha, experiment
     id, operating-point conf, timestamp) travels alongside; the number is only as trustworthy as the
     operating point + model behind it. Those cells are built by ``delivered_tail`` from the
     verification the gate already ran, so a producer this delivery cannot corroborate is reported
     unknown rather than repeated from the stamp that asserted it, ``produced_at`` is the write's own
     timestamp rather than one the caller asserts, and ``validation_record`` names the record a
-    reader can open to see what the claim was earned against.
+    reader can open to see what the claim was earned against. ``acknowledged_by``/
+    ``acknowledgement_reason`` carry the gate's own effective acknowledgement (blank together on a
+    fully validated delivery, even one posted with one, since the gate discards an acknowledgement
+    that cleared nothing), never the caller's ``acknowledgement`` verbatim, so the CSV tail and the
+    recorded delivery event can never disagree about who acknowledged what.
 
     Every row also carries ``measurement_document``, always ``"operating_point"``: a detection count
     never rests on a scalar head or a physical scale, so this is a constant column, unlike
@@ -263,19 +272,27 @@ def export_detection_csv(
             unvalidated otherwise, since nothing on disk backs it.
         pred_dirs: Prediction buckets to reconcile the count operating point's (and, if tiled, the
             tile-geometry) validity from.
+        acknowledgement: The breeder's own act of shipping this delivery unvalidated, or ``None``
+            for an ordinary validated export or an MCP-tool call, which never builds one.
+        project_root: The project this delivery's meaning-record reads and delivery event belong
+            to. ``None`` (every MCP-tool call) resolves against this process's pinned platform
+            root, correct since an MCP process serves exactly one project; a web route already
+            holding its own guarded, resolved root passes it explicitly.
 
     Returns:
-        ``(path, tail, summary)``: the path to the written CSV, the ``_PROVENANCE_COLUMNS`` tail
-        ``delivered_tail`` composed and wrote into every row (so a caller that needs one of those
-        cells back, a response echoing the CSV's own ``operating_point_validated``, say, reads the
-        value actually written rather than re-deriving or re-asserting it a second time), and the
-        gate's own evaluation summary (``stamp``, ``unvalidated``, ``tile_size_operative``,
-        ``tile_size_validated``, ``binding_notes``) so a door composes its response fields from
-        this call's single authoritative gate rather than re-reconciling the same buckets itself.
+        ``(path, tail, summary, event_recorded)``: the path to the written CSV, the
+        ``_PROVENANCE_COLUMNS`` tail ``delivered_tail`` composed and wrote into every row (so a
+        caller that needs one of those cells back, a response echoing the CSV's own
+        ``operating_point_validated``, say, reads the value actually written rather than
+        re-deriving or re-asserting it a second time), the gate's own evaluation summary
+        (``stamp``, ``unvalidated``, ``tile_size_operative``, ``tile_size_validated``,
+        ``binding_notes``) so a door composes its response fields from this call's single
+        authoritative gate rather than re-reconciling the same buckets itself, and whether the
+        best-effort delivery-event write landed (``record_delivery_binding_event``'s own return).
 
     Raises:
-        DeliveryRefused: the gate refused (an unvalidated dimension with no acknowledgement);
-            carries the ``DeliveryGateResult`` and both reconcilers' binding notes.
+        DeliveryRefused: the gate refused (an unvalidated dimension with no acknowledgement that
+            clears it); carries the ``DeliveryGateResult`` and both reconcilers' binding notes.
         ValueError: the ``trait``'s ``per_image_count`` operationalization is unrecorded, not
             breeder-confirmed, or was withdrawn since the first check; never carries a gate result,
             so a caller must not read a delivered count off this raise.
@@ -301,7 +318,7 @@ def export_detection_csv(
     # Only buckets that recorded a map: one that recorded none says nothing about what was counted.
     recorded_maps = {d: bucket_id_map(Path(d)) for d in (pred_dirs or [])}
     id_maps = {d: m for d, m in recorded_maps.items() if m is not None} or None
-    spec, record, _specs_dir = resolve_trait_and_record(trait, PER_IMAGE_COUNT)
+    spec, record, _specs_dir = resolve_trait_and_record(trait, PER_IMAGE_COUNT, project_root=project_root)
     # This door never delivers a crossing kind, so it has no registry to check a positive class against.
     stated = check_operationalization(spec, record, PER_IMAGE_COUNT, id_maps=id_maps, registry=None)
     if not stated.ok:
@@ -322,14 +339,15 @@ def export_detection_csv(
         if tile_recon["operative"]:
             flags["tile_size"] = tile_recon["validated"]
 
-    gate = check_delivery_gate(flags)
+    gate = check_delivery_gate(flags, acknowledgement=acknowledgement)
     if not gate.ok:
         notes = binding_notes_text(
             {**operating_point_recon.get("binding_notes", {}), **tile_recon.get("binding_notes", {})})
         raise DeliveryRefused(gate, notes)
 
     # A confirmation withdrawn or a field moved since the first check refuses here, before anything.
-    spec_now, record_now, _ = resolve_trait_and_record(trait, PER_IMAGE_COUNT)
+    spec_now, record_now, _ = resolve_trait_and_record(
+        trait, PER_IMAGE_COUNT, project_root=project_root)
     still_stated = check_operationalization(
         spec_now, record_now, PER_IMAGE_COUNT, id_maps=id_maps, registry=None, basis=stated.basis)
     if not still_stated.ok:
@@ -359,11 +377,11 @@ def export_detection_csv(
                 **stamp,
             })
 
-    record_delivery_binding_event("export_detection_csv", output_path, pred_dirs,
-                                  operating_point_recon["bindings"],
-                                  measurement_documents=[_MEASUREMENT_DOCUMENT],
-                                  scale_document=None, acknowledgement=None,
-                                  trait=trait, delivery_kind=PER_IMAGE_COUNT)
+    event_recorded = record_delivery_binding_event(
+        "export_detection_csv", output_path, pred_dirs, operating_point_recon["bindings"],
+        measurement_documents=[_MEASUREMENT_DOCUMENT], scale_document=None,
+        acknowledgement=gate.effective_acknowledgement(), trait=trait,
+        delivery_kind=PER_IMAGE_COUNT, project_root=project_root)
     summary = {
         "stamp": gate.stamp,
         "unvalidated": gate.unvalidated,
@@ -372,4 +390,4 @@ def export_detection_csv(
         "binding_notes": binding_notes_text(
             {**operating_point_recon.get("binding_notes", {}), **tile_recon.get("binding_notes", {})}),
     }
-    return output_path, stamp, summary
+    return output_path, stamp, summary, event_recorded

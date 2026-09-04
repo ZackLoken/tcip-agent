@@ -4,9 +4,10 @@ Covers the single ``check_delivery_gate`` helper and its retrofit onto the previ
 writers/tools: ``export_detection_csv`` / ``export_aggregated_csv`` (writer-level, no MCP wrapper)
 and ``deliver_per_image_counts`` (reads the run's resolved validity, not a caller string). The phenology
 doors' gate behavior is pinned in the Phase-0 measurement goldens; here we pin the doors newly
-gated. Neither writer takes an acknowledgement (no surface delivers a per-image count or a
-per-plant aggregate provisionally today), so an unvalidated dimension always refuses on them; the
-gate's own acknowledgement escape is pinned directly against ``check_delivery_gate``.
+gated. Neither writer's MCP-tool caller builds an acknowledgement (no MCP door ever does), so an
+unvalidated dimension always refuses through the tools; a writer called directly with a real one
+(the web results route's count export) ships instead. The gate's own acknowledgement escape is
+pinned directly against ``check_delivery_gate``.
 """
 
 from __future__ import annotations
@@ -237,15 +238,55 @@ def test_export_detection_csv_gate_refusal_carries_the_gate_result(tmp_path):
     assert not (tmp_path / "o.csv").exists()
 
 
-def test_export_detection_csv_takes_no_acknowledgement_and_refuses_the_retired_keyword(tmp_path):
-    """No surface delivers a per-image count provisionally today, so this writer accepts no
-    acknowledgement at all: the retired boolean keyword is refused at the signature, never
-    silently accepted and ignored."""
+def test_export_detection_csv_refuses_the_retired_acknowledge_unvalidated_keyword(tmp_path):
+    """This writer's real acknowledgement keyword is ``acknowledgement`` (a real
+    ``Acknowledgement``, built only by the web results route's count export); the retired boolean
+    spelling is refused at the signature, never silently accepted and ignored."""
     from tcip_mcp.pipelines.postprocessing.export import export_detection_csv
 
     with pytest.raises(TypeError):
         export_detection_csv([{"image": "a.jpg", "count": 3}], str(tmp_path / "o.csv"),  # type: ignore[call-arg]
                              trait=fx.COUNT_TRAIT, acknowledge_unvalidated=True)
+
+
+def test_export_detection_csv_records_the_gates_effective_acknowledgement(tmp_path):
+    """A real ``Acknowledgement`` on an otherwise-unvalidated call clears the gate and both
+    columns carry it; the same call on a validated bucket (mirrored below) carries neither,
+    since the gate discards an acknowledgement that cleared nothing."""
+    from tcip_mcp.pipelines.postprocessing.export import export_detection_csv
+
+    _path, tail, _summary, event_recorded = export_detection_csv(
+        [{"image": "a.jpg", "count": 3}], str(tmp_path / "o.csv"), trait=fx.COUNT_TRAIT,
+        acknowledgement=Acknowledgement(acknowledged_by="user:tester", reason="a look now"))
+    assert tail["acknowledged_by"] == "user:tester"
+    assert tail["acknowledgement_reason"] == "a look now"
+    assert tail["operating_point_validated"] == VALIDATED_FALSE
+    assert event_recorded is True
+
+
+def test_delivery_skill_documents_the_real_per_image_csv_schema(tmp_path):
+    """The delivery skill's Per-Image CSV Schema table must be the schema the writer actually
+    writes, the per-image counterpart of the per-plant pin in test_aggregation.py."""
+    from tcip_mcp.knowledge import document_path
+    from tcip_mcp.pipelines.postprocessing.export import export_detection_csv
+
+    out_path = tmp_path / "schema.csv"
+    export_detection_csv([{"image": "a.jpg", "count": 1}], str(out_path), trait=fx.COUNT_TRAIT,
+                         acknowledgement=Acknowledgement(acknowledged_by="user:t", reason="r"))
+    with open(out_path, newline="") as f:
+        written = next(csv.reader(f))
+
+    skill = document_path("delivery")
+    lines = skill.read_text(encoding="utf-8").splitlines()
+    start = next(i for i, ln in enumerate(lines) if ln.startswith("### Per-Image CSV Schema"))
+    documented = []
+    for ln in lines[start:]:
+        if ln.startswith("#") and not ln.startswith("### Per-Image CSV Schema"):
+            break
+        if ln.startswith("|") and not ln.startswith("|---") and not ln.startswith("| Column"):
+            documented.append(ln.split("|")[1].strip())
+
+    assert documented == written
 
 
 def test_export_detection_csv_signature_carries_operating_point_validated_not_measurement_validated():
@@ -427,8 +468,8 @@ def test_a_wrong_kind_assertion_floors_a_valid_bucket(tmp_path):
 
 def test_export_detection_csv_omitted_pred_dirs_floors_to_unvalidated(tmp_path):
     """No buckets to reconcile from: nothing on disk backs the caller's string, so the measurement
-    dimension floors and refuses, mirroring export_aggregated_csv's no-pred_dirs path. This door
-    takes no acknowledgement, so there is no route around it: a caller-asserted string alone can
+    dimension floors and refuses, mirroring export_aggregated_csv's no-pred_dirs path. This call
+    passes no acknowledgement, so there is no route around it: a caller-asserted string alone can
     never deliver, whatever it claims."""
     from tcip_mcp.pipelines.postprocessing.export import export_detection_csv
 
@@ -480,10 +521,10 @@ def test_export_aggregated_csv_continuous_trait_bare_string_never_trusted(tmp_pa
             str(out), delivered_phenotype="fruit_diameter", operating_point_validated=VALIDATED_HELD_OUT)
 
 
-def test_export_aggregated_csv_takes_no_acknowledgement_and_refuses_the_retired_keyword(tmp_path):
-    """No surface delivers a per-plant aggregate provisionally today, so this writer accepts no
-    acknowledgement at all: a bare string can never masquerade as validated, and the retired
-    boolean keyword is refused at the signature."""
+def test_export_aggregated_csv_refuses_the_retired_acknowledge_unvalidated_keyword(tmp_path):
+    """This writer's real acknowledgement keyword is ``acknowledgement`` (a real
+    ``Acknowledgement``, built only by the web results route's count export): a bare string can
+    never masquerade as validated, and the retired boolean keyword is refused at the signature."""
     from tcip_mcp.pipelines.postprocessing.aggregation import export_aggregated_csv
 
     with pytest.raises(TypeError):
@@ -492,6 +533,43 @@ def test_export_aggregated_csv_takes_no_acknowledgement_and_refuses_the_retired_
              "plant_attribution": "image", "measurement_document": "regression_operating_point"}],
             str(tmp_path / "o.csv"), delivered_phenotype="fruit_diameter",
             operating_point_validated=VALIDATED_HELD_OUT, acknowledge_unvalidated=True)
+
+
+def test_export_aggregated_csv_records_the_gates_effective_acknowledgement(tmp_path):
+    """A real ``Acknowledgement`` on an otherwise-unvalidated per-plant aggregate clears the gate
+    and both columns carry it; a validated delivery posted with one (mirrored below) carries
+    neither, since the gate discards an acknowledgement that cleared nothing."""
+    from tcip_mcp.pipelines.postprocessing.aggregation import export_aggregated_csv
+
+    _path, tail, event_recorded = export_aggregated_csv(
+        [{"plant_id": "p1", "value": 4.2, "observations": 3, "value_key": "fruit_diameter",
+         "plant_attribution": "image", "measurement_document": "regression_operating_point"}],
+        str(tmp_path / "o.csv"), delivered_phenotype="fruit_diameter",
+        acknowledgement=Acknowledgement(acknowledged_by="user:tester", reason="a look now"))
+    assert tail["acknowledged_by"] == "user:tester"
+    assert tail["acknowledgement_reason"] == "a look now"
+    assert tail["operating_point_validated"] == VALIDATED_FALSE
+    assert event_recorded is True
+
+
+def test_export_aggregated_csv_discards_an_acknowledgement_that_cleared_nothing(tmp_path):
+    """A validated delivery posted with an acknowledgement anyway ships with the pair blank: the
+    gate applies one only to a dimension it actually needed to clear."""
+    from tcip_mcp.pipelines.postprocessing.aggregation import export_aggregated_csv
+
+    d = tmp_path / "ds" / "predictions" / "bucket"
+    stamp = {"validated": True, "trait": fx.DELIVERY_TRAIT_BY_PHENOTYPE["fruit_diameter"],
+             "operating_point": {"regression": {"validated_against": VALIDATED_HELD_OUT}}}
+    write_bound_sidecar(d, stamp, document="regression_operating_point",
+                        dataset_root=tmp_path / "ds", experiment_id="exp-ack-validated")
+    _path, tail, _event = export_aggregated_csv(
+        [{"plant_id": "p1", "value": 4.2, "observations": 3, "value_key": "fruit_diameter",
+         "plant_attribution": "image", "measurement_document": "regression_operating_point"}],
+        str(tmp_path / "o.csv"), delivered_phenotype="fruit_diameter", pred_dirs=[str(d)],
+        acknowledgement=Acknowledgement(acknowledged_by="user:tester", reason="just in case"))
+    assert tail["acknowledged_by"] is None
+    assert tail["acknowledgement_reason"] is None
+    assert tail["operating_point_validated"] == VALIDATED_HELD_OUT
 
 
 # ── export_aggregated_csv wired to the ordinal/regression sidecar producer ────
@@ -666,9 +744,10 @@ def test_deliver_per_image_counts_publishes_via_staging_but_the_csv_itself_still
     tmp_path, monkeypatch,
 ):
     """allow_unvalidated_staging clears only the bucket's own tile-scale staging gate: the bucket
-    publishes fine, but export_detection_csv takes no acknowledgement, so a fabricated tile_size
-    still refuses the CSV even though the run's own conf reference is genuinely validated. The
-    refusal still names what happened to the bucket the live regime already published."""
+    publishes fine, but this tool builds export_detection_csv no acknowledgement, so a fabricated
+    tile_size still refuses the CSV even though the run's own conf reference is genuinely
+    validated. The refusal still names what happened to the bucket the live regime already
+    published."""
     import tcip_mcp.tools.inference_tools as itools
 
     def _fake(*a, **kw):
@@ -1224,7 +1303,7 @@ def test_export_aggregated_csv_never_gates_an_untiled_bucket_on_tile_size(tmp_pa
 
 def test_export_aggregated_csv_fabricated_tile_size_refuses_despite_valid_conf(tmp_path):
     """A per-plant CSV whose conf is genuinely validated but whose tile scale has no real basis
-    must still refuse (this writer takes no acknowledgement): the gate it refused on floors
+    must still refuse (this call passes no acknowledgement): the gate it refused on floors
     tile_size, not conf's own clean reference, and names tile_size as the actual floorer."""
     from tcip_mcp.pipelines.postprocessing.aggregation import export_aggregated_csv
 
@@ -1359,7 +1438,7 @@ def test_export_aggregated_csv_scale_capture_id_match_ships(tmp_path):
 
 def test_export_aggregated_csv_unvalidated_scale_refuses_despite_valid_conf(tmp_path):
     """A dimensional CSV whose conf is genuinely validated but whose scale never cleared must
-    still refuse (this writer takes no acknowledgement); the gate it refused on floors scale, not
+    still refuse (this call passes no acknowledgement); the gate it refused on floors scale, not
     conf's own clean reference."""
     from tcip_mcp.pipelines.postprocessing.aggregation import export_aggregated_csv
 
@@ -1536,10 +1615,10 @@ def _delivered_row(out_path):
 def test_delivered_provenance_keeps_a_bespoke_checkpoint_hash_with_nothing_bound():
     """A bucket produced by a real checkpoint that belongs to no experiment, with no bucket bound
     behind it, still names the checkpoint: validity and producer identity rest on different
-    evidence, and a hash resolved from the checkpoint file answers for itself. This is no longer
-    reachable through export_aggregated_csv itself (it takes no acknowledgement, so an unbound
-    bucket's delivery always refuses before this composition ever runs), so it is pinned directly
-    against the shared composition instead."""
+    evidence, and a hash resolved from the checkpoint file answers for itself. Without an
+    acknowledgement (no MCP tool ever builds one), an unbound bucket's delivery through
+    export_aggregated_csv always refuses before this composition ever runs, so it is pinned
+    directly against the shared composition instead."""
     from tcip_mcp.pipelines.resolution import delivered_provenance
 
     columns = ["producer_model_sha256", "producing_experiment_id", "validation_record"]
@@ -1655,10 +1734,9 @@ def test_the_delivery_records_what_it_verified_in_the_dataset_own_log(tmp_path):
 def test_an_unbound_bucket_records_why_it_was_not_verified(tmp_path):
     """The same event on the failing side: a reader of the log sees which bucket floored the
     delivery and the reason, not only that a CSV was written. Pinned directly against
-    record_delivery_binding_event: export_aggregated_csv itself can no longer deliver from an
-    unbound bucket (it takes no acknowledgement), so the door that still reaches this path (a
-    phenology delivery, shipped under a breeder's acknowledgement) is stood in for by a real
-    unbound StampBinding rather than a second door's full setup."""
+    record_delivery_binding_event: no MCP-tool call reaches this path (an unbound bucket, no
+    acknowledgement, through export_aggregated_csv), so it is stood in for by a real unbound
+    StampBinding rather than a full door's setup."""
     from tcip_mcp.pipelines.resolution import StampBinding, record_delivery_binding_event
 
     d = _write_bucket(tmp_path, "unbound", conf_ref=VALIDATED_HELD_OUT, validated=False)

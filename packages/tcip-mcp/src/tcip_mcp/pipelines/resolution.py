@@ -2798,13 +2798,30 @@ class DeliveryRefused(ValueError):
     ``ValueError`` cannot be told apart without a second classification of the same writer's own
     raises, drifting from it the moment either changes. ``str(self)`` is the gate's reason plus
     every gated dimension's own reconciler's binding notes, for a caller content to just log or
-    propagate the message.
+    propagate the message. ``facts`` starts empty and is set by a count-delivery core once it
+    catches this raise, to the counts-bearing facts the core already had in hand.
     """
 
     def __init__(self, gate: DeliveryGateResult, notes: str = "") -> None:
         super().__init__(f"{gate.reason} {notes}".rstrip())
         self.gate = gate
         self.notes = notes
+        # A count-delivery core sets this to the facts it already had in hand when it caught this.
+        self.facts: dict[str, Any] = {}
+
+
+class CountDeliveryRefused(ValueError):
+    """A count-delivery core's own refusal for anything other than the delivery gate
+    (:class:`DeliveryRefused`) or the meaning door
+    (``operationalization.OperationalizationRefused``): a missing or malformed bucket, a mismatched
+    stamp, an unreadable plant registry, a raster identity mismatch. Carries whatever counts-bearing
+    facts the core already had in hand at the point it refused, named the same way the tool's own
+    ``{"error": ...}`` response and the web route's own structured detail body both name them.
+    """
+
+    def __init__(self, message: str, **facts: Any) -> None:
+        super().__init__(message)
+        self.facts = facts
 
 
 STAGING_DIMENSIONS: tuple[str, ...] = ("tile_size", "claim_scope")

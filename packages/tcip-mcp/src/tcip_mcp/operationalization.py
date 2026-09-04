@@ -316,6 +316,19 @@ class OperationalizationCheck:
         }
 
 
+class OperationalizationRefused(ValueError):
+    """A count-delivery core's own meaning-door refusal, carrying the failed
+    :class:`OperationalizationCheck` and no counts: a number with no confirmed meaning has nothing
+    counts-bearing to report. Raised from a core's own pre-check (before a bucket is touched) or
+    from a writer's post-gate re-check (a confirmation withdrawn, or a spec field moved, between
+    the two), never from the delivery gate itself, which carries its own refusal
+    (``resolution.DeliveryRefused``)."""
+
+    def __init__(self, check: "OperationalizationCheck") -> None:
+        super().__init__(check.message)
+        self.check = check
+
+
 def _is_empty(value: Any) -> bool:
     """Whether a spec field holds nothing. Zero and false are values, not absences."""
     return value is None or (isinstance(value, (str, bytes, tuple, list, dict, set)) and not value)

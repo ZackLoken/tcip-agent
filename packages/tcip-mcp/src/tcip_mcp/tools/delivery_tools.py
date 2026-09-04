@@ -151,7 +151,7 @@ def deliver_per_plant_csv(
 
     resolved_output_path = str(resolve_output_path(output_path))
     try:
-        csv_path, tail = export_aggregated_csv(
+        csv_path, tail, _event_recorded = export_aggregated_csv(
             results, resolved_output_path, delivered_phenotype=delivered_phenotype, crop=crop,
             pipeline_version=pipeline_version, pred_dirs=pred_dirs, images_dir=images_dir,
             scale_capture_id=scale_capture_id, door="deliver_per_plant_csv",

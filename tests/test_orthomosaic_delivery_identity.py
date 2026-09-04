@@ -210,7 +210,7 @@ def test_delivery_resolves_the_raster_it_was_produced_on_then_refuses_on_the_unc
 def _aggregated(tmp_path, bucket: Path, *, name: str = "counts.csv"):
     from tcip_mcp.pipelines.postprocessing.aggregation import export_aggregated_csv
 
-    path, _tail = export_aggregated_csv(
+    path, _tail, _event_recorded = export_aggregated_csv(
         [{"plant_id": "plot0", "value": 3, "observations": 1, "value_key": "count",
           "measurement_document": "operating_point", "plant_attribution": "detection"}],
         str(tmp_path / name),

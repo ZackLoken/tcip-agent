@@ -26,7 +26,10 @@ import logging
 import statistics
 from collections import Counter, defaultdict
 from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
+
+if TYPE_CHECKING:
+    from tcip_mcp.pipelines.resolution import Acknowledgement
 
 logger = logging.getLogger(__name__)
 
@@ -203,7 +206,8 @@ _STRATEGIES = {
 
 
 _PROVENANCE_COLUMNS = ["producer_model_sha256", "producing_experiment_id", "produced_at",
-                       "operating_point_validated", "unvalidated_dimensions", "validation_record"]
+                       "operating_point_validated", "unvalidated_dimensions", "validation_record",
+                       "acknowledged_by", "acknowledgement_reason"]
 
 def _unit_from_value_key(value_key: str) -> tuple[str, str] | None:
     """``(display_unit, linear_basis)`` a value_key implies (``area_mm2`` -> ``("mm2", "mm")``,
@@ -295,7 +299,9 @@ def export_aggregated_csv(
     scale_capture_id: str | None = None,
     door: str = "export_aggregated_csv",
     plant_mapping: dict | None = None,
-) -> tuple[str, dict]:
+    acknowledgement: Acknowledgement | None = None,
+    project_root: str | Path | None = None,
+) -> tuple[str, dict, bool]:
     """Export per-plant aggregated results to a delivery CSV.
 
     Follows the per-plant CSV schema from the delivery skill, the ``fieldnames`` list below is the
@@ -333,9 +339,10 @@ def export_aggregated_csv(
     native-frame edge, and no explicit caller override refuses here; untiled buckets are never
     gated on it, and neither is an ordinal/regression delivery, which rests on a per-image scalar
     prediction no tile geometry produced. ``pred_dirs`` empty/omitted has no on-disk validity
-    producer at all and floors to unvalidated unconditionally, and this door takes no
-    acknowledgement: no surface delivers a per-plant aggregate provisionally today, so an
-    unvalidated delivery here always refuses.
+    producer at all and floors to unvalidated unconditionally. ``acknowledgement`` is the breeder's
+    own act of shipping this delivery unvalidated (the web results route's per-plant count export
+    is the one surface that builds one), or ``None`` for every MCP-tool call, which still refuses a
+    bare unvalidated write here exactly as before.
 
     The physical-scale dimension is reconciled when and only when the results state
     ``scale_document`` and ``pred_dirs`` is given. A stated scale with a value_key implying no
@@ -347,8 +354,9 @@ def export_aggregated_csv(
     construction) and refuses under ``operating_point``, since a dimensional number from a detection
     or segmentation bucket with no scale behind it has nothing answering for its unit; with no
     ``pred_dirs``, the delivery has no on-disk validity producer at all regardless of unit, and
-    floors to unvalidated exactly as the operating_point dimension does, and this door takes no
-    acknowledgement to ship one anyway. When operative, each bucket's ``resolve_scale.json`` is
+    floors to unvalidated exactly as the operating_point dimension does; nothing an acknowledgement
+    clears fixes a scale claim with nothing on disk to reconcile it from, since this refusal
+    precedes the gate. When operative, each bucket's ``resolve_scale.json`` is
     reconciled the same floor-from-disk way the operating_point dimension is, checked against the
     delivered unit and the delivered trait (``reconcile_scale_validity``), which recomputes the
     claim's imagery digest from ``images_dir`` (required whenever ``scale_document`` is stated
@@ -412,16 +420,23 @@ def export_aggregated_csv(
             or has not verified one against the buckets this delivery reads. Never a bare name or
             digest on its own, since the stored record's own schema (``PlantMappingDisclosure`` /
             ``PlantRegistryDisclosure``) validates the whole shape or nothing.
+        acknowledgement: The breeder's own act of shipping this delivery unvalidated, or ``None``
+            for an ordinary validated export or an MCP-tool call, which never builds one.
+        project_root: The project this delivery's meaning-record reads and delivery event belong
+            to. ``None`` (every MCP-tool call) resolves against this process's pinned platform
+            root; a web route already holding its own guarded, resolved root passes it explicitly.
 
     Returns:
-        ``(path, tail)``: the path to the written CSV, and the ``_PROVENANCE_COLUMNS`` tail
-        ``delivered_tail`` composed and wrote into every row, so a caller that needs one of those
-        cells back reads the value actually written rather than re-deriving or re-asserting it a
-        second time.
+        ``(path, tail, event_recorded)``: the path to the written CSV, the ``_PROVENANCE_COLUMNS``
+        tail ``delivered_tail`` composed and wrote into every row (so a caller that needs one of
+        those cells back reads the value actually written rather than re-deriving or re-asserting
+        it a second time), and whether the best-effort delivery-event write landed
+        (``record_delivery_binding_event``'s own return).
 
     Raises:
-        DeliveryRefused: the gate refused (an unvalidated dimension with no acknowledgement);
-            carries the ``DeliveryGateResult`` and every operative reconciler's binding notes.
+        DeliveryRefused: the gate refused (an unvalidated dimension with no acknowledgement that
+            clears it); carries the ``DeliveryGateResult`` and every operative reconciler's binding
+            notes.
         ValueError: any other refusal (a statement, unit, or meaning problem the results or the
             trait's operationalization carry); never carries a gate result, so a caller must not
             read a delivered count off this raise.
@@ -494,9 +509,10 @@ def export_aggregated_csv(
     )
 
     delivery_kind = aggregate_delivery_kind(measurement_document)
-    trait = resolve_trait_for_phenotype(delivered_phenotype)
+    trait = resolve_trait_for_phenotype(delivered_phenotype, project_root=project_root)
     value_keys = [r.get("value_key", "") for r in results]
-    spec, record, _specs_dir = resolve_trait_and_record(trait, delivery_kind)
+    spec, record, _specs_dir = resolve_trait_and_record(
+        trait, delivery_kind, project_root=project_root)
     # This door never delivers a crossing kind, so it has no registry to check a positive class against.
     stated = check_operationalization(
         spec, record, delivery_kind, delivered_phenotype=delivered_phenotype, value_keys=value_keys,
@@ -544,7 +560,7 @@ def export_aggregated_csv(
         flags["scale"] = scale_recon["validated"]
     if claim_scope_recon["operative"]:
         flags["claim_scope"] = claim_scope_recon["validated"]
-    gate = check_delivery_gate(flags)
+    gate = check_delivery_gate(flags, acknowledgement=acknowledgement)
     if not gate.ok:
         notes = " ".join(filter(None, (
             binding_notes_text(operating_point_recon.get("binding_notes", {})),
@@ -555,7 +571,8 @@ def export_aggregated_csv(
         raise DeliveryRefused(gate, notes)
 
     # A confirmation withdrawn or a field moved since the first check refuses here, before anything.
-    spec_now, record_now, _ = resolve_trait_and_record(trait, delivery_kind)
+    spec_now, record_now, _ = resolve_trait_and_record(
+        trait, delivery_kind, project_root=project_root)
     still_stated = check_operationalization(
         spec_now, record_now, delivery_kind, delivered_phenotype=delivered_phenotype,
         value_keys=value_keys, registry=None, basis=stated.basis)
@@ -596,13 +613,12 @@ def export_aggregated_csv(
                 **stamp,
             })
 
-    record_delivery_binding_event(door, output_path, pred_dirs,
-                                  operating_point_recon["bindings"],
-                                  measurement_documents=[measurement_document],
-                                  scale_document=scale_document, acknowledgement=None,
-                                  trait=trait, delivery_kind=delivery_kind,
-                                  plant_mapping=plant_mapping)
-    return output_path, stamp
+    event_recorded = record_delivery_binding_event(
+        door, output_path, pred_dirs, operating_point_recon["bindings"],
+        measurement_documents=[measurement_document], scale_document=scale_document,
+        acknowledgement=gate.effective_acknowledgement(), trait=trait, delivery_kind=delivery_kind,
+        project_root=project_root, plant_mapping=plant_mapping)
+    return output_path, stamp, event_recorded
 
 
 def _resolve_statement(
