@@ -67,6 +67,13 @@ groups): ``workspace``'s own project-name segment rule. The store package depend
 ``filelock`` alone and cannot import ``tcip_mcp``, so this constant lives here and
 ``workspace._SEGMENT_RE`` imports it, not the other way round."""
 
+ARCHIVED_NAME_SEGMENT = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*@[0-9a-f]{12}$")
+"""An archived plant-mapping key's own shape: a legal :data:`NAME_SEGMENT` plus ``@`` and the
+twelve-hex-digit prefix of the record digest it archived (``plant_mapping.persist_mapping``'s
+``supersede`` path). Never a name a caller may register a fresh mapping or registry under, and
+never one :func:`~tcip_mcp.pipelines.postprocessing.plant_mapping.plant_mapping_names` enumerates
+(it fails plain :data:`NAME_SEGMENT`, which that listing filters on)."""
+
 LAYOUTS = (
     ROOT,
     STATE,
@@ -328,7 +335,18 @@ PLATFORM_CLAIMS: Mapping[str, Claim] = {
     ),
     "plant_mapping": Claim(
         STATE,
-        ((Constant("plant_mappings"), Patterned(PartPattern(regex=NAME_SEGMENT), tail=".json")),),
+        (
+            (Constant("plant_mappings"), Patterned(PartPattern(regex=NAME_SEGMENT), tail=".json")),
+            (Constant("plant_mappings"),
+             Patterned(PartPattern(regex=ARCHIVED_NAME_SEGMENT), tail=".json")),
+        ),
+    ),
+    "plant_registries": Claim(
+        STATE,
+        ((Constant("plant_registries"), Patterned(PartPattern(regex=NAME_SEGMENT), tail=".json")),),
+    ),
+    "delivery_supersessions": Claim(
+        STATE, ((Constant("delivery_supersessions"), Patterned(ANY, tail=".json")),)
     ),
     "review_verdicts": Claim(
         STATE,
@@ -658,6 +676,7 @@ def anchored_matches(
 
 __all__ = [
     "ANY",
+    "ARCHIVED_NAME_SEGMENT",
     "AnchoredMatch",
     "CURATED",
     "Claim",

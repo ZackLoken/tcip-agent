@@ -28,12 +28,84 @@ from tcip_mcp.server import mcp
 
 @mcp.tool()
 @audited
+def register_plant_registry(name: str, csv_paths: list[str], *, crop: str, site: str) -> dict:
+    """Register a plant-locations CSV set under a name, so ``build_plant_mapping`` and
+    ``deliver_orthomosaic_plant_counts`` name which version of a plant list they read rather than
+    re-asserting file paths on every call.
+
+    Reads every path in ``csv_paths`` through the same parser those two doors already use
+    (``read_plant_csvs``), one file at a time, and refuses naming any file that parses to no
+    georeferenced, named plant. The stored, frozen, project-scoped record holds each file's
+    ``{path, sha256, n_plants}``, ``crop``, ``site``, ``registered_by`` (always this door's own
+    identity: no HTTP request reaches this tool, so there is no breeder identity to stamp
+    instead), ``registered_at``, and a content digest over every parsed row.
+
+    A second registration under a taken ``name`` is read before it writes (this store's own
+    ``concurrency="cas"``): it returns the existing record unchanged when the digest matches (the
+    same plants again, from a different path or row order), and refuses naming both digests when
+    it does not, since silently moving what a taken name means would strand every mapping already
+    citing it.
+
+    Args:
+        name: The registry's name within this project (``tcip_store.layout_claims.NAME_SEGMENT``:
+            lowercase letters, digits, single hyphens).
+        csv_paths: One or more plant-locations CSVs (columns ``plot_name``, ``accession_name``,
+            ``WGS84_centroid_x/y``, …).
+        crop: The crop these plants are of. The expert's fact, never inferred.
+        site: The site or block these plants are of. The expert's fact, never inferred.
+
+    Refuses (``{"error": ...}``) naming any missing file, naming any file that parsed no
+    georeferenced plant, and naming a name conflict's two digests. A name outside
+    ``NAME_SEGMENT`` refuses at the door. Unlike ``build_plant_mapping``, this does not require a
+    project record: ``deliver_orthomosaic_plant_counts`` reads a registry without one, and a
+    registry has to be registrable before either door can name it.
+    """
+    from tcip_store.layout_claims import NAME_SEGMENT
+
+    from tcip_mcp.pipelines.postprocessing import plant_mapping
+    from tcip_mcp.project_paths import platform_state_root
+
+    if not NAME_SEGMENT.fullmatch(name):
+        return {"error": (
+            f"name {name!r} is not lowercase letters, digits and single hyphens "
+            f"({NAME_SEGMENT.pattern})")}
+
+    platform_root = platform_state_root()
+    missing = [p for p in csv_paths if not Path(p).is_file()]
+    if missing:
+        return {"error": f"plant CSV(s) not found: {missing}"}
+
+    try:
+        record = plant_mapping.register_plant_registry_record(
+            platform_root, name, [Path(p) for p in csv_paths],
+            crop=crop, site=site, registered_by="agent:register_plant_registry",
+        )
+    except (plant_mapping.NoGeoreferencedPlantsRefusal,
+            plant_mapping.PlantRegistryNameConflict) as exc:
+        return {"error": str(exc)}
+
+    return {
+        "name": record["name"],
+        "project_root": str(platform_root),
+        "crop": record["crop"],
+        "site": record["site"],
+        "n_plants": record["n_plants"],
+        "digest": record["digest"],
+        "csvs": record["csvs"],
+        "registered_by": record["registered_by"],
+        "registered_at": record["registered_at"],
+    }
+
+
+@mcp.tool()
+@audited
 def build_plant_mapping(
     name: str,
     images_root: str,
-    plant_csv_paths: list[str],
+    plant_registry: str,
     dates: list[str] | None = None,
     nn_tolerance_m: float | None = None,
+    supersede: bool = False,
 ) -> dict:
     """Assign each geolocated image to a plant, then persist the mapping under this project.
 
@@ -52,23 +124,30 @@ def build_plant_mapping(
             name.
         images_root: Directory whose immediate subfolders are ``<YYYY-MM-DD>/`` image buckets
             (the ingest layout).
-        plant_csv_paths: One or more plant-locations CSVs (columns ``plot_name``,
-            ``accession_name``, ``WGS84_centroid_x/y``, …).
+        plant_registry: The name of a plant registry already registered under this project by
+            ``register_plant_registry``.
         dates: Optional subset of date folders to map (default: all under ``images_root``).
         nn_tolerance_m: Nearest-neighbour tolerance (m). ``None`` (default) derives it from the
             plot's grid pitch (pitch/6) so the match radius stays within half a grid cell; an
             explicit value is honored but still capped at that pitch-derived ceiling.
+        supersede: A rebuild under ``name`` whose current record is still cited by a delivery
+            event under this project refuses by name, listing the citing events, unless this is
+            ``True``: the current record is then archived first (never overwritten), the new
+            record's own ``supersedes`` names the archived digest, and the archived record stays
+            readable by that digest. An uncited rebuild replaces as it always has, ignoring this.
 
     Refuses (a plain ``{"error": ...}``) naming ``register_dataset`` when ``images_root`` is not
-    a registered dataset's own ``images/`` directory, and naming ``initialize_project``/
-    ``activate_project`` when the resolved platform state root carries no project record. A name
+    a registered dataset's own ``images/`` directory, naming ``initialize_project``/
+    ``activate_project`` when the resolved platform state root carries no project record, and
+    naming ``register_plant_registry`` when ``plant_registry`` names no stored registry. A name
     outside ``tcip_store.layout_claims.NAME_SEGMENT`` (lowercase letters, digits, single hyphens)
     refuses at the door. No capture at all under the requested dates, or captures that carry no
     position this door reads (no GPS EXIF, or a raster/band-group capture), also refuses, naming
     the plant-tag mechanism the platform does not yet have. A receipt that cannot be written fails
     the call naming the receipt: the record it would have named is left on disk but
     :func:`~tcip_mcp.pipelines.postprocessing.plant_mapping.load_mapping` refuses to read it until
-    a rebuild replaces it.
+    a rebuild replaces it. A rebuild a delivery event still cites, with ``supersede`` left
+    ``False``, refuses naming those events.
 
     Returns a compact per-date summary (images, mapped count, unattributed count, avg GPS
     distance) plus totals, the mapping's ``name``, the resolved ``project_root`` and
@@ -102,9 +181,6 @@ def build_plant_mapping(
     resolved_images_root = Path(images_root).resolve()
     if not resolved_images_root.is_dir():
         return {"error": f"images_root not found: {images_root}"}
-    missing = [p for p in plant_csv_paths if not Path(p).is_file()]
-    if missing:
-        return {"error": f"plant CSV(s) not found: {missing}"}
 
     candidate = dataset_root_of(resolved_images_root)
     if candidate is None or not same_directory(image_root(candidate), resolved_images_root):
@@ -116,20 +192,30 @@ def build_plant_mapping(
     except ValueError as exc:
         return {"error": str(exc)}
 
+    registry_record = plant_mapping.load_registry(platform_root, plant_registry)
+    if registry_record is None:
+        return {"error": (
+            f"plant registry not found: {plant_registry!r} under {platform_root}; register it "
+            "with register_plant_registry before build_plant_mapping reads it")}
+    registry_ref = {"name": plant_registry, "digest": registry_record["digest"]}
+    registry_paths = [Path(e["path"]) for e in plant_mapping.registry_csv_entries(registry_record)]
+
     try:
         build = plant_mapping.build_mapping(
-            resolved_images_root, [Path(p) for p in plant_csv_paths],
+            resolved_images_root, registry_paths,
             name=name, dataset_root=candidate, dataset_id=identity["id"],
             project_root=platform_root, built_by="build_plant_mapping",
-            dates=dates, nn_tolerance_m=nn_tolerance_m,
+            plant_registry=registry_ref, dates=dates, nn_tolerance_m=nn_tolerance_m,
         )
     except (AmbiguousImageStem, plant_mapping.UngeoreferencedCaptureRefusal) as exc:
         return {"error": str(exc)}
 
     try:
-        plant_mapping.persist_mapping(build, platform_root, name)
+        plant_mapping.persist_mapping(build, platform_root, name, supersede=supersede)
     except AuditEntryNotWritten as exc:
         return {"error": str(exc)}
+    except plant_mapping.MappingRebuildRefusal as exc:
+        return {"error": str(exc), "citing_events": exc.event_ids}
 
     summary = build.summary()
     return {
