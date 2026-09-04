@@ -503,7 +503,7 @@ def calibrate_count_operating_point(
     honest ``conf`` with ``validated=false`` and earns nothing.
 
     ``pred_dir`` must already carry an ``operating_point.json`` stamp (a bucket
-    ``run_inference``/``export_predictions`` already published at this checkpoint) and sit under
+    ``run_inference`` already published at this checkpoint) and sit under
     ``dataset_root``, the same requirement ``seal_validation`` holds every claimed bucket to
     (``resolution.bucket_relative_key``, the one under-root check both apply). A bucket outside
     ``dataset_root``, with no stamp at all, whose stamp carries no ``checkpoint_sha256`` at all (a
