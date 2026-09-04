@@ -251,9 +251,20 @@ def captured_requests(monkeypatch: pytest.MonkeyPatch) -> list:
     return seen
 
 
-def test_the_push_through_a_handshake_sends_the_identity_as_headers(captured_requests: list) -> None:
+def test_the_push_through_a_handshake_sends_the_identity_as_headers(
+    captured_requests: list, tmp_path: Path,
+) -> None:
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    from tcip_web.app import app
+    from tests.test_canvas_liveview import _select
+
+    _select(TestClient(app, base_url="http://127.0.0.1"), tmp_path)
+
     call_through_handshake([("push_panel_event", {
         "panel": "meta", "event_type": "identity_probe", "data": {"n": 1},
+        "project_root": str(tmp_path),
     })])
 
     (req,) = captured_requests

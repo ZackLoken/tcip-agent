@@ -296,12 +296,18 @@ class TestPushPanelDataTool:
         """Backend not running → graceful 'no_subscribers' status."""
         from tcip_mcp.tools.gui_tools import push_panel_event
 
+        from tests.test_canvas_liveview import _mint_binding
+
+        # A matching binding, so the call reaches the HTTP push this exercises rather than being
+        # refused by the binding rail before it.
+        _mint_binding(tmp_path)
         # Point port discovery at an unused port in an isolated project root
         monkeypatch.setenv("TCIP_WEB_PORT", "59999")  # very unlikely to be bound
         result = push_panel_event(
             panel="training",
             event_type="metrics_update",
             data={"epoch": 1},
+            project_root=str(tmp_path),
         )
         # Either the connection was refused (no_subscribers) or a URL error;
         # both are acceptable. Tool must not raise.
@@ -309,11 +315,11 @@ class TestPushPanelDataTool:
         # Panel name preserved in result
         assert result.get("panel") == "training"
 
-    def test_invalid_panel_rejected(self) -> None:
+    def test_invalid_panel_rejected(self, tmp_path: Path) -> None:
         """Unknown panel names return an error before any HTTP call."""
         from tcip_mcp.tools.gui_tools import push_panel_event
 
-        result = push_panel_event(panel="bogus", event_type="test", data={})
+        result = push_panel_event(panel="bogus", event_type="test", data={}, project_root=str(tmp_path))
         assert "error" in result
 
 
