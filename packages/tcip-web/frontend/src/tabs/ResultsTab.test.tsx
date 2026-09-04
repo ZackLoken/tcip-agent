@@ -1341,6 +1341,7 @@ describe("ResultsTab delivery events (read-only)", () => {
         detections_unattributed: 3,
         detections_unattributed_scope: "delivered_raster",
         plant_attribution: "detection",
+        plants_outside_raster: ["plot9"],
       },
     };
     vi.spyOn(resultsApi, "deliveryEvents").mockResolvedValue({ records: [withRegistry] });
@@ -1353,6 +1354,48 @@ describe("ResultsTab delivery events (read-only)", () => {
       within(row).getByText(/3 detection\(s\) attributed to no plant on the delivered raster/),
     ).toBeInTheDocument();
     expect(within(row).getByText(/detection-level attribution/)).toBeInTheDocument();
+    expect(within(row).getByText(/Outside the raster: plot9/)).toBeInTheDocument();
+    expect(within(row).queryByText(/Delivered dates/)).not.toBeInTheDocument();
+  });
+
+  it("renders the orthomosaic door's own canopy-segment disclosure, narrowed before the registry form", async () => {
+    const withCanopy: DeliveryEventRecord = {
+      ...DELIVERY_EVENT,
+      event_id: "with-canopy",
+      door: "deliver_orthomosaic_plant_counts",
+      plant_mapping: {
+        plant_registry: { name: "orchard-block", digest: "0".repeat(64) },
+        project_root: "C:/proj",
+        raster_identity: { width: 4096, height: 4096 },
+        canopy_segments: { path: "C:/proj/annotations/2024-06-01/mosaic.json",
+                          sha256: "1".repeat(64), subject: "canopy", n_segments: 3 },
+        segment_ties: [
+          { segment_index: 0, plot_name: "plot0", clearance_m: 0.8 },
+          { segment_index: 1, plot_name: "plot1", clearance_m: 1.2 },
+        ],
+        segments_without_plant: 1,
+        plants_outside_raster: ["plot9"],
+        plants_without_segment: ["plot8"],
+        plants_with_ambiguous_detections: ["plot1"],
+        detections_unattributed: 2,
+        detections_unattributed_by_source: {
+          outside_segments: 1, overlapping_segments: 1, segment_without_plant: 0,
+        },
+        detections_unattributed_scope: "delivered_raster",
+        plant_attribution: "segment",
+      },
+    };
+    vi.spyOn(resultsApi, "deliveryEvents").mockResolvedValue({ records: [withCanopy] });
+
+    render(<ResultsTab />);
+    const row = await screen.findByTestId("delivery-with-canopy");
+
+    expect(within(row).getByTestId("canopy-disclosure")).toBeInTheDocument();
+    expect(within(row).getByText(/Canopy segments \(orchard-block\): 1\/4/)).toBeInTheDocument();
+    expect(within(row).getByText(/No segment: plot8/)).toBeInTheDocument();
+    expect(within(row).getByText(/Outside the raster: plot9/)).toBeInTheDocument();
+    expect(within(row).getByText(/Ambiguous detection: plot1/)).toBeInTheDocument();
+    expect(within(row).queryByText(/Plant registry orchard-block:/)).not.toBeInTheDocument();
     expect(within(row).queryByText(/Delivered dates/)).not.toBeInTheDocument();
   });
 

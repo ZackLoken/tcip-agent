@@ -211,6 +211,64 @@ def test_record_delivery_binding_event_raises_and_writes_nothing_when_plant_mapp
     assert _delivery_event_records(tmp_path) == []
 
 
+def test_plant_mapping_union_resolves_each_shape_and_refuses_a_hybrid(tmp_path: Path) -> None:
+    """No two of the three ``plant_mapping`` disclosure shapes share a required key set: a dict
+    validates against exactly the one model whose keys it carries, and a hybrid combining keys
+    from two shapes resolves to none."""
+    from pydantic import ValidationError
+
+    from tcip_mcp.pipelines.delivery_events_schema import (
+        CanopySegmentDisclosure,
+        DeliveryEventRecord,
+        PlantMappingDisclosure,
+        PlantRegistryDisclosure,
+    )
+
+    mapping = {
+        "name": "valley", "project_root": str(tmp_path), "dataset_id": "ds-1",
+        "dataset_root": "C:/data", "built_at": "2026-02-01T00:00:00+00:00",
+        "record_sha256": "0" * 64, "nn_tolerance_m": {"value": 3, "source": "stated"},
+        "capture_identity": {}, "captures_unverified": [], "plant_csvs_unverified": [],
+        "dates_delivered": [], "images_unattributed": 0,
+        "images_unattributed_scope": "delivered_dates", "plant_attribution": "image",
+    }
+    registry = {
+        "plant_registry": {"name": "reg", "digest": "0" * 64}, "project_root": str(tmp_path),
+        "raster_identity": {"width": 10, "height": 10},
+        "nn_tolerance_m": {"value": 1, "source": "stated"}, "detections_unattributed": 0,
+        "detections_unattributed_scope": "delivered_raster", "plant_attribution": "detection",
+        "plants_outside_raster": [],
+    }
+    canopy = {
+        "plant_registry": {"name": "reg", "digest": "0" * 64}, "project_root": str(tmp_path),
+        "raster_identity": {"width": 10, "height": 10},
+        "canopy_segments": {"path": "x", "sha256": "0" * 64, "subject": "canopy", "n_segments": 1},
+        "segment_ties": [], "segments_without_plant": 0, "plants_outside_raster": [],
+        "plants_without_segment": [], "plants_with_ambiguous_detections": [],
+        "detections_unattributed": 0,
+        "detections_unattributed_by_source": {
+            "outside_segments": 0, "overlapping_segments": 0, "segment_without_plant": 0},
+        "detections_unattributed_scope": "delivered_raster", "plant_attribution": "segment",
+    }
+
+    def _resolved(pm: dict) -> object:
+        record = {
+            "event_id": "e", "trait": None, "delivery_kind": None, "door": "d",
+            "output_path": None, "output_sha256": None, "measurement_documents": [],
+            "scale_document": None, "acknowledged_by": None, "acknowledgement_reason": None,
+            "plant_mapping": pm, "documents": {}, "produced_at": "t",
+        }
+        return DeliveryEventRecord.model_validate(record).plant_mapping
+
+    assert isinstance(_resolved(mapping), PlantMappingDisclosure)
+    assert isinstance(_resolved(registry), PlantRegistryDisclosure)
+    assert isinstance(_resolved(canopy), CanopySegmentDisclosure)
+
+    hybrid = {**registry, "canopy_segments": canopy["canopy_segments"]}
+    with pytest.raises(ValidationError):
+        _resolved(hybrid)
+
+
 def test_phenology_measurement_records_no_delivery_event_for_an_assessed_look(
     tmp_path: Path,
 ) -> None:

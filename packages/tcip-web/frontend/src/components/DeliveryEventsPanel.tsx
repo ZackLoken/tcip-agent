@@ -8,6 +8,7 @@
 import { Fragment } from "react";
 
 import {
+  isCanopySegmentDisclosure,
   isPlantMappingDisclosure,
   isPlantRegistryDisclosure,
   type DeliveryEventRecord,
@@ -70,11 +71,47 @@ function DeliveryEventRow({ record }: { record: DeliveryEventRecord }) {
           ))}
         </div>
       )}
+      {record.plant_mapping && isCanopySegmentDisclosure(record.plant_mapping) && (
+        <div className="mt-2 text-[11px] text-tcip-muted" data-testid="canopy-disclosure">
+          {(() => {
+            const pm = record.plant_mapping;
+            const delivered = pm.segment_ties.length - pm.plants_with_ambiguous_detections.length;
+            const registered = delivered + pm.plants_without_segment.length
+              + pm.plants_outside_raster.length + pm.plants_with_ambiguous_detections.length;
+            return (
+              <>
+                <div>
+                  {`Canopy segments (${pm.plant_registry.name}): ${delivered}/${registered} `
+                    + `registry plant(s) delivered, ${pm.segments_without_plant} segment(s) `
+                    + "with no plant"}
+                </div>
+                {pm.plants_without_segment.length > 0 && (
+                  <div>{`No segment: ${pm.plants_without_segment.join(", ")}`}</div>
+                )}
+                {pm.plants_outside_raster.length > 0 && (
+                  <div>{`Outside the raster: ${pm.plants_outside_raster.join(", ")}`}</div>
+                )}
+                {pm.plants_with_ambiguous_detections.length > 0 && (
+                  <div>{`Ambiguous detection: ${pm.plants_with_ambiguous_detections.join(", ")}`}</div>
+                )}
+              </>
+            );
+          })()}
+        </div>
+      )}
       {record.plant_mapping && isPlantRegistryDisclosure(record.plant_mapping) && (
         <div className="mt-2 text-[11px] text-tcip-muted">
-          {`Plant registry ${record.plant_mapping.plant_registry.name}: ` +
-            `${record.plant_mapping.detections_unattributed} detection(s) attributed to no plant ` +
-            `on the delivered raster (${record.plant_mapping.plant_attribution}-level attribution)`}
+          <div>
+            {`Plant registry ${record.plant_mapping.plant_registry.name}: ` +
+              `${record.plant_mapping.detections_unattributed} detection(s) attributed to no ` +
+              `plant on the delivered raster (${record.plant_mapping.plant_attribution}-level ` +
+              "attribution)"}
+          </div>
+          {record.plant_mapping.plants_outside_raster.length > 0 && (
+            <div>
+              {`Outside the raster: ${record.plant_mapping.plants_outside_raster.join(", ")}`}
+            </div>
+          )}
         </div>
       )}
       {record.plant_mapping && isPlantMappingDisclosure(record.plant_mapping) && (

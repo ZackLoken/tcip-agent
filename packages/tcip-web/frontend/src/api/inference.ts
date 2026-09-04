@@ -368,8 +368,8 @@ export interface PlantMappingDisclosure {
   plant_attribution: string;
 }
 
-// The whole-raster counterpart, a different required key set from PlantMappingDisclosure's:
-// an orthomosaic delivery's own registry disclosure (deliver_orthomosaic_plant_counts's own).
+// The whole-raster counterpart of PlantMappingDisclosure: a nearest-neighbour orthomosaic
+// delivery's own registry disclosure (deliver_orthomosaic_plant_counts's own).
 export interface PlantRegistryDisclosure {
   plant_registry: { name: string; digest: string };
   project_root: string;
@@ -378,19 +378,68 @@ export interface PlantRegistryDisclosure {
   detections_unattributed: number;
   detections_unattributed_scope: string;
   plant_attribution: string;
+  plants_outside_raster: string[];
 }
 
-/** Whether `pm` is the whole-raster registry disclosure rather than a walked mapping's. */
-export function isPlantRegistryDisclosure(
-  pm: PlantMappingDisclosure | PlantRegistryDisclosure,
-): pm is PlantRegistryDisclosure {
-  return "plant_registry" in pm;
+// One resolved segment-to-plant tie: the derived clearance a displaced registry position
+// would have to exceed to leave this segment.
+export interface SegmentTieDisclosure {
+  segment_index: number;
+  plot_name: string;
+  clearance_m: number;
 }
 
-/** Whether `pm` is a walked mapping's disclosure rather than the whole-raster registry one. */
-export function isPlantMappingDisclosure(
-  pm: PlantMappingDisclosure | PlantRegistryDisclosure,
-): pm is PlantMappingDisclosure {
+// The label document a canopy-segment delivery read its boundaries from.
+export interface CanopySegmentsDocument {
+  path: string;
+  sha256: string;
+  subject: string;
+  n_segments: number;
+}
+
+// A canopy-segment delivery's unattributed-detection count, broken out by source; the sum of
+// these three is CanopySegmentDisclosure.detections_unattributed, stated there as derived.
+export interface UnattributedDetectionsBySource {
+  outside_segments: number;
+  overlapping_segments: number;
+  segment_without_plant: number;
+}
+
+// The third disclosure shape: a canopy-segment orthomosaic delivery's own disclosure
+// (deliver_orthomosaic_plant_counts's canopy_subject argument).
+export interface CanopySegmentDisclosure {
+  plant_registry: { name: string; digest: string };
+  project_root: string;
+  raster_identity: Record<string, unknown>;
+  canopy_segments: CanopySegmentsDocument;
+  segment_ties: SegmentTieDisclosure[];
+  segments_without_plant: number;
+  plants_outside_raster: string[];
+  plants_without_segment: string[];
+  plants_with_ambiguous_detections: string[];
+  detections_unattributed: number;
+  detections_unattributed_by_source: UnattributedDetectionsBySource;
+  detections_unattributed_scope: string;
+  plant_attribution: string;
+}
+
+export type PlantMappingUnion =
+  | PlantMappingDisclosure
+  | PlantRegistryDisclosure
+  | CanopySegmentDisclosure;
+
+/** Whether `pm` is the canopy-segment disclosure, narrowed first. */
+export function isCanopySegmentDisclosure(pm: PlantMappingUnion): pm is CanopySegmentDisclosure {
+  return "canopy_segments" in pm;
+}
+
+/** Whether `pm` is the whole-raster registry disclosure, narrowed after the canopy shape. */
+export function isPlantRegistryDisclosure(pm: PlantMappingUnion): pm is PlantRegistryDisclosure {
+  return !isCanopySegmentDisclosure(pm) && "plant_registry" in pm;
+}
+
+/** Whether `pm` is a walked mapping's disclosure, narrowed last. */
+export function isPlantMappingDisclosure(pm: PlantMappingUnion): pm is PlantMappingDisclosure {
   return "name" in pm && "record_sha256" in pm;
 }
 
@@ -420,9 +469,9 @@ export interface DeliveryEventRecord {
   // Who acknowledged this delivery unvalidated, and why; null on both when nothing was.
   acknowledged_by: string | null;
   acknowledgement_reason: string | null;
-  // The plant mapping this delivery attributed detections through, door-conditional: the
-  // phenology doors carry a mapping, deliver_orthomosaic_plant_counts a registry, others null.
-  plant_mapping: PlantMappingDisclosure | PlantRegistryDisclosure | null;
+  // The plant mapping this delivery attributed detections through, door-conditional (phenology
+  // a mapping, deliver_orthomosaic_plant_counts a registry or canopy disclosure, others null).
+  plant_mapping: PlantMappingUnion | null;
   // Set only alongside plant_mapping: the name to load to see exactly the cited record (its own
   // name while unmoved, an archived key once superseded, or null when neither resolves).
   plant_mapping_resolved_key?: string | null;
