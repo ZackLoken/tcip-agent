@@ -66,8 +66,9 @@ data/                          # sample hazelnut dataset (gitignored)
 
 ```bash
 # Python: creates the env and installs the four packages (editable). Run from
-# the repo root. Installs a CPU/-or-platform torch wheel; see environment.yml for
-# the CUDA option.
+# the repo root. Installs the CUDA (cu126) torch wheel by default (environment.yml's
+# --extra-index-url); it runs fine without a GPU too, since device placement branches on
+# torch.cuda.is_available().
 conda env create -f environment.yml
 conda activate tcip-agent
 
