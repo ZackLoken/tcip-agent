@@ -117,9 +117,10 @@ source file under a covered root that no row names.
 | packages/tcip-mcp/src/tcip_mcp/pipelines/postprocessing/__init__.py | Postprocessing pipeline: temporal aggregation and CSV export. | 0 | 0 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/postprocessing/aggregation.py | Per-plant aggregation, temporal/spatial aggregation of per-image results. | 4 | 2 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/postprocessing/export.py | CSV export for per-plant phenotyping results. | 7 | 2 |
-| packages/tcip-mcp/src/tcip_mcp/pipelines/postprocessing/orthomosaic_mapping.py | Georeferencing for a whole-mosaic GeoTIFF. | 1 | 5 |
+| packages/tcip-mcp/src/tcip_mcp/pipelines/postprocessing/orthomosaic_mapping.py | Georeferencing for a whole-mosaic GeoTIFF. | 1 | 7 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/postprocessing/phenology.py | Canonical phenology measurement, the one implementation of a trait's positive-fraction milestones. | 4 | 4 |
-| packages/tcip-mcp/src/tcip_mcp/pipelines/postprocessing/plant_mapping.py | Plant-ID mapping across image capture dates. | 11 | 14 |
+| packages/tcip-mcp/src/tcip_mcp/pipelines/postprocessing/plant_mapping.py | Plant-ID mapping across image capture dates. | 11 | 16 |
+| packages/tcip-mcp/src/tcip_mcp/pipelines/postprocessing/segment_attribution.py | Per-plant attribution by canopy segment: containment of a detection in a canopy boundary a person accepted, the segment tied to a registry plant by containment of the plant's own projected position. | 5 | 1 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/proposal.py | Annotation-proposal engines: a method-neutral seam for auto-labeling. | 2 | 1 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/raster_source.py | Raster reading: one open-and-read surface for every image source this platform decodes. | 4 | 18 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/reference_grid.py | Named reference grid over a raster's native pixel frame. | 3 | 4 |
@@ -161,7 +162,7 @@ source file under a covered root that no row names.
 | packages/tcip-mcp/src/tcip_mcp/tools/model_tools.py | Model management tools, registry, listing, comparison. | 8 | 3 |
 | packages/tcip-mcp/src/tcip_mcp/tools/operationalization_tools.py | The agent's statement tool for trait operationalizations; it can state, never confirm. | 4 | 1 |
 | packages/tcip-mcp/src/tcip_mcp/tools/trait_spec_authoring_tools.py | The agent's two doors for a trait spec: `author_trait_spec` creates (or restates, when a spec exists with no statement), `revise_trait_spec` edits fields on one already on record; neither confirms. | 4 | 1 |
-| packages/tcip-mcp/src/tcip_mcp/tools/orthomosaic_tools.py | Orthomosaic MCP tools: per-plant delivery from a persisted whole-raster prediction bucket plus a plant-locations CSV. | 12 | 1 |
+| packages/tcip-mcp/src/tcip_mcp/tools/orthomosaic_tools.py | Orthomosaic MCP tools: per-plant delivery from a persisted whole-raster prediction bucket plus a plant-locations CSV. | 14 | 1 |
 | packages/tcip-mcp/src/tcip_mcp/tools/phenology_tools.py | Phenology MCP tools, the agent-facing surface for the per-plant phenology pipeline: plant mapping, the positive-state classifier's own calibration gate, and deliver_phenology_milestones. | 19 | 5 |
 | packages/tcip-mcp/src/tcip_mcp/tools/project_tools.py | Project management tools. | 19 | 13 |
 | packages/tcip-mcp/src/tcip_mcp/tools/proposal_tools.py | Proposal-workflow tools: turn a chosen auto-labeling engine's output into predictions for canvas review. | 19 | 2 |
@@ -180,12 +181,12 @@ source file under a covered root that no row names.
 | packages/tcip-annotation/src/tcip_annotation/__init__.py | Headless annotation library: canonical name-based per-image JSON labels + a single-file COCO. | 8 | 7 |
 | packages/tcip-annotation/src/tcip_annotation/annotation_engine.py | AnnotationEngine: Annotation CRUD, spatial index, undo/redo. | 2 | 1 |
 | packages/tcip-annotation/src/tcip_annotation/format_io.py | Annotation I/O for the two on-disk formats: the canonical per-image JSON and a single-file COCO. | 4 | 7 |
-| packages/tcip-annotation/src/tcip_annotation/json_io.py | Per-image JSON: the canonical on-disk label format (ground truth + predictions). | 3 | 42 |
+| packages/tcip-annotation/src/tcip_annotation/json_io.py | Per-image JSON: the canonical on-disk label format (ground truth + predictions). | 3 | 43 |
 | packages/tcip-annotation/src/tcip_annotation/mask_contours.py | Mask -> polygon rings: the one contour extractor behind every mask-derived shape. | 0 | 3 |
-| packages/tcip-annotation/src/tcip_annotation/matching.py | Geometry helpers and GT-vs-prediction matching engine. | 1 | 3 |
+| packages/tcip-annotation/src/tcip_annotation/matching.py | Geometry helpers and GT-vs-prediction matching engine. | 1 | 4 |
 | packages/tcip-annotation/src/tcip_annotation/review_engine.py | ReviewEngine: review logic, detection walk-through, accept/reject. | 5 | 7 |
 | packages/tcip-annotation/src/tcip_annotation/sam_wrapper.py | SAM2 wrapper for interactive segmentation. | 2 | 6 |
-| packages/tcip-annotation/src/tcip_annotation/state.py | Annotation and review data model. | 0 | 21 |
+| packages/tcip-annotation/src/tcip_annotation/state.py | Annotation and review data model. | 0 | 22 |
 | packages/tcip-annotation/src/tcip_annotation/utils.py | Shared utilities: image orientation, geometry helpers. | 0 | 4 |
 | packages/tcip-annotation/src/tcip_annotation/verdicts.py | The review verdict's action vocabulary, declared once. | 0 | 3 |
 | packages/tcip-annotation/src/tcip_annotation/viz.py | Visualization rendering: draws annotations and predictions on images. | 2 | 2 |
@@ -475,7 +476,7 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | scripts/compute_disagreements.py | Summarize GT-vs-prediction disagreements per image at several conf thresholds. | 1 | 0 |
 | scripts/conform_cal_holdout_locks.py | Conform every pre-existing `cal_holdout_split_lock` record under a root to carry `split_manifest_dir`. | 3 | 0 |
 | scripts/conform_dataset_registry_paths.py | Conform a project's dataset registry onto the relative-path row: rewrite each entry's stored path through the same identity-based rule `register_dataset` now uses. | 3 | 0 |
-| scripts/conform_delivery_events.py | Check a project's stored `delivery_events` records against the current `DeliveryEventRecord` shape and name, by event_id, any that no longer validate; rewrites nothing. | 4 | 0 |
+| scripts/conform_delivery_events.py | Check a project's stored `delivery_events` records against the current `DeliveryEventRecord` shape and name, by event_id, any that no longer validate; rewrites nothing. | 6 | 0 |
 | scripts/conform_job_registry_roots.py | Stamp a job-registry document's own root onto every summary it holds that predates the `platform_root` field. | 3 | 0 |
 | scripts/conform_metrics_marker.py | Stamp the ``metrics_logged`` marker onto every experiment a root's status record predates. | 3 | 0 |
 | scripts/conform_model_registry_paths.py | Wrap a project's model registry index to schema_version 2 and respell every entry's checkpoint_path relative to its scope root, relocating a moved or replaced checkpoint by content digest. | 3 | 0 |
