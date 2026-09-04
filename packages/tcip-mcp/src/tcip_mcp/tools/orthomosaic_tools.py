@@ -373,7 +373,8 @@ def orthomosaic_plant_counts(
     extra_response_fields: dict = {}
     if canopy_subject:
         from tcip_mcp.pipelines.postprocessing.segment_attribution import (
-            SegmentAssignment, assign_detections_to_segments, tie_segments_to_plants,
+            SEGMENT_ASSIGNMENT_SOURCES, SegmentAssignment, assign_detections_to_segments,
+            tie_segments_to_plants,
         )
 
         try:
@@ -383,7 +384,7 @@ def orthomosaic_plant_counts(
 
         assignments = assign_detections_to_segments(detections, tie)
         ambiguous_segment_indices = {
-            idx for a in assignments if a.source == "overlapping_segments"
+            idx for a in assignments if a.source == SEGMENT_ASSIGNMENT_SOURCES.overlapping
             for idx in a.overlapping_segment_indices
         }
         tied_by_index = {t.segment_index: t for t in tie.tied}
@@ -393,11 +394,11 @@ def orthomosaic_plant_counts(
 
         counts_by_segment: dict[int, int] = {}
         for a in assignments:
-            if a.source == "segment_containment":
+            if a.source == SEGMENT_ASSIGNMENT_SOURCES.containment:
                 counts_by_segment[a.segment_index] = counts_by_segment.get(a.segment_index, 0) + 1
 
         records = [
-            {"plant_id": t.plot_name, "plant_id_source": "segment_containment",
+            {"plant_id": t.plot_name, "plant_id_source": SEGMENT_ASSIGNMENT_SOURCES.containment,
              _PER_PLANT_VALUE_KEY: counts_by_segment.get(t.segment_index, 0),
              "measurement_document": "operating_point",
              "plant_attribution": SegmentAssignment.plant_attribution}
@@ -411,16 +412,17 @@ def orthomosaic_plant_counts(
                 f"({tie.plants_without_segment}) while {len(tie.untied)} segment(s) contain no "
                 "plant")
 
-        n_mapped = sum(1 for a in assignments if a.source == "segment_containment"
+        n_mapped = sum(1 for a in assignments if a.source == SEGMENT_ASSIGNMENT_SOURCES.containment
                       and a.segment_index not in ambiguous_tied_indices)
         n_unmapped = len(assignments) - n_mapped
 
         by_source = {
-            "outside_segments": sum(1 for a in assignments if a.source == "outside_segments"),
+            "outside_segments": sum(
+                1 for a in assignments if a.source == SEGMENT_ASSIGNMENT_SOURCES.outside),
             "overlapping_segments": sum(
-                1 for a in assignments if a.source == "overlapping_segments"),
+                1 for a in assignments if a.source == SEGMENT_ASSIGNMENT_SOURCES.overlapping),
             "segment_without_plant": sum(
-                1 for a in assignments if a.source == "segment_without_plant"),
+                1 for a in assignments if a.source == SEGMENT_ASSIGNMENT_SOURCES.without_plant),
         }
 
         assert document_path is not None  # canopy_subject implies the document was resolved above
