@@ -6,11 +6,11 @@ dates plus a plant-locations CSV, then runs the exact two tools the agent compos
     build_plant_mapping   images + CSV                 → a named mapping under the project
     deliver_phenology_milestones     mapping + classified preds   → <trait>_phenology.csv
 
-and asserts the delivered CSV has the canonical columns and plausible, correctly-ordered
-milestone dates. Then it confirms the measurement-integrity guard refuses to write a CSV when
-the predictions carry no positive class. This covers the seam unit tests don't: real EXIF →
-real GPS matching → real per-plant milestones. No backend or network: it calls the tool
-functions directly, in an isolated temp dir.
+then asserts the tool refuses this genuinely unvalidated delivery (no MCP surface takes an
+acknowledgement) and, over the same real mapping and predictions, that the underlying milestone
+computation itself is plausible and correctly ordered. This covers the seam unit tests don't:
+real EXIF -> real GPS matching -> real per-plant milestones. No backend or network: it calls
+the tool functions directly, in an isolated temp dir.
 
 Usage (repo root, tcip-agent env):
     python scripts/smoke_phenology_e2e.py
@@ -216,41 +216,44 @@ def main() -> int:
             from tcip_mcp.pipelines.postprocessing import plant_mapping as _plant_mapping
             check("mapping persisted", bool(_plant_mapping.load_mapping(root, mapping_name)))
 
-            # 3. deliver_phenology_milestones: the real coverage rule and classifier gate are both live. The
-            # positive class is resolved from each bucket's own recorded id_map (never a pinned
-            # int), and every image is classified (no bare single-class-detector buckets here), so the
-            # elongation split is valid; this script is the delivery path's acceptance artifact,
-            # proving the delivery path genuinely produces a curve+milestones end to end, not just
-            # refuses.
-            print("\nStep 2: deliver_phenology_milestones delivers a real bloom curve + milestones")
+            # No MCP tool takes an acknowledgement; only the Results tab's export does.
+            # This bucket's sidecar was never validated, so the door refuses unconditionally.
+            print("\nStep 2: deliver_phenology_milestones refuses an unacknowledgeable unvalidated delivery")
             r = deliver_phenology_milestones(
                 trait="catkin",
                 mapping_name=mapping_name,
                 predictions_by_date=preds_by_date,
                 output_csv_path=str(csv_out),
-                acknowledge_unvalidated=True,
             )
-            check("no error", "error" not in r, str(r.get("error", "")))
+            check("refused (no acknowledgement route exists on this tool)", "error" in r, str(r))
             check("positive_class_assessed true (every bucket resolved the positive class)",
                   r.get("positive_class_assessed") is True, str(r.get("positive_class_assessed")))
-            check("CSV delivered", csv_out.is_file())
+            check("no CSV written on refusal", not csv_out.is_file())
 
-            if csv_out.is_file():
-                with csv_out.open(newline="", encoding="utf-8") as f:
-                    rows = list(csv.DictReader(f))
-                check("one row per plant", len(rows) == len(PLANTS), str(len(rows)))
-                row = next((r2 for r2 in rows if r2.get("plant_id") == "P1"), None)
-                check("P1 row present", row is not None)
-                if row:
-                    d05, d50, d95 = row.get("catkin_05per_date"), row.get("catkin_50per_date"), row.get("catkin_95per_date")
-                    check("05/50/95per dates all populated (not a fabricated blank)",
-                          all([d05, d50, d95]), f"05={d05} 50={d50} 95={d95}")
-                    if d05 and d50 and d95:
-                        check("milestones correctly ordered (05 <= 50 <= 95)", d05 <= d50 <= d95,
-                              f"05={d05} 50={d50} 95={d95}")
-                        check("milestones fall within the observed date range",
-                              DATES[0] <= d05 and d95 <= DATES[-1],
-                              f"range={DATES[0]}..{DATES[-1]} 05={d05} 95={d95}")
+            # The real milestone math a breeder's acknowledged Results-tab export would deliver,
+            # pinned directly so this script still verifies real EXIF/GPS-matched dates end to end.
+            print("\nStep 3: the milestone computation itself, over the same real mapping + predictions")
+            from tcip_mcp.operationalization import STATE_CROSSING_DATES, resolve_trait_and_record
+            from tcip_mcp.pipelines.postprocessing import phenology as _phenology
+
+            spec, _record, _specs_dir = resolve_trait_and_record("catkin", STATE_CROSSING_DATES)
+            mapping_raw = _plant_mapping.load_mapping(root, mapping_name).rows()
+            result = _phenology.per_plant_phenology(
+                mapping_raw, preds_by_date, positive_class_name=spec.positive_class_name, spec=spec)
+            rows = result["rows"]
+            check("one row per plant", len(rows) == len(PLANTS), str(len(rows)))
+            row = next((r2 for r2 in rows if r2.get("plant_id") == "P1"), None)
+            check("P1 row present", row is not None)
+            if row:
+                d05, d50, d95 = row.get("catkin_05per_date"), row.get("catkin_50per_date"), row.get("catkin_95per_date")
+                check("05/50/95per dates all populated (not a fabricated blank)",
+                      all([d05, d50, d95]), f"05={d05} 50={d50} 95={d95}")
+                if d05 and d50 and d95:
+                    check("milestones correctly ordered (05 <= 50 <= 95)", d05 <= d50 <= d95,
+                          f"05={d05} 50={d50} 95={d95}")
+                    check("milestones fall within the observed date range",
+                          DATES[0] <= d05 and d95 <= DATES[-1],
+                          f"range={DATES[0]}..{DATES[-1]} 05={d05} 95={d95}")
         finally:
             if _saved_platform_root is None:
                 os.environ.pop("TCIP_STATE_ROOT", None)
