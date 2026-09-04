@@ -589,16 +589,18 @@ def resolve_match_criterion(trait_name: str | None, per_image: list[dict], *,
 
 
 def _dt_score(d: dict) -> float:
-    """The one place a detection record's confidence is read for the governing count.
+    """The one accessor every governing-count reader takes a detection record's confidence through.
 
-    No default: a detection record with no ``score`` cannot be ordered or thresholded by
-    confidence, so this refuses by name rather than letting ``governing_counts`` and
-    ``_count_stats_at_conf`` each risk a different silent stand-in for a field that measures the
-    model's own certainty, the same no-default rule the classifier calibration path already
-    applies to its own records.
+    No default: a detection record with no ``score``, or a ``score`` of ``None``, cannot be
+    ordered or thresholded by confidence, so this refuses by name rather than letting
+    ``governing_counts``, ``_count_stats_at_conf`` and the calibration curve's score grid each
+    risk a different silent stand-in for a field that measures the model's own certainty, the
+    same no-default rule the classifier calibration path already applies to its own records.
     """
     if "score" not in d:
         raise ValueError(f"detection record has no 'score' field, cannot count it: {d!r}")
+    if d["score"] is None:
+        raise ValueError(f"detection record's 'score' is None, cannot count it: {d!r}")
     return float(d["score"])
 
 
@@ -745,7 +747,7 @@ def derive_operating_point_curve(per_image: list[dict], *, tolerance: float,
     phenotype for a fraction/ratio trait, are both wrong. Class ids come from the records themselves;
     which of them is the trait's positive class is not read here and is not needed to measure bias.
     """
-    scores = sorted({d["score"] for rec in per_image for d in rec.get("dt", [])})
+    scores = sorted({_dt_score(d) for rec in per_image for d in rec.get("dt", [])})
     if conf_grid is None:
         if len(scores) > max_thresholds:
             conf_grid = list(np.linspace(scores[0], scores[-1], max_thresholds))

@@ -277,7 +277,9 @@ def _greedy_match(gt: list, preds: list, gt_boxes: list, pred_boxes: list, *,
     The classifier calibration's ``iou_match`` branch only: ``center_match`` calls
     ``evaluation.center_match_pairs`` directly instead (see ``_match_gt_to_predictions``), so this
     keeps a single accept direction (``score >= tolerance``) rather than the two directions a
-    shared higher/lower-is-better loop used to carry.
+    shared higher/lower-is-better loop used to carry. Equal IoUs are claimed by (gt index,
+    pred index) descending here, where ``tcip_annotation.matching.compute_matches`` keeps them
+    ascending: the two agree on the IoU primitive, not on the tie order.
     """
     pairs = sorted(
         ((score(g, p), gi, pi) for gi, g in gt_boxes for pi, p in pred_boxes),
