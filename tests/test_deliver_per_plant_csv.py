@@ -147,9 +147,12 @@ def test_deliver_per_plant_csv_refuses_unvalidated_then_delivers_once_validated(
                                   value_key="count")
     out_csv = tmp_path / "out" / "counts.csv"
 
+    mapping_kwargs = {"dataset_root": str(dataset_root), "predictions_by_date": {date: str(pred_dir)}}
+
     refused = deliver_per_plant_csv(
         results, str(out_csv), delivered_phenotype="stem_count", crop="hazelnut",
-        pipeline_version="v1", plant_mapping=mapping_name, pred_dirs=[str(pred_dir)])
+        pipeline_version="v1", plant_mapping=mapping_name, pred_dirs=[str(pred_dir)],
+        **mapping_kwargs)
     assert "error" in refused
     assert refused["unvalidated_dimensions"] == "operating_point"
     assert not out_csv.exists()
@@ -158,7 +161,7 @@ def test_deliver_per_plant_csv_refuses_unvalidated_then_delivers_once_validated(
         deliver_per_plant_csv(
             results, str(out_csv), delivered_phenotype="stem_count", crop="hazelnut",
             pipeline_version="v1", plant_mapping=mapping_name, pred_dirs=[str(pred_dir)],
-            acknowledge_unvalidated=True)
+            acknowledge_unvalidated=True, **mapping_kwargs)
     assert not out_csv.exists()
 
     from tcip_mcp.pipelines.resolution import VALIDATED_HELD_OUT, read_operating_point_sidecar
@@ -173,7 +176,7 @@ def test_deliver_per_plant_csv_refuses_unvalidated_then_delivers_once_validated(
     delivered = deliver_per_plant_csv(
         results, str(out_csv), delivered_phenotype="stem_count", crop="hazelnut",
         pipeline_version="v1", plant_mapping=mapping_name, pred_dirs=[str(pred_dir)],
-        dataset_root=str(dataset_root), predictions_by_date={date: str(pred_dir)})
+        **mapping_kwargs)
     assert "error" not in delivered, delivered
     assert delivered["operating_point_validated"] == VALIDATED_HELD_OUT
     assert delivered["unvalidated_dimensions"] == ""
@@ -226,10 +229,33 @@ def test_deliver_per_plant_csv_refuses_an_unknown_plant_mapping_by_name(tmp_path
 
     res = deliver_per_plant_csv(
         results, str(out_csv), delivered_phenotype="stem_count", crop="hazelnut",
-        pipeline_version="v1", plant_mapping="no-such-mapping")
+        pipeline_version="v1", plant_mapping="no-such-mapping",
+        dataset_root=str(tmp_path), predictions_by_date={"2026-02-11": str(tmp_path)})
     assert "error" in res
     assert "no-such-mapping" in res["error"]
     assert "build_plant_mapping" in res["error"]
+    assert not out_csv.exists()
+
+
+def test_deliver_per_plant_csv_refuses_a_named_mapping_with_no_verification_inputs(tmp_path):
+    """A delivery either fully verifies the mapping it names or names none: naming one without
+    both ``dataset_root`` and ``predictions_by_date`` refuses stating the two missing arguments,
+    before the name is even resolved, rather than shipping a mapping nothing checked."""
+    from tcip_mcp.pipelines.postprocessing.aggregation import aggregate_per_plant
+    from tcip_mcp.tools.delivery_tools import deliver_per_plant_csv
+
+    records = [
+        {"plant_id": "PLANT_A", "count": 3, "plant_attribution": "image",
+         "measurement_document": "operating_point"},
+    ]
+    results = aggregate_per_plant(records, strategy="count", value_key="count")
+    out_csv = tmp_path / "o.csv"
+
+    res = deliver_per_plant_csv(
+        results, str(out_csv), delivered_phenotype="stem_count", crop="hazelnut",
+        pipeline_version="v1", plant_mapping="valley")
+    assert "error" in res
+    assert "dataset_root" in res["error"] and "predictions_by_date" in res["error"]
     assert not out_csv.exists()
 
 
