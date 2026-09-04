@@ -1,5 +1,5 @@
-"""Coverage for ``register_plant_registry`` (additions-design section 1): a named,
-project-scoped record of a plant-locations CSV set, read back by ``build_plant_mapping`` and
+"""Coverage for ``register_plant_registry``: a named, project-scoped record of a
+plant-locations CSV set, read back by ``build_plant_mapping`` and
 ``deliver_orthomosaic_plant_counts`` in place of a re-asserted path list on every call.
 """
 
@@ -39,7 +39,7 @@ def test_registers_a_csv_and_persists_the_frozen_record(tmp_path: Path) -> None:
     assert "error" not in res, res
     assert res["name"] == "valley-plants"
     assert res["n_plants"] == len(PLANTS)
-    assert res["registered_by"] == "agent:register_plant_registry"
+    assert res["registered_by"] == "register_plant_registry"
     assert len(res["digest"]) == 64
     assert res["csvs"] == [{
         "path": str(csv_path),
@@ -155,5 +155,142 @@ def test_build_plant_mapping_refuses_naming_register_plant_registry_when_registr
 
     assert "error" in res
     assert "register_plant_registry" in res["error"]
+
+
+def _deliver_scene(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[str, dict[str, str]]:
+    """A real, delivered phenology scene through the platform's own producers, for the registry
+    doors below to then interfere with. Returns the registered registry's own name and
+    predictions_by_date."""
+    from tests.test_second_trait_acceptance import _seed_currant_bloom_trait
+
+    _init(tmp_path, monkeypatch)
+    dataset_root = _dataset(tmp_path)
+    images_root, plant_csv, preds_by_date = _write_scene(dataset_root, dates=["2026-02-11"])
+    reg = register_plant_registry(
+        name="valley-plants", csv_paths=[str(plant_csv)], crop="hazelnut", site="orchard")
+    assert "error" not in reg, reg
+    build_res = build_plant_mapping(
+        name="valley", images_root=str(images_root), plant_registry="valley-plants")
+    assert "error" not in build_res, build_res
+    _seed_currant_bloom_trait(tmp_path)
+    return "valley-plants", preds_by_date
+
+
+def test_the_happy_path_through_the_platforms_own_producers_still_delivers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Admits valid work: a registered registry that still loads and still hashes to what the
+    mapping recorded delivers without complaint."""
+    from tcip_mcp.tools.phenology_tools import deliver_phenology_milestones
+
+    _, preds_by_date = _deliver_scene(tmp_path, monkeypatch)
+    out_csv = tmp_path / "out.csv"
+
+    res = deliver_phenology_milestones(
+        trait="currant_bloom", mapping_name="valley", predictions_by_date=preds_by_date,
+        output_csv_path=str(out_csv), acknowledge_unvalidated=True)
+
+    assert "error" not in res, res
+    assert out_csv.exists()
+
+
+def test_a_deleted_registry_refuses_at_delivery_naming_the_registry_and_the_mapping(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """GUARDS: a registry deleted after the mapping was built refuses the delivery by name,
+    rather than verifying an empty plant_csvs_unverified list against nothing."""
+    from tcip_mcp.tools.phenology_tools import deliver_phenology_milestones
+
+    registry_name, preds_by_date = _deliver_scene(tmp_path, monkeypatch)
+    key = plant_mapping.plant_registry_key(tmp_path, registry_name)
+    ts.delete(key, expect=ts.read_versioned(key).version)
+    out_csv = tmp_path / "out.csv"
+
+    res = deliver_phenology_milestones(
+        trait="currant_bloom", mapping_name="valley", predictions_by_date=preds_by_date,
+        output_csv_path=str(out_csv), acknowledge_unvalidated=True)
+
+    assert "error" in res
+    assert registry_name in res["error"]
+    assert "valley" in res["error"]
+    assert not out_csv.exists()
+
+
+def test_a_registry_digest_mismatch_refuses_at_delivery(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """GUARDS: a registry whose stored digest no longer matches what the mapping was built
+    against (a hand-edited or store-corrupted record) refuses rather than verifying against the
+    wrong plants."""
+    from tcip_mcp.tools.phenology_tools import deliver_phenology_milestones
+
+    registry_name, preds_by_date = _deliver_scene(tmp_path, monkeypatch)
+    key = plant_mapping.plant_registry_key(tmp_path, registry_name)
+    versioned = ts.read_versioned(key)
+    ts.replace(key, {**versioned.value, "digest": "0" * 64}, expect=versioned.version)
+    out_csv = tmp_path / "out.csv"
+
+    res = deliver_phenology_milestones(
+        trait="currant_bloom", mapping_name="valley", predictions_by_date=preds_by_date,
+        output_csv_path=str(out_csv), acknowledge_unvalidated=True)
+
+    assert "error" in res
+    assert registry_name in res["error"]
+    assert not out_csv.exists()
+
+
+def _call_arg_blocks(text: str, name: str) -> list[str]:
+    """Every argument block of a call to ``name(`` in ``text``, skipping ``name``'s own ``def``,
+    tracking paren depth so a nested call inside the arguments (``str(images_root)``, say) never
+    closes the block early the way a single non-nested regex would."""
+    blocks = []
+    marker = name + "("
+    search_from = 0
+    while True:
+        idx = text.find(marker, search_from)
+        if idx == -1:
+            break
+        search_from = idx + len(marker)
+        if text[max(0, idx - 4):idx] == "def ":
+            continue
+        depth = 1
+        pos = search_from
+        while pos < len(text) and depth > 0:
+            if text[pos] == "(":
+                depth += 1
+            elif text[pos] == ")":
+                depth -= 1
+            pos += 1
+        blocks.append(text[search_from:pos - 1])
+    return blocks
+
+
+def test_no_build_plant_mapping_call_site_names_the_retired_plant_csv_paths_argument() -> None:
+    """Collection-time guard against smoke_phenology_e2e.py's own regression: every
+    build_plant_mapping( call site under scripts/ and packages/ passes plant_registry and never
+    the retired plant_csv_paths keyword, so a fresh script cannot silently reintroduce it."""
+    import subprocess
+
+    repo_root = Path(__file__).resolve().parents[1]
+    tracked = subprocess.run(
+        ["git", "ls-files", "scripts", "packages"], cwd=repo_root, capture_output=True,
+        text=True, check=True,
+    ).stdout.splitlines()
+
+    call_sites: list[tuple[str, str]] = []
+    for rel in tracked:
+        if not rel.endswith(".py"):
+            continue
+        text = (repo_root / rel).read_text(encoding="utf-8")
+        for block in _call_arg_blocks(text, "build_plant_mapping"):
+            call_sites.append((rel, block))
+
+    stale = [rel for rel, block in call_sites if "plant_csv_paths" in block]
+    assert not stale, f"build_plant_mapping call(s) still pass plant_csv_paths: {stale}"
+    missing = [
+        rel for rel, block in call_sites
+        if "plant_registry" not in block and "**" not in block
+    ]
+    assert not missing, f"build_plant_mapping call(s) do not pass plant_registry: {missing}"
 
 
