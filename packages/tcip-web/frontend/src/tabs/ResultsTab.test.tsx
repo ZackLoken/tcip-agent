@@ -1367,8 +1367,12 @@ describe("ResultsTab delivery events (read-only)", () => {
         plant_registry: { name: "orchard-block", digest: "0".repeat(64) },
         project_root: "C:/proj",
         raster_identity: { width: 4096, height: 4096 },
-        canopy_segments: { path: "C:/proj/annotations/2024-06-01/mosaic.json",
-                          sha256: "1".repeat(64), subject: "canopy", n_segments: 3 },
+        canopy_segments: {
+          path: "C:/proj/annotations/2024-06-01/mosaic.json",
+          sha256: "1".repeat(64),
+          subject: "canopy",
+          n_segments: 3,
+        },
         segment_ties: [
           { segment_index: 0, plot_name: "plot0", clearance_m: 0.8 },
           { segment_index: 1, plot_name: "plot1", clearance_m: 1.2 },
@@ -1379,7 +1383,9 @@ describe("ResultsTab delivery events (read-only)", () => {
         plants_with_ambiguous_detections: ["plot1"],
         detections_unattributed: 2,
         detections_unattributed_by_source: {
-          outside_segments: 1, overlapping_segments: 1, segment_without_plant: 0,
+          outside_segments: 1,
+          overlapping_segments: 1,
+          segment_without_plant: 0,
         },
         detections_unattributed_scope: "delivered_raster",
         plant_attribution: "segment",

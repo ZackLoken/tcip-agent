@@ -76,14 +76,17 @@ function DeliveryEventRow({ record }: { record: DeliveryEventRecord }) {
           {(() => {
             const pm = record.plant_mapping;
             const delivered = pm.segment_ties.length - pm.plants_with_ambiguous_detections.length;
-            const registered = delivered + pm.plants_without_segment.length
-              + pm.plants_outside_raster.length + pm.plants_with_ambiguous_detections.length;
+            const registered =
+              delivered +
+              pm.plants_without_segment.length +
+              pm.plants_outside_raster.length +
+              pm.plants_with_ambiguous_detections.length;
             return (
               <>
                 <div>
-                  {`Canopy segments (${pm.plant_registry.name}): ${delivered}/${registered} `
-                    + `registry plant(s) delivered, ${pm.segments_without_plant} segment(s) `
-                    + "with no plant"}
+                  {`Canopy segments (${pm.plant_registry.name}): ${delivered}/${registered} ` +
+                    `registry plant(s) delivered, ${pm.segments_without_plant} segment(s) ` +
+                    "with no plant"}
                 </div>
                 {pm.plants_without_segment.length > 0 && (
                   <div>{`No segment: ${pm.plants_without_segment.join(", ")}`}</div>
