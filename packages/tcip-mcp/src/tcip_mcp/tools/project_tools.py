@@ -73,7 +73,32 @@ def read_datasets(project_root: str | Path) -> list[dict]:
 
     A registry present but undecodable raises rather than reading as empty: an empty answer
     here would make the next :func:`upsert_dataset` write a list holding one entry and drop
-    every other dataset identity the project had recorded.
+    every other dataset identity the project had recorded. An entry carrying a non-null
+    ``fingerprint`` that names no formula version (a bare value from before the ``v<n>:`` prefix
+    existed) refuses by id, naming ``scripts/restamp_dataset_fingerprint.py`` as the remedy,
+    rather than serving it as that dataset's current identity.
+    """
+    from tcip_mcp.pipelines.data.dataset_fingerprint import fingerprint_formula_version
+
+    entries = _registry_entries(tcip_store.read(dataset_registry_key(project_root), default=[]))
+    for entry in entries:
+        fingerprint = entry.get("fingerprint")
+        if fingerprint is not None and fingerprint_formula_version(fingerprint) is None:
+            raise ValueError(
+                f"dataset registry entry {entry.get('id')!r} under {project_root} carries a "
+                f"fingerprint {fingerprint!r} that names no formula version; run "
+                "scripts/restamp_dataset_fingerprint.py against it to bring it to the current "
+                "shape")
+    return entries
+
+
+def read_datasets_raw(project_root: str | Path) -> list[dict]:
+    """The project's dataset registry entries, whatever fingerprint each one states, never
+    refusing on a bare pre-prefix value the way :func:`read_datasets` does.
+
+    For a caller whose job is fixing or diagnosing that very value
+    (``scripts/restamp_dataset_fingerprint.py``, ``scripts/check_dataset_identity.py``) rather
+    than serving it as a dataset's current identity.
     """
     return _registry_entries(tcip_store.read(dataset_registry_key(project_root), default=[]))
 
@@ -191,7 +216,7 @@ def register_dataset(dataset_root: str, crop: str, project_root: str = "") -> di
     """
     from tcip_store import SchemaVersionRefused
 
-    from tcip_mcp.dataset_layout import decode_dataset_identity, dataset_identity_key
+    from tcip_mcp.dataset_layout import decode_dataset_identity_document, dataset_identity_key
     from tcip_mcp.pipelines.data.dataset_fingerprint import dataset_fingerprint
 
     root = Path(dataset_root)
@@ -213,7 +238,7 @@ def register_dataset(dataset_root: str, crop: str, project_root: str = "") -> di
             existing: dict = {}
         else:
             try:
-                existing = decode_dataset_identity(stored.value, dataset_root=root)
+                existing = decode_dataset_identity_document(stored.value, dataset_root=root)
             except SchemaVersionRefused as exc:
                 return {"error": f"{exc} Re-registering here would overwrite a newer writer's "
                                  "identity document; nothing was written."}

@@ -371,10 +371,13 @@ def dataset_identity_key(dataset_root: str | Path) -> Key:
     return Key(DATASET_IDENTITY_STORE, str(dataset_root), _DATASET_IDENTITY_PARTS)
 
 
-def decode_dataset_identity(data: bytes, *, dataset_root: str | Path) -> dict:
-    """A dataset identity document's bytes, decoded and checked: the one implementation
-    :func:`require_dataset_identity` and ``register_dataset``'s own re-register read both call,
-    so a version-refused identity document reads the same fact whichever caller hits it.
+def decode_dataset_identity_document(data: bytes, *, dataset_root: str | Path) -> dict:
+    """A dataset identity document's bytes, decoded and shape/version-checked, whatever its
+    ``fingerprint`` states: the raw layer :func:`decode_dataset_identity` (the general reader,
+    which also refuses a bare pre-prefix fingerprint) builds on, and ``register_dataset``'s own
+    re-register read calls directly. Re-registering is the fix for a bare fingerprint, so that
+    read (which only ever preserves the minted ``id`` across the rewrite) must not itself refuse
+    on the very value it is about to overwrite.
 
     Raises ``ValueError`` for bytes that do not decode, or that decode to something other than a
     dict carrying an ``id``. Propagates :class:`tcip_store.SchemaVersionRefused`, uncaught, for a
@@ -396,16 +399,34 @@ def decode_dataset_identity(data: bytes, *, dataset_root: str | Path) -> dict:
     return identity
 
 
-def require_dataset_identity(dataset_root: str | Path) -> dict:
-    """The dataset's identity record (``{crop, id, fingerprint}``), or the refusal naming
-    ``register_dataset`` when it is absent.
+def decode_dataset_identity(data: bytes, *, dataset_root: str | Path) -> dict:
+    """:func:`decode_dataset_identity_document`, plus a refusal for a non-null ``fingerprint``
+    naming no formula version (a bare value from before the ``v<n>:`` prefix existed):
+    ``scripts/restamp_dataset_fingerprint.py`` is the remedy, never a reader that admits the bare
+    value as the dataset's current identity. A null ``fingerprint`` (a dataset with no images or
+    labels) is not this case. :func:`require_dataset_identity` is the one caller; a re-register
+    read that must see the document's fingerprint whatever it states uses the raw layer instead.
+    """
+    from tcip_mcp.pipelines.data.dataset_fingerprint import fingerprint_formula_version
+
+    identity = decode_dataset_identity_document(data, dataset_root=dataset_root)
+    fingerprint = identity.get("fingerprint")
+    if fingerprint is not None and fingerprint_formula_version(fingerprint) is None:
+        raise ValueError(
+            f"{dataset_identity_path(dataset_root)} carries a fingerprint {fingerprint!r} that "
+            "names no formula version; run scripts/restamp_dataset_fingerprint.py against this "
+            "dataset to bring it to the current shape")
+    return identity
+
+
+def _read_dataset_identity(dataset_root: str | Path, *, decode) -> dict:
+    """The shared absence-check both :func:`require_dataset_identity` and
+    :func:`read_dataset_identity_document` build on, differing only in which decoder checks the
+    present document.
 
     Read through the store (``tcip_store.read_blob_versioned``), never a bare file check, which
     the database backend would fail: a directory that merely ends in ``images`` is not a dataset
-    until ``register_dataset`` has minted an identity for it. A present document's decode, shape
-    and version are checked through :func:`decode_dataset_identity`; its
-    :class:`tcip_store.SchemaVersionRefused` propagates uncaught, distinguishable from the plain
-    ``ValueError`` this function itself raises for absence or a malformed document.
+    until ``register_dataset`` has minted an identity for it.
     """
     import tcip_store
 
@@ -415,7 +436,30 @@ def require_dataset_identity(dataset_root: str | Path) -> dict:
             f"{dataset_root} carries no dataset identity record "
             f"({dataset_identity_path(dataset_root)} absent); register it first with "
             "register_dataset")
-    return decode_dataset_identity(stored.value, dataset_root=dataset_root)
+    return decode(stored.value, dataset_root=dataset_root)
+
+
+def require_dataset_identity(dataset_root: str | Path) -> dict:
+    """The dataset's identity record (``{crop, id, fingerprint}``), or the refusal naming
+    ``register_dataset`` when it is absent.
+
+    A present document's decode, shape and version are checked through
+    :func:`decode_dataset_identity`, which also refuses a non-null ``fingerprint`` naming no
+    formula version; its :class:`tcip_store.SchemaVersionRefused` propagates uncaught,
+    distinguishable from the plain ``ValueError`` this function itself raises for absence or a
+    malformed document. :func:`read_dataset_identity_document` is the raw counterpart for a
+    caller whose job is fixing that very fingerprint.
+    """
+    return _read_dataset_identity(dataset_root, decode=decode_dataset_identity)
+
+
+def read_dataset_identity_document(dataset_root: str | Path) -> dict:
+    """:func:`require_dataset_identity`, but through :func:`decode_dataset_identity_document`:
+    the identity record whatever its ``fingerprint`` states, never refusing on a bare pre-prefix
+    value. For ``scripts/restamp_dataset_fingerprint.py``, the one caller whose job is fixing
+    that very value and so must be able to see it rather than being refused before it can act.
+    """
+    return _read_dataset_identity(dataset_root, decode=decode_dataset_identity_document)
 
 
 def image_status_path(dataset_root: str | Path) -> Path:
