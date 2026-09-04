@@ -847,3 +847,115 @@ def test_deliver_orthomosaic_drops_a_producer_no_experiment_answers_for(tmp_path
     assert row["producer_model_sha256"] == ""
     assert row["producing_experiment_id"] == ""
     assert row["validation_record"] != ""
+
+
+# ── plant_mapping disclosure (PlantRegistryDisclosure) ───────────────────
+
+
+def test_deliver_orthomosaic_plant_counts_records_a_registry_disclosure_that_reads_back_validated(
+    tmp_path, monkeypatch,
+):
+    """A whole-raster frame carries no walked MappingBuild, so this door's own delivery event
+    names the registry it read, the raster identity, the matched tolerance and its source, and
+    this delivery's own unattributed-detection count, and that disclosure reads back through
+    read_delivery_events and validates against DeliveryEventRecord (PlantRegistryDisclosure)."""
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path / "proj"))
+    (tmp_path / "proj" / ".tcip" / "state").mkdir(parents=True, exist_ok=True)
+
+    raster_path = tmp_path / "mosaic.tif"
+    _write_geo_raster(raster_path)
+    bucket_dir, stem = _run_bucket(tmp_path, monkeypatch, raster_path)
+    _replace_boxes(bucket_dir / f"{stem}.json", [
+        (8.0, 8.0, 12.0, 12.0),
+        (3990.0, 3990.0, 4010.0, 4010.0),  # far from every plant: contributes to n_unmapped
+    ])
+    _promote_bucket_conf(bucket_dir, bucket_dir.parents[1], trait=fx.COUNT_TRAIT)
+    plant_csv = _plant_grid_csv(tmp_path, raster_path, _PLANT_PIXELS)
+    registry_name = _plant_registry(plant_csv)
+
+    from tcip_mcp.tools.orthomosaic_tools import deliver_orthomosaic_plant_counts
+
+    out_csv = tmp_path / "counts.csv"
+    result = deliver_orthomosaic_plant_counts(
+        str(bucket_dir), str(raster_path), registry_name, str(out_csv),
+        delivered_phenotype="stem_count")
+    assert "error" not in result, result
+    assert result["n_unmapped"] == 1
+
+    from tcip_mcp.pipelines.delivery_events_schema import DeliveryEventRecord
+    from tcip_mcp.pipelines.resolution import read_delivery_events
+
+    events = read_delivery_events(tmp_path / "proj")
+    assert len(events) == 1
+    event = events[0]
+    DeliveryEventRecord.model_validate(event)
+
+    pm = event["plant_mapping"]
+    assert pm["plant_registry"]["name"] == registry_name
+    assert pm["detections_unattributed"] == 1
+    assert pm["detections_unattributed_scope"] == "delivered_raster"
+    assert pm["plant_attribution"] == "detection"
+    assert pm["nn_tolerance_m"]["source"] in ("grid_pitch", "fallback", "stated")
+    assert "dates_delivered" not in pm  # the walked-mapping form's own keys, never named here
+    assert "record_sha256" not in pm
+
+
+def test_deliver_orthomosaic_plant_counts_refuses_a_registry_csv_rewritten_after_registration(
+    tmp_path, monkeypatch,
+):
+    """The registry byte check this door now runs (verify_registry_csv_bytes, shared with the
+    walked-mapping verifier) refuses by name when a registered plant CSV's bytes moved since
+    registration, before any prediction is read: every CSV this delivery reads is verified or the
+    delivery never happens."""
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path / "proj"))
+    (tmp_path / "proj" / ".tcip" / "state").mkdir(parents=True, exist_ok=True)
+
+    raster_path = tmp_path / "mosaic.tif"
+    _write_geo_raster(raster_path)
+    bucket_dir, stem = _run_bucket(tmp_path, monkeypatch, raster_path)
+    _replace_boxes(bucket_dir / f"{stem}.json", [(8.0, 8.0, 12.0, 12.0)])
+    _promote_bucket_conf(bucket_dir, bucket_dir.parents[1], trait=fx.COUNT_TRAIT)
+    plant_csv = _plant_grid_csv(tmp_path, raster_path, _PLANT_PIXELS)
+    registry_name = _plant_registry(plant_csv)
+
+    plant_csv.write_text(
+        "plot_name,accession_name,WGS84_centroid_x,WGS84_centroid_y\n"
+        "plot0,acc0,-93.0,42.0\n", encoding="utf-8")
+
+    from tcip_mcp.tools.orthomosaic_tools import deliver_orthomosaic_plant_counts
+
+    out_csv = tmp_path / "counts.csv"
+    refused = deliver_orthomosaic_plant_counts(
+        str(bucket_dir), str(raster_path), registry_name, str(out_csv),
+        delivered_phenotype="stem_count")
+
+    assert "error" in refused
+    assert str(plant_csv) in refused["error"]
+    assert not out_csv.exists()
+
+
+def test_deliver_orthomosaic_plant_counts_delivers_once_registry_csv_bytes_verify(
+    tmp_path, monkeypatch,
+):
+    """The rail admits valid work: an unmodified registry CSV still delivers, so the byte check
+    above refuses only a genuinely rewritten file, never a legitimately unchanged one."""
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path / "proj"))
+    (tmp_path / "proj" / ".tcip" / "state").mkdir(parents=True, exist_ok=True)
+
+    raster_path = tmp_path / "mosaic.tif"
+    _write_geo_raster(raster_path)
+    bucket_dir, stem = _run_bucket(tmp_path, monkeypatch, raster_path)
+    _replace_boxes(bucket_dir / f"{stem}.json", [(8.0, 8.0, 12.0, 12.0)])
+    _promote_bucket_conf(bucket_dir, bucket_dir.parents[1], trait=fx.COUNT_TRAIT)
+    plant_csv = _plant_grid_csv(tmp_path, raster_path, _PLANT_PIXELS)
+    registry_name = _plant_registry(plant_csv)
+
+    from tcip_mcp.tools.orthomosaic_tools import deliver_orthomosaic_plant_counts
+
+    out_csv = tmp_path / "counts.csv"
+    delivered = deliver_orthomosaic_plant_counts(
+        str(bucket_dir), str(raster_path), registry_name, str(out_csv),
+        delivered_phenotype="stem_count")
+
+    assert "error" not in delivered, delivered
+    assert out_csv.exists()

@@ -402,13 +402,16 @@ def export_aggregated_csv(
             ``deliver_orthomosaic_plant_counts``, which composes this CSV rather than calling it
             directly) passes it here instead of also recording its own event for the same export,
             which would otherwise record one CSV as two shipments.
-        plant_mapping: The delivery's own plant-mapping binding, exactly the shape
-            ``plant_mapping.MappingBuild.delivery_disclosure`` composes (the mapping's identity, its
-            unverified-input disclosures, and this delivery's own unattributed-capture count),
-            recorded onto the delivery event unchanged; ``None`` when the caller names no mapping
+        plant_mapping: The delivery's own plant-mapping binding, recorded onto the delivery event
+            unchanged: either the shape ``plant_mapping.MappingBuild.delivery_disclosure`` composes
+            for a walked capture mapping (its identity, its unverified-input disclosures, and this
+            delivery's own unattributed-capture count), or the shape
+            ``deliver_orthomosaic_plant_counts`` composes for a whole-raster frame with no such
+            mapping (the registry it read, the raster identity, the matched tolerance, and this
+            delivery's own unattributed-detection count). ``None`` when the caller names no mapping
             or has not verified one against the buckets this delivery reads. Never a bare name or
-            digest on its own, since the stored record's own schema (``PlantMappingDisclosure``)
-            validates the whole shape or nothing.
+            digest on its own, since the stored record's own schema (``PlantMappingDisclosure`` /
+            ``PlantRegistryDisclosure``) validates the whole shape or nothing.
 
     Returns:
         ``(path, tail)``: the path to the written CSV, and the ``_PROVENANCE_COLUMNS`` tail
