@@ -18,7 +18,7 @@ const initialStoreState = useStore.getState();
 // would be describing a response the server cannot produce.
 const VALIDATED = {
   validated: { operating_point: "validated_held_out", classifier: "validated_held_out" },
-  provisional: false,
+  has_unvalidated_dimensions: false,
   validity_detail: {},
   positive_class_assessed: true,
   captures_unverified: [],
@@ -232,7 +232,7 @@ describe("ResultsTab evidence gate", () => {
   };
   const UNVALIDATED = {
     validated: { operating_point: "false", classifier: "validated_held_out" },
-    provisional: true,
+    has_unvalidated_dimensions: true,
     validity_detail: {},
     positive_class_assessed: true,
     captures_unverified: [],
@@ -281,22 +281,36 @@ describe("ResultsTab evidence gate", () => {
     expect(screen.getByRole("button", { name: /show provisional numbers/i })).toBeInTheDocument();
   });
 
-  it("keeps both CSV doors shut while the displayed numbers are provisional", async () => {
+  it("replaces the disabled export with an acknowledge-and-export flow while provisional", async () => {
     mockTree();
     vi.spyOn(resultsApi, "phenologyMeasurement").mockResolvedValue({
       curves: { rows: [CURVE_ROW], n_plants: 1, positive_class_id: 1 },
       milestones: { rows: [ONSET_ROW] },
       ...UNVALIDATED,
     });
+    const downloadCsv = vi.spyOn(resultsApi, "downloadCsv").mockResolvedValue(new Blob(["x"]));
 
     await renderAndCompute();
     await waitFor(() => expect(screen.getByText("P1")).toBeInTheDocument());
 
-    expect(screen.getByRole("button", { name: /curves csv/i })).toBeDisabled();
-    expect(screen.getByRole("button", { name: /milestones csv/i })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: /curves csv/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /milestones csv/i })).not.toBeInTheDocument();
     // The row itself has to say so too; the banner explaining it scrolls out of view.
     expect(screen.getByText("provisional")).toBeInTheDocument();
     expect(screen.queryByText("valid")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /acknowledge and export/i }));
+    expect(screen.getByRole("button", { name: /curves csv/i })).toBeDisabled();
+
+    fireEvent.change(screen.getByPlaceholderText(/reason for delivering unvalidated/i), {
+      target: { value: "calibration is not ready yet" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /curves csv/i }));
+
+    await waitFor(() => expect(downloadCsv).toHaveBeenCalled());
+    expect(downloadCsv.mock.calls[0][0].acknowledgement).toEqual({
+      reason: "calibration is not ready yet",
+    });
   });
 
   it("opens both CSV doors once the same rows arrive on validated evidence", async () => {
@@ -735,7 +749,7 @@ describe("ResultsTab operationalization records", () => {
   it("renders a structured refusal from the CSV download instead of stringifying it", async () => {
     const VALIDATED_EVIDENCE = {
       validated: { operating_point: "validated_held_out", classifier: "validated_held_out" },
-      provisional: false,
+      has_unvalidated_dimensions: false,
       validity_detail: {},
       positive_class_assessed: true,
       captures_unverified: [],
@@ -1129,9 +1143,11 @@ describe("ResultsTab delivery events (read-only)", () => {
     event_id: "abc123",
     trait: "subject_a",
     delivery_kind: "state_crossing_dates",
-    door: "results.per_plant_curves",
-    output_path: null,
-    output_sha256: null,
+    door: "results.export_csv",
+    output_path: "C:/proj/results_export/subject_a_phenology.csv",
+    output_sha256: "a".repeat(64),
+    acknowledged_by: null,
+    acknowledgement_reason: null,
     documents: {
       "C:/data/predictions/baseline/2026-01-01": {
         ok: true,
@@ -1165,9 +1181,11 @@ describe("ResultsTab delivery events (read-only)", () => {
 
     expect(within(row).getByText("subject_a")).toBeInTheDocument();
     expect(within(row).getByText("state_crossing_dates")).toBeInTheDocument();
-    expect(within(row).getByText("results.per_plant_curves")).toBeInTheDocument();
+    expect(within(row).getByText("results.export_csv")).toBeInTheDocument();
     expect(within(row).getByText(/2026-02-03T12:00:00\+00:00/)).toBeInTheDocument();
-    expect(within(row).getByText(/no file written/i)).toBeInTheDocument();
+    expect(
+      within(row).getByText("C:/proj/results_export/subject_a_phenology.csv"),
+    ).toBeInTheDocument();
     expect(
       within(row).getByText("C:/data/predictions/baseline/2026-01-01: verified"),
     ).toBeInTheDocument();
@@ -1177,6 +1195,22 @@ describe("ResultsTab delivery events (read-only)", () => {
     expect(within(row).queryByRole("button", { name: /confirm/i })).not.toBeInTheDocument();
     expect(within(row).queryByRole("button", { name: /withdraw/i })).not.toBeInTheDocument();
     expect(within(row).queryByRole("button", { name: /correction/i })).not.toBeInTheDocument();
+  });
+
+  it("renders the acknowledging breeder's name and reason on an acknowledged delivery", async () => {
+    const acknowledged: DeliveryEventRecord = {
+      ...DELIVERY_EVENT,
+      event_id: "acked",
+      acknowledged_by: "user:breeder",
+      acknowledgement_reason: "calibration is not ready yet",
+    };
+    vi.spyOn(resultsApi, "deliveryEvents").mockResolvedValue({ records: [acknowledged] });
+
+    render(<ResultsTab />);
+    const row = await screen.findByTestId("delivery-acked");
+
+    expect(within(row).getByText("user:breeder")).toBeInTheDocument();
+    expect(within(row).getByText("calibration is not ready yet")).toBeInTheDocument();
   });
 
   it("renders nothing extra when this project has no deliveries yet", async () => {

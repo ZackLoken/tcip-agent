@@ -36,12 +36,14 @@ describe("results api error handling (asJson)", () => {
   });
 });
 
-describe("exportCsv refusal decoding", () => {
+describe("downloadCsv refusal decoding", () => {
   const REQUEST = {
     project_root: "C:/proj",
     mapping_name: "valley",
     predictions_by_date: {},
-    trait: "catkin_50per_date",
+    trait: "stage_50per_date",
+    payload: "curves" as const,
+    filename: "x.csv",
   };
 
   afterEach(() => {
@@ -52,13 +54,13 @@ describe("exportCsv refusal decoding", () => {
     const detail = {
       kind: "operationalization",
       state: 1,
-      trait: "catkin_50per_date",
+      trait: "stage_50per_date",
       delivery_kind: "state_crossing_dates",
       message: "no operationalization is recorded for a state_crossing_dates delivery",
     };
     stubFetch(400, { detail });
 
-    const thrown = await resultsApi.exportCsv(REQUEST, "curves", "x.csv").catch((e: unknown) => e);
+    const thrown = await resultsApi.downloadCsv(REQUEST).catch((e: unknown) => e);
     expect(thrown).toBeInstanceOf(StructuredRefusalError);
     expect((thrown as Error).message).not.toContain("[object Object]");
     expect(operationalizationRefusalOf(thrown)?.delivery_kind).toBe("state_crossing_dates");
@@ -66,9 +68,7 @@ describe("exportCsv refusal decoding", () => {
 
   it("keeps the status-only message when the refusal body carries no detail", async () => {
     stubFetch(500, {});
-    await expect(resultsApi.exportCsv(REQUEST, "curves", "x.csv")).rejects.toThrow(
-      "export_csv failed: 500",
-    );
+    await expect(resultsApi.downloadCsv(REQUEST)).rejects.toThrow("export_csv failed: 500");
   });
 });
 

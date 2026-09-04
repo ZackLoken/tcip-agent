@@ -44,7 +44,15 @@ function DeliveryEventRow({ record }: { record: DeliveryEventRecord }) {
         <dt className="text-tcip-muted">Door</dt>
         <dd className="font-mono">{record.door}</dd>
         <dt className="text-tcip-muted">Output path</dt>
-        <dd>{record.output_path ?? "none (rendered on screen, no file written)"}</dd>
+        <dd>{record.output_path}</dd>
+        {record.acknowledged_by && (
+          <>
+            <dt className="text-tcip-muted">Acknowledged by</dt>
+            <dd>{record.acknowledged_by}</dd>
+            <dt className="text-tcip-muted">Reason</dt>
+            <dd>{record.acknowledgement_reason}</dd>
+          </>
+        )}
       </dl>
       {buckets.length > 0 && (
         <div className="mt-2 flex flex-col gap-0.5">

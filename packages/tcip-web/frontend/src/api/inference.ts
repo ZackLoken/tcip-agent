@@ -141,9 +141,28 @@ export interface PhenologyRequest {
   mapping_name: string;
   predictions_by_date: Record<string, string>;
   trait: string;
-  // Show provisional numbers instead of refusing. The server still marks them provisional, and it
-  // never applies to a CSV.
-  acknowledge_unvalidated?: boolean;
+  // Show unvalidated numbers on screen instead of refusing. A display choice, never an
+  // acknowledgement: it never applies to a CSV, which has its own export request shape.
+  show_unvalidated?: boolean;
+}
+
+/** The breeder's own act of shipping a phenology export unvalidated: the reason only, since
+ *  acknowledged_by is resolved server-side from the request's own user. */
+export interface AcknowledgementRequest {
+  reason: string;
+}
+
+/** The export door's own request shape: it shares the four fields PhenologyRequest also carries
+ *  but does not inherit it (no show_unvalidated, a display-only choice this door never honors). */
+export interface ExportCsvRequest {
+  project_root: string;
+  mapping_name: string;
+  predictions_by_date: Record<string, string>;
+  trait: string;
+  payload: "curves" | "milestones";
+  filename?: string;
+  user?: string;
+  acknowledgement?: AcknowledgementRequest | null;
 }
 
 // One door returns both projections from one server-side measurement, so no surface can render
@@ -153,9 +172,9 @@ export interface PhenologyMeasurementResponse {
   milestones: { rows: OnsetRow[] };
   // Per-dimension reconciled state, e.g. { operating_point: "validated_held_out", classifier: "false" }.
   validated: Record<string, string>;
-  // True when any dimension lacked on-disk evidence, including when the caller acknowledged it,
-  // which is exactly when these numbers must not be rendered as valid.
-  provisional: boolean;
+  // True when any dimension lacked on-disk evidence, including one an acknowledgement cleared,
+  // which is exactly when these numbers must not be rendered as validated.
+  has_unvalidated_dimensions: boolean;
   validity_detail: Record<string, unknown>;
   // False when nothing was ever classified along the trait's positive-class axis: the ratios are
   // then not a valid phenology measurement (run + validate the classifier first).
@@ -368,6 +387,9 @@ export interface DeliveryEventRecord {
   output_sha256: string | null;
   documents: Record<string, unknown>;
   produced_at: string;
+  // Who acknowledged this delivery unvalidated, and why; null on both when nothing was.
+  acknowledged_by: string | null;
+  acknowledgement_reason: string | null;
   // The plant mapping this delivery attributed detections through, door-conditional: the
   // phenology doors carry it, every other delivery door carries null.
   plant_mapping: PlantMappingDisclosure | null;
@@ -466,21 +488,13 @@ export const resultsApi = {
       `${ROUTES.getResultsDeliveryEvents}?project_root=${encodeURIComponent(project_root)}`,
     ),
 
-  // The server computes what it exports: this sends the inputs a phenology measurement is derived from
-  // plus which computation to run, never a table of rows: sending rows would let the caller
-  // control both the columns and any accompanying kind declaration, so the backend could no
-  // longer trust either.
-  exportCsv: async (
-    body: PhenologyRequest,
-    payload: "curves" | "milestones",
-    filename: string,
-  ): Promise<Blob> => {
+  // The server computes what it exports, never a caller-composed table of rows. Its own request
+  // shape, never a spread of the measurement request, which no longer shares one with it.
+  downloadCsv: async (body: ExportCsvRequest): Promise<Blob> => {
     const resp = await fetch(ROUTES.postResultsExportCsv, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      // acknowledge_unvalidated is deliberately dropped: it may reveal provisional numbers on
-      // screen, never write them to a file that leaves the platform.
-      body: JSON.stringify({ ...body, acknowledge_unvalidated: false, payload, filename }),
+      body: JSON.stringify(body),
     });
     if (!resp.ok) {
       // The same decoder every JSON call uses, so a structured refusal arrives parsed, not stringified.
