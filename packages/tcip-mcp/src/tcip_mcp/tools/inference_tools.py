@@ -1466,6 +1466,9 @@ def _export_predictions_raster(
         raster_identity = dataclasses.asdict(content_identity(raster_path, predictor.in_chans))
     except ValueError as exc:
         return {"error": f"raster content identity could not be computed for {raster_path}: {exc}"}
+    # Round-tripped through the record codec so a tuple field (band_interpretations) reads the
+    # same shape a recorded identity would, and later comparison is a plain dict equality.
+    raster_identity = RECORD_JSON.decode(RECORD_JSON.encode(raster_identity))
 
     identity_key = _raster_pass_key(out, "identity")
     existing_pass_identity = store.read(identity_key, default=None)
