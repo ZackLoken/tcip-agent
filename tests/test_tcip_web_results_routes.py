@@ -351,7 +351,7 @@ def test_every_phenology_door_delivers_on_real_bucket_evidence(client: TestClien
 def test_show_unvalidated_reveals_provisional_numbers_on_screen_but_never_opens_export_on_its_own(
     client: TestClient, tmp_path: Path,
 ) -> None:
-    # A breeder whose operating point is not yet calibrated can LOOK at what they have, clearly
+    # A breeder whose operating point is not yet calibrated can look at what they have, clearly
     # marked (show_unvalidated, a display choice); only a real Acknowledgement (below) opens export.
     body = _phenology_fixture(tmp_path, validated=False)
     for route in GATE_DOORS:
@@ -380,6 +380,15 @@ def test_export_ships_an_unvalidated_measurement_once_a_breeder_acknowledges_it(
     assert cells["acknowledged_by"] == "user:tester"
     assert cells["acknowledgement_reason"] == "breeder needs a look before calibration finishes"
     assert cells["operating_point_validated"] == "false"
+
+    # The delivery event this export just wrote carries the same act, read back through the
+    # listing door rather than the CSV's own columns.
+    events = client.get(
+        "/api/results/delivery-events", params={"project_root": body["project_root"]},
+    ).json()["records"]
+    event = next(r for r in events if r["door"] == "results.export_csv")
+    assert event["acknowledged_by"] == "user:tester"
+    assert event["acknowledgement_reason"] == "breeder needs a look before calibration finishes"
 
 
 def test_export_refuses_an_acknowledgement_with_no_user(client: TestClient, tmp_path: Path) -> None:

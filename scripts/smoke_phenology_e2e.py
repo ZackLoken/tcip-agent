@@ -1,16 +1,17 @@
 """Live e2e smoke: the agent's phenology pipeline on real geolocated images.
 
 Builds a synthetic scene: geolocated JPEGs (real EXIF GPS + capture time) across three
-dates plus a plant-locations CSV, then runs the exact two tools the agent composes:
+dates plus a plant-locations CSV, then runs the exact tools and web route the agent and the
+breeder compose between them:
 
-    build_plant_mapping   images + CSV                 → a named mapping under the project
-    deliver_phenology_milestones     mapping + classified preds   → <trait>_phenology.csv
+    build_plant_mapping        images + CSV                 -> a named mapping under the project
+    deliver_phenology_milestones  mapping + classified preds -> refuses (no MCP surface acknowledges)
+    /api/results/export_csv    the same mapping + preds, acknowledged -> <trait>_phenology.csv
 
-then asserts the tool refuses this genuinely unvalidated delivery (no MCP surface takes an
-acknowledgement) and, over the same real mapping and predictions, that the underlying milestone
-computation itself is plausible and correctly ordered. This covers the seam unit tests don't:
-real EXIF -> real GPS matching -> real per-plant milestones. No backend or network: it calls
-the tool functions directly, in an isolated temp dir.
+covering the seam unit tests don't: real EXIF -> real GPS matching -> a real per-plant curve and
+milestones delivered end to end through the writer, the delivery gate, the delivered tail and the
+delivery event, driven through the web app's own route with a TestClient rather than a second,
+hand-rolled measurement. No served backend or network.
 
 Usage (repo root, tcip-agent env):
     python scripts/smoke_phenology_e2e.py
@@ -21,6 +22,7 @@ Exits non-zero on the first failed assertion.
 from __future__ import annotations
 
 import csv
+import io
 import os
 import shutil
 import sys
@@ -29,11 +31,13 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
-_MCP_SRC = _REPO_ROOT / "packages" / "tcip-mcp" / "src"
-for _path in (_MCP_SRC, _REPO_ROOT):
+_PKG_SRC = [_REPO_ROOT / "packages" / pkg / "src" for pkg in
+           ("tcip-store", "tcip-annotation", "tcip-mcp", "tcip-web")]
+for _path in (*_PKG_SRC, _REPO_ROOT):
     if str(_path) not in sys.path:
         sys.path.insert(0, str(_path))
 
+from fastapi.testclient import TestClient  # noqa: E402
 from PIL import Image  # noqa: E402
 
 from tcip_annotation import json_io  # noqa: E402
@@ -44,6 +48,10 @@ from tcip_mcp.tools.phenology_tools import (  # noqa: E402
     deliver_phenology_milestones,
     register_plant_registry,
 )
+# Imported before main()'s own bind_default(): this import binds its own backend, so the
+# explicit bind_default() below must run after it to be the one every call below uses.
+from tcip_web.app import app  # noqa: E402
+from tcip_web.state import store  # noqa: E402
 
 # Two plants ~3 m apart in one row (1 deg lon ≈ 81 km at 43°N, so 3.7e-5 deg ≈ 3 m).
 PLANTS = [
@@ -53,9 +61,8 @@ PLANTS = [
 # Three capture dates; the elongated fraction rises 0.0 → 0.4 → 1.0.
 DATES = ["2026-02-11", "2026-02-25", "2026-03-11"]
 FRACTIONS = {"2026-02-11": 0.0, "2026-02-25": 0.4, "2026-03-11": 1.0}
-# The bucket's own recorded id_map (the positive class is resolved from this, on disk, never a
-# pinned integer, so this is the production id_map a real run_inference run would have
-# stamped, not a magic constant deliver_phenology_milestones reads directly).
+# The bucket's own recorded id_map: the positive class is resolved from this on disk, never a
+# pinned integer or a magic constant deliver_phenology_milestones reads directly.
 ID_MAP = {"dormant": 0, "elongated": 1}
 N_DETECTIONS = 10
 
@@ -120,7 +127,9 @@ def _author_catkin_trait_spec(root: Path) -> None:
     The spec is ``tests/_trait_fixtures.CATKIN`` itself rather than a copy of its field values, so
     a change to that definition cannot leave this smoke run exercising a stale one. The crossing
     door refuses a trait whose delivered number has no breeder-confirmed meaning, so this states
-    one and confirms it through the same two writers a real project goes through.
+    one and confirms it through the same two writers a real project goes through; it also declares
+    the confirmed positive class in ``root``'s own class registry, which the web export route (but
+    not the MCP tool) requires reachable from the delivered dataset's own root.
     """
     import tcip_store as ts
 
@@ -142,26 +151,31 @@ def main() -> int:
 
     backend = bind_default()
 
-    print("Phenology e2e smoke: build_plant_mapping -> deliver_phenology_milestones\n")
+    print("Phenology e2e smoke: build_plant_mapping -> deliver_phenology_milestones -> "
+          "acknowledged web export\n")
     with tempfile.TemporaryDirectory() as td:
-        root = Path(td)
+        # A workspace/project split, its name fitting crop_subject_phenotype
+        # (initialize_project holds a workspace project to that scheme).
+        workspace_root = Path(td)
+        root = workspace_root / "hazelnut_catkin_phenology"
+        root.mkdir(parents=True)
         dataset_root = root / "dataset"        # a registered dataset the mapping is built over
         images_root = dataset_root / "images"
         preds_root = dataset_root / "predictions" / "live"  # class-carrying predictions (valid)
         mapping_name = "smoke-valley"
-        csv_out = root / "delivery" / "catkin_phenology.csv"
 
-        # Trait registration is per-project state resolved via $TCIP_STATE_ROOT
-        # (tcip_mcp.project_paths.resolve_state); the outer chdir into a separate audit-only
-        # tmpdir does not point resolution at root, so pin it explicitly for this run, restoring
-        # whatever the process already had once done.
+        # Both pinned explicitly for this run and restored after: state resolution otherwise
+        # follows the process cwd, and the web app refuses a TestClient request with no workspace.
         _saved_platform_root = os.environ.get("TCIP_STATE_ROOT")
+        _saved_workspace = os.environ.get("TCIP_WORKSPACE")
         os.environ["TCIP_STATE_ROOT"] = str(root)
+        os.environ["TCIP_WORKSPACE"] = str(workspace_root)
         try:
             from tcip_mcp.traits import registered_crops
             from tcip_mcp.tools.project_tools import initialize_project, register_dataset
 
-            initialize_project(str(root), site="smoke test orchard")
+            init = initialize_project(str(root), site="smoke test orchard")
+            check("project initialized", "error" not in init, init.get("error", ""))
             _author_catkin_trait_spec(root)
 
             # 1. Scene: geolocated images + per-image classified predictions.
@@ -192,6 +206,12 @@ def main() -> int:
 
             crop = sorted(registered_crops())[0]
             register_dataset(str(dataset_root), crop=crop, project_root=str(root))
+            # The web export route resolves the class registry from the delivered dataset's own
+            # root, never the project's; the MCP tool never checks one (it reads the bucket's id_map).
+            from tcip_mcp.class_registry import copy_registry
+            from tcip_mcp.dataset_layout import classes_path
+
+            copy_registry(classes_path(root), classes_path(dataset_root))
 
             preds_by_date = {d: str(preds_root / d) for d in DATES}
 
@@ -219,6 +239,7 @@ def main() -> int:
             # No MCP tool takes an acknowledgement; only the Results tab's export does.
             # This bucket's sidecar was never validated, so the door refuses unconditionally.
             print("\nStep 2: deliver_phenology_milestones refuses an unacknowledgeable unvalidated delivery")
+            csv_out = root / "delivery" / "catkin_phenology.csv"
             r = deliver_phenology_milestones(
                 trait="catkin",
                 mapping_name=mapping_name,
@@ -226,39 +247,93 @@ def main() -> int:
                 output_csv_path=str(csv_out),
             )
             check("refused (no acknowledgement route exists on this tool)", "error" in r, str(r))
-            check("positive_class_assessed true (every bucket resolved the positive class)",
-                  r.get("positive_class_assessed") is True, str(r.get("positive_class_assessed")))
+            # The tool refuses on the positive class before ever reaching the classifier gate, so
+            # a classifier-gate refusal (not the earlier one) proves every bucket resolved it.
+            check("positive_class_assessed true (else the tool would refuse on the class instead)",
+                  "validated positive-state classifier" in r.get("error", ""), str(r))
             check("no CSV written on refusal", not csv_out.is_file())
 
-            # The real milestone math a breeder's acknowledged Results-tab export would deliver,
-            # pinned directly so this script still verifies real EXIF/GPS-matched dates end to end.
-            print("\nStep 3: the milestone computation itself, over the same real mapping + predictions")
-            from tcip_mcp.operationalization import STATE_CROSSING_DATES, resolve_trait_and_record
-            from tcip_mcp.pipelines.postprocessing import phenology as _phenology
+            # 3. The breeder's own route: look at the unvalidated numbers, then acknowledge and
+            # export them, exercising the writer, the gate, the tail and the delivery event.
+            print("\nStep 3: the web export route delivers an acknowledged, unvalidated CSV")
+            store.open_project(root.resolve())
+            client = TestClient(app, base_url="http://127.0.0.1")
+            body = {
+                "project_root": str(root), "mapping_name": mapping_name,
+                "predictions_by_date": preds_by_date, "trait": "catkin",
+            }
 
-            spec, _record, _specs_dir = resolve_trait_and_record("catkin", STATE_CROSSING_DATES)
-            mapping_raw = _plant_mapping.load_mapping(root, mapping_name).rows()
-            result = _phenology.per_plant_phenology(
-                mapping_raw, preds_by_date, positive_class_name=spec.positive_class_name, spec=spec)
-            rows = result["rows"]
-            check("one row per plant", len(rows) == len(PLANTS), str(len(rows)))
-            row = next((r2 for r2 in rows if r2.get("plant_id") == "P1"), None)
-            check("P1 row present", row is not None)
-            if row:
-                d05, d50, d95 = row.get("catkin_05per_date"), row.get("catkin_50per_date"), row.get("catkin_95per_date")
-                check("05/50/95per dates all populated (not a fabricated blank)",
-                      all([d05, d50, d95]), f"05={d05} 50={d50} 95={d95}")
-                if d05 and d50 and d95:
-                    check("milestones correctly ordered (05 <= 50 <= 95)", d05 <= d50 <= d95,
-                          f"05={d05} 50={d50} 95={d95}")
-                    check("milestones fall within the observed date range",
-                          DATES[0] <= d05 and d95 <= DATES[-1],
-                          f"range={DATES[0]}..{DATES[-1]} 05={d05} 95={d95}")
+            screen = client.post(
+                "/api/results/phenology_measurement", json={**body, "show_unvalidated": True})
+            check("phenology_measurement looks at the unvalidated numbers (200)",
+                  screen.status_code == 200, screen.text)
+            if screen.status_code == 200:
+                screen_body = screen.json()
+                check("has_unvalidated_dimensions true (nothing on disk was ever validated)",
+                      screen_body.get("has_unvalidated_dimensions") is True)
+                milestone_rows = screen_body.get("milestones", {}).get("rows", [])
+                check("one milestone row per plant", len(milestone_rows) == len(PLANTS),
+                      str(len(milestone_rows)))
+                row = next((r2 for r2 in milestone_rows if r2.get("plant_id") == "P1"), None)
+                check("P1 row present", row is not None)
+                if row:
+                    d05 = row.get("catkin_05per_date")
+                    d50 = row.get("catkin_50per_date")
+                    d95 = row.get("catkin_95per_date")
+                    check("05/50/95per dates all populated (not a fabricated blank)",
+                          all([d05, d50, d95]), f"05={d05} 50={d50} 95={d95}")
+                    if d05 and d50 and d95:
+                        check("milestones correctly ordered (05 <= 50 <= 95)", d05 <= d50 <= d95,
+                              f"05={d05} 50={d50} 95={d95}")
+                        check("milestones fall within the observed date range",
+                              DATES[0] <= d05 and d95 <= DATES[-1],
+                              f"range={DATES[0]}..{DATES[-1]} 05={d05} 95={d95}")
+
+            export = client.post("/api/results/export_csv", json={
+                **body, "payload": "milestones", "filename": "catkin_phenology_ack.csv",
+                "user": "user:smoketest",
+                "acknowledgement": {"reason": "smoke run over an uncalibrated scene"},
+            })
+            check("export_csv delivers the acknowledged CSV (200)",
+                  export.status_code == 200, export.text)
+            if export.status_code == 200:
+                saved_to = export.headers.get("X-TCIP-Saved-To", "")
+                check("the delivery landed under the project's own results_export/",
+                      saved_to == str(root / "results_export" / "catkin_phenology_ack.csv"),
+                      saved_to)
+                delivered_rows = list(csv.DictReader(io.StringIO(export.text)))
+                check("the CSV carries the delivered rows", bool(delivered_rows))
+                if delivered_rows:
+                    cell = delivered_rows[0]
+                    check("acknowledged_by carries the acting user",
+                          cell.get("acknowledged_by") == "user:smoketest", str(cell))
+                    check("acknowledgement_reason carries the stated reason",
+                          cell.get("acknowledgement_reason") == "smoke run over an uncalibrated scene",
+                          str(cell))
+                    check("operating_point_validated stamps false (never silently upgraded)",
+                          cell.get("operating_point_validated") == "false", str(cell))
+
+            events = client.get(
+                "/api/results/delivery-events", params={"project_root": str(root)}).json()
+            record = next(
+                (e for e in events.get("records", []) if e.get("door") == "results.export_csv"),
+                None)
+            check("the delivery event names the acknowledging user", record is not None)
+            if record:
+                check("the delivery event carries acknowledged_by",
+                      record.get("acknowledged_by") == "user:smoketest", str(record))
+                check("the delivery event carries the reason",
+                      record.get("acknowledgement_reason") == "smoke run over an uncalibrated scene",
+                      str(record))
         finally:
             if _saved_platform_root is None:
                 os.environ.pop("TCIP_STATE_ROOT", None)
             else:
                 os.environ["TCIP_STATE_ROOT"] = _saved_platform_root
+            if _saved_workspace is None:
+                os.environ.pop("TCIP_WORKSPACE", None)
+            else:
+                os.environ["TCIP_WORKSPACE"] = _saved_workspace
             # Windows can't remove the tempdir the bound backend still holds a database handle
             # into; close it before the enclosing TemporaryDirectory context tears the tree down.
             backend.close()

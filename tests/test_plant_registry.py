@@ -176,7 +176,7 @@ def _deliver_scene(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[str
     return "valley-plants", preds_by_date
 
 
-def test_the_happy_path_through_the_platforms_own_producers_still_delivers(
+def test_the_happy_path_through_the_platforms_own_producers_refuses_at_the_classifier_gate(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Admits valid work: a registered registry that still loads and still hashes to what the
