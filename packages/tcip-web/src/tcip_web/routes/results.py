@@ -1127,11 +1127,15 @@ def list_delivery_events(project_root: str) -> dict:
 
     Each record carries its own ``superseded`` key: the ``delivery_supersessions`` record
     ``supersede_delivery`` filed against its ``event_id`` (naming the reason and any replacement
-    event), or ``None`` when nothing supersedes it. A record naming a ``plant_mapping`` also
-    carries ``plant_mapping_resolved_key``: the name to load to see exactly the record this event
-    cites, its own name when a rebuild has not moved past it, the archived key
+    event), or ``None`` when nothing supersedes it. A record naming a walked-mapping
+    ``plant_mapping`` (a dict carrying ``name`` and ``record_sha256``) also carries
+    ``plant_mapping_resolved_key``: the name to load to see exactly the record this event cites,
+    its own name when a rebuild has not moved past it, the archived key
     (``resolved_mapping_key_for_citation``) when a superseding rebuild has, or ``None`` when
-    neither name holds a stored record any more, for the panel to render as unresolved.
+    neither name holds a stored record any more, for the panel to render as unresolved. A record
+    naming a whole-raster registry ``plant_mapping`` instead (``deliver_orthomosaic_plant_counts``'s
+    own ``PlantRegistryDisclosure``, which names no mapping to resolve) carries no
+    ``plant_mapping_resolved_key`` at all.
     """
     from tcip_mcp.pipelines.delivery_events_schema import with_supersessions
     from tcip_mcp.pipelines.postprocessing.plant_mapping import resolved_mapping_key_for_citation
@@ -1148,7 +1152,7 @@ def list_delivery_events(project_root: str) -> dict:
         raise HTTPException(400, str(exc)) from exc
     for record in records:
         pm = record.get("plant_mapping")
-        if isinstance(pm, dict):
+        if isinstance(pm, dict) and "name" in pm and "record_sha256" in pm:
             record["plant_mapping_resolved_key"] = resolved_mapping_key_for_citation(
                 root, pm["name"], pm["record_sha256"])
     return {"records": with_supersessions(records, load_delivery_supersessions(root))}

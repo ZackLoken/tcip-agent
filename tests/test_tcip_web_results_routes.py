@@ -412,6 +412,53 @@ def test_export_refuses_a_whitespace_only_acknowledgement_reason(
     assert "non-blank reason" in resp.json()["detail"]
 
 
+def test_delivery_events_route_serves_a_registry_disclosure_without_a_resolved_key(
+    client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A registry disclosure (deliver_orthomosaic_plant_counts's own PlantRegistryDisclosure,
+    which names no walked mapping) carries no plant_mapping_resolved_key at all, beside a walked-
+    mapping disclosure that does, in the same listing."""
+    from tcip_mcp.pipelines.resolution import record_delivery_binding_event
+
+    monkeypatch.setenv("TCIP_IMAGE_ROOTS", str(tmp_path))
+    store.open_project(tmp_path.resolve())
+
+    record_delivery_binding_event(
+        "deliver_orthomosaic_plant_counts", None, [], {},
+        measurement_documents=["operating_point"], scale_document=None, acknowledgement=None,
+        trait="stem_count", delivery_kind="per_plant_count_aggregate", project_root=tmp_path,
+        plant_mapping={
+            "plant_registry": {"name": "orchard-block", "digest": "0" * 64},
+            "project_root": str(tmp_path),
+            "raster_identity": {"width": 100},
+            "nn_tolerance_m": {"value": 1.5, "source": "grid_pitch"},
+            "detections_unattributed": 2,
+            "detections_unattributed_scope": "delivered_raster",
+            "plant_attribution": "detection",
+        },
+    )
+    record_delivery_binding_event(
+        "results.export_csv", None, [], {},
+        measurement_documents=["operating_point"], scale_document=None, acknowledgement=None,
+        trait="catkin", delivery_kind="state_crossing_dates", project_root=tmp_path,
+        plant_mapping={
+            "name": "valley", "project_root": str(tmp_path), "dataset_id": "ds-1",
+            "dataset_root": str(tmp_path / "ds"), "built_at": "2026-02-01T00:00:00+00:00",
+            "record_sha256": "1" * 64, "nn_tolerance_m": {"value": 3, "source": "stated"},
+            "capture_identity": {}, "captures_unverified": [], "plant_csvs_unverified": [],
+            "dates_delivered": ["2026-01-01"], "images_unattributed": 0,
+            "images_unattributed_scope": "delivered_dates", "plant_attribution": "image",
+        },
+    )
+
+    resp = client.get("/api/results/delivery-events", params={"project_root": str(tmp_path)})
+    assert resp.status_code == 200, resp.text
+    records = {r["door"]: r for r in resp.json()["records"]}
+
+    assert "plant_mapping_resolved_key" not in records["deliver_orthomosaic_plant_counts"]
+    assert "plant_mapping_resolved_key" in records["results.export_csv"]
+
+
 def _set_tile_provenance(body: dict, tile_size_prov: dict | None) -> dict:
     """Rewrite each bucket's sidecar tile_size entry, leaving every other dimension untouched.
 

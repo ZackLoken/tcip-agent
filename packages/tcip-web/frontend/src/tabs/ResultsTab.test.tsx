@@ -1326,6 +1326,36 @@ describe("ResultsTab delivery events (read-only)", () => {
     expect(within(row).getByText(/image-level attribution/)).toBeInTheDocument();
   });
 
+  it("renders the orthomosaic door's own registry disclosure, not the walked-mapping form", async () => {
+    // Covers deliver_orthomosaic_plant_counts's PlantRegistryDisclosure: no dates_delivered or
+    // record_sha256 to render, since no walked mapping exists for a whole-raster frame.
+    const withRegistry: DeliveryEventRecord = {
+      ...DELIVERY_EVENT,
+      event_id: "with-registry",
+      door: "deliver_orthomosaic_plant_counts",
+      plant_mapping: {
+        plant_registry: { name: "orchard-block", digest: "0".repeat(64) },
+        project_root: "C:/proj",
+        raster_identity: { width: 4096, height: 4096 },
+        nn_tolerance_m: { value: 1.5, source: "grid_pitch" },
+        detections_unattributed: 3,
+        detections_unattributed_scope: "delivered_raster",
+        plant_attribution: "detection",
+      },
+    };
+    vi.spyOn(resultsApi, "deliveryEvents").mockResolvedValue({ records: [withRegistry] });
+
+    render(<ResultsTab />);
+    const row = await screen.findByTestId("delivery-with-registry");
+
+    expect(within(row).getByText(/Plant registry orchard-block:/)).toBeInTheDocument();
+    expect(
+      within(row).getByText(/3 detection\(s\) attributed to no plant on the delivered raster/),
+    ).toBeInTheDocument();
+    expect(within(row).getByText(/detection-level attribution/)).toBeInTheDocument();
+    expect(within(row).queryByText(/Delivered dates/)).not.toBeInTheDocument();
+  });
+
   it("renders the archived key beside a cited mapping once a rebuild has moved past it", async () => {
     const withMapping: DeliveryEventRecord = {
       ...DELIVERY_EVENT,

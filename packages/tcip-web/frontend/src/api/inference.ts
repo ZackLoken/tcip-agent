@@ -368,6 +368,25 @@ export interface PlantMappingDisclosure {
   plant_attribution: string;
 }
 
+// The whole-raster counterpart, shares no key with PlantMappingDisclosure: an orthomosaic
+// delivery's own registry disclosure (deliver_orthomosaic_plant_counts's PlantRegistryDisclosure).
+export interface PlantRegistryDisclosure {
+  plant_registry: { name: string; digest: string };
+  project_root: string;
+  raster_identity: Record<string, unknown>;
+  nn_tolerance_m: PlantMappingTolerance;
+  detections_unattributed: number;
+  detections_unattributed_scope: string;
+  plant_attribution: string;
+}
+
+/** Whether `pm` is the whole-raster registry disclosure rather than a walked mapping's. */
+export function isPlantRegistryDisclosure(
+  pm: PlantMappingDisclosure | PlantRegistryDisclosure,
+): pm is PlantRegistryDisclosure {
+  return "plant_registry" in pm;
+}
+
 /** The `delivery_supersessions` record `supersede_delivery` filed against one event's id, joined
  *  onto that event by the backend (`delivery_events_schema.with_supersessions`). */
 export interface DeliverySupersession {
@@ -395,8 +414,8 @@ export interface DeliveryEventRecord {
   acknowledged_by: string | null;
   acknowledgement_reason: string | null;
   // The plant mapping this delivery attributed detections through, door-conditional: the
-  // phenology doors carry it, every other delivery door carries null.
-  plant_mapping: PlantMappingDisclosure | null;
+  // phenology doors carry a mapping, deliver_orthomosaic_plant_counts a registry, others null.
+  plant_mapping: PlantMappingDisclosure | PlantRegistryDisclosure | null;
   // Set only alongside plant_mapping: the name to load to see exactly the cited record (its own
   // name while unmoved, an archived key once superseded, or null when neither resolves).
   plant_mapping_resolved_key?: string | null;
