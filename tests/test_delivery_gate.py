@@ -177,6 +177,12 @@ def test_an_unknown_dimension_name_refuses_loudly():
         check_delivery_gate({"provenance": VALIDATED_HELD_OUT})
 
 
+@pytest.mark.parametrize("reason", ["", "   ", "\t\n"])
+def test_acknowledgement_refuses_a_blank_reason(reason):
+    with pytest.raises(ValueError, match="reason is required non-empty"):
+        Acknowledgement(acknowledged_by="user:breeder", reason=reason)
+
+
 def test_measurement_dimension_key_is_retired():
     """The dimension key measurement is retired in favor of operating_point: a caller still
     composing flags under the old key hits the same unknown-dimension refusal any other dead

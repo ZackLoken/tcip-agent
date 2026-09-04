@@ -701,10 +701,16 @@ def export_csv(payload: ExportCsvPayload) -> Response:
                 "an acknowledgement requires a user: a server identity is never written as a "
                 "breeder's name",
             )
+        reason = payload.acknowledgement.reason.strip()
+        if not reason:
+            raise HTTPException(
+                400,
+                "an acknowledgement requires a non-blank reason: the one thing the record "
+                "carries that says why",
+            )
         from tcip_web.identity import user_id
 
-        acknowledgement = Acknowledgement(
-            acknowledged_by=user_id(payload.user), reason=payload.acknowledgement.reason)
+        acknowledgement = Acknowledgement(acknowledged_by=user_id(payload.user), reason=reason)
 
     measurement = _measure_phenology(payload, acknowledgement=acknowledgement)
     if not measurement.gate.ok:

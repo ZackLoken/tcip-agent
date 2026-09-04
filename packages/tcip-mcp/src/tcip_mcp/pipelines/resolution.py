@@ -2673,6 +2673,13 @@ class Acknowledgement:
     acknowledged_by: str
     reason: str
 
+    def __post_init__(self) -> None:
+        if not self.reason.strip():
+            raise ValueError(
+                "Acknowledgement.reason is required non-empty: it is the one thing the record "
+                "carries that says why."
+            )
+
 
 @dataclass(frozen=True)
 class DeliveryGateResult:

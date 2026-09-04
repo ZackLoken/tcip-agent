@@ -44,7 +44,7 @@ function DeliveryEventRow({ record }: { record: DeliveryEventRecord }) {
         <dt className="text-tcip-muted">Door</dt>
         <dd className="font-mono">{record.door}</dd>
         <dt className="text-tcip-muted">Output path</dt>
-        <dd>{record.output_path}</dd>
+        <dd>{record.output_path ?? "no file"}</dd>
         {record.acknowledged_by && (
           <>
             <dt className="text-tcip-muted">Acknowledged by</dt>

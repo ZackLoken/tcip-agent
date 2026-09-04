@@ -391,6 +391,18 @@ def test_export_refuses_an_acknowledgement_with_no_user(client: TestClient, tmp_
     assert "server identity is never written as a breeder's name" in resp.json()["detail"]
 
 
+def test_export_refuses_a_whitespace_only_acknowledgement_reason(
+    client: TestClient, tmp_path: Path,
+) -> None:
+    # min_length=1 admits a blank string of spaces; the route strips before it names why.
+    body = _phenology_fixture(tmp_path, validated=False)
+    resp = _export(
+        client, body, "milestones", acknowledgement={"reason": "   "}, user="user:tester",
+    )
+    assert resp.status_code == 400
+    assert "non-blank reason" in resp.json()["detail"]
+
+
 def _set_tile_provenance(body: dict, tile_size_prov: dict | None) -> dict:
     """Rewrite each bucket's sidecar tile_size entry, leaving every other dimension untouched.
 
