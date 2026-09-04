@@ -23,7 +23,12 @@ def project_roots(project_root: str | Path) -> tuple[tuple[str, str], ...]:
     """The roots a whole project's records live in, each with the layout it is.
 
     The registered dataset roots come from the project's own registry rather than from a
-    directory guess, so a dataset that lives outside the project tree still travels.
+    directory guess, so a dataset that lives outside the project tree still travels. Reads
+    through :func:`~tcip_mcp.tools.project_tools.read_datasets_raw`, never
+    :func:`~tcip_mcp.tools.project_tools.read_datasets`: this only needs a dataset's own
+    location to enumerate its roots, not its current fingerprint identity, and a bare
+    pre-prefix fingerprint elsewhere in the registry must not stop ``adopt_store.py``/
+    ``export_store.py`` from reaching the very project a conform script needs to run against.
     """
     root = Path(project_root).absolute()
     roots: list[tuple[str, str]] = [
@@ -32,7 +37,7 @@ def project_roots(project_root: str | Path) -> tuple[tuple[str, str], ...]:
         (str(root / ".tcip" / "experiments"), EXPERIMENTS),
     ]
     seen = {os.path.normcase(str(root))}
-    for entry in project_tools.read_datasets(root):
+    for entry in project_tools.read_datasets_raw(root):
         if not entry.get("path"):
             continue
         dataset_root = project_tools.dataset_entry_path(root, entry).absolute()

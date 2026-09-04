@@ -1151,6 +1151,12 @@ def _run_import_into_staging(bp: Path, staging: Path, dest: Path) -> dict:
 def _external_dataset_paths(project_root: Path) -> list[str]:
     """The imported project's own registered dataset entries that stay absolute (external),
     disclosed rather than silently kept: the door never rewrites a dataset registry entry, only
-    the model registry's own checkpoint paths get a conform step (see :func:`import_project`)."""
-    entries = read_datasets(project_root)
+    the model registry's own checkpoint paths get a conform step (see :func:`import_project`).
+
+    Reads through :func:`read_datasets_raw`, never :func:`read_datasets`: this only needs each
+    entry's own path, not its current fingerprint identity, and a bare pre-prefix fingerprint
+    elsewhere in the extracted registry must not make the import door raise after extraction has
+    already run.
+    """
+    entries = read_datasets_raw(project_root)
     return sorted(str(e["path"]) for e in entries if entry_is_external(e))
