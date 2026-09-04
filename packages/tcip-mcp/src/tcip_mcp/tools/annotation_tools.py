@@ -28,6 +28,7 @@ from tcip_mcp.dataset_layout import (
     annotation_path_for_image,
     find_gt_label,
     find_prediction,
+    image_root,
 )
 from tcip_mcp.pipelines.image_utils import image_dimensions, resolve_image_source
 from tcip_mcp.pipelines.resolution import DEFAULT_CONF
@@ -341,7 +342,7 @@ def _evaluate_folder(
     from tcip_mcp.pipelines.image_utils import BandGroupRef, list_logical_images
 
     root = Path(folder_path)
-    images_dir = root / "images"
+    images_dir = image_root(root)
     if not images_dir.is_dir():
         images_dir = root
 
