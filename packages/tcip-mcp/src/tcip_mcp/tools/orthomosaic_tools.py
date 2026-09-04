@@ -21,9 +21,13 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from tcip_mcp.audit import audited
 from tcip_mcp.server import mcp
+
+if TYPE_CHECKING:
+    from tcip_mcp.pipelines.resolution import Acknowledgement
 
 logger = logging.getLogger(__name__)
 
@@ -31,9 +35,7 @@ _PER_PLANT_VALUE_KEY = "count"
 """The quantity every row of this delivery holds, named once for the aggregation and the check."""
 
 
-@mcp.tool()
-@audited
-def deliver_orthomosaic_plant_counts(
+def orthomosaic_plant_counts(
     predictions_dir: str,
     raster_path: str,
     plant_registry: str,
@@ -43,8 +45,23 @@ def deliver_orthomosaic_plant_counts(
     pipeline_version: str = "",
     nn_tolerance_m: float | None = None,
     canopy_subject: str = "",
+    project_root: str | Path | None = None,
+    acknowledgement: Acknowledgement | None = None,
 ) -> dict:
     """Per-plant detection counts from a persisted orthomosaic prediction bucket plus plant CSV(s).
+
+    The core the MCP tool ``deliver_orthomosaic_plant_counts`` (no ``project_root``, no
+    ``acknowledgement``: the process-pinned root, never a provisional delivery) and the web
+    results route (a guarded project root, a real breeder acknowledgement) both call. Raises
+    rather than returns an error dict: ``operationalization.OperationalizationRefused`` for an
+    unrecorded, unconfirmed, or
+    since-withdrawn ``per_plant_count_aggregate`` meaning (carrying the check, no counts);
+    ``pipelines.resolution.DeliveryRefused`` for the writer's own gate refusal (carrying the gate,
+    with this call's own counts-bearing facts attached); ``pipelines.resolution.
+    CountDeliveryRefused`` for everything else this door refuses on today (a missing bucket or
+    raster, a conflicting regime, an unregistered or rewritten plant registry, an empty bucket, a
+    raster identity mismatch, a canopy-segment refusal), each carrying the same facts its
+    ``{"error": ...}`` response carried before this refactor.
 
     A prediction bucket here is a directory of prediction documents, not a score bin, held
     immutable once a human reviews it.
@@ -102,9 +119,11 @@ def deliver_orthomosaic_plant_counts(
     from a caller string), reusing the identical ``export_aggregated_csv`` gate every other
     per-plant delivery goes through, not a second implementation of it. A tiled bucket's
     ``tile_size`` gates the same way (the tile edge scales the per-image counts the per-plant
-    value sums). This door takes no acknowledgement: ``export_aggregated_csv`` accepts none, so an
-    unvalidated dimension always refuses here, and a mosaic whose training run reserved no
-    calibration region has no route to a delivered CSV at all until a web door delivers this kind.
+    value sums). ``acknowledgement`` is the breeder's own act of shipping this delivery
+    unvalidated (the web results route's per-plant count export is the one surface that builds
+    one); the MCP tool ``deliver_orthomosaic_plant_counts`` builds none, so an unvalidated
+    dimension always refuses through it, and a mosaic whose training run reserved no calibration
+    region has no route to a delivered CSV through that door alone.
 
     Meaning door: this runs the same per-plant-count-aggregate precondition its nested writer runs,
     and runs it first, before the raster identity is resolved or a single prediction is read. A
@@ -154,21 +173,27 @@ def deliver_orthomosaic_plant_counts(
             attributes by segment containment instead, and no model architecture is prescribed
             for how the boundary itself was produced (a hand trace, an accepted SAM proposal, or
             an accepted bespoke instance-segmentation output all admit the same way).
+        project_root: The project this delivery's meaning-record reads and delivery event belong
+            to, and where ``plant_registry`` is looked up. ``None`` (the MCP tool) resolves
+            against this process's pinned platform root; a web route already holding its own
+            guarded, resolved root passes it explicitly.
+        acknowledgement: The breeder's own act of shipping this delivery unvalidated, or ``None``
+            for an ordinary validated export or the MCP tool, which never builds one.
     """
     from tcip_annotation.json_io import prediction_documents
+    from tcip_mcp.pipelines.resolution import CountDeliveryRefused
     from tcip_mcp.project_paths import resolve_output_path
 
     output_csv_path = str(resolve_output_path(output_csv_path))
     pred_dir = Path(predictions_dir)
     if not pred_dir.is_dir():
-        return {"error": f"predictions_dir not found: {predictions_dir}"}
+        raise CountDeliveryRefused(f"predictions_dir not found: {predictions_dir}")
     if not Path(raster_path).is_file():
-        return {"error": f"raster_path not found: {raster_path}"}
+        raise CountDeliveryRefused(f"raster_path not found: {raster_path}")
     if canopy_subject and nn_tolerance_m is not None:
-        return {"error": (
+        raise CountDeliveryRefused(
             "canopy_subject and nn_tolerance_m are refused together: the segment regime attributes "
-            "by containment, never by nearest-neighbour distance, so it takes no match tolerance"
-        )}
+            "by containment, never by nearest-neighbour distance, so it takes no match tolerance")
 
     from tcip_mcp.pipelines.postprocessing.plant_mapping import (
         load_registry,
@@ -177,24 +202,25 @@ def deliver_orthomosaic_plant_counts(
     )
     from tcip_mcp.project_paths import platform_state_root
 
-    project_root = platform_state_root()
-    registry_record = load_registry(project_root, plant_registry)
+    resolved_project_root = Path(project_root) if project_root is not None else platform_state_root()
+    registry_record = load_registry(resolved_project_root, plant_registry)
     if registry_record is None:
-        return {"error": (
+        raise CountDeliveryRefused(
             f"plant registry not found: {plant_registry!r}; register it with "
-            "register_plant_registry before deliver_orthomosaic_plant_counts reads it")}
+            "register_plant_registry before this door reads it")
     registry_entries = registry_csv_entries(registry_record)
     missing, rewritten_fact, verified_csv_bytes = verify_registry_csv_bytes(registry_entries)
     if missing:
-        return {"error": f"plant CSV(s) not found: {missing}"}
+        raise CountDeliveryRefused(f"plant CSV(s) not found: {missing}")
     if rewritten_fact:
-        return {"error": (
+        raise CountDeliveryRefused(
             f"{rewritten_fact}: restore the file's registered bytes, or register the current "
-            "file under a new registry name and deliver under that name")}
+            "file under a new registry name and deliver under that name")
     plant_csv_paths = [e["path"] for e in registry_entries]
 
     from tcip_mcp.operationalization import (
         PER_PLANT_COUNT_AGGREGATE,
+        OperationalizationRefused,
         check_operationalization,
         resolve_trait_and_record,
         resolve_trait_for_phenotype,
@@ -203,20 +229,21 @@ def deliver_orthomosaic_plant_counts(
 
     # First refusal in this body: how a number was attributed says nothing until it has a meaning.
     try:
-        trait = resolve_trait_for_phenotype(delivered_phenotype)
-        spec, record, _specs_dir = resolve_trait_and_record(trait, PER_PLANT_COUNT_AGGREGATE)
+        trait = resolve_trait_for_phenotype(delivered_phenotype, project_root=resolved_project_root)
+        spec, record, _specs_dir = resolve_trait_and_record(
+            trait, PER_PLANT_COUNT_AGGREGATE, project_root=resolved_project_root)
     except (TraitUnknownError, ValueError) as exc:
-        return {"error": str(exc)}
+        raise CountDeliveryRefused(str(exc)) from exc
     # This door never delivers a crossing kind, so it has no registry to check a positive class against.
     stated = check_operationalization(
         spec, record, PER_PLANT_COUNT_AGGREGATE, delivered_phenotype=delivered_phenotype,
         value_keys=[_PER_PLANT_VALUE_KEY], registry=None)
     if not stated.ok:
-        return {"error": stated.message}
+        raise OperationalizationRefused(stated)
 
     pred_files = prediction_documents(pred_dir)
     if not pred_files:
-        return {"error": f"no prediction file(s) found in {predictions_dir}"}
+        raise CountDeliveryRefused(f"no prediction file(s) found in {predictions_dir}")
 
     from tcip_mcp.pipelines.raster_source import georeferenced_raster_identity_mismatch
     from tcip_mcp.pipelines.resolution import read_operating_point_sidecar
@@ -224,23 +251,21 @@ def deliver_orthomosaic_plant_counts(
     sidecar = read_operating_point_sidecar(predictions_dir) or {}
     recorded_identity = sidecar.get("raster_content_identity")
     if recorded_identity is None:
-        return {"error": (
+        raise CountDeliveryRefused(
             f"delivery refused: the bucket at {predictions_dir} records no raster content "
             "identity, so there is nothing to check raster_path against. Every count this "
             "delivery writes is attributed to a plant through the supplied raster's own "
             "georeferencing, so the bucket must carry the identity of the raster it was produced "
             "on: produce it with run_inference's raster_path regime, which records that "
-            "identity into the bucket's operating_point.json."
-        )}
+            "identity into the bucket's operating_point.json.")
     try:
         identity_mismatch = georeferenced_raster_identity_mismatch(recorded_identity, raster_path)
     except ValueError as exc:
-        return {"error": f"delivery refused: {exc}"}
+        raise CountDeliveryRefused(f"delivery refused: {exc}") from exc
     if identity_mismatch is not None:
-        return {"error": (
+        raise CountDeliveryRefused(
             f"delivery refused: {raster_path} is not the raster the bucket at {predictions_dir} "
-            f"was produced on. {identity_mismatch}"
-        )}
+            f"was produced on. {identity_mismatch}")
 
     document_bytes: bytes = b""
     document_path: Path | None = None
@@ -255,45 +280,41 @@ def deliver_orthomosaic_plant_counts(
 
         raster_dataset_root = dataset_root_of(Path(raster_path))
         if raster_dataset_root is None:
-            return {"error": (
+            raise CountDeliveryRefused(
                 f"canopy_subject delivery refused: {raster_path} does not lie under a "
                 "registered dataset's images/ tree; copy the verified raster to its ingested "
                 "position under the bucket's dataset (the identity is content-based, so the "
-                "tiled pass is not re-run)"
-            )}
+                "tiled pass is not re-run)")
         try:
             raster_dataset_identity = require_dataset_identity(raster_dataset_root)
         except ValueError as exc:
-            return {"error": f"canopy_subject delivery refused: {exc}"}
+            raise CountDeliveryRefused(f"canopy_subject delivery refused: {exc}") from exc
 
         bucket_dataset_root = dataset_root_of(pred_dir)
         if bucket_dataset_root is None:
-            return {"error": (
+            raise CountDeliveryRefused(
                 f"canopy_subject delivery refused: {predictions_dir} does not lie under a "
                 "registered dataset's predictions/ tree; the canopy document is resolved "
-                "relative to the bucket's own registered dataset"
-            )}
+                "relative to the bucket's own registered dataset")
         try:
             bucket_dataset_identity = require_dataset_identity(bucket_dataset_root)
         except ValueError as exc:
-            return {"error": f"canopy_subject delivery refused: {exc}"}
+            raise CountDeliveryRefused(f"canopy_subject delivery refused: {exc}") from exc
 
         if raster_dataset_identity["id"] != bucket_dataset_identity["id"]:
-            return {"error": (
+            raise CountDeliveryRefused(
                 f"canopy_subject delivery refused: {raster_path} lies under dataset "
                 f"{raster_dataset_root} (id {raster_dataset_identity['id']!r}), a different "
                 f"dataset than the bucket at {predictions_dir} (under {bucket_dataset_root}, "
                 f"id {bucket_dataset_identity['id']!r}); copy the verified raster to its "
-                "ingested position under the bucket's dataset"
-            )}
+                "ingested position under the bucket's dataset")
 
         document_path = annotation_path_for_image(raster_path)
         if not document_path.is_file():
-            return {"error": (
+            raise CountDeliveryRefused(
                 f"canopy_subject delivery refused: no label document at {document_path} for "
                 f"raster {raster_path}; author the canopy boundaries for subject "
-                f"{canopy_subject!r} there first"
-            )}
+                f"{canopy_subject!r} there first")
         document_bytes = document_path.read_bytes()
         try:
             segments = load_canopy_segments(
@@ -301,7 +322,7 @@ def deliver_orthomosaic_plant_counts(
                 raster_identity=recorded_identity,
             )
         except CanopySegmentRefusal as exc:
-            return {"error": f"canopy_subject delivery refused: {exc}"}
+            raise CountDeliveryRefused(f"canopy_subject delivery refused: {exc}") from exc
 
     from tcip_annotation.json_io import UnreadableLabelDocument, detection_annotations
     from tcip_annotation.state import bbox_of
@@ -313,7 +334,7 @@ def deliver_orthomosaic_plant_counts(
                 b = bbox_of(a.geometry)
                 boxes.append([b.x1, b.y1, b.x2, b.y2])
     except UnreadableLabelDocument as exc:
-        return {"error": str(exc)}
+        raise CountDeliveryRefused(str(exc)) from exc
     detections = {"boxes": boxes}
 
     from tcip_mcp.pipelines.postprocessing.orthomosaic_mapping import (
@@ -330,7 +351,7 @@ def deliver_orthomosaic_plant_counts(
     try:
         georef = OrthomosaicGeoreference.from_file(raster_path)
     except (GeoreferencingError, RotatedRasterError) as exc:
-        return {"error": str(exc)}
+        raise CountDeliveryRefused(str(exc)) from exc
 
     # Parsed from the bytes verify_registry_csv_bytes already read and hashed, never a second open.
     plants = [
@@ -339,7 +360,7 @@ def deliver_orthomosaic_plant_counts(
         for plant in read_plant_csv_bytes(verified_csv_bytes[entry["path"]])
     ]
     if not plants:
-        return {"error": f"no georeferenced plants parsed from {plant_csv_paths}"}
+        raise CountDeliveryRefused(f"no georeferenced plants parsed from {plant_csv_paths}")
 
     width, height = int(recorded_identity["width"]), int(recorded_identity["height"])
     in_frame_plants, outside_plants = plants_in_frame(plants, georef, width=width, height=height)
@@ -354,7 +375,7 @@ def deliver_orthomosaic_plant_counts(
         try:
             tie = tie_segments_to_plants(segments, plants, georef, width=width, height=height)
         except ValueError as exc:
-            return {"error": f"canopy_subject delivery refused: {exc}"}
+            raise CountDeliveryRefused(f"canopy_subject delivery refused: {exc}") from exc
 
         assignments = assign_detections_to_segments(detections, tie)
         ambiguous_segment_indices = {
@@ -403,7 +424,7 @@ def deliver_orthomosaic_plant_counts(
         ]
         plant_mapping_disclosure = {
             "plant_registry": {"name": registry_record["name"], "digest": registry_record["digest"]},
-            "project_root": str(project_root),
+            "project_root": str(resolved_project_root),
             "raster_identity": recorded_identity,
             "canopy_segments": canopy_segments_doc,
             "segment_ties": segment_ties_disclosure,
@@ -428,10 +449,9 @@ def deliver_orthomosaic_plant_counts(
         }
     else:
         if not in_frame_plants:
-            return {"error": (
+            raise CountDeliveryRefused(
                 f"no registered plant lies inside this raster's frame ({raster_path}); every "
-                f"plant in {plant_csv_paths} projects outside it"
-            )}
+                f"plant in {plant_csv_paths} projects outside it")
         resolved_tolerance = resolve_nn_tolerance_m(in_frame_plants, nn_tolerance_m)
         assignments = assign_detections_to_plants(
             detections, georef, in_frame_plants, nn_tolerance_m=resolved_tolerance["value"])
@@ -457,7 +477,7 @@ def deliver_orthomosaic_plant_counts(
         # the raster identity and the tolerance instead.
         plant_mapping_disclosure = {
             "plant_registry": {"name": registry_record["name"], "digest": registry_record["digest"]},
-            "project_root": str(project_root),
+            "project_root": str(resolved_project_root),
             "raster_identity": recorded_identity,
             "nn_tolerance_m": resolved_tolerance,
             "detections_unattributed": n_unmapped,
@@ -477,38 +497,42 @@ def deliver_orthomosaic_plant_counts(
     # The raw asserted identity; export_aggregated_csv's own delivered_tail corroborates it.
     provenance = {"producer_model_sha256": sidecar.get("checkpoint_sha256"),
                  "producing_experiment_id": sidecar.get("experiment_id")}
+    counts_facts = {
+        "n_detections": len(assignments), "n_mapped": n_mapped, "n_unmapped": n_unmapped,
+    }
 
     try:
-        csv_path, tail = export_aggregated_csv(
+        csv_path, tail, event_recorded = export_aggregated_csv(
             agg, output_csv_path, delivered_phenotype=delivered_phenotype, crop=crop,
             pipeline_version=pipeline_version, provenance=provenance,
             pred_dirs=[predictions_dir],
             door="deliver_orthomosaic_plant_counts",
             plant_mapping=plant_mapping_disclosure,
+            acknowledgement=acknowledgement, project_root=resolved_project_root,
         )
     except DeliveryRefused as exc:
         # operating_point_validated is the operating_point dimension's own cleared reference;
         # unvalidated_dimensions names every refusing dimension (claim_scope and scale included).
-        refusal = {
-            "error": (
-                f"{exc}. Calibrate the operating point (or the tile geometry) that produced this "
-                "bucket and re-run; a mosaic whose training run reserved no calibration region "
-                "has no route to a delivered CSV today."
-            ),
+        exc.facts = {
             "operating_point_validated": exc.gate.stamp.get("operating_point", VALIDATED_FALSE),
             "unvalidated_dimensions": exc.gate.unvalidated_cell(),
-            "n_detections": len(assignments), "n_mapped": n_mapped,
-            "n_unmapped": n_unmapped,
+            **counts_facts,
         }
         if "tile_size" in exc.gate.stamp:
-            refusal["tile_size_validated"] = exc.gate.stamp["tile_size"]
-        return refusal
+            exc.facts["tile_size_validated"] = exc.gate.stamp["tile_size"]
+        raise
     except ValueError as exc:
+        # Distinguishes a withdrawn confirmation (still_stated fails too) from any other refusal.
+        spec_now, record_now, _ = resolve_trait_and_record(
+            trait, PER_PLANT_COUNT_AGGREGATE, project_root=resolved_project_root)
+        still_stated = check_operationalization(
+            spec_now, record_now, PER_PLANT_COUNT_AGGREGATE, delivered_phenotype=delivered_phenotype,
+            value_keys=[_PER_PLANT_VALUE_KEY], registry=None, basis=stated.basis)
+        if not still_stated.ok:
+            raise OperationalizationRefused(still_stated) from exc
         # aggregation.py's own refusal already names the failing bucket and why, through the same
         # binding_notes_text helper this door's own (identically-scoped) recon would just repeat.
-        return {"error": str(exc),
-                "n_detections": len(assignments), "n_mapped": n_mapped,
-                "n_unmapped": n_unmapped}
+        raise CountDeliveryRefused(str(exc), **counts_facts) from exc
 
     # export_aggregated_csv already recorded the delivery event under this door's own name; this
     # door does not record a second event for the one CSV it just wrote.
@@ -516,13 +540,66 @@ def deliver_orthomosaic_plant_counts(
         "csv_path": csv_path,
         "n_plants": len(agg),
         "n_plants_zero_count": sum(1 for r in agg if r.get("value") == 0),
-        "n_detections": len(assignments),
-        "n_mapped": n_mapped,
-        "n_unmapped": n_unmapped,
+        **counts_facts,
         "operating_point_validated": tail["operating_point_validated"],
         "unvalidated_dimensions": tail["unvalidated_dimensions"],
+        "acknowledged_by": tail["acknowledged_by"],
         "checkpoint_sha256": tail["producer_model_sha256"],
         "producing_experiment_id": tail["producing_experiment_id"],
         "validation_record": tail["validation_record"],
+        "delivery_event_recorded": event_recorded,
         **extra_response_fields,
     }
+
+
+@mcp.tool()
+@audited
+def deliver_orthomosaic_plant_counts(
+    predictions_dir: str,
+    raster_path: str,
+    plant_registry: str,
+    output_csv_path: str,
+    delivered_phenotype: str,
+    crop: str = "",
+    pipeline_version: str = "",
+    nn_tolerance_m: float | None = None,
+    canopy_subject: str = "",
+) -> dict:
+    """Per-plant detection counts from a persisted orthomosaic prediction bucket plus plant CSV(s).
+
+    The MCP door over :func:`orthomosaic_plant_counts`, which carries the full contract (the
+    nearest-neighbour and canopy-segment regimes, the raster-identity check, the delivery gate,
+    the meaning door, and every response field); read that function's docstring for the complete
+    picture. This door passes no ``project_root`` (the process-pinned platform root) and builds no
+    ``acknowledgement``, so an unvalidated delivery always refuses here; the web results route's
+    count export is the one surface that can acknowledge and ship this kind unvalidated.
+
+    Returns the core's own response dict unchanged on success. On refusal, returns
+    ``{"error": ..., **facts}``: the meaning door's own message with no facts
+    (``OperationalizationRefused``), the delivery gate's refusal with
+    ``operating_point_validated``/``unvalidated_dimensions``/``n_detections``/``n_mapped``/
+    ``n_unmapped`` (``DeliveryRefused``, its own message naming the calibration remedy and the
+    Results tab's count export), or every other refusal this door raises on, with whatever facts
+    it had in hand (``CountDeliveryRefused``).
+    """
+    from tcip_mcp.operationalization import OperationalizationRefused
+    from tcip_mcp.pipelines.resolution import CountDeliveryRefused, DeliveryRefused
+
+    try:
+        return orthomosaic_plant_counts(
+            predictions_dir, raster_path, plant_registry, output_csv_path, delivered_phenotype,
+            crop=crop, pipeline_version=pipeline_version, nn_tolerance_m=nn_tolerance_m,
+            canopy_subject=canopy_subject, project_root=None, acknowledgement=None,
+        )
+    except OperationalizationRefused as exc:
+        return {"error": exc.check.message}
+    except DeliveryRefused as exc:
+        reason = (
+            f"{exc}. Calibrate the operating point (or the tile geometry) that produced this "
+            "bucket and re-run, or acknowledge and re-export through the Results tab's count "
+            "export; a mosaic whose training run reserved no calibration region has no route to "
+            "a delivered CSV through this tool alone."
+        )
+        return {"error": reason, **exc.facts}
+    except CountDeliveryRefused as exc:
+        return {"error": str(exc), **exc.facts}
