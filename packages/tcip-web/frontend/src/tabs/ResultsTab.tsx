@@ -312,6 +312,9 @@ export function ResultsTab() {
   const dataset = useStore((s) => s.gui.dataset);
   const projectRoot = dataset.project_root;
   const datasetRoot = dataset.dataset_root;
+  // An acknowledged export is refused server-side with no user set; read reactively so the
+  // acknowledged-export buttons disable themselves before a breeder types a reason for nothing.
+  const user = useStore((s) => s.user);
 
   const [mappingName, setMappingName] = useState("");
   // Every mapping name already persisted under the open project, for the picker below; a name
@@ -1151,7 +1154,7 @@ export function ResultsTab() {
                         onClick={() => void compute(true)}
                         disabled={loading}
                       >
-                        Show provisional numbers
+                        Show unvalidated numbers
                       </button>
                       <button
                         className="tcip-btn-primary text-[11px] self-start"
@@ -1169,9 +1172,8 @@ export function ResultsTab() {
                 {provisional && (
                   <div className="text-[11px] text-tcip-fp border border-tcip-fp/40 rounded p-2 flex flex-col gap-2">
                     <div>
-                      Provisional: unvalidated dimensions {unvalidatedDims.join(", ") || "unknown"}.
-                      Calibrate to deliver a validated phenotype, or acknowledge and export it
-                      unvalidated below.
+                      Unvalidated dimensions {unvalidatedDims.join(", ") || "unknown"}. Calibrate to
+                      deliver a validated phenotype, or acknowledge and export it unvalidated below.
                     </div>
                     <button
                       className="tcip-btn-primary text-[11px] self-start"
@@ -1241,6 +1243,12 @@ export function ResultsTab() {
                   </div>
                 ) : (
                   <div className="flex flex-col gap-1">
+                    {!user.trim() && (
+                      <div className="text-[11px] text-tcip-fp">
+                        Set your name on the workspace page before delivering an acknowledged
+                        export: a server identity is never written as a breeder's name.
+                      </div>
+                    )}
                     <input
                       className="tcip-input text-[11px]"
                       placeholder="Reason for delivering unvalidated"
@@ -1251,14 +1259,20 @@ export function ResultsTab() {
                       <button
                         className="tcip-btn flex-1 text-[11px]"
                         onClick={downloadCurvesCsv}
-                        disabled={curves.length === 0 || !ackReason.trim()}
+                        disabled={curves.length === 0 || !ackReason.trim() || !user.trim()}
+                        title={
+                          !user.trim() ? "set your name on the workspace page first" : undefined
+                        }
                       >
                         Curves CSV
                       </button>
                       <button
                         className="tcip-btn flex-1 text-[11px]"
                         onClick={downloadOnsetCsv}
-                        disabled={onset.length === 0 || !ackReason.trim()}
+                        disabled={onset.length === 0 || !ackReason.trim() || !user.trim()}
+                        title={
+                          !user.trim() ? "set your name on the workspace page first" : undefined
+                        }
                       >
                         Milestones CSV
                       </button>
@@ -1369,9 +1383,9 @@ export function ResultsTab() {
                               // a phenology date beside a plain "valid" would be an unearned precision claim.
                               <span
                                 className="text-tcip-fp"
-                                title="Coverage is complete, but the operating point behind these dates is not validated on disk: provisional, not a deliverable phenotype."
+                                title="Coverage is complete, but the operating point behind these dates is not validated on disk: unvalidated, not a deliverable phenotype."
                               >
-                                provisional
+                                unvalidated
                               </span>
                             ) : rowValid ? (
                               <span className="text-tcip-muted">valid</span>

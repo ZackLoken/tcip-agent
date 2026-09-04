@@ -278,10 +278,11 @@ describe("ResultsTab evidence gate", () => {
     expect(
       await screen.findByRole("button", { name: /ask the agent to calibrate this/i }),
     ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /show provisional numbers/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /show unvalidated numbers/i })).toBeInTheDocument();
   });
 
-  it("replaces the disabled export with an acknowledge-and-export flow while provisional", async () => {
+  it("replaces the disabled export with an acknowledge-and-export flow while unvalidated", async () => {
+    useStore.setState({ user: "breeder" });
     mockTree();
     vi.spyOn(resultsApi, "phenologyMeasurement").mockResolvedValue({
       curves: { rows: [CURVE_ROW], n_plants: 1, positive_class_id: 1 },
@@ -296,7 +297,7 @@ describe("ResultsTab evidence gate", () => {
     expect(screen.queryByRole("button", { name: /curves csv/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /milestones csv/i })).not.toBeInTheDocument();
     // The row itself has to say so too; the banner explaining it scrolls out of view.
-    expect(screen.getByText("provisional")).toBeInTheDocument();
+    expect(screen.getByText("unvalidated")).toBeInTheDocument();
     expect(screen.queryByText("valid")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: /acknowledge and export/i }));
@@ -311,6 +312,27 @@ describe("ResultsTab evidence gate", () => {
     expect(downloadCsv.mock.calls[0][0].acknowledgement).toEqual({
       reason: "calibration is not ready yet",
     });
+  });
+
+  it("disables the acknowledged-export buttons with a stated reason when no user is set", async () => {
+    mockTree();
+    vi.spyOn(resultsApi, "phenologyMeasurement").mockResolvedValue({
+      curves: { rows: [CURVE_ROW], n_plants: 1, positive_class_id: 1 },
+      milestones: { rows: [ONSET_ROW] },
+      ...UNVALIDATED,
+    });
+
+    await renderAndCompute();
+    await waitFor(() => expect(screen.getByText("P1")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("button", { name: /acknowledge and export/i }));
+    fireEvent.change(screen.getByPlaceholderText(/reason for delivering unvalidated/i), {
+      target: { value: "calibration is not ready yet" },
+    });
+
+    expect(screen.getByText(/set your name on the workspace page/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /curves csv/i })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /milestones csv/i })).toBeDisabled();
   });
 
   it("opens both CSV doors once the same rows arrive on validated evidence", async () => {
@@ -742,7 +764,7 @@ describe("ResultsTab operationalization records", () => {
       screen.queryByRole("button", { name: /ask the agent to calibrate this/i }),
     ).not.toBeInTheDocument();
     expect(
-      screen.queryByRole("button", { name: /show provisional numbers/i }),
+      screen.queryByRole("button", { name: /show unvalidated numbers/i }),
     ).not.toBeInTheDocument();
   });
 
