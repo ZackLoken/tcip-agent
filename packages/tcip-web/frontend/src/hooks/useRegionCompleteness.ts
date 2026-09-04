@@ -38,7 +38,7 @@ export interface RegionCompleteness {
   /** Cells attested complete for the active subject on the current grid but now stale. */
   activeStale: ReadonlySet<string>;
   /** The active subject's scale provenance per attested cell, on the current grid; empty for a
-   *  cell attested before this field existed or on a record that predates it entirely. */
+   *  cell attested before this field existed. */
   activeCellsAttestedView: Readonly<Record<string, CellAttestedView>>;
   /** Cells attested complete for another subject on the current grid, stale ones excluded. */
   otherComplete: ReadonlySet<string>;
@@ -148,7 +148,7 @@ export function useRegionCompleteness(args: {
   );
 
   const activeCellsAttestedView = useMemo(
-    () => (activeOnGrid && activeRecord ? (activeRecord.cells_attested_view ?? {}) : {}),
+    () => (activeOnGrid && activeRecord ? activeRecord.cells_attested_view : {}),
     [activeRecord, activeOnGrid],
   );
 

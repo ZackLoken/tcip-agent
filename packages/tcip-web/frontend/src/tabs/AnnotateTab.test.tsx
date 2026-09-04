@@ -1378,6 +1378,7 @@ describe("AnnotateTab completeness refresh and attestation control", () => {
         date: "2026-01-01",
         subject: "subject_a",
         stale_cells: [],
+        cells_attested_view: {},
       },
     });
     expect(screen.getByRole("button", { name: "Unattest A1 for subject_a" })).toBeInTheDocument();
@@ -1394,6 +1395,7 @@ describe("AnnotateTab completeness refresh and attestation control", () => {
         date: "2026-01-01",
         subject: "subject_a",
         stale_cells: ["A1"],
+        cells_attested_view: {},
       },
     });
     expect(
@@ -1417,6 +1419,7 @@ describe("AnnotateTab completeness refresh and attestation control", () => {
           date: "2026-01-01",
           subject: "subject_a",
           stale_cells: [],
+          cells_attested_view: {},
         },
       },
       annotation_counts: { subject_a: { A1: 2 }, subject_b: { A1: 5 } },
