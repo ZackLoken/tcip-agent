@@ -124,7 +124,7 @@ def test_a_dataset_registered_to_a_workspace_project_is_admitted_wherever_it_liv
     with pytest.raises(ValueError):
         assert_path_allowed(str(external / "images"))
     upsert_dataset(project, {"id": "ds-1", "path": str(external), "crop": "hazelnut",
-                             "fingerprint": "f"})
+                             "fingerprint": "v1:f"})
     assert assert_path_allowed(str(external / "images")) == (external / "images").resolve()
 
 
@@ -466,7 +466,7 @@ def test_a_delivery_from_a_dataset_registered_to_the_open_project_is_admitted(
     assert "does not belong to project" in refused.json()["detail"]
 
     upsert_dataset(tmp_path, {"id": "ds-1", "path": str(copied), "crop": "hazelnut",
-                              "fingerprint": "f"})
+                              "fingerprint": "v1:f"})
     resp = client.post("/api/results/phenology_measurement", json=relocated)
     assert resp.status_code not in (403, 409), resp.text
 

@@ -940,7 +940,7 @@ def test_concurrent_registrations_both_survive_in_the_registry(tmp_path: Path):
     def register(name: str) -> None:
         try:
             upsert_dataset(project, {"id": _BarrierId(name), "path": str(tmp_path / name),
-                                     "crop": "hazelnut", "fingerprint": name})
+                                     "crop": "hazelnut", "fingerprint": f"v1:{name}"})
         except BaseException as exc:  # recorded, never swallowed into a passing test
             failures.append(exc)
 

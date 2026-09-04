@@ -8,6 +8,12 @@ dataset found at a new path but with the same fingerprint reads as moved, not ch
 
 A dedicated script rather than folded into the ``@audited`` read tools: recomputing touches every
 image on disk, which a read tool must not do.
+
+``require_dataset_identity`` and ``read_datasets`` refuse a bare pre-prefix fingerprint rather
+than serve it as a dataset's current identity; this script's own FORMULA-UNRECORDED and
+MOVED-FORMULA-UNRECORDED outcomes exist to report exactly that condition, a diagnostic rather
+than a delivered result, so it reads through the raw counterparts
+(``read_dataset_identity_document``, ``read_datasets_raw``) instead.
 """
 
 from __future__ import annotations
@@ -19,13 +25,13 @@ from pathlib import Path
 
 from tcip_store import SchemaVersionRefused
 
-from tcip_mcp.dataset_layout import require_dataset_identity
+from tcip_mcp.dataset_layout import read_dataset_identity_document
 from tcip_mcp.pipelines.data.dataset_fingerprint import (
     FINGERPRINT_FORMULA_VERSION,
     dataset_fingerprint,
     fingerprint_formula_version,
 )
-from tcip_mcp.tools.project_tools import dataset_entry_path, read_datasets
+from tcip_mcp.tools.project_tools import dataset_entry_path, read_datasets_raw
 
 
 def main() -> int:
@@ -51,7 +57,7 @@ def main() -> int:
         return 0
 
     try:
-        identity = require_dataset_identity(root)
+        identity = read_dataset_identity_document(root)
     except SchemaVersionRefused as exc:
         print(f"VERSION-REFUSED: {exc}")
         return 5
@@ -81,7 +87,7 @@ def main() -> int:
     # Moved: the project registry knows this id at a different path, by identity rather than a
     # stored-versus-passed spelling. Formula-aware: never bare string equality across formulas.
     project = args.project or root
-    regs = read_datasets(project)
+    regs = read_datasets_raw(project)
     same_id = [r for r in regs if r.get("id") == ds_id]
     for r in same_id:
         entry_path = dataset_entry_path(project, r)
