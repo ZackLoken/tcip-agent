@@ -70,6 +70,7 @@ MERGED = [
     ("list_training_runs", "list_experiments"),
     ("list_registered_models", "rank_registered_models"),
     ("stage_accepted_proposals", "stage_proposals"),
+    ("export_predictions", "run_inference"),
 ]
 
 # A demotion folded into a script with no single surviving door gets the same whole-tree sweep a
