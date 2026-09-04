@@ -109,6 +109,12 @@
       "schema_version": 1,
       "cannot_carry_field": null
     },
+    "delivery_supersessions": {
+      "kind": "record",
+      "frozen": true,
+      "schema_version": 1,
+      "cannot_carry_field": null
+    },
     "evaluation_results": {
       "kind": "record",
       "frozen": true,
@@ -272,6 +278,12 @@
       "cannot_carry_field": null
     },
     "plant_mapping": {
+      "kind": "record",
+      "frozen": true,
+      "schema_version": 1,
+      "cannot_carry_field": null
+    },
+    "plant_registries": {
       "kind": "record",
       "frozen": true,
       "schema_version": 1,

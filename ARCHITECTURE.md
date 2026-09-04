@@ -62,7 +62,7 @@ source file under a covered root that no row names.
 | packages/tcip-mcp/src/tcip_mcp/__init__.py | TCIP MCP Server: domain tools for the phenotyping platform. | 0 | 0 |
 | packages/tcip-mcp/src/tcip_mcp/__main__.py | Entry point: ``python -m tcip_mcp``. | 1 | 0 |
 | packages/tcip-mcp/src/tcip_mcp/agent_identity.py | Which agent harness this MCP server process serves, declared at the handshake, and the session it minted; projected onto every audit line, statement record and HTTP push. | 0 | 7 |
-| packages/tcip-mcp/src/tcip_mcp/audit.py | Audit logging decorator for MCP tools, the log each event's scope routes it to, and the refusal a call raises when its own entry cannot be appended. | 5 | 33 |
+| packages/tcip-mcp/src/tcip_mcp/audit.py | Audit logging decorator for MCP tools, the log each event's scope routes it to, and the refusal a call raises when its own entry cannot be appended. | 5 | 35 |
 | packages/tcip-mcp/src/tcip_mcp/class_registry.py | The dataset's class registry, subjects, their attributes, and the deterministic name→id assignment a training run uses (and records, so predictions stay decodable). | 2 | 12 |
 | packages/tcip-mcp/src/tcip_mcp/dataset_layout.py | Canonical dataset-layout resolver: the single source of truth for where an image's ground-truth labels and model predictions live on disk. | 6 | 43 |
 | packages/tcip-mcp/src/tcip_mcp/experiments.py | Experiment tracking for ML training runs. | 11 | 18 |
@@ -95,7 +95,7 @@ source file under a covered root that no row names.
 | packages/tcip-mcp/src/tcip_mcp/pipelines/data/split_construction.py | Constructing and persisting training splits from a data config, beside ``splits.py``. | 15 | 3 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/data/splits.py | Group-aware, annotation-stratified train/val splitting. | 7 | 18 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/data/tiling.py | Sliding-window tiling geometry for small-object detection (SAHI-style). | 0 | 7 |
-| packages/tcip-mcp/src/tcip_mcp/pipelines/delivery_events_schema.py | The `delivery_events` record's declared shape, so its writer (`resolution.py`'s `record_delivery_binding_event`) and its readers (`tcip_web`'s `list_delivery_events` route, `scripts/conform_delivery_events.py`) agree on one shape rather than each independently tolerating whatever the others happen to have written. | 0 | 3 |
+| packages/tcip-mcp/src/tcip_mcp/pipelines/delivery_events_schema.py | The `delivery_events` record's declared shape, so its writer (`resolution.py`'s `record_delivery_binding_event`) and its readers (`tcip_web`'s `list_delivery_events` route, `scripts/conform_delivery_events.py`) agree on one shape rather than each independently tolerating whatever the others happen to have written. | 0 | 4 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/derivations.py | Tier-A data/model derivations, read the artifact in hand, compute the value. | 8 | 11 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/display_bounds.py | Pixel bounds for what the platform serves to a screen or writes as an agent-facing artifact. | 0 | 4 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/feedback/__init__.py | Review -> retrain feedback: materialize curated datasets (W5) and reconstruct a review-confirmed calibration reference from review verdicts (W1). | 1 | 1 |
@@ -119,12 +119,12 @@ source file under a covered root that no row names.
 | packages/tcip-mcp/src/tcip_mcp/pipelines/postprocessing/export.py | CSV export for per-plant phenotyping results. | 7 | 2 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/postprocessing/orthomosaic_mapping.py | Georeferencing for a whole-mosaic GeoTIFF. | 1 | 5 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/postprocessing/phenology.py | Canonical phenology measurement, the one implementation of a trait's positive-fraction milestones. | 4 | 4 |
-| packages/tcip-mcp/src/tcip_mcp/pipelines/postprocessing/plant_mapping.py | Plant-ID mapping across image capture dates. | 9 | 12 |
+| packages/tcip-mcp/src/tcip_mcp/pipelines/postprocessing/plant_mapping.py | Plant-ID mapping across image capture dates. | 10 | 13 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/proposal.py | Annotation-proposal engines: a method-neutral seam for auto-labeling. | 2 | 1 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/raster_source.py | Raster reading: one open-and-read surface for every image source this platform decodes. | 4 | 18 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/reference_grid.py | Named reference grid over a raster's native pixel frame. | 3 | 4 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/region_completeness.py | Per-cell content digest for the region-completeness store (:func:`tcip_mcp.dataset_layout.region_completeness_path`): detects an annotation edited or deleted inside an attested cell after attestation. | 6 | 3 |
-| packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py | Runtime parameter resolution, the "derive, don't pin" currency. | 9 | 36 |
+| packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py | Runtime parameter resolution, the "derive, don't pin" currency. | 9 | 38 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/schemas.py | Pydantic v2 config schemas for structural/type validation. | 0 | 3 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/training/__init__.py | Training pipeline: trainer, progressive unfreezing, HPO. | 0 | 0 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/training/collation.py | Collate functions for a task's ``DataLoader``: batches per-sample pairs into the shape ``train()`` and ``evaluate()`` both expect. | 0 | 5 |
@@ -142,7 +142,7 @@ source file under a covered root that no row names.
 | packages/tcip-mcp/src/tcip_mcp/project_record.py | The project record: the one document every project carries, holding its authored site. | 2 | 6 |
 | packages/tcip-mcp/src/tcip_mcp/project_status.py | Per-project status pointer: a small, persisted summary of recent activity. | 2 | 3 |
 | packages/tcip-mcp/src/tcip_mcp/registry_paths.py | The containment core and grammar-aware external test the checkpoint and dataset registries share, plus the resolver every stored registry path becomes an absolute one through. | 0 | 5 |
-| packages/tcip-mcp/src/tcip_mcp/server.py | MCP server entry point: register all domain tools and run on stdio. | 24 | 23 |
+| packages/tcip-mcp/src/tcip_mcp/server.py | MCP server entry point: register all domain tools and run on stdio. | 25 | 24 |
 | packages/tcip-mcp/src/tcip_mcp/statements.py | Comparable-value and content-hash primitives shared by every statement kind. | 0 | 2 |
 | packages/tcip-mcp/src/tcip_mcp/store_catalogue.py | The whole store catalogue in one import: every module that registers a store, package-only so account_for reaches it with no repo root on sys.path. | 34 | 4 |
 | packages/tcip-mcp/src/tcip_mcp/tools/__init__.py | Tool sub-package: each module registers tools with the MCP server. | 0 | 0 |
@@ -150,6 +150,7 @@ source file under a covered root that no row names.
 | packages/tcip-mcp/src/tcip_mcp/tools/bundle.py | The shared membership accounting archive_project and import_project both compose from: derives every root a project tree is or holds and classifies each file into bookkeeping, a claimed record/log, a blob, or unaccounted. | 9 | 1 |
 | packages/tcip-mcp/src/tcip_mcp/tools/calibration_tools.py | Calibration-administration tools: redrawing a locked cal/holdout split, calibrating a scalar (ordinal-rank or continuous-value) trait against a disjoint held-out split, and earning a validated count operating point over an already-published prediction bucket. | 17 | 1 |
 | packages/tcip-mcp/src/tcip_mcp/tools/data_tools.py | Data management tools: census a dataset, split data. | 16 | 11 |
+| packages/tcip-mcp/src/tcip_mcp/tools/delivery_tools.py | Delivery-general tools: doors over the delivery-events record that no one trait or delivery kind owns. | 6 | 1 |
 | packages/tcip-mcp/src/tcip_mcp/tools/experiment_tools.py | Experiment tracking MCP tools: create, log, compare, and trace experiments. | 4 | 2 |
 | packages/tcip-mcp/src/tcip_mcp/tools/feedback_tools.py | Review -> retrain feedback MCP tools. | 15 | 3 |
 | packages/tcip-mcp/src/tcip_mcp/tools/gui_tools.py | GUI-driving tools: push data to a panel, or drive the live Annotate/Review tab to a frame. | 10 | 1 |
@@ -195,9 +196,9 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 
 | Module path | Ownership (one line) | In-repo imports | Imported by |
 |---|---|---|---|
-| packages/tcip-store/src/tcip_store/__init__.py | The storage seam's public surface: keys, errors, store declarations, and the module-level operations. | 6 | 71 |
+| packages/tcip-store/src/tcip_store/__init__.py | The storage seam's public surface: keys, errors, store declarations, and the module-level operations. | 6 | 73 |
 | packages/tcip-store/src/tcip_store/adoption.py | Moving a root's existing record and log files into a database, exclusively and atomically, or refusing before it writes, including the stores a database beside them has never held. | 6 | 3 |
-| packages/tcip-store/src/tcip_store/binding.py | Which backend a process binds at its entry point: the database unless `TCIP_STORE_BACKEND` names the file backend, and a refusal for any other name. | 3 | 36 |
+| packages/tcip-store/src/tcip_store/binding.py | Which backend a process binds at its entry point: the database unless `TCIP_STORE_BACKEND` names the file backend, and a refusal for any other name. | 3 | 37 |
 | packages/tcip-store/src/tcip_store/errors.py | Every typed refusal the seam raises, absence and corruption included. | 1 | 17 |
 | packages/tcip-store/src/tcip_store/export.py | Writing a root's database-held records and logs back out as the file layout, and the per-store counters that say when those files are behind. | 4 | 3 |
 | packages/tcip-store/src/tcip_store/file_backend.py | The filesystem backend: identity to path, atomic replace, file locks, append-only logs, blobs, and the conform rail's refusal of record writes, and of a colliding blob write, to a root a database holds. | 5 | 42 |
@@ -477,6 +478,7 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | scripts/conform_delivery_events.py | Check a project's stored `delivery_events` records against the current `DeliveryEventRecord` shape and name, by event_id, any that no longer validate; rewrites nothing. | 4 | 0 |
 | scripts/conform_metrics_marker.py | Stamp the ``metrics_logged`` marker onto every experiment a root's status record predates. | 3 | 0 |
 | scripts/conform_model_registry_paths.py | Wrap a project's model registry index to schema_version 2 and respell every entry's checkpoint_path relative to its scope root, relocating a moved or replaced checkpoint by content digest. | 3 | 0 |
+| scripts/conform_plant_mapping_records.py | Rewrite one project's stored plant-mapping records from the old `plant_csvs` field to the new `plant_registry` reference, registering the CSV files the old field named under a name the operator states, and add `supersedes: null`. | 5 | 0 |
 | scripts/conform_project_site.py | Write or correct one project's authored site: the record ``initialize_project``/``ingest_images`` themselves cannot reach for a project whose name does not fit the workspace scheme, and the one deliberate overwrite for a site typed wrong once or a record damaged by hand. | 3 | 0 |
 | scripts/conform_registry_experiment_id.py | Conform a project's registry entries to carry ``experiment_id``, for an entry registered before the producer-binding field existed. | 4 | 0 |
 | scripts/conform_view_coverage_viewing.py | Conform a dataset's stored `view_coverage` records to the current `CoverageViewing` shape. | 4 | 0 |
@@ -659,6 +661,7 @@ A module counts as zero-importer when no other module in its own scanned tree re
 | scripts | scripts/conform_delivery_events.py |
 | scripts | scripts/conform_metrics_marker.py |
 | scripts | scripts/conform_model_registry_paths.py |
+| scripts | scripts/conform_plant_mapping_records.py |
 | scripts | scripts/conform_project_site.py |
 | scripts | scripts/conform_registry_experiment_id.py |
 | scripts | scripts/conform_view_coverage_viewing.py |
@@ -819,13 +822,20 @@ Docstring is the function's docstring first line, verbatim.
 |---|---|---|---|
 | `deliver_orthomosaic_plant_counts` | `orthomosaic_tools.py:36` | yes | Per-plant detection counts from a persisted orthomosaic prediction bucket plus plant CSV(s). |
 
-### phenology_tools.py (3 tools)
+### delivery_tools.py (1 tool)
 
 | tool | line | audited | docstring first line |
 |---|---|---|---|
-| `build_plant_mapping` | `phenology_tools.py:31` | yes | Assign each geolocated image to a plant, then persist the mapping under this project. |
-| `calibrate_classifier_operating_point` | `phenology_tools.py:395` | yes | Calibrate and validate the trait's positive-class classifier against held-out GT. |
-| `deliver_phenology_milestones` | `phenology_tools.py:536` | yes | Per-plant phenology milestones from classified predictions + a plant mapping. |  <!-- queued: P5-43 unify -->
+| `supersede_delivery` | `delivery_tools.py:25` | yes | Record that a delivered file's number is withdrawn or replaced, without touching the file |
+
+### phenology_tools.py (4 tools)
+
+| tool | line | audited | docstring first line |
+|---|---|---|---|
+| `register_plant_registry` | `phenology_tools.py:31` | yes | Register a plant-locations CSV set under a name, so `build_plant_mapping` and |
+| `build_plant_mapping` | `phenology_tools.py:102` | yes | Assign each geolocated image to a plant, then persist the mapping under this project. |
+| `calibrate_classifier_operating_point` | `phenology_tools.py:481` | yes | Calibrate and validate the trait's positive-class classifier against held-out GT. |
+| `deliver_phenology_milestones` | `phenology_tools.py:622` | yes | Per-plant phenology milestones from classified predictions + a plant mapping. |  <!-- queued: P5-43 unify -->
 
 ### project_tools.py (5 tools)
 
@@ -1005,20 +1015,20 @@ registered at HEAD.
 
 | method | path | handler | line |
 |---|---|---|---|
-| POST | `/plant_mapping/build` | `build_plant_mapping` | `routes/results.py:177` |
-| POST | `/plant_mapping/load` | `load_plant_mapping` | `routes/results.py:269` |
-| GET | `/plant_mapping/list` | `list_plant_mappings` | `routes/results.py:303` |
-| POST | `/phenology_measurement` | `phenology_measurement` | `routes/results.py:577` |
-| POST | `/export_csv` | `export_csv` | `routes/results.py:633` |
-| GET | `/traits` | `list_traits` | `routes/results.py:1087` |
-| GET | `/operationalization` | `get_operationalization` | `routes/results.py:757` |
-| GET | `/operationalizations` | `list_operationalizations` | `routes/results.py:773` |
-| POST | `/operationalization/confirm` | `confirm_operationalization` | `routes/results.py:811` |
-| GET | `/trait-spec-statement` | `get_trait_spec_statement` | `routes/results.py:913` |
-| GET | `/trait-spec-statements` | `list_trait_spec_statements` | `routes/results.py:929` |
-| POST | `/trait-spec-statement/confirm` | `confirm_trait_spec_statement` | `routes/results.py:971` |
-| GET | `/delivery-events` | `list_delivery_events` | `routes/results.py:1044` |
-| GET | `/models/registered` | `registered_models` | `routes/results.py:1116` |
+| POST | `/plant_mapping/build` | `build_plant_mapping` | `routes/results.py:178` |
+| POST | `/plant_mapping/load` | `load_plant_mapping` | `routes/results.py:288` |
+| GET | `/plant_mapping/list` | `list_plant_mappings` | `routes/results.py:322` |
+| POST | `/phenology_measurement` | `phenology_measurement` | `routes/results.py:596` |
+| POST | `/export_csv` | `export_csv` | `routes/results.py:652` |
+| GET | `/traits` | `list_traits` | `routes/results.py:1115` |
+| GET | `/operationalization` | `get_operationalization` | `routes/results.py:776` |
+| GET | `/operationalizations` | `list_operationalizations` | `routes/results.py:792` |
+| POST | `/operationalization/confirm` | `confirm_operationalization` | `routes/results.py:830` |
+| GET | `/trait-spec-statement` | `get_trait_spec_statement` | `routes/results.py:932` |
+| GET | `/trait-spec-statements` | `list_trait_spec_statements` | `routes/results.py:948` |
+| POST | `/trait-spec-statement/confirm` | `confirm_trait_spec_statement` | `routes/results.py:990` |
+| GET | `/delivery-events` | `list_delivery_events` | `routes/results.py:1063` |
+| GET | `/models/registered` | `registered_models` | `routes/results.py:1144` |
 
 ### routes/review.py, prefix `/api/review` (8 routes)
 
@@ -1168,7 +1178,7 @@ Names not re-exported in `__all__` but importable directly from their defining s
 ## 4. Entry points
 
 `python -m tcip_mcp`: `packages/tcip-mcp/src/tcip_mcp/__main__.py:1-5` imports `main`
-from `tcip_mcp.server` and calls it: `packages/tcip-mcp/src/tcip_mcp/server.py:69`
+from `tcip_mcp.server` and calls it: `packages/tcip-mcp/src/tcip_mcp/server.py:70`
 (`def main()`). `server.py:9` defines `mcp = MCPServer("tcip-pipeline")`, the object every
 `@mcp.tool()` decorator in `packages/tcip-mcp/src/tcip_mcp/tools/*.py` registers against
 (`python scripts/list_tools.py` lists them; the count is never written down, since it drifts).
@@ -2185,7 +2195,7 @@ arguments: dict) -> None:`, which calls `record_event` with the dataset root its
 resolved; `routes/annotate.py:150` does the same for its own dataset, `routes/classes.py:63`
 likewise, the one `routes/inference.py:368` imports and calls rather than defining its own);
 `routes/results.py:151` does the same for a project root instead. Reader:
-`pipelines/postprocessing/plant_mapping.py:1071` (`_require_receipt`)
+`pipelines/postprocessing/plant_mapping.py:1291` (`_require_receipt`)
 trusts only a `plant_mapping_built` entry it finds in the log under the root its caller holds
 (the MCP tool's pinned platform root, the platform log's own file until adoption makes it a
 project's; the web route's guarded project root), scanned by `_scan_receipts`, line 923, which
@@ -2356,7 +2366,7 @@ Phase 3 verdict: single.
 
 Must agree: the MCP registrar and the GUI model pickers read one registry entry shape.
 Side A: `packages/tcip-mcp/src/tcip_mcp/model_registry.py:132` (`def read_registry_index(`, the read path for everything outside the module; `_register_entry`, line 429, replaces one entry by name inside one `tcip_store.transaction` on the key `registry_index_key`, line 116, mints).
-Side B: `packages/tcip-web/src/tcip_web/routes/results.py:1115` (`@router.get("/models/registered")`, serving `model_tools.rank_registered_models`'s listing view) and the browser's one entry declaration, `packages/tcip-web/frontend/src/api/inference.ts:16` (`export interface RegisteredModel {`), held field by field against an entry the real registrar wrote by `tests/test_registry_entry_shape_agreement.py`.
+Side B: `packages/tcip-web/src/tcip_web/routes/results.py:1143` (`@router.get("/models/registered")`, serving `model_tools.rank_registered_models`'s listing view) and the browser's one entry declaration, `packages/tcip-web/frontend/src/api/inference.ts:16` (`export interface RegisteredModel {`), held field by field against an entry the real registrar wrote by `tests/test_registry_entry_shape_agreement.py`.
 Phase 3 verdict: single.
 
 ## S28. operating_point.json prediction-bucket sidecar
@@ -2616,7 +2626,7 @@ Phase 3 verdict: duplicated.
 ## S64. MCP tool registry against documented tool names  <!-- queued: P5-303 unify -->
 
 Must agree: any document naming a tool names one the server actually registers.
-Side A: `packages/tcip-mcp/src/tcip_mcp/server.py:41` (`def list_registered_tools() -> list[str]:`).
+Side A: `packages/tcip-mcp/src/tcip_mcp/server.py:42` (`def list_registered_tools() -> list[str]:`).
 Side B: `scripts/list_tools.py:15` (`from tcip_mcp.server import list_registered_tools`).
 Phase 3 verdict: duplicated.
 
