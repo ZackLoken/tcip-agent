@@ -77,14 +77,15 @@ _ATTESTED_VIEW_CONFORM_HINT = (
 
 
 def _refuse_missing_attested_view(image_name: str, record: dict) -> None:
-    """Refuse a stored region-completeness record that carries no ``cells_attested_view`` key at
-    all: a record written before the key existed, not a record with an empty map (which is the
-    conformed, current shape and reads on)."""
-    if "cells_attested_view" in record:
+    """Refuse a stored region-completeness record whose ``cells_attested_view`` is missing or
+    not a map: a record written before the key existed carries neither, and a record carrying
+    the key with a null value must not read the same as the conformed, current shape (an empty
+    map), which reads on."""
+    if isinstance(record.get("cells_attested_view"), dict):
         return
     raise HTTPException(
         400,
-        f"{image_name}'s stored region-completeness record carries no cells_attested_view key; "
+        f"{image_name}'s stored region-completeness record carries no cells_attested_view map; "
         f"{_ATTESTED_VIEW_CONFORM_HINT}")
 
 

@@ -1331,15 +1331,42 @@ class TestCompletenessRoute:
     def test_get_completeness_serves_a_conformed_record_with_an_empty_attested_view(
         self, client, dated_dataset,
     ):
-        """A record already carrying ``cells_attested_view`` (even an empty map, the conform
-        script's write-forward) reads and attests normally."""
+        """A record whose ``cells_attested_view`` is present but empty -- the shape an unattest
+        leaves it in, and the shape the conform script write-forwards onto a pre-field record --
+        reads and attests normally. Built through the route's own ``_toggle`` producer (attest,
+        unattest, attest again) rather than a hand-built record."""
+        root, path = dated_dataset
+        grid = _grid(client, path, tile_size=64)
+        self._toggle(client, path, grid, "A1", view_scale=0.5)
+        self._toggle(client, path, grid, "A1", complete=False)
+
+        resp = self._toggle(client, path, grid, "B1", complete=True)
+        assert resp.status_code == 200, resp.text
+
+        got = client.get("/api/coverage/completeness", params={"path": path})
+        assert got.status_code == 200, got.text
+        assert got.json()["by_subject"]["catkin"]["cells_complete"] == ["B1"]
+
+        # A further attest still merges into the (now non-empty) map without disturbing it.
+        resp = self._toggle(client, path, grid, "B2", view_scale=0.5)
+        assert resp.status_code == 200, resp.text
+        record = client.get(
+            "/api/coverage/completeness", params={"path": path}).json()["by_subject"]["catkin"]
+        assert set(record["cells_complete"]) == {"B1", "B2"}
+        assert "B2" in record["cells_attested_view"]
+
+    def test_get_completeness_refuses_a_record_whose_cells_attested_view_is_null(
+        self, client, dated_dataset,
+    ):
+        """A record carrying the key with a null value (not a map) must not read the same as an
+        absent key does: ``dict(None)`` in the merge would 500 rather than refuse by name."""
         import tcip_store as ts
 
         from tcip_mcp.dataset_layout import region_completeness_key
 
         root, path = dated_dataset
         grid = _grid(client, path, tile_size=64)
-        conformed_record = {
+        old_record = {
             "grid": _grid_only(grid),
             "cells_complete": ["A1"],
             "attested_by": "user:z",
@@ -1347,22 +1374,18 @@ class TestCompletenessRoute:
             "stem": Path(path).stem,
             "date": "2026-03-01",
             "subject": "catkin",
-            "cells_attested_view": {},
+            "cells_attested_view": None,
         }
         bucket = f"catkin/{Path(path).stem}"
-        ts.replace(
-            region_completeness_key(root), {bucket: conformed_record}, expect=ts.Version.ABSENT)
+        ts.replace(region_completeness_key(root), {bucket: old_record}, expect=ts.Version.ABSENT)
 
         got = client.get("/api/coverage/completeness", params={"path": path})
-        assert got.status_code == 200, got.text
-        assert got.json()["by_subject"]["catkin"]["cells_complete"] == ["A1"]
+        assert got.status_code == 400
+        assert "conform_region_completeness_attested_view.py" in got.json()["detail"]
 
         resp = self._toggle(client, path, grid, "B2", view_scale=0.5)
-        assert resp.status_code == 200, resp.text
-        record = client.get(
-            "/api/coverage/completeness", params={"path": path}).json()["by_subject"]["catkin"]
-        assert set(record["cells_complete"]) == {"A1", "B2"}
-        assert "B2" in record["cells_attested_view"]
+        assert resp.status_code == 400
+        assert "conform_region_completeness_attested_view.py" in resp.json()["detail"]
 
     def test_attest_on_a_new_lattice_returns_and_audits_the_replaced_cells(
         self, client, dated_dataset,

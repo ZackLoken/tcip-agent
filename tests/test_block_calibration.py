@@ -156,7 +156,7 @@ def _attest_regions_complete(root: Path, stem: str, regions: list[list[tuple[int
     bucket = status_bucket(subject, stem)
     store = {bucket: {
         "grid": grid, "cells_complete": covered, "attested_by": "test", "attested_at": "now",
-        "stem": stem, "date": None, "subject": subject,
+        "stem": stem, "date": None, "subject": subject, "cells_attested_view": {},
     }}
     digests = {bucket: {
         c.name: cell_annotation_digest(annotations, subject, c) for c in cells if c.name in covered
