@@ -1086,36 +1086,35 @@ def raster_content_identity(
     read with ``getattr(src, "band_interpretations", None)``, this module's own convention for
     the one GDAL-only attribute (see :class:`GdalSource`), never a refusal condition on its own.
 
-    Raises ``ValueError`` naming the source when the raster genuinely cannot be opened at all
-    (whatever the backend's own open failure was, wrapped uniformly here rather than leaking a
-    backend-specific exception type); never refuses merely for lacking a GDAL-only attribute or a
-    resolvable geotransform, both optional terms here.
+    Raises ``ValueError`` naming the source when the raster genuinely cannot be opened or sampled
+    at all (whatever the backend's own open or read failure was, wrapped uniformly here rather
+    than leaking a backend-specific exception type); never refuses merely for lacking a GDAL-only
+    attribute or a resolvable geotransform, both optional terms here.
     """
     try:
-        src_cm = open_raster(source, num_channels)
+        with open_raster(source, num_channels) as src:
+            windows = sample_windows(
+                src.width, src.height, seed=seed, window_size=window_size, max_windows=max_windows)
+            digest = hashlib.sha256()
+            covered = 0
+            for rect in windows:
+                region = np.ascontiguousarray(src.read_region(rect)[0])
+                digest.update(f"{rect.x0},{rect.y0},{rect.x1},{rect.y1}|".encode("ascii"))
+                digest.update(region.tobytes())
+                covered += rect.width * rect.height
+            fraction = covered / float(src.width * src.height)
+            identity = RasterIdentity(
+                width=int(src.width), height=int(src.height), num_channels=int(src.num_channels),
+                dtype=str(src.dtype), pixel_checksum=digest.hexdigest(), seed=int(seed),
+                window_size=int(window_size), max_windows=int(max_windows),
+                pixel_fraction=float(fraction),
+                band_interpretations=getattr(src, "band_interpretations", None),
+                geotransform=_optional_geotransform(source),
+            )
     except ValueError:
         raise
     except Exception as exc:  # noqa: BLE001, uniformly named as this function's own refusal
-        raise ValueError(f"cannot open raster {source!r} for a content identity: {exc}") from exc
-    with src_cm as src:
-        windows = sample_windows(
-            src.width, src.height, seed=seed, window_size=window_size, max_windows=max_windows)
-        digest = hashlib.sha256()
-        covered = 0
-        for rect in windows:
-            region = np.ascontiguousarray(src.read_region(rect)[0])
-            digest.update(f"{rect.x0},{rect.y0},{rect.x1},{rect.y1}|".encode("ascii"))
-            digest.update(region.tobytes())
-            covered += rect.width * rect.height
-        fraction = covered / float(src.width * src.height)
-        identity = RasterIdentity(
-            width=int(src.width), height=int(src.height), num_channels=int(src.num_channels),
-            dtype=str(src.dtype), pixel_checksum=digest.hexdigest(), seed=int(seed),
-            window_size=int(window_size), max_windows=int(max_windows),
-            pixel_fraction=float(fraction),
-            band_interpretations=getattr(src, "band_interpretations", None),
-            geotransform=_optional_geotransform(source),
-        )
+        raise ValueError(f"cannot open or read raster {source!r} for a content identity: {exc}") from exc
     return identity
 
 

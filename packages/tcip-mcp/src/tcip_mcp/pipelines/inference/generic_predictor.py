@@ -510,8 +510,14 @@ class GenericPredictor:
         windowed-reader source only, the resume seam a raster too large to decode whole needs; see
         that method's own docstring. The whole-decode source never resumes (a plain directory-of-
         images pass writes its files all at the end, unchanged), so a caller of that path leaves
-        both unset.
+        both unset; passing either against a whole-decode source refuses by name rather than
+        silently dropping the resume state the caller thinks it handed over.
         """
+        if not hasattr(source, "read_window") and (prior is not None or progress is not None):
+            raise ValueError(
+                "prior/progress apply only to a windowed-reader source: a whole-decode pass writes "
+                "its files all at once and has no resume seam to feed them into."
+            )
         if hasattr(source, "read_window"):
             if self.task not in _DETECTION_TASKS:
                 raise ValueError(
