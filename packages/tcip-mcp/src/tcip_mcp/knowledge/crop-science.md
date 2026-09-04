@@ -47,7 +47,9 @@ not a single-image reading. Date traits (`catkin_05per_date`, `catkin_50per_date
 `catkin_95per_date`, `catkin_elongation_date`, `pistillate_05per_date`, `bloom_05per_date`,
 `bloom_95per_date`, `fruit_ripe_50per_date`, `burr_drop_date`, `catkin_bloom_date`,
 `leaf_out_05per_date`, `leaf_senescence_95per_date`) require repeated captures
-bracketing the transition. One flight yields no date. The milestone definition and the
+bracketing the transition. One flight yields at most a censored bound (an upper bound when the
+single observation already meets the target, a lower bound when it does not), never a measured
+crossing. The milestone definition and the
 crossing math (elongated-fraction, linear interpolation between visits, per-plant delivery)
 belong to the `phenology` skill; compose it, do not re-derive it here.
 
