@@ -36,22 +36,35 @@ def deliver_per_plant_csv(
     plant_mapping: str = "",
     *,
     pred_dirs: list[str] | None = None,
+    dataset_root: str | None = None,
+    predictions_by_date: dict[str, str] | None = None,
     images_dir: str | None = None,
     scale_capture_id: str | None = None,
 ) -> dict:
     """The general per-plant CSV door: ``aggregate_per_plant``'s own output plus the existing
-    writer, nothing else.
+    writer, over a plant mapping this door resolves and verifies by name rather than trusting.
 
     Every other tool that ships a per-plant CSV (``deliver_orthomosaic_plant_counts``,
     ``deliver_phenology_milestones``) reads its own buckets and its own plant mapping and composes
     them into ``export_aggregated_csv``'s ``results`` shape before calling it; this door is for a
     caller that has already produced that shape by some other composition (a bespoke aggregation
     script, a mapping built by ``build_plant_mapping`` joined against prediction buckets by hand)
-    and has no tool surface to reach the writer from. It reads no bucket, resolves no mapping and
-    recomputes nothing: ``results`` is taken exactly as given, and every check a delivered number
-    has to pass (the meaning door, the evidence gate) is the one ``export_aggregated_csv`` already
-    runs, not a second implementation of either kept in step by hand. The delivered schema is that
+    and has no tool surface to reach the writer from. ``results`` is taken exactly as given: this
+    door never reads a bucket or a mapping to build it, and every check a delivered number has to
+    pass (the meaning door, the evidence gate) is the one ``export_aggregated_csv`` already runs,
+    not a second implementation of either kept in step by hand. The delivered schema is that
     writer's own ``fieldnames`` list and nothing else; this docstring does not repeat it.
+
+    ``plant_mapping``, when named, is a claim about where ``results``' plant identities came from,
+    and a claim the data must positively carry: naming a mapping that is not on record refuses,
+    the way ``deliver_phenology_milestones`` refuses one. When ``dataset_root`` and
+    ``predictions_by_date`` are also given, the named mapping's own recorded inputs are freshly
+    verified against them (``plant_mapping.verify_mapping_inputs``, the same check the phenology
+    doors run), and the resulting disclosure is recorded onto the delivery event, naming the
+    mapping's own digest rather than a bare string a reader cannot check. Without those two
+    arguments there is nothing on disk this door can verify the name against beyond its own
+    existence, so the delivery event carries no mapping disclosure, honestly, rather than one this
+    door never checked.
 
     Args:
         results: ``aggregate_per_plant``'s own output: one dict per plant, each carrying at least
@@ -67,31 +80,63 @@ def deliver_per_plant_csv(
         crop: Crop species name, written into every row's own column.
         pipeline_version: Pipeline identifier, written into every row's own column.
         plant_mapping: The name of the plant mapping (``build_plant_mapping``'s own persisted
-            record) whose assignments gave ``results`` their ``plant_id`` values. Disclosed in this
-            call's own audit line and echoed back in the response so a delivered CSV's plant
-            identities can be traced to the mapping that assigned them; this door does not read,
-            verify or resolve the named mapping itself, since ``results`` is already the aggregated
-            output of it, not a bucket or path this door composes.
-        pred_dirs: The prediction buckets ``results`` came from, so the writer can reconcile each
-            dimension's validity from their own on-disk sidecars rather than floor to unvalidated
-            unconditionally. Omitted or empty has no on-disk validity producer at all, and this door
-            takes no acknowledgement, so an unvalidated delivery always refuses.
+            record) whose assignments gave ``results`` their ``plant_id`` values. Empty (the
+            default) states no claim and is not checked; a non-empty name is resolved through
+            ``plant_mapping.load_mapping`` and refuses by name when no such record exists.
+        pred_dirs: The prediction buckets whose on-disk validity the writer reconciles into this
+            delivery's evidence gate (the same buckets ``results``' own values came from). Omitted
+            or empty has no on-disk validity producer at all, and this door takes no
+            acknowledgement, so an unvalidated delivery always refuses. Derived from
+            ``predictions_by_date``'s own values when omitted and that is given.
+        dataset_root: The dataset ``predictions_by_date`` belongs to, required alongside it to
+            verify ``plant_mapping``'s own recorded inputs; has no effect without a named
+            ``plant_mapping``.
+        predictions_by_date: ``{date: predictions_dir}`` for the buckets this delivery reads,
+            keyed by capture date, so ``plant_mapping``'s own recorded inputs can be freshly
+            verified against them. Optional: a caller that already trusts its own composition
+            outside this door's reach can omit it, at the cost of the delivery event's mapping
+            disclosure.
         images_dir: The buckets' own images directory, required when a result states
             ``scale_document`` alongside ``pred_dirs`` (see ``export_aggregated_csv``).
         scale_capture_id: The capture this delivery's physical scale must match, when the scale is
             capture-scoped.
 
     Returns:
-        A dict carrying ``csv_path``, ``n_plants``, ``plant_mapping`` (echoed back), and the
-        writer's own delivered tail (``operating_point_validated``, ``unvalidated_dimensions``,
-        ``checkpoint_sha256``, ``producing_experiment_id``, ``validation_record``); or
-        ``{"error": ...}`` naming the writer's own refusal, unchanged, when the meaning door or the
-        evidence gate refused.
+        A dict carrying ``csv_path``, ``n_plants``, ``plant_mapping`` (the name, echoed back),
+        ``plant_mapping_record_sha256`` (the resolved record's own digest, blank when no mapping
+        was named), and the writer's own delivered tail (``operating_point_validated``,
+        ``unvalidated_dimensions``, ``checkpoint_sha256``, ``producing_experiment_id``,
+        ``validation_record``); or ``{"error": ...}`` naming the refusal, unchanged from
+        ``export_aggregated_csv`` or from the mapping's own resolution/verification.
     """
+    from tcip_mcp.pipelines.postprocessing import plant_mapping as plant_mapping_pipeline
     from tcip_mcp.pipelines.postprocessing.aggregation import export_aggregated_csv
     from tcip_mcp.pipelines.resolution import VALIDATED_FALSE, DeliveryRefused
-    from tcip_mcp.project_paths import resolve_output_path
+    from tcip_mcp.project_paths import platform_state_root, resolve_output_path
     from tcip_mcp.traits import TraitUnknownError
+
+    mapping_build = None
+    if plant_mapping:
+        mapping_build = plant_mapping_pipeline.load_mapping(platform_state_root(), plant_mapping)
+        if mapping_build is None:
+            return {"error": (
+                f"mapping not found: {plant_mapping!r}; build one with build_plant_mapping "
+                "before delivering a CSV whose plant identities it produced")}
+
+    mapping_disclosure = None
+    if mapping_build is not None and predictions_by_date is not None:
+        if dataset_root is None:
+            return {"error": (
+                "dataset_root is required alongside predictions_by_date to verify plant_mapping "
+                f"{plant_mapping!r}'s own recorded inputs")}
+        verified = plant_mapping_pipeline.verify_mapping_inputs(
+            mapping_build, dataset_root, predictions_by_date)
+        if "refusal" in verified:
+            return {"error": verified["refusal"]}
+        mapping_disclosure = mapping_build.delivery_disclosure(verified, predictions_by_date)
+
+    if pred_dirs is None and predictions_by_date is not None:
+        pred_dirs = list(predictions_by_date.values())
 
     resolved_output_path = str(resolve_output_path(output_path))
     try:
@@ -99,6 +144,7 @@ def deliver_per_plant_csv(
             results, resolved_output_path, delivered_phenotype=delivered_phenotype, crop=crop,
             pipeline_version=pipeline_version, pred_dirs=pred_dirs, images_dir=images_dir,
             scale_capture_id=scale_capture_id, door="deliver_per_plant_csv",
+            plant_mapping=mapping_disclosure,
         )
     except DeliveryRefused as exc:
         refusal = {
@@ -117,6 +163,7 @@ def deliver_per_plant_csv(
         "csv_path": csv_path,
         "n_plants": len(results),
         "plant_mapping": plant_mapping,
+        "plant_mapping_record_sha256": mapping_build.record_sha256 if mapping_build else "",
         "operating_point_validated": tail["operating_point_validated"],
         "unvalidated_dimensions": tail["unvalidated_dimensions"],
         "checkpoint_sha256": tail["producer_model_sha256"],
