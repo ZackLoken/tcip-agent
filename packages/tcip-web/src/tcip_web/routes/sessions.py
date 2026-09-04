@@ -7,8 +7,8 @@ A per-image annotation timer + session aggregate at
         "sessions": [
             {
                 "user": "exx",
-                "started": "2026-04-26 09:00:00",
-                "ended":   "2026-04-26 09:32:14",
+                "started": "26-04-2026 09:00:00",
+                "ended":   "26-04-2026 09:32:14",
                 "images_annotated": 7,
                 "total_annotations": 154,
                 "total_time_seconds": 1934.21,
