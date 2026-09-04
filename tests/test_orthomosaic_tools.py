@@ -1012,3 +1012,272 @@ def test_deliver_orthomosaic_plant_counts_delivers_once_registry_csv_bytes_verif
 
     assert "error" not in delivered, delivered
     assert out_csv.exists()
+
+
+# ── nearest-neighbour path: the in-frame correction ───────────────────────
+
+
+def _plants_csv_at(tmp_path: Path, raster_path: Path, rows: list[tuple[str, float, float]]) -> Path:
+    """A registry CSV naming ``rows`` (plot_name, pixel_x, pixel_y) each projected to WGS84
+    through this raster's own georeferencing, for a test that needs plants at arbitrary pixel
+    positions rather than the shared ``_PLANT_PIXELS`` grid."""
+    entries = []
+    for i, (name, px, py) in enumerate(rows):
+        lat, lon = _pixel_to_wgs84(raster_path, px, py)
+        entries.append({
+            "plot_name": name, "accession_name": f"acc-{name}", "plot_number": i,
+            "row_number": 0, "col_number": i, "WGS84_centroid_y": lat, "WGS84_centroid_x": lon,
+        })
+    csv_path = tmp_path / f"plants_{len(rows)}.csv"
+    _write_plant_csv(csv_path, entries)
+    return csv_path
+
+
+def test_deliver_orthomosaic_plant_counts_names_an_outside_raster_plant_and_leaves_a_near_edge_detection_unmapped(
+    tmp_path, monkeypatch,
+):
+    """A registry plant outside the raster's own frame gets no row and is named
+    (plants_outside_raster); a detection at the raster's edge, nearer to that outside plant than
+    to any in-frame plant, stays unmapped rather than attributed to it: without the in-frame
+    guard, the outside plant would have been the nearest candidate and well inside the fallback
+    tolerance, mapping the edge detection to a plant this raster never pictures."""
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path / "proj"))
+    (tmp_path / "proj" / ".tcip" / "state").mkdir(parents=True, exist_ok=True)
+
+    raster_path = tmp_path / "mosaic.tif"
+    _write_geo_raster(raster_path)  # 64x64
+    bucket_dir, stem = _run_bucket(tmp_path, monkeypatch, raster_path)
+
+    plant_csv = _plants_csv_at(tmp_path, raster_path, [
+        ("plot_in", 10.0, 10.0), ("plot_out", 70.0, 10.0),  # column 70 >= width 64: outside
+    ])
+    _replace_boxes(bucket_dir / f"{stem}.json", [(61.0, 8.0, 65.0, 12.0)])  # centroid (63, 10)
+    _promote_bucket_conf(bucket_dir, bucket_dir.parents[1], trait=fx.COUNT_TRAIT)
+
+    from tcip_mcp.tools.orthomosaic_tools import deliver_orthomosaic_plant_counts
+
+    out_csv = tmp_path / "counts.csv"
+    result = deliver_orthomosaic_plant_counts(
+        str(bucket_dir), str(raster_path), _plant_registry(plant_csv), str(out_csv),
+        delivered_phenotype="stem_count")
+
+    assert "error" not in result, result
+    assert result["n_unmapped"] == 1
+    assert result["plants_outside_raster"] == ["plot_out"]
+
+    rows = {r["plant_id"]: r for r in csv.DictReader(out_csv.open(newline=""))}
+    assert rows["plot_in"]["value"] == "0"
+    assert "plot_out" not in rows
+
+
+# ── canopy_subject: attribution by segment containment ────────────────────
+
+
+def _canopy_setup(tmp_path, monkeypatch) -> tuple[Path, Path, Path, str]:
+    """A raster and its prediction bucket under one shared, registered dataset root, for the
+    canopy_subject regime's own dataset-binding check."""
+    from tests._geotiff_fixtures import write_canonical_dataset_raster
+
+    dataset_root = tmp_path / "ds"
+    raster_path = write_canonical_dataset_raster(dataset_root, width=64, height=64)
+    bucket_dir, stem = _run_bucket(tmp_path, monkeypatch, raster_path)
+    return dataset_root, raster_path, bucket_dir, stem
+
+
+def _write_canopy_document(raster_path: Path, boxes: list[tuple[float, float, float, float]],
+                          *, subject: str = "canopy") -> None:
+    """A hand-traced canopy boundary document at ``raster_path``'s own canonical label position,
+    one rectangle per ``boxes`` entry, under a person's identity."""
+    from tcip_annotation import json_io
+    from tcip_annotation.state import Annotation, Polygon
+    from tcip_mcp.dataset_layout import annotation_path_for_image
+
+    anns = [
+        Annotation(
+            subject=subject,
+            geometry=Polygon(rings=[[(x0, y0), (x1, y0), (x1, y1), (x0, y1)]]),
+            created_by="user:breeder", created_at="2024-01-01T00:00:00+00:00",
+        )
+        for (x0, y0, x1, y1) in boxes
+    ]
+    doc_path = annotation_path_for_image(raster_path)
+    doc_path.parent.mkdir(parents=True, exist_ok=True)
+    json_io.write_annotations(str(doc_path), anns, 64, 64, keep_empty=True)
+
+
+def test_deliver_orthomosaic_plant_counts_canopy_subject_delivers_ties_and_names_the_gaps(
+    tmp_path, monkeypatch,
+):
+    dataset_root, raster_path, bucket_dir, stem = _canopy_setup(tmp_path, monkeypatch)
+    plant_csv = _plants_csv_at(tmp_path, raster_path, [
+        ("plot0", 10.0, 10.0), ("plot1", 10.0, 50.0),
+        ("plot2", 50.0, 10.0), ("plot3", 50.0, 50.0),
+    ])
+    registry_name = _plant_registry(plant_csv)
+    _write_canopy_document(raster_path, [
+        (5.0, 5.0, 15.0, 15.0),    # segment 0: ties to plot0
+        (45.0, 5.0, 55.0, 15.0),   # segment 1: ties to plot2
+        (0.0, 55.0, 5.0, 60.0),    # segment 2: no plant inside, untied
+    ])
+    _replace_boxes(bucket_dir / f"{stem}.json", [
+        (8.0, 8.0, 12.0, 12.0),    # inside segment 0: attributed to plot0
+        (48.0, 8.0, 52.0, 12.0),   # inside segment 1: attributed to plot2
+        (1.0, 56.0, 3.0, 58.0),    # inside segment 2: segment_without_plant
+        (30.0, 30.0, 32.0, 32.0),  # inside no segment: outside_segments
+    ])
+    _promote_bucket_conf(bucket_dir, dataset_root, trait=fx.COUNT_TRAIT)
+
+    from tcip_mcp.tools.orthomosaic_tools import deliver_orthomosaic_plant_counts
+
+    out_csv = tmp_path / "counts.csv"
+    result = deliver_orthomosaic_plant_counts(
+        str(bucket_dir), str(raster_path), registry_name, str(out_csv),
+        delivered_phenotype="stem_count", canopy_subject="canopy")
+
+    assert "error" not in result, result
+    assert result["n_segments"] == 3
+    assert result["n_segments_without_plant"] == 1
+    assert sorted(result["plants_without_segment"]) == ["plot1", "plot3"]
+    assert result["plants_with_ambiguous_detections"] == []
+    assert result["plants_outside_raster"] == []
+    assert result["n_mapped"] == 2
+    assert result["n_unmapped"] == 2
+
+    rows = {r["plant_id"]: r for r in csv.DictReader(out_csv.open(newline=""))}
+    assert rows["plot0"]["value"] == "1"
+    assert rows["plot2"]["value"] == "1"
+    assert "plot1" not in rows
+    assert "plot3" not in rows
+    for r in rows.values():
+        assert r["plant_attribution"] == "segment"
+        assert r["plant_id_source"] == "segment_containment"
+        assert r["plant_id_distance_m_max"] == ""
+
+    from tcip_mcp.pipelines.resolution import read_delivery_events
+
+    events = read_delivery_events(tmp_path)
+    canopy_events = [e for e in events if "canopy_segments" in (e["plant_mapping"] or {})]
+    assert len(canopy_events) == 1
+    pm = canopy_events[0]["plant_mapping"]
+    assert pm["canopy_segments"]["n_segments"] == 3
+    assert pm["canopy_segments"]["subject"] == "canopy"
+    assert {t["plot_name"] for t in pm["segment_ties"]} == {"plot0", "plot2"}
+    assert all(t["clearance_m"] > 0 for t in pm["segment_ties"])
+    assert pm["plant_attribution"] == "segment"
+
+
+def test_deliver_orthomosaic_plant_counts_canopy_subject_drops_an_ambiguous_overlap(
+    tmp_path, monkeypatch,
+):
+    """Two overlapping segments with a detection in the overlap: unattributed under
+    overlapping_segments, both implicated plants absent and named, a third unimplicated plant
+    delivered."""
+    dataset_root, raster_path, bucket_dir, stem = _canopy_setup(tmp_path, monkeypatch)
+    plant_csv = _plants_csv_at(tmp_path, raster_path, [
+        ("plot0", 10.0, 10.0), ("plot1", 25.0, 10.0), ("plot2", 50.0, 50.0),
+    ])
+    registry_name = _plant_registry(plant_csv)
+    _write_canopy_document(raster_path, [
+        (0.0, 0.0, 20.0, 20.0),    # segment 0: ties to plot0, overlaps segment 1 on x in [15,20]
+        (15.0, 0.0, 35.0, 20.0),   # segment 1: ties to plot1
+        (45.0, 45.0, 55.0, 55.0),  # segment 2: ties to plot2, unimplicated
+    ])
+    _replace_boxes(bucket_dir / f"{stem}.json", [
+        (15.0, 8.0, 19.0, 12.0),   # centroid (17, 10): inside both segment 0 and segment 1
+        (48.0, 48.0, 52.0, 52.0),  # inside segment 2 alone: attributed to plot2
+    ])
+    _promote_bucket_conf(bucket_dir, dataset_root, trait=fx.COUNT_TRAIT)
+
+    from tcip_mcp.tools.orthomosaic_tools import deliver_orthomosaic_plant_counts
+
+    out_csv = tmp_path / "counts.csv"
+    result = deliver_orthomosaic_plant_counts(
+        str(bucket_dir), str(raster_path), registry_name, str(out_csv),
+        delivered_phenotype="stem_count", canopy_subject="canopy")
+
+    assert "error" not in result, result
+    assert sorted(result["plants_with_ambiguous_detections"]) == ["plot0", "plot1"]
+
+    rows = {r["plant_id"]: r for r in csv.DictReader(out_csv.open(newline=""))}
+    assert "plot0" not in rows
+    assert "plot1" not in rows
+    assert rows["plot2"]["value"] == "1"
+
+
+def test_deliver_orthomosaic_plant_counts_refuses_nn_tolerance_m_beside_canopy_subject(
+    tmp_path, monkeypatch,
+):
+    dataset_root, raster_path, bucket_dir, stem = _canopy_setup(tmp_path, monkeypatch)
+    plant_csv = _plants_csv_at(tmp_path, raster_path, [("plot0", 10.0, 10.0)])
+    registry_name = _plant_registry(plant_csv)
+    _write_canopy_document(raster_path, [(5.0, 5.0, 15.0, 15.0)])
+
+    from tcip_mcp.tools.orthomosaic_tools import deliver_orthomosaic_plant_counts
+
+    result = deliver_orthomosaic_plant_counts(
+        str(bucket_dir), str(raster_path), registry_name, str(tmp_path / "counts.csv"),
+        delivered_phenotype="stem_count", canopy_subject="canopy", nn_tolerance_m=5.0)
+
+    assert "error" in result
+    assert "nn_tolerance_m" in result["error"]
+    assert not (tmp_path / "counts.csv").exists()
+
+
+def test_deliver_orthomosaic_plant_counts_canopy_subject_refuses_a_raster_outside_a_registered_dataset(
+    tmp_path, monkeypatch,
+):
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path / "proj"))
+    (tmp_path / "proj" / ".tcip" / "state").mkdir(parents=True, exist_ok=True)
+
+    raster_path = tmp_path / "mosaic.tif"
+    _write_geo_raster(raster_path)
+    bucket_dir, stem = _run_bucket(tmp_path, monkeypatch, raster_path)
+    plant_csv = _plants_csv_at(tmp_path, raster_path, [("plot0", 10.0, 10.0)])
+    registry_name = _plant_registry(plant_csv)
+
+    from tcip_mcp.tools.orthomosaic_tools import deliver_orthomosaic_plant_counts
+
+    result = deliver_orthomosaic_plant_counts(
+        str(bucket_dir), str(raster_path), registry_name, str(tmp_path / "counts.csv"),
+        delivered_phenotype="stem_count", canopy_subject="canopy")
+
+    assert "error" in result
+    assert "registered dataset" in result["error"]
+
+
+def test_deliver_orthomosaic_plant_counts_canopy_subject_refuses_a_raster_under_a_different_dataset_than_the_bucket(
+    tmp_path, monkeypatch,
+):
+    from tests._geotiff_fixtures import write_canonical_dataset_raster
+
+    dataset_root, raster_path, bucket_dir, stem = _canopy_setup(tmp_path, monkeypatch)
+    other_dataset_root = tmp_path / "other_ds"
+    other_raster_path = write_canonical_dataset_raster(other_dataset_root, width=64, height=64)
+    plant_csv = _plants_csv_at(tmp_path, raster_path, [("plot0", 10.0, 10.0)])
+    registry_name = _plant_registry(plant_csv)
+
+    from tcip_mcp.tools.orthomosaic_tools import deliver_orthomosaic_plant_counts
+
+    result = deliver_orthomosaic_plant_counts(
+        str(bucket_dir), str(other_raster_path), registry_name, str(tmp_path / "counts.csv"),
+        delivered_phenotype="stem_count", canopy_subject="canopy")
+
+    assert "error" in result
+    assert "different" in result["error"]
+
+
+def test_deliver_orthomosaic_plant_counts_canopy_subject_refuses_a_missing_document(
+    tmp_path, monkeypatch,
+):
+    dataset_root, raster_path, bucket_dir, stem = _canopy_setup(tmp_path, monkeypatch)
+    plant_csv = _plants_csv_at(tmp_path, raster_path, [("plot0", 10.0, 10.0)])
+    registry_name = _plant_registry(plant_csv)
+
+    from tcip_mcp.tools.orthomosaic_tools import deliver_orthomosaic_plant_counts
+
+    result = deliver_orthomosaic_plant_counts(
+        str(bucket_dir), str(raster_path), registry_name, str(tmp_path / "counts.csv"),
+        delivered_phenotype="stem_count", canopy_subject="canopy")
+
+    assert "error" in result
+    assert "no label document" in result["error"]
