@@ -456,8 +456,9 @@ def require_dataset_identity(dataset_root: str | Path) -> dict:
 def read_dataset_identity_document(dataset_root: str | Path) -> dict:
     """:func:`require_dataset_identity`, but through :func:`decode_dataset_identity_document`:
     the identity record whatever its ``fingerprint`` states, never refusing on a bare pre-prefix
-    value. For ``scripts/restamp_dataset_fingerprint.py``, the one caller whose job is fixing
-    that very value and so must be able to see it rather than being refused before it can act.
+    value. For ``scripts/restamp_dataset_fingerprint.py`` (fixing that very value) and
+    ``scripts/check_dataset_identity.py`` (diagnosing it), whose jobs are seeing the value
+    rather than being refused before either can act on it.
     """
     return _read_dataset_identity(dataset_root, decode=decode_dataset_identity_document)
 
