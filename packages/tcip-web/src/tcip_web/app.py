@@ -334,7 +334,9 @@ async def set_active_tab(payload: ActiveTabPayload) -> dict:
 
 @app.websocket("/ws/state")
 async def state_ws(websocket: WebSocket) -> None:
-    """Receive live GuiState deltas. Replays the current snapshot on connect."""
+    """Push live GuiState snapshots to the browser; replays the current snapshot on connect.
+    One-directional: the client never sends a payload over this socket, and an inbound frame,
+    if one ever arrived, is read and discarded, only to detect disconnect."""
     if not origin_allowed(websocket.headers.get("origin"), websocket.scope):
         await websocket.close(code=1008, reason="origin not allowed")
         return
