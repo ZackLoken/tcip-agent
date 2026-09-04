@@ -82,7 +82,7 @@ _PROSE_COPY_SITES = [
     *_ARCHITECTURE_SITES,
     (REPO_ROOT / "scripts" / "distill_learnings.py", 8),
     (REPO_ROOT / "scripts" / "smoke_fence_e2e.py", 9),
-    (REPO_ROOT / "scripts" / "smoke_phenology_e2e.py", 15),
+    (REPO_ROOT / "scripts" / "smoke_phenology_e2e.py", 16),
     (REPO_ROOT / "scripts" / "smoke_terminal_e2e.py", 9),
     (REPO_ROOT / "scripts" / "watch_agent_chat.py", 13),
 ]
