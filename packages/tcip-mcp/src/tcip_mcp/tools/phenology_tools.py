@@ -78,7 +78,7 @@ def register_plant_registry(name: str, csv_paths: list[str], *, crop: str, site:
     try:
         record = plant_mapping.register_plant_registry_record(
             platform_root, name, [Path(p) for p in csv_paths],
-            crop=crop, site=site, registered_by="agent:register_plant_registry",
+            crop=crop, site=site, registered_by="register_plant_registry",
         )
     except (plant_mapping.NoGeoreferencedPlantsRefusal,
             plant_mapping.PlantRegistryNameConflict) as exc:

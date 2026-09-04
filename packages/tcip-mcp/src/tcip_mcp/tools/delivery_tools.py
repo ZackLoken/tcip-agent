@@ -14,10 +14,10 @@ import tcip_store
 from tcip_mcp.audit import audited
 from tcip_mcp.server import mcp
 
-_SUPERSEDED_BY = "agent:supersede_delivery"
+_SUPERSEDED_BY = "supersede_delivery"
 """The actor stamped on every supersession: this door is MCP-only (no HTTP request carries a
-breeder identity to it), so the stamp names the door itself the way ``built_by`` does for a
-plant-mapping build, prefixed the way a real user's statement would be."""
+breeder identity to it), so the stamp names the door itself, bare, the way a tool producer's
+identity is stamped everywhere else (``identity.py``), never a person's ``user:`` prefix."""
 
 
 @mcp.tool()
