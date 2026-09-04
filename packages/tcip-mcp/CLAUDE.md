@@ -27,10 +27,13 @@ src/tcip_mcp/
     proposal.py               # auto-labeling engine seam: built-in SAM, or a bespoke Proposer
     resolution.py              # ResolvedParam: the derive-don't-pin currency and the
                                 # unvalidated-value firewall
-    operating_point.py          # resolves conf/NMS/max_dets/tile per dataset, the one place all
-                                 # consumers (train-eval, test-eval, inference, export) agree
+    operating_point.py          # resolve_operating_point: the calibrated conf/NMS/max_dets/tile
+                                 # path; resolution.py's raw and block-calibrated-export paths are
+                                 # the other two regimes, sharing only resolve_tile_size_param
     schemas.py, image_utils.py
-  dataset_layout.py      # the single path resolver: where an image's labels/predictions live on disk
+  dataset_layout.py      # the single path resolver on the backend: where an image's
+                          # labels/predictions live on disk. The frontend cannot import it; its
+                          # own frontend/src/lib/paths.ts carries the one necessary copy (RECORD_EXT)
   class_registry.py      # classes.json: subjects, attributes, the name<->id assignment
   traits.py               # the trait registry: human-defined measurement semantics per trait
   operationalization.py    # per-project records of what a trait's delivered number means, who
@@ -54,8 +57,10 @@ doc or comment, since it drifts.
 
 ## Conventions specific to this package
 
-- Lazy-import torch/torchvision inside function bodies: the MCP server must start fast, and
-  most tool calls never touch the model layer.
+- `tools/` lazy-imports torch/torchvision and the `pipelines/` modules that carry them, inside
+  function bodies: the MCP server must start fast, and most tool calls never touch the model
+  layer. `pipelines/` itself imports torch at module level; a pipeline module only loads when a
+  tool reaches into it.
 - Detectors are built via the plain `build_detector` (+ `_build_faster_rcnn` / `_build_fcos` /
   `_build_retinanet` / `_build_mask_rcnn`); bespoke model code imports these directly. There is no
   model spec or component registry; see the `toolkit-inventory` skill for the full composition
