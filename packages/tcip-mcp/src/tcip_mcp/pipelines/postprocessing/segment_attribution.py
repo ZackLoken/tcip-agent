@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import ClassVar
+from typing import ClassVar, NamedTuple
 
 from shapely.geometry import Point as ShapelyPoint
 from shapely.ops import nearest_points
@@ -49,6 +49,20 @@ class CanopySegmentRefusal(ValueError):
     """A canopy-segment document, or one of its own annotations, cannot stand behind a segment
     tie: a document/raster identity mismatch, an absent subject, a ``Point`` naming no region, or
     a record not positively a person's."""
+
+
+class _SegmentAssignmentSources(NamedTuple):
+    """The four values :class:`SegmentAssignment`'s own ``source`` field takes, named once so
+    :func:`assign_detections_to_segments` builds each assignment against a name rather than
+    repeating the vocabulary as a bare literal per branch."""
+
+    containment: str = "segment_containment"
+    outside: str = "outside_segments"
+    overlapping: str = "overlapping_segments"
+    without_plant: str = "segment_without_plant"
+
+
+SEGMENT_ASSIGNMENT_SOURCES = _SegmentAssignmentSources()
 
 
 @dataclass
@@ -341,7 +355,7 @@ class SegmentAssignment:
     segment_index: int | None
     plot_name: str | None
     accession_name: str | None
-    source: str  # "segment_containment" | "outside_segments" | "overlapping_segments" | "segment_without_plant"
+    source: str  # one of SEGMENT_ASSIGNMENT_SOURCES
     distance_m: None
     overlapping_segment_indices: tuple[int, ...] = ()
 
@@ -371,13 +385,13 @@ def assign_detections_to_segments(detections: dict, tie: SegmentTie) -> list[Seg
         if not hits:
             out.append(SegmentAssignment(
                 detection_index=i, pixel_x=cx, pixel_y=cy, segment_index=None, plot_name=None,
-                accession_name=None, source="outside_segments", distance_m=None,
+                accession_name=None, source=SEGMENT_ASSIGNMENT_SOURCES.outside, distance_m=None,
             ))
         elif len(hits) > 1:
             out.append(SegmentAssignment(
                 detection_index=i, pixel_x=cx, pixel_y=cy, segment_index=None, plot_name=None,
-                accession_name=None, source="overlapping_segments", distance_m=None,
-                overlapping_segment_indices=tuple(idx for idx, _ in hits),
+                accession_name=None, source=SEGMENT_ASSIGNMENT_SOURCES.overlapping,
+                distance_m=None, overlapping_segment_indices=tuple(idx for idx, _ in hits),
             ))
         else:
             idx, tied = hits[0]
@@ -385,11 +399,12 @@ def assign_detections_to_segments(detections: dict, tie: SegmentTie) -> list[Seg
                 out.append(SegmentAssignment(
                     detection_index=i, pixel_x=cx, pixel_y=cy, segment_index=idx,
                     plot_name=tied.plot_name, accession_name=tied.accession_name,
-                    source="segment_containment", distance_m=None,
+                    source=SEGMENT_ASSIGNMENT_SOURCES.containment, distance_m=None,
                 ))
             else:
                 out.append(SegmentAssignment(
                     detection_index=i, pixel_x=cx, pixel_y=cy, segment_index=idx, plot_name=None,
-                    accession_name=None, source="segment_without_plant", distance_m=None,
+                    accession_name=None, source=SEGMENT_ASSIGNMENT_SOURCES.without_plant,
+                    distance_m=None,
                 ))
     return out
