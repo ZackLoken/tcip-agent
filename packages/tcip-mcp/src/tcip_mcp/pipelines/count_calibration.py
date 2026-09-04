@@ -18,6 +18,13 @@ from typing import Any
 from tcip_mcp.pipelines.resolution import ResolvedBundle
 
 
+class CalibrationUsageError(ValueError):
+    """A cal/holdout draw refusal the offline script and the audited door both exit cleanly for:
+    a usage or configuration mistake, never a data-integrity refusal. Distinct from the bare
+    ``ValueError`` :func:`~tcip_annotation.json_io.require_reference_ground_truth` raises for an
+    agent-authored, unadjudicated reference, which a caller lets propagate instead."""
+
+
 @dataclass(frozen=True)
 class CountCalibrationBundle:
     """Everything a caller needs from one resolution pass: the bundle itself for inspection, and
@@ -67,14 +74,17 @@ def resolve_count_operating_point(
     to one capture date's calibration side of a split manifest instead of every labeled stem,
     requires ``subject``, and conflicts with ``group_by``/``group_key_map``.
 
-    Raises ``ValueError`` for every refusal above, for fewer than two labeled stems to split, and
-    for whatever :func:`~tcip_mcp.pipelines.data.splits.resolve_manifest_calibration_universe`
-    raises under ``split_manifest_dir``.
+    Raises :class:`CalibrationUsageError` (a ``ValueError``) for every usage refusal above, for
+    fewer than two labeled stems to split, and for whatever
+    :func:`~tcip_mcp.pipelines.data.splits.resolve_manifest_calibration_universe` raises under
+    ``split_manifest_dir``; a caller (the offline script, the audited door) can catch that one
+    type for a clean exit without also swallowing ``require_reference_ground_truth``'s own bare
+    ``ValueError``, a data-integrity refusal rather than a usage one.
     """
     if split_manifest_dir and not subject:
-        raise ValueError("split_manifest_dir requires subject.")
+        raise CalibrationUsageError("split_manifest_dir requires subject.")
     if split_manifest_dir and (group_by is not None or group_key_map):
-        raise ValueError(
+        raise CalibrationUsageError(
             "split_manifest_dir conflicts with group_by/group_key_map: the manifest's own "
             "grouping policy governs the locked draw."
         )
@@ -109,7 +119,8 @@ def resolve_count_operating_point(
                           subject=subject, attribute=attribute)
     stems = sorted(getattr(probe, "stems", []))
     if len(stems) < 2:
-        raise ValueError(f"Need >=2 labeled stems to split cal/holdout; found {len(stems)}.")
+        raise CalibrationUsageError(
+            f"Need >=2 labeled stems to split cal/holdout; found {len(stems)}.")
 
     from tcip_mcp.dataset_layout import annotation_date
 
@@ -122,9 +133,12 @@ def resolve_count_operating_point(
 
         manifest = read_split_manifest_dir(split_manifest_dir)
         split_manifest_sha256 = manifest_digest(manifest)
-        stems, group_by, group_key_map, _excluded, cal_date, subject, attribute = \
-            resolve_manifest_calibration_universe(
-                manifest, split_manifest_dir, labels_dir, images_dir, subject, attribute, stems)
+        try:
+            stems, group_by, group_key_map, _excluded, cal_date, subject, attribute = \
+                resolve_manifest_calibration_universe(
+                    manifest, split_manifest_dir, labels_dir, images_dir, subject, attribute, stems)
+        except ValueError as exc:
+            raise CalibrationUsageError(str(exc)) from exc
 
     dh = dataset_hash(labels_dir, stems=(stems if split_manifest_dir else None))
     annotation_counts = {

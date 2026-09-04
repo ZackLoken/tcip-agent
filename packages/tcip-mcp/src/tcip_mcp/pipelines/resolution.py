@@ -817,6 +817,15 @@ def update_sidecar(
     return True
 
 
+def fold_tile_validation(validated: bool, tile_size_validated: str | None) -> bool:
+    """The one floor a stamp's ``validated`` bit answers to: no tile-geometry claim, no validated
+    bucket, whatever the door's own dimension resolved. Called by :func:`operating_point_stamp` for
+    every fresh stamp and by a caller that merges a later claim onto one (``calibrate_count_operating_point``),
+    so the floor is applied identically wherever a bucket's overall ``validated`` bit is computed.
+    """
+    return bool(validated) and tile_size_validated != VALIDATED_FALSE
+
+
 def operating_point_stamp(
     operating_point: dict | None,
     *,
@@ -867,7 +876,7 @@ def operating_point_stamp(
         "dataset_hash": dataset_hash,
         "operating_point": operating_point,
         "id_map": id_map,
-        "validated": bool(validated) and tile_size_validated != VALIDATED_FALSE,
+        "validated": fold_tile_validation(validated, tile_size_validated),
         "validated_by": validated_by,
         "tile_size_validated": tile_size_validated,
         "shippable_issues": list(shippable_issues),
@@ -929,7 +938,9 @@ STAMP_EXTENSION_KEYS: dict[str, str] = {
                               "persisted a curve",
     "gate_evidence_summary": "the shared per-image bucket publisher behind export_predictions "
                              "and deliver_per_image_counts's live path, for a calibrated run that "
-                             "persisted a curve",
+                             "persisted a curve, and calibration_tools.calibrate_count_operating_point, "
+                             "which earns a claim over an already-published bucket rather than "
+                             "publishing one",
     "image_filenames": "the per-image bucket publishers (the shared image-bucket publisher behind "
                        "export_predictions and deliver_per_image_counts's live path, and the web inference "
                        "worker): each prediction document stem mapped to its source image's "
@@ -1435,6 +1446,28 @@ by ``None`` for every document with no more specific sentence of its own (every 
 ``resolve_scale`` today)."""
 
 
+def bucket_relative_key(bucket: str | Path, root: str | Path, *, document: str) -> str:
+    """``bucket``'s path relative to ``root``, or refuse: the one under-root check every caller
+    that records a claim against a bucket applies.
+
+    Shared by :func:`seal_validation` (each bucket a claim covers) and
+    ``calibration_tools.calibrate_count_operating_point``'s own pre-check over ``pred_dir``, so a
+    bucket outside the dataset root is refused with one wording wherever a claim would try to
+    place it, rather than two independently-worded checks that could drift.
+    """
+    resolved = Path(bucket).resolve()
+    root_resolved = Path(root).resolve()
+    try:
+        return resolved.relative_to(root_resolved).as_posix()
+    except ValueError:
+        raise ValueError(
+            f"prediction bucket {str(resolved)!r} is not under dataset_root {str(root_resolved)!r}, "
+            f"so a {document} claim covering it has no dataset-relative key to record. Write the "
+            "predictions into the dataset's own predictions layout (resolve_prediction_bucket) to "
+            "earn a validated claim."
+        ) from None
+
+
 def seal_validation(
     draft: ValidationDraft,
     *,
@@ -1500,15 +1533,7 @@ def seal_validation(
 
         for d in bucket_dirs:
             resolved = Path(d).resolve()
-            try:
-                key = resolved.relative_to(root).as_posix()
-            except ValueError:
-                raise ValueError(
-                    f"prediction bucket {str(resolved)!r} is not under dataset root {str(root)!r}, "
-                    f"so a {draft.document} claim covering it has no dataset-relative key to "
-                    "record. Write the predictions into the dataset's own predictions layout "
-                    "(resolve_prediction_bucket) to earn a validated claim."
-                ) from None
+            key = bucket_relative_key(resolved, root, document=draft.document)
             covered[key] = digest_fn(resolved)
     elif bucket_dirs:
         raise ValueError(

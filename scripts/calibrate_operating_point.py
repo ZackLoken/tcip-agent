@@ -75,13 +75,6 @@ def main(argv: list[str] | None = None) -> int:
                              "run_inference applies. Conflicts with --group-by/--group-key-map; "
                              "requires --subject.")
     args = parser.parse_args(argv)
-    if args.split_manifest_dir and not args.subject:
-        print("--split-manifest-dir requires --subject.", file=sys.stderr)
-        return 2
-    if args.split_manifest_dir and (args.group_by is not None or args.group_key_map):
-        print("--split-manifest-dir conflicts with --group-by/--group-key-map: the manifest's "
-              "own grouping policy governs the locked draw.", file=sys.stderr)
-        return 2
 
     # Its own process entry point, so it binds the storage backend the seam has no default for.
     from tcip_store.binding import bind_default
@@ -94,7 +87,9 @@ def main(argv: list[str] | None = None) -> int:
             group_key_map = json.load(f)
 
     from tcip_mcp.model_registry import UnregisteredCheckpoint
-    from tcip_mcp.pipelines.count_calibration import resolve_count_operating_point
+    from tcip_mcp.pipelines.count_calibration import (
+        CalibrationUsageError, resolve_count_operating_point,
+    )
 
     try:
         result = resolve_count_operating_point(
@@ -105,7 +100,7 @@ def main(argv: list[str] | None = None) -> int:
             split_manifest_dir=args.split_manifest_dir, val_ratio=args.val_ratio, seed=args.seed,
             device=args.device,
         )
-    except UnregisteredCheckpoint as exc:
+    except (UnregisteredCheckpoint, CalibrationUsageError) as exc:
         print(str(exc), file=sys.stderr)
         return 2
 

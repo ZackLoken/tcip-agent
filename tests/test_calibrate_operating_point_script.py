@@ -311,6 +311,37 @@ def test_script_refuses_an_agent_authored_reference_before_touching_a_model(monk
     assert "created_by" in str(refused.value) or "claude" in str(refused.value)
 
 
+def test_script_prints_and_exits_cleanly_for_fewer_than_two_labeled_stems(monkeypatch, tmp_path, capsys):
+    """A labeled split too small to divide into cal/holdout is a usage refusal, not a traceback:
+    the library's CalibrationUsageError becomes a printed message and rc=2."""
+    _stub_checkpoint_load(monkeypatch)
+
+    class _Predictor:
+        def __init__(self):
+            self.model = SimpleNamespace(detector=SimpleNamespace(
+                roi_heads=SimpleNamespace(score_thresh=0.5, nms_thresh=0.5, detections_per_img=100)))
+            self.device = "cpu"
+            self.train_tile_size = None
+
+    monkeypatch.setattr("tcip_mcp.pipelines.inference.predictor.build_predictor",
+                        lambda checkpoint=None, **kw: _Predictor())
+
+    class _Probe:
+        stems = ["only_one"]
+
+    monkeypatch.setattr("tcip_mcp.pipelines.data.datasets.build_dataset", lambda *a, **kw: _Probe())
+    monkeypatch.setattr("tcip_mcp.project_paths.platform_state_root", lambda: tmp_path)
+
+    from scripts.calibrate_operating_point import main
+
+    rc = main(["--checkpoint", "x.pt", "--trait", "catkin",
+              "--labels-dir", str(tmp_path / "labels"), "--images-dir", str(tmp_path / "images"),
+              "--dataset-root", str(tmp_path), "--project-root", str(tmp_path)])
+
+    assert rc == 2
+    assert "Need >=2 labeled stems" in capsys.readouterr().err
+
+
 def test_script_split_manifest_dir_requires_subject(tmp_path):
     """--split-manifest-dir needs --subject to check the manifest's own subject against; this
     refuses before touching a checkpoint or a dataset."""
