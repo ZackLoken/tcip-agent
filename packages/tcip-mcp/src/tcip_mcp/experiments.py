@@ -959,6 +959,10 @@ def log_metrics(
     A bespoke loop's row is its own dict, so it is checked field by field first: a tensor or
     a non-finite loss is named here, where the caller can see which metric it was.
 
+    ``check_json_value`` admits any JSON-encodable value, wider than the frontend's own
+    ``MetricRow`` type (``number | string | undefined`` per key), which renders only the metric
+    shapes it recognizes and drops the rest silently.
+
     Stamps ``status.json["metrics_logged"] = True`` before appending, the record
     :func:`is_pristine` reads instead of a log key no record transaction can name. The marker
     goes before the append, not after, so a marker written but then an append that fails still
