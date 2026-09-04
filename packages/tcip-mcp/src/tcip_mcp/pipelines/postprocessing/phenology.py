@@ -685,7 +685,8 @@ def write_phenology_csv(
     ``plant_mapping`` is ``_write_phenology_delivery``'s own required disclosure dict.
     ``acknowledgement`` is ``None`` for every MCP-tool call (``deliver_phenology_milestones`` takes
     no acknowledgement) and a real :class:`~tcip_mcp.pipelines.resolution.Acknowledgement` only from
-    the web ``export_csv`` route, the one surface that builds one.
+    the web ``export_csv`` route; the web ``export_count_csv`` route builds its own for the count
+    kinds it serves, never for phenology.
     """
     return _write_phenology_delivery(
         door, rows, out_path, spec, phenology_csv_columns(spec),

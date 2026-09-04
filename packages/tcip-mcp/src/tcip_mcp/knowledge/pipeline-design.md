@@ -205,7 +205,7 @@ image_results = [
 ]
 
 # The final CSV is a phenotype delivery door: without pred_dirs it floors to unvalidated
-# regardless of any asserted string, and this writer takes no acknowledgement at all.
+# regardless of any asserted string, and this call passes no acknowledgement, so it still refuses.
 summaries = aggregate_per_plant(image_results, plant_id_fn=plant_id_fn)
 export_aggregated_csv(summaries, "phenotype_csv", delivered_phenotype="<phenotype>", pred_dirs=["stage_b_preds"])
 ```

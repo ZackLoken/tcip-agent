@@ -744,7 +744,7 @@ def test_deliver_per_image_counts_publishes_via_staging_but_the_csv_itself_still
     tmp_path, monkeypatch,
 ):
     """allow_unvalidated_staging clears only the bucket's own tile-scale staging gate: the bucket
-    publishes fine, but this tool builds export_detection_csv no acknowledgement, so a fabricated
+    publishes fine, but this tool passes export_detection_csv no acknowledgement, so a fabricated
     tile_size still refuses the CSV even though the run's own conf reference is genuinely
     validated. The refusal still names what happened to the bucket the live regime already
     published."""

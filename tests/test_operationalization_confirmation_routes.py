@@ -335,8 +335,9 @@ def test_the_list_route_returns_every_kinds_record_and_confirming_one_leaves_the
 ) -> None:
     """The panel enumerates the pairs that exist, and a confirmation is scoped to its own pair.
 
-    A count record is listed and confirmable even though the Results tab computes no counts, and
-    confirming it must not read as a confirmation of the crossing record beside it.
+    A count record is listed and confirmable the same way a crossing record is, regardless of
+    which delivery kind's door serves it, and confirming it must not read as a confirmation of
+    the crossing record beside it.
     """
     fx.state_crossing(project)
     fx.state_count(project)

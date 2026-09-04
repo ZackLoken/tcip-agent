@@ -164,17 +164,6 @@ def test_a_calibrated_conf_delivers_the_count_csv_untouched(tmp_path, monkeypatc
         stamp, bucket, document="operating_point", trait=fx.COUNT_TRAIT).ok
 
 
-def _conf_cell(csv_path):
-    """The delivered CSV's operating_point_conf cell, a Python-repr'd dict (csv.DictWriter's
-    default str() coercion of a non-string value, never JSON), read back with ast.literal_eval."""
-    import ast
-    import csv as csv_module
-
-    with open(csv_path, newline="") as f:
-        row = next(csv_module.DictReader(f))
-    return ast.literal_eval(row["operating_point_conf"])
-
-
 def test_deliver_per_image_counts_stamps_default_conf_source_when_omitted(tmp_path, monkeypatch):
     """The rail must admit the ordinary, unstated call: an omitted conf still runs the pass at the
     platform default, and its provenance says so in the persisted bucket, never laundered into
