@@ -1236,6 +1236,60 @@ describe("ResultsTab delivery events (read-only)", () => {
     ).toBeInTheDocument();
     expect(within(row).getByText(/image-level attribution/)).toBeInTheDocument();
   });
+
+  it("renders the archived key beside a cited mapping once a rebuild has moved past it", async () => {
+    const withMapping: DeliveryEventRecord = {
+      ...DELIVERY_EVENT,
+      event_id: "moved-on",
+      plant_mapping: {
+        name: "valley",
+        project_root: "C:/proj",
+        dataset_id: "ds-1",
+        dataset_root: "C:/data",
+        built_at: "2026-02-01T00:00:00+00:00",
+        record_sha256: "0".repeat(64),
+        nn_tolerance_m: { value: 3, source: "stated" },
+        capture_identity: {},
+        captures_unverified: [],
+        plant_csvs_unverified: [],
+        dates_delivered: ["2026-01-01"],
+        images_unattributed: 0,
+        images_unattributed_scope: "delivered_dates",
+        plant_attribution: "image",
+      },
+      plant_mapping_resolved_key: "valley@0123456789ab",
+    };
+    vi.spyOn(resultsApi, "deliveryEvents").mockResolvedValue({ records: [withMapping] });
+
+    render(<ResultsTab />);
+    const row = await screen.findByTestId("delivery-moved-on");
+
+    expect(within(row).getByText(/archived as valley@0123456789ab/)).toBeInTheDocument();
+  });
+
+  it("renders a supersession's reason and replacement", async () => {
+    const superseded: DeliveryEventRecord = {
+      ...DELIVERY_EVENT,
+      event_id: "superseded-1",
+      superseded: {
+        superseded_event_id: "superseded-1",
+        output_sha256: "abc",
+        replacement_event_id: "replacement-1",
+        reason: "a mis-stated crop was corrected upstream",
+        superseded_by: "supersede_delivery",
+        superseded_at: "2026-02-04T00:00:00+00:00",
+      },
+    };
+    vi.spyOn(resultsApi, "deliveryEvents").mockResolvedValue({ records: [superseded] });
+
+    render(<ResultsTab />);
+    const row = await screen.findByTestId("delivery-superseded-1");
+
+    expect(
+      within(row).getByText(/Superseded: a mis-stated crop was corrected upstream/),
+    ).toBeInTheDocument();
+    expect(within(row).getByText(/replaced by replacement-1/)).toBeInTheDocument();
+  });
 });
 
 describe("ResultsTab plant-mapping build: match-tolerance phrase", () => {
@@ -1309,6 +1363,45 @@ describe("ResultsTab plant-mapping build: match-tolerance phrase", () => {
   it("renders a source this map does not know as its own raw string", async () => {
     await buildWithTolerance({ value: 5, source: "future_branch" });
     expect(await screen.findByText(/future_branch/)).toBeInTheDocument();
+  });
+
+  it("sends supersede only once the checkbox is checked", async () => {
+    await buildWithTolerance({ value: 3, source: "stated" });
+
+    expect(resultsApi.buildPlantMapping).toHaveBeenCalledWith(
+      expect.objectContaining({ supersede: false }),
+    );
+
+    fireEvent.click(screen.getByLabelText(/supersede a mapping a delivery event still cites/i));
+    fireEvent.click(screen.getByRole("button", { name: /build \+ save mapping/i }));
+    await waitFor(() =>
+      expect(resultsApi.buildPlantMapping).toHaveBeenLastCalledWith(
+        expect.objectContaining({ supersede: true }),
+      ),
+    );
+  });
+
+  it("shows a citing-events 409 beside the supersede checkbox rather than only a toast", async () => {
+    mockTreeAndMappings();
+    vi.spyOn(resultsApi, "buildPlantMapping").mockRejectedValue(
+      new StructuredRefusalError(
+        { message: "plant mapping 'valley' is cited by delivery event(s) ['evt-1']" },
+        409,
+        "plant mapping 'valley' is cited by delivery event(s) ['evt-1']",
+      ),
+    );
+
+    render(<ResultsTab />);
+    await waitFor(() => expect(resultsApi.listPlantMappings).toHaveBeenCalled());
+    fireEvent.change(screen.getByPlaceholderText("valley-2026"), {
+      target: { value: "valley-2026" },
+    });
+    fireEvent.change(screen.getByPlaceholderText("valley-plants"), {
+      target: { value: "valley-plants" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /build \+ save mapping/i }));
+
+    expect(await screen.findByText(/cited by delivery event\(s\)/)).toBeInTheDocument();
   });
 
   function buildMappingWith(

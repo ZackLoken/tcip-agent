@@ -371,6 +371,9 @@ export interface DeliveryEventRecord {
   // The plant mapping this delivery attributed detections through, door-conditional: the
   // phenology doors carry it, every other delivery door carries null.
   plant_mapping: PlantMappingDisclosure | null;
+  // Set only alongside plant_mapping: the name to load to see exactly the cited record (its own
+  // name while unmoved, an archived key once superseded, or null when neither resolves).
+  plant_mapping_resolved_key?: string | null;
   // The supersession filed against this event, if any (see DeliverySupersession above).
   superseded: DeliverySupersession | null;
 }
