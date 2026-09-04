@@ -192,6 +192,16 @@ def canvas_open_binding_key(*, create: bool = True) -> Key:
     return Key(CANVAS_OPEN_BINDING_STORE, str(workspace.workspace_root(create=create)), _BINDING_PARTS)
 
 
+class GuiBindingUnreadable(RuntimeError):
+    """The canvas-open binding record could not be read: a store error or an OS-level failure.
+
+    Raised by :func:`gui_binding_matches` rather than left to propagate as the underlying
+    ``StoreError``/``OSError``, so its three callers (``capture_live_canvas``,
+    ``focus_human_attention``, ``push_panel_event``) share one error contract instead of each
+    wrapping the read in its own try/except.
+    """
+
+
 def gui_binding_matches(root: str | Path) -> tuple[bool, dict[str, Any] | None]:
     """Whether the GUI's currently open project is ``root``, and the binding compared against.
 
@@ -201,9 +211,14 @@ def gui_binding_matches(root: str | Path) -> tuple[bool, dict[str, Any] | None]:
     ``CLAUDE.md`` warns against. Returns ``(False, None)`` when no binding record exists at all
     (nothing is open for any root to match); otherwise ``(matches, binding)``, so a caller
     refusing a mismatch can name the binding's own project straight from the second element
-    without a re-read.
+    without a re-read. Raises :class:`GuiBindingUnreadable` when the record itself cannot be
+    read, rather than returning as if none existed: a caller that cannot tell "no binding" from
+    "binding illegible" would refuse the wrong way and might steer a browser it should not.
     """
-    binding = tcip_store.read(canvas_open_binding_key(create=False), default=None)
+    try:
+        binding = tcip_store.read(canvas_open_binding_key(create=False), default=None)
+    except (tcip_store.StoreError, OSError) as exc:
+        raise GuiBindingUnreadable(f"Could not read the canvas-open binding: {exc}") from exc
     if binding is None:
         return False, None
     matches = tcip_store.canonical_path(binding["root"]) == tcip_store.canonical_path(str(root))

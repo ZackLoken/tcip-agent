@@ -771,7 +771,8 @@ def capture_live_canvas(
 
     from tcip_mcp import workspace
     from tcip_mcp.web_client import (
-        canvas_geometry_key, canvas_meta_key, canvas_open_binding_key, gui_binding_matches,
+        GuiBindingUnreadable, canvas_geometry_key, canvas_meta_key, canvas_open_binding_key,
+        gui_binding_matches,
     )
 
     root = str(platform_state_root())
@@ -802,8 +803,8 @@ def capture_live_canvas(
     for attempt in range(2):
         try:
             same_root, binding = gui_binding_matches(root)
-        except (ts.StoreError, OSError) as exc:
-            return {"error": f"Could not read the canvas-open binding: {exc}"}
+        except GuiBindingUnreadable as exc:
+            return {"error": str(exc)}
 
         if binding is None:
             ws_root = str(workspace.workspace_root(create=False))

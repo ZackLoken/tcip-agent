@@ -83,3 +83,51 @@ def test_push_panel_event_delivers_under_a_matching_binding(
 
     assert "bound_project" not in res  # not refused by the binding rail
     assert res["panel"] == "training"
+
+
+def test_focus_human_attention_refuses_with_no_binding_at_all(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
+    date = "2026-03-02"
+    _scene(tmp_path, date)
+
+    res = focus_human_attention("annotate", str(tmp_path), str(tmp_path), "catkin", date)
+
+    assert "error" in res
+    assert res["bound_project"] is None
+    assert res["bound_root"] is None
+    assert res["delivered"] is False
+
+
+def test_push_panel_event_refuses_with_no_binding_at_all(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
+
+    res = push_panel_event(panel="training", event_type="metrics_update", data={"epoch": 1})
+
+    assert "error" in res
+    assert res["bound_project"] is None
+    assert res["bound_root"] is None
+    assert res["delivered"] is False
+
+
+def test_push_panel_event_refuses_when_the_binding_cannot_be_read(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    import tcip_store
+    from tcip_mcp import web_client as web_client_module
+
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
+
+    def _boom(*args, **kwargs):
+        raise tcip_store.StoreError("boom")
+
+    monkeypatch.setattr(web_client_module.tcip_store, "read", _boom)
+
+    res = push_panel_event(panel="training", event_type="metrics_update", data={"epoch": 1})
+
+    assert "error" in res
+    assert "Could not read the canvas-open binding" in res["error"]
+    assert res["delivered"] is False

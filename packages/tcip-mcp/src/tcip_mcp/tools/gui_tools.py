@@ -27,7 +27,8 @@ def _binding_refusal(binding: dict | None, compared_root: str) -> dict:
     ``web_client.gui_binding_matches`` predicate ``capture_live_canvas`` already refuses under:
     no binding at all means nothing is open for either root to match, and a binding naming
     another project means this call would drive a browser that has moved on. Neither driver
-    takes an override; a mismatch, or no binding, refuses every time.
+    takes an override; a mismatch, or no binding, refuses every time. ``delivered`` is always
+    ``False`` here, since neither caller reaches its own post to the GUI once this refuses.
     """
     if binding is None:
         return {
@@ -36,6 +37,7 @@ def _binding_refusal(binding: dict | None, compared_root: str) -> dict:
             "bound_project": None,
             "bound_root": None,
             "compared_root": compared_root,
+            "delivered": False,
         }
     return {
         "error": f"The GUI's open project ({binding.get('project_name') or binding.get('root')}) "
@@ -44,6 +46,7 @@ def _binding_refusal(binding: dict | None, compared_root: str) -> dict:
         "bound_project": binding.get("project_name"),
         "bound_root": binding.get("root"),
         "compared_root": compared_root,
+        "delivered": False,
     }
 
 
@@ -88,16 +91,20 @@ def push_panel_event(
         data: Arbitrary JSON data payload.
     """
     from tcip_mcp.project_paths import platform_state_root
-    from tcip_mcp.web_client import VALID_PANELS, gui_binding_matches, post_panel_event
+    from tcip_mcp.web_client import (
+        VALID_PANELS, GuiBindingUnreadable, gui_binding_matches, post_panel_event,
+    )
 
     if panel not in VALID_PANELS:
         return {"error": f"Unknown panel: {panel}. Valid: {sorted(VALID_PANELS)}"}
 
     own_root = str(platform_state_root())
-    matches, binding = gui_binding_matches(own_root)
+    try:
+        matches, binding = gui_binding_matches(own_root)
+    except GuiBindingUnreadable as exc:
+        return {"error": str(exc), "delivered": False, "panel": panel, "event_type": event_type}
     if not matches:
         refusal = _binding_refusal(binding, own_root)
-        refusal["delivered"] = False
         refusal.setdefault("panel", panel)
         refusal.setdefault("event_type", event_type)
         return refusal
@@ -156,9 +163,12 @@ def focus_human_attention(
         iou_threshold: Review only, IoU cutoff for the TP/FP/FN match classification.
         conf_threshold: Review only, confidence cutoff for showing predictions.
     """
-    from tcip_mcp.web_client import gui_binding_matches
+    from tcip_mcp.web_client import GuiBindingUnreadable, gui_binding_matches
 
-    matches, binding = gui_binding_matches(project_root)
+    try:
+        matches, binding = gui_binding_matches(project_root)
+    except GuiBindingUnreadable as exc:
+        return {"error": str(exc), "delivered": False}
     if not matches:
         return _binding_refusal(binding, project_root)
 
