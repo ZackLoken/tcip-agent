@@ -2181,6 +2181,12 @@ def deliver_per_image_counts(
                 "which is what a validated count CSV rests on; an unvalidated bucket can also be "
                 "promoted to validated later through the review validation route, with no re-run."
             )
+        else:
+            reason += (
+                " This door takes no acknowledgement for the CSV itself: validate the dimension "
+                "named above, or promote this bucket to validated through the review validation "
+                "route (validate_reference) and re-deliver."
+            )
         refusal = {
             "error": reason,
             "operating_point_validated": op_validated,
@@ -2389,7 +2395,11 @@ def _deliver_per_image_counts_from_bucket(predictions_dir: str, output_path: str
         )
     except DeliveryRefused as exc:
         refusal = {
-            "error": str(exc),
+            "error": (
+                f"{exc} This door takes no acknowledgement: validate the dimension named above, "
+                "or promote this bucket to validated through the review validation route "
+                "(validate_reference) and re-deliver."
+            ),
             "operating_point_validated": exc.gate.stamp.get("operating_point", VALIDATED_FALSE),
             "tile_size_validated": exc.gate.stamp.get("tile_size"),
             "unvalidated_dimensions": exc.gate.unvalidated_cell(),

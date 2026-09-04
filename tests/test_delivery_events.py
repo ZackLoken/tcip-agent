@@ -163,6 +163,27 @@ def test_phenology_measurement_records_no_delivery_event_for_an_unclassified_loo
     assert any(e["tool"] == "results.phenology_measurement" for e in audit)
 
 
+def test_record_delivery_binding_event_reports_a_failed_store_write_without_raising(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The event write is best effort: a store failure after the artifact already shipped is a
+    provenance gap the caller can disclose, never a reason to raise on an already-completed
+    delivery. The return value says whether the write actually landed."""
+    def _boom(*a, **kw):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(ts, "replace", _boom)
+
+    recorded = resolution.record_delivery_binding_event(
+        "test_door", None, [], {}, measurement_documents=["operating_point"],
+        scale_document=None, acknowledgement=None, trait="astringency",
+        delivery_kind=STATE_CROSSING_DATES, project_root=tmp_path, plant_mapping=None,
+    )
+
+    assert recorded is False
+    assert _delivery_event_records(tmp_path.resolve()) == []
+
+
 def test_record_delivery_binding_event_raises_and_writes_nothing_when_plant_mapping_fails_validation(
     tmp_path: Path,
 ) -> None:

@@ -260,7 +260,11 @@ def deliver_orthomosaic_plant_counts(
         # operating_point_validated is the operating_point dimension's own cleared reference;
         # unvalidated_dimensions names every refusing dimension (claim_scope and scale included).
         refusal = {
-            "error": str(exc),
+            "error": (
+                f"{exc}. Calibrate the operating point (or the tile geometry) that produced this "
+                "bucket and re-run; a mosaic whose training run reserved no calibration region "
+                "has no route to a delivered CSV today."
+            ),
             "operating_point_validated": exc.gate.stamp.get("operating_point", VALIDATED_FALSE),
             "unvalidated_dimensions": exc.gate.unvalidated_cell(),
             "n_detections": len(assignments), "n_mapped": len(mapped),
