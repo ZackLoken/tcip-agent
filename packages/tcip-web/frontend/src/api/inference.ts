@@ -345,6 +345,17 @@ export interface PlantMappingDisclosure {
   plant_attribution: string;
 }
 
+/** The `delivery_supersessions` record `supersede_delivery` filed against one event's id, joined
+ *  onto that event by the backend (`delivery_events_schema.with_supersessions`). */
+export interface DeliverySupersession {
+  superseded_event_id: string;
+  output_sha256: string | null;
+  replacement_event_id: string | null;
+  reason: string;
+  superseded_by: string;
+  superseded_at: string;
+}
+
 /** One completed delivery: what shipped, under which trait and kind, and the real per-bucket
  *  verification evidence the delivering door reconciled at the time. Read-only; a delivery event
  *  is a fact recorded after an artifact already shipped, not a statement to confirm. */
@@ -354,11 +365,14 @@ export interface DeliveryEventRecord {
   delivery_kind: string | null;
   door: string;
   output_path: string | null;
+  output_sha256: string | null;
   documents: Record<string, unknown>;
   produced_at: string;
   // The plant mapping this delivery attributed detections through, door-conditional: the
   // phenology doors carry it, every other delivery door carries null.
   plant_mapping: PlantMappingDisclosure | null;
+  // The supersession filed against this event, if any (see DeliverySupersession above).
+  superseded: DeliverySupersession | null;
 }
 
 export const resultsApi = {
@@ -380,9 +394,10 @@ export const resultsApi = {
   buildPlantMapping: (body: {
     name: string;
     images_root: string;
-    plant_csv_paths: string[];
+    plant_registry: string;
     dates?: string[];
     nn_tolerance_m?: number;
+    supersede?: boolean;
   }) =>
     postJson<{
       summary: PlantMappingSummary;

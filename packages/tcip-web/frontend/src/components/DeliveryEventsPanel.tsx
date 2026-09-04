@@ -65,6 +65,14 @@ function DeliveryEventRow({ record }: { record: DeliveryEventRecord }) {
             `(${record.plant_mapping.plant_attribution}-level attribution)`}
         </div>
       )}
+      {record.superseded && (
+        <div className="mt-2 text-[11px] text-tcip-fp" data-testid={`superseded-${record.event_id}`}>
+          {`Superseded: ${record.superseded.reason}` +
+            (record.superseded.replacement_event_id
+              ? ` (replaced by ${record.superseded.replacement_event_id})`
+              : "")}
+        </div>
+      )}
     </li>
   );
 }

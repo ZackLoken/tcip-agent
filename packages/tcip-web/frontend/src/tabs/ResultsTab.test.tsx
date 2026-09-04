@@ -1131,6 +1131,7 @@ describe("ResultsTab delivery events (read-only)", () => {
     delivery_kind: "state_crossing_dates",
     door: "results.per_plant_curves",
     output_path: null,
+    output_sha256: null,
     documents: {
       "C:/data/predictions/baseline/2026-01-01": {
         ok: true,
@@ -1153,6 +1154,7 @@ describe("ResultsTab delivery events (read-only)", () => {
     },
     produced_at: "2026-02-03T12:00:00+00:00",
     plant_mapping: null,
+    superseded: null,
   };
 
   it("lists what shipped, with real per-bucket verification evidence and no confirm/withdraw controls", async () => {
@@ -1272,8 +1274,8 @@ describe("ResultsTab plant-mapping build: match-tolerance phrase", () => {
     fireEvent.change(screen.getByPlaceholderText("valley-2026"), {
       target: { value: "valley-2026" },
     });
-    fireEvent.change(screen.getByPlaceholderText("…/plants_block_A.csv"), {
-      target: { value: "C:/plants.csv" },
+    fireEvent.change(screen.getByPlaceholderText("valley-plants"), {
+      target: { value: "valley-plants" },
     });
     fireEvent.click(screen.getByRole("button", { name: /build \+ save mapping/i }));
     await waitFor(() => expect(resultsApi.buildPlantMapping).toHaveBeenCalled());
@@ -1346,8 +1348,8 @@ describe("ResultsTab plant-mapping build: match-tolerance phrase", () => {
     fireEvent.change(screen.getByPlaceholderText("valley-2026"), {
       target: { value: "valley-2026" },
     });
-    fireEvent.change(screen.getByPlaceholderText("…/plants_block_A.csv"), {
-      target: { value: "C:/plants.csv" },
+    fireEvent.change(screen.getByPlaceholderText("valley-plants"), {
+      target: { value: "valley-plants" },
     });
     fireEvent.click(screen.getByRole("button", { name: /build \+ save mapping/i }));
   }
