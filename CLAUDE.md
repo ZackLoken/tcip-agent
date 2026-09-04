@@ -46,8 +46,9 @@ silently corrupts results and compounds across sessions.
 
 - Scope the project-data ritual before running it. Platform work skips `load_project_memory`,
   `inspect_project` and `doctor.py` entirely. Project work first confirms the active-project
-  marker names the task's project (`view_gui_state`, cheaply; the marker is written once by
-  `activate_project` and persists across sessions), asking when the task names none; then
+  marker names the task's project (`view_gui_state`, cheaply; the marker is rewritten by
+  `activate_project` on every project switch and persists across sessions between switches),
+  asking when the task names none; then
   `load_project_memory` (reports and retrospectives), `inspect_project`, and
   `python scripts/doctor.py <project_root>`, reporting what it finds through `report_friction`
   before acting on the data.
