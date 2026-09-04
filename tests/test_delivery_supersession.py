@@ -48,7 +48,8 @@ def _one_event(tmp_path: Path, door: str = "deliver_phenology_milestones") -> di
 def test_a_delivered_csv_carries_the_written_files_own_digest(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """GUARDS: record_delivery_binding_event now stamps output_sha256 from the file it names."""
+    """Coverage: the same digest, end to end through the real phenology delivery door (the
+    isolated GUARDS proof for the writer itself lives in test_delivery_output_digest_guard.py)."""
     preds_by_date = _delivered_scene(tmp_path, monkeypatch)
     out_csv = tmp_path / "out.csv"
     res = deliver_phenology_milestones(
