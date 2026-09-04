@@ -7,7 +7,11 @@
 
 import { Fragment } from "react";
 
-import { isPlantRegistryDisclosure, type DeliveryEventRecord } from "@/api/inference";
+import {
+  isPlantMappingDisclosure,
+  isPlantRegistryDisclosure,
+  type DeliveryEventRecord,
+} from "@/api/inference";
 
 /** One bucket's binding evidence, as `record_delivery_binding_event` (resolution.py) writes it. */
 interface DocumentBinding {
@@ -73,7 +77,7 @@ function DeliveryEventRow({ record }: { record: DeliveryEventRecord }) {
             `on the delivered raster (${record.plant_mapping.plant_attribution}-level attribution)`}
         </div>
       )}
-      {record.plant_mapping && !isPlantRegistryDisclosure(record.plant_mapping) && (
+      {record.plant_mapping && isPlantMappingDisclosure(record.plant_mapping) && (
         <div className="mt-2 text-[11px] text-tcip-muted">
           {`Delivered dates ${record.plant_mapping.dates_delivered.join(", ")}: ` +
             `${record.plant_mapping.images_unattributed} attributed to no plant ` +

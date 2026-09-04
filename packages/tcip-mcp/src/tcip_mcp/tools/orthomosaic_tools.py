@@ -98,12 +98,12 @@ def deliver_orthomosaic_plant_counts(
     Delivery-event disclosure: every registry CSV named above is hashed against the byte digest
     ``register_plant_registry`` recorded for it (:func:`~tcip_mcp.pipelines.postprocessing.
     plant_mapping.verify_registry_csv_bytes`), and a missing or rewritten file refuses by name
-    before anything is read, so every CSV this delivery reads is verified or the delivery never
-    happens. The delivery event this door's own ``export_aggregated_csv`` call records carries a
-    ``PlantRegistryDisclosure`` (``delivery_events_schema.py``): the registry it read, the raster
-    identity every count is attributed through, the matched tolerance and its source, and this
-    delivery's own unattributed-detection count, the whole-raster counterpart of the walked
-    mapping's own ``PlantMappingDisclosure`` the phenology doors record.
+    before any plant or prediction is read, so every CSV this delivery reads is verified or the
+    delivery never happens. The delivery event this door's own ``export_aggregated_csv`` call
+    records carries a ``PlantRegistryDisclosure`` (``delivery_events_schema.py``): the registry it
+    read, the raster identity every count is attributed through, the matched tolerance and its
+    source, and this delivery's own unattributed-detection count, the whole-raster counterpart of
+    the walked mapping's own ``PlantMappingDisclosure`` the phenology doors record.
 
     Args:
         predictions_dir: The bucket ``run_inference``'s ``raster_path`` regime persisted.
@@ -149,11 +149,13 @@ def deliver_orthomosaic_plant_counts(
             f"plant registry not found: {plant_registry!r}; register it with "
             "register_plant_registry before deliver_orthomosaic_plant_counts reads it")}
     registry_entries = registry_csv_entries(registry_record)
-    missing, rewritten_refusal = verify_registry_csv_bytes(registry_entries)
+    missing, rewritten_fact = verify_registry_csv_bytes(registry_entries)
     if missing:
         return {"error": f"plant CSV(s) not found: {missing}"}
-    if rewritten_refusal:
-        return {"error": rewritten_refusal}
+    if rewritten_fact:
+        return {"error": (
+            f"{rewritten_fact}: restore the file's registered bytes, or register the current "
+            "file under a new registry name and deliver under that name")}
     plant_csv_paths = [e["path"] for e in registry_entries]
 
     from tcip_mcp.operationalization import (

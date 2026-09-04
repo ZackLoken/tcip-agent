@@ -12,9 +12,10 @@ other schema-only module instead of widening that statement.
 capture mapping's :class:`PlantMappingDisclosure` (the phenology doors, and
 ``deliver_per_plant_csv`` when its caller verified one), or a whole-raster frame's
 :class:`PlantRegistryDisclosure` (``deliver_orthomosaic_plant_counts`` alone, which has no walked
-mapping build to name). The two share no key, so pydantic resolves a stored dict to exactly one
-model with no discriminator field added to either: every key either model declares is required and
-both forbid an extra one, so a dict is a legal instance of at most one of the two.
+mapping build to name). The two declare different required key sets, neither a subset of the
+other (they do share ``project_root``, ``nn_tolerance_m`` and ``plant_attribution``), so with an
+extra key forbidden on both a stored dict validates against at most one: pydantic resolves it with
+no discriminator field added to either.
 
 Both models forbid an undeclared key, so a stored record or disclosure carrying one is refused by
 name rather than silently accepted and later misread.
@@ -22,7 +23,7 @@ name rather than silently accepted and later misread.
 
 from __future__ import annotations
 
-from typing import Literal, Mapping, Optional, Union
+from typing import Literal, Mapping, Optional, TypeGuard, Union
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
@@ -78,6 +79,15 @@ class PlantRegistryDisclosure(BaseModel):
     detections_unattributed: int
     detections_unattributed_scope: Literal["delivered_raster"]
     plant_attribution: str
+
+
+def is_mapping_disclosure(pm: object) -> TypeGuard[dict]:
+    """Whether ``pm`` is a walked-mapping :class:`PlantMappingDisclosure` dict rather than a
+    whole-raster :class:`PlantRegistryDisclosure` one (or neither): the one key test every reader
+    that needs to tell the two disclosure shapes apart (``list_delivery_events``,
+    :func:`~tcip_mcp.pipelines.postprocessing.plant_mapping._citing_delivery_event_ids`) calls,
+    rather than each restating ``"name" in pm and "record_sha256" in pm`` on its own."""
+    return isinstance(pm, dict) and "name" in pm and "record_sha256" in pm
 
 
 class DocumentBinding(BaseModel):

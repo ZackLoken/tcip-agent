@@ -368,8 +368,8 @@ export interface PlantMappingDisclosure {
   plant_attribution: string;
 }
 
-// The whole-raster counterpart, shares no key with PlantMappingDisclosure: an orthomosaic
-// delivery's own registry disclosure (deliver_orthomosaic_plant_counts's PlantRegistryDisclosure).
+// The whole-raster counterpart, a different required key set from PlantMappingDisclosure's:
+// an orthomosaic delivery's own registry disclosure (deliver_orthomosaic_plant_counts's own).
 export interface PlantRegistryDisclosure {
   plant_registry: { name: string; digest: string };
   project_root: string;
@@ -385,6 +385,13 @@ export function isPlantRegistryDisclosure(
   pm: PlantMappingDisclosure | PlantRegistryDisclosure,
 ): pm is PlantRegistryDisclosure {
   return "plant_registry" in pm;
+}
+
+/** Whether `pm` is a walked mapping's disclosure rather than the whole-raster registry one. */
+export function isPlantMappingDisclosure(
+  pm: PlantMappingDisclosure | PlantRegistryDisclosure,
+): pm is PlantMappingDisclosure {
+  return "name" in pm && "record_sha256" in pm;
 }
 
 /** The `delivery_supersessions` record `supersede_delivery` filed against one event's id, joined
