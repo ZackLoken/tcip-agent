@@ -86,9 +86,10 @@ def load_canopy_segments(
     ``image`` is not ``raster_stem`` or its ``width``/``height`` differ from ``raster_identity``'s
     (the document at this position does not describe this raster); when no annotation of
     ``subject`` exists (a stated subject is a claim the data must positively carry); when an
-    annotation of ``subject`` is a :class:`~tcip_annotation.state.Point` (it names no region,
-    refused naming the record so the breeder can delete it, rather than skipped silently or the
-    whole document refused by implication); and when any annotation of ``subject`` is not
+    annotation of ``subject`` carries no geometry at all (an image-level label) or is a
+    :class:`~tcip_annotation.state.Point` (either way it names no region, refused naming the
+    record so the breeder can delete it, rather than skipped silently or the whole document
+    refused by implication); and when any annotation of ``subject`` is not
     positively a person's: a scored record (the model's own unreviewed output), a record with no
     ``created_by`` at all (the reference rule's own pre-provenance exception does not apply here),
     or a record whose ``created_by`` is not a person's unless its ``accepted_by`` is a person's,
@@ -135,6 +136,12 @@ def load_canopy_segments(
                 "not accepted"
             )
     for i, a in enumerate(annotations):
+        if a.geometry is None:
+            raise CanopySegmentRefusal(
+                f"canopy segment {i} of subject {subject!r} carries no geometry (an image-level "
+                "label), which names no region; delete this record or replace it with a boundary "
+                "(a box or a traced polygon)"
+            )
         if isinstance(a.geometry, AnnotationPoint):
             raise CanopySegmentRefusal(
                 f"canopy segment {i} of subject {subject!r} is a Point, which names no region; "
