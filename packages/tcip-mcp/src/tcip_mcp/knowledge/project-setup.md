@@ -51,7 +51,8 @@ Scales across 6 crops × subjects × phenotypes, and sorts sensibly on disk.
 
 Structure the raw pile into the canonical layout. One auditable primitive:
 
-```
+```python
+from tcip_mcp.tools.ingest_tools import ingest_images
 ingest_images(source="<raw folder or glob>", name="black-locust_tree_trunk-diameter", site="<the breeder's site>")
 ```
 
@@ -131,8 +132,9 @@ refuses rather than guesses, inherited by `load_annotations_any` and
 
 Create leakage-free train/val/calibration splits with `draw_splits` (group-aware, keeps sibling
 tiles of one source image in the same split; there is no held-out test list, and no launch path
-honours one). Non-destructive by default (writes a manifest + stats); pass
-`materialize=True` to also lay out a `{train,val,calibration}/{images,labels}/` tree, with the
+honours one). Non-destructive by default (a stats dict only; a manifest is written only when
+`output_path` is given or `materialize=True`); pass `materialize=True` to also lay out a
+`{train,val,calibration}/{images,labels}/` tree, with the
 platform's own per-image JSON labels (not YOLO's `.txt` format; `tcip-annotation` supports
 `{json, coco}` only). Writing a manifest requires `subject` and all three ratios stated non-zero:
 its members are drawn through the same admission a training run uses, and a run names it with
