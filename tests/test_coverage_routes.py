@@ -1296,12 +1296,12 @@ class TestCompletenessRoute:
             "/api/coverage/completeness", params={"path": path}).json()["by_subject"]["catkin"]
         assert record["grid"]["tile_size"] == 100
 
-    def test_an_old_record_with_no_cells_attested_view_map_still_reads_and_attests(
+    def test_get_completeness_refuses_a_record_lacking_the_cells_attested_view_key(
         self, client, dated_dataset,
     ):
-        """A record from before this field existed (no ``cells_attested_view`` key at all) is
-        still a valid completeness record: reading it back and attesting a further cell on it
-        both succeed, admitting the legitimate old-shape case rather than refusing it."""
+        """A record from before this field existed (no ``cells_attested_view`` key at all)
+        refuses by name rather than being served or merged into: conform_region_completeness_
+        attested_view.py write-forwards it to an empty map before the record is usable again."""
         import tcip_store as ts
 
         from tcip_mcp.dataset_layout import region_completeness_key
@@ -1319,6 +1319,39 @@ class TestCompletenessRoute:
         }
         bucket = f"catkin/{Path(path).stem}"
         ts.replace(region_completeness_key(root), {bucket: old_record}, expect=ts.Version.ABSENT)
+
+        got = client.get("/api/coverage/completeness", params={"path": path})
+        assert got.status_code == 400
+        assert "conform_region_completeness_attested_view.py" in got.json()["detail"]
+
+        resp = self._toggle(client, path, grid, "B2", view_scale=0.5)
+        assert resp.status_code == 400
+        assert "conform_region_completeness_attested_view.py" in resp.json()["detail"]
+
+    def test_get_completeness_serves_a_conformed_record_with_an_empty_attested_view(
+        self, client, dated_dataset,
+    ):
+        """A record already carrying ``cells_attested_view`` (even an empty map, the conform
+        script's write-forward) reads and attests normally."""
+        import tcip_store as ts
+
+        from tcip_mcp.dataset_layout import region_completeness_key
+
+        root, path = dated_dataset
+        grid = _grid(client, path, tile_size=64)
+        conformed_record = {
+            "grid": _grid_only(grid),
+            "cells_complete": ["A1"],
+            "attested_by": "user:z",
+            "attested_at": "2026-01-01T00:00:00+00:00",
+            "stem": Path(path).stem,
+            "date": "2026-03-01",
+            "subject": "catkin",
+            "cells_attested_view": {},
+        }
+        bucket = f"catkin/{Path(path).stem}"
+        ts.replace(
+            region_completeness_key(root), {bucket: conformed_record}, expect=ts.Version.ABSENT)
 
         got = client.get("/api/coverage/completeness", params={"path": path})
         assert got.status_code == 200, got.text

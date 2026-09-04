@@ -285,6 +285,7 @@ describe("effectiveComplete", () => {
       date: null,
       subject: "bush",
       stale_cells: [],
+      cells_attested_view: {},
       ...overrides,
     };
   }

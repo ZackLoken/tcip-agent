@@ -70,6 +70,23 @@ _WORKING_SCALE_CONFORM_HINT = (
     "current shape (--plan first to preview the change)"
 )
 
+_ATTESTED_VIEW_CONFORM_HINT = (
+    "run scripts/conform_region_completeness_attested_view.py against this dataset to bring it "
+    "to the current shape (--plan first to preview the change)"
+)
+
+
+def _refuse_missing_attested_view(image_name: str, record: dict) -> None:
+    """Refuse a stored region-completeness record that carries no ``cells_attested_view`` key at
+    all: a record written before the key existed, not a record with an empty map (which is the
+    conformed, current shape and reads on)."""
+    if "cells_attested_view" in record:
+        return
+    raise HTTPException(
+        400,
+        f"{image_name}'s stored region-completeness record carries no cells_attested_view key; "
+        f"{_ATTESTED_VIEW_CONFORM_HINT}")
+
 
 def _refuse_old_working_scale_key(image_name: str, record: dict) -> None:
     """Refuse a stored region-completeness record whose ``cells_attested_view`` still carries
@@ -746,6 +763,7 @@ def get_completeness(
         record_subject = record.get("subject")
         if not isinstance(record_subject, str) or not record_subject:
             continue
+        _refuse_missing_attested_view(f"{stem} ({record_subject})", record)
         _refuse_old_working_scale_key(f"{stem} ({record_subject})", record)
         stamped = digests.get(bucket)
         try:
@@ -900,12 +918,13 @@ def post_completeness(payload: CompletenessSetPayload) -> dict:
         existing = store.get(bucket)
         grid_matches = existing is not None and existing.get("grid") == grid
         if grid_matches and isinstance(existing, dict):
+            _refuse_missing_attested_view(image_name, existing)
             _refuse_old_working_scale_key(image_name, existing)
         cells_complete = (
             set(existing.get("cells_complete") or [])
             if grid_matches and existing is not None else set())
         cells_attested_view = (
-            dict(existing.get("cells_attested_view") or {})
+            dict(existing["cells_attested_view"])
             if grid_matches and existing is not None else {})
 
         if not complete and payload.cell not in cells_complete:

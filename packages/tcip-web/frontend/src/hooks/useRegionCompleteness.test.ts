@@ -25,6 +25,7 @@ function record(
     date: null,
     subject,
     stale_cells,
+    cells_attested_view: {},
   };
 }
 
@@ -458,7 +459,7 @@ describe("useRegionCompleteness", () => {
     await waitFor(() => expect(result.current.activeCellsAttestedView).toEqual({ A1: entry }));
   });
 
-  it("an absent cells_attested_view on an old-shape record reads as empty, not an error", async () => {
+  it("a record with no attested cells exposes an empty cells_attested_view", async () => {
     vi.spyOn(api.coverage, "completeness").mockResolvedValue(
       response({ bush: record("bush", ["A1"]) }),
     );

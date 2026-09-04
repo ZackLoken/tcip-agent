@@ -61,7 +61,8 @@ export interface CellAttestedView {
 /** One subject's region-completeness record, as GET /api/coverage/completeness returns it
  *  (per subject, in `by_subject`). `stale_cells` is recomputed server-side on every read: an
  *  attested cell whose annotation content has since been edited or deleted. `cells_attested_view`
- *  is absent on a record from before this field existed; read a missing key as `{}`. */
+ *  is always present; a record predating the key refuses on the backend rather than being
+ *  served with it missing. */
 export interface CompletenessRecord {
   grid: GridGeometry;
   cells_complete: string[];
@@ -71,7 +72,7 @@ export interface CompletenessRecord {
   date: string | null;
   subject: string;
   stale_cells: string[];
-  cells_attested_view?: Record<string, CellAttestedView>;
+  cells_attested_view: Record<string, CellAttestedView>;
 }
 
 /** GET /api/coverage/completeness's full response: every subject's record, plus every subject's
