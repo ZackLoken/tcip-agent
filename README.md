@@ -174,10 +174,11 @@ only the Results tab's own delivering route can, through the breeder's own ackno
 - Measurement-integrity gates: every parameter a delivered phenotype depends on (confidence
   threshold, tile geometry, mask-binarize threshold, physical pixel-to-real-world scale) carries
   its own validation state and a record of what actually cleared it, never a bare number. A
-  delivery door refuses to write a bare unvalidated result; it either ships a validated one or a
-  caller must explicitly acknowledge shipping a flagged provisional one. The same shared gate
-  (`check_delivery_gate` in `pipelines/resolution.py`) backs every delivery path so none of them
-  can drift into disagreeing about when a number is trustworthy.
+  delivery door refuses to write a bare unvalidated result; only the Results tab's own delivering
+  route can ship a flagged unvalidated one, through the breeder's own acknowledged act, since it is
+  the one delivery kind a web door serves. The same shared gate (`check_delivery_gate` in
+  `pipelines/resolution.py`) backs every delivery path so none of them can drift into disagreeing
+  about when a number is trustworthy.
 
 ## Roadmap
 
