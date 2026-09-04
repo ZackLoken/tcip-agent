@@ -269,9 +269,9 @@ def resolve_nn_tolerance_m(
     derive a pitch from.
 
     A single-detection-per-object mosaic frame accepts a match at the tolerance itself, never
-    ``plant_mapping.build_mapping``'s own sequence-anchored ceiling (a stated override capped at
-    the grid pitch): the two doors' match semantics differ enough that a stated override is never
-    capped here, so this stays its own derivation rather than sharing ``build_mapping``'s.
+    ``plant_mapping.build_mapping``'s own sequence-anchored ceiling (a stated override capped at a
+    sixth of the grid pitch): the two doors' match semantics differ enough that a stated override
+    is never capped here, so this stays its own derivation rather than sharing ``build_mapping``'s.
     """
     if nn_tolerance_m is not None:
         return {"value": nn_tolerance_m, "source": "stated"}
