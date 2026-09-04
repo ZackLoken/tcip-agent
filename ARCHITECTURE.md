@@ -761,7 +761,7 @@ Docstring is the function's docstring first line, verbatim.
 | tool | line | audited | docstring first line |
 |---|---|---|---|
 | `run_inference` | `inference_tools.py:222` | yes | Run a trained model over images or a raster, and persist the predictions as a bucket. |
-| `deliver_per_image_counts` | `inference_tools.py:1755` | yes | Export a CSV summary of detection counts per image, from a live run or a persisted bucket. |
+| `deliver_per_image_counts` | `inference_tools.py:1758` | yes | Export a CSV summary of detection counts per image, from a live run or a persisted bucket. |
 
 ### calibration_tools.py (3 tools)
 
