@@ -230,6 +230,28 @@ def test_center_match_pairs_distance_first_tie_breaks_by_gt_then_detection_index
     assert pairs == [(0, 0), (1, 1)]
 
 
+def test_center_match_pairs_refuses_an_unknown_policy_by_name():
+    """Coverage: a policy outside the two stated ones refuses rather than falling through to
+    either, so a typo never silently picks a matching rule."""
+    with pytest.raises(ValueError, match="policy"):
+        center_match_pairs([(0.0, 0.0)], [(0.0, 0.0)], 1.0, policy="nearest")
+
+
+def test_dt_score_refuses_a_record_without_a_score_or_with_none_by_name():
+    """Coverage: the one confidence accessor the governing count reads through refuses a record
+    with no score field, and one whose score is None, each naming the record; the curve's score
+    grid reads through the same accessor, so neither reaches a bare KeyError or TypeError."""
+    from tcip_mcp.pipelines.training.evaluation import _dt_score, derive_operating_point_curve
+
+    with pytest.raises(ValueError, match="no 'score' field"):
+        _dt_score({"bbox": [0, 0, 1, 1]})
+    with pytest.raises(ValueError, match="is None"):
+        _dt_score({"bbox": [0, 0, 1, 1], "score": None})
+    per_image = [{"image_id": 1, "gt": [], "dt": [{"bbox": [0, 0, 1, 1], "category_id": 1}]}]
+    with pytest.raises(ValueError, match="no 'score' field"):
+        derive_operating_point_curve(per_image, tolerance=1.0)
+
+
 # resolve_match_criterion derives/records the localization kind once, reuses it, and warns
 # (never silently switches) on divergence.
 
