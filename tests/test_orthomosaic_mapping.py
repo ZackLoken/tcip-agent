@@ -231,20 +231,25 @@ def test_plants_in_frame_partitions_by_the_rasters_own_recorded_dimensions(tmp_p
 
 
 def test_plants_in_frame_edge_pixel_at_width_or_height_is_outside(tmp_path: Path) -> None:
-    """The half-open test: a plant projecting to exactly the raster's own width or height column
-    is outside, since a valid pixel index runs only 0..width-1 / 0..height-1."""
+    """The half-open test: a plant projecting to exactly the raster's own width or height row or
+    column is outside, since a valid pixel index runs only 0..width-1 / 0..height-1, on both axes."""
     from tcip_mcp.pipelines.postprocessing.plant_mapping import PlantRecord
 
     path = tmp_path / "mosaic.tif"
     _write_geotiff(path, width=64, height=64, shape=(64, 64, 3))
     georef = OrthomosaicGeoreference.from_file(path)
-    edge_lat, edge_lon = georef.pixel_to_wgs84(64.0, 10.0)
-    plants = [PlantRecord(plot_name="edge", accession_name="a", plot_number=0, row_number=0,
-                          col_number=0, lat=edge_lat, lon=edge_lon)]
+    width_edge_lat, width_edge_lon = georef.pixel_to_wgs84(64.0, 10.0)
+    height_edge_lat, height_edge_lon = georef.pixel_to_wgs84(10.0, 64.0)
+    plants = [
+        PlantRecord(plot_name="width_edge", accession_name="a", plot_number=0, row_number=0,
+                    col_number=0, lat=width_edge_lat, lon=width_edge_lon),
+        PlantRecord(plot_name="height_edge", accession_name="b", plot_number=1, row_number=0,
+                    col_number=1, lat=height_edge_lat, lon=height_edge_lon),
+    ]
 
     in_frame, outside = plants_in_frame(plants, georef, width=64, height=64)
     assert in_frame == []
-    assert [p.plot_name for p in outside] == ["edge"]
+    assert {p.plot_name for p in outside} == {"width_edge", "height_edge"}
 
 
 # ── GeoTransform composes with plain floats (no bespoke point type) ─────
