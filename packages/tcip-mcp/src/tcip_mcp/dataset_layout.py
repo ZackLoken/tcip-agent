@@ -1006,12 +1006,13 @@ def bucket_digest_stamps(stamps: object, bucket: str) -> dict:
     """The ``bucket``-scoped image-to-digest map inside a raw digest-store document.
 
     Returns ``{}`` when ``stamps`` itself, or its value at ``bucket``, is not a dict: whatever a
-    corrupt or absent read produced, never raised here.
+    corrupt or absent read produced, never raised here. Always a copy, never the document's own
+    inner dict, so a caller that mutates the result cannot reach back into ``stamps``.
     """
     if not isinstance(stamps, dict):
         return {}
     bucket_stamps = stamps.get(bucket)
-    return bucket_stamps if isinstance(bucket_stamps, dict) else {}
+    return dict(bucket_stamps) if isinstance(bucket_stamps, dict) else {}
 
 
 def stamp_image_status_digests(
