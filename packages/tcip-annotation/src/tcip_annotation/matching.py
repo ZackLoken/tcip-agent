@@ -105,12 +105,19 @@ def _rings_to_shapely(rings: list[list[tuple[float, float]]]):
     return ShapelyMultiPolygon([ShapelyPolygon(r) for r in valid])
 
 
+def box_ring(bbox: BBox) -> list[tuple[float, float]]:
+    """``bbox``'s four corners as one closed ring, in a fixed order (x1,y1 -> x2,y1 -> x2,y2 ->
+    x1,y2): the one ring construction a box turns into, shared by every caller that needs a box's
+    own rectangle as a polygon (:func:`_to_shapely` here, and a canopy segment's own box-to-polygon
+    conversion in :mod:`tcip_mcp.pipelines.postprocessing.segment_attribution`), so two calls on
+    the same box can never independently disagree about which corner comes first."""
+    return [(bbox.x1, bbox.y1), (bbox.x2, bbox.y1), (bbox.x2, bbox.y2), (bbox.x1, bbox.y2)]
+
+
 def _to_shapely(a: Annotation):
     """Convert an annotation's geometry to a Shapely polygon (or multipolygon) + area."""
     if isinstance(a.geometry, BBox):
-        b = a.geometry
-        pts = [(b.x1, b.y1), (b.x2, b.y1), (b.x2, b.y2), (b.x1, b.y2)]
-        g = ShapelyPolygon(pts)
+        g = ShapelyPolygon(box_ring(a.geometry))
     elif isinstance(a.geometry, Polygon):
         g = _rings_to_shapely(a.geometry.rings)
     else:  # pragma: no cover - callers filter geometry-less annotations out first

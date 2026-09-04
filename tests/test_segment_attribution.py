@@ -13,12 +13,14 @@ from pathlib import Path
 import pytest
 
 from tcip_annotation.json_io import write_annotations
+from tcip_annotation.matching import _to_shapely, box_ring
 from tcip_annotation.state import Annotation, BBox, Point, Polygon
 
 from tcip_mcp.pipelines.postprocessing.orthomosaic_mapping import OrthomosaicGeoreference
 from tcip_mcp.pipelines.postprocessing.plant_mapping import PlantRecord
 from tcip_mcp.pipelines.postprocessing.segment_attribution import (
     CanopySegmentRefusal,
+    _polygon_of,
     assign_detections_to_segments,
     load_canopy_segments,
     tie_segments_to_plants,
@@ -80,6 +82,20 @@ def test_load_canopy_segments_admits_a_hand_traced_polygon_and_a_box(tmp_path: P
     assert segments[0].polygon.rings[0][0] == (5.0, 5.0)
     # A box is admitted as the rectangle it is: four corners, same order _to_shapely builds.
     assert segments[1].polygon.rings[0] == [(30.0, 30.0), (45.0, 30.0), (45.0, 45.0), (30.0, 45.0)]
+
+
+def test_polygon_of_a_box_agrees_with_matchings_own_box_conversion() -> None:
+    """``_polygon_of`` and ``tcip_annotation.matching._to_shapely`` both build a box's rectangle
+    through the one shared :func:`box_ring`, so a canopy segment's own polygon and the shapely
+    polygon a box annotation matches through carry the same corner order, never two independently
+    maintained copies of it."""
+    b = BBox(3.0, 4.0, 9.0, 12.0)
+
+    segment_polygon = _polygon_of(b)
+    matching_polygon, _area = _to_shapely(Annotation(subject="canopy", geometry=b))
+
+    assert segment_polygon.rings == [box_ring(b)]
+    assert list(matching_polygon.exterior.coords)[:-1] == box_ring(b)
 
 
 def test_load_canopy_segments_excludes_annotations_of_another_subject(tmp_path: Path) -> None:

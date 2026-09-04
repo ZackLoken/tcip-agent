@@ -13,6 +13,7 @@ from tcip_annotation import (
     polygon_iou,
     point_in_polygon,
 )
+from tcip_annotation.matching import box_ring
 
 
 # ── box_iou ──────────────────────────────────────────────────────────────
@@ -35,6 +36,14 @@ def test_box_iou_partial_overlap():
     # Intersection: 50×50=2500, Union: 10000+10000-2500=17500
     expected = 2500 / 17500
     assert abs(box_iou(b1, b2) - expected) < 1e-4
+
+
+# ── box_ring ─────────────────────────────────────────────────────────────
+
+
+def test_box_ring_corner_order():
+    b = BBox(1.0, 2.0, 5.0, 8.0)
+    assert box_ring(b) == [(1.0, 2.0), (5.0, 2.0), (5.0, 8.0), (1.0, 8.0)]
 
 
 # ── polygon_iou ──────────────────────────────────────────────────────────

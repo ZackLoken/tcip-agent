@@ -33,7 +33,7 @@ from tcip_annotation.json_io import (
     parse_label_document,
     provenance_facts,
 )
-from tcip_annotation.matching import _rings_to_shapely, point_in_polygon
+from tcip_annotation.matching import _rings_to_shapely, box_ring, point_in_polygon
 from tcip_annotation.state import BBox, Point as AnnotationPoint, Polygon
 
 from tcip_mcp.pipelines.postprocessing.orthomosaic_mapping import (
@@ -58,7 +58,8 @@ class CanopySegment:
     ``segment_index`` is the boundary's position among the document's own annotations of the
     stated subject (stable within one load, so a later reader joins a tie or an assignment back
     to the boundary it names); ``polygon`` is the boundary itself, a box admitted as the rectangle
-    it is through the same corner conversion :mod:`tcip_annotation.matching` builds for one.
+    it is through :func:`tcip_annotation.matching.box_ring`, the one ring construction a box
+    turns into everywhere it does.
     """
 
     segment_index: int
@@ -66,13 +67,13 @@ class CanopySegment:
 
 
 def _polygon_of(geometry: BBox | Polygon) -> Polygon:
-    """``geometry`` as a :class:`Polygon`: itself, or a box's own rectangle in the corner order
-    ``tcip_annotation.matching._to_shapely`` already builds for a box, so the two conversions can
-    never disagree about which corner comes first."""
+    """``geometry`` as a :class:`Polygon`: itself, or a box's own rectangle built through
+    :func:`tcip_annotation.matching.box_ring`, the one ring construction
+    ``tcip_annotation.matching._to_shapely`` uses too, so the two conversions cannot
+    independently drift on which corner comes first."""
     if isinstance(geometry, Polygon):
         return geometry
-    b = geometry
-    return Polygon(rings=[[(b.x1, b.y1), (b.x2, b.y1), (b.x2, b.y2), (b.x1, b.y2)]])
+    return Polygon(rings=[box_ring(geometry)])
 
 
 def load_canopy_segments(
