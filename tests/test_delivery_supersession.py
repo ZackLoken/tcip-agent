@@ -17,7 +17,7 @@ from tcip_mcp.tools.delivery_tools import supersede_delivery
 from tcip_mcp.tools.phenology_tools import build_plant_mapping, deliver_phenology_milestones
 
 from tests._binding_fixtures import register_plant_registry_for
-from tests.test_plant_mapping_binding import DATES, _dataset, _init
+from tests.test_plant_mapping_binding import DATES, _dataset, _init, _validate_buckets
 from tests.test_second_trait_acceptance import _seed_currant_bloom_trait
 
 
@@ -34,6 +34,7 @@ def _delivered_scene(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[st
         name="valley", images_root=str(images_root), plant_registry=registry)
     assert "error" not in build_res, build_res
     _seed_currant_bloom_trait(tmp_path)
+    _validate_buckets(preds_by_date, dataset_root)
     return preds_by_date
 
 
@@ -54,7 +55,7 @@ def test_a_delivered_csv_carries_the_written_files_own_digest(
     out_csv = tmp_path / "out.csv"
     res = deliver_phenology_milestones(
         trait="currant_bloom", mapping_name="valley", predictions_by_date=preds_by_date,
-        output_csv_path=str(out_csv), acknowledge_unvalidated=True)
+        output_csv_path=str(out_csv), classifier_pred_dirs=list(preds_by_date.values()))
     assert "error" not in res, res
 
     event = _one_event(tmp_path)
@@ -65,8 +66,8 @@ def test_a_delivered_csv_carries_the_written_files_own_digest(
 def test_a_fileless_event_carries_no_digest(tmp_path: Path) -> None:
     resolution.record_delivery_binding_event(
         "test_door", None, [], {}, measurement_documents=["operating_point"],
-        scale_document=None, trait="astringency", delivery_kind="state_crossing_dates",
-        project_root=tmp_path, plant_mapping=None,
+        scale_document=None, acknowledgement=None, trait="astringency",
+        delivery_kind="state_crossing_dates", project_root=tmp_path, plant_mapping=None,
     )
     event = _one_event(tmp_path, door="test_door")
     assert event["output_sha256"] is None
@@ -80,7 +81,7 @@ def test_supersede_delivery_over_a_real_event_records_the_withdrawal(
     out_csv = tmp_path / "out.csv"
     res = deliver_phenology_milestones(
         trait="currant_bloom", mapping_name="valley", predictions_by_date=preds_by_date,
-        output_csv_path=str(out_csv), acknowledge_unvalidated=True)
+        output_csv_path=str(out_csv), classifier_pred_dirs=list(preds_by_date.values()))
     assert "error" not in res, res
     event = _one_event(tmp_path)
 
@@ -106,13 +107,13 @@ def test_supersede_delivery_names_a_replacement_event(
     first_csv = tmp_path / "first.csv"
     assert "error" not in deliver_phenology_milestones(
         trait="currant_bloom", mapping_name="valley", predictions_by_date=preds_by_date,
-        output_csv_path=str(first_csv), acknowledge_unvalidated=True)
+        output_csv_path=str(first_csv), classifier_pred_dirs=list(preds_by_date.values()))
     first_event = _one_event(tmp_path)
 
     second_csv = tmp_path / "second.csv"
     assert "error" not in deliver_phenology_milestones(
         trait="currant_bloom", mapping_name="valley", predictions_by_date=preds_by_date,
-        output_csv_path=str(second_csv), acknowledge_unvalidated=True)
+        output_csv_path=str(second_csv), classifier_pred_dirs=list(preds_by_date.values()))
     scope = resolution.delivery_events_scope(tmp_path)
     events = [ts.read(k) for k in ts.keys(resolution.DELIVERY_EVENTS_STORE, str(scope))
              if ts.read(k)["door"] == "deliver_phenology_milestones"]
@@ -157,7 +158,7 @@ def test_supersede_delivery_refuses_an_unknown_replacement_event_id(
     out_csv = tmp_path / "out.csv"
     assert "error" not in deliver_phenology_milestones(
         trait="currant_bloom", mapping_name="valley", predictions_by_date=preds_by_date,
-        output_csv_path=str(out_csv), acknowledge_unvalidated=True)
+        output_csv_path=str(out_csv), classifier_pred_dirs=list(preds_by_date.values()))
     event = _one_event(tmp_path)
 
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
@@ -175,7 +176,7 @@ def test_supersede_delivery_refuses_a_second_supersession_of_the_same_event(
     out_csv = tmp_path / "out.csv"
     assert "error" not in deliver_phenology_milestones(
         trait="currant_bloom", mapping_name="valley", predictions_by_date=preds_by_date,
-        output_csv_path=str(out_csv), acknowledge_unvalidated=True)
+        output_csv_path=str(out_csv), classifier_pred_dirs=list(preds_by_date.values()))
     event = _one_event(tmp_path)
 
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))

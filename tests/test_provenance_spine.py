@@ -222,18 +222,29 @@ def _run_with_a_recorded_checkpoint(tmp_path, experiment_id):
 
 def test_export_detection_csv_carries_provenance(tmp_path):
     from tcip_mcp.pipelines.postprocessing.export import export_detection_csv
+    from tcip_mcp.pipelines.resolution import VALIDATED_HELD_OUT
 
     from tests import _operationalization_fixtures as fx
+    from tests._binding_fixtures import write_bound_sidecar, write_prediction
 
     fx.seed_confirmed_count(tmp_path)
     sha = _run_with_a_recorded_checkpoint(tmp_path, "expE")
+    # This door takes no acknowledgement, so the delivery is made genuinely validated: a real
+    # bucket bound to the checkpoint that produced it, rather than a provisional escape.
+    root = tmp_path / "ds"
+    bucket = root / "predictions" / "preds"
+    write_prediction(bucket, "img_a")
+    stamp = {
+        "validated": True, "trait": fx.COUNT_TRAIT, "checkpoint_sha256": sha,
+        "operating_point": {"conf": {"value": 0.4, "requires_validation": True,
+                                     "validation_kind": "annotations",
+                                     "validated_against": VALIDATED_HELD_OUT}},
+    }
+    write_bound_sidecar(bucket, stamp, dataset_root=root, producing_experiment_id="expE")
     out = tmp_path / "counts.csv"
     export_detection_csv(
         [{"image": "a.jpg", "count": 3, "scores": [0.9, 0.8, 0.7]}], str(out),
-        trait=fx.COUNT_TRAIT,
-        provenance={"producer_model_sha256": sha, "producing_experiment_id": "expE",
-                    "operating_point_conf": 0.42},
-        acknowledge_unvalidated=True)
+        trait=fx.COUNT_TRAIT, provenance={"operating_point_conf": 0.42}, pred_dirs=[str(bucket)])
     rows = list(__import__("csv").DictReader(out.open()))
     assert rows[0]["producer_model_sha256"] == sha
     assert rows[0]["producing_experiment_id"] == "expE"
@@ -242,20 +253,31 @@ def test_export_detection_csv_carries_provenance(tmp_path):
 
 def test_export_aggregated_csv_carries_provenance(tmp_path):
     from tcip_mcp.pipelines.postprocessing.aggregation import export_aggregated_csv
+    from tcip_mcp.pipelines.resolution import VALIDATED_HELD_OUT
 
     from tests import _operationalization_fixtures as fx
+    from tests._binding_fixtures import write_bound_sidecar, write_prediction
 
     fx.seed_delivery_traits(tmp_path)
     fx.seed_confirmed_aggregate(tmp_path, "stem_count", value_keys=["count"])
     sha = _run_with_a_recorded_checkpoint(tmp_path, "expA")
+    # This door takes no acknowledgement either, so the same real-bucket route as above
+    # is what earns a genuinely validated delivery.
+    root = tmp_path / "ds"
+    bucket = root / "predictions" / "preds"
+    write_prediction(bucket, "img_a")
+    stamp = {
+        "validated": True, "trait": fx.COUNT_TRAIT, "checkpoint_sha256": sha,
+        "operating_point": {"conf": {"value": 0.4, "requires_validation": True,
+                                     "validation_kind": "annotations",
+                                     "validated_against": VALIDATED_HELD_OUT}},
+    }
+    write_bound_sidecar(bucket, stamp, dataset_root=root, producing_experiment_id="expA")
     out = tmp_path / "agg.csv"
-    # No pred_dirs means no on-disk validity source, so the provisional delivery is acknowledged.
     export_aggregated_csv(
         [{"plant_id": "p1", "value": 5, "observations": 2, "value_key": "count",
           "measurement_document": "operating_point", "plant_attribution": "image"}],
-        str(out), delivered_phenotype="stem_count",
-        provenance={"producer_model_sha256": sha, "producing_experiment_id": "expA"},
-        operating_point_validated="held_out_annotations", acknowledge_unvalidated=True)
+        str(out), delivered_phenotype="stem_count", pred_dirs=[str(bucket)])
     rows = list(__import__("csv").DictReader(out.open()))
     assert rows[0]["producer_model_sha256"] == sha
     assert rows[0]["producing_experiment_id"] == "expA"
@@ -301,14 +323,27 @@ def test_export_detection_csvs_produced_at_is_present_and_iso_parseable(tmp_path
     from datetime import datetime
 
     from tcip_mcp.pipelines.postprocessing.export import export_detection_csv
+    from tcip_mcp.pipelines.resolution import VALIDATED_HELD_OUT
     from tests import _operationalization_fixtures as fx
+    from tests._binding_fixtures import write_bound_sidecar, write_prediction
 
     fx.seed_confirmed_count(tmp_path)
+    # This door takes no acknowledgement, so the delivery is made genuinely validated.
+    root = tmp_path / "ds"
+    bucket = root / "predictions" / "preds"
+    write_prediction(bucket, "img_a")
+    stamp = {
+        "validated": True, "trait": fx.COUNT_TRAIT,
+        "operating_point": {"conf": {"value": 0.4, "requires_validation": True,
+                                     "validation_kind": "annotations",
+                                     "validated_against": VALIDATED_HELD_OUT}},
+    }
+    write_bound_sidecar(bucket, stamp, dataset_root=root)
     out = tmp_path / "counts.csv"
 
     export_detection_csv(
         [{"image": "a.jpg", "count": 3, "scores": [0.9, 0.8, 0.7]}], str(out),
-        trait=fx.COUNT_TRAIT, acknowledge_unvalidated=True)
+        trait=fx.COUNT_TRAIT, pred_dirs=[str(bucket)])
 
     rows = list(__import__("csv").DictReader(out.open()))
     datetime.fromisoformat(rows[0]["produced_at"])
@@ -320,9 +355,13 @@ def test_delivered_tail_treats_a_none_valued_produced_at_key_as_absent(tmp_path)
     never a caller-stated one; ``delivered_tail`` must not refuse that the way it refuses a
     caller that actually asserts a ``produced_at``, matching ``corroborated_producer``'s own
     absence convention two functions up."""
-    from tcip_mcp.pipelines.resolution import VALIDATED_FALSE, check_delivery_gate, delivered_tail
+    from tcip_mcp.pipelines.resolution import (
+        VALIDATED_FALSE, Acknowledgement, check_delivery_gate, delivered_tail,
+    )
 
-    gate = check_delivery_gate({"operating_point": VALIDATED_FALSE}, acknowledge_unvalidated=True)
+    gate = check_delivery_gate(
+        {"operating_point": VALIDATED_FALSE},
+        acknowledgement=Acknowledgement(acknowledged_by="user:tester", reason="test acknowledgement"))
     columns = ("produced_at", "operating_point_validated")
 
     tail = delivered_tail({"produced_at": None}, {}, gate, columns=columns)

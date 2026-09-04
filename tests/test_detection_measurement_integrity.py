@@ -1221,13 +1221,13 @@ def test_run_inference_validated_from_bundle(tmp_path, monkeypatch, seed_catkin_
     assert r["validated"] is True and r["conf_source"] == "calibration"
 
 
-def _deliver_per_image_counts_over(monkeypatch, tmp_path, op, *, validated, captured=None,
-                          acknowledge=False):
+def _deliver_per_image_counts_over(monkeypatch, tmp_path, op, *, validated, captured=None):
     """Run deliver_per_image_counts against a stubbed run_inference returning ``op``/``validated``.
 
     The dimension under test here is which reference the conf param itself recorded. With no
-    ``predictions_dir`` these counts rest on no bucket anyone can re-read, so a caller wanting the
-    CSV to be delivered at all acknowledges it as provisional.
+    ``predictions_dir`` these counts rest on no bucket anyone can re-read, and this door takes no
+    acknowledgement, so the CSV itself always refuses; the refusal still carries the operating
+    point and the run's own narrowed conf reference for a caller to inspect.
     """
     import tcip_mcp.model_registry as model_registry_mod
     import tcip_mcp.tools.inference_tools as itools
@@ -1251,21 +1251,24 @@ def _deliver_per_image_counts_over(monkeypatch, tmp_path, op, *, validated, capt
                         lambda *a, **kw: _stub_checkpoint(str(ckpt)))
     return itools.deliver_per_image_counts(str(ckpt), str(tmp_path), str(tmp_path / "o.csv"),
                                   trait=fx.COUNT_TRAIT,
-                                  calibration_labels_dir=str(tmp_path),
-                                  acknowledge_unvalidated=acknowledge)
+                                  calibration_labels_dir=str(tmp_path))
 
 
 def test_deliver_per_image_counts_carries_operating_point(tmp_path, monkeypatch):
+    """No predictions_dir means no bucket to back the count, so this door's own no-acknowledgement
+    rule refuses the CSV outright; the refusal still threads the calibration call through and
+    reports the run's own operating point and narrowed conf reference."""
     captured: dict = {}
     op = {"conf": {"value": 0.6, "validated_against": "held_out_annotations"}}
-    r = _deliver_per_image_counts_over(monkeypatch, tmp_path, op, validated=True, captured=captured,
-                              acknowledge=True)
+    r = _deliver_per_image_counts_over(monkeypatch, tmp_path, op, validated=True, captured=captured)
     from tests import _operationalization_fixtures as fx
 
     assert captured["trait"] == fx.COUNT_TRAIT              # calibration threaded through
     assert captured["calibration_labels_dir"] == str(tmp_path)
-    assert r["validated"] is True and r["conf_source"] == "calibration"
+    assert "error" in r
+    assert r["validated"] is False
     assert r["operating_point"] == op
+    assert r["run_conf_validated_against"] == "held_out_annotations"
 
 
 def test_deliver_per_image_counts_never_launders_a_bare_validated_bool_into_a_reference(tmp_path, monkeypatch):
@@ -1287,12 +1290,12 @@ def test_deliver_per_image_counts_never_launders_a_bare_validated_bool_into_a_re
         assert "error" in r, conf_prov
         assert r["operating_point_validated"] == VALIDATED_FALSE
         assert r["validated"] is False
-    # ...and the rail still admits the legitimate case: a real annotations reference delivers,
-    # reported under its own name; the CSV-facing column still floors with no bucket to back it.
+    # A real annotations reference is still reported under its own name even though this door
+    # takes no acknowledgement and no bucket backs the count, so the CSV-facing column floors too.
     ok = _deliver_per_image_counts_over(
         monkeypatch, tmp_path,
         {"conf": {"value": 0.6, "validated_against": "reviewer_confirmed_annotations"}},
-        validated=True, acknowledge=True)
-    assert "error" not in ok
+        validated=True)
+    assert "error" in ok
     assert ok["operating_point_validated"] == VALIDATED_FALSE
     assert ok["run_conf_validated_against"] == "reviewer_confirmed_annotations"

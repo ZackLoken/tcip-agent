@@ -625,18 +625,22 @@ def test_an_unvalidated_bucket_keeps_the_tile_geometry_it_really_persisted(tmp_p
     assert tile["binding_notes"] == {}
 
 
-def test_acknowledge_unvalidated_still_writes_a_flagged_provisional_path(tmp_path):
-    """An honestly-flagged provisional delivery is the escape hatch, and the gate keeps it open."""
-    from tcip_mcp.pipelines.resolution import check_delivery_gate
+def test_an_acknowledgement_still_writes_a_flagged_provisional_path(tmp_path):
+    """An honestly-flagged provisional delivery is the escape hatch, and the gate keeps it open
+    for a real acknowledgement naming who and why, never a bare boolean."""
+    from tcip_mcp.pipelines.resolution import Acknowledgement, check_delivery_gate
 
     root = tmp_path / "ds"
     pred_dir = _bucket(root)
     _write_raw(pred_dir, _count_stamp())
     validity = _count_validity(pred_dir)
 
-    gate = check_delivery_gate({"operating_point": validity["validated"]},
-                               acknowledge_unvalidated=True)
+    gate = check_delivery_gate(
+        {"operating_point": validity["validated"]},
+        acknowledgement=Acknowledgement(acknowledged_by="user:tester", reason="known uncalibrated"))
 
     assert gate.ok
     assert gate.unvalidated == ("operating_point",)
     assert gate.stamp["operating_point"] == "false"
+    assert gate.acknowledged_by == "user:tester"
+    assert gate.acknowledgement_reason == "known uncalibrated"

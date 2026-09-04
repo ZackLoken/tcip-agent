@@ -512,7 +512,60 @@ def test_deliver_phenology_milestones_refuses_unvalidated_classifier(tmp_path: P
     assert not out_csv.exists()
 
 
-def test_deliver_phenology_milestones_acknowledge_unvalidated_stamps_false(tmp_path: Path) -> None:
+def _deliver_via_writer(
+    *, trait: str, mapping_name: str, predictions_by_date: dict[str, str],
+    output_csv_path: Path, classifier_pred_dirs: list[str] | None = None,
+    operating_point_conf: float | None = None, operating_point_validated: str | None = None,
+    acknowledgement,
+) -> dict:
+    """Deliver through the canonical writer directly, built from the same reconciliation, basis
+    and mapping ``deliver_phenology_milestones`` itself resolves before calling it.
+
+    The MCP tool takes no acknowledgement any more, so a test proving what an acknowledged,
+    unvalidated delivery stamps on the CSV runs through this instead.
+    """
+    from tcip_mcp.operationalization import (
+        STATE_CROSSING_DATES, check_operationalization, resolve_trait_and_record,
+    )
+    from tcip_mcp.pipelines.postprocessing import phenology, plant_mapping
+    from tcip_mcp.pipelines.resolution import (
+        bind_classifier_validity, reconcile_classifier_validity, reconcile_operating_point_validity,
+        reconcile_tile_size_validity,
+    )
+    from tcip_mcp.project_paths import platform_state_root
+
+    platform_root = platform_state_root()
+    mapping_build, verified = plant_mapping.resolve_delivery_mapping(
+        platform_root, mapping_name, predictions_by_date)
+    disclosure = mapping_build.delivery_disclosure(verified, list(predictions_by_date))
+
+    pred_dirs = list(predictions_by_date.values())
+    recon = reconcile_operating_point_validity(
+        pred_dirs, trait=trait, asserted=operating_point_validated)
+    classifier_recon = reconcile_classifier_validity(classifier_pred_dirs or [])
+    classifier_state, _note = bind_classifier_validity(
+        classifier_recon["validated"], classifier_pred_dirs, pred_dirs, trait=trait)
+    tile_recon = reconcile_tile_size_validity(pred_dirs)
+    flags = phenology.phenology_delivery_flags(classifier_state, recon["validated"], tile_recon)
+
+    spec, record, _specs_dir = resolve_trait_and_record(trait, STATE_CROSSING_DATES)
+    stated = check_operationalization(spec, record, STATE_CROSSING_DATES)
+    result = phenology.per_plant_phenology(
+        mapping_build.rows(), predictions_by_date,
+        positive_class_name=spec.positive_class_name, spec=spec)
+
+    return phenology.write_phenology_csv(
+        "test", result["rows"], Path(output_csv_path), spec, flags=flags,
+        acknowledgement=acknowledgement, basis=stated.basis,
+        operating_point_conf=(operating_point_conf if operating_point_conf is not None
+                              else recon["conf"]),
+        producer={}, bindings=recon["bindings"], pred_dirs=pred_dirs,
+        project_root=platform_root, plant_mapping=disclosure)
+
+
+def test_an_acknowledged_delivery_stamps_the_unvalidated_dimension_false(tmp_path: Path) -> None:
+    from tcip_mcp.pipelines.resolution import Acknowledgement
+
     root = _ds_root(tmp_path)
     d1, d2 = _bucket(tmp_path, "2026-02-11"), _bucket(tmp_path, "2026-03-09")
     _write_preds(d1, "P1_a", ["dormant"])
@@ -525,15 +578,15 @@ def test_deliver_phenology_milestones_acknowledge_unvalidated_stamps_false(tmp_p
         "2026-03-09": [{"stem": "P1_b", "plot_name": "P1", "accession_name": "acc-9"}],
     })
     out_csv = tmp_path / "out" / "catkin_phenology.csv"
-    res = deliver_phenology_milestones(
+    cells = _deliver_via_writer(
         trait="catkin",
         mapping_name=mapping_name,
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
-        output_csv_path=str(out_csv),
-        acknowledge_unvalidated=True,  # provisional delivery, clearly flagged
+        output_csv_path=out_csv,
+        acknowledgement=Acknowledgement(  # provisional delivery, clearly flagged
+            acknowledged_by="user:tester", reason="test acknowledgement"),
     )
-    assert "error" not in res, res
-    assert res["positive_state_classifier_validated"] == "false"
+    assert cells["positive_state_classifier_validated"] == "false"
     assert out_csv.exists()
 
 
@@ -564,6 +617,8 @@ def test_deliver_phenology_milestones_refuses_asymmetric_validation(tmp_path: Pa
 
 
 def test_deliver_phenology_milestones_acknowledge_stamps_each_dimension_independently(tmp_path: Path) -> None:
+    from tcip_mcp.pipelines.resolution import Acknowledgement
+
     root = _ds_root(tmp_path)
     d1, d2 = _bucket(tmp_path, "2026-02-11"), _bucket(tmp_path, "2026-03-09")
     _write_preds(d1, "P1_a", ["dormant"])
@@ -577,17 +632,16 @@ def test_deliver_phenology_milestones_acknowledge_stamps_each_dimension_independ
         "2026-03-09": [{"stem": "P1_b", "plot_name": "P1", "accession_name": "acc-9"}],
     })
     out_csv = tmp_path / "out" / "catkin_phenology.csv"
-    res = deliver_phenology_milestones(
+    cells = _deliver_via_writer(
         trait="catkin",
         mapping_name=mapping_name,
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
-        output_csv_path=str(out_csv),
+        output_csv_path=out_csv,
         operating_point_validated="held_out_annotations",
-        acknowledge_unvalidated=True,
+        acknowledgement=Acknowledgement(acknowledged_by="user:tester", reason="test acknowledgement"),
     )
-    assert "error" not in res, res
-    assert res["positive_state_classifier_validated"] == "false"  # never upgraded
-    assert res["operating_point_validated"] == "held_out_annotations"
+    assert cells["positive_state_classifier_validated"] == "false"  # never upgraded
+    assert cells["operating_point_validated"] == "held_out_annotations"
     assert out_csv.exists()
 
 
@@ -653,13 +707,16 @@ def test_deliver_phenology_milestones_acknowledged_tile_size_floors_the_csv_oper
 ) -> None:
     """The CSV's operating_point_validated column is the count operating point's only count-side
     stamp, and the tile scale has no column of its own. A delivery whose tile edge only shipped
-    through acknowledge_unvalidated must not read as fully validated there."""
+    through an acknowledgement must not read as fully validated there."""
     import csv
 
+    from tcip_mcp.pipelines.resolution import Acknowledgement
+
     args = _tile_gate_fixture(tmp_path, _tiled("false"))
-    res = deliver_phenology_milestones(**args, acknowledge_unvalidated=True)
-    assert "error" not in res, res
-    assert res["operating_point_validated"] == "false"
+    cells = _deliver_via_writer(
+        **args, acknowledgement=Acknowledgement(acknowledged_by="user:tester",
+                                                reason="test acknowledgement"))
+    assert cells["operating_point_validated"] == "false"
     rows = list(csv.DictReader(Path(args["output_csv_path"]).open(encoding="utf-8")))
     assert rows and all(r["operating_point_validated"] == "false" for r in rows)
 
@@ -668,14 +725,17 @@ def test_deliver_phenology_milestones_acknowledged_tile_size_floors_the_csv_clas
     tmp_path: Path,
 ) -> None:
     """The classifier column has no less claim on the tile scale's floor than the count operating
-    point's own column does: a tile edge that only shipped through acknowledge_unvalidated must
-    not let a genuinely-validated classifier read as fully validated beside it."""
+    point's own column does: a tile edge that only shipped through an acknowledgement must not
+    let a genuinely-validated classifier read as fully validated beside it."""
     import csv
 
+    from tcip_mcp.pipelines.resolution import Acknowledgement
+
     args = _tile_gate_fixture(tmp_path, _tiled("false"))
-    res = deliver_phenology_milestones(**args, acknowledge_unvalidated=True)
-    assert "error" not in res, res
-    assert res["positive_state_classifier_validated"] == "false"
+    cells = _deliver_via_writer(
+        **args, acknowledgement=Acknowledgement(acknowledged_by="user:tester",
+                                                reason="test acknowledgement"))
+    assert cells["positive_state_classifier_validated"] == "false"
     rows = list(csv.DictReader(Path(args["output_csv_path"]).open(encoding="utf-8")))
     assert rows and all(r["positive_state_classifier_validated"] == "false" for r in rows)
 
@@ -1808,8 +1868,20 @@ def test_deliver_phenology_milestones_delivers_a_forged_stamp_provisionally_with
 ) -> None:
     """A stamp claiming validation no record answers for floors the count, and the acknowledged
     provisional CSV says the producer is unknown instead of repeating the names the stamp asserted
-    for itself."""
-    from tcip_mcp.pipelines.resolution import update_sidecar
+    for itself.
+
+    The MCP tool takes no acknowledgement, so this delivers through the canonical writer directly,
+    built from the same reconciliation, basis and mapping the tool itself resolves before calling it.
+    """
+    from tcip_mcp.operationalization import (
+        STATE_CROSSING_DATES, check_operationalization, resolve_trait_and_record,
+    )
+    from tcip_mcp.pipelines.postprocessing import phenology, plant_mapping
+    from tcip_mcp.pipelines.resolution import (
+        Acknowledgement, bind_classifier_validity, reconcile_classifier_validity,
+        reconcile_operating_point_validity, reconcile_tile_size_validity, update_sidecar,
+    )
+    from tcip_mcp.project_paths import platform_state_root
 
     mapping_name, d1, d2 = _delivery_setup(
         tmp_path, experiment_id="exp-producer", checkpoint_sha256="a" * 64)
@@ -1820,17 +1892,35 @@ def test_deliver_phenology_milestones_delivers_a_forged_stamp_provisionally_with
 
     for d in (d1, d2):
         update_sidecar(d, _forge, "operating_point")
+
+    predictions_by_date = {"2026-02-11": str(d1), "2026-03-09": str(d2)}
+    pred_dirs = list(predictions_by_date.values())
+    platform_root = platform_state_root()
+    mapping_build, verified = plant_mapping.resolve_delivery_mapping(
+        platform_root, mapping_name, predictions_by_date)
+    disclosure = mapping_build.delivery_disclosure(verified, list(predictions_by_date))
+
+    recon = reconcile_operating_point_validity(pred_dirs, trait="catkin")
+    classifier_recon = reconcile_classifier_validity([str(d1)])
+    classifier_state, _note = bind_classifier_validity(
+        classifier_recon["validated"], [str(d1)], pred_dirs, trait="catkin")
+    tile_recon = reconcile_tile_size_validity(pred_dirs)
+    flags = phenology.phenology_delivery_flags(classifier_state, recon["validated"], tile_recon)
+
+    spec, record, _specs_dir = resolve_trait_and_record("catkin", STATE_CROSSING_DATES)
+    stated = check_operationalization(spec, record, STATE_CROSSING_DATES)
+    result = phenology.per_plant_phenology(
+        mapping_build.rows(), predictions_by_date,
+        positive_class_name=spec.positive_class_name, spec=spec)
     out_csv = tmp_path / "out" / "catkin_phenology.csv"
 
-    res = deliver_phenology_milestones(
-        trait="catkin", mapping_name=mapping_name,
-        predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
-        output_csv_path=str(out_csv), classifier_pred_dirs=[str(d1)],
-        operating_point_conf=0.4, acknowledge_unvalidated=True,
-    )
+    cells = phenology.write_phenology_csv(
+        "test", result["rows"], out_csv, spec, flags=flags,
+        acknowledgement=Acknowledgement(acknowledged_by="user:tester", reason="test acknowledgement"),
+        basis=stated.basis, operating_point_conf=0.4, producer={}, bindings=recon["bindings"],
+        pred_dirs=pred_dirs, project_root=platform_root, plant_mapping=disclosure)
 
-    assert "error" not in res, res
-    assert res["operating_point_validated"] == "false"
+    assert cells["operating_point_validated"] == "false"
     rows = _delivered_rows(out_csv)
     assert rows
     for row in rows:

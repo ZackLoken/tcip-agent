@@ -4,7 +4,9 @@ Covers the single ``check_delivery_gate`` helper and its retrofit onto the previ
 writers/tools: ``export_detection_csv`` / ``export_aggregated_csv`` (writer-level, no MCP wrapper)
 and ``deliver_per_image_counts`` (reads the run's resolved validity, not a caller string). The phenology
 doors' gate behavior is pinned in the Phase-0 measurement goldens; here we pin the doors newly
-gated, plus the escape hatch (acknowledge_unvalidated) that ships an honestly-flagged provisional CSV.
+gated. Neither writer takes an acknowledgement (no surface delivers a per-image count or a
+per-plant aggregate provisionally today), so an unvalidated dimension always refuses on them; the
+gate's own acknowledgement escape is pinned directly against ``check_delivery_gate``.
 """
 
 from __future__ import annotations
@@ -20,6 +22,8 @@ from tcip_mcp.pipelines.resolution import (
     VALIDATED_FALSE,
     VALIDATED_HELD_OUT,
     VALIDATED_REVIEW_CONFIRMED,
+    Acknowledgement,
+    DeliveryRefused,
     check_delivery_gate,
 )
 from tcip_mcp import operationalization as op
@@ -85,14 +89,40 @@ def test_gate_refuses_a_bare_unvalidated_dimension():
     assert g.ok is False
     assert g.unvalidated == ("operating_point",)
     assert g.stamp == {"operating_point": VALIDATED_FALSE}
-    assert "acknowledge_unvalidated" in g.reason
+    assert "acknowledged delivery" in g.reason
 
 
-def test_gate_acknowledge_ships_but_stamps_false():
-    g = check_delivery_gate({"operating_point": "false"}, acknowledge_unvalidated=True)
+def test_gate_acknowledgement_ships_but_stamps_false():
+    ack = Acknowledgement(acknowledged_by="user:breeder", reason="calibration is not ready yet")
+    g = check_delivery_gate({"operating_point": "false"}, acknowledgement=ack)
     assert g.ok is True
     # the acknowledged dimension still travels stamped false, never silently upgraded
     assert g.stamp == {"operating_point": VALIDATED_FALSE}
+    assert g.acknowledged_by == "user:breeder"
+    assert g.acknowledgement_reason == "calibration is not ready yet"
+
+
+def test_gate_ignores_an_acknowledgement_when_nothing_needed_one():
+    ack = Acknowledgement(acknowledged_by="user:breeder", reason="just in case")
+    g = check_delivery_gate({"operating_point": VALIDATED_HELD_OUT}, acknowledgement=ack)
+    assert g.ok is True
+    assert g.acknowledged_by is None
+    assert g.acknowledgement_reason is None
+
+
+def test_gate_allow_unvalidated_staging_clears_only_staging_dimensions():
+    g = check_delivery_gate({"tile_size": VALIDATED_FALSE, "claim_scope": VALIDATED_FALSE},
+                            allow_unvalidated_staging=True)
+    assert g.ok is True
+    assert g.acknowledged_by is None
+
+
+def test_gate_allow_unvalidated_staging_never_clears_operating_point():
+    """The staging escape is for a raw bucket write, never a phenotype's own delivered
+    dimension: it can never pass an unvalidated count on its own."""
+    g = check_delivery_gate({"operating_point": VALIDATED_FALSE}, allow_unvalidated_staging=True)
+    assert g.ok is False
+    assert g.unvalidated == ("operating_point",)
 
 
 @pytest.mark.parametrize("dimension, reference", [
@@ -133,8 +163,9 @@ def test_every_dimension_still_clears_with_its_own_kind(dimension, reference):
 
 
 def test_acknowledged_wrong_kind_reference_ships_stamped_false():
+    ack = Acknowledgement(acknowledged_by="user:breeder", reason="known limitation")
     g = check_delivery_gate({"operating_point": res.VALIDATED_SAME_MOSAIC_IDENTITY},
-                            acknowledge_unvalidated=True)
+                            acknowledgement=ack)
     assert g.ok is True
     assert g.stamp == {"operating_point": VALIDATED_FALSE}
 
@@ -191,18 +222,15 @@ def test_export_detection_csv_gate_refusal_carries_the_gate_result(tmp_path):
     assert not (tmp_path / "o.csv").exists()
 
 
-def test_export_detection_csv_acknowledge_stamps_false(tmp_path):
+def test_export_detection_csv_takes_no_acknowledgement_and_refuses_the_retired_keyword(tmp_path):
+    """No surface delivers a per-image count provisionally today, so this writer accepts no
+    acknowledgement at all: the retired boolean keyword is refused at the signature, never
+    silently accepted and ignored."""
     from tcip_mcp.pipelines.postprocessing.export import export_detection_csv
 
-    out = tmp_path / "o.csv"
-    export_detection_csv([{"image": "a.jpg", "count": 3}], str(out),
-                         trait=fx.COUNT_TRAIT, acknowledge_unvalidated=True)
-    with open(out, newline="") as f:
-        reader = csv.DictReader(f)
-        rows = list(reader)
-        assert "operating_point_validated" in (reader.fieldnames or [])
-        assert "measurement_validated" not in (reader.fieldnames or [])
-    assert rows[0]["operating_point_validated"] == VALIDATED_FALSE
+    with pytest.raises(TypeError):
+        export_detection_csv([{"image": "a.jpg", "count": 3}], str(tmp_path / "o.csv"),
+                             trait=fx.COUNT_TRAIT, acknowledge_unvalidated=True)
 
 
 def test_export_detection_csv_signature_carries_operating_point_validated_not_measurement_validated():
@@ -235,8 +263,10 @@ def test_export_detection_csv_and_the_persisted_document_agree_on_a_degenerate_b
     assert dropped == 1
     persisted = json.loads(pred_path.read_text())["annotations"]
 
+    bucket = _detection_bucket(tmp_path, "preds", validated=True)
     out = tmp_path / "o.csv"
-    export_detection_csv([_raw()], str(out), trait=fx.COUNT_TRAIT, acknowledge_unvalidated=True)
+    export_detection_csv([_raw()], str(out), trait=fx.COUNT_TRAIT,
+                         operating_point_validated=VALIDATED_HELD_OUT, pred_dirs=[bucket])
     rows = list(csv.DictReader(out.open()))
 
     assert len(persisted) == 1
@@ -250,10 +280,11 @@ def test_export_detection_csv_quantizes_a_non_finite_score_before_averaging(tmp_
     score reads as their quantized mean, not the NaN a naive round(mean(scores), 4) would carry."""
     from tcip_mcp.pipelines.postprocessing.export import export_detection_csv
 
+    bucket = _detection_bucket(tmp_path, "preds", validated=True)
     out = tmp_path / "o.csv"
     export_detection_csv(
         [{"image": "a.jpg", "count": 2, "scores": [float("nan"), 0.5]}], str(out),
-        trait=fx.COUNT_TRAIT, acknowledge_unvalidated=True)
+        trait=fx.COUNT_TRAIT, operating_point_validated=VALIDATED_HELD_OUT, pred_dirs=[bucket])
     rows = list(csv.DictReader(out.open()))
     assert rows[0]["avg_confidence"] == "0.25"  # (0.0 + 0.5) / 2, never a NaN-propagated mean
 
@@ -381,8 +412,9 @@ def test_a_wrong_kind_assertion_floors_a_valid_bucket(tmp_path):
 
 def test_export_detection_csv_omitted_pred_dirs_floors_to_unvalidated(tmp_path):
     """No buckets to reconcile from: nothing on disk backs the caller's string, so the measurement
-    dimension floors and refuses, mirroring export_aggregated_csv's no-pred_dirs path. The
-    explicit acknowledge is the only delivery route, and it stamps false."""
+    dimension floors and refuses, mirroring export_aggregated_csv's no-pred_dirs path. This door
+    takes no acknowledgement, so there is no route around it: a caller-asserted string alone can
+    never deliver, whatever it claims."""
     from tcip_mcp.pipelines.postprocessing.export import export_detection_csv
 
     out = tmp_path / "o.csv"
@@ -390,12 +422,6 @@ def test_export_detection_csv_omitted_pred_dirs_floors_to_unvalidated(tmp_path):
         export_detection_csv([{"image": "a.jpg", "count": 3, "scores": [0.9]}], str(out),
                              trait=fx.COUNT_TRAIT, operating_point_validated=VALIDATED_HELD_OUT)
     assert not out.exists()
-
-    export_detection_csv([{"image": "a.jpg", "count": 3, "scores": [0.9]}], str(out),
-                         trait=fx.COUNT_TRAIT, operating_point_validated=VALIDATED_HELD_OUT,
-                         acknowledge_unvalidated=True)
-    rows = list(csv.DictReader(out.open()))
-    assert rows[0]["operating_point_validated"] == VALIDATED_FALSE
 
 
 # ── export_aggregated_csv (writer) refuses a bare write ────────────────────
@@ -439,19 +465,18 @@ def test_export_aggregated_csv_continuous_trait_bare_string_never_trusted(tmp_pa
             str(out), delivered_phenotype="fruit_diameter", operating_point_validated=VALIDATED_HELD_OUT)
 
 
-def test_export_aggregated_csv_continuous_trait_ships_provisional_when_acknowledged(tmp_path):
-    # The honest provisional path still ships (stamped false); it just can't masquerade as
-    # validated on a bare string.
+def test_export_aggregated_csv_takes_no_acknowledgement_and_refuses_the_retired_keyword(tmp_path):
+    """No surface delivers a per-plant aggregate provisionally today, so this writer accepts no
+    acknowledgement at all: a bare string can never masquerade as validated, and the retired
+    boolean keyword is refused at the signature."""
     from tcip_mcp.pipelines.postprocessing.aggregation import export_aggregated_csv
 
-    out = tmp_path / "o.csv"
-    export_aggregated_csv(
-        [{"plant_id": "p1", "value": 4.2, "observations": 3, "value_key": "fruit_diameter",
-         "plant_attribution": "image", "measurement_document": "regression_operating_point"}],
-        str(out), delivered_phenotype="fruit_diameter", operating_point_validated=VALIDATED_HELD_OUT,
-        acknowledge_unvalidated=True)
-    rows = list(csv.DictReader(out.open()))
-    assert rows[0]["operating_point_validated"] == VALIDATED_FALSE
+    with pytest.raises(TypeError):
+        export_aggregated_csv(
+            [{"plant_id": "p1", "value": 4.2, "observations": 3, "value_key": "fruit_diameter",
+             "plant_attribution": "image", "measurement_document": "regression_operating_point"}],
+            str(tmp_path / "o.csv"), delivered_phenotype="fruit_diameter",
+            operating_point_validated=VALIDATED_HELD_OUT, acknowledge_unvalidated=True)
 
 
 # ── export_aggregated_csv wired to the ordinal/regression sidecar producer ────
@@ -566,7 +591,9 @@ def test_deliver_per_image_counts_refuses_unvalidated_run(tmp_path, monkeypatch)
     assert not (tmp_path / "o.csv").exists()
 
 
-def test_deliver_per_image_counts_acknowledge_writes_flagged(tmp_path, monkeypatch):
+def test_deliver_per_image_counts_takes_no_acknowledgement_for_the_delivery(tmp_path, monkeypatch):
+    """The live regime with no predictions_dir has no bucket to persist and no acknowledgement to
+    ship the CSV unvalidated: an unvalidated run's counts can never be delivered this way."""
     import tcip_mcp.tools.inference_tools as itools
 
     def _fake_run_inference(*a, **kw):
@@ -576,12 +603,13 @@ def test_deliver_per_image_counts_acknowledge_writes_flagged(tmp_path, monkeypat
 
     monkeypatch.setattr(itools, "_run_inference_verified", _fake_run_inference)
     out_csv = tmp_path / "o.csv"
+    with pytest.raises(TypeError):
+        itools.deliver_per_image_counts(_dummy_checkpoint(tmp_path), str(tmp_path), str(out_csv),
+                                   trait=fx.COUNT_TRAIT, acknowledge_unvalidated=True)
     r = itools.deliver_per_image_counts(_dummy_checkpoint(tmp_path), str(tmp_path), str(out_csv),
-                               trait=fx.COUNT_TRAIT, acknowledge_unvalidated=True)
-    assert "error" not in r
-    assert r["operating_point_validated"] == VALIDATED_FALSE
-    rows = list(csv.DictReader(out_csv.open()))
-    assert rows[0]["operating_point_validated"] == VALIDATED_FALSE
+                               trait=fx.COUNT_TRAIT)
+    assert "error" in r
+    assert not out_csv.exists()
 
 
 # ── tile_size gates the same way, closing the asymmetry with conf ─────
@@ -619,13 +647,13 @@ def test_deliver_per_image_counts_refuses_fabricated_tile_size_even_with_validat
     assert not (tmp_path / "o.csv").exists()
 
 
-def test_deliver_per_image_counts_live_with_bucket_reports_the_written_floored_cell(tmp_path, monkeypatch):
-    """The live regime, publishing into predictions_dir, must read its response's
-    operating_point_validated straight off the CSV cell export_detection_csv actually wrote, never
-    the run's own raw conf reference: a fabricated tile_size forecloses the count claim at publish
-    (a stamp's dimensions stand or fall together, verify_stamp_binding's own rule), so a run
-    reporting a real conf reference still delivers a floored, unvalidated cell, with
-    unvalidated_dimensions naming every gated dimension the writer actually floored."""
+def test_deliver_per_image_counts_publishes_via_staging_but_the_csv_itself_still_refuses(
+    tmp_path, monkeypatch,
+):
+    """allow_unvalidated_staging clears only the bucket's own tile-scale staging gate: the bucket
+    publishes fine, but export_detection_csv takes no acknowledgement, so a fabricated tile_size
+    still refuses the CSV even though the run's own conf reference is genuinely validated. The
+    refusal still names what happened to the bucket the live regime already published."""
     import tcip_mcp.tools.inference_tools as itools
 
     def _fake(*a, **kw):
@@ -640,13 +668,16 @@ def test_deliver_per_image_counts_live_with_bucket_reports_the_written_floored_c
     bucket = tmp_path / "ds" / "predictions" / "baseline" / "2026-01-01"
     r = itools.deliver_per_image_counts(_dummy_checkpoint(tmp_path), str(tmp_path), str(tmp_path / "o.csv"),
                                trait=fx.COUNT_TRAIT, calibration_labels_dir=str(tmp_path),
-                               predictions_dir=str(bucket), acknowledge_unvalidated=True)
-    assert "error" not in r, r
-    assert r["operating_point_validated"] == VALIDATED_FALSE  # never the run's raw conf reference
+                               predictions_dir=str(bucket), allow_unvalidated_staging=True)
+    assert "error" in r
+    assert r["bucket_published"] is True         # the staging escape let the bucket land
+    assert r["csv_delivered"] is False
+    assert r["tile_size_validated"] == VALIDATED_FALSE
+    # The bucket's own overall validated bit floors every dimension reconciled from it, conf's
+    # otherwise-clean reference included: a stamp's dimensions stand or fall together.
+    assert r["operating_point_validated"] == VALIDATED_FALSE
     assert r["unvalidated_dimensions"] == "operating_point;tile_size"
-    rows = list(csv.DictReader((tmp_path / "o.csv").open()))
-    assert rows[0]["operating_point_validated"] == r["operating_point_validated"]
-    assert rows[0]["unvalidated_dimensions"] == r["unvalidated_dimensions"]
+    assert not (tmp_path / "o.csv").exists()
 
 
 def test_deliver_per_image_counts_ships_when_tile_size_has_a_real_basis(tmp_path, monkeypatch):
@@ -686,14 +717,13 @@ def test_deliver_per_image_counts_never_gates_tile_size_when_untiled(tmp_path, m
     assert r["tile_size_validated"] is None  # never entered the gate at all
 
 
-def test_deliver_per_image_counts_without_a_persisted_bucket_cannot_deliver_a_validated_csv(
+def test_deliver_per_image_counts_without_a_persisted_bucket_cannot_deliver_a_csv_at_all(
     tmp_path, monkeypatch,
 ):
-    """A count read off one in-memory pass rests on nothing a reviewer can re-read, so the CSV is
-    refused unless it is acknowledged as provisional, and the acknowledged one is stamped false
-    however clean the operating point behind it was. Both responses still report the live run's
-    own narrowed reference honestly under its own name, distinct from the CSV-facing column, which
-    floors false on this path regardless: the writer's unconditional no-bucket floor."""
+    """A count read off one in-memory pass rests on nothing a reviewer can re-read, and this door
+    takes no acknowledgement for the CSV itself, so there is no route around the refusal: the
+    response still reports the live run's own narrowed reference honestly under its own name,
+    distinct from the CSV-facing column, which floors false on this path regardless."""
     import tcip_mcp.tools.inference_tools as itools
 
     monkeypatch.setattr(itools, "_run_inference_verified",
@@ -705,27 +735,13 @@ def test_deliver_per_image_counts_without_a_persisted_bucket_cannot_deliver_a_va
     assert "predictions_dir" in refused["error"]
     assert refused["operating_point_validated"] == VALIDATED_FALSE  # no bucket, nothing on disk
     assert refused["run_conf_validated_against"] == VALIDATED_HELD_OUT  # conf itself was fine
-
-    provisional = itools.deliver_per_image_counts(_dummy_checkpoint(tmp_path), str(tmp_path), str(tmp_path / "o.csv"),
-                                         trait=fx.COUNT_TRAIT,
-                                         calibration_labels_dir=str(tmp_path),
-                                         acknowledge_unvalidated=True)
-    assert "error" not in provisional, provisional
-    assert provisional["predictions_dir"] is None
-    assert provisional["operating_point_validated"] == VALIDATED_FALSE
-    assert provisional["run_conf_validated_against"] == VALIDATED_HELD_OUT
+    assert not (tmp_path / "o.csv").exists()
 
 
-def test_deliver_per_image_counts_acknowledge_unvalidated_tile_size_floors_csv_stamp_despite_valid_conf(
-    tmp_path,
-):
-    """A CSV whose conf is genuinely validated but whose tile_size has no real basis must not
-    stamp operating_point_validated as if the whole delivery were trustworthy: the single CSV
-    column must reflect the floor across every gated dimension, not just conf's own
-    (possibly-real) reference, and unvalidated_dimensions must name the actual floorer.
-    Exercised through a real bucket, so the flooring is read off the writer's own reconciled gate
-    (column_stamp) rather than the no-pred_dirs floor a caller-asserted string would hit with no
-    bucket at all."""
+def test_deliver_per_image_counts_bucket_regime_takes_no_acknowledgement(tmp_path):
+    """The bucket regime reads an existing, already-persisted bucket: there is nothing left to
+    stage, and no acknowledgement to ship the CSV unvalidated, so a fabricated tile_size refuses
+    outright even though conf itself is genuinely validated."""
     import tcip_mcp.tools.inference_tools as itools
     from tcip_mcp.pipelines.postprocessing.export import write_predictions_json
 
@@ -744,12 +760,15 @@ def test_deliver_per_image_counts_acknowledge_unvalidated_tile_size_floors_csv_s
              }}
     write_bound_sidecar(bucket, stamp, dataset_root=tmp_path / "ds", experiment_id="exp-tile-floor")
 
+    with pytest.raises(TypeError):
+        itools.deliver_per_image_counts(predictions_dir=str(bucket), output_path=str(tmp_path / "o.csv"),
+                                   trait=fx.COUNT_TRAIT, acknowledge_unvalidated=True)
     r = itools.deliver_per_image_counts(predictions_dir=str(bucket), output_path=str(tmp_path / "o.csv"),
-                               trait=fx.COUNT_TRAIT, acknowledge_unvalidated=True)
-    assert "error" not in r, r
-    assert r["operating_point_validated"] == VALIDATED_FALSE     # the column floors across the gate
+                               trait=fx.COUNT_TRAIT)
+    assert "error" in r
     assert r["tile_size_validated"] == VALIDATED_FALSE           # tile_size is what floors
     assert r["unvalidated_dimensions"] == "tile_size"            # names the floorer
+    assert not (tmp_path / "o.csv").exists()
 
 
 # ── run_inference gates tile_size too: it is the door that actually persists a bucket ──
@@ -842,9 +861,9 @@ def test_run_inference_never_gates_tile_size_when_untiled(
     assert r["validated"] is True
 
 
-def test_run_inference_acknowledge_writes_and_floors_the_sidecar_stamp(tmp_path, monkeypatch):
+def test_run_inference_staging_escape_writes_and_floors_the_sidecar_stamp(tmp_path, monkeypatch):
     """A bucket whose conf is genuinely validated but whose tile_size only shipped via
-    acknowledge_unvalidated must not stamp validated=true on the sidecar, or a downstream door
+    allow_unvalidated_staging must not stamp validated=true on the sidecar, or a downstream door
     reading it would treat a fabricated tile scale as trustworthy."""
     import tcip_mcp.tools.inference_tools as itools
 
@@ -853,7 +872,8 @@ def test_run_inference_acknowledge_writes_and_floors_the_sidecar_stamp(tmp_path,
         tile_size_prov={"value": 640, "requires_validation": True,
                         "validation_kind": "geometry", "validated_against": VALIDATED_FALSE}))
     out = tmp_path / "preds"
-    r = itools.run_inference(_dummy_checkpoint(tmp_path), str(tmp_path), output_dir=str(out), acknowledge_unvalidated=True)
+    r = itools.run_inference(_dummy_checkpoint(tmp_path), str(tmp_path), output_dir=str(out),
+                             allow_unvalidated_staging=True)
     assert "error" not in r
     assert r["tile_size_validated"] == VALIDATED_FALSE
     assert r["validated"] is False  # floored despite conf's own clean reference
@@ -1187,22 +1207,25 @@ def test_export_aggregated_csv_never_gates_an_untiled_bucket_on_tile_size(tmp_pa
     assert rows[0]["operating_point_validated"] == VALIDATED_HELD_OUT
 
 
-def test_export_aggregated_csv_acknowledged_tile_size_floors_the_row_stamp(tmp_path):
-    """A per-plant CSV whose conf is genuinely validated but whose tile scale only shipped through
-    acknowledge_unvalidated must stamp its one measurement column false, not conf's clean
-    reference, and must name tile_size, not operating_point, as the actual floorer."""
+def test_export_aggregated_csv_fabricated_tile_size_refuses_despite_valid_conf(tmp_path):
+    """A per-plant CSV whose conf is genuinely validated but whose tile scale has no real basis
+    must still refuse (this writer takes no acknowledgement): the gate it refused on floors
+    tile_size, not conf's own clean reference, and names tile_size as the actual floorer."""
     from tcip_mcp.pipelines.postprocessing.aggregation import export_aggregated_csv
 
     d = _write_bucket(tmp_path, "preds", conf_ref=VALIDATED_HELD_OUT,
                       tile_size_prov=_tile(VALIDATED_FALSE, 640))
     out = tmp_path / "o.csv"
-    export_aggregated_csv(
-        [{"plant_id": "p1", "value": 5, "observations": 2, "value_key": "count",
-         "plant_attribution": "image", "measurement_document": "operating_point"}], str(out),
-        delivered_phenotype="stem_count", pred_dirs=[d], acknowledge_unvalidated=True)
-    rows = list(csv.DictReader(out.open()))
-    assert rows[0]["operating_point_validated"] == VALIDATED_FALSE
-    assert rows[0]["unvalidated_dimensions"] == "tile_size"
+    with pytest.raises(DeliveryRefused) as exc_info:
+        export_aggregated_csv(
+            [{"plant_id": "p1", "value": 5, "observations": 2, "value_key": "count",
+             "plant_attribution": "image", "measurement_document": "operating_point"}], str(out),
+            delivered_phenotype="stem_count", pred_dirs=[d])
+    gate = exc_info.value.gate
+    assert gate.stamp["operating_point"] == VALIDATED_HELD_OUT
+    assert gate.stamp["tile_size"] == VALIDATED_FALSE
+    assert gate.unvalidated == ("tile_size",)
+    assert not out.exists()
 
 
 # ── export_aggregated_csv gates a dimensional value_key on its physical scale too ──
@@ -1319,19 +1342,21 @@ def test_export_aggregated_csv_scale_capture_id_match_ships(tmp_path):
     assert rows[0]["operating_point_validated"] == VALIDATED_HELD_OUT
 
 
-def test_export_aggregated_csv_acknowledged_unvalidated_scale_floors_the_row_stamp(tmp_path):
-    """A dimensional CSV whose conf is genuinely validated but whose scale never cleared must stamp
-    its one measurement column false when shipped through acknowledge_unvalidated, not conf's clean
-    reference."""
+def test_export_aggregated_csv_unvalidated_scale_refuses_despite_valid_conf(tmp_path):
+    """A dimensional CSV whose conf is genuinely validated but whose scale never cleared must
+    still refuse (this writer takes no acknowledgement); the gate it refused on floors scale, not
+    conf's own clean reference."""
     from tcip_mcp.pipelines.postprocessing.aggregation import export_aggregated_csv
 
     d = _write_bucket(tmp_path, "preds", conf_ref=VALIDATED_HELD_OUT, trait="plant_surface_area")
     out = tmp_path / "o.csv"
-    export_aggregated_csv(_DIM_RESULTS, str(out), delivered_phenotype="plant_surface_area",
-                          pred_dirs=[d], images_dir=str(tmp_path / "ds" / "images"),
-                          acknowledge_unvalidated=True)
-    rows = list(csv.DictReader(out.open()))
-    assert rows[0]["operating_point_validated"] == VALIDATED_FALSE
+    with pytest.raises(DeliveryRefused) as exc_info:
+        export_aggregated_csv(_DIM_RESULTS, str(out), delivered_phenotype="plant_surface_area",
+                              pred_dirs=[d], images_dir=str(tmp_path / "ds" / "images"))
+    gate = exc_info.value.gate
+    assert gate.stamp["operating_point"] == VALIDATED_HELD_OUT
+    assert gate.stamp["scale"] == VALIDATED_FALSE
+    assert not out.exists()
 
 
 def test_export_aggregated_csv_refuses_a_stated_scale_with_no_physical_unit(tmp_path):
@@ -1413,7 +1438,7 @@ def test_export_aggregated_csv_refuses_classifier_operating_point_as_a_measureme
         export_aggregated_csv(
             [{"plant_id": "p1", "value": 5, "observations": 2, "value_key": "count",
              "plant_attribution": "image", "measurement_document": "classifier_operating_point"}],
-            str(tmp_path / "o.csv"), delivered_phenotype="stem_count", acknowledge_unvalidated=True)
+            str(tmp_path / "o.csv"), delivered_phenotype="stem_count")
 
 
 def test_export_aggregated_csv_refuses_resolve_scale_as_a_measurement_document(tmp_path):
@@ -1425,7 +1450,7 @@ def test_export_aggregated_csv_refuses_resolve_scale_as_a_measurement_document(t
         export_aggregated_csv(
             [{"plant_id": "p1", "value": 5, "observations": 2, "value_key": "count",
              "plant_attribution": "image", "measurement_document": "resolve_scale"}],
-            str(tmp_path / "o.csv"), delivered_phenotype="stem_count", acknowledge_unvalidated=True)
+            str(tmp_path / "o.csv"), delivered_phenotype="stem_count")
 
 
 def test_aggregate_per_plant_refuses_a_plant_whose_images_disagree_on_the_statement(tmp_path):
@@ -1458,8 +1483,7 @@ def test_a_plant_with_no_value_at_all_refuses_naming_the_plant(tmp_path):
     ]
     summaries = aggregate_per_plant(records, strategy="count", value_key="count")
     with pytest.raises(ValueError, match="PLANT_B"):
-        export_aggregated_csv(summaries, str(tmp_path / "o.csv"), delivered_phenotype="stem_count",
-                              acknowledge_unvalidated=True)
+        export_aggregated_csv(summaries, str(tmp_path / "o.csv"), delivered_phenotype="stem_count")
 
 
 def test_a_plant_with_a_real_zero_ships_beside_one_with_a_value(tmp_path):
@@ -1477,9 +1501,9 @@ def test_a_plant_with_a_real_zero_ships_beside_one_with_a_value(tmp_path):
          "plant_attribution": "image", "measurement_document": "operating_point"},
     ]
     summaries = aggregate_per_plant(records, strategy="count", value_key="count")
+    d = _write_bucket(tmp_path, "preds", conf_ref=VALIDATED_HELD_OUT)
     out = tmp_path / "o.csv"
-    export_aggregated_csv(summaries, str(out), delivered_phenotype="stem_count",
-                          acknowledge_unvalidated=True)
+    export_aggregated_csv(summaries, str(out), delivered_phenotype="stem_count", pred_dirs=[d])
     rows = {r["plant_id"]: r for r in csv.DictReader(out.open())}
     assert rows["PLANT_B"]["value"] == "0"
 
@@ -1494,44 +1518,36 @@ def _delivered_row(out_path):
     return next(csv.DictReader(Path(out_path).open(newline="")))
 
 
-def test_a_bespoke_producer_keeps_its_checkpoint_hash_in_a_provisional_delivery(tmp_path):
-    """A bucket produced by a real checkpoint that belongs to no experiment, delivered honestly
-    unvalidated, still names the checkpoint behind its numbers: validity and producer identity rest
-    on different evidence, and a hash resolved from the checkpoint file answers for itself."""
-    from tcip_mcp.pipelines.postprocessing.aggregation import export_aggregated_csv
+def test_delivered_provenance_keeps_a_bespoke_checkpoint_hash_with_nothing_bound():
+    """A bucket produced by a real checkpoint that belongs to no experiment, with no bucket bound
+    behind it, still names the checkpoint: validity and producer identity rest on different
+    evidence, and a hash resolved from the checkpoint file answers for itself. This is no longer
+    reachable through export_aggregated_csv itself (it takes no acknowledgement, so an unbound
+    bucket's delivery always refuses before this composition ever runs), so it is pinned directly
+    against the shared composition instead."""
+    from tcip_mcp.pipelines.resolution import delivered_provenance
 
-    d = _write_bucket(tmp_path, "bespoke", conf_ref=VALIDATED_FALSE)
-    out = tmp_path / "o.csv"
-    export_aggregated_csv(
-        _COUNT_RESULTS, str(out), delivered_phenotype="stem_count", pred_dirs=[d],
-        provenance={"producer_model_sha256": "a" * 64, "producing_experiment_id": None},
-        acknowledge_unvalidated=True)
-
-    row = _delivered_row(out)
-    assert row["producer_model_sha256"] == "a" * 64
-    assert row["producing_experiment_id"] == ""
-    assert row["validation_record"] == ""
-    assert row["operating_point_validated"] == VALIDATED_FALSE
+    columns = ["producer_model_sha256", "producing_experiment_id", "validation_record"]
+    values = delivered_provenance(
+        {"producer_model_sha256": "a" * 64, "producing_experiment_id": None}, {}, columns=columns)
+    assert values["producer_model_sha256"] == "a" * 64
+    assert values["producing_experiment_id"] is None
+    assert values["validation_record"] == ""
 
 
-def test_a_bucket_naming_an_experiment_that_never_ran_delivers_no_producer_identity(tmp_path):
-    """The provisional half of the recorded route: a stamp may assert any checkpoint and any run,
-    so a delivery repeats neither unless something outside the bucket answers for the run. The CSV
-    says the producer is unknown rather than naming an experiment the store never held."""
-    from tcip_mcp.pipelines.postprocessing.aggregation import export_aggregated_csv
+def test_delivered_provenance_drops_an_asserted_experiment_that_never_ran():
+    """A stamp may assert any checkpoint and any run; with nothing bound behind it, an asserted
+    experiment the store never held is dropped rather than repeated, so the producer reads as
+    unknown, the same shared composition every delivered CSV's tail routes through."""
+    from tcip_mcp.pipelines.resolution import delivered_provenance
 
-    d = _write_bucket(tmp_path, "forged", conf_ref=VALIDATED_FALSE)
-    out = tmp_path / "o.csv"
-    export_aggregated_csv(
-        _COUNT_RESULTS, str(out), delivered_phenotype="stem_count", pred_dirs=[d],
-        provenance={"producer_model_sha256": "0" * 64,
-                    "producing_experiment_id": "exp_that_never_ran"},
-        acknowledge_unvalidated=True)
-
-    row = _delivered_row(out)
-    assert row["producer_model_sha256"] == ""
-    assert row["producing_experiment_id"] == ""
-    assert row["validation_record"] == ""
+    columns = ["producer_model_sha256", "producing_experiment_id", "validation_record"]
+    values = delivered_provenance(
+        {"producer_model_sha256": "0" * 64, "producing_experiment_id": "exp_that_never_ran"}, {},
+        columns=columns)
+    assert values["producer_model_sha256"] is None
+    assert values["producing_experiment_id"] is None
+    assert values["validation_record"] == ""
 
 
 def test_a_validated_delivery_names_the_record_its_numbers_rest_on(tmp_path):
@@ -1623,22 +1639,20 @@ def test_the_delivery_records_what_it_verified_in_the_dataset_own_log(tmp_path):
 
 def test_an_unbound_bucket_records_why_it_was_not_verified(tmp_path):
     """The same event on the failing side: a reader of the log sees which bucket floored the
-    delivery and the reason, not only that a CSV was written."""
-    import tcip_store
-
-    from tcip_mcp.pipelines.postprocessing.aggregation import export_aggregated_csv
-    from tcip_mcp.pipelines.resolution import sidecar_key
+    delivery and the reason, not only that a CSV was written. Pinned directly against
+    record_delivery_binding_event: export_aggregated_csv itself can no longer deliver from an
+    unbound bucket (it takes no acknowledgement), so the door that still reaches this path (a
+    phenology delivery, shipped under a breeder's acknowledgement) is stood in for by a real
+    unbound StampBinding rather than a second door's full setup."""
+    from tcip_mcp.pipelines.resolution import StampBinding, record_delivery_binding_event
 
     d = _write_bucket(tmp_path, "unbound", conf_ref=VALIDATED_HELD_OUT, validated=False)
-    # Forges a stamp claiming validated=True with no real validated_by, exactly the shape
-    # write_sidecar's own claim check refuses, so this writes under it, through the seam.
-    key = sidecar_key(d)
-    with tcip_store.transaction(key) as txn:
-        stamp = txn.read(key)
-        txn.write(key, {**stamp, "validated": True})
-
-    export_aggregated_csv(_COUNT_RESULTS, str(tmp_path / "o.csv"), delivered_phenotype="stem_count",
-                          pred_dirs=[d], acknowledge_unvalidated=True)
+    binding = StampBinding(ok=False, claimed=False,
+                           note="a hand-forged claim with no validated_by")
+    record_delivery_binding_event(
+        "export_aggregated_csv", str(tmp_path / "o.csv"), [d], {d: binding},
+        measurement_documents=["operating_point"], scale_document=None, acknowledgement=None,
+        trait=fx.COUNT_TRAIT, delivery_kind=op.PER_PLANT_COUNT_AGGREGATE)
 
     rows = _audit_rows(tmp_path / "ds", "export_aggregated_csv")
     assert len(rows) == 1, rows

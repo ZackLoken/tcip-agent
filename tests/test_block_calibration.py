@@ -673,8 +673,8 @@ def test_run_inference_raster_claim_scope_admits_a_georeferenced_self_export(
 
 def test_run_inference_raster_claim_scope_refuses_a_moved_tiepoint_copy(tmp_path: Path):
     """A pixel-identical copy of the training mosaic with a moved tiepoint refuses (a different
-    raster to a consumer that resolves pixels through the georeferencing), and the acknowledged
-    provisional path still ships, stamped false exactly as a content mismatch does today."""
+    raster to a consumer that resolves pixels through the georeferencing), and the staging escape
+    still ships it, stamped false exactly as a content mismatch does today."""
     plant_csv = tmp_path / "plants.csv"
     _write_plant_csv(plant_csv)
     exp = _build_experiment(tmp_path, plant_csv_paths=[str(plant_csv)])
@@ -700,7 +700,7 @@ def test_run_inference_raster_claim_scope_refuses_a_moved_tiepoint_copy(tmp_path
     acknowledged = run_inference(
         exp["checkpoint_path"], output_dir=str(out_dir), raster_path=str(moved),
         conf_threshold=0.0, tile_size=TILE, overlap=0.2, trait="catkin",
-        experiment_id=exp["experiment_id"], acknowledge_unvalidated=True)
+        experiment_id=exp["experiment_id"], allow_unvalidated_staging=True)
     assert "error" not in acknowledged, acknowledged
     assert acknowledged["claim_scope_validated"] == VALIDATED_FALSE
     assert "georeferencing mismatch" in acknowledged["claim_scope_note"]

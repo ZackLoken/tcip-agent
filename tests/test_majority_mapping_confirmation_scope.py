@@ -4,8 +4,9 @@ A trait's ``majority_provisional`` says one thing: whether the breeders have con
 trait's "most objects in state" phrase maps to the crossing key the spec names. It travels into the
 phenology CSV as its own column, per trait, and it is not the delivery gate's verdict on whether the
 numbers beside it were validated. Two different questions, two columns, two independent answers: a
-gate-cleared delivery of a trait whose majority reading is still unconfirmed, and an acknowledged
-unvalidated delivery of a trait whose reading is settled, are both real cases.
+gate-cleared delivery of a trait whose majority reading is still unconfirmed, and a gate refusal
+naming each dimension's own reconciled state for a trait whose reading is settled, are both real
+cases.
 """
 
 from __future__ import annotations
@@ -116,7 +117,12 @@ def _stamp_classifier(pred_dir: str, trait: str, positive_class: str, *, dataset
 
 
 def _deliver(tmp_path: Path, spec: dict, *, validated: bool) -> dict:
-    """Run one trait's phenology delivery, either through the gate or by acknowledging it."""
+    """Run one trait's phenology delivery.
+
+    Returns the delivered row when every dimension clears the gate, or the door's own refusal
+    dict when the classifier is left unvalidated: this door takes no acknowledgement at all, so
+    an unvalidated dimension always refuses now.
+    """
     root = tmp_path / spec["name"]
     mapping_name, dirs = _predictions(
         tmp_path, root, spec["positive_class_name"],
@@ -134,8 +140,9 @@ def _deliver(tmp_path: Path, spec: dict, *, validated: bool) -> dict:
         output_csv_path=str(out_csv),
         classifier_pred_dirs=classifier_dirs,
         operating_point_validated="held_out_annotations",
-        acknowledge_unvalidated=not validated,
     )
+    if not validated:
+        return res
     assert "error" not in res, res
     with open(out_csv, newline="") as f:
         rows = list(csv.DictReader(f))
@@ -162,13 +169,13 @@ def test_each_trait_carries_its_own_majority_mapping_marker(tmp_path: Path):
 
 
 def test_the_majority_mapping_marker_is_not_the_delivery_gates_verdict(tmp_path: Path):
-    """The marker answers whether the breeders confirmed the majority reading, so it does not move
-    when the delivery gate does. Delivered with one measurement dimension cleared and the other
-    acknowledged unvalidated, a trait with a confirmed reading still reads confirmed, and each gate
-    dimension reports its own state in its own column beside it."""
+    """The marker answers whether the breeders confirmed the majority reading, a different
+    question from the delivery gate's own verdict. With one measurement dimension cleared and the
+    classifier left unvalidated, this door takes no acknowledgement at all, so the delivery
+    refuses, and the refusal still names each dimension's own reconciled state."""
     pistillate = _deliver(tmp_path, PISTILLATE_SPEC, validated=False)
 
-    assert pistillate["pistillate_flowering_crossing_unconfirmed"] == "false"
+    assert "error" in pistillate
     assert pistillate["positive_state_classifier_validated"] == "false"
     assert pistillate["operating_point_validated"] == "held_out_annotations"
 

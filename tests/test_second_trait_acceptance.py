@@ -164,7 +164,7 @@ def test_currant_bloom_json_doors_deliver_its_own_schema_when_validated(
     resp = client.post("/api/results/phenology_measurement", json=body)
     assert resp.status_code == 200
     out = resp.json()
-    assert out["provisional"] is False
+    assert out["has_unvalidated_dimensions"] is False
     assert out["curves"]["rows"] and out["milestones"]["rows"]
     onset = next(r for r in out["milestones"]["rows"] if r["plant_id"] == "BUSH_A")
     # currant_bloom's own column names, not catkin's, and no majority alias column at all.

@@ -108,28 +108,19 @@ def test_a_caller_chosen_conf_never_reaches_a_written_count_csv(tmp_path, monkey
     assert not out_csv.exists()
 
 
-def test_an_acknowledged_uncalibrated_count_is_written_flagged_rather_than_refused(
-    tmp_path, monkeypatch,
-):
-    """The escape hatch stays open and honest: the same caller-chosen conf delivers a CSV whose
-    every row carries the unvalidated stamp."""
+def test_acknowledge_unvalidated_keyword_is_no_longer_accepted(tmp_path, monkeypatch):
+    """The old escape hatch is retired outright, not just narrowed: this door takes no
+    acknowledgement for its own CSV, so the retired keyword is a caller error rather than a
+    route to a flagged write. The plain refusal it used to escape is already covered above."""
     import tcip_mcp.tools.inference_tools as itools
-    from tcip_mcp.pipelines.resolution import VALIDATED_FALSE
 
     ckpt, images_dir = _prepare(tmp_path, monkeypatch)
     out_csv = tmp_path / "counts.csv"
 
-    r = itools.deliver_per_image_counts(ckpt, str(images_dir), str(out_csv), trait=fx.COUNT_TRAIT,
-                               conf_threshold=CALLER_PICKED_CONF, device="cpu", tile=False,
-                               acknowledge_unvalidated=True)
-
-    assert "error" not in r, r
-    assert r["operating_point_validated"] == VALIDATED_FALSE
-    assert r["run_conf_validated_against"] == VALIDATED_FALSE
-    assert r["unvalidated_dimensions"] == "operating_point"
-    rows = out_csv.read_text(encoding="utf-8").strip().splitlines()
-    assert len(rows) == 1 + len(_CountStub._COUNTS)  # header plus one row per image
-    assert all(VALIDATED_FALSE in row for row in rows[1:])
+    with pytest.raises(TypeError):
+        itools.deliver_per_image_counts(ckpt, str(images_dir), str(out_csv), trait=fx.COUNT_TRAIT,
+                                   conf_threshold=CALLER_PICKED_CONF, device="cpu", tile=False,
+                                   acknowledge_unvalidated=True)
 
 
 def test_a_calibrated_conf_delivers_the_count_csv_untouched(tmp_path, monkeypatch):
@@ -186,33 +177,38 @@ def _conf_cell(csv_path):
 
 def test_deliver_per_image_counts_stamps_default_conf_source_when_omitted(tmp_path, monkeypatch):
     """The rail must admit the ordinary, unstated call: an omitted conf still runs the pass at the
-    platform default, and its provenance says so in both the persisted bucket and the delivered
-    CSV's own operating_point_conf cell, never laundered into 'explicit'."""
+    platform default, and its provenance says so in the persisted bucket, never laundered into
+    'explicit'. The bucket publish is ungated on an uncalibrated conf, so the stamp lands even
+    though the CSV itself, taking no acknowledgement of its own, refuses right after."""
     import tcip_mcp.tools.inference_tools as itools
-    from tcip_mcp.pipelines.resolution import DEFAULT_CONF, read_operating_point_sidecar
+    from tcip_mcp.pipelines.resolution import (
+        DEFAULT_CONF, VALIDATED_FALSE, read_operating_point_sidecar,
+    )
 
     ckpt, images_dir = _prepare(tmp_path, monkeypatch)
     out_csv = tmp_path / "counts.csv"
     bucket = tmp_path / "predictions" / "baseline" / "2026-01-01"
 
     r = itools.deliver_per_image_counts(ckpt, str(images_dir), str(out_csv), trait=fx.COUNT_TRAIT,
-                               device="cpu", tile=False, predictions_dir=str(bucket),
-                               acknowledge_unvalidated=True)
+                               device="cpu", tile=False, predictions_dir=str(bucket))
 
-    assert "error" not in r, r
+    assert "error" in r
+    assert r["operating_point_validated"] == VALIDATED_FALSE
     stamp = read_operating_point_sidecar(bucket)
     assert stamp["operating_point"]["conf"]["source"] == "default"
     assert stamp["operating_point"]["conf"]["value"] == DEFAULT_CONF
-    assert _conf_cell(out_csv)["source"] == "default"
 
 
 def test_deliver_per_image_counts_stamps_explicit_conf_source_when_stated_at_the_default(
     tmp_path, monkeypatch,
 ):
     """A caller-stated conf is stamped 'explicit' even when it happens to equal the platform
-    default, in both the persisted bucket and the delivered CSV."""
+    default, in the persisted bucket; the CSV itself still refuses since nothing here calibrates
+    the operating point, so the stamp is checked off the bucket's own sidecar."""
     import tcip_mcp.tools.inference_tools as itools
-    from tcip_mcp.pipelines.resolution import DEFAULT_CONF, read_operating_point_sidecar
+    from tcip_mcp.pipelines.resolution import (
+        DEFAULT_CONF, VALIDATED_FALSE, read_operating_point_sidecar,
+    )
 
     ckpt, images_dir = _prepare(tmp_path, monkeypatch)
     out_csv = tmp_path / "counts.csv"
@@ -220,12 +216,12 @@ def test_deliver_per_image_counts_stamps_explicit_conf_source_when_stated_at_the
 
     r = itools.deliver_per_image_counts(ckpt, str(images_dir), str(out_csv), trait=fx.COUNT_TRAIT,
                                conf_threshold=DEFAULT_CONF, device="cpu", tile=False,
-                               predictions_dir=str(bucket), acknowledge_unvalidated=True)
+                               predictions_dir=str(bucket))
 
-    assert "error" not in r, r
+    assert "error" in r
+    assert r["operating_point_validated"] == VALIDATED_FALSE
     stamp = read_operating_point_sidecar(bucket)
     assert stamp["operating_point"]["conf"]["source"] == "explicit"
-    assert _conf_cell(out_csv)["source"] == "explicit"
 
 
 def test_run_inference_stamps_default_conf_source_when_omitted(tmp_path, monkeypatch):

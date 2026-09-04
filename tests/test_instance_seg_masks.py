@@ -285,9 +285,10 @@ def test_run_inference_instance_seg_unset_tile_writes_tiled(instance_seg_ckpt, t
     assert (Path(r["output_dir"]) / "img.json").is_file()
 
 
-def test_deliver_per_image_counts_instance_seg_writes_csv_tiled(instance_seg_ckpt, tmp_path):
-    """deliver_per_image_counts must produce a count CSV for a tiled instance_seg run just like any other
-    detection checkpoint, now that tiled inference carries masks rather than being blocked."""
+def test_deliver_per_image_counts_instance_seg_refuses_a_bare_tiled_pass(instance_seg_ckpt, tmp_path):
+    """deliver_per_image_counts takes no acknowledgement for the CSV itself, so a masked tiled
+    instance_seg run with no calibration behind it refuses cleanly, the same as any other detection
+    checkpoint, now that tiled inference carries masks rather than being blocked."""
     from tcip_mcp.tools.inference_tools import deliver_per_image_counts
 
     images_dir = tmp_path / "images"
@@ -298,20 +299,18 @@ def test_deliver_per_image_counts_instance_seg_writes_csv_tiled(instance_seg_ckp
     _register_instance_seg_ckpt(instance_seg_ckpt, tmp_path)
     fx.seed_confirmed_count(tmp_path)
     r = deliver_per_image_counts(instance_seg_ckpt, str(images_dir), str(out_path),
-                        trait=fx.COUNT_TRAIT, device="cpu", tile_size=TILE,
-                        acknowledge_unvalidated=True)
-    assert "error" not in r
-    assert out_path.is_file()
+                        trait=fx.COUNT_TRAIT, device="cpu", tile_size=TILE)
+    assert "error" in r
+    assert not out_path.exists()
 
 
-def test_deliver_per_image_counts_instance_seg_live_and_bucket_regime_agree_on_masks(
+def test_deliver_per_image_counts_instance_seg_bucket_regime_reads_agree_on_masks(
     instance_seg_ckpt, tmp_path,
 ):
     """The write-side geometry drop (write_predictions_json's geometry_extent_ok on the mask
-    polygon) is the only extent filter a masks-backed CSV row goes through in either regime now:
-    the live-with-predictions_dir path counts the just-published documents through the same
-    reader the bucket regime uses, so a masked detection's box-based extent (irrelevant to a
-    polygon) can no longer diverge the two regimes' counts."""
+    polygon) is the only extent filter a masks-backed CSV row goes through: two independent
+    bucket-regime reads of the same promoted, masked, tiled bucket agree on every cell, so a
+    masked detection's box-based extent (irrelevant to a polygon) cannot diverge them."""
     import csv
     from datetime import datetime
 
@@ -323,17 +322,33 @@ def test_deliver_per_image_counts_instance_seg_live_and_bucket_regime_agree_on_m
     _register_instance_seg_ckpt(instance_seg_ckpt, tmp_path)
     fx.seed_confirmed_count(tmp_path)
 
+    # This door takes no acknowledgement for the CSV itself, so the live pass refuses; the raw
+    # bucket it published ahead of that refusal is what the bucket-regime reads below promote.
     bucket = tmp_path / "ds" / "predictions" / "baseline" / "2026-01-01"
+    published = deliver_per_image_counts(
+        instance_seg_ckpt, str(images_dir), str(tmp_path / "seed.csv"), trait=fx.COUNT_TRAIT,
+        device="cpu", tile_size=TILE, predictions_dir=str(bucket))
+    assert "error" in published
+    assert bucket.is_dir()
+
+    from tcip_mcp.pipelines.resolution import VALIDATED_HELD_OUT, read_operating_point_sidecar
+    from tests._binding_fixtures import write_bound_sidecar
+
+    sidecar = read_operating_point_sidecar(bucket) or {}
+    op = dict(sidecar.get("operating_point") or {})
+    op["conf"] = {**op.get("conf", {}), "validated_against": VALIDATED_HELD_OUT}
+    stamp = {**sidecar, "validated": True, "trait": fx.COUNT_TRAIT, "operating_point": op}
+    write_bound_sidecar(bucket, stamp, dataset_root=tmp_path / "ds", producing_experiment_id=None)
+
     csv_a = tmp_path / "a.csv"
-    live = deliver_per_image_counts(instance_seg_ckpt, str(images_dir), str(csv_a), trait=fx.COUNT_TRAIT,
-                           device="cpu", tile_size=TILE, acknowledge_unvalidated=True,
-                           predictions_dir=str(bucket))
-    assert "error" not in live, live
+    reread_a = deliver_per_image_counts(predictions_dir=str(bucket), output_path=str(csv_a),
+                             trait=fx.COUNT_TRAIT)
+    assert "error" not in reread_a, reread_a
 
     csv_b = tmp_path / "b.csv"
-    reread = deliver_per_image_counts(predictions_dir=str(bucket), output_path=str(csv_b),
-                             trait=fx.COUNT_TRAIT, acknowledge_unvalidated=True)
-    assert "error" not in reread, reread
+    reread_b = deliver_per_image_counts(predictions_dir=str(bucket), output_path=str(csv_b),
+                             trait=fx.COUNT_TRAIT)
+    assert "error" not in reread_b, reread_b
 
     rows_a = list(csv.DictReader(csv_a.open()))
     rows_b = list(csv.DictReader(csv_b.open()))

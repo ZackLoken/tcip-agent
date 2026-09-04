@@ -112,9 +112,10 @@ def test_delivery_csv_carries_each_plants_own_value_and_image_count(tmp_path):
     ]
     summaries = aggregate_per_plant(results, strategy="count", value_key="count")
 
+    bucket = _count_bucket(tmp_path, "count_preds")
     out_path = tmp_path / "per_plant.csv"
     export_aggregated_csv(summaries, str(out_path), delivered_phenotype="stem_count", crop="hazelnut",
-                          acknowledge_unvalidated=True)
+                          pred_dirs=[bucket])
     with open(out_path, newline="") as f:
         rows = _by_plant(list(csv.DictReader(f)))
 

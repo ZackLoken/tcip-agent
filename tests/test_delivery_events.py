@@ -122,29 +122,29 @@ def test_a_web_route_writes_its_delivery_event_under_the_payloads_root_not_the_p
     body = _phenology_fixture(payload_root, validated=True, fractions=(0.75, 1.0), detections=4)
 
     resp = TestClient(app, base_url="http://127.0.0.1").post(
-        "/api/results/phenology_measurement", json=body)
+        "/api/results/export_csv", json={**body, "payload": "milestones", "filename": "x.csv"})
     assert resp.status_code == 200, resp.text
 
     payload_records = [
         r for r in _delivery_event_records(payload_root.resolve())
-        if r["door"] == "results.per_plant_curves"
+        if r["door"] == "results.export_csv"
     ]
     assert len(payload_records) == 1, payload_records
 
     pinned_records = [
-        r for r in _delivery_event_records(pinned_root) if r["door"] == "results.per_plant_curves"
+        r for r in _delivery_event_records(pinned_root) if r["door"] == "results.export_csv"
     ]
     assert pinned_records == []
 
 
-def test_phenology_measurement_records_onset_dates_only_when_the_positive_class_was_assessed(
+def test_phenology_measurement_records_no_delivery_event_for_an_unclassified_look(
     tmp_path: Path,
 ) -> None:
-    """The deleted onset_dates door itself recorded its event unconditionally, but ResultsTab
-    never called that door at all when positive_class_assessed was false; the merged door now
-    runs both projections every time, so it must enforce that same condition itself rather than
-    recording an onset-projection event the pre-merge flow never produced."""
+    """Looking at a number on screen is not delivering it: phenology_measurement records no
+    delivery event either way, only an audit line, since nothing here shipped an artifact."""
     from fastapi.testclient import TestClient
+
+    from tcip_mcp.audit import audit_log_key
 
     from tcip_web.app import app
 
@@ -158,9 +158,9 @@ def test_phenology_measurement_records_onset_dates_only_when_the_positive_class_
     assert resp.status_code == 200, resp.text
     assert resp.json()["positive_class_assessed"] is False
 
-    doors = {r["door"] for r in _delivery_event_records(tmp_path.resolve())}
-    assert "results.per_plant_curves" in doors
-    assert "results.onset_dates" not in doors
+    assert _delivery_event_records(tmp_path.resolve()) == []
+    audit = ts.read_log(audit_log_key(tmp_path)).records
+    assert any(e["tool"] == "results.phenology_measurement" for e in audit)
 
 
 def test_record_delivery_binding_event_raises_and_writes_nothing_when_plant_mapping_fails_validation(
@@ -183,19 +183,21 @@ def test_record_delivery_binding_event_raises_and_writes_nothing_when_plant_mapp
     with pytest.raises(ValidationError):
         resolution.record_delivery_binding_event(
             "test_door", None, [], {}, measurement_documents=["operating_point"],
-            scale_document=None, trait="astringency", delivery_kind=STATE_CROSSING_DATES,
-            project_root=tmp_path, plant_mapping=bad_mapping,
+            scale_document=None, acknowledgement=None, trait="astringency",
+            delivery_kind=STATE_CROSSING_DATES, project_root=tmp_path, plant_mapping=bad_mapping,
         )
 
     assert _delivery_event_records(tmp_path) == []
 
 
-def test_phenology_measurement_records_onset_dates_when_the_positive_class_was_assessed(
+def test_phenology_measurement_records_no_delivery_event_for_an_assessed_look(
     tmp_path: Path,
 ) -> None:
-    """The parity counterpart: a run that did assess the positive class still records both
-    projection events, the merged door's baseline behavior."""
+    """The parity counterpart: a run that did assess the positive class still records no delivery
+    event, only the same audit line, since a look on screen never becomes a shipped artifact."""
     from fastapi.testclient import TestClient
+
+    from tcip_mcp.audit import audit_log_key
 
     from tcip_web.app import app
 
@@ -208,5 +210,6 @@ def test_phenology_measurement_records_onset_dates_when_the_positive_class_was_a
     assert resp.status_code == 200, resp.text
     assert resp.json()["positive_class_assessed"] is True
 
-    doors = {r["door"] for r in _delivery_event_records(tmp_path.resolve())}
-    assert {"results.per_plant_curves", "results.onset_dates"} <= doors
+    assert _delivery_event_records(tmp_path.resolve()) == []
+    audit = ts.read_log(audit_log_key(tmp_path)).records
+    assert any(e["tool"] == "results.phenology_measurement" for e in audit)

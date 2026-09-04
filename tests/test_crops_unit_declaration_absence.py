@@ -31,6 +31,28 @@ def _recorded_meaning(tmp_path: Path):
                                 value_keys=["detections_count"])
     fx.seed_confirmed_aggregate(tmp_path, "plant_surface_area", value_keys=["area_mm2"])
 
+
+def _validated_bucket(tmp_path: Path, trait: str, *, document: str = "operating_point",
+                      tag: str = "a") -> str:
+    """A prediction bucket whose sidecar carries a genuine held-out-validated claim for ``trait``,
+    for a test whose subject is unit resolution rather than the delivery gate itself."""
+    from tcip_mcp.pipelines.resolution import VALIDATED_HELD_OUT
+    from tests._binding_fixtures import write_bound_sidecar, write_prediction
+
+    root = tmp_path / f"ds_{tag}"
+    bucket = root / "predictions" / "preds"
+    write_prediction(bucket, "img_a")
+    param_key = {"operating_point": "conf", "regression_operating_point": "regression"}[document]
+    stamp = {
+        "validated": True, "trait": trait,
+        "operating_point": {param_key: {"value": 0.4, "requires_validation": True,
+                                        "validation_kind": "annotations",
+                                        "validated_against": VALIDATED_HELD_OUT}},
+    }
+    write_bound_sidecar(bucket, stamp, document=document, dataset_root=root,
+                        experiment_id=f"exp-validated-{tag}")
+    return str(bucket)
+
 # crops.yml traits that declare a physical unit, one per declared unit shape it uses.
 DECLARED_UNITS = {
     "bark_thickness": "mm",
@@ -94,8 +116,9 @@ def test_a_count_valued_delivery_ships_with_a_blank_units_column(tmp_path: Path)
          "plant_attribution": "image", "measurement_document": "operating_point"},
     ]
     out_path = tmp_path / "counts.csv"
+    bucket = _validated_bucket(tmp_path, fx.COUNT_TRAIT, tag="counts")
     export_aggregated_csv(results, str(out_path), delivered_phenotype="stem_count",
-                          acknowledge_unvalidated=True)
+                          pred_dirs=[bucket])
     with open(out_path, newline="") as f:
         rows = list(csv.DictReader(f))
     assert [r["units"] for r in rows] == ["", ""]
@@ -105,14 +128,25 @@ def test_a_count_valued_delivery_ships_with_a_blank_units_column(tmp_path: Path)
 def test_a_dimensional_value_ships_for_a_trait_crops_yml_declares_no_unit_for(tmp_path: Path):
     """crops.yml declaring no unit for a trait means there is nothing to cross-check against, not
     that the measurement is refused: an mm-keyed area still resolves to its own squared label. A
-    stand-in unit in the mapping would turn this legitimate delivery into a mismatch refusal."""
-    results = [{"plant_id": "PLANT_001", "value": 812.5, "observations": 2,
-                "value_key": "area_mm2", "plant_attribution": "image", "measurement_document": "operating_point"}]
-    assert _resolve_units("plant_surface_area", results, "operating_point") == ("mm2", "mm")
+    stand-in unit in the mapping would turn this legitimate delivery into a mismatch refusal.
 
+    Delivered under a scalar head (regression_operating_point): its prediction is in the trait's
+    declared unit by construction, so a dimensional value ships with no stated physical scale,
+    unlike the same shape under operating_point, which has nothing answering for its unit without
+    one.
+    """
+    results = [{"plant_id": "PLANT_001", "value": 812.5, "observations": 2,
+                "value_key": "area_mm2", "plant_attribution": "image",
+                "measurement_document": "regression_operating_point"}]
+    assert _resolve_units("plant_surface_area", results, "regression_operating_point") == ("mm2", "mm")
+
+    fx.seed_confirmed_aggregate(tmp_path, "plant_surface_area", value_keys=["area_mm2"],
+                                measurement_document="regression_operating_point")
+    bucket = _validated_bucket(tmp_path, "plant_surface_area", document="regression_operating_point",
+                               tag="area")
     out_path = tmp_path / "area.csv"
     export_aggregated_csv(results, str(out_path), delivered_phenotype="plant_surface_area",
-                          acknowledge_unvalidated=True)
+                          pred_dirs=[bucket])
     with open(out_path, newline="") as f:
         rows = list(csv.DictReader(f))
     assert rows[0]["units"] == "mm2"
@@ -126,4 +160,4 @@ def test_a_declared_unit_still_cross_checks_the_value_keys_own_unit(tmp_path: Pa
     assert crops_units()["bark_thickness"] == "mm"
     with pytest.raises(ValueError, match="declared units"):
         export_aggregated_csv(results, str(tmp_path / "mismatch.csv"),
-                              delivered_phenotype="bark_thickness", acknowledge_unvalidated=True)
+                              delivered_phenotype="bark_thickness")

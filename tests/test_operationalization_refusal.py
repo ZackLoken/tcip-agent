@@ -9,7 +9,6 @@ that has not been shown to admit valid work.
 from __future__ import annotations
 
 import dataclasses
-import json
 from pathlib import Path
 
 import pytest
@@ -395,7 +394,7 @@ def delivered_golden(body: dict, produced_at: bytes) -> bytes:
     row = (b",2,2,0,0,2026-02-24,2026-02-12,2026-02-18,2026-02-24,interpolated,interpolated,"
            b"interpolated,interpolated,true,0.4,held_out_annotations,held_out_annotations,,"
            + sha + b",exp-1," + produced_at + b"," + record + b"," + mapping_sha + b","
-           + captures_unverified + b",," + dates_delivered + b",0,image\r\n")
+           + captures_unverified + b",," + dates_delivered + b",0,image,,\r\n")
     return (
         b"plant_id,accession,n_dates,n_observed_dates,n_dates_unclassified,n_dates_missing_images,"
         b"catkin_elongation_date,catkin_05per_date,catkin_50per_date,catkin_95per_date,"
@@ -405,7 +404,7 @@ def delivered_golden(body: dict, produced_at: bytes) -> bytes:
         b"producer_model_sha256,"
         b"producing_experiment_id,produced_at,validation_record,plant_mapping_sha256,"
         b"captures_unverified,plant_csvs_unverified,dates_delivered,images_unattributed,"
-        b"plant_attribution\r\n"
+        b"plant_attribution,acknowledged_by,acknowledgement_reason\r\n"
         + b"PLANT_A,AccA" + row
         + b"PLANT_B,AccB" + row
     )
@@ -564,36 +563,43 @@ def test_acknowledge_does_not_clear_the_precondition_at_every_door(
 ):
     """Acknowledging an unvalidated measurement says nothing about whether one was defined.
 
-    An acknowledged provisional number whose meaning is stated ships stamped false. An acknowledged
-    number whose meaning is unstated is not a number, so no door takes the acknowledgement for it.
+    The MCP tool door takes no acknowledgement at all, so there is no escape left to try there;
+    both web routes run the same precondition before either reaches its own gate, so an
+    acknowledged number whose meaning is unstated is refused there too.
     """
     body = _delivery(tmp_path, validated=True)
     _withdraw(tmp_path, "catkin")
     out_csv = tmp_path / "delivered.csv"
 
-    res = _compute(body, out_csv, acknowledge_unvalidated=True, **_validated_call(body))
-    assert "stated but not confirmed by the breeder" in res["error"]
+    with pytest.raises(TypeError, match="acknowledge_unvalidated"):
+        _compute(body, out_csv, acknowledge_unvalidated=True, **_validated_call(body))
     assert not out_csv.exists()
 
-    acknowledged = {**body, "acknowledge_unvalidated": True}
     for route in ("phenology_measurement", "export_csv"):
-        assert _web_refusal(client, acknowledged, route)["kind"] == "operationalization", route
+        assert _web_refusal(client, body, route)["kind"] == "operationalization", route
 
 
-def test_acknowledge_still_clears_the_gate_dimensions_in_the_same_call(tmp_path: Path):
+def test_acknowledge_still_clears_the_gate_dimensions_in_the_same_call(
+    client: TestClient, tmp_path: Path,
+):
     """The two rules are separate, and this is the direction that proves it rather than assumes it.
 
     Same call, same acknowledgement: with the meaning confirmed, the unvalidated evidence ships
-    stamped false exactly as it did before the precondition existed.
+    stamped false exactly as it did before the precondition existed. The MCP tool takes no
+    acknowledgement any more, so this runs through the web export route, the one surface that
+    builds a real one.
     """
     body = _delivery(tmp_path, validated=False)
-    out_csv = tmp_path / "delivered.csv"
 
-    res = _compute(body, out_csv, acknowledge_unvalidated=True)
+    resp = client.post("/api/results/export_csv", json={
+        **body, "payload": "milestones", "filename": "x.csv", "user": "user:tester",
+        "acknowledgement": {"reason": "test acknowledgement"},
+    })
 
-    assert "error" not in res, res
-    assert res["positive_state_classifier_validated"] == "false"
-    assert out_csv.exists()
+    assert resp.status_code == 200, resp.text
+    header = resp.text.splitlines()[0].split(",")
+    cells = dict(zip(header, resp.text.splitlines()[1].split(",")))
+    assert cells["positive_state_classifier_validated"] == "false"
 
 
 def test_confirmation_withdrawn_during_delivery_refuses_before_the_write(
@@ -661,7 +667,7 @@ def test_write_phenology_csv_refuses_without_a_basis(tmp_path: Path):
 
     with pytest.raises(ValueError) as excinfo:
         phenology.write_phenology_csv(
-            "test", [], tmp_path / "out.csv", CATKIN, flags={}, acknowledge_unvalidated=False,
+            "test", [], tmp_path / "out.csv", CATKIN, flags={}, acknowledgement=None,
             basis=None, operating_point_conf=None, producer={}, bindings={}, pred_dirs=[],
             project_root=tmp_path, plant_mapping=_NO_MAPPING)
 
@@ -724,7 +730,7 @@ def test_write_phenology_csv_with_a_basis_writes_the_delivered_schema(tmp_path: 
     row = {"plant_id": "P1", "accession": "acc-9", "n_dates": 2, "n_observed_dates": 2}
 
     phenology.write_phenology_csv(
-        "test", [row], tmp_path / "out.csv", CATKIN, flags=flags, acknowledge_unvalidated=False,
+        "test", [row], tmp_path / "out.csv", CATKIN, flags=flags, acknowledgement=None,
         basis=check.basis, operating_point_conf=0.4, producer={}, bindings=recon["bindings"],
         pred_dirs=pred_dirs, project_root=tmp_path, plant_mapping=_NO_MAPPING)
 
@@ -753,20 +759,21 @@ def test_a_crossing_unconfirmed_majority_reading_delivers_and_flipping_it_invali
     assert ",false,0.4," in flipped.read_text(encoding="utf-8")
 
 
-def test_the_screen_doors_still_honor_acknowledge_unvalidated_for_the_evidence_gate(
+def test_the_screen_door_still_honors_show_unvalidated_for_the_evidence_gate(
     client: TestClient, tmp_path: Path,
 ):
     """A confirmed meaning plus unvalidated evidence still reaches the screen, marked provisional.
 
     The precondition is about meaning and must not have absorbed the evidence gate's job, which is
-    what would strand a breeder who has nothing to look at.
+    what would strand a breeder who has nothing to look at. ``show_unvalidated`` is a display
+    choice, never an acknowledgement, and it is the mechanism this screen door actually honors.
     """
     body = _delivery(tmp_path, validated=False)
-    acknowledged = {**body, "acknowledge_unvalidated": True}
 
-    resp = client.post("/api/results/phenology_measurement", json=acknowledged)
+    resp = client.post(
+        "/api/results/phenology_measurement", json={**body, "show_unvalidated": True})
     assert resp.status_code == 200, resp.text
-    assert resp.json()["provisional"] is True
+    assert resp.json()["has_unvalidated_dimensions"] is True
     assert client.post(
         "/api/results/phenology_measurement", json=body).status_code == 400
 
@@ -844,14 +851,40 @@ def _bucket_recording(tmp_path: Path, id_map: dict) -> str:
     return str(bucket)
 
 
+def _validated_bucket(
+    tmp_path: Path, name: str, *, trait: str, document: str = "operating_point",
+    param_key: str = "conf", id_map: dict | None = None,
+) -> str:
+    """A prediction bucket genuinely bound to a validation record.
+
+    None of these doors take an acknowledgement any more, so a call that must actually deliver
+    needs real evidence behind it rather than a caller-asserted escape.
+    """
+    from tcip_mcp.pipelines.resolution import VALIDATED_HELD_OUT
+    from tests._binding_fixtures import write_bound_sidecar, write_prediction
+
+    root = tmp_path / "ds"
+    bucket = root / "predictions" / name
+    write_prediction(bucket, "img_a")
+    stamp: dict = {
+        "validated": True, "trait": trait,
+        "operating_point": {param_key: {"value": 0.4, "requires_validation": True,
+                                        "validation_kind": "annotations",
+                                        "validated_against": VALIDATED_HELD_OUT}},
+    }
+    if id_map is not None:
+        stamp["id_map"] = id_map
+    write_bound_sidecar(bucket, stamp, document=document, dataset_root=root)
+    return str(bucket)
+
+
 def test_unstated_count_door_refuses(delivery_root: Path, tmp_path: Path):
     """A per-image count CSV under a trait nobody has defined a count for is not a measurement."""
     from tcip_mcp.pipelines.postprocessing.export import export_detection_csv
 
     out_csv = tmp_path / "counts.csv"
     with pytest.raises(ValueError) as excinfo:
-        export_detection_csv(_count_rows(), str(out_csv), trait=fx.COUNT_TRAIT,
-                             acknowledge_unvalidated=True)
+        export_detection_csv(_count_rows(), str(out_csv), trait=fx.COUNT_TRAIT)
 
     assert "no operationalization is recorded" in str(excinfo.value)
     assert op.PER_IMAGE_COUNT in str(excinfo.value)
@@ -895,7 +928,7 @@ def test_measured_subject_absent_from_id_maps_refuses(delivery_root: Path, tmp_p
 
     with pytest.raises(ValueError) as excinfo:
         export_detection_csv(_count_rows(), str(out_csv), trait=fx.COUNT_TRAIT,
-                             pred_dirs=[bucket], acknowledge_unvalidated=True)
+                             pred_dirs=[bucket])
 
     assert fx.COUNT_SUBJECT in str(excinfo.value)
     assert "The counts are of something else" in str(excinfo.value)
@@ -909,15 +942,13 @@ def test_a_bucket_recording_the_subject_delivers_and_one_recording_none_is_unche
     from tcip_mcp.pipelines.postprocessing.export import export_detection_csv
 
     fx.seed_confirmed_count(tmp_path)
-    matching = _bucket_recording(tmp_path, {fx.COUNT_SUBJECT: 0})
-    silent = tmp_path / "ds" / "predictions" / "silent"
-    silent.mkdir(parents=True)
-    (silent / "operating_point.json").write_text(json.dumps({"validated": False}), encoding="utf-8")
+    matching = _validated_bucket(tmp_path, "recorded", trait=fx.COUNT_TRAIT,
+                                 id_map={fx.COUNT_SUBJECT: 0})
+    silent = _validated_bucket(tmp_path, "silent", trait=fx.COUNT_TRAIT)
 
-    for name, bucket in (("recorded.csv", matching), ("silent.csv", str(silent))):
+    for name, bucket in (("recorded.csv", matching), ("silent.csv", silent)):
         out_csv = tmp_path / name
-        export_detection_csv(_count_rows(), str(out_csv), trait=fx.COUNT_TRAIT,
-                             pred_dirs=[bucket], acknowledge_unvalidated=True)
+        export_detection_csv(_count_rows(), str(out_csv), trait=fx.COUNT_TRAIT, pred_dirs=[bucket])
         assert out_csv.exists(), name
 
 
@@ -930,8 +961,7 @@ def test_row_without_value_key_refuses(delivery_root: Path, tmp_path: Path):
     out_csv = tmp_path / "agg.csv"
 
     with pytest.raises(ValueError) as excinfo:
-        export_aggregated_csv(_aggregate_rows(None), str(out_csv), delivered_phenotype="stem_count",
-                              acknowledge_unvalidated=True)
+        export_aggregated_csv(_aggregate_rows(None), str(out_csv), delivered_phenotype="stem_count")
 
     assert "1 of these rows carry no value key" in str(excinfo.value)
     assert not out_csv.exists()
@@ -947,7 +977,7 @@ def test_value_key_outside_confirmed_set_refuses(delivery_root: Path, tmp_path: 
 
     with pytest.raises(ValueError) as excinfo:
         export_aggregated_csv(_aggregate_rows("leaf_length"), str(out_csv),
-                              delivered_phenotype="stem_count", acknowledge_unvalidated=True)
+                              delivered_phenotype="stem_count")
 
     assert "leaf_length" in str(excinfo.value)
     assert "never confirmed" in str(excinfo.value)
@@ -966,8 +996,7 @@ def test_a_phenotype_no_registered_trait_delivers_refuses_and_names_the_authorin
 
     out_csv = tmp_path / "agg.csv"
     with pytest.raises(ValueError) as excinfo:
-        export_aggregated_csv(_aggregate_rows(), str(out_csv), delivered_phenotype="cluster_nut_count",
-                              acknowledge_unvalidated=True)
+        export_aggregated_csv(_aggregate_rows(), str(out_csv), delivered_phenotype="cluster_nut_count")
 
     assert "no trait registered for this project delivers" in str(excinfo.value)
     assert not out_csv.exists()
@@ -983,8 +1012,7 @@ def test_a_phenotype_two_registered_traits_deliver_refuses_as_ambiguous(
     out_csv = tmp_path / "agg.csv"
 
     with pytest.raises(ValueError) as excinfo:
-        export_aggregated_csv(_aggregate_rows(), str(out_csv), delivered_phenotype="stem_count",
-                              acknowledge_unvalidated=True)
+        export_aggregated_csv(_aggregate_rows(), str(out_csv), delivered_phenotype="stem_count")
 
     assert "each deliver" in str(excinfo.value)
     assert "second_deliverer" in str(excinfo.value)
@@ -1002,24 +1030,26 @@ def test_ordinal_and_count_aggregates_need_their_own_records(delivery_root: Path
     fx.confirm_aggregate(tmp_path, "astringency", op.PER_PLANT_ORDINAL_AGGREGATE,
                          delivered_phenotype="astringency", value_keys=["astringency"])
 
+    ordinal_bucket = _validated_bucket(tmp_path, "ordinal", trait="astringency",
+                                       document="ordinal_operating_point", param_key="ordinal")
     ordinal_rows = _aggregate_rows("astringency", measurement_document="ordinal_operating_point")
     ordinal_csv = tmp_path / "ordinal.csv"
     export_aggregated_csv(ordinal_rows, str(ordinal_csv), delivered_phenotype="astringency",
-                          acknowledge_unvalidated=True)
+                          pred_dirs=[ordinal_bucket])
     assert ordinal_csv.exists()
 
     count_rows = _aggregate_rows("astringency")
     count_csv = tmp_path / "count.csv"
     with pytest.raises(ValueError) as excinfo:
-        export_aggregated_csv(count_rows, str(count_csv), delivered_phenotype="astringency",
-                              acknowledge_unvalidated=True)
+        export_aggregated_csv(count_rows, str(count_csv), delivered_phenotype="astringency")
     assert op.PER_PLANT_COUNT_AGGREGATE in str(excinfo.value)
     assert not count_csv.exists()
 
     fx.confirm_aggregate(tmp_path, "astringency", op.PER_PLANT_COUNT_AGGREGATE,
                          delivered_phenotype="astringency", value_keys=["astringency"])
+    count_bucket = _validated_bucket(tmp_path, "count", trait="astringency")
     export_aggregated_csv(count_rows, str(count_csv), delivered_phenotype="astringency",
-                          acknowledge_unvalidated=True)
+                          pred_dirs=[count_bucket])
 
     assert count_csv.exists()
     _spec, ordinal_record, _dir = fx.resolve(
@@ -1037,7 +1067,7 @@ def test_a_count_csv_no_longer_ships_under_no_trait_at_all(delivery_root: Path, 
 
     out_csv = tmp_path / "counts.csv"
     with pytest.raises(TypeError, match="'trait'"):
-        export_detection_csv(_count_rows(), str(out_csv), acknowledge_unvalidated=True)  # type: ignore[call-arg]  # the omission is the subject; the raises pins it to trait
+        export_detection_csv(_count_rows(), str(out_csv))  # type: ignore[call-arg]  # the omission is the subject; the raises pins it to trait
 
     assert not out_csv.exists()
 
@@ -1053,8 +1083,8 @@ def test_the_count_tool_no_longer_tabulates_under_no_trait_at_all(
         "operating_point": {"conf": {"value": 0.5}}, "validated": False, "conf_source": "default"})
     out_csv = tmp_path / "o.csv"
 
-    with pytest.raises(TypeError):
-        itools.deliver_per_image_counts("m.pt", str(tmp_path), str(out_csv), acknowledge_unvalidated=True)
+    with pytest.raises(TypeError, match="'trait'"):
+        itools.deliver_per_image_counts("m.pt", str(tmp_path), str(out_csv))
 
     assert not out_csv.exists()
 
@@ -1072,6 +1102,6 @@ def test_a_per_plant_csv_no_longer_ships_under_the_writers_own_default_name(
 
     out_csv = tmp_path / "agg.csv"
     with pytest.raises(TypeError, match="'delivered_phenotype'"):
-        export_aggregated_csv(_aggregate_rows(), str(out_csv), acknowledge_unvalidated=True)  # type: ignore[call-arg]  # the omission is the subject; the raises pins it to delivered_phenotype
+        export_aggregated_csv(_aggregate_rows(), str(out_csv))  # type: ignore[call-arg]  # the omission is the subject; the raises pins it to delivered_phenotype
 
     assert not out_csv.exists()

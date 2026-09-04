@@ -15,6 +15,7 @@ from tcip_mcp.pipelines.resolution import (
     VALIDATED_FALSE,
     VALIDATED_HELD_OUT,
     VALIDATED_PERSISTED_GEOMETRY,
+    Acknowledgement,
     ResolvedBundle,
     ResolvedParam,
     accepted_references,
@@ -303,7 +304,7 @@ def test_declared_stamp_filenames_cover_every_declared_document(tmp_path):
 
 def test_column_stamp_floors_on_a_dimension_with_no_column_of_its_own():
     gate = check_delivery_gate({"operating_point": VALIDATED_HELD_OUT, "tile_size": VALIDATED_FALSE},
-                               acknowledge_unvalidated=True)
+                               allow_unvalidated_staging=True)
 
     assert gate.ok is True
     assert gate.stamp["operating_point"] == VALIDATED_HELD_OUT
@@ -315,7 +316,7 @@ def test_column_stamp_is_not_floored_by_a_separately_stamped_dimension():
     not also drag down the column beside it."""
     gate = check_delivery_gate(
         {"operating_point": VALIDATED_HELD_OUT, "classifier": VALIDATED_FALSE},
-        acknowledge_unvalidated=True)
+        acknowledgement=Acknowledgement(acknowledged_by="user:tester", reason="known unvalidated"))
 
     assert gate.column_stamp("operating_point", own_column=("classifier",)) == VALIDATED_HELD_OUT
     assert gate.stamp["classifier"] == VALIDATED_FALSE

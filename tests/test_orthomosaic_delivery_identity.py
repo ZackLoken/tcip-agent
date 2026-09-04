@@ -120,8 +120,7 @@ def test_delivery_refuses_a_pixel_identical_raster_whose_tiepoint_moved(tmp_path
 
     out_csv = tmp_path / "counts.csv"
     refused = deliver_orthomosaic_plant_counts(
-        str(bucket), str(moved), _plant_registry(plant_csv), str(out_csv), delivered_phenotype="stem_count",
-        acknowledge_unvalidated=True)
+        str(bucket), str(moved), _plant_registry(plant_csv), str(out_csv), delivered_phenotype="stem_count")
 
     assert "error" in refused
     assert "georeferencing mismatch" in refused["error"]
@@ -144,8 +143,7 @@ def test_delivery_refuses_a_raster_of_different_content(tmp_path, monkeypatch):
 
     out_csv = tmp_path / "counts.csv"
     refused = deliver_orthomosaic_plant_counts(
-        str(bucket), str(other), _plant_registry(plant_csv), str(out_csv), delivered_phenotype="stem_count",
-        acknowledge_unvalidated=True)
+        str(bucket), str(other), _plant_registry(plant_csv), str(out_csv), delivered_phenotype="stem_count")
 
     assert "error" in refused
     assert "content mismatch" in refused["error"]
@@ -172,9 +170,14 @@ def test_delivery_refuses_a_bucket_that_records_no_raster_identity(tmp_path, mon
     assert not out_csv.exists()
 
 
-def test_delivery_admits_the_raster_the_bucket_was_produced_on(tmp_path, monkeypatch):
-    """The legitimate call is unchanged: the same raster delivers, with the identity recorded by
-    the producer itself rather than written into the fixture by hand."""
+def test_delivery_resolves_the_raster_it_was_produced_on_then_refuses_on_the_uncalibrated_count(
+    tmp_path, monkeypatch,
+):
+    """The raster the bucket was produced on is admitted by the identity check, with the identity
+    recorded by the producer itself rather than written into the fixture by hand: the mapping
+    resolves and attributes the detection to its plant. A bare run_inference pass reserved no
+    calibration region, so the count operating point never earned a reference and this door takes
+    no acknowledgement; the refusal named is the gate's, never the identity check's."""
     _project(tmp_path, monkeypatch)
     raster_path = tmp_path / "mosaic.tif"
     _write_geo_raster(raster_path)
@@ -191,14 +194,14 @@ def test_delivery_admits_the_raster_the_bucket_was_produced_on(tmp_path, monkeyp
     from tcip_mcp.tools.orthomosaic_tools import deliver_orthomosaic_plant_counts
 
     out_csv = tmp_path / "counts.csv"
-    delivered = deliver_orthomosaic_plant_counts(
-        str(bucket), str(raster_path), _plant_registry(plant_csv), str(out_csv), delivered_phenotype="stem_count",
-        acknowledge_unvalidated=True)
+    refused = deliver_orthomosaic_plant_counts(
+        str(bucket), str(raster_path), _plant_registry(plant_csv), str(out_csv), delivered_phenotype="stem_count")
 
-    assert "error" not in delivered
-    assert delivered["n_mapped"] == 1
-    rows = {r["plant_id"]: r for r in csv.DictReader(out_csv.open(newline=""))}
-    assert rows["plot0"]["value"] == "1"
+    assert "georeferencing mismatch" not in refused["error"]
+    assert "content mismatch" not in refused["error"]
+    assert "unvalidated dimension" in refused["error"]
+    assert refused["n_mapped"] == 1
+    assert not out_csv.exists()
 
 
 # ── the claim-scope dimension of the shared delivery gate ────────────────
@@ -268,7 +271,7 @@ def test_orthomosaic_precondition_precedes_the_raster_identity_refusal(tmp_path,
     out_csv = tmp_path / "counts.csv"
     refused = deliver_orthomosaic_plant_counts(
         str(bucket), str(raster_path), _plant_registry(plant_csv), str(out_csv),
-        delivered_phenotype="bark_thickness", acknowledge_unvalidated=True)
+        delivered_phenotype="bark_thickness")
 
     assert "no operationalization is recorded" in refused["error"]
     assert "run_inference" not in refused["error"]
