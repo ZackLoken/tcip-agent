@@ -172,6 +172,7 @@ def test_main_prints_delivery_events_a_conform_would_strand(
         "event_id": "evt-1", "trait": "currant_bloom", "delivery_kind": "state_crossing_dates",
         "door": "deliver_phenology_milestones", "output_path": None, "output_sha256": None,
         "measurement_documents": ["operating_point"], "scale_document": None,
+        "acknowledged_by": None, "acknowledgement_reason": None,
         "plant_mapping": {
             "name": "valley", "project_root": str(tmp_path), "dataset_id": "ds-1",
             "dataset_root": str(tmp_path / "ds"), "built_at": "2026-02-11T00:00:00+00:00",

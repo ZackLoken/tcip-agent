@@ -199,11 +199,17 @@ fresh root predates another change, not a capability to build on.
 - `conform_dataset_registry_paths.py` - conforms a project's dataset registry entries onto the
   relative-path row `register_dataset` now writes, for a project registered before that change.
 - `conform_delivery_events.py` - checks a project's stored `delivery_events` records against the
-  current `DeliveryEventRecord` shape and names, by `event_id`, any that no longer validate.
-  Never rewrites: none of the three `plant_mapping` disclosure keys a refused record lacks was
-  ever computed for that delivery, so there is no old shape to map forward. `--plan` is accepted
-  for CLI parity with the other conform scripts but changes nothing, since this script never
-  writes either way.
+  current `DeliveryEventRecord` shape and names, by `event_id`, any that no longer validate. The
+  one write it makes is forwarding `acknowledged_by` and `acknowledgement_reason` to null on a
+  record lacking exactly those two keys, since a delivery predating them was made under no
+  acknowledgement; every other missing key is named, never rewritten, since its value was never
+  computed for that delivery. `--plan` previews and writes nothing.
+- `conform_plant_mapping_records.py` - rewrites a project's stored plant-mapping records from
+  the retired `plant_csvs` list to a `plant_registry` reference, registering the CSVs those
+  records named under an operator-stated registry name (`--crop` and `--site` are the expert's
+  facts), adds `supersedes: null`, and appends a fresh `plant_mapping_built` receipt naming each
+  rewritten record's new digest; prints the delivery events whose cited mapping digest the
+  rewrite strands. `--plan` previews and writes nothing.
 - `conform_metrics_marker.py` - stamps the `metrics_logged` marker onto every experiment a
   root's status record predates, so `is_pristine` reads the marker instead of scanning the
   metrics log.
