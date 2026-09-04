@@ -173,9 +173,11 @@ active marker *and* repins the platform-state root to `<workspace>/<project>`, s
 the experiment store and the model registry live under that one project's `.tcip/` alongside its
 data, and the platform's own audit log is now this project's own, one file at one key
 (self-contained and portable; a dataset's own audit log stays beside that dataset, unaffected by
-adoption; `python
-scripts/archive_project.py` bundles everything; `python scripts/import_project.py` restores that
-ZIP into a destination dir, round-tripping back to a `inspect_project`-visible project). After
+adoption; `python scripts/archive_project.py <project_path> --output-path <path>` bundles the
+project into a ZIP at the destination you name, or `--output-dir <dir>` writes the identical
+bundle as a directory tree; `python scripts/import_project.py <bundle_path> <destination>`
+restores either container into a destination dir, round-tripping back to an
+`inspect_project`-visible project). After
 adoption, `inspect_project`, `rank_registered_models` (listing with `metric=""` or ranking with
 one stated) and `register_model` all default (`project_path=""`) to that project, and a
 training run auto-registers there, so the model you trained is the one you retrieve. Pass an
