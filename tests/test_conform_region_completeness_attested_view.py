@@ -95,6 +95,39 @@ def test_plan_mode_writes_nothing(tmp_path: Path):
     assert ts.read(region_completeness_key(tmp_path))["bush/plot"] == record
 
 
+def test_a_corrupt_non_dict_store_is_refused_by_name_not_treated_as_empty(tmp_path: Path):
+    """A stored document present but not the recognized dict shape must be reported as a
+    refusal naming the store, never silently folded into "nothing to conform" the way an
+    absent document reads."""
+    _bind_sqlite()
+    module = _load_script()
+    (tmp_path / ".tcip").mkdir(parents=True, exist_ok=True)
+    ts.replace(region_completeness_key(tmp_path), ["not", "a", "dict"], expect=ts.Version.ABSENT)
+
+    outcomes, refused = module.conform_root(tmp_path, plan=False)
+
+    assert refused is True
+    assert any("not a dict" in line for line in outcomes)
+    assert ts.read(region_completeness_key(tmp_path)) == ["not", "a", "dict"]
+
+
+def test_main_a_corrupt_store_exits_2_and_names_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+):
+    bind_default()
+    module = _load_script()
+    (tmp_path / ".tcip").mkdir(parents=True, exist_ok=True)
+    ts.replace(region_completeness_key(tmp_path), ["not", "a", "dict"], expect=ts.Version.ABSENT)
+
+    monkeypatch.setattr(
+        sys, "argv", ["conform_region_completeness_attested_view.py", str(tmp_path)])
+    exit_code = module.main()
+    output = capsys.readouterr().out
+
+    assert exit_code == 2
+    assert "not a dict" in output
+
+
 def test_a_root_with_no_tcip_directory_is_refused_by_name(tmp_path: Path):
     _bind_sqlite()
     module = _load_script()

@@ -49,8 +49,19 @@ def _conform_bucket(bucket: str, record: dict, *, plan: bool) -> tuple[str, bool
     ), True
 
 
+def _corrupt_store_outcome(root: Path, store: object) -> str:
+    """The one refusal line for a stored region-completeness document that is present but not
+    the dict shape this script recognizes: named rather than silently treated as empty, so a
+    corrupt store is never mistaken for one with nothing to conform."""
+    return (
+        f"refused, the region_completeness store under {root} is a {type(store).__name__}, not "
+        "a dict; this script does not know how to conform it"
+    )
+
+
 def conform_root(root: Path, *, plan: bool) -> tuple[list[str], bool]:
-    """Every outcome line for ``root``, and whether it was refused (no ``.tcip`` directory)."""
+    """Every outcome line for ``root``, and whether it was refused (no ``.tcip`` directory, or
+    a stored document present but not the recognized dict shape)."""
     if not (root / ".tcip").is_dir():
         return ["refused, no .tcip directory found; not a project root"], True
 
@@ -58,7 +69,7 @@ def conform_root(root: Path, *, plan: bool) -> tuple[list[str], bool]:
     if plan:
         store = ts.read(key, default={})
         if not isinstance(store, dict):
-            store = {}
+            return [_corrupt_store_outcome(root, store)], True
         outcomes = [
             _conform_bucket(bucket, dict(record), plan=True)[0]
             for bucket, record in store.items() if isinstance(record, dict)
@@ -68,7 +79,7 @@ def conform_root(root: Path, *, plan: bool) -> tuple[list[str], bool]:
     with ts.transaction(key) as txn:
         store = txn.read(key, default={})
         if not isinstance(store, dict):
-            store = {}
+            return [_corrupt_store_outcome(root, store)], True
         outcomes = []
         changed = False
         for bucket, record in store.items():
