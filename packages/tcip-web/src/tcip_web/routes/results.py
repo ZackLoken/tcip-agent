@@ -34,8 +34,9 @@ from typing import TYPE_CHECKING, Literal, Optional
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import Response
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 from tcip_mcp.pipelines.postprocessing import phenology, plant_mapping
+from tcip_mcp.pipelines.resolution import Acknowledgement
 
 from tcip_web.paths import assert_path_allowed, assert_project_root_allowed, exposed_arrival, within
 from tcip_web.state import store
@@ -341,17 +342,17 @@ class PhenologyPayload(BaseModel):
     rows, and the server knows what it produced because it produced it.
     """
 
+    model_config = ConfigDict(extra="forbid")
+
     project_root: str
     mapping_name: str  # a name persisted under the open project's own plant-mapping store
-    # map date → predictions directory for that date. A trait's positive class id is resolved
-    # server-side from each bucket's own recorded id_map: a client-supplied
-    # class id is never honored, closing the bypass a caller-chosen id would otherwise open.
+    # map date -> predictions directory for that date. A trait's positive class id is resolved
+    # server-side from each bucket's own recorded id_map, never a client-supplied one.
     predictions_by_date: dict[str, str]
     trait: str
-    # Show provisional numbers on screen rather than refusing outright: the same escape
-    # ``deliver_phenology_milestones`` offers, so a breeder whose operating point is not yet calibrated can see
-    # what they have instead of a dead end. It never applies to a file leaving the platform.
-    acknowledge_unvalidated: bool = False
+    # Show provisional numbers on screen rather than refusing outright, so a breeder sees what
+    # they have instead of a dead end. A display choice, never an acknowledgement.
+    show_unvalidated: bool = False
 
 
 class _PhenologyMeasurement:
@@ -360,12 +361,11 @@ class _PhenologyMeasurement:
     def __init__(
         self, spec, plants: dict, validity: dict, gate, positive_class_id, project_root: Path,
         basis, bindings: dict, predictions_by_date: dict[str, str], flags: dict[str, str | None],
-        plant_mapping_disclosure: dict,
+        plant_mapping_disclosure: dict, *, show_unvalidated: bool = False,
     ) -> None:
         self.spec, self.plants, self.validity, self.gate = spec, plants, validity, gate
         self.positive_class_id = positive_class_id
-        # What the count reconciliation verified per bucket, and the buckets it verified, by their
-        # resolved paths.
+        # What the count reconciliation verified per bucket, by their resolved paths.
         self.bindings, self.predictions_by_date = bindings, predictions_by_date
         self.pred_dirs = list(predictions_by_date.values())
         # The guarded, resolved root every later write and audit entry resolves from.
@@ -375,9 +375,11 @@ class _PhenologyMeasurement:
         # The dimension flags the gate above was computed from; validity["tile_size"] is None for
         # an untiled delivery, not the same as the key being absent from the gate's own flags.
         self.flags = flags
-        # The mapping this delivery attributed detections through, plus what verify_mapping_inputs
-        # could not verify: threaded to the event and the CSV's own columns.
+        # The mapping this delivery attributed detections through, threaded to the event and CSV.
         self.plant_mapping_disclosure = plant_mapping_disclosure
+        # The screen route's own display choice: lets an unvalidated gate still reach the caller,
+        # never a delivery act, so a downloading route ignores this and reads gate.ok alone.
+        self.show_unvalidated = show_unvalidated
 
     @property
     def positive_class_assessed(self) -> bool:
@@ -430,7 +432,9 @@ def _delivered_registry(pred_dirs: Sequence[str]) -> "ClassRegistry | None":
     return registry
 
 
-def _measure_phenology(payload: PhenologyPayload) -> _PhenologyMeasurement:
+def _measure_phenology(
+    payload, *, acknowledgement: Acknowledgement | None = None, show_unvalidated: bool = False,
+) -> _PhenologyMeasurement:
     """Compute a trait's phenology measurement and reconcile the evidence behind it: one producer.
 
     Every Results door routes through here, so the numbers and the validity that qualifies them are
@@ -443,6 +447,13 @@ def _measure_phenology(payload: PhenologyPayload) -> _PhenologyMeasurement:
     The spec and the operationalization record come from one call against the guarded root, so the
     two can never be read from different projects, and the precondition runs before anything else
     this door does: a breeder must not see a curve on screen that Download would then refuse.
+    ``payload`` is either ``PhenologyPayload`` (the screen route) or ``ExportCsvPayload`` (the
+    export route); only the four fields read below (``project_root``, ``mapping_name``,
+    ``predictions_by_date``, ``trait``) are shared between them, so neither's own escape field is
+    read off it here. ``acknowledgement`` is a real act only the export route ever builds, and
+    ``show_unvalidated`` is the screen route's own display choice; the one gate this call runs is
+    given whichever the caller holds, and the resulting measurement carries both back to the
+    caller rather than re-deciding anything downstream.
     """
     from tcip_mcp.operationalization import (
         STATE_CROSSING_DATES,
@@ -509,7 +520,7 @@ def _measure_phenology(payload: PhenologyPayload) -> _PhenologyMeasurement:
         "unvalidated_tile_size_buckets": tile_recon["unvalidated_buckets"],
     }
     flags = phenology.phenology_delivery_flags(classifier_state, recon["validated"], tile_recon)
-    gate = check_delivery_gate(flags, acknowledge_unvalidated=payload.acknowledge_unvalidated)
+    gate = check_delivery_gate(flags, acknowledgement=acknowledgement)
     plants = phenology.per_plant_phenology(
         mapping_raw, predictions_by_date,
         positive_class_name=spec.positive_class_name, spec=spec,
@@ -518,7 +529,8 @@ def _measure_phenology(payload: PhenologyPayload) -> _PhenologyMeasurement:
     return _PhenologyMeasurement(
         spec, plants, validity, gate, positive_class_id, root, stated.basis,
         recon["bindings"], predictions_by_date, flags,
-        mapping_build.delivery_disclosure(verified, list(predictions_by_date)))
+        mapping_build.delivery_disclosure(verified, list(predictions_by_date)),
+        show_unvalidated=show_unvalidated)
 
 
 def _still_stated(measurement: _PhenologyMeasurement, trait: str) -> None:
@@ -578,9 +590,9 @@ def _disclosure(measurement: _PhenologyMeasurement) -> dict:
     """What qualifies these numbers, returned beside them so no surface can render them bare."""
     return {
         "validated": measurement.gate.stamp,
-        # True whenever a dimension lacked on-disk evidence: including when the caller acknowledged
-        # it, which is exactly when a surface must not render these numbers as valid.
-        "provisional": bool(measurement.gate.unvalidated),
+        # True whenever a dimension lacked on-disk evidence, including one an acknowledgement
+        # cleared: exactly when a surface must not render these numbers as validated.
+        "has_unvalidated_dimensions": bool(measurement.gate.unvalidated),
         "validity_detail": measurement.validity,
         # Honest signal: was anything actually classified along the trait's axis? If false, the
         # ratios are not a valid phenology measurement: do not deliver curves from them.
@@ -601,31 +613,22 @@ def phenology_measurement(payload: PhenologyPayload) -> dict:
     same payload, though ``per_plant_phenology`` (called once inside ``_measure_phenology``) was
     already their one shared producer; ResultsTab always called both on one Compute click. One
     door removes the two-computation shape structurally rather than by convention: gated on the
-    same reconciled evidence either projection used to gate on separately, refused unless the
-    caller explicitly acknowledges, in which case both ship marked provisional rather than bare.
+    same reconciled evidence either projection used to gate on separately, refused unless
+    ``show_unvalidated`` asks to see the numbers anyway, in which case both ship marked with
+    unvalidated dimensions rather than bare.
+
+    Looking at a number on screen is not delivering it: this route records no delivery event
+    either way, only an audit line, since a delivery event is a fact about an artifact that
+    shipped and nothing here does.
     """
-    measurement = _measure_phenology(payload)
-    if not measurement.gate.ok:
+    measurement = _measure_phenology(payload, show_unvalidated=payload.show_unvalidated)
+    if not measurement.gate.ok and not payload.show_unvalidated:
         raise HTTPException(400, _refusal(measurement))
     _still_stated(measurement, payload.trait)
-    from tcip_mcp.operationalization import STATE_CROSSING_DATES
-    from tcip_mcp.pipelines.resolution import record_delivery_binding_event
-
-    def _record(door: str) -> None:
-        record_delivery_binding_event(door, None,
-                                      measurement.pred_dirs, measurement.bindings,
-                                      measurement_documents=["operating_point",
-                                                             "classifier_operating_point"],
-                                      scale_document=None,
-                                      trait=payload.trait, delivery_kind=STATE_CROSSING_DATES,
-                                      project_root=measurement.project_root,
-                                      plant_mapping=measurement.plant_mapping_disclosure)
-
-    # per_plant_curves records whenever the gate passes, its deleted door's own condition.
-    # onset_dates only when the positive class was assessed, restoring ResultsTab's own old gate.
-    _record("results.per_plant_curves")
-    if measurement.positive_class_assessed:
-        _record("results.onset_dates")
+    _audit(str(measurement.project_root), "results.phenology_measurement", {
+        "trait": payload.trait, "mapping_name": payload.mapping_name,
+        "has_unvalidated_dimensions": bool(measurement.gate.unvalidated),
+    })
     return {
         "curves": {
             "rows": measurement.curve_rows(),
@@ -640,24 +643,49 @@ def phenology_measurement(payload: PhenologyPayload) -> dict:
 # ── CSV export ───────────────────────────────────────────────────────────
 
 
-class ExportCsvPayload(PhenologyPayload):
+class AcknowledgementPayload(BaseModel):
+    """The reason half of a breeder's acknowledgement; the ``acknowledged_by`` half is resolved
+    by the route from the request's own ``user``, never carried in this body."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    reason: str = Field(min_length=1)
+
+
+class ExportCsvPayload(BaseModel):
+    """The export door's own payload: it does not inherit ``PhenologyPayload`` (it carries no
+    ``show_unvalidated``, a display-only choice this door never honors) but shares the four fields
+    ``_measure_phenology`` reads off either payload.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    project_root: str
+    mapping_name: str
+    predictions_by_date: dict[str, str]
+    trait: str
     # Which server computation to export: a choice of producer, never a claim about what the rows
-    # mean or whether they are valid. Picking the "wrong" one yields a correctly-gated CSV of the
-    # other thing, so there is nothing here for a caller to defeat.
+    # mean or whether they are valid. Picking the "wrong" one yields a correctly-gated CSV.
     payload: Literal["curves", "milestones"]
     filename: Optional[str] = None
+    user: Optional[str] = None
+    # The breeder's own act of shipping this delivery unvalidated, or None for an ordinary
+    # validated export; who acknowledged is resolved from user, never carried here.
+    acknowledgement: Optional[AcknowledgementPayload] = None
 
 
 @router.post("/export_csv")
 def export_csv(payload: ExportCsvPayload) -> Response:
     """Write the CSV for a phenology measurement this route computes itself.
 
-    The gate is unconditional because there is nothing else to branch on: this door computes
-    the rows from the buckets (``_measure_phenology``) instead of accepting a caller-composed table, so the only
-    question left is whether the evidence on disk supports delivering them. ``acknowledge_unvalidated``
-    is deliberately ignored here: it lets the breeder look at provisional numbers on screen, never
-    write them to a file that leaves the platform without its evidence, so the writer below is
-    always called with ``acknowledge_unvalidated=False``.
+    This door computes the rows from the buckets (``_measure_phenology``) instead of accepting a
+    caller-composed table, so the only question left is whether the evidence on disk supports
+    delivering them, or the request itself acknowledges shipping it unvalidated.
+    ``payload.acknowledgement`` names only the reason; ``acknowledged_by`` is resolved from
+    ``payload.user`` here, and a request naming no user is refused before anything runs, since a
+    server identity is never written as a breeder's name. The same resolved acknowledgement (or
+    ``None``) is handed to ``_measure_phenology``'s one gate and, unchanged, to the writer below,
+    so the record and the tail can never disagree about who acknowledged what.
 
     Delegates to ``write_phenology_csv``/``write_phenology_curve_csv``, the same writer(s)
     ``deliver_phenology_milestones`` calls: the gate, the provenance cells and the recorded delivery event are
@@ -665,8 +693,21 @@ def export_csv(payload: ExportCsvPayload) -> Response:
     delivery carries. The response body is the file read back as bytes, never a second composition
     of the same rows.
     """
-    measurement = _measure_phenology(payload)
-    if measurement.gate.unvalidated:
+    acknowledgement: Optional[Acknowledgement] = None
+    if payload.acknowledgement is not None:
+        if not (payload.user or "").strip():
+            raise HTTPException(
+                400,
+                "an acknowledgement requires a user: a server identity is never written as a "
+                "breeder's name",
+            )
+        from tcip_web.identity import user_id
+
+        acknowledgement = Acknowledgement(
+            acknowledged_by=user_id(payload.user), reason=payload.acknowledgement.reason)
+
+    measurement = _measure_phenology(payload, acknowledgement=acknowledgement)
+    if not measurement.gate.ok:
         raise HTTPException(400, _refusal(measurement))
     # The same refusal deliver_phenology_milestones makes: if no bucket anywhere ever assessed the trait's
     # positive-class axis, the fraction is not a measurement and there is nothing valid to deliver.
@@ -700,7 +741,7 @@ def export_csv(payload: ExportCsvPayload) -> Response:
     saved_path = measurement.project_root / "results_export" / Path(filename).name
     write_csv(
         "results.export_csv", rows, saved_path, measurement.spec,
-        flags=measurement.flags, acknowledge_unvalidated=False, basis=measurement.basis,
+        flags=measurement.flags, acknowledgement=acknowledgement, basis=measurement.basis,
         operating_point_conf=measurement.validity["operating_point_conf"], producer=producer,
         bindings=measurement.bindings, pred_dirs=measurement.pred_dirs,
         project_root=measurement.project_root,

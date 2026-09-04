@@ -2059,9 +2059,10 @@ def read_delivery_events(project_root: str | Path | None = None) -> list[dict]:
                 f"delivery event {event_id!r} under {scope} does not validate against the "
                 f"current delivery_events shape: {validation_error_detail(exc)}; run "
                 "scripts/conform_delivery_events.py against this project to see which stored "
-                "events do not validate and why (--plan previews; nothing here is "
-                "auto-rewritable, since the missing keys were never computed for an older "
-                "delivery)",
+                "events do not validate and why (--plan previews; a record missing only "
+                "acknowledged_by and acknowledgement_reason is write-forwarded to null, their "
+                "true value for a delivery predating those keys; every other missing key is "
+                "named, never rewritten, since its value was never computed for that delivery)",
                 event_id=event_id,
             ) from exc
         records.append(record)

@@ -17,6 +17,7 @@ import {
   resultsApi,
   traitSpecAuthoringRefusalOf,
   type DeliveryEventRecord,
+  type ExportCsvRequest,
   type OperationalizationRecord,
   type OperationalizationRefusal,
   type PhenologyRequest,
@@ -359,6 +360,10 @@ export function ResultsTab() {
   const [datesDelivered, setDatesDelivered] = useState<string[]>([]);
   const [imagesUnattributed, setImagesUnattributed] = useState(0);
   const [unvalidatedRefusal, setUnvalidatedRefusal] = useState<string | null>(null);
+  // The reason field for acknowledging and exporting a provisional measurement; shown once the
+  // breeder opts into the acknowledged-export flow, cleared on every fresh compute.
+  const [showAckExport, setShowAckExport] = useState(false);
+  const [ackReason, setAckReason] = useState("");
 
   // Listed rather than selected: records are keyed by trait plus kind, including uncomputed kinds.
   const [operationalizations, setOperationalizations] = useState<OperationalizationRecord[]>([]);
@@ -689,7 +694,7 @@ export function ResultsTab() {
     }
   }
 
-  async function compute(acknowledgeUnvalidated = false) {
+  async function compute(showUnvalidated = false) {
     if (!projectRoot) return;
     if (!trait) {
       setError(traitError ?? "Pick a trait before computing.");
@@ -698,6 +703,8 @@ export function ResultsTab() {
     setLoading(true);
     setError(null);
     setOperationalizationRefusal(null);
+    setShowAckExport(false);
+    setAckReason("");
     try {
       const predsMap: Record<string, string> = {};
       for (const d of dates) {
@@ -709,7 +716,7 @@ export function ResultsTab() {
         mapping_name: mappingName,
         predictions_by_date: predsMap,
         trait,
-        acknowledge_unvalidated: acknowledgeUnvalidated,
+        show_unvalidated: showUnvalidated,
       };
       setLastRequest(request);
       // One request computes both projections from one server-side measurement: a milestone
@@ -717,7 +724,7 @@ export function ResultsTab() {
       const res = await resultsApi.phenologyMeasurement(request);
       // The numbers and the evidence that qualifies them arrive together, so the tables below can
       // never render an unvalidated phenology measurement as though it were a delivery.
-      setProvisional(res.provisional);
+      setProvisional(res.has_unvalidated_dimensions);
       setValidity(res.validated);
       setCapturesUnverified(res.captures_unverified ?? []);
       setPlantCsvsUnverified(res.plant_csvs_unverified ?? []);
@@ -739,11 +746,10 @@ export function ResultsTab() {
         setOnset([]);
         return;
       }
-      // The server refuses unvalidated evidence by default. Surface why, plus the one-click way to
-      // see the numbers anyway (clearly marked provisional), so an uncalibrated operating point is
-      // a signposted next step rather than a dead end.
+      // The server refuses unvalidated evidence by default. Surface why, plus the one-click way
+      // to see the numbers anyway, marked with their unvalidated dimensions.
       const detail = e instanceof Error ? e.message : String(e);
-      if (!acknowledgeUnvalidated && /unvalidated|not validated/i.test(detail)) {
+      if (!showUnvalidated && /unvalidated|not validated/i.test(detail)) {
         setUnvalidatedRefusal(detail);
         setCurves([]);
         setOnset([]);
@@ -757,8 +763,19 @@ export function ResultsTab() {
 
   async function downloadCsv(payload: "curves" | "milestones", filename: string) {
     if (!lastRequest) return;
+    if (provisional && !ackReason.trim()) return;
     try {
-      const blob = await resultsApi.exportCsv(lastRequest, payload, filename);
+      const body: ExportCsvRequest = {
+        project_root: lastRequest.project_root,
+        mapping_name: lastRequest.mapping_name,
+        predictions_by_date: lastRequest.predictions_by_date,
+        trait: lastRequest.trait,
+        payload,
+        filename,
+        user: useStore.getState().user || undefined,
+        acknowledgement: provisional ? { reason: ackReason.trim() } : null,
+      };
+      const blob = await resultsApi.downloadCsv(body);
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
@@ -778,12 +795,9 @@ export function ResultsTab() {
     }
   }
 
-  // Measurement-integrity guard: never export a phenology CSV built on predictions that carry no
-  // positive-state class, or on provisional evidence. Mirrors deliver_phenology_milestones, which
-  // hard-refuses both, so the GUI and the agent surface behave identically (see CLAUDE.md
-  // invariant). The server refuses either case regardless; these keep the button from promising
-  // what it can't do.
-  const exportBlocked = positiveClassUnassessed || provisional;
+  // Never export a CSV built on predictions with no positive-state class, mirroring
+  // deliver_phenology_milestones. A provisional measurement exports once acknowledged (below).
+  const exportBlocked = positiveClassUnassessed;
   const downloadOnsetCsv = () => {
     if (exportBlocked) return;
     void downloadCsv("milestones", `${trait}_phenology.csv`);
@@ -1127,7 +1141,8 @@ export function ResultsTab() {
                     <div>
                       These predictions have no validated operating point on disk, so this is not
                       yet a deliverable phenology measurement. Calibrate first, or look at the
-                      numbers as provisional, which will not let you export them.
+                      numbers with their unvalidated dimensions marked and acknowledge and export
+                      them anyway.
                     </div>
                     <div className="text-tcip-muted">{unvalidatedRefusal}</div>
                     <div className="flex gap-2">
@@ -1154,9 +1169,9 @@ export function ResultsTab() {
                 {provisional && (
                   <div className="text-[11px] text-tcip-fp border border-tcip-fp/40 rounded p-2 flex flex-col gap-2">
                     <div>
-                      Provisional: shown for inspection only, not a deliverable phenotype.
-                      Unvalidated: {unvalidatedDims.join(", ") || "unknown"}. CSV export stays
-                      disabled until both dimensions are validated on disk.
+                      Provisional: unvalidated dimensions {unvalidatedDims.join(", ") || "unknown"}.
+                      Calibrate to deliver a validated phenotype, or acknowledge and export it
+                      unvalidated below.
                     </div>
                     <button
                       className="tcip-btn-primary text-[11px] self-start"
@@ -1195,22 +1210,61 @@ export function ResultsTab() {
                   One computed measurement in two shapes: every (plant, date) point, or the
                   milestone dates read off it.
                 </p>
-                <div className="flex gap-1">
-                  <button
-                    className="tcip-btn flex-1 text-[11px]"
-                    onClick={downloadCurvesCsv}
-                    disabled={curves.length === 0 || exportBlocked}
-                  >
-                    Curves CSV
-                  </button>
-                  <button
-                    className="tcip-btn flex-1 text-[11px]"
-                    onClick={downloadOnsetCsv}
-                    disabled={onset.length === 0 || exportBlocked}
-                  >
-                    Milestones CSV
-                  </button>
-                </div>
+                {!provisional || !showAckExport ? (
+                  <div className="flex gap-1">
+                    {provisional ? (
+                      <button
+                        className="tcip-btn flex-1 text-[11px]"
+                        onClick={() => setShowAckExport(true)}
+                        disabled={exportBlocked}
+                      >
+                        Acknowledge and export
+                      </button>
+                    ) : (
+                      <>
+                        <button
+                          className="tcip-btn flex-1 text-[11px]"
+                          onClick={downloadCurvesCsv}
+                          disabled={curves.length === 0 || exportBlocked}
+                        >
+                          Curves CSV
+                        </button>
+                        <button
+                          className="tcip-btn flex-1 text-[11px]"
+                          onClick={downloadOnsetCsv}
+                          disabled={onset.length === 0 || exportBlocked}
+                        >
+                          Milestones CSV
+                        </button>
+                      </>
+                    )}
+                  </div>
+                ) : (
+                  <div className="flex flex-col gap-1">
+                    <input
+                      className="tcip-input text-[11px]"
+                      placeholder="Reason for delivering unvalidated"
+                      value={ackReason}
+                      onChange={(e) => setAckReason(e.target.value)}
+                    />
+                    <div className="flex gap-1">
+                      <button
+                        className="tcip-btn flex-1 text-[11px]"
+                        onClick={downloadCurvesCsv}
+                        disabled={curves.length === 0 || !ackReason.trim()}
+                      >
+                        Curves CSV
+                      </button>
+                      <button
+                        className="tcip-btn flex-1 text-[11px]"
+                        onClick={downloadOnsetCsv}
+                        disabled={onset.length === 0 || !ackReason.trim()}
+                      >
+                        Milestones CSV
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
             {error && <div className="mt-2 text-[11px] text-tcip-fp">{error}</div>}
