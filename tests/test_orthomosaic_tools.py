@@ -1345,3 +1345,57 @@ def test_deliver_orthomosaic_plant_counts_canopy_subject_refuses_when_no_plant_w
     assert "error" in result
     assert "plot0" in result["error"] and "plot1" in result["error"]
     assert not out_csv.exists()
+
+
+def test_deliver_orthomosaic_plant_counts_refuses_a_duplicate_plot_name_in_the_registry(
+    tmp_path, monkeypatch,
+):
+    """The nearest-neighbour regime refuses a duplicated plot_name by name too, through the same
+    check the canopy regime already runs over its own registry (require_named_plants): two rows
+    sharing one identity would otherwise merge two trees' detections into one aggregation row."""
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path / "proj"))
+    (tmp_path / "proj" / ".tcip" / "state").mkdir(parents=True, exist_ok=True)
+
+    raster_path = tmp_path / "mosaic.tif"
+    _write_geo_raster(raster_path)
+    bucket_dir, stem = _run_bucket(tmp_path, monkeypatch, raster_path)
+    plant_csv = _plants_csv_at(tmp_path, raster_path, [
+        ("plotA", 10.0, 10.0), ("plotA", 50.0, 50.0),
+    ])
+    registry_name = _plant_registry(plant_csv)
+
+    from tcip_mcp.tools.orthomosaic_tools import deliver_orthomosaic_plant_counts
+
+    out_csv = tmp_path / "counts.csv"
+    result = deliver_orthomosaic_plant_counts(
+        str(bucket_dir), str(raster_path), registry_name, str(out_csv),
+        delivered_phenotype="stem_count")
+
+    assert "error" in result
+    assert "duplicate plot_name" in result["error"]
+    assert not out_csv.exists()
+
+
+def test_deliver_orthomosaic_plant_counts_refuses_a_blank_plot_name_in_the_registry(
+    tmp_path, monkeypatch,
+):
+    """Same guard, a blank identity instead of a duplicated one."""
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path / "proj"))
+    (tmp_path / "proj" / ".tcip" / "state").mkdir(parents=True, exist_ok=True)
+
+    raster_path = tmp_path / "mosaic.tif"
+    _write_geo_raster(raster_path)
+    bucket_dir, stem = _run_bucket(tmp_path, monkeypatch, raster_path)
+    plant_csv = _plants_csv_at(tmp_path, raster_path, [("", 10.0, 10.0)])
+    registry_name = _plant_registry(plant_csv)
+
+    from tcip_mcp.tools.orthomosaic_tools import deliver_orthomosaic_plant_counts
+
+    out_csv = tmp_path / "counts.csv"
+    result = deliver_orthomosaic_plant_counts(
+        str(bucket_dir), str(raster_path), registry_name, str(out_csv),
+        delivered_phenotype="stem_count")
+
+    assert "error" in result
+    assert "blank plot_name" in result["error"]
+    assert not out_csv.exists()
