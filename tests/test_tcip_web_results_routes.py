@@ -1112,20 +1112,32 @@ def test_export_count_csv_refuses_an_unconfirmed_meaning(
     assert detail["kind"] == "operationalization"
 
 
-def test_export_count_csv_refuses_a_confirmation_withdrawn_between_check_and_write(
-    client: TestClient, tmp_path: Path,
+def test_export_count_csv_per_image_refuses_a_confirmation_withdrawn_between_check_and_write(
+    client: TestClient, tmp_path: Path, monkeypatch,
 ) -> None:
+    """The core's own pre-check and the writer's own pre-check both pass; a confirmation
+    withdrawn after that, before the writer's post-gate re-check, is caught there, not silently
+    written past."""
     from tcip_mcp import operationalization as op
+    import tcip_mcp.pipelines.resolution as resolution_mod
 
     _seed_count_meaning(tmp_path)
     bucket = _count_bucket(tmp_path, validated=True)
     store.open_project(tmp_path.resolve())
-    op.confirm_trait_operationalization(
-        tmp_path, "stem", op.PER_IMAGE_COUNT, user="grüne",
-        record_seen=op.record_seen_hash(
-            op.resolve_trait_and_record(
-                "stem", op.PER_IMAGE_COUNT, project_root=tmp_path).record.value),
-        identity_from_request=True, confirmed=False)
+
+    real_gate = resolution_mod.check_delivery_gate
+
+    def _withdraw_then_gate(*args, **kwargs):
+        result = real_gate(*args, **kwargs)
+        op.confirm_trait_operationalization(
+            tmp_path, "stem", op.PER_IMAGE_COUNT, user="grüne",
+            record_seen=op.record_seen_hash(
+                op.resolve_trait_and_record(
+                    "stem", op.PER_IMAGE_COUNT, project_root=tmp_path).record.value),
+            identity_from_request=True, confirmed=False)
+        return result
+
+    monkeypatch.setattr(resolution_mod, "check_delivery_gate", _withdraw_then_gate)
     resp = _export_count(client, {
         "project_root": str(tmp_path),
         "delivery": {"kind": "per_image_count", "predictions_dir": str(bucket), "trait": "stem"},
@@ -1133,6 +1145,28 @@ def test_export_count_csv_refuses_a_confirmation_withdrawn_between_check_and_wri
     })
     assert resp.status_code == 400
     assert resp.json()["detail"]["kind"] == "operationalization"
+
+
+def test_export_count_csv_per_image_refuses_a_bucket_whose_id_map_omits_the_confirmed_subject(
+    client: TestClient, tmp_path: Path,
+) -> None:
+    """The core's own pre-check never reads a bucket's id_map (it runs before the bucket is
+    touched); a subject a bucket's recorded id_map does not name is caught only by the writer's
+    own check, and answers 400 with the structured detail rather than a 500."""
+    from tcip_mcp.pipelines.resolution import update_sidecar
+
+    _seed_count_meaning(tmp_path)  # confirms measured_subject="stem"
+    bucket = _count_bucket(tmp_path, validated=True, trait="stem")
+    update_sidecar(bucket, lambda current: {**current, "id_map": {"other": 0}}, "operating_point")
+    store.open_project(tmp_path.resolve())
+    resp = _export_count(client, {
+        "project_root": str(tmp_path),
+        "delivery": {"kind": "per_image_count", "predictions_dir": str(bucket), "trait": "stem"},
+        "filename": "counts.csv",
+    })
+    assert resp.status_code == 400
+    detail = resp.json()["detail"]
+    assert detail["kind"] == "operationalization"
 
 
 def test_export_count_csv_refuses_a_bucket_outside_the_project(
@@ -1162,6 +1196,82 @@ def test_export_count_csv_refuses_a_malformed_payload_with_422_not_500(
     assert resp.status_code == 422
 
 
+def test_export_count_csv_per_image_refuses_a_blank_predictions_dir_with_422(
+    client: TestClient, tmp_path: Path,
+) -> None:
+    store.open_project(tmp_path.resolve())
+    resp = _export_count(client, {
+        "project_root": str(tmp_path),
+        "delivery": {"kind": "per_image_count", "predictions_dir": "", "trait": "stem"},
+        "filename": "counts.csv",
+    })
+    assert resp.status_code == 422
+
+
+def test_export_count_csv_per_image_refuses_a_blank_trait_with_422(
+    client: TestClient, tmp_path: Path,
+) -> None:
+    _seed_count_meaning(tmp_path)
+    bucket = _count_bucket(tmp_path, validated=True)
+    store.open_project(tmp_path.resolve())
+    resp = _export_count(client, {
+        "project_root": str(tmp_path),
+        "delivery": {"kind": "per_image_count", "predictions_dir": str(bucket), "trait": ""},
+        "filename": "counts.csv",
+    })
+    assert resp.status_code == 422
+
+
+def test_export_count_csv_orthomosaic_refuses_a_blank_predictions_dir_with_422(
+    client: TestClient, tmp_path: Path,
+) -> None:
+    store.open_project(tmp_path.resolve())
+    resp = _export_count(client, {
+        "project_root": str(tmp_path),
+        "delivery": {
+            "kind": "orthomosaic_plant_counts", "predictions_dir": "",
+            "raster_path": str(tmp_path / "mosaic.tif"), "plant_registry": "reg",
+            "delivered_phenotype": "stem_count",
+        },
+        "filename": "plant_counts.csv",
+    })
+    assert resp.status_code == 422
+
+
+def test_export_count_csv_orthomosaic_refuses_a_blank_raster_path_with_422(
+    client: TestClient, tmp_path: Path,
+) -> None:
+    store.open_project(tmp_path.resolve())
+    resp = _export_count(client, {
+        "project_root": str(tmp_path),
+        "delivery": {
+            "kind": "orthomosaic_plant_counts", "predictions_dir": str(tmp_path / "preds"),
+            "raster_path": "", "plant_registry": "reg", "delivered_phenotype": "stem_count",
+        },
+        "filename": "plant_counts.csv",
+    })
+    assert resp.status_code == 422
+
+
+def test_export_count_csv_per_image_refuses_an_unknown_trait_with_400_not_500(
+    client: TestClient, tmp_path: Path,
+) -> None:
+    """No confirmed meaning is seeded at all for this trait name: the core's resolve_trait_and_
+    record raises TraitUnknownError, caught and converted to CountDeliveryRefused, never an
+    unhandled 500."""
+    bucket = _count_bucket(tmp_path, validated=True, trait="stem")
+    store.open_project(tmp_path.resolve())
+    resp = _export_count(client, {
+        "project_root": str(tmp_path),
+        "delivery": {
+            "kind": "per_image_count", "predictions_dir": str(bucket), "trait": "no-such-trait",
+        },
+        "filename": "counts.csv",
+    })
+    assert resp.status_code == 400
+    assert resp.json()["detail"]["kind"] == "count_delivery"
+
+
 def test_export_count_csv_split_root_event_lands_under_the_open_project(
     client: TestClient, tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, monkeypatch,
 ) -> None:
@@ -1184,6 +1294,221 @@ def test_export_count_csv_split_root_event_lands_under_the_open_project(
         "/api/results/delivery-events", params={"project_root": str(project_root)},
     ).json()["records"]
     assert any(r["door"] == "export_detection_csv" for r in events)
+
+
+# ── Count CSV export: orthomosaic kind ───────────────────────────────────
+
+
+def _seed_orthomosaic_meaning(project_root: Path) -> None:
+    from tests import _operationalization_fixtures as fx
+
+    fx.seed_delivery_traits(project_root)
+    fx.seed_confirmed_aggregate(project_root, "stem_count", value_keys=["count"])
+
+
+def _orthomosaic_fixture(
+    project_root: Path, monkeypatch, *, validated: bool, registry_root: Path | None = None,
+    state_root: Path | None = None,
+) -> tuple[Path, Path, str]:
+    """A real orthomosaic bucket (``run_inference``'s ``raster_path`` regime), raster and
+    registered plant registry, the same producers ``test_orthomosaic_tools.py`` uses. The
+    registry is registered directly under ``registry_root`` (``project_root`` by default),
+    independent of ``state_root`` (``project_root / "state"`` by default), which pins
+    ``TCIP_STATE_ROOT`` for the model registration and inference pass: that scratch location
+    never has to match the project a delivery reads the registry and the meaning record from,
+    but stays fixed through both this build and any later request, since a promoted bucket's
+    ``validated_by`` claim names an experiment the process-pinned experiment store must still
+    hold when the claim is later reconciled. Returns ``(bucket_dir, raster_path, registry_name)``.
+    """
+    from tests import _operationalization_fixtures as fx
+    from tests.test_orthomosaic_tools import (
+        _PLANT_PIXELS, _plant_grid_csv, _promote_bucket_conf, _replace_boxes, _run_bucket,
+        _write_geo_raster,
+    )
+    from tcip_mcp.pipelines.postprocessing.plant_mapping import register_plant_registry_record
+
+    root = state_root if state_root is not None else project_root / "state"
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(root))
+    (root / ".tcip" / "state").mkdir(parents=True, exist_ok=True)
+
+    raster_path = project_root / "mosaic.tif"
+    _write_geo_raster(raster_path)
+    bucket_dir, stem = _run_bucket(project_root, monkeypatch, raster_path)
+    _replace_boxes(bucket_dir / f"{stem}.json", [(8.0, 8.0, 12.0, 12.0)])
+    if validated:
+        _promote_bucket_conf(bucket_dir, bucket_dir.parents[1], trait=fx.COUNT_TRAIT)
+    plant_csv = _plant_grid_csv(project_root, raster_path, _PLANT_PIXELS)
+    root = registry_root if registry_root is not None else project_root
+    register_plant_registry_record(
+        root, "reg", [plant_csv], crop="hazelnut", site="orchard", registered_by="test")
+    return bucket_dir, raster_path, "reg"
+
+
+def _export_orthomosaic(
+    client: TestClient, project_root: Path, bucket_dir: Path, raster_path: Path, registry: str,
+    **extra,
+):
+    body = {
+        "project_root": str(project_root),
+        "delivery": {
+            "kind": "orthomosaic_plant_counts", "predictions_dir": str(bucket_dir),
+            "raster_path": str(raster_path), "plant_registry": registry,
+            "delivered_phenotype": "stem_count",
+        },
+        "filename": "plant_counts.csv",
+    }
+    return _export_count(client, body, **extra)
+
+
+def test_export_count_csv_orthomosaic_refuses_unvalidated_with_no_acknowledgement(
+    client: TestClient, tmp_path: Path, monkeypatch,
+) -> None:
+    pytest.importorskip("torch")
+    pytest.importorskip("torchvision")
+    _seed_orthomosaic_meaning(tmp_path)
+    bucket_dir, raster_path, registry = _orthomosaic_fixture(tmp_path, monkeypatch, validated=False)
+    store.open_project(tmp_path.resolve())
+    resp = _export_orthomosaic(client, tmp_path, bucket_dir, raster_path, registry)
+    assert resp.status_code == 400
+    detail = resp.json()["detail"]
+    assert detail["kind"] == "delivery_gate"
+    assert "operating_point" in detail["unvalidated_dimensions"]
+    assert detail["n_detections"] == 1
+    assert detail["n_mapped"] == 1
+    assert detail["n_unmapped"] == 0
+
+
+def test_export_count_csv_orthomosaic_delivers_under_acknowledgement(
+    client: TestClient, tmp_path: Path, monkeypatch,
+) -> None:
+    pytest.importorskip("torch")
+    pytest.importorskip("torchvision")
+    _seed_orthomosaic_meaning(tmp_path)
+    bucket_dir, raster_path, registry = _orthomosaic_fixture(tmp_path, monkeypatch, validated=False)
+    store.open_project(tmp_path.resolve())
+    resp = _export_orthomosaic(
+        client, tmp_path, bucket_dir, raster_path, registry,
+        user="user:tester",
+        acknowledgement={"reason": "breeder needs a look before calibration finishes"})
+    assert resp.status_code == 200
+    assert resp.headers["X-TCIP-Unvalidated-Dimensions"] == "operating_point"
+    assert resp.headers["X-TCIP-Acknowledged-By"] == "user%3Atester"
+    assert resp.headers["X-TCIP-Delivery-Event-Recorded"] == "true"
+    header = resp.text.splitlines()[0].split(",")
+    rows = [dict(zip(header, line.split(","))) for line in resp.text.splitlines()[1:]]
+    assert rows
+    for row in rows:
+        assert row["acknowledged_by"] == "user:tester"
+        assert row["acknowledgement_reason"] == "breeder needs a look before calibration finishes"
+        assert row["operating_point_validated"] == "false"
+
+    events = client.get(
+        "/api/results/delivery-events", params={"project_root": str(tmp_path)},
+    ).json()["records"]
+    event = next(r for r in events if r["door"] == "deliver_orthomosaic_plant_counts")
+    assert event["acknowledged_by"] == "user:tester"
+
+
+def test_export_count_csv_orthomosaic_delivers_validated_with_blank_pair(
+    client: TestClient, tmp_path: Path, monkeypatch,
+) -> None:
+    pytest.importorskip("torch")
+    pytest.importorskip("torchvision")
+    _seed_orthomosaic_meaning(tmp_path)
+    bucket_dir, raster_path, registry = _orthomosaic_fixture(tmp_path, monkeypatch, validated=True)
+    store.open_project(tmp_path.resolve())
+    resp = _export_orthomosaic(client, tmp_path, bucket_dir, raster_path, registry)
+    assert resp.status_code == 200
+    assert resp.headers["X-TCIP-Unvalidated-Dimensions"] == ""
+    assert resp.headers["X-TCIP-Acknowledged-By"] == ""
+    header = resp.text.splitlines()[0].split(",")
+    rows = [dict(zip(header, line.split(","))) for line in resp.text.splitlines()[1:]]
+    assert rows
+    for row in rows:
+        assert row["acknowledged_by"] == ""
+        assert row["acknowledgement_reason"] == ""
+
+
+def test_export_count_csv_orthomosaic_split_root_event_lands_under_the_open_project(
+    client: TestClient, tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, monkeypatch,
+) -> None:
+    """The open project and the pinned state root differ; the event, the registry and the meaning
+    record all follow the open project, never the pinned one."""
+    pytest.importorskip("torch")
+    pytest.importorskip("torchvision")
+    pinned = tmp_path_factory.mktemp("pinned")
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    _seed_orthomosaic_meaning(project_root)
+    bucket_dir, raster_path, registry = _orthomosaic_fixture(
+        project_root, monkeypatch, validated=True, state_root=pinned)
+    store.open_project(project_root.resolve())
+    resp = _export_orthomosaic(client, project_root, bucket_dir, raster_path, registry)
+    assert resp.status_code == 200
+    assert not (pinned / ".tcip" / "state" / "delivery_events").exists()
+    events = client.get(
+        "/api/results/delivery-events", params={"project_root": str(project_root)},
+    ).json()["records"]
+    assert any(r["door"] == "deliver_orthomosaic_plant_counts" for r in events)
+
+
+def test_export_count_csv_orthomosaic_refuses_a_registry_csv_outside_the_project(
+    client: TestClient, tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, monkeypatch,
+) -> None:
+    """A registry naming a byte-valid CSV outside the project's own roots refuses 403 before the
+    core ever reads it, the same ownership check every other evidence path goes through."""
+    pytest.importorskip("torch")
+    pytest.importorskip("torchvision")
+    outside = tmp_path_factory.mktemp("outside")
+    _seed_orthomosaic_meaning(tmp_path)
+    bucket_dir, raster_path, registry = _orthomosaic_fixture(
+        tmp_path, monkeypatch, validated=True, registry_root=tmp_path)
+
+    # Rewrite the registry's own record to name a CSV outside the project's roots (the file
+    # itself is real and byte-valid, only its location is foreign).
+    from tests.test_orthomosaic_tools import _write_plant_csv
+    from tcip_mcp.pipelines.postprocessing import plant_mapping
+
+    foreign_csv = outside / "plants.csv"
+    _write_plant_csv(foreign_csv, [{
+        "plot_name": "plotX", "accession_name": "accX", "plot_number": 0, "row_number": 0,
+        "col_number": 0, "WGS84_centroid_y": 0.0, "WGS84_centroid_x": 0.0,
+    }])
+    import hashlib
+
+    key = plant_mapping.plant_registry_key(tmp_path, registry)
+    with tcip_store.transaction(key) as txn:
+        record = txn.read(key)
+        record["csvs"] = [{
+            "path": str(foreign_csv), "sha256": hashlib.sha256(foreign_csv.read_bytes()).hexdigest(),
+            "n_plants": 1,
+        }]
+        txn.write(key, record)
+
+    store.open_project(tmp_path.resolve())
+    resp = _export_orthomosaic(client, tmp_path, bucket_dir, raster_path, registry)
+    assert resp.status_code == 403
+
+
+def test_export_count_csv_orthomosaic_filename_with_directory_saves_by_basename(
+    client: TestClient, tmp_path: Path, monkeypatch,
+) -> None:
+    pytest.importorskip("torch")
+    pytest.importorskip("torchvision")
+    _seed_orthomosaic_meaning(tmp_path)
+    bucket_dir, raster_path, registry = _orthomosaic_fixture(tmp_path, monkeypatch, validated=True)
+    store.open_project(tmp_path.resolve())
+    resp = _export_count(client, {
+        "project_root": str(tmp_path),
+        "delivery": {
+            "kind": "orthomosaic_plant_counts", "predictions_dir": str(bucket_dir),
+            "raster_path": str(raster_path), "plant_registry": registry,
+            "delivered_phenotype": "stem_count",
+        },
+        "filename": "../../escape/plant_counts.csv",
+    })
+    assert resp.status_code == 200
+    assert resp.headers["X-TCIP-Saved-To"] == str(tmp_path / "results_export" / "plant_counts.csv")
 
 
 def test_registered_models_confines_project_path_to_allowed_roots(

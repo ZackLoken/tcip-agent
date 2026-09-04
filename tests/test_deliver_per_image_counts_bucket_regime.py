@@ -306,6 +306,7 @@ def test_bucket_regime_measured_subject_check_is_driven_by_a_recorded_id_map(tmp
     the matching case is read off the gate refusal it reaches, not a delivered CSV."""
     from tcip_mcp import operationalization as op
     import tcip_mcp.tools.inference_tools as itools
+    from tcip_mcp.operationalization import OperationalizationRefused
     from tcip_mcp.pipelines.resolution import VALIDATED_FALSE
 
     other_trait = "astringency"
@@ -325,9 +326,8 @@ def test_bucket_regime_measured_subject_check_is_driven_by_a_recorded_id_map(tmp
              "operating_point": {"conf": {"value": 0.5, "validated_against": VALIDATED_FALSE}}}
     write_bound_sidecar(bucket, stamp, dataset_root=tmp_path)
 
-    with pytest.raises(ValueError, match="a subject no recorded id_map names"):
-        itools.deliver_per_image_counts(predictions_dir=str(bucket),
-                               output_path=str(tmp_path / "mismatch.csv"),
+    with pytest.raises(OperationalizationRefused, match="a subject no recorded id_map names"):
+        itools.per_image_counts_from_bucket(str(bucket), str(tmp_path / "mismatch.csv"),
                                trait=other_trait)
 
     match = itools.deliver_per_image_counts(predictions_dir=str(bucket), output_path=str(tmp_path / "match.csv"),
@@ -335,6 +335,49 @@ def test_bucket_regime_measured_subject_check_is_driven_by_a_recorded_id_map(tmp
     assert "error" in match
     assert "image_count" in match  # past the subject check, into the gate refusal
     assert match["unvalidated_dimensions"] == "operating_point"
+
+
+def test_bucket_regime_returns_an_error_dict_for_an_unknown_trait(tmp_path):
+    """No spec is registered for this trait name at all: resolve_trait_and_record's own
+    TraitUnknownError is caught and converted to the tool's ordinary {"error": ...} shape, the
+    same contract every other bucket-regime refusal has, never an unhandled 500 or a raise out of
+    the tool."""
+    import tcip_mcp.tools.inference_tools as itools
+
+    bucket = tmp_path / "ds" / "predictions" / "baseline" / "2026-01-01"
+    _write_real_prediction(bucket, "a")
+    stamp = {"trait": "no-such-trait", "images_dir": str(tmp_path), "raster_path": None,
+             "operating_point": {"conf": {"value": 0.5, "validated_against": VALIDATED_HELD_OUT}}}
+    write_bound_sidecar(bucket, stamp, dataset_root=tmp_path)
+
+    r = itools.deliver_per_image_counts(
+        predictions_dir=str(bucket), output_path=str(tmp_path / "o.csv"), trait="no-such-trait")
+    assert "error" in r
+    assert not (tmp_path / "o.csv").exists()
+
+
+def test_bucket_regime_forwards_project_root_none_unchanged_to_its_own_precheck(
+    tmp_path, monkeypatch,
+):
+    """The tool builds no project_root of its own (always None); the core's own meaning
+    pre-check (run before the bucket is even touched) must receive that None unchanged, never a
+    substituted resolved root."""
+    from tcip_mcp import operationalization as op
+    from tcip_mcp.pipelines.resolution import CountDeliveryRefused
+    import tcip_mcp.tools.inference_tools as itools
+
+    real_resolve = op.resolve_trait_and_record
+    seen_roots = []
+
+    def _spy(*a, **kw):
+        seen_roots.append(kw.get("project_root"))
+        return real_resolve(*a, **kw)
+
+    monkeypatch.setattr(op, "resolve_trait_and_record", _spy)
+    with pytest.raises(CountDeliveryRefused):
+        itools.per_image_counts_from_bucket(
+            str(tmp_path / "no-such-bucket"), str(tmp_path / "o.csv"), trait=fx.COUNT_TRAIT)
+    assert seen_roots == [None]
 
 
 # ── the publish bracket: shared with run_inference ────────────────────
@@ -417,8 +460,9 @@ def test_a_withdrawn_operationalization_mid_flow_is_count_free_in_the_bucket_reg
     tmp_path, monkeypatch,
 ):
     """The writer's own meaning-door raise (a confirmation withdrawn since the door's own first
-    check) propagates bare past deliver_per_image_counts, never composed into the counts-bearing refusal
-    dict a gate refusal gets: a count-bearing response can only come from a caught DeliveryRefused."""
+    check) is the same typed OperationalizationRefused the core's own first check raises, so
+    deliver_per_image_counts converts it to the same count-free {"error": ...} dict either way,
+    never the counts-bearing shape a caught DeliveryRefused gets."""
     from dataclasses import replace
 
     import tcip_mcp.tools.inference_tools as itools
@@ -436,16 +480,17 @@ def test_a_withdrawn_operationalization_mid_flow_is_count_free_in_the_bucket_reg
     def _flaky_check(*a, **kw):
         calls["n"] += 1
         result = real_check(*a, **kw)
-        # The door's own first check (call 1) passes; every later call (the writer's own,
-        # including its post-write re-check) reads as withdrawn since.
+        # The door's own first check (call 1) passes; every later call (the writer's own) reads
+        # as withdrawn since.
         return result if calls["n"] == 1 else replace(
             result, state=1, message="operationalization withdrawn mid-flow")
 
     monkeypatch.setattr(op, "check_operationalization", _flaky_check)
 
-    with pytest.raises(ValueError, match="withdrawn mid-flow"):
-        itools.deliver_per_image_counts(predictions_dir=str(bucket), output_path=str(tmp_path / "o.csv"),
-                               trait=fx.COUNT_TRAIT)
+    result = itools.deliver_per_image_counts(
+        predictions_dir=str(bucket), output_path=str(tmp_path / "o.csv"), trait=fx.COUNT_TRAIT)
+    assert result == {"error": "operationalization withdrawn mid-flow"}
+    assert not (tmp_path / "o.csv").exists()
 
 
 def test_a_withdrawn_operationalization_mid_flow_is_count_free_in_the_live_regime(

@@ -535,6 +535,52 @@ def test_deliver_orthomosaic_plant_counts_records_exactly_one_delivery_event(tmp
     assert events[0]["door"] == "deliver_orthomosaic_plant_counts"
 
 
+def test_deliver_orthomosaic_plant_counts_forwards_project_root_none_unchanged(
+    tmp_path, monkeypatch,
+):
+    """The MCP tool builds no project_root of its own (always None); the core must forward that
+    None to every meaning-record read (resolve_trait_for_phenotype, resolve_trait_and_record) and
+    to export_aggregated_csv unchanged, never substitute platform_state_root() (or any other
+    resolved path) in its place, even though the registry lookup genuinely needs a resolved root
+    to read the file from disk."""
+    import tcip_mcp.operationalization as op
+
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path / "proj"))
+    (tmp_path / "proj" / ".tcip" / "state").mkdir(parents=True, exist_ok=True)
+
+    raster_path = tmp_path / "mosaic.tif"
+    _write_geo_raster(raster_path)
+    bucket_dir, stem = _run_bucket(tmp_path, monkeypatch, raster_path)
+    _replace_boxes(bucket_dir / f"{stem}.json", [(8.0, 8.0, 12.0, 12.0)])
+    _promote_bucket_conf(bucket_dir, bucket_dir.parents[1], trait=fx.COUNT_TRAIT)
+    plant_csv = _plant_grid_csv(tmp_path, raster_path, _PLANT_PIXELS)
+
+    real_resolve = op.resolve_trait_and_record
+    real_for_phenotype = op.resolve_trait_for_phenotype
+    seen_roots = []
+
+    def _spy_record(*a, **kw):
+        seen_roots.append(kw.get("project_root"))
+        return real_resolve(*a, **kw)
+
+    def _spy_phenotype(*a, **kw):
+        seen_roots.append(kw.get("project_root"))
+        return real_for_phenotype(*a, **kw)
+
+    monkeypatch.setattr(op, "resolve_trait_and_record", _spy_record)
+    monkeypatch.setattr(op, "resolve_trait_for_phenotype", _spy_phenotype)
+
+    from tcip_mcp.tools.orthomosaic_tools import deliver_orthomosaic_plant_counts
+
+    out_csv = tmp_path / "counts.csv"
+    result = deliver_orthomosaic_plant_counts(
+        str(bucket_dir), str(raster_path), _plant_registry(plant_csv), str(out_csv),
+        delivered_phenotype="stem_count")
+    assert "error" not in result, result
+    assert seen_roots
+    assert all(root is None for root in seen_roots)
+
+
 def test_deliver_orthomosaic_plant_counts_excludes_a_point_from_the_count(tmp_path, monkeypatch):
     """A Point annotation in a reviewed bucket names no detection to georeference or count
     (bbox_of has no box for one by design): the door must read the bucket through the same
