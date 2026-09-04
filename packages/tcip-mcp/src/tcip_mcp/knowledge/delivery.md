@@ -135,7 +135,10 @@ neither: an unvalidated dimension always refuses on them.
   and the count operating point, then hand the reconciled state to `write_phenology_csv` /
   `write_phenology_curve_csv` (`phenology.py`), the one writer both doors share: it runs the gate
   itself, composes every provenance cell and records the delivery event, so a CSV from either door
-  carries the same schema and the same composition. The MCP door alone can carry a caller-stated
+  carries the same schema and the same composition. The delivery event is a best-effort second
+  write after the CSV already exists, so an already-delivered file can outlive a failed event
+  write; the web export route's own `X-TCIP-Delivery-Event-Recorded` response header says whether
+  this delivery's event actually landed. The MCP door alone can carry a caller-stated
   `operating_point_conf` and a caller-asserted validity floor (`phenology_tools.py:543`, `:545`),
   fields the web door has none for. The producer tail (`producer_model_sha256`,
   `producing_experiment_id`, `validation_record`) is filled from the verified bindings, so a
