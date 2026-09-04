@@ -623,13 +623,13 @@ def _viz_dataset_sample(
 ) -> dict:
     """Render a grid of random annotated dataset samples. See ``visualize``."""
     from tcip_annotation.format_io import detect_format
-    from tcip_mcp.dataset_layout import find_gt_label
+    from tcip_mcp.dataset_layout import find_gt_label, image_root
     from tcip_mcp.pipelines.image_utils import (
         BandGroupIncomplete, BandGroupRef, list_logical_images, resolve_image_source,
     )
 
     root = Path(folder_path)
-    images_dir = root / "images"
+    images_dir = image_root(root)
     if not images_dir.is_dir():
         return {"error": f"Images directory not found: {images_dir}"}
 
