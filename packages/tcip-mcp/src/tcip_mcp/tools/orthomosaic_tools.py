@@ -60,8 +60,8 @@ def orthomosaic_plant_counts(
     with this call's own counts-bearing facts attached); ``pipelines.resolution.
     CountDeliveryRefused`` for everything else this door refuses on today (a missing bucket or
     raster, a conflicting regime, an unregistered or rewritten plant registry, an empty bucket, a
-    raster identity mismatch, a canopy-segment refusal), each carrying the same facts its
-    ``{"error": ...}`` response carried before this refactor.
+    raster identity mismatch, a canopy-segment refusal), each carrying the same facts the tool's
+    own ``{"error": ...}`` response carries.
 
     A prediction bucket here is a directory of prediction documents, not a score bin, held
     immutable once a human reviews it.
@@ -238,10 +238,11 @@ def orthomosaic_plant_counts(
     from tcip_mcp.traits import TraitUnknownError
 
     # First refusal in this body: how a number was attributed says nothing until it has a meaning.
+    # project_root (the caller's own, unresolved) is what every meaning-record read resolves against.
     try:
-        trait = resolve_trait_for_phenotype(delivered_phenotype, project_root=resolved_project_root)
+        trait = resolve_trait_for_phenotype(delivered_phenotype, project_root=project_root)
         spec, record, _specs_dir = resolve_trait_and_record(
-            trait, PER_PLANT_COUNT_AGGREGATE, project_root=resolved_project_root)
+            trait, PER_PLANT_COUNT_AGGREGATE, project_root=project_root)
     except (TraitUnknownError, ValueError) as exc:
         raise CountDeliveryRefused(str(exc)) from exc
     # This door never delivers a crossing kind, so it has no registry to check a positive class against.
@@ -537,7 +538,7 @@ def orthomosaic_plant_counts(
             pred_dirs=[predictions_dir],
             door="deliver_orthomosaic_plant_counts",
             plant_mapping=plant_mapping_disclosure,
-            acknowledgement=acknowledgement, project_root=resolved_project_root,
+            acknowledgement=acknowledgement, project_root=project_root,
         )
     except DeliveryRefused as exc:
         # operating_point_validated is the operating_point dimension's own cleared reference;
@@ -550,15 +551,10 @@ def orthomosaic_plant_counts(
         if "tile_size" in exc.gate.stamp:
             exc.facts["tile_size_validated"] = exc.gate.stamp["tile_size"]
         raise
+    except OperationalizationRefused:
+        # The writer's own raise already carries the failed check and no counts; nothing to add.
+        raise
     except ValueError as exc:
-        # Distinguishes a withdrawn confirmation (still_stated fails too) from any other refusal.
-        spec_now, record_now, _ = resolve_trait_and_record(
-            trait, PER_PLANT_COUNT_AGGREGATE, project_root=resolved_project_root)
-        still_stated = check_operationalization(
-            spec_now, record_now, PER_PLANT_COUNT_AGGREGATE, delivered_phenotype=delivered_phenotype,
-            value_keys=[_PER_PLANT_VALUE_KEY], registry=None, basis=stated.basis)
-        if not still_stated.ok:
-            raise OperationalizationRefused(still_stated) from exc
         # aggregation.py's own refusal already names what triggered it (a plant, a phenotype, a
         # unit); this door's own counts-scoped recon would only restate it under a different name.
         raise CountDeliveryRefused(str(exc), **counts_facts) from exc

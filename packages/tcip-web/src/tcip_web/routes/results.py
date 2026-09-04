@@ -806,8 +806,8 @@ class PerImageCountDelivery(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     kind: Literal["per_image_count"]
-    predictions_dir: str
-    trait: str
+    predictions_dir: str = Field(min_length=1)
+    trait: str = Field(min_length=1)
 
 
 class OrthomosaicPlantCountsDelivery(BaseModel):
@@ -820,8 +820,8 @@ class OrthomosaicPlantCountsDelivery(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     kind: Literal["orthomosaic_plant_counts"]
-    predictions_dir: str
-    raster_path: str
+    predictions_dir: str = Field(min_length=1)
+    raster_path: str = Field(min_length=1)
     plant_registry: str
     delivered_phenotype: str
     crop: str = ""
@@ -863,7 +863,7 @@ def export_count_csv(payload: ExportCountCsvPayload) -> Response:
     """Write the CSV for a per-image or per-plant count delivery, over the buckets (and, for the
     per-plant kind, the registered plant registry) this route confines to the open project.
 
-    The two count kinds the acknowledgement family left with no provisional route:
+    The two count kinds with no other provisional route:
     ``per_image_count`` (the bucket regime of ``deliver_per_image_counts``) and
     ``per_plant_count_aggregate`` through the orthomosaic composition
     (``deliver_orthomosaic_plant_counts``). Each delegates to the same core its MCP tool calls
@@ -893,7 +893,9 @@ def export_count_csv(payload: ExportCountCsvPayload) -> Response:
 
     if payload.delivery.kind == "per_image_count":
         (predictions_dir,) = _belonging(root, payload.delivery.predictions_dir)
-        assert predictions_dir is not None
+        if predictions_dir is None:
+            raise HTTPException(
+                400, {"kind": "count_delivery", "message": "predictions_dir is required"})
         from tcip_mcp.tools.inference_tools import per_image_counts_from_bucket
 
         try:
@@ -910,7 +912,10 @@ def export_count_csv(payload: ExportCountCsvPayload) -> Response:
     else:
         predictions_dir, raster_path = _belonging(
             root, payload.delivery.predictions_dir, payload.delivery.raster_path)
-        assert predictions_dir is not None and raster_path is not None
+        if predictions_dir is None or raster_path is None:
+            raise HTTPException(
+                400, {"kind": "count_delivery",
+                      "message": "predictions_dir and raster_path are required"})
         registry_record = plant_mapping.load_registry(root, payload.delivery.plant_registry)
         if registry_record is None:
             raise HTTPException(

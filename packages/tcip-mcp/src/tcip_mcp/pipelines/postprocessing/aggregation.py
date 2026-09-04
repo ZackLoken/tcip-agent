@@ -209,6 +209,7 @@ _PROVENANCE_COLUMNS = ["producer_model_sha256", "producing_experiment_id", "prod
                        "operating_point_validated", "unvalidated_dimensions", "validation_record",
                        "acknowledged_by", "acknowledgement_reason"]
 
+
 def _unit_from_value_key(value_key: str) -> tuple[str, str] | None:
     """``(display_unit, linear_basis)`` a value_key implies (``area_mm2`` -> ``("mm2", "mm")``,
     ``principal_axis_extent_cm`` -> ``("cm", "cm")``), or None for a key with no physical-unit suffix
@@ -309,9 +310,9 @@ def export_aggregated_csv(
     scale_document, confidence, n_images, pipeline_version, plant_id_source, plant_attribution,
     plant_id_distance_m_max, then ``_PROVENANCE_COLUMNS`` (producer_model_sha256,
     producing_experiment_id, produced_at, operating_point_validated, unvalidated_dimensions,
-    validation_record) so the final per-plant value is traceable to the exact model that produced
-    it and carries its own validity stamp. Those cells are built by ``delivered_tail`` from the
-    verification the gate already ran,
+    validation_record, acknowledged_by, acknowledgement_reason) so the final per-plant value is
+    traceable to the exact model that produced it and carries its own validity stamp. Those cells
+    are built by ``delivered_tail`` from the verification the gate already ran,
     so a producer this delivery cannot corroborate is reported unknown rather than repeated from
     the stamp that asserted it, ``produced_at`` is the write's own timestamp rather than one the
     caller asserts, and ``validation_record`` names the record a reader can open to see what the
@@ -437,9 +438,12 @@ def export_aggregated_csv(
         DeliveryRefused: the gate refused (an unvalidated dimension with no acknowledgement that
             clears it); carries the ``DeliveryGateResult`` and every operative reconciler's binding
             notes.
-        ValueError: any other refusal (a statement, unit, or meaning problem the results or the
-            trait's operationalization carry); never carries a gate result, so a caller must not
-            read a delivered count off this raise.
+        OperationalizationRefused (``tcip_mcp.operationalization``): ``delivered_phenotype``'s
+            operationalization is unrecorded, not breeder-confirmed, or was withdrawn since the
+            first check; carries the failed check and no counts, so a caller must not read a
+            delivered value off this raise.
+        ValueError: any other refusal (a statement or unit problem the results carry); never
+            carries a gate result, so a caller must not read a delivered count off this raise.
     """
     from tcip_mcp.pipelines.resolution import (
         MEASUREMENT_DOCUMENTS,
@@ -480,8 +484,8 @@ def export_aggregated_csv(
         raise ValueError(
             "export_aggregated_csv: results state scale_document with no pred_dirs; nothing on "
             "disk can answer for a physical-scale claim without a bucket to reconcile it from, "
-            "and this door takes no acknowledgement to ship one unvalidated regardless. Pass "
-            "pred_dirs for the buckets behind these results."
+            "and no acknowledgement clears a scale claim with nothing on disk to reconcile it "
+            "from regardless. Pass pred_dirs for the buckets behind these results."
         )
     if pred_dirs and units and scale_document is None and measurement_document == "operating_point":
         raise ValueError(
@@ -502,6 +506,7 @@ def export_aggregated_csv(
         )
 
     from tcip_mcp.operationalization import (
+        OperationalizationRefused,
         aggregate_delivery_kind,
         check_operationalization,
         resolve_trait_and_record,
@@ -518,7 +523,7 @@ def export_aggregated_csv(
         spec, record, delivery_kind, delivered_phenotype=delivered_phenotype, value_keys=value_keys,
         registry=None)
     if not stated.ok:
-        raise ValueError(stated.message)
+        raise OperationalizationRefused(stated)
 
     _reconcilers = {
         "operating_point": reconcile_operating_point_validity,
@@ -577,7 +582,7 @@ def export_aggregated_csv(
         spec_now, record_now, delivery_kind, delivered_phenotype=delivered_phenotype,
         value_keys=value_keys, registry=None, basis=stated.basis)
     if not still_stated.ok:
-        raise ValueError(still_stated.message)
+        raise OperationalizationRefused(still_stated)
 
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
 
