@@ -17,6 +17,7 @@ from tcip_mcp.tools.project_tools import (
     read_datasets,
     register_dataset,
     upsert_dataset,
+    _external_dataset_paths,
 )
 from tcip_store.binding import BACKEND_ENV, DEFAULT_BACKEND, FILE_BACKEND, SQLITE_BACKEND
 
@@ -500,6 +501,61 @@ def test_export_import_roundtrip(tmp_path: Path):
 
     restored_id = json.loads((dest / "dataset.json").read_text())
     assert restored_id == {"crop": "hazelnut", "id": reg["id"], "fingerprint": reg["fingerprint"]}
+
+
+def _bare_the_registry_entry(project_root: Path, entry: dict) -> str:
+    """Overwrite a real registration's project-registry entry with its bare-hex fingerprint,
+    standing in for a dataset registered under a project before the formula-version prefix
+    existed: the project-registry counterpart to test_restamp_dataset_fingerprint.py's own
+    _bare_the_identity, which does this to the dataset's own identity document instead."""
+    bare = entry["fingerprint"].split(":", 1)[1]
+    upsert_dataset(project_root, {**entry, "fingerprint": bare})
+    return bare
+
+
+def test_store_bootstrap_project_roots_admits_a_bare_fingerprint_registry_entry(tmp_path: Path):
+    """project_roots is the path adopt_store.py/export_store.py use to reach a project, the
+    conform script's own way in; it must not itself be blocked by the identity problem a
+    conform script exists to fix, so it reads locations through read_datasets_raw rather than
+    read_datasets."""
+    from tcip_store.layout_claims import ROOT
+
+    from scripts._store_bootstrap import project_roots
+
+    project = tmp_path / "project"
+    dataset = tmp_path / "dataset"
+    project.mkdir()
+    dataset.mkdir()
+    _make_dataset(dataset)
+    register_dataset(str(dataset), crop="hazelnut", project_root=str(project))
+    _bare_the_registry_entry(project, read_datasets(project)[0])
+
+    with pytest.raises(ValueError, match="restamp_dataset_fingerprint.py"):
+        read_datasets(project)
+
+    roots = project_roots(project)
+    assert (str(dataset.resolve()), ROOT) in roots
+
+
+def test_external_dataset_paths_admits_a_bare_fingerprint_registry_entry(tmp_path: Path):
+    """import_project calls this after extraction to disclose which registered datasets stayed
+    external; a bare pre-prefix fingerprint left over from before the restamp family existed
+    must not make the door raise after the extraction it is reporting on has already run, so it
+    reads through read_datasets_raw rather than read_datasets."""
+    project = tmp_path / "project"
+    dataset = tmp_path / "dataset"  # a sibling of project, never nested under it: external
+    project.mkdir()
+    dataset.mkdir()
+    _make_dataset(dataset)
+    register_dataset(str(dataset), crop="hazelnut", project_root=str(project))
+    entry = read_datasets(project)[0]
+    assert entry["path"] == str(dataset.resolve())  # external entries store absolute
+    _bare_the_registry_entry(project, entry)
+
+    with pytest.raises(ValueError, match="restamp_dataset_fingerprint.py"):
+        read_datasets(project)
+
+    assert _external_dataset_paths(project) == [str(dataset.resolve())]
 
 
 def test_archive_project_includes_bespoke_model_source(tmp_path: Path):
