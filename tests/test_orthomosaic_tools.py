@@ -1281,3 +1281,67 @@ def test_deliver_orthomosaic_plant_counts_canopy_subject_refuses_a_missing_docum
 
     assert "error" in result
     assert "no label document" in result["error"]
+
+
+def test_deliver_orthomosaic_plant_counts_canopy_subject_refuses_a_raster_one_level_deeper_than_canonical(
+    tmp_path, monkeypatch,
+):
+    """A raster resolves under its registered dataset (dataset_root_of only checks for an
+    images/, predictions/, annotations/, or labels/ segment somewhere in the path) but does not
+    sit at either canonical position parse_image_path recognizes
+    (<root>/images/<date>/<stem> or <root>/images/<stem>); the door refuses by name instead of
+    raising an uncaught ValueError out of annotation_path_for_image."""
+    from tcip_mcp.tools.project_tools import register_dataset
+
+    dataset_root = tmp_path / "ds"
+    raster_path = dataset_root / "images" / "extra" / "2024-06-01" / "mosaic.tif"
+    raster_path.parent.mkdir(parents=True, exist_ok=True)
+    _write_geo_raster(raster_path)
+    reg = register_dataset(str(dataset_root), crop="chestnut", project_root=str(dataset_root))
+    assert "error" not in reg, reg
+
+    bucket_dir, stem = _run_bucket(tmp_path, monkeypatch, raster_path)
+    plant_csv = _plants_csv_at(tmp_path, raster_path, [("plot0", 10.0, 10.0)])
+    registry_name = _plant_registry(plant_csv)
+
+    from tcip_mcp.tools.orthomosaic_tools import deliver_orthomosaic_plant_counts
+
+    out_csv = tmp_path / "counts.csv"
+    result = deliver_orthomosaic_plant_counts(
+        str(bucket_dir), str(raster_path), registry_name, str(out_csv),
+        delivered_phenotype="stem_count", canopy_subject="canopy")
+
+    assert "error" in result
+    assert "not under a recognized dataset image tree" in result["error"]
+    assert not out_csv.exists()
+
+
+def test_deliver_orthomosaic_plant_counts_canopy_subject_refuses_when_no_plant_would_receive_a_row(
+    tmp_path, monkeypatch,
+):
+    """Every tied segment's own detection is ambiguous, so no plant would receive a row: the
+    door refuses before export_aggregated_csv's own generic 'results is empty' refusal, naming
+    which plants were dropped and why, rather than reaching that refusal's unnamed message."""
+    dataset_root, raster_path, bucket_dir, stem = _canopy_setup(tmp_path, monkeypatch)
+    plant_csv = _plants_csv_at(tmp_path, raster_path, [
+        ("plot0", 10.0, 10.0), ("plot1", 25.0, 10.0),
+    ])
+    registry_name = _plant_registry(plant_csv)
+    _write_canopy_document(raster_path, [
+        (0.0, 0.0, 20.0, 20.0),    # segment 0: ties to plot0, overlaps segment 1
+        (15.0, 0.0, 35.0, 20.0),   # segment 1: ties to plot1
+    ])
+    _replace_boxes(bucket_dir / f"{stem}.json", [
+        (15.0, 8.0, 19.0, 12.0),   # centroid (17, 10): inside both segments, ambiguous
+    ])
+
+    from tcip_mcp.tools.orthomosaic_tools import deliver_orthomosaic_plant_counts
+
+    out_csv = tmp_path / "counts.csv"
+    result = deliver_orthomosaic_plant_counts(
+        str(bucket_dir), str(raster_path), registry_name, str(out_csv),
+        delivered_phenotype="stem_count", canopy_subject="canopy")
+
+    assert "error" in result
+    assert "plot0" in result["error"] and "plot1" in result["error"]
+    assert not out_csv.exists()

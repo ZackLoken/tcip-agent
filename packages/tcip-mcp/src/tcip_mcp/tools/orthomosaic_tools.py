@@ -282,9 +282,10 @@ def orthomosaic_plant_counts(
         if raster_dataset_root is None:
             raise CountDeliveryRefused(
                 f"canopy_subject delivery refused: {raster_path} does not lie under a "
-                "registered dataset's images/ tree; copy the verified raster to its ingested "
-                "position under the bucket's dataset (the identity is content-based, so the "
-                "tiled pass is not re-run)")
+                "registered dataset (no images/, predictions/, annotations/, or labels/ segment "
+                "in its path); copy the verified raster to its ingested position under the "
+                "bucket's dataset (the identity is content-based, so the tiled pass is not "
+                "re-run)")
         try:
             raster_dataset_identity = require_dataset_identity(raster_dataset_root)
         except ValueError as exc:
@@ -309,7 +310,10 @@ def orthomosaic_plant_counts(
                 f"id {bucket_dataset_identity['id']!r}); copy the verified raster to its "
                 "ingested position under the bucket's dataset")
 
-        document_path = annotation_path_for_image(raster_path)
+        try:
+            document_path = annotation_path_for_image(raster_path)
+        except ValueError as exc:
+            raise CountDeliveryRefused(f"canopy_subject delivery refused: {exc}") from exc
         if not document_path.is_file():
             raise CountDeliveryRefused(
                 f"canopy_subject delivery refused: no label document at {document_path} for "
@@ -399,6 +403,13 @@ def orthomosaic_plant_counts(
              "plant_attribution": SegmentAssignment.plant_attribution}
             for t in tie.tied if t.segment_index not in ambiguous_tied_indices
         ]
+        if not records:
+            raise CountDeliveryRefused(
+                "canopy_subject delivery refused: no plant would receive a row; every tied "
+                f"segment's own detection is ambiguous ({plants_with_ambiguous_detections}), and "
+                f"{len(tie.plants_without_segment)} in-frame plant(s) lie in no segment "
+                f"({tie.plants_without_segment}) while {len(tie.untied)} segment(s) contain no "
+                "plant")
 
         n_mapped = sum(1 for a in assignments if a.source == "segment_containment"
                       and a.segment_index not in ambiguous_tied_indices)
@@ -530,8 +541,8 @@ def orthomosaic_plant_counts(
             value_keys=[_PER_PLANT_VALUE_KEY], registry=None, basis=stated.basis)
         if not still_stated.ok:
             raise OperationalizationRefused(still_stated) from exc
-        # aggregation.py's own refusal already names the failing bucket and why, through the same
-        # binding_notes_text helper this door's own (identically-scoped) recon would just repeat.
+        # aggregation.py's own refusal already names what triggered it (a plant, a phenotype, a
+        # unit); this door's own counts-scoped recon would only restate it under a different name.
         raise CountDeliveryRefused(str(exc), **counts_facts) from exc
 
     # export_aggregated_csv already recorded the delivery event under this door's own name; this
