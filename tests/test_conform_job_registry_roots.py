@@ -115,6 +115,42 @@ def test_every_job_registry_document_is_conformed(tmp_path: Path):
             outcomes)
 
 
+def test_a_corrupt_non_list_document_is_refused_by_name_not_treated_as_empty(tmp_path: Path):
+    """A document present but not the recognized list shape (a non-list top-level value) must
+    be reported as a refusal naming the document, never silently folded into "nothing to
+    conform" the way an absent document reads."""
+    _bind_sqlite()
+    module = _load_script()
+    (tmp_path / ".tcip").mkdir(parents=True, exist_ok=True)
+    ts.replace(job_registry_key(INFERENCE_JOBS, root=tmp_path), {"not": "a list"},
+               expect=ts.Version.ABSENT)
+
+    outcomes, refused = module.conform_root(tmp_path, plan=False)
+
+    assert refused is True
+    assert any("not a list" in line for line in outcomes)
+    assert any(INFERENCE_JOBS in line for line in outcomes)
+    stored = ts.read(job_registry_key(INFERENCE_JOBS, root=tmp_path))
+    assert stored == {"not": "a list"}
+
+
+def test_main_a_corrupt_document_exits_2_and_names_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+):
+    bind_default()
+    module = _load_script()
+    (tmp_path / ".tcip").mkdir(parents=True, exist_ok=True)
+    ts.replace(job_registry_key(INFERENCE_JOBS, root=tmp_path), {"not": "a list"},
+               expect=ts.Version.ABSENT)
+
+    monkeypatch.setattr(sys, "argv", ["conform_job_registry_roots.py", str(tmp_path)])
+    exit_code = module.main()
+    output = capsys.readouterr().out
+
+    assert exit_code == 2
+    assert "not a list" in output
+
+
 def test_a_root_with_no_tcip_directory_is_refused_by_name(tmp_path: Path):
     _bind_sqlite()
     module = _load_script()
