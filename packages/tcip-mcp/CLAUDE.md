@@ -27,9 +27,8 @@ src/tcip_mcp/
     proposal.py               # auto-labeling engine seam: built-in SAM, or a bespoke Proposer
     resolution.py              # ResolvedParam: the derive-don't-pin currency and the
                                 # unvalidated-value firewall
-    operating_point.py          # resolve_operating_point: the calibrated conf/NMS/max_dets/tile
-                                 # path; resolution.py's raw and block-calibrated-export paths are
-                                 # the other two regimes, sharing only resolve_tile_size_param
+    operating_point.py          # five resolvers, resolve_operating_point (the calibrated
+                                 # conf/NMS/max_dets/tile path) among them, plus resolve_classifier_operating_point, _resolve_scalar_operating_point, resolve_ordinal_operating_point and resolve_regression_operating_point; resolution.py's raw and block-calibrated-export paths are the other two regimes, the latter carrying conf and cross_tile_nms straight from the calibrated bundle and sharing resolve_tile_size_param with the others for tile scale
     schemas.py, image_utils.py
   dataset_layout.py      # the single path resolver on the backend: where an image's
                           # labels/predictions live on disk. The frontend cannot import it, so paths.ts's RECORD_EXT and classes.ts's ImageStatus union each restate a fact of it, held equal by tests/test_frontend_dataset_vocabulary.py
