@@ -60,11 +60,20 @@ async def _lifespan(_app: FastAPI):
 
     configure_gdal_cache()
     try:
+        from tcip_web import jobstore
         from tcip_web.routes import inference, review, tuning
 
-        inference.rehydrate_for_current_root()
-        tuning.rehydrate_for_current_root()
-        review.rehydrate_for_current_root()
+        # One try per registry, so a refused rehydrate never skips the other two.
+        for registry_name, rehydrate in (
+            (jobstore.INFERENCE_JOBS, inference.rehydrate_for_current_root),
+            (jobstore.HPO_SWEEPS, tuning.rehydrate_for_current_root),
+            (jobstore.REVIEW_PRIORITY_JOBS, review.rehydrate_for_current_root),
+        ):
+            try:
+                rehydrate()
+            except Exception as exc:  # pragma: no cover - rehydrate is best-effort
+                logger.exception("%s registry rehydrate refused", registry_name)
+                jobstore.record_startup_refusal(registry_name, str(exc))
         # Training runs aren't rehydrated from a state file: the training list route
         # reconstructs past runs on demand from the immutable .tcip/experiments/ records.
     except Exception:  # pragma: no cover - rehydrate is best-effort

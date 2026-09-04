@@ -105,8 +105,14 @@ def list_projects() -> dict:
     request or repinned via ``activate_project``, never merely imported): the backend's own
     platform-state root, so the GUI can show it disagreeing with ``active``/``active_path`` in
     the window before a repin lands.
+
+    ``job_registry_startup_refusals`` names every job-registry rehydrate this process has
+    refused (an unconformed document, :func:`tcip_web.jobstore.startup_refusals`), each error
+    text already naming the conform script; empty when nothing was refused.
     """
     from tcip_mcp.project_paths import root_binding
+
+    from tcip_web import jobstore
 
     root = workspace.workspace_root()
     found = workspace.active_project_if_present()
@@ -126,6 +132,7 @@ def list_projects() -> dict:
         "active": active,
         "active_path": active_path,
         "projects": [p.model_dump() for p in projects],
+        "job_registry_startup_refusals": jobstore.startup_refusals(),
     }
     binding = root_binding()
     if binding is not None:

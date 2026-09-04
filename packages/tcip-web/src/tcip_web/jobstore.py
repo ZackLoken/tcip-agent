@@ -122,7 +122,9 @@ JobStatus = Literal["pending", "running", "completed", "failed", "cancelled", "i
 TERMINAL_STATUSES: frozenset[str] = frozenset({"completed", "failed", "cancelled", "interrupted"})
 
 
-def persist_grouped(name: str, summaries: list[dict]) -> None:
+def persist_grouped(
+    name: str, summaries: list[dict], *, refused_roots: frozenset[str] = frozenset(),
+) -> None:
     """Atomically write ``summaries`` to one registry document per root.
 
     Groups by each summary's own ``platform_root`` and writes each group under that root's
@@ -132,14 +134,31 @@ def persist_grouped(name: str, summaries: list[dict]) -> None:
     snapshot as empty: a root with no summaries here keeps whatever its file already holds. A
     summary carrying no ``platform_root`` refuses by name (:func:`require_platform_root`)
     rather than being guessed onto this process's own current root.
+
+    ``refused_roots`` names a root whose stored document this process could not fully
+    rehydrate (:meth:`JobRegistry.rehydrate`, on a summary with no ``platform_root``): its own
+    group is skipped rather than written, so the untouched document survives on disk, and this
+    call raises naming the conform script once every other root's group has landed, rather than
+    silently dropping the caller's own new work for that root or letting it overwrite the
+    document with only the summaries that did rehydrate.
     """
     this_root = current_root()
     groups: dict[str, list[dict]] = {}
     for s in summaries:
         root = require_platform_root(s, name=name, root=this_root)
         groups.setdefault(root, []).append(s)
+    blocked = sorted(root for root in groups if root in refused_roots)
     for root, group in groups.items():
+        if root in refused_roots:
+            continue
         persist_to(job_registry_key(name, root=root), group)
+    if blocked:
+        raise ValueError(
+            f"{name} document(s) under {', '.join(blocked)} were not fully rehydrated this "
+            "process (a stored summary carries no platform_root) and this write would destroy "
+            "the summaries it never loaded; run scripts/conform_job_registry_roots.py against "
+            "each root first (--plan to preview), then restart this process"
+        )
 
 
 def persist_to(key: Key, summaries: list[dict]) -> None:
@@ -221,6 +240,27 @@ def evict_terminal(jobs: dict, root: str | None, max_jobs: int = MAX_JOBS) -> No
             jobs.pop(jid, None)
 
 
+_startup_refusals: list[dict[str, str]] = []
+_startup_refusals_lock = threading.Lock()
+
+
+def record_startup_refusal(registry: str, error: str) -> None:
+    """Record that ``registry``'s rehydrate refused this process's startup or a repin, for
+    :func:`startup_refusals` to report until this process restarts against a conformed
+    document. One call per refusal: a later repin that refuses again appends its own entry."""
+    with _startup_refusals_lock:
+        _startup_refusals.append({"registry": registry, "error": error})
+
+
+def startup_refusals() -> list[dict[str, str]]:
+    """Every job-registry rehydrate this process has refused, each naming the conform script
+    in its own error text (:func:`require_platform_root`'s message). Reported by the workspace
+    status route so a refusal the lifespan's own per-registry try only logged is still visible
+    to the breeder rather than silently leaving that registry's history stuck."""
+    with _startup_refusals_lock:
+        return list(_startup_refusals)
+
+
 def rehydrated_status(summary: dict) -> JobStatus:
     """A persisted job's status as a rehydrate should read it back.
 
@@ -279,6 +319,9 @@ class JobRegistry:
         self._to_summary = to_summary
         self._from_summary = from_summary
         self._id_field = id_field
+        # A root whose stored document this instance's rehydrate could not fully load; persist
+        # refuses to write over it until a restart rehydrates a conformed document (see below).
+        self._refused_roots: set[str] = set()
 
     def register(self, job_id: str, job: Any, *, job_root: str | None) -> None:
         """Add ``job`` under ``job_id``, evict overflow (:func:`evict_terminal`'s own two
@@ -327,27 +370,41 @@ class JobRegistry:
 
     def persist(self) -> None:
         """Write every live job's own summary, grouped by root, through the codec given at
-        construction; a no-op for an unpersisted registry (``name`` is ``None``)."""
+        construction; a no-op for an unpersisted registry (``name`` is ``None``).
+
+        Raises, writing nothing for that root, when a root about to be written is in
+        :attr:`_refused_roots`: see :func:`persist_grouped`.
+        """
         if self.name is None:
             return
         assert self._to_summary is not None, "a named registry always has one, refused otherwise"
         with self.lock:
             summaries = [self._to_summary(j) for j in self.jobs.values()]
-        persist_grouped(self.name, summaries)
+        persist_grouped(self.name, summaries, refused_roots=frozenset(self._refused_roots))
 
     def rehydrate(self) -> None:
         """Merge this root's persisted summaries, not already live, into memory via the
         ``from_summary`` codec given at construction, then bound the dict the same way
         :meth:`register` does. A no-op for an unpersisted registry, which has nothing to
-        rehydrate from."""
+        rehydrate from.
+
+        A summary with no ``platform_root`` (:func:`require_platform_root`, inside
+        ``from_summary``) marks this root refused on this instance before the exception
+        propagates, so a later :meth:`persist` never overwrites that root's document with only
+        the summaries that did load here.
+        """
         if self.name is None:
             return
         assert self._from_summary is not None, "a named registry always has one, refused otherwise"
         root = current_root()
         with self.lock:
-            for s in load(self.name):
-                jid = s.get(self._id_field)
-                if not jid or jid in self.jobs:
-                    continue
-                self.jobs[jid] = self._from_summary(s, root)
+            try:
+                for s in load(self.name):
+                    jid = s.get(self._id_field)
+                    if not jid or jid in self.jobs:
+                        continue
+                    self.jobs[jid] = self._from_summary(s, root)
+            except ValueError:
+                self._refused_roots.add(root)
+                raise
             evict_terminal(self.jobs, root)

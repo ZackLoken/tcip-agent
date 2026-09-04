@@ -691,6 +691,115 @@ def test_tuning_rehydrate_refuses_a_summary_carrying_no_platform_root(tmp_path, 
         tuning.rehydrate_for_current_root()
 
 
+def test_review_priority_queue_summaries_persist_byte_stable_through_job_registry(
+    tmp_path, monkeypatch,
+):
+    """The same byte-stability check as inference's own, fed by review's real _pq_summary
+    producer, so the priority-queue registry's persisted shape is pinned too, not only
+    inference's."""
+    monkeypatch.chdir(tmp_path)
+    from tcip_web.jobstore import JobRegistry, load, persist_grouped
+    from tcip_web.routes import review
+
+    root = str(tmp_path.resolve())
+    job = review.PriorityQueueJob(
+        job_id="pq-byte", checkpoint_path="c", images_dir="i", dataset_root="d",
+        status="completed", queue=[{"image": "a.jpg", "score": 0.9}],
+        total_candidates=4, reviewed_skipped=1, platform_root=root,
+    )
+    persist_grouped("review_priority_jobs", [review._pq_summary(job)])
+    before = load("review_priority_jobs")
+
+    registry = JobRegistry(
+        "review_priority_jobs", to_summary=review._pq_summary, from_summary=review._pq_from_summary,
+    )
+    registry.jobs[job.job_id] = job
+    registry.persist()
+
+    assert load("review_priority_jobs") == before
+
+
+def test_tuning_sweep_summaries_persist_byte_stable_through_job_registry(tmp_path, monkeypatch):
+    """The same byte-stability check, fed by tuning's real persisted-summary producer, so the
+    HPO registry's persisted shape is pinned too."""
+    monkeypatch.chdir(tmp_path)
+    from tcip_web.jobstore import JobRegistry, load, persist_grouped
+    from tcip_web.routes import tuning
+
+    root = str(tmp_path.resolve())
+    job = tuning.HPOJob(sweep_id="hpo-byte", status="completed", platform_root=root)
+    persist_grouped("hpo_sweeps", [tuning._persisted_summary(job)])
+    before = load("hpo_sweeps")
+
+    registry = JobRegistry(
+        "hpo_sweeps", to_summary=tuning._persisted_summary, from_summary=tuning._from_summary,
+        id_field="sweep_id",
+    )
+    registry.jobs[job.sweep_id] = job
+    registry.persist()
+
+    assert load("hpo_sweeps") == before
+
+
+def test_job_registry_persist_refuses_to_overwrite_a_document_it_could_not_fully_rehydrate(
+    tmp_path, monkeypatch,
+):
+    """A rehydrate refused by one bad summary must not let ordinary new-job registration
+    silently rewrite the document down to just the summaries that did load: the stored document
+    survives byte-for-byte until the conform script has stamped the missing key and this
+    process is restarted against a conformed document."""
+    import importlib.util
+
+    monkeypatch.chdir(tmp_path)
+    from tcip_store import read, replace
+    from tcip_web.jobstore import JobRegistry, job_registry_key, require_platform_root
+
+    root = str(tmp_path.resolve())
+    (tmp_path / ".tcip").mkdir(exist_ok=True)
+
+    class J:
+        def __init__(self, job_id, status, platform_root):
+            self.job_id = job_id
+            self.status = status
+            self.platform_root = platform_root
+
+    def to_summary(j):
+        return {"job_id": j.job_id, "status": j.status, "platform_root": j.platform_root}
+
+    def from_summary(s, root):
+        return J(s["job_id"], s["status"], require_platform_root(s, name="inference_jobs", root=root))
+
+    stored = [
+        {"job_id": "old-good", "status": "completed", "platform_root": root},
+        {"job_id": "old-bad", "status": "completed"},
+    ]
+    replace(job_registry_key("inference_jobs"), stored, expect=None)
+
+    registry = JobRegistry("inference_jobs", to_summary=to_summary, from_summary=from_summary)
+    with pytest.raises(ValueError, match="conform_job_registry_roots.py"):
+        registry.rehydrate()
+    assert read(job_registry_key("inference_jobs"), default=[]) == stored
+
+    with pytest.raises(ValueError, match="conform_job_registry_roots.py"):
+        registry.register("new", J("new", "pending", root), job_root=root)
+    assert read(job_registry_key("inference_jobs"), default=[]) == stored
+
+    script = Path(__file__).parent.parent / "scripts" / "conform_job_registry_roots.py"
+    spec = importlib.util.spec_from_file_location("conform_job_registry_roots_under_test", script)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    outcomes, refused = module.conform_root(tmp_path, plan=False)
+    assert refused is False
+
+    fresh = JobRegistry("inference_jobs", to_summary=to_summary, from_summary=from_summary)
+    fresh.rehydrate()  # no longer raises: this instance never marked the root refused
+    fresh.register("new2", J("new2", "pending", root), job_root=root)
+
+    final = read(job_registry_key("inference_jobs"), default=[])
+    assert {d["job_id"] for d in final} == {"old-good", "old-bad", "new2"}
+
+
 def test_a_conformed_summary_rehydrates(tmp_path, monkeypatch):
     """conform_job_registry_roots.py's stamp is what makes a pre-field document rehydratable
     again: the same summary that refuses above, once the conform script has stamped its
