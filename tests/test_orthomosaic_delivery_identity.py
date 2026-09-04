@@ -54,11 +54,11 @@ def _project(tmp_path, monkeypatch) -> None:
 
 
 def _raster_bucket(tmp_path, raster_path: Path, boxes) -> Path:
-    """A bucket from the real producer: export_predictions's whole-raster regime."""
-    from tcip_mcp.tools.inference_tools import export_predictions
+    """A bucket from the real producer: run_inference's whole-raster regime."""
+    from tcip_mcp.tools.inference_tools import run_inference
 
     out_dir = tmp_path / "preds"
-    result = export_predictions(
+    result = run_inference(
         _bespoke_detection_checkpoint(tmp_path), output_dir=str(out_dir),
         raster_path=str(raster_path), conf_threshold=0.0, tile_size=TILE)
     assert "error" not in result, result
@@ -168,7 +168,7 @@ def test_delivery_refuses_a_bucket_that_records_no_raster_identity(tmp_path, mon
         str(bucket), str(raster_path), [str(plant_csv)], str(out_csv), delivered_phenotype="stem_count")
 
     assert "error" in refused
-    assert "export_predictions" in refused["error"]
+    assert "run_inference" in refused["error"]
     assert not out_csv.exists()
 
 
@@ -271,6 +271,6 @@ def test_orthomosaic_precondition_precedes_the_raster_identity_refusal(tmp_path,
         delivered_phenotype="bark_thickness", acknowledge_unvalidated=True)
 
     assert "no operationalization is recorded" in refused["error"]
-    assert "export_predictions" not in refused["error"]
+    assert "run_inference" not in refused["error"]
     assert "raster content identity" not in refused["error"]
     assert not out_csv.exists()

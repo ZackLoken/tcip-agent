@@ -1,4 +1,4 @@
-"""Tiled inference: GenericPredictor.predict_tiled + run_inference(tile=True)."""
+"""Tiled inference: GenericPredictor.predict_tiled + the verified pass at tile=True."""
 
 from __future__ import annotations
 
@@ -92,20 +92,20 @@ def test_predict_tiled_stamps_cap_hit_when_the_full_frame_cap_truncates(tmp_path
 
 
 def test_run_inference_tile_flag(tmp_path, monkeypatch):
-    from tcip_mcp.tools.inference_tools import run_inference
+    from tests._verified_checkpoint_fixtures import run_inference_verified
 
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     ckpt = _detection_checkpoint(tmp_path)
     img = _image(tmp_path)
 
-    r = run_inference(ckpt, image_paths=[img], tile=True, tile_size=TILE, conf_threshold=0.0)
+    r = run_inference_verified(ckpt, image_paths=[img], tile=True, tile_size=TILE, conf_threshold=0.0)
     assert r["tiled"] is True
     assert r["total_detections"] == sum(x["count"] for x in r["results"])
     assert len(r["results"]) == 1
     # the count carries a resolved-bundle operating point, unvalidated for raw inference
     assert r["operating_point"]["conf"]["validated_against"] == "false"
 
-    r2 = run_inference(ckpt, image_paths=[img], tile=False, conf_threshold=0.0)
+    r2 = run_inference_verified(ckpt, image_paths=[img], tile=False, conf_threshold=0.0)
     assert r2["tiled"] is False
     assert len(r2["results"]) == 1  # non-tiled path still works
 
@@ -164,7 +164,7 @@ def test_run_inference_prefers_the_checkpoints_own_recorded_id_map(tmp_path, mon
     falling through to the registry-derivation branch)."""
     import torch as _torch
 
-    from tcip_mcp.tools.inference_tools import run_inference
+    from tests._verified_checkpoint_fixtures import run_inference_verified
     from tcip_mcp.tools.model_tools import register_model
 
     model_source = {"builder": "tests.bespoke_models:build_bespoke_detection",
@@ -187,5 +187,5 @@ def test_run_inference_prefers_the_checkpoints_own_recorded_id_map(tmp_path, mon
     assert "error" not in result, result
     img = _image(tmp_path)
 
-    r = run_inference(str(ckpt_path), image_paths=[img], conf_threshold=0.0)
+    r = run_inference_verified(str(ckpt_path), image_paths=[img], conf_threshold=0.0)
     assert r["id_map"] == recorded_id_map  # the recorded map, not a fresh registry re-derivation

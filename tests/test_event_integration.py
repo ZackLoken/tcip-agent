@@ -557,7 +557,8 @@ class TestInferenceToolOutputSchema:
 
         ckpt = tmp_path / "detector.pt"
         ckpt.write_bytes(b"a dry run never loads the weights")
-        res = run_inference(str(ckpt), images_dir=str(tmp_path), dry_run=True, tile=True,
+        res = run_inference(str(ckpt), images_dir=str(tmp_path), output_dir=str(tmp_path / "out"),
+                            dry_run=True, tile=True,
                             tile_size=512, overlap=0.35, conf_threshold=0.17, max_dets=37,
                             global_nms_iou=0.55, postprocess="nmm")
 
@@ -574,7 +575,7 @@ class TestInferenceToolOutputSchema:
         assert op["tiled"] is True
         assert op["tiled_source"] == "explicit"
 
-    def test_export_predictions_writes_one_file_per_image_carrying_that_images_detections(
+    def test_run_inference_writes_one_file_per_image_carrying_that_images_detections(
         self, tmp_path: Path, monkeypatch, seed_catkin_trait_spec,
     ) -> None:
         """A prediction bucket holds one file per image the pass saw, named for that image's own
@@ -610,8 +611,8 @@ class TestInferenceToolOutputSchema:
                             lambda *a, **kw: stub_verified_checkpoint(str(ckpt)))
 
         out = tmp_path / "dataset" / "predictions" / "baseline" / "2026-01-01"
-        res = itools.export_predictions(str(ckpt), images_dir=str(tmp_path), output_dir=str(out),
-                                        trait="catkin")
+        res = itools.run_inference(str(ckpt), images_dir=str(tmp_path), output_dir=str(out),
+                                   trait="catkin")
 
         assert "error" not in res, res
         assert res["image_count"] == len(counts)

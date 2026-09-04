@@ -32,7 +32,7 @@ from tcip_annotation import json_io  # noqa: E402
 from tcip_annotation.state import Annotation, BBox  # noqa: E402
 
 IMG = 32
-PRODUCER = "model:m_best@c9f632ba98b2"  # the shape export_predictions stamps on every prediction
+PRODUCER = "model:m_best@c9f632ba98b2"  # the shape run_inference stamps on every prediction
 
 
 def _save_png(path):
@@ -305,8 +305,7 @@ class _OneDetectionStub(_CalStub):
 def _run_with_bundle(tmp_path, monkeypatch, calibration):
     import tcip_mcp.pipelines.calibration as calibration_pipeline
     import tcip_mcp.pipelines.inference.predictor as predictor_mod
-    import tcip_mcp.tools.inference_tools as itools
-    from tests._verified_checkpoint_fixtures import registered_checkpoint
+    from tests._verified_checkpoint_fixtures import registered_checkpoint, run_inference_verified
 
     bundle, inputs = calibration
     evidence = {"resolver": "resolve_operating_point", "inputs": inputs,
@@ -319,7 +318,7 @@ def _run_with_bundle(tmp_path, monkeypatch, calibration):
     image = tmp_path / "capture.png"
     _save_png(image)
     ckpt = registered_checkpoint(tmp_path, project_root=tmp_path)
-    return itools.run_inference(
+    return run_inference_verified(
         str(ckpt), image_paths=[str(image)], images_dir=str(tmp_path), device="cpu", tile=False,
         trait="catkin", calibration_labels_dir=str(tmp_path))
 

@@ -43,7 +43,7 @@ _NO_MAPPING = MappingBuild(
 
 
 def _sidecar(dir_path: Path, id_map: dict | None) -> None:
-    """Write a bucket's operating_point.json exactly the way export_predictions does: the only
+    """Write a bucket's operating_point.json exactly the way run_inference does: the only
     fact count_by_class reads to decide whether/how a bucket was classified."""
     from tcip_mcp.pipelines.resolution import write_sidecar
 

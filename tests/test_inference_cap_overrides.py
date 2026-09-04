@@ -1,6 +1,6 @@
 """The NMS/detection-cap parameters of the public inference tools: unset means derive.
 
-``run_inference``/``export_predictions``/``deliver_per_image_counts`` decide whether the caller stated a cap
+``run_inference``/``deliver_per_image_counts`` decide whether the caller stated a cap
 by the ``None`` sentinel, so a stated value is honored as an override at every value it can take,
 including the one the platform would otherwise have fallen back to. The resolver stays the only
 thing that derives an unstated cap.
@@ -47,13 +47,13 @@ def _calibration_records() -> list[dict]:
 
 @pytest.fixture
 def inference_call(tmp_path, monkeypatch):
-    """Call ``run_inference`` with the model pass stubbed, the real resolver behind calibration."""
+    """Call the verified pass behind ``run_inference`` with the model build stubbed, the real
+    resolver behind calibration."""
     from tcip_mcp import model_registry as model_registry_module
     from tcip_mcp.pipelines import calibration as calibration_pipeline
     from tcip_mcp.pipelines.inference import predictor as predictor_module
-    from tcip_mcp.tools import inference_tools
 
-    from tests._verified_checkpoint_fixtures import stub_verified_checkpoint
+    from tests._verified_checkpoint_fixtures import run_inference_verified, stub_verified_checkpoint
 
     checkpoint = tmp_path / "model.pt"
     checkpoint.write_bytes(b"not-a-real-checkpoint")
@@ -92,8 +92,8 @@ def inference_call(tmp_path, monkeypatch):
     monkeypatch.setattr(calibration_pipeline, "calibrate_operating_point", _spy_calibrate)
 
     def _call(**kwargs):
-        result = inference_tools.run_inference(
-            checkpoint_path=str(checkpoint), image_paths=[str(image_path)], device="cpu",
+        result = run_inference_verified(
+            str(checkpoint), image_paths=[str(image_path)], device="cpu",
             experiment_id="run-1", **kwargs)
         assert "error" not in result, result
         return result
@@ -205,9 +205,9 @@ def test_a_stated_cap_on_the_raw_path_stamps_explicit_even_at_the_platform_defau
 def test_the_public_inference_tools_agree_that_an_unstated_cap_is_none():
     """One sentinel across the door: a concrete default on any one of them would erase the stated
     versus unstated distinction for every caller of that door."""
-    from tcip_mcp.tools.inference_tools import export_predictions, run_inference, deliver_per_image_counts
+    from tcip_mcp.tools.inference_tools import run_inference, deliver_per_image_counts
 
-    for tool in (run_inference, export_predictions, deliver_per_image_counts):
+    for tool in (run_inference, deliver_per_image_counts):
         params = inspect.signature(tool).parameters
         assert params["global_nms_iou"].default is None, tool.__name__
         assert params["max_dets"].default is None, tool.__name__
@@ -223,7 +223,8 @@ def test_the_dry_run_report_shows_the_applied_conf_never_the_raw_none(tmp_path):
     checkpoint = tmp_path / "model.pt"
     checkpoint.write_bytes(b"not-a-real-checkpoint")
 
-    result = run_inference(checkpoint_path=str(checkpoint), image_paths=[], dry_run=True)
+    result = run_inference(
+        checkpoint_path=str(checkpoint), output_dir=str(tmp_path / "out"), dry_run=True)
 
     assert result["operating_point"]["conf"] == DEFAULT_CONF
 
@@ -252,7 +253,7 @@ def test_the_raster_export_path_receives_an_unstated_cap_unstated(tmp_path, monk
         model_registry_module, "load_registered_checkpoint",
         lambda *a, **kw: stub_verified_checkpoint(str(checkpoint)))
 
-    inference_tools.export_predictions(
+    inference_tools.run_inference(
         checkpoint_path=str(checkpoint), raster_path=str(raster),
         output_dir=str(tmp_path / "out"))
 

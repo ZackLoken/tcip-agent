@@ -211,7 +211,7 @@ def test_inference_list_images_folds_a_group_into_one_entry(grouped_dataset: Pat
     """routes/inference.py's own directory-listing fallback must route through
     list_logical_images, not just widen its extension tuple, or a grouped capture's sibling band
     files each enumerate as their own (spurious) image, the same bug class
-    export_predictions/run_inference had (inference_tools.py; see test_band_group_call_sites /
+    run_inference had (inference_tools.py; see test_band_group_call_sites /
     test_band_group_inference_calibration)."""
     from tcip_mcp.pipelines.data.band_groups import BandGroupRef
     from tcip_web.routes.inference import _list_images

@@ -102,7 +102,7 @@ def test_script_and_mcp_path_share_the_same_cap_constant(monkeypatch, tmp_path):
     # ---- MCP path ----
     from PIL import Image
 
-    from tcip_mcp.tools.inference_tools import run_inference
+    from tests._verified_checkpoint_fixtures import run_inference_verified as run_inference
 
     ckpt = tmp_path / "m.pt"
     ckpt.write_bytes(b"x")

@@ -69,8 +69,7 @@ def _held_out_bundle():
 def _run(tmp_path, monkeypatch, in_chans):
     import tcip_mcp.pipelines.calibration as calibration
     import tcip_mcp.pipelines.inference.predictor as predictor_mod
-    import tcip_mcp.tools.inference_tools as itools
-    from tests._verified_checkpoint_fixtures import registered_checkpoint
+    from tests._verified_checkpoint_fixtures import registered_checkpoint, run_inference_verified
 
     bundle, inputs = _held_out_bundle()
     evidence = {"resolver": "resolve_operating_point", "inputs": inputs,
@@ -81,7 +80,7 @@ def _run(tmp_path, monkeypatch, in_chans):
                         lambda checkpoint, **kw: _ChannelStub(in_chans))
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     ckpt = registered_checkpoint(tmp_path, project_root=tmp_path)
-    return itools.run_inference(
+    return run_inference_verified(
         str(ckpt), image_paths=[_rgb_image(tmp_path)], images_dir=str(tmp_path), device="cpu",
         tile=False, trait="catkin", calibration_labels_dir=str(tmp_path))
 

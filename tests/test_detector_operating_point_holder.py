@@ -150,7 +150,7 @@ def test_a_bespoke_module_exposing_its_own_knob_reaches_a_validated_point(tmp_pa
     attribute path it was applied on recorded. Also the admitting half of the curve-identity
     codec check: an ordinary calibration's evidence carries nothing the codec refuses, so it
     survives the check test_checkpoint_digest_rails.py's NaN-evidence test drives to a refusal."""
-    from tcip_mcp.tools.inference_tools import run_inference
+    from tests._verified_checkpoint_fixtures import run_inference_verified as run_inference
 
     monkeypatch.chdir(tmp_path)
     ckpt = _checkpoint(tmp_path, "build_bare_score_thresh_detector")
@@ -184,7 +184,7 @@ def test_a_bespoke_module_exposing_its_own_knob_reaches_a_validated_point(tmp_pa
 def test_a_module_exposing_no_knob_refuses_unstated_not_censored(tmp_path, monkeypatch):
     """A module exposing no operating-point knob under any recognized name has no floor the
     platform can state, and refuses with conf_floor_unstated, never conf_censored."""
-    from tcip_mcp.tools.inference_tools import run_inference
+    from tests._verified_checkpoint_fixtures import run_inference_verified as run_inference
 
     monkeypatch.chdir(tmp_path)
     ckpt = _checkpoint(tmp_path, "build_bare_no_knob_detector")

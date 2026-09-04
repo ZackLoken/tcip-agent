@@ -228,7 +228,7 @@ def test_deliver_per_image_counts_stamps_explicit_conf_source_when_stated_at_the
     assert _conf_cell(out_csv)["source"] == "explicit"
 
 
-def test_export_predictions_stamps_default_conf_source_when_omitted(tmp_path, monkeypatch):
+def test_run_inference_stamps_default_conf_source_when_omitted(tmp_path, monkeypatch):
     """The raster/image export door carries the same distinction as deliver_per_image_counts: an omitted
     conf is never laundered into 'explicit' in the persisted bucket."""
     import tcip_mcp.tools.inference_tools as itools
@@ -237,8 +237,8 @@ def test_export_predictions_stamps_default_conf_source_when_omitted(tmp_path, mo
     ckpt, images_dir = _prepare(tmp_path, monkeypatch)
     out_dir = tmp_path / "preds"
 
-    r = itools.export_predictions(ckpt, images_dir=str(images_dir), output_dir=str(out_dir),
-                                  device="cpu", tile=False)
+    r = itools.run_inference(ckpt, images_dir=str(images_dir), output_dir=str(out_dir),
+                             device="cpu", tile=False)
 
     assert "error" not in r, r
     stamp = read_operating_point_sidecar(out_dir)
@@ -246,7 +246,7 @@ def test_export_predictions_stamps_default_conf_source_when_omitted(tmp_path, mo
     assert stamp["operating_point"]["conf"]["value"] == DEFAULT_CONF
 
 
-def test_export_predictions_stamps_explicit_conf_source_when_stated_at_the_default(
+def test_run_inference_stamps_explicit_conf_source_when_stated_at_the_default(
     tmp_path, monkeypatch,
 ):
     """A caller-stated conf equal to the platform default still stamps 'explicit' through the
@@ -257,8 +257,8 @@ def test_export_predictions_stamps_explicit_conf_source_when_stated_at_the_defau
     ckpt, images_dir = _prepare(tmp_path, monkeypatch)
     out_dir = tmp_path / "preds"
 
-    r = itools.export_predictions(ckpt, images_dir=str(images_dir), output_dir=str(out_dir),
-                                  conf_threshold=DEFAULT_CONF, device="cpu", tile=False)
+    r = itools.run_inference(ckpt, images_dir=str(images_dir), output_dir=str(out_dir),
+                             conf_threshold=DEFAULT_CONF, device="cpu", tile=False)
 
     assert "error" not in r, r
     stamp = read_operating_point_sidecar(out_dir)

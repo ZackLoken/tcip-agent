@@ -2,7 +2,7 @@
 
 Covers the source-regime discrimination, the bucket's positive-claim checks (a readable stamp,
 the per-image mandatory shape, the trait binding), the publish bracket the live regime shares with
-export_predictions, and the refusal-channel split between a meaning-door raise and a gate refusal.
+run_inference, and the refusal-channel split between a meaning-door raise and a gate refusal.
 """
 
 from __future__ import annotations
@@ -325,11 +325,11 @@ def test_bucket_regime_measured_subject_check_is_driven_by_a_recorded_id_map(tmp
     assert "error" not in match, match
 
 
-# ── the publish bracket: shared with export_predictions ────────────────────
+# ── the publish bracket: shared with run_inference ────────────────────
 
 def test_publish_bracket_refuses_a_fabricated_tile_with_the_bucket_left_absent(tmp_path, monkeypatch):
     """A tiled run whose tile scale has no real basis refuses before anything lands, gated exactly
-    as export_predictions gates it: the bucket is left absent, not published unvalidated."""
+    as run_inference gates it: the bucket is left absent, not published unvalidated."""
     import tcip_mcp.tools.inference_tools as itools
 
     def _fake(*a, **kw):
