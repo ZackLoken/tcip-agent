@@ -212,6 +212,8 @@ def test_consolidated_tools_present_and_removed_absent():
         "visualize",
         # Folded into scripts/doctor.py's check_data_quality; its own function is deleted.
         "validate_data_quality",
+        # Merged into run_inference, which persists the bucket both doors used to.
+        "export_predictions",
     }
     assert not (removed & registered), f"removed tools still registered: {removed & registered}"
 

@@ -295,6 +295,12 @@
       "schema_version": 1,
       "cannot_carry_field": null
     },
+    "raster_pass_progress": {
+      "kind": "record",
+      "frozen": false,
+      "schema_version": 1,
+      "cannot_carry_field": null
+    },
     "ray_dashboard": {
       "kind": "record",
       "frozen": true,

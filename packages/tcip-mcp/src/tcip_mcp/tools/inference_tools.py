@@ -1,13 +1,14 @@
-"""Inference MCP tools: run_inference, export_predictions and deliver_per_image_counts, sharing one
-verified body (``_run_inference_verified``) so the firewalled operating point (conf/NMS/tiling/
-max_dets) resolves identically for every entry point that runs a model over images."""
+"""Inference MCP tools: run_inference and deliver_per_image_counts, sharing one verified body
+(``_run_inference_verified``) so the firewalled operating point (conf/NMS/tiling/max_dets)
+resolves identically for every entry point that runs a model over images."""
 
 from __future__ import annotations
 
 import logging
 from pathlib import Path, PurePosixPath
 
-from tcip_store import RECORD_JSON, BadKey, Key, StoreDescriptor, register_store
+from tcip_store import RECORD_JSON, BadKey, Key, StoreDescriptor, Version, register_store, store
+from tcip_store.file_backend import RootedFileLocator
 
 from tcip_mcp.server import mcp
 from tcip_mcp.audit import audited
@@ -114,6 +115,32 @@ def calibration_curve_identity(body: dict) -> str:
     return _sha256_of_bytes(RECORD_JSON.encode(body))
 
 
+RASTER_PASS_PROGRESS_STORE = "raster_pass_progress"
+_RASTER_PASS_PROGRESS_LOCATOR = RootedFileLocator(
+    prefix=(".tcip", "raster_pass_progress"), suffix=".json")
+register_store(
+    StoreDescriptor(
+        name=RASTER_PASS_PROGRESS_STORE,
+        kind="record",
+        key_fields=("segment",),
+        frozen=False,
+        codec=RECORD_JSON,
+        concurrency="cas",
+        enumerable=True,
+        locator=_RASTER_PASS_PROGRESS_LOCATOR,
+    )
+)
+"""One tiled raster pass' resume state: an ``identity`` record naming the pass a bucket is mid-way
+through, plus one ``batch-<index>`` record per tile batch already reconstructed. Sits under
+``<bucket>/.tcip/raster_pass_progress/``, outside ``prediction_documents``' own non-recursive glob
+of the bucket root, so an interrupted pass' own progress never reads as a prediction document. Not
+frozen: its shape may still move, so a reader checks the identity record's own ``schema_version`` by
+hand (``_RASTER_PASS_PROGRESS_SCHEMA_VERSION``) rather than relying on the seam, which only enforces
+that ceiling for a store declared frozen."""
+
+_RASTER_PASS_PROGRESS_SCHEMA_VERSION = 1
+
+
 def _recorded_training_id_map(predictor) -> dict | None:
     """The training run's own recorded name->id map (``config["data"]["id_map"]``), or ``None``
     when the checkpoint carries none. The one read :func:`resolve_decode_id_map` and calibration's
@@ -191,11 +218,12 @@ def resolve_decode_id_map(predictor, images_dir: str | None, *,
 
 
 @mcp.tool()
-@audited
+@audited(scope_arg="output_dir", scope_via=resolve_output_path)
 def run_inference(
     checkpoint_path: str,
-    image_paths: list[str] | None = None,
     images_dir: str | None = None,
+    raster_path: str | None = None,
+    output_dir: str = "",
     conf_threshold: float | None = None,
     device: str | None = None,
     tile: bool | None = None,
@@ -209,37 +237,109 @@ def run_inference(
     trait: str | None = None,
     calibration_labels_dir: str | None = None,
     calibration_images_dir: str | None = None,
+    split_manifest_dir: str | None = None,
     experiment_id: str | None = None,
     group_by: str | None = None,
     group_key_map: dict[str, str] | None = None,
     split_seed: int = 0,
     split_holdout_ratio: float = 0.5,
-    split_manifest_dir: str | None = None,
+    overwrite: bool = False,
+    acknowledge_unvalidated: bool = False,
+    require_masks: bool = True,
+    resume: bool = False,
 ) -> dict:
-    """Run a trained model on images.
+    """Run a trained model over images or a raster, and persist the predictions as a bucket.
 
-    Provide either image_paths (specific images) or images_dir (all images
-    in a directory). Set ``tile=True`` for SAHI-style sliding-window detection on
-    high-resolution imagery with many small objects (detection heads only).
+    Provide exactly one of ``images_dir`` (an ordinary directory of per-image captures) or
+    ``raster_path`` (a single raster, georeferenced or not, potentially too large to decode
+    whole). Every call publishes a prediction bucket at ``output_dir``: this is the one door that
+    runs a checkpoint over images and the one door that persists what it produced, so the
+    operating point a caller sees is exactly the one behind the files on disk. The pass itself
+    stays a private library call, :func:`_run_inference_verified`, an ordinary function with no
+    audit line of its own; this tool's own audit line is the record of a call.
+
+    A prediction bucket is the directory these writes persist into, not a score bin or a quota
+    allocation: its identity is that directory's own path (relative to the dataset root when it
+    sits under one, its own resolved path otherwise; see
+    :func:`~tcip_mcp.prediction_buckets.bucket_key_of`), and a bucket under a dataset root turns
+    immutable the moment a human review verdict lands on any image inside it (a bucket written
+    outside any dataset root has no verdict store to guard it; see below). Two source regimes,
+    sharing one bucket-resolution/immutability/gate/lineage contract so a breeder or agent has
+    one door regardless of capture shape:
+
+    - ``images_dir``: writes ``<stem>.json`` per image. Works for ``instance_seg`` too; each
+      tiled result's ``masks`` (see ``GenericPredictor.predict_tiled``) are a tile-local patch
+      plus its full-image-space offset, never the untiled path's dense full-image array.
+    - ``raster_path``: sources tiles from the windowed raster layer instead
+      (:func:`~tcip_mcp.pipelines.raster_source.open_raster`), always tiled (there is no untiled
+      option for a raster too large to decode whole), and writes exactly one ``<raster
+      stem>.json`` prediction file (in full-raster pixel space), since there is no natural
+      directory-of-per-plant-images shape for a whole-raster capture. ``calibration_labels_dir``/
+      ``split_manifest_dir`` are not accepted with it (there is no separate labeled directory
+      shape for one raster); ``trait`` alone calibrates against the mosaic's own reserved regions
+      instead (:func:`~tcip_mcp.pipelines.block_calibration.resolve_block_calibration_records`),
+      when the checkpoint's own training experiment reserved one
+      (``data.split.reserve_calibration_fraction`` at training time). Without a reserved region,
+      conf has no per-dataset calibration for this regime; a validated per-plant count is earned
+      later, at delivery (``deliver_orthomosaic_plant_counts``). ``resume`` (below) applies only
+      here.
+
+    Both regimes write the same ``operating_point.json`` stamp convention beside the prediction
+    file(s), so downstream code that reads a bucket's sidecar generically needs no special case
+    for which regime produced it.
+
+    Neither regime's underlying pass ever refuses on an unvalidated dimension on its own; each is
+    the shared, honestly-stamped raw substrate this door builds on, the same contract an
+    uncalibrated ``conf`` already has. This tool is the one that actually persists a prediction
+    bucket other doors treat as ground truth, so it is where the refusal belongs: a tiled run
+    whose tile_size has no real basis (no persisted training geometry, no recoverable native-frame
+    edge, no explicit override) refuses to write here unless ``acknowledge_unvalidated=True``, the
+    same gate ``deliver_per_image_counts``/``deliver_phenology_milestones``/the web results
+    routes/``export_aggregated_csv`` already apply, via the same shared
+    :func:`tcip_mcp.pipelines.resolution.tile_size_gate_flag`. Both regimes gate before the
+    (expensive) pass runs: the ``raster_path`` regime uses the predictor that pass then reuses;
+    the ``images_dir`` regime sniffs the checkpoint's own stamped config (no weights load, never
+    raises on a missing/unreadable checkpoint) to resolve the same geometry the verified pass
+    will, then re-checks against that pass' own real result after it runs as the authoritative
+    gate. An untiled run's tile_size is never operative and can't manufacture a refusal.
+
+    A prediction bucket (``output_dir``) that already carries review verdicts is immutable: by
+    default the write is redirected to a fresh run-scoped bucket (``<dir>@r2``, ``@r3``, next
+    free) and the dir actually written is returned as ``output_dir``. Pass ``overwrite=True`` to
+    write in place only when the bucket has zero verdicts; with verdicts present it is refused
+    (error names the count and a suggested dir) so a re-run never orphans recorded verdicts. The
+    verdicts consulted are the ones recorded in the bucket's own dataset, so a bucket written
+    outside any dataset has no store to be guarded against: that write lands where it was asked
+    for, ``verdict_guard_operative`` comes back false with a note saying so, and it is stamped
+    unvalidated whatever its operating point cleared, since a count claim outside the dataset
+    layout has no dataset-relative key a reader could locate it by.
+
+    A bucket stamped validated names the validation record its claim was earned from. The gate
+    for that record runs before any file is written, and the record is appended over the
+    prediction files as they actually landed, so a run that dies partway leaves either
+    predictions with no stamp or a record no stamp names, both of which floor to unvalidated at
+    every delivery door.
 
     Args:
         checkpoint_path: Path to model .pt checkpoint. Must be registered under this process's
             platform state root (``register_model``, explicit mode for a foreign or bespoke
             checkpoint) or this door refuses before loading it.
-        image_paths: List of specific image paths.
-        images_dir: Directory containing images to process.
-        conf_threshold: Minimum confidence score. ``None`` (default) states nothing and runs at the
-            platform default, stamped ``"default"``; a stated value is honored as an explicit
+        images_dir: Directory containing input images (mutually exclusive with ``raster_path``).
+        raster_path: A single raster, georeferenced or not, potentially too large to decode whole
+            (mutually exclusive with ``images_dir``); see the regime description above.
+        output_dir: Directory for output .json prediction file(s). Required, including for
+            ``dry_run``, which names the bucket the write would resolve to without writing it. A
+            relative path resolves against the platform state root, never the server process's
+            cwd.
+        conf_threshold: Minimum confidence score. ``None`` (default) states nothing and runs at
+            the platform default, stamped ``"default"``; a stated value is honored as an explicit
             override and stamped as one, including when it happens to equal the platform default.
         device: Device to use ('cuda' or 'cpu').
-        tile: Enable tiled (SAHI-style) detection inference. ``None`` (default) derives it from the
-            checkpoint's own training tile geometry (``predictor.train_tile_size is not None``), not
-            a fixed default, its provenance is stamped ``"default"`` vs ``"explicit"`` so a caller
-            who deliberately chose one way is distinguishable from one who left it unset. Works for
-            ``instance_seg`` too: each tiled result's ``masks`` (see
-            ``GenericPredictor.predict_tiled``) are a tile-local patch plus its full-image-space
-            offset, never the untiled path's dense full-image array, a downstream reader of
-            ``results[i]["masks"]`` must not assume the two shapes are interchangeable.
+        tile: Enable tiled (SAHI-style) detection inference (``images_dir`` regime only;
+            ``raster_path`` is always tiled). ``None`` (default) derives it from the checkpoint's
+            own training tile geometry (``predictor.train_tile_size is not None``), not a fixed
+            default, its provenance is stamped ``"default"`` vs ``"explicit"`` so a caller who
+            deliberately chose one way is distinguishable from one who left it unset.
         tile_size: Sliding-window tile edge (px). ``None`` (default) derives it from the
             checkpoint's training tile geometry so inference matches the trained scale; a value
             overrides. A checkpoint that trained untiled on frames that all shared one square size
@@ -263,59 +363,83 @@ def run_inference(
             including when it happens to equal the platform default.
         postprocess: Cross-tile merge, "nms" suppresses overlaps, "nmm" unions boxes split
             across a tile seam (better for an object straddling a boundary).
-        dry_run: Report the effective operating point (conf/tiling/max_dets/postprocess) without
-            loading the model or running inference.
-        trait: Trait name (with ``calibration_labels_dir``) to derive the confidence operating point
-            per dataset instead of pinning a default, the count is the phenotype, so conf must be
-            calibrated. Absent -> the byte-identical raw path (conf=score_threshold, unvalidated).
-        calibration_labels_dir: Labeled dir for a disjoint cal/holdout split to calibrate + held-out
-            validate the operating point. Its GT identity scopes the resolved conf (dataset firewall).
+        dry_run: Report the effective operating point (conf/tiling/max_dets/postprocess) and the
+            bucket the write would resolve to, without loading the model or running inference.
+        trait: Trait name to derive the confidence operating point per dataset instead of pinning
+            a default, the count is the phenotype, so conf must be calibrated. ``images_dir``
+            regime: with ``calibration_labels_dir``. ``raster_path`` regime: alone, against the
+            checkpoint's own training mosaic's reserved calibration/test regions (requires
+            ``data.split.reserve_calibration_fraction`` at training time; refuses by name
+            otherwise). Absent -> the byte-identical raw path (conf=score_threshold, unvalidated).
+        calibration_labels_dir: Labeled dir for a disjoint cal/holdout split to calibrate +
+            held-out validate the operating point (``images_dir`` regime only; not accepted with
+            ``raster_path``, see ``trait``). Its GT identity scopes the resolved conf (dataset
+            firewall).
         calibration_images_dir: Images for the calibration labels (defaults to ``images_dir``).
-        experiment_id: The run that produced the checkpoint, for provenance. Best-effort resolved
-            (checkpoint's own stamp, then the registry) when omitted; a raw/foreign checkpoint
-            legitimately has none. Also gates calibration's train-disjointness check: a
-            *known* run whose training split can't be read/reconstructed fails that check closed.
-        group_by: Grouping policy for the locked calibration/holdout split, ``"tile_prefix"``
-            or ``"stem"``. Ignored when ``group_key_map`` is given. ``None`` (default) resolves
-            to ``"tile_prefix"`` when neither this nor ``split_manifest_dir`` was given; a value
-            beside ``split_manifest_dir`` conflicts with the manifest's own grouping policy and
-            refuses, naming both. Only the first calibration call for a given calibration-labels
-            identity draws the split; later calls return the same locked split regardless of this
-            argument (see ``redraw_calibration_holdout`` to redraw deliberately).
-        group_key_map: An agent-derived ``{stem: group_key}`` map overriding ``group_by`` for the
-            locked calibration/holdout split, must cover every stem in ``calibration_labels_dir``.
-            Conflicts with ``split_manifest_dir`` the same way ``group_by`` does.
-        split_seed: Split seed for the locked calibration/holdout split, like
-            ``group_by``, only takes effect on the first calibration call for a given
-            calibration-labels identity; a later call's declared value is compared to the lock and
-            any divergence is reported in ``gate_evidence_summary``/the resolved bundle rather than
-            silently ignored.
-        split_holdout_ratio: Calibration/holdout fraction for the locked split, same
-            first-call-only semantics as ``split_seed``.
         split_manifest_dir: Restrict the calibration universe to one capture date's
-            ``calibration`` side of a split manifest (``data_tools.read_split_manifest_dir``)
-            instead of every labelled stem with an image, so the operating point is measured on
-            exactly the side the manifest held out for it, never the side the checkpoint was
-            chosen on. A checkpoint bound to a different manifest than the one named here is
-            refused by name. The manifest's subject/attribute must equal the checkpoint's own
-            recorded training scope, the calibration labels' date must be one the manifest holds
-            members under, and the manifest's ``images_root`` for that date must be
+            ``calibration`` side of a split manifest (``data_tools.read_split_manifest_dir``,
+            ``images_dir`` regime only; not accepted with ``raster_path``, block calibration draws
+            no split-manifest universe) instead of every labelled stem with an image, so the
+            operating point is measured on exactly the side the manifest held out for it, never
+            the side the checkpoint was chosen on. A checkpoint bound to a different manifest than
+            the one named here is refused by name. The manifest's subject/attribute must equal the
+            checkpoint's own recorded training scope, the calibration labels' date must be one the
+            manifest holds members under, and the manifest's ``images_root`` for that date must be
             ``calibration_images_dir`` (or ``images_dir``), each refusing by name. The response
             carries ``n_excluded_training_stems``, ``n_excluded_validation_stems`` and
             ``n_excluded_unassigned_stems``, the present stems the manifest's universe left out
             (its train side, its val side, and stems the draw never assigned), beside
             ``n_excluded_incomplete_attribute``.
+        experiment_id: The run that produced the checkpoint, for provenance. Best-effort resolved
+            (checkpoint's own stamp, then the registry) when omitted; a raw/foreign checkpoint
+            legitimately has none. Also gates calibration's train-disjointness check: a
+            *known* run whose training split can't be read/reconstructed fails that check closed.
+        group_by: ``images_dir`` regime only. Grouping policy for the locked calibration/holdout
+            split, ``"tile_prefix"`` or ``"stem"``. Ignored when ``group_key_map`` is given.
+            ``None`` (default) resolves to ``"tile_prefix"`` when neither this nor
+            ``split_manifest_dir`` was given; a value beside ``split_manifest_dir`` conflicts with
+            the manifest's own grouping policy and refuses, naming both. Only the first
+            calibration call for a given calibration-labels identity draws the split; later calls
+            return the same locked split regardless of this argument (see
+            ``redraw_calibration_holdout`` to redraw deliberately).
+        group_key_map: ``images_dir`` regime only. An agent-derived ``{stem: group_key}`` map
+            overriding ``group_by`` for the locked calibration/holdout split, must cover every
+            stem in ``calibration_labels_dir``. Conflicts with ``split_manifest_dir`` the same way
+            ``group_by`` does.
+        split_seed: ``images_dir`` regime only. Split seed for the locked calibration/holdout
+            split, like ``group_by``, only takes effect on the first calibration call for a given
+            calibration-labels identity; a later call's declared value is compared to the lock and
+            any divergence is reported in ``gate_evidence_summary``/the resolved bundle rather than
+            silently ignored.
+        split_holdout_ratio: ``images_dir`` regime only. Calibration/holdout fraction for the
+            locked split, same first-call-only semantics as ``split_seed``.
+        overwrite: Write into ``output_dir`` even if it exists. Refused if the bucket has review
+            verdicts; the default (False) auto-redirects to a fresh bucket instead. For a
+            ``raster_path`` pass, also the way out of a bucket carrying another pass' progress
+            (``resume``, below): it discards that progress and starts over.
+        acknowledge_unvalidated: Write the bucket even when tile_size (a tiled run only) has no
+            real basis, stamping ``tile_size_validated=false`` on the sidecar so the
+            un-trustworthiness travels with it rather than writing silently.
+        require_masks: Collect masks for an ``instance_seg`` checkpoint (``raster_path`` regime
+            only; ignored for ``images_dir``, which always carries masks).
+        resume: ``raster_path`` regime only (refuses with ``images_dir``). Continue a raster pass
+            this bucket carries progress from, rather than refusing over that progress or starting
+            a new one. The recorded pass' checkpoint, raster content, trait, experiment, tile batch
+            size and resolved operating point must all match this call's own, or it refuses naming
+            what differs; refuses outright when the bucket carries no progress at all, when the
+            recorded progress is a schema version newer than this reader knows, and for a
+            mask-bearing (``instance_seg`` with ``require_masks``) pass, which never records
+            progress to resume from. See :func:`_export_predictions_raster`'s own docstring for
+            the progress records this pass keeps.
     """
     if not Path(checkpoint_path).is_file():
         return {"error": f"Checkpoint not found: {checkpoint_path}"}
-    if split_manifest_dir and not calibration_labels_dir:
-        return {"error": "split_manifest_dir requires calibration_labels_dir: it scopes a "
-                         "calibration this call has no trait/calibration_labels_dir to run, so "
-                         "the manifest would be silently dropped rather than bounding one."}
+    if not output_dir:
+        return {"error": "output_dir is required"}
 
     if dry_run:
-        # No model load here: an unset ``tile`` is a pending derivation (the checkpoint decides
-        # it), not a fabricated default, like tile_size/overlap already report.
+        # No model load here: an unset ``tile`` is a pending derivation, not a fabricated default.
+        # A preview needs no images_dir/raster_path: those are about the pass, not this preview.
         applied_conf, applied_nms_iou, applied_max_dets = _applied_operating_point(
             conf_threshold, global_nms_iou, max_dets)
         if tile is None:
@@ -325,9 +449,15 @@ def run_inference(
         else:
             tiled_dry, tiled_source_dry = tile, "explicit"
             cross_tile_nms_dry = applied_nms_iou if tile else None
+        out_preview, resolution_preview, _bucket_root_preview, refusal_preview = (
+            _resolve_writable_bucket_for(output_dir, overwrite=overwrite))
+        if refusal_preview is not None:
+            return refusal_preview
         return {
             "dry_run": True,
             "checkpoint_path": checkpoint_path,
+            "output_dir": str(out_preview),
+            "bucket_redirected": resolution_preview.redirected,
             "operating_point": {
                 "conf": applied_conf,
                 "cross_tile_nms": cross_tile_nms_dry,
@@ -343,22 +473,146 @@ def run_inference(
                      "(resolve_operating_point) so the count is calibrated, not a default."),
         }
 
+    if images_dir is None and raster_path is None:
+        return {"error": "Provide either images_dir or raster_path"}
+    if images_dir is not None and raster_path is not None:
+        return {"error": "Provide only one of images_dir or raster_path, not both"}
+    if raster_path is not None and calibration_labels_dir:
+        return {"error": "calibration_labels_dir is not supported for a raster_path export: "
+                         "block calibration (trait alone, see below) validates against the "
+                         "mosaic's own reserved regions instead of a caller-supplied labeled dir."}
+    if raster_path is not None and split_manifest_dir:
+        return {"error": "split_manifest_dir is not supported for a raster_path export: block "
+                         "calibration draws no split-manifest universe, so it would be silently "
+                         "dropped rather than scoping anything."}
+    if split_manifest_dir and not calibration_labels_dir:
+        return {"error": "split_manifest_dir requires calibration_labels_dir: it scopes a "
+                         "calibration this call has no trait/calibration_labels_dir to run, so "
+                         "the manifest would be silently dropped rather than bounding one."}
+    if raster_path is not None and not Path(raster_path).is_file():
+        return {"error": f"raster_path not found: {raster_path}"}
+    if resume and images_dir is not None:
+        return {"error": "resume=True only applies to the raster_path regime: the images_dir "
+                         "regime has no resume, its all-at-the-end write is unchanged."}
+
+    # Resolve the writable bucket before the checkpoint is read: a verdict-blocked overwrite must
+    # still refuse before the file is touched at all.
+    out, resolution, bucket_root, refusal = _resolve_writable_bucket_for(
+        output_dir, overwrite=overwrite)
+    if refusal is not None:
+        return refusal
+
     from tcip_mcp.model_registry import UnregisteredCheckpoint, load_registered_checkpoint
 
     try:
         checkpoint = load_registered_checkpoint(checkpoint_path)
     except UnregisteredCheckpoint as exc:
         return {"error": str(exc)}
-    return _run_inference_verified(
-        checkpoint, image_paths=image_paths, images_dir=images_dir,
-        conf_threshold=conf_threshold, device=device, tile=tile, tile_size=tile_size,
-        overlap=overlap, tile_batch_size=tile_batch_size, global_nms_iou=global_nms_iou,
-        max_dets=max_dets, postprocess=postprocess, trait=trait,
-        calibration_labels_dir=calibration_labels_dir,
-        calibration_images_dir=calibration_images_dir, experiment_id=experiment_id,
-        group_by=group_by, group_key_map=group_key_map, split_seed=split_seed,
-        split_holdout_ratio=split_holdout_ratio, split_manifest_dir=split_manifest_dir,
+
+    block_calibration_experiment_id = None
+    if raster_path is not None and trait:
+        from tcip_mcp.model_registry import resolve_model_identity
+        from tcip_mcp.pipelines.block_calibration import reserved_calibration_region_available
+
+        block_identity = resolve_model_identity(checkpoint, experiment_id=experiment_id)
+        block_calibration_experiment_id = block_identity["experiment_id"]
+        if block_calibration_experiment_id is None or not reserved_calibration_region_available(
+            block_calibration_experiment_id
+        ):
+            return {"error": (
+                "trait calibration for a raster_path export requires the checkpoint's own "
+                "training experiment to have a spatial-strip split with a reserved calibration "
+                "region (train it with data.split.reserve_calibration_fraction set); this "
+                f"checkpoint's experiment_id ({block_calibration_experiment_id!r}) has none. "
+                "Deliver a calibrated per-plant count via deliver_orthomosaic_plant_counts "
+                "instead, or retrain with reserve_calibration_fraction set."
+            )}
+
+    if raster_path is not None:
+        return _export_predictions_raster(
+            checkpoint=checkpoint, raster_path=raster_path, out=out,
+            resolution=resolution, device=device, conf_threshold=conf_threshold,
+            tile_size=tile_size, overlap=overlap, tile_batch_size=tile_batch_size,
+            global_nms_iou=global_nms_iou, max_dets=max_dets, postprocess=postprocess,
+            require_masks=require_masks,
+            experiment_id=block_calibration_experiment_id or experiment_id,
+            acknowledge_unvalidated=acknowledge_unvalidated, trait=trait,
+            resume=resume, overwrite=overwrite,
+        )
+
+    from tcip_mcp.pipelines.resolution import (
+        check_delivery_gate, resolve_tile_size_param, tile_size_gate_flag,
     )
+
+    # Gate before the (expensive) pass: the checkpoint's own stamped config, already loaded,
+    # resolves the same tile geometry the verified pass itself will.
+    from types import SimpleNamespace
+
+    from tcip_mcp.pipelines.inference.predictor import (
+        TileEdgeContradiction, explicit_edge_provenance, resolve_tile_regime,
+    )
+
+    data_cfg = checkpoint.data_config
+    tiling_cfg = data_cfg.get("tiling") or {}
+    stub = SimpleNamespace(
+        train_tile_size=tiling_cfg.get("tile_size"), train_overlap=tiling_cfg.get("overlap"),
+        train_native_size=data_cfg.get("train_native_size"))
+    pre_tiled = (stub.train_tile_size is not None) if tile is None else tile
+    try:
+        pre_tile, pre_tile_source, _pre_overlap, _pre_overlap_source, _pre_resize = resolve_tile_regime(
+            stub, tiled=pre_tiled, tile_size=tile_size, overlap=overlap)
+    except TileEdgeContradiction as exc:
+        return {"error": str(exc)}
+    pre_tile_derived_from = (
+        explicit_edge_provenance(stub, pre_tile)
+        if pre_tile_source == "explicit" and pre_tile is not None else None)
+    pre_param = resolve_tile_size_param(
+        pre_tile, tiled=pre_tiled, tile_size_source=pre_tile_source,
+        tile_size_derived_from=pre_tile_derived_from)
+    pre_tile_ref = tile_size_gate_flag({"tile_size": pre_param.to_provenance()})
+    pre_gate = check_delivery_gate(
+        {"tile_size": pre_tile_ref} if pre_tile_ref is not None else {},
+        acknowledge_unvalidated=acknowledge_unvalidated)
+    if not pre_gate.ok:
+        return {"error": pre_gate.reason, "tile_size_validated": pre_tile_ref}
+
+    result = _run_inference_verified(
+        checkpoint, images_dir=images_dir, conf_threshold=conf_threshold,
+        device=device, tile=tile, tile_size=tile_size, overlap=overlap,
+        tile_batch_size=tile_batch_size, global_nms_iou=global_nms_iou, max_dets=max_dets,
+        postprocess=postprocess, trait=trait,
+        calibration_labels_dir=calibration_labels_dir, calibration_images_dir=calibration_images_dir,
+        split_manifest_dir=split_manifest_dir, experiment_id=experiment_id,
+        group_by=group_by, group_key_map=group_key_map, split_seed=split_seed,
+        split_holdout_ratio=split_holdout_ratio,
+    )
+    if "error" in result:
+        return result
+
+    pub = _publish_bucket_bracket(
+        result, out=out, checkpoint_path=checkpoint_path, trait=trait, images_dir=images_dir,
+        dataset_root=bucket_root, acknowledge_unvalidated=acknowledge_unvalidated)
+    if pub["refusal"] is not None:
+        return pub["refusal"]
+    written, dropped_boxes = pub["written"], pub["dropped_boxes"]
+    op_stamp, tile_size_validated = pub["op_stamp"], pub["tile_size_validated"]
+
+    # Every field the pass returned, minus ``results``, overlaid with the bucket fields the write
+    # itself earned (the pass' own raw ``validated`` does not yet know about the tile-scale floor).
+    response = dict(result)
+    response.pop("results", None)
+    response.update({
+        "image_count": len(written), "output_dir": str(out), "files": written,
+        "bucket_redirected": resolution.redirected,
+        "requested_output_dir": output_dir if resolution.redirected else None,
+        "validated": op_stamp["validated"],
+        "tile_size_validated": tile_size_validated,
+        "verdict_guard_operative": bucket_root is not None,
+        "dropped_nonpositive_boxes": dropped_boxes,
+    })
+    if bucket_root is None:
+        response["note"] = _NO_DATASET_ROOT_NOTE.format(bucket=out)
+    return response
 
 
 def _applied_operating_point(
@@ -399,8 +653,9 @@ def _run_inference_verified(
     """The verified body of ``run_inference``: everything after its checkpoint is loaded once.
 
     Carries no ``@audited`` of its own: the calling tool's audit line is the record of this call.
-    ``export_predictions`` calls this directly (never the ``@mcp.tool()`` wrapper) with the
-    checkpoint it already loaded, so a door composing this pass never loads the file twice.
+    ``deliver_per_image_counts``'s live regime calls this directly with the checkpoint it already
+    loaded, never a second load through ``run_inference`` itself, so a door composing this pass
+    never loads the file twice.
     """
     max_dets_stated = max_dets is not None
     conf_stated = conf_threshold is not None
@@ -617,8 +872,6 @@ def _run_inference_verified(
             return {"error": f"the operating-point curve for trait {trait!r} could not be kept "
                              f"(its body cannot be recorded): {exc}"}
         # The evidence rides in the curve artifact, read back by identity, never on this response.
-        from tcip_store import store
-
         try:
             store.replace(calibration_curve_key(curve_identity_hex), curve_body)
         except Exception:
@@ -793,8 +1046,6 @@ def _calibration_evidence(result: dict) -> dict | None:
     identity = result.get("calibration_evidence_key")
     if not identity:
         return None
-    from tcip_store import store
-
     body = store.read(calibration_curve_key(identity), default=None)
     if body is None:
         return None
@@ -889,7 +1140,7 @@ def _publish_image_predictions(out: Path, result: dict, *, checkpoint_path: str,
                                ) -> tuple[list[str], int, dict]:
     """Write one prediction file per image, then earn and stamp over exactly what landed.
 
-    The steps ``export_predictions`` and ``deliver_per_image_counts`` share once each has resolved its own
+    The steps ``run_inference`` and ``deliver_per_image_counts`` share once each has resolved its own
     bucket and run its own gate: both persist the same run's per-image detections into a bucket and
     both stamp it, so the file naming, the producer string, the claim payload and the write order
     are one implementation rather than two that agree today. ``draft`` present is exactly the
@@ -947,7 +1198,7 @@ def _publish_bucket_bracket(result: dict, *, out: Path, checkpoint_path: str, tr
                            images_dir: str | None, dataset_root: Path | None,
                            acknowledge_unvalidated: bool) -> dict:
     """Publish a live run's predictions into ``out``, gated and linked exactly as
-    ``export_predictions`` does: the authoritative post-inference tile gate, the count claim's own
+    ``run_inference`` does: the authoritative post-inference tile gate, the count claim's own
     gate, the frozen-lineage-pointer refusal, the write, and the post-write lineage link. Shared so
     ``deliver_per_image_counts``' live-with-``predictions_dir`` path publishes under the identical contract
     rather than a second implementation.
@@ -1012,18 +1263,103 @@ def _publish_bucket_bracket(result: dict, *, out: Path, checkpoint_path: str, tr
             "lineage_linked": lineage_linked}
 
 
+# --- resuming an interrupted tiled raster pass (the raster regime only) ---
+
+
+def _raster_pass_key(bucket: Path, segment: str) -> Key:
+    """One raster pass' progress record under ``bucket``: the identity (``segment="identity"``)
+    or one flushed tile batch (``segment=f"batch-{index:06d}"``)."""
+    return Key(RASTER_PASS_PROGRESS_STORE, str(bucket), (segment,))
+
+
+def _raster_pass_identity_body(
+    *, raster_identity: dict, checkpoint_sha256: str | None, trait: str | None,
+    experiment_id: str | None, tile_batch_size: int, conf: float, cross_tile_nms: float | None,
+    max_dets: int | None, tile_size: int, overlap: float, tile_resize: tuple[int, int] | None,
+    postprocess: str, require_masks: bool,
+) -> dict:
+    """The pass a raster-export bucket is mid-way through, as the plain dict a later resume
+    compares its own call against. The device is deliberately absent: the same detections on
+    other hardware are the same pass."""
+    return {
+        "schema_version": _RASTER_PASS_PROGRESS_SCHEMA_VERSION,
+        "raster_identity": raster_identity,
+        "checkpoint_sha256": checkpoint_sha256,
+        "trait": trait,
+        "experiment_id": experiment_id,
+        "tile_batch_size": tile_batch_size,
+        "operating_point": {
+            "conf": conf,
+            "cross_tile_nms": cross_tile_nms,
+            "max_dets": max_dets,
+            "tile_size": tile_size,
+            "overlap": overlap,
+            "tile_resize": list(tile_resize) if tile_resize is not None else None,
+            "postprocess": postprocess,
+            "require_masks": require_masks,
+        },
+    }
+
+
+def _raster_pass_identity_mismatches(recorded: dict, current: dict) -> list[str]:
+    """Every field naming a difference between a recorded raster-pass identity and this call's
+    own, for a resume refusal to list by name."""
+    differing = [
+        field for field in
+        ("checkpoint_sha256", "trait", "experiment_id", "tile_batch_size", "raster_identity")
+        if recorded.get(field) != current.get(field)
+    ]
+    recorded_op = recorded.get("operating_point") or {}
+    current_op = current.get("operating_point") or {}
+    differing.extend(
+        f"operating_point.{field}" for field in sorted(set(recorded_op) | set(current_op))
+        if recorded_op.get(field) != current_op.get(field)
+    )
+    return differing
+
+
+def _load_raster_pass_prior(bucket: Path) -> dict:
+    """Every tile batch a bucket's progress already holds, merged into the shape
+    ``GenericPredictor._tiled_infer_core`` seeds its own accumulators from."""
+    tile_info: list[dict] = []
+    boxes: list = []
+    scores: list = []
+    labels: list = []
+    for key in store.keys(RASTER_PASS_PROGRESS_STORE, str(bucket)):
+        if key.parts[0] == "identity":
+            continue
+        batch = store.read(key)
+        tile_info.extend(batch["tile_info"])
+        boxes.extend(batch["boxes"])
+        scores.extend(batch["scores"])
+        labels.extend(batch["labels"])
+    return {"tile_info": tile_info, "boxes": boxes, "scores": scores, "labels": labels}
+
+
+def _clear_raster_pass_progress(bucket: Path) -> None:
+    """Delete every progress record a raster pass over ``bucket`` left, in one transaction: a
+    completed pass has nothing left to resume."""
+    keys = store.keys(RASTER_PASS_PROGRESS_STORE, str(bucket))
+    if not keys:
+        return
+    with store.transaction(*keys) as txn:
+        for key in keys:
+            txn.delete(key)
+
+
 def _export_predictions_raster(
     *, checkpoint, raster_path: str, out: Path, resolution, device: str | None,
     conf_threshold: float | None, tile_size: int | None, overlap: float | None, tile_batch_size: int,
     global_nms_iou: float | None, max_dets: int | None, postprocess: str, require_masks: bool,
     experiment_id: str | None, acknowledge_unvalidated: bool, trait: str | None = None,
+    resume: bool = False, overwrite: bool = False,
 ) -> dict:
-    """The windowed-raster regime of :func:`export_predictions`: tiled detection/instance_seg
+    """The windowed-raster regime of :func:`run_inference`: tiled detection/instance_seg
     inference over a whole georeferenced (or merely huge) raster too large to decode whole, sourced
     from the windowed raster layer (:func:`~tcip_mcp.pipelines.raster_source.open_raster`) rather
     than an ordinary directory of per-image captures. Always tiled: there is no untiled option, the
     whole point of this regime is a raster too large for one. ``out``/``resolution`` are the bucket
-    :func:`export_predictions` already resolved (immutability/redirect), shared with the ordinary
+    :func:`run_inference` already resolved (immutability/redirect), shared with the ordinary
     regime rather than a second implementation of that check.
 
     Persists one prediction bucket: since there is no natural directory-of-per-plant-images shape
@@ -1034,7 +1370,7 @@ def _export_predictions_raster(
     ``trait`` is ``None`` for every raster export with no reserved calibration region (the
     original, byte-identical raw path: the persisted operating point is never stamped validated
     here, conf has no per-dataset calibration for a raster source, a validated per-plant count is
-    earned later at delivery). ``export_predictions`` only ever passes a real ``trait`` here once
+    earned later at delivery). ``run_inference`` only ever passes a real ``trait`` here once
     it has already confirmed the checkpoint's training experiment reserved a calibration region
     (:func:`~tcip_mcp.pipelines.block_calibration.reserved_calibration_region_available`); in that
     case this runs block calibration first (small reserved bands, not the whole mosaic), gates on
@@ -1055,6 +1391,18 @@ def _export_predictions_raster(
     geometry refuses before that, from ``resolve_tile_regime`` itself. For the ``trait`` path, the
     block calibration's own reserved-region bands must also be tiled at this same resolved edge;
     a split manifest recorded at a different edge refuses there too.
+
+    Every call over a raster that is not mask-bearing (``instance_seg`` with ``require_masks``)
+    records this pass' own identity and, as tile batches flush, its progress into
+    ``RASTER_PASS_PROGRESS_STORE`` under ``<out>/.tcip/``, so an interruption anywhere in the pass
+    leaves a recoverable trail rather than nothing. ``resume=True`` continues that trail: the
+    recorded identity must match this call's own (checkpoint, raster content, trait, experiment,
+    tile batch size and the resolved operating point) or the call refuses naming what differs,
+    since merging tiles run at two different operating points would corrupt the count.
+    ``resume=False`` over a bucket already carrying progress refuses too, naming ``resume=True``
+    or ``overwrite=True`` (which discards the partial pass) as the two ways out. On completion
+    every progress record for this bucket is deleted in one transaction, whether the pass ran
+    straight through or resumed one interruption.
     """
     from tcip_mcp.model_registry import resolve_model_identity
     from tcip_mcp.pipelines.inference.predictor import (
@@ -1100,6 +1448,51 @@ def _export_predictions_raster(
             "always-tiled regime has no real basis to run at. Pass tile_size explicitly, or "
             "retrain with tile geometry persisted."
         )}
+
+    if resume and predictor.task == "instance_seg" and require_masks:
+        return {"error": (
+            "resume=True refuses for a mask-bearing pass: an instance_seg checkpoint's tiled "
+            "masks have no persisted per-batch representation this door records, so a "
+            "mask-bearing raster pass records no progress and cannot be resumed. Run the whole "
+            "pass again instead."
+        )}
+    record_progress = not (predictor.task == "instance_seg" and require_masks)
+
+    import dataclasses
+
+    from tcip_mcp.pipelines.raster_source import content_identity
+
+    try:
+        raster_identity = dataclasses.asdict(content_identity(raster_path, predictor.in_chans))
+    except ValueError as exc:
+        return {"error": f"raster content identity could not be computed for {raster_path}: {exc}"}
+
+    identity_key = _raster_pass_key(out, "identity")
+    existing_pass_identity = store.read(identity_key, default=None)
+    if resume and existing_pass_identity is None:
+        return {"error": (
+            f"resume=True but {out} carries no raster-pass identity record to resume from: "
+            "either no pass has started here, or a prior pass already completed and cleared "
+            "its own progress."
+        )}
+    if existing_pass_identity is not None and not resume:
+        if overwrite:
+            _clear_raster_pass_progress(out)
+            existing_pass_identity = None
+        else:
+            return {"error": (
+                f"{out} carries progress from an interrupted raster pass: pass resume=True to "
+                "continue it, or overwrite=True to discard it and start over."
+            )}
+    if existing_pass_identity is not None:
+        recorded_schema_version = existing_pass_identity.get("schema_version", 1)
+        if (not isinstance(recorded_schema_version, int)
+                or recorded_schema_version > _RASTER_PASS_PROGRESS_SCHEMA_VERSION):
+            return {"error": (
+                f"{out}'s raster-pass identity record is schema_version "
+                f"{recorded_schema_version!r}, above the {_RASTER_PASS_PROGRESS_SCHEMA_VERSION} "
+                "this reader knows: a newer writer produced it than this code understands."
+            )}
 
     from tcip_mcp.pipelines.resolution import (
         VALIDATED_FALSE, block_calibrated_export_operating_point, check_delivery_gate,
@@ -1226,6 +1619,32 @@ def _export_predictions_raster(
 
     from tcip_mcp.pipelines.raster_source import open_raster
 
+    current_pass_identity = _raster_pass_identity_body(
+        raster_identity=raster_identity, checkpoint_sha256=identity["sha256"], trait=trait,
+        experiment_id=identity["experiment_id"], tile_batch_size=tile_batch_size,
+        conf=predictor.score_threshold, cross_tile_nms=applied_nms_iou, max_dets=predictor.max_dets,
+        tile_size=resolved_tile, overlap=resolved_overlap, tile_resize=tile_resize,
+        postprocess=postprocess, require_masks=require_masks,
+    )
+    prior: dict | None = None
+    if existing_pass_identity is not None:
+        mismatches = _raster_pass_identity_mismatches(existing_pass_identity, current_pass_identity)
+        if mismatches:
+            return {"error": (
+                f"resume=True but the recorded pass over {out} differs from this call in "
+                f"{mismatches}: a resumed pass must be the identical pass, since merging tiles "
+                "run at two different operating points would corrupt the count."
+            )}
+        prior = _load_raster_pass_prior(out)
+    elif record_progress:
+        store.replace(identity_key, current_pass_identity, expect=Version.ABSENT)
+
+    def _record_raster_pass_batch(start_index: int, end_index: int, batch: dict) -> None:
+        store.replace(
+            _raster_pass_key(out, f"batch-{start_index:06d}"),
+            {"tile_index_range": [start_index, end_index], **batch}, expect=Version.ABSENT,
+        )
+
     # The model's own in_chans is the channel routing hint; the reader's real band count is
     # checked against it inside predict_tiled before any tile is read.
     with open_raster(raster_path, predictor.in_chans) as reader:
@@ -1233,7 +1652,8 @@ def _export_predictions_raster(
             reader, tile_size=resolved_tile, overlap=resolved_overlap,
             tile_batch_size=tile_batch_size, global_nms_iou=applied_nms_iou,
             postprocess=postprocess, require_masks=require_masks, source_label=str(raster_path),
-            tile_resize=tile_resize,
+            tile_resize=tile_resize, prior=prior,
+            progress=_record_raster_pass_batch if record_progress else None,
         )
 
     # No images_dir for a raster source: a foreign checkpoint with no recorded id_map decodes to
@@ -1276,17 +1696,9 @@ def _export_predictions_raster(
         op_stamp["block_calibration"] = {
             k: v for k, v in block_prov.items() if k != "spatial_manifest"
         }
-    # Recorded for every run of this regime: a consumer resolving these boxes through a raster's
-    # georeferencing has no other way to tell that raster is the one behind them.
-    try:
-        import dataclasses
-
-        from tcip_mcp.pipelines.raster_source import content_identity
-
-        export_identity = content_identity(raster_path, predictor.in_chans)
-        op_stamp["raster_content_identity"] = dataclasses.asdict(export_identity)
-    except Exception:
-        logger.warning("export-time raster content identity could not be recorded", exc_info=True)
+    # Reused from the sampling taken at the top of this call, never resampled: a consumer
+    # resolving these boxes through a raster's georeferencing needs this to name that raster.
+    op_stamp["raster_content_identity"] = raster_identity
     op_stamp = _seal_and_stamp(out, op_stamp, draft)
 
     exp_id = identity["experiment_id"]
@@ -1297,6 +1709,9 @@ def _export_predictions_raster(
             update_lineage(exp_id, predictions=str(out))
         except Exception:
             logger.warning("could not link predictions into experiment lineage", exc_info=True)
+
+    # The pass finished: whatever progress it left has nothing left to resume.
+    _clear_raster_pass_progress(out)
 
     response = {
         "image_count": 1, "output_dir": str(out), "files": [str(pred_path)],
@@ -1318,287 +1733,6 @@ def _export_predictions_raster(
         response["claim_scope_validated"] = claim_scope_validated
         if claim_scope_mismatch is not None:
             response["claim_scope_note"] = claim_scope_mismatch
-    return response
-
-
-@mcp.tool()
-@audited(scope_arg="output_dir", scope_via=resolve_output_path)
-def export_predictions(
-    checkpoint_path: str,
-    images_dir: str | None = None,
-    output_dir: str = "",
-    conf_threshold: float | None = None,
-    device: str | None = None,
-    tile: bool | None = None,
-    tile_size: int | None = None,
-    overlap: float | None = None,
-    tile_batch_size: int = 96,
-    global_nms_iou: float | None = None,
-    max_dets: int | None = None,
-    postprocess: str = "nms",
-    trait: str | None = None,
-    calibration_labels_dir: str | None = None,
-    calibration_images_dir: str | None = None,
-    split_manifest_dir: str | None = None,
-    experiment_id: str | None = None,
-    overwrite: bool = False,
-    acknowledge_unvalidated: bool = False,
-    raster_path: str | None = None,
-    require_masks: bool = True,
-) -> dict:
-    """Run inference and save predictions as COCO/JSON prediction file(s).
-
-    A prediction bucket is the directory these writes persist into, not a score bin or a quota
-    allocation: its identity is that directory's own path (relative to the dataset root when it
-    sits under one, its own resolved path otherwise; see
-    :func:`~tcip_mcp.prediction_buckets.bucket_key_of`), and a bucket under a dataset root turns
-    immutable the moment a human review verdict lands on any image inside it (a bucket written
-    outside any dataset root has no verdict store to guard it; see below). Two source regimes,
-    sharing one bucket-resolution/immutability/gate/lineage contract so a breeder or agent has
-    one door regardless of capture shape:
-
-    - ``images_dir`` (an ordinary directory of per-image captures, the common case): routes through
-      ``run_inference`` so this door resolves the same firewalled operating point (conf/NMS/tiling/
-      max_dets) rather than building a bare predictor of its own, which would truncate the count at
-      the framework default and ship labels with no provenance. Writes ``<stem>.json`` per image.
-    - ``raster_path`` (a single raster, georeferenced or not, potentially too large to decode
-      whole): sources tiles from the windowed raster layer instead
-      (:func:`~tcip_mcp.pipelines.raster_source.open_raster`), always tiled (there is no untiled
-      option for a raster too large to decode whole), and writes exactly one ``<raster stem>.json``
-      prediction file (in full-raster pixel space), since there is no natural
-      directory-of-per-plant-images shape for a whole-raster capture. ``calibration_labels_dir`` is
-      not accepted with it (there is no separate labeled directory shape for one raster); ``trait``
-      alone calibrates against the mosaic's own reserved regions instead
-      (:func:`~tcip_mcp.pipelines.block_calibration.resolve_block_calibration_records`), when the
-      checkpoint's own training experiment reserved one (``data.split.reserve_calibration_fraction``
-      at training time). Without a reserved region, conf has no per-dataset calibration for this
-      regime; a validated per-plant count is earned later, at delivery
-      (``deliver_orthomosaic_plant_counts``).
-
-    Provide exactly one of ``images_dir``/``raster_path``. Both regimes write the same
-    ``operating_point.json`` stamp convention beside the prediction file(s), so downstream code that
-    reads a bucket's sidecar generically needs no special case for which regime produced it.
-
-    Neither regime's underlying pass (``run_inference``, or the raster pass) ever refuses on an
-    unvalidated dimension on its own, each is the shared, honestly-stamped raw substrate this door
-    builds on, the same contract an uncalibrated ``conf`` already has. This tool is the one that
-    actually persists a prediction bucket other doors treat as ground truth, so it is where the
-    refusal belongs: a tiled run whose tile_size has no real basis (no persisted training geometry,
-    no recoverable native-frame edge, no explicit override) refuses to write here unless
-    ``acknowledge_unvalidated=True``, the same
-    gate ``deliver_per_image_counts``/``deliver_phenology_milestones``/the web results routes/``export_aggregated_csv``
-    already apply, via the same shared :func:`tcip_mcp.pipelines.resolution.tile_size_gate_flag`.
-    Both regimes gate before the (expensive) pass runs: the ``raster_path`` regime uses the
-    predictor that pass then reuses; the ``images_dir`` regime sniffs the checkpoint's own stamped
-    config (no weights load, never raises on a missing/unreadable checkpoint) to resolve the same
-    geometry ``run_inference`` will, then re-checks against ``run_inference``'s own real result
-    after the pass as the authoritative gate. An untiled run's tile_size is never operative and
-    can't manufacture a refusal.
-
-    A prediction bucket (``output_dir``) that already carries review verdicts is immutable: by
-    default the export is redirected to a fresh run-scoped bucket (``<dir>@r2``, ``@r3``, next
-    free) and the dir actually written is returned as ``output_dir``. Pass ``overwrite=True`` to
-    write in place only when the bucket has zero verdicts; with verdicts present it is refused
-    (error names the count and a suggested dir) so a re-run never orphans recorded verdicts. The
-    verdicts consulted are the ones recorded in the bucket's own dataset, so a bucket written
-    outside any dataset has no store to be guarded against: that export is written where it was
-    asked for, ``verdict_guard_operative`` comes back false with a note saying so, and it is
-    stamped unvalidated whatever its operating point cleared, since a count claim outside the
-    dataset layout has no dataset-relative key a reader could locate it by.
-
-    A bucket stamped validated names the validation record its claim was earned from. The gate for
-    that record runs before any file is written, and the record is appended over the prediction
-    files as they actually landed, so a run that dies partway leaves either predictions with no
-    stamp or a record no stamp names, both of which floor to unvalidated at every delivery door.
-
-    Args:
-        checkpoint_path: Path to model .pt checkpoint. Must be registered under this process's
-            platform state root (``register_model``, explicit mode for a foreign or bespoke
-            checkpoint) or this door refuses before loading it.
-        images_dir: Directory containing input images (mutually exclusive with ``raster_path``).
-        output_dir: Directory for output .json prediction file(s). A relative path resolves
-            against the platform state root, never the server process's cwd.
-        conf_threshold: Minimum confidence score. ``None`` (default) states nothing and forwards
-            that on, leaving the value to run at the platform default; a stated value is an
-            explicit override even when it equals the platform default.
-        device: Device to use.
-        tile: Tiled (SAHI-style) inference for small dense objects (``images_dir`` regime only;
-            ``raster_path`` is always tiled). ``None`` (default) forwards to ``run_inference``
-            unresolved, see its own ``tile`` doc: a documented default distinct from an explicit
-            choice, not silently ``False``. Works for ``instance_seg`` too; masks reach
-            ``write_predictions_json`` either way, tiled or untiled, in whichever of the two
-            coordinate shapes the producing pass produced.
-        tile_size: Sliding-window tile edge (px).
-        overlap: Fractional tile overlap.
-        tile_batch_size: Tiles per forward batch.
-        global_nms_iou: Cross-tile NMS IoU. ``None`` (default) states nothing and forwards that on,
-            leaving the value to be derived; a stated value is an explicit override even when it
-            equals the platform default. See ``run_inference``'s own doc.
-        max_dets: Full-frame detection cap. ``None`` (default) states nothing and forwards that on,
-            leaving the value to be derived; a stated value is an explicit override even when it
-            equals the platform default. See ``run_inference``'s own doc.
-        postprocess: Cross-tile merge, "nms" or "nmm".
-        trait: Trait to calibrate the operating point per dataset. ``images_dir`` regime: with
-            ``calibration_labels_dir``. ``raster_path`` regime: alone, against the checkpoint's own
-            training mosaic's reserved calibration/test regions (requires
-            ``data.split.reserve_calibration_fraction`` at training time; refuses by name
-            otherwise).
-        calibration_labels_dir: Labeled dir for calibrating + held-out validating the operating
-            point (``images_dir`` regime only; not accepted with ``raster_path``, see ``trait``).
-        calibration_images_dir: Images for the calibration labels (defaults to ``images_dir``).
-        split_manifest_dir: Restrict calibration to one capture date's ``calibration`` side of a
-            split manifest (forwarded to ``run_inference``; see its own doc), so a
-            manifest-restricted calibration's evidence can earn a validation record through this
-            door.
-        experiment_id: The run that produced the checkpoint, for provenance (forwarded to
-            ``run_inference``; see its own doc for the best-effort resolution when omitted).
-        overwrite: Write into ``output_dir`` even if it exists. Refused if the bucket has review
-            verdicts; the default (False) auto-redirects to a fresh bucket instead.
-        acknowledge_unvalidated: Write the bucket even when tile_size (a tiled run only) has no
-            real basis, stamping ``tile_size_validated=false`` on the sidecar so the
-            un-trustworthiness travels with it rather than writing silently.
-        raster_path: A single raster, georeferenced or not, potentially too large to decode whole
-            (mutually exclusive with ``images_dir``); see the regime description above.
-        require_masks: Collect masks for an ``instance_seg`` checkpoint (``raster_path`` regime
-            only; ignored for ``images_dir``, which always carries masks via ``run_inference``).
-    """
-    if not Path(checkpoint_path).is_file():
-        return {"error": f"Checkpoint not found: {checkpoint_path}"}
-    if not output_dir:
-        return {"error": "output_dir is required"}
-    if images_dir is None and raster_path is None:
-        return {"error": "Provide either images_dir or raster_path"}
-    if images_dir is not None and raster_path is not None:
-        return {"error": "Provide only one of images_dir or raster_path, not both"}
-    if raster_path is not None and calibration_labels_dir:
-        return {"error": "calibration_labels_dir is not supported for a raster_path export: "
-                         "block calibration (trait alone, see below) validates against the "
-                         "mosaic's own reserved regions instead of a caller-supplied labeled dir."}
-    if raster_path is not None and split_manifest_dir:
-        return {"error": "split_manifest_dir is not supported for a raster_path export: block "
-                         "calibration draws no split-manifest universe, so it would be silently "
-                         "dropped rather than scoping anything."}
-    if raster_path is not None and not Path(raster_path).is_file():
-        return {"error": f"raster_path not found: {raster_path}"}
-
-    # Resolve the writable bucket before the checkpoint is read: a verdict-blocked overwrite must
-    # still refuse before the file is touched at all.
-    out, resolution, bucket_root, refusal = _resolve_writable_bucket_for(
-        output_dir, overwrite=overwrite)
-    if refusal is not None:
-        return refusal
-
-    from tcip_mcp.model_registry import UnregisteredCheckpoint, load_registered_checkpoint
-
-    try:
-        checkpoint = load_registered_checkpoint(checkpoint_path)
-    except UnregisteredCheckpoint as exc:
-        return {"error": str(exc)}
-
-    block_calibration_experiment_id = None
-    if raster_path is not None and trait:
-        from tcip_mcp.model_registry import resolve_model_identity
-        from tcip_mcp.pipelines.block_calibration import reserved_calibration_region_available
-
-        block_identity = resolve_model_identity(checkpoint, experiment_id=experiment_id)
-        block_calibration_experiment_id = block_identity["experiment_id"]
-        if block_calibration_experiment_id is None or not reserved_calibration_region_available(
-            block_calibration_experiment_id
-        ):
-            return {"error": (
-                "trait calibration for a raster_path export requires the checkpoint's own "
-                "training experiment to have a spatial-strip split with a reserved calibration "
-                "region (train it with data.split.reserve_calibration_fraction set); this "
-                f"checkpoint's experiment_id ({block_calibration_experiment_id!r}) has none. "
-                "Deliver a calibrated per-plant count via deliver_orthomosaic_plant_counts "
-                "instead, or retrain with reserve_calibration_fraction set."
-            )}
-
-    if raster_path is not None:
-        return _export_predictions_raster(
-            checkpoint=checkpoint, raster_path=raster_path, out=out,
-            resolution=resolution, device=device, conf_threshold=conf_threshold,
-            tile_size=tile_size, overlap=overlap, tile_batch_size=tile_batch_size,
-            global_nms_iou=global_nms_iou, max_dets=max_dets, postprocess=postprocess,
-            require_masks=require_masks,
-            experiment_id=block_calibration_experiment_id or experiment_id,
-            acknowledge_unvalidated=acknowledge_unvalidated, trait=trait,
-        )
-
-    from tcip_mcp.pipelines.resolution import (
-        check_delivery_gate, resolve_tile_size_param, tile_size_gate_flag,
-    )
-
-    # Gate before the (expensive) pass: the checkpoint's own stamped config, already loaded,
-    # resolves the same tile geometry run_inference itself will.
-    from types import SimpleNamespace
-
-    from tcip_mcp.pipelines.inference.predictor import (
-        TileEdgeContradiction, explicit_edge_provenance, resolve_tile_regime,
-    )
-
-    data_cfg = checkpoint.data_config
-    tiling_cfg = data_cfg.get("tiling") or {}
-    stub = SimpleNamespace(
-        train_tile_size=tiling_cfg.get("tile_size"), train_overlap=tiling_cfg.get("overlap"),
-        train_native_size=data_cfg.get("train_native_size"))
-    pre_tiled = (stub.train_tile_size is not None) if tile is None else tile
-    try:
-        pre_tile, pre_tile_source, _pre_overlap, _pre_overlap_source, _pre_resize = resolve_tile_regime(
-            stub, tiled=pre_tiled, tile_size=tile_size, overlap=overlap)
-    except TileEdgeContradiction as exc:
-        return {"error": str(exc)}
-    pre_tile_derived_from = (
-        explicit_edge_provenance(stub, pre_tile)
-        if pre_tile_source == "explicit" and pre_tile is not None else None)
-    pre_param = resolve_tile_size_param(
-        pre_tile, tiled=pre_tiled, tile_size_source=pre_tile_source,
-        tile_size_derived_from=pre_tile_derived_from)
-    pre_tile_ref = tile_size_gate_flag({"tile_size": pre_param.to_provenance()})
-    pre_gate = check_delivery_gate(
-        {"tile_size": pre_tile_ref} if pre_tile_ref is not None else {},
-        acknowledge_unvalidated=acknowledge_unvalidated)
-    if not pre_gate.ok:
-        return {"error": pre_gate.reason, "tile_size_validated": pre_tile_ref}
-
-    result = _run_inference_verified(
-        checkpoint, images_dir=images_dir, conf_threshold=conf_threshold,
-        device=device, tile=tile, tile_size=tile_size, overlap=overlap,
-        tile_batch_size=tile_batch_size, global_nms_iou=global_nms_iou, max_dets=max_dets,
-        postprocess=postprocess, trait=trait,
-        calibration_labels_dir=calibration_labels_dir, calibration_images_dir=calibration_images_dir,
-        split_manifest_dir=split_manifest_dir, experiment_id=experiment_id,
-    )
-    if "error" in result:
-        return result
-
-    sha = result.get("checkpoint_sha256")
-    exp_id = result.get("experiment_id")
-    pub = _publish_bucket_bracket(
-        result, out=out, checkpoint_path=checkpoint_path, trait=trait, images_dir=images_dir,
-        dataset_root=bucket_root, acknowledge_unvalidated=acknowledge_unvalidated)
-    if pub["refusal"] is not None:
-        return pub["refusal"]
-    written, dropped_boxes = pub["written"], pub["dropped_boxes"]
-    op_stamp, tile_size_validated = pub["op_stamp"], pub["tile_size_validated"]
-
-    response = {"image_count": len(written), "output_dir": str(out), "files": written,
-                "bucket_redirected": resolution.redirected,
-                "requested_output_dir": output_dir if resolution.redirected else None,
-                "operating_point": result.get("operating_point"),
-                "validated": op_stamp["validated"],
-                "tile_size_validated": tile_size_validated,
-                "conf_source": result.get("conf_source"),
-                "checkpoint_sha256": sha,
-                "experiment_id": exp_id,
-                "verdict_guard_operative": bucket_root is not None,
-                "dropped_nonpositive_boxes": dropped_boxes}
-    if bucket_root is None:
-        response["note"] = _NO_DATASET_ROOT_NOTE.format(bucket=out)
-    # The run's warnings (a CPU-bound workload) belong on this door's own response too, otherwise
-    # the reason a delivered bucket ran in the regime it did is visible only in the server log.
-    if result.get("warning"):
-        response["warning"] = result["warning"]
     return response
 
 
@@ -1647,17 +1781,17 @@ def deliver_per_image_counts(
 
     Two source regimes, exactly one stated:
 
-    - Live (``checkpoint_path`` and ``images_dir``, both required together): routes through
-      ``run_inference`` so the per-image counts resolve the same firewalled operating point
-      (conf/NMS/tiling/max_dets) as ``run_inference``/``export_predictions``; the CSV is a
+    - Live (``checkpoint_path`` and ``images_dir``, both required together): routes through the
+      private verified pass so the per-image counts resolve the same firewalled operating point
+      (conf/NMS/tiling/max_dets) as ``run_inference``; the CSV is a
       count-bearing deliverable, so it must not be produced at a different, untiled, truncating
       operating point. Passing ``predictions_dir`` too persists the run's own predictions into
-      that bucket, gated and linked exactly as ``export_predictions`` publishes one (the same
+      that bucket, gated and linked exactly as ``run_inference`` publishes one (the same
       tile-scale gate, frozen-lineage-pointer refusal, and lineage link), then reads the CSV's own
       validity back off the bucket it just wrote. Without ``predictions_dir`` the counts rest on
       one in-memory pass with nothing a reviewer can re-open, so the CSV can only be delivered
       provisionally (``acknowledge_unvalidated=True``); a bucket published this way (or by
-      ``export_predictions``) can also be promoted to validated later, with no re-run, through the
+      ``run_inference``) can also be promoted to validated later, with no re-run, through the
       review validation route (``validate_reference``), then re-delivered through this door's
       bucket regime below.
     - Bucket (``predictions_dir`` alone, ``checkpoint_path``/``images_dir`` both absent): no GPU,
@@ -1682,7 +1816,7 @@ def deliver_per_image_counts(
     ``predictions_dir`` the live regime published before the CSV's own gate ran
     (``bucket_published``, ``bucket_redirected``, ``lineage_linked``, beside ``csv_delivered:
     false``): the bucket is the caller's own stated ``predictions_dir`` intent, published under
-    ``export_predictions``' contract, and it survives a refused CSV so the review-promotion
+    ``run_inference``'s own contract, and it survives a refused CSV so the review-promotion
     workflow above can proceed from it.
 
     Every row's image cell holds the source image's basename with its extension, never the bare
@@ -1770,7 +1904,7 @@ def deliver_per_image_counts(
             unvalidated, stamping it ``operating_point_validated=false`` so the un-trustworthiness
             travels downstream.
         predictions_dir: Live regime: directory to persist the counted predictions into, resolved
-            and stamped the way ``export_predictions`` resolves and stamps a bucket (a relative
+            and stamped the way ``run_inference`` resolves and stamps a bucket (a relative
             path resolves against the platform state root; a bucket carrying review verdicts redirects to
             a fresh variant); omitted, the CSV can only be delivered provisionally. Bucket regime:
             the existing bucket to read (required, resolved the same way; no writable-bucket
@@ -2078,7 +2212,7 @@ def _deliver_per_image_counts_from_bucket(predictions_dir: str, output_path: str
     if sidecar is None:
         return {"error": (
             f"{bucket_path} carries no readable operating_point.json: a bucket regime call reads "
-            "a stamp a platform producer wrote (export_predictions, deliver_per_image_counts's own "
+            "a stamp a platform producer wrote (run_inference, deliver_per_image_counts's own "
             "live-with-predictions_dir path, or the web inference worker), never a directory of "
             "label JSON with no stamp."
         )}
@@ -2106,7 +2240,7 @@ def _deliver_per_image_counts_from_bucket(predictions_dir: str, output_path: str
         return {"error": (
             f"{bucket_path}'s stamp's image_filenames is not a mapping (got "
             f"{type(filename_map).__name__}): a bucket regime call expects the stem-to-filename "
-            "map export_predictions, deliver_per_image_counts's live-with-predictions_dir path, or the web "
+            "map run_inference, deliver_per_image_counts's live-with-predictions_dir path, or the web "
             "inference worker writes there, or nothing at all."
         )}
     image_results, fallback_stems = _bucket_csv_rows(bucket_path, filename_map)

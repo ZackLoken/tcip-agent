@@ -1,4 +1,4 @@
-"""export_predictions: writes per-image prediction JSON, never overwrites a bucket with verdicts."""
+"""run_inference: writes per-image prediction JSON, never overwrites a bucket with verdicts."""
 
 from __future__ import annotations
 
@@ -39,7 +39,7 @@ def _ckpt(tmp_path, name: str = "ckpt.pt") -> str:
     return str(p)
 
 
-def test_export_predictions_writes_json(tmp_path, monkeypatch):
+def test_run_inference_writes_json(tmp_path, monkeypatch):
     ckpt = tmp_path / "m.pt"
     ckpt.write_bytes(b"stub")  # only existence is checked
     images_dir = tmp_path / "images"
@@ -57,10 +57,10 @@ def test_export_predictions_writes_json(tmp_path, monkeypatch):
 
     monkeypatch.setattr(
         "tcip_mcp.pipelines.inference.generic_predictor.GenericPredictor", FakePredictor)
-    from tcip_mcp.tools.inference_tools import export_predictions
+    from tcip_mcp.tools.inference_tools import run_inference
 
     out = tmp_path / "out"
-    export_predictions(str(ckpt), str(images_dir), str(out), tile=False)
+    run_inference(str(ckpt), str(images_dir), output_dir=str(out), tile=False)
     data = json.loads((out / "img.json").read_text())
     assert data["image"] == "img"
     assert (data["width"], data["height"]) == (100, 100)
@@ -76,9 +76,9 @@ def test_export_predictions_writes_json(tmp_path, monkeypatch):
     assert anns[0]["created_by"] == f"model:m@{hashlib.sha256(ckpt.read_bytes()).hexdigest()[:12]}"
 
 
-def test_export_predictions_forwards_split_manifest_dir_to_run_inference(tmp_path, monkeypatch):
+def test_run_inference_forwards_split_manifest_dir_to_the_verified_pass(tmp_path, monkeypatch):
     """A manifest-restricted calibration's evidence can only earn a validation record through
-    this door if the door actually forwards split_manifest_dir to run_inference."""
+    this door if the door actually forwards split_manifest_dir to the verified pass."""
     import tcip_mcp.tools.inference_tools as itools
 
     captured = {}
@@ -89,20 +89,20 @@ def test_export_predictions_forwards_split_manifest_dir_to_run_inference(tmp_pat
 
     monkeypatch.setattr(itools, "_run_inference_verified", _fake_run_inference_verified)
 
-    itools.export_predictions(
+    itools.run_inference(
         _ckpt(tmp_path), images_dir=str(tmp_path), output_dir=str(tmp_path / "out"),
-        split_manifest_dir=str(tmp_path / "m"))
+        calibration_labels_dir=str(tmp_path), split_manifest_dir=str(tmp_path / "m"))
 
     assert captured.get("split_manifest_dir") == str(tmp_path / "m")
 
 
-def test_export_predictions_refuses_split_manifest_dir_with_raster_path(tmp_path):
+def test_run_inference_refuses_split_manifest_dir_with_raster_path(tmp_path):
     """The raster regime draws no split-manifest universe (block calibration validates against
     the mosaic's own reserved regions instead), so a caller-given manifest is refused by name
     rather than silently dropped before it ever reaches the raster pass."""
-    from tcip_mcp.tools.inference_tools import export_predictions
+    from tcip_mcp.tools.inference_tools import run_inference
 
-    result = export_predictions(
+    result = run_inference(
         _ckpt(tmp_path), output_dir=str(tmp_path / "out"),
         raster_path=str(tmp_path / "mosaic.tif"), split_manifest_dir=str(tmp_path / "m"))
 
@@ -166,17 +166,17 @@ def test_a_second_image_regime_export_against_a_completed_experiment_refuses_bef
     create_experiment("expImg", {"model_source": {"builder": "x:y"}})
     update_status("expImg", "running")
 
-    from tcip_mcp.tools.inference_tools import export_predictions
+    from tcip_mcp.tools.inference_tools import run_inference
 
     out1 = tmp_path / "out1"
-    r1 = export_predictions(str(ckpt), str(images_dir), str(out1), tile=False,
-                            experiment_id="expImg")
+    r1 = run_inference(str(ckpt), str(images_dir), output_dir=str(out1), tile=False,
+                       experiment_id="expImg")
     assert "error" not in r1, r1
     update_status("expImg", "completed")
 
     out2 = tmp_path / "out2"
-    r2 = export_predictions(str(ckpt), str(images_dir), str(out2), tile=False,
-                            experiment_id="expImg")
+    r2 = run_inference(str(ckpt), str(images_dir), output_dir=str(out2), tile=False,
+                       experiment_id="expImg")
     assert "error" in r2
     assert not out2.exists()
 
@@ -197,21 +197,21 @@ def test_a_same_path_image_regime_export_against_a_completed_experiment_admits_t
     create_experiment("expImgSame", {"model_source": {"builder": "x:y"}})
     update_status("expImgSame", "running")
 
-    from tcip_mcp.tools.inference_tools import export_predictions
+    from tcip_mcp.tools.inference_tools import run_inference
 
     out = tmp_path / "out"
-    r1 = export_predictions(str(ckpt), str(images_dir), str(out), tile=False,
-                            experiment_id="expImgSame")
+    r1 = run_inference(str(ckpt), str(images_dir), output_dir=str(out), tile=False,
+                       experiment_id="expImgSame")
     assert "error" not in r1, r1
     update_status("expImgSame", "completed")
 
-    r2 = export_predictions(str(ckpt), str(images_dir), str(out), tile=False,
-                            experiment_id="expImgSame")
+    r2 = run_inference(str(ckpt), str(images_dir), output_dir=str(out), tile=False,
+                       experiment_id="expImgSame")
     assert "error" not in r2, r2
     assert (out / "img.json").is_file()
 
 
-def test_export_predictions_redirects_a_bespoke_bucket_against_its_own_datasets_verdicts(
+def test_run_inference_redirects_a_bespoke_bucket_against_its_own_datasets_verdicts(
     tmp_path, monkeypatch,
 ):
     """A bucket that is not the canonical predictions/<model>/<date> shape but still sits inside a
@@ -248,15 +248,15 @@ def test_export_predictions_redirects_a_bespoke_bucket_against_its_own_datasets_
     _fake_predictor(monkeypatch)
     ckpt = tmp_path / "m.pt"
     ckpt.write_bytes(b"stub")
-    from tcip_mcp.tools.inference_tools import export_predictions
+    from tcip_mcp.tools.inference_tools import run_inference
 
     # overwrite=True is refused with the verdict count and a suggested fresh bucket.
-    res2 = export_predictions(str(ckpt), str(images_dir), str(out), overwrite=True, tile=False)
+    res2 = run_inference(str(ckpt), str(images_dir), output_dir=str(out), overwrite=True, tile=False)
     assert "error" in res2 and res2["verdict_count"] == 1
     assert Path(res2["suggested_bucket"]).name == "preds@r2"
 
     # Default: redirect to a fresh @r2 bucket; the reviewed bucket is left intact.
-    res = export_predictions(str(ckpt), str(images_dir), str(out), tile=False)
+    res = run_inference(str(ckpt), str(images_dir), output_dir=str(out), tile=False)
     assert res["bucket_redirected"] is True
     assert res["verdict_guard_operative"] is True
     assert Path(res["output_dir"]).name == "preds@r2"
@@ -264,7 +264,7 @@ def test_export_predictions_redirects_a_bespoke_bucket_against_its_own_datasets_
     assert json.loads((out / "img.json").read_text())["annotations"] == []  # untouched
 
 
-def test_export_predictions_writes_a_bucket_under_no_dataset_root_and_says_the_guard_is_off(
+def test_run_inference_writes_a_bucket_under_no_dataset_root_and_says_the_guard_is_off(
     tmp_path, monkeypatch,
 ):
     """A bucket outside any dataset has no verdict store to be guarded against, so the export is
@@ -283,10 +283,10 @@ def test_export_predictions_writes_a_bucket_under_no_dataset_root_and_says_the_g
     _fake_predictor(monkeypatch)
     ckpt = tmp_path / "m.pt"
     ckpt.write_bytes(b"stub")
-    from tcip_mcp.tools.inference_tools import export_predictions
+    from tcip_mcp.tools.inference_tools import run_inference
 
     out = tmp_path / "scratch_preds"
-    res = export_predictions(str(ckpt), str(images_dir), str(out), tile=False)
+    res = run_inference(str(ckpt), str(images_dir), output_dir=str(out), tile=False)
 
     assert "error" not in res, res
     assert Path(res["output_dir"]) == out
@@ -337,7 +337,7 @@ def _canonical_bucket_with_a_verdict(tmp_path, monkeypatch) -> tuple:
     return dataset_root, images_dir, out, ckpt
 
 
-def test_export_predictions_redirect_varies_the_model_segment_for_a_canonical_bucket(
+def test_run_inference_redirect_varies_the_model_segment_for_a_canonical_bucket(
     tmp_path, monkeypatch
 ) -> None:
     """A caller-assembled predictions/<model>/<date> output_dir must redirect the same way the
@@ -347,9 +347,9 @@ def test_export_predictions_redirect_varies_the_model_segment_for_a_canonical_bu
     from tcip_mcp.dataset_layout import prediction_dir
 
     dataset_root, images_dir, out, ckpt = _canonical_bucket_with_a_verdict(tmp_path, monkeypatch)
-    from tcip_mcp.tools.inference_tools import export_predictions
+    from tcip_mcp.tools.inference_tools import run_inference
 
-    res = export_predictions(str(ckpt), str(images_dir), str(out), tile=False)
+    res = run_inference(str(ckpt), str(images_dir), output_dir=str(out), tile=False)
     assert res["bucket_redirected"] is True
     redirected = Path(res["output_dir"])
     # The model segment moved, not the date: still findable under the same date, a different model name.
@@ -359,7 +359,7 @@ def test_export_predictions_redirect_varies_the_model_segment_for_a_canonical_bu
     assert (redirected / "img.json").is_file()
 
 
-def test_export_predictions_counts_a_canonical_buckets_verdicts_in_its_own_datasets_store(
+def test_run_inference_counts_a_canonical_buckets_verdicts_in_its_own_datasets_store(
     tmp_path, monkeypatch
 ) -> None:
     """The verdicts that freeze a dataset's prediction bucket are the ones recorded in that
@@ -368,15 +368,15 @@ def test_export_predictions_counts_a_canonical_buckets_verdicts_in_its_own_datas
     from pathlib import Path
 
     _dataset_root, images_dir, out, ckpt = _canonical_bucket_with_a_verdict(tmp_path, monkeypatch)
-    from tcip_mcp.tools.inference_tools import export_predictions
+    from tcip_mcp.tools.inference_tools import run_inference
 
-    refused = export_predictions(str(ckpt), str(images_dir), str(out), overwrite=True, tile=False)
+    refused = run_inference(str(ckpt), str(images_dir), output_dir=str(out), overwrite=True, tile=False)
     assert "error" in refused and refused["verdict_count"] == 1
     assert Path(refused["suggested_bucket"]).parent.name == "baseline@r2"
     assert json.loads((out / "img.json").read_text())["annotations"] == []
 
 
-def test_export_predictions_writes_a_canonical_bucket_with_no_verdicts_in_place(
+def test_run_inference_writes_a_canonical_bucket_with_no_verdicts_in_place(
     tmp_path, monkeypatch
 ) -> None:
     """The same dataset-scoped guard must still admit the ordinary re-run: an unreviewed bucket is
@@ -399,9 +399,9 @@ def test_export_predictions_writes_a_canonical_bucket_with_no_verdicts_in_place(
     _fake_predictor(monkeypatch)
     ckpt = tmp_path / "m.pt"
     ckpt.write_bytes(b"stub")
-    from tcip_mcp.tools.inference_tools import export_predictions
+    from tcip_mcp.tools.inference_tools import run_inference
 
-    res = export_predictions(str(ckpt), str(images_dir), str(out), overwrite=True, tile=False)
+    res = run_inference(str(ckpt), str(images_dir), output_dir=str(out), overwrite=True, tile=False)
     assert "error" not in res
     assert res["bucket_redirected"] is False
     assert Path(res["output_dir"]) == out
