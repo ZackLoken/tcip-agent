@@ -20,6 +20,7 @@ pytest.importorskip("pycocotools")
 from tcip_mcp.pipelines.training.evaluation import (  # noqa: E402
     DEFAULT_SCORE_WEIGHTS,
     build_coco_image_record,
+    center_match_pairs,
     classification_metrics,
     coco_detection_metrics,
     compute_composite_objective,
@@ -193,10 +194,44 @@ def test_golden_operating_point_pickers():
     assert at06["count_bias_mean"] == pytest.approx(0.0)
 
 
-# --------------------------------------------------------------------------
+# center_match_pairs: one matcher, two stated policies (score_first for the count,
+# distance_first for the classifier calibration pairing); coverage of the pinned tie rules.
+
+def test_center_match_pairs_score_first_and_distance_first_disagree_on_cardinality():
+    """Two ground truths, one detection within tolerance of both: score-first (walking
+    detections in the given, score-descending order) claims one pair; distance-first (every
+    pair sorted by distance ascending) claims two. Exact pairs, not just counts."""
+    gt_centers = [(0.0, 0.0), (10.0, 0.0)]
+    dt_centers = [(4.0, 0.0), (0.0, 0.0)]  # score 0.9 then 0.1, already score-descending
+
+    score_first = center_match_pairs(gt_centers, dt_centers, 6.0, policy="score_first")
+    assert score_first == [(0, 0)]
+
+    distance_first = center_match_pairs(gt_centers, dt_centers, 6.0, policy="distance_first")
+    assert distance_first == [(0, 1), (1, 0)]
+
+
+def test_center_match_pairs_score_first_tie_keeps_the_last_index():
+    """Coverage: among equidistant unused ground truths, score-first keeps the last index,
+    the count's existing tie rule, unchanged by this primitive's introduction."""
+    gt_centers = [(0.0, 0.0), (2.0, 0.0)]
+    dt_centers = [(1.0, 0.0)]  # equidistant (1.0) from both
+    pairs = center_match_pairs(gt_centers, dt_centers, 1.0, policy="score_first")
+    assert pairs == [(1, 0)]
+
+
+def test_center_match_pairs_distance_first_tie_breaks_by_gt_then_detection_index():
+    """Coverage: distance-first breaks a tied distance by (gt index, detection index)
+    ascending, so a fully degenerate 2x2 assigns each detection to the ground truth sharing
+    its own index rather than crossing them."""
+    gt_centers = [(0.0, 0.0), (0.0, 0.0)]
+    dt_centers = [(5.0, 0.0), (5.0, 0.0)]  # every pair is equidistant (5.0)
+    pairs = center_match_pairs(gt_centers, dt_centers, 10.0, policy="distance_first")
+    assert pairs == [(0, 0), (1, 1)]
+
+
 # resolve_match_criterion derives/records the localization kind once, reuses it, and warns
 # (never silently switches) on divergence.
-# --------------------------------------------------------------------------
 
 def _write_bare_trait(name: str, **extra) -> None:
     """A minimal trait spec with no localization recorded (unlike seed_catkin_trait_spec's
