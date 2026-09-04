@@ -36,6 +36,7 @@ import tcip_mcp.tools.inference_tools  # noqa: F401, E402
 import tcip_mcp.tools.calibration_tools  # noqa: F401, E402
 import tcip_mcp.tools.model_tools  # noqa: F401, E402
 import tcip_mcp.tools.orthomosaic_tools  # noqa: F401, E402
+import tcip_mcp.tools.delivery_tools  # noqa: F401, E402
 
 
 def list_registered_tools() -> list[str]:

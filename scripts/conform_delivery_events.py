@@ -6,10 +6,10 @@ This script conforms by checking and naming, never by rewriting: it is a one-off
 per this repo's no-backward-compatibility boundary (CLAUDE.md), but unlike
 ``conform_view_coverage_viewing.py`` it has nothing to reshape. A ``delivery_events`` record
 predating the three ``plant_mapping`` disclosure keys (``dates_delivered``, ``images_unattributed``,
-``plant_attribution``) carries no value for them anywhere on the record: they were never computed
-for that delivery, so there is no old shape to map forward, only a gap to name. A refused record is
-left exactly as stored; the only remedy is a fresh delivery through the door that writes this
-record, or removing the record by hand.
+``plant_attribution``) or the delivered file's own ``output_sha256`` carries no value for them
+anywhere on the record: they were never computed for that delivery, so there is no old shape to
+map forward, only a gap to name. A refused record is left exactly as stored; the only remedy is a
+fresh delivery through the door that writes this record, or removing the record by hand.
 
 ``--plan`` is accepted for the same invocation shape as the other conform scripts in this
 directory, but changes nothing here: this script never writes in either mode, so there is no
