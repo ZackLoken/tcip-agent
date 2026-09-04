@@ -8,8 +8,8 @@ Headless annotation/review engine: label I/O, IoU matching, SAM wrapper. Loads o
 ```
 src/tcip_annotation/
   annotation_engine.py   # core annotation read/write
-  review_engine.py        # review-verdict logging (accept/edit/reject); the hard-negative
-                          # partition itself lives in tcip-mcp's pipelines/feedback/materialize.py
+  review_engine.py        # review-verdict logging (accept/edit/reject) and the GT label write-back
+                          # (save_gt); the hard-negative partition itself lives in tcip-mcp's pipelines/feedback/materialize.py
   json_io.py               # per-image JSON annotation records
   format_io.py              # format detection/parsing
   matching.py                # IoU matching (GT vs prediction, review vs GT)
