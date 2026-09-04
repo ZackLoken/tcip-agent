@@ -129,6 +129,31 @@ def assignment_is_attributed(assignment: object) -> bool:
     return isinstance(plot_name, str) and plot_name != ""
 
 
+def require_named_plants(plants: list[PlantRecord]) -> None:
+    """Refuse a registry carrying a blank or duplicate ``plot_name``, the one check every
+    raster-level attribution regime (nearest-neighbour distance, canopy-segment containment)
+    runs over the same registry before attributing a single detection to it.
+
+    A blank name fails :func:`assignment_is_attributed`'s own rule; a duplicate would merge two
+    trees' detections into one row once ``aggregate_per_plant`` groups by ``plot_name``. Raises
+    ``ValueError`` naming the offending accession or names, never silently dropping either plant
+    from the registry it was asked to check.
+    """
+    for p in plants:
+        if not assignment_is_attributed({"plot_name": p.plot_name}):
+            raise ValueError(
+                f"the plant registry carries a blank plot_name (accession {p.accession_name!r}); "
+                "every plant this delivery attributes detections to must carry a plot_name"
+            )
+    names = [p.plot_name for p in plants]
+    duplicates = sorted({n for n in names if names.count(n) > 1})
+    if duplicates:
+        raise ValueError(
+            f"the plant registry carries duplicate plot_name(s) {duplicates}; two rows sharing "
+            "one identity would merge two trees' detections into one aggregation row"
+        )
+
+
 @dataclass
 class MappingBuild:
     """One build's provenance plus its per-date assignments: the whole persisted record, in
