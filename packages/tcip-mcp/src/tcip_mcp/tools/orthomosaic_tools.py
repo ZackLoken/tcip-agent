@@ -42,7 +42,6 @@ def deliver_orthomosaic_plant_counts(
     crop: str = "",
     pipeline_version: str = "",
     nn_tolerance_m: float | None = None,
-    acknowledge_unvalidated: bool = False,
 ) -> dict:
     """Per-plant detection counts from a persisted orthomosaic prediction bucket plus plant CSV(s).
 
@@ -76,11 +75,12 @@ def deliver_orthomosaic_plant_counts(
 
     Delivery gate: the count is the phenotype, so this refuses a bare write of an unvalidated
     count operating point (read from the bucket's own ``operating_point.json``, never trusted
-    from a caller string) unless ``acknowledge_unvalidated=True`` ships a clearly-flagged
-    provisional CSV stamped ``operating_point_validated=false``. A tiled bucket's ``tile_size`` gates
-    the same way (the tile edge scales the per-image counts the per-plant value sums), reusing
-    the identical ``export_aggregated_csv`` gate every other per-plant delivery goes through, not
-    a second implementation of it.
+    from a caller string), reusing the identical ``export_aggregated_csv`` gate every other
+    per-plant delivery goes through, not a second implementation of it. A tiled bucket's
+    ``tile_size`` gates the same way (the tile edge scales the per-image counts the per-plant
+    value sums). This door takes no acknowledgement: ``export_aggregated_csv`` accepts none, so an
+    unvalidated dimension always refuses here, and a mosaic whose training run reserved no
+    calibration region has no route to a delivered CSV at all until a web door delivers this kind.
 
     Meaning door: this runs the same per-plant-count-aggregate precondition its nested writer runs,
     and runs it first, before the raster identity is resolved or a single prediction is read. A
@@ -114,9 +114,6 @@ def deliver_orthomosaic_plant_counts(
         nn_tolerance_m: Nearest-neighbour match tolerance (m). ``None`` (default) derives it from
             the plant grid's own spacing (:func:`assign_detections_to_plants`'s own default),
             never a pinned constant.
-        acknowledge_unvalidated: Write the CSV even when the count operating point or tile_size
-            is unvalidated, stamping the un-validated dimension ``false`` so the
-            un-trustworthiness travels downstream.
     """
     from tcip_annotation.json_io import prediction_documents
     from tcip_mcp.project_paths import resolve_output_path
@@ -257,7 +254,6 @@ def deliver_orthomosaic_plant_counts(
             agg, output_csv_path, delivered_phenotype=delivered_phenotype, crop=crop,
             pipeline_version=pipeline_version, provenance=provenance,
             pred_dirs=[predictions_dir],
-            acknowledge_unvalidated=acknowledge_unvalidated,
             door="deliver_orthomosaic_plant_counts",
         )
     except DeliveryRefused as exc:

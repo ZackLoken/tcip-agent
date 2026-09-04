@@ -244,7 +244,7 @@ def run_inference(
     split_seed: int = 0,
     split_holdout_ratio: float = 0.5,
     overwrite: bool = False,
-    acknowledge_unvalidated: bool = False,
+    allow_unvalidated_staging: bool = False,
     require_masks: bool = True,
     resume: bool = False,
 ) -> dict:
@@ -293,10 +293,11 @@ def run_inference(
     uncalibrated ``conf`` already has. This tool is the one that actually persists a prediction
     bucket other doors treat as ground truth, so it is where the refusal belongs: a tiled run
     whose tile_size has no real basis (no persisted training geometry, no recoverable native-frame
-    edge, no explicit override) refuses to write here unless ``acknowledge_unvalidated=True``, the
-    same gate ``deliver_per_image_counts``/``deliver_phenology_milestones``/the web results
-    routes/``export_aggregated_csv`` already apply, via the same shared
-    :func:`tcip_mcp.pipelines.resolution.tile_size_gate_flag`. Both regimes gate before the
+    edge, no explicit override) refuses to write here unless ``allow_unvalidated_staging=True``, the
+    staging escape that clears only ``tile_size``/``claim_scope``
+    (:data:`tcip_mcp.pipelines.resolution.STAGING_DIMENSIONS`), never a phenotype's own delivered
+    dimensions: it lets a raw, honestly-stamped bucket be persisted at an unproven scale, a
+    different act from delivering a phenotype from one. Both regimes gate before the
     (expensive) pass runs: the ``raster_path`` regime uses the predictor that pass then reuses;
     the ``images_dir`` regime sniffs the checkpoint's own stamped config (no weights load, never
     raises on a missing/unreadable checkpoint) to resolve the same geometry the verified pass
@@ -419,9 +420,11 @@ def run_inference(
             (``resume``, below): it discards that progress and starts over. Conflicts with
             ``resume=True`` (refused by name): the two name opposite ways of handling the same
             recorded progress.
-        acknowledge_unvalidated: Write the bucket even when tile_size (a tiled run only) has no
+        allow_unvalidated_staging: Write the bucket even when tile_size (a tiled run only) has no
             real basis, stamping ``tile_size_validated=false`` on the sidecar so the
-            un-trustworthiness travels with it rather than writing silently.
+            un-trustworthiness travels with it rather than writing silently. Clears only the
+            staging dimensions (tile_size, claim_scope); never a delivered phenotype's own
+            operating-point or classifier dimension, which no argument here can clear.
         require_masks: Collect masks for an ``instance_seg`` checkpoint (``raster_path`` regime
             only; ignored for ``images_dir``, which always carries masks).
         resume: ``raster_path`` regime only (refuses with ``images_dir``, and with
@@ -548,7 +551,7 @@ def run_inference(
             global_nms_iou=global_nms_iou, max_dets=max_dets, postprocess=postprocess,
             require_masks=require_masks,
             experiment_id=block_calibration_experiment_id or experiment_id,
-            acknowledge_unvalidated=acknowledge_unvalidated, trait=trait,
+            allow_unvalidated_staging=allow_unvalidated_staging, trait=trait,
             resume=resume, overwrite=overwrite,
         )
 
@@ -584,7 +587,7 @@ def run_inference(
     pre_tile_ref = tile_size_gate_flag({"tile_size": pre_param.to_provenance()})
     pre_gate = check_delivery_gate(
         {"tile_size": pre_tile_ref} if pre_tile_ref is not None else {},
-        acknowledge_unvalidated=acknowledge_unvalidated)
+        allow_unvalidated_staging=allow_unvalidated_staging)
     if not pre_gate.ok:
         return {"error": pre_gate.reason, "tile_size_validated": pre_tile_ref}
 
@@ -603,7 +606,7 @@ def run_inference(
 
     pub = _publish_bucket_bracket(
         result, out=out, checkpoint_path=checkpoint_path, trait=trait, images_dir=images_dir,
-        dataset_root=bucket_root, acknowledge_unvalidated=acknowledge_unvalidated)
+        dataset_root=bucket_root, allow_unvalidated_staging=allow_unvalidated_staging)
     if pub["refusal"] is not None:
         return pub["refusal"]
     written, dropped_boxes = pub["written"], pub["dropped_boxes"]
@@ -1114,8 +1117,9 @@ def _draft_count_claim(result: dict, *, trait: str | None, bucket: Path,
             f"the run reports a validated operating point for trait {trait!r} but kept no "
             "calibration evidence to earn a validation record from, so these counts cannot be "
             "stamped validated. The evidence is written beside the confidence sweep at calibration "
-            "time; re-run the calibration, or pass acknowledge_unvalidated=True to write an "
-            "honestly-flagged provisional result."
+            "time; re-run the calibration. This has no acknowledgement route: it is a missing "
+            "validation record for a run that already reports itself validated, not an ungated "
+            "dimension a breeder can choose to ship unvalidated."
         )}
     if dataset_root is None:
         logger.warning(_NO_DATASET_ROOT_NOTE.format(bucket=bucket))
@@ -1208,7 +1212,7 @@ def _publish_image_predictions(out: Path, result: dict, *, checkpoint_path: str,
 
 def _publish_bucket_bracket(result: dict, *, out: Path, checkpoint_path: str, trait: str | None,
                            images_dir: str | None, dataset_root: Path | None,
-                           acknowledge_unvalidated: bool) -> dict:
+                           allow_unvalidated_staging: bool) -> dict:
     """Publish a live run's predictions into ``out``, gated and linked exactly as
     ``run_inference`` does: the authoritative post-inference tile gate, the count claim's own
     gate, the frozen-lineage-pointer refusal, the write, and the post-write lineage link. Shared so
@@ -1226,7 +1230,7 @@ def _publish_bucket_bracket(result: dict, *, out: Path, checkpoint_path: str, tr
     # early opt-out, this stays the authoritative gate.
     tile_ref = tile_size_gate_flag(result.get("operating_point"))
     tile_flags = {"tile_size": tile_ref} if tile_ref is not None else {}
-    gate = check_delivery_gate(tile_flags, acknowledge_unvalidated=acknowledge_unvalidated)
+    gate = check_delivery_gate(tile_flags, allow_unvalidated_staging=allow_unvalidated_staging)
     if not gate.ok:
         return {"refusal": {"error": gate.reason, "tile_size_validated": tile_ref},
                 "written": [], "dropped_boxes": 0, "op_stamp": {},
@@ -1381,7 +1385,7 @@ def _export_predictions_raster(
     *, checkpoint, raster_path: str, out: Path, resolution, device: str | None,
     conf_threshold: float | None, tile_size: int | None, overlap: float | None, tile_batch_size: int,
     global_nms_iou: float | None, max_dets: int | None, postprocess: str, require_masks: bool,
-    experiment_id: str | None, acknowledge_unvalidated: bool, trait: str | None = None,
+    experiment_id: str | None, allow_unvalidated_staging: bool, trait: str | None = None,
     resume: bool = False, overwrite: bool = False,
 ) -> dict:
     """The windowed-raster regime of :func:`run_inference`: tiled detection/instance_seg
@@ -1390,7 +1394,8 @@ def _export_predictions_raster(
     than an ordinary directory of per-image captures. Always tiled: there is no untiled option, the
     whole point of this regime is a raster too large for one. ``out``/``resolution`` are the bucket
     :func:`run_inference` already resolved (immutability/redirect), shared with the ordinary
-    regime rather than a second implementation of that check.
+    regime rather than a second implementation of that check. ``allow_unvalidated_staging`` is
+    :func:`run_inference`'s own staging escape, forwarded unchanged.
 
     Persists one prediction bucket: since there is no natural directory-of-per-plant-images shape
     for a whole-raster capture, "one image" is the whole raster, so the bucket holds exactly one
@@ -1414,9 +1419,9 @@ def _export_predictions_raster(
     the always-expensive tiled pass. Unlike the ordinary regime (which can fall back to running
     untiled), this regime always tiles, so a checkpoint with no persisted geometry, no recoverable
     native-frame edge, and no explicit override has no real basis to tile at *at all*: that refusal
-    is unconditional, never overridable via ``acknowledge_unvalidated`` (there is no value to
+    is unconditional, never overridable via ``allow_unvalidated_staging`` (there is no value to
     provisionally proceed with). This door has no real-but-unvalidated tile scale left to admit on
-    acknowledgement: every basis the gate below resolves to either clears it on its own or is this
+    the staging escape: every basis the gate below resolves to either clears it on its own or is this
     no-basis-at-all case. An explicit ``tile_size`` that contradicts the checkpoint's own recorded
     geometry refuses before that, from ``resolve_tile_regime`` itself. For the ``trait`` path, the
     block calibration's own reserved-region bands must also be tiled at this same resolved edge;
@@ -1666,7 +1671,7 @@ def _export_predictions_raster(
             gate_flags = {"claim_scope": claim_scope_flag}
             if tile_ref is not None:
                 gate_flags["tile_size"] = tile_ref
-            gate = check_delivery_gate(gate_flags, acknowledge_unvalidated=acknowledge_unvalidated)
+            gate = check_delivery_gate(gate_flags, allow_unvalidated_staging=allow_unvalidated_staging)
             if not gate.ok:
                 reason = gate.reason if claim_scope_mismatch is None else (
                     f"{gate.reason} {claim_scope_mismatch}")
@@ -1716,7 +1721,7 @@ def _export_predictions_raster(
 
         tile_ref = tile_size_gate_flag(op_provenance)
         tile_flags = {"tile_size": tile_ref} if tile_ref is not None else {}
-        gate = check_delivery_gate(tile_flags, acknowledge_unvalidated=acknowledge_unvalidated)
+        gate = check_delivery_gate(tile_flags, allow_unvalidated_staging=allow_unvalidated_staging)
         if not gate.ok:
             return {"error": gate.reason, "tile_size_validated": tile_ref}
         tile_size_validated = gate.stamp.get("tile_size")
@@ -1883,7 +1888,7 @@ def deliver_per_image_counts(
     calibration_images_dir: str | None = None,
     split_manifest_dir: str | None = None,
     experiment_id: str | None = None,
-    acknowledge_unvalidated: bool = False,
+    allow_unvalidated_staging: bool = False,
     predictions_dir: str | None = None,
 ) -> dict:
     """Export a CSV summary of detection counts per image, from a live run or a persisted bucket.
@@ -1898,14 +1903,15 @@ def deliver_per_image_counts(
       (conf/NMS/tiling/max_dets) as ``run_inference``; the CSV is a
       count-bearing deliverable, so it must not be produced at a different, untiled, truncating
       operating point. Passing ``predictions_dir`` too persists the run's own predictions into
-      that bucket, gated and linked exactly as ``run_inference`` publishes one (the same
-      tile-scale gate, frozen-lineage-pointer refusal, and lineage link), then reads the CSV's own
+      that bucket, gated (``allow_unvalidated_staging`` clears only its own tile-scale staging gate,
+      never the CSV's own delivery gate below) and linked exactly as ``run_inference`` publishes
+      one (the same frozen-lineage-pointer refusal and lineage link), then reads the CSV's own
       validity back off the bucket it just wrote. Without ``predictions_dir`` the counts rest on
-      one in-memory pass with nothing a reviewer can re-open, so the CSV can only be delivered
-      provisionally (``acknowledge_unvalidated=True``); a bucket published this way (or by
-      ``run_inference``) can also be promoted to validated later, with no re-run, through the
-      review validation route (``validate_reference``), then re-delivered through this door's
-      bucket regime below.
+      one in-memory pass with nothing a reviewer can re-open, and this door takes no acknowledgement
+      to ship an unvalidated CSV anyway, so an unvalidated live pass with no ``predictions_dir``
+      cannot be delivered at all; a bucket published this way (or by ``run_inference``) can also be
+      promoted to validated later, with no re-run, through the review validation route
+      (``validate_reference``), then re-delivered through this door's bucket regime below.
     - Bucket (``predictions_dir`` alone, ``checkpoint_path``/``images_dir`` both absent): no GPU,
       no predictor import, no checkpoint argument at all. Reads an existing, reviewed per-image
       prediction bucket's own ``operating_point.json`` stamp as its identity and validity source,
@@ -1922,9 +1928,12 @@ def deliver_per_image_counts(
 
     Delivery gate, both regimes: one composition, inside ``export_detection_csv``, over the count
     operating point and (if tiled) the tile geometry, reconciled from the bucket's own sidecar
-    rather than trusted from a caller string; ships unless every dimension clears, or
-    ``acknowledge_unvalidated=True`` writes a clearly-flagged provisional CSV stamped
-    ``operating_point_validated=false``. A refused delivery still names what happened to a
+    rather than trusted from a caller string; ships only when every dimension clears. This door
+    takes no acknowledgement for the CSV itself: no surface delivers a per-image count
+    provisionally today, so an unvalidated dimension always refuses here, whichever regime produced
+    it. The documented route around a refusal is the one above: promote the bucket to validated
+    through the review validation route, then re-deliver through the bucket regime. A refused
+    delivery still names what happened to a
     ``predictions_dir`` the live regime published before the CSV's own gate ran
     (``bucket_published``, ``bucket_redirected``, ``lineage_linked``, beside ``csv_delivered:
     false``): the bucket is the caller's own stated ``predictions_dir`` intent, published under
@@ -2012,15 +2021,16 @@ def deliver_per_image_counts(
         experiment_id: Live regime only. The run that produced the checkpoint, for provenance
             (forwarded to ``run_inference``; see its own doc for the best-effort resolution when
             omitted).
-        acknowledge_unvalidated: Both regimes. Write the count CSV even when a gated dimension is
-            unvalidated, stamping it ``operating_point_validated=false`` so the un-trustworthiness
-            travels downstream.
+        allow_unvalidated_staging: Live regime with ``predictions_dir`` only. Persist the bucket
+            even when tile_size has no real basis, stamping ``tile_size_validated=false``; the
+            staging escape a raw bucket write shares with ``run_inference``, never a route to
+            deliver the CSV itself unvalidated (this door takes no acknowledgement for that).
         predictions_dir: Live regime: directory to persist the counted predictions into, resolved
             and stamped the way ``run_inference`` resolves and stamps a bucket (a relative
             path resolves against the platform state root; a bucket carrying review verdicts redirects to
-            a fresh variant); omitted, the CSV can only be delivered provisionally. Bucket regime:
-            the existing bucket to read (required, resolved the same way; no writable-bucket
-            resolution or redirect, since nothing is written).
+            a fresh variant); omitted, an unvalidated live pass cannot be delivered at all. Bucket
+            regime: the existing bucket to read (required, resolved the same way; no
+            writable-bucket resolution or redirect, since nothing is written).
     """
     from tcip_mcp.operationalization import (
         PER_IMAGE_COUNT,
@@ -2078,8 +2088,7 @@ def deliver_per_image_counts(
 
     if not live:
         return _deliver_per_image_counts_from_bucket(
-            predictions_dir, output_path, trait=trait, acknowledge_unvalidated=acknowledge_unvalidated,
-            stated_basis=stated.basis)
+            predictions_dir, output_path, trait=trait, stated_basis=stated.basis)
 
     bucket = bucket_root = None
     resolution = None
@@ -2138,7 +2147,7 @@ def deliver_per_image_counts(
     if bucket is not None:
         pub = _publish_bucket_bracket(
             result, out=bucket, checkpoint_path=checkpoint_path, trait=trait, images_dir=images_dir,
-            dataset_root=bucket_root, acknowledge_unvalidated=acknowledge_unvalidated)
+            dataset_root=bucket_root, allow_unvalidated_staging=allow_unvalidated_staging)
         if pub["refusal"] is not None:
             return pub["refusal"]
         dropped_boxes = pub["dropped_boxes"]
@@ -2160,7 +2169,6 @@ def deliver_per_image_counts(
             csv_rows, output_path, provenance=provenance, trait=trait,
             operating_point_validated=op_ref,
             pred_dirs=[str(bucket)] if bucket is not None else None,
-            acknowledge_unvalidated=acknowledge_unvalidated,
         )
     except DeliveryRefused as exc:
         reason = str(exc)
@@ -2305,7 +2313,7 @@ def _image_filename_fallback_note(
 
 
 def _deliver_per_image_counts_from_bucket(predictions_dir: str, output_path: str, *, trait: str,
-                                          acknowledge_unvalidated: bool, stated_basis) -> dict:
+                                          stated_basis) -> dict:
     """``deliver_per_image_counts``'s bucket regime: an existing, reviewed prediction bucket in, no GPU.
 
     No writable-bucket resolution and no verdict redirect: nothing is written, and reading a
@@ -2378,7 +2386,6 @@ def _deliver_per_image_counts_from_bucket(predictions_dir: str, output_path: str
         csv_path, tail, summary = export_detection_csv(
             image_results, output_path, provenance=provenance, trait=trait,
             operating_point_validated=None, pred_dirs=[str(bucket_path)],
-            acknowledge_unvalidated=acknowledge_unvalidated,
         )
     except DeliveryRefused as exc:
         refusal = {

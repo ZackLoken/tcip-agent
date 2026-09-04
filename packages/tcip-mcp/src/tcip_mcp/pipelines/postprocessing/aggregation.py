@@ -293,7 +293,6 @@ def export_aggregated_csv(
     pred_dirs: list[str] | None = None,
     images_dir: str | None = None,
     scale_capture_id: str | None = None,
-    acknowledge_unvalidated: bool = False,
     door: str = "export_aggregated_csv",
 ) -> tuple[str, dict]:
     """Export per-plant aggregated results to a delivery CSV.
@@ -333,8 +332,9 @@ def export_aggregated_csv(
     native-frame edge, and no explicit caller override refuses here; untiled buckets are never
     gated on it, and neither is an ordinal/regression delivery, which rests on a per-image scalar
     prediction no tile geometry produced. ``pred_dirs`` empty/omitted has no on-disk validity
-    producer at all and floors to unvalidated unconditionally; the only route to delivery is the
-    explicit acknowledge below.
+    producer at all and floors to unvalidated unconditionally, and this door takes no
+    acknowledgement: no surface delivers a per-plant aggregate provisionally today, so an
+    unvalidated delivery here always refuses.
 
     The physical-scale dimension is reconciled when and only when the results state
     ``scale_document`` and ``pred_dirs`` is given. A stated scale with a value_key implying no
@@ -346,15 +346,14 @@ def export_aggregated_csv(
     construction) and refuses under ``operating_point``, since a dimensional number from a detection
     or segmentation bucket with no scale behind it has nothing answering for its unit; with no
     ``pred_dirs``, the delivery has no on-disk validity producer at all regardless of unit, and
-    floors to unvalidated exactly as the operating_point dimension does, shippable only through
-    ``acknowledge_unvalidated``. When operative, each bucket's ``resolve_scale.json`` is reconciled
-    the same floor-from-disk way the operating_point dimension is, checked against the delivered unit
-    and the delivered trait (``reconcile_scale_validity``), which recomputes the claim's imagery
-    digest from ``images_dir`` (required whenever ``scale_document`` is stated alongside
-    ``pred_dirs``). ``scale_capture_id`` scopes that reconciliation to one capture when the
-    delivery's physical scale is itself capture-scoped (a handheld standoff that can vary image to
-    image). ``acknowledge_unvalidated`` ships a clearly-flagged provisional CSV stamped
-    ``validated=false``.
+    floors to unvalidated exactly as the operating_point dimension does, and this door takes no
+    acknowledgement to ship one anyway. When operative, each bucket's ``resolve_scale.json`` is
+    reconciled the same floor-from-disk way the operating_point dimension is, checked against the
+    delivered unit and the delivered trait (``reconcile_scale_validity``), which recomputes the
+    claim's imagery digest from ``images_dir`` (required whenever ``scale_document`` is stated
+    alongside ``pred_dirs``). ``scale_capture_id`` scopes that reconciliation to one capture when
+    the delivery's physical scale is itself capture-scoped (a handheld standoff that can vary image
+    to image).
 
     Under ``operating_point``, a trait declaring a physical unit (crops.yml) whose delivered
     value_key implies none also refuses, naming both: a px-space value delivered under a
@@ -398,7 +397,6 @@ def export_aggregated_csv(
             (with ``pred_dirs`` given) to recompute a scale claim's imagery digest.
         scale_capture_id: The capture this delivery's physical scale must match, when the scale is
             capture-scoped; a bucket's sidecar recording a different capture floors to unvalidated.
-        acknowledge_unvalidated: Write an unvalidated phenotype as a flagged provisional CSV.
         door: The name the recorded delivery event carries. A caller with its own door name (e.g.
             ``deliver_orthomosaic_plant_counts``, which composes this CSV rather than calling it
             directly) passes it here instead of also recording its own event for the same export,
@@ -534,7 +532,7 @@ def export_aggregated_csv(
         flags["scale"] = scale_recon["validated"]
     if claim_scope_recon["operative"]:
         flags["claim_scope"] = claim_scope_recon["validated"]
-    gate = check_delivery_gate(flags, acknowledge_unvalidated=acknowledge_unvalidated)
+    gate = check_delivery_gate(flags)
     if not gate.ok:
         notes = " ".join(filter(None, (
             binding_notes_text(operating_point_recon.get("binding_notes", {})),
@@ -589,7 +587,7 @@ def export_aggregated_csv(
     record_delivery_binding_event(door, output_path, pred_dirs,
                                   operating_point_recon["bindings"],
                                   measurement_documents=[measurement_document],
-                                  scale_document=scale_document,
+                                  scale_document=scale_document, acknowledgement=None,
                                   trait=trait, delivery_kind=delivery_kind)
     return output_path, stamp
 

@@ -41,6 +41,7 @@ from pathlib import Path
 from typing import Optional
 
 from tcip_mcp.operationalization import OperationalizationBasis
+from tcip_mcp.pipelines.resolution import Acknowledgement
 
 
 def _milestone_targets(spec) -> dict[str, float]:
@@ -156,6 +157,10 @@ PROVENANCE_COLUMNS = [
     "dates_delivered",
     "images_unattributed",
     "plant_attribution",
+    # Who acknowledged this delivery unvalidated, and why; blank on either when nothing was
+    # acknowledged (a fully-validated delivery, or one refused outright).
+    "acknowledged_by",
+    "acknowledgement_reason",
 ]
 
 
@@ -543,7 +548,7 @@ def _write_phenology_delivery(
     *,
     include_majority_marker: bool,
     flags: dict[str, str | None],
-    acknowledge_unvalidated: bool,
+    acknowledgement: Acknowledgement | None,
     basis: OperationalizationBasis | None,
     operating_point_conf: float | None,
     producer: dict,
@@ -563,12 +568,15 @@ def _write_phenology_delivery(
     Runs ``check_delivery_gate`` over ``flags`` itself, the way its sibling writers
     (``export_aggregated_csv``, ``export_detection_csv``) run their own gate before opening a file:
     a gate that does not pass raises ``ValueError`` with the gate's own reason, and nothing is
-    written. ``basis`` is what a passing ``check_operationalization`` returned, and it is required:
-    this writer takes a spec object rather than a project it could read the record from, so it
-    cannot prove the precondition itself.
+    written. ``acknowledgement`` is the breeder's own act (or ``None``) the caller already resolved
+    and hands through unchanged, the same value ``check_operationalization``'s ``basis`` is: neither
+    is built here. ``basis`` is what a passing ``check_operationalization`` returned, and it is
+    required: this writer takes a spec object rather than a project it could read the record from,
+    so it cannot prove the precondition itself.
 
     Composes every provenance cell the schema declares (the operating-point and classifier
-    validity columns, the producer tail and ``produced_at``, all through the shared
+    validity columns, the producer tail and ``produced_at``, the delivery's own
+    ``acknowledged_by``/``acknowledgement_reason``, all through the shared
     ``resolution.delivered_tail``, the one composition every delivered tail routes through, and,
     when ``include_majority_marker`` is set, the trait's majority-alias marker through
     ``majority_crossing_unconfirmed_column``) and returns them, so a caller fills its own response
@@ -598,7 +606,7 @@ def _write_phenology_delivery(
         check_delivery_gate, delivered_tail, record_delivery_binding_event,
     )
 
-    gate = check_delivery_gate(flags, acknowledge_unvalidated=acknowledge_unvalidated)
+    gate = check_delivery_gate(flags, acknowledgement=acknowledgement)
     if not gate.ok:
         raise ValueError(gate.reason)
     if "classifier" not in gate.stamp:
@@ -636,7 +644,8 @@ def _write_phenology_delivery(
     record_delivery_binding_event(
         door, str(out_path), list(pred_dirs), bindings,
         measurement_documents=["operating_point", "classifier_operating_point"],
-        scale_document=None, trait=spec.name, delivery_kind=STATE_CROSSING_DATES,
+        scale_document=None, acknowledgement=acknowledgement,
+        trait=spec.name, delivery_kind=STATE_CROSSING_DATES,
         project_root=project_root, plant_mapping=plant_mapping,
     )
     return cells
@@ -649,7 +658,7 @@ def write_phenology_csv(
     spec,
     *,
     flags: dict[str, str | None],
-    acknowledge_unvalidated: bool,
+    acknowledgement: Acknowledgement | None,
     basis: OperationalizationBasis | None,
     operating_point_conf: float | None,
     producer: dict,
@@ -665,11 +674,14 @@ def write_phenology_csv(
     the spec names one) and the recorded delivery event are all that function's, not a second copy
     of any of them. ``door`` is the name ``record_delivery_binding_event`` records the delivery under.
     ``plant_mapping`` is ``_write_phenology_delivery``'s own required disclosure dict.
+    ``acknowledgement`` is ``None`` for every MCP-tool call (``deliver_phenology_milestones`` takes
+    no acknowledgement) and a real :class:`~tcip_mcp.pipelines.resolution.Acknowledgement` only from
+    the web ``export_csv`` route, the one surface that builds one.
     """
     return _write_phenology_delivery(
         door, rows, out_path, spec, phenology_csv_columns(spec),
         include_majority_marker=True, flags=flags,
-        acknowledge_unvalidated=acknowledge_unvalidated, basis=basis,
+        acknowledgement=acknowledgement, basis=basis,
         operating_point_conf=operating_point_conf, producer=producer, bindings=bindings,
         pred_dirs=pred_dirs, project_root=project_root, plant_mapping=plant_mapping)
 
@@ -681,7 +693,7 @@ def write_phenology_curve_csv(
     spec,
     *,
     flags: dict[str, str | None],
-    acknowledge_unvalidated: bool,
+    acknowledgement: Acknowledgement | None,
     basis: OperationalizationBasis | None,
     operating_point_conf: float | None,
     producer: dict,
@@ -695,12 +707,12 @@ def write_phenology_curve_csv(
     Emits exactly ``curve_csv_columns()`` through ``_write_phenology_delivery``, the same gate,
     provenance composition and delivery recording ``write_phenology_csv`` runs, minus the
     milestone-only majority crossing-unconfirmed marker: a curve names no crossing for one to
-    qualify.
-    ``plant_mapping`` is ``_write_phenology_delivery``'s own required disclosure dict.
+    qualify. ``plant_mapping`` is ``_write_phenology_delivery``'s own required disclosure dict.
+    ``acknowledgement`` is the same required, caller-resolved value ``write_phenology_csv`` takes.
     """
     return _write_phenology_delivery(
         door, rows, out_path, spec, curve_csv_columns(),
         include_majority_marker=False, flags=flags,
-        acknowledge_unvalidated=acknowledge_unvalidated, basis=basis,
+        acknowledgement=acknowledgement, basis=basis,
         operating_point_conf=operating_point_conf, producer=producer, bindings=bindings,
         pred_dirs=pred_dirs, project_root=project_root, plant_mapping=plant_mapping)

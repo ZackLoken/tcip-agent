@@ -208,7 +208,6 @@ def export_detection_csv(
     trait: str,
     operating_point_validated: str | None = None,
     pred_dirs: list[str] | None = None,
-    acknowledge_unvalidated: bool = False,
 ) -> tuple[str, dict, dict]:
     """Export per-image detection counts to CSV.
 
@@ -228,10 +227,11 @@ def export_detection_csv(
     this CSV's own shape for a physical scale to have produced, so gating on it would manufacture a
     refusal over a dimension that can't apply to a count. Without ``pred_dirs`` there is no on-disk
     source for the count's validity, so the operating_point dimension floors to unvalidated
-    regardless of the caller's string, mirroring ``export_aggregated_csv``: a bare caller-asserted
-    reference is never trusted on its own, and ``acknowledge_unvalidated=True`` is the only route to delivery on
-    that path. Either way, ``acknowledge_unvalidated=True`` writes a clearly-flagged provisional
-    CSV stamped ``validated=false``. The ``provenance`` stamp (producing checkpoint sha, experiment
+    regardless of the caller's string, mirroring ``export_aggregated_csv``. This door takes no
+    acknowledgement: no surface delivers a per-image count provisionally today (the no-re-run route
+    is to promote the underlying bucket through the review validation route, then re-deliver
+    through the bucket regime), so a bare unvalidated write here always refuses. The ``provenance``
+    stamp (producing checkpoint sha, experiment
     id, operating-point conf, timestamp) travels alongside; the number is only as trustworthy as the
     operating point + model behind it. Those cells are built by ``delivered_tail`` from the
     verification the gate already ran, so a producer this delivery cannot corroborate is reported
@@ -263,7 +263,6 @@ def export_detection_csv(
             unvalidated otherwise, since nothing on disk backs it.
         pred_dirs: Prediction buckets to reconcile the count operating point's (and, if tiled, the
             tile-geometry) validity from.
-        acknowledge_unvalidated: Write an unvalidated count as a flagged provisional CSV.
 
     Returns:
         ``(path, tail, summary)``: the path to the written CSV, the ``_PROVENANCE_COLUMNS`` tail
@@ -323,7 +322,7 @@ def export_detection_csv(
         if tile_recon["operative"]:
             flags["tile_size"] = tile_recon["validated"]
 
-    gate = check_delivery_gate(flags, acknowledge_unvalidated=acknowledge_unvalidated)
+    gate = check_delivery_gate(flags)
     if not gate.ok:
         notes = binding_notes_text(
             {**operating_point_recon.get("binding_notes", {}), **tile_recon.get("binding_notes", {})})
@@ -363,7 +362,7 @@ def export_detection_csv(
     record_delivery_binding_event("export_detection_csv", output_path, pred_dirs,
                                   operating_point_recon["bindings"],
                                   measurement_documents=[_MEASUREMENT_DOCUMENT],
-                                  scale_document=None,
+                                  scale_document=None, acknowledgement=None,
                                   trait=trait, delivery_kind=PER_IMAGE_COUNT)
     summary = {
         "stamp": gate.stamp,
