@@ -1002,6 +1002,18 @@ def replace_image_status_store(
                         for k in sorted(records_by_bucket)})
 
 
+def bucket_digest_stamps(stamps: object, bucket: str) -> dict:
+    """The ``bucket``-scoped image-to-digest map inside a raw digest-store document.
+
+    Returns ``{}`` when ``stamps`` itself, or its value at ``bucket``, is not a dict: whatever a
+    corrupt or absent read produced, never raised here.
+    """
+    if not isinstance(stamps, dict):
+        return {}
+    bucket_stamps = stamps.get(bucket)
+    return bucket_stamps if isinstance(bucket_stamps, dict) else {}
+
+
 def stamp_image_status_digests(
     dataset_root: str | Path, bucket: str, image_names: Iterable[str], digest: str,
     *, only_unstamped: bool = False,
@@ -1024,9 +1036,7 @@ def stamp_image_status_digests(
         stamps = txn.read(key, default={})
         if not isinstance(stamps, dict):
             stamps = {}
-        bucket_stamps = stamps.get(bucket)
-        if not isinstance(bucket_stamps, dict):
-            bucket_stamps = {}
+        bucket_stamps = bucket_digest_stamps(stamps, bucket)
         stamped = [name for name in image_names
                    if not (only_unstamped and isinstance(bucket_stamps.get(name), str))]
         if not stamped:
