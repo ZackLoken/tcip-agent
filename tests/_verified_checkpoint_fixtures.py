@@ -66,19 +66,27 @@ def run_inference_verified(checkpoint_path: str, **overrides: Any):
     every real caller of ``load_registered_checkpoint`` wraps it in, rather than raising out of
     this stand-in for one.
     """
+    import inspect
+
     from tcip_mcp.model_registry import UnregisteredCheckpoint, load_registered_checkpoint
-    from tcip_mcp.tools.inference_tools import _run_inference_verified
+    from tcip_mcp.tools.inference_tools import _run_inference_verified, run_inference
 
     try:
         checkpoint = load_registered_checkpoint(checkpoint_path)
     except UnregisteredCheckpoint as exc:
         return {"error": str(exc)}
+    # Read off run_inference's own defaults rather than restate them, so this stand-in for its
+    # private pass cannot drift from the door it stands in for.
+    door_defaults = inspect.signature(run_inference).parameters
     kwargs: dict[str, Any] = {
         "image_paths": None, "images_dir": None, "conf_threshold": None, "device": None,
-        "tile": None, "tile_size": None, "overlap": None, "tile_batch_size": 96,
+        "tile": None, "tile_size": None, "overlap": None,
+        "tile_batch_size": door_defaults["tile_batch_size"].default,
         "global_nms_iou": None, "max_dets": None, "postprocess": "nms", "trait": None,
         "calibration_labels_dir": None, "calibration_images_dir": None, "experiment_id": None,
-        "group_by": None, "group_key_map": None, "split_seed": 0, "split_holdout_ratio": 0.5,
+        "group_by": None, "group_key_map": None,
+        "split_seed": door_defaults["split_seed"].default,
+        "split_holdout_ratio": door_defaults["split_holdout_ratio"].default,
         "split_manifest_dir": None,
     }
     kwargs.update(overrides)

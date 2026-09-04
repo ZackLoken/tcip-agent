@@ -417,3 +417,51 @@ def test_a_producer_string_is_refused_without_the_checkpoints_hash():
     with pytest.raises(ValueError, match="no checkpoint hash for .*m.pt"):
         prediction_producer("m.pt", None)  # type: ignore[arg-type]
     assert prediction_producer("m.pt", "725c546b990dabcdef") == "model:m@725c546b990d"
+
+
+def test_dry_run_previews_the_both_sources_refusal(tmp_path):
+    """A preview previews the same refusal a real call would hit: dry_run does not skip the
+    mutual-exclusion check just because it loads no model."""
+    from tcip_mcp.tools.inference_tools import run_inference
+
+    images_dir = tmp_path / "images"
+    images_dir.mkdir()
+    raster_path = tmp_path / "mosaic.tif"
+    raster_path.write_bytes(b"stub")
+
+    result = run_inference(
+        _ckpt(tmp_path), images_dir=str(images_dir), raster_path=str(raster_path),
+        output_dir=str(tmp_path / "out"), dry_run=True)
+
+    assert "error" in result and "not both" in result["error"]
+
+
+def test_dry_run_names_the_bucket_it_would_write_to_and_writes_nothing(tmp_path):
+    """dry_run needs neither images_dir nor raster_path: it previews the bucket a real write would
+    resolve to and the operating point it would run at, without touching disk."""
+    from tcip_mcp.tools.inference_tools import run_inference
+
+    out = tmp_path / "out"
+
+    result = run_inference(_ckpt(tmp_path), output_dir=str(out), dry_run=True)
+
+    assert "error" not in result, result
+    assert result["output_dir"] == str(out)
+    assert result["bucket_redirected"] is False
+    assert not out.exists()
+
+
+def test_resume_and_overwrite_together_refuse_by_name(tmp_path):
+    """The two name opposite ways of handling a bucket's recorded progress; letting one silently
+    win over the other would discard progress a caller asked to keep, or vice versa."""
+    from tcip_mcp.tools.inference_tools import run_inference
+
+    raster_path = tmp_path / "mosaic.tif"
+    raster_path.write_bytes(b"stub")
+
+    result = run_inference(
+        _ckpt(tmp_path), raster_path=str(raster_path), output_dir=str(tmp_path / "out"),
+        resume=True, overwrite=True)
+
+    assert "error" in result
+    assert "resume=True" in result["error"] and "overwrite=True" in result["error"]
