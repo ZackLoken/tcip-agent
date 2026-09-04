@@ -424,9 +424,7 @@ export interface CanopySegmentDisclosure {
 }
 
 export type PlantMappingUnion =
-  | PlantMappingDisclosure
-  | PlantRegistryDisclosure
-  | CanopySegmentDisclosure;
+  PlantMappingDisclosure | PlantRegistryDisclosure | CanopySegmentDisclosure;
 
 /** Whether `pm` is the canopy-segment disclosure, narrowed first. */
 export function isCanopySegmentDisclosure(pm: PlantMappingUnion): pm is CanopySegmentDisclosure {
