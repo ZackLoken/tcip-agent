@@ -392,7 +392,7 @@ def _snapshot_run_provenance(ctx: TrainContext) -> None:
 
     Closes the 'no source/env provenance' hole for every run: ``env.json`` records the library
     versions + seed + model kind. For a bespoke ``model_source`` / ``training_source`` run, the
-    per-file source snapshot is added in S3 (``snapshot_model_source``)."""
+    per-file source snapshot is added by ``snapshot_model_source``."""
     if ctx.experiment_id is None:
         return
     try:
