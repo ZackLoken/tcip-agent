@@ -69,11 +69,11 @@ _ARCHITECTURE_SITES = _sites_in(REPO_ROOT / "ARCHITECTURE.md")
 # Enumerated, not derived, since none of these lines carries a structured key the name could be
 # read from; ARCHITECTURE.md's sites are derived above because its line numbers shift under edits.
 _PROSE_COPY_SITES = [
-    (REPO_ROOT / "README.md", 71),
-    (REPO_ROOT / "README.md", 93),
+    (REPO_ROOT / "README.md", 73),
+    (REPO_ROOT / "README.md", 95),
     (REPO_ROOT / "CONTRIBUTING.md", 14),
     (REPO_ROOT / "CONTRIBUTING.md", 26),
-    (REPO_ROOT / "CLAUDE.md", 203),
+    (REPO_ROOT / "CLAUDE.md", 204),
     (REPO_ROOT / "environment.yml", 4),
     (REPO_ROOT / "environment.linux.lock.yml", 3),
     (REPO_ROOT / "environment.linux.lock.yml", 8),
