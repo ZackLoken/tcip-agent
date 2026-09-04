@@ -23,7 +23,7 @@ Status: the browser GUI is built out across all tabs (Annotate / Review / Traini
 │  Python MCP server           │  domain tools: data, annotation,
 │  (packages/tcip-mcp)         │  training, inference, experiments, viz
 └──────────┬───────────────────┘
-           │ HTTP / WebSocket
+           │ HTTP
            ▼
 ┌──────────────────────────────┐
 │  FastAPI + React GUI         │  Annotate / Review / Training / Tuning /
