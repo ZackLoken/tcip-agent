@@ -350,7 +350,9 @@ def orthomosaic_plant_counts(
         plants_in_frame,
         resolve_nn_tolerance_m,
     )
-    from tcip_mcp.pipelines.postprocessing.plant_mapping import read_plant_csv_bytes
+    from tcip_mcp.pipelines.postprocessing.plant_mapping import (
+        read_plant_csv_bytes, require_named_plants,
+    )
 
     try:
         georef = OrthomosaicGeoreference.from_file(raster_path)
@@ -367,8 +369,6 @@ def orthomosaic_plant_counts(
         raise CountDeliveryRefused(f"no georeferenced plants parsed from {plant_csv_paths}")
 
     width, height = int(recorded_identity["width"]), int(recorded_identity["height"])
-    in_frame_plants, outside_plants = plants_in_frame(plants, georef, width=width, height=height)
-    plants_outside_raster_names = sorted(p.plot_name for p in outside_plants)
 
     extra_response_fields: dict = {}
     if canopy_subject:
@@ -459,6 +459,12 @@ def orthomosaic_plant_counts(
             "n_unmapped_by_source": by_source,
         }
     else:
+        try:
+            require_named_plants(plants)
+        except ValueError as exc:
+            raise CountDeliveryRefused(f"delivery refused: {exc}") from exc
+        in_frame_plants, outside_plants = plants_in_frame(plants, georef, width=width, height=height)
+        plants_outside_raster_names = sorted(p.plot_name for p in outside_plants)
         if not in_frame_plants:
             raise CountDeliveryRefused(
                 f"no registered plant lies inside this raster's frame ({raster_path}); every "
