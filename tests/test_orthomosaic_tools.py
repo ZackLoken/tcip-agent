@@ -858,7 +858,9 @@ def test_deliver_orthomosaic_plant_counts_records_a_registry_disclosure_that_rea
     """A whole-raster frame carries no walked MappingBuild, so this door's own delivery event
     names the registry it read, the raster identity, the matched tolerance and its source, and
     this delivery's own unattributed-detection count, and that disclosure reads back through
-    read_delivery_events and validates against DeliveryEventRecord (PlantRegistryDisclosure)."""
+    read_delivery_events, which already validates every record against DeliveryEventRecord
+    (PlantRegistryDisclosure). A second delivery under an explicit nn_tolerance_m records that
+    value under source "stated" rather than the derived "grid_pitch" the first delivery gets."""
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path / "proj"))
     (tmp_path / "proj" / ".tcip" / "state").mkdir(parents=True, exist_ok=True)
 
@@ -882,22 +884,38 @@ def test_deliver_orthomosaic_plant_counts_records_a_registry_disclosure_that_rea
     assert "error" not in result, result
     assert result["n_unmapped"] == 1
 
-    from tcip_mcp.pipelines.delivery_events_schema import DeliveryEventRecord
-    from tcip_mcp.pipelines.resolution import read_delivery_events
+    from tcip_mcp.pipelines.postprocessing.plant_mapping import grid_pitch_m, read_plant_csvs
+    from tcip_mcp.pipelines.resolution import read_delivery_events, read_operating_point_sidecar
 
     events = read_delivery_events(tmp_path / "proj")
     assert len(events) == 1
     event = events[0]
-    DeliveryEventRecord.model_validate(event)
 
     pm = event["plant_mapping"]
     assert pm["plant_registry"]["name"] == registry_name
     assert pm["detections_unattributed"] == 1
     assert pm["detections_unattributed_scope"] == "delivered_raster"
     assert pm["plant_attribution"] == "detection"
-    assert pm["nn_tolerance_m"]["source"] in ("grid_pitch", "fallback", "stated")
+    plants = read_plant_csvs([plant_csv])
+    assert pm["nn_tolerance_m"] == {"value": grid_pitch_m(plants) / 6, "source": "grid_pitch"}
+    sidecar = read_operating_point_sidecar(bucket_dir)
+    assert pm["raster_identity"] == sidecar["raster_content_identity"]
     assert "dates_delivered" not in pm  # the walked-mapping form's own keys, never named here
     assert "record_sha256" not in pm
+
+    stated_tolerance = 5.0
+    out_csv_stated = tmp_path / "counts_stated.csv"
+    result_stated = deliver_orthomosaic_plant_counts(
+        str(bucket_dir), str(raster_path), registry_name, str(out_csv_stated),
+        delivered_phenotype="stem_count", nn_tolerance_m=stated_tolerance)
+    assert "error" not in result_stated, result_stated
+
+    existing_ids = {e["event_id"] for e in events}
+    new_events = [
+        e for e in read_delivery_events(tmp_path / "proj") if e["event_id"] not in existing_ids]
+    assert len(new_events) == 1
+    assert new_events[0]["plant_mapping"]["nn_tolerance_m"] == {
+        "value": stated_tolerance, "source": "stated"}
 
 
 def test_deliver_orthomosaic_plant_counts_refuses_a_registry_csv_rewritten_after_registration(
@@ -905,8 +923,10 @@ def test_deliver_orthomosaic_plant_counts_refuses_a_registry_csv_rewritten_after
 ):
     """The registry byte check this door now runs (verify_registry_csv_bytes, shared with the
     walked-mapping verifier) refuses by name when a registered plant CSV's bytes moved since
-    registration, before any prediction is read: every CSV this delivery reads is verified or the
-    delivery never happens."""
+    registration, before any plant or prediction is read: every CSV this delivery reads is
+    verified or the delivery never happens. The refused sentence names the fact
+    (verify_registry_csv_bytes' own words) plus this door's own composed remedy, never the
+    walked-mapping verifier's different one."""
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path / "proj"))
     (tmp_path / "proj" / ".tcip" / "state").mkdir(parents=True, exist_ok=True)
 
@@ -931,6 +951,39 @@ def test_deliver_orthomosaic_plant_counts_refuses_a_registry_csv_rewritten_after
 
     assert "error" in refused
     assert str(plant_csv) in refused["error"]
+    assert "was rewritten since it was registered" in refused["error"]
+    assert "register the current file under a new registry name" in refused["error"]
+    assert not out_csv.exists()
+
+
+def test_deliver_orthomosaic_plant_counts_refuses_a_registered_csv_deleted_after_registration(
+    tmp_path, monkeypatch,
+):
+    """The same registry byte check refuses by name when a registered plant CSV is missing
+    entirely, a separate outcome from a rewritten one (verify_registry_csv_bytes' own missing
+    list, not its rewritten-file fact)."""
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path / "proj"))
+    (tmp_path / "proj" / ".tcip" / "state").mkdir(parents=True, exist_ok=True)
+
+    raster_path = tmp_path / "mosaic.tif"
+    _write_geo_raster(raster_path)
+    bucket_dir, stem = _run_bucket(tmp_path, monkeypatch, raster_path)
+    _replace_boxes(bucket_dir / f"{stem}.json", [(8.0, 8.0, 12.0, 12.0)])
+    _promote_bucket_conf(bucket_dir, bucket_dir.parents[1], trait=fx.COUNT_TRAIT)
+    plant_csv = _plant_grid_csv(tmp_path, raster_path, _PLANT_PIXELS)
+    registry_name = _plant_registry(plant_csv)
+
+    plant_csv.unlink()
+
+    from tcip_mcp.tools.orthomosaic_tools import deliver_orthomosaic_plant_counts
+
+    out_csv = tmp_path / "counts.csv"
+    refused = deliver_orthomosaic_plant_counts(
+        str(bucket_dir), str(raster_path), registry_name, str(out_csv),
+        delivered_phenotype="stem_count")
+
+    assert "error" in refused
+    assert plant_csv.name in refused["error"]
     assert not out_csv.exists()
 
 
