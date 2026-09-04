@@ -28,4 +28,4 @@ def test_a_delivered_files_own_bytes_are_the_recorded_digest(tmp_path: Path) -> 
     keys = ts.keys(resolution.DELIVERY_EVENTS_STORE, str(scope))
     events = [ts.read(k) for k in keys if ts.read(k)["door"] == "test_door"]
     assert len(events) == 1, events
-    assert events[0]["output_sha256"] == hashlib.sha256(out_csv.read_bytes()).hexdigest()
+    assert events[0].get("output_sha256") == hashlib.sha256(out_csv.read_bytes()).hexdigest()

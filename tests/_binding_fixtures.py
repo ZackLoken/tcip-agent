@@ -218,11 +218,19 @@ def write_plant_mapping(
     A fixture's real interest is only ``mapping``; every other provenance field is a placeholder
     a delivery's dataset-identity and receipt checks require but do not otherwise inspect.
     ``dataset_root`` is registered (``register_dataset``) if it carries no identity yet, so a
-    delivery reading these predictions binds on a real minted id.
+    delivery reading these predictions binds on a real minted id. ``plant_registry`` names a real,
+    empty registry (``register_plant_registry_record`` over no CSVs, idempotent under a repeat
+    call), so a delivery's own registry check (``registry_entries_or_refusal``) finds a real
+    record to load rather than refusing a fixture's placeholder name as vanished.
     """
     from datetime import datetime, timezone
 
-    from tcip_mcp.pipelines.postprocessing.plant_mapping import Assignment, MappingBuild, persist_mapping
+    from tcip_mcp.pipelines.postprocessing.plant_mapping import (
+        Assignment,
+        MappingBuild,
+        persist_mapping,
+        register_plant_registry_record,
+    )
     from tcip_mcp.tools.project_tools import register_dataset
     from tcip_mcp.traits import registered_crops
 
@@ -238,13 +246,17 @@ def write_plant_mapping(
 
     root = Path(dataset_root)
     root.mkdir(parents=True, exist_ok=True)
-    reg = register_dataset(str(root), crop=sorted(registered_crops())[0], project_root=str(project_root))
+    crop = sorted(registered_crops())[0]
+    reg = register_dataset(str(root), crop=crop, project_root=str(project_root))
+    registry = register_plant_registry_record(
+        project_root, "unregistered", [], crop=crop, site="fixture",
+        registered_by="write_plant_mapping")
     build = MappingBuild(
         name=name, project_root=str(project_root), dataset_root=str(root), dataset_id=reg["id"],
         built_by="build_plant_mapping", built_at=datetime.now(timezone.utc).isoformat(),
         dates_requested=None, dates=sorted(mapping),
         nn_tolerance_m={"value": 10.0, "source": "fallback"},
-        plant_registry={"name": "unregistered", "digest": "0" * 64},
+        plant_registry={"name": "unregistered", "digest": registry["digest"]},
         capture_identity={d: "0" * 16 for d in mapping},
         capture_digests={d: {} for d in mapping}, unreadable={d: [] for d in mapping},
         assignments={d: [_row(row, d) for row in rows] for d, rows in mapping.items()},

@@ -2010,6 +2010,58 @@ def load_delivery_supersessions(project_root: str | Path | None = None) -> dict[
     return out
 
 
+class DeliveryEventShapeError(ValueError):
+    """One project's ``delivery_events`` record does not validate against ``DeliveryEventRecord``.
+
+    ``event_id`` names the offending record when it could be read from the raw document, ``None``
+    when the document is not even a dict."""
+
+    def __init__(self, message: str, *, event_id: str | None) -> None:
+        super().__init__(message)
+        self.event_id = event_id
+
+
+def read_delivery_events(project_root: str | Path | None = None) -> list[dict]:
+    """Every ``delivery_events`` record stored under this project, each validated against
+    :class:`~tcip_mcp.pipelines.delivery_events_schema.DeliveryEventRecord`.
+
+    Raises :class:`DeliveryEventShapeError`, naming the offending ``event_id`` and
+    ``scripts/conform_delivery_events.py`` as the remedy, on the first stored record that does not
+    validate, rather than silently dropping or half-trusting it. The Results tab's delivery panel
+    (``routes/results.py``'s ``list_delivery_events``),
+    :func:`~tcip_mcp.pipelines.postprocessing.plant_mapping._citing_delivery_event_ids` and
+    ``scripts/conform_plant_mapping_records.py`` all read delivery events through this one
+    function, so a shape refusal reads the same wherever it is met, and a rebuild's own citing-
+    events check can never silently skip a record it cannot decode.
+    """
+    from pydantic import ValidationError
+
+    from tcip_mcp.pipelines.delivery_events_schema import (
+        DeliveryEventRecord,
+        validation_error_detail,
+    )
+
+    scope = delivery_events_scope(project_root)
+    records: list[dict] = []
+    for key in tcip_store.keys(DELIVERY_EVENTS_STORE, str(scope)):
+        record = tcip_store.read(key, default=None)
+        event_id = record.get("event_id") if isinstance(record, dict) else None
+        try:
+            DeliveryEventRecord.model_validate(record)
+        except ValidationError as exc:
+            raise DeliveryEventShapeError(
+                f"delivery event {event_id!r} under {scope} does not validate against the "
+                f"current delivery_events shape: {validation_error_detail(exc)}; run "
+                "scripts/conform_delivery_events.py against this project to see which stored "
+                "events do not validate and why (--plan previews; nothing here is "
+                "auto-rewritable, since the missing keys were never computed for an older "
+                "delivery)",
+                event_id=event_id,
+            ) from exc
+        records.append(record)
+    return records
+
+
 def _delivery_event_id(door: str, output_path: str | None, now: str) -> str:
     """A stable, Windows-safe id for one delivery event: a hex digest carries no colon and no
     timestamp-collision risk a caller-supplied nonce would otherwise need, and is computed here
@@ -2018,16 +2070,14 @@ def _delivery_event_id(door: str, output_path: str | None, now: str) -> str:
 
 
 def _delivered_file_sha256(output_path: str | None) -> str | None:
-    """The delivered file's own digest, read after the writer already wrote it: ``None`` for a
-    fileless event (the two ``phenology_measurement`` calls below, which compute a curve rather
-    than write a CSV), and ``None`` when a file was named but cannot be read now (the write
-    itself is this function's caller's concern, not this best-effort read's)."""
+    """The delivered file's own digest, read after the writer already wrote it: ``None`` only for
+    a fileless event (the two ``phenology_measurement`` calls below, which compute a curve rather
+    than write a CSV). A stated ``output_path`` the writer just produced that cannot be read back
+    is a failed delivery, not a fileless one, and raises rather than recording a blank digest for
+    bytes that were supposedly just written."""
     if not output_path:
         return None
-    try:
-        return hashlib.sha256(Path(output_path).read_bytes()).hexdigest()
-    except OSError:
-        return None
+    return hashlib.sha256(Path(output_path).read_bytes()).hexdigest()
 
 
 def record_delivery_binding_event(

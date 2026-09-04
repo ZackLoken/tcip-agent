@@ -184,9 +184,9 @@ def build_plant_mapping(payload: BuildMappingPayload, request: Request) -> dict:
     from another project's captures, or over a directory that merely ends in ``images``.
     ``plant_registry`` names a registry already registered under this project by the MCP door
     ``register_plant_registry`` (only that door registers; this route only names one). Its
-    registered files were confined at registration time and are re-checked under the allowed
-    roots here, since a routable connection may be reading them for the first time. A receipt
-    that cannot be written answers 409: the record it would have named is left on disk, refused
+    registered files are re-checked under the allowed roots here, since a routable connection may
+    be reading them for the first time. A receipt that cannot be written answers 409: the record
+    it would have named is left on disk, refused
     until a rebuild replaces it. A rebuild a delivery event still cites answers 409 too, naming
     the citing events, unless ``supersede=True``.
 
@@ -232,8 +232,8 @@ def build_plant_mapping(payload: BuildMappingPayload, request: Request) -> dict:
             f"plant registry not found: {payload.plant_registry!r} under {root}; register it "
             "with register_plant_registry before naming it here")
     registry_ref = {"name": payload.plant_registry, "digest": registry_record["digest"]}
-    # Registered paths were confined at registration time (register_plant_registry, MCP-only);
-    # re-check them under the allowed roots now that a routable connection may be reading them.
+    # register_plant_registry applies no path confinement (MCP-only, no routable caller); check
+    # the registered paths under the allowed roots now that a routable connection is reading them.
     registry_paths = [
         _reference_file(e["path"], request)
         for e in plant_mapping.registry_csv_entries(registry_record)
@@ -1052,13 +1052,6 @@ def confirm_trait_spec_statement(payload: ConfirmTraitSpecPayload) -> dict:
 # ── What has shipped: the delivery-event record, read-only ─────────────
 
 
-_DELIVERY_EVENTS_CONFORM_HINT = (
-    "run scripts/conform_delivery_events.py against this project to see which stored events do "
-    "not validate and why (--plan previews; nothing here is auto-rewritable, since the missing "
-    "keys were never computed for an older delivery)"
-)
-
-
 @router.get("/delivery-events")
 def list_delivery_events(project_root: str) -> dict:
     """Every delivery event this project holds: what shipped, under which trait and kind, and the
@@ -1079,36 +1072,23 @@ def list_delivery_events(project_root: str) -> dict:
     event), or ``None`` when nothing supersedes it. A record naming a ``plant_mapping`` also
     carries ``plant_mapping_resolved_key``: the name to load to see exactly the record this event
     cites, its own name when a rebuild has not moved past it, the archived key
-    (``resolved_mapping_key_for_citation``) when a superseding rebuild has.
+    (``resolved_mapping_key_for_citation``) when a superseding rebuild has, or ``None`` when
+    neither name holds a stored record any more, for the panel to render as unresolved.
     """
-    import tcip_store as ts
-    from pydantic import ValidationError
-    from tcip_mcp.pipelines.delivery_events_schema import (
-        DeliveryEventRecord,
-        validation_error_detail,
-        with_supersessions,
-    )
+    from tcip_mcp.pipelines.delivery_events_schema import with_supersessions
     from tcip_mcp.pipelines.postprocessing.plant_mapping import resolved_mapping_key_for_citation
     from tcip_mcp.pipelines.resolution import (
-        DELIVERY_EVENTS_STORE,
-        delivery_events_scope,
+        DeliveryEventShapeError,
         load_delivery_supersessions,
+        read_delivery_events,
     )
 
     root = _guarded_project_root(project_root)
-    scope = delivery_events_scope(root)
-    records = [ts.read(key) for key in ts.keys(DELIVERY_EVENTS_STORE, str(scope))]
+    try:
+        records = read_delivery_events(root)
+    except DeliveryEventShapeError as exc:
+        raise HTTPException(400, str(exc)) from exc
     for record in records:
-        event_id = record.get("event_id") if isinstance(record, dict) else None
-        try:
-            DeliveryEventRecord.model_validate(record)
-        except ValidationError as exc:
-            raise HTTPException(
-                400,
-                f"delivery event {event_id!r} does not validate against the current "
-                f"delivery_events shape: {validation_error_detail(exc)}; "
-                f"{_DELIVERY_EVENTS_CONFORM_HINT}",
-            ) from exc
         pm = record.get("plant_mapping")
         if isinstance(pm, dict):
             record["plant_mapping_resolved_key"] = resolved_mapping_key_for_citation(
