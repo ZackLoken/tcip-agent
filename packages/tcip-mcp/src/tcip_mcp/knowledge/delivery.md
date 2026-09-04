@@ -189,9 +189,10 @@ must be able to produce unvalidated predictions to *reach* a validated measureme
 refuses on conf; it does refuse (unconditionally, no `acknowledge_unvalidated`) when tiling is
 requested and the checkpoint's tile scale has no real basis at all, since there is no number to tile
 at. `run_inference` itself, the door that actually persists a prediction bucket other doors treat as
-ground truth, applies a further tile_size gate on top of that pass' own result: a real-but-unvalidated
-scale (any of the three bases) still refuses the write unless `acknowledge_unvalidated=True`. Conf
-itself is never gated at either layer; the measurement gate lives at the final phenotype door.
+ground truth, applies a further tile_size gate on top of that pass' own result, which any of the
+three bases clears; the pass beneath it has already refused unconditionally when no basis exists
+at all, so this gate never actually sees that case for a tiled run. Conf itself is never gated at
+either layer; the measurement gate lives at the final phenotype door.
 
 ## Quality Control
 
