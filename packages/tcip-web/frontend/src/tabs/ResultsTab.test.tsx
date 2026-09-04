@@ -1725,6 +1725,228 @@ describe("ResultsTab plant-mapping build: match-tolerance phrase", () => {
   });
 });
 
+describe("ResultsTab count export", () => {
+  // jsdom carries no Blob-URL support at all; every export path that reaches a completed
+  // download needs these stubbed, the same way a real browser's URL object provides them.
+  beforeEach(() => {
+    Object.defineProperty(URL, "createObjectURL", {
+      value: vi.fn(() => "blob:mock-url"),
+      writable: true,
+      configurable: true,
+    });
+    Object.defineProperty(URL, "revokeObjectURL", {
+      value: vi.fn(),
+      writable: true,
+      configurable: true,
+    });
+  });
+
+  function mockCountTree() {
+    vi.spyOn(api.dataset, "tree").mockResolvedValue({
+      dataset_root: "C:/data",
+      dates_with_images: ["2026-01-01"],
+      subjects: [],
+      model_names: ["baseline"],
+      subjects_by_date: {},
+      models_by_date: { "2026-01-01": ["baseline"] },
+      prediction_dirs: { "2026-01-01": { baseline: "C:/data/predictions/baseline/2026-01-01" } },
+      label_problem: null,
+    });
+  }
+
+  // Every field in the count-export panel sits immediately after its own <label>, the DOM
+  // relationship this reads rather than a positional guess at render order.
+  function controlFollowing(panel: HTMLElement, labelText: string): HTMLElement {
+    const label = within(panel).getByText(labelText);
+    const control = label.nextElementSibling;
+    if (!control) throw new Error(`no control follows the ${labelText} label`);
+    return control as HTMLElement;
+  }
+
+  async function renderCountPanel(): Promise<HTMLElement> {
+    mockCountTree();
+    render(<ResultsTab />);
+    await waitFor(() => expect(resultsApi.traits).toHaveBeenCalled());
+    await waitFor(() => expect(api.dataset.tree).toHaveBeenCalled());
+    const heading = await screen.findByText("Count export");
+    const panel = heading.closest(".tcip-panel");
+    if (!panel) throw new Error("Count export panel not found");
+    // The Trait and Prediction bucket selects only fill in once their own async loads resolve.
+    await within(panel as HTMLElement).findByText("subject_a");
+    await within(panel as HTMLElement).findByText("2026-01-01 (baseline)");
+    return panel as HTMLElement;
+  }
+
+  function chooseBucket(panel: HTMLElement) {
+    fireEvent.change(controlFollowing(panel, "Prediction bucket"), {
+      target: { value: "2026-01-01 baseline" },
+    });
+  }
+
+  it("posts a per_image_count delivery with the selected bucket and trait", async () => {
+    const panel = await renderCountPanel();
+    const downloadCountCsv = vi.spyOn(resultsApi, "downloadCountCsv").mockResolvedValue({
+      blob: new Blob(["x"]),
+      headers: {
+        savedTo: "C:/proj/results_export/counts.csv",
+        deliveryEventRecorded: true,
+        unvalidatedDimensions: "",
+        acknowledgedBy: "",
+      },
+    });
+
+    chooseBucket(panel);
+    fireEvent.change(controlFollowing(panel, "Trait"), { target: { value: "subject_a" } });
+    fireEvent.change(controlFollowing(panel, "Filename"), { target: { value: "counts.csv" } });
+    fireEvent.click(within(panel).getByRole("button", { name: /^export$/i }));
+
+    await waitFor(() => expect(downloadCountCsv).toHaveBeenCalled());
+    expect(downloadCountCsv.mock.calls[0][0]).toMatchObject({
+      project_root: "C:/proj",
+      delivery: {
+        kind: "per_image_count",
+        predictions_dir: "C:/data/predictions/baseline/2026-01-01",
+        trait: "subject_a",
+      },
+      filename: "counts.csv",
+    });
+  });
+
+  it("posts an orthomosaic_plant_counts delivery with its own fields", async () => {
+    const panel = await renderCountPanel();
+    const downloadCountCsv = vi.spyOn(resultsApi, "downloadCountCsv").mockResolvedValue({
+      blob: new Blob(["x"]),
+      headers: {
+        savedTo: "C:/proj/results_export/plant_counts.csv",
+        deliveryEventRecorded: true,
+        unvalidatedDimensions: "",
+        acknowledgedBy: "",
+      },
+    });
+
+    fireEvent.change(controlFollowing(panel, "Kind"), {
+      target: { value: "orthomosaic_plant_counts" },
+    });
+    chooseBucket(panel);
+    fireEvent.change(controlFollowing(panel, "Raster path"), {
+      target: { value: "C:/data/mosaic.tif" },
+    });
+    fireEvent.change(controlFollowing(panel, "Plant registry (registered by name)"), {
+      target: { value: "reg" },
+    });
+    fireEvent.change(controlFollowing(panel, "Delivered phenotype"), {
+      target: { value: "stem_count" },
+    });
+    fireEvent.change(controlFollowing(panel, "Filename"), {
+      target: { value: "plant_counts.csv" },
+    });
+    fireEvent.click(within(panel).getByRole("button", { name: /^export$/i }));
+
+    await waitFor(() => expect(downloadCountCsv).toHaveBeenCalled());
+    expect(downloadCountCsv.mock.calls[0][0]).toMatchObject({
+      project_root: "C:/proj",
+      delivery: {
+        kind: "orthomosaic_plant_counts",
+        predictions_dir: "C:/data/predictions/baseline/2026-01-01",
+        raster_path: "C:/data/mosaic.tif",
+        plant_registry: "reg",
+        delivered_phenotype: "stem_count",
+      },
+      filename: "plant_counts.csv",
+    });
+  });
+
+  it("decodes a delivery_gate refusal and offers the acknowledgement controls", async () => {
+    useStore.setState({ user: "breeder" });
+    const panel = await renderCountPanel();
+    vi.spyOn(resultsApi, "downloadCountCsv").mockRejectedValue(
+      new StructuredRefusalError(
+        {
+          kind: "delivery_gate",
+          message: "delivery refused: unvalidated dimension(s) ['operating_point'].",
+          unvalidated_dimensions: "operating_point",
+        },
+        400,
+        "delivery_gate",
+      ),
+    );
+
+    chooseBucket(panel);
+    fireEvent.change(controlFollowing(panel, "Trait"), { target: { value: "subject_a" } });
+    fireEvent.change(controlFollowing(panel, "Filename"), { target: { value: "counts.csv" } });
+    fireEvent.click(within(panel).getByRole("button", { name: /^export$/i }));
+
+    expect(
+      await within(panel).findByText(/unvalidated dimension\(s\) \['operating_point'\]/),
+    ).toBeInTheDocument();
+    expect(
+      within(panel).getByPlaceholderText(/reason for delivering unvalidated/i),
+    ).toBeInTheDocument();
+    expect(
+      within(panel).getByRole("button", { name: /acknowledge and export/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("downloads with the four headers and reports from them", async () => {
+    const panel = await renderCountPanel();
+    vi.spyOn(resultsApi, "downloadCountCsv").mockResolvedValue({
+      blob: new Blob(["x"]),
+      headers: {
+        savedTo: "C:/proj/results_export/counts.csv",
+        deliveryEventRecorded: true,
+        unvalidatedDimensions: "operating_point",
+        acknowledgedBy: "user:breeder",
+      },
+    });
+
+    chooseBucket(panel);
+    fireEvent.change(controlFollowing(panel, "Trait"), { target: { value: "subject_a" } });
+    fireEvent.change(controlFollowing(panel, "Filename"), { target: { value: "counts.csv" } });
+    fireEvent.click(within(panel).getByRole("button", { name: /^export$/i }));
+
+    expect(
+      await within(panel).findByText(/Saved to C:\/proj\/results_export\/counts\.csv/),
+    ).toBeInTheDocument();
+    expect(within(panel).getByText(/Delivery event recorded: yes/)).toBeInTheDocument();
+    expect(within(panel).getByText(/Unvalidated: operating_point/)).toBeInTheDocument();
+    expect(within(panel).getByText(/Acknowledged by user:breeder/)).toBeInTheDocument();
+  });
+
+  it("disables the Export button while a post is in flight", async () => {
+    const panel = await renderCountPanel();
+    let resolveDownload!: (value: {
+      blob: Blob;
+      headers: Awaited<ReturnType<typeof resultsApi.downloadCountCsv>>["headers"];
+    }) => void;
+    vi.spyOn(resultsApi, "downloadCountCsv").mockReturnValue(
+      new Promise((resolve) => {
+        resolveDownload = resolve;
+      }),
+    );
+
+    chooseBucket(panel);
+    fireEvent.change(controlFollowing(panel, "Trait"), { target: { value: "subject_a" } });
+    fireEvent.change(controlFollowing(panel, "Filename"), { target: { value: "counts.csv" } });
+    const button = within(panel).getByRole("button", { name: /^export$/i });
+    fireEvent.click(button);
+
+    expect(await within(panel).findByRole("button", { name: /exporting/i })).toBeDisabled();
+
+    resolveDownload({
+      blob: new Blob(["x"]),
+      headers: {
+        savedTo: "C:/proj/results_export/counts.csv",
+        deliveryEventRecorded: true,
+        unvalidatedDimensions: "",
+        acknowledgedBy: "",
+      },
+    });
+    await waitFor(() =>
+      expect(within(panel).getByRole("button", { name: /^export$/i })).toBeEnabled(),
+    );
+  });
+});
+
 describe("ResultsTab heading", () => {
   it("renders exactly one top-level heading naming the tab", async () => {
     render(<ResultsTab />);
