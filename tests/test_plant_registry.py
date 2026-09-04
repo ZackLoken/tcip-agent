@@ -180,18 +180,23 @@ def test_the_happy_path_through_the_platforms_own_producers_still_delivers(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Admits valid work: a registered registry that still loads and still hashes to what the
-    mapping recorded delivers without complaint."""
+    mapping recorded is admitted by the delivery door, which resolves the mapping, runs the
+    per-plant phenology over it and reaches the measurement gate. The scene's classifier is
+    unvalidated and the MCP door takes no acknowledgement, so the gate is where this delivery
+    stops, naming the classifier rather than the registry or the mapping."""
     from tcip_mcp.tools.phenology_tools import deliver_phenology_milestones
 
-    _, preds_by_date = _deliver_scene(tmp_path, monkeypatch)
+    registry_name, preds_by_date = _deliver_scene(tmp_path, monkeypatch)
     out_csv = tmp_path / "out.csv"
 
     res = deliver_phenology_milestones(
         trait="currant_bloom", mapping_name="valley", predictions_by_date=preds_by_date,
-        output_csv_path=str(out_csv), acknowledge_unvalidated=True)
+        output_csv_path=str(out_csv))
 
-    assert "error" not in res, res
-    assert out_csv.exists()
+    assert "error" in res, res
+    assert "validated positive-state classifier" in res["error"]
+    assert registry_name not in res["error"]
+    assert res["n_plants"] > 0
 
 
 def test_a_deleted_registry_refuses_at_delivery_naming_the_registry_and_the_mapping(
@@ -208,7 +213,7 @@ def test_a_deleted_registry_refuses_at_delivery_naming_the_registry_and_the_mapp
 
     res = deliver_phenology_milestones(
         trait="currant_bloom", mapping_name="valley", predictions_by_date=preds_by_date,
-        output_csv_path=str(out_csv), acknowledge_unvalidated=True)
+        output_csv_path=str(out_csv))
 
     assert "error" in res
     assert registry_name in res["error"]
@@ -232,7 +237,7 @@ def test_a_registry_digest_mismatch_refuses_at_delivery(
 
     res = deliver_phenology_milestones(
         trait="currant_bloom", mapping_name="valley", predictions_by_date=preds_by_date,
-        output_csv_path=str(out_csv), acknowledge_unvalidated=True)
+        output_csv_path=str(out_csv))
 
     assert "error" in res
     assert registry_name in res["error"]

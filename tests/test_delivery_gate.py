@@ -229,7 +229,7 @@ def test_export_detection_csv_takes_no_acknowledgement_and_refuses_the_retired_k
     from tcip_mcp.pipelines.postprocessing.export import export_detection_csv
 
     with pytest.raises(TypeError):
-        export_detection_csv([{"image": "a.jpg", "count": 3}], str(tmp_path / "o.csv"),
+        export_detection_csv([{"image": "a.jpg", "count": 3}], str(tmp_path / "o.csv"),  # type: ignore[call-arg]
                              trait=fx.COUNT_TRAIT, acknowledge_unvalidated=True)
 
 
@@ -472,7 +472,7 @@ def test_export_aggregated_csv_takes_no_acknowledgement_and_refuses_the_retired_
     from tcip_mcp.pipelines.postprocessing.aggregation import export_aggregated_csv
 
     with pytest.raises(TypeError):
-        export_aggregated_csv(
+        export_aggregated_csv(  # type: ignore[call-arg]
             [{"plant_id": "p1", "value": 4.2, "observations": 3, "value_key": "fruit_diameter",
              "plant_attribution": "image", "measurement_document": "regression_operating_point"}],
             str(tmp_path / "o.csv"), delivered_phenotype="fruit_diameter",
@@ -1649,6 +1649,7 @@ def test_an_unbound_bucket_records_why_it_was_not_verified(tmp_path):
     d = _write_bucket(tmp_path, "unbound", conf_ref=VALIDATED_HELD_OUT, validated=False)
     binding = StampBinding(ok=False, claimed=False,
                            note="a hand-forged claim with no validated_by")
+    (tmp_path / "o.csv").write_text("plant_id,count\n", encoding="utf-8")
     record_delivery_binding_event(
         "export_aggregated_csv", str(tmp_path / "o.csv"), [d], {d: binding},
         measurement_documents=["operating_point"], scale_document=None, acknowledgement=None,

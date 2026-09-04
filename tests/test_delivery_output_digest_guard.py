@@ -20,7 +20,8 @@ def test_a_delivered_files_own_bytes_are_the_recorded_digest(tmp_path: Path) -> 
 
     resolution.record_delivery_binding_event(
         "test_door", str(out_csv), [], {}, measurement_documents=["operating_point"],
-        scale_document=None, trait="astringency", delivery_kind="state_crossing_dates",
+        scale_document=None, acknowledgement=None, trait="astringency",
+        delivery_kind="state_crossing_dates",
         project_root=tmp_path, plant_mapping=None,
     )
 
