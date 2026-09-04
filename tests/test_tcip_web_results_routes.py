@@ -917,6 +917,274 @@ def test_export_refuses_a_bucket_whose_id_map_never_carried_the_positive_class(
     assert "elongated" in resp.json()["detail"]
 
 
+# ── Count CSV export ────────────────────────────────────────────────────
+
+_COUNT_ID_MAP = {"stem": 0}
+
+
+def _count_bucket(
+    tmp_path: Path, *, validated: bool, dataset_root: Path | None = None,
+    trait: str = "stem", n_images: int = 2, count: int = 3,
+) -> Path:
+    """A per-image prediction bucket a per_image_count delivery reads: real prediction
+    documents plus a real (optionally validated) ``operating_point.json``."""
+    from tcip_mcp.pipelines.postprocessing.export import write_predictions_json
+
+    from tests._binding_fixtures import write_bound_sidecar
+
+    root = dataset_root if dataset_root is not None else tmp_path / "ds"
+    bucket = root / "predictions" / "live" / "counts"
+    bucket.mkdir(parents=True, exist_ok=True)
+    for i in range(n_images):
+        write_predictions_json(
+            bucket / f"img{i}.json",
+            {"boxes": [[j, 0, j + 4, 4] for j in range(count)],
+             "labels": [1] * count, "scores": [0.9] * count, "width": 100, "height": 100},
+            id_map=_COUNT_ID_MAP)
+    sidecar: dict = {"id_map": _COUNT_ID_MAP, "images_dir": str(root / "images"), "trait": trait}
+    if validated:
+        sidecar.update({
+            "validated": True,
+            "operating_point": {"conf": {"value": 0.4, "validated_against": "held_out_annotations"}},
+        })
+        write_bound_sidecar(bucket, sidecar, dataset_root=root, experiment_id="exp-count-op",
+                            trait=trait)
+    else:
+        write_sidecar(bucket, sidecar, "operating_point")
+    return bucket
+
+
+def _seed_count_meaning(project_root: Path) -> None:
+    from tests._operationalization_fixtures import seed_confirmed_count
+
+    seed_confirmed_count(project_root, measured_subject="stem")
+
+
+def _export_count(client: TestClient, body: dict, **extra):
+    return client.post("/api/results/export_count_csv", json={**body, **extra})
+
+
+def test_export_count_csv_per_image_refuses_unvalidated_with_no_acknowledgement(
+    client: TestClient, tmp_path: Path,
+) -> None:
+    _seed_count_meaning(tmp_path)
+    bucket = _count_bucket(tmp_path, validated=False)
+    store.open_project(tmp_path.resolve())
+    resp = _export_count(client, {
+        "project_root": str(tmp_path),
+        "delivery": {"kind": "per_image_count", "predictions_dir": str(bucket), "trait": "stem"},
+        "filename": "counts.csv",
+    })
+    assert resp.status_code == 400
+    detail = resp.json()["detail"]
+    assert detail["kind"] == "delivery_gate"
+    assert "operating_point" in detail["unvalidated_dimensions"]
+    assert detail["image_count"] == 2
+    assert detail["total_detections"] == 6
+
+
+def test_export_count_csv_per_image_delivers_under_acknowledgement(
+    client: TestClient, tmp_path: Path,
+) -> None:
+    _seed_count_meaning(tmp_path)
+    bucket = _count_bucket(tmp_path, validated=False)
+    store.open_project(tmp_path.resolve())
+    resp = _export_count(client, {
+        "project_root": str(tmp_path),
+        "delivery": {"kind": "per_image_count", "predictions_dir": str(bucket), "trait": "stem"},
+        "filename": "counts.csv",
+        "user": "user:tester",
+        "acknowledgement": {"reason": "breeder needs a look before calibration finishes"},
+    })
+    assert resp.status_code == 200
+    assert resp.headers["X-TCIP-Unvalidated-Dimensions"] == "operating_point"
+    assert resp.headers["X-TCIP-Acknowledged-By"] == "user%3Atester"
+    assert resp.headers["X-TCIP-Delivery-Event-Recorded"] == "true"
+    header = resp.text.splitlines()[0].split(",")
+    cells = dict(zip(header, resp.text.splitlines()[1].split(",")))
+    assert cells["acknowledged_by"] == "user:tester"
+    assert cells["acknowledgement_reason"] == "breeder needs a look before calibration finishes"
+    assert cells["operating_point_validated"] == "false"
+
+    events = client.get(
+        "/api/results/delivery-events", params={"project_root": str(tmp_path)},
+    ).json()["records"]
+    event = next(r for r in events if r["door"] == "export_detection_csv")
+    assert event["acknowledged_by"] == "user:tester"
+
+
+def test_export_count_csv_per_image_delivers_validated_with_blank_pair(
+    client: TestClient, tmp_path: Path,
+) -> None:
+    _seed_count_meaning(tmp_path)
+    bucket = _count_bucket(tmp_path, validated=True)
+    store.open_project(tmp_path.resolve())
+    resp = _export_count(client, {
+        "project_root": str(tmp_path),
+        "delivery": {"kind": "per_image_count", "predictions_dir": str(bucket), "trait": "stem"},
+        "filename": "counts.csv",
+    })
+    assert resp.status_code == 200
+    assert resp.headers["X-TCIP-Unvalidated-Dimensions"] == ""
+    assert resp.headers["X-TCIP-Acknowledged-By"] == ""
+    header = resp.text.splitlines()[0].split(",")
+    cells = dict(zip(header, resp.text.splitlines()[1].split(",")))
+    assert cells["acknowledged_by"] == ""
+    assert cells["acknowledgement_reason"] == ""
+    assert cells["operating_point_validated"] == "held_out_annotations"
+    # operating_point_conf carries the bucket's own numeric conf value, never the whole
+    # {"value": ..., "validated_against": ...} provenance dict the sidecar stores it as.
+    assert cells["operating_point_conf"] == "0.4"
+
+
+def test_export_count_csv_a_validated_bucket_posted_with_acknowledgement_discards_it(
+    client: TestClient, tmp_path: Path,
+) -> None:
+    # check_delivery_gate discards an acknowledgement that cleared nothing: both cells stay blank.
+    _seed_count_meaning(tmp_path)
+    bucket = _count_bucket(tmp_path, validated=True)
+    store.open_project(tmp_path.resolve())
+    resp = _export_count(client, {
+        "project_root": str(tmp_path),
+        "delivery": {"kind": "per_image_count", "predictions_dir": str(bucket), "trait": "stem"},
+        "filename": "counts.csv",
+        "user": "user:tester",
+        "acknowledgement": {"reason": "just in case"},
+    })
+    assert resp.status_code == 200
+    header = resp.text.splitlines()[0].split(",")
+    cells = dict(zip(header, resp.text.splitlines()[1].split(",")))
+    assert cells["acknowledged_by"] == ""
+    assert cells["acknowledgement_reason"] == ""
+
+
+def test_export_count_csv_refuses_a_nameless_acknowledgement(
+    client: TestClient, tmp_path: Path,
+) -> None:
+    _seed_count_meaning(tmp_path)
+    bucket = _count_bucket(tmp_path, validated=False)
+    store.open_project(tmp_path.resolve())
+    resp = _export_count(client, {
+        "project_root": str(tmp_path),
+        "delivery": {"kind": "per_image_count", "predictions_dir": str(bucket), "trait": "stem"},
+        "filename": "counts.csv",
+        "acknowledgement": {"reason": "no user given"},
+    })
+    assert resp.status_code == 400
+    assert "requires a user" in resp.json()["detail"]
+
+
+def test_export_count_csv_refuses_a_whitespace_only_reason(
+    client: TestClient, tmp_path: Path,
+) -> None:
+    _seed_count_meaning(tmp_path)
+    bucket = _count_bucket(tmp_path, validated=False)
+    store.open_project(tmp_path.resolve())
+    resp = _export_count(client, {
+        "project_root": str(tmp_path),
+        "delivery": {"kind": "per_image_count", "predictions_dir": str(bucket), "trait": "stem"},
+        "filename": "counts.csv",
+        "user": "user:tester",
+        "acknowledgement": {"reason": "   "},
+    })
+    assert resp.status_code == 400
+    assert "non-blank reason" in resp.json()["detail"]
+
+
+def test_export_count_csv_refuses_an_unconfirmed_meaning(
+    client: TestClient, tmp_path: Path,
+) -> None:
+    # No confirmation seeded: the core's own pre-check refuses before the bucket is touched.
+    from tests._operationalization_fixtures import write_spec
+    from tests._trait_fixtures import CATKIN
+
+    write_spec(tmp_path, CATKIN)
+    bucket = _count_bucket(tmp_path, validated=True, trait=CATKIN.name)
+    store.open_project(tmp_path.resolve())
+    resp = _export_count(client, {
+        "project_root": str(tmp_path),
+        "delivery": {"kind": "per_image_count", "predictions_dir": str(bucket), "trait": CATKIN.name},
+        "filename": "counts.csv",
+    })
+    assert resp.status_code == 400
+    detail = resp.json()["detail"]
+    assert detail["kind"] == "operationalization"
+
+
+def test_export_count_csv_refuses_a_confirmation_withdrawn_between_check_and_write(
+    client: TestClient, tmp_path: Path,
+) -> None:
+    from tcip_mcp import operationalization as op
+
+    _seed_count_meaning(tmp_path)
+    bucket = _count_bucket(tmp_path, validated=True)
+    store.open_project(tmp_path.resolve())
+    op.confirm_trait_operationalization(
+        tmp_path, "stem", op.PER_IMAGE_COUNT, user="grüne",
+        record_seen=op.record_seen_hash(
+            op.resolve_trait_and_record(
+                "stem", op.PER_IMAGE_COUNT, project_root=tmp_path).record.value),
+        identity_from_request=True, confirmed=False)
+    resp = _export_count(client, {
+        "project_root": str(tmp_path),
+        "delivery": {"kind": "per_image_count", "predictions_dir": str(bucket), "trait": "stem"},
+        "filename": "counts.csv",
+    })
+    assert resp.status_code == 400
+    assert resp.json()["detail"]["kind"] == "operationalization"
+
+
+def test_export_count_csv_refuses_a_bucket_outside_the_project(
+    client: TestClient, tmp_path: Path, tmp_path_factory: pytest.TempPathFactory,
+) -> None:
+    _seed_count_meaning(tmp_path)
+    outside_root = tmp_path_factory.mktemp("outside")
+    bucket = _count_bucket(outside_root, validated=False, dataset_root=outside_root / "ds")
+    store.open_project(tmp_path.resolve())
+    resp = _export_count(client, {
+        "project_root": str(tmp_path),
+        "delivery": {"kind": "per_image_count", "predictions_dir": str(bucket), "trait": "stem"},
+        "filename": "counts.csv",
+    })
+    assert resp.status_code == 403
+
+
+def test_export_count_csv_refuses_a_malformed_payload_with_422_not_500(
+    client: TestClient, tmp_path: Path,
+) -> None:
+    store.open_project(tmp_path.resolve())
+    resp = client.post("/api/results/export_count_csv", json={
+        "project_root": str(tmp_path),
+        "delivery": {"kind": "not_a_real_kind"},
+        "filename": "counts.csv",
+    })
+    assert resp.status_code == 422
+
+
+def test_export_count_csv_split_root_event_lands_under_the_open_project(
+    client: TestClient, tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, monkeypatch,
+) -> None:
+    # The open project and the pinned state root differ; the event follows the open project.
+    pinned = tmp_path_factory.mktemp("pinned")
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(pinned))
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    _seed_count_meaning(project_root)
+    bucket = _count_bucket(project_root, validated=True)
+    store.open_project(project_root.resolve())
+    resp = _export_count(client, {
+        "project_root": str(project_root),
+        "delivery": {"kind": "per_image_count", "predictions_dir": str(bucket), "trait": "stem"},
+        "filename": "counts.csv",
+    })
+    assert resp.status_code == 200
+    assert not (pinned / ".tcip" / "state" / "delivery_events").exists()
+    events = client.get(
+        "/api/results/delivery-events", params={"project_root": str(project_root)},
+    ).json()["records"]
+    assert any(r["door"] == "export_detection_csv" for r in events)
+
+
 def test_registered_models_confines_project_path_to_allowed_roots(
     client: TestClient, tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, monkeypatch
 ) -> None:
