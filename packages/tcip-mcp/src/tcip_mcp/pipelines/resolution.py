@@ -1004,6 +1004,18 @@ def read_scale_sidecar(pred_dir: str | Path) -> dict | None:
     return _read_sidecar(pred_dir, "resolve_scale")
 
 
+def stamp_names_raster(sidecar: dict | None) -> bool:
+    """Whether a stamp names a whole-raster bucket (its own ``raster_path`` field set).
+
+    One mosaic total is not a per-image count, so a raster bucket is refused wherever a door
+    reasons over per-image predictions: shared by the per-image delivery door's own refusal
+    (``inference_tools._deliver_per_image_counts_from_bucket``) and
+    ``calibration_tools.calibrate_count_operating_point``, rather than each spelling the same
+    ``raster_path is not None`` check on its own.
+    """
+    return bool(sidecar) and sidecar.get("raster_path") is not None
+
+
 def _sidecar_reference(
     sidecar: dict | None, *, param_key: str = "conf", validation_kind: str = "annotations",
 ) -> str:

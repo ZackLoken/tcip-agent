@@ -478,40 +478,51 @@ def calibrate_count_operating_point(
     seed: int = 0,
     device: str | None = None,
 ) -> dict:
-    """Calibrate and validate the count operating point against held-out GT, earning a claim
-    over an already-published prediction bucket.
+    """Calibrate the count operating point against held-out GT, and earn a validated claim over
+    ``pred_dir`` only when the earned conf is the conf its stored detections were produced at.
 
     Runs :func:`tcip_mcp.pipelines.count_calibration.resolve_count_operating_point` unchanged
     (the same resolution ``scripts/calibrate_operating_point.py`` prints and writes nothing for):
     one low-threshold model pass over a disjoint, locked calibration/holdout split of
-    ``labels_dir``, resolved into the count-unbiased conf and its held-out count-bias gate. When
-    the resolved conf clears an accepted annotations reference and the bucket's own tile geometry
-    is validated, this door earns the validation record the same two-phase way the classifier and
-    scalar calibrators do (``resolution.open_validation`` runs the gate over the evidence,
-    ``seal_validation`` files the row and returns the stamp with its pointer merged in) and merges
-    the earned ``conf`` and the pointer into ``pred_dir``'s own ``operating_point.json``,
-    preserving every other field that stamp already carries (``id_map``, ``images_dir``,
-    ``checkpoint``, and the rest of ``operating_point_stamp``'s own shape) since this door
-    publishes no predictions of its own. The merge runs through
-    ``resolution.update_sidecar``, reading and writing inside the stamp's own lock, the same
-    discipline the review-promotion route (``routes/validation.py``'s ``_promotion_of``) holds a
-    stamp to: the decision of what ``validated`` folds to (``resolution.fold_tile_validation``,
-    against the tile geometry the bucket actually carries) and whether the earned pointer still
-    answers for the stamp as it is now stored, not as it read before the pass, so a stamp another
-    process validated while this pass was running is left exactly as that process left it. A
-    calibration that does not clear its gate, or whose tile geometry never validated, merges an
-    honest ``conf`` with ``validated=false`` and earns nothing.
+    ``labels_dir``, resolved into the count-unbiased conf and its held-out count-bias gate. That
+    pass runs at a floor far below any production conf and proves the resolved conf against
+    held-out GT; it says nothing about the detections already sitting in ``pred_dir``, which were
+    filtered to whatever conf actually produced them. So a validated stamp is written only when
+    the earned conf equals the conf ``pred_dir``'s own stamp already records as its production
+    conf (``operating_point.conf.value``), decided under the stamp's own lock
+    (``resolution.update_sidecar``) against the stamp as it is actually stored, not the copy read
+    before the pass: only then are the detections sitting in the bucket the detections the
+    validated conf describes. Any other earned conf refuses by name, stating both values, and
+    points at ``run_inference``, whose calibrated path re-predicts a bucket at the earned conf.
 
-    ``pred_dir`` must already carry an ``operating_point.json`` stamp (a bucket
-    ``run_inference`` already published at this checkpoint) and sit under
-    ``dataset_root``, the same requirement ``seal_validation`` holds every claimed bucket to
-    (``resolution.bucket_relative_key``, the one under-root check both apply). A bucket outside
-    ``dataset_root``, with no stamp at all, whose stamp carries no ``checkpoint_sha256`` at all (a
-    claim sealed under a digest the stamp does not carry could never bind at delivery), whose
-    stamped checkpoint disagrees with ``checkpoint_path``, or that already carries a validated
-    stamp all refuse by name before the calibration pass ever draws its cal/holdout lock, so a
-    refusal never leaves anything written: the last of those because that stamp was earned at the
-    conf its predictions were produced at, and this door never overwrites an earned claim.
+    Every other decision this merge makes follows the same discipline the review-promotion route
+    (``routes/validation.py``'s ``_promotion_of``) holds a stamp to, decided against the stamp as
+    it is now stored: whether ``pred_dir`` already carries an earned claim is decided through
+    ``resolution.verify_stamp_binding``, never a bare ``validated`` boolean, so a stamp asserting
+    validated with no record answering for it is promotable over exactly as the route treats it;
+    the tile-geometry floor (``resolution.fold_tile_validation``) is re-applied against the
+    stamp's own tile field; ``trait`` is written only when this calibration actually earns the
+    claim, so an unvalidated merge never relabels a bucket produced for a different trait; and
+    ``shippable_issues`` is refreshed to this run's own list. A calibration whose count-bias gate
+    does not clear, or whose tile geometry never validated, merges an honest ``conf`` with
+    ``validated=false`` and earns nothing, since it claims nothing about the stored detections.
+
+    ``pred_dir`` must already carry an ``operating_point.json`` stamp naming a checkpoint
+    identity, hold at least one prediction document (the bucket is this claim's subject; an
+    empty one has nothing to validate), and not name a whole-raster bucket
+    (``resolution.stamp_names_raster``, the predicate the per-image delivery door refuses a
+    mosaic bucket on too: one mosaic total is not a per-image count this calibration's records
+    reason over), and sit under ``dataset_root``, the same requirement ``seal_validation`` holds
+    every claimed bucket to (``resolution.bucket_relative_key``). A bucket outside
+    ``dataset_root``, with no stamp at all, empty, a whole-raster bucket, whose stamp carries no
+    ``checkpoint_sha256`` at all (a claim sealed under a digest the stamp does not carry could
+    never bind at delivery), whose stamped checkpoint disagrees with ``checkpoint_path``, or that
+    already carries a claim ``verify_stamp_binding`` answers for, all refuse by name before the
+    calibration pass ever draws its cal/holdout lock. A refusal discovered only after the pass has
+    run (the earned conf disagreeing with the bucket's own production conf, or the stamp having
+    changed underneath it) can still leave a minted calibration experiment and an appended,
+    inert validation row behind: no bucket names that row, so nothing a delivery reads changes,
+    but the record exists, and the response names it when this happens.
 
     Args:
         checkpoint_path: The trained checkpoint to calibrate; must be registered under the
@@ -535,6 +546,7 @@ def calibrate_count_operating_point(
             first draw for this labels_dir's identity.
         device: cuda / cpu (auto if omitted).
     """
+    from tcip_annotation.json_io import prediction_documents
     from tcip_mcp.model_registry import (
         UnregisteredCheckpoint, load_registered_checkpoint, resolve_model_identity,
     )
@@ -542,9 +554,11 @@ def calibrate_count_operating_point(
     from tcip_mcp.pipelines.count_calibration import resolve_count_operating_point
     from tcip_mcp.pipelines.resolution import (
         bucket_relative_key, claim_payload, fold_tile_validation, open_validation,
-        read_operating_point_sidecar, seal_validation, update_sidecar,
+        read_operating_point_sidecar, seal_validation, stamp_names_raster, update_sidecar,
+        verify_stamp_binding,
     )
     from tcip_mcp.project_paths import platform_state_root
+    from tcip_store.errors import SchemaVersionRefused, StoreBusy
 
     root = Path(dataset_root).resolve()
     bucket = Path(pred_dir).resolve()
@@ -558,10 +572,19 @@ def calibrate_count_operating_point(
         return {"error": f"{bucket} carries no operating_point.json stamp; "
                          "calibrate_count_operating_point earns a claim over an already-"
                          "published inference bucket, never an empty one."}
-    if existing.get("validated"):
-        return {"error": f"{bucket} already carries a validated operating_point.json stamp "
-                         "(earned at the conf its predictions were produced at); "
-                         "calibrate_count_operating_point never overwrites an earned stamp."}
+    if stamp_names_raster(existing):
+        return {"error": f"{bucket} is a whole-raster bucket (its stamp records raster_path): "
+                         "the count-unbiased calibration reasons over per-image predictions, "
+                         "which one mosaic total is not."}
+    if not prediction_documents(bucket):
+        return {"error": f"{bucket} carries a readable operating_point.json stamp but no "
+                         "prediction documents: an empty bucket is not this claim's subject "
+                         "either."}
+    existing_binding = verify_stamp_binding(existing, bucket, document="operating_point")
+    if existing_binding.claimed and existing_binding.ok:
+        return {"error": f"{bucket} already carries a validated operating_point.json stamp a "
+                         "record answers for (earned at the conf its predictions were produced "
+                         "at); calibrate_count_operating_point never overwrites an earned stamp."}
 
     # Checkpoint identity is derived and refused on before the pass below draws its lock.
     existing_sha = existing.get("checkpoint_sha256")
@@ -594,18 +617,21 @@ def calibrate_count_operating_point(
 
     conf = resolved.bundle.get("conf")
     conf_provenance = conf.to_provenance()
+    earned_conf_value = conf_provenance["value"]
     gate_summary = gate_evidence_summary(conf)
+    issues = resolved.bundle.shippable_issues()
 
-    # Tentatively earn the record against the stamp as read before the pass; the merge below
-    # re-decides against the stamp as it is actually stored once the lock is taken.
+    # Tentative, against the tile floor read before the pass; the merge below re-decides
+    # validated, the tile floor and the conf-equality rule against the stamp as actually stored.
     validated_tentative = fold_tile_validation(conf.is_shippable, existing.get("tile_size_validated"))
     draft = None
     earned = dict(existing)
     earned["operating_point"] = {**(existing.get("operating_point") or {}), "conf": conf_provenance}
     earned["validated"] = validated_tentative
-    earned["trait"] = trait
     earned["gate_evidence_summary"] = gate_summary
+    earned["shippable_issues"] = issues
     if validated_tentative:
+        earned["trait"] = trait
         draft = open_validation(
             document="operating_point",
             evidence={"resolver": "resolve_operating_point", "inputs": resolved.resolver_inputs},
@@ -618,6 +644,8 @@ def calibrate_count_operating_point(
     else:
         earned["validated_by"] = None
 
+    refusal: dict[str, object] = {}
+
     def _merge(stored: dict) -> dict | None:
         """Merge this calibration's earned conf into whatever the producing run left, inside the
         stamp's own lock.
@@ -625,19 +653,24 @@ def calibrate_count_operating_point(
         Distinct from the review-promotion route's own updater (``routes/validation.py``'s
         ``_promotion_of``): that one folds one review verdict across every bucket a review pass
         covered, while this one earns a single bucket's own count-calibration claim from a
-        resolved conf, so the two merge different fields. Both hold to the same discipline of
-        deciding ``validated``/no-downgrade against the stamp as it is stored, not the copy read
-        before the lock.
+        resolved conf. Both hold to deciding whether the bucket already carries an answered
+        claim through ``verify_stamp_binding``, and deciding ``validated``, the tile floor and
+        the conf-equality rule against the stamp as stored, not the copy read before the lock.
         """
-        if stored.get("validated"):
+        binding = verify_stamp_binding(stored, bucket, document="operating_point")
+        if binding.claimed and binding.ok:
             return None
         validated = fold_tile_validation(conf.is_shippable, stored.get("tile_size_validated"))
+        stored_conf_value = ((stored.get("operating_point") or {}).get("conf") or {}).get("value")
+        if validated and stored_conf_value != earned_conf_value:
+            refusal["stored_conf_value"] = stored_conf_value
+            return None
         merged = dict(stored)
         merged["operating_point"] = {**(stored.get("operating_point") or {}),
                                      "conf": conf_provenance}
-        merged["validated"] = validated
-        merged["trait"] = trait
         merged["gate_evidence_summary"] = gate_summary
+        merged["shippable_issues"] = issues
+        merged["validated"] = validated
         if not validated:
             merged["validated_by"] = None
             return merged
@@ -647,20 +680,45 @@ def calibrate_count_operating_point(
                 != claim_payload(earned, document="operating_point")):
             return None
         merged["validated_by"] = earned["validated_by"]
+        merged["trait"] = trait
         return merged
 
-    if not update_sidecar(bucket, _merge):
+    try:
+        wrote = update_sidecar(bucket, _merge)
+    except (StoreBusy, ValueError, SchemaVersionRefused) as exc:
+        return {"error": str(exc)}
+
+    if not wrote:
+        orphan = (
+            f" This calibration's own validation record {earned.get('validated_by')} was filed "
+            "before the merge refused and answers for nothing: no bucket names it."
+            if draft is not None else ""
+        )
+        if "stored_conf_value" in refusal:
+            return {"error": (
+                f"{bucket}'s operating_point.json stamp records its predictions were produced "
+                f"at conf={refusal['stored_conf_value']!r}, and this calibration earned "
+                f"conf={earned_conf_value!r}: a validated stamp can only claim the conf its "
+                "stored predictions were produced at, since calibrate_count_operating_point "
+                "never re-predicts pred_dir. Produce a fresh bucket at the earned conf through "
+                f"run_inference's calibrated path, then calibrate that bucket.{orphan}"
+            )}
         return {"error": f"{bucket}'s operating_point.json stamp changed while this calibration "
-                         "pass was running; recalibrate against the bucket as it is now."}
+                         f"pass was running; recalibrate against the bucket as it is now.{orphan}"}
 
     new_stamp = read_operating_point_sidecar(bucket) or {}
+    new_binding = verify_stamp_binding(new_stamp, bucket, document="operating_point", trait=trait)
+    validated_now = bool(new_binding.claimed and new_binding.ok)
     return {
         "pred_dir": str(bucket),
         "trait": trait,
         "dataset_hash": resolved.dataset_hash,
-        "validated": new_stamp.get("validated", False),
-        "validated_against": conf.validated_against,
-        "validated_by": new_stamp.get("validated_by"),
+        "validated": validated_now,
+        "validated_against": (
+            ((new_stamp.get("operating_point") or {}).get("conf") or {}).get("validated_against")
+            if validated_now else None
+        ),
+        "validated_by": new_stamp.get("validated_by") if validated_now else None,
         "n_calibration_images": len(resolved.resolver_inputs["calibration_records"]),
         "n_holdout_images": len(resolved.resolver_inputs["holdout_records"]),
         "gate_evidence": new_stamp.get("gate_evidence_summary"),

@@ -2208,7 +2208,9 @@ def _deliver_per_image_counts_from_bucket(predictions_dir: str, output_path: str
         check_operationalization,
         resolve_trait_and_record,
     )
-    from tcip_mcp.pipelines.resolution import VALIDATED_FALSE, read_operating_point_sidecar
+    from tcip_mcp.pipelines.resolution import (
+        VALIDATED_FALSE, read_operating_point_sidecar, stamp_names_raster,
+    )
 
     bucket_path = resolve_output_path(predictions_dir)
     sidecar = read_operating_point_sidecar(bucket_path)
@@ -2219,7 +2221,7 @@ def _deliver_per_image_counts_from_bucket(predictions_dir: str, output_path: str
             "live-with-predictions_dir path, or the web inference worker), never a directory of "
             "label JSON with no stamp."
         )}
-    if sidecar.get("raster_path") is not None:
+    if stamp_names_raster(sidecar):
         return {"error": (
             f"{bucket_path} is a whole-raster bucket (its stamp records raster_path): one mosaic "
             "total is not a per-image count, and the per_image_count operationalization was never "
