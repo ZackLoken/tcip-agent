@@ -331,7 +331,7 @@ export function ResultsTab() {
   const [dateModel, setDateModel] = useState<Record<string, string>>({});
 
   // Plant-mapping build inputs.
-  const [plantCsvText, setPlantCsvText] = useState("");
+  const [plantRegistry, setPlantRegistry] = useState("");
   const [nnTolerance, setNnTolerance] = useState<number | "">("");
   const [buildSummary, setBuildSummary] = useState<PlantMappingSummary | null>(null);
   const [buildTolerance, setBuildTolerance] = useState<PlantMappingTolerance | null>(null);
@@ -649,12 +649,8 @@ export function ResultsTab() {
       setBuildMsg("Name the mapping before building.");
       return;
     }
-    const paths = plantCsvText
-      .split(/[\n,]/)
-      .map((s) => s.trim())
-      .filter(Boolean);
-    if (paths.length === 0) {
-      setBuildMsg("Add at least one plant CSV path.");
+    if (!plantRegistry) {
+      setBuildMsg("Name a registered plant registry before building.");
       return;
     }
     setBuilding(true);
@@ -666,7 +662,7 @@ export function ResultsTab() {
       const res = await resultsApi.buildPlantMapping({
         name: mappingName,
         images_root: `${datasetRoot}/images`,
-        plant_csv_paths: paths,
+        plant_registry: plantRegistry,
         ...(nnTolerance === "" ? {} : { nn_tolerance_m: nnTolerance }),
       });
       setBuildSummary(res.summary);
@@ -936,13 +932,14 @@ export function ResultsTab() {
                 <option key={name} value={name} />
               ))}
             </datalist>
-            <label className="tcip-label mt-1">Plant CSV path(s), one per line</label>
-            <textarea
-              className="tcip-input h-16 font-mono text-[11px] leading-4"
-              value={plantCsvText}
-              onChange={(e) => setPlantCsvText(e.target.value)}
-              placeholder="…/plants_block_A.csv"
-              spellCheck={false}
+            <label className="tcip-label mt-1">
+              Plant registry name (registered via register_plant_registry)
+            </label>
+            <input
+              className="tcip-input"
+              value={plantRegistry}
+              onChange={(e) => setPlantRegistry(e.target.value)}
+              placeholder="valley-plants"
             />
           </div>
           <div className="flex flex-col gap-2">

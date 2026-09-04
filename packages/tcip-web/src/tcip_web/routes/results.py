@@ -168,9 +168,10 @@ def _audit(project_root: str, tool: str, arguments: dict) -> None:
 class BuildMappingPayload(BaseModel):
     name: str
     images_root: str
-    plant_csv_paths: list[str]
+    plant_registry: str
     dates: Optional[list[str]] = None
     nn_tolerance_m: Optional[float] = None
+    supersede: bool = False
 
 
 @router.post("/plant_mapping/build")
@@ -180,12 +181,14 @@ def build_plant_mapping(payload: BuildMappingPayload, request: Request) -> dict:
     The mapping is project state, so it always persists under the open project, by name, and is
     audited there; ``images_root`` must be a registered dataset's own ``images/`` directory (its
     identity record minted by ``register_dataset``), so a mapping cannot be built for one project
-    from another project's captures, or over a directory that merely ends in ``images``. The
-    plant-location files are the breeder's own reference data, picked from wherever they keep
-    them: from this machine they are read from any path, like the picker that finds them; from a
-    routable connection they are confined to the allowed roots. A receipt that cannot be written
-    answers 409: the record it would have named is left on disk, refused until a rebuild replaces
-    it.
+    from another project's captures, or over a directory that merely ends in ``images``.
+    ``plant_registry`` names a registry already registered under this project by the MCP door
+    ``register_plant_registry`` (only that door registers; this route only names one). Its
+    registered files were confined at registration time and are re-checked under the allowed
+    roots here, since a routable connection may be reading them for the first time. A receipt
+    that cannot be written answers 409: the record it would have named is left on disk, refused
+    until a rebuild replaces it. A rebuild a delivery event still cites answers 409 too, naming
+    the citing events, unless ``supersede=True``.
 
     Answers ``{"mapping", "summary", "unreadable", "nn_tolerance_m", "max_match_distance_m"}``;
     ``summary`` is the mapping's own ``{"per_date": {...}, "totals": {...}}`` (``build.summary()``),
@@ -210,7 +213,6 @@ def build_plant_mapping(payload: BuildMappingPayload, request: Request) -> dict:
     root = _open_project_root()
     (images_root,) = _belonging(root, payload.images_root)
     assert images_root is not None
-    plant_csvs = [_reference_file(p, request) for p in payload.plant_csv_paths]
 
     candidate = dataset_root_of(images_root)
     if candidate is None or not same_directory(image_root(candidate), images_root):
@@ -223,12 +225,27 @@ def build_plant_mapping(payload: BuildMappingPayload, request: Request) -> dict:
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
 
+    registry_record = plant_mapping.load_registry(root, payload.plant_registry)
+    if registry_record is None:
+        raise HTTPException(
+            404,
+            f"plant registry not found: {payload.plant_registry!r} under {root}; register it "
+            "with register_plant_registry before naming it here")
+    registry_ref = {"name": payload.plant_registry, "digest": registry_record["digest"]}
+    # Registered paths were confined at registration time (register_plant_registry, MCP-only);
+    # re-check them under the allowed roots now that a routable connection may be reading them.
+    registry_paths = [
+        _reference_file(e["path"], request)
+        for e in plant_mapping.registry_csv_entries(registry_record)
+    ]
+
     try:
         build = plant_mapping.build_mapping(
-            images_root, plant_csvs,
+            images_root, registry_paths,
             name=payload.name, dataset_root=candidate, dataset_id=identity["id"],
             project_root=root, built_by="gui_build_plant_mapping",
-            dates=payload.dates, nn_tolerance_m=payload.nn_tolerance_m,
+            plant_registry=registry_ref, dates=payload.dates,
+            nn_tolerance_m=payload.nn_tolerance_m,
         )
     except AmbiguousImageStem as exc:
         raise HTTPException(400, str(exc)) from exc
@@ -236,9 +253,11 @@ def build_plant_mapping(payload: BuildMappingPayload, request: Request) -> dict:
         raise HTTPException(exc.status, str(exc)) from exc
 
     try:
-        plant_mapping.persist_mapping(build, root, payload.name)
+        plant_mapping.persist_mapping(build, root, payload.name, supersede=payload.supersede)
     except AuditEntryNotWritten as exc:
         raise HTTPException(409, str(exc)) from exc
+    except plant_mapping.MappingRebuildRefusal as exc:
+        raise HTTPException(exc.status, str(exc)) from exc
 
     _audit(
         str(root),
@@ -1054,14 +1073,23 @@ def list_delivery_events(project_root: str) -> dict:
     ``event_id`` and the conform script) rather than serving a partial list silently: the Results
     tab has no way to tell "this project shipped nothing else" from "one record was dropped",
     and a delivery event is exactly the audit trail that must not go quietly missing.
+
+    Each record carries its own ``superseded`` key: the ``delivery_supersessions`` record
+    ``supersede_delivery`` filed against its ``event_id`` (naming the reason and any replacement
+    event), or ``None`` when nothing supersedes it.
     """
     import tcip_store as ts
     from pydantic import ValidationError
     from tcip_mcp.pipelines.delivery_events_schema import (
         DeliveryEventRecord,
         validation_error_detail,
+        with_supersessions,
     )
-    from tcip_mcp.pipelines.resolution import DELIVERY_EVENTS_STORE, delivery_events_scope
+    from tcip_mcp.pipelines.resolution import (
+        DELIVERY_EVENTS_STORE,
+        delivery_events_scope,
+        load_delivery_supersessions,
+    )
 
     root = _guarded_project_root(project_root)
     scope = delivery_events_scope(root)
@@ -1077,7 +1105,7 @@ def list_delivery_events(project_root: str) -> dict:
                 f"delivery_events shape: {validation_error_detail(exc)}; "
                 f"{_DELIVERY_EVENTS_CONFORM_HINT}",
             ) from exc
-    return {"records": records}
+    return {"records": with_supersessions(records, load_delivery_supersessions(root))}
 
 
 # ── Registered traits (drives the Results tab's trait selection) ───────
