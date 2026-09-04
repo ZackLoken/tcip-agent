@@ -822,11 +822,12 @@ Docstring is the function's docstring first line, verbatim.
 |---|---|---|---|
 | `deliver_orthomosaic_plant_counts` | `orthomosaic_tools.py:36` | yes | Per-plant detection counts from a persisted orthomosaic prediction bucket plus plant CSV(s). |
 
-### delivery_tools.py (1 tool)
+### delivery_tools.py (2 tools)
 
 | tool | line | audited | docstring first line |
 |---|---|---|---|
-| `supersede_delivery` | `delivery_tools.py:178` | yes | Record that a delivered file's number is withdrawn or replaced, without touching the file |
+| `deliver_per_plant_csv` | `delivery_tools.py:30` | yes | The general per-plant CSV door: `aggregate_per_plant`'s own output plus the existing |
+| `supersede_delivery` | `delivery_tools.py:187` | yes | Record that a delivered file's number is withdrawn or replaced, without touching the file |
 
 ### phenology_tools.py (4 tools)
 
