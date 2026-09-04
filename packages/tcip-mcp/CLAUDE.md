@@ -32,8 +32,7 @@ src/tcip_mcp/
                                  # the other two regimes, sharing only resolve_tile_size_param
     schemas.py, image_utils.py
   dataset_layout.py      # the single path resolver on the backend: where an image's
-                          # labels/predictions live on disk. The frontend cannot import it; its
-                          # own frontend/src/lib/paths.ts carries the one necessary copy (RECORD_EXT)
+                          # labels/predictions live on disk. The frontend cannot import it, so paths.ts's RECORD_EXT and classes.ts's ImageStatus union each restate a fact of it, held equal by tests/test_frontend_dataset_vocabulary.py
   class_registry.py      # classes.json: subjects, attributes, the name<->id assignment
   traits.py               # the trait registry: human-defined measurement semantics per trait
   operationalization.py    # per-project records of what a trait's delivered number means, who
