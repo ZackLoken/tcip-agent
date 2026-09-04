@@ -1243,7 +1243,7 @@ Path: `<dataset_root>/annotations/[<date>/]<stem>.json` (ground truth);
 `<dataset_root>/predictions/<model>/[<date>/]<stem>.json` (predictions, identical schema).
 
 Writers: `tcip_annotation.json_io.write_annotations`,
-`packages/tcip-annotation/src/tcip_annotation/json_io.py:722`;
+`packages/tcip-annotation/src/tcip_annotation/json_io.py:785`;
 `tcip_annotation.format_io.save_annotations` (`fmt="json"`),
 `packages/tcip-annotation/src/tcip_annotation/format_io.py:283`;
 `tcip_annotation.review_engine.ReviewEngine.save_gt`,
@@ -1252,7 +1252,7 @@ Writers: `tcip_annotation.json_io.write_annotations`,
 `packages/tcip-mcp/src/tcip_mcp/prediction_buckets.py:258`.
 
 Readers: `tcip_annotation.json_io.read_annotations`,
-`packages/tcip-annotation/src/tcip_annotation/json_io.py:523`;
+`packages/tcip-annotation/src/tcip_annotation/json_io.py:538`;
 `tcip_annotation.format_io.load_annotations`,
 `packages/tcip-annotation/src/tcip_annotation/format_io.py:353`;
 `tcip_mcp.dataset_layout.subjects_on_date`,
@@ -1544,8 +1544,8 @@ unknown `schema_version`. `experiments._index_refused_mutations`,
 compares in one call; `page.corrupt`/`page.version_refused` both fail the whole call (`None`, not
 a partial index), so a caller who cannot see behind an unreadable entry never reports "no
 refusals" in its place. `plant_mapping._scan_receipts`
-(`pipelines/postprocessing/plant_mapping.py:1352`) and `_require_receipt`
-(`pipelines/postprocessing/plant_mapping.py:1379`), the hard receipt gate `load_mapping` runs
+(`pipelines/postprocessing/plant_mapping.py:1377`) and `_require_receipt`
+(`pipelines/postprocessing/plant_mapping.py:1404`), the hard receipt gate `load_mapping` runs
 before trusting a persisted mapping record:
 every `plant_mapping_built` entry in the record's own project log is scanned for a receipt naming
 the record's digest, and a page reporting `page.corrupt` or `page.version_refused` raises rather
@@ -1758,7 +1758,7 @@ Path: `<dataset_root>/predictions/<model_name>/[<date>/]`, via
 
 Writer: `stage_prediction_shapes`, `packages/tcip-mcp/src/tcip_mcp/prediction_buckets.py:258`, the
 underlying per-image files written via `tcip_annotation.json_io.write_annotations`,
-`packages/tcip-annotation/src/tcip_annotation/json_io.py:722` (format 1's writer).
+`packages/tcip-annotation/src/tcip_annotation/json_io.py:785` (format 1's writer).
 `resolve_prediction_bucket`, `prediction_buckets.py:227`, resolves a `(dataset_root, model_name,
 date)` triple to a writable directory; `resolve_writable_bucket`, `prediction_buckets.py:195`,
 redirects to the next free `<model_name>@r2`/`@r3` variant once any image in a bucket has a
@@ -1784,7 +1784,7 @@ block, has no test coverage; every test of that regime writes into a fresh, verd
 Path: `<prediction_bucket_dir>/operating_point.json`, sibling of the bucket's per-image
 prediction files (format 17's immutability-scoped prediction directory, not a score bin), one
 of the stamp filenames `tcip_annotation.json_io.SIDECAR_FILENAMES`
-(`packages/tcip-annotation/src/tcip_annotation/json_io.py:242`) names and every bucket
+(`packages/tcip-annotation/src/tcip_annotation/json_io.py:243`) names and every bucket
 enumeration excludes (format 17).
 
 Writer: `write_sidecar`, `resolution.py:779`, the one write, under the stamp's own lock;
@@ -2200,11 +2200,11 @@ arguments: dict) -> None:`, which calls `record_event` with the dataset root its
 resolved; `routes/annotate.py:150` does the same for its own dataset, `routes/classes.py:63`
 likewise, the one `routes/inference.py:368` imports and calls rather than defining its own);
 `routes/results.py:151` does the same for a project root instead. Reader:
-`pipelines/postprocessing/plant_mapping.py:1379` (`_require_receipt`)
+`pipelines/postprocessing/plant_mapping.py:1404` (`_require_receipt`)
 trusts only a `plant_mapping_built` entry it finds in the log under the root its caller holds
 (the MCP tool's pinned platform root, the platform log's own file until adoption makes it a
 project's; the web route's guarded project root), scanned by `_scan_receipts`
-(`pipelines/postprocessing/plant_mapping.py:1352`), which refuses (never scans past) a page
+(`pipelines/postprocessing/plant_mapping.py:1377`), which refuses (never scans past) a page
 reporting corruption or an unknown `schema_version`.
 Phase 3 verdict: single. Each writer is exercised through a real append and checked for its own
 tool name landing in the log its own scope names: `tests/test_tcip_web_routes.py:766,1193,1229`
@@ -2300,7 +2300,7 @@ Phase 3 verdict: single.
 ## S17. Canonical per-image annotation JSON schema
 
 Must agree: every writer produces, and every reader accepts, the same name-based record shape.
-Side A: `packages/tcip-annotation/src/tcip_annotation/json_io.py:415` (`def annotation_from_payload(`, the one conversion from a client payload to a record, with `_annotations_of` at line 227 the one parse back and `write_annotations` at line 336 the one writer).
+Side A: `packages/tcip-annotation/src/tcip_annotation/json_io.py:416` (`def annotation_from_payload(`, the one conversion from a client payload to a record, with `_annotations_of` at line 227 the one parse back and `write_annotations` at line 336 the one writer).
 Side B: `packages/tcip-web/src/tcip_web/routes/annotate.py:191`, `packages/tcip-web/src/tcip_web/routes/review.py:667` and `packages/tcip-mcp/src/tcip_mcp/tools/annotation_tools.py:179` (every save entry point converts through it rather than assembling records of its own).
 Phase 3 verdict: single.
 
@@ -2308,7 +2308,7 @@ Phase 3 verdict: single.
 
 Must agree: the browser and the route use corner coordinates while the file uses xywh, with the conversion happening once.
 Side A: `packages/tcip-web/src/tcip_web/routes/annotate.py:40` (`bbox: Optional[list[float]] = None          # [x1, y1, x2, y2], pixel`, the wire form).
-Side B: `packages/tcip-annotation/src/tcip_annotation/json_io.py:641` (`def xywh(`, the one corner-to-xywh conversion and the 2-decimal grid the stored document lives on, applied on write and, via the import at `packages/tcip-mcp/src/tcip_mcp/pipelines/training/evaluation.py:33` (`from tcip_annotation.json_io import xywh`), to every box scored against a stored label so both sides of a match sit on one grid; a wire box becomes a `BBox` in `annotation_from_payload`, line 175, and `_annotations_of`, line 227, is the inverse read).
+Side B: `packages/tcip-annotation/src/tcip_annotation/json_io.py:704` (`def xywh(`, the one corner-to-xywh conversion and the 2-decimal grid the stored document lives on, applied on write and, via the import at `packages/tcip-mcp/src/tcip_mcp/pipelines/training/evaluation.py:33` (`from tcip_annotation.json_io import xywh`), to every box scored against a stored label so both sides of a match sit on one grid; a wire box becomes a `BBox` in `annotation_from_payload`, line 175, and `_annotations_of`, line 227, is the inverse read).
 Phase 3 verdict: single.
 
 ## S19. Annotation format detection scope (json, coco)
