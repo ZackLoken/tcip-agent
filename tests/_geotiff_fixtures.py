@@ -1,7 +1,7 @@
 """The one GeoTIFF-writing helper every suite that needs a real (or deliberately incomplete or
 rotated) georeferenced raster on disk imports, so test_region_completeness.py,
-test_coverage_routes.py and test_orthomosaic_mapping.py never drift into three slightly
-different recipes for "the same" fixture.
+test_coverage_routes.py, test_orthomosaic_mapping.py, test_orthomosaic_tools.py and
+test_segment_attribution.py never drift into slightly different recipes for "the same" fixture.
 """
 
 from __future__ import annotations
@@ -79,3 +79,25 @@ def write_geotiff(
     if rowsperstrip is not None:
         kwargs["rowsperstrip"] = rowsperstrip
     tifffile.imwrite(str(path), arr, photometric="rgb", extratags=extratags, **kwargs)
+
+
+def write_canonical_dataset_raster(
+    dataset_root: Path, *, date: str = "2024-06-01", stem: str = "mosaic",
+    width: int = 64, height: int = 64, crop: str = "chestnut", channels: int = 3,
+) -> Path:
+    """A georeferenced raster at ``<dataset_root>/images/<date>/<stem>.tif``, its dataset
+    registered (``register_dataset``), so its own label document resolves through
+    ``annotation_path_for_image`` and its identity is a real, registered one.
+
+    The one canonical-position raster fixture every canopy-segment and whole-raster delivery
+    test that needs a registered dataset behind its raster builds through, so none of them
+    re-derives the layout by hand.
+    """
+    from tcip_mcp.tools.project_tools import register_dataset
+
+    raster_path = dataset_root / "images" / date / f"{stem}.tif"
+    raster_path.parent.mkdir(parents=True, exist_ok=True)
+    write_geotiff(raster_path, width=width, height=height, shape=(height, width, channels))
+    result = register_dataset(str(dataset_root), crop=crop, project_root=str(dataset_root))
+    assert "error" not in result, result
+    return raster_path
