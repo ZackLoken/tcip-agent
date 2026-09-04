@@ -91,6 +91,25 @@ def test_predict_tiled_stamps_cap_hit_when_the_full_frame_cap_truncates(tmp_path
     assert not_capped["count"] == uncapped["count"]
 
 
+def test_predict_tiled_whole_decode_refuses_prior_or_progress_by_name(tmp_path):
+    """``prior``/``progress`` only apply to the windowed-reader resume seam; a whole-decode source
+    (a plain path or ``BandGroupRef``) has no resume seam to feed them into, and silently dropping
+    them would let a caller believe a whole-decode pass resumed when it quietly started over."""
+    from tcip_mcp.model_registry import load_registered_checkpoint
+    from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
+
+    ckpt = _detection_checkpoint(tmp_path)
+    img = _image(tmp_path)
+    checkpoint = load_registered_checkpoint(ckpt, project_path=str(tmp_path))
+    pred = GenericPredictor(checkpoint, device="cpu", score_threshold=0.0)
+    empty_prior = {"tile_info": [], "boxes": [], "scores": [], "labels": []}
+
+    with pytest.raises(ValueError, match="resume seam"):
+        pred.predict_tiled(img, tile_size=TILE, overlap=0.2, prior=empty_prior)
+    with pytest.raises(ValueError, match="resume seam"):
+        pred.predict_tiled(img, tile_size=TILE, overlap=0.2, progress=lambda *a: None)
+
+
 def test_run_inference_tile_flag(tmp_path, monkeypatch):
     from tests._verified_checkpoint_fixtures import run_inference_verified
 

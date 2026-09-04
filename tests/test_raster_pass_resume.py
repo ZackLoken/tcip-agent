@@ -175,9 +175,13 @@ def test_resume_completes_an_interrupted_pass_with_the_same_detections_and_clear
 
     resumed_doc = json.loads((interrupted_out / "mosaic.json").read_text())
     baseline_doc = json.loads((uninterrupted_out / "mosaic.json").read_text())
-    resumed_boxes = sorted(tuple(a["bbox"]) for a in resumed_doc["annotations"])
-    baseline_boxes = sorted(tuple(a["bbox"]) for a in baseline_doc["annotations"])
-    assert resumed_boxes == baseline_boxes
+
+    def _as_produced(doc: dict) -> list[tuple]:
+        return [(tuple(a["bbox"]), a["score"], a["subject"]) for a in doc["annotations"]]
+
+    # As produced, not sorted: a resumed pass must reconstruct the identical detection set in the
+    # identical order, not merely the same boxes in some order.
+    assert _as_produced(resumed_doc) == _as_produced(baseline_doc)
 
 
 def test_no_resume_refuses_over_recorded_progress_naming_both_ways_out(tmp_path, monkeypatch):
@@ -280,3 +284,119 @@ def test_a_redirected_interrupted_pass_resumes_in_its_own_bucket(tmp_path, monke
     assert "error" not in result, result
     assert Path(result["output_dir"]) == redirected
     assert _progress_keys(redirected) == []
+
+
+def test_resume_refuses_when_the_recorded_identity_carries_an_extra_top_level_key(
+    tmp_path, monkeypatch,
+):
+    """The top-level comparison is a key union, not a fixed field list: a field a future writer
+    adds to the identity body is compared, and named, without a second list to keep in sync."""
+    from tcip_mcp.tools.inference_tools import RASTER_PASS_PROGRESS_STORE
+    from tcip_store import Key, store
+
+    ckpt, raster_path = _setup(tmp_path, monkeypatch)
+    out = tmp_path / "preds"
+    _interrupt_after_one_batch(monkeypatch)
+    with pytest.raises(RuntimeError, match="simulated crash"):
+        _run(ckpt, raster_path, out)
+
+    identity_key = Key(RASTER_PASS_PROGRESS_STORE, str(out), ("identity",))
+    body = dict(store.read(identity_key))
+    body["future_field"] = "a value this reader does not expect"
+    with store.transaction(identity_key) as txn:
+        txn.write(identity_key, body)
+
+    result = _run(ckpt, raster_path, out, resume=True)
+
+    assert "error" in result and "future_field" in result["error"]
+
+
+def test_content_identity_failure_after_open_refuses_naming_the_raster(tmp_path, monkeypatch):
+    """A raster that opens cleanly but fails partway through the sampling read refuses through
+    the same ``{"error": ...}`` shape a failed open already does, rather than letting a bare
+    exception escape this audited tool."""
+    ckpt, raster_path = _setup(tmp_path, monkeypatch)
+    out = tmp_path / "preds"
+
+    import tcip_mcp.pipelines.raster_source as raster_source_module
+
+    real_open_raster = raster_source_module.open_raster
+
+    def _flaky_open_raster(source, num_channels):
+        reader = real_open_raster(source, num_channels)
+
+        def _raise(*args, **kwargs):
+            raise OSError("simulated disk read failure")
+
+        reader.read_region = _raise
+        return reader
+
+    monkeypatch.setattr(raster_source_module, "open_raster", _flaky_open_raster)
+
+    result = _run(ckpt, raster_path, out)
+
+    assert "error" in result
+    assert str(raster_path) in result["error"]
+    assert not out.exists()
+
+
+def test_resume_completes_an_interrupted_block_calibrated_pass_running_the_calibration_pass_once(
+    tmp_path, monkeypatch, seed_catkin_trait_spec,
+):
+    """A block-calibrated resume applies the recorded conf/cross_tile_nms directly rather than
+    re-running the reserved-band calibration a second time: the resolver that earns them runs
+    exactly once, at the interrupted attempt, and the resumed pass reproduces the same detections
+    an uninterrupted pass over the identical inputs would."""
+    from tests.test_block_calibration import TILE as BLOCK_TILE, _attest_regions_complete, _build_experiment
+
+    exp = _build_experiment(tmp_path)
+    manifest = exp["spatial_manifest"]
+    _attest_regions_complete(
+        exp["root"], exp["stem"], [manifest["calibration_region"], manifest["test_region"]])
+
+    import tcip_mcp.pipelines.block_calibration as block_calibration_module
+
+    real_resolve = block_calibration_module.resolve_block_calibration_records
+    calls = {"n": 0}
+
+    def _counting_resolve(*args, **kwargs):
+        calls["n"] += 1
+        return real_resolve(*args, **kwargs)
+
+    monkeypatch.setattr(
+        block_calibration_module, "resolve_block_calibration_records", _counting_resolve)
+
+    from tcip_mcp.tools.inference_tools import run_inference
+
+    call_kwargs = {
+        "raster_path": str(exp["raster_path"]), "conf_threshold": 0.0, "tile_size": BLOCK_TILE,
+        "overlap": 0.2, "tile_batch_size": 50, "device": "cpu", "trait": "catkin",
+        "experiment_id": exp["experiment_id"],
+    }
+
+    interrupted_out = tmp_path / "interrupted"
+    _interrupt_after_one_batch(monkeypatch)
+    with pytest.raises(RuntimeError, match="simulated crash"):
+        run_inference(exp["checkpoint_path"], output_dir=str(interrupted_out), **call_kwargs)
+    assert calls["n"] == 1
+
+    resumed = run_inference(
+        exp["checkpoint_path"], output_dir=str(interrupted_out), resume=True, **call_kwargs)
+    assert "error" not in resumed, resumed
+    assert calls["n"] == 1  # the resume applied the recorded operating point, never re-derived one
+
+    uninterrupted_out = tmp_path / "uninterrupted"
+    baseline = run_inference(
+        exp["checkpoint_path"], output_dir=str(uninterrupted_out), **call_kwargs)
+    assert "error" not in baseline, baseline
+    assert calls["n"] == 2
+
+    import json
+
+    resumed_doc = json.loads((interrupted_out / f"{exp['stem']}.json").read_text())
+    baseline_doc = json.loads((uninterrupted_out / f"{exp['stem']}.json").read_text())
+
+    def _as_produced(doc: dict) -> list[tuple]:
+        return [(tuple(a["bbox"]), a["score"], a["subject"]) for a in doc["annotations"]]
+
+    assert _as_produced(resumed_doc) == _as_produced(baseline_doc)
