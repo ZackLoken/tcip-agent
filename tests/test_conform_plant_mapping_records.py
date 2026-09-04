@@ -73,6 +73,8 @@ def test_plan_previews_without_writing(tmp_path: Path) -> None:
     assert writes
     stored = ts.read(plant_mapping.plant_mapping_key(tmp_path, "valley"))
     assert stored == before, "plan_root computes writes but must not apply them"
+    assert plant_mapping.load_registry(tmp_path, "valley-plants") is None, (
+        "plan_root must not register the CSVs either")
 
 
 def test_main_conforms_the_record_and_registers_the_csv(
@@ -137,3 +139,57 @@ def test_a_stored_path_no_longer_on_disk_refuses(tmp_path: Path) -> None:
 
     assert writes == []
     assert any("refused" in o for o in outcomes)
+
+
+def test_a_registry_name_outside_name_segment_refuses(tmp_path: Path) -> None:
+    module = _load_script()
+    csv_path = tmp_path / "plants.csv"
+    _write_plant_csv(csv_path)
+    _write_old_shaped_record(tmp_path, "valley", csv_path)
+
+    outcomes, writes = module.plan_root(tmp_path, "Not Legal!", crop="hazelnut", site="north")
+
+    assert writes == []
+    assert any("refused" in o and "lowercase" in o for o in outcomes)
+    assert plant_mapping.load_registry(tmp_path, "Not Legal!") is None
+
+
+def test_main_prints_delivery_events_a_conform_would_strand(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Rewriting plant_csvs to plant_registry moves the record's own digest, so a delivery event
+    minted against the old digest now cites a record nothing hashes to; the conform names it."""
+    from tcip_mcp.pipelines import resolution
+
+    module = _load_script()
+    csv_path = tmp_path / "plants.csv"
+    _write_plant_csv(csv_path)
+    old_record = _write_old_shaped_record(tmp_path, "valley", csv_path)
+    old_digest = plant_mapping.record_digest(old_record)
+
+    event_key = resolution.delivery_event_key(resolution.delivery_events_scope(tmp_path), "evt-1")
+    ts.replace(event_key, {
+        "event_id": "evt-1", "trait": "currant_bloom", "delivery_kind": "state_crossing_dates",
+        "door": "deliver_phenology_milestones", "output_path": None, "output_sha256": None,
+        "measurement_documents": ["operating_point"], "scale_document": None,
+        "plant_mapping": {
+            "name": "valley", "project_root": str(tmp_path), "dataset_id": "ds-1",
+            "dataset_root": str(tmp_path / "ds"), "built_at": "2026-02-11T00:00:00+00:00",
+            "record_sha256": old_digest, "nn_tolerance_m": {"value": 10.0, "source": "fallback"},
+            "capture_identity": {}, "captures_unverified": [], "plant_csvs_unverified": [],
+            "dates_delivered": ["2026-02-11"], "images_unattributed": 0,
+            "images_unattributed_scope": "delivered_dates", "plant_attribution": "image",
+        },
+        "documents": {}, "produced_at": "2026-02-11T00:00:00+00:00",
+    })
+
+    monkeypatch.setattr(sys, "argv", [
+        "conform_plant_mapping_records.py", str(tmp_path), "valley-plants",
+        "--crop", "hazelnut", "--site", "north orchard", "--plan",
+    ])
+    exit_code = module.main()
+    output = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert "evt-1" in output
+    assert old_digest in output
