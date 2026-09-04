@@ -30,7 +30,7 @@ import logging
 import os
 from collections.abc import Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal, Optional
+from typing import TYPE_CHECKING, Literal, Optional, Union
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import Response
@@ -43,6 +43,7 @@ from tcip_web.state import store
 
 if TYPE_CHECKING:
     from tcip_mcp.class_registry import ClassRegistry
+    from tcip_mcp.pipelines.resolution import DeliveryRefused
 
 logger = logging.getLogger(__name__)
 
@@ -668,6 +669,36 @@ class AcknowledgementPayload(BaseModel):
     reason: str = Field(min_length=1)
 
 
+def _acknowledgement_from(payload) -> Optional[Acknowledgement]:
+    """The breeder's own act of shipping a delivery unvalidated, resolved from a payload's own
+    ``acknowledgement`` and ``user`` fields: the one construction every acknowledging Results
+    door shares (``export_csv``, ``export_count_csv``), so a resolved user identity, an empty
+    reason, and the "acknowledgement requires a user" refusal are worded and enforced identically
+    wherever a door builds one. ``payload.acknowledgement`` names only the reason;
+    ``acknowledged_by`` is resolved from ``payload.user`` here, and a request naming no user is
+    refused before anything runs, since a server identity is never written as a breeder's name.
+    ``None`` when the payload names no acknowledgement at all.
+    """
+    if payload.acknowledgement is None:
+        return None
+    if not (payload.user or "").strip():
+        raise HTTPException(
+            400,
+            "an acknowledgement requires a user: a server identity is never written as a "
+            "breeder's name",
+        )
+    reason = payload.acknowledgement.reason.strip()
+    if not reason:
+        raise HTTPException(
+            400,
+            "an acknowledgement requires a non-blank reason: the one thing the record "
+            "carries that says why",
+        )
+    from tcip_web.identity import user_id
+
+    return Acknowledgement(acknowledged_by=user_id(payload.user), reason=reason)
+
+
 class ExportCsvPayload(BaseModel):
     """The export door's own payload: it does not inherit ``PhenologyPayload`` (it carries no
     ``show_unvalidated``, a display-only choice this door never honors) but shares the four fields
@@ -712,25 +743,7 @@ def export_csv(payload: ExportCsvPayload) -> Response:
     delivery carries. The response body is the file read back as bytes, never a second composition
     of the same rows.
     """
-    acknowledgement: Optional[Acknowledgement] = None
-    if payload.acknowledgement is not None:
-        if not (payload.user or "").strip():
-            raise HTTPException(
-                400,
-                "an acknowledgement requires a user: a server identity is never written as a "
-                "breeder's name",
-            )
-        reason = payload.acknowledgement.reason.strip()
-        if not reason:
-            raise HTTPException(
-                400,
-                "an acknowledgement requires a non-blank reason: the one thing the record "
-                "carries that says why",
-            )
-        from tcip_web.identity import user_id
-
-        acknowledgement = Acknowledgement(acknowledged_by=user_id(payload.user), reason=reason)
-
+    acknowledgement = _acknowledgement_from(payload)
     measurement = _measure_phenology(payload, acknowledgement=acknowledgement)
     if not measurement.gate.ok:
         raise HTTPException(400, _refusal(measurement))
@@ -780,6 +793,159 @@ def export_csv(payload: ExportCsvPayload) -> Response:
     # The file above is already on disk either way; this tells the breeder's client whether the
     # best-effort delivery_events write behind it actually landed.
     headers["X-TCIP-Delivery-Event-Recorded"] = str(cells["delivery_event_recorded"]).lower()
+    return Response(content=body, media_type="text/csv", headers=headers)
+
+
+# ── Count CSV export ────────────────────────────────────────────────────
+
+
+class PerImageCountDelivery(BaseModel):
+    """The bucket regime of a per-image count delivery: an existing, reviewed prediction bucket,
+    the same shape ``inference_tools.per_image_counts_from_bucket`` takes."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["per_image_count"]
+    predictions_dir: str
+    trait: str
+
+
+class OrthomosaicPlantCountsDelivery(BaseModel):
+    """A per-plant count delivery from a persisted whole-raster prediction bucket plus a
+    registered plant registry, the same shape ``orthomosaic_tools.orthomosaic_plant_counts``
+    takes. ``nn_tolerance_m`` is not exposed here: this door serves the derived tolerance the
+    core resolves from the plant grid's own spacing, or the ``canopy_subject`` regime; the MCP
+    tool carries the explicit-override knob for a caller that needs it."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["orthomosaic_plant_counts"]
+    predictions_dir: str
+    raster_path: str
+    plant_registry: str
+    delivered_phenotype: str
+    crop: str = ""
+    pipeline_version: str = ""
+    canopy_subject: str = ""
+
+
+class ExportCountCsvPayload(BaseModel):
+    """The count-export door's own payload: a discriminated ``delivery`` naming which of the two
+    stranded count kinds this posts, the acknowledgement shape ``export_csv`` shares, never a
+    caller-composed table (``PhenologyPayload``'s own principle, restated for counts)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    project_root: str
+    delivery: Union[PerImageCountDelivery, OrthomosaicPlantCountsDelivery] = Field(
+        discriminator="kind")
+    filename: str = Field(min_length=1)
+    user: Optional[str] = None
+    acknowledgement: Optional[AcknowledgementPayload] = None
+
+
+def _count_gate_detail(exc: DeliveryRefused) -> dict:
+    """The structured 400 body for a count door's own delivery-gate refusal: the gate's reason
+    plus this door's own remedy (acknowledge and re-export from this tab, the escape
+    ``export_csv``'s own gate refusal names for phenology), beside every counts-bearing fact the
+    core already had in hand.
+    """
+    message = (
+        f"{exc} Acknowledge and re-export from this tab, or validate the dimension named above "
+        "and re-export."
+    )
+    return {"kind": "delivery_gate", "message": message,
+           "unvalidated_dimensions": exc.gate.unvalidated_cell(), **exc.facts}
+
+
+@router.post("/export_count_csv")
+def export_count_csv(payload: ExportCountCsvPayload) -> Response:
+    """Write the CSV for a per-image or per-plant count delivery, over the buckets (and, for the
+    per-plant kind, the registered plant registry) this route confines to the open project.
+
+    The two count kinds the acknowledgement family left with no provisional route:
+    ``per_image_count`` (the bucket regime of ``deliver_per_image_counts``) and
+    ``per_plant_count_aggregate`` through the orthomosaic composition
+    (``deliver_orthomosaic_plant_counts``). Each delegates to the same core its MCP tool calls
+    (``inference_tools.per_image_counts_from_bucket`` /
+    ``orthomosaic_tools.orthomosaic_plant_counts``), so a web-delivered count CSV and the MCP
+    door's cannot disagree about what either delivery carries. The core runs its own meaning
+    check first, with this door's own arguments, and raises ``OperationalizationRefused``; this
+    route runs no check of its own.
+
+    ``predictions_dir``/``raster_path`` are confined to the open project's own tree or a dataset
+    registered to it (ownership, not the transport-boundary ``_reference_file`` check); for the
+    orthomosaic kind, every entry of the named plant registry is confined the same way before the
+    core ever reads it, so a registered, byte-valid CSV outside the project's roots refuses 403
+    up front. ``DeliveryRefused`` returns 400 with ``{"kind": "delivery_gate", "message",
+    "unvalidated_dimensions", **facts}``; ``OperationalizationRefused`` returns 400 with the
+    check's own ``as_detail()``; ``CountDeliveryRefused`` returns 400 with its own message and
+    facts. Each post is a distinct delivery with its own event: a second post naming the same
+    ``filename`` overwrites the file, and the earlier event's own digest no longer describes it,
+    the same contract ``export_csv`` has, with ``supersede_delivery`` the remedy.
+    """
+    from tcip_mcp.operationalization import OperationalizationRefused
+    from tcip_mcp.pipelines.resolution import CountDeliveryRefused, DeliveryRefused
+
+    root = _open_project_root(payload.project_root)
+    acknowledgement = _acknowledgement_from(payload)
+    saved_path = root / "results_export" / Path(payload.filename).name
+
+    if payload.delivery.kind == "per_image_count":
+        (predictions_dir,) = _belonging(root, payload.delivery.predictions_dir)
+        assert predictions_dir is not None
+        from tcip_mcp.tools.inference_tools import per_image_counts_from_bucket
+
+        try:
+            result = per_image_counts_from_bucket(
+                str(predictions_dir), str(saved_path), trait=payload.delivery.trait,
+                project_root=root, acknowledgement=acknowledgement)
+        except OperationalizationRefused as exc:
+            raise HTTPException(400, exc.check.as_detail()) from exc
+        except DeliveryRefused as exc:
+            raise HTTPException(400, _count_gate_detail(exc)) from exc
+        except CountDeliveryRefused as exc:
+            raise HTTPException(400, {"kind": "count_delivery", "message": str(exc),
+                                      **exc.facts}) from exc
+    else:
+        predictions_dir, raster_path = _belonging(
+            root, payload.delivery.predictions_dir, payload.delivery.raster_path)
+        assert predictions_dir is not None and raster_path is not None
+        registry_record = plant_mapping.load_registry(root, payload.delivery.plant_registry)
+        if registry_record is None:
+            raise HTTPException(
+                404,
+                f"plant registry not found: {payload.delivery.plant_registry!r} under {root}; "
+                "register it with register_plant_registry before naming it here")
+        _belonging(root, *(e["path"] for e in plant_mapping.registry_csv_entries(registry_record)))
+        from tcip_mcp.tools.orthomosaic_tools import orthomosaic_plant_counts
+
+        try:
+            result = orthomosaic_plant_counts(
+                str(predictions_dir), str(raster_path), payload.delivery.plant_registry,
+                str(saved_path), payload.delivery.delivered_phenotype,
+                crop=payload.delivery.crop, pipeline_version=payload.delivery.pipeline_version,
+                canopy_subject=payload.delivery.canopy_subject,
+                project_root=root, acknowledgement=acknowledgement)
+        except OperationalizationRefused as exc:
+            raise HTTPException(400, exc.check.as_detail()) from exc
+        except DeliveryRefused as exc:
+            raise HTTPException(400, _count_gate_detail(exc)) from exc
+        except CountDeliveryRefused as exc:
+            raise HTTPException(400, {"kind": "count_delivery", "message": str(exc),
+                                      **exc.facts}) from exc
+
+    body = saved_path.read_bytes()
+    _audit(str(root), "results.export_count_csv", {
+        "kind": payload.delivery.kind, "saved_path": str(saved_path),
+    })
+    headers = {"Content-Disposition": f'attachment; filename="{Path(payload.filename).name}"'}
+    headers["X-TCIP-Saved-To"] = str(saved_path)
+    headers["X-TCIP-Delivery-Event-Recorded"] = str(result["delivery_event_recorded"]).lower()
+    headers["X-TCIP-Unvalidated-Dimensions"] = result.get("unvalidated_dimensions") or ""
+    from urllib.parse import quote
+
+    headers["X-TCIP-Acknowledged-By"] = quote(result.get("acknowledged_by") or "")
     return Response(content=body, media_type="text/csv", headers=headers)
 
 
