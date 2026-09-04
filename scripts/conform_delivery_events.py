@@ -11,6 +11,11 @@ anywhere on the record: they were never computed for that delivery, so there is 
 map forward, only a gap to name. A refused record is left exactly as stored; the only remedy is a
 fresh delivery through the door that writes this record, or removing the record by hand.
 
+``plant_mapping`` carries one of two disclosure shapes, or ``null`` (``delivery_events_schema.py``):
+a walked capture mapping's, or ``deliver_orthomosaic_plant_counts``'s own whole-raster registry
+disclosure. Every stored record written so far still validates against the shape it always carried,
+so this script gains no write-forward for the second shape, only this sentence.
+
 The one exception is ``acknowledged_by``/``acknowledgement_reason``: a record written before this
 pair existed carries no acknowledgement of any kind, so ``null`` on both is not a guess but the
 true value, derivable from the record's own age rather than from anything it states. A record

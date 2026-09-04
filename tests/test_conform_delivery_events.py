@@ -189,6 +189,37 @@ def test_a_nonexistent_root_is_refused_the_same_way_as_one_missing_tcip(tmp_path
     assert "no .tcip directory" in outcomes[0]
 
 
+def _write_event_with_neither_plant_mapping_shape(root: Path, event_id: str = "neither-shape") -> None:
+    """A ``plant_mapping`` naming neither ``PlantMappingDisclosure``'s nor
+    ``PlantRegistryDisclosure``'s own key set: the union resolves to nothing, so this refuses."""
+    key = resolution.delivery_event_key(resolution.delivery_events_scope(root), event_id)
+    ts.replace(
+        key,
+        {
+            "event_id": event_id, "trait": "astringency", "delivery_kind": "state_crossing_dates",
+            "door": "test_door", "output_path": None, "output_sha256": None,
+            "measurement_documents": ["operating_point"], "scale_document": None,
+            "acknowledged_by": None, "acknowledgement_reason": None,
+            "plant_mapping": {"garbage": True}, "documents": {},
+            "produced_at": datetime.now(timezone.utc).isoformat(),
+        },
+        expect=ts.Version.ABSENT,
+    )
+
+
+def test_check_root_names_a_plant_mapping_of_neither_disclosure_shape(tmp_path: Path):
+    bind_default()
+    module = _load_script()
+    _write_event_with_neither_plant_mapping_shape(tmp_path)
+
+    outcomes, refused = module.check_root(tmp_path)
+
+    assert refused is True
+    assert len(outcomes) == 1
+    assert "neither-shape: refused" in outcomes[0]
+    assert "plant_mapping" in outcomes[0]
+
+
 def test_check_root_names_a_valid_record_and_refuses_an_old_shaped_one(tmp_path: Path):
     bind_default()
     module = _load_script()
