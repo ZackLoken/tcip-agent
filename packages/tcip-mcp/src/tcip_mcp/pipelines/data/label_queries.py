@@ -510,7 +510,7 @@ def confirmed_negative_records(
 
     from tcip_mcp.class_registry import attribute_schema_digest, read_registry
     from tcip_mcp.dataset_layout import (
-        classes_path, dataset_root_of, image_status_digest_key,
+        bucket_digest_stamps, classes_path, dataset_root_of, image_status_digest_key,
         is_confirmed_negative, status_confirmations, status_bucket, status_of,
     )
 
@@ -539,15 +539,11 @@ def confirmed_negative_records(
     if not negatives:
         return negatives
 
-    stamped_by_image: dict = {}
     try:
         stamps = tcip_store.read(image_status_digest_key(root), default={})
     except tcip_store.DecodeError:
         stamps = {}
-    if isinstance(stamps, dict):
-        bucket_stamps = stamps.get(bucket_key)
-        if isinstance(bucket_stamps, dict):
-            stamped_by_image = bucket_stamps
+    stamped_by_image = bucket_digest_stamps(stamps, bucket_key)
     if not stamped_by_image:
         # nothing stamped -> no quarantine signal -> admit, but still check for contradiction
         return _exclude_contradicted(negatives, subject, labels_dir, contradicted_out)
