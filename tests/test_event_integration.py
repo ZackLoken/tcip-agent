@@ -622,17 +622,14 @@ class TestInferenceToolOutputSchema:
                    for p in out.glob("*.json") if p.name != "operating_point.json"}
         assert written == counts
 
-    def test_deliver_per_image_counts_writes_each_images_own_count_into_the_csv(
+    def test_deliver_per_image_counts_refuses_a_live_pass_with_no_bucket_naming_each_count(
         self, tmp_path: Path, monkeypatch,
     ) -> None:
-        """The delivered CSV carries the count measured for each image, one row each.
-
-        The counts across the block are deliberately uneven, including a zero, so a CSV that
-        flattens them or drops the empty frame reads differently from one that reports what was
-        measured.
+        """A live pass with no ``predictions_dir`` has no bucket a reviewer could re-open, and this
+        door takes no acknowledgement for the CSV itself, so it always refuses; the refusal still
+        names the count measured for each image and the run's own narrowed conf reference,
+        distinct from the CSV-facing column, which floors false with nothing on disk behind it.
         """
-        import csv
-
         import tcip_mcp.model_registry as model_registry_mod
         import tcip_mcp.tools.inference_tools as itools
         from tcip_mcp.pipelines.resolution import VALIDATED_FALSE, VALIDATED_HELD_OUT
@@ -654,24 +651,19 @@ class TestInferenceToolOutputSchema:
 
         fx.seed_confirmed_count(tmp_path)
         out_csv = tmp_path / "block_counts.csv"
-        # No predictions_dir: the CSV is the provisional one but still carries each measured count.
+        # No predictions_dir: nothing on disk backs the count, so the delivery refuses outright.
         res = itools.deliver_per_image_counts(str(ckpt), str(tmp_path), str(out_csv),
                                      trait=fx.COUNT_TRAIT,
-                                     calibration_labels_dir=str(tmp_path),
-                                     acknowledge_unvalidated=True)
+                                     calibration_labels_dir=str(tmp_path))
 
-        assert "error" not in res, res
-        assert res["csv_path"] == str(out_csv)
+        assert "error" in res
         assert res["image_count"] == len(counts)
         assert res["total_detections"] == sum(counts.values())
         # No bucket, so the CSV-facing column floors false regardless; the run's own narrowed
         # reference travels honestly under its own name instead.
         assert res["operating_point_validated"] == VALIDATED_FALSE
         assert res["run_conf_validated_against"] == VALIDATED_HELD_OUT
-        # The delivered image cell is the source basename with its extension, passed straight
-        # through from this live, no-bucket call's own result: export_detection_csv's own spelling.
-        rows = list(csv.DictReader(out_csv.read_text(encoding="utf-8").splitlines()))
-        assert {r["image"]: int(r["detection_count"]) for r in rows} == counts
+        assert not out_csv.exists()
 
 
 class TestHpoToolOutputSchema:

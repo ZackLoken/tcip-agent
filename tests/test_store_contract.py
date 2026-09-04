@@ -1743,6 +1743,7 @@ REGISTERED = {
          "output_path": "büsch_phenology.csv", "output_sha256": "0" * 64,
          "measurement_documents": ["operating_point", "classifier_operating_point"],
          "scale_document": None,
+         "acknowledged_by": None, "acknowledgement_reason": None,
          "plant_mapping": {
              "name": "valley", "project_root": "P:/valley", "dataset_id": "ds-1",
              "dataset_root": "dü", "built_at": "2026-03-04T12:00:00+00:00",

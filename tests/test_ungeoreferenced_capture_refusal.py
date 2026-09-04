@@ -222,7 +222,7 @@ def _assert_all_doors_refuse(
     out_csv = tmp_path / "out.csv"
     res = deliver_phenology_milestones(
         trait="currant_bloom", mapping_name=mapping_name, predictions_by_date=preds_by_date,
-        output_csv_path=str(out_csv), acknowledge_unvalidated=True)
+        output_csv_path=str(out_csv))
     assert "error" in res
     assert expected_fragment in res["error"]
     assert not out_csv.exists()
@@ -232,7 +232,6 @@ def _assert_all_doors_refuse(
     payload = {
         "project_root": str(tmp_path), "mapping_name": mapping_name,
         "predictions_by_date": preds_by_date, "trait": "currant_bloom",
-        "acknowledge_unvalidated": True,
     }
     resp = client.post("/api/results/export_csv",
                        json={**payload, "payload": "milestones", "filename": "x.csv"})
@@ -325,6 +324,42 @@ def test_a_blank_plant_name_is_unattributed_by_the_one_predicate(tmp_path: Path)
     assert list(per_plant) == ["P1"]
 
 
+def _validate_delivery_buckets(
+    preds_by_date: dict[str, str], dataset_root: Path,
+) -> list[str]:
+    """Bind a genuinely validated operating_point and classifier_operating_point sidecar onto
+    every bucket a delivery names, all naming one shared producing run, so a delivery earns its
+    result the way the door requires rather than through the acknowledgement it no longer takes.
+    Mirrors ``test_second_trait_acceptance._currant_bloom_fixture``'s own validated branch, over
+    buckets this module's own ``_write_scene`` already wrote. Returns the bucket paths, so a
+    caller can pass them straight through as ``classifier_pred_dirs``.
+    """
+    from tests._binding_fixtures import write_bound_sidecar
+    from tests.test_second_trait_acceptance import _ID_MAP
+
+    producing = "exp-currant-run"
+    classifier_dirs = []
+    for date, bucket in preds_by_date.items():
+        sidecar = {
+            "id_map": _ID_MAP, "validated": True, "trait": "currant_bloom",
+            "operating_point": {"conf": {"value": 0.4, "validated_against": "held_out_annotations"}},
+            "experiment_id": producing, "checkpoint_sha256": "abc123",
+        }
+        write_bound_sidecar(bucket, sidecar, dataset_root=dataset_root,
+                            experiment_id=f"exp-op-{date}", producing_experiment_id=producing,
+                            trait="currant_bloom")
+        classifier_stamp = {
+            "validated": True, "trait": "currant_bloom", "experiment_id": producing,
+            "operating_point": {"classifier": {"value": "open",
+                                               "validated_against": "held_out_annotations"}},
+        }
+        write_bound_sidecar(bucket, classifier_stamp, document="classifier_operating_point",
+                            dataset_root=dataset_root, experiment_id=f"exp-cls-{date}",
+                            producing_experiment_id=producing, trait="currant_bloom")
+        classifier_dirs.append(bucket)
+    return classifier_dirs
+
+
 # ── admits valid work: a partly positioned dataset keeps delivering, disclosed ──────────
 
 
@@ -362,10 +397,11 @@ def test_a_partly_positioned_scene_builds_and_delivers_with_the_count_disclosed(
     assert loaded_summary["totals"]["n_unattributed"] == 1
 
     _seed_currant_bloom_trait(tmp_path)
+    classifier_dirs = _validate_delivery_buckets(preds_by_date, dataset_root)
     out_csv = tmp_path / "out.csv"
     res = deliver_phenology_milestones(
         trait="currant_bloom", mapping_name="valley", predictions_by_date=preds_by_date,
-        output_csv_path=str(out_csv), acknowledge_unvalidated=True)
+        output_csv_path=str(out_csv), classifier_pred_dirs=classifier_dirs)
     assert "error" not in res, res
     assert res["n_images_unattributed"] == 1
     assert res["dates_delivered"] == [DATE]
@@ -406,11 +442,12 @@ def test_a_delivery_naming_one_of_two_mapping_dates_carries_the_delivered_scope(
     assert build_res["n_unattributed"] == 1
 
     _seed_currant_bloom_trait(tmp_path)
+    delivered = {dates[0]: preds_by_date[dates[0]]}
+    classifier_dirs = _validate_delivery_buckets(delivered, dataset_root)
     out_csv = tmp_path / "out.csv"
     res = deliver_phenology_milestones(
-        trait="currant_bloom", mapping_name="valley",
-        predictions_by_date={dates[0]: preds_by_date[dates[0]]},
-        output_csv_path=str(out_csv), acknowledge_unvalidated=True)
+        trait="currant_bloom", mapping_name="valley", predictions_by_date=delivered,
+        output_csv_path=str(out_csv), classifier_pred_dirs=classifier_dirs)
     assert "error" not in res, res
     assert res["n_images_unattributed"] == 0
     assert res["dates_delivered"] == [dates[0]]
@@ -438,11 +475,12 @@ def test_a_date_recorded_with_no_capture_still_delivers_beside_an_attributed_one
     assert build_res["per_date"][empty_date]["n_images"] == 0
 
     _seed_currant_bloom_trait(tmp_path)
+    delivered = {**preds_by_date, empty_date: str(empty_bucket)}
+    classifier_dirs = _validate_delivery_buckets(delivered, dataset_root)
     out_csv = tmp_path / "out.csv"
     res = deliver_phenology_milestones(
-        trait="currant_bloom", mapping_name="valley",
-        predictions_by_date={**preds_by_date, empty_date: str(empty_bucket)},
-        output_csv_path=str(out_csv), acknowledge_unvalidated=True)
+        trait="currant_bloom", mapping_name="valley", predictions_by_date=delivered,
+        output_csv_path=str(out_csv), classifier_pred_dirs=classifier_dirs)
     assert "error" not in res, res
     assert sorted(res["dates_delivered"]) == sorted([DATE, empty_date])
 
@@ -458,10 +496,11 @@ def test_a_fully_positioned_scene_keeps_delivering_with_zero_unattributed(
     assert "error" not in build_res, build_res
     assert build_res["n_unattributed"] == 0
 
+    classifier_dirs = _validate_delivery_buckets(preds_by_date, dataset_root)
     out_csv = tmp_path / "out.csv"
     res = deliver_phenology_milestones(
         trait="currant_bloom", mapping_name="valley", predictions_by_date=preds_by_date,
-        output_csv_path=str(out_csv), acknowledge_unvalidated=True)
+        output_csv_path=str(out_csv), classifier_pred_dirs=classifier_dirs)
     assert "error" not in res, res
     assert res["n_images_unattributed"] == 0
 
@@ -480,10 +519,11 @@ def test_a_raster_beside_positioned_photographs_still_delivers(
     assert "error" not in build_res, build_res
     _seed_currant_bloom_trait(tmp_path)
 
+    classifier_dirs = _validate_delivery_buckets(preds_by_date, dataset_root)
     out_csv = tmp_path / "out.csv"
     res = deliver_phenology_milestones(
         trait="currant_bloom", mapping_name="valley", predictions_by_date=preds_by_date,
-        output_csv_path=str(out_csv), acknowledge_unvalidated=True)
+        output_csv_path=str(out_csv), classifier_pred_dirs=classifier_dirs)
     assert "error" not in res, res
     assert out_csv.exists()
 

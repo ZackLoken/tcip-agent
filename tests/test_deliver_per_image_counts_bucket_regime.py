@@ -146,23 +146,24 @@ def test_a_live_only_parameter_stated_at_its_own_default_is_silently_admitted(tm
     at that default is honestly admitted rather than refused for a statement it cannot detect."""
     import tcip_mcp.tools.inference_tools as itools
 
-    bucket = tmp_path / "preds"
+    dataset_root = tmp_path / "ds"
+    bucket = dataset_root / "predictions" / "baseline" / "2026-01-01"
     _write_real_prediction(bucket, "a")
-    stamp = {"trait": fx.COUNT_TRAIT, "images_dir": str(tmp_path), "raster_path": None,
-             "operating_point": {"conf": {"value": 0.5, "validated_against": VALIDATED_FALSE}}}
-    write_bound_sidecar(bucket, stamp, dataset_root=tmp_path)
+    stamp = {"validated": True, "trait": fx.COUNT_TRAIT, "images_dir": str(tmp_path),
+             "raster_path": None,
+             "operating_point": {"conf": {"value": 0.5, "validated_against": VALIDATED_HELD_OUT}}}
+    write_bound_sidecar(bucket, stamp, dataset_root=dataset_root)
 
     r = itools.deliver_per_image_counts(predictions_dir=str(bucket), output_path=str(tmp_path / "o.csv"),
-                               trait=fx.COUNT_TRAIT, tile_batch_size=96,
-                               acknowledge_unvalidated=True)
+                               trait=fx.COUNT_TRAIT, tile_batch_size=96)
     assert "error" not in r, r
 
 
 # ── the bucket's positive stamp shape ───────────────────────────────────────
 
 def test_bucket_regime_refuses_a_directory_with_no_stamp(tmp_path):
-    """A directory of label JSON with no stamp (a GT annotations tree) is refused, never counted,
-    whatever acknowledge_unvalidated says: the platform's own label writer produces the tree."""
+    """A directory of label JSON with no stamp (a GT annotations tree) is refused, never counted:
+    the platform's own label writer produces the tree."""
     import tcip_mcp.tools.inference_tools as itools
     from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
@@ -173,7 +174,7 @@ def test_bucket_regime_refuses_a_directory_with_no_stamp(tmp_path):
         100, 100)
 
     r = itools.deliver_per_image_counts(predictions_dir=str(labels_dir), output_path=str(tmp_path / "o.csv"),
-                               trait=fx.COUNT_TRAIT, acknowledge_unvalidated=True)
+                               trait=fx.COUNT_TRAIT)
     assert "error" in r
     assert "operating_point.json" in r["error"]
 
@@ -190,7 +191,7 @@ def test_bucket_regime_refuses_a_mosaic_bucket(tmp_path):
     write_bound_sidecar(bucket, stamp, dataset_root=tmp_path)
 
     r = itools.deliver_per_image_counts(predictions_dir=str(bucket), output_path=str(tmp_path / "o.csv"),
-                               trait=fx.COUNT_TRAIT, acknowledge_unvalidated=True)
+                               trait=fx.COUNT_TRAIT)
     assert "error" in r
     assert "deliver_orthomosaic_plant_counts" in r["error"]
 
@@ -205,7 +206,7 @@ def test_bucket_regime_refuses_a_stamp_naming_neither_images_dir_nor_raster_path
     write_bound_sidecar(bucket, stamp, dataset_root=tmp_path)
 
     r = itools.deliver_per_image_counts(predictions_dir=str(bucket), output_path=str(tmp_path / "o.csv"),
-                               trait=fx.COUNT_TRAIT, acknowledge_unvalidated=True)
+                               trait=fx.COUNT_TRAIT)
     assert "error" in r
     assert "per-image" in r["error"]
 
@@ -223,7 +224,7 @@ def test_bucket_regime_refuses_a_stamp_naming_an_empty_string_images_dir(tmp_pat
     write_bound_sidecar(bucket, stamp, dataset_root=tmp_path)
 
     r = itools.deliver_per_image_counts(predictions_dir=str(bucket), output_path=str(tmp_path / "o.csv"),
-                               trait=fx.COUNT_TRAIT, acknowledge_unvalidated=True)
+                               trait=fx.COUNT_TRAIT)
     assert "error" in r
     assert "per-image" in r["error"]
 
@@ -252,15 +253,19 @@ def test_bucket_regime_refuses_a_trait_contradiction_even_unvalidated(tmp_path):
     write_bound_sidecar(bucket, stamp, dataset_root=tmp_path)
 
     r = itools.deliver_per_image_counts(predictions_dir=str(bucket), output_path=str(tmp_path / "o.csv"),
-                               trait=fx.COUNT_TRAIT, acknowledge_unvalidated=True)
+                               trait=fx.COUNT_TRAIT)
     assert "error" in r
     assert other_trait in r["error"] and fx.COUNT_TRAIT in r["error"]
 
 
 def test_bucket_regime_admits_a_stamp_naming_no_trait_at_all(tmp_path):
     """The rail must admit valid work: a stamp that names no trait (trait=None) is not a
-    contradiction, so a bucket-regime call over it delivers under the caller's stated trait."""
+    contradiction, so a bucket-regime call over it reaches the counting/gate stage under the
+    caller's stated trait rather than refusing on a mismatch it never made. A trait-less stamp can
+    never itself earn a validated claim (the writer refuses one with no trait to check against),
+    so what this proves is that the call gets past the trait check, not that it ships a CSV."""
     import tcip_mcp.tools.inference_tools as itools
+    from tcip_mcp.pipelines.resolution import VALIDATED_FALSE
 
     bucket = tmp_path / "no_trait_preds"
     _write_real_prediction(bucket, "a")
@@ -269,8 +274,10 @@ def test_bucket_regime_admits_a_stamp_naming_no_trait_at_all(tmp_path):
     write_bound_sidecar(bucket, stamp, dataset_root=tmp_path)
 
     r = itools.deliver_per_image_counts(predictions_dir=str(bucket), output_path=str(tmp_path / "o.csv"),
-                               trait=fx.COUNT_TRAIT, acknowledge_unvalidated=True)
-    assert "error" not in r, r
+                               trait=fx.COUNT_TRAIT)
+    assert "error" in r
+    assert "image_count" in r  # past the trait check, into the gate refusal
+    assert r["unvalidated_dimensions"] == "operating_point"
 
 
 def test_bucket_regime_refuses_a_stamped_bucket_with_no_prediction_documents(tmp_path):
@@ -285,7 +292,7 @@ def test_bucket_regime_refuses_a_stamped_bucket_with_no_prediction_documents(tmp
 
     out_csv = tmp_path / "o.csv"
     r = itools.deliver_per_image_counts(predictions_dir=str(bucket), output_path=str(out_csv),
-                               trait=fx.COUNT_TRAIT, acknowledge_unvalidated=True)
+                               trait=fx.COUNT_TRAIT)
     assert "error" in r
     assert "no prediction documents" in r["error"]
     assert not out_csv.exists()
@@ -294,9 +301,12 @@ def test_bucket_regime_refuses_a_stamped_bucket_with_no_prediction_documents(tmp
 def test_bucket_regime_measured_subject_check_is_driven_by_a_recorded_id_map(tmp_path):
     """A bucket whose sidecar records an id_map drives the measured-subject check both ways: a
     stated trait whose confirmed subject is absent from every recorded id_map refuses naming it,
-    and one present in it delivers."""
+    and one present in it clears the same check, reaching the counting/gate stage rather than
+    refusing on the subject. The stamp names no trait, which a validated claim can never do, so
+    the matching case is read off the gate refusal it reaches, not a delivered CSV."""
     from tcip_mcp import operationalization as op
     import tcip_mcp.tools.inference_tools as itools
+    from tcip_mcp.pipelines.resolution import VALIDATED_FALSE
 
     other_trait = "astringency"
     other_subject = "a subject no recorded id_map names"
@@ -318,11 +328,13 @@ def test_bucket_regime_measured_subject_check_is_driven_by_a_recorded_id_map(tmp
     with pytest.raises(ValueError, match="a subject no recorded id_map names"):
         itools.deliver_per_image_counts(predictions_dir=str(bucket),
                                output_path=str(tmp_path / "mismatch.csv"),
-                               trait=other_trait, acknowledge_unvalidated=True)
+                               trait=other_trait)
 
     match = itools.deliver_per_image_counts(predictions_dir=str(bucket), output_path=str(tmp_path / "match.csv"),
-                                   trait=fx.COUNT_TRAIT, acknowledge_unvalidated=True)
-    assert "error" not in match, match
+                                   trait=fx.COUNT_TRAIT)
+    assert "error" in match
+    assert "image_count" in match  # past the subject check, into the gate refusal
+    assert match["unvalidated_dimensions"] == "operating_point"
 
 
 # ── the publish bracket: shared with run_inference ────────────────────
@@ -367,16 +379,19 @@ def test_publish_bracket_refuses_a_frozen_lineage_pointer(tmp_path, monkeypatch)
                         lambda *a, **kw: _unvalidated_run_result(experiment_id=eid))
     bucket = tmp_path / "ds" / "predictions" / "baseline" / "2026-01-01"
     r = itools.deliver_per_image_counts(_dummy_checkpoint(tmp_path), str(tmp_path), str(tmp_path / "o.csv"),
-                               trait=fx.COUNT_TRAIT, predictions_dir=str(bucket),
-                               acknowledge_unvalidated=True)
+                               trait=fx.COUNT_TRAIT, predictions_dir=str(bucket))
     assert "error" in r
     assert eid in r["error"]
     assert not bucket.exists()
 
 
 def test_publish_bracket_links_a_resolvable_experiments_bucket_into_its_lineage(tmp_path, monkeypatch):
+    """The bracket links a resolvable run into its lineage as it publishes, before the CSV's own
+    gate ever runs: an uncalibrated conf with no acknowledgement route refuses the CSV, but the
+    refusal still discloses the bucket it published and the lineage it linked."""
     import tcip_store
     import tcip_mcp.tools.inference_tools as itools
+    from tcip_mcp.pipelines.resolution import VALIDATED_FALSE
     from tcip_mcp.experiments import create_experiment, lineage_key, update_status
 
     eid = "exp-tabulate-lineage-link"
@@ -387,9 +402,10 @@ def test_publish_bracket_links_a_resolvable_experiments_bucket_into_its_lineage(
                         lambda *a, **kw: _unvalidated_run_result(experiment_id=eid))
     bucket = tmp_path / "ds" / "predictions" / "baseline" / "2026-01-01"
     r = itools.deliver_per_image_counts(_dummy_checkpoint(tmp_path), str(tmp_path), str(tmp_path / "o.csv"),
-                               trait=fx.COUNT_TRAIT, predictions_dir=str(bucket),
-                               acknowledge_unvalidated=True)
-    assert "error" not in r, r
+                               trait=fx.COUNT_TRAIT, predictions_dir=str(bucket))
+    assert "error" in r
+    assert r["operating_point_validated"] == VALIDATED_FALSE
+    assert r["bucket_published"] is True
     assert r["lineage_linked"] is True
     lineage = tcip_store.read(lineage_key(eid), default={})
     assert lineage.get("predictions") == str(bucket)
@@ -549,15 +565,17 @@ def test_bucket_regime_falls_back_to_the_stem_for_a_bucket_with_no_filename_map(
     fallback through image_note rather than silently reading as a filename."""
     import tcip_mcp.tools.inference_tools as itools
 
-    bucket = tmp_path / "ds" / "predictions" / "baseline" / "2026-01-01"
+    dataset_root = tmp_path / "ds"
+    bucket = dataset_root / "predictions" / "baseline" / "2026-01-01"
     _write_real_prediction(bucket, "a")
-    stamp = {"trait": fx.COUNT_TRAIT, "images_dir": str(tmp_path), "raster_path": None,
-             "operating_point": {"conf": {"value": 0.5, "validated_against": VALIDATED_FALSE}}}
-    write_bound_sidecar(bucket, stamp, dataset_root=tmp_path)
+    stamp = {"validated": True, "trait": fx.COUNT_TRAIT, "images_dir": str(tmp_path),
+             "raster_path": None,
+             "operating_point": {"conf": {"value": 0.5, "validated_against": VALIDATED_HELD_OUT}}}
+    write_bound_sidecar(bucket, stamp, dataset_root=dataset_root)
 
     out_csv = tmp_path / "o.csv"
     r = itools.deliver_per_image_counts(predictions_dir=str(bucket), output_path=str(out_csv),
-                               trait=fx.COUNT_TRAIT, acknowledge_unvalidated=True)
+                               trait=fx.COUNT_TRAIT)
     assert "error" not in r, r
     assert "carries no image filename map" in r["image_note"]
     rows = list(csv.DictReader(out_csv.open()))
@@ -572,17 +590,18 @@ def test_bucket_regime_partial_map_delivers_filenames_for_mapped_rows_and_stems_
     the unmapped stems through image_note: the fallback branch is per-row, not all-or-nothing."""
     import tcip_mcp.tools.inference_tools as itools
 
-    bucket = tmp_path / "preds"
+    dataset_root = tmp_path / "ds"
+    bucket = dataset_root / "predictions" / "baseline" / "2026-01-01"
     _write_real_prediction(bucket, "a")
     _write_real_prediction(bucket, "b")
-    stamp = {"trait": fx.COUNT_TRAIT, "images_dir": str(tmp_path), "raster_path": None,
-             "image_filenames": {"a": "a.png"},
-             "operating_point": {"conf": {"value": 0.5, "validated_against": VALIDATED_FALSE}}}
-    write_bound_sidecar(bucket, stamp, dataset_root=tmp_path)
+    stamp = {"validated": True, "trait": fx.COUNT_TRAIT, "images_dir": str(tmp_path),
+             "raster_path": None, "image_filenames": {"a": "a.png"},
+             "operating_point": {"conf": {"value": 0.5, "validated_against": VALIDATED_HELD_OUT}}}
+    write_bound_sidecar(bucket, stamp, dataset_root=dataset_root)
 
     out_csv = tmp_path / "o.csv"
     r = itools.deliver_per_image_counts(predictions_dir=str(bucket), output_path=str(out_csv),
-                               trait=fx.COUNT_TRAIT, acknowledge_unvalidated=True)
+                               trait=fx.COUNT_TRAIT)
     assert "error" not in r, r
     assert "['b']" in r["image_note"]
     rows = {row["image"]: row for row in csv.DictReader(out_csv.open())}
@@ -621,7 +640,7 @@ def test_bucket_regime_refuses_a_non_dict_image_filenames_in_the_stamp(tmp_path)
     write_bound_sidecar(bucket, stamp, dataset_root=tmp_path)
 
     r = itools.deliver_per_image_counts(predictions_dir=str(bucket), output_path=str(tmp_path / "o.csv"),
-                               trait=fx.COUNT_TRAIT, acknowledge_unvalidated=True)
+                               trait=fx.COUNT_TRAIT)
     assert "error" in r
     assert "image_filenames" in r["error"]
 
@@ -682,11 +701,13 @@ def test_bucket_regime_reads_a_real_published_bucket_with_no_torch_import(tmp_pa
     bucket built through the platform's own sidecar/prediction writers is read to a delivered CSV
     in a subprocess with torch blocked from importing at all."""
     pytest.importorskip("torch")
-    bucket = tmp_path / "ds" / "predictions" / "baseline" / "2026-01-01"
+    dataset_root = tmp_path / "ds"
+    bucket = dataset_root / "predictions" / "baseline" / "2026-01-01"
     _write_real_prediction(bucket, "a")
-    stamp = {"trait": fx.COUNT_TRAIT, "images_dir": str(tmp_path), "raster_path": None,
-             "operating_point": {"conf": {"value": 0.5, "validated_against": VALIDATED_FALSE}}}
-    write_bound_sidecar(bucket, stamp, dataset_root=tmp_path)
+    stamp = {"validated": True, "trait": fx.COUNT_TRAIT, "images_dir": str(tmp_path),
+             "raster_path": None,
+             "operating_point": {"conf": {"value": 0.5, "validated_against": VALIDATED_HELD_OUT}}}
+    write_bound_sidecar(bucket, stamp, dataset_root=dataset_root)
     out_csv = tmp_path / "o.csv"
 
     script = f"""
@@ -703,7 +724,7 @@ from tcip_store.binding import bind_default
 bind_default()
 import tcip_mcp.tools.inference_tools as itools
 r = itools.deliver_per_image_counts(predictions_dir={str(bucket)!r}, output_path={str(out_csv)!r},
-                           trait={fx.COUNT_TRAIT!r}, acknowledge_unvalidated=True)
+                           trait={fx.COUNT_TRAIT!r})
 assert "error" not in r, r
 assert "torch" not in sys.modules, "the bucket regime pulled torch into sys.modules"
 print("ok")
@@ -720,8 +741,10 @@ print("ok")
 # ── the provisional path re-delivers identically ────────────────────────────
 
 def test_bucket_regime_re_delivers_the_provisional_floor_identically(tmp_path, monkeypatch):
-    """An uncalibrated acknowledged live call publishes a false-stamped bucket and CSV; the bucket
-    regime re-delivers identical floored rows off the same bucket."""
+    """An uncalibrated live call publishes a false-stamped bucket even though its own CSV takes no
+    acknowledgement and refuses; the bucket regime reads the same published bucket back and floors
+    it identically, both refusing on the same disclosed facts rather than one silently outranking
+    the other."""
     import tcip_mcp.tools.inference_tools as itools
 
     monkeypatch.setattr(itools, "_run_inference_verified",
@@ -729,24 +752,21 @@ def test_bucket_regime_re_delivers_the_provisional_floor_identically(tmp_path, m
     bucket = tmp_path / "ds" / "predictions" / "baseline" / "2026-01-01"
     csv_a = tmp_path / "a.csv"
     live = itools.deliver_per_image_counts(_dummy_checkpoint(tmp_path), str(tmp_path), str(csv_a),
-                                  trait=fx.COUNT_TRAIT, predictions_dir=str(bucket),
-                                  acknowledge_unvalidated=True)
-    assert "error" not in live, live
+                                  trait=fx.COUNT_TRAIT, predictions_dir=str(bucket))
+    assert "error" in live
     assert live["operating_point_validated"] == VALIDATED_FALSE
+    assert live["bucket_published"] is True
+    assert not csv_a.exists()
 
     csv_b = tmp_path / "b.csv"
     reread = itools.deliver_per_image_counts(predictions_dir=str(bucket), output_path=str(csv_b),
-                                    trait=fx.COUNT_TRAIT, acknowledge_unvalidated=True)
-    assert "error" not in reread, reread
+                                    trait=fx.COUNT_TRAIT)
+    assert "error" in reread
     assert reread["operating_point_validated"] == VALIDATED_FALSE
-    with csv_a.open() as f:
-        reader_a = csv.DictReader(f)
-        rows_a = list(reader_a)
-        assert "operating_point_validated" in (reader_a.fieldnames or [])
-        assert "measurement_validated" not in (reader_a.fieldnames or [])
-    rows_b = list(csv.DictReader(csv_b.open()))
-    assert rows_a[0]["detection_count"] == rows_b[0]["detection_count"]
-    assert rows_a[0]["avg_confidence"] == rows_b[0]["avg_confidence"]
+    assert reread["unvalidated_dimensions"] == live["unvalidated_dimensions"]
+    assert reread["image_count"] == live["image_count"]
+    assert reread["total_detections"] == live["total_detections"]
+    assert not csv_b.exists()
 
 
 # ── promotion: an unvalidated bucket earns a validated re-delivery with no re-run ──
@@ -771,10 +791,12 @@ def test_bucket_regime_delivers_validated_after_the_stamp_is_promoted(tmp_path):
 
     import tcip_mcp.tools.inference_tools as itools
 
-    before = itools.deliver_per_image_counts(predictions_dir=str(bucket), output_path=str(tmp_path / "before.csv"),
-                                    trait=fx.COUNT_TRAIT, acknowledge_unvalidated=True)
-    assert "error" not in before, before
+    before_csv = tmp_path / "before.csv"
+    before = itools.deliver_per_image_counts(predictions_dir=str(bucket), output_path=str(before_csv),
+                                    trait=fx.COUNT_TRAIT)
+    assert "error" in before
     assert before["operating_point_validated"] == VALIDATED_FALSE
+    assert not before_csv.exists()
 
     earned_op_point = {"conf": {"value": 0.5, "validated_against": VALIDATED_HELD_OUT}}
     bound = file_validation_record(

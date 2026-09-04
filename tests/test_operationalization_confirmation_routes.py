@@ -820,8 +820,8 @@ def test_delivery_events_route_lists_a_recorded_event(client: TestClient, tmp_pa
 
     record_delivery_binding_event(
         "test_door", None, [], {}, measurement_documents=["operating_point"],
-        scale_document=None, trait=STATEMENT_TRAIT, delivery_kind=PER_IMAGE_COUNT,
-        project_root=tmp_path,
+        scale_document=None, acknowledgement=None, trait=STATEMENT_TRAIT,
+        delivery_kind=PER_IMAGE_COUNT, project_root=tmp_path,
     )
 
     resp = client.get(DELIVERY_EVENTS_ROUTE, params={"project_root": str(tmp_path)})
@@ -923,8 +923,8 @@ def test_delivery_events_route_serves_a_real_plant_mapping_disclosure_with_all_t
 
     record_delivery_binding_event(
         "test_door", None, [], {}, measurement_documents=["operating_point"],
-        scale_document=None, trait=STATEMENT_TRAIT, delivery_kind="state_crossing_dates",
-        project_root=tmp_path, plant_mapping=disclosure,
+        scale_document=None, acknowledgement=None, trait=STATEMENT_TRAIT,
+        delivery_kind="state_crossing_dates", project_root=tmp_path, plant_mapping=disclosure,
     )
 
     resp = client.get(DELIVERY_EVENTS_ROUTE, params={"project_root": str(tmp_path)})

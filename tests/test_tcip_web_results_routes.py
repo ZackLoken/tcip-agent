@@ -338,7 +338,7 @@ def test_every_phenology_door_delivers_on_real_bucket_evidence(client: TestClien
     for route in GATE_DOORS:
         resp = client.post(f"/api/results/{route}", json=body)
         assert resp.status_code == 200, route
-        assert resp.json()["provisional"] is False, route
+        assert resp.json()["has_unvalidated_dimensions"] is False, route
         assert resp.json()["curves"]["rows"], route
         assert resp.json()["milestones"]["rows"], route
     for payload in ("curves", "milestones"):
@@ -348,20 +348,47 @@ def test_every_phenology_door_delivers_on_real_bucket_evidence(client: TestClien
         assert len(resp.text.strip().splitlines()) > 1, payload
 
 
-def test_acknowledge_reveals_provisional_numbers_on_screen_but_never_in_a_file(
+def test_show_unvalidated_reveals_provisional_numbers_on_screen_but_never_opens_export_on_its_own(
     client: TestClient, tmp_path: Path,
 ) -> None:
-    # The non-stranding escape, mirroring deliver_phenology_milestones's acknowledge_unvalidated: a breeder
-    # whose operating point is not yet calibrated can LOOK at what they have, clearly marked. A file
-    # leaving the platform has no such escape, so the same flag must not open the CSV door.
+    # A breeder whose operating point is not yet calibrated can LOOK at what they have, clearly
+    # marked (show_unvalidated, a display choice); only a real Acknowledgement (below) opens export.
     body = _phenology_fixture(tmp_path, validated=False)
     for route in GATE_DOORS:
-        resp = client.post(f"/api/results/{route}", json={**body, "acknowledge_unvalidated": True})
+        resp = client.post(f"/api/results/{route}", json={**body, "show_unvalidated": True})
         assert resp.status_code == 200, route
-        assert resp.json()["provisional"] is True, route
+        assert resp.json()["has_unvalidated_dimensions"] is True, route
         assert resp.json()["validated"]["operating_point"] == "false", route
-    assert _export(client, body, "milestones", acknowledge_unvalidated=True).status_code == 400
-    assert _export(client, body, "curves", acknowledge_unvalidated=True).status_code == 400
+    assert _export(client, body, "milestones").status_code == 400
+    assert _export(client, body, "curves").status_code == 400
+
+
+def test_export_ships_an_unvalidated_measurement_once_a_breeder_acknowledges_it(
+    client: TestClient, tmp_path: Path,
+) -> None:
+    # The core reversal: a breeder's own recorded act (a real user, a non-empty reason) ships a
+    # flagged-unvalidated CSV instead of always refusing; both travel into the file's own columns.
+    body = _phenology_fixture(tmp_path, validated=False)
+    resp = _export(
+        client, body, "milestones",
+        acknowledgement={"reason": "breeder needs a look before calibration finishes"},
+        user="user:tester",
+    )
+    assert resp.status_code == 200
+    header = resp.text.splitlines()[0].split(",")
+    cells = dict(zip(header, resp.text.splitlines()[1].split(",")))
+    assert cells["acknowledged_by"] == "user:tester"
+    assert cells["acknowledgement_reason"] == "breeder needs a look before calibration finishes"
+    assert cells["operating_point_validated"] == "false"
+
+
+def test_export_refuses_an_acknowledgement_with_no_user(client: TestClient, tmp_path: Path) -> None:
+    # A server identity is never written as a breeder's name: an acknowledgement naming no user
+    # is refused before anything runs, rather than falling back to a process identity.
+    body = _phenology_fixture(tmp_path, validated=False)
+    resp = _export(client, body, "milestones", acknowledgement={"reason": "needs a look"})
+    assert resp.status_code == 400
+    assert "server identity is never written as a breeder's name" in resp.json()["detail"]
 
 
 def _set_tile_provenance(body: dict, tile_size_prov: dict | None) -> dict:
@@ -422,7 +449,7 @@ def test_every_phenology_door_delivers_when_the_tile_scale_has_a_real_basis(
     for route in GATE_DOORS:
         resp = client.post(f"/api/results/{route}", json=body)
         assert resp.status_code == 200, route
-        assert resp.json()["provisional"] is False, route
+        assert resp.json()["has_unvalidated_dimensions"] is False, route
         assert resp.json()["validated"]["tile_size"] == "persisted_training_geometry", route
     for payload in ("curves", "milestones"):
         assert _export(client, body, payload).status_code == 200, payload
@@ -440,18 +467,18 @@ def test_an_untiled_delivery_is_never_gated_on_tile_size(client: TestClient, tmp
         assert "tile_size" not in resp.json()["validated"], route
 
 
-def test_acknowledge_shows_a_fabricated_tile_scale_on_screen_but_never_in_a_file(
+def test_show_unvalidated_shows_a_fabricated_tile_scale_on_screen_but_never_opens_export_alone(
     client: TestClient, tmp_path: Path,
 ) -> None:
     """The same non-stranding escape the other dimensions get: a breeder can look at numbers whose
-    tile scale has no basis, clearly marked provisional, and still cannot download them."""
+    tile scale has no basis, clearly marked, and still cannot download them without acknowledging."""
     body = _set_tile_provenance(_phenology_fixture(tmp_path, validated=True), _tiled("false"))
     for route in GATE_DOORS:
-        resp = client.post(f"/api/results/{route}", json={**body, "acknowledge_unvalidated": True})
+        resp = client.post(f"/api/results/{route}", json={**body, "show_unvalidated": True})
         assert resp.status_code == 200, route
-        assert resp.json()["provisional"] is True, route
+        assert resp.json()["has_unvalidated_dimensions"] is True, route
         assert resp.json()["validated"]["tile_size"] == "false", route
-    assert _export(client, body, "milestones", acknowledge_unvalidated=True).status_code == 400
+    assert _export(client, body, "milestones").status_code == 400
 
 
 def test_export_refuses_when_nothing_was_ever_classified(client: TestClient, tmp_path: Path) -> None:
@@ -484,20 +511,19 @@ def test_the_old_declaration_bypass_no_longer_reaches_the_door(
 
 
 def test_no_caller_field_can_raise_the_reconciled_validity(client: TestClient, tmp_path: Path) -> None:
-    # Validity is read from the buckets' own sidecars, so an optimistic caller assertion (under the
-    # stamp column names the delivered CSV itself uses) must be inert. Extra fields are ignored by
-    # the payload model, so the refusal is byte-identical to the one with no assertion at all.
+    # Validity comes from the buckets' own sidecars, never a caller assertion; an optimistic one
+    # (under the stamp column names the delivered CSV itself uses) is now refused outright.
     body = _phenology_fixture(tmp_path, validated=False)
     bare = client.post("/api/results/phenology_measurement", json=body)
-    optimistic = client.post("/api/results/phenology_measurement", json={
-        **body,
-        "operating_point_validated": "held_out_annotations",
-        "positive_state_classifier_validated": "held_out_annotations",
-        "validated": {"operating_point": "held_out_annotations", "classifier": "held_out_annotations"},
-        "provisional": False,
-    })
-    assert bare.status_code == optimistic.status_code == 400
-    assert bare.json()["detail"] == optimistic.json()["detail"]
+    assert bare.status_code == 400
+    for field, value in (
+        ("operating_point_validated", "held_out_annotations"),
+        ("positive_state_classifier_validated", "held_out_annotations"),
+        ("validated", {"operating_point": "held_out_annotations", "classifier": "held_out_annotations"}),
+        ("has_unvalidated_dimensions", False),
+    ):
+        resp = client.post("/api/results/phenology_measurement", json={**body, field: value})
+        assert resp.status_code == 422, field
 
 
 def test_a_genuinely_unvalidated_classifier_refuses_even_when_the_count_is_validated(
@@ -539,9 +565,10 @@ def test_exported_milestone_csv_carries_the_canonical_schema_and_its_provenance(
     assert cells["producing_experiment_id"] == "exp-1"
     assert cells["producer_model_sha256"] == producer_checkpoint_sha256("exp-1")
     assert cells["validation_record"] == _expected_validation_record(body)
-    # plant_csvs_unverified and unvalidated_dimensions are legitimately empty here (no plant CSV
-    # to check, nothing floored); captures_unverified is not: no images/ tree at all in this fixture.
-    exempt = {"plant_csvs_unverified", "unvalidated_dimensions"}
+    # Legitimately blank here: no plant CSV to check, nothing floored, and nothing acknowledged
+    # on a fully-validated delivery; captures_unverified is not, since this fixture has no images/.
+    exempt = {"plant_csvs_unverified", "unvalidated_dimensions", "acknowledged_by",
+              "acknowledgement_reason"}
     assert [c for c, v in cells.items() if v == "" and c not in exempt] == []
     assert cells["plant_csvs_unverified"] == ""
     assert cells["unvalidated_dimensions"] == ""
@@ -750,7 +777,7 @@ def test_the_curves_csv_carries_the_same_provenance_as_the_milestone_csv(
                   "producer_model_sha256", "producing_experiment_id", "produced_at",
                   "validation_record", "plant_mapping_sha256", "captures_unverified",
                   "plant_csvs_unverified", "dates_delivered", "images_unattributed",
-                  "plant_attribution"]
+                  "plant_attribution", "acknowledged_by", "acknowledgement_reason"]
     body = _phenology_fixture(tmp_path, validated=True)
     resp = client.post("/api/results/export_csv",
                        json={**body, "payload": "curves", "filename": "c.csv"})
@@ -758,9 +785,11 @@ def test_the_curves_csv_carries_the_same_provenance_as_the_milestone_csv(
     header = resp.text.splitlines()[0].split(",")
     assert header[-len(provenance):] == provenance
     cells = dict(zip(header, resp.text.splitlines()[1].split(",")))
+    blank_ok = ("plant_csvs_unverified", "unvalidated_dimensions", "acknowledged_by",
+                "acknowledgement_reason")
     for col in provenance:
-        if col in ("plant_csvs_unverified", "unvalidated_dimensions"):
-            continue  # legitimately empty: no plant CSV to check, and nothing floored
+        if col in blank_ok:
+            continue  # legitimately empty here: nothing to check, nothing floored, nothing acknowledged
         assert cells[col] != "", col
     assert cells["operating_point_validated"] == "held_out_annotations"
     assert cells["producing_experiment_id"] == "exp-1"

@@ -163,13 +163,23 @@ class TestFullClassificationPipeline:
                 "count": len(preds) if isinstance(preds, list) else 1,
                 "scores": confs if isinstance(confs, list) else [confs] if confs else [],
             })
-        # Uncalibrated smoke export: acknowledge the count is unvalidated (the delivery gate refuses
-        # a bare write); it is stamped operating_point_validated=false.
+        # A genuinely validated bucket stands behind the export: the delivery gate refuses a bare
+        # unvalidated write, and this door takes no acknowledgement at all.
         from tests import _operationalization_fixtures as fx
+        from tests._binding_fixtures import write_bound_sidecar, write_prediction
+        from tcip_mcp.pipelines.resolution import VALIDATED_HELD_OUT
 
         fx.seed_confirmed_count(tmp_path)
+        bucket = tmp_path / "ds" / "predictions" / "cls_preds"
+        write_prediction(bucket, "img_a")
+        write_bound_sidecar(
+            bucket, {"validated": True, "trait": fx.COUNT_TRAIT,
+                    "operating_point": {"conf": {"value": 0.6,
+                                                 "validated_against": VALIDATED_HELD_OUT}}},
+            dataset_root=tmp_path / "ds", experiment_id="exp-cls-smoke")
         export_detection_csv(csv_results, csv_path, trait=fx.COUNT_TRAIT,
-                             acknowledge_unvalidated=True)
+                             operating_point_validated=VALIDATED_HELD_OUT,
+                             pred_dirs=[str(bucket)])
 
         assert Path(csv_path).is_file()
         content = Path(csv_path).read_text()
@@ -322,10 +332,20 @@ class TestDetectionPipelineRealData:
         # --- Step 5: Export detection CSV ---
         csv_path = str(out / "catkin_detections.csv")
         from tests import _operationalization_fixtures as fx
+        from tests._binding_fixtures import write_bound_sidecar, write_prediction
+        from tcip_mcp.pipelines.resolution import VALIDATED_HELD_OUT
 
         fx.seed_confirmed_count(tmp_path)
+        bucket = tmp_path / "ds" / "predictions" / "det_preds"
+        write_prediction(bucket, "img_a")
+        write_bound_sidecar(
+            bucket, {"validated": True, "trait": fx.COUNT_TRAIT,
+                    "operating_point": {"conf": {"value": 0.6,
+                                                 "validated_against": VALIDATED_HELD_OUT}}},
+            dataset_root=tmp_path / "ds", experiment_id="exp-det-smoke")
         export_detection_csv(results, csv_path, trait=fx.COUNT_TRAIT,
-                             acknowledge_unvalidated=True)
+                             operating_point_validated=VALIDATED_HELD_OUT,
+                             pred_dirs=[str(bucket)])
 
         assert Path(csv_path).is_file()
         content = Path(csv_path).read_text()
