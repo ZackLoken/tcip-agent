@@ -66,7 +66,10 @@ function DeliveryEventRow({ record }: { record: DeliveryEventRecord }) {
         </div>
       )}
       {record.superseded && (
-        <div className="mt-2 text-[11px] text-tcip-fp" data-testid={`superseded-${record.event_id}`}>
+        <div
+          className="mt-2 text-[11px] text-tcip-fp"
+          data-testid={`superseded-${record.event_id}`}
+        >
           {`Superseded: ${record.superseded.reason}` +
             (record.superseded.replacement_event_id
               ? ` (replaced by ${record.superseded.replacement_event_id})`
