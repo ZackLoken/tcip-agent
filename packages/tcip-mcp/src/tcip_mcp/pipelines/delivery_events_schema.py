@@ -8,13 +8,21 @@ A sibling module to ``resolution.py`` rather than a class inside it, the same sp
 own dependency surface as storage-seam-and-stdlib only, and a pydantic import belongs with the
 other schema-only module instead of widening that statement.
 
+``DeliveryEventRecord.plant_mapping`` carries one of two disclosure shapes, or ``None``: a walked
+capture mapping's :class:`PlantMappingDisclosure` (the phenology doors, and
+``deliver_per_plant_csv`` when its caller verified one), or a whole-raster frame's
+:class:`PlantRegistryDisclosure` (``deliver_orthomosaic_plant_counts`` alone, which has no walked
+mapping build to name). The two share no key, so pydantic resolves a stored dict to exactly one
+model with no discriminator field added to either: every key either model declares is required and
+both forbid an extra one, so a dict is a legal instance of at most one of the two.
+
 Both models forbid an undeclared key, so a stored record or disclosure carrying one is refused by
 name rather than silently accepted and later misread.
 """
 
 from __future__ import annotations
 
-from typing import Literal, Mapping, Optional
+from typing import Literal, Mapping, Optional, Union
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
@@ -46,6 +54,29 @@ class PlantMappingDisclosure(BaseModel):
     dates_delivered: list[str]
     images_unattributed: int
     images_unattributed_scope: Literal["delivered_dates"]
+    plant_attribution: str
+
+
+class PlantRegistryDisclosure(BaseModel):
+    """The ``plant_mapping`` an orthomosaic delivery attributed detections through, exactly as
+    ``deliver_orthomosaic_plant_counts`` (``orthomosaic_tools.py``) composes it.
+
+    A whole-mosaic frame carries no walked capture sequence to build a
+    :class:`MappingBuild`-shaped mapping from, so this names only what that door verifies or
+    computes itself: the plant registry it read, the raster identity every count in the delivery
+    is attributed through, the tolerance it matched detections under, and this delivery's own
+    unattributed-detection count. Every key is required, the same reasoning
+    :class:`PlantMappingDisclosure` states: none is reconstructable from a record that lacks it.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    plant_registry: dict
+    project_root: str
+    raster_identity: dict
+    nn_tolerance_m: dict
+    detections_unattributed: int
+    detections_unattributed_scope: Literal["delivered_raster"]
     plant_attribution: str
 
 
@@ -84,7 +115,7 @@ class DeliveryEventRecord(BaseModel):
     # acknowledged, the same pair DeliveryGateResult carries.
     acknowledged_by: Optional[str]
     acknowledgement_reason: Optional[str]
-    plant_mapping: Optional[PlantMappingDisclosure]
+    plant_mapping: Optional[Union[PlantMappingDisclosure, PlantRegistryDisclosure]]
     documents: dict[str, DocumentBinding]
     produced_at: str
 
