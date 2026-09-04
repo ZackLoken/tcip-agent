@@ -489,11 +489,16 @@ def calibrate_count_operating_point(
     held-out GT; it says nothing about the detections already sitting in ``pred_dir``, which were
     filtered to whatever conf actually produced them. So a validated stamp is written only when
     the earned conf equals the conf ``pred_dir``'s own stamp already records as its production
-    conf (``operating_point.conf.value``), decided under the stamp's own lock
-    (``resolution.update_sidecar``) against the stamp as it is actually stored, not the copy read
-    before the pass: only then are the detections sitting in the bucket the detections the
-    validated conf describes. Any other earned conf refuses by name, stating both values, and
-    points at ``run_inference``, whose calibrated path re-predicts a bucket at the earned conf.
+    conf (``operating_point.conf.value``, read before the pass runs): only then are the
+    detections sitting in the bucket the detections the validated conf describes. Any other
+    earned conf refuses by name, stating both values, and points at ``run_inference``, whose
+    calibrated path re-predicts a bucket at the earned conf; this is decided before
+    ``open_validation``/``seal_validation`` ever run, so the ordinary mismatch mints no
+    calibration experiment and no validation row. The same equality is re-decided under the
+    stamp's own lock (``resolution.update_sidecar``) against the stamp as it is actually stored,
+    not the copy read before the pass, for the one case the pre-pass read cannot see: a stamp
+    another process overwrote with a different production conf while this (potentially long)
+    pass was running.
 
     Every other decision this merge makes follows the same discipline the review-promotion route
     (``routes/validation.py``'s ``_promotion_of``) holds a stamp to, decided against the stamp as
@@ -518,11 +523,11 @@ def calibrate_count_operating_point(
     ``checkpoint_sha256`` at all (a claim sealed under a digest the stamp does not carry could
     never bind at delivery), whose stamped checkpoint disagrees with ``checkpoint_path``, or that
     already carries a claim ``verify_stamp_binding`` answers for, all refuse by name before the
-    calibration pass ever draws its cal/holdout lock. A refusal discovered only after the pass has
-    run (the earned conf disagreeing with the bucket's own production conf, or the stamp having
-    changed underneath it) can still leave a minted calibration experiment and an appended,
-    inert validation row behind: no bucket names that row, so nothing a delivery reads changes,
-    but the record exists, and the response names it when this happens.
+    calibration pass ever draws its cal/holdout lock. Only the race (the stamp changing to a
+    different production conf while the pass is running) is discovered after a record has
+    already been sealed against the pre-pass reading: that refusal can leave a minted calibration
+    experiment and an appended, inert validation row behind, since no bucket ever comes to name
+    it, but the record exists, and the response names it when this happens.
 
     Args:
         checkpoint_path: The trained checkpoint to calibrate; must be registered under the
@@ -621,9 +626,22 @@ def calibrate_count_operating_point(
     gate_summary = gate_evidence_summary(conf)
     issues = resolved.bundle.shippable_issues()
 
-    # Tentative, against the tile floor read before the pass; the merge below re-decides
-    # validated, the tile floor and the conf-equality rule against the stamp as actually stored.
+    def _conf_mismatch_error(production_conf_value: object) -> str:
+        return (
+            f"{bucket}'s operating_point.json stamp records its predictions were produced at "
+            f"conf={production_conf_value!r}, and this calibration earned "
+            f"conf={earned_conf_value!r}: a validated stamp can only claim the conf its stored "
+            "predictions were produced at, since calibrate_count_operating_point never "
+            "re-predicts pred_dir. Produce a fresh bucket at the earned conf through "
+            "run_inference's calibrated path, then calibrate that bucket."
+        )
+
+    # Tentative, against the tile floor and production conf read before the pass; the merge
+    # below re-decides both against the stamp as actually stored, for a race only.
+    existing_conf_value = ((existing.get("operating_point") or {}).get("conf") or {}).get("value")
     validated_tentative = fold_tile_validation(conf.is_shippable, existing.get("tile_size_validated"))
+    if validated_tentative and existing_conf_value != earned_conf_value:
+        return {"error": _conf_mismatch_error(existing_conf_value)}
     draft = None
     earned = dict(existing)
     earned["operating_point"] = {**(existing.get("operating_point") or {}), "conf": conf_provenance}
@@ -695,14 +713,7 @@ def calibrate_count_operating_point(
             if draft is not None else ""
         )
         if "stored_conf_value" in refusal:
-            return {"error": (
-                f"{bucket}'s operating_point.json stamp records its predictions were produced "
-                f"at conf={refusal['stored_conf_value']!r}, and this calibration earned "
-                f"conf={earned_conf_value!r}: a validated stamp can only claim the conf its "
-                "stored predictions were produced at, since calibrate_count_operating_point "
-                "never re-predicts pred_dir. Produce a fresh bucket at the earned conf through "
-                f"run_inference's calibrated path, then calibrate that bucket.{orphan}"
-            )}
+            return {"error": _conf_mismatch_error(refusal["stored_conf_value"]) + orphan}
         return {"error": f"{bucket}'s operating_point.json stamp changed while this calibration "
                          f"pass was running; recalibrate against the bucket as it is now.{orphan}"}
 
