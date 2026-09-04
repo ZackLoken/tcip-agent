@@ -424,31 +424,46 @@ def capture_digests(stamps: list[ImageStamp]) -> dict[str, str]:
 # ── Plant CSV parsing ───────────────────────────────────────────────────
 
 
+def read_plant_csv_bytes(data: bytes) -> list[PlantRecord]:
+    """Parse one plant-locations CSV's own bytes into :class:`PlantRecord` rows.
+
+    The row parse :func:`read_plant_csvs` applies per path, extracted so a caller already holding
+    a file's verified bytes (:func:`verify_registry_csv_bytes`'s own return) parses those bytes
+    directly instead of re-opening the file a second time: the read-then-parse race a file
+    replaced in between the two reads could otherwise let slip through.
+    """
+    import io
+
+    records: list[PlantRecord] = []
+    text = data.decode("utf-8-sig")
+    reader = csv.DictReader(io.StringIO(text, newline=""))
+    for row in reader:
+        try:
+            lat = float(row["WGS84_centroid_y"])
+            lon = float(row["WGS84_centroid_x"])
+        except Exception:
+            continue
+        records.append(
+            PlantRecord(
+                plot_name=row.get("plot_name", ""),
+                accession_name=row.get("accession_name", ""),
+                plot_number=_maybe_float(row.get("plot_number")),
+                row_number=_maybe_float(row.get("row_number")),
+                col_number=_maybe_float(row.get("col_number")),
+                lat=lat,
+                lon=lon,
+            )
+        )
+    return records
+
+
 def read_plant_csvs(paths: Iterable[Path]) -> list[PlantRecord]:
     records: list[PlantRecord] = []
     for path in paths:
         p = Path(path)
         if not p.is_file():
             continue
-        with p.open("r", encoding="utf-8-sig", newline="") as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                try:
-                    lat = float(row["WGS84_centroid_y"])
-                    lon = float(row["WGS84_centroid_x"])
-                except Exception:
-                    continue
-                records.append(
-                    PlantRecord(
-                        plot_name=row.get("plot_name", ""),
-                        accession_name=row.get("accession_name", ""),
-                        plot_number=_maybe_float(row.get("plot_number")),
-                        row_number=_maybe_float(row.get("row_number")),
-                        col_number=_maybe_float(row.get("col_number")),
-                        lat=lat,
-                        lon=lon,
-                    )
-                )
+        records.extend(read_plant_csv_bytes(p.read_bytes()))
     return records
 
 
@@ -562,30 +577,40 @@ def registry_entries_or_refusal(
     return registry_csv_entries(record), None
 
 
-def verify_registry_csv_bytes(registry_entries: list[dict]) -> tuple[list[str], Optional[str]]:
+def verify_registry_csv_bytes(
+    registry_entries: list[dict],
+) -> tuple[list[str], Optional[str], dict[str, bytes]]:
     """Check each of ``registry_entries``'s (:func:`registry_csv_entries`'s own ``{path, sha256,
-    n_plants}`` shape) recorded bytes against what is on disk now.
+    n_plants}`` shape) recorded bytes against what is on disk now, reading each present file's
+    bytes exactly once.
 
     Returns every missing path (the loop runs to completion rather than stopping at the first
-    rewritten file) and the fact that the first rewritten file was rewritten, naming it, or
-    ``None`` when every present path's bytes still match what was registered. This function
-    reports the bytes facts only, never a remedy: a caller decides for itself what a missing path
-    means and composes its own wording for a rewritten one
-    (:func:`verify_mapping_inputs` and
+    rewritten file), the fact that the first rewritten file was rewritten, naming it, or ``None``
+    when every present path's bytes still match what was registered, and the verified bytes this
+    call read for every present path, keyed by the entry's own ``path``. A caller parses a verified
+    file from that third return rather than re-opening it a second time: reading bytes here and
+    parsing them again from the path afterward is a read-then-parse race a file replaced in
+    between could slip through, closed by parsing the one snapshot this call already took
+    (:func:`read_plant_csv_bytes`). This function reports the bytes facts only, never a remedy: a
+    caller decides for itself what a missing path means and composes its own wording for a
+    rewritten one (:func:`verify_mapping_inputs` and
     :func:`~tcip_mcp.tools.orthomosaic_tools.deliver_orthomosaic_plant_counts` each refuse under a
     different remedy, since one can rebuild a mapping against a new registry and the other cannot).
     """
     missing: list[str] = []
     rewritten: Optional[str] = None
+    bytes_by_path: dict[str, bytes] = {}
     for entry in registry_entries:
         p = Path(entry["path"])
         if not p.is_file():
             missing.append(entry["path"])
             continue
-        digest = hashlib.sha256(p.read_bytes()).hexdigest()
+        data = p.read_bytes()
+        bytes_by_path[entry["path"]] = data
+        digest = hashlib.sha256(data).hexdigest()
         if digest != entry["sha256"] and rewritten is None:
             rewritten = f"plant CSV {entry['path']} was rewritten since it was registered"
-    return missing, rewritten
+    return missing, rewritten, bytes_by_path
 
 
 def parse_plant_registry_csvs(csv_paths: list[Path]) -> tuple[list[dict], str, int]:
@@ -1539,16 +1564,18 @@ def verify_mapping_inputs(
     registry_entries, registry_refusal = registry_entries_or_refusal(build, build.project_root)
     if registry_refusal:
         return {"refusal": registry_refusal}
-    plant_csvs_unverified, rewritten_fact = verify_registry_csv_bytes(registry_entries)
+    plant_csvs_unverified, rewritten_fact, verified_csv_bytes = verify_registry_csv_bytes(
+        registry_entries)
     if rewritten_fact:
         return {"refusal": (
             f"{rewritten_fact}: restore the file's registered bytes, or register the current "
             "file under a new registry name, rebuild the mapping against it, and deliver under "
             "that name")}
-    verified_plants = read_plant_csvs(
-        Path(entry["path"]) for entry in registry_entries
-        if entry["path"] not in plant_csvs_unverified
-    )
+    verified_plants = [
+        plant
+        for entry in registry_entries if entry["path"] not in plant_csvs_unverified
+        for plant in read_plant_csv_bytes(verified_csv_bytes[entry["path"]])
+    ]
 
     captures_unverified: list[str] = []
     for date in build.dates:
