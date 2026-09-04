@@ -99,7 +99,7 @@ def _list_dir(p: Path, *, confined: bool) -> dict:
     return {
         "path": str(p),
         "parent": parent,
-        "is_dataset_root": (p / "images").is_dir(),
+        "is_dataset_root": image_root(p).is_dir(),
         "has_tcip": (p / ".tcip").is_dir(),
         "entries": entries,
     }

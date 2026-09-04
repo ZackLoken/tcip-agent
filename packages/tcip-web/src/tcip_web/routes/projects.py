@@ -69,7 +69,7 @@ def _subjects_by_date(project_dir: Path, dates: list[str]) -> tuple[dict[str, li
 
 def _summarize(project_dir: Path, active_name: str | None) -> ProjectSummary:
     st = project_dir.stat()
-    images_dir = project_dir / "images"
+    images_dir = dataset_layout.image_root(project_dir)
     image_count = 0
     if images_dir.is_dir():
         image_count = sum(
