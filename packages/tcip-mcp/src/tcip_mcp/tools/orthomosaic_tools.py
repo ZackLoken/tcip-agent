@@ -95,6 +95,16 @@ def deliver_orthomosaic_plant_counts(
     response. ``validation_record`` names the record behind a validated count, and is empty
     otherwise.
 
+    Delivery-event disclosure: every registry CSV named above is hashed against the byte digest
+    ``register_plant_registry`` recorded for it (:func:`~tcip_mcp.pipelines.postprocessing.
+    plant_mapping.verify_registry_csv_bytes`), and a missing or rewritten file refuses by name
+    before anything is read, so every CSV this delivery reads is verified or the delivery never
+    happens. The delivery event this door's own ``export_aggregated_csv`` call records carries a
+    ``PlantRegistryDisclosure`` (``delivery_events_schema.py``): the registry it read, the raster
+    identity every count is attributed through, the matched tolerance and its source, and this
+    delivery's own unattributed-detection count, the whole-raster counterpart of the walked
+    mapping's own ``PlantMappingDisclosure`` the phenology doors record.
+
     Args:
         predictions_dir: The bucket ``run_inference``'s ``raster_path`` regime persisted.
         raster_path: The same georeferenced raster the bucket's predictions were produced from
@@ -112,8 +122,8 @@ def deliver_orthomosaic_plant_counts(
         crop: Crop species name.
         pipeline_version: Pipeline identifier.
         nn_tolerance_m: Nearest-neighbour match tolerance (m). ``None`` (default) derives it from
-            the plant grid's own spacing (:func:`assign_detections_to_plants`'s own default),
-            never a pinned constant.
+            the plant grid's own spacing (:func:`~tcip_mcp.pipelines.postprocessing.
+            orthomosaic_mapping.resolve_nn_tolerance_m`), never a pinned constant.
     """
     from tcip_annotation.json_io import prediction_documents
     from tcip_mcp.project_paths import resolve_output_path
@@ -125,18 +135,26 @@ def deliver_orthomosaic_plant_counts(
     if not Path(raster_path).is_file():
         return {"error": f"raster_path not found: {raster_path}"}
 
-    from tcip_mcp.pipelines.postprocessing.plant_mapping import load_registry, registry_csv_entries
+    from tcip_mcp.pipelines.postprocessing.plant_mapping import (
+        load_registry,
+        registry_csv_entries,
+        verify_registry_csv_bytes,
+    )
     from tcip_mcp.project_paths import platform_state_root
 
-    registry_record = load_registry(platform_state_root(), plant_registry)
+    project_root = platform_state_root()
+    registry_record = load_registry(project_root, plant_registry)
     if registry_record is None:
         return {"error": (
             f"plant registry not found: {plant_registry!r}; register it with "
             "register_plant_registry before deliver_orthomosaic_plant_counts reads it")}
-    plant_csv_paths = [e["path"] for e in registry_csv_entries(registry_record)]
-    missing = [p for p in plant_csv_paths if not Path(p).is_file()]
+    registry_entries = registry_csv_entries(registry_record)
+    missing, rewritten_refusal = verify_registry_csv_bytes(registry_entries)
     if missing:
         return {"error": f"plant CSV(s) not found: {missing}"}
+    if rewritten_refusal:
+        return {"error": rewritten_refusal}
+    plant_csv_paths = [e["path"] for e in registry_entries]
 
     from tcip_mcp.operationalization import (
         PER_PLANT_COUNT_AGGREGATE,
@@ -206,6 +224,7 @@ def deliver_orthomosaic_plant_counts(
         OrthomosaicGeoreference,
         RotatedRasterError,
         assign_detections_to_plants,
+        resolve_nn_tolerance_m,
     )
     from tcip_mcp.pipelines.postprocessing.plant_mapping import read_plant_csvs
 
@@ -218,8 +237,9 @@ def deliver_orthomosaic_plant_counts(
     if not plants:
         return {"error": f"no georeferenced plants parsed from {plant_csv_paths}"}
 
+    resolved_tolerance = resolve_nn_tolerance_m(plants, nn_tolerance_m)
     assignments = assign_detections_to_plants(
-        detections, georef, plants, nn_tolerance_m=nn_tolerance_m)
+        detections, georef, plants, nn_tolerance_m=resolved_tolerance["value"])
     mapped = [a for a in assignments if a.plot_name is not None]
     n_unmapped = len(assignments) - len(mapped)
 
@@ -249,12 +269,25 @@ def deliver_orthomosaic_plant_counts(
     provenance = {"producer_model_sha256": sidecar.get("checkpoint_sha256"),
                  "producing_experiment_id": sidecar.get("experiment_id")}
 
+    # PlantRegistryDisclosure: no walked MappingBuild exists for a whole-raster frame, so this
+    # names the registry, the raster identity, the tolerance and the unattributed count instead.
+    plant_mapping_disclosure = {
+        "plant_registry": {"name": registry_record["name"], "digest": registry_record["digest"]},
+        "project_root": str(project_root),
+        "raster_identity": recorded_identity,
+        "nn_tolerance_m": resolved_tolerance,
+        "detections_unattributed": n_unmapped,
+        "detections_unattributed_scope": "delivered_raster",
+        "plant_attribution": DetectionAssignment.plant_attribution,
+    }
+
     try:
         csv_path, tail = export_aggregated_csv(
             agg, output_csv_path, delivered_phenotype=delivered_phenotype, crop=crop,
             pipeline_version=pipeline_version, provenance=provenance,
             pred_dirs=[predictions_dir],
             door="deliver_orthomosaic_plant_counts",
+            plant_mapping=plant_mapping_disclosure,
         )
     except DeliveryRefused as exc:
         # operating_point_validated is the operating_point dimension's own cleared reference;
