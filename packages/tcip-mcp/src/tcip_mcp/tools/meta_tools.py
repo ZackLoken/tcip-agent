@@ -14,7 +14,7 @@ import json
 import re
 import secrets
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -343,6 +343,42 @@ def load_project_memory(
     return {"error": f"unknown kind '{kind}'", "valid_kinds": ["reports", "retrospectives"]}
 
 
+def _parse_audit_timestamp(value: str | None) -> datetime | None:
+    """Parse an audit entry's own stated timestamp, or ``None`` when it is absent or will not
+    parse. An entry is data the platform itself wrote, never a caller argument to refuse over,
+    so a bad or missing timestamp sorts and filters as "unknown" rather than aborting the read.
+    A naive result is treated as UTC, matching what every writer through ``audit._entry`` stamps.
+    """
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
+def _parse_audit_bound(label: str, value: str, *, end_of_day: bool = False) -> datetime:
+    """Parse a caller-supplied ``since``/``until`` bound, or raise naming which bound and why.
+
+    A date-only bound (no ``T`` separator) names a whole day, not an instant: ``since`` already
+    starts at that day's midnight once parsed, and ``until`` with ``end_of_day=True`` is pushed
+    to the last microsecond of that day, so ``until="2026-03-02"`` includes every entry from that
+    date rather than only one landing on midnight exactly.
+    """
+    parsed = _parse_audit_timestamp(value)
+    if parsed is None:
+        raise ValueError(f"{label} {value!r} is not a parseable ISO-8601 timestamp")
+    if end_of_day and "T" not in value:
+        parsed = parsed + timedelta(days=1) - timedelta(microseconds=1)
+    return parsed
+
+
 @mcp.tool()
 @audited
 def read_audit_log(
@@ -357,19 +393,37 @@ def read_audit_log(
     """Read one audit log's own entries: which door touched a dataset or project, when, with
     what status.
 
-    ``scope`` resolves through ``tcip_mcp.audit.audit_log_key``, the one resolver every audit
-    writer uses: a dataset root, a project root, or the platform default when ``scope`` is
-    ``None``. The whole log is read through ``tcip_store.read_log`` (no cursor: this is a
-    bounded lookback, not a stream a caller resumes), filtered in memory on each entry's own
-    ``tool`` name, ``status``, and ``timestamp`` (``since``/``until`` are ISO-8601 strings
-    compared lexically against the entry's own, inclusive on both ends), then returned newest
-    first, up to ``limit``. ``skipped`` states how many entries this call is not returning,
-    whether filtered out or truncated by ``limit``, so a caller can tell "nothing matched" apart
-    from "more exists".
+    ``scope`` resolves through ``tcip_mcp.audit.dataset_scope_of``, the one resolver ``audited``
+    itself calls to file a writer's own entry: a path under a dataset's canonical segment
+    (``annotations``, ``predictions``, ``images``, ``labels``) resolves up to its dataset root,
+    and a bare directory counts as a root only when it carries its own ``.tcip`` directory or a
+    registered dataset marker (``classes.json``), which a project root does too. ``scope=None``
+    is the platform default. A ``scope`` that resolves to none of these refuses by name, naming
+    what was passed, rather than answering from whichever log a typo or an unrecognized inner
+    path happened to resolve to (indistinguishable from an empty log otherwise). The whole log is
+    read through ``tcip_store.read_log`` (no cursor: this is a bounded lookback, not a stream a
+    caller resumes), filtered in memory on each entry's own ``tool`` name, ``status``, and
+    ``timestamp``, then returned newest first by each entry's own stated timestamp, the same
+    basis ``load_project_memory`` sorts its corpora on, never by append order (a relaunched or
+    backfilled entry need not land in the order it was appended). ``skipped`` states how many
+    entries this call is not returning, whether filtered out or truncated by ``limit``, so a
+    caller can tell "nothing matched" apart from "more exists".
 
-    A page carrying undecodable or unknown-schema-version entries is refused rather than
+    ``since``/``until`` are ISO-8601 strings parsed with ``datetime.fromisoformat`` (a trailing
+    ``Z`` is accepted), inclusive on both ends against each entry's own parsed timestamp; a bound
+    that will not parse refuses by name rather than falling back to a lexical string comparison
+    that would silently mis-order non-padded or mixed-precision timestamps. A date-only ``until``
+    (no time part) means the end of that whole day, not its midnight start, so
+    ``until="2026-03-02"`` includes every entry from that date.
+
+    A page carrying undecodable entries, unknown-schema-version entries, or a torn tail (an
+    appender's own in-flight, not-yet-newline-terminated fragment) is refused rather than
     answered from what did decode: a provenance read that silently dropped rows would be worse
     than one that says it cannot answer.
+
+    This call's own audit entry is written after this function returns (:func:`audited` appends
+    it around the call), so it is never present in this call's own result; a later read of the
+    same scope sees it, the same as any earlier call's entry appears in this one.
 
     This is a read, not a replacement for the two readers that already scan this log for their
     own narrow question: the plant-mapping receipt scan (``pipelines.postprocessing.plant_mapping._scan_receipts``)
@@ -379,42 +433,77 @@ def read_audit_log(
     read of the record is on the record too, the same as ``load_project_memory``.
 
     Args:
-        scope: Dataset root, project root, or ``None`` for the platform log.
+        scope: Dataset root, project root, a path under either, or ``None`` for the platform log.
         tool: Exact tool-name filter, e.g. 'save_annotations'.
         since: Only entries whose own timestamp is at or after this ISO-8601 string.
-        until: Only entries whose own timestamp is at or before this ISO-8601 string.
+        until: Only entries whose own timestamp is at or before this ISO-8601 string; a
+            date-only string means the end of that day.
         status: Exact status filter, e.g. 'ok', 'error', 'exception'.
         limit: Maximum entries to return (default 200), newest first.
     """
-    from tcip_mcp.audit import audit_log_key
+    from tcip_mcp.audit import audit_log_key, dataset_scope_of
 
-    key = audit_log_key(scope)
+    if scope is None:
+        key = audit_log_key(None)
+    else:
+        resolved_scope = dataset_scope_of(scope)
+        if resolved_scope is None:
+            return {
+                "error": (
+                    f"scope '{scope}' names no dataset root, project root, or path under "
+                    "either: pass the platform default (omit scope), a dataset root, a "
+                    "project root, or a path under one; a project root must carry its own "
+                    ".tcip directory or classes.json for this to resolve it"
+                ),
+            }
+        key = audit_log_key(resolved_scope)
+
     page = tcip_store.read_log(key)
-    if page.corrupt or page.version_refused:
+    if page.corrupt or page.version_refused or page.torn_tail:
+        undecodable = len(page.corrupt)
+        refused = len(page.version_refused)
+        parts = [
+            f"{undecodable} undecodable entr{'y' if undecodable == 1 else 'ies'}",
+            f"{refused} version-refused entr{'y' if refused == 1 else 'ies'}",
+        ]
+        if page.torn_tail:
+            parts.append("a torn tail from an appender still mid-write")
         return {
             "error": (
-                f"the audit log at {key.root} carries {len(page.corrupt)} undecodable and "
-                f"{len(page.version_refused)} version-refused entr"
-                f"{'y' if (len(page.corrupt) + len(page.version_refused)) == 1 else 'ies'}; "
-                "repair the log before trusting a read of it"
+                f"the audit log at {key.root} carries {', '.join(parts)}; repair the log "
+                "before trusting a read of it"
             ),
             "scope_resolved": key.root,
         }
+
+    try:
+        since_dt = _parse_audit_bound("since", since) if since is not None else None
+        until_dt = (
+            _parse_audit_bound("until", until, end_of_day=True) if until is not None else None
+        )
+    except ValueError as exc:
+        return {"error": str(exc), "scope_resolved": key.root}
 
     def _matches(entry: dict) -> bool:
         if tool is not None and entry.get("tool") != tool:
             return False
         if status is not None and entry.get("status") != status:
             return False
-        entry_timestamp = entry.get("timestamp")
-        if since is not None and (entry_timestamp is None or entry_timestamp < since):
+        entry_ts = _parse_audit_timestamp(entry.get("timestamp"))
+        if since_dt is not None and (entry_ts is None or entry_ts < since_dt):
             return False
-        if until is not None and (entry_timestamp is None or entry_timestamp > until):
+        if until_dt is not None and (entry_ts is None or entry_ts > until_dt):
             return False
         return True
 
     filtered = [entry for entry in page.records if _matches(entry)]
-    newest_first = list(reversed(filtered))
+
+    def _sort_key(entry: dict) -> datetime:
+        return _parse_audit_timestamp(entry.get("timestamp")) or datetime.min.replace(
+            tzinfo=timezone.utc
+        )
+
+    newest_first = sorted(filtered, key=_sort_key, reverse=True)
     truncated = max(0, len(newest_first) - limit)
     entries = newest_first[:limit]
     skipped = (len(page.records) - len(filtered)) + truncated
