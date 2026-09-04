@@ -46,6 +46,7 @@ import json
 import math
 import os
 from collections.abc import Mapping
+from dataclasses import dataclass
 from pathlib import Path
 
 import tcip_store
@@ -516,6 +517,20 @@ def _annotations_of(data: dict | None) -> list[Annotation]:
     return out
 
 
+def annotations_of_document(document: dict) -> list[Annotation]:
+    """The typed annotation records a parsed per-image document holds.
+
+    The public counterpart of :func:`_annotations_of`, for a caller that has already parsed one
+    document (through :func:`parse_label_document` or :func:`annotations_from_bytes`'s own
+    decode) and wants its typed annotations without discarding the document's own ``image``,
+    ``width`` and ``height`` fields the way :func:`read_annotations` does: reading both from the
+    one parsed dict is one byte snapshot, never two independent reads of a file that could change
+    in between. Raises :class:`UnreadableLabelDocument` for the same shapes ``_annotations_of``
+    refuses (see its own docstring).
+    """
+    return _annotations_of(document)
+
+
 # ── reader ─────────────────────────────────────────────────────────────────
 # A missing file reads as []; a present, unreadable document raises UnreadableLabelDocument.
 
@@ -586,6 +601,58 @@ def is_unadjudicated_agent_authorship(a: Annotation) -> bool:
     return not a.accepted_by
 
 
+@dataclass
+class ProvenanceFacts:
+    """The provenance classification over one list of annotations, computed once so
+    :func:`require_reference_ground_truth` (the reference rule, which admits a record with no
+    ``created_by`` at all as a pre-provenance hand label) and
+    ``segment_attribution.load_canopy_segments`` (the canopy rule, stricter: it admits none of
+    those) apply their own different admissibility policy to one shared classification, rather
+    than each re-deriving what a record's provenance says.
+
+    ``scored`` and ``machine_authored`` are exactly what :func:`require_reference_ground_truth`
+    already computed inline before this extraction (the same :func:`is_unadjudicated_prediction`/
+    :func:`is_unadjudicated_agent_authorship` predicates, so its own refusal wording holds
+    unchanged); ``no_created_by``/``not_positively_a_persons`` are index lists into the annotations
+    passed in, for a caller (the canopy rule) that names the specific record its own refusal is
+    about.
+    """
+
+    total: int
+    scored: int
+    machine_authored: list[str]
+    no_created_by: list[int]
+    not_positively_a_persons: list[int]
+    """Index of every record whose ``created_by`` is not a person's and whose ``accepted_by`` is
+    not a person's either (present or not): the canopy rule's own stricter test, which checks
+    ``accepted_by``'s identity rather than merely its presence the way
+    :func:`is_unadjudicated_agent_authorship` does. Never includes a record already counted under
+    ``no_created_by``: that record's ``created_by`` names nobody to test as a person or not."""
+
+
+def provenance_facts(annotations: list[Annotation]) -> ProvenanceFacts:
+    """The :class:`ProvenanceFacts` classification over ``annotations``, the one computation both
+    admissibility rules apply their own policy to (see that class's own docstring)."""
+    scored = 0
+    machine_authored: list[str] = []
+    no_created_by: list[int] = []
+    not_positively_a_persons: list[int] = []
+    for i, a in enumerate(annotations):
+        if is_unadjudicated_prediction(a):
+            scored += 1
+        if is_unadjudicated_agent_authorship(a):
+            machine_authored.append(str(a.created_by))
+        if not a.created_by:
+            no_created_by.append(i)
+        elif not a.created_by.startswith(PERSON_IDENTITY_PREFIX):
+            if not (a.accepted_by and a.accepted_by.startswith(PERSON_IDENTITY_PREFIX)):
+                not_positively_a_persons.append(i)
+    return ProvenanceFacts(
+        total=len(annotations), scored=scored, machine_authored=machine_authored,
+        no_created_by=no_created_by, not_positively_a_persons=not_positively_a_persons,
+    )
+
+
 def require_reference_ground_truth(directory: str | Path) -> None:
     """Refuse ``directory`` as a measurement reference when only the model stands behind it.
 
@@ -605,15 +672,11 @@ def require_reference_ground_truth(directory: str | Path) -> None:
     refuse as unreadable).
     """
     directory = Path(directory)
-    scored = 0
-    total = 0
-    agent_authored: list[str] = []
+    annotations: list[Annotation] = []
     for path in prediction_documents(directory):
-        for a in read_annotations(path):
-            total += 1
-            scored += is_unadjudicated_prediction(a)
-            if is_unadjudicated_agent_authorship(a):
-                agent_authored.append(str(a.created_by))
+        annotations.extend(read_annotations(path))
+    facts = provenance_facts(annotations)
+    scored, total, agent_authored = facts.scored, facts.total, facts.machine_authored
     if scored:
         raise ValueError(
             f"{scored} of {total} annotations in {directory} carry a prediction score, so they are "
