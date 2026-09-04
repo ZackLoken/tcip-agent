@@ -1960,11 +1960,62 @@ def delivery_event_key(scope: str | Path, event_id: str) -> Key:
     return Key(DELIVERY_EVENTS_STORE, str(scope), (event_id,))
 
 
+DELIVERY_SUPERSESSIONS_STORE = "delivery_supersessions"
+_DELIVERY_SUPERSESSIONS_LOCATOR = RootedFileLocator(
+    prefix=("delivery_supersessions",), suffix=".json")
+register_store(
+    StoreDescriptor(
+        name=DELIVERY_SUPERSESSIONS_STORE,
+        kind="record",
+        key_fields=("event_id",),
+        frozen=True,
+        codec=RECORD_JSON,
+        concurrency="cas",
+        enumerable=True,
+        locator=_DELIVERY_SUPERSESSIONS_LOCATOR,
+    )
+)
+"""One record per superseded delivery event, keyed by the superseded event's own id (so an event
+can carry at most one supersession); ``concurrency="cas"`` since ``supersede_delivery`` writes
+create-only (``expect=Version.ABSENT``) rather than overwriting a standing withdrawal."""
+
+
+def delivery_supersession_key(scope: str | Path, event_id: str) -> Key:
+    """The supersession filed against ``event_id``, if any: same scope as the event it names."""
+    return Key(DELIVERY_SUPERSESSIONS_STORE, str(scope), (event_id,))
+
+
+def load_delivery_supersessions(project_root: str | Path | None = None) -> dict[str, dict]:
+    """Every delivery-event id under this project that carries a supersession, mapped to its own
+    stored record: the input :func:`~tcip_mcp.pipelines.delivery_events_schema.with_supersessions`
+    joins against a delivery-events listing, read once here rather than per event."""
+    scope = delivery_events_scope(project_root)
+    out: dict[str, dict] = {}
+    for key in tcip_store.keys(DELIVERY_SUPERSESSIONS_STORE, str(scope)):
+        record = tcip_store.read(key, default=None)
+        if isinstance(record, dict):
+            out[key.parts[-1]] = record
+    return out
+
+
 def _delivery_event_id(door: str, output_path: str | None, now: str) -> str:
     """A stable, Windows-safe id for one delivery event: a hex digest carries no colon and no
     timestamp-collision risk a caller-supplied nonce would otherwise need, and is computed here
     rather than accepted from a caller so no door can name its own event twice."""
     return hashlib.sha256(f"{door}|{output_path}|{now}".encode()).hexdigest()
+
+
+def _delivered_file_sha256(output_path: str | None) -> str | None:
+    """The delivered file's own digest, read after the writer already wrote it: ``None`` for a
+    fileless event (the two ``phenology_measurement`` calls below, which compute a curve rather
+    than write a CSV), and ``None`` when a file was named but cannot be read now (the write
+    itself is this function's caller's concern, not this best-effort read's)."""
+    if not output_path:
+        return None
+    try:
+        return hashlib.sha256(Path(output_path).read_bytes()).hexdigest()
+    except OSError:
+        return None
 
 
 def record_delivery_binding_event(
@@ -2048,6 +2099,7 @@ def record_delivery_binding_event(
         "delivery_kind": delivery_kind,
         "door": door,
         "output_path": output_path,
+        "output_sha256": _delivered_file_sha256(output_path),
         "measurement_documents": list(measurement_documents),
         "scale_document": scale_document,
         "plant_mapping": plant_mapping,

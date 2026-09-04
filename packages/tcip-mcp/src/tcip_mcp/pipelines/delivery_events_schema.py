@@ -14,7 +14,7 @@ name rather than silently accepted and later misread.
 
 from __future__ import annotations
 
-from typing import Literal, Optional
+from typing import Literal, Mapping, Optional
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
@@ -77,11 +77,46 @@ class DeliveryEventRecord(BaseModel):
     delivery_kind: Optional[str]
     door: str
     output_path: Optional[str]
+    output_sha256: Optional[str]
     measurement_documents: list[str]
     scale_document: Optional[str]
     plant_mapping: Optional[PlantMappingDisclosure]
     documents: dict[str, DocumentBinding]
     produced_at: str
+
+
+class DeliverySupersessionRecord(BaseModel):
+    """One ``delivery_supersessions`` record, as ``supersede_delivery`` writes it: the superseded
+    event's own id and digest, the replacement event when a re-delivery already exists, and the
+    non-empty reason and actor behind the withdrawal."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    superseded_event_id: str
+    output_sha256: Optional[str]
+    replacement_event_id: Optional[str]
+    reason: str
+    superseded_by: str
+    superseded_at: str
+
+
+def with_supersessions(
+    events: list[dict], supersessions: Mapping[str, dict]
+) -> list[dict]:
+    """Every one of ``events`` (as ``list_delivery_events`` reads them back) with its own
+    supersession attached under ``superseded``: the record ``supersede_delivery`` filed against
+    that event's id, or ``None`` when nothing supersedes it.
+
+    ``supersessions`` maps a superseded event's id to its own stored ``delivery_supersessions``
+    record (:func:`tcip_mcp.pipelines.resolution.load_delivery_supersessions`'s own shape), read
+    once by the caller rather than once per event. The one join every delivery-events reader (the
+    Results tab's panel route, and ``read_audit_log``) composes through, so the two can never
+    disagree about which record answers for which event.
+    """
+    return [
+        {**event, "superseded": supersessions.get(event.get("event_id"))}
+        for event in events
+    ]
 
 
 def validation_error_detail(exc: ValidationError) -> str:
