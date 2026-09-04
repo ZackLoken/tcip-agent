@@ -124,7 +124,7 @@ source file under a covered root that no row names.
 | packages/tcip-mcp/src/tcip_mcp/pipelines/raster_source.py | Raster reading: one open-and-read surface for every image source this platform decodes. | 4 | 18 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/reference_grid.py | Named reference grid over a raster's native pixel frame. | 3 | 4 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/region_completeness.py | Per-cell content digest for the region-completeness store (:func:`tcip_mcp.dataset_layout.region_completeness_path`): detects an annotation edited or deleted inside an attested cell after attestation. | 6 | 3 |
-| packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py | Runtime parameter resolution, the "derive, don't pin" currency. | 9 | 38 |
+| packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py | Runtime parameter resolution, the "derive, don't pin" currency. | 9 | 39 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/schemas.py | Pydantic v2 config schemas for structural/type validation. | 0 | 3 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/training/__init__.py | Training pipeline: trainer, progressive unfreezing, HPO. | 0 | 0 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/training/collation.py | Collate functions for a task's ``DataLoader``: batches per-sample pairs into the shape ``train()`` and ``evaluate()`` both expect. | 0 | 5 |
@@ -478,7 +478,7 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | scripts/conform_delivery_events.py | Check a project's stored `delivery_events` records against the current `DeliveryEventRecord` shape and name, by event_id, any that no longer validate; rewrites nothing. | 4 | 0 |
 | scripts/conform_metrics_marker.py | Stamp the ``metrics_logged`` marker onto every experiment a root's status record predates. | 3 | 0 |
 | scripts/conform_model_registry_paths.py | Wrap a project's model registry index to schema_version 2 and respell every entry's checkpoint_path relative to its scope root, relocating a moved or replaced checkpoint by content digest. | 3 | 0 |
-| scripts/conform_plant_mapping_records.py | Rewrite one project's stored plant-mapping records from the old `plant_csvs` field to the new `plant_registry` reference, registering the CSV files the old field named under a name the operator states, and add `supersedes: null`. | 5 | 0 |
+| scripts/conform_plant_mapping_records.py | Rewrite one project's stored plant-mapping records from the old `plant_csvs` field to the new `plant_registry` reference, registering the CSV files the old field named under a name the operator states, and add `supersedes: null`. | 6 | 0 |
 | scripts/conform_project_site.py | Write or correct one project's authored site: the record ``initialize_project``/``ingest_images`` themselves cannot reach for a project whose name does not fit the workspace scheme, and the one deliberate overwrite for a site typed wrong once or a record damaged by hand. | 3 | 0 |
 | scripts/conform_registry_experiment_id.py | Conform a project's registry entries to carry ``experiment_id``, for an entry registered before the producer-binding field existed. | 4 | 0 |
 | scripts/conform_view_coverage_viewing.py | Conform a dataset's stored `view_coverage` records to the current `CoverageViewing` shape. | 4 | 0 |
@@ -1020,15 +1020,15 @@ registered at HEAD.
 | GET | `/plant_mapping/list` | `list_plant_mappings` | `routes/results.py:322` |
 | POST | `/phenology_measurement` | `phenology_measurement` | `routes/results.py:596` |
 | POST | `/export_csv` | `export_csv` | `routes/results.py:652` |
-| GET | `/traits` | `list_traits` | `routes/results.py:1123` |
+| GET | `/traits` | `list_traits` | `routes/results.py:1103` |
 | GET | `/operationalization` | `get_operationalization` | `routes/results.py:776` |
 | GET | `/operationalizations` | `list_operationalizations` | `routes/results.py:792` |
 | POST | `/operationalization/confirm` | `confirm_operationalization` | `routes/results.py:830` |
 | GET | `/trait-spec-statement` | `get_trait_spec_statement` | `routes/results.py:932` |
 | GET | `/trait-spec-statements` | `list_trait_spec_statements` | `routes/results.py:948` |
 | POST | `/trait-spec-statement/confirm` | `confirm_trait_spec_statement` | `routes/results.py:990` |
-| GET | `/delivery-events` | `list_delivery_events` | `routes/results.py:1063` |
-| GET | `/models/registered` | `registered_models` | `routes/results.py:1152` |
+| GET | `/delivery-events` | `list_delivery_events` | `routes/results.py:1056` |
+| GET | `/models/registered` | `registered_models` | `routes/results.py:1132` |
 
 ### routes/review.py, prefix `/api/review` (8 routes)
 
@@ -2195,7 +2195,7 @@ arguments: dict) -> None:`, which calls `record_event` with the dataset root its
 resolved; `routes/annotate.py:150` does the same for its own dataset, `routes/classes.py:63`
 likewise, the one `routes/inference.py:368` imports and calls rather than defining its own);
 `routes/results.py:151` does the same for a project root instead. Reader:
-`pipelines/postprocessing/plant_mapping.py:1291` (`_require_receipt`)
+`pipelines/postprocessing/plant_mapping.py:1352` (`_require_receipt`)
 trusts only a `plant_mapping_built` entry it finds in the log under the root its caller holds
 (the MCP tool's pinned platform root, the platform log's own file until adoption makes it a
 project's; the web route's guarded project root), scanned by `_scan_receipts`, line 923, which
@@ -2366,7 +2366,7 @@ Phase 3 verdict: single.
 
 Must agree: the MCP registrar and the GUI model pickers read one registry entry shape.
 Side A: `packages/tcip-mcp/src/tcip_mcp/model_registry.py:132` (`def read_registry_index(`, the read path for everything outside the module; `_register_entry`, line 429, replaces one entry by name inside one `tcip_store.transaction` on the key `registry_index_key`, line 116, mints).
-Side B: `packages/tcip-web/src/tcip_web/routes/results.py:1151` (`@router.get("/models/registered")`, serving `model_tools.rank_registered_models`'s listing view) and the browser's one entry declaration, `packages/tcip-web/frontend/src/api/inference.ts:16` (`export interface RegisteredModel {`), held field by field against an entry the real registrar wrote by `tests/test_registry_entry_shape_agreement.py`.
+Side B: `packages/tcip-web/src/tcip_web/routes/results.py:1131` (`@router.get("/models/registered")`, serving `model_tools.rank_registered_models`'s listing view) and the browser's one entry declaration, `packages/tcip-web/frontend/src/api/inference.ts:16` (`export interface RegisteredModel {`), held field by field against an entry the real registrar wrote by `tests/test_registry_entry_shape_agreement.py`.
 Phase 3 verdict: single.
 
 ## S28. operating_point.json prediction-bucket sidecar
