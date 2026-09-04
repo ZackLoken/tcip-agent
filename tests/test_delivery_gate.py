@@ -89,7 +89,10 @@ def test_gate_refuses_a_bare_unvalidated_dimension():
     assert g.ok is False
     assert g.unvalidated == ("operating_point",)
     assert g.stamp == {"operating_point": VALIDATED_FALSE}
-    assert "acknowledged delivery" in g.reason
+    assert "unvalidated dimension" in g.reason
+    # The gate names no escape here: naming "an acknowledged delivery" would claim a route
+    # every door has, when only the phenology writer and the web route ever build one.
+    assert "acknowledged" not in g.reason
 
 
 def test_gate_acknowledgement_ships_but_stamps_false():
@@ -181,6 +184,12 @@ def test_an_unknown_dimension_name_refuses_loudly():
 def test_acknowledgement_refuses_a_blank_reason(reason):
     with pytest.raises(ValueError, match="reason is required non-empty"):
         Acknowledgement(acknowledged_by="user:breeder", reason=reason)
+
+
+@pytest.mark.parametrize("acknowledged_by", ["", "   ", "\t\n"])
+def test_acknowledgement_refuses_a_blank_acknowledged_by(acknowledged_by):
+    with pytest.raises(ValueError, match="acknowledged_by is required non-empty"):
+        Acknowledgement(acknowledged_by=acknowledged_by, reason="known limitation")
 
 
 def test_measurement_dimension_key_is_retired():

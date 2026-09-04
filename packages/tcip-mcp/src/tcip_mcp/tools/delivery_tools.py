@@ -159,7 +159,11 @@ def deliver_per_plant_csv(
         )
     except DeliveryRefused as exc:
         refusal = {
-            "error": str(exc),
+            "error": (
+                f"{exc} This door takes no acknowledgement: validate the dimension named above, "
+                "or, for a per-image bucket, promote it to validated through the review "
+                "validation route (validate_reference) and re-deliver."
+            ),
             "operating_point_validated": exc.gate.stamp.get("operating_point", VALIDATED_FALSE),
             "unvalidated_dimensions": exc.gate.unvalidated_cell(),
         }

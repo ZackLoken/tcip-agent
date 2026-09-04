@@ -2128,7 +2128,7 @@ def record_delivery_binding_event(
     delivery_kind: str | None = None,
     project_root: str | Path | None = None,
     plant_mapping: dict | None = None,
-) -> None:
+) -> bool:
     """Record what verification found for each bucket a delivery read, in that dataset's own log.
 
     The ``@audited`` decorator records a door's arguments and its status, which is not what a later
@@ -2179,6 +2179,11 @@ def record_delivery_binding_event(
     is a deterministic defect in the caller, never an environmental failure the way an unwritable
     disk is, so it raises ``pydantic.ValidationError`` to the caller instead of falling into this
     call's own best-effort warning path below, which covers the store write alone.
+
+    Returns whether the event write actually landed: ``True`` on a successful store write,
+    ``False`` when the best-effort write below failed (logged, never raised). A delivered file
+    already exists by the time this runs, so a caller cannot un-deliver on a ``False`` here; it can
+    only disclose the gap to whoever asked for the delivery.
     """
     from tcip_mcp.audit import record_event
 
@@ -2231,6 +2236,8 @@ def record_delivery_binding_event(
         tcip_store.replace(key, record)
     except Exception:
         logger.warning("Failed to write delivery_events record for door %r", door, exc_info=True)
+        return False
+    return True
 
 
 def binding_notes_text(notes: Mapping[str, str]) -> str:
@@ -2689,19 +2696,28 @@ def bind_classifier_validity(
 
 @dataclass(frozen=True)
 class Acknowledgement:
-    """The breeder's own act of shipping an unvalidated delivery, built only by the web delivering
-    route (``tcip_web.routes.results.export_csv``) once a request names a real user.
+    """The breeder's own act of shipping an unvalidated delivery: who did it and why.
 
-    Never constructed by an MCP tool or a pipeline: an agent acknowledging its own unvalidated
-    output would be attesting to a breeder's judgment it never obtained. ``reason`` is required
-    non-empty (the one thing the record carries that says why), and ``acknowledged_by`` is the
-    ``user:<name>`` identity resolved from the request that made the act, never a server identity.
+    In production, this is built only by the web delivering route
+    (``tcip_web.routes.results.export_csv``) once a request names a real user; an agent
+    acknowledging its own unvalidated output would be attesting to a breeder's judgment it never
+    obtained. That is a convention at this Python seam, not a rail the type enforces: nothing here
+    stops another caller from constructing one. Whoever builds an ``Acknowledgement`` is recorded
+    by name and reason regardless, so a caller outside the web route still leaves an attributed
+    trail rather than a silent bare number. ``acknowledged_by`` and ``reason`` are both required
+    non-empty: ``acknowledged_by`` is the one thing the record carries that says who, ``reason``
+    the one thing that says why.
     """
 
     acknowledged_by: str
     reason: str
 
     def __post_init__(self) -> None:
+        if not self.acknowledged_by.strip():
+            raise ValueError(
+                "Acknowledgement.acknowledged_by is required non-empty: it is the one thing the "
+                "record carries that says who."
+            )
         if not self.reason.strip():
             raise ValueError(
                 "Acknowledgement.reason is required non-empty: it is the one thing the record "
@@ -2738,6 +2754,31 @@ class DeliveryGateResult:
         if any(name not in own_column for name in self.unvalidated):
             return VALIDATED_FALSE
         return self.stamp[dimension]
+
+    def owned_column_stamp(self) -> dict[str, str]:
+        """Every dimension's ``column_stamp``, using :data:`_DIMENSION_TO_COLUMN`'s own membership
+        as ``own_column``: exactly what a delivered tail carrying a column for every one of those
+        dimensions would show per dimension. For a reader with no CSV columns of its own (the
+        Results tab), this is the one way to show a per-dimension validity that cannot read
+        stronger than the file the same gate result would produce.
+        """
+        owned = tuple(_DIMENSION_TO_COLUMN)
+        return {dim: self.column_stamp(dim, own_column=owned) for dim in self.stamp}
+
+    def effective_acknowledgement(self) -> Acknowledgement | None:
+        """The acknowledgement this gate result actually applied, or ``None`` when every dimension
+        validated and nothing needed one, regardless of what a caller passed in.
+
+        Built from ``acknowledged_by``/``acknowledgement_reason`` (already ``None``/``None`` when
+        the gate discarded a caller's acknowledgement as unneeded) rather than from a caller's own
+        ``Acknowledgement`` object, so a writer recording the delivery event and a writer composing
+        the CSV tail from the same gate result can never disagree about whether this delivery
+        rested on one.
+        """
+        if self.acknowledged_by is None:
+            return None
+        return Acknowledgement(
+            acknowledged_by=self.acknowledged_by, reason=self.acknowledgement_reason or "")
 
     def unvalidated_cell(self) -> str:
         """Every gated dimension that did not validate, in the platform's delivered-list-cell
@@ -2854,8 +2895,7 @@ def check_delivery_gate(
             reason=(
                 f"delivery refused: unvalidated dimension(s) {list(blocking)}. A "
                 "phenotype deliverable requires each dimension validated against a reference of "
-                f"its own kind ({clears}); validate it, or ship it through an acknowledged "
-                "delivery."
+                f"its own kind ({clears})."
             ),
         )
     acknowledged_by = acknowledgement.acknowledged_by if (unvalidated and acknowledgement) else None
