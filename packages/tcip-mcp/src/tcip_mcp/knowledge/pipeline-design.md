@@ -13,10 +13,10 @@ from the data in hand, and it is the decision this platform exists to have you m
 
 Derive it by measuring the dataset, not by classifying the trait:
 
-- `python scripts/scan_dataset.py <folder_path>`: how many images, at what resolution, and which
-  capture dates exist.
-- `pipelines.derivations.gt_aspect_ratios` over the GT `(w, h)`: the object scale and elongation
-  that actually occur here, rather than an assumed shape.
+- `python scripts/scan_dataset.py <folder_path>`: how many images, labels and predictions exist,
+  and the detected label format; capture dates come from `ingest_images`, below.
+- `pipelines.derivations.gt_aspect_ratios` over the GT `(w, h)`: the object elongation that
+  actually occurs here, rather than an assumed shape.
 - Object scale against your tile size: whether objects survive tiling, and whether a seam cuts
   them. `pipelines.derivations.derive_cross_tile_nms` returns `None` when the GT gives no basis
   for a threshold; that `None` is the honest answer, not a failure.
