@@ -1,10 +1,13 @@
 """GUI-driving tools: push data to a panel, or drive the live Annotate/Review tab to a frame.
 
-Both routes go through the tcip-web event channel (:mod:`tcip_mcp.web_client`), a soft miss with
-``delivered: false`` if no GUI answers. Neither reads or writes an annotation or prediction file
-itself beyond what it needs to resolve where to land: push_panel_event forwards an arbitrary
-payload; focus_human_attention resolves a (subject, date) frame through read_annotations' own reader and posts
-the event the GUI honors with local view setters.
+Both routes refuse before posting anything when the GUI's currently open project (the
+``canvas_open_binding`` record) does not name the caller's own stated project; once the binding
+agrees, delivery itself goes through the tcip-web event channel (:mod:`tcip_mcp.web_client`) as
+a soft miss with ``delivered: false`` if no GUI answers there. Neither reads or writes an
+annotation or prediction file itself beyond what it needs to resolve where to land:
+push_panel_event forwards an arbitrary payload; focus_human_attention resolves a (subject, date)
+frame through read_annotations' own reader and posts the event the GUI honors with local view
+setters.
 """
 
 from __future__ import annotations
@@ -21,31 +24,34 @@ from tcip_mcp.server import mcp
 
 
 def _binding_refusal(binding: dict | None, compared_root: str) -> dict:
-    """Refuse driving the GUI, naming the binding's own project and the root compared against.
+    """Refuse driving the GUI, naming what the GUI has open, the root this call named, and the
+    step that converges them.
 
     Shared by ``focus_human_attention`` and ``push_panel_event``, the same standing
     ``web_client.gui_binding_matches`` predicate ``capture_live_canvas`` already refuses under:
-    no binding at all means nothing is open for either root to match, and a binding naming
-    another project means this call would drive a browser that has moved on. Neither driver
-    takes an override; a mismatch, or no binding, refuses every time. ``delivered`` is always
-    ``False`` here, since neither caller reaches its own post to the GUI once this refuses.
+    no binding at all means nothing is open in the GUI for either root to match, and a binding
+    naming another project means this call would drive a browser that has moved on. Neither
+    driver takes an override; a mismatch, or no binding, refuses every time. ``delivered`` is
+    always ``False`` here, since neither caller reaches its own post to the GUI once this
+    refuses. The naming and the converge step are ``web_client.binding_divergence``, the same
+    helper ``capture_live_canvas``'s own mismatch branches report, so an agent refused here is
+    told the same thing an agent refused by that tool would be.
     """
+    from tcip_mcp.web_client import binding_divergence
+
+    divergence = binding_divergence(binding, compared_root)
     if binding is None:
-        return {
-            "error": f"No current canvas binding exists; nothing is open in the GUI to drive "
-                     f"toward {compared_root}.",
-            "bound_project": None,
-            "bound_root": None,
-            "compared_root": compared_root,
-            "delivered": False,
-        }
+        opened = "The GUI has no project open"
+    elif divergence["bound_project"]:
+        opened = f"The GUI has {divergence['bound_project']!r} open"
+    else:
+        opened = f"The GUI has the root {divergence['bound_root']} open"
     return {
-        "error": f"The GUI's open project ({binding.get('project_name') or binding.get('root')}) "
-                 f"differs from {compared_root}; refusing to drive a browser that has moved to "
-                 "another project.",
-        "bound_project": binding.get("project_name"),
-        "bound_root": binding.get("root"),
+        "error": f"{opened}; this call named {compared_root}. {divergence['converge']}.",
+        "bound_project": divergence["bound_project"],
+        "bound_root": divergence["bound_root"],
         "compared_root": compared_root,
+        "converge": divergence["converge"],
         "delivered": False,
     }
 
@@ -68,29 +74,41 @@ def push_panel_event(
     panel: str,
     event_type: str,
     data: dict,
+    *,
+    project_root: str,
 ) -> dict:
-    """Push structured data to a TCIP GUI panel via the tcip-web backend.
-
-    Sends an HTTP POST to the running FastAPI server (see :mod:`tcip_mcp.web_client`); the backend
-    broadcasts to any connected browsers via WebSocket. If the backend is not running the call
-    returns ``{"status": "no_subscribers"}`` so the agent can proceed.
+    """Push structured data to a TCIP GUI panel via the tcip-web backend, for ``project_root``.
 
     Refuses before posting anything when the GUI's currently open project (the
-    ``canvas_open_binding`` record) is not this process's own pinned platform root, naming both
-    sides: an agent pinned to one project must not steer a browser that has moved to, or never
-    opened, another one. No override; a mismatch, or no binding at all, refuses every time.
+    ``canvas_open_binding`` record) does not name ``project_root``: a mismatch, or no binding at
+    all, refuses every time, naming what the GUI has open, the root this call named, and the
+    step that converges them. No override. The comparison is against ``project_root`` as the
+    caller states it, never this process's own pinned platform-state root: a session outside the
+    platform's own agent terminal pins that root to the repo checkout rather than to any project
+    (``project_paths.pin_platform_root``), so comparing against it would refuse or admit a push
+    for reasons unrelated to which project the caller actually means.
+
+    Once the binding agrees, sends an HTTP POST to the running FastAPI server (see
+    :mod:`tcip_mcp.web_client`); the backend broadcasts to any connected browsers via WebSocket.
+    If the backend itself is not running, this later step returns
+    ``{"status": "no_subscribers"}`` so the agent can proceed.
 
     Args:
         panel: Target panel: one per GUI tab, or 'app' for app-level events like annotate_focus /
-            review_focus / active_project_changed. See ``web_client.VALID_PANELS`` for the
-            current set.
+            review_focus. See ``web_client.VALID_PANELS`` for the current set.
+            ``active_project_changed`` is not sendable through this tool: it is exactly the event
+            that must reach the GUI while the binding disagrees (a project switch in progress),
+            so ``activate_project`` posts it through ``web_client.post_panel_event`` directly,
+            bypassing this tool's binding gate.
         event_type: Any event type the panel understands, not confined to
             ``web_client.PLATFORM_PANEL_EVENTS`` (the platform's own emitters). 'banner' is the
             one example the browser renders directly: ``data['text']`` shows as a quiet note
             above that tab.
         data: Arbitrary JSON data payload.
+        project_root: The project this push means to drive the GUI for, compared against the
+            ``canvas_open_binding`` record exactly as ``focus_human_attention``'s own
+            ``project_root`` is. Required.
     """
-    from tcip_mcp.project_paths import platform_state_root
     from tcip_mcp.web_client import (
         VALID_PANELS, GuiBindingUnreadable, gui_binding_matches, post_panel_event,
     )
@@ -98,13 +116,12 @@ def push_panel_event(
     if panel not in VALID_PANELS:
         return {"error": f"Unknown panel: {panel}. Valid: {sorted(VALID_PANELS)}"}
 
-    own_root = str(platform_state_root())
     try:
-        matches, binding = gui_binding_matches(own_root)
+        matches, binding = gui_binding_matches(project_root)
     except GuiBindingUnreadable as exc:
         return {"error": str(exc), "delivered": False, "panel": panel, "event_type": event_type}
     if not matches:
-        refusal = _binding_refusal(binding, own_root)
+        refusal = _binding_refusal(binding, project_root)
         refusal.setdefault("panel", panel)
         refusal.setdefault("event_type", event_type)
         return refusal
@@ -135,17 +152,18 @@ def focus_human_attention(
 
     ``tab='annotate'`` lands the Annotate tab on the first frame annotated for ``subject`` in the
     right mode (emits ``annotate_focus``); ``tab='review'`` lands the Review tab on a model's
-    predictions (emits ``review_focus``). Requires the GUI to be running; returns ``delivered:
-    false`` if not. On both tabs, an image elsewhere on the date whose label or prediction
-    document will not read is named by file name in the result's ``unreadable`` rather than
-    aborting the call; only the landed-on or explicitly named frame's own unreadable document
-    refuses, naming that document's path.
+    predictions (emits ``review_focus``). Once the GUI's open project agrees with
+    ``project_root`` (see below), a backend that is not running still answers ``delivered:
+    false`` rather than raising. On both tabs, an image elsewhere on the date whose label or
+    prediction document will not read is named by file name in the result's ``unreadable`` rather
+    than aborting the call; only the landed-on or explicitly named frame's own unreadable
+    document refuses, naming that document's path.
 
     Refuses before resolving anything when the GUI's currently open project (the
-    ``canvas_open_binding`` record) is not ``project_root``, naming both sides: driving a browser
-    that has moved to, or never opened, another project would land the wrong project's Annotate
-    or Review tab in front of the human. No override; a mismatch, or no binding at all, refuses
-    every time.
+    ``canvas_open_binding`` record) does not name ``project_root``: driving a browser that has
+    moved to, or never opened, another project would land the wrong project's Annotate or Review
+    tab in front of the human. No override; a mismatch, or no binding at all, refuses every time,
+    naming what the GUI has open, the root this call named, and the step that converges them.
 
     Args:
         tab: Which GUI surface to drive, 'annotate' or 'review'.
