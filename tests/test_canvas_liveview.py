@@ -62,8 +62,16 @@ def _write_binding_raw(workspace: Path, *, generation: int, root: Path,
 
 
 def _mint_binding(root: Path, *, generation: int = 1, project_name: str | None = None) -> None:
-    """Write a canvas_open_binding record directly through the seam, for an MCP-only test with
-    no HTTP round trip to mint one through."""
+    """Write a canvas_open_binding record directly through the seam, standing in for the one
+    production writer, ``_write_canvas_binding`` (``routes/dataset.py``), for an MCP-only test
+    with no HTTP round trip to mint one through.
+
+    Not a call to that writer itself: it derives ``project_name`` from
+    ``workspace.workspace_project_name(root)``, which names a project only for a root that is
+    exactly one workspace project's own directory, so a foreign-binding test that needs an
+    arbitrary ``project_name`` on a root outside the workspace (the shape a mismatch test wants)
+    has no way to reach that name through the real writer.
+    """
     from tcip_mcp.web_client import canvas_open_binding_key
 
     key = canvas_open_binding_key()
