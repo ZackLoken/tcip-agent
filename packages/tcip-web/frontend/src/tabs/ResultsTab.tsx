@@ -333,6 +333,8 @@ export function ResultsTab() {
   // Plant-mapping build inputs.
   const [plantRegistry, setPlantRegistry] = useState("");
   const [nnTolerance, setNnTolerance] = useState<number | "">("");
+  // Off by default: a rebuild a delivery event still cites answers 409 unless this is sent true.
+  const [supersedeMapping, setSupersedeMapping] = useState(false);
   const [buildSummary, setBuildSummary] = useState<PlantMappingSummary | null>(null);
   const [buildTolerance, setBuildTolerance] = useState<PlantMappingTolerance | null>(null);
   const [buildMaxMatchDistance, setBuildMaxMatchDistance] = useState<number | null>(null);
@@ -663,6 +665,7 @@ export function ResultsTab() {
         name: mappingName,
         images_root: `${datasetRoot}/images`,
         plant_registry: plantRegistry,
+        supersede: supersedeMapping,
         ...(nnTolerance === "" ? {} : { nn_tolerance_m: nnTolerance }),
       });
       setBuildSummary(res.summary);
@@ -671,10 +674,16 @@ export function ResultsTab() {
       setBuildMsg(`Mapping built + saved as ${mappingName}`);
       refreshMappingNames();
     } catch (e) {
-      useStore
-        .getState()
-        .pushToast(`Build mapping failed: ${e instanceof Error ? e.message : String(e)}`);
-      setBuildMsg(null);
+      if (e instanceof StructuredRefusalError && e.status === 409) {
+        // A rebuild a delivery event still cites: show the citing events here, beside the
+        // checkbox that resolves it, rather than only as a toast.
+        setBuildMsg(e.message);
+      } else {
+        useStore
+          .getState()
+          .pushToast(`Build mapping failed: ${e instanceof Error ? e.message : String(e)}`);
+        setBuildMsg(null);
+      }
     } finally {
       setBuilding(false);
     }
@@ -941,6 +950,14 @@ export function ResultsTab() {
               onChange={(e) => setPlantRegistry(e.target.value)}
               placeholder="valley-plants"
             />
+            <label className="tcip-label mt-1 flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={supersedeMapping}
+                onChange={(e) => setSupersedeMapping(e.target.checked)}
+              />
+              Supersede a mapping a delivery event still cites
+            </label>
           </div>
           <div className="flex flex-col gap-2">
             <label className="tcip-label">Match tolerance (m)</label>

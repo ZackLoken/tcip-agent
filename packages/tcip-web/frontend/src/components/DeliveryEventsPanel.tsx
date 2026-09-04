@@ -63,6 +63,11 @@ function DeliveryEventRow({ record }: { record: DeliveryEventRecord }) {
           {`Delivered dates ${record.plant_mapping.dates_delivered.join(", ")}: ` +
             `${record.plant_mapping.images_unattributed} attributed to no plant ` +
             `(${record.plant_mapping.plant_attribution}-level attribution)`}
+          {record.plant_mapping_resolved_key === null &&
+            " (the cited mapping record no longer resolves)"}
+          {record.plant_mapping_resolved_key != null &&
+            record.plant_mapping_resolved_key !== record.plant_mapping.name &&
+            ` (cited record archived as ${record.plant_mapping_resolved_key})`}
         </div>
       )}
       {record.superseded && (
