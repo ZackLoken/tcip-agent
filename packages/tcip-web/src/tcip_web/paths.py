@@ -72,6 +72,11 @@ def allowed_roots() -> list[Path]:
                 f"the dataset registry of project {project} will not decode, so its registered "
                 f"roots cannot be admitted: {exc}"
             ) from exc
+        except ValueError as exc:
+            raise RuntimeError(
+                f"the dataset registry of project {project} names a fingerprint with no formula "
+                f"version, so its registered roots cannot be admitted: {exc}"
+            ) from exc
         roots.extend(dataset_entry_path(project, e) for e in entries if e.get("path"))
     roots.extend(allowed_image_roots())
     seen: set[str] = set()

@@ -79,6 +79,33 @@ def test_plant_mapping_build_requires_a_registered_dataset(
     assert "is not a dataset" in resp.json()["detail"]
 
 
+def test_plant_mapping_build_answers_the_named_400_for_a_bare_registry_fingerprint(
+    client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A dataset registry entry carrying a bare pre-prefix fingerprint must answer the same
+    named 400 require_dataset_identity's own refusal gives a few lines later, not an unhandled
+    500, when the evidence-roots helper resolves the open project's own registered roots."""
+    from tcip_mcp.tools import project_tools
+
+    def bare(_root):
+        raise ValueError(
+            "dataset registry entry 'x' carries a fingerprint 'deadbeef' that names no formula "
+            "version; run scripts/restamp_dataset_fingerprint.py against it")
+
+    monkeypatch.setattr(project_tools, "read_datasets", bare)
+    store.open_project(tmp_path.resolve())
+    resp = client.post(
+        "/api/results/plant_mapping/build",
+        json={
+            "name": "valley",
+            "images_root": str(tmp_path / "nope"),
+            "plant_registry": "unregistered",
+        },
+    )
+    assert resp.status_code == 400
+    assert "restamp_dataset_fingerprint.py" in resp.json()["detail"]
+
+
 def test_plant_mapping_load_missing_returns_empty(client: TestClient, tmp_path: Path) -> None:
     store.open_project(tmp_path.resolve())
     resp = client.post(

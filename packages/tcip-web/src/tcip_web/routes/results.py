@@ -83,10 +83,21 @@ def _open_project_root(stated: Optional[str] = None) -> Path:
 
 
 def _evidence_roots(root: Path) -> list[Path]:
-    """The open project's own tree plus every dataset root registered to it."""
+    """The open project's own tree plus every dataset root registered to it.
+
+    A registry entry naming a bare pre-prefix fingerprint, or one that will not decode, refuses
+    the same named 400 :func:`require_dataset_identity`'s own refusal gives a caller a few lines
+    further on, rather than surfacing as an unhandled 500.
+    """
+    from tcip_store import DecodeError
+
     from tcip_mcp.tools.project_tools import dataset_entry_path, read_datasets
 
-    return [root, *(dataset_entry_path(root, e) for e in read_datasets(root) if e.get("path"))]
+    try:
+        entries = read_datasets(root)
+    except (DecodeError, ValueError) as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return [root, *(dataset_entry_path(root, e) for e in entries if e.get("path"))]
 
 
 def _belonging(root: Path, *paths: Optional[str]) -> list[Optional[Path]]:
