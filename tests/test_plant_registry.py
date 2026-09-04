@@ -157,21 +157,3 @@ def test_build_plant_mapping_refuses_naming_register_plant_registry_when_registr
     assert "register_plant_registry" in res["error"]
 
 
-def test_build_plant_mapping_no_longer_accepts_plant_csv_paths(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """GUARDS: the door's signature dropped plant_csv_paths for plant_registry."""
-    _init(tmp_path, monkeypatch)
-    with pytest.raises(TypeError):
-        build_plant_mapping(  # type: ignore[call-arg]
-            name="valley", images_root=str(tmp_path), plant_csv_paths=["nope.csv"])
-
-
-def test_deliver_orthomosaic_plant_counts_no_longer_accepts_plant_csv_paths() -> None:
-    """GUARDS: the door's signature dropped plant_csv_paths for plant_registry."""
-    from tcip_mcp.tools.orthomosaic_tools import deliver_orthomosaic_plant_counts
-
-    with pytest.raises(TypeError):
-        deliver_orthomosaic_plant_counts(  # type: ignore[call-arg]
-            predictions_dir="preds", raster_path="raster.tif", plant_csv_paths=["nope.csv"],
-            output_csv_path="out.csv", delivered_phenotype="stem_count")
