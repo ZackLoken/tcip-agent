@@ -271,25 +271,23 @@ def _resolve_producer_identity(predictions_by_date: dict[str, str]) -> dict:
 
 
 def _greedy_match(gt: list, preds: list, gt_boxes: list, pred_boxes: list, *,
-                  score: Callable[[Any, Any], float], tolerance: float,
-                  best_first: bool) -> list[tuple]:
-    """Greedy 1:1 assignment over every (gt, pred) pair, best-scoring pair claimed first.
+                  score: Callable[[Any, Any], float], tolerance: float) -> list[tuple]:
+    """Greedy 1:1 IoU assignment over every (gt, pred) pair, highest IoU claimed first.
 
-    ``best_first=True`` (e.g. IoU, higher is better) keeps a pair while ``score >= tolerance``;
-    ``False`` (e.g. center distance, lower is better) keeps a pair while ``score <= tolerance``. One
-    shared assignment loop for both of ``_match_gt_to_predictions``'s match kinds, which differ only
-    in the pairwise score and its accept direction, not in the greedy logic itself.
+    The classifier calibration's ``iou_match`` branch only: ``center_match`` calls
+    ``evaluation.center_match_pairs`` directly instead (see ``_match_gt_to_predictions``), so this
+    keeps a single accept direction (``score >= tolerance``) rather than the two directions a
+    shared higher/lower-is-better loop used to carry.
     """
     pairs = sorted(
         ((score(g, p), gi, pi) for gi, g in gt_boxes for pi, p in pred_boxes),
-        reverse=best_first,
+        reverse=True,
     )
     matched_gt: set[int] = set()
     matched_pred: set[int] = set()
     matches: list[tuple] = []
     for s, gi, pi in pairs:
-        ok = s >= tolerance if best_first else s <= tolerance
-        if not ok or gi in matched_gt or pi in matched_pred:
+        if s < tolerance or gi in matched_gt or pi in matched_pred:
             continue
         matched_gt.add(gi)
         matched_pred.add(pi)
@@ -321,10 +319,13 @@ def _match_gt_to_predictions(gt: list, preds: list, *, kind: str,
     goes through, computed once across the whole reference split by the caller
     (``_classification_items``), never re-derived per image (a per-image average lets one atypical
     annotation both drop real pairs, on a smaller-than-typical image, and fabricate a false match,
-    on a larger-than-typical one). For ``center_match``, mirrors ``evaluation.py``'s own
-    center-match algorithm (adapted, via ``_greedy_match``, to return matched ``(gt, pred)`` pairs
-, ``_center_match_image`` returns aggregate TP/FP/FN counts only, so pairing needs its own
-    pass). For ``iou_match``, reuses
+    on a larger-than-typical one). For ``center_match``, calls ``evaluation.center_match_pairs``
+    directly under its ``distance_first`` policy: acceptance drops a prediction's score once it is
+    confirmed (``review.py``), so a partly reviewed bucket holds records with no place in a score
+    order, and geometry alone is the evidence for which ground truth a prediction identifies
+    (``_center_match_image`` returns aggregate TP/FP/FN counts only, under the count's own
+    score-first policy, so this pairing goes through the shared primitive under its own policy
+    instead). For ``iou_match``, reuses
     ``tcip_annotation.matching.box_iou`` (the same primitive ``compute_matches`` itself calls)
     rather than a second IoU implementation.
     """
@@ -335,18 +336,19 @@ def _match_gt_to_predictions(gt: list, preds: list, *, kind: str,
     pred_boxes = [(i, a) for i, a in enumerate(preds) if isinstance(a.geometry, BBox)]
 
     if kind == "center_match":
-        def _dist(g, p):
-            gx, gy = _center(g)
-            px, py = _center(p)
-            return ((gx - px) ** 2 + (gy - py) ** 2) ** 0.5
+        from tcip_mcp.pipelines.training.evaluation import center_match_pairs
 
         tolerance = center_match_tolerance if center_match_tolerance is not None else 0.0
-        return _greedy_match(gt, preds, gt_boxes, pred_boxes,
-                             score=_dist, tolerance=tolerance, best_first=False)
+        gt_centers = [_center(g) for _, g in gt_boxes]
+        pred_centers = [_center(p) for _, p in pred_boxes]
+        # The identity question: acceptance drops a prediction's score, so geometry alone, not
+        # confidence order, decides which ground truth a prediction is.
+        pairs = center_match_pairs(gt_centers, pred_centers, tolerance, policy="distance_first")
+        return [(gt[gt_boxes[gi][0]], preds[pred_boxes[pi][0]]) for gi, pi in pairs]
 
     return _greedy_match(gt, preds, gt_boxes, pred_boxes,
                          score=lambda g, p: box_iou(g.geometry, p.geometry),
-                         tolerance=iou_threshold, best_first=True)
+                         tolerance=iou_threshold)
 
 
 def _classification_items(gt_dir: str, pred_dir: str, *, trait_name: str, subject: str,

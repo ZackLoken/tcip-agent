@@ -388,22 +388,83 @@ def gt_class_typical_count(per_image: list[dict], class_id: int | None = None) -
     return mean_of_present_counts(counts)
 
 
-def _center_match_image(gt: list[dict], dt: list[dict], tolerance: float) -> tuple[int, int, int]:
-    """Greedy nearest-center 1:1 matching (dt pre-sorted by score desc). Returns (tp, fp, fn)."""
-    gt_centers = _centers_xywh(gt)
-    used = [False] * len(gt_centers)
-    tp = 0
-    for dx, dy in _centers_xywh(dt):
-        best_j, best_d = -1, tolerance
-        for j, (gx, gy) in enumerate(gt_centers):
-            if used[j]:
+def center_match_pairs(gt_centers: list[tuple[float, float]], dt_centers: list[tuple[float, float]],
+                       tolerance: float, *, policy: str) -> list[tuple[int, int]]:
+    """The one greedy nearest-center 1:1 matcher behind both the count and the classifier
+    calibration's identity pairing, two stated policies rather than two implementations that
+    could silently drift apart.
+
+    Inputs are plain ``(x, y)`` centres, already reduced from whatever box shape the caller holds
+    (an xywh detection box for the count, an ``Annotation``'s box for the calibration pairing);
+    this primitive knows nothing about either representation. Distance is Euclidean, the
+    tolerance inclusive (``d <= tolerance`` matches, so a pair exactly at the boundary counts).
+    Returns ``(gt_index, dt_index)`` pairs, indices into the two input lists.
+
+    ``policy="score_first"`` walks ``dt_centers`` in the order given (a caller passing detections
+    score-descending resolves a duplicate claim on one ground truth by keeping the
+    higher-confidence detection); among equidistant unused ground truths the last index wins, the
+    count's existing semantics, unchanged by this primitive's introduction. A detection with no
+    recorded score cannot be placed in that order at all, so a caller using this policy refuses
+    such a record before it ever reaches here, never passing a stand-in score in its place.
+
+    ``policy="distance_first"`` sorts every (gt, dt) pair within tolerance by distance ascending
+    and claims the closest first, ties broken by ``(gt index, dt index)`` ascending, the order a
+    plain ascending sort of the ``(distance, gt_index, dt_index)`` tuples already gives. This is
+    the identity policy: acceptance drops a prediction's score once it is confirmed, so a partly
+    reviewed bucket holds records with no place in a score order, and geometry alone is the
+    evidence for which ground truth a prediction identifies.
+
+    Neither policy deduplicates the false-positive count for a caller: an entry in ``dt_centers``
+    that claims no pair is a false positive, so ``fp = len(dt_centers) - len(pairs)`` counts every
+    detection that never claimed a ground truth, duplicates included, against the raw detection
+    count.
+    """
+    if policy == "score_first":
+        used = [False] * len(gt_centers)
+        pairs: list[tuple[int, int]] = []
+        for di, (dx, dy) in enumerate(dt_centers):
+            best_gi, best_d = -1, tolerance
+            for gi, (gx, gy) in enumerate(gt_centers):
+                if used[gi]:
+                    continue
+                d = ((dx - gx) ** 2 + (dy - gy) ** 2) ** 0.5
+                if d <= best_d:
+                    best_d, best_gi = d, gi
+            if best_gi >= 0:
+                used[best_gi] = True
+                pairs.append((best_gi, di))
+        return pairs
+
+    if policy == "distance_first":
+        candidates: list[tuple[float, int, int]] = []
+        for gi, (gx, gy) in enumerate(gt_centers):
+            for di, (dx, dy) in enumerate(dt_centers):
+                d = ((dx - gx) ** 2 + (dy - gy) ** 2) ** 0.5
+                if d <= tolerance:
+                    candidates.append((d, gi, di))
+        candidates.sort()
+        matched_gt: set[int] = set()
+        matched_dt: set[int] = set()
+        pairs = []
+        for _, gi, di in candidates:
+            if gi in matched_gt or di in matched_dt:
                 continue
-            d = ((dx - gx) ** 2 + (dy - gy) ** 2) ** 0.5
-            if d <= best_d:
-                best_d, best_j = d, j
-        if best_j >= 0:
-            used[best_j] = True
-            tp += 1
+            matched_gt.add(gi)
+            matched_dt.add(di)
+            pairs.append((gi, di))
+        return pairs
+
+    raise ValueError(f"center_match_pairs: unknown policy {policy!r}, expected "
+                     "'score_first' or 'distance_first'")
+
+
+def _center_match_image(gt: list[dict], dt: list[dict], tolerance: float) -> tuple[int, int, int]:
+    """tp/fp/fn under the count's score-first policy (``dt`` pre-sorted by score descending)."""
+    gt_centers = _centers_xywh(gt)
+    dt_centers = _centers_xywh(dt)
+    # The count's identity question: a duplicate claim on one ground truth is resolved by keeping
+    # the higher-confidence detection, never by geometry alone.
+    tp = len(center_match_pairs(gt_centers, dt_centers, tolerance, policy="score_first"))
     return tp, len(dt) - tp, len(gt_centers) - tp
 
 
@@ -527,6 +588,20 @@ def resolve_match_criterion(trait_name: str | None, per_image: list[dict], *,
     return result
 
 
+def _dt_score(d: dict) -> float:
+    """The one place a detection record's confidence is read for the governing count.
+
+    No default: a detection record with no ``score`` cannot be ordered or thresholded by
+    confidence, so this refuses by name rather than letting ``governing_counts`` and
+    ``_count_stats_at_conf`` each risk a different silent stand-in for a field that measures the
+    model's own certainty, the same no-default rule the classifier calibration path already
+    applies to its own records.
+    """
+    if "score" not in d:
+        raise ValueError(f"detection record has no 'score' field, cannot count it: {d!r}")
+    return float(d["score"])
+
+
 def governing_counts(per_image: list[dict], criterion: dict, *, conf_threshold: float,
                      class_id: int | None = None, max_dets: int = 1000) -> dict:
     """tp/fp/fn/precision/recall/f1 at the criterion that governs the phenotype count.
@@ -545,9 +620,9 @@ def governing_counts(per_image: list[dict], criterion: dict, *, conf_threshold: 
             gt = [a for a in rec.get("gt", []) if class_id is None or a["category_id"] == class_id]
             dt = sorted(
                 (d for d in rec.get("dt", [])
-                 if d.get("score", 1.0) >= conf_threshold
+                 if _dt_score(d) >= conf_threshold
                  and (class_id is None or d["category_id"] == class_id)),
-                key=lambda d: -d.get("score", 1.0),
+                key=lambda d: -_dt_score(d),
             )
             t, f, n = _center_match_image(gt, dt, tol)
             tp += t
@@ -593,8 +668,8 @@ def _count_stats_at_conf(per_image: list[dict], *, tolerance: float, conf: float
         gt = [a for a in rec.get("gt", []) if class_id is None or a["category_id"] == class_id]
         dt = sorted(
             (d for d in rec.get("dt", [])
-             if d["score"] >= conf and (class_id is None or d["category_id"] == class_id)),
-            key=lambda d: -d["score"],
+             if _dt_score(d) >= conf and (class_id is None or d["category_id"] == class_id)),
+            key=lambda d: -_dt_score(d),
         )
         t, f, n = _center_match_image(gt, dt, tolerance)
         tp += t
