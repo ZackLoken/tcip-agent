@@ -13,10 +13,14 @@ import {
 import { api } from "@/api/client";
 import { StructuredRefusalError } from "@/api/http";
 import {
+  deliveryGateRefusalOf,
   operationalizationRefusalOf,
   resultsApi,
   traitSpecAuthoringRefusalOf,
   type DeliveryEventRecord,
+  type DeliveryGateRefusal,
+  type ExportCountCsvHeaders,
+  type ExportCountCsvRequest,
   type ExportCsvRequest,
   type OperationalizationRecord,
   type OperationalizationRefusal,
@@ -399,6 +403,30 @@ export function ResultsTab() {
   // What has shipped from this project: read-only, no confirm/withdraw state to carry.
   const [deliveryEvents, setDeliveryEvents] = useState<DeliveryEventRecord[]>([]);
   const [deliveryEventsError, setDeliveryEventsError] = useState<string | null>(null);
+
+  // Count export: the two delivery kinds the acknowledgement family left with no provisional
+  // route, reachable here only (an MCP tool call builds no acknowledgement for either).
+  const [countKind, setCountKind] = useState<"per_image_count" | "orthomosaic_plant_counts">(
+    "per_image_count",
+  );
+  const [countDate, setCountDate] = useState("");
+  const [countModel, setCountModel] = useState("");
+  const [countTrait, setCountTrait] = useState("");
+  const [countRasterPath, setCountRasterPath] = useState("");
+  const [countPlantRegistry, setCountPlantRegistry] = useState("");
+  const [countDeliveredPhenotype, setCountDeliveredPhenotype] = useState("");
+  const [countCrop, setCountCrop] = useState("");
+  const [countPipelineVersion, setCountPipelineVersion] = useState("");
+  const [countCanopySubject, setCountCanopySubject] = useState("");
+  const [countFilename, setCountFilename] = useState("");
+  const [countExporting, setCountExporting] = useState(false);
+  const [countError, setCountError] = useState<string | null>(null);
+  const [countGateRefusal, setCountGateRefusal] = useState<DeliveryGateRefusal | null>(null);
+  const [countOperationalizationRefusal, setCountOperationalizationRefusal] =
+    useState<OperationalizationRefusal | null>(null);
+  const [countAckReason, setCountAckReason] = useState("");
+  const [countShowAck, setCountShowAck] = useState(false);
+  const [countResultHeaders, setCountResultHeaders] = useState<ExportCountCsvHeaders | null>(null);
 
   // The trait a delivery is computed for, resolved from this project's own registered traits
   // (never assumed): auto-selected when there is exactly one, left blank (with an explicit
@@ -798,6 +826,62 @@ export function ResultsTab() {
     }
   }
 
+  const countPredictionsDir = (countModel && predictionDirs[countDate]?.[countModel]) || "";
+
+  async function exportCountCsv() {
+    if (!projectRoot || !countPredictionsDir || !countFilename.trim()) return;
+    if (countShowAck && !countAckReason.trim()) return;
+    setCountExporting(true);
+    setCountError(null);
+    setCountGateRefusal(null);
+    setCountOperationalizationRefusal(null);
+    try {
+      const delivery: ExportCountCsvRequest["delivery"] =
+        countKind === "per_image_count"
+          ? { kind: "per_image_count", predictions_dir: countPredictionsDir, trait: countTrait }
+          : {
+              kind: "orthomosaic_plant_counts",
+              predictions_dir: countPredictionsDir,
+              raster_path: countRasterPath,
+              plant_registry: countPlantRegistry,
+              delivered_phenotype: countDeliveredPhenotype,
+              crop: countCrop || undefined,
+              pipeline_version: countPipelineVersion || undefined,
+              canopy_subject: countCanopySubject || undefined,
+            };
+      const body: ExportCountCsvRequest = {
+        project_root: projectRoot,
+        delivery,
+        filename: countFilename.trim(),
+        user: useStore.getState().user || undefined,
+        acknowledgement: countShowAck ? { reason: countAckReason.trim() } : null,
+      };
+      const { blob, headers } = await resultsApi.downloadCountCsv(body);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = countFilename.trim();
+      a.click();
+      URL.revokeObjectURL(url);
+      setCountResultHeaders(headers);
+    } catch (e) {
+      const opRefusal = operationalizationRefusalOf(e);
+      if (opRefusal) {
+        setCountOperationalizationRefusal(opRefusal);
+        return;
+      }
+      const gateRefusal = deliveryGateRefusalOf(e);
+      if (gateRefusal) {
+        setCountGateRefusal(gateRefusal);
+        setCountShowAck(true);
+        return;
+      }
+      setCountError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setCountExporting(false);
+    }
+  }
+
   // Never export a CSV built on predictions with no positive-state class, mirroring
   // deliver_phenology_milestones. An unvalidated measurement exports once acknowledged (below).
   const exportBlocked = positiveClassUnassessed;
@@ -1047,6 +1131,171 @@ export function ResultsTab() {
 
       <DeliveryEventsPanel records={deliveryEvents} loadError={deliveryEventsError} />
 
+      <div className="tcip-panel p-4">
+        <div className="tcip-heading mb-3">Count export</div>
+        <p className="text-[10px] text-tcip-muted mb-2">
+          A per-image count (a bucket, no plant identity) or a per-plant count through the
+          orthomosaic composition (a bucket plus a registered plant registry). The ordinal,
+          regression and per-plant walked-capture count kinds have no route here; deliver those
+          through the agent.
+        </p>
+        <div className="grid grid-cols-[1fr_1fr] gap-3">
+          <div className="flex flex-col gap-2">
+            <label className="tcip-label">Kind</label>
+            <select
+              className="tcip-select"
+              value={countKind}
+              onChange={(e) => {
+                setCountKind(e.target.value as typeof countKind);
+                setCountGateRefusal(null);
+                setCountOperationalizationRefusal(null);
+                setCountShowAck(false);
+              }}
+            >
+              <option value="per_image_count">Per-image count</option>
+              <option value="orthomosaic_plant_counts">Per-plant count (orthomosaic)</option>
+            </select>
+
+            <label className="tcip-label">Prediction bucket</label>
+            <select
+              className="tcip-select"
+              value={countDate && countModel ? `${countDate} ${countModel}` : ""}
+              onChange={(e) => {
+                const [d, m] = e.target.value.split(" ");
+                setCountDate(d ?? "");
+                setCountModel(m ?? "");
+              }}
+            >
+              <option value="">Choose a bucket…</option>
+              {dates.flatMap((d) =>
+                (modelsByDate[d] ?? []).map((m) => (
+                  <option key={`${d} ${m}`} value={`${d} ${m}`}>
+                    {`${d} (${m})`}
+                  </option>
+                )),
+              )}
+            </select>
+
+            {countKind === "per_image_count" ? (
+              <>
+                <label className="tcip-label">Trait</label>
+                <select
+                  className="tcip-select"
+                  value={countTrait}
+                  onChange={(e) => setCountTrait(e.target.value)}
+                >
+                  <option value="">Choose a trait…</option>
+                  {availableTraits.map((t) => (
+                    <option key={t} value={t}>
+                      {t}
+                    </option>
+                  ))}
+                </select>
+              </>
+            ) : (
+              <>
+                <label className="tcip-label">Raster path</label>
+                <input
+                  className="tcip-input"
+                  value={countRasterPath}
+                  onChange={(e) => setCountRasterPath(e.target.value)}
+                  placeholder="the georeferenced raster the bucket was produced from"
+                />
+                <label className="tcip-label">Plant registry (registered by name)</label>
+                <input
+                  className="tcip-input"
+                  value={countPlantRegistry}
+                  onChange={(e) => setCountPlantRegistry(e.target.value)}
+                />
+                <label className="tcip-label">Delivered phenotype</label>
+                <input
+                  className="tcip-input"
+                  value={countDeliveredPhenotype}
+                  onChange={(e) => setCountDeliveredPhenotype(e.target.value)}
+                />
+                <div className="grid grid-cols-3 gap-2">
+                  <input
+                    className="tcip-input"
+                    value={countCrop}
+                    onChange={(e) => setCountCrop(e.target.value)}
+                    placeholder="crop"
+                  />
+                  <input
+                    className="tcip-input"
+                    value={countPipelineVersion}
+                    onChange={(e) => setCountPipelineVersion(e.target.value)}
+                    placeholder="pipeline_version"
+                  />
+                  <input
+                    className="tcip-input"
+                    value={countCanopySubject}
+                    onChange={(e) => setCountCanopySubject(e.target.value)}
+                    placeholder="canopy_subject (optional)"
+                  />
+                </div>
+              </>
+            )}
+
+            <label className="tcip-label">Filename</label>
+            <input
+              className="tcip-input"
+              value={countFilename}
+              onChange={(e) => setCountFilename(e.target.value)}
+              placeholder="stem_count.csv"
+            />
+          </div>
+
+          <div className="flex flex-col gap-2">
+            {countError && <div className="text-[11px] text-tcip-fp">{countError}</div>}
+            {countOperationalizationRefusal && (
+              <div className="text-[11px] text-tcip-fp border border-tcip-fp/40 rounded p-2">
+                {countOperationalizationRefusal.message}
+              </div>
+            )}
+            {countGateRefusal && (
+              <div className="text-[11px] text-tcip-fp border border-tcip-fp/40 rounded p-2 flex flex-col gap-2">
+                <div>{countGateRefusal.message}</div>
+                {!user.trim() && (
+                  <div>
+                    Set your name on the workspace page before delivering an acknowledged export.
+                  </div>
+                )}
+                <input
+                  className="tcip-input text-[11px]"
+                  placeholder="Reason for delivering unvalidated"
+                  value={countAckReason}
+                  onChange={(e) => setCountAckReason(e.target.value)}
+                />
+              </div>
+            )}
+            {countResultHeaders && (
+              <div className="text-[11px] text-tcip-muted">
+                Saved to {countResultHeaders.savedTo}. Delivery event recorded:{" "}
+                {countResultHeaders.deliveryEventRecorded ? "yes" : "no"}.
+                {countResultHeaders.unvalidatedDimensions
+                  ? ` Unvalidated: ${countResultHeaders.unvalidatedDimensions}.`
+                  : ""}
+                {countResultHeaders.acknowledgedBy
+                  ? ` Acknowledged by ${countResultHeaders.acknowledgedBy}.`
+                  : ""}
+              </div>
+            )}
+            <button
+              className="tcip-btn-primary"
+              onClick={() => void exportCountCsv()}
+              disabled={
+                countExporting ||
+                !countPredictionsDir ||
+                !countFilename.trim() ||
+                (countShowAck && (!countAckReason.trim() || !user.trim()))
+              }
+            >
+              {countExporting ? "Exporting…" : countShowAck ? "Acknowledge and export" : "Export"}
+            </button>
+          </div>
+        </div>
+      </div>
+
       {trait && !hasMilestones && (
         <div className="tcip-panel p-4 flex flex-col gap-2">
           <div className="tcip-heading">Nothing to compute here for {trait}</div>
@@ -1214,9 +1463,11 @@ export function ResultsTab() {
                   milestone dates read off it.
                 </p>
                 <p className="text-[10px] text-tcip-muted">
-                  Only a phenology milestone delivery can be acknowledged and exported unvalidated
-                  from here; per-image and per-plant counts have no acknowledged route and need a
-                  validated operating point before they can be delivered at all.
+                  A phenology milestone delivery here, and a per-image or per-plant-orthomosaic
+                  count in the section below, can each be acknowledged and exported unvalidated.
+                  Every other count kind (ordinal, regression, a per-plant walked-capture count) has
+                  no acknowledged route yet and needs a validated operating point before it can be
+                  delivered at all.
                 </p>
                 {!unvalidated || !showAckExport ? (
                   <div className="flex gap-1">
