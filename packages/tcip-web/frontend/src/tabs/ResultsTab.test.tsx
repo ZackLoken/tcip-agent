@@ -18,6 +18,7 @@ const initialStoreState = useStore.getState();
 // would be describing a response the server cannot produce.
 const VALIDATED = {
   validated: { operating_point: "validated_held_out", classifier: "validated_held_out" },
+  validated_raw: { operating_point: "validated_held_out", classifier: "validated_held_out" },
   has_unvalidated_dimensions: false,
   validity_detail: {},
   positive_class_assessed: true,
@@ -232,6 +233,7 @@ describe("ResultsTab evidence gate", () => {
   };
   const UNVALIDATED = {
     validated: { operating_point: "false", classifier: "validated_held_out" },
+    validated_raw: { operating_point: "false", classifier: "validated_held_out" },
     has_unvalidated_dimensions: true,
     validity_detail: {},
     positive_class_assessed: true,
@@ -349,6 +351,22 @@ describe("ResultsTab evidence gate", () => {
     expect(screen.getByRole("button", { name: /curves csv/i })).toBeEnabled();
     expect(screen.getByRole("button", { name: /milestones csv/i })).toBeEnabled();
     expect(screen.getByText("valid")).toBeInTheDocument();
+  });
+
+  it("states which delivery kinds the export controls actually cover", async () => {
+    mockTree();
+    vi.spyOn(resultsApi, "phenologyMeasurement").mockResolvedValue({
+      curves: { rows: [CURVE_ROW], n_plants: 1, positive_class_id: 1 },
+      milestones: { rows: [ONSET_ROW] },
+      ...VALIDATED,
+    });
+
+    await renderAndCompute();
+    await waitFor(() => expect(screen.getByText("P1")).toBeInTheDocument());
+
+    expect(
+      screen.getByText(/only a phenology milestone delivery can be acknowledged and exported/i),
+    ).toBeInTheDocument();
   });
 
   it("renders the delivery-scoped unattributed count beside the measurement", async () => {
@@ -771,6 +789,7 @@ describe("ResultsTab operationalization records", () => {
   it("renders a structured refusal from the CSV download instead of stringifying it", async () => {
     const VALIDATED_EVIDENCE = {
       validated: { operating_point: "validated_held_out", classifier: "validated_held_out" },
+      validated_raw: { operating_point: "validated_held_out", classifier: "validated_held_out" },
       has_unvalidated_dimensions: false,
       validity_detail: {},
       positive_class_assessed: true,

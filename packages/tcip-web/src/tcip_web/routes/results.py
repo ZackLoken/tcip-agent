@@ -582,9 +582,19 @@ def _refusal(measurement: _PhenologyMeasurement) -> str:
 
 
 def _disclosure(measurement: _PhenologyMeasurement) -> dict:
-    """What qualifies these numbers, returned beside them so no surface can render them bare."""
+    """What qualifies these numbers, returned beside them so no surface can render them bare.
+
+    ``validated`` is the floored per-dimension value the delivered CSV's own columns would carry
+    (``DeliveryGateResult.owned_column_stamp``), never the gate's raw ``stamp``: an unvalidated
+    dimension with no column of its own (``tile_size``, say) floors every dimension that does have
+    one in the file, and a screen showing the raw stamp instead would read one dimension as its own
+    real reference while the file that same measurement produces would floor it. ``validated_raw``
+    carries the gate's unfloored per-dimension stamp for a reader that wants each dimension's own
+    outcome regardless of what the file would do with it.
+    """
     return {
-        "validated": measurement.gate.stamp,
+        "validated": measurement.gate.owned_column_stamp(),
+        "validated_raw": measurement.gate.stamp,
         # True whenever a dimension lacked on-disk evidence, including one an acknowledgement
         # cleared: exactly when a surface must not render these numbers as validated.
         "has_unvalidated_dimensions": bool(measurement.gate.unvalidated),
@@ -678,9 +688,12 @@ def export_csv(payload: ExportCsvPayload) -> Response:
     delivering them, or the request itself acknowledges shipping it unvalidated.
     ``payload.acknowledgement`` names only the reason; ``acknowledged_by`` is resolved from
     ``payload.user`` here, and a request naming no user is refused before anything runs, since a
-    server identity is never written as a breeder's name. The same resolved acknowledgement (or
-    ``None``) is handed to ``_measure_phenology``'s one gate and, unchanged, to the writer below,
-    so the record and the tail can never disagree about who acknowledged what.
+    server identity is never written as a breeder's name. The resolved acknowledgement (or
+    ``None``) is handed to ``_measure_phenology``'s one gate and, again, to the writer below, which
+    passes it through the same gate a second time; the CSV tail and the delivery event both read
+    what that gate actually applied (``None`` when every dimension validated and nothing needed
+    acknowledging), never the caller's object verbatim, so the two can never disagree about who
+    acknowledged what.
 
     Delegates to ``write_phenology_csv``/``write_phenology_curve_csv``, the same writer(s)
     ``deliver_phenology_milestones`` calls: the gate, the provenance cells and the recorded delivery event are
@@ -740,7 +753,7 @@ def export_csv(payload: ExportCsvPayload) -> Response:
     # The browser download lands wherever the breeder's browser puts it; the delivery itself
     # belongs to the project, so the same bytes are written to <project>/results_export/, audited.
     saved_path = measurement.project_root / "results_export" / Path(filename).name
-    write_csv(
+    cells = write_csv(
         "results.export_csv", rows, saved_path, measurement.spec,
         flags=measurement.flags, acknowledgement=acknowledgement, basis=measurement.basis,
         operating_point_conf=measurement.validity["operating_point_conf"], producer=producer,
@@ -753,6 +766,9 @@ def export_csv(payload: ExportCsvPayload) -> Response:
         "rows": len(rows),
     })
     headers["X-TCIP-Saved-To"] = str(saved_path)
+    # The file above is already on disk either way; this tells the breeder's client whether the
+    # best-effort delivery_events write behind it actually landed.
+    headers["X-TCIP-Delivery-Event-Recorded"] = str(cells["delivery_event_recorded"]).lower()
     return Response(content=body, media_type="text/csv", headers=headers)
 
 

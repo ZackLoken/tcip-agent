@@ -170,8 +170,12 @@ export interface ExportCsvRequest {
 export interface PhenologyMeasurementResponse {
   curves: { rows: PerPlantRow[]; n_plants: number; positive_class_id: number | null };
   milestones: { rows: OnsetRow[] };
-  // Per-dimension reconciled state, e.g. { operating_point: "validated_held_out", classifier: "false" }.
+  // Per-dimension state floored exactly as the delivered CSV's columns would be: a dimension with
+  // no column of its own (tile_size) floors every dimension that does. Never stronger than the file.
   validated: Record<string, string>;
+  // Each dimension's own unfloored state, e.g. { operating_point: "validated_held_out" }: for a
+  // reader wanting one dimension's real outcome regardless of an unrelated dimension's failure.
+  validated_raw: Record<string, string>;
   // True when any dimension lacked on-disk evidence, including one an acknowledgement cleared,
   // which is exactly when these numbers must not be rendered as validated.
   has_unvalidated_dimensions: boolean;

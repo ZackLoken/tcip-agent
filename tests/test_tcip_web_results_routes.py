@@ -492,13 +492,21 @@ def test_show_unvalidated_shows_a_fabricated_tile_scale_on_screen_but_never_open
     client: TestClient, tmp_path: Path,
 ) -> None:
     """The same non-stranding escape the other dimensions get: a breeder can look at numbers whose
-    tile scale has no basis, clearly marked, and still cannot download them without acknowledging."""
+    tile scale has no basis, clearly marked, and still cannot download them without acknowledging.
+
+    The count operating point is genuinely validated here (only tile_size is fabricated), but
+    tile_size owns no column of its own on the delivered CSV, so its failure floors every column
+    that does exist; ``validated`` must show the same floor the file would, never the operating
+    point's own real reference (``validated_raw`` still carries that, for a reader that wants each
+    dimension's own outcome)."""
     body = _set_tile_provenance(_phenology_fixture(tmp_path, validated=True), _tiled("false"))
     for route in GATE_DOORS:
         resp = client.post(f"/api/results/{route}", json={**body, "show_unvalidated": True})
         assert resp.status_code == 200, route
         assert resp.json()["has_unvalidated_dimensions"] is True, route
         assert resp.json()["validated"]["tile_size"] == "false", route
+        assert resp.json()["validated"]["operating_point"] == "false", route
+        assert resp.json()["validated_raw"]["operating_point"] != "false", route
     assert _export(client, body, "milestones").status_code == 400
 
 
@@ -767,6 +775,7 @@ def test_export_csv_also_saves_the_delivery_into_the_projects_exports_dir(
     assert resp.status_code == 200
     saved = tmp_path / "results_export" / "catkin_delivery.csv"
     assert resp.headers["X-TCIP-Saved-To"] == str(saved)
+    assert resp.headers["X-TCIP-Delivery-Event-Recorded"] == "true"
 
     lines = resp.content.decode("utf-8").splitlines()
     header = lines[0].split(",")

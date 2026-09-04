@@ -568,11 +568,11 @@ def _write_phenology_delivery(
     Runs ``check_delivery_gate`` over ``flags`` itself, the way its sibling writers
     (``export_aggregated_csv``, ``export_detection_csv``) run their own gate before opening a file:
     a gate that does not pass raises ``ValueError`` with the gate's own reason, and nothing is
-    written. ``acknowledgement`` is the breeder's own act (or ``None``) the caller already resolved
-    and hands through unchanged, the same value ``check_operationalization``'s ``basis`` is: neither
-    is built here. ``basis`` is what a passing ``check_operationalization`` returned, and it is
-    required: this writer takes a spec object rather than a project it could read the record from,
-    so it cannot prove the precondition itself.
+    written. ``acknowledgement`` is the breeder's own act (or ``None``) the caller already resolved,
+    the same value ``check_operationalization``'s ``basis`` is: neither is built here. ``basis`` is
+    what a passing ``check_operationalization`` returned, and it is required: this writer takes a
+    spec object rather than a project it could read the record from, so it cannot prove the
+    precondition itself.
 
     Composes every provenance cell the schema declares (the operating-point and classifier
     validity columns, the producer tail and ``produced_at``, the delivery's own
@@ -583,7 +583,14 @@ def _write_phenology_delivery(
     from what was actually written rather than re-deriving the same values.
     Records the delivery through ``record_delivery_binding_event`` after the file is written, under
     the caller-stated ``door`` and the explicit ``project_root``, so a delivered phenology CSV
-    cannot exist without both the gate having run and the delivery having been recorded.
+    cannot exist without both the gate having run and the delivery having been recorded. The event
+    is given the gate's own ``effective_acknowledgement()``, not the caller's ``acknowledgement``
+    argument verbatim: the gate already discards an acknowledgement that cleared nothing (every
+    dimension validated), and the CSV tail (through ``delivered_tail``) reads the same discarded
+    value off the gate, so the tail and the event agree by construction rather than by two callers
+    independently doing the same thing. That write is best-effort, so the returned dict carries one
+    key beyond the schema's own columns, ``delivery_event_recorded``, the write's own success bool,
+    for a caller (the web export route) to disclose alongside an already-delivered file.
 
     ``plant_mapping`` is the mapping this delivery attributed detections through, shaped exactly
     as ``delivery_events_schema.PlantMappingDisclosure`` declares and produced by the caller's own
@@ -641,10 +648,12 @@ def _write_phenology_delivery(
         for row in rows:
             writer.writerow({**row, **cells})
 
-    record_delivery_binding_event(
+    # Not a schema column (the CSV above is already written with extrasaction="ignore"), but a
+    # caller composing its own response from these cells needs to know whether it landed.
+    cells["delivery_event_recorded"] = record_delivery_binding_event(
         door, str(out_path), list(pred_dirs), bindings,
         measurement_documents=["operating_point", "classifier_operating_point"],
-        scale_document=None, acknowledgement=acknowledgement,
+        scale_document=None, acknowledgement=gate.effective_acknowledgement(),
         trait=spec.name, delivery_kind=STATE_CROSSING_DATES,
         project_root=project_root, plant_mapping=plant_mapping,
     )

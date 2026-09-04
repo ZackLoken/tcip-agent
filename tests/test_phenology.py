@@ -507,10 +507,42 @@ def test_write_phenology_csv_records_the_delivery_event_without_a_door_calling_i
     assert records[0]["trait"] == "catkin"
 
 
+def test_write_phenology_csv_fully_validated_acknowledgement_leaves_the_tail_and_event_agreeing(
+    tmp_path,
+):
+    """A caller that passes an ``Acknowledgement`` on a delivery every dimension actually clears
+    gets a gate that discards it (nothing needed acknowledging); the writer records that discarded
+    outcome on the event too, rather than the caller's original object verbatim, so the CSV tail's
+    blank ``acknowledged_by``/``acknowledgement_reason`` and the event's own fields can never
+    disagree about whether this delivery rested on one."""
+    import tcip_store as ts
+    from tcip_mcp.pipelines import resolution
+
+    flags, bindings, pred_dirs = _real_delivery_flags(tmp_path)
+    out_csv = tmp_path / "out" / "catkin_phenology.csv"
+
+    cells = phenology.write_phenology_csv(
+        "test.fully_validated_ack", [], out_csv, CATKIN, flags=flags,
+        acknowledgement=Acknowledgement(acknowledged_by="user:tester", reason="just in case"),
+        basis=schema_basis(), operating_point_conf=0.4, producer={}, bindings=bindings,
+        pred_dirs=pred_dirs, project_root=tmp_path, plant_mapping=_NO_MAPPING)
+
+    assert cells["acknowledged_by"] is None
+    assert cells["acknowledgement_reason"] is None
+
+    scope = resolution.delivery_events_scope(tmp_path)
+    keys = ts.keys(resolution.DELIVERY_EVENTS_STORE, str(scope))
+    records = [ts.read(k) for k in keys if ts.read(k)["door"] == "test.fully_validated_ack"]
+    assert len(records) == 1, records
+    assert records[0]["acknowledged_by"] is None
+    assert records[0]["acknowledgement_reason"] is None
+
+
 def test_write_phenology_csv_cells_are_exactly_the_schemas_provenance_columns(tmp_path):
     """No ``stamp`` parameter exists any more: the writer composes its own provenance cells and
     returns them, so this pins that the set it returns is exactly the schema's provenance columns
-    plus the trait's own majority crossing-unconfirmed marker, nothing else."""
+    plus the trait's own majority crossing-unconfirmed marker and the write's own
+    ``delivery_event_recorded`` flag (not a schema column; the CSV itself never carries it)."""
     flags, bindings, pred_dirs = _real_delivery_flags(tmp_path)
 
     cells = phenology.write_phenology_csv(
@@ -518,8 +550,10 @@ def test_write_phenology_csv_cells_are_exactly_the_schemas_provenance_columns(tm
         basis=schema_basis(), operating_point_conf=0.4, producer={}, bindings=bindings,
         pred_dirs=pred_dirs, project_root=tmp_path, plant_mapping=_NO_MAPPING)
 
-    expected = set(phenology.PROVENANCE_COLUMNS) | {phenology.majority_crossing_unconfirmed_column(CATKIN)}
+    expected = (set(phenology.PROVENANCE_COLUMNS)
+                | {phenology.majority_crossing_unconfirmed_column(CATKIN), "delivery_event_recorded"})
     assert set(cells) == expected
+    assert cells["delivery_event_recorded"] is True
 
 
 def test_write_phenology_curve_csv_writes_the_curve_schema(tmp_path):
