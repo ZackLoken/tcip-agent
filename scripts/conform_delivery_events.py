@@ -19,11 +19,14 @@ present. The first is ``acknowledged_by``/``acknowledgement_reason``: a record w
 pair existed carries no acknowledgement of any kind, so ``null`` on both is not a guess but the
 true value, derivable from the record's own age rather than from anything it states. The second is
 a registry disclosure's ``plants_outside_raster``, added after that form already shipped: its true
-value is derivable from the event's own registry (name and digest) and raster identity (width,
-height and geotransform) through :func:`~tcip_mcp.pipelines.postprocessing.orthomosaic_mapping.
+value is derivable from the event's own registry (name and digest), that registry's own CSV files
+(verified against their registration-time digests and parsed from the verified bytes, never a
+second open by path, the same read the door itself performs) and raster identity (width, height
+and geotransform) through :func:`~tcip_mcp.pipelines.postprocessing.orthomosaic_mapping.
 plants_in_frame`, recomputed here rather than guessed, and refused by name when the named registry
-no longer loads or its digest has moved (the value cannot be reconstructed from a registry that is
-not the one the delivery read). Every other gap is still only named.
+no longer loads, its digest has moved, or one of its own CSV files is missing or was rewritten
+since it was registered (the value cannot be reconstructed from a registry, or a CSV, that is not
+the one the delivery read). Every other gap is still only named.
 
 ``--plan`` previews what would be written without writing it; without it, an applicable record's
 write-forward runs. Every other refused record is unaffected by either mode.
@@ -110,15 +113,20 @@ def _forward_plants_outside_raster(record: dict, project_root: Path) -> dict:
     geotransform). Call only when :func:`_plants_outside_raster_gap` is true.
 
     Raises :class:`_RegistryUnrecoverable`, naming why, when the named registry no longer loads,
-    when its digest has moved, or when the event's own raster identity carries no geotransform or
-    dimensions to project through: the value cannot be reconstructed from a registry, or an
-    identity, that is not the one this delivery read.
+    when its digest has moved, when the event's own raster identity carries no geotransform or
+    dimensions to project through, or when one of the registry's own CSV files is missing or was
+    rewritten since it was registered: the value cannot be reconstructed from a registry, an
+    identity, or a CSV that is not the one this delivery read. Verifies and parses each CSV the
+    same way the door does (:func:`~tcip_mcp.pipelines.postprocessing.plant_mapping.
+    verify_registry_csv_bytes` then :func:`~tcip_mcp.pipelines.postprocessing.plant_mapping.
+    read_plant_csv_bytes`), never a second open of the path by name, which a registration-time
+    ``digest`` check alone does not cover.
     """
     from tcip_mcp.pipelines.postprocessing.orthomosaic_mapping import (
         GeoTransform, OrthomosaicGeoreference, plants_in_frame,
     )
     from tcip_mcp.pipelines.postprocessing.plant_mapping import (
-        load_registry, read_plant_csvs, registry_csv_entries,
+        load_registry, read_plant_csv_bytes, registry_csv_entries, verify_registry_csv_bytes,
     )
 
     pm = record["plant_mapping"]
@@ -146,7 +154,24 @@ def _forward_plants_outside_raster(record: dict, project_root: Path) -> dict:
             "this event's raster_identity carries no geotransform or no dimensions; "
             "plants_outside_raster cannot be recomputed without them"
         )
-    plants = read_plant_csvs(Path(e["path"]) for e in registry_csv_entries(stored_registry))
+    registry_entries = registry_csv_entries(stored_registry)
+    missing, rewritten_fact, verified_csv_bytes = verify_registry_csv_bytes(registry_entries)
+    if missing:
+        raise _RegistryUnrecoverable(
+            f"plant CSV(s) named by registry {name!r} are missing: {missing}; "
+            "plants_outside_raster cannot be recomputed from a registry whose own CSV files are "
+            "not the ones this delivery read"
+        )
+    if rewritten_fact:
+        raise _RegistryUnrecoverable(
+            f"{rewritten_fact}; plants_outside_raster cannot be recomputed from a registry whose "
+            "own CSV file no longer holds the bytes this delivery read"
+        )
+    plants = [
+        plant
+        for entry in registry_entries
+        for plant in read_plant_csv_bytes(verified_csv_bytes[entry["path"]])
+    ]
     georef = OrthomosaicGeoreference(GeoTransform(**geotransform))
     _in_frame, outside = plants_in_frame(plants, georef, width=int(width), height=int(height))
     names = sorted(p.plot_name for p in outside)

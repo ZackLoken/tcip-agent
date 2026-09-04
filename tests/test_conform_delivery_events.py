@@ -369,6 +369,51 @@ def test_check_root_refuses_a_registry_event_whose_registry_no_longer_loads(tmp_
     assert "no longer loads" in outcomes[0]
 
 
+def test_check_root_refuses_a_registry_event_whose_csv_was_rewritten_on_disk(tmp_path: Path) -> None:
+    """A registered CSV's own registration-time digest does not move when the file is rewritten
+    afterward: only reading and hashing the file's current bytes catches this."""
+    bind_default()
+    module = _load_script()
+    registry, _in_position = _register_two_plants(tmp_path)
+    _write_registry_event_missing_plants_outside_raster(
+        tmp_path, event_id="registry-csv-rewritten", registry_digest=registry["digest"])
+    csv_path = Path(registry["csvs"][0]["path"])
+    csv_path.write_text(
+        "plot_name,accession_name,WGS84_centroid_x,WGS84_centroid_y\n"
+        "plot_new,acc_new,0.0,0.0\n",
+        encoding="utf-8",
+    )
+
+    outcomes, refused = module.check_root(tmp_path)
+
+    assert refused is True
+    assert len(outcomes) == 1
+    assert "registry-csv-rewritten" in outcomes[0]
+    assert str(csv_path) in outcomes[0]
+    assert "rewritten" in outcomes[0]
+    stored = _events(tmp_path)["registry-csv-rewritten"]
+    assert "plants_outside_raster" not in stored["plant_mapping"]
+
+
+def test_check_root_refuses_a_registry_event_whose_csv_file_is_missing(tmp_path: Path) -> None:
+    bind_default()
+    module = _load_script()
+    registry, _in_position = _register_two_plants(tmp_path)
+    _write_registry_event_missing_plants_outside_raster(
+        tmp_path, event_id="registry-csv-missing", registry_digest=registry["digest"])
+    csv_path = Path(registry["csvs"][0]["path"])
+    csv_path.unlink()
+
+    outcomes, refused = module.check_root(tmp_path)
+
+    assert refused is True
+    assert len(outcomes) == 1
+    assert "registry-csv-missing" in outcomes[0]
+    assert csv_path.name in outcomes[0]
+    stored = _events(tmp_path)["registry-csv-missing"]
+    assert "plants_outside_raster" not in stored["plant_mapping"]
+
+
 def test_main_plan_mode_over_a_mixed_root_prints_both_lines_exits_two_and_rewrites_nothing(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
 ) -> None:
