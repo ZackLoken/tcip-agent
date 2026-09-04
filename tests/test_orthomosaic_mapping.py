@@ -15,7 +15,9 @@ from tcip_mcp.pipelines.postprocessing.orthomosaic_mapping import (
     GeoTransform,
     OrthomosaicGeoreference,
     RotatedRasterError,
+    native_to_pixel,
     pixel_to_native,
+    plants_in_frame,
     read_geotransform,
 )
 from tcip_mcp.pipelines.raster_source import open_raster
@@ -147,6 +149,102 @@ def test_pixel_to_wgs84_central_meridian_known_reference(tmp_path: Path) -> None
     georef = OrthomosaicGeoreference.from_file(path)
     _lat, lon = georef.pixel_to_wgs84(0.0, 0.0)  # tiepoint pixel -> native (500000, 4800000)
     assert lon == pytest.approx(-93.0, abs=1e-6)
+
+
+# ── WGS84 -> pixel: the exact inverse of pixel -> WGS84 ─────────────────
+
+
+def test_wgs84_to_pixel_matches_independent_pyproj_inverse_at_asymmetric_pixel(tmp_path: Path) -> None:
+    """An asymmetric pixel (distinct nonzero x and y, off the tiepoint): the round-trip and an
+    independently-built pyproj inverse transform must both land back on it."""
+    import pyproj
+
+    path = tmp_path / "mosaic.tif"
+    _write_geotiff(path)
+    georef = OrthomosaicGeoreference.from_file(path)
+    px, py = 30.0, 47.0
+    lat, lon = georef.pixel_to_wgs84(px, py)
+
+    reference = pyproj.Transformer.from_crs("EPSG:4326", f"EPSG:{UTM_15N_EPSG}", always_xy=True)
+    expected_native_x, expected_native_y = reference.transform(lon, lat)
+    transform = read_geotransform(path)
+    expected_px, expected_py = native_to_pixel(transform, expected_native_x, expected_native_y)
+
+    result_px, result_py = georef.wgs84_to_pixel(lat, lon)
+    assert result_px == pytest.approx(expected_px, abs=1e-6)
+    assert result_py == pytest.approx(expected_py, abs=1e-6)
+    assert result_px == pytest.approx(px, abs=1e-6)
+    assert result_py == pytest.approx(py, abs=1e-6)
+
+
+def test_native_to_pixel_round_trips_with_pixel_to_native_at_asymmetric_pixel(tmp_path: Path) -> None:
+    path = tmp_path / "mosaic.tif"
+    _write_geotiff(path)
+    transform = read_geotransform(path)
+    px, py = 30.0, 47.0
+    native_x, native_y = pixel_to_native(transform, px, py)
+    round_px, round_py = native_to_pixel(transform, native_x, native_y)
+    assert round_px == pytest.approx(px)
+    assert round_py == pytest.approx(py)
+
+
+def test_native_to_pixel_zero_pixel_scale_x_refuses_naming_the_scale(tmp_path: Path) -> None:
+    path = tmp_path / "mosaic.tif"
+    _write_geotiff(path)
+    transform = read_geotransform(path)
+    degenerate = GeoTransform(**{**transform.__dict__, "pixel_scale_x": 0.0})
+    with pytest.raises(ValueError, match="pixel_scale_x"):
+        native_to_pixel(degenerate, 500_000.0, 4_800_000.0)
+
+
+def test_native_to_pixel_zero_pixel_scale_y_refuses_naming_the_scale(tmp_path: Path) -> None:
+    path = tmp_path / "mosaic.tif"
+    _write_geotiff(path)
+    transform = read_geotransform(path)
+    degenerate = GeoTransform(**{**transform.__dict__, "pixel_scale_y": 0.0})
+    with pytest.raises(ValueError, match="pixel_scale_y"):
+        native_to_pixel(degenerate, 500_000.0, 4_800_000.0)
+
+
+# ── plants_in_frame: the one in-frame partition both attribution regimes share ──
+
+
+def test_plants_in_frame_partitions_by_the_rasters_own_recorded_dimensions(tmp_path: Path) -> None:
+    from tcip_mcp.pipelines.postprocessing.plant_mapping import PlantRecord
+
+    path = tmp_path / "mosaic.tif"
+    _write_geotiff(path, width=64, height=64, shape=(64, 64, 3))
+    georef = OrthomosaicGeoreference.from_file(path)
+
+    inside_lat, inside_lon = georef.pixel_to_wgs84(10.0, 10.0)
+    outside_lat, outside_lon = georef.pixel_to_wgs84(-5.0, 10.0)  # negative column: outside
+    plants = [
+        PlantRecord(plot_name="in", accession_name="a", plot_number=0, row_number=0,
+                   col_number=0, lat=inside_lat, lon=inside_lon),
+        PlantRecord(plot_name="out", accession_name="b", plot_number=1, row_number=0,
+                   col_number=1, lat=outside_lat, lon=outside_lon),
+    ]
+
+    in_frame, outside = plants_in_frame(plants, georef, width=64, height=64)
+    assert [p.plot_name for p in in_frame] == ["in"]
+    assert [p.plot_name for p in outside] == ["out"]
+
+
+def test_plants_in_frame_edge_pixel_at_width_or_height_is_outside(tmp_path: Path) -> None:
+    """The half-open test: a plant projecting to exactly the raster's own width or height column
+    is outside, since a valid pixel index runs only 0..width-1 / 0..height-1."""
+    from tcip_mcp.pipelines.postprocessing.plant_mapping import PlantRecord
+
+    path = tmp_path / "mosaic.tif"
+    _write_geotiff(path, width=64, height=64, shape=(64, 64, 3))
+    georef = OrthomosaicGeoreference.from_file(path)
+    edge_lat, edge_lon = georef.pixel_to_wgs84(64.0, 10.0)
+    plants = [PlantRecord(plot_name="edge", accession_name="a", plot_number=0, row_number=0,
+                          col_number=0, lat=edge_lat, lon=edge_lon)]
+
+    in_frame, outside = plants_in_frame(plants, georef, width=64, height=64)
+    assert in_frame == []
+    assert [p.plot_name for p in outside] == ["edge"]
 
 
 # ── GeoTransform composes with plain floats (no bespoke point type) ─────

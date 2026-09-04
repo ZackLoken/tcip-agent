@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import ClassVar
+from typing import ClassVar, Sequence
 
 # GeoTIFF tag IDs this module reads (see the GeoTIFF spec; tifffile exposes each as a plain
 # TiffTag keyed by these codes, no prior art for any of them elsewhere in this codebase).
@@ -168,6 +168,29 @@ def pixel_to_native(transform: GeoTransform, pixel_x: float, pixel_y: float) -> 
     return native_x, native_y
 
 
+def native_to_pixel(transform: GeoTransform, native_x: float, native_y: float) -> tuple[float, float]:
+    """The pixel (column, row) for a native-CRS coordinate ``(native_x, native_y)``: the exact
+    inverse of :func:`pixel_to_native`.
+
+    Refuses by name when ``transform``'s own ``pixel_scale_x`` or ``pixel_scale_y`` is zero: the
+    affine this module implements has no inverse at a degenerate scale, and dividing by it would
+    silently produce an infinite or NaN pixel position instead of a real one.
+    """
+    if transform.pixel_scale_x == 0:
+        raise ValueError(
+            "native_to_pixel: transform.pixel_scale_x is zero; the tiepoint + pixel-scale affine "
+            "has no inverse at a degenerate scale"
+        )
+    if transform.pixel_scale_y == 0:
+        raise ValueError(
+            "native_to_pixel: transform.pixel_scale_y is zero; the tiepoint + pixel-scale affine "
+            "has no inverse at a degenerate scale"
+        )
+    pixel_x = transform.tiepoint_pixel_x + (native_x - transform.tiepoint_native_x) / transform.pixel_scale_x
+    pixel_y = transform.tiepoint_pixel_y - (native_y - transform.tiepoint_native_y) / transform.pixel_scale_y
+    return pixel_x, pixel_y
+
+
 class OrthomosaicGeoreference:
     """Resolves a real-world coordinate for any pixel in a whole-mosaic GeoTIFF.
 
@@ -204,6 +227,20 @@ class OrthomosaicGeoreference:
         native_x, native_y = self.pixel_to_native(pixel_x, pixel_y)
         lon, lat = self._to_wgs84.transform(native_x, native_y)
         return lat, lon
+
+    def wgs84_to_pixel(self, lat: float, lon: float) -> tuple[float, float]:
+        """The pixel (column, row) in this raster for a WGS84 ``(lat, lon)``: the exact inverse
+        of :meth:`pixel_to_wgs84`, run through the same cached transformer this instance already
+        built (never a second one) with ``direction="INVERSE"``, then :func:`native_to_pixel`.
+        """
+        import pyproj
+
+        if self._to_wgs84 is None:
+            self._to_wgs84 = pyproj.Transformer.from_crs(
+                f"EPSG:{self.transform.epsg}", f"EPSG:{WGS84_EPSG}", always_xy=True
+            )
+        native_x, native_y = self._to_wgs84.transform(lon, lat, direction="INVERSE")
+        return native_to_pixel(self.transform, native_x, native_y)
 
 
 # ── Per-detection plant assignment ──────────────────────────────────────
@@ -257,6 +294,44 @@ class DetectionAssignment:
     mapper-wide fact rather than a per-assignment value nothing here computes differently."""
 
 
+def detection_location(box: Sequence[float]) -> tuple[float, float]:
+    """A detection's own location: its box centroid ``((x1+x2)/2, (y1+y2)/2)``, in the same pixel
+    space the box itself is stated in, the point the detector's own geometry most directly stands
+    for. The one centroid computation :func:`assign_detections_to_plants` and
+    :func:`~tcip_mcp.pipelines.postprocessing.segment_attribution.assign_detections_to_segments`
+    both call, so per-detection nearest-neighbour attribution and per-detection segment
+    containment can never silently disagree about where a detection "is".
+    """
+    x1, y1, x2, y2 = box
+    return (x1 + x2) / 2.0, (y1 + y2) / 2.0
+
+
+def plants_in_frame(
+    plants: list[PlantRecord], georef: OrthomosaicGeoreference, *, width: int, height: int,
+) -> tuple[list[PlantRecord], list[PlantRecord]]:
+    """``(in_frame, outside)``: ``plants`` partitioned by whether their projected pixel position
+    falls inside this raster's own frame, the half-open test ``0 <= px < width`` and
+    ``0 <= py < height`` on the position :meth:`OrthomosaicGeoreference.wgs84_to_pixel` projects.
+
+    ``width``/``height`` come from the raster's own verified recorded identity, never assumed:
+    the one partition both attribution regimes share, so a registry point the raster does not
+    picture is treated the same way whichever regime reads it. The nearest-neighbour delivery
+    regime's own candidate list is the in-frame plants only, so a detection near a raster edge
+    cannot map to a registry point outside the raster; the canopy segment tie's own containment
+    test is meaningless for a plant the raster never pictures, so it partitions the same way
+    before testing containment at all.
+    """
+    in_frame: list[PlantRecord] = []
+    outside: list[PlantRecord] = []
+    for p in plants:
+        px, py = georef.wgs84_to_pixel(p.lat, p.lon)
+        if 0 <= px < width and 0 <= py < height:
+            in_frame.append(p)
+        else:
+            outside.append(p)
+    return in_frame, outside
+
+
 def resolve_nn_tolerance_m(
     plants: list[PlantRecord], nn_tolerance_m: float | None = None,
 ) -> dict:
@@ -304,8 +379,8 @@ def assign_detections_to_plants(
     tolerance_m = resolve_nn_tolerance_m(plants, nn_tolerance_m)["value"]
 
     out: list[DetectionAssignment] = []
-    for i, (x1, y1, x2, y2) in enumerate(boxes):
-        cx, cy = (x1 + x2) / 2.0, (y1 + y2) / 2.0
+    for i, box in enumerate(boxes):
+        cx, cy = detection_location(box)
         lat, lon = georeference.pixel_to_wgs84(cx, cy)
         plant, distance_m = _nearest_plant(lat, lon, plants) if plants else (None, None)
         if plant is not None and distance_m is not None and distance_m <= tolerance_m:
