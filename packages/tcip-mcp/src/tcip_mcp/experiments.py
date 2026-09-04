@@ -42,7 +42,7 @@ from tcip_store import (
 )
 from tcip_store.file_backend import RootedFileLocator
 
-from tcip_mcp.project_paths import platform_state_root, resolve_state
+from tcip_mcp.project_paths import resolve_state
 
 logger = logging.getLogger(__name__)
 
@@ -1363,6 +1363,7 @@ def register_model_from_experiment(
         return {"error": f"Experiment not found: {experiment_id}"}
 
     from tcip_mcp.pipelines.data.splits import same_directory
+    from tcip_mcp.project_paths import platform_state_root
 
     root = str(platform_state_root())
     if project_path and not same_directory(project_path, root):

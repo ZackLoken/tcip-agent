@@ -5,11 +5,17 @@ from __future__ import annotations
 from tcip_mcp.server import mcp
 from tcip_mcp.audit import audited
 from tcip_mcp.model_registry import ModelRegistry
-from tcip_mcp.project_paths import platform_state_root
 
 
 def _registry_root(project_path: str) -> str:
-    """Explicit path wins; empty falls back to the platform root (the adopted project)."""
+    """Explicit path wins; empty falls back to the platform root (the adopted project).
+
+    ``platform_state_root`` is imported at call time so the live attribute of
+    ``tcip_mcp.project_paths`` is what resolves, never a function object captured when this
+    module was first loaded; every other consumer of it imports it the same way.
+    """
+    from tcip_mcp.project_paths import platform_state_root
+
     return project_path or str(platform_state_root())
 
 
