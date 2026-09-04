@@ -24,7 +24,7 @@ from tcip_mcp.pipelines.resolution import (  # noqa: E402
 )
 from tests.test_orthomosaic_tools import (  # noqa: E402
     _PLANT_PIXELS, TIEPOINT_NATIVE_X, TILE, _bespoke_detection_checkpoint, _plant_grid_csv,
-    _replace_boxes, _write_geo_raster,
+    _plant_registry, _replace_boxes, _write_geo_raster,
 )
 
 from tcip_mcp import operationalization as op  # noqa: E402
@@ -120,7 +120,7 @@ def test_delivery_refuses_a_pixel_identical_raster_whose_tiepoint_moved(tmp_path
 
     out_csv = tmp_path / "counts.csv"
     refused = deliver_orthomosaic_plant_counts(
-        str(bucket), str(moved), [str(plant_csv)], str(out_csv), delivered_phenotype="stem_count",
+        str(bucket), str(moved), _plant_registry(plant_csv), str(out_csv), delivered_phenotype="stem_count",
         acknowledge_unvalidated=True)
 
     assert "error" in refused
@@ -144,7 +144,7 @@ def test_delivery_refuses_a_raster_of_different_content(tmp_path, monkeypatch):
 
     out_csv = tmp_path / "counts.csv"
     refused = deliver_orthomosaic_plant_counts(
-        str(bucket), str(other), [str(plant_csv)], str(out_csv), delivered_phenotype="stem_count",
+        str(bucket), str(other), _plant_registry(plant_csv), str(out_csv), delivered_phenotype="stem_count",
         acknowledge_unvalidated=True)
 
     assert "error" in refused
@@ -165,7 +165,7 @@ def test_delivery_refuses_a_bucket_that_records_no_raster_identity(tmp_path, mon
 
     out_csv = tmp_path / "counts.csv"
     refused = deliver_orthomosaic_plant_counts(
-        str(bucket), str(raster_path), [str(plant_csv)], str(out_csv), delivered_phenotype="stem_count")
+        str(bucket), str(raster_path), _plant_registry(plant_csv), str(out_csv), delivered_phenotype="stem_count")
 
     assert "error" in refused
     assert "run_inference" in refused["error"]
@@ -192,7 +192,7 @@ def test_delivery_admits_the_raster_the_bucket_was_produced_on(tmp_path, monkeyp
 
     out_csv = tmp_path / "counts.csv"
     delivered = deliver_orthomosaic_plant_counts(
-        str(bucket), str(raster_path), [str(plant_csv)], str(out_csv), delivered_phenotype="stem_count",
+        str(bucket), str(raster_path), _plant_registry(plant_csv), str(out_csv), delivered_phenotype="stem_count",
         acknowledge_unvalidated=True)
 
     assert "error" not in delivered
@@ -267,7 +267,7 @@ def test_orthomosaic_precondition_precedes_the_raster_identity_refusal(tmp_path,
 
     out_csv = tmp_path / "counts.csv"
     refused = deliver_orthomosaic_plant_counts(
-        str(bucket), str(raster_path), [str(plant_csv)], str(out_csv),
+        str(bucket), str(raster_path), _plant_registry(plant_csv), str(out_csv),
         delivered_phenotype="bark_thickness", acknowledge_unvalidated=True)
 
     assert "no operationalization is recorded" in refused["error"]

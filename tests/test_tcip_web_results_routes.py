@@ -72,7 +72,7 @@ def test_plant_mapping_build_requires_a_registered_dataset(
         json={
             "name": "valley",
             "images_root": str(tmp_path / "nope"),
-            "plant_csv_paths": [],
+            "plant_registry": "unregistered",
         },
     )
     assert resp.status_code == 400

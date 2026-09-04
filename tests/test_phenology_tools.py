@@ -69,10 +69,13 @@ def test_build_plant_mapping_wraps_build_and_persists(
     _plant_csv(csv_path)
     name = "valley"
 
+    from tests._binding_fixtures import register_plant_registry_for
+
+    registry = register_plant_registry_for([csv_path])
     res = build_plant_mapping(
         name=name,
         images_root=str(images_root),
-        plant_csv_paths=[str(csv_path)],
+        plant_registry=registry,
     )
 
     assert "error" not in res, res
@@ -100,29 +103,32 @@ def test_build_plant_mapping_missing_images_root(
     assert "error" not in initialize_project(str(tmp_path), site="orchard block")
     res = build_plant_mapping(
         images_root=str(tmp_path / "nope"),
-        plant_csv_paths=[str(tmp_path / "plants.csv")],
+        plant_registry="unregistered",
         name="m",
     )
     assert "error" in res
     assert "images_root not found" in res["error"]
 
 
-def test_build_plant_mapping_missing_csv(
+def test_build_plant_mapping_missing_registry(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from tcip_mcp.tools.project_tools import initialize_project
+    from tcip_mcp.tools.project_tools import initialize_project, register_dataset
+    from tcip_mcp.traits import registered_crops
 
     monkeypatch.setenv("TCIP_WORKSPACE", str(tmp_path / "unused_workspace"))
     assert "error" not in initialize_project(str(tmp_path), site="orchard block")
     images_root = tmp_path / "images"
     (images_root / "2026-02-11").mkdir(parents=True)
+    register_dataset(str(tmp_path), crop=sorted(registered_crops())[0])
     res = build_plant_mapping(
         images_root=str(images_root),
-        plant_csv_paths=[str(tmp_path / "missing.csv")],
+        plant_registry="does-not-exist",
         name="m",
     )
     assert "error" in res
-    assert "plant CSV" in res["error"]
+    assert "plant registry not found" in res["error"]
+    assert "register_plant_registry" in res["error"]
 
 
 def _write_mapping(project_root: Path, name: str, mapping: dict) -> None:

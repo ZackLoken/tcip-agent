@@ -494,10 +494,12 @@ def test_a_mapping_build_writes_and_audits_under_the_open_project_only(
 
     # The breeder's plant-location file is reference data picked from wherever they keep it.
     moved_csv = outside / "plots.csv"
-    moved_csv.write_text(Path(payload["plant_csv_paths"][0]).read_text(encoding="utf-8"),
-                         encoding="utf-8")
+    moved_csv.write_text(Path(payload["csv_path"]).read_text(encoding="utf-8"), encoding="utf-8")
+    from tests._binding_fixtures import register_plant_registry_for
+
+    moved_registry = register_plant_registry_for([moved_csv], name="moved-plots")
     ok = client.post("/api/results/plant_mapping/build",
-                     json={**payload, "plant_csv_paths": [str(moved_csv)]})
+                     json={**payload, "plant_registry": moved_registry})
     assert ok.status_code == 200, ok.text
     built = [r for r in tcip_store.read_log(audit_log_key(tmp_path)).records
              if r["tool"] == "gui_build_plant_mapping"]

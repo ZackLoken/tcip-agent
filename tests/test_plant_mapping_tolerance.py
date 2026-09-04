@@ -50,6 +50,7 @@ def _build(tmp_path: Path, plants: list[dict], nn_tolerance_m: float | None) -> 
     build = build_mapping(
         images_root, [plant_csv], name="valley", dataset_root=tmp_path / "ds",
         dataset_id="ds-1", project_root=tmp_path, built_by="build_plant_mapping",
+        plant_registry={"name": "unregistered", "digest": "0" * 64},
         nn_tolerance_m=nn_tolerance_m,
     )
     return build, grid_pitch_m(read_plant_csvs([plant_csv]))
