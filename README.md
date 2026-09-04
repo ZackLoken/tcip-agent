@@ -46,9 +46,10 @@ packages/
     src/tcip_mcp/
       knowledge/               # domain knowledge modules (crops, annotation, training, ...)
       tools/                   # domain tools (run scripts/list_tools.py for the current list)
-      pipelines/               # ML: model_build, trainer, predictor, envelope + plain
-                               #   nn.Module blocks; postprocessing (per-image plant mapping +
-                               #   phenology, plus orthomosaic georeferencing/windowed inference)
+      pipelines/               # ML: model_build, trainer, predictor (windowed/tiled raster
+                               #   reads), envelope + plain nn.Module blocks; postprocessing
+                               #   (per-image plant mapping + phenology, plus orthomosaic
+                               #   georeferencing)
   tcip-annotation/             # headless annotation library
   tcip-store/                  # storage seam: keyed records, append-only logs, blobs
     src/tcip_store/            # the contract (model, errors, registry, store) + file backend
