@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path, PurePosixPath
+from typing import TYPE_CHECKING
 
 from tcip_store import RECORD_JSON, BadKey, Key, StoreDescriptor, Version, register_store, store
 from tcip_store.file_backend import RootedFileLocator
@@ -25,6 +26,9 @@ from tcip_mcp.pipelines.resolution import (
     DeliveryRefused,
 )
 from tcip_mcp.project_paths import resolve_output_path
+
+if TYPE_CHECKING:
+    from tcip_mcp.pipelines.resolution import Acknowledgement
 
 logger = logging.getLogger(__name__)
 
@@ -1928,11 +1932,13 @@ def deliver_per_image_counts(
 
     Delivery gate, both regimes: one composition, inside ``export_detection_csv``, over the count
     operating point and (if tiled) the tile geometry, reconciled from the bucket's own sidecar
-    rather than trusted from a caller string; ships only when every dimension clears. This door
-    takes no acknowledgement for the CSV itself: no surface delivers a per-image count
-    provisionally today, so an unvalidated dimension always refuses here, whichever regime produced
-    it. The documented route around a refusal is the one above: promote the bucket to validated
-    through the review validation route, then re-deliver through the bucket regime. A refused
+    rather than trusted from a caller string; ships only when every dimension clears. This tool
+    itself builds no acknowledgement (no MCP door ever does), so an unvalidated dimension always
+    refuses here, whichever regime produced it; the bucket regime's own count is reachable
+    provisionally through the web results route's count export, which builds a real
+    ``Acknowledgement`` from the breeder's own reason and identity. The other documented route
+    around a refusal is the one above: promote the bucket to validated through the review
+    validation route, then re-deliver through the bucket regime. A refused
     delivery still names what happened to a
     ``predictions_dir`` the live regime published before the CSV's own gate ran
     (``bucket_published``, ``bucket_redirected``, ``lineage_linked``, beside ``csv_delivered:
@@ -2034,9 +2040,11 @@ def deliver_per_image_counts(
     """
     from tcip_mcp.operationalization import (
         PER_IMAGE_COUNT,
+        OperationalizationRefused,
         check_operationalization,
         resolve_trait_and_record,
     )
+    from tcip_mcp.pipelines.resolution import CountDeliveryRefused
     from tcip_mcp.project_paths import resolve_output_path
     from tcip_mcp.traits import TraitUnknownError
 
@@ -2074,8 +2082,26 @@ def deliver_per_image_counts(
         return {"error": "output_path is required"}
     output_path = str(resolve_output_path(output_path))
 
-    # Ahead of the pass (live) or the bucket read (bucket regime), so a refused delivery has no
-    # counts of its own to hand back.
+    if not live:
+        assert predictions_dir is not None  # the regime check above already requires it
+        try:
+            return per_image_counts_from_bucket(
+                predictions_dir, output_path, trait=trait, project_root=None,
+                acknowledgement=None)
+        except OperationalizationRefused as exc:
+            return {"error": exc.check.message}
+        except DeliveryRefused as exc:
+            reason = (
+                f"{exc} This door takes no acknowledgement: acknowledge and re-export through "
+                "the Results tab's count export, or validate the dimension named above, or "
+                "promote this bucket to validated through the review validation route "
+                "(validate_reference) and re-deliver."
+            )
+            return {"error": reason, **exc.facts}
+        except CountDeliveryRefused as exc:
+            return {"error": str(exc), **exc.facts}
+
+    # Ahead of the pass, so a refused delivery has no counts of its own to hand back.
     try:
         spec, record, _specs_dir = resolve_trait_and_record(trait, PER_IMAGE_COUNT)
     except TraitUnknownError as e:
@@ -2085,10 +2111,6 @@ def deliver_per_image_counts(
     stated = check_operationalization(spec, record, PER_IMAGE_COUNT, registry=None)
     if not stated.ok:
         return {"error": stated.message}
-
-    if not live:
-        return _deliver_per_image_counts_from_bucket(
-            predictions_dir, output_path, trait=trait, stated_basis=stated.basis)
 
     bucket = bucket_root = None
     resolution = None
@@ -2162,10 +2184,10 @@ def deliver_per_image_counts(
     provenance = {
         "producer_model_sha256": result.get("checkpoint_sha256"),
         "producing_experiment_id": result.get("experiment_id"),
-        "operating_point_conf": op.get("conf"),
+        "operating_point_conf": (op.get("conf") or {}).get("value"),
     }
     try:
-        csv_path, tail, summary = export_detection_csv(
+        csv_path, tail, summary, _event_recorded = export_detection_csv(
             csv_rows, output_path, provenance=provenance, trait=trait,
             operating_point_validated=op_ref,
             pred_dirs=[str(bucket)] if bucket is not None else None,
@@ -2318,65 +2340,85 @@ def _image_filename_fallback_note(
     return None
 
 
-def _deliver_per_image_counts_from_bucket(predictions_dir: str, output_path: str, *, trait: str,
-                                          stated_basis) -> dict:
-    """``deliver_per_image_counts``'s bucket regime: an existing, reviewed prediction bucket in, no GPU.
+def per_image_counts_from_bucket(
+    predictions_dir: str, output_path: str, *, trait: str,
+    project_root: str | Path | None = None,
+    acknowledgement: Acknowledgement | None = None,
+) -> dict:
+    """``deliver_per_image_counts``'s bucket regime, as a core the tool and the web results route
+    both call: an existing, reviewed prediction bucket in, no GPU.
 
     No writable-bucket resolution and no verdict redirect: nothing is written, and reading a
     reviewed bucket is the point. Refuses on the bucket's own mandatory stamp shape before
     counting anything, so a mosaic bucket or a directory with no stamp at all is never counted.
+
+    Runs the ``per_image_count`` meaning check first, against ``trait`` and ``project_root``,
+    before the bucket is touched: a caller with its own response shape (the tool's own
+    ``{"error": ...}``, the route's structured HTTP detail) composes it from which class this
+    raises rather than parsing a message. ``OperationalizationRefused``
+    (``tcip_mcp.operationalization``) carries the failed check and no counts, raised either from
+    this call's own pre-check or from ``export_detection_csv``'s post-gate re-check (a
+    confirmation withdrawn, or a spec field moved, between the two); ``DeliveryRefused``
+    (``pipelines.resolution``) is the writer's own gate refusal, its ``facts`` attribute set here
+    to this call's own counts-bearing facts; ``CountDeliveryRefused`` (``pipelines.resolution``)
+    covers everything else this door refuses on (a missing stamp, a whole-raster bucket, a trait
+    mismatch, a malformed filename map, an empty bucket), each carrying the same facts its
+    ``{"error": ...}`` shape carried before this refactor.
     """
     from tcip_mcp.operationalization import (
         PER_IMAGE_COUNT,
+        OperationalizationRefused,
         check_operationalization,
         resolve_trait_and_record,
     )
     from tcip_mcp.pipelines.resolution import (
-        VALIDATED_FALSE, read_operating_point_sidecar, stamp_names_raster,
+        VALIDATED_FALSE, CountDeliveryRefused, read_operating_point_sidecar, stamp_names_raster,
     )
+
+    spec, record, _specs_dir = resolve_trait_and_record(
+        trait, PER_IMAGE_COUNT, project_root=project_root)
+    # A per_image_count delivery names no positive class, so check_operationalization ignores a
+    # registry for this kind regardless of what one would resolve to.
+    stated = check_operationalization(spec, record, PER_IMAGE_COUNT, registry=None)
+    if not stated.ok:
+        raise OperationalizationRefused(stated)
 
     bucket_path = resolve_output_path(predictions_dir)
     sidecar = read_operating_point_sidecar(bucket_path)
     if sidecar is None:
-        return {"error": (
+        raise CountDeliveryRefused(
             f"{bucket_path} carries no readable operating_point.json: a bucket regime call reads "
             "a stamp a platform producer wrote (run_inference, deliver_per_image_counts's own "
             "live-with-predictions_dir path, or the web inference worker), never a directory of "
-            "label JSON with no stamp."
-        )}
+            "label JSON with no stamp.")
     if stamp_names_raster(sidecar):
-        return {"error": (
+        raise CountDeliveryRefused(
             f"{bucket_path} is a whole-raster bucket (its stamp records raster_path): one mosaic "
             "total is not a per-image count, and the per_image_count operationalization was never "
             "confirmed for it. Deliver a per-plant count from it through "
-            "deliver_orthomosaic_plant_counts instead."
-        )}
+            "deliver_orthomosaic_plant_counts instead.")
     if not sidecar.get("images_dir"):
-        return {"error": (
+        raise CountDeliveryRefused(
             f"{bucket_path}'s stamp records neither images_dir nor raster_path: it is not a "
-            "per-image prediction bucket this door can read."
-        )}
+            "per-image prediction bucket this door can read.")
     stamp_trait = sidecar.get("trait")
     if stamp_trait is not None and stamp_trait != trait:
-        return {"error": (
+        raise CountDeliveryRefused(
             f"{bucket_path}'s stamp was recorded for trait {stamp_trait!r}, not {trait!r}: a "
-            "bucket produced for one trait cannot deliver a per-image count under another."
-        )}
+            "bucket produced for one trait cannot deliver a per-image count under another.")
 
     filename_map = sidecar.get("image_filenames")
     if filename_map is not None and not isinstance(filename_map, dict):
-        return {"error": (
+        raise CountDeliveryRefused(
             f"{bucket_path}'s stamp's image_filenames is not a mapping (got "
             f"{type(filename_map).__name__}): a bucket regime call expects the stem-to-filename "
-            "map run_inference, deliver_per_image_counts's live-with-predictions_dir path, or the web "
-            "inference worker writes there, or nothing at all."
-        )}
+            "map run_inference, deliver_per_image_counts's live-with-predictions_dir path, or the "
+            "web inference worker writes there, or nothing at all.")
     image_results, fallback_stems = _bucket_csv_rows(bucket_path, filename_map)
     if not image_results:
-        return {"error": (
+        raise CountDeliveryRefused(
             f"{bucket_path} carries a readable stamp but no prediction documents: an empty "
-            "bucket is not a per-image count either."
-        )}
+            "bucket is not a per-image count either.")
     image_count = len(image_results)
     total_detections = sum(r["count"] for r in image_results)
 
@@ -2386,20 +2428,16 @@ def _deliver_per_image_counts_from_bucket(predictions_dir: str, output_path: str
     provenance = {
         "producer_model_sha256": sidecar.get("checkpoint_sha256"),
         "producing_experiment_id": sidecar.get("experiment_id"),
-        "operating_point_conf": op.get("conf"),
+        "operating_point_conf": (op.get("conf") or {}).get("value"),
     }
     try:
-        csv_path, tail, summary = export_detection_csv(
+        csv_path, tail, summary, event_recorded = export_detection_csv(
             image_results, output_path, provenance=provenance, trait=trait,
             operating_point_validated=None, pred_dirs=[str(bucket_path)],
+            acknowledgement=acknowledgement, project_root=project_root,
         )
     except DeliveryRefused as exc:
-        refusal = {
-            "error": (
-                f"{exc} This door takes no acknowledgement: validate the dimension named above, "
-                "or promote this bucket to validated through the review validation route "
-                "(validate_reference) and re-deliver."
-            ),
+        exc.facts = {
             "operating_point_validated": exc.gate.stamp.get("operating_point", VALIDATED_FALSE),
             "tile_size_validated": exc.gate.stamp.get("tile_size"),
             "unvalidated_dimensions": exc.gate.unvalidated_cell(),
@@ -2409,14 +2447,15 @@ def _deliver_per_image_counts_from_bucket(predictions_dir: str, output_path: str
             "predictions_dir": str(bucket_path),
         }
         if image_note is not None:
-            refusal["image_note"] = image_note
-        return refusal
+            exc.facts["image_note"] = image_note
+        raise
 
-    spec_now, record_now, _ = resolve_trait_and_record(trait, PER_IMAGE_COUNT)
+    spec_now, record_now, _ = resolve_trait_and_record(
+        trait, PER_IMAGE_COUNT, project_root=project_root)
     still_stated = check_operationalization(
-        spec_now, record_now, PER_IMAGE_COUNT, registry=None, basis=stated_basis)
+        spec_now, record_now, PER_IMAGE_COUNT, registry=None, basis=stated.basis)
     if not still_stated.ok:
-        return {"error": still_stated.message}
+        raise OperationalizationRefused(still_stated)
 
     out = {
         "csv_path": csv_path,
@@ -2427,9 +2466,11 @@ def _deliver_per_image_counts_from_bucket(predictions_dir: str, output_path: str
         "tile_size_validated": (
             summary["stamp"].get("tile_size") if summary["tile_size_operative"] else None),
         "unvalidated_dimensions": tail["unvalidated_dimensions"],
+        "acknowledged_by": tail["acknowledged_by"],
         "checkpoint_sha256": sidecar.get("checkpoint_sha256"),
         "experiment_id": sidecar.get("experiment_id"),
         "predictions_dir": str(bucket_path),
+        "delivery_event_recorded": event_recorded,
     }
     if image_note is not None:
         out["image_note"] = image_note
