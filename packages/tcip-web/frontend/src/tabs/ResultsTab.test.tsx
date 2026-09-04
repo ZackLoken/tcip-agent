@@ -365,7 +365,7 @@ describe("ResultsTab evidence gate", () => {
     await waitFor(() => expect(screen.getByText("P1")).toBeInTheDocument());
 
     expect(
-      screen.getByText(/only a phenology milestone delivery can be acknowledged and exported/i),
+      screen.getByText(/a phenology milestone delivery here, and a per-image or per-plant/i),
     ).toBeInTheDocument();
   });
 

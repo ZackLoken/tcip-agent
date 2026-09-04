@@ -70,6 +70,7 @@ export const ROUTES = {
   postInferenceLaunch: "/api/inference/launch",
   postProjectsActive: "/api/projects/active",
   postResultsExportCsv: "/api/results/export_csv",
+  postResultsExportCountCsv: "/api/results/export_count_csv",
   postResultsOperationalizationConfirm: "/api/results/operationalization/confirm",
   postResultsPhenologyMeasurement: "/api/results/phenology_measurement",
   postResultsPlantMappingBuild: "/api/results/plant_mapping/build",

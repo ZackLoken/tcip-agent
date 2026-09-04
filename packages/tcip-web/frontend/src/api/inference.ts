@@ -165,6 +165,46 @@ export interface ExportCsvRequest {
   acknowledgement?: AcknowledgementRequest | null;
 }
 
+/** The bucket regime of a per-image count delivery: an existing, reviewed prediction bucket. */
+export interface PerImageCountDeliveryRequest {
+  kind: "per_image_count";
+  predictions_dir: string;
+  trait: string;
+}
+
+/** A per-plant count delivery from a persisted whole-raster prediction bucket plus a
+ *  registered plant registry. `nn_tolerance_m` is not exposed here: this door serves the
+ *  derived tolerance, or the `canopy_subject` regime. */
+export interface OrthomosaicPlantCountsDeliveryRequest {
+  kind: "orthomosaic_plant_counts";
+  predictions_dir: string;
+  raster_path: string;
+  plant_registry: string;
+  delivered_phenotype: string;
+  crop?: string;
+  pipeline_version?: string;
+  canopy_subject?: string;
+}
+
+/** The count-export door's own request shape: a discriminated `delivery` naming which of the
+ *  two stranded count kinds this posts, the same acknowledgement shape `ExportCsvRequest` uses. */
+export interface ExportCountCsvRequest {
+  project_root: string;
+  delivery: PerImageCountDeliveryRequest | OrthomosaicPlantCountsDeliveryRequest;
+  filename: string;
+  user?: string;
+  acknowledgement?: AcknowledgementRequest | null;
+}
+
+/** The count-export door's own response headers: present on every response, an empty string
+ *  (never a rendering of null/undefined) when nothing was unvalidated or acknowledged. */
+export interface ExportCountCsvHeaders {
+  savedTo: string;
+  deliveryEventRecorded: boolean;
+  unvalidatedDimensions: string;
+  acknowledgedBy: string;
+}
+
 // One door returns both projections from one server-side measurement, so no surface can render
 // either projection bare, and a milestone date and the curve it was read off cannot disagree.
 export interface PhenologyMeasurementResponse {
@@ -289,6 +329,35 @@ export function operationalizationRefusalOf(e: unknown): OperationalizationRefus
     delivery_kind: String(detail.delivery_kind ?? ""),
     message: typeof detail.message === "string" ? detail.message : e.message,
     registry_problem: typeof detail.registry_problem === "string" ? detail.registry_problem : null,
+  };
+}
+
+/** A count door's own delivery-gate refusal: the gate's reason plus this door's own remedy,
+ *  beside every counts-bearing fact the core had in hand (image_count, n_detections, and the
+ *  like, door-dependent, so this carries the raw detail rather than a fixed field set). */
+export interface DeliveryGateRefusal {
+  kind: "delivery_gate";
+  message: string;
+  unvalidated_dimensions: string;
+  [fact: string]: unknown;
+}
+
+/**
+ * The delivery-gate refusal a thrown error carries, or null for every other failure.
+ *
+ * Read by kind off the parsed detail, the same dispatch `operationalizationRefusalOf` uses for
+ * its own family, so a delivery-gate refusal is never matched by a prose regex either.
+ */
+export function deliveryGateRefusalOf(e: unknown): DeliveryGateRefusal | null {
+  if (!(e instanceof StructuredRefusalError)) return null;
+  const detail = e.detail;
+  if (detail.kind !== "delivery_gate") return null;
+  return {
+    ...detail,
+    kind: "delivery_gate",
+    message: typeof detail.message === "string" ? detail.message : e.message,
+    unvalidated_dimensions:
+      typeof detail.unvalidated_dimensions === "string" ? detail.unvalidated_dimensions : "",
   };
 }
 
@@ -578,5 +647,30 @@ export const resultsApi = {
       throw await decodeRefusal(resp, `export_csv failed: ${resp.status}`);
     }
     return await resp.blob();
+  },
+
+  // Unlike downloadCsv, this reports from the response headers: there is no prior screen
+  // measurement for a count, so the headers travel back beside the blob rather than discarded.
+  downloadCountCsv: async (
+    body: ExportCountCsvRequest,
+  ): Promise<{ blob: Blob; headers: ExportCountCsvHeaders }> => {
+    const resp = await fetch(ROUTES.postResultsExportCountCsv, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!resp.ok) {
+      throw await decodeRefusal(resp, `export_count_csv failed: ${resp.status}`);
+    }
+    const blob = await resp.blob();
+    return {
+      blob,
+      headers: {
+        savedTo: resp.headers.get("X-TCIP-Saved-To") ?? "",
+        deliveryEventRecorded: resp.headers.get("X-TCIP-Delivery-Event-Recorded") === "true",
+        unvalidatedDimensions: resp.headers.get("X-TCIP-Unvalidated-Dimensions") ?? "",
+        acknowledgedBy: decodeURIComponent(resp.headers.get("X-TCIP-Acknowledged-By") ?? ""),
+      },
+    };
   },
 };
