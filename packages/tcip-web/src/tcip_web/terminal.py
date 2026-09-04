@@ -50,8 +50,8 @@ DEFAULT_CLI = "claude"
 DEFAULT_ROWS = 30
 DEFAULT_COLS = 100
 
-# The committed permission fence for the in-app (breeder-lane) agent. Passed via --settings,
-# whose permissions.allow/deny lists merge (union) with the repo's own and the user's own settings; a `claude` session with no --settings flag (this one) is unaffected by the fence file itself.
+# The committed permission fence for the in-app (breeder-lane) agent. Passed via --settings, which merges its allow/deny lists
+# (union) with the repo's and the user's own settings; a `claude` session with none (this one) is unaffected by the fence file.
 _FENCE_SETTINGS = Path(__file__).resolve().parent / "agent_terminal.settings.json"
 
 _UNAVAILABLE_REASON = (
