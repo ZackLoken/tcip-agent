@@ -162,6 +162,12 @@ straight and its visual long axis is the statistically dominant one. When the de
 span a chord cannot represent (an arc length, a skeleton path, a landmark-to-landmark distance),
 compose that computation on the same validated mask instead of relabeling an extent as it.
 
+A canopy segment (`deliver_orthomosaic_plant_counts`'s `canopy_subject` argument) is whatever the
+breeder accepted, reviewed into the raster's own label document: a hand trace, a SAM proposal a
+reviewer accepted, or a bespoke instance-segmentation model's own output once a reviewer has
+accepted it, all admitted the same way. The door prescribes no model architecture for how the
+boundary was produced; what it requires is that a person positively stands behind it.
+
 ## Multi-phase pipelines
 
 When a trait's decomposition needs more than one training phase, write a logged script in

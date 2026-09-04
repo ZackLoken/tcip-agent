@@ -26,7 +26,7 @@ it in `pipelines/postprocessing/aggregation.py` if this table looks stale):
 | n_images | int | Number of source images |
 | pipeline_version | string | Pipeline that produced this result |
 | plant_id_source | string | How the plant identity was resolved for this plant's images (`"mixed"` when they disagree); blank when the records carried no identity provenance |
-| plant_attribution | string | The granularity objects were attributed to plants at (`"image"` for `build_plant_mapping`'s walked-capture mapping, `"detection"` for an orthomosaic's per-detection mapping): distinct from `plant_id_source`, which names the matching method, not the granularity |
+| plant_attribution | string | The granularity objects were attributed to plants at: `"image"` for `build_plant_mapping`'s walked-capture mapping, `"detection"` for an orthomosaic's nearest-neighbour per-detection mapping, `"segment"` for an orthomosaic's canopy-segment mapping (a detection's box centroid fell inside a canopy boundary a person accepted, never a mask-level or area measurement). Distinct from `plant_id_source`, which names the matching method, not the granularity |
 | plant_id_distance_m_max | float | Worst per-image plant-assignment distance, in metres, across this plant's images; the identity-confidence signal `build_plant_mapping` produces |
 | producer_model_sha256 | string | Checkpoint hash of the model that produced the predictions; blank when the bucket names an experiment nothing outside it can corroborate |
 | producing_experiment_id | string | The run that produced the predictions, blank when there was none or nothing corroborates it; never the calibration a claim was earned under |
@@ -61,7 +61,7 @@ Examples use real `crops.yml` trait names; verify any trait against `crops.yml` 
 | `run_inference` | Run a checkpoint over images or a raster and persist predictions as per-image JSON (COCO-shaped) or, for a raster, one whole-mosaic prediction file. A bucket (`output_dir`, the run's own prediction directory, not a score bin) with review verdicts is immutable; the run redirects to a fresh `<dir>@r2` bucket (see the response's `output_dir`); `overwrite=True` forces in-place but is refused when verdicts exist |
 | `deliver_phenology_milestones` | Per-plant bloom CSV (05/50/95-per-date) from classified preds + plant mapping; its own column schema; see `phenology` skill |
 | `register_plant_registry` | Names a plant-locations CSV set once (per-file `sha256`/`n_plants`, `crop`, `site`, a content digest over the parsed rows), so `deliver_orthomosaic_plant_counts` and `build_plant_mapping` read the same registered version by name (`plant_registry`) instead of re-asserting file paths |
-| `deliver_orthomosaic_plant_counts` | Per-plant detection counts from a persisted whole-raster prediction bucket plus a `plant_registry` name; georeferences the boxes, assigns them to plants, and delivers through `export_aggregated_csv`, so it inherits the same gate and provenance columns; refuses a bucket that cannot vouch for the caller's raster |
+| `deliver_orthomosaic_plant_counts` | Per-plant detection counts from a persisted whole-raster prediction bucket plus a `plant_registry` name; georeferences the boxes and delivers through `export_aggregated_csv`, so it inherits the same gate and provenance columns; refuses a bucket that cannot vouch for the caller's raster. Nearest-neighbour by default; `canopy_subject` switches to containment in an accepted canopy boundary instead (refused alongside a stated `nn_tolerance_m`). Fewer rows than the registry names can ship under either regime, the absent plants named on the delivery event (outside the raster's frame under both; with no segment, or with an ambiguous detection, under the segment regime) |
 | `deliver_per_plant_csv` | The general per-plant CSV door: takes `aggregate_per_plant`'s own output (a caller's own composition of buckets plus a plant mapping) and calls `export_aggregated_csv` directly, for the case neither specialist door's own composition covers; `predictions_by_date` names the buckets a delivery reads, whether or not a mapping is named; a named `plant_mapping` requires it in the same call and is resolved, refused by name when unknown, when it does not cover a delivered date, when it was built over a different dataset than the buckets belong to, or when its own recorded inputs no longer verify, through the same preamble the phenology doors share; every delivered `plant_id` must also appear among a plot the mapping actually assigned on the delivered dates; a delivery either fully verifies the mapping it names or names none |
 | `supersede_delivery` | Records that an already-shipped delivery's number is withdrawn or replaced (`delivery_supersessions`, keyed by the superseded event's id, naming its `output_sha256`, the replacement event when one exists, and the reason); never deletes or rewrites the file or the event |
 | `calibrate_scalar_operating_point` | Calibrate and validate a continuous or ordinal trait's prediction against a disjoint held-out split; stamps `ordinal_operating_point.json` / `regression_operating_point.json`, the on-disk producer `export_aggregated_csv` reconciles against |
@@ -153,9 +153,20 @@ neither: an unvalidated dimension always refuses on them.
   shape: no walked `build_plant_mapping` build exists for a whole-raster frame, so its own
   `plant_mapping` names the registry it read (byte-verified against what `register_plant_registry`
   recorded, refusing a rewritten file by name before any plant or prediction is read), the raster
-  identity every count is attributed through, the matched tolerance and its source, and
-  `detections_unattributed` scoped to the delivered raster, the raster-frame counterpart of
-  `images_unattributed`.
+  identity every count is attributed through, and `detections_unattributed` scoped to the
+  delivered raster, the raster-frame counterpart of `images_unattributed`. The nearest-neighbour
+  regime's disclosure adds the matched tolerance and its source, and every registry plant outside
+  the raster's own frame, by name (`plants_outside_raster`; "outside the raster" is the registry's
+  own point, never the tree's real canopy extent). The canopy-segment regime's disclosure instead
+  names the boundary document it read (path, digest, subject, segment count), the resolved
+  segment-to-plant ties with each one's own `clearance_m` (the margin a displaced registry
+  position would have to exceed to leave its tied segment; the tie itself rests on nothing but
+  that disclosed clearance, since no breeder-confirmed tie or validated position-error bound
+  exists yet), and every plant its own rows do not cover: outside the raster, inside no segment,
+  or inside a segment whose own detection was ambiguous. Either regime's per-plant count is a
+  raster-visible count, not a whole-tree total: where the crop's own knowledge document states 2D
+  occlusion undercounts a canopy-borne quantity (the chestnut document does, for `n_burrs`/
+  `burrs_density`), a raster count inherits that undercount.
 - `deliver_per_image_counts`'s live regime, given a `predictions_dir`, publishes into it through the same
   bracket `run_inference` publishes with (tile gate, count-claim gate, frozen-lineage-pointer
   refusal, write, lineage link, gated only by `allow_unvalidated_staging`, never a route to ship
