@@ -33,6 +33,7 @@ node_modules/
 *.tsbuildinfo
 
 # ── Frontend build output (keep static assets, ignore generated bundles) ──
+# Same output path is restated in frontend/.prettierignore and frontend/vite.config.ts's outDir.
 packages/tcip-web/static/index.html
 packages/tcip-web/static/assets/*.js
 packages/tcip-web/static/assets/*.js.map
