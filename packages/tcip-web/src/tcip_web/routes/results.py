@@ -1310,9 +1310,9 @@ def list_delivery_events(project_root: str) -> dict:
     its own name when a rebuild has not moved past it, the archived key
     (``resolved_mapping_key_for_citation``) when a superseding rebuild has, or ``None`` when
     neither name holds a stored record any more, for the panel to render as unresolved. A record
-    naming a whole-raster registry ``plant_mapping`` instead (``deliver_orthomosaic_plant_counts``'s
-    own ``PlantRegistryDisclosure``, which names no mapping to resolve) carries no
-    ``plant_mapping_resolved_key`` at all.
+    naming a whole-raster ``plant_mapping`` instead (``deliver_orthomosaic_plant_counts``'s own
+    ``PlantRegistryDisclosure`` or ``CanopySegmentDisclosure``, neither of which names a mapping
+    to resolve) carries no ``plant_mapping_resolved_key`` at all.
     """
     from tcip_mcp.pipelines.delivery_events_schema import is_mapping_disclosure, with_supersessions
     from tcip_mcp.pipelines.postprocessing.plant_mapping import resolved_mapping_key_for_citation
