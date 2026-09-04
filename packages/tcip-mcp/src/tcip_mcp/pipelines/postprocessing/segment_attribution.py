@@ -42,7 +42,7 @@ from tcip_mcp.pipelines.postprocessing.orthomosaic_mapping import (
     detection_location,
     plants_in_frame,
 )
-from tcip_mcp.pipelines.postprocessing.plant_mapping import PlantRecord, assignment_is_attributed
+from tcip_mcp.pipelines.postprocessing.plant_mapping import PlantRecord, require_named_plants
 
 
 class CanopySegmentRefusal(ValueError):
@@ -252,28 +252,15 @@ def tie_segments_to_plants(
     """Tie every one of ``segments`` to the one registry plant, if any, whose own projected
     position it contains.
 
-    Refuses by name: a registry with a blank ``plot_name`` (:func:`~tcip_mcp.pipelines.
-    postprocessing.plant_mapping.assignment_is_attributed`'s own rule) or a duplicate ``plot_name``
-    (two rows, one identity, would merge two trees' detections into one row in
-    ``aggregate_per_plant``'s own grouping); a plant inside more than one segment; a segment
-    containing more than one plant; no in-frame plant in the registry at all. Plants are
+    Refuses by name: a registry with a blank or duplicate ``plot_name``
+    (:func:`~tcip_mcp.pipelines.postprocessing.plant_mapping.require_named_plants`, the same check
+    the nearest-neighbour regime runs over its own registry); a plant inside more than one segment;
+    a segment containing more than one plant; no in-frame plant in the registry at all. Plants are
     partitioned first through :func:`~tcip_mcp.pipelines.postprocessing.orthomosaic_mapping.
     plants_in_frame`, so a plant outside the raster is never tested for containment and is instead
     disclosed by name on the returned :class:`SegmentTie`.
     """
-    for p in plants:
-        if not assignment_is_attributed({"plot_name": p.plot_name}):
-            raise ValueError(
-                f"the plant registry carries a blank plot_name (accession {p.accession_name!r}); "
-                "every plant a canopy segment ties to must carry a plot_name"
-            )
-    names = [p.plot_name for p in plants]
-    duplicates = sorted({n for n in names if names.count(n) > 1})
-    if duplicates:
-        raise ValueError(
-            f"the plant registry carries duplicate plot_name(s) {duplicates}; a segment tied to a "
-            "duplicated identity would merge two trees' detections into one aggregation row"
-        )
+    require_named_plants(plants)
 
     in_frame, outside = plants_in_frame(plants, georef, width=width, height=height)
     if not in_frame:
