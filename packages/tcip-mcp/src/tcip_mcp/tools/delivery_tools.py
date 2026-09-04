@@ -56,15 +56,14 @@ def deliver_per_plant_csv(
     writer's own ``fieldnames`` list and nothing else; this docstring does not repeat it.
 
     ``plant_mapping``, when named, is a claim about where ``results``' plant identities came from,
-    and a claim the data must positively carry: naming a mapping that is not on record refuses,
-    the way ``deliver_phenology_milestones`` refuses one. When ``dataset_root`` and
-    ``predictions_by_date`` are also given, the named mapping's own recorded inputs are freshly
-    verified against them (``plant_mapping.verify_mapping_inputs``, the same check the phenology
-    doors run), and the resulting disclosure is recorded onto the delivery event, naming the
-    mapping's own digest rather than a bare string a reader cannot check. Without those two
-    arguments there is nothing on disk this door can verify the name against beyond its own
-    existence, so the delivery event carries no mapping disclosure, honestly, rather than one this
-    door never checked.
+    and a claim the data must positively carry: a delivery either fully verifies the mapping it
+    names or names none at all, never a half state where a name is resolved but nothing about it is
+    checked. Naming a mapping without both ``dataset_root`` and ``predictions_by_date`` refuses,
+    stating the two arguments; naming one that is not on record refuses by name, the way
+    ``deliver_phenology_milestones`` refuses one; naming one that resolves, with both arguments
+    given, is freshly verified against them (``plant_mapping.verify_mapping_inputs``, the same
+    check the phenology doors run), and the resulting disclosure is recorded onto the delivery
+    event, naming the mapping's own digest rather than a bare string a reader cannot check.
 
     Args:
         results: ``aggregate_per_plant``'s own output: one dict per plant, each carrying at least
@@ -81,30 +80,32 @@ def deliver_per_plant_csv(
         pipeline_version: Pipeline identifier, written into every row's own column.
         plant_mapping: The name of the plant mapping (``build_plant_mapping``'s own persisted
             record) whose assignments gave ``results`` their ``plant_id`` values. Empty (the
-            default) states no claim and is not checked; a non-empty name is resolved through
-            ``plant_mapping.load_mapping`` and refuses by name when no such record exists.
+            default) states no claim and neither ``dataset_root`` nor ``predictions_by_date`` is
+            required; a non-empty name requires both and is resolved through
+            ``plant_mapping.load_mapping``, refusing by name when no such record exists.
         pred_dirs: The prediction buckets whose on-disk validity the writer reconciles into this
             delivery's evidence gate (the same buckets ``results``' own values came from). Omitted
             or empty has no on-disk validity producer at all, and this door takes no
             acknowledgement, so an unvalidated delivery always refuses. Derived from
             ``predictions_by_date``'s own values when omitted and that is given.
-        dataset_root: The dataset ``predictions_by_date`` belongs to, required alongside it to
-            verify ``plant_mapping``'s own recorded inputs; has no effect without a named
-            ``plant_mapping``.
+        dataset_root: The dataset ``predictions_by_date`` belongs to. Required whenever
+            ``plant_mapping`` is named (to verify its own recorded inputs); refuses naming both
+            arguments when ``plant_mapping`` is named and this is omitted. Has no effect when
+            ``plant_mapping`` is empty.
         predictions_by_date: ``{date: predictions_dir}`` for the buckets this delivery reads,
-            keyed by capture date, so ``plant_mapping``'s own recorded inputs can be freshly
-            verified against them. Optional: a caller that already trusts its own composition
-            outside this door's reach can omit it, at the cost of the delivery event's mapping
-            disclosure.
+            keyed by capture date. Required whenever ``plant_mapping`` is named, so its own
+            recorded inputs are freshly verified against them rather than trusted unresolved;
+            refuses naming both arguments when ``plant_mapping`` is named and this is omitted.
         images_dir: The buckets' own images directory, required when a result states
             ``scale_document`` alongside ``pred_dirs`` (see ``export_aggregated_csv``).
         scale_capture_id: The capture this delivery's physical scale must match, when the scale is
             capture-scoped.
 
     Returns:
-        A dict carrying ``csv_path``, ``n_plants``, ``plant_mapping`` (the name, echoed back),
-        ``plant_mapping_record_sha256`` (the resolved record's own digest, blank when no mapping
-        was named), and the writer's own delivered tail (``operating_point_validated``,
+        A dict carrying ``csv_path``, ``n_plants``, ``plant_mapping`` and
+        ``plant_mapping_record_sha256`` (both blank together when no mapping was named, both
+        carrying the name and its freshly-verified digest together when one was, never one without
+        the other), and the writer's own delivered tail (``operating_point_validated``,
         ``unvalidated_dimensions``, ``checkpoint_sha256``, ``producing_experiment_id``,
         ``validation_record``); or ``{"error": ...}`` naming the refusal, unchanged from
         ``export_aggregated_csv`` or from the mapping's own resolution/verification.
@@ -116,19 +117,19 @@ def deliver_per_plant_csv(
     from tcip_mcp.traits import TraitUnknownError
 
     mapping_build = None
+    mapping_disclosure = None
     if plant_mapping:
+        if dataset_root is None or predictions_by_date is None:
+            return {"error": (
+                f"plant_mapping {plant_mapping!r} is named without both dataset_root and "
+                "predictions_by_date: a delivery either fully verifies the mapping it names or "
+                "names none, never a name resolved with nothing checked against it. Pass both, "
+                "or name no mapping at all.")}
         mapping_build = plant_mapping_pipeline.load_mapping(platform_state_root(), plant_mapping)
         if mapping_build is None:
             return {"error": (
                 f"mapping not found: {plant_mapping!r}; build one with build_plant_mapping "
                 "before delivering a CSV whose plant identities it produced")}
-
-    mapping_disclosure = None
-    if mapping_build is not None and predictions_by_date is not None:
-        if dataset_root is None:
-            return {"error": (
-                "dataset_root is required alongside predictions_by_date to verify plant_mapping "
-                f"{plant_mapping!r}'s own recorded inputs")}
         verified = plant_mapping_pipeline.verify_mapping_inputs(
             mapping_build, dataset_root, predictions_by_date)
         if "refusal" in verified:
