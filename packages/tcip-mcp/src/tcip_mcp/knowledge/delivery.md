@@ -152,9 +152,10 @@ neither: an unvalidated dimension always refuses on them.
   `deliver_orthomosaic_plant_counts`'s own delivery event carries the same idea in a different
   shape: no walked `build_plant_mapping` build exists for a whole-raster frame, so its own
   `plant_mapping` names the registry it read (byte-verified against what `register_plant_registry`
-  recorded, refusing a rewritten file by name before anything is read), the raster identity every
-  count is attributed through, the matched tolerance and its source, and `detections_unattributed`
-  scoped to the delivered raster, the raster-frame counterpart of `images_unattributed`.
+  recorded, refusing a rewritten file by name before any plant or prediction is read), the raster
+  identity every count is attributed through, the matched tolerance and its source, and
+  `detections_unattributed` scoped to the delivered raster, the raster-frame counterpart of
+  `images_unattributed`.
 - `deliver_per_image_counts`'s live regime, given a `predictions_dir`, publishes into it through the same
   bracket `run_inference` publishes with (tile gate, count-claim gate, frozen-lineage-pointer
   refusal, write, lineage link, gated only by `allow_unvalidated_staging`, never a route to ship

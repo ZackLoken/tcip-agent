@@ -13,8 +13,8 @@ fresh delivery through the door that writes this record, or removing the record 
 
 ``plant_mapping`` carries one of two disclosure shapes, or ``null`` (``delivery_events_schema.py``):
 a walked capture mapping's, or ``deliver_orthomosaic_plant_counts``'s own whole-raster registry
-disclosure. Every stored record written so far still validates against the shape it always carried,
-so this script gains no write-forward for the second shape, only this sentence.
+disclosure. Every stored record written so far still validates against the shape it always
+carried, so neither disclosure shape needs a write-forward here.
 
 The one exception is ``acknowledged_by``/``acknowledgement_reason``: a record written before this
 pair existed carries no acknowledgement of any kind, so ``null`` on both is not a guess but the
