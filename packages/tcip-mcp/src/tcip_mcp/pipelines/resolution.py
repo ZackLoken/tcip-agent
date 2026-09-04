@@ -1917,7 +1917,9 @@ def delivered_tail(
     when none), so a reader can always recover the gate's full outcome behind a floored validity
     column without a second spelling of it. ``acknowledged_by``/``acknowledgement_reason`` named in
     ``columns`` carry ``gate.acknowledged_by``/``gate.acknowledgement_reason`` verbatim (``None``
-    when nothing was acknowledged), the phenology door's own column list today, no other door's.
+    when nothing was acknowledged): every door whose own column list names them carries the pair,
+    the phenology writer and the two count writers (``export_detection_csv``,
+    ``export_aggregated_csv``) alike.
     """
     if asserted and asserted.get("produced_at") is not None:
         raise ValueError(
@@ -2700,10 +2702,10 @@ def bind_classifier_validity(
 class Acknowledgement:
     """The breeder's own act of shipping an unvalidated delivery: who did it and why.
 
-    In production, this is built only by the web delivering route
-    (``tcip_web.routes.results.export_csv``) once a request names a real user; an agent
-    acknowledging its own unvalidated output would be attesting to a breeder's judgment it never
-    obtained. That is a convention at this Python seam, not a rail the type enforces: nothing here
+    In production, this is built only by the web results routes
+    (``tcip_web.routes.results.export_csv`` and ``export_count_csv``) once a request names a real
+    user; an agent acknowledging its own unvalidated output would be attesting to a breeder's
+    judgment it never obtained. That is a convention at this Python seam, not a rail the type enforces: nothing here
     stops another caller from constructing one. Whoever builds an ``Acknowledgement`` is recorded
     by name and reason regardless, so a caller outside the web route still leaves an attributed
     trail rather than a silent bare number. ``acknowledged_by`` and ``reason`` are both required

@@ -246,8 +246,11 @@ unaffected by a caller's project root.
   `operating_point_validated=false` (and every other unvalidated dimension the same way) so the
   un-trustworthiness travels with the CSV. This is for an honest, breeder-attested provisional
   delivery, never for silently shipping a bare number. No MCP tool builds an `Acknowledgement`
-  itself; the ordinal, regression and per-plant walked-capture aggregate kinds still have no
-  acknowledged route at all, since no web door composes them.
+  itself; the ordinal and regression aggregates have no acknowledged route since their per-plant
+  strategy is the agent's own choice, reached only through `deliver_per_plant_csv`, which accepts
+  a caller-composed table the principle above refuses a web route for; nor does a per-plant count
+  aggregate over walked captures, since no structured field states its across-dates aggregation
+  strategy for a breeder to confirm, and a door fixing one would prescribe it.
 
 The private pass beneath `run_inference` stays fully ungated but honestly stamped: the review loop
 must be able to produce unvalidated predictions to *reach* a validated measurement, so it never
