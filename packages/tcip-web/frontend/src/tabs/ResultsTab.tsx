@@ -352,9 +352,9 @@ export function ResultsTab() {
   // The exact request the displayed numbers came from: the CSV door recomputes from these inputs
   // rather than being handed the rows, so export and screen share one producer.
   const [lastRequest, setLastRequest] = useState<PhenologyRequest | null>(null);
-  // Reconciled evidence for what is currently displayed. `provisional` is true whenever a dimension
+  // Reconciled evidence for what is currently displayed. `unvalidated` is true whenever a dimension
   // lacked on-disk backing, so the tables can say so instead of rendering a phenology date as "valid".
-  const [provisional, setProvisional] = useState(false);
+  const [unvalidated, setUnvalidated] = useState(false);
   const [validity, setValidity] = useState<Record<string, string>>({});
   // What the mapping's own delivery-time check could not verify, shown beside the numbers rather
   // than only in the exported CSV.
@@ -363,7 +363,7 @@ export function ResultsTab() {
   const [datesDelivered, setDatesDelivered] = useState<string[]>([]);
   const [imagesUnattributed, setImagesUnattributed] = useState(0);
   const [unvalidatedRefusal, setUnvalidatedRefusal] = useState<string | null>(null);
-  // The reason field for acknowledging and exporting a provisional measurement; shown once the
+  // The reason field for acknowledging and exporting an unvalidated measurement; shown once the
   // breeder opts into the acknowledged-export flow, cleared on every fresh compute.
   const [showAckExport, setShowAckExport] = useState(false);
   const [ackReason, setAckReason] = useState("");
@@ -727,7 +727,7 @@ export function ResultsTab() {
       const res = await resultsApi.phenologyMeasurement(request);
       // The numbers and the evidence that qualifies them arrive together, so the tables below can
       // never render an unvalidated phenology measurement as though it were a delivery.
-      setProvisional(res.has_unvalidated_dimensions);
+      setUnvalidated(res.has_unvalidated_dimensions);
       setValidity(res.validated);
       setCapturesUnverified(res.captures_unverified ?? []);
       setPlantCsvsUnverified(res.plant_csvs_unverified ?? []);
@@ -766,7 +766,7 @@ export function ResultsTab() {
 
   async function downloadCsv(payload: "curves" | "milestones", filename: string) {
     if (!lastRequest) return;
-    if (provisional && !ackReason.trim()) return;
+    if (unvalidated && !ackReason.trim()) return;
     try {
       const body: ExportCsvRequest = {
         project_root: lastRequest.project_root,
@@ -776,7 +776,7 @@ export function ResultsTab() {
         payload,
         filename,
         user: useStore.getState().user || undefined,
-        acknowledgement: provisional ? { reason: ackReason.trim() } : null,
+        acknowledgement: unvalidated ? { reason: ackReason.trim() } : null,
       };
       const blob = await resultsApi.downloadCsv(body);
       const url = URL.createObjectURL(blob);
@@ -799,7 +799,7 @@ export function ResultsTab() {
   }
 
   // Never export a CSV built on predictions with no positive-state class, mirroring
-  // deliver_phenology_milestones. A provisional measurement exports once acknowledged (below).
+  // deliver_phenology_milestones. An unvalidated measurement exports once acknowledged (below).
   const exportBlocked = positiveClassUnassessed;
   const downloadOnsetCsv = () => {
     if (exportBlocked) return;
@@ -1142,10 +1142,11 @@ export function ResultsTab() {
                 {unvalidatedRefusal && (
                   <div className="text-[11px] text-tcip-fp border border-tcip-fp/40 rounded p-2 flex flex-col gap-2">
                     <div>
-                      These predictions have no validated operating point on disk, so this is not
-                      yet a deliverable phenology measurement. Calibrate first, or look at the
-                      numbers with their unvalidated dimensions marked and acknowledge and export
-                      them anyway.
+                      At least one dimension behind this measurement (the count operating point, the
+                      positive-state classifier, or the tile scale; see detail below) has no
+                      validated evidence on disk, so this is not yet a deliverable phenology
+                      measurement. Calibrate first, or look at the numbers with their unvalidated
+                      dimensions marked and acknowledge and export them anyway.
                     </div>
                     <div className="text-tcip-muted">{unvalidatedRefusal}</div>
                     <div className="flex gap-2">
@@ -1169,7 +1170,7 @@ export function ResultsTab() {
                     </div>
                   </div>
                 )}
-                {provisional && (
+                {unvalidated && (
                   <div className="text-[11px] text-tcip-fp border border-tcip-fp/40 rounded p-2 flex flex-col gap-2">
                     <div>
                       Unvalidated dimensions {unvalidatedDims.join(", ") || "unknown"}. Calibrate to
@@ -1212,9 +1213,14 @@ export function ResultsTab() {
                   One computed measurement in two shapes: every (plant, date) point, or the
                   milestone dates read off it.
                 </p>
-                {!provisional || !showAckExport ? (
+                <p className="text-[10px] text-tcip-muted">
+                  Only a phenology milestone delivery can be acknowledged and exported unvalidated
+                  from here; per-image and per-plant counts have no acknowledged route and need a
+                  validated operating point before they can be delivered at all.
+                </p>
+                {!unvalidated || !showAckExport ? (
                   <div className="flex gap-1">
-                    {provisional ? (
+                    {unvalidated ? (
                       <button
                         className="tcip-btn flex-1 text-[11px]"
                         onClick={() => setShowAckExport(true)}
@@ -1246,7 +1252,8 @@ export function ResultsTab() {
                     {!user.trim() && (
                       <div className="text-[11px] text-tcip-fp">
                         Set your name on the workspace page before delivering an acknowledged
-                        export: a server identity is never written as a breeder's name.
+                        export: the recorded name is the one this session states, not an
+                        authenticated identity.
                       </div>
                     )}
                     <input
@@ -1376,7 +1383,7 @@ export function ResultsTab() {
                               >
                                 no observations
                               </span>
-                            ) : rowValid && provisional ? (
+                            ) : rowValid && unvalidated ? (
                               // Coverage is complete, but the measurement behind these dates has no
                               // validated operating point. The banner announcing that sits two panels
                               // up and scrolls out of view, so the row must say so where it is read:
