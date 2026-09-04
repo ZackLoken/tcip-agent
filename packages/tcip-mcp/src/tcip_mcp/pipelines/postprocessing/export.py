@@ -293,12 +293,14 @@ def export_detection_csv(
     Raises:
         DeliveryRefused: the gate refused (an unvalidated dimension with no acknowledgement that
             clears it); carries the ``DeliveryGateResult`` and both reconcilers' binding notes.
-        ValueError: the ``trait``'s ``per_image_count`` operationalization is unrecorded, not
-            breeder-confirmed, or was withdrawn since the first check; never carries a gate result,
-            so a caller must not read a delivered count off this raise.
+        OperationalizationRefused (``tcip_mcp.operationalization``): the ``trait``'s
+            ``per_image_count`` operationalization is unrecorded, not breeder-confirmed, or was
+            withdrawn since the first check; carries the failed check and no counts, so a caller
+            must not read a delivered count off this raise.
     """
     from tcip_mcp.operationalization import (
         PER_IMAGE_COUNT,
+        OperationalizationRefused,
         check_operationalization,
         resolve_trait_and_record,
     )
@@ -322,7 +324,7 @@ def export_detection_csv(
     # This door never delivers a crossing kind, so it has no registry to check a positive class against.
     stated = check_operationalization(spec, record, PER_IMAGE_COUNT, id_maps=id_maps, registry=None)
     if not stated.ok:
-        raise ValueError(stated.message)
+        raise OperationalizationRefused(stated)
 
     # With no pred_dirs nothing on disk backs the count's validity, so the dimension floors to
     # unvalidated rather than trusting the caller's bare string (mirrors export_aggregated_csv).
@@ -351,7 +353,7 @@ def export_detection_csv(
     still_stated = check_operationalization(
         spec_now, record_now, PER_IMAGE_COUNT, id_maps=id_maps, registry=None, basis=stated.basis)
     if not still_stated.ok:
-        raise ValueError(still_stated.message)
+        raise OperationalizationRefused(still_stated)
 
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
 

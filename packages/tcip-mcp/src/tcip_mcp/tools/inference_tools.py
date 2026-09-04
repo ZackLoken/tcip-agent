@@ -2357,13 +2357,15 @@ def per_image_counts_from_bucket(
     ``{"error": ...}``, the route's structured HTTP detail) composes it from which class this
     raises rather than parsing a message. ``OperationalizationRefused``
     (``tcip_mcp.operationalization``) carries the failed check and no counts, raised either from
-    this call's own pre-check or from ``export_detection_csv``'s post-gate re-check (a
-    confirmation withdrawn, or a spec field moved, between the two); ``DeliveryRefused``
+    this call's own pre-check, from ``export_detection_csv``'s own pre-check (which additionally
+    reads each recorded bucket's ``id_map`` for the confirmed subject, never checked here since
+    the bucket is not yet touched), or from that writer's post-gate re-check (a confirmation
+    withdrawn, or a spec field moved, since either check); ``DeliveryRefused``
     (``pipelines.resolution``) is the writer's own gate refusal, its ``facts`` attribute set here
     to this call's own counts-bearing facts; ``CountDeliveryRefused`` (``pipelines.resolution``)
-    covers everything else this door refuses on (a missing stamp, a whole-raster bucket, a trait
-    mismatch, a malformed filename map, an empty bucket), each carrying the same facts its
-    ``{"error": ...}`` shape carried before this refactor.
+    covers everything else this door refuses on (a missing stamp, a whole-raster bucket, an
+    unknown or mismatched trait, a malformed filename map, an empty bucket), each carrying the
+    same facts the tool's own ``{"error": ...}`` shape carries.
     """
     from tcip_mcp.operationalization import (
         PER_IMAGE_COUNT,
@@ -2374,9 +2376,13 @@ def per_image_counts_from_bucket(
     from tcip_mcp.pipelines.resolution import (
         VALIDATED_FALSE, CountDeliveryRefused, read_operating_point_sidecar, stamp_names_raster,
     )
+    from tcip_mcp.traits import TraitUnknownError
 
-    spec, record, _specs_dir = resolve_trait_and_record(
-        trait, PER_IMAGE_COUNT, project_root=project_root)
+    try:
+        spec, record, _specs_dir = resolve_trait_and_record(
+            trait, PER_IMAGE_COUNT, project_root=project_root)
+    except TraitUnknownError as exc:
+        raise CountDeliveryRefused(str(exc)) from exc
     # A per_image_count delivery names no positive class, so check_operationalization ignores a
     # registry for this kind regardless of what one would resolve to.
     stated = check_operationalization(spec, record, PER_IMAGE_COUNT, registry=None)
@@ -2449,13 +2455,6 @@ def per_image_counts_from_bucket(
         if image_note is not None:
             exc.facts["image_note"] = image_note
         raise
-
-    spec_now, record_now, _ = resolve_trait_and_record(
-        trait, PER_IMAGE_COUNT, project_root=project_root)
-    still_stated = check_operationalization(
-        spec_now, record_now, PER_IMAGE_COUNT, registry=None, basis=stated.basis)
-    if not still_stated.ok:
-        raise OperationalizationRefused(still_stated)
 
     out = {
         "csv_path": csv_path,
