@@ -22,6 +22,7 @@ export default defineConfig({
     ),
   },
   build: {
+    // Same path is restated in the repo root .gitignore and this dir's .prettierignore.
     outDir: "../static",
     emptyOutDir: true,
     // No sourcemaps in the shipped bundle: keeps static/ (and any wheel) lean. Use
