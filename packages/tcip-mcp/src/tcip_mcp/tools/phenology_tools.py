@@ -631,7 +631,6 @@ def deliver_phenology_milestones(
     classifier_pred_dirs: list[str] | None = None,
     operating_point_conf: float | None = None,
     operating_point_validated: str | None = None,
-    acknowledge_unvalidated: bool = False,
 ) -> dict:
     """Per-plant phenology milestones from classified predictions + a plant mapping.
 
@@ -672,10 +671,10 @@ def deliver_phenology_milestones(
             validity. It only *lowers* the result: the real state is read from each bucket's
             ``operating_point.json`` and floored against this (a missing/unvalidated sidecar
             floors the curve to ``false``). Must reconcile to a reference
-            ``accepted_references("annotations")`` recognizes to deliver unacknowledged.
-        acknowledge_unvalidated: Override the gate, write the CSV even when the classifier or
-            operating point is unvalidated, stamping the un-validated dimension as ``false`` so
-            the un-trustworthiness travels with the delivery.
+            ``accepted_references("annotations")`` recognizes to deliver: this tool takes no
+            acknowledgement, so an unvalidated dimension always refuses here. Only the Results
+            tab's ``export_csv`` route can deliver this trait's ``state_crossing_dates`` unvalidated,
+            through a breeder's own acknowledged act.
 
     A bucket produced by a tiled run also gates on its ``tile_size``: the tile edge scales the
     per-image counts the positive fraction is built from, so a run with no persisted training
@@ -812,7 +811,7 @@ def deliver_phenology_milestones(
     # A delivered phenotype needs both the classifier and the count operating point validated against a
     # reference sized to the trait, the one shared refuse-or-stamp gate, or an explicit acknowledge.
     flags = phenology.phenology_delivery_flags(classifier_state, op_state, tile_recon)
-    gate = check_delivery_gate(flags, acknowledge_unvalidated=acknowledge_unvalidated)
+    gate = check_delivery_gate(flags)
     if not gate.ok:
         floor_note = ""
         if recon["missing_sidecars"] or recon["unvalidated_buckets"]:
@@ -841,8 +840,9 @@ def deliver_phenology_milestones(
                 f"validated count operating point (reconciled from operating_point.json = "
                 f"{op_state!r})." + floor_note
                 + " Validate both (calibrate_classifier_operating_point for the classifier; a "
-                "calibrated run_inference for the count), or pass acknowledge_unvalidated=True "
-                "to write a clearly-flagged provisional CSV."
+                "calibrated run_inference for the count). This tool takes no acknowledgement; "
+                "acknowledge and deliver a clearly-flagged provisional CSV from the Results tab "
+                "instead."
             ),
             "positive_state_classifier_validated": gate.stamp["classifier"],
             "operating_point_validated": op_state,
@@ -873,7 +873,7 @@ def deliver_phenology_milestones(
     # (including the majority crossing-unconfirmed marker) and records the delivery.
     cells = phenology.write_phenology_csv(
         "deliver_phenology_milestones", rows, Path(output_csv_path), spec,
-        flags=flags, acknowledge_unvalidated=acknowledge_unvalidated, basis=still_stated.basis,
+        flags=flags, acknowledgement=None, basis=still_stated.basis,
         operating_point_conf=operating_point_conf, producer=producer, bindings=recon["bindings"],
         pred_dirs=list(predictions_by_date.values()), project_root=platform_state_root(),
         plant_mapping=disclosure)

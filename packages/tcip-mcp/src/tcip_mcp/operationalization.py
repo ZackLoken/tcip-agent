@@ -376,7 +376,7 @@ def check_operationalization(
     or spec that moved in between refuses with state 6 rather than delivering against a confirmation
     nobody gave.
 
-    ``acknowledge_unvalidated`` is deliberately not a parameter. An acknowledged provisional number
+    An acknowledgement is deliberately not a parameter here. An acknowledged provisional number
     whose meaning is stated is honest and ships stamped false; an acknowledged number whose meaning
     is unstated is not a number.
     """
