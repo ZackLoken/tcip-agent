@@ -34,6 +34,8 @@ it in `pipelines/postprocessing/aggregation.py` if this table looks stale):
 | operating_point_validated | string | The named dimension's cleared reference (paired with `measurement_document`, e.g. `measurement_document=ordinal_operating_point` beside this column naming which document it answers for), floored false whenever any other gated dimension with no column of its own (tile_size, scale, claim_scope) is unvalidated |
 | unvalidated_dimensions | string | Every gated dimension that did not validate, `;`-joined; blank when everything cleared |
 | validation_record | string | `experiment:digest` of the validation record the delivered claim was verified against; blank when the numbers rest on no record |
+| acknowledged_by | string | Who shipped this delivery unvalidated, from the gate's own `Acknowledgement`; blank on a fully validated delivery, even one posted with one (the gate discards an acknowledgement that cleared nothing) |
+| acknowledgement_reason | string | Why, from the same `Acknowledgement`; blank together with `acknowledged_by` |
 
 ## Aggregation Rules
 
@@ -61,7 +63,8 @@ Examples use real `crops.yml` trait names; verify any trait against `crops.yml` 
 | `run_inference` | Run a checkpoint over images or a raster and persist predictions as per-image JSON (COCO-shaped) or, for a raster, one whole-mosaic prediction file. A bucket (`output_dir`, the run's own prediction directory, not a score bin) with review verdicts is immutable; the run redirects to a fresh `<dir>@r2` bucket (see the response's `output_dir`); `overwrite=True` forces in-place but is refused when verdicts exist |
 | `deliver_phenology_milestones` | Per-plant bloom CSV (05/50/95-per-date) from classified preds + plant mapping; its own column schema; see `phenology` skill |
 | `register_plant_registry` | Names a plant-locations CSV set once (per-file `sha256`/`n_plants`, `crop`, `site`, a content digest over the parsed rows), so `deliver_orthomosaic_plant_counts` and `build_plant_mapping` read the same registered version by name (`plant_registry`) instead of re-asserting file paths |
-| `deliver_orthomosaic_plant_counts` | Per-plant detection counts from a persisted whole-raster prediction bucket plus a `plant_registry` name; georeferences the boxes and delivers through `export_aggregated_csv`, so it inherits the same gate and provenance columns; refuses a bucket that cannot vouch for the caller's raster. Nearest-neighbour by default; `canopy_subject` switches to containment in an accepted canopy boundary instead (refused alongside a stated `nn_tolerance_m`). Fewer rows than the registry names can ship under either regime, the absent plants named on the delivery event (outside the raster's frame under both; with no segment, or with an ambiguous detection, under the segment regime) |
+| `deliver_orthomosaic_plant_counts` | Per-plant detection counts from a persisted whole-raster prediction bucket plus a `plant_registry` name; georeferences the boxes and delivers through `export_aggregated_csv`, so it inherits the same gate and provenance columns; refuses a bucket that cannot vouch for the caller's raster. Nearest-neighbour by default; `canopy_subject` switches to containment in an accepted canopy boundary instead (refused alongside a stated `nn_tolerance_m`). Fewer rows than the registry names can ship under either regime, the absent plants named on the delivery event (outside the raster's frame under both; with no segment, or with an ambiguous detection, under the segment regime). This tool builds no acknowledgement, so an unvalidated dimension always refuses here; the Results tab's count export (`/api/results/export_count_csv`) is the one surface that can acknowledge and ship this kind unvalidated |
+| `deliver_per_image_counts` | Per-image detection-count CSV; see the Per-Image CSV Schema above. Builds no acknowledgement either, so its bucket regime's unvalidated dimension always refuses here too; the same Results tab count export serves it |
 | `deliver_per_plant_csv` | The general per-plant CSV door: takes `aggregate_per_plant`'s own output (a caller's own composition of buckets plus a plant mapping) and calls `export_aggregated_csv` directly, for the case neither specialist door's own composition covers; `predictions_by_date` names the buckets a delivery reads, whether or not a mapping is named; a named `plant_mapping` requires it in the same call and is resolved, refused by name when unknown, when it does not cover a delivered date, when it was built over a different dataset than the buckets belong to, or when its own recorded inputs no longer verify, through the same preamble the phenology doors share; every delivered `plant_id` must also appear among a plot the mapping actually assigned on the delivered dates; a delivery either fully verifies the mapping it names or names none |
 | `supersede_delivery` | Records that an already-shipped delivery's number is withdrawn or replaced (`delivery_supersessions`, keyed by the superseded event's id, naming its `output_sha256`, the replacement event when one exists, and the reason); never deletes or rewrites the file or the event |
 | `calibrate_scalar_operating_point` | Calibrate and validate a continuous or ordinal trait's prediction against a disjoint held-out split; stamps `ordinal_operating_point.json` / `regression_operating_point.json`, the on-disk producer `export_aggregated_csv` reconciles against |
@@ -69,16 +72,37 @@ Examples use real `crops.yml` trait names; verify any trait against `crops.yml` 
 | `calibrate_physical_scale` | Derive and validate a per-pixel physical scale against a breeder-supplied reference, and stamp it into a bucket's `resolve_scale.json`, the `scale_document` cell's producer |
 | `materialize_review_dataset` | Turn human review verdicts into a curated training set for re-delivery after correction; see `annotation` skill |
 
-`deliver_per_image_counts` produces a different, per-image `image, detection_count,
-avg_confidence` CSV, not the per-plant schema above (the `image` cell is the source basename with
-its extension, this platform's image identity everywhere else). The bucket regime resolves it from
-the stamp's `image_filenames` map (each prediction document's stem mapped to its source image's
-filename, recorded at publication) and falls back to the bare stem, disclosed in the response's
-`image_note`, for a bucket stamped before that map existed or for a stem the map does not name.
-Don't reach for it when the per-plant schema is what's wanted. Two source regimes: live (`checkpoint_path` +
-`images_dir`, routing through the same verified pass `run_inference` runs, optionally persisting the
-counted predictions into `predictions_dir` under `run_inference`'s own publish contract) or bucket
-(`predictions_dir` alone, no GPU, reading an existing reviewed bucket's own stamp), exactly one stated.
+`deliver_per_image_counts` produces a different, per-image CSV, not the per-plant schema above
+(the `image` cell is the source basename with its extension, this platform's image identity
+everywhere else). The bucket regime resolves it from the stamp's `image_filenames` map (each
+prediction document's stem mapped to its source image's filename, recorded at publication) and
+falls back to the bare stem, disclosed in the response's `image_note`, for a bucket stamped before
+that map existed or for a stem the map does not name. Don't reach for it when the per-plant schema
+is what's wanted. Two source regimes: live (`checkpoint_path` + `images_dir`, routing through the
+same verified pass `run_inference` runs, optionally persisting the counted predictions into
+`predictions_dir` under `run_inference`'s own publish contract) or bucket (`predictions_dir` alone,
+no GPU, reading an existing reviewed bucket's own stamp), exactly one stated.
+
+### Per-Image CSV Schema
+
+Columns, in the order `export_detection_csv` writes them (its `fieldnames` is the authority; check
+it in `pipelines/postprocessing/export.py` if this table looks stale):
+
+| Column | Type | Description |
+|--------|------|-------------|
+| image | string | Source image basename with its extension |
+| detection_count | int | Real detections in this image (a zero-extent box excluded) |
+| avg_confidence | float | Mean score across this image's kept detections |
+| measurement_document | string | Always `operating_point`: a detection count never rests on a scalar head or a physical scale |
+| producer_model_sha256 | string | Checkpoint hash of the model that produced the predictions; blank when the bucket names an experiment nothing outside it can corroborate |
+| producing_experiment_id | string | The run that produced the predictions, blank when there was none or nothing corroborates it |
+| operating_point_conf | float | The count operating point's confidence threshold |
+| produced_at | string | Timestamp this CSV was written, stamped by the shared tail composition |
+| operating_point_validated | string | The count operating point's cleared reference |
+| unvalidated_dimensions | string | Every gated dimension that did not validate, `;`-joined; blank when everything cleared |
+| validation_record | string | `experiment:digest` of the validation record the delivered claim was verified against; blank when the numbers rest on no record |
+| acknowledged_by | string | Who shipped this delivery unvalidated; blank on a fully validated delivery |
+| acknowledgement_reason | string | Why, from the same `Acknowledgement`; blank together with `acknowledged_by` |
 
 ## The meaning door (what the number is)
 
@@ -122,13 +146,21 @@ one of the five measurement-document kinds a bucket can carry (`operating_point.
 `resolve_scale.json`), rather than trusting a caller-asserted string, then hands the resolved states to one shared
 `check_delivery_gate`, which does no I/O of its own: it judges the already-resolved dict and ships
 only when every dimension it was handed clears, or two independent escapes cover what didn't. An
-`Acknowledgement` (a real name and a non-empty reason, built only by the web delivering route)
-clears any dimension, stamped false so the un-trustworthiness travels with the CSV; today only the
-phenology writer ever takes one, since it is the one delivery kind a web door serves.
+`Acknowledgement` (a real name and a non-empty reason, built only by a web delivering route)
+clears any dimension, stamped false so the un-trustworthiness travels with the CSV. The
+phenology writer, `export_detection_csv` and `export_aggregated_csv` all take one now, each from
+the web results route that composes it for its own delivery kind (`/export_csv` for phenology,
+`/export_count_csv` for the per-image bucket regime and the per-plant orthomosaic composition);
+no MCP tool builds one, since an agent acknowledging its own unvalidated output would be
+attesting to a breeder's judgment it never obtained.
 `allow_unvalidated_staging` clears only `tile_size`/`claim_scope`, the pre-pass gate a raw
 prediction bucket is written under, and can never clear a phenotype's own delivered dimension
-(`operating_point`, `classifier`, `scale`). `export_detection_csv`/`export_aggregated_csv` take
-neither: an unvalidated dimension always refuses on them.
+(`operating_point`, `classifier`, `scale`).
+
+`record_delivery_binding_event`'s own project-scoped `delivery_events` record files under the
+caller's project (an MCP tool's process-pinned root, or a web route's guarded, resolved one); its
+dataset-scoped audit-log line files under the buckets' own shared dataset root regardless, and is
+unaffected by a caller's project root.
 
 - `deliver_phenology_milestones` and the web `/export_csv` phenology branch both reconcile the positive-state
   classifier (from `classifier_operating_point.json`, see `calibrate_classifier_operating_point`)
@@ -173,7 +205,8 @@ neither: an unvalidated dimension always refuses on them.
   the CSV unvalidated), then hands `export_detection_csv` that bucket; the CSV's own delivery gate
   then runs exactly once, inside the writer, never a second time at the door. Without a
   `predictions_dir`, the door calls the writer with no bucket at all, and the writer's own
-  no-`pred_dirs` floor always refuses, since this writer takes no acknowledgement; the door's own
+  no-`pred_dirs` floor always refuses: an acknowledgement clears an unvalidated dimension, never
+  the absence of a bucket to reconcile one from at all. The door's own
   response then reports the live run's own narrowed conf reference honestly under
   `run_conf_validated_against` (accepted-or-false by construction), a different fact from
   `operating_point_validated`, which floors false on this path since nothing on disk backs it
@@ -207,11 +240,14 @@ neither: an unvalidated dimension always refuses on them.
   one, the native frame) does not contradict, every tiling door refuses outright when it does,
   naming both edges. A delivery that mixes buckets across tiers travels under the weakest
   tier present. An untiled run is never gated on it.
-- To ship a provisional phenology result, the web `/export_csv` route builds a real `Acknowledgement`
-  from the breeder's own reason and identity; the door writes but stamps
-  `operating_point_validated=false` so the un-trustworthiness travels with the CSV. This is for an
-  honest, breeder-attested provisional delivery, never for silently shipping a bare number. No MCP
-  tool builds an `Acknowledgement` itself.
+- To ship a provisional result, the web `/export_csv` route (phenology) or `/export_count_csv`
+  route (the per-image bucket regime and the per-plant orthomosaic composition) builds a real
+  `Acknowledgement` from the breeder's own reason and identity; the door writes but stamps
+  `operating_point_validated=false` (and every other unvalidated dimension the same way) so the
+  un-trustworthiness travels with the CSV. This is for an honest, breeder-attested provisional
+  delivery, never for silently shipping a bare number. No MCP tool builds an `Acknowledgement`
+  itself; the ordinal, regression and per-plant walked-capture aggregate kinds still have no
+  acknowledged route at all, since no web door composes them.
 
 The private pass beneath `run_inference` stays fully ungated but honestly stamped: the review loop
 must be able to produce unvalidated predictions to *reach* a validated measurement, so it never

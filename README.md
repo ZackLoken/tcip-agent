@@ -161,8 +161,8 @@ positive state, such as a phenology milestone, instead calibrates through the
 
 Read the `delivery` skill before choosing between `deliver_per_image_counts` and `run_inference`
 (and the per-plant aggregation tools built on top of a prediction bucket): they answer different
-questions and carry different CSV schemas, and neither MCP tool ships a bare unvalidated phenotype;
-only the Results tab's own delivering route can, through the breeder's own acknowledged act.
+questions and carry different CSV schemas, and no MCP tool ships a bare unvalidated phenotype;
+only a Results tab delivering route can, through the breeder's own acknowledged act.
 
 ## Conventions
 
@@ -174,9 +174,9 @@ only the Results tab's own delivering route can, through the breeder's own ackno
 - Measurement-integrity gates: every parameter a delivered phenotype depends on (confidence
   threshold, tile geometry, mask-binarize threshold, physical pixel-to-real-world scale) carries
   its own validation state and a record of what actually cleared it, never a bare number. A
-  delivery door refuses to write a bare unvalidated result; only the Results tab's own delivering
-  route can ship a flagged unvalidated one, through the breeder's own acknowledged act, since it is
-  the one delivery kind a web door serves. The same shared gate (`check_delivery_gate` in
+  delivery door refuses to write a bare unvalidated result; only that result's own delivering
+  route in the Results tab can ship a flagged unvalidated one, through the breeder's own
+  acknowledged act, never a caller of any door in general. The same shared gate (`check_delivery_gate` in
   `pipelines/resolution.py`) backs every delivery path so none of them can drift into disagreeing
   about when a number is trustworthy.
 
