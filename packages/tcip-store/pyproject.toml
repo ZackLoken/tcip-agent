@@ -3,7 +3,7 @@ name = "tcip-store"
 version = "0.1.0"
 description = "Storage seam: one interface for TCIP's mutable records, append-only logs, and blobs"
 license = "Apache-2.0"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = [
     "filelock>=3.0",
 ]
