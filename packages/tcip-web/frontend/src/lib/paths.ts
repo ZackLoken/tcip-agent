@@ -19,7 +19,7 @@ export function cleanPath(raw: string): string {
  *
  * The backend's dataset_layout owns this rule and resolves every directory the browser is given;
  * this is the one place the browser states the rest of the record's name, and
- * tests/test_frontend_dataset_paths.py holds it equal to the backend's own value.
+ * tests/test_frontend_dataset_vocabulary.py holds it equal to the backend's own value.
  */
 export const RECORD_EXT = ".json";
 
