@@ -462,6 +462,7 @@ def test_delivery_events_route_serves_a_registry_disclosure_without_a_resolved_k
             "detections_unattributed": 2,
             "detections_unattributed_scope": "delivered_raster",
             "plant_attribution": "detection",
+            "plants_outside_raster": [],
         },
     )
     record_delivery_binding_event(
