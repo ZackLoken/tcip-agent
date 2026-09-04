@@ -80,6 +80,10 @@ class DeliveryEventRecord(BaseModel):
     output_sha256: Optional[str]
     measurement_documents: list[str]
     scale_document: Optional[str]
+    # Who acknowledged this delivery unvalidated, and why: null on both when nothing was
+    # acknowledged, the same pair DeliveryGateResult carries.
+    acknowledged_by: Optional[str]
+    acknowledgement_reason: Optional[str]
     plant_mapping: Optional[PlantMappingDisclosure]
     documents: dict[str, DocumentBinding]
     produced_at: str

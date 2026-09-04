@@ -1,8 +1,10 @@
 """``scripts/conform_delivery_events.py``: the one-off check for a project's stored
 ``delivery_events`` records against the current ``DeliveryEventRecord`` shape. Unlike
-``conform_view_coverage_viewing.py`` this script never rewrites a record: none of the three
+``conform_view_coverage_viewing.py`` this script rewrites almost nothing: none of the three
 ``plant_mapping`` disclosure keys a refused record lacks has a value derivable from the rest of
-that record.
+that record. The one exception is ``acknowledged_by``/``acknowledgement_reason``, whose true value
+for a record predating this pair is ``null``, derivable from the record's own age alone; a record
+missing only that pair is write-forwarded rather than merely named.
 """
 
 from __future__ import annotations
@@ -39,8 +41,8 @@ def _events(root: Path) -> dict[str, dict]:
 def _write_valid_event(root: Path) -> None:
     record_delivery_binding_event(
         "test_door", None, [], {}, measurement_documents=["operating_point"],
-        scale_document=None, trait="astringency", delivery_kind="state_crossing_dates",
-        project_root=root, plant_mapping=None,
+        scale_document=None, acknowledgement=None, trait="astringency",
+        delivery_kind="state_crossing_dates", project_root=root, plant_mapping=None,
     )
 
 
@@ -92,6 +94,54 @@ def _write_event_missing_output_sha256(root: Path, event_id: str = "no-digest") 
         },
         expect=ts.Version.ABSENT,
     )
+
+
+def _write_event_missing_acknowledgement(root: Path, event_id: str = "no-ack") -> None:
+    """A fully-shaped ``delivery_events`` record written before ``acknowledged_by``/
+    ``acknowledgement_reason`` existed: every other key present, those two alone missing, so
+    forwarding them to ``null`` is enough to validate."""
+    key = resolution.delivery_event_key(resolution.delivery_events_scope(root), event_id)
+    ts.replace(
+        key,
+        {
+            "event_id": event_id, "trait": "astringency", "delivery_kind": "state_crossing_dates",
+            "door": "test_door", "output_path": None, "output_sha256": None,
+            "measurement_documents": ["operating_point"], "scale_document": None,
+            "plant_mapping": None, "documents": {},
+            "produced_at": datetime.now(timezone.utc).isoformat(),
+        },
+        expect=ts.Version.ABSENT,
+    )
+
+
+def test_check_root_write_forwards_a_record_missing_only_acknowledgement_keys(tmp_path: Path):
+    bind_default()
+    module = _load_script()
+    _write_event_missing_acknowledgement(tmp_path)
+
+    outcomes, refused = module.check_root(tmp_path)
+
+    assert refused is False
+    assert "write-forwarded acknowledged_by/acknowledgement_reason to null, validates" in outcomes[0]
+    stored = _events(tmp_path)["no-ack"]
+    assert stored["acknowledged_by"] is None
+    assert stored["acknowledgement_reason"] is None
+    # The write-forward is the only change: every other key survives untouched.
+    assert stored["event_id"] == "no-ack"
+    assert stored["door"] == "test_door"
+
+
+def test_check_root_plan_mode_names_the_forwardable_gap_and_writes_nothing(tmp_path: Path):
+    bind_default()
+    module = _load_script()
+    _write_event_missing_acknowledgement(tmp_path)
+    before = _events(tmp_path)
+
+    outcomes, refused = module.check_root(tmp_path, plan=True)
+
+    assert refused is True
+    assert "would write-forward" in outcomes[0]
+    assert _events(tmp_path) == before
 
 
 def test_check_root_names_the_gap_when_output_sha256_predates_this_record(tmp_path: Path):
