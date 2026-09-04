@@ -907,7 +907,7 @@ def _pq_from_summary(s: dict, root: str) -> PriorityQueueJob:
         total_candidates=s.get("total_candidates", 0),
         reviewed_skipped=s.get("reviewed_skipped", 0),
         marks_unresolved=s.get("marks_unresolved"),
-        platform_root=s.get("platform_root") or root,
+        platform_root=jobstore.require_platform_root(s, name=REVIEW_PRIORITY_REGISTRY, root=root),
     )
 
 

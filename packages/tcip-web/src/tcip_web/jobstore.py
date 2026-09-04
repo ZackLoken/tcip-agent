@@ -93,6 +93,27 @@ def job_registry_key(name: str, *, root: str | Path | None = None) -> Key:
     return Key(JOB_REGISTRY_STORE, resolved, (name,))
 
 
+def require_platform_root(summary: dict, *, name: str, root: str) -> str:
+    """``summary['platform_root']``, refusing rather than substituting ``root`` when it is
+    missing.
+
+    A summary carrying no ``platform_root`` predates the field, so ``root`` (the caller's
+    current process root, or the registry document's own root at load time) would stand in as a
+    guess for the summary's actual launch root, not a derived fact.
+    ``scripts/conform_job_registry_roots.py`` stamps the true value, the registry document's own
+    root, onto every summary a persisted registry holds before this refusal admits it again.
+    """
+    value = summary.get("platform_root")
+    if value:
+        return value
+    job_id = summary.get("job_id") or summary.get("sweep_id") or "<unknown>"
+    raise ValueError(
+        f"{name} summary {job_id!r} under {root} carries no platform_root; run "
+        "scripts/conform_job_registry_roots.py against this platform root to bring its "
+        "persisted registries to the current shape (--plan first to preview the change)"
+    )
+
+
 MAX_JOBS = 100
 
 JobStatus = Literal["pending", "running", "completed", "failed", "cancelled", "interrupted"]
@@ -109,12 +130,13 @@ def persist_grouped(name: str, summaries: list[dict]) -> None:
     adopted another project in between) never overwrites one project's persisted history with
     a snapshot that includes another's, and never mislabels a root that overflowed out of this
     snapshot as empty: a root with no summaries here keeps whatever its file already holds. A
-    summary carrying no ``platform_root`` (a registry document written before this field
-    existed) groups under this process's own current root, the file it already lived under.
+    summary carrying no ``platform_root`` refuses by name (:func:`require_platform_root`)
+    rather than being guessed onto this process's own current root.
     """
+    this_root = current_root()
     groups: dict[str, list[dict]] = {}
     for s in summaries:
-        root = s.get("platform_root") or current_root()
+        root = require_platform_root(s, name=name, root=this_root)
         groups.setdefault(root, []).append(s)
     for root, group in groups.items():
         persist_to(job_registry_key(name, root=root), group)

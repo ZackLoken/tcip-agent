@@ -1,5 +1,7 @@
 """Web job lifecycle: memory cap, persistence, and inference cancellation."""
 
+from pathlib import Path
+
 import pytest
 
 
@@ -79,17 +81,27 @@ def test_evict_terminal_bounds_the_whole_dict_across_roots():
 def test_persist_grouped_writes_state_that_reads_back(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     from tcip_web.jobstore import load, persist_grouped
-    persist_grouped("inference_jobs", [{"job_id": "a", "status": "completed"}])
-    assert load("inference_jobs") == [{"job_id": "a", "status": "completed"}]
+    root = str(tmp_path.resolve())
+    persist_grouped("inference_jobs", [{"job_id": "a", "status": "completed", "platform_root": root}])
+    assert load("inference_jobs") == [{"job_id": "a", "status": "completed", "platform_root": root}]
+
+
+def test_persist_grouped_refuses_a_summary_carrying_no_platform_root(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    from tcip_web.jobstore import persist_grouped
+
+    with pytest.raises(ValueError, match="conform_job_registry_roots.py"):
+        persist_grouped("inference_jobs", [{"job_id": "a", "status": "completed"}])
 
 
 def test_load_roundtrips_persist_grouped_and_defaults_empty(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     from tcip_web.jobstore import load, persist_grouped
+    root = str(tmp_path.resolve())
 
     assert load("inference_jobs") == []  # nothing persisted yet -> clean start
-    persist_grouped("inference_jobs", [{"job_id": "a", "status": "running"}])
-    assert load("inference_jobs") == [{"job_id": "a", "status": "running"}]
+    persist_grouped("inference_jobs", [{"job_id": "a", "status": "running", "platform_root": root}])
+    assert load("inference_jobs") == [{"job_id": "a", "status": "running", "platform_root": root}]
 
 
 def test_persist_grouped_writes_each_root_under_its_own_key(tmp_path, monkeypatch):
@@ -118,11 +130,12 @@ def test_inference_rehydrate_marks_dead_jobs_interrupted(tmp_path, monkeypatch):
     from tcip_web.jobstore import persist_grouped
     from tcip_web.routes import inference
 
+    root = str(tmp_path.resolve())
     persist_grouped("inference_jobs", [
         {"job_id": "done", "status": "completed", "done": 3, "total": 3,
-         "images_dir": "i", "output_dir": "o", "error": None},
+         "images_dir": "i", "output_dir": "o", "error": None, "platform_root": root},
         {"job_id": "dead", "status": "running", "done": 1, "total": 5,
-         "images_dir": "i", "output_dir": "o", "error": None},
+         "images_dir": "i", "output_dir": "o", "error": None, "platform_root": root},
     ])
     inference._registry.jobs.clear()
     try:
@@ -139,9 +152,12 @@ def test_tuning_rehydrate_marks_dead_sweeps_interrupted(tmp_path, monkeypatch):
     from tcip_web.jobstore import persist_grouped
     from tcip_web.routes import tuning
 
+    root = str(tmp_path.resolve())
     persist_grouped("hpo_sweeps", [
-        {"sweep_id": "s_done", "status": "completed", "error": None, "has_result": True},
-        {"sweep_id": "s_dead", "status": "running", "error": None, "has_result": False},
+        {"sweep_id": "s_done", "status": "completed", "error": None, "has_result": True,
+         "platform_root": root},
+        {"sweep_id": "s_dead", "status": "running", "error": None, "has_result": False,
+         "platform_root": root},
     ])
     tuning._registry.jobs.clear()
     try:
@@ -627,3 +643,83 @@ def test_registered_job_summaries_persist_byte_stable_through_job_registry(tmp_p
 
     after = load("inference_jobs")
     assert after == before
+
+
+def test_inference_rehydrate_refuses_a_summary_carrying_no_platform_root(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    from tcip_store import replace
+    from tcip_web.jobstore import job_registry_key
+    from tcip_web.routes import inference
+
+    replace(job_registry_key("inference_jobs"), [
+        {"job_id": "old", "status": "completed", "done": 1, "total": 1,
+         "images_dir": "i", "output_dir": "o", "error": None},
+    ], expect=None)
+
+    with pytest.raises(ValueError, match="conform_job_registry_roots.py"):
+        inference.rehydrate_for_current_root()
+
+
+def test_review_priority_queue_rehydrate_refuses_a_summary_carrying_no_platform_root(
+    tmp_path, monkeypatch,
+):
+    monkeypatch.chdir(tmp_path)
+    from tcip_store import replace
+    from tcip_web.jobstore import job_registry_key
+    from tcip_web.routes import review
+
+    replace(job_registry_key("review_priority_jobs"), [
+        {"job_id": "old", "status": "completed", "error": None, "queue": [],
+         "total_candidates": 0, "reviewed_skipped": 0, "marks_unresolved": None},
+    ], expect=None)
+
+    with pytest.raises(ValueError, match="conform_job_registry_roots.py"):
+        review.rehydrate_for_current_root()
+
+
+def test_tuning_rehydrate_refuses_a_summary_carrying_no_platform_root(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    from tcip_store import replace
+    from tcip_web.jobstore import job_registry_key
+    from tcip_web.routes import tuning
+
+    replace(job_registry_key("hpo_sweeps"), [
+        {"sweep_id": "old", "status": "completed", "error": None, "has_result": False},
+    ], expect=None)
+
+    with pytest.raises(ValueError, match="conform_job_registry_roots.py"):
+        tuning.rehydrate_for_current_root()
+
+
+def test_a_conformed_summary_rehydrates(tmp_path, monkeypatch):
+    """conform_job_registry_roots.py's stamp is what makes a pre-field document rehydratable
+    again: the same summary that refuses above, once the conform script has stamped its
+    platform_root, loads back into the live registry."""
+    import importlib.util
+
+    monkeypatch.chdir(tmp_path)
+    from tcip_store import replace
+    from tcip_web.jobstore import job_registry_key
+    from tcip_web.routes import inference
+
+    (tmp_path / ".tcip").mkdir()
+    replace(job_registry_key("inference_jobs"), [
+        {"job_id": "old", "status": "completed", "done": 1, "total": 1,
+         "images_dir": "i", "output_dir": "o", "error": None},
+    ], expect=None)
+
+    script = Path(__file__).parent.parent / "scripts" / "conform_job_registry_roots.py"
+    spec = importlib.util.spec_from_file_location("conform_job_registry_roots_under_test", script)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    outcomes, refused = module.conform_root(tmp_path, plan=False)
+    assert refused is False
+
+    inference._registry.jobs.clear()
+    try:
+        inference.rehydrate_for_current_root()
+        jobs = {j["job_id"]: j for j in inference.list_jobs()["jobs"]}
+        assert jobs["old"]["status"] == "completed"
+    finally:
+        inference._registry.jobs.clear()

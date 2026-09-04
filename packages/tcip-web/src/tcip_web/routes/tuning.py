@@ -169,7 +169,7 @@ def _summary(job: HPOJob) -> dict:
 def _from_summary(s: dict, root: str) -> HPOJob:
     return HPOJob(
         sweep_id=s["sweep_id"], status=jobstore.rehydrated_status(s), error=s.get("error"),
-        platform_root=s.get("platform_root") or root,
+        platform_root=jobstore.require_platform_root(s, name=HPO_REGISTRY, root=root),
     )
 
 

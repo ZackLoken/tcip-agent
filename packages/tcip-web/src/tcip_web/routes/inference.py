@@ -124,7 +124,7 @@ def _from_summary(s: dict, root: str) -> InferenceJob:
         overlap=0.0,
         total=s.get("total", 0),
         done=s.get("done", 0),
-        platform_root=s.get("platform_root") or root,
+        platform_root=jobstore.require_platform_root(s, name=INFERENCE_REGISTRY, root=root),
         status=jobstore.rehydrated_status(s),
         error=s.get("error"),
         warning=s.get("warning"),
