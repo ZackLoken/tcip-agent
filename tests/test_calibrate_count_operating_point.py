@@ -212,9 +212,9 @@ def test_calibrate_count_operating_point_refuses_when_earned_conf_differs_from_p
 ):
     """A bucket's stored detections were filtered at the conf its stamp records, never at
     whatever conf a later calibration resolves: any other earned conf refuses by name rather
-    than silently overwriting the production conf the stored detections never saw, and the
-    calibration's own validation record, minted before this was discovered, is named as an
-    orphan the refusal leaves behind.
+    than silently overwriting the production conf the stored detections never saw. The
+    production conf is read before the pass runs, so this ordinary mismatch is caught before
+    open_validation/seal_validation ever run and mints no calibration experiment.
     """
     _stub_predictor(monkeypatch)
     monkeypatch.setattr("tcip_mcp.pipelines.operating_point.resolve_operating_point",
@@ -234,7 +234,6 @@ def test_calibrate_count_operating_point_refuses_when_earned_conf_differs_from_p
     assert "error" in result
     assert "0.3" in result["error"]
     assert "0.42" in result["error"]
-    assert "answers for nothing" in result["error"]
 
     on_disk = read_operating_point_sidecar(pred_dir)
     assert on_disk["validated"] is False
@@ -242,7 +241,7 @@ def test_calibrate_count_operating_point_refuses_when_earned_conf_differs_from_p
 
     from tcip_mcp.project_paths import platform_state_root
 
-    assert (platform_state_root() / ".tcip" / "experiments").exists()
+    assert not (platform_state_root() / ".tcip" / "experiments").exists()
 
 
 def test_calibrate_count_operating_point_folds_the_tile_floor_into_validated(monkeypatch, tmp_path):
@@ -571,7 +570,9 @@ def test_calibrate_count_operating_point_refuses_a_stamp_validated_mid_pass(monk
     """
     _stub_predictor(monkeypatch)
     labels_dir = _label_pair(tmp_path)
-    dataset_root, pred_dir = _existing_bucket(tmp_path, tile_size_validated=None)
+    # conf_value=0.42 matches what this calibration earns below, so the pre-pass equality
+    # check clears and this test reaches the race, caught only under the lock.
+    dataset_root, pred_dir = _existing_bucket(tmp_path, tile_size_validated=None, conf_value=0.42)
 
     from tcip_mcp.pipelines.resolution import (
         VALIDATED_HELD_OUT, ResolvedBundle, derived, read_operating_point_sidecar, write_sidecar,
