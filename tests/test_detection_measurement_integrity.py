@@ -383,7 +383,7 @@ def _one_image(tmp_path):
 
 
 def test_derives_tile_size_from_checkpoint(tmp_path, monkeypatch):
-    from tcip_mcp.tools.inference_tools import run_inference
+    from tests._verified_checkpoint_fixtures import run_inference_verified as run_inference
 
     ckpt = tmp_path / "m.pt"
     ckpt.write_bytes(b"x")
@@ -404,7 +404,7 @@ def test_foreign_checkpoint_with_no_geometry_refuses_explicit_tile(tmp_path, mon
     """A checkpoint with no persisted training tile geometry has no real basis to tile at: an
     explicit tile=True with no explicit tile_size either must refuse (naming the missing basis),
     never silently fabricate a scale to proceed on."""
-    from tcip_mcp.tools.inference_tools import run_inference
+    from tests._verified_checkpoint_fixtures import run_inference_verified as run_inference
 
     ckpt = tmp_path / "m.pt"
     ckpt.write_bytes(b"x")
@@ -500,7 +500,7 @@ def test_run_inference_no_registry_degrades_honestly_not_a_crash(tmp_path, monke
     precondition check guarding this path must admit it, not turn it into a hard failure that
     discards completed prediction work."""
     import tcip_mcp.pipelines.inference.predictor as predictor_mod
-    from tcip_mcp.tools.inference_tools import run_inference
+    from tests._verified_checkpoint_fixtures import run_inference_verified as run_inference
 
     images_dir = tmp_path / "images"  # no classes.json anywhere under this root
     images_dir.mkdir()
@@ -530,7 +530,7 @@ def test_run_inference_corrupted_registry_still_propagates(tmp_path, monkeypatch
     and must still raise loudly, not be silently absorbed by the same precondition that admits
     the honest degraded case."""
     import tcip_mcp.pipelines.inference.predictor as predictor_mod
-    from tcip_mcp.tools.inference_tools import run_inference
+    from tests._verified_checkpoint_fixtures import run_inference_verified as run_inference
 
     root = tmp_path / "ds"
     images_dir = root / "images"
@@ -557,7 +557,7 @@ def test_run_inference_corrupted_registry_still_propagates(tmp_path, monkeypatch
 def test_explicit_tile_size_wins(tmp_path, monkeypatch):
     """An explicit edge that agrees with the checkpoint's own persisted geometry wins over
     deriving it, still stamped as the caller's own explicit statement."""
-    from tcip_mcp.tools.inference_tools import run_inference
+    from tests._verified_checkpoint_fixtures import run_inference_verified as run_inference
 
     ckpt = tmp_path / "m.pt"
     ckpt.write_bytes(b"x")
@@ -569,7 +569,7 @@ def test_explicit_tile_size_wins(tmp_path, monkeypatch):
 
 
 def test_explicit_tile_size_contradicting_persisted_geometry_refuses(tmp_path, monkeypatch):
-    from tcip_mcp.tools.inference_tools import run_inference
+    from tests._verified_checkpoint_fixtures import run_inference_verified as run_inference
 
     ckpt = tmp_path / "m.pt"
     ckpt.write_bytes(b"x")
@@ -750,7 +750,7 @@ class _CalStub:
 
 def test_default_path_unchanged(tmp_path, monkeypatch):
     import tcip_mcp.pipelines.inference.predictor as predictor_mod
-    from tcip_mcp.tools.inference_tools import run_inference
+    from tests._verified_checkpoint_fixtures import run_inference_verified as run_inference
     from tcip_mcp.pipelines.resolution import DEFAULT_CONF
 
     stub = _CalStub()
@@ -786,8 +786,9 @@ def test_calibration_wires_resolved_conf(tmp_path, monkeypatch):
     import tcip_mcp.pipelines.calibration as calibration_pipeline
     import tcip_mcp.tools.inference_tools as itools
     import tcip_mcp.pipelines.inference.predictor as predictor_mod
+    from tests._verified_checkpoint_fixtures import run_inference_verified
 
-    # tiled=False: this test's real run_inference call below is tile=False (tile_size only
+    # tiled=False: this test's real verified-pass call below is tile=False (tile_size only
     # gates a bundle when tiled, so the mocked bundle must match the real regime it stands in for).
     _stand_in_calibration(monkeypatch, calibration_pipeline, tmp_path, tiled=False)
     stub = _CalStub()
@@ -797,9 +798,9 @@ def test_calibration_wires_resolved_conf(tmp_path, monkeypatch):
     ckpt = tmp_path / "m.pt"
     ckpt.write_bytes(b"x")
     img = _one_image(tmp_path)
-    r = itools.run_inference(str(ckpt), image_paths=[img], images_dir=str(tmp_path),
-                             device="cpu", tile=False, trait="catkin",
-                             calibration_labels_dir=str(tmp_path))
+    r = run_inference_verified(str(ckpt), image_paths=[img], images_dir=str(tmp_path),
+                               device="cpu", tile=False, trait="catkin",
+                               calibration_labels_dir=str(tmp_path))
     assert r["conf_source"] == "calibration"
     assert r["validated"] is True                                   # held-out passed
     assert r["dataset_hash"] == "H"
@@ -816,6 +817,7 @@ def test_sweep_artifact_is_content_addressed_not_label_hash_only(tmp_path, monke
     import tcip_mcp.pipelines.calibration as calibration_pipeline
     import tcip_mcp.tools.inference_tools as itools
     import tcip_mcp.pipelines.inference.predictor as predictor_mod
+    from tests._verified_checkpoint_fixtures import run_inference_verified
 
     _stand_in_calibration(monkeypatch, calibration_pipeline, tmp_path, tiled=True)
     stub = _CalStub()
@@ -826,12 +828,12 @@ def test_sweep_artifact_is_content_addressed_not_label_hash_only(tmp_path, monke
     ckpt.write_bytes(b"x")
     img = _one_image(tmp_path)
 
-    r_untiled = itools.run_inference(str(ckpt), image_paths=[img], images_dir=str(tmp_path),
-                                     device="cpu", tile=False, trait="catkin",
+    r_untiled = run_inference_verified(str(ckpt), image_paths=[img], images_dir=str(tmp_path),
+                                       device="cpu", tile=False, trait="catkin",
+                                       calibration_labels_dir=str(tmp_path))
+    r_tiled = run_inference_verified(str(ckpt), image_paths=[img], images_dir=str(tmp_path),
+                                     device="cpu", tile=True, tile_size=256, trait="catkin",
                                      calibration_labels_dir=str(tmp_path))
-    r_tiled = itools.run_inference(str(ckpt), image_paths=[img], images_dir=str(tmp_path),
-                                   device="cpu", tile=True, tile_size=256, trait="catkin",
-                                   calibration_labels_dir=str(tmp_path))
 
     assert r_untiled["calibration_curve_path"] != r_tiled["calibration_curve_path"]  # distinct predictor paths, distinct files
     assert ts.exists(itools.calibration_curve_key(r_untiled["calibration_evidence_key"]))
@@ -843,7 +845,7 @@ def test_sweep_artifact_is_content_addressed_not_label_hash_only(tmp_path, monke
     assert sweep_body["predictor_path"]["tile_size"] == 256
 
 
-def test_export_predictions_sidecar_carries_sweep_pointer(tmp_path, monkeypatch):
+def test_run_inference_sidecar_carries_sweep_pointer(tmp_path, monkeypatch):
     """The delivered operating_point.json sidecar must record the sweep artifact
     that justified the shipped conf, not omit it entirely."""
     from pathlib import PurePosixPath
@@ -854,7 +856,7 @@ def test_export_predictions_sidecar_carries_sweep_pointer(tmp_path, monkeypatch)
     import tcip_mcp.pipelines.inference.predictor as predictor_mod
     from tcip_mcp.pipelines.resolution import read_operating_point_sidecar
 
-    # tiled=False matches the real tile=False export_predictions runs at below, so the gate
+    # tiled=False matches the real tile=False run_inference runs at below, so the gate
     # never sees a mismatched tile_size dimension against the actual untiled call.
     _stand_in_calibration(monkeypatch, calibration_pipeline, tmp_path, tiled=False)
     stub = _CalStub()
@@ -863,9 +865,9 @@ def test_export_predictions_sidecar_carries_sweep_pointer(tmp_path, monkeypatch)
 
     ckpt = tmp_path / "m.pt"
     ckpt.write_bytes(b"x")
-    _one_image(tmp_path)  # written directly under images_dir=tmp_path; export_predictions globs it
+    _one_image(tmp_path)  # written directly under images_dir=tmp_path; run_inference globs it
 
-    out = itools.export_predictions(
+    out = itools.run_inference(
         str(ckpt), images_dir=str(tmp_path), output_dir="dataset/predictions/baseline/2026-01-01",
         device="cpu", tile=False, trait="catkin", calibration_labels_dir=str(tmp_path))
     assert "error" not in out, out
@@ -882,9 +884,9 @@ def test_cross_dataset_inheritance_flagged(tmp_path, monkeypatch):
     """Inferencing the same labeled set with a bundle scoped to a different hash flags inheritance and
     refuses to stamp validated=True (validated and shippable_issues stay consistent)."""
     import tcip_mcp.pipelines.calibration as calibration_pipeline
-    import tcip_mcp.tools.inference_tools as itools
     import tcip_mcp.pipelines.inference.predictor as predictor_mod
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
+    from tests._verified_checkpoint_fixtures import run_inference_verified
 
     from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
@@ -905,9 +907,9 @@ def test_cross_dataset_inheritance_flagged(tmp_path, monkeypatch):
 
     ckpt = tmp_path / "m.pt"
     ckpt.write_bytes(b"x")
-    r = itools.run_inference(str(ckpt), image_paths=[img], images_dir=str(tmp_path),
-                             device="cpu", tile=False, trait="catkin",
-                             calibration_labels_dir=str(tmp_path))
+    r = run_inference_verified(str(ckpt), image_paths=[img], images_dir=str(tmp_path),
+                               device="cpu", tile=False, trait="catkin",
+                               calibration_labels_dir=str(tmp_path))
     assert r["cross_dataset_check"] == "same-labeled-set"
     assert any("inherited across a different dataset" in i for i in r["shippable_issues"])
     assert r["validated"] is False  # not shippable under the target actually used
@@ -918,9 +920,9 @@ def test_manifest_calibration_subset_of_inference_target_is_still_comparable(tmp
     directory; inferring the whole directory is still the same labelled set, so the firewall
     compares real hashes instead of reading a fully-labelled target as unlabeled."""
     import tcip_mcp.pipelines.calibration as calibration_pipeline
-    import tcip_mcp.tools.inference_tools as itools
     import tcip_mcp.pipelines.inference.predictor as predictor_mod
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
+    from tests._verified_checkpoint_fixtures import run_inference_verified
 
     from PIL import Image
 
@@ -946,7 +948,7 @@ def test_manifest_calibration_subset_of_inference_target_is_still_comparable(tmp
     Image.new("RGB", (100, 100)).save(img_b)
     ckpt = tmp_path / "m.pt"
     ckpt.write_bytes(b"x")
-    r = itools.run_inference(
+    r = run_inference_verified(
         str(ckpt), image_paths=[str(img_a), str(img_b)], images_dir=str(tmp_path), device="cpu",
         tile=False, trait="catkin", calibration_labels_dir=str(tmp_path),
         split_manifest_dir=str(tmp_path / "m"))
@@ -969,10 +971,10 @@ def test_manifest_calibration_firewall_hashes_the_universe(
     target stays the honest not-comparable case, in both cases regardless of whether
     calibration_images_dir is given."""
     import tcip_mcp.pipelines.calibration as calibration_pipeline
-    import tcip_mcp.tools.inference_tools as itools
     import tcip_mcp.pipelines.inference.predictor as predictor_mod
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
     from tcip_mcp.pipelines.resolution import dataset_hash
+    from tests._verified_checkpoint_fixtures import run_inference_verified
 
     from PIL import Image
 
@@ -1007,7 +1009,7 @@ def test_manifest_calibration_firewall_hashes_the_universe(
     if give_calibration_images_dir:
         kwargs["calibration_images_dir"] = str(tmp_path)
 
-    r = itools.run_inference(
+    r = run_inference_verified(
         str(ckpt), image_paths=image_paths, images_dir=str(tmp_path), device="cpu",
         tile=False, trait="catkin", **kwargs)
 
@@ -1022,9 +1024,9 @@ def test_manifest_calibration_reports_its_exclusion_counts_on_the_response(tmp_p
     incomplete attribute count, so the caller learns the exclusions without opening the persisted
     evidence."""
     import tcip_mcp.pipelines.calibration as calibration_pipeline
-    import tcip_mcp.tools.inference_tools as itools
     import tcip_mcp.pipelines.inference.predictor as predictor_mod
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
+    from tests._verified_checkpoint_fixtures import run_inference_verified
 
     from PIL import Image
 
@@ -1051,7 +1053,7 @@ def test_manifest_calibration_reports_its_exclusion_counts_on_the_response(tmp_p
     Image.new("RGB", (100, 100)).save(img)
     ckpt = tmp_path / "m.pt"
     ckpt.write_bytes(b"x")
-    r = itools.run_inference(
+    r = run_inference_verified(
         str(ckpt), image_paths=[str(img)], images_dir=str(tmp_path), device="cpu",
         tile=False, trait="catkin", calibration_labels_dir=str(tmp_path),
         split_manifest_dir=str(tmp_path / "m"))
@@ -1066,19 +1068,19 @@ def test_unlabeled_target_is_not_comparable_but_shippable(tmp_path, monkeypatch)
     """An unlabeled inference target has no GT hash to compare: record it as such and still ship when
     the held-out calibration passed (no validated/shippable_issues contradiction)."""
     import tcip_mcp.pipelines.calibration as calibration_pipeline
-    import tcip_mcp.tools.inference_tools as itools
     import tcip_mcp.pipelines.inference.predictor as predictor_mod
+    from tests._verified_checkpoint_fixtures import run_inference_verified
 
-    # tiled=False: matches the real run_inference call below (tile=False).
+    # tiled=False: matches the real verified-pass call below (tile=False).
     _stand_in_calibration(monkeypatch, calibration_pipeline, tmp_path, tiled=False)
     _patch_build_predictor(monkeypatch, predictor_mod, _CalStub)
     monkeypatch.chdir(tmp_path)
 
     ckpt = tmp_path / "m.pt"
     ckpt.write_bytes(b"x")
-    r = itools.run_inference(str(ckpt), image_paths=[_one_image(tmp_path)], images_dir=str(tmp_path),
-                             device="cpu", tile=False, trait="catkin",
-                             calibration_labels_dir=str(tmp_path))  # no labels beside the image
+    r = run_inference_verified(str(ckpt), image_paths=[_one_image(tmp_path)], images_dir=str(tmp_path),
+                               device="cpu", tile=False, trait="catkin",
+                               calibration_labels_dir=str(tmp_path))  # no labels beside the image
     assert r["cross_dataset_check"] == "not-comparable-unlabeled-target"
     assert r["shippable_issues"] == []
     assert r["validated"] is True
@@ -1088,7 +1090,7 @@ def test_calibration_follows_delivery_tile_regime(tmp_path, monkeypatch):
     """Regime lock: calibration must run the same tiled predictor path the delivery uses, not an
     untiled model forward, else the conf is validated in a different regime than it ships through."""
     import tcip_mcp.pipelines.inference.predictor as predictor_mod
-    from tcip_mcp.tools.inference_tools import run_inference
+    from tests._verified_checkpoint_fixtures import run_inference_verified as run_inference
 
     from PIL import Image
     from tcip_annotation import json_io
@@ -1149,7 +1151,7 @@ def test_calibrated_run_refuses_when_tile_size_has_no_real_basis(tmp_path, monke
     with no explicit tile_size refuses before the (expensive) calibration pass ever runs, never
     silently calibrates (or ships) against a fabricated scale."""
     import tcip_mcp.pipelines.inference.predictor as predictor_mod
-    from tcip_mcp.tools.inference_tools import run_inference
+    from tests._verified_checkpoint_fixtures import run_inference_verified as run_inference
 
     from PIL import Image
     from tcip_annotation import json_io
@@ -1187,7 +1189,7 @@ def test_calibrated_run_refuses_when_tile_size_has_no_real_basis(tmp_path, monke
     assert "tile_size" in r["error"]
 
 
-def test_export_predictions_validated_from_bundle(tmp_path, monkeypatch, seed_catkin_trait_spec):
+def test_run_inference_validated_from_bundle(tmp_path, monkeypatch, seed_catkin_trait_spec):
     import tcip_mcp.model_registry as model_registry_mod
     import tcip_mcp.tools.inference_tools as itools
     from tcip_mcp.pipelines.resolution import read_operating_point_sidecar
@@ -1211,8 +1213,8 @@ def test_export_predictions_validated_from_bundle(tmp_path, monkeypatch, seed_ca
     monkeypatch.setattr(model_registry_mod, "load_registered_checkpoint",
                         lambda *a, **kw: _stub_checkpoint(str(ckpt)))
     out_dir = tmp_path / "dataset" / "predictions" / "baseline" / "2026-01-01"
-    r = itools.export_predictions(str(ckpt), str(tmp_path), str(out_dir), trait="catkin",
-                                  calibration_labels_dir=str(tmp_path))
+    r = itools.run_inference(str(ckpt), str(tmp_path), output_dir=str(out_dir), trait="catkin",
+                             calibration_labels_dir=str(tmp_path))
     assert "error" not in r, r
     stamp = read_operating_point_sidecar(out_dir)
     assert stamp["validated"] is True                       # not hardcoded False

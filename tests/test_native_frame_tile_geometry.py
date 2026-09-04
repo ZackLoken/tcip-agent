@@ -396,7 +396,7 @@ def test_run_inference_tiles_a_native_frame_checkpoint_and_says_what_it_rests_on
     delivery door no longer refuses it."""
     import logging
 
-    from tcip_mcp.tools.inference_tools import run_inference
+    from tests._verified_checkpoint_fixtures import run_inference_verified
     from tcip_mcp.tools.model_tools import register_model
 
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
@@ -406,8 +406,8 @@ def test_run_inference_tiles_a_native_frame_checkpoint_and_says_what_it_rests_on
     assert "error" not in result, result
 
     with caplog.at_level(logging.INFO):
-        r = run_inference(ckpt, image_paths=[_image(tmp_path)], device="cpu", tile=True,
-                          conf_threshold=0.0)
+        r = run_inference_verified(ckpt, image_paths=[_image(tmp_path)], device="cpu", tile=True,
+                                   conf_threshold=0.0)
 
     assert "error" not in r
     assert r["tiled"] is True and len(r["results"]) == 1
@@ -421,7 +421,7 @@ def test_run_inference_tiles_a_native_frame_checkpoint_and_says_what_it_rests_on
 def test_run_inference_leaves_a_native_frame_checkpoint_untiled_unless_asked(tmp_path, monkeypatch):
     """``tile`` unset still derives the checkpoint's own regime, and an untiled-trained checkpoint's
     regime is untiled: the tier is a capability a caller opts into, never a silent upgrade."""
-    from tcip_mcp.tools.inference_tools import run_inference
+    from tests._verified_checkpoint_fixtures import run_inference_verified
     from tcip_mcp.tools.model_tools import register_model
 
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
@@ -430,7 +430,7 @@ def test_run_inference_leaves_a_native_frame_checkpoint_untiled_unless_asked(tmp
                             project_path=str(tmp_path))
     assert "error" not in result, result
 
-    r = run_inference(ckpt, image_paths=[_image(tmp_path)], device="cpu", conf_threshold=0.0)
+    r = run_inference_verified(ckpt, image_paths=[_image(tmp_path)], device="cpu", conf_threshold=0.0)
 
     assert r["tiled"] is False
     assert r["operating_point"]["tile_size"]["value"] is None
@@ -440,7 +440,7 @@ def test_an_unreadable_recorded_augmentation_config_does_not_sink_an_untiled_run
         tmp_path, monkeypatch):
     """The recorded config is only consulted to reproduce a training input geometry, which an
     untiled run never does; a run that reads no tile geometry must not be refused over it."""
-    from tcip_mcp.tools.inference_tools import run_inference
+    from tests._verified_checkpoint_fixtures import run_inference_verified
     from tcip_mcp.tools.model_tools import register_model
 
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
@@ -449,7 +449,7 @@ def test_an_unreadable_recorded_augmentation_config_does_not_sink_an_untiled_run
                             project_path=str(tmp_path))
     assert "error" not in result, result
 
-    r = run_inference(ckpt, image_paths=[_image(tmp_path)], device="cpu", conf_threshold=0.0)
+    r = run_inference_verified(ckpt, image_paths=[_image(tmp_path)], device="cpu", conf_threshold=0.0)
 
     assert "error" not in r and r["tiled"] is False and len(r["results"]) == 1
 
@@ -714,7 +714,7 @@ def test_run_inference_refuses_a_stated_edge_that_contradicts_persisted_geometry
         tmp_path, monkeypatch):
     """A caller-typed tile edge that differs from the checkpoint's own persisted training geometry
     is a real contradiction, never a caller override to trust blindly."""
-    from tcip_mcp.tools.inference_tools import run_inference
+    from tests._verified_checkpoint_fixtures import run_inference_verified
     from tcip_mcp.tools.model_tools import register_model
 
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
@@ -723,8 +723,8 @@ def test_run_inference_refuses_a_stated_edge_that_contradicts_persisted_geometry
                             project_path=str(tmp_path))
     assert "error" not in result, result
 
-    r = run_inference(ckpt, image_paths=[_image(tmp_path)], device="cpu", tile=True,
-                      tile_size=64, conf_threshold=0.0)
+    r = run_inference_verified(ckpt, image_paths=[_image(tmp_path)], device="cpu", tile=True,
+                               tile_size=64, conf_threshold=0.0)
 
     assert "error" in r
     assert "64" in r["error"] and "128" in r["error"]
@@ -734,7 +734,7 @@ def test_run_inference_refuses_a_stated_edge_that_contradicts_the_native_frame(
         tmp_path, monkeypatch):
     """The same contradiction, checked against the checkpoint's own recorded untiled training frame
     when it persists no tiled geometry."""
-    from tcip_mcp.tools.inference_tools import run_inference
+    from tests._verified_checkpoint_fixtures import run_inference_verified
     from tcip_mcp.tools.model_tools import register_model
 
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
@@ -743,8 +743,8 @@ def test_run_inference_refuses_a_stated_edge_that_contradicts_the_native_frame(
                             project_path=str(tmp_path))
     assert "error" not in result, result
 
-    r = run_inference(ckpt, image_paths=[_image(tmp_path)], device="cpu", tile=True,
-                      tile_size=64, conf_threshold=0.0)
+    r = run_inference_verified(ckpt, image_paths=[_image(tmp_path)], device="cpu", tile=True,
+                               tile_size=64, conf_threshold=0.0)
 
     assert "error" in r
     assert "64" in r["error"] and "512" in r["error"]
@@ -752,7 +752,7 @@ def test_run_inference_refuses_a_stated_edge_that_contradicts_the_native_frame(
 
 def test_run_inference_admits_an_explicit_edge_matching_persisted_geometry(tmp_path, monkeypatch):
     """The rail refuses a contradiction, not an explicit edge that simply agrees."""
-    from tcip_mcp.tools.inference_tools import run_inference
+    from tests._verified_checkpoint_fixtures import run_inference_verified
     from tcip_mcp.tools.model_tools import register_model
 
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
@@ -761,8 +761,8 @@ def test_run_inference_admits_an_explicit_edge_matching_persisted_geometry(tmp_p
                             project_path=str(tmp_path))
     assert "error" not in result, result
 
-    r = run_inference(ckpt, image_paths=[_image(tmp_path)], device="cpu", tile=True,
-                      tile_size=TILE, conf_threshold=0.0)
+    r = run_inference_verified(ckpt, image_paths=[_image(tmp_path)], device="cpu", tile=True,
+                               tile_size=TILE, conf_threshold=0.0)
 
     assert "error" not in r
     tile_param = r["operating_point"]["tile_size"]

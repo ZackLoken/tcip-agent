@@ -63,7 +63,7 @@ def test_run_inference_refuses_an_unregistered_checkpoint(tmp_path, monkeypatch)
     ckpt = _bespoke_checkpoint(tmp_path / "m.pt")
     images_dir, _ = _images(tmp_path)
 
-    from tcip_mcp.tools.inference_tools import run_inference
+    from tests._verified_checkpoint_fixtures import run_inference_verified as run_inference
 
     r = run_inference(ckpt, images_dir=str(images_dir), device="cpu", tile=False)
     assert "error" in r
@@ -71,15 +71,15 @@ def test_run_inference_refuses_an_unregistered_checkpoint(tmp_path, monkeypatch)
     assert str(tmp_path) in r["error"]
 
 
-def test_export_predictions_refuses_an_unregistered_checkpoint_and_writes_nothing(tmp_path, monkeypatch):
+def test_run_inference_refuses_an_unregistered_checkpoint_and_writes_nothing(tmp_path, monkeypatch):
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     ckpt = _bespoke_checkpoint(tmp_path / "m.pt")
     images_dir, _ = _images(tmp_path)
     out = tmp_path / "preds"
 
-    from tcip_mcp.tools.inference_tools import export_predictions
+    from tcip_mcp.tools.inference_tools import run_inference
 
-    r = export_predictions(ckpt, str(images_dir), str(out), tile=False)
+    r = run_inference(ckpt, str(images_dir), output_dir=str(out), tile=False)
     assert "error" in r
     assert "register_model" in r["error"]
     assert not out.exists()
@@ -299,7 +299,7 @@ def test_run_inference_refuses_a_checkpoint_overwritten_in_place_after_registrat
     _bespoke_checkpoint(ckpt, tile_size=96)
     images_dir, _ = _images(tmp_path)
 
-    from tcip_mcp.tools.inference_tools import run_inference
+    from tests._verified_checkpoint_fixtures import run_inference_verified as run_inference
 
     r = run_inference(str(ckpt), images_dir=str(images_dir), device="cpu", tile=False)
     assert "error" in r
@@ -318,7 +318,7 @@ def test_run_inference_refuses_a_registered_checkpoint_replaced_by_rename(tmp_pa
     Path(other).rename(ckpt)
     images_dir, _ = _images(tmp_path)
 
-    from tcip_mcp.tools.inference_tools import run_inference
+    from tests._verified_checkpoint_fixtures import run_inference_verified as run_inference
 
     r = run_inference(str(ckpt), images_dir=str(images_dir), device="cpu", tile=False)
     assert "error" in r
@@ -344,7 +344,7 @@ def test_two_entries_naming_one_digest_with_disagreeing_producers_refuse(tmp_pat
         assert "error" not in reg, reg
     images_dir, _ = _images(tmp_path)
 
-    from tcip_mcp.tools.inference_tools import run_inference
+    from tests._verified_checkpoint_fixtures import run_inference_verified as run_inference
 
     r = run_inference(str(ckpt), images_dir=str(images_dir), device="cpu", tile=False)
     assert "error" in r
@@ -365,7 +365,7 @@ def test_two_entries_naming_one_digest_with_agreeing_producers_admit_it(tmp_path
     assert "error" not in register_model_from_experiment("expA", str(ckpt), name="entry-b")
     images_dir, _ = _images(tmp_path)
 
-    from tcip_mcp.tools.inference_tools import run_inference
+    from tests._verified_checkpoint_fixtures import run_inference_verified as run_inference
 
     r = run_inference(str(ckpt), images_dir=str(images_dir), device="cpu", tile=False)
     assert "error" not in r, r
@@ -386,7 +386,7 @@ def test_one_entry_naming_none_beside_one_that_does_admits_the_named_producer(tm
     assert "error" not in register_model_from_experiment("expA", str(ckpt), name="entry-tagged")
     images_dir, _ = _images(tmp_path)
 
-    from tcip_mcp.tools.inference_tools import run_inference
+    from tests._verified_checkpoint_fixtures import run_inference_verified as run_inference
 
     r = run_inference(str(ckpt), images_dir=str(images_dir), device="cpu", tile=False)
     assert "error" not in r, r
@@ -418,7 +418,7 @@ def test_run_inference_refuses_without_unpickling_a_side_effect_payload(tmp_path
                "carries_side_effect": _SideEffectOnUnpickle(str(marker))}, str(ckpt))
     images_dir, _ = _images(tmp_path)
 
-    from tcip_mcp.tools.inference_tools import run_inference
+    from tests._verified_checkpoint_fixtures import run_inference_verified as run_inference
 
     try:
         run_inference(str(ckpt), images_dir=str(images_dir), device="cpu", tile=False)
@@ -436,7 +436,7 @@ def test_run_inference_admits_a_registered_checkpoint_and_carries_its_digest(tmp
     reg = _register(tmp_path, str(ckpt))
     images_dir, _ = _images(tmp_path)
 
-    from tcip_mcp.tools.inference_tools import run_inference
+    from tests._verified_checkpoint_fixtures import run_inference_verified as run_inference
 
     r = run_inference(str(ckpt), images_dir=str(images_dir), device="cpu", tile=False)
     assert "error" not in r, r
@@ -452,7 +452,7 @@ def test_run_inference_admits_the_same_checkpoint_copied_to_another_path(tmp_pat
     copy.write_bytes(ckpt.read_bytes())
     images_dir, _ = _images(tmp_path)
 
-    from tcip_mcp.tools.inference_tools import run_inference
+    from tests._verified_checkpoint_fixtures import run_inference_verified as run_inference
 
     r = run_inference(str(copy), images_dir=str(images_dir), device="cpu", tile=False)
     assert "error" not in r, r
@@ -466,7 +466,7 @@ def test_run_inference_admits_a_raw_run_with_no_trait_and_stamps_unvalidated(tmp
     _register(tmp_path, str(ckpt))
     images_dir, _ = _images(tmp_path)
 
-    from tcip_mcp.tools.inference_tools import run_inference
+    from tests._verified_checkpoint_fixtures import run_inference_verified as run_inference
 
     r = run_inference(str(ckpt), images_dir=str(images_dir), device="cpu", tile=False)
     assert "error" not in r, r
@@ -487,7 +487,7 @@ def test_run_inference_admits_a_second_checkpoint_of_a_run_registered_under_a_di
     _register(tmp_path, str(final), name="run-final")
     images_dir, _ = _images(tmp_path)
 
-    from tcip_mcp.tools.inference_tools import run_inference
+    from tests._verified_checkpoint_fixtures import run_inference_verified as run_inference
 
     r = run_inference(str(final), images_dir=str(images_dir), device="cpu", tile=False)
     assert "error" not in r, r
@@ -516,7 +516,7 @@ def test_a_completed_runs_registered_weights_run_through_run_inference_with_no_f
 
     import hashlib
 
-    from tcip_mcp.tools.inference_tools import run_inference
+    from tests._verified_checkpoint_fixtures import run_inference_verified as run_inference
 
     r = run_inference(str(ckpt), images_dir=str(images_dir), device="cpu", tile=False)
     assert "error" not in r, r
@@ -653,14 +653,14 @@ def test_load_registered_checkpoints_version_refusal_is_caught_by_a_door(tmp_pat
     _register(tmp_path, str(ckpt))
     images_dir, _ = _images(tmp_path)
 
-    from tcip_mcp.tools.inference_tools import run_inference
+    from tests._verified_checkpoint_fixtures import run_inference_verified as run_inference
 
     r = run_inference(str(ckpt), images_dir=str(images_dir), device="cpu", tile=False)
     assert "error" in r
 
 
 # Rail 3: a sweep record edited after the run is refused by _calibration_evidence through
-# export_predictions, naming both digests.
+# run_inference, naming both digests.
 
 def _stand_in_calibration(monkeypatch, calibration_pipeline, labels_dir):
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
@@ -685,7 +685,7 @@ def _stand_in_calibration(monkeypatch, calibration_pipeline, labels_dir):
                         lambda *a, **k: (bundle, "H", 0, evidence))
 
 
-def test_export_predictions_refuses_a_sweep_record_edited_after_the_run(tmp_path, monkeypatch):
+def test_run_inference_refuses_a_sweep_record_edited_after_the_run(tmp_path, monkeypatch):
     """Coverage, not a fail-before guard: the spy stubs _run_inference_verified, a symbol the
     family's baseline (f4413a14) does not carry, so a run against that baseline dies in setup
     rather than on the assertion this test names. See the driven-through-real-doors version
@@ -712,8 +712,8 @@ def test_export_predictions_refuses_a_sweep_record_edited_after_the_run(tmp_path
     monkeypatch.setattr(itools, "_run_inference_verified", _spy)
 
     out = tmp_path / "preds"
-    r = itools.export_predictions(str(ckpt), str(images_dir), str(out), trait="catkin",
-                                  calibration_labels_dir=str(tmp_path))
+    r = itools.run_inference(str(ckpt), str(images_dir), output_dir=str(out), trait="catkin",
+                             calibration_labels_dir=str(tmp_path))
     assert "error" not in r, r
 
     from tcip_store import store
@@ -726,28 +726,29 @@ def test_export_predictions_refuses_a_sweep_record_edited_after_the_run(tmp_path
 
     monkeypatch.setattr(itools, "_run_inference_verified", lambda *a, **kw: dict(captured))
     out2 = tmp_path / "preds2"
-    refused = itools.export_predictions(str(ckpt), str(images_dir), str(out2), trait="catkin",
-                                        calibration_labels_dir=str(tmp_path))
+    refused = itools.run_inference(str(ckpt), str(images_dir), output_dir=str(out2), trait="catkin",
+                                   calibration_labels_dir=str(tmp_path))
     assert "error" in refused
     assert identity in refused["error"]
     assert not out2.exists()
 
 
-def test_export_predictions_refuses_a_sweep_record_edited_after_the_run_through_real_doors(
+def test_run_inference_refuses_a_sweep_record_edited_after_the_run_through_real_doors(
     tmp_path, monkeypatch,
 ):
     """The fail-before guard for rail 3, driven through real doors with no stub of
     _run_inference_verified (a symbol the family's baseline, f4413a14, does not carry): the
     calibration itself is the same deterministic stand-in the coverage test above uses (a real
     model pass is not reproducible byte for byte across two separate calls, see
-    _stand_in_calibration), so a real run_inference and a real export_predictions over it agree
+    _stand_in_calibration), so two real run_inference calls over it agree
     on one identity. store.replace (a baseline-old primitive) is patched to skip only the
     confidence-sweep write on the second call, so the first call's tampered record is the one
-    export_predictions reads back and refuses on."""
+    run_inference reads back and refuses on."""
     import tcip_store.store as store_mod
 
     import tcip_mcp.pipelines.calibration as calibration_pipeline
     import tcip_mcp.tools.inference_tools as itools
+    from tests._verified_checkpoint_fixtures import run_inference_verified
 
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     ckpt = tmp_path / "m.pt"
@@ -756,8 +757,8 @@ def test_export_predictions_refuses_a_sweep_record_edited_after_the_run_through_
     images_dir, _ = _images(tmp_path)
     _stand_in_calibration(monkeypatch, calibration_pipeline, tmp_path)
 
-    r1 = itools.run_inference(str(ckpt), images_dir=str(images_dir), trait="catkin",
-                              calibration_labels_dir=str(tmp_path))
+    r1 = run_inference_verified(str(ckpt), images_dir=str(images_dir), trait="catkin",
+                                calibration_labels_dir=str(tmp_path))
     assert "error" not in r1, r1
     identity = r1["calibration_evidence_key"]
 
@@ -778,14 +779,14 @@ def test_export_predictions_refuses_a_sweep_record_edited_after_the_run_through_
     monkeypatch.setattr(store_mod, "replace", _skip_the_sweep_write)
 
     out = tmp_path / "preds"
-    refused = itools.export_predictions(str(ckpt), str(images_dir), str(out), trait="catkin",
-                                        calibration_labels_dir=str(tmp_path))
+    refused = itools.run_inference(str(ckpt), str(images_dir), output_dir=str(out), trait="catkin",
+                                   calibration_labels_dir=str(tmp_path))
     assert "error" in refused
     assert identity in refused["error"]
     assert not out.exists()
 
 
-def test_export_predictions_refuses_a_sweep_whose_evidence_the_codec_cannot_carry(
+def test_run_inference_refuses_a_sweep_whose_evidence_the_codec_cannot_carry(
     tmp_path, monkeypatch,
 ):
     """A body the codec refuses (RECORD_JSON's allow_nan=False; a NaN in the resolver's inputs
@@ -823,8 +824,8 @@ def test_export_predictions_refuses_a_sweep_whose_evidence_the_codec_cannot_carr
     monkeypatch.setattr(calibration_pipeline, "calibrate_operating_point", _nan_evidence)
 
     out = tmp_path / "preds"
-    refused = itools.export_predictions(ckpt, str(images_dir), str(out), trait="catkin",
-                                        calibration_labels_dir=str(labels_dir))
+    refused = itools.run_inference(ckpt, str(images_dir), output_dir=str(out), trait="catkin",
+                                   calibration_labels_dir=str(labels_dir))
     assert "error" in refused
     assert "could not be kept" in refused["error"]
     assert not out.exists()
@@ -845,15 +846,15 @@ def test_doctor_lists_a_prerail_bucket_and_stays_silent_on_a_registered_one(tmp_
 
     images_dir, _ = _images(tmp_path)
     from tcip_mcp.dataset_layout import prediction_dir
-    from tcip_mcp.tools.inference_tools import export_predictions
+    from tcip_mcp.tools.inference_tools import run_inference
 
     good_dir = tmp_path / "predictions" / "baseline" / "2026-01-01"
-    r_good = export_predictions(str(ckpt), str(images_dir), str(good_dir), tile=False)
+    r_good = run_inference(str(ckpt), str(images_dir), output_dir=str(good_dir), tile=False)
     assert "error" not in r_good, r_good
     assert r_good["checkpoint_sha256"] == reg["sha256"]
 
     stale_dir = tmp_path / "predictions" / "stale" / "2026-01-01"
-    r_stale = export_predictions(str(stale_ckpt), str(images_dir), str(stale_dir), tile=False)
+    r_stale = run_inference(str(stale_ckpt), str(images_dir), output_dir=str(stale_dir), tile=False)
     assert "error" not in r_stale, r_stale
 
     # An undated bucket (prediction_dir(root, model, None), no date segment) is a real platform
@@ -862,7 +863,7 @@ def test_doctor_lists_a_prerail_bucket_and_stays_silent_on_a_registered_one(tmp_
     _bespoke_checkpoint(undated_ckpt, tile_size=112)
     _register(tmp_path, str(undated_ckpt), name="undated-model")
     undated_dir = prediction_dir(tmp_path, "undated-model", None)
-    r_undated = export_predictions(str(undated_ckpt), str(images_dir), str(undated_dir), tile=False)
+    r_undated = run_inference(str(undated_ckpt), str(images_dir), output_dir=str(undated_dir), tile=False)
     assert "error" not in r_undated, r_undated
 
     # Supersede stale-model's and undated-model's entries under the same name: their digests no

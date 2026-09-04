@@ -242,10 +242,10 @@ def test_a_bucket_the_prediction_writer_produced_reads_back_with_its_own_classes
 
     monkeypatch.setattr(
         "tcip_mcp.pipelines.inference.generic_predictor.GenericPredictor", FakePredictor)
-    from tcip_mcp.tools.inference_tools import export_predictions
+    from tcip_mcp.tools.inference_tools import run_inference
 
     bucket = tmp_path / "preds"
-    res = export_predictions(str(ckpt), str(images_dir), str(bucket), tile=False)
+    res = run_inference(str(ckpt), str(images_dir), output_dir=str(bucket), tile=False)
     assert "error" not in res, res
 
     id_map = phenology.bucket_id_map(bucket)

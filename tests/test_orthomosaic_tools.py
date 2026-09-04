@@ -115,10 +115,10 @@ def _plant_grid_csv(tmp_path: Path, raster_path: Path,
 _PLANT_PIXELS = [(10.0, 10.0), (10.0, 50.0), (50.0, 10.0), (50.0, 50.0)]
 
 
-# ── export_predictions (raster_path regime) ──────────────────────────────
+# ── run_inference (raster_path regime) ──────────────────────────────
 
 
-def test_export_predictions_raster_writes_bucket_with_explicit_tile_size(tmp_path, monkeypatch):
+def test_run_inference_raster_writes_bucket_with_explicit_tile_size(tmp_path, monkeypatch):
     """An explicit tile_size clears the tile_size gate on its own (no acknowledgement needed);
     the persisted bucket carries one prediction file for the whole raster plus a real
     operating_point.json sidecar in the same shape every other bucket writes."""
@@ -129,10 +129,10 @@ def test_export_predictions_raster_writes_bucket_with_explicit_tile_size(tmp_pat
     _write_geo_raster(raster_path)
     ckpt = _bespoke_detection_checkpoint(tmp_path)
 
-    from tcip_mcp.tools.inference_tools import export_predictions
+    from tcip_mcp.tools.inference_tools import run_inference
 
     out_dir = tmp_path / "preds"
-    result = export_predictions(
+    result = run_inference(
         ckpt, output_dir=str(out_dir), raster_path=str(raster_path), conf_threshold=0.0,
         tile_size=TILE, overlap=0.2)
 
@@ -178,17 +178,17 @@ def test_a_second_orthomosaic_export_against_a_completed_experiment_refuses_befo
     _write_geo_raster(raster_path)
     ckpt = _bespoke_detection_checkpoint(tmp_path)
 
-    from tcip_mcp.tools.inference_tools import export_predictions
+    from tcip_mcp.tools.inference_tools import run_inference
 
     out1 = tmp_path / "preds1"
-    r1 = export_predictions(ckpt, output_dir=str(out1), raster_path=str(raster_path),
+    r1 = run_inference(ckpt, output_dir=str(out1), raster_path=str(raster_path),
                             conf_threshold=0.0, tile_size=TILE, overlap=0.2,
                             experiment_id="expOrtho")
     assert "error" not in r1, r1
     update_status("expOrtho", "completed")
 
     out2 = tmp_path / "preds2"
-    r2 = export_predictions(ckpt, output_dir=str(out2), raster_path=str(raster_path),
+    r2 = run_inference(ckpt, output_dir=str(out2), raster_path=str(raster_path),
                             conf_threshold=0.0, tile_size=TILE, overlap=0.2,
                             experiment_id="expOrtho")
     assert "error" in r2
@@ -211,22 +211,22 @@ def test_a_same_path_orthomosaic_export_against_a_completed_experiment_admits_th
     _write_geo_raster(raster_path)
     ckpt = _bespoke_detection_checkpoint(tmp_path)
 
-    from tcip_mcp.tools.inference_tools import export_predictions
+    from tcip_mcp.tools.inference_tools import run_inference
 
     out = tmp_path / "preds"
-    r1 = export_predictions(ckpt, output_dir=str(out), raster_path=str(raster_path),
+    r1 = run_inference(ckpt, output_dir=str(out), raster_path=str(raster_path),
                             conf_threshold=0.0, tile_size=TILE, overlap=0.2,
                             experiment_id="expOrthoSame")
     assert "error" not in r1, r1
     update_status("expOrthoSame", "completed")
 
-    r2 = export_predictions(ckpt, output_dir=str(out), raster_path=str(raster_path),
+    r2 = run_inference(ckpt, output_dir=str(out), raster_path=str(raster_path),
                             conf_threshold=0.0, tile_size=TILE, overlap=0.2,
                             experiment_id="expOrthoSame")
     assert "error" not in r2, r2
 
 
-def test_export_predictions_raster_refuses_missing_checkpoint_cleanly(tmp_path, monkeypatch):
+def test_run_inference_raster_refuses_missing_checkpoint_cleanly(tmp_path, monkeypatch):
     """A missing checkpoint must return an honest {"error": ...}, the same shape every other
     refusal in this door uses, never an uncaught FileNotFoundError out of the MCP tool: the
     raster regime builds its own predictor directly rather than going through run_inference's own
@@ -237,33 +237,33 @@ def test_export_predictions_raster_refuses_missing_checkpoint_cleanly(tmp_path, 
     raster_path = tmp_path / "mosaic.tif"
     _write_geo_raster(raster_path)
 
-    from tcip_mcp.tools.inference_tools import export_predictions
+    from tcip_mcp.tools.inference_tools import run_inference
 
     out_dir = tmp_path / "preds"
-    r = export_predictions(str(tmp_path / "missing.pt"), output_dir=str(out_dir),
+    r = run_inference(str(tmp_path / "missing.pt"), output_dir=str(out_dir),
                            raster_path=str(raster_path), conf_threshold=0.0)
     assert "error" in r
     assert "Checkpoint not found" in r["error"]
     assert not out_dir.exists()
 
 
-def test_export_predictions_raster_refuses_missing_raster_cleanly(tmp_path, monkeypatch):
+def test_run_inference_raster_refuses_missing_raster_cleanly(tmp_path, monkeypatch):
     """Same shape for a missing raster_path."""
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path / "proj"))
     (tmp_path / "proj" / ".tcip" / "state").mkdir(parents=True, exist_ok=True)
     ckpt = _bespoke_detection_checkpoint(tmp_path)
 
-    from tcip_mcp.tools.inference_tools import export_predictions
+    from tcip_mcp.tools.inference_tools import run_inference
 
     out_dir = tmp_path / "preds"
-    r = export_predictions(ckpt, output_dir=str(out_dir),
+    r = run_inference(ckpt, output_dir=str(out_dir),
                            raster_path=str(tmp_path / "missing.tif"), conf_threshold=0.0)
     assert "error" in r
     assert "raster_path not found" in r["error"]
     assert not out_dir.exists()
 
 
-def test_export_predictions_raster_refuses_when_tile_size_has_no_real_basis(tmp_path, monkeypatch):
+def test_run_inference_raster_refuses_when_tile_size_has_no_real_basis(tmp_path, monkeypatch):
     """No persisted training geometry and no explicit tile_size -> no real basis to tile at, at
     all, unlike the ordinary images_dir regime this always-tiled regime has no untiled fallback to
     run instead, so this refusal is unconditional: acknowledge_unvalidated=True cannot un-stick it
@@ -276,22 +276,22 @@ def test_export_predictions_raster_refuses_when_tile_size_has_no_real_basis(tmp_
     _write_geo_raster(raster_path)
     ckpt = _bespoke_detection_checkpoint(tmp_path)  # no persisted tiling geometry in its config
 
-    from tcip_mcp.tools.inference_tools import export_predictions
+    from tcip_mcp.tools.inference_tools import run_inference
 
     out_dir = tmp_path / "preds"
-    refused = export_predictions(
+    refused = run_inference(
         ckpt, output_dir=str(out_dir), raster_path=str(raster_path), conf_threshold=0.0)
     assert "error" in refused
     assert not out_dir.exists()  # refused before ever writing the bucket
 
-    still_refused = export_predictions(
+    still_refused = run_inference(
         ckpt, output_dir=str(out_dir), raster_path=str(raster_path), conf_threshold=0.0,
         acknowledge_unvalidated=True)
     assert "error" in still_refused
     assert not out_dir.exists()
 
 
-def test_export_predictions_raster_bucket_immutability(tmp_path, monkeypatch):
+def test_run_inference_raster_bucket_immutability(tmp_path, monkeypatch):
     """A bucket with a recorded review verdict is never silently overwritten, the same
     immutability the images_dir regime already enforces, shared rather than reimplemented."""
     platform_root = tmp_path / "platform"
@@ -302,12 +302,12 @@ def test_export_predictions_raster_bucket_immutability(tmp_path, monkeypatch):
     _write_geo_raster(raster_path)
     ckpt = _bespoke_detection_checkpoint(tmp_path)
 
-    from tcip_mcp.tools.inference_tools import export_predictions
+    from tcip_mcp.tools.inference_tools import run_inference
 
     # Inside a dataset, where the verdicts that freeze a bucket are recorded.
     dataset_root = tmp_path / "dataset"
     out_dir = dataset_root / "predictions" / "preds"
-    first = export_predictions(
+    first = run_inference(
         ckpt, output_dir=str(out_dir), raster_path=str(raster_path), conf_threshold=0.0,
         tile_size=TILE)
     assert "error" not in first
@@ -324,13 +324,13 @@ def test_export_predictions_raster_bucket_immutability(tmp_path, monkeypatch):
                           pred_idx=0, bbox=(1.0, 1.0, 5.0, 5.0))
     engine.record_detection_action(bucket_key_of(out_dir), det, ctx, action="accepted")
 
-    overwrite_attempt = export_predictions(
+    overwrite_attempt = run_inference(
         ckpt, output_dir=str(out_dir), raster_path=str(raster_path), conf_threshold=0.0,
         tile_size=TILE, overwrite=True)
     assert "error" in overwrite_attempt and overwrite_attempt["verdict_count"] == 1
     assert Path(overwrite_attempt["suggested_bucket"]).name == "preds@r2"
 
-    redirected = export_predictions(
+    redirected = run_inference(
         ckpt, output_dir=str(out_dir), raster_path=str(raster_path), conf_threshold=0.0,
         tile_size=TILE)
     assert "error" not in redirected
@@ -354,13 +354,13 @@ def test_deliver_orthomosaic_plant_counts_signature_carries_delivered_phenotype_
 
 
 def _run_bucket(tmp_path, monkeypatch, raster_path: Path) -> tuple[Path, str]:
-    """A real bucket via export_predictions's raster_path regime (explicit tile_size, so it
+    """A real bucket via run_inference's raster_path regime (explicit tile_size, so it
     writes without acknowledgement); returns (bucket dir, prediction stem)."""
-    from tcip_mcp.tools.inference_tools import export_predictions
+    from tcip_mcp.tools.inference_tools import run_inference
 
     ckpt = _bespoke_detection_checkpoint(tmp_path)
     out_dir = tmp_path / "preds"
-    result = export_predictions(
+    result = run_inference(
         ckpt, output_dir=str(out_dir), raster_path=str(raster_path), conf_threshold=0.0,
         tile_size=TILE)
     assert "error" not in result
@@ -537,12 +537,12 @@ def test_deliver_orthomosaic_plant_counts_floors_a_stamp_earned_for_a_different_
     raster_path = tmp_path / "mosaic.tif"
     _write_geo_raster(raster_path)
 
-    from tcip_mcp.tools.inference_tools import export_predictions
+    from tcip_mcp.tools.inference_tools import run_inference
 
     ckpt = _bespoke_detection_checkpoint(tmp_path)
     dataset_root = tmp_path / "ds"
     bucket_dir = dataset_root / "predictions" / "run1"
-    result = export_predictions(
+    result = run_inference(
         ckpt, output_dir=str(bucket_dir), raster_path=str(raster_path), conf_threshold=0.0,
         tile_size=TILE)
     assert "error" not in result
@@ -584,12 +584,12 @@ def test_deliver_orthomosaic_plant_counts_sibling_tile_floor_despite_valid_conf(
     raster_path = tmp_path / "mosaic.tif"
     _write_geo_raster(raster_path)
 
-    from tcip_mcp.tools.inference_tools import export_predictions
+    from tcip_mcp.tools.inference_tools import run_inference
 
     ckpt = _bespoke_detection_checkpoint(tmp_path)
     dataset_root = tmp_path / "ds"
     bucket_dir = dataset_root / "predictions" / "run1"
-    result = export_predictions(
+    result = run_inference(
         ckpt, output_dir=str(bucket_dir), raster_path=str(raster_path), conf_threshold=0.0,
         tile_size=TILE)
     assert "error" not in result
@@ -604,7 +604,7 @@ def test_deliver_orthomosaic_plant_counts_sibling_tile_floor_despite_valid_conf(
     assert stamped is not None
     op = dict(stamped["operating_point"])
     op["conf"] = {**op["conf"], "validated_against": VALIDATED_HELD_OUT}
-    # Patched here rather than published this way: export_predictions's own persist-time gate
+    # Patched here rather than published this way: run_inference's own persist-time gate
     # refuses an unfounded tile_size unconditionally, so no real bucket can carry one directly.
     op["tile_size"] = {**op["tile_size"], "validated_against": VALIDATED_FALSE}
     validated_stamp = {**stamped, "operating_point": op, "trait": fx.COUNT_TRAIT, "validated": True}

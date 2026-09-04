@@ -393,7 +393,8 @@ def test_run_inference_dry_run_reports_operating_point(tmp_path):
     from tcip_mcp.tools.inference_tools import run_inference
     ckpt = tmp_path / "m.pt"
     ckpt.write_bytes(b"x")  # dry_run never loads it
-    res = run_inference(str(ckpt), images_dir=str(tmp_path), dry_run=True, tile=True, tile_size=640)
+    res = run_inference(str(ckpt), images_dir=str(tmp_path), output_dir=str(tmp_path / "out"),
+                        dry_run=True, tile=True, tile_size=640)
     assert res["dry_run"] is True
     op = res["operating_point"]
     assert op["conf"] == 0.5  # DEFAULT_CONF (one shared source)
@@ -409,7 +410,8 @@ def test_run_inference_dry_run_unset_tile_is_pending_not_a_default(tmp_path):
     from tcip_mcp.tools.inference_tools import run_inference
     ckpt = tmp_path / "m.pt"
     ckpt.write_bytes(b"x")  # dry_run never loads it
-    res = run_inference(str(ckpt), images_dir=str(tmp_path), dry_run=True)
+    res = run_inference(str(ckpt), images_dir=str(tmp_path), output_dir=str(tmp_path / "out"),
+                        dry_run=True)
     assert res["dry_run"] is True
     op = res["operating_point"]
     assert op["tiled"] == "pending-checkpoint-derivation"

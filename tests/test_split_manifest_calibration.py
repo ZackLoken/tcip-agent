@@ -533,7 +533,8 @@ def test_run_inference_refuses_split_manifest_dir_without_calibration_labels_dir
     ckpt.write_bytes(b"stub")
 
     result = run_inference(
-        str(ckpt), image_paths=[str(tmp_path / "a.png")], split_manifest_dir=str(tmp_path / "m"))
+        str(ckpt), images_dir=str(tmp_path), output_dir=str(tmp_path / "out"),
+        split_manifest_dir=str(tmp_path / "m"))
 
     assert "error" in result and "split_manifest_dir" in result["error"]
 
@@ -651,7 +652,7 @@ def test_force_redraw_manifest_addresses_the_same_lock_when_an_image_is_missing(
 def test_manifest_calibrations_evidence_earns_a_validated_record_through_export(
         tmp_path: Path, monkeypatch):
     """A manifest-restricted calibration's evidence, driven through the real count door
-    (``export_predictions``), earns a record whose reference identity carries the manifest's
+    (``run_inference``), earns a record whose reference identity carries the manifest's
     universe, and the delivery reader's own verification of the stamp's binding passes against
     the bucket as it was actually written."""
     import tcip_mcp.pipelines.calibration as calibration
@@ -716,7 +717,7 @@ def test_manifest_calibrations_evidence_earns_a_validated_record_through_export(
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
     ckpt = registered_checkpoint(tmp_path, project_root=tmp_path)
-    result = itools.export_predictions(
+    result = itools.run_inference(
         str(ckpt), images_dir=str(root / "images" / DATES[0]),
         output_dir=str(root / "predictions" / "baseline" / DATES[0]),
         device="cpu", tile=False, trait=SUBJECT,
@@ -740,7 +741,7 @@ def test_manifest_calibrations_evidence_earns_a_validated_record_through_export(
 
 def test_count_door_round_trip_earns_a_checked_selection_disjointness(tmp_path, monkeypatch):
     """``draw_splits`` draws three sides; a real bound launch binds to the manifest's train/val;
-    ``export_predictions`` calibrates under the manifest with that run as producer; the sealed
+    ``run_inference`` calibrates under the manifest with that run as producer; the sealed
     row carries ``label_stems.calibration`` and a checked, leak-free ``selection_disjointness``;
     and ``verify_stamp_binding`` verifies the delivered bucket."""
     import tcip_mcp.pipelines.calibration as calibration
@@ -820,7 +821,7 @@ def test_count_door_round_trip_earns_a_checked_selection_disjointness(tmp_path, 
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
     ckpt = registered_checkpoint(tmp_path, project_root=tmp_path)
-    result = itools.export_predictions(
+    result = itools.run_inference(
         str(ckpt), images_dir=str(root / "images" / DATES[0]),
         output_dir=str(root / "predictions" / "bound" / DATES[0]),
         device="cpu", tile=False, trait=SUBJECT,

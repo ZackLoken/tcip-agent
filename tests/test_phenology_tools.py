@@ -167,7 +167,7 @@ def _write_op_sidecar(dir_path: Path, *, dataset_root: Path, validated: bool, co
                       id_map: dict | None = None, experiment_id: str | None = None,
                       checkpoint_sha256: str | None = None,
                       tile_size_prov: dict | None = None, trait: str = "catkin") -> None:
-    """The operating_point.json a calibrated export_predictions writes.
+    """The operating_point.json a calibrated run_inference writes.
 
     ``tile_size_prov`` is the tile_size param's own provenance entry, present for a run that
     actually tiled; omitted here for an untiled run, which carries no gating tile scale.

@@ -531,7 +531,7 @@ def _write_op_sidecar(d: Path, *, dataset_root: Path, validated: bool, conf: flo
                       id_map: dict | None = None,
                       checkpoint_sha256: str | None = None,
                       experiment_id: str | None = "exp-golden") -> None:
-    """The operating_point.json stamp export_predictions writes beside a bucket's labels: the
+    """The operating_point.json stamp run_inference writes beside a bucket's labels: the
     on-disk validity deliver_phenology_milestones reconciles against, including id_map and
     producer identity (the real writer always stamps checkpoint_sha256/experiment_id
     at the top level; a fixture that omitted them blessed a shape the platform never produces).

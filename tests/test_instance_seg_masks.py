@@ -243,11 +243,11 @@ def test_run_inference_instance_seg_unset_tile_runs_tiled_with_masks(instance_se
     behaves exactly as plain detection does (tiled inference threads masks through the cross-tile
     merge instead of being refused outright), and each result's masks are the tiled (patch + offset)
     shape."""
-    from tcip_mcp.tools.inference_tools import run_inference
+    from tests._verified_checkpoint_fixtures import run_inference_verified
 
     _register_instance_seg_ckpt(instance_seg_ckpt, tmp_path)
-    r = run_inference(instance_seg_ckpt, image_paths=[_image(tmp_path / "images")], device="cpu",
-                      tile_size=TILE, conf_threshold=0.0)
+    r = run_inference_verified(instance_seg_ckpt, image_paths=[_image(tmp_path / "images")],
+                               device="cpu", tile_size=TILE, conf_threshold=0.0)
     assert "error" not in r
     assert r["tiled"] is True
     assert r["operating_point"]["tiled"]["value"] is True
@@ -261,25 +261,25 @@ def test_run_inference_instance_seg_unset_tile_runs_tiled_with_masks(instance_se
 def test_run_inference_instance_seg_explicit_tile_true_runs_tiled_with_masks(instance_seg_ckpt, tmp_path):
     """An explicit tile=True is no longer refused for instance_seg: tiled inference threads masks
     through the cross-tile reconstruction/merge now, so this checkpoint tiles like any other."""
-    from tcip_mcp.tools.inference_tools import run_inference
+    from tests._verified_checkpoint_fixtures import run_inference_verified
 
     _register_instance_seg_ckpt(instance_seg_ckpt, tmp_path)
-    r = run_inference(instance_seg_ckpt, image_paths=[_image(tmp_path / "images")], device="cpu",
-                      tile=True, tile_size=TILE, conf_threshold=0.0)
+    r = run_inference_verified(instance_seg_ckpt, image_paths=[_image(tmp_path / "images")],
+                               device="cpu", tile=True, tile_size=TILE, conf_threshold=0.0)
     assert "error" not in r
     assert r["tiled"] is True
     assert len(r["results"]) == 1
     assert "masks" in r["results"][0]
 
 
-def test_export_predictions_instance_seg_unset_tile_writes_tiled(instance_seg_ckpt, tmp_path):
-    from tcip_mcp.tools.inference_tools import export_predictions
+def test_run_inference_instance_seg_unset_tile_writes_tiled(instance_seg_ckpt, tmp_path):
+    from tcip_mcp.tools.inference_tools import run_inference
 
     _register_instance_seg_ckpt(instance_seg_ckpt, tmp_path)
     images_dir = tmp_path / "images"
     _image(images_dir)
-    r = export_predictions(instance_seg_ckpt, str(images_dir), str(tmp_path / "preds"),
-                           device="cpu", tile_size=TILE, conf_threshold=0.0)
+    r = run_inference(instance_seg_ckpt, str(images_dir), output_dir=str(tmp_path / "preds"),
+                      device="cpu", tile_size=TILE, conf_threshold=0.0)
     assert "error" not in r
     assert r["operating_point"]["tiled"]["value"] is True
     assert (Path(r["output_dir"]) / "img.json").is_file()
@@ -346,7 +346,7 @@ def test_deliver_per_image_counts_instance_seg_live_and_bucket_regime_agree_on_m
         assert rows_a[0][key] == rows_b[0][key], key
 
 
-def test_export_predictions_stamps_mask_binarize_provenance_when_masks_present(instance_seg_ckpt, tmp_path):
+def test_run_inference_stamps_mask_binarize_provenance_when_masks_present(instance_seg_ckpt, tmp_path):
     """The unvalidated mask-binarize threshold must not be stamped into Annotation.attributes
     (the domain trait namespace, which would pollute GT). It travels once, as a run constant,
     in operating_point.json, the same door tiled/tile_size/conf already use. Exercised on the
@@ -355,14 +355,14 @@ def test_export_predictions_stamps_mask_binarize_provenance_when_masks_present(i
     import json
 
     from tcip_mcp.pipelines.resolution import read_operating_point_sidecar
-    from tcip_mcp.tools.inference_tools import export_predictions
+    from tcip_mcp.tools.inference_tools import run_inference
 
     _register_instance_seg_ckpt(instance_seg_ckpt, tmp_path)
     images_dir = tmp_path / "images"
     _image(images_dir)
     out = tmp_path / "preds"
-    r = export_predictions(instance_seg_ckpt, str(images_dir), str(out), device="cpu",
-                           tile_size=TILE, conf_threshold=0.0)  # force at least one (masked) detection
+    r = run_inference(instance_seg_ckpt, str(images_dir), output_dir=str(out), device="cpu",
+                      tile_size=TILE, conf_threshold=0.0)  # force at least one (masked) detection
     assert "error" not in r
     op = read_operating_point_sidecar(r["output_dir"])
     assert op["mask_binarize"]["name"] == "mask_binarize_threshold"
@@ -373,17 +373,17 @@ def test_export_predictions_stamps_mask_binarize_provenance_when_masks_present(i
         assert ann.get("attributes", {}) == {}  # never per-annotation
 
 
-def test_export_predictions_instance_seg_explicit_tile_true_writes_tiled(instance_seg_ckpt, tmp_path):
+def test_run_inference_instance_seg_explicit_tile_true_writes_tiled(instance_seg_ckpt, tmp_path):
     """An explicit tile=True is no longer refused for instance_seg export: masks travel through
     the tiled path into the written prediction bucket."""
-    from tcip_mcp.tools.inference_tools import export_predictions
+    from tcip_mcp.tools.inference_tools import run_inference
 
     _register_instance_seg_ckpt(instance_seg_ckpt, tmp_path)
     images_dir = tmp_path / "images"
     _image(images_dir)
     out = tmp_path / "preds"
-    r = export_predictions(instance_seg_ckpt, str(images_dir), str(out), device="cpu",
-                           tile=True, tile_size=TILE, conf_threshold=0.0)
+    r = run_inference(instance_seg_ckpt, str(images_dir), output_dir=str(out), device="cpu",
+                      tile=True, tile_size=TILE, conf_threshold=0.0)
     assert "error" not in r
     assert (Path(r["output_dir"]) / "img.json").is_file()
 
@@ -479,7 +479,7 @@ def test_export_does_not_pollute_annotation_attributes_with_binarize_threshold(t
     namespace, not a machine-provenance one) would let it survive into GT the moment a breeder
     accepts the prediction. attributes must stay empty; the threshold travels via
     mask_binarize_provenance() into the run's operating_point.json instead (see
-    test_export_predictions_stamps_mask_binarize_provenance_when_masks_present)."""
+    test_run_inference_stamps_mask_binarize_provenance_when_masks_present)."""
     from tcip_mcp.pipelines.postprocessing.export import write_predictions_json
     from tcip_annotation import json_io
 

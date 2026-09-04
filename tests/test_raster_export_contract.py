@@ -44,10 +44,10 @@ def test_the_whole_mosaic_pass_runs_at_the_cap_its_sidecar_records(tmp_path, mon
 
     monkeypatch.setattr(GenericPredictor, "predict_tiled", _capture_predict_tiled)
 
-    from tcip_mcp.tools.inference_tools import export_predictions
+    from tcip_mcp.tools.inference_tools import run_inference
 
     out_dir = tmp_path / "preds"
-    result = export_predictions(
+    result = run_inference(
         exp["checkpoint_path"], output_dir=str(out_dir), raster_path=str(exp["raster_path"]),
         conf_threshold=0.0, tile_size=TILE, overlap=0.2, trait="catkin",
         experiment_id=exp["experiment_id"])
@@ -77,10 +77,10 @@ def test_a_raster_trait_export_with_no_reserved_region_names_the_audited_deliver
 
     exp = _build_experiment(tmp_path, reserve_frac=0.0, experiment_id="exp_no_reserved_region")
 
-    from tcip_mcp.tools.inference_tools import export_predictions
+    from tcip_mcp.tools.inference_tools import run_inference
 
     out_dir = tmp_path / "preds"
-    result = export_predictions(
+    result = run_inference(
         exp["checkpoint_path"], output_dir=str(out_dir), raster_path=str(exp["raster_path"]),
         conf_threshold=0.0, tile_size=TILE, overlap=0.2, trait="catkin",
         experiment_id=exp["experiment_id"])

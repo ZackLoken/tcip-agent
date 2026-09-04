@@ -131,7 +131,7 @@ def test_run_inference_images_dir_folds_a_grouped_capture(tmp_path, monkeypatch)
     list_logical_images rather than a bare image_exts scan, or a grouped capture's sibling band
     files each enumerate as their own (spurious) image instead of folding into one. Real forward
     pass, no images_dir mixing (see module docstring)."""
-    from tcip_mcp.tools.inference_tools import run_inference
+    from tests._verified_checkpoint_fixtures import run_inference_verified
 
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     images_dir = tmp_path / "images"
@@ -139,7 +139,7 @@ def test_run_inference_images_dir_folds_a_grouped_capture(tmp_path, monkeypatch)
     _write_group(images_dir, "capture_001")
     ckpt = _detection_checkpoint(tmp_path)
 
-    result = run_inference(ckpt, images_dir=str(images_dir), device="cpu", tile=False)
+    result = run_inference_verified(ckpt, images_dir=str(images_dir), device="cpu", tile=False)
 
     assert "error" not in result
     assert result["image_count"] == 1  # one grouped capture, never 2 raw sibling band files

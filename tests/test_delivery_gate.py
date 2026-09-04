@@ -752,7 +752,7 @@ def test_deliver_per_image_counts_acknowledge_unvalidated_tile_size_floors_csv_s
     assert r["unvalidated_dimensions"] == "tile_size"            # names the floorer
 
 
-# ── export_predictions gates tile_size too: it is the door that actually persists a bucket ──
+# ── run_inference gates tile_size too: it is the door that actually persists a bucket ──
 
 def _fake_run_inference_result(*, conf_ref, tile_size_prov=None):
     op = {"conf": {"value": 0.6, "validated_against": conf_ref}}
@@ -786,10 +786,10 @@ def _earned_run_inference_result(tmp_path, *, trait="catkin", **calibration):
     }
 
 
-def test_export_predictions_refuses_fabricated_tile_size_even_with_validated_conf(tmp_path, monkeypatch):
+def test_run_inference_refuses_fabricated_tile_size_even_with_validated_conf(tmp_path, monkeypatch):
     """The delivery door that actually persists a prediction bucket must refuse a fabricated tile
     scale the same way deliver_per_image_counts/deliver_phenology_milestones/export_aggregated_csv already do:
-    run_inference itself never refuses (it is the shared, honestly-stamped raw substrate every
+    the verified pass itself never refuses (it is the shared, honestly-stamped raw substrate every
     door builds on, same contract as an uncalibrated conf), so the refusal belongs here."""
     import tcip_mcp.tools.inference_tools as itools
 
@@ -798,13 +798,13 @@ def test_export_predictions_refuses_fabricated_tile_size_even_with_validated_con
         tile_size_prov={"value": 640, "requires_validation": True,
                         "validation_kind": "geometry", "validated_against": VALIDATED_FALSE}))
     out = tmp_path / "preds"
-    r = itools.export_predictions(_dummy_checkpoint(tmp_path), str(tmp_path), str(out))
+    r = itools.run_inference(_dummy_checkpoint(tmp_path), str(tmp_path), output_dir=str(out))
     assert "error" in r
     assert r["tile_size_validated"] == VALIDATED_FALSE
     assert not out.exists()
 
 
-def test_export_predictions_ships_when_tile_size_has_a_real_basis(
+def test_run_inference_ships_when_tile_size_has_a_real_basis(
     tmp_path, monkeypatch, seed_catkin_trait_spec,
 ):
     """The rail must admit valid work, not only reject invalid work."""
@@ -815,7 +815,7 @@ def test_export_predictions_ships_when_tile_size_has_a_real_basis(
     monkeypatch.setattr(itools, "_run_inference_verified", lambda *a, **kw: _earned_run_inference_result(
         tmp_path, tiled=True, tile_size=224, tile_size_source="derived"))
     out = tmp_path / "ds" / "predictions" / "baseline" / "2026-01-01"
-    r = itools.export_predictions(_dummy_checkpoint(tmp_path), str(tmp_path), str(out), trait="catkin")
+    r = itools.run_inference(_dummy_checkpoint(tmp_path), str(tmp_path), output_dir=str(out), trait="catkin")
     assert "error" not in r, r
     assert r["tile_size_validated"] == VALIDATED_PERSISTED_GEOMETRY
     assert r["validated"] is True
@@ -826,7 +826,7 @@ def test_export_predictions_ships_when_tile_size_has_a_real_basis(
     assert sidecar["validated"] is True
 
 
-def test_export_predictions_never_gates_tile_size_when_untiled(
+def test_run_inference_never_gates_tile_size_when_untiled(
     tmp_path, monkeypatch, seed_catkin_trait_spec,
 ):
     """An untiled run's tile_size is never operative: it must not manufacture a refusal just
@@ -836,13 +836,13 @@ def test_export_predictions_never_gates_tile_size_when_untiled(
     monkeypatch.setattr(itools, "_run_inference_verified",
                         lambda *a, **kw: _earned_run_inference_result(tmp_path, tiled=False))
     out = tmp_path / "ds" / "predictions" / "baseline" / "2026-01-01"
-    r = itools.export_predictions(_dummy_checkpoint(tmp_path), str(tmp_path), str(out), trait="catkin")
+    r = itools.run_inference(_dummy_checkpoint(tmp_path), str(tmp_path), output_dir=str(out), trait="catkin")
     assert "error" not in r, r
     assert r["tile_size_validated"] is None
     assert r["validated"] is True
 
 
-def test_export_predictions_acknowledge_writes_and_floors_the_sidecar_stamp(tmp_path, monkeypatch):
+def test_run_inference_acknowledge_writes_and_floors_the_sidecar_stamp(tmp_path, monkeypatch):
     """A bucket whose conf is genuinely validated but whose tile_size only shipped via
     acknowledge_unvalidated must not stamp validated=true on the sidecar, or a downstream door
     reading it would treat a fabricated tile scale as trustworthy."""
@@ -853,7 +853,7 @@ def test_export_predictions_acknowledge_writes_and_floors_the_sidecar_stamp(tmp_
         tile_size_prov={"value": 640, "requires_validation": True,
                         "validation_kind": "geometry", "validated_against": VALIDATED_FALSE}))
     out = tmp_path / "preds"
-    r = itools.export_predictions(_dummy_checkpoint(tmp_path), str(tmp_path), str(out), acknowledge_unvalidated=True)
+    r = itools.run_inference(_dummy_checkpoint(tmp_path), str(tmp_path), output_dir=str(out), acknowledge_unvalidated=True)
     assert "error" not in r
     assert r["tile_size_validated"] == VALIDATED_FALSE
     assert r["validated"] is False  # floored despite conf's own clean reference
@@ -864,9 +864,9 @@ def test_export_predictions_acknowledge_writes_and_floors_the_sidecar_stamp(tmp_
     assert (out / "a.json").exists()  # the honestly-flagged provisional bucket still wrote
 
 
-def test_export_predictions_images_dir_gates_before_the_pass_not_after(tmp_path, monkeypatch):
+def test_run_inference_images_dir_gates_before_the_pass_not_after(tmp_path, monkeypatch):
     """DECIDED #1: the images_dir regime's gate runs before the (expensive) pass, the same
-    ordering the raster_path regime already had, not only after run_inference already ran it.
+    ordering the raster_path regime already had, not only after the verified pass already ran it.
     A real checkpoint with no tile geometry at all (no persisted tile size, no untiled training
     frame to derive a native-ratio edge from, no explicit override) must refuse without ever
     reaching the model's own forward pass; GenericPredictor's predict_batch is monkeypatched to
@@ -900,13 +900,13 @@ def test_export_predictions_images_dir_gates_before_the_pass_not_after(tmp_path,
     Image.fromarray(arr).save(images_dir / "a.png")
 
     out = tmp_path / "preds"
-    r = itools.export_predictions(str(ckpt), str(images_dir), str(out), conf_threshold=0.0,
-                                  tile=True)
+    r = itools.run_inference(str(ckpt), str(images_dir), output_dir=str(out), conf_threshold=0.0,
+                             tile=True)
     assert "error" in r
     assert not out.exists()
 
 
-# ── the GUI inference worker gates the bucket it persists, same as export_predictions ──
+# ── the GUI inference worker gates the bucket it persists, same as run_inference ──
 
 def _run_gui_inference_worker(tmp_path, monkeypatch, *, tile, train_tile_size=None,
                               slice_source="default", tile_source="explicit"):
@@ -965,7 +965,7 @@ def _sidecar_tile_reference(out_dir):
 def test_gui_inference_worker_refuses_a_fabricated_tile_scale(tmp_path, monkeypatch):
     """The breeder's own door must be gated like every other door that persists a bucket: a tiled
     run off a checkpoint with no persisted training geometry writes counts at a scale nothing
-    justifies, which export_predictions already refuses. The refusal has to reach the breeder as a
+    justifies, which run_inference already refuses. The refusal has to reach the breeder as a
     failed job carrying the reason, never a silent bucket plus an unvalidated sidecar."""
     job, out_dir = _run_gui_inference_worker(tmp_path, monkeypatch, tile=True)
     assert job.status == "failed"
@@ -1049,7 +1049,7 @@ def test_gui_launch_with_no_tile_field_and_no_checkpoint_geometry_stays_untiled(
 
 def _write_bucket(tmp_path, name, *, conf_ref, tile_size_prov=None, validated=None,
                   trait=fx.COUNT_TRAIT):
-    """A prediction bucket's operating_point.json, the shape export_predictions writes."""
+    """A prediction bucket's operating_point.json, the shape run_inference writes."""
     root = tmp_path / "ds"
     d = root / "predictions" / name
     write_prediction(d, "img_a")

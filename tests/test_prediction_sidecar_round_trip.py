@@ -1,6 +1,6 @@
 """A written prediction bucket has to be readable by the readers the delivery doors use.
 
-``export_predictions`` writes ``operating_point.json`` beside the predictions, and every door that
+``run_inference`` writes ``operating_point.json`` beside the predictions, and every door that
 later assembles a phenotype from that bucket reads its validity back out of that file rather than
 from a caller's word. These tests drive the real writer and the real readers against each other, so
 a stamp the writer produces but no reader can find is a failure here rather than downstream.
@@ -86,7 +86,7 @@ def _export(tmp_path, monkeypatch, *, calibration, tile, tile_size=None):
     monkeypatch.setattr(predictor_mod, "build_predictor", lambda checkpoint, **kw: _BucketStub())
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     ckpt = registered_checkpoint(tmp_path, project_root=tmp_path)
-    result = itools.export_predictions(
+    result = itools.run_inference(
         str(ckpt), images_dir=str(images_dir),
         output_dir=str(dataset_root / "predictions" / "baseline" / "2026-03-01"),
         device="cpu", tile=tile, tile_size=tile_size, trait="catkin",
@@ -143,7 +143,7 @@ def test_a_registered_bespoke_checkpoint_exports_and_earns_its_own_calibration_r
     experiment behind it, exports predictions and earns a validated count against an experiment
     created for the calibration, with the producing run recorded as absent rather than invented.
     An unregistered checkpoint is refused before any of this runs; that refusal is
-    test_export_predictions_refuses_an_unregistered_checkpoint_and_writes_nothing in
+    test_run_inference_refuses_an_unregistered_checkpoint_and_writes_nothing in
     test_checkpoint_digest_rails.py."""
     from tcip_mcp.experiments import experiment_exists, find_validation
     from tcip_mcp.pipelines.resolution import read_operating_point_sidecar

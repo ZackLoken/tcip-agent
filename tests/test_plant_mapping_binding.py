@@ -190,9 +190,9 @@ def test_deliver_phenology_milestones_refuses_predictions_under_no_dataset_root_
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Rail 4's missing clause: a delivery whose prediction buckets resolve to no dataset root at
-    all (a caller-chosen directory ``export_predictions`` may legitimately write to, carrying no
+    all (a caller-chosen directory ``run_inference`` may legitimately write to, carrying no
     ``images``/``annotations``/``predictions``/``labels`` path segment) refuses naming the remedy,
-    since this dataset-bound mapping delivery, not ``export_predictions`` itself, is what needs
+    since this dataset-bound mapping delivery, not ``run_inference`` itself, is what needs
     one dataset root to attribute detections to."""
     _init(tmp_path, monkeypatch)
     dataset_root = _dataset(tmp_path)

@@ -53,6 +53,38 @@ def registered_checkpoint(
     return str(ckpt_path)
 
 
+def run_inference_verified(checkpoint_path: str, **overrides: Any):
+    """The ephemeral in-memory pass, for a test that wants exactly what the old, non-persisting
+    ``run_inference`` tool used to hand back before the merge folded it into the door that
+    persists a bucket: loads the registered checkpoint and calls ``_run_inference_verified``
+    directly, the same private pass the merged tool itself calls once it has resolved a bucket.
+
+    ``overrides`` supplies whichever of the pass' own keyword arguments (``image_paths`` included,
+    since the merged tool no longer exposes it) a test cares about; every other one takes the same
+    unstated-sentinel default the old tool forwarded when a caller stated nothing. A checkpoint
+    the registry refuses (``UnregisteredCheckpoint``) returns ``{"error": ...}``, the same catch
+    every real caller of ``load_registered_checkpoint`` wraps it in, rather than raising out of
+    this stand-in for one.
+    """
+    from tcip_mcp.model_registry import UnregisteredCheckpoint, load_registered_checkpoint
+    from tcip_mcp.tools.inference_tools import _run_inference_verified
+
+    try:
+        checkpoint = load_registered_checkpoint(checkpoint_path)
+    except UnregisteredCheckpoint as exc:
+        return {"error": str(exc)}
+    kwargs: dict[str, Any] = {
+        "image_paths": None, "images_dir": None, "conf_threshold": None, "device": None,
+        "tile": None, "tile_size": None, "overlap": None, "tile_batch_size": 96,
+        "global_nms_iou": None, "max_dets": None, "postprocess": "nms", "trait": None,
+        "calibration_labels_dir": None, "calibration_images_dir": None, "experiment_id": None,
+        "group_by": None, "group_key_map": None, "split_seed": 0, "split_holdout_ratio": 0.5,
+        "split_manifest_dir": None,
+    }
+    kwargs.update(overrides)
+    return _run_inference_verified(checkpoint, **kwargs)
+
+
 def stub_verified_checkpoint(
     path: str,
     *,
