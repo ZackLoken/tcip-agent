@@ -404,8 +404,8 @@ export function ResultsTab() {
   const [deliveryEvents, setDeliveryEvents] = useState<DeliveryEventRecord[]>([]);
   const [deliveryEventsError, setDeliveryEventsError] = useState<string | null>(null);
 
-  // Count export: the two delivery kinds the acknowledgement family left with no provisional
-  // route, reachable here only (an MCP tool call builds no acknowledgement for either).
+  // Count export: per_image_count and orthomosaic_plant_counts, the two delivery kinds this
+  // route serves, reachable here only (an MCP tool call builds no acknowledgement for either).
   const [countKind, setCountKind] = useState<"per_image_count" | "orthomosaic_plant_counts">(
     "per_image_count",
   );
@@ -827,14 +827,21 @@ export function ResultsTab() {
   }
 
   const countPredictionsDir = (countModel && predictionDirs[countDate]?.[countModel]) || "";
+  // Each kind's own required fields, beside the bucket and filename every kind needs.
+  const countKindFieldsMissing =
+    countKind === "per_image_count"
+      ? !countTrait
+      : !countRasterPath.trim() || !countPlantRegistry.trim() || !countDeliveredPhenotype.trim();
 
   async function exportCountCsv() {
     if (!projectRoot || !countPredictionsDir || !countFilename.trim()) return;
+    if (countKindFieldsMissing) return;
     if (countShowAck && !countAckReason.trim()) return;
     setCountExporting(true);
     setCountError(null);
     setCountGateRefusal(null);
     setCountOperationalizationRefusal(null);
+    setCountResultHeaders(null);
     try {
       const delivery: ExportCountCsvRequest["delivery"] =
         countKind === "per_image_count"
@@ -864,6 +871,7 @@ export function ResultsTab() {
       a.click();
       URL.revokeObjectURL(url);
       setCountResultHeaders(headers);
+      setCountShowAck(false);
     } catch (e) {
       const opRefusal = operationalizationRefusalOf(e);
       if (opRefusal) {
@@ -1135,9 +1143,10 @@ export function ResultsTab() {
         <div className="tcip-heading mb-3">Count export</div>
         <p className="text-[10px] text-tcip-muted mb-2">
           A per-image count (a bucket, no plant identity) or a per-plant count through the
-          orthomosaic composition (a bucket plus a registered plant registry). The ordinal,
-          regression and per-plant walked-capture count kinds have no route here; deliver those
-          through the agent.
+          orthomosaic composition (a bucket plus a registered plant registry). The ordinal and
+          regression aggregates (their per-plant strategy is an agent choice) and the per-plant
+          walked-capture count (its across-dates strategy is not yet a structured, breeder-confirmed
+          field) have no route here; deliver those through the agent.
         </p>
         <div className="grid grid-cols-[1fr_1fr] gap-3">
           <div className="flex flex-col gap-2">
@@ -1159,9 +1168,9 @@ export function ResultsTab() {
             <label className="tcip-label">Prediction bucket</label>
             <select
               className="tcip-select"
-              value={countDate && countModel ? `${countDate} ${countModel}` : ""}
+              value={countDate && countModel ? `${countDate} ${countModel}` : ""}
               onChange={(e) => {
-                const [d, m] = e.target.value.split(" ");
+                const [d, m] = e.target.value.split(" ");
                 setCountDate(d ?? "");
                 setCountModel(m ?? "");
               }}
@@ -1169,7 +1178,7 @@ export function ResultsTab() {
               <option value="">Choose a bucket…</option>
               {dates.flatMap((d) =>
                 (modelsByDate[d] ?? []).map((m) => (
-                  <option key={`${d} ${m}`} value={`${d} ${m}`}>
+                  <option key={`${d} ${m}`} value={`${d} ${m}`}>
                     {`${d} (${m})`}
                   </option>
                 )),
@@ -1287,6 +1296,7 @@ export function ResultsTab() {
                 countExporting ||
                 !countPredictionsDir ||
                 !countFilename.trim() ||
+                countKindFieldsMissing ||
                 (countShowAck && (!countAckReason.trim() || !user.trim()))
               }
             >
