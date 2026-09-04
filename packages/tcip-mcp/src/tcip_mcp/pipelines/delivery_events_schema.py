@@ -113,7 +113,13 @@ class UnattributedDetectionsBySource(BaseModel):
     """A canopy-segment delivery's own unattributed-detection count, broken out by the
     :class:`~tcip_mcp.pipelines.postprocessing.segment_attribution.SegmentAssignment.source`
     that left each one unattributed; ``detections_unattributed`` on the enclosing disclosure is
-    the sum of these three, stated there as derived, never independent evidence."""
+    the sum of these three, stated there as derived, never independent evidence.
+
+    This sum excludes one further case the door's own response counts as unmapped: a detection
+    whose containment resolved to exactly one tied segment (``source="segment_containment"``, so
+    it never appears in any of these three counts) but whose only containing segment's plant was
+    then dropped from delivery for an ambiguous detection elsewhere in that same segment. The two
+    numbers can differ for that reason alone."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -154,11 +160,12 @@ class CanopySegmentDisclosure(BaseModel):
 
 
 def is_mapping_disclosure(pm: object) -> TypeGuard[dict]:
-    """Whether ``pm`` is a walked-mapping :class:`PlantMappingDisclosure` dict rather than a
-    whole-raster :class:`PlantRegistryDisclosure` one (or neither): the one key test every reader
-    that needs to tell the two disclosure shapes apart (``list_delivery_events``,
-    :func:`~tcip_mcp.pipelines.postprocessing.plant_mapping._citing_delivery_event_ids`) calls,
-    rather than each restating ``"name" in pm and "record_sha256" in pm`` on its own."""
+    """Whether ``pm`` is a walked-mapping :class:`PlantMappingDisclosure` dict rather than one of
+    the two whole-raster shapes (:class:`PlantRegistryDisclosure`, :class:`CanopySegmentDisclosure`)
+    or neither: the one key test every reader that needs to tell the mapping disclosure apart from
+    the others (``list_delivery_events``, :func:`~tcip_mcp.pipelines.postprocessing.plant_mapping.
+    _citing_delivery_event_ids`) calls, rather than each restating
+    ``"name" in pm and "record_sha256" in pm`` on its own."""
     return isinstance(pm, dict) and "name" in pm and "record_sha256" in pm
 
 
