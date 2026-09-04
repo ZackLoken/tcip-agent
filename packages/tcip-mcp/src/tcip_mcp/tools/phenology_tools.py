@@ -8,7 +8,7 @@ the web Results tab):
                                            under the project
     calibrate_classifier_operating_point   the positive-state classifier's own held-out
                                            validation gate, distinct from the count operating
-                                           point export_predictions calibrates
+                                           point run_inference calibrates
     deliver_phenology_milestones           that mapping + classified predictions →
                                            <phenology_prefix>_phenology.csv
 
@@ -690,7 +690,7 @@ def deliver_phenology_milestones(
     )
 
     # The count operating point's validity is read from each prediction bucket's operating_point.json
-    # (stamped by export_predictions), floored against any caller assertion, never trusted from the
+    # (stamped by run_inference), floored against any caller assertion, never trusted from the
     # caller's string alone. A missing/unvalidated sidecar floors the whole curve to false.
     recon = reconcile_operating_point_validity(
         list(predictions_by_date.values()), trait=trait, asserted=operating_point_validated)
@@ -751,7 +751,7 @@ def deliver_phenology_milestones(
                 f"validated count operating point (reconciled from operating_point.json = "
                 f"{op_state!r})." + floor_note
                 + " Validate both (calibrate_classifier_operating_point for the classifier; a "
-                "calibrated export_predictions for the count), or pass acknowledge_unvalidated=True "
+                "calibrated run_inference for the count), or pass acknowledge_unvalidated=True "
                 "to write a clearly-flagged provisional CSV."
             ),
             "positive_state_classifier_validated": gate.stamp["classifier"],

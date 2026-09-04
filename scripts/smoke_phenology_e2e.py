@@ -53,7 +53,7 @@ PLANTS = [
 DATES = ["2026-02-11", "2026-02-25", "2026-03-11"]
 FRACTIONS = {"2026-02-11": 0.0, "2026-02-25": 0.4, "2026-03-11": 1.0}
 # The bucket's own recorded id_map (the positive class is resolved from this, on disk, never a
-# pinned integer, so this is the production id_map a real export_predictions run would have
+# pinned integer, so this is the production id_map a real run_inference run would have
 # stamped, not a magic constant deliver_phenology_milestones reads directly).
 ID_MAP = {"dormant": 0, "elongated": 1}
 N_DETECTIONS = 10
@@ -178,7 +178,7 @@ def main() -> int:
                         preds_root / date / f"{stem}.json",
                         _pred_boxes(n_elong, N_DETECTIONS), 8, 8,
                     )
-                # The bucket's own recorded id_map, the real shape export_predictions stamps,
+                # The bucket's own recorded id_map, the real shape run_inference stamps,
                 # written through the store so a database-bound backend's reader can see it.
                 write_sidecar(preds_root / date, {"id_map": ID_MAP}, "operating_point")
 

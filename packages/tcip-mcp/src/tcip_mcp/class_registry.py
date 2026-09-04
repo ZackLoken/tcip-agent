@@ -542,7 +542,7 @@ def dataset_root_for_pred_dirs(pred_dirs: Sequence[str | Path]) -> Path:
     check ``registry_for_pred_dirs`` makes, and refuses by name when none resolves to a dataset
     root at all: a plant-mapping delivery needs the dataset the buckets belong to, and buckets
     under no dataset root cannot supply one. This is a mapping-delivery-only requirement:
-    ``export_predictions`` itself writes and reads a bucket under no dataset root fine, only this
+    ``run_inference`` itself writes and reads a bucket under no dataset root fine, only this
     dataset-bound delivery refuses it.
     """
     root = _distinct_dataset_root(pred_dirs)

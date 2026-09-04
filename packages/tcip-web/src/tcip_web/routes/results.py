@@ -545,7 +545,7 @@ def _refusal(measurement: _PhenologyMeasurement) -> str:
         f"missing operating_point.json: {measurement.validity['missing_operating_point_sidecars']}; "
         f"unvalidated buckets: {measurement.validity['unvalidated_buckets']}; missing "
         f"classifier_operating_point.json: {measurement.validity['missing_classifier_sidecars']}). "
-        "Produce the predictions via a calibrated export_predictions and calibrate the classifier "
+        "Produce the predictions via a calibrated run_inference and calibrate the classifier "
         "via calibrate_classifier_operating_point."
         + tile_note
         + (f" {binding_notes_text(measurement.validity['binding_notes'])}"

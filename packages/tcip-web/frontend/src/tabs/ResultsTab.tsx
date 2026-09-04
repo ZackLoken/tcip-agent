@@ -816,7 +816,7 @@ export function ResultsTab() {
   );
 
   // What a breeder can't act on themselves: the backend refuses to deliver phenology until a
-  // calibrated export_predictions + calibrate_classifier_operating_point stand behind it (see
+  // calibrated run_inference + calibrate_classifier_operating_point stand behind it (see
   // results.py's _refusal). Hand that off to the agent instead of leaving the tool names on
   // screen with no next step.
   function calibrationRequest(detail: string | null): string {
@@ -824,7 +824,7 @@ export function ResultsTab() {
     const subject = trait ? `the "${trait}" trait` : "this trait";
     return (
       `Phenology delivery for ${subject} is blocked: ${dims} not validated on disk. ` +
-      "Please produce the predictions via a calibrated export_predictions and calibrate the " +
+      "Please produce the predictions via a calibrated run_inference and calibrate the " +
       "classifier via calibrate_classifier_operating_point so this validates, then let me know " +
       "when it's ready so I can recompute here." +
       (detail ? ` Details from the app: ${detail}` : "")

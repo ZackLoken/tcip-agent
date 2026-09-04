@@ -4,7 +4,7 @@ a plant-locations CSV.
 The map-and-deliver half of the same detect-and-persist / map-and-deliver shape
 ``phenology_tools``'s ``build_plant_mapping``/``deliver_phenology_milestones`` already use for the
 per-image-EXIF case: the detect-and-persist half (tiled inference over a raster too large to load
-whole) lives in ``inference_tools.export_predictions`` (its ``raster_path`` regime), so a breeder
+whole) lives in ``inference_tools.run_inference`` (its ``raster_path`` regime), so a breeder
 can review the persisted predictions (or simply trust a tens-of-minutes tiled run once) before
 re-running this comparatively cheap plant-mapping + aggregation step, or re-running it against a
 different plant CSV without repeating the raster pass.
@@ -49,7 +49,7 @@ def deliver_orthomosaic_plant_counts(
     A prediction bucket here is a directory of prediction documents, not a score bin, held
     immutable once a human reviews it.
 
-    Reads back the whole-mosaic predictions ``export_predictions``'s ``raster_path`` regime
+    Reads back the whole-mosaic predictions ``run_inference``'s ``raster_path`` regime
     persisted (never re-runs the expensive tiled pass), resolves each detection's box centroid
     to a real-world coordinate via the raster's own georeferencing tags, and matches it to the
     nearest plant
@@ -96,7 +96,7 @@ def deliver_orthomosaic_plant_counts(
     otherwise.
 
     Args:
-        predictions_dir: The bucket ``export_predictions``'s ``raster_path`` regime persisted.
+        predictions_dir: The bucket ``run_inference``'s ``raster_path`` regime persisted.
         raster_path: The same georeferenced raster the bucket's predictions were produced from
             (needed to resolve each detection's pixel position to a real-world coordinate). Given
             by the caller rather than taken from the sidecar's recorded ``raster_path``, which
@@ -167,7 +167,7 @@ def deliver_orthomosaic_plant_counts(
             "identity, so there is nothing to check raster_path against. Every count this "
             "delivery writes is attributed to a plant through the supplied raster's own "
             "georeferencing, so the bucket must carry the identity of the raster it was produced "
-            "on: produce it with export_predictions's raster_path regime, which records that "
+            "on: produce it with run_inference's raster_path regime, which records that "
             "identity into the bucket's operating_point.json."
         )}
     try:

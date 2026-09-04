@@ -75,7 +75,7 @@ def write_predictions_json(
     machine-provenance float stamped there survives unfixed into GT the moment a breeder accepts the
     prediction). The threshold is a run constant, not a per-detection fact, so it belongs in the run's
     own ``operating_point.json`` instead; see :func:`mask_binarize_provenance`, which the two entry
-    points that write predictions to disk (``export_predictions``, the web inference route) call once and
+    points that write predictions to disk (``run_inference``, the web inference route) call once and
     fold into that same stamp, mirroring how ``tiled``/``tile_size``/``conf`` already travel there.
 
     A detector's own box can collapse to zero extent at an image edge (clipping), or a mask can

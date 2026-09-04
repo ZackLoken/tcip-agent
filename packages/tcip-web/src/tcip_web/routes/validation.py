@@ -186,7 +186,7 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
     review_state = {"image": completed}
     # Thread the producing run's experiment_id through so the calibration's train-disjointness
     # gate can check the reviewed images against that run's training split. Sourced from the
-    # buckets' own operating_point.json sidecars (stamped by export_predictions), never asserted:
+    # buckets' own operating_point.json sidecars (stamped by run_inference), never asserted:
     # when multiple buckets disagree on which run produced them, pass None (mixed-provenance
     # shouldn't silently vouch for one run's disjointness) rather than raising, so this route keeps
     # working for a legitimate multi-bucket review call.
