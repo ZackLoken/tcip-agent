@@ -1,6 +1,6 @@
-"""Coverage for the delivered-file digest (``output_sha256``) and ``supersede_delivery``
-(additions-design section 3): a delivery event records the bytes it shipped, and a supersession
-states that a delivered number is withdrawn or replaced without touching the file or the event.
+"""Coverage for the delivered-file digest (``output_sha256``) and ``supersede_delivery``: a
+delivery event records the bytes it shipped, and a supersession states that a delivered number is
+withdrawn or replaced without touching the file or the event.
 """
 
 from __future__ import annotations

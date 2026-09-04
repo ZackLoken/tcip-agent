@@ -1,5 +1,5 @@
 """Coverage for the same-name ``build_plant_mapping`` rebuild that supersedes rather than
-silently replaces a mapping a delivery event still cites (additions-design section 7c).
+silently replaces a mapping a delivery event still cites.
 """
 
 from __future__ import annotations
