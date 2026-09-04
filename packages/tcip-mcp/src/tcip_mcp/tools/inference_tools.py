@@ -2354,7 +2354,7 @@ def _deliver_per_image_counts_from_bucket(predictions_dir: str, output_path: str
     if stamp_trait is not None and stamp_trait != trait:
         return {"error": (
             f"{bucket_path}'s stamp was recorded for trait {stamp_trait!r}, not {trait!r}: a "
-            "bucket produced for one trait cannot deliver acknowledged under another."
+            "bucket produced for one trait cannot deliver a per-image count under another."
         )}
 
     filename_map = sidecar.get("image_filenames")

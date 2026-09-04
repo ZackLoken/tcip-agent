@@ -765,10 +765,8 @@ def deliver_phenology_milestones(
             "dates_delivered": disclosure["dates_delivered"],
         }
 
-    # Measurement-integrity gate (the numerator's validity): the phenotype rests on the
-    # classifier's positive/negative state call being right, so a delivery requires a classifier validated against
-    # held-out GT, presence of the class is not enough. Refuse unless explicitly acknowledged,
-    # and in that case stamp the CSV validated=false so the un-trustworthiness travels downstream.
+    # Measurement-integrity gate: a delivery requires a classifier validated against held-out GT.
+    # This tool builds no acknowledgement, so an unvalidated dimension always refuses here.
     from tcip_mcp.pipelines.resolution import (
         bind_classifier_validity,
         binding_notes_text,
@@ -808,8 +806,7 @@ def deliver_phenology_milestones(
         classifier_state, classifier_pred_dirs, list(predictions_by_date.values()), trait=trait,
     )
 
-    # A delivered phenotype needs both the classifier and the count operating point validated against a
-    # reference sized to the trait, the one shared refuse-or-stamp gate, or an explicit acknowledge.
+    # A delivered phenotype needs both dimensions validated; this tool passes no acknowledgement.
     flags = phenology.phenology_delivery_flags(classifier_state, op_state, tile_recon)
     gate = check_delivery_gate(flags)
     if not gate.ok:

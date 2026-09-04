@@ -461,8 +461,9 @@ def export_aggregated_csv(
     if scale_document is not None and not pred_dirs:
         raise ValueError(
             "export_aggregated_csv: results state scale_document with no pred_dirs; nothing on "
-            "disk can answer for a physical-scale claim without a bucket to reconcile it from. "
-            "State no scale_document for a provisional delivery with no buckets."
+            "disk can answer for a physical-scale claim without a bucket to reconcile it from, "
+            "and this door takes no acknowledgement to ship one unvalidated regardless. Pass "
+            "pred_dirs for the buckets behind these results."
         )
     if pred_dirs and units and scale_document is None and measurement_document == "operating_point":
         raise ValueError(

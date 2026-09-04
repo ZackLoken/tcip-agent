@@ -1213,6 +1213,20 @@ describe("ResultsTab delivery events (read-only)", () => {
     expect(within(row).getByText("calibration is not ready yet")).toBeInTheDocument();
   });
 
+  it("renders a stated 'no file' for a delivery event with no output path", async () => {
+    const fileless: DeliveryEventRecord = {
+      ...DELIVERY_EVENT,
+      event_id: "fileless",
+      output_path: null,
+    };
+    vi.spyOn(resultsApi, "deliveryEvents").mockResolvedValue({ records: [fileless] });
+
+    render(<ResultsTab />);
+    const row = await screen.findByTestId("delivery-fileless");
+
+    expect(within(row).getByText("no file")).toBeInTheDocument();
+  });
+
   it("renders nothing extra when this project has no deliveries yet", async () => {
     vi.spyOn(resultsApi, "deliveryEvents").mockResolvedValue({ records: [] });
 
