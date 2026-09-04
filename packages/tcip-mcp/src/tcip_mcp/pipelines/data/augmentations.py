@@ -2,8 +2,8 @@
 
 Provides composable augmentation transforms that work with both detection
 (image, target dict with 'boxes') and classification (image, target dict)
-pipelines. Uses torchvision.transforms.v2 when available, with a pure-PIL
-fallback for environments without torchvision.
+pipelines. Implemented directly on PIL and torch, with no torchvision
+dependency.
 
 Usage:
     transforms = build_augmentation(config)
