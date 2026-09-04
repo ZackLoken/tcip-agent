@@ -193,13 +193,32 @@ def canvas_open_binding_key(*, create: bool = True) -> Key:
 
 
 class GuiBindingUnreadable(RuntimeError):
-    """The canvas-open binding record could not be read: a store error or an OS-level failure.
+    """The canvas-open binding record could not be read, or read as something that does not
+    carry the ``root`` field a comparison needs: a store error, an OS-level failure, or a
+    record shape it cannot trust.
 
-    Raised by :func:`gui_binding_matches` rather than left to propagate as the underlying
-    ``StoreError``/``OSError``, so its three callers (``capture_live_canvas``,
-    ``focus_human_attention``, ``push_panel_event``) share one error contract instead of each
+    Raised by :func:`read_canvas_binding` and :func:`gui_binding_matches` rather than left to
+    propagate as the underlying ``StoreError``/``OSError``/``KeyError``, so every reader of the
+    binding (``capture_live_canvas``'s initial read and its post-render generation fence,
+    ``focus_human_attention``, ``push_panel_event``) shares one error contract instead of each
     wrapping the read in its own try/except.
     """
+
+
+def read_canvas_binding() -> dict[str, Any] | None:
+    """Read the canvas-open binding record as-is, or ``None`` when none exists yet.
+
+    The one read every binding consumer builds on: :func:`gui_binding_matches`'s own root
+    comparison, and ``capture_live_canvas``'s post-render generation fence, which compares
+    ``generation`` rather than ``root`` and so cannot use :func:`gui_binding_matches` itself.
+    Raises :class:`GuiBindingUnreadable` when the record cannot be read, rather than returning
+    as if none existed: a caller that cannot tell "no binding" from "binding illegible" would
+    refuse the wrong way and might steer a browser it should not.
+    """
+    try:
+        return tcip_store.read(canvas_open_binding_key(create=False), default=None)
+    except (tcip_store.StoreError, OSError) as exc:
+        raise GuiBindingUnreadable(f"Could not read the canvas-open binding: {exc}") from exc
 
 
 def gui_binding_matches(root: str | Path) -> tuple[bool, dict[str, Any] | None]:
@@ -211,18 +230,61 @@ def gui_binding_matches(root: str | Path) -> tuple[bool, dict[str, Any] | None]:
     ``CLAUDE.md`` warns against. Returns ``(False, None)`` when no binding record exists at all
     (nothing is open for any root to match); otherwise ``(matches, binding)``, so a caller
     refusing a mismatch can name the binding's own project straight from the second element
-    without a re-read. Raises :class:`GuiBindingUnreadable` when the record itself cannot be
-    read, rather than returning as if none existed: a caller that cannot tell "no binding" from
-    "binding illegible" would refuse the wrong way and might steer a browser it should not.
+    without a re-read. Raises :class:`GuiBindingUnreadable` when the record cannot be read, or
+    reads as a mapping with no ``root`` field: a record this seam itself never writes without
+    one, so a caller seeing it that way must be told the record is illegible rather than have
+    the comparison raise ``KeyError`` out to it.
     """
-    try:
-        binding = tcip_store.read(canvas_open_binding_key(create=False), default=None)
-    except (tcip_store.StoreError, OSError) as exc:
-        raise GuiBindingUnreadable(f"Could not read the canvas-open binding: {exc}") from exc
+    binding = read_canvas_binding()
     if binding is None:
         return False, None
-    matches = tcip_store.canonical_path(binding["root"]) == tcip_store.canonical_path(str(root))
+    try:
+        bound_root = binding["root"]
+    except KeyError as exc:
+        raise GuiBindingUnreadable(
+            f"Canvas-open binding record carries no 'root' field: {binding!r}"
+        ) from exc
+    matches = tcip_store.canonical_path(bound_root) == tcip_store.canonical_path(str(root))
     return matches, binding
+
+
+def binding_divergence(binding: dict[str, Any] | None, own_root: str) -> dict[str, Any]:
+    """Name both sides of a binding disagreement (a foreign project, an unnamed root, or no
+    binding at all) and the step that converges them.
+
+    Shared by ``capture_live_canvas``'s mismatch and miss branches and by ``gui_tools``'s
+    ``_binding_refusal`` (the same fact reported two ways: nested under ``capture_live_canvas``'s
+    own ``divergence`` key, flattened into ``push_panel_event``'s and ``focus_human_attention``'s
+    top-level refusal), so the naming logic itself lives once. ``activate_project`` can only
+    adopt a named workspace project, so a binding on a non-workspace root (a registered dataset
+    or a ``TCIP_IMAGE_ROOTS`` entry) has no name for it to converge on, and no binding at all has
+    nothing to converge to besides opening one: the GUI's own (re)selection is the route back to
+    agreement in both cases.
+    """
+    from tcip_mcp import workspace
+
+    bound_root = binding.get("root") if binding else None
+    bound_name = binding.get("project_name") if binding else None
+    own_name = workspace.workspace_project_name(Path(own_root))
+    if bound_name:
+        converge = (
+            f"activate_project({bound_name!r}) repins this process to the GUI's open project "
+            "and steers the GUI through the panel-event chain"
+        )
+    elif bound_root:
+        converge = (
+            f"the GUI's open root ({bound_root}) has no workspace name for activate_project "
+            "to adopt; reselect this project in the GUI instead"
+        )
+    else:
+        converge = "nothing is open in the GUI; opening a project there creates a binding"
+    return {
+        "bound_project": bound_name,
+        "bound_root": bound_root,
+        "pinned_project": own_name,
+        "pinned_root": own_root,
+        "converge": converge,
+    }
 
 
 ActiveTab = Literal["annotate", "review", "training", "tuning", "inference", "results", "meta"]

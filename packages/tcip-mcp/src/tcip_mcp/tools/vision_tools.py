@@ -695,37 +695,6 @@ def _viz_dataset_sample(
     }
 
 
-def _binding_divergence(binding: dict, own_root: str) -> dict:
-    """Name both sides of a binding mismatch and the step that converges them.
-
-    ``activate_project`` can only adopt a named workspace project, so a binding on a
-    non-workspace root (a registered dataset or a ``TCIP_IMAGE_ROOTS`` entry) has no name for
-    it to converge on; the GUI's own reselection is the only route back to agreement then.
-    """
-    from tcip_mcp import workspace
-
-    bound_root = binding.get("root")
-    bound_name = binding.get("project_name")
-    own_name = workspace.workspace_project_name(Path(own_root))
-    if bound_name:
-        converge = (
-            f"activate_project({bound_name!r}) repins this process to the GUI's open project "
-            "and steers the GUI through the panel-event chain"
-        )
-    else:
-        converge = (
-            f"the GUI's open root ({bound_root}) has no workspace name for activate_project "
-            "to adopt; reselect this project in the GUI instead"
-        )
-    return {
-        "bound_project": bound_name,
-        "bound_root": bound_root,
-        "pinned_project": own_name,
-        "pinned_root": own_root,
-        "converge": converge,
-    }
-
-
 @mcp.tool()
 @audited
 def capture_live_canvas(
@@ -771,8 +740,8 @@ def capture_live_canvas(
     from tcip_mcp import workspace
     from tcip_mcp.project_paths import platform_state_root
     from tcip_mcp.web_client import (
-        GuiBindingUnreadable, canvas_geometry_key, canvas_meta_key, canvas_open_binding_key,
-        gui_binding_matches,
+        GuiBindingUnreadable, binding_divergence, canvas_geometry_key, canvas_meta_key,
+        gui_binding_matches, read_canvas_binding,
     )
 
     root = str(platform_state_root())
@@ -784,9 +753,6 @@ def capture_live_canvas(
             return ts.read(key, default=None)
         except (OSError, ts.DecodeError):
             return None
-
-    def _read_binding() -> dict | None:
-        return ts.read(canvas_open_binding_key(create=False), default=None)
 
     binding: dict | None = None
     same_root = False
@@ -815,7 +781,7 @@ def capture_live_canvas(
             return {
                 "error": "The GUI's open project differs from this tool's own pinned project; "
                          "its canvas is not this project's live view.",
-                "divergence": _binding_divergence(binding, root),
+                "divergence": binding_divergence(binding, root),
             }
 
         prev = _read(meta_doc)
@@ -845,7 +811,7 @@ def capture_live_canvas(
             return {
                 "error": f"No live canvas state found under this project's own root ({root}); "
                          "the GUI has a different project open.",
-                "divergence": _binding_divergence(binding, root),
+                "divergence": binding_divergence(binding, root),
             }
 
         src_image = state.get("image_path") or ""
@@ -874,16 +840,16 @@ def capture_live_canvas(
         # render reads only this project's documents, so a binding already elsewhere can't stale it.
         if same_root:
             try:
-                binding_after = _read_binding()
-            except (ts.StoreError, OSError) as exc:
-                return {"error": f"Could not confirm the canvas binding after rendering: {exc}"}
+                binding_after = read_canvas_binding()
+            except GuiBindingUnreadable as exc:
+                return {"error": str(exc)}
             if binding_after is None or binding_after.get("generation") != binding.get("generation"):
                 if attempt == 0:
                     continue
                 return {
                     "error": "The GUI's open project changed while this call was rendering; "
                              "retry the call.",
-                    "divergence": _binding_divergence(binding_after or binding, root),
+                    "divergence": binding_divergence(binding_after or binding, root),
                 }
         break
 
@@ -943,7 +909,7 @@ def capture_live_canvas(
         "summary": summary,
     }
     if not same_root:
-        result["divergence"] = _binding_divergence(binding, root)
+        result["divergence"] = binding_divergence(binding, root)
     return result
 
 

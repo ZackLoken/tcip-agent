@@ -72,7 +72,7 @@ applied twice or skipped.
 |------|---------|
 | `save_annotations` | Write annotations to any supported format |
 | `segment_prompt` | Engine-assisted polygon generation from point/box/grid prompts (`engine='sam'` default) |
-| `push_panel_event` | Push an arbitrary event to a GUI panel over the tcip-web backend, not restricted to images/annotations |
+| `push_panel_event` | Push an arbitrary event to a GUI panel over the tcip-web backend for a named `project_root`, not restricted to images/annotations; refuses when the GUI's open project does not agree |
 | `prioritize_review_queue` | Rank unlabeled images by active-learning uncertainty/diversity for the next review batch |
 | `materialize_review_dataset` | Turn human review verdicts into a curated training set (accepted/edited → labels, rejected → hard negatives) with experiment lineage |
 
@@ -200,8 +200,11 @@ The agent must never write ground truth the human hasn't seen. Stage proposals t
 - `focus_human_attention(tab='review', project_root, dataset_root, subject, date, model_name, image_index,
   detection_idx, filter_type, iou_threshold, conf_threshold)` drives the live Review tab straight to a model's
   predictions on a frame/detection, so the human sees exactly what you flagged (a false positive, a
-  missed catkin) without hunting. The Review analog of `focus_human_attention(tab='annotate')`; a soft no-op if no
-  GUI is running.
+  missed catkin) without hunting. The Review analog of `focus_human_attention(tab='annotate')`.
+  Refuses before resolving anything when the GUI's open project (its `canvas_open_binding` record)
+  does not name `project_root`: a mismatch, or no binding at all, refuses every time, naming what
+  the GUI has open and how to converge on it. Once the binding agrees, a backend that is not
+  running still answers `delivered: false` rather than raising.
 
 Flow: run inference (or `stage_proposals`) → `focus_human_attention(tab='review')` the human to the weakest/flagged
 frames → they accept on the canvas → only then does it become GT. See

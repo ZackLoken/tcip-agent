@@ -138,7 +138,7 @@ source file under a covered root that no row names.
 | packages/tcip-mcp/src/tcip_mcp/pipelines/training/subprocess_worker.py | The subprocess entry point ``launch_training`` spawns to run one bespoke training run's actual body, dataset/loader construction, the audited envelope, ``run_training_envelope()``, in an isolated OS process, so a leak/OOM/hang in one run can't take down the launching process or any other concurrent run's process. | 14 | 0 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/training/tensorboard_manager.py | TensorBoard process management for training and HPO runs. | 0 | 3 |
 | packages/tcip-mcp/src/tcip_mcp/prediction_buckets.py | Prediction-bucket immutability: never silently overwrite predictions a human reviewed. | 7 | 9 |
-| packages/tcip-mcp/src/tcip_mcp/project_paths.py | Stable resolution of the platform state root, independent of a process's cwd. | 1 | 30 |
+| packages/tcip-mcp/src/tcip_mcp/project_paths.py | Stable resolution of the platform state root, independent of a process's cwd. | 1 | 29 |
 | packages/tcip-mcp/src/tcip_mcp/project_record.py | The project record: the one document every project carries, holding its authored site. | 2 | 6 |
 | packages/tcip-mcp/src/tcip_mcp/project_status.py | Per-project status pointer: a small, persisted summary of recent activity. | 2 | 3 |
 | packages/tcip-mcp/src/tcip_mcp/registry_paths.py | The containment core and grammar-aware external test the checkpoint and dataset registries share, plus the resolver every stored registry path becomes an absolute one through. | 0 | 5 |
@@ -153,7 +153,7 @@ source file under a covered root that no row names.
 | packages/tcip-mcp/src/tcip_mcp/tools/delivery_tools.py | Delivery-general tools: doors over the delivery-events record that no one trait or delivery kind owns. | 6 | 1 |
 | packages/tcip-mcp/src/tcip_mcp/tools/experiment_tools.py | Experiment tracking MCP tools: create, log, compare, and trace experiments. | 4 | 2 |
 | packages/tcip-mcp/src/tcip_mcp/tools/feedback_tools.py | Review -> retrain feedback MCP tools. | 15 | 3 |
-| packages/tcip-mcp/src/tcip_mcp/tools/gui_tools.py | GUI-driving tools: push data to a panel, or drive the live Annotate/Review tab to a frame. | 10 | 1 |
+| packages/tcip-mcp/src/tcip_mcp/tools/gui_tools.py | GUI-driving tools: push data to a panel, or drive the live Annotate/Review tab to a frame. | 9 | 1 |
 | packages/tcip-mcp/src/tcip_mcp/tools/inference_tools.py | Inference MCP tools: run_inference and deliver_per_image_counts, sharing one verified body (``_run_inference_verified``) so the firewalled operating point (conf/NMS/tiling/max_dets) resolves identically for every entry point that runs a model over images; run_inference and deliver_per_image_counts's live-with-predictions_dir path also share one publish bracket (tile gate, count-claim gate, frozen-lineage refusal, write, lineage link), and deliver_per_image_counts alone gains a second, bucket-only source regime reading an existing prediction bucket with no pass at all. run_inference's raster_path regime also resumes an interrupted tiled pass, from progress it records as it runs. | 23 | 5 |
 | packages/tcip-mcp/src/tcip_mcp/tools/ingest_tools.py | Image ingestion: turn a raw folder of photos into a structured TCIP project. | 10 | 1 |
 | packages/tcip-mcp/src/tcip_mcp/tools/knowledge_tools.py | The serve_domain_knowledge MCP tool, the one non-Claude-Code-skill route to the knowledge documents; its description is composed at import time from the corpus itself. | 4 | 1 |
@@ -756,8 +756,8 @@ Docstring is the function's docstring first line, verbatim.
 
 | tool | line | audited | docstring first line |
 |---|---|---|---|
-| `push_panel_event` | `gui_tools.py:67` | yes | Push structured data to a TCIP GUI panel via the tcip-web backend. |
-| `focus_human_attention` | `gui_tools.py:120` | yes | Drive the live GUI to a (subject, date) frame, the Annotate tab or the Review tab. |
+| `push_panel_event` | `gui_tools.py:73` | yes | Push structured data to a TCIP GUI panel via the tcip-web backend. |
+| `focus_human_attention` | `gui_tools.py:137` | yes | Drive the live GUI to a (subject, date) frame, the Annotate tab or the Review tab. |
 
 ### inference_tools.py (2 tools)
 
@@ -888,7 +888,7 @@ anything.
 
 | tool | line | audited | docstring first line |
 |---|---|---|---|
-| `capture_live_canvas` | `vision_tools.py:731` | yes | Render exactly what the human's GUI canvas shows right now: image, shapes, viewport. |
+| `capture_live_canvas` | `vision_tools.py:700` | yes | Render exactly what the human's GUI canvas shows right now: image, shapes, viewport. |
 
 ## 2. HTTP routes and WebSocket endpoints
 
@@ -2165,16 +2165,16 @@ Phase 3 verdict: single.
 ## S04. Panel-event panel vocabulary (VALID_PANELS)  <!-- queued: P5-324 unify -->
 
 Must agree: sender and receiver accept the same set of panel names.
-Side A: `packages/tcip-mcp/src/tcip_mcp/web_client.py:245` (`VALID_PANELS = frozenset(`).
+Side A: `packages/tcip-mcp/src/tcip_mcp/web_client.py:307` (`VALID_PANELS = frozenset(`).
 Side B: `packages/tcip-web/src/tcip_web/app.py:38` (`VALID_PANELS,`).
 Phase 3 verdict: duplicated.
 
 ## S05. Panel event_type vocabulary  <!-- queued: P5-272 unify -->
 
 Must agree: the Python poster, the FastAPI hub, and the browser handler use the same event_type strings.
-Side A: `packages/tcip-mcp/src/tcip_mcp/tools/gui_tools.py:284` (`result = post_panel_event("app", "annotate_focus", payload)`).
+Side A: `packages/tcip-mcp/src/tcip_mcp/tools/gui_tools.py:302` (`result = post_panel_event("app", "annotate_focus", payload)`).
 Side B: `packages/tcip-web/src/tcip_web/app.py:518` (`if event.event_type == PANEL_EVENT_REVIEW_FOCUS:`).
-Phase 3 verdict: single. The posted payload carries `subject` beside `active_subject` (`packages/tcip-mcp/src/tcip_mcp/tools/gui_tools.py:282`), the key both readers take (`packages/tcip-web/src/tcip_web/app.py:296`, `frontend/src/lib/annotateFocus.ts:21,54`), held by `tests/test_event_integration.py`'s producer-driven test, which posts the focus_human_attention tool's own event and asserts the advisory state's `active_subject`.
+Phase 3 verdict: single. The posted payload carries `subject` beside `active_subject` (`packages/tcip-mcp/src/tcip_mcp/tools/gui_tools.py:300`), the key both readers take (`packages/tcip-web/src/tcip_web/app.py:296`, `frontend/src/lib/annotateFocus.ts:21,54`), held by `tests/test_event_integration.py`'s producer-driven test, which posts the focus_human_attention tool's own event and asserts the advisory state's `active_subject`.
 
 ## S06. `audit_log`, one append-only store under three kinds of root
 
@@ -2246,7 +2246,7 @@ Phase 3 verdict: single.
 
 Must agree: which root the GUI currently has open, so the push route writes canvas_live.json/canvas_shapes.json under it and capture_live_canvas reads them from that same root rather than trusting its own pinned one to still be live. The filename half is closed (both sides address through one locator pair); the root half used to be open (the writer took the browser payload's own project_root as authority, Part 20's own rejected shape), and is now resolved through the canvas_open_binding record P5-274 added (docs/audit/remediation/batch8/p5-274-canvas-binding-design.md): a pinned-root refusal landed for the old shape and was reverted after a three-family review refuted its anchor (docs/audit/remediation/batch8/xf-canvas-root/), and this binding is the settled replacement.
 Side A: `packages/tcip-mcp/src/tcip_mcp/web_client.py:178` (`def canvas_open_binding_key(`, the one workspace-scoped record `{generation, root, project_name, issued_at}`, declared alongside `canvas_meta_key`/`canvas_geometry_key` at lines 142/153 addressing the two per-project documents the binding's root names) and `packages/tcip-web/src/tcip_web/routes/dataset.py:203` (`def _write_canvas_binding(`, the one writer, called from `select_dataset`, line 229, before the selection is adopted; `generation` bumps only when `root` actually changes).
-Side B: `packages/tcip-web/src/tcip_web/routes/canvas.py:79` (`def push_canvas_state(`, reads the binding, verifies the payload's `binding_generation` against it, and writes both documents under the binding's own `root`, never a client-supplied one) and `packages/tcip-mcp/src/tcip_mcp/tools/vision_tools.py:731` (`def capture_live_canvas(`, reads the same binding beside its own pinned root, through the shared divergence-naming helper `_binding_divergence`, line 697, with a generation fence re-reading the binding after the documents so a switch mid-call cannot render a false live result).
+Side B: `packages/tcip-web/src/tcip_web/routes/canvas.py:79` (`def push_canvas_state(`, reads the binding, verifies the payload's `binding_generation` against it, and writes both documents under the binding's own `root`, never a client-supplied one) and the binding's three MCP-side readers, each comparing a root it names against the record through the one predicate `packages/tcip-mcp/src/tcip_mcp/web_client.py:224` (`def gui_binding_matches(`): `packages/tcip-mcp/src/tcip_mcp/tools/vision_tools.py:700` (`def capture_live_canvas(`, beside its own pinned root, with a generation fence re-reading the binding after the documents through the same store-error contract so a switch mid-call cannot render a false live result) and `packages/tcip-mcp/src/tcip_mcp/tools/gui_tools.py:73` and `:135` (`push_panel_event`/`focus_human_attention`, each against a caller-stated `project_root` rather than a process's own pin). A mismatch or absence on any of the three is named through the shared helper `packages/tcip-mcp/src/tcip_mcp/web_client.py:251` (`def binding_divergence(`).
 Phase 3 verdict: single. The current generation also rides the GuiState broadcast envelope (`packages/tcip-web/src/tcip_web/app.py:185` `SERVER_EPOCH`, read off `StateStore.binding_generation`, `packages/tcip-web/src/tcip_web/state.py:150`) and is adopted with the dataset in one client-side store update (`packages/tcip-web/frontend/src/store/slices/gui.ts:138` `applyRestoredDataset`, and `mergeSnapshot`), so the push's `binding_generation` and the reader's own comparison never straddle a stale identity.
 
 ## S12. Friction reports and retrospectives under .tcip/
@@ -2570,7 +2570,7 @@ Phase 3 verdict: duplicated. The prefix literals still stand on their own, but `
 ## S56. Tab-name vocabulary  <!-- queued: P5-290 unify -->
 
 Must agree: the tab a panel event targets, the tab the browser can restore, and the tab the backend persists are the same set of names.
-Side A: `packages/tcip-mcp/src/tcip_mcp/web_client.py:228` (`ActiveTab = Literal["annotate", "review", "training", "tuning", "inference", "results", "meta"]`, with `TAB_NAMES = get_args(ActiveTab)` beside it, `tcip_web.state` importing both).
+Side A: `packages/tcip-mcp/src/tcip_mcp/web_client.py:290` (`ActiveTab = Literal["annotate", "review", "training", "tuning", "inference", "results", "meta"]`, with `TAB_NAMES = get_args(ActiveTab)` beside it, `tcip_web.state` importing both).
 Side B: `packages/tcip-web/frontend/src/api/types.generated.ts:14` (`export const TAB_NAMES = [`, generated from the same declaration).
 Phase 3 verdict: duplicated.
 
