@@ -416,26 +416,57 @@ def run_inference(
         overwrite: Write into ``output_dir`` even if it exists. Refused if the bucket has review
             verdicts; the default (False) auto-redirects to a fresh bucket instead. For a
             ``raster_path`` pass, also the way out of a bucket carrying another pass' progress
-            (``resume``, below): it discards that progress and starts over.
+            (``resume``, below): it discards that progress and starts over. Conflicts with
+            ``resume=True`` (refused by name): the two name opposite ways of handling the same
+            recorded progress.
         acknowledge_unvalidated: Write the bucket even when tile_size (a tiled run only) has no
             real basis, stamping ``tile_size_validated=false`` on the sidecar so the
             un-trustworthiness travels with it rather than writing silently.
         require_masks: Collect masks for an ``instance_seg`` checkpoint (``raster_path`` regime
             only; ignored for ``images_dir``, which always carries masks).
-        resume: ``raster_path`` regime only (refuses with ``images_dir``). Continue a raster pass
-            this bucket carries progress from, rather than refusing over that progress or starting
-            a new one. The recorded pass' checkpoint, raster content, trait, experiment, tile batch
-            size and resolved operating point must all match this call's own, or it refuses naming
-            what differs; refuses outright when the bucket carries no progress at all, when the
-            recorded progress is a schema version newer than this reader knows, and for a
-            mask-bearing (``instance_seg`` with ``require_masks``) pass, which never records
-            progress to resume from. See :func:`_export_predictions_raster`'s own docstring for
-            the progress records this pass keeps.
+        resume: ``raster_path`` regime only (refuses with ``images_dir``, and with
+            ``overwrite=True``). Continue a raster pass this bucket carries progress from, rather
+            than refusing over that progress or starting a new one. The recorded pass' checkpoint,
+            raster content, trait, experiment and tile batch size must all match this call's own,
+            or it refuses naming what differs; the resumed pass then runs the remaining tiles at
+            the recorded operating point rather than re-deriving one (a block-calibrated pass in
+            particular applies the recorded conf/cross_tile_nms directly, so it never re-runs the
+            calibration bands a second time and can never refuse over a re-derivation's own float
+            noise). Refuses outright when the bucket carries no progress at all, when the recorded
+            progress is a schema version newer than this reader knows, and for a mask-bearing
+            (``instance_seg`` with ``require_masks``) pass, which never records progress to resume
+            from. See :func:`_export_predictions_raster`'s own docstring for the progress records
+            this pass keeps.
     """
     if not Path(checkpoint_path).is_file():
         return {"error": f"Checkpoint not found: {checkpoint_path}"}
     if not output_dir:
         return {"error": "output_dir is required"}
+
+    # Every check below refuses on the call's own shape ahead of dry_run's preview, so a preview
+    # previews the same refusal a real call would hit; "provide either" runs after dry_run instead.
+    if images_dir is not None and raster_path is not None:
+        return {"error": "Provide only one of images_dir or raster_path, not both"}
+    if raster_path is not None and calibration_labels_dir:
+        return {"error": "calibration_labels_dir is not supported for a raster_path export: "
+                         "block calibration (trait alone, see below) validates against the "
+                         "mosaic's own reserved regions instead of a caller-supplied labeled dir."}
+    if raster_path is not None and split_manifest_dir:
+        return {"error": "split_manifest_dir is not supported for a raster_path export: block "
+                         "calibration draws no split-manifest universe, so it would be silently "
+                         "dropped rather than scoping anything."}
+    if split_manifest_dir and not calibration_labels_dir:
+        return {"error": "split_manifest_dir requires calibration_labels_dir: it scopes a "
+                         "calibration this call has no trait/calibration_labels_dir to run, so "
+                         "the manifest would be silently dropped rather than bounding one."}
+    if raster_path is not None and not Path(raster_path).is_file():
+        return {"error": f"raster_path not found: {raster_path}"}
+    if resume and images_dir is not None:
+        return {"error": "resume=True only applies to the raster_path regime: the images_dir "
+                         "regime has no resume, its all-at-the-end write is unchanged."}
+    if resume and overwrite:
+        return {"error": "resume=True and overwrite=True conflict: overwrite discards a bucket's "
+                         "recorded progress and starts over, resume continues it. Pick one."}
 
     if dry_run:
         # No model load here: an unset ``tile`` is a pending derivation, not a fabricated default.
@@ -475,25 +506,6 @@ def run_inference(
 
     if images_dir is None and raster_path is None:
         return {"error": "Provide either images_dir or raster_path"}
-    if images_dir is not None and raster_path is not None:
-        return {"error": "Provide only one of images_dir or raster_path, not both"}
-    if raster_path is not None and calibration_labels_dir:
-        return {"error": "calibration_labels_dir is not supported for a raster_path export: "
-                         "block calibration (trait alone, see below) validates against the "
-                         "mosaic's own reserved regions instead of a caller-supplied labeled dir."}
-    if raster_path is not None and split_manifest_dir:
-        return {"error": "split_manifest_dir is not supported for a raster_path export: block "
-                         "calibration draws no split-manifest universe, so it would be silently "
-                         "dropped rather than scoping anything."}
-    if split_manifest_dir and not calibration_labels_dir:
-        return {"error": "split_manifest_dir requires calibration_labels_dir: it scopes a "
-                         "calibration this call has no trait/calibration_labels_dir to run, so "
-                         "the manifest would be silently dropped rather than bounding one."}
-    if raster_path is not None and not Path(raster_path).is_file():
-        return {"error": f"raster_path not found: {raster_path}"}
-    if resume and images_dir is not None:
-        return {"error": "resume=True only applies to the raster_path regime: the images_dir "
-                         "regime has no resume, its all-at-the-end write is unchanged."}
 
     # Resolve the writable bucket before the checkpoint is read: a verdict-blocked overwrite must
     # still refuse before the file is touched at all.
@@ -1301,14 +1313,23 @@ def _raster_pass_identity_body(
     }
 
 
+def _raster_pass_input_mismatches(recorded: dict, current: dict) -> list[str]:
+    """Every top-level identity field (everything but ``schema_version``, compared by the reader
+    that reads it off the record directly, and ``operating_point``, compared by
+    :func:`_raster_pass_identity_mismatches` below) naming a difference between a recorded
+    raster-pass identity and this call's own.
+
+    A key union over both sides, not a fixed field tuple, so a field :func:`_raster_pass_identity_body`
+    gains later is compared here without a second list to keep in sync with it.
+    """
+    fields = sorted((set(recorded) | set(current)) - {"schema_version", "operating_point"})
+    return [field for field in fields if recorded.get(field) != current.get(field)]
+
+
 def _raster_pass_identity_mismatches(recorded: dict, current: dict) -> list[str]:
     """Every field naming a difference between a recorded raster-pass identity and this call's
     own, for a resume refusal to list by name."""
-    differing = [
-        field for field in
-        ("checkpoint_sha256", "trait", "experiment_id", "tile_batch_size", "raster_identity")
-        if recorded.get(field) != current.get(field)
-    ]
+    differing = _raster_pass_input_mismatches(recorded, current)
     recorded_op = recorded.get("operating_point") or {}
     current_op = current.get("operating_point") or {}
     differing.extend(
@@ -1319,15 +1340,24 @@ def _raster_pass_identity_mismatches(recorded: dict, current: dict) -> list[str]
 
 
 def _load_raster_pass_prior(bucket: Path) -> dict:
-    """Every tile batch a bucket's progress already holds, merged into the shape
-    ``GenericPredictor._tiled_infer_core`` seeds its own accumulators from."""
+    """Every tile batch a bucket's progress already holds, merged in tile order into the shape
+    ``GenericPredictor._tiled_infer_core`` seeds its own accumulators from.
+
+    Ordered by the numeric index parsed out of each ``batch-<index>`` key, never by the order the
+    store happens to hand keys back in: the zero-padded width only makes that order agree by
+    coincidence, on a backend that lists keys lexically, for a grid this platform actually tiles.
+    """
+    indexed: list[tuple[int, Key]] = []
+    for key in store.keys(RASTER_PASS_PROGRESS_STORE, str(bucket)):
+        segment = key.parts[0]
+        if not segment.startswith("batch-"):
+            continue
+        indexed.append((int(segment[len("batch-"):]), key))
     tile_info: list[dict] = []
     boxes: list = []
     scores: list = []
     labels: list = []
-    for key in store.keys(RASTER_PASS_PROGRESS_STORE, str(bucket)):
-        if key.parts[0] == "identity":
-            continue
+    for _index, key in sorted(indexed):
         batch = store.read(key)
         tile_info.extend(batch["tile_info"])
         boxes.extend(batch["boxes"])
@@ -1396,13 +1426,17 @@ def _export_predictions_raster(
     records this pass' own identity and, as tile batches flush, its progress into
     ``RASTER_PASS_PROGRESS_STORE`` under ``<out>/.tcip/``, so an interruption anywhere in the pass
     leaves a recoverable trail rather than nothing. ``resume=True`` continues that trail: the
-    recorded identity must match this call's own (checkpoint, raster content, trait, experiment,
-    tile batch size and the resolved operating point) or the call refuses naming what differs,
-    since merging tiles run at two different operating points would corrupt the count.
-    ``resume=False`` over a bucket already carrying progress refuses too, naming ``resume=True``
-    or ``overwrite=True`` (which discards the partial pass) as the two ways out. On completion
-    every progress record for this bucket is deleted in one transaction, whether the pass ran
-    straight through or resumed one interruption.
+    recorded identity's checkpoint, raster content, trait, experiment and tile batch size must
+    match this call's own, or it refuses naming what differs. A resumed pass then applies the
+    recorded operating point directly rather than re-deriving one, since merging tiles run at two
+    different operating points would corrupt the count; for the ``trait`` path this means the
+    reserved-band calibration pass that earned that operating point runs once, at the interrupted
+    attempt, never again at resume, and the recorded conf/cross_tile_nms/max_dets are applied as
+    the pass' own fact. ``resume=False`` over a bucket already carrying progress refuses too,
+    naming ``resume=True`` or ``overwrite=True`` (which discards the partial pass, and conflicts
+    with ``resume=True``) as the two ways out. On completion every progress record for this bucket
+    is deleted in one transaction, whether the pass ran straight through or resumed one
+    interruption.
     """
     from tcip_mcp.model_registry import resolve_model_identity
     from tcip_mcp.pipelines.inference.predictor import (
@@ -1497,6 +1531,20 @@ def _export_predictions_raster(
                 "this reader knows: a newer writer produced it than this code understands."
             )}
 
+    if resume:
+        current_inputs = {
+            "checkpoint_sha256": identity["sha256"], "trait": trait,
+            "experiment_id": identity["experiment_id"], "tile_batch_size": tile_batch_size,
+            "raster_identity": raster_identity,
+        }
+        input_mismatches = _raster_pass_input_mismatches(existing_pass_identity, current_inputs)
+        if input_mismatches:
+            return {"error": (
+                f"resume=True but the recorded pass over {out} differs from this call in "
+                f"{input_mismatches}: a resumed pass must be the identical pass, since merging "
+                "tiles run at two different operating points would corrupt the count."
+            )}
+
     from tcip_mcp.pipelines.resolution import (
         VALIDATED_FALSE, block_calibrated_export_operating_point, check_delivery_gate,
         operating_point_stamp, prediction_producer, raw_operating_point, tile_size_gate_flag,
@@ -1509,98 +1557,151 @@ def _export_predictions_raster(
     claim_scope_mismatch: str | None = None
     bucket_root = _bucket_dataset_root(out)
     draft = None
+    block_calibration_snapshot: dict | None = None
+    bundle_dataset_hash: str | None = None
+    bundle_shippable_issues: list[str] = []
 
     if trait is not None:
-        from tcip_mcp.pipelines.block_calibration import (
-            BlockCalibrationRefused, resolve_block_calibration_records,
-        )
-        from tcip_mcp.pipelines.raster_source import (
-            georeferenced_raster_identity_mismatch, raster_identity_matches,
-        )
-        from tcip_mcp.pipelines.resolution import (
-            VALIDATED_SAME_MOSAIC_CONTENT_IDENTITY, VALIDATED_SAME_MOSAIC_IDENTITY,
-        )
-
-        try:
-            block_bundle, block_prov, block_evidence = resolve_block_calibration_records(
-                predictor, trait_name=trait,
-                experiment_id=identity["experiment_id"], global_nms_iou=applied_nms_iou,
-                export_tile_size=resolved_tile,
-                tile_batch_size=tile_batch_size, postprocess=postprocess,
-            )
-        except BlockCalibrationRefused as exc:
-            return {"error": str(exc)}
-
-        training_identity = (block_prov["spatial_manifest"] or {}).get("raster_content_identity")
-        if training_identity is None:
-            return {"error": (
-                "block calibration refused: no raster content identity was recorded for "
-                f"experiment {block_prov['experiment_id']!r} at spatial-split time (an unreadable "
-                "or unsupported training source); the claim-scope gate has nothing to compare "
-                "this export target against."
-            )}
-        try:
-            if training_identity.get("geotransform") is not None:
-                claim_scope_mismatch = georeferenced_raster_identity_mismatch(
-                    training_identity, raster_path)
-                claim_scope_token = VALIDATED_SAME_MOSAIC_IDENTITY
-            else:
-                claim_scope_mismatch = (
-                    None if raster_identity_matches(training_identity, raster_path)
-                    else f"{raster_path} is not the raster this identity was recorded on"
-                )
-                claim_scope_token = VALIDATED_SAME_MOSAIC_CONTENT_IDENTITY
-        except ValueError as exc:
-            return {"error": f"claim-scope check refused: {exc}"}
-        claim_scope_flag = (
-            claim_scope_token if claim_scope_mismatch is None else VALIDATED_FALSE)
-
-        conf_param = block_bundle.get("conf")
-        conf = (conf_param.value if conf_param.is_shippable
-                else conf_param.unvalidated_value(acknowledge_unvalidated=True))
-        applied_nms_iou = float(block_bundle.get("cross_tile_nms").value)
-
-        # Reset from the calibration-time floor to the real, calibrated point (full-frame cap
-        # committed to None below, never the block bundle's own band-scoped density-derived one).
         from tcip_mcp.pipelines.operating_point import set_detector_operating_point
 
-        predictor.score_threshold = conf
-        set_detector_operating_point(predictor.model, score_thresh=conf,
-                                     detections_per_img=applied_max_dets)
-        predictor.max_dets = None
+        if resume:
+            # Confirmed above to continue the recorded pass: apply its operating point directly
+            # rather than re-run calibration and risk refusing over a re-derivation's float noise.
+            snapshot = store.read(_raster_pass_key(out, "block-calibration"), default=None)
+            if snapshot is None:
+                return {"error": (
+                    f"resume=True but {out}'s recorded pass carries no block-calibration snapshot "
+                    "to resume the calibrated operating point from; it did not calibrate at all, "
+                    "or was recorded before this door persisted one."
+                )}
+            recorded_op = existing_pass_identity["operating_point"]
+            conf = recorded_op["conf"]
+            applied_nms_iou = recorded_op["cross_tile_nms"]
+            predictor.score_threshold = conf
+            set_detector_operating_point(predictor.model, score_thresh=conf,
+                                         detections_per_img=applied_max_dets)
+            predictor.max_dets = recorded_op["max_dets"]
+            op_provenance = snapshot["op_provenance"]
+            tile_size_validated = snapshot["tile_size_validated"]
+            claim_scope_validated = snapshot["claim_scope_validated"]
+            conf_source = snapshot["conf_source"]
+            block_prov = snapshot["block_prov"]
+            bundle_dataset_hash = snapshot["dataset_hash"]
+            bundle_shippable_issues = snapshot["shippable_issues"]
+            if snapshot["count_claim_eligible"]:
+                if bucket_root is None:
+                    logger.warning(_NO_DATASET_ROOT_NOTE.format(bucket=out))
+                else:
+                    try:
+                        draft = _open_count_claim(
+                            snapshot["block_evidence"], trait=trait,
+                            checkpoint_sha256=identity["sha256"],
+                            producing_experiment_id=identity["experiment_id"],
+                            dataset_root=bucket_root)
+                    except ValueError as exc:
+                        return {"error": f"the count claim for trait {trait!r} was not earned: {exc}"}
+        else:
+            from tcip_mcp.pipelines.block_calibration import (
+                BlockCalibrationRefused, resolve_block_calibration_records,
+            )
+            from tcip_mcp.pipelines.raster_source import (
+                georeferenced_raster_identity_mismatch, raster_identity_matches,
+            )
+            from tcip_mcp.pipelines.resolution import (
+                VALIDATED_SAME_MOSAIC_CONTENT_IDENTITY, VALIDATED_SAME_MOSAIC_IDENTITY,
+            )
 
-        op_bundle = block_calibrated_export_operating_point(
-            block_bundle, trait=trait, tile_size=resolved_tile,
-            tile_size_source=tile_size_source, tile_size_derived_from=tile_size_derived_from)
-        op_provenance = op_bundle.to_provenance()["operating_point"]
+            try:
+                block_bundle, block_prov, block_evidence = resolve_block_calibration_records(
+                    predictor, trait_name=trait,
+                    experiment_id=identity["experiment_id"], global_nms_iou=applied_nms_iou,
+                    export_tile_size=resolved_tile,
+                    tile_batch_size=tile_batch_size, postprocess=postprocess,
+                )
+            except BlockCalibrationRefused as exc:
+                return {"error": str(exc)}
 
-        tile_ref = tile_size_gate_flag(op_provenance)
-        gate_flags = {"claim_scope": claim_scope_flag}
-        if tile_ref is not None:
-            gate_flags["tile_size"] = tile_ref
-        gate = check_delivery_gate(gate_flags, acknowledge_unvalidated=acknowledge_unvalidated)
-        if not gate.ok:
-            reason = gate.reason if claim_scope_mismatch is None else (
-                f"{gate.reason} {claim_scope_mismatch}")
-            return {"error": reason, "tile_size_validated": tile_ref,
-                    "claim_scope_validated": claim_scope_flag}
-        tile_size_validated = gate.stamp.get("tile_size")
-        claim_scope_validated = gate.stamp.get("claim_scope")
-        conf_source = "block_calibration"
+            training_identity = (block_prov["spatial_manifest"] or {}).get("raster_content_identity")
+            if training_identity is None:
+                return {"error": (
+                    "block calibration refused: no raster content identity was recorded for "
+                    f"experiment {block_prov['experiment_id']!r} at spatial-split time (an unreadable "
+                    "or unsupported training source); the claim-scope gate has nothing to compare "
+                    "this export target against."
+                )}
+            try:
+                if training_identity.get("geotransform") is not None:
+                    claim_scope_mismatch = georeferenced_raster_identity_mismatch(
+                        training_identity, raster_path)
+                    claim_scope_token = VALIDATED_SAME_MOSAIC_IDENTITY
+                else:
+                    claim_scope_mismatch = (
+                        None if raster_identity_matches(training_identity, raster_path)
+                        else f"{raster_path} is not the raster this identity was recorded on"
+                    )
+                    claim_scope_token = VALIDATED_SAME_MOSAIC_CONTENT_IDENTITY
+            except ValueError as exc:
+                return {"error": f"claim-scope check refused: {exc}"}
+            claim_scope_flag = (
+                claim_scope_token if claim_scope_mismatch is None else VALIDATED_FALSE)
 
-        # The count claim's own gate, run before the always-expensive whole-mosaic pass.
-        if (op_bundle.is_shippable and claim_scope_validated != VALIDATED_FALSE
-                and tile_size_validated != VALIDATED_FALSE):
-            if bucket_root is None:
-                logger.warning(_NO_DATASET_ROOT_NOTE.format(bucket=out))
-            else:
-                try:
-                    draft = _open_count_claim(
-                        block_evidence, trait=trait, checkpoint_sha256=identity["sha256"],
-                        producing_experiment_id=identity["experiment_id"],
-                        dataset_root=bucket_root)
-                except ValueError as exc:
-                    return {"error": f"the count claim for trait {trait!r} was not earned: {exc}"}
+            conf_param = block_bundle.get("conf")
+            conf = (conf_param.value if conf_param.is_shippable
+                    else conf_param.unvalidated_value(acknowledge_unvalidated=True))
+            applied_nms_iou = float(block_bundle.get("cross_tile_nms").value)
+
+            # Reset from the calibration-time floor to the real, calibrated point (full-frame cap
+            # committed to None below, never the block bundle's own band-scoped density-derived one).
+            predictor.score_threshold = conf
+            set_detector_operating_point(predictor.model, score_thresh=conf,
+                                         detections_per_img=applied_max_dets)
+            predictor.max_dets = None
+
+            op_bundle = block_calibrated_export_operating_point(
+                block_bundle, trait=trait, tile_size=resolved_tile,
+                tile_size_source=tile_size_source, tile_size_derived_from=tile_size_derived_from)
+            op_provenance = op_bundle.to_provenance()["operating_point"]
+
+            tile_ref = tile_size_gate_flag(op_provenance)
+            gate_flags = {"claim_scope": claim_scope_flag}
+            if tile_ref is not None:
+                gate_flags["tile_size"] = tile_ref
+            gate = check_delivery_gate(gate_flags, acknowledge_unvalidated=acknowledge_unvalidated)
+            if not gate.ok:
+                reason = gate.reason if claim_scope_mismatch is None else (
+                    f"{gate.reason} {claim_scope_mismatch}")
+                return {"error": reason, "tile_size_validated": tile_ref,
+                        "claim_scope_validated": claim_scope_flag}
+            tile_size_validated = gate.stamp.get("tile_size")
+            claim_scope_validated = gate.stamp.get("claim_scope")
+            conf_source = "block_calibration"
+            bundle_dataset_hash = op_bundle.dataset_hash
+            bundle_shippable_issues = op_bundle.shippable_issues()
+
+            # The count claim's own gate, run before the always-expensive whole-mosaic pass.
+            count_claim_eligible = (
+                op_bundle.is_shippable and claim_scope_validated != VALIDATED_FALSE
+                and tile_size_validated != VALIDATED_FALSE)
+            if count_claim_eligible:
+                if bucket_root is None:
+                    logger.warning(_NO_DATASET_ROOT_NOTE.format(bucket=out))
+                else:
+                    try:
+                        draft = _open_count_claim(
+                            block_evidence, trait=trait, checkpoint_sha256=identity["sha256"],
+                            producing_experiment_id=identity["experiment_id"],
+                            dataset_root=bucket_root)
+                    except ValueError as exc:
+                        return {"error": f"the count claim for trait {trait!r} was not earned: {exc}"}
+            # Persisted beside this pass' identity record below, so a resume can apply this same
+            # operating point without re-running calibration.
+            block_calibration_snapshot = {
+                "op_provenance": op_provenance, "claim_scope_validated": claim_scope_validated,
+                "tile_size_validated": tile_size_validated, "conf_source": conf_source,
+                "block_prov": block_prov, "block_evidence": block_evidence,
+                "count_claim_eligible": count_claim_eligible,
+                "dataset_hash": bundle_dataset_hash, "shippable_issues": bundle_shippable_issues,
+            }
     else:
         # Always tiled (a raster too large to load whole has no untiled alternative); every input
         # the gate needs is already resolved, so it runs here, before the expensive raster pass.
@@ -1619,6 +1720,8 @@ def _export_predictions_raster(
         if not gate.ok:
             return {"error": gate.reason, "tile_size_validated": tile_ref}
         tile_size_validated = gate.stamp.get("tile_size")
+        bundle_dataset_hash = op_bundle.dataset_hash
+        bundle_shippable_issues = op_bundle.shippable_issues()
 
     from tcip_mcp.pipelines.raster_source import open_raster
 
@@ -1641,8 +1744,14 @@ def _export_predictions_raster(
         prior = _load_raster_pass_prior(out)
     elif record_progress:
         store.replace(identity_key, current_pass_identity, expect=Version.ABSENT)
+        if block_calibration_snapshot is not None:
+            store.replace(
+                _raster_pass_key(out, "block-calibration"), block_calibration_snapshot,
+                expect=Version.ABSENT)
 
     def _record_raster_pass_batch(start_index: int, end_index: int, batch: dict) -> None:
+        # Six digits also sorts the key into tile order lexically (covers any grid this
+        # platform tiles); _load_raster_pass_prior parses the index itself rather than lean on that.
         store.replace(
             _raster_pass_key(out, f"batch-{start_index:06d}"),
             {"tile_index_range": [start_index, end_index], **batch}, expect=Version.ABSENT,
@@ -1680,10 +1789,10 @@ def _export_predictions_raster(
         validated=draft is not None,
         validated_by=None,
         tile_size_validated=tile_size_validated,
-        shippable_issues=op_bundle.shippable_issues(),
+        shippable_issues=bundle_shippable_issues,
         id_map=id_map,
-        trait=op_bundle.trait or None,
-        dataset_hash=op_bundle.dataset_hash,
+        trait=trait or None,
+        dataset_hash=bundle_dataset_hash,
         checkpoint=Path(checkpoint.path).stem,
         checkpoint_sha256=sha,
         experiment_id=identity["experiment_id"],
