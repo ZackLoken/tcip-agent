@@ -363,6 +363,8 @@ def _prepare_queue_sources(
             resolved_bucket, refusal = _resolve_review_bucket(engine, bucket)
             if refusal is not None:
                 return None, 0, None, {"error": refusal}
+            # _resolve_review_bucket pairs a None refusal with a bucket
+            assert resolved_bucket is not None
             reviewed = reviewed_image_names({"image": engine.image_states(resolved_bucket)})
             before = len(sources)
             # A band-grouped capture's review-state identity is its manifest filename, not a sibling band's.
