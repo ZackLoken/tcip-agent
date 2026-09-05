@@ -332,7 +332,11 @@ class TrainContext:
         Refuses (``ValueError``) a ``state`` carrying a ``schema_version`` key: that name is
         reserved for this platform's own checkpoint-version field, read from the payload's
         top-level namespace by the load-time version check, and a bespoke loop's own key of the
-        same name would collide with it silently.
+        same name would collide with it silently. ``config`` is reserved the same way: the
+        checkpoint's ``config`` is always this run's launch config, the record every publishing
+        door reads a run's ``(subject, attribute, id_map)`` scope from, so a loop's own ``state``
+        carrying that key would displace it and could make a classified bespoke run look like a
+        detector run at every reader.
         """
         if "schema_version" in state:
             raise ValueError(
@@ -340,11 +344,17 @@ class TrainContext:
                 f"({state['schema_version']!r}), reserved for this platform's own checkpoint "
                 "version field; name a bespoke loop's own field something else."
             )
+        if "config" in state:
+            raise ValueError(
+                "ctx.save_checkpoint: state carries a 'config' key, reserved for this run's own "
+                "launch config, the record every publishing door reads this run's scope from; "
+                "name a bespoke loop's own field something else."
+            )
         from tcip_mcp.pipelines.model_build import stamp_model_ref
         from tcip_mcp.pipelines.training.generic_trainer import checkpoint_key, write_checkpoint
 
         payload = dict(state)
-        payload.setdefault("config", self.config)
+        payload["config"] = self.config
         stamp_model_ref(payload, self.config, experiment_id=self.experiment_id)
         path = write_checkpoint(payload, checkpoint_key(self.run.output_dir, tag))
         return str(path)
