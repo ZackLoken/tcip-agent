@@ -704,6 +704,18 @@ def record_action(payload: ActionPayload) -> dict:
         raise HTTPException(
             400, "this verdict writes ground truth, but no annotations path was provided")
 
+    # Recompute over the mutated in-memory documents before any write, so a refusal here leaves
+    # neither the verdict log nor the GT file touched, never a write on disk behind a 400.
+    bucket = _bucket_of_file(pred_path)
+    try:
+        matches = _compute_matches(
+            work.gt, ctx.preds,
+            iou_threshold=payload.iou_threshold, conf_threshold=payload.conf_threshold,
+            subject=scope.subject, attribute=scope.attribute, vocabulary=vocabulary,
+        )
+    except ClassifiedRecordRefused as exc:
+        raise HTTPException(400, str(exc)) from exc
+
     # An edited verdict rewrites the GT geometry, so key the entry to the post-edit geometry;
     # otherwise the next reload's spatial lookup misses it and the detection reads unreviewed.
     norm_det = norm_ctx = None
@@ -712,7 +724,6 @@ def record_action(payload: ActionPayload) -> dict:
         norm_ctx = work
     producer_identity = _resolve_producer_identity(pred_path)
     class_id = _resolve_verdict_class_id(pred_path, payload.class_name)
-    bucket = _bucket_of_file(pred_path)
     engine.record_detection_action(
         bucket, det, ctx, action=payload.action, norm_det=norm_det, norm_ctx=norm_ctx,
         producer_identity=producer_identity, conf_threshold=payload.conf_threshold,
@@ -732,15 +743,7 @@ def record_action(payload: ActionPayload) -> dict:
         annotation_status = "partial" if work.gt else "unannotated"
 
     # Promote to 'completed' once every detection at these thresholds is reviewed, the only path
-    # by which a GUI review reaches 'completed'. Recompute against the (now-authored) GT.
-    try:
-        matches = _compute_matches(
-            work.gt, ctx.preds,
-            iou_threshold=payload.iou_threshold, conf_threshold=payload.conf_threshold,
-            subject=scope.subject, attribute=scope.attribute, vocabulary=vocabulary,
-        )
-    except ClassifiedRecordRefused as exc:
-        raise HTTPException(400, str(exc)) from exc
+    # by which a GUI review reaches 'completed'.
     engine.check_image_review_complete(bucket, work, matches)
     _audit(payload.dataset_root, "gui_review_action", {
         "image_name": payload.image_name,

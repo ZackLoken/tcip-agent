@@ -218,6 +218,31 @@ def test_accept_on_the_paired_fp_replaces_the_value_and_keeps_geometry_and_autho
     assert written[0].accepted_by == "user:breeder"
 
 
+def test_action_refusal_leaves_the_label_file_unchanged(client: TestClient, tmp_path: Path) -> None:
+    """The post-mutation recompute runs over the in-memory documents before any write: a
+    prediction value outside the bucket's own vocabulary refuses the whole request, and the GT
+    file on disk is exactly what it was before the call, never a write behind the 400."""
+    dataset_root = tmp_path / "data"
+    img = _image(dataset_root)
+    staged = _stage_classified_prediction(dataset_root, value="unknown-value")
+    bucket = Path(prediction_dir(dataset_root, "classifier", DATE))
+    _stamp_classified_bucket(bucket)
+    gt = _write_gt(dataset_root, value="diseased")
+    before = gt.read_bytes()
+
+    resp = client.post("/api/review/action", json={
+        "dataset_root": str(dataset_root), "image_name": f"{STEM}.jpg", "image_path": str(img),
+        "gt_path": str(gt), "pred_path": staged["path"],
+        "det_type": "fp", "class_name": "unknown-value", "conf": 0.9,
+        "iou": None, "gt_idx": None, "pred_idx": 0,
+        "bbox": list(BOX), "action": "accepted", "user": "breeder",
+        "iou_threshold": 0.3, "conf_threshold": 0.1,
+    })
+
+    assert resp.status_code == 400
+    assert gt.read_bytes() == before
+
+
 def test_reject_on_a_true_positive_under_a_classified_scope_refuses(
     client: TestClient, tmp_path: Path,
 ) -> None:
