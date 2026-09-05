@@ -695,16 +695,25 @@ def sidecar_key(pred_dir: str | Path, document: str = "operating_point") -> Key:
     return Key(store, str(pred_dir), (document,))
 
 
-def _read_sidecar(pred_dir: str | Path, document: str) -> dict | None:
-    """One bucket's stamp for one dimension, or ``None`` when absent or unreadable.
+def _read_sidecar(pred_dir: str | Path, document: str, *, strict: bool = False) -> dict | None:
+    """One bucket's stamp for one dimension, or ``None`` when absent.
 
-    Never raises: an unreadable stamp floors the dimension it describes to unvalidated at every
-    reconciler below, which is the safe direction, where a raised decode error would take down a
-    delivery gate that has a well-defined answer for a stamp it cannot trust.
+    At its default (``strict=False``), a stamp that will not decode also reads as ``None``: an
+    unreadable stamp floors the dimension it describes to unvalidated at every reconciler below,
+    which is the safe direction, where a raised decode error would take down a delivery gate that
+    has a well-defined answer for a stamp it cannot trust.
+
+    Under ``strict=True``, which :func:`bucket_scope` passes, the seam's own decode error
+    (``StoreError``, covering ``DecodeError`` and ``SchemaVersionRefused``) propagates instead: a
+    caller that must tell an absent stamp from a present one that will not decode cannot read the
+    second as the first, since a classified bucket whose stamp will not decode would otherwise be
+    reviewed as a bare directory and its value-keyed records accepted as object classes.
     """
     try:
         return tcip_store.read(sidecar_key(pred_dir, document), default=None)
     except StoreError:
+        if strict:
+            raise
         return None
 
 
@@ -727,6 +736,52 @@ def well_formed_validated_by(stamp: dict | None) -> dict | None:
     return pointer
 
 
+def scope_consistent_with_map(
+    subject: str | None, attribute: str | None, id_map: dict | None,
+) -> str | None:
+    """Whether a bucket's ``(subject, attribute)`` claim is consistent with its own recorded
+    ``id_map``, or the reason it is not (``None`` when it is).
+
+    A detector pair (``attribute`` ``None``) needs a map that is absent or keyed by exactly the
+    subject, the shape a detector run records (``class_registry.assign_class_ids`` with no
+    attribute); a map keyed otherwise says the bucket classified. A classified pair (``attribute``
+    not ``None``) needs a map that is not keyed by the subject alone, since a run that decoded
+    along an attribute never records that shape.
+
+    The stamp write rail (:func:`_check_stamp_claim`) and the conform script's own rule 3 call
+    this one predicate rather than holding the rule twice.
+
+    The one blind spot: an attribute declaring exactly one value whose name equals the subject
+    records ``{subject: 0}``, indistinguishable here from a detector map. No registry in the two
+    projects on the share declares such a value; a caller stamping a detector pair over a one-key
+    map this way should report the case to its operator rather than trust it silently.
+    """
+    keyed_by_subject_alone = id_map is None or set(id_map) == {subject}
+    if attribute is None:
+        if keyed_by_subject_alone:
+            return None
+        return (
+            f"the pair ({subject!r}, None) claims a detector bucket, but its recorded id_map is "
+            f"keyed by {sorted(id_map)}, not just {subject!r}: this looks like a classified bucket"
+        )
+    if keyed_by_subject_alone:
+        return (
+            f"the pair ({subject!r}, {attribute!r}) claims a classified bucket, but its recorded "
+            f"id_map is keyed by exactly {subject!r}, the shape a detector run records"
+        )
+    return None
+
+
+class StampScopeUnstated(ValueError):
+    """A bucket's ``operating_point.json`` decodes but carries no usable ``(subject, attribute)``
+    pair: either key absent, or one present with a type other than ``str`` or ``None``.
+
+    Raised by :func:`bucket_scope` for a stamp written before this platform recorded the pair;
+    the remedy is ``scripts/conform_classified_predictions.py`` over the bucket, named in the
+    message every time this is raised.
+    """
+
+
 def _check_stamp_claim(
     stamp: dict, document: str, pred_dir: str | Path, *, introduced_keys: set[str] | None = None,
 ) -> None:
@@ -744,6 +799,17 @@ def _check_stamp_claim(
     documents (classifier/ordinal/regression/scale) carry no such declared shape and are not
     checked here.
 
+    The same document also carries the writer-side scope rail: the body being written (the whole
+    fresh stamp, or the merged body for an update) must carry both ``subject`` and ``attribute``,
+    each a string or ``None``; an ``attribute`` that is not ``None`` needs a ``subject`` that is
+    not ``None``; and when the body also carries an ``id_map`` the pair must agree with it through
+    :func:`scope_consistent_with_map`. A fresh stamp failing this is refused naming the producer's
+    own obligation to state the pair; a merged body missing the pair is refused naming the stored
+    stamp as one written before the keys existed, and the conform script as the remedy. No live
+    producer can mint a stamp without the pair after this rail exists; the pair is provenance, not
+    claim (:data:`_CLAIM_KEYS` does not carry it), so a stamp's scope can still be edited by the
+    conform script without flooring a sealed count claim.
+
     A validated stamp also names the record it was earned from and the trait it was earned for.
     Neither is defaultable: a pointer this writer filled in would point at nothing, and a trait it
     guessed would be a claim nobody made. Both rails are writer-side and close nothing on their own,
@@ -759,6 +825,40 @@ def _check_stamp_claim(
                 f"{sorted(unknown)}. Declare a new producer addition in STAMP_EXTENSION_KEYS "
                 "(resolution.py), naming which producer writes it, before writing it here."
             )
+        fresh = introduced_keys is None
+        if "subject" not in stamp or "attribute" not in stamp:
+            if fresh:
+                raise ValueError(
+                    f"{document}.json at {str(pred_dir)!r} carries no subject/attribute pair. "
+                    "Every producer must call operating_point_stamp with both: the object class "
+                    "every prediction record in this bucket is of, and the attribute each "
+                    "record's value sits under (None for a detector bucket)."
+                )
+            raise ValueError(
+                f"{document}.json at {str(pred_dir)!r} has a stored stamp with no subject/"
+                "attribute pair, written before this platform recorded the pair. Run "
+                "scripts/conform_classified_predictions.py over this bucket before merging "
+                "into its stamp."
+            )
+        subject, attribute = stamp.get("subject"), stamp.get("attribute")
+        if subject is not None and not isinstance(subject, str):
+            raise ValueError(
+                f"{document}.json at {str(pred_dir)!r}: subject must be a string or None, "
+                f"got {type(subject).__name__}")
+        if attribute is not None and not isinstance(attribute, str):
+            raise ValueError(
+                f"{document}.json at {str(pred_dir)!r}: attribute must be a string or None, "
+                f"got {type(attribute).__name__}")
+        if attribute is not None and subject is None:
+            raise ValueError(
+                f"{document}.json at {str(pred_dir)!r} declares attribute {attribute!r} with no "
+                "subject: a value with no object class names nothing a reader could hold it to."
+            )
+        recorded_map = stamp.get("id_map")
+        if recorded_map is not None:
+            reason = scope_consistent_with_map(subject, attribute, recorded_map)
+            if reason is not None:
+                raise ValueError(f"{document}.json at {str(pred_dir)!r}: {reason}")
     if not stamp.get("validated"):
         return
     if well_formed_validated_by(stamp) is None:
@@ -834,6 +934,8 @@ def operating_point_stamp(
     tile_size_validated: str | None,
     shippable_issues: list[str],
     id_map: dict | None,
+    subject: str | None,
+    attribute: str | None,
     trait: str | None,
     dataset_hash: str | None,
     checkpoint: str | None,
@@ -852,6 +954,12 @@ def operating_point_stamp(
     door quietly omit what stands behind its counts; the per-path additions a single producer has
     (persisted gate evidence, a mask-binarize threshold, a block calibration's own record) travel through
     ``fields``.
+
+    ``subject`` and ``attribute`` are the run's own scope: the object class every prediction
+    record in the bucket is of, and the attribute each record's value sits under (``attribute``
+    ``None`` for a detector bucket). Required, with no default, the same run-scope pair the
+    training run recorded on its experiment config; every reader below resolves a bucket's scope
+    from these two fields through :func:`bucket_scope`, never from the records' own vocabulary.
 
     ``validated`` is the producing door's own verdict over the dimensions it resolved. The tile
     scale is floored in here rather than at each door: a bucket whose tile geometry has no real
@@ -876,6 +984,8 @@ def operating_point_stamp(
         "dataset_hash": dataset_hash,
         "operating_point": operating_point,
         "id_map": id_map,
+        "subject": subject,
+        "attribute": attribute,
         "validated": fold_tile_validation(validated, tile_size_validated),
         "validated_by": validated_by,
         "tile_size_validated": tile_size_validated,
@@ -910,11 +1020,11 @@ def prediction_producer(checkpoint_path: str, sha256: str) -> str:
 
 
 STAMP_KEYS: frozenset[str] = frozenset((
-    "schema_version", "trait", "dataset_hash", "operating_point", "id_map", "validated",
-    "validated_by", "tile_size_validated", "shippable_issues", "checkpoint", "checkpoint_sha256",
-    "experiment_id", "images_dir", "raster_path", "produced_at",
+    "schema_version", "trait", "dataset_hash", "operating_point", "id_map", "subject", "attribute",
+    "validated", "validated_by", "tile_size_validated", "shippable_issues", "checkpoint",
+    "checkpoint_sha256", "experiment_id", "images_dir", "raster_path", "produced_at",
 ))
-"""``operating_point_stamp``'s own fifteen keys: the ones it returns unconditionally, before a
+"""``operating_point_stamp``'s own seventeen keys: the ones it returns unconditionally, before a
 producer's own ``**fields``. Declared literally rather than derived from the signature, since a
 parameter name matching its returned key is this constructor's own convention, not a guarantee (and
 ``schema_version`` is a literal the function stamps, never a parameter at all);
@@ -946,7 +1056,7 @@ STAMP_EXTENSION_KEYS: dict[str, str] = {
                        "worker): each prediction document stem mapped to its source image's "
                        "basename with extension",
 }
-"""Every top-level key a producer adds beside ``operating_point_stamp``'s own fourteen, one entry
+"""Every top-level key a producer adds beside ``operating_point_stamp``'s own seventeen, one entry
 per key naming which producer writes it. :func:`write_sidecar` refuses a fresh ``operating_point``
 stamp whose body carries a top-level key outside ``STAMP_KEYS | STAMP_EXTENSION_KEYS``;
 :func:`update_sidecar` refuses only a key the update itself introduces relative to the stored
@@ -958,6 +1068,53 @@ accepting whatever a caller assembled."""
 def read_operating_point_sidecar(pred_dir: str | Path) -> dict | None:
     """The bucket's ``operating_point.json`` stamp, or ``None`` if absent/unreadable (never raises)."""
     return _read_sidecar(pred_dir, "operating_point")
+
+
+@dataclass(frozen=True)
+class BucketScope:
+    """A prediction bucket's own recorded ``(subject, attribute)`` claim.
+
+    ``subject`` is the object class every prediction record in the bucket is of; ``attribute`` is
+    the attribute each record's value sits under, ``None`` for a detector bucket.
+    """
+
+    subject: str | None
+    attribute: str | None
+
+    @property
+    def classified(self) -> bool:
+        return self.attribute is not None
+
+
+def bucket_scope(pred_dir: str | Path) -> BucketScope | None:
+    """A prediction bucket's own recorded scope, or ``None`` for a bucket with no stamp at all.
+
+    ``None`` means a bare directory (a staged bucket, a hand-split copy, a directory under no
+    producer's own layout): its records are read under the caller's own statement, never as a
+    proven detector bucket. A stamp that decodes but carries no usable ``(subject, attribute)``
+    pair raises :class:`StampScopeUnstated`, naming the conform script; a stamp that will not
+    decode at all propagates the seam's own error (the strict read, :func:`_read_sidecar`). Both
+    are refusals rather than a bare-directory read: an undecodable or pre-scope classified stamp
+    read as a bare directory would let its value-keyed records be reviewed as object classes, the
+    laundering this function exists to remove.
+    """
+    stamp = _read_sidecar(pred_dir, "operating_point", strict=True)
+    if stamp is None:
+        return None
+    if "subject" not in stamp or "attribute" not in stamp:
+        raise StampScopeUnstated(
+            f"{pred_dir}: operating_point.json carries no subject/attribute pair. Run "
+            "scripts/conform_classified_predictions.py over this bucket before reading its scope."
+        )
+    subject, attribute = stamp["subject"], stamp["attribute"]
+    if (subject is not None and not isinstance(subject, str)) or (
+        attribute is not None and not isinstance(attribute, str)
+    ):
+        raise StampScopeUnstated(
+            f"{pred_dir}: operating_point.json's subject/attribute pair is not a string or None. "
+            "Run scripts/conform_classified_predictions.py over this bucket."
+        )
+    return BucketScope(subject=subject, attribute=attribute)
 
 
 def read_classifier_operating_point_sidecar(pred_dir: str | Path) -> dict | None:
@@ -1056,7 +1213,10 @@ _CLAIM_KEYS: dict[str, tuple[str, ...]] = {
 """Which of a stamp's fields *are* the claim, per document: the values a delivery consumes, as
 opposed to the provenance describing where they came from. Stated once and nowhere restated, since
 the side that mints a record and the side that verifies one must subset a stamp identically or a
-verification compares two different things and always agrees."""
+verification compares two different things and always agrees. ``operating_point``'s
+``subject``/``attribute`` pair is deliberately absent: it is provenance, not claim, so the conform
+script can edit a bucket's scope without flooring a count claim already sealed over it, and
+:func:`verify_stamp_binding` never sees it move."""
 
 _DOCUMENT_PARAM: dict[str, tuple[str, str]] = {
     "operating_point": ("conf", "annotations"),
