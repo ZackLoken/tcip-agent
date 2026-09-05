@@ -387,6 +387,39 @@ describe("TrainingTab chart placeholder", () => {
   });
 });
 
+describe("TrainingTab chart accessibility", () => {
+  it("names the chart as an image built from the run and its metrics, with the same values behind a table disclosure", async () => {
+    useStore.setState((s) => ({
+      gui: { ...s.gui, dataset: { ...s.gui.dataset, project_root: "/proj" } },
+    }));
+    vi.spyOn(trainingApi, "listRuns").mockResolvedValue({
+      runs: [run({ run_id: "train-chart", status: "running" })],
+    });
+    vi.mocked(openTrainingStream).mockImplementation((_root, runId, onMessage) => {
+      onMessage({ type: "metric", run_id: runId, row: { epoch: 1, loss: 0.5 } });
+      onMessage({ type: "metric", run_id: runId, row: { epoch: 2, loss: 0.3 } });
+      return () => {};
+    });
+
+    render(<TrainingTab />);
+    fireEvent.click(await screen.findByText("train-chart"));
+
+    expect(
+      await screen.findByRole("img", { name: "Live metrics for train-chart: loss" }),
+    ).toBeInTheDocument();
+
+    expect(screen.queryByRole("table")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "as table" }));
+    const table = await screen.findByRole("table");
+    expect(within(table).getAllByRole("row")).toHaveLength(3);
+    expect(within(table).getByText("0.5")).toBeInTheDocument();
+    expect(within(table).getByText("0.3")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "as table" }));
+    expect(screen.queryByRole("table")).not.toBeInTheDocument();
+  });
+});
+
 describe("TrainingTab switching between runs directly", () => {
   it("launches a fresh TensorBoard for the newly selected run, not the previous one's", async () => {
     vi.spyOn(trainingApi, "listRuns").mockResolvedValue({
