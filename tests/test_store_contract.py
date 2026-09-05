@@ -1585,7 +1585,7 @@ REGISTERED = {
         f".tcip/experiments/{EXPERIMENT}/metrics.jsonl", pin=_pin_platform_root,
         root_of=lambda root: Path(experiments.experiments_scope())),
     "operating_point_sidecar": Registered(
-        {"schema_version": 2, "trait": "bud_opening_50per_date", "dataset_hash": "9f2c1b0a4d6e8f31",
+        {"trait": "bud_opening_50per_date", "dataset_hash": "9f2c1b0a4d6e8f31",
          "operating_point": {"conf": {"name": "conf", "value": 0.42, "source": "derived",
                                       "validated_against": "held_out_annotations"}},
          "id_map": {"bud": 0}, "validated": True, "shippable_issues": [],
@@ -1593,23 +1593,20 @@ REGISTERED = {
         lambda root: resolution.sidecar_key(_stamp_bucket(root), "operating_point"),
         "predictions/live/2026-03-04/operating_point.json", root_of=_stamp_bucket),
     "classifier_operating_point_sidecar": Registered(
-        {"schema_version": 2,
-         "operating_point": {"classifier": {"validated_against": "held_out_annotations",
+        {"operating_point": {"classifier": {"validated_against": "held_out_annotations",
                                             "value": "elongiert"}},
          "validated": True, "failures": [], "gate_evidence": {"kappa": 0.81}},
         lambda root: resolution.sidecar_key(_stamp_bucket(root), "classifier_operating_point"),
         "predictions/live/2026-03-04/classifier_operating_point.json", root_of=_stamp_bucket),
     "ordinal_operating_point_sidecar": Registered(
-        {"schema_version": 2,
-         "operating_point": {"ordinal": {"validated_against": "held_out_annotations",
+        {"operating_point": {"ordinal": {"validated_against": "held_out_annotations",
                                          "criterion": "quadratic_weighted_kappa"}},
          "validated": True, "failures": [], "gate_evidence": {"qwk": 0.77},
          "trait": "ü_ordinal_trait"},
         lambda root: resolution.sidecar_key(_stamp_bucket(root), "ordinal_operating_point"),
         "predictions/live/2026-03-04/ordinal_operating_point.json", root_of=_stamp_bucket),
     "regression_operating_point_sidecar": Registered(
-        {"schema_version": 2,
-         "operating_point": {"regression": {"validated_against": "held_out_annotations",
+        {"operating_point": {"regression": {"validated_against": "held_out_annotations",
                                             "criterion": "r_squared"}},
          "validated": False, "failures": ["insufficient_holdout"],
          "gate_evidence": {"score": None, "score_state": "nan"}, "trait": "ü_regression_trait"},
@@ -1618,8 +1615,7 @@ REGISTERED = {
     "resolve_scale_sidecar": Registered(
         # every key scale_tools.calibrate_physical_scale's stamp literal writes, "unit" as the
         # writer spells it rather than "units"
-        {"schema_version": 2,
-         "operating_point": {"scale": {
+        {"operating_point": {"scale": {
              "name": "scale_mm_per_px", "value": 0.271, "unit": "mm", "source": "derived",
              "derived_from": "mean of 3 'reference_object' reference object(s), the calibration "
                               "half of the locked reference split",
@@ -1758,7 +1754,7 @@ REGISTERED = {
          "device": "cpu"},
         lambda root: training_tools.launch_config_key(root), "launch_config.json"),
     "confidence_sweep": Registered(
-        {"schema_version": 2, "trait": "messgröße", "dataset_hash": "d41d8cd98f00b204",
+        {"trait": "messgröße", "dataset_hash": "d41d8cd98f00b204",
          "checkpoint_sha256": "0" * 64,
          "gate_evidence": [{"conf": 0.1, "f1": 0.4}, {"conf": 0.2, "f1": 0.6}]},
         lambda root: inference_tools.calibration_curve_key(SWEEP_IDENTITY),

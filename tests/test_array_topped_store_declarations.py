@@ -1,9 +1,8 @@
 """Three registered stores wrap a top-level JSON array of entries rather than a keyed record: the
 project dataset registry and the web job registry declare ``cannot_carry_field`` naming the
 array-top shape, since neither has an object to hold ``schema_version`` on. The model registry
-index used to be the same shape; it now wraps into ``{schema_version, entries}`` (the
-relative-paths family) and declares a cleared ``cannot_carry_field`` with a ceiling of 2 instead,
-covered separately below.
+index used to be the same shape; it now wraps into ``{entries: [...]}`` (the relative-paths
+family) and declares a cleared ``cannot_carry_field``, covered separately below.
 """
 
 from __future__ import annotations
@@ -33,11 +32,11 @@ def test_every_still_array_topped_store_declares_cannot_carry_with_the_array_top
         assert "array" in descriptor.cannot_carry_field
 
 
-def test_model_registry_declares_a_cleared_cannot_carry_field_and_ceiling_two():
+def test_model_registry_declares_a_cleared_cannot_carry_field_and_ceiling_one():
     descriptor = ts.get_descriptor(MODEL_REGISTRY_STORE)
     assert descriptor.frozen
     assert descriptor.cannot_carry_field == ""
-    assert descriptor.schema_version == 2
+    assert descriptor.schema_version == 1
 
 
 def test_model_registry_document_composes_with_its_own_declaration(tmp_path: Path):
@@ -46,7 +45,7 @@ def test_model_registry_document_composes_with_its_own_declaration(tmp_path: Pat
     ModelRegistry(str(tmp_path)).register_model("a", str(ckpt), {}, metrics_source=None)
 
     raw = ts.read(registry_index_key(tmp_path))
-    assert raw["schema_version"] == 2
+    assert "schema_version" not in raw
     ts.check_schema_version(ts.get_descriptor(MODEL_REGISTRY_STORE), raw)
 
 

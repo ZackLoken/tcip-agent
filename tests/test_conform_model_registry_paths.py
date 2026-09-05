@@ -1,6 +1,7 @@
 """``scripts/conform_model_registry_paths.py`` and its shared implementation,
-``tcip_mcp.model_registry.conform_registry_paths``: wrap a version-1 registry index to version 2
-and respell every entry's ``checkpoint_path`` relative to the registry's own scope root.
+``tcip_mcp.model_registry.conform_registry_paths``: wrap a bare top-level array into the
+entries-mapping shape and respell every entry's ``checkpoint_path`` relative to the registry's
+own scope root.
 """
 
 from __future__ import annotations
@@ -51,9 +52,9 @@ def test_conform_wraps_a_legacy_bare_array_with_nothing_to_respell(tmp_path: Pat
 
     lines = conform_registry_paths(root)
 
-    assert any("schema_version 2" in ln for ln in lines)
+    assert any("wrapped the registry index" in ln for ln in lines)
     raw = ts.read(registry_index_key(root))
-    assert raw == {"schema_version": 2, "entries": []}
+    assert raw == {"entries": []}
 
 
 def test_conform_respells_an_entry_whose_stored_path_already_resolves_under_root(tmp_path: Path):
@@ -172,9 +173,9 @@ def test_conform_is_idempotent(tmp_path: Path):
 def test_on_disk_conform_wraps_and_respells_directly_against_the_extracted_files(tmp_path: Path):
     """The import door's own conform, exercised directly against loose files on disk rather
     than through the storage seam (a staging tree is always loose files, whatever backend the
-    process is bound to): a bare version-1 array wraps to version 2 and a stored path that
-    resolves under root with a matching digest respells relative, the identical outcome
-    conform_registry_paths produces through the seam."""
+    process is bound to): a bare top-level array wraps into the entries mapping and a stored
+    path that resolves under root with a matching digest respells relative, the identical
+    outcome conform_registry_paths produces through the seam."""
     from tcip_mcp.model_registry import conform_registry_paths_on_disk, registry_index_path
 
     root = tmp_path / "proj"
@@ -189,10 +190,10 @@ def test_on_disk_conform_wraps_and_respells_directly_against_the_extracted_files
 
     lines = conform_registry_paths_on_disk(root)
 
-    assert any("schema_version 2" in ln for ln in lines)
+    assert any("wrapped the registry index" in ln for ln in lines)
     assert any("respelled" in ln for ln in lines)
     raw = json.loads(index_path.read_text())
-    assert raw["schema_version"] == 2
+    assert "schema_version" not in raw
     assert raw["entries"][0]["checkpoint_path"] == ".tcip/models/m.pt"
 
 

@@ -42,7 +42,7 @@ def _base_stamp(*, id_map: dict, experiment_id: str = "exp-classified", **overri
     from tcip_mcp.pipelines.resolution import VALIDATED_HELD_OUT
 
     stamp = {
-        "schema_version": 2, "trait": ATTRIBUTE, "dataset_hash": "h",
+        "trait": ATTRIBUTE, "dataset_hash": "h",
         "operating_point": {"conf": {"value": 0.5, "validated_against": VALIDATED_HELD_OUT}},
         "id_map": id_map,
         "validated": False, "validated_by": None, "tile_size_validated": None,

@@ -77,7 +77,7 @@ def test_doctor_flags_the_field_session_bug_family(tmp_path):
     # registry entry pointing at a pytest temp checkpoint (the leak the field session found)
     reg = root / ".tcip" / "models"
     reg.mkdir(parents=True)
-    (reg / "registry.json").write_text(json.dumps({"schema_version": 2, "entries": [
+    (reg / "registry.json").write_text(json.dumps({"entries": [
         {"name": "junk", "checkpoint_path": "C:\Temp\pytest-of-x\model.pt"}]}))
 
     res = _run(root, file_layout=True)
@@ -438,7 +438,7 @@ def test_a_missing_checkpoint_and_a_test_checkpoint_are_distinct_registry_findin
     models.mkdir(parents=True)
     ghost = str(Path(root.anchor) / "tcip_absent_models" / "orchard.pt")
     scratch = str(Path(root.anchor) / "scratch" / "pytest-of-someone" / "run" / "last.pt")
-    (models / "registry.json").write_text(json.dumps({"schema_version": 2, "entries": [
+    (models / "registry.json").write_text(json.dumps({"entries": [
         {"name": "orchard_detector_v2", "checkpoint_path": ghost},
         {"name": "scratch_detector", "checkpoint_path": scratch},
     ]}))
@@ -461,7 +461,7 @@ def test_a_checkpoint_under_a_temp_rooted_project_is_not_pollution(tmp_path):
     ckpt_dir = root / ".tcip" / "models"
     ckpt_dir.mkdir(parents=True)
     (ckpt_dir / "m.pt").write_bytes(b"weights")
-    (ckpt_dir / "registry.json").write_text(json.dumps({"schema_version": 2, "entries": [
+    (ckpt_dir / "registry.json").write_text(json.dumps({"entries": [
         {"name": "m", "checkpoint_path": ".tcip/models/m.pt"}]}))
 
     res = _run(root, file_layout=True)
@@ -531,7 +531,7 @@ def test_registry_entry_with_no_metrics_source_is_flagged(tmp_path):
     ckpt.write_bytes(b"weights")
     models = root / ".tcip" / "models"
     models.mkdir(parents=True)
-    (models / "registry.json").write_text(json.dumps({"schema_version": 2, "entries": [
+    (models / "registry.json").write_text(json.dumps({"entries": [
         {"name": "legacy", "checkpoint_path": str(ckpt), "metrics": {"val_map50": 0.5}}]}))
 
     try:

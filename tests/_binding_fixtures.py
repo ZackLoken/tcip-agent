@@ -100,7 +100,6 @@ def file_validation_record(
         create_experiment(experiment_id, {"derived_from": "a reference for a test whose subject is "
                                                           "not the binding itself"})
     body = {
-        "schema_version": 2,  # mirrors seal_validation's own row literal (resolution.py)
         "document": document,
         "trait": trait if trait is not None else stamp.get("trait"),
         "claim": claim_payload(stamp, document=document),
@@ -311,7 +310,6 @@ def calibrated_run_fields(
                 "reference_inputs": {"label_dirs": {"calibration": str(labels_dir)}}}
     # Mirrors _run_inference_verified's own persisted body (inference_tools.py).
     body = {
-        "schema_version": 2,
         "trait": trait,
         "dataset_hash": "H",
         "checkpoint_sha256": checkpoint_sha256,

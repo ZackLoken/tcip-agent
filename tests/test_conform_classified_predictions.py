@@ -46,7 +46,7 @@ def _load_script():
 
 def _base_stamp(*, id_map: dict, experiment_id: str = "exp-1", **overrides) -> dict:
     stamp = {
-        "schema_version": 2, "trait": "condition", "dataset_hash": "h",
+        "trait": "condition", "dataset_hash": "h",
         "operating_point": {"conf": {"value": 0.5}}, "id_map": id_map,
         "validated": False, "validated_by": None, "tile_size_validated": None,
         "shippable_issues": [], "checkpoint": "m", "checkpoint_sha256": "f" * 64,

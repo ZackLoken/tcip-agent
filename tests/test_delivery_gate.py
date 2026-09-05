@@ -1918,7 +1918,7 @@ def test_calibrate_physical_scale_whole_chain_delivers_a_validated_mm2_area(tmp_
     from tcip_mcp.pipelines.resolution import read_scale_sidecar
 
     sc = read_scale_sidecar(bucket)
-    assert sc["schema_version"] == 2
+    assert "schema_version" not in sc
     assert "gate_evidence" in sc
 
     from tcip_mcp.pipelines.resolution import VALIDATED_PHYSICAL_MEASUREMENT, reconcile_scale_validity

@@ -41,7 +41,6 @@ def _real_selection_disjointness() -> dict[str, Any]:
 def _row(**overrides: Any) -> dict[str, Any]:
     """One complete validation row, with the fields a case varies replaced."""
     body: dict[str, Any] = {
-        "schema_version": 2,
         "document": "operating_point",
         "trait": "bud_50per_date",
         "claim": {"operating_point": {"conf": {"value": 0.42,
@@ -260,10 +259,10 @@ def test_the_append_and_the_calibration_creation_each_leave_one_platform_audit_r
 
 
 @pytest.mark.usefixtures("seed_bud_trait_spec")
-def test_a_version_2_row_earned_through_the_real_gate_round_trips(tmp_path):
+def test_a_row_earned_through_the_real_gate_round_trips(tmp_path):
     """The producer-fed round trip: a row earned through open_validation/seal_validation (the
-    platform's own two-phase writer, not _append_validation directly) carries schema_version 2 and
-    reads back unchanged."""
+    platform's own two-phase writer, not _append_validation directly) carries no schema_version
+    field and reads back unchanged."""
     pytest.importorskip("torch")
     from tests._dense_op_fixtures import dense_records
 
@@ -301,29 +300,29 @@ def test_a_version_2_row_earned_through_the_real_gate_round_trips(tmp_path):
 
     rows = read_validations(experiment_id)
     assert len(rows) == 1
-    assert rows[0]["schema_version"] == 2
+    assert "schema_version" not in rows[0]
     assert validation_digest(rows[0]) == digest
 
 
-def test_read_validations_admits_an_old_row_with_no_schema_version(tmp_path):
-    """Lazy absence: a row filed before schema_version existed carries no such key, and the store's
-    ceiling (declared schema_version 2 on the experiment_validations store) still reads it, the
-    absent key meaning the frozen version 1."""
+def test_read_validations_admits_a_row_with_no_schema_version_beside_one_stamped_one(tmp_path):
+    """Lazy absence: a row carrying no schema_version key (what every real producer writes today)
+    reads as the frozen version 1, and a row explicitly stamped 1 reads identically, the store's
+    ceiling either way."""
     from tcip_mcp.experiments import (
         create_experiment, read_validations, validation_digest, validations_key,
     )
 
     experiment_id = "exp-028-quince-old-vintage-det"
     create_experiment(experiment_id, TRAINING_CONFIG)
-    old_row = _row()
-    del old_row["schema_version"]
-    # Digest taken at write time and the row relocated by it beside a version-2 sibling,
-    # so the proof is identification in a mixed-vintage log, not dict self-equality.
-    digest_at_write = validation_digest(old_row)
-    ts.append(validations_key(experiment_id), old_row)
-    ts.append(validations_key(experiment_id), _row())
+    bare_row = _row()
+    stamped_row = _row(schema_version=1)
+    # Digest taken at write time and the row relocated by it beside its sibling, so the proof is
+    # identification in a mixed-shape log, not dict self-equality.
+    digest_at_write = validation_digest(bare_row)
+    ts.append(validations_key(experiment_id), bare_row)
+    ts.append(validations_key(experiment_id), stamped_row)
 
     rows = read_validations(experiment_id)
-    assert old_row in rows and len(rows) == 2
+    assert bare_row in rows and len(rows) == 2
     matched = [r for r in rows if validation_digest(r) == digest_at_write]
-    assert matched == [old_row]
+    assert matched == [bare_row]

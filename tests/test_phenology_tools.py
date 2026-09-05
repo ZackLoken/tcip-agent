@@ -1075,7 +1075,7 @@ def test_calibrate_classifier_operating_point_partial_flip_fails_compensating_er
     from tcip_mcp.pipelines.resolution import read_classifier_operating_point_sidecar
 
     sidecar = read_classifier_operating_point_sidecar(tmp_path / "out")
-    assert sidecar["schema_version"] == 2
+    assert "schema_version" not in sidecar
     gate_evidence = sidecar["gate_evidence"]
     assert gate_evidence["kappa"] is not None
     assert gate_evidence["kappa"] <= gate_evidence["kappa_floor"]
@@ -1671,7 +1671,7 @@ def test_calibrate_scalar_operating_point_ordinal_e2e(
     from tcip_mcp.pipelines.resolution import read_ordinal_operating_point_sidecar
 
     sidecar = read_ordinal_operating_point_sidecar(tmp_path / "calib")
-    assert sidecar["schema_version"] == 2
+    assert "schema_version" not in sidecar
     assert sidecar["trait"] == "bud_opening"
     assert sidecar["operating_point"]["ordinal"]["criterion"] == "quadratic_weighted_kappa"
     assert sidecar["operating_point"]["ordinal"]["validated_against"] == result["validated_against"]
@@ -1735,7 +1735,7 @@ def test_calibrate_scalar_operating_point_regression_e2e(
     from tcip_mcp.pipelines.resolution import read_regression_operating_point_sidecar
 
     sidecar = read_regression_operating_point_sidecar(tmp_path / "calib")
-    assert sidecar["schema_version"] == 2
+    assert "schema_version" not in sidecar
     assert sidecar["trait"] == "bud_opening"
     assert sidecar["operating_point"]["regression"]["criterion"] == "r_squared"
     assert sidecar["operating_point"]["regression"]["validated_against"] == result["validated_against"]

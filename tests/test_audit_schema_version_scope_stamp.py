@@ -1,13 +1,15 @@
-"""Every audit line a real writer produces carries the version-2 stamp ``_stamp_scope`` decides.
+"""Every audit line a real writer produces carries the scope stamp ``_stamp_scope`` decides, and
+none carries a ``schema_version`` field.
 
 A dataset-scoped write, a project-scoped write, and a platform-default write each go through a
 real production writer (a decorated tool, ``record_event_or_raise``, and ``record_event``), never
-a hand-built entry, so what these prove is the shared helper's actual contract: ``schema_version``
-is always ``2``, and ``scope`` is the resolved root exactly when the caller passed one. The
-project case passes a genuinely non-canonical spelling (a ``..`` segment) that reaches the
-helper unresolved, so it proves the helper's own resolution; the dataset case's spelling is
-canonicalized upstream by ``dataset_scope_of`` before the helper runs, so what it guards is the
-version stamp, and the resolution claim rests on the project case alone.
+a hand-built entry, so what these prove is the shared helper's actual contract: ``scope`` is the
+resolved root exactly when the caller passed one, and no line carries ``schema_version`` (absence
+is the frozen version 1, ``frozen-formats.json``'s ceiling for this store). The project case
+passes a genuinely non-canonical spelling (a ``..`` segment) that reaches the helper unresolved,
+so it proves the helper's own resolution; the dataset case's spelling is canonicalized upstream by
+``dataset_scope_of`` before the helper runs, so what it guards is the absent-field contract, and
+the resolution claim rests on the project case alone.
 """
 
 from __future__ import annotations
@@ -46,7 +48,7 @@ def test_dataset_scoped_decorator_write_carries_the_version_stamp_and_resolved_s
     rows = list(ts.read_log(audit_module.audit_log_key(dataset_root)).records)
     matches = [r for r in rows if r["tool"] == "write_class_map"]
     assert len(matches) == 1, rows
-    assert matches[0]["schema_version"] == 2
+    assert "schema_version" not in matches[0]
     assert matches[0]["scope"] == str(dataset_root.resolve())
 
 
@@ -75,7 +77,7 @@ def test_project_scoped_writer_carries_the_version_stamp_and_resolved_scope(
     rows = list(ts.read_log(audit_module.audit_log_key(project_root)).records)
     matches = [r for r in rows if r["tool"] == "plant_mapping_built"]
     assert len(matches) == 1, rows
-    assert matches[0]["schema_version"] == 2
+    assert "schema_version" not in matches[0]
     assert matches[0]["scope"] == str(project_root.resolve())
 
 
@@ -83,7 +85,7 @@ def test_platform_default_write_carries_the_version_stamp_and_no_scope(
     platform_root: Path, tmp_path: Path,
 ) -> None:
     """A model-registry replace (real production ``record_event`` caller, no ``scope`` of its
-    own) stays a platform event: ``schema_version`` is stamped, ``scope`` is not."""
+    own) stays a platform event: no ``schema_version`` field, and no ``scope`` either."""
     from tcip_mcp.model_registry import ModelRegistry
 
     reg = ModelRegistry(str(tmp_path))
@@ -97,5 +99,5 @@ def test_platform_default_write_carries_the_version_stamp_and_no_scope(
     rows = list(ts.read_log(audit_module.audit_log_key(platform_root)).records)
     matches = [r for r in rows if r["tool"] == "model_registry_replace"]
     assert len(matches) == 1, rows
-    assert matches[0]["schema_version"] == 2
+    assert "schema_version" not in matches[0]
     assert "scope" not in matches[0]

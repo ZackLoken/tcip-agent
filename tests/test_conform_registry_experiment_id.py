@@ -30,8 +30,7 @@ def _load_script():
 
 
 def _seed_index(root: Path, entries: list[dict]) -> None:
-    ts.replace(registry_index_key(root), {"schema_version": 2, "entries": entries},
-               expect=ts.Version.ABSENT)
+    ts.replace(registry_index_key(root), {"entries": entries}, expect=ts.Version.ABSENT)
 
 
 def _entry(name: str, **overrides) -> dict:
