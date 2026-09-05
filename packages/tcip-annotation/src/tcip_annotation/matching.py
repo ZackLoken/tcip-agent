@@ -98,6 +98,12 @@ def _is_box(a: Annotation) -> bool:
     return isinstance(a.geometry, BBox)
 
 
+def _as_box(a: Annotation) -> BBox:
+    """``a``'s geometry as a :class:`BBox`, for a caller that has already checked ``_is_box(a)``."""
+    assert isinstance(a.geometry, BBox), "caller must verify _is_box(a) before calling _as_box"
+    return a.geometry
+
+
 def _rings_to_shapely(rings: list[list[tuple[float, float]]]):
     """One or more simple closed rings -> a Shapely Polygon (one ring) or MultiPolygon (several);
     every ring contributes, never just the first/largest."""
@@ -166,8 +172,8 @@ def compute_matches(
     for li, item in enumerate(gt_items):
         gt_by_class[item[1]].append(li)
     pred_by_class: dict[str, list[int]] = defaultdict(list)
-    for li, item in enumerate(pred_items):
-        pred_by_class[item[1]].append(li)
+    for li, pred_item in enumerate(pred_items):
+        pred_by_class[pred_item[1]].append(li)
 
     gt_geom_cache: dict[int, tuple] = {}
     pred_geom_cache: dict[int, tuple] = {}
@@ -197,13 +203,13 @@ def compute_matches(
             _is_box(pred_items[li][3]) for li in pis
         ):
             gt_arr = np.array(
-                [(d.geometry.x1, d.geometry.y1, d.geometry.x2, d.geometry.y2)
-                 for d in (gt_items[li][2] for li in gis)],
+                [(b.x1, b.y1, b.x2, b.y2)
+                 for b in (_as_box(gt_items[li][2]) for li in gis)],
                 dtype=np.float64,
             )
             pred_arr = np.array(
-                [(d.geometry.x1, d.geometry.y1, d.geometry.x2, d.geometry.y2)
-                 for d in (pred_items[li][3] for li in pis)],
+                [(b.x1, b.y1, b.x2, b.y2)
+                 for b in (_as_box(pred_items[li][3]) for li in pis)],
                 dtype=np.float64,
             )
             _append_box_iou_pairs(np, gt_arr, pred_arr, gis, pis, iou_threshold, pairs)
@@ -213,7 +219,7 @@ def compute_matches(
                 gt_ann = gt_items[gi][2]
                 pred_ann = pred_items[pi][3]
                 if _is_box(gt_ann) and _is_box(pred_ann):
-                    iou = box_iou(gt_ann.geometry, pred_ann.geometry)
+                    iou = box_iou(_as_box(gt_ann), _as_box(pred_ann))
                 else:
                     g1, a1 = _gt_geom(gi)
                     g2, a2 = _pred_geom(pi)
