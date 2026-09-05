@@ -446,3 +446,30 @@ def test_web_worker_n_detections_agrees_with_the_persisted_document_on_a_degener
     assert job.dropped_boxes == 1
     persisted = json.loads((out_dir / "img.json").read_text())["annotations"]
     assert len(persisted) == 1
+
+
+def test_web_worker_fails_the_job_on_a_stem_collision(tmp_path):
+    """``_list_images`` enumerates through ``image_utils.list_logical_images``, the same
+    enumeration every reader shares: a bucket already holding two logical identities under one
+    case-folded stem fails the job with the refusal's own message, through the worker's own
+    ``except Exception`` handler, rather than crashing the worker thread."""
+    from PIL import Image
+
+    from tcip_web.routes.inference import InferenceJob, _worker
+
+    images_dir = tmp_path / "images"
+    images_dir.mkdir()
+    Image.new("RGB", (100, 100), (120, 120, 120)).save(images_dir / "foo.jpg")
+    Image.new("RGB", (100, 100), (120, 120, 120)).save(images_dir / "foo.png")
+    ckpt = tmp_path / "m.pt"
+    ckpt.write_bytes(b"stub")
+
+    job = InferenceJob(
+        job_id="collision", checkpoint_path=str(ckpt), images_dir=str(images_dir),
+        output_dir=str(tmp_path / "out"), tile=False, conf=0.25, iou=0.7,
+        slice_hw=(0, 0), overlap=0.2, postprocess="nms",
+    )
+    _worker(job)
+
+    assert job.status == "failed"
+    assert "logical image" in job.error
