@@ -340,12 +340,14 @@ def orthomosaic_plant_counts(
             raise CountDeliveryRefused(f"canopy_subject delivery refused: {exc}") from exc
 
     from tcip_annotation.json_io import UnreadableLabelDocument, detection_annotations
-    from tcip_annotation.state import bbox_of
+    from tcip_annotation.state import Point, bbox_of
 
     boxes: list[list[float]] = []
     try:
         for f in pred_files:
             for a in detection_annotations(str(f)):
+                # detection_annotations already excludes a None or Point geometry
+                assert a.geometry is not None and not isinstance(a.geometry, Point)
                 b = bbox_of(a.geometry)
                 boxes.append([b.x1, b.y1, b.x2, b.y2])
     except UnreadableLabelDocument as exc:
@@ -404,11 +406,11 @@ def orthomosaic_plant_counts(
             tied_by_index[idx].plot_name for idx in ambiguous_tied_indices)
 
         counts_by_segment: dict[int, int] = {}
-        for a in segment_assignments:
-            if a.source == SEGMENT_ASSIGNMENT_SOURCES.containment:
+        for sa in segment_assignments:
+            if sa.source == SEGMENT_ASSIGNMENT_SOURCES.containment:
                 # a containment assignment always carries the segment it was contained in
-                assert a.segment_index is not None
-                counts_by_segment[a.segment_index] = counts_by_segment.get(a.segment_index, 0) + 1
+                assert sa.segment_index is not None
+                counts_by_segment[sa.segment_index] = counts_by_segment.get(sa.segment_index, 0) + 1
 
         records = [
             {"plant_id": t.plot_name, "plant_id_source": SEGMENT_ASSIGNMENT_SOURCES.containment,
