@@ -89,7 +89,7 @@ source file under a covered root that no row names.
 | packages/tcip-mcp/src/tcip_mcp/pipelines/data/augmentations.py | Data augmentation transforms for all task types. | 1 | 5 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/data/band_groups.py | Sensor-agnostic band-group correlation: sibling single-band raster files that are really one logical multi-band capture (some multispectral drone sensors write one file per band instead of one multi-band file per image), and the ``.bandgroup`` manifest that records a found group. | 4 | 20 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/data/dataset_fingerprint.py | Whole-dataset content identity: the ``dataset_fingerprint`` formula (labels + image files + registry + confirmed negatives) and its formula-version stamp. | 5 | 7 |
-| packages/tcip-mcp/src/tcip_mcp/pipelines/data/datasets.py | Multi-task datasets with standardized interfaces. | 10 | 6 |
+| packages/tcip-mcp/src/tcip_mcp/pipelines/data/datasets.py | Multi-task datasets with standardized interfaces. | 10 | 5 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/data/label_queries.py | The label-store and registry query library: reads a dataset's per-image JSON or assembled COCO labels, its ``classes.json`` registry, and its confirmed-negative image-status store. | 9 | 12 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/data/samplers.py | Task-aware data samplers: class-imbalance handling plus read-locality ordering. | 2 | 3 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/data/split_construction.py | Constructing and persisting training splits from a data config, beside ``splits.py``. | 15 | 3 |
@@ -130,7 +130,7 @@ source file under a covered root that no row names.
 | packages/tcip-mcp/src/tcip_mcp/pipelines/training/__init__.py | Training pipeline: trainer, progressive unfreezing, HPO. | 0 | 0 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/training/collation.py | Collate functions for a task's ``DataLoader``: batches per-sample pairs into the shape ``train()`` and ``evaluate()`` both expect. | 0 | 5 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/training/envelope.py | The audited training envelope + ``TrainContext``. | 21 | 2 |
-| packages/tcip-mcp/src/tcip_mcp/pipelines/training/eval_runners.py | Orchestrates a checkpoint evaluation run (tile-level or delivery-grade full-frame) and writes its scored result; ``evaluation.py`` keeps the metrics computation itself. | 12 | 2 |
+| packages/tcip-mcp/src/tcip_mcp/pipelines/training/eval_runners.py | Orchestrates a checkpoint evaluation run (tile-level or delivery-grade full-frame) and writes its scored result; ``evaluation.py`` keeps the metrics computation itself. | 11 | 2 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/training/evaluation.py | Task-aware evaluation metrics + composite selection objective. | 7 | 12 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/training/generic_trainer.py | Task-agnostic training loop for a bespoke ``model_source`` model. | 13 | 6 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/training/hpo.py | HPO, hyperparameter optimization on Ray Tune. | 7 | 3 |

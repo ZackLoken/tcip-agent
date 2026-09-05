@@ -391,9 +391,9 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
         declared = declared_in_chans(model_source)
         images_dir = data_cfg.get("images_dir")
         if declared is not None and images_dir and Path(images_dir).is_dir():
-            from tcip_mcp.pipelines.data.datasets import IMAGE_EXTS
-            sample = next((f for f in sorted(Path(images_dir).iterdir())
-                           if f.suffix.lower() in IMAGE_EXTS), None)
+            from tcip_mcp.pipelines.image_utils import list_logical_images
+            logical = list_logical_images(images_dir)
+            sample = logical[sorted(logical)[0]] if logical else None
             if sample is not None:
                 from tcip_mcp.pipelines.derivations import probe_channels
                 from tcip_mcp.pipelines.resolution import (
@@ -466,9 +466,8 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
     if split_cfg_dict.get("group_by") or split_cfg_dict.get("group_key_map"):
         images_dir = data_cfg_dict.get("images_dir")
         if images_dir and Path(images_dir).is_dir():
-            from tcip_mcp.pipelines.data.datasets import IMAGE_EXTS
-            stems = sorted(f.stem for f in Path(images_dir).iterdir()
-                           if f.suffix.lower() in IMAGE_EXTS)
+            from tcip_mcp.pipelines.image_utils import list_logical_images
+            stems = sorted(list_logical_images(images_dir))
             if stems:
                 from tcip_mcp.pipelines.data.splits import resolve_group_key_fn
                 try:
@@ -3061,9 +3060,9 @@ def _reserve_calibration_feasibility_issues(
     if not images_dir or not labels_dir or not Path(images_dir).is_dir() or not Path(labels_dir).is_dir():
         return []  # the existing images_dir/labels_dir structural checks already cover this
 
-    from tcip_mcp.pipelines.data.datasets import IMAGE_EXTS
+    from tcip_mcp.pipelines.image_utils import list_logical_images
 
-    stems = sorted(f.stem for f in Path(images_dir).iterdir() if f.suffix.lower() in IMAGE_EXTS)
+    stems = sorted(list_logical_images(images_dir))
     if len(stems) >= 2:
         return [
             f"data.split.reserve_calibration_fraction={reserve_cal_frac} has no effect: "

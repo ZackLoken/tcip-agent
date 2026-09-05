@@ -433,11 +433,18 @@ def _scan_dataset(root: str) -> dict:
     known exclusion rather than a disagreement. ``reserved_name_images`` names every image whose
     own stem is reserved the same way, since such an image otherwise counts as an ordinary
     unlabelled one with no signal at all that its label can never be read through any bucket walk.
+
+    ``images``, unlike ``labels``, is built per bucket through
+    :func:`~tcip_mcp.pipelines.image_utils.list_logical_images`: a stem collision within one
+    bucket raises :class:`~tcip_mcp.pipelines.image_utils.AmbiguousImageStem` rather than this
+    census silently keeping one raw file of the pair, and a grouped capture counts once, its own
+    manifest, never once per band file. Falls back to a raw walk of the whole dataset root only
+    when there is no canonical ``images/`` tree to route through at all.
     """
     from tcip_annotation.json_io import is_sidecar_name, prediction_documents
     from tcip_annotation.review_engine import BASELINE_DIRNAME
     from tcip_mcp.dataset_layout import annotation_root, image_root, prediction_root
-    from tcip_mcp.pipelines.image_utils import IMAGE_EXTS
+    from tcip_mcp.pipelines.image_utils import BandGroupRef, IMAGE_EXTS, list_logical_images
 
     root_path = Path(root)
     image_exts = IMAGE_EXTS
@@ -448,14 +455,24 @@ def _scan_dataset(root: str) -> dict:
     reserved_name_images: list[str] = []
     detected_format: str | None = None
 
-    # Find images (recurse to catch the canonical images/<date>/ layout).
+    # Find images through the platform's own bucket enumeration: a stem collision refuses here
+    # too, and a grouped capture counts once, its own manifest.
     images_dir = image_root(root_path)
-    scan_root = images_dir if images_dir.is_dir() else root_path
-    for f in sorted(scan_root.rglob("*")):
-        if f.is_file() and f.suffix.lower() in image_exts:
-            images.append(str(f))
-            if is_sidecar_name(f"{f.stem}.json"):
-                reserved_name_images.append(str(f))
+    if images_dir.is_dir():
+        buckets = [images_dir] + sorted(p for p in images_dir.iterdir() if p.is_dir())
+        for bucket in buckets:
+            for source in list_logical_images(bucket).values():
+                f = source.manifest_path if isinstance(source, BandGroupRef) else source
+                images.append(str(f))
+                if is_sidecar_name(f"{f.stem}.json"):
+                    reserved_name_images.append(str(f))
+    else:
+        # No canonical images/ tree, so no bucket contract to route through this walk.
+        for f in sorted(root_path.rglob("*")):
+            if f.is_file() and f.suffix.lower() in image_exts:
+                images.append(str(f))
+                if is_sidecar_name(f"{f.stem}.json"):
+                    reserved_name_images.append(str(f))
 
     # Ground-truth labels: annotations/[<date>/]<stem>.json (one file per image, every subject),
     # a review baseline copy under BASELINE_DIRNAME excluded: it is a snapshot, not a label.

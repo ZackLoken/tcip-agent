@@ -51,22 +51,6 @@ class AmbiguousImageStem(ValueError):
 # names.
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".heic", ".tif", ".tiff", ".npy", ".npz", MANIFEST_EXT}
 
-_RAW_WALKS_OUTSIDE_THIS_MODULE = """
-Six raw directory walks over images/ stay outside bucket_logical_identities and
-list_logical_images. Each can pick one member of a collided pair without refusing, so a bucket
-this module would refuse can still be walked by one of these:
-
-training_tools.py's training preflight, in its first-file sample (:394-396) and its stem listing
-(:469-471), and in its calibration-feasibility count (:3051-3053).
-
-eval_runners.py's label-less tiled evaluation, in its path listing (:245-258).
-
-doctor.py's ``_image_stems`` (:41-53), which keeps the last raw file per stem across buckets.
-
-data_tools.py's ``_scan_dataset``, in its image census (:451-453).
-"""
-
-
 def stem_collision_key(name: str) -> str:
     """The fold that decides whether two stems name one logical identity: ``str.lower()``.
 

@@ -39,17 +39,22 @@ def _note_version(findings: list, where: str, store: str, doc) -> None:
 
 
 def _image_stems(root: Path) -> dict[str, str]:
-    """stem -> file name for every image under images/ (any date bucket), over the platform's
-    own extension set, so a capture the loaders admit is never reported as missing here."""
+    """stem -> file name for every image under images/ (the flat form and every date bucket),
+    through the platform's own bucket enumeration, so a stem collision within one bucket refuses
+    here too rather than this walk silently keeping one raw file of the pair. A stem present in
+    more than one bucket keeps the latest bucket's file, buckets visited in sorted (chronological,
+    for ISO dates) order."""
     from tcip_mcp.dataset_layout import image_root
-    from tcip_mcp.pipelines.image_utils import IMAGE_EXTS
+    from tcip_mcp.pipelines.image_utils import list_logical_images, logical_image_name
 
     out: dict[str, str] = {}
     images = image_root(root)
-    if images.is_dir():
-        for p in images.rglob("*"):
-            if p.is_file() and p.suffix.lower() in IMAGE_EXTS:
-                out[p.stem] = p.name
+    if not images.is_dir():
+        return out
+    buckets = [images] + sorted(p for p in images.iterdir() if p.is_dir())
+    for bucket in buckets:
+        for stem, source in list_logical_images(bucket).items():
+            out[stem] = logical_image_name(source)
     return out
 
 
@@ -87,7 +92,11 @@ def check_negatives(root: Path, findings: list) -> None:
         findings.append(("warn", f"the image status store will not read ({exc}); negatives "
                          "cannot be verified against it"))
         return
-    stems = _image_stems(root)
+    try:
+        stems = _image_stems(root)
+    except AmbiguousImageStem as exc:
+        findings.append(("error", str(exc)))
+        return
     ann_root = annotation_root(root)
     neg_names = confirmed_negative_names_any_subject(by_bucket)
     ambiguous_reported: set[str] = set()
@@ -185,6 +194,9 @@ def check_data_quality(root: Path, findings: list) -> None:
         scan = _scan_dataset(str(root))
     except UnreadableLabelDocument as exc:
         findings.append(("error", f"data quality scan: {exc}"))
+        return
+    except AmbiguousImageStem as exc:
+        findings.append(("error", str(exc)))
         return
 
     image_stems = {Path(p).stem for p in scan["images"]}
@@ -443,9 +455,14 @@ def check_provenance(root: Path, findings: list) -> None:
 
 def check_state(root: Path, findings: list) -> None:
     from tcip_annotation.review_engine import REVIEW_VERDICTS_STORE
+    from tcip_mcp.pipelines.image_utils import AmbiguousImageStem
 
     state = root / ".tcip" / "state"
-    stems = _image_stems(root)
+    try:
+        stems = _image_stems(root)
+    except AmbiguousImageStem as exc:
+        findings.append(("error", str(exc)))
+        return
     shard_dir = state / "review"
     if shard_dir.is_dir():
         # Shards sit one directory deep per prediction bucket, and directly here for a review
