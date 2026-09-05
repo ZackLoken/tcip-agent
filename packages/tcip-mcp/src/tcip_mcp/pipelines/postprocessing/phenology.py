@@ -24,9 +24,11 @@ any positive-state observation appears) is a separate helper, not the delivered 
 
 This module is pure (stdlib only, plus ``resolution.py`` and ``operationalization.py``, both of
 which are themselves torch-free): it consumes
-prediction buckets and never touches pixels or model machinery. A prediction file's ``.subject``
-carries the classifier's own decoded call (see ``count_by_class``'s docstring for the full
-schema-vs-GT distinction). If the bucket
+prediction buckets and never touches pixels or model machinery. A classified bucket's own
+recorded scope (``resolution.bucket_scope``) says which prediction records carry the classifier's
+decoded call: ``.subject`` names the object class and the call sits under
+``.attributes[attribute]``, the same shape ground truth carries (see ``count_by_class``'s
+docstring for the full picture). If the bucket
 never assessed the trait's positive-class axis at all, the fraction is not a valid measurement,
 ``per_plant_phenology`` surfaces that via per-plant/per-date disclosure fields so callers never
 deliver a curve built on unclassified or missing detections.
@@ -38,10 +40,13 @@ import csv
 from dataclasses import dataclass
 from datetime import date, timedelta
 from pathlib import Path
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 from tcip_mcp.operationalization import OperationalizationBasis
-from tcip_mcp.pipelines.resolution import Acknowledgement
+from tcip_mcp.pipelines.resolution import Acknowledgement, bucket_scope
+
+if TYPE_CHECKING:
+    from tcip_mcp.pipelines.resolution import BucketScope
 
 
 def _milestone_targets(spec) -> dict[str, float]:
@@ -344,30 +349,30 @@ def bucket_id_map(pred_dir: Path) -> dict | None:
     return id_map if isinstance(id_map, dict) else None
 
 
-def count_by_class(json_path: Path, id_map: dict | None, positive_value: str) -> tuple[int, int, int]:
+def count_by_class(
+    json_path: Path, id_map: dict | None, positive_value: str, *,
+    scope: BucketScope | None,
+) -> tuple[int, int, int]:
     """``(n_total, n_positive, n_unclassified)`` for one image's predictions.
 
-    Two checks, in order:
+    ``scope`` is the bucket's own recorded scope (:func:`~tcip_mcp.pipelines.resolution.
+    bucket_scope`). Under no scope, a detector scope, or a classified scope whose recorded
+    ``id_map`` lacks ``positive_value``, every detection is unclassified: a whole-bucket decision,
+    since only a bucket that classified along an attribute assessed a state at all. This also
+    means a detector bucket whose one map key happens to equal ``positive_value`` never counts a
+    positive: a bare single-class detector never assessed the trait's positive state.
 
-    1. Bucket-level precondition: ``id_map`` must be a dict containing ``positive_value`` as a
-       key, the run that produced this bucket must have actually classified along the trait's own
-       axis. A bare single-class detector's ``id_map`` (e.g. ``{"<object>": 0}``, no attribute axis)
-       fails this, correctly, since the detector never assessed the trait's positive state at all.
-       If it fails, every detection in this image is unclassified, a whole-bucket decision, not a
-       per-detection one.
-    2. Per-detection check: within a bucket that passes (1), a detection is positive if
-       ``.subject == positive_value``, classified-negative if ``.subject`` is some other key of
-       ``id_map``, and unclassified if ``.subject`` is not a key of ``id_map`` at all, a stale file
-       left behind by an earlier run, or a raw-index fallback (``export.py``'s
-       ``id_to_name.get(cid, str(cid))``) from a checkpoint whose class vocabulary shrank after
-       training. Never silently coerced into a classified negative.
+    Under a classified scope, every record is held to
+    :func:`~tcip_annotation.json_io.require_classified_record` under the bucket's own recorded
+    vocabulary (``id_map``'s keys, the vocabulary its producer decoded through): a value outside
+    that vocabulary refuses by name (a pre-conform record or a foreign document), rather than
+    reading as unclassified. A record whose value equals ``positive_value`` counts positive; every
+    other classified record counts toward neither positive nor unclassified.
 
     Predictions decode differently from GT annotations, verified against the real writer,
-    ``write_predictions_json``, which puts the classifier's decoded call straight into
-    ``Annotation.subject`` and leaves ``.attributes`` empty, always, for every prediction-bucket
-    writer this reads from (``json_io.target_class_id``, built for GT's ``subject``+``attributes``
-    shape, is not reused here, applying it to a prediction file returns ``None``/raises for either
-    bucket shape, unusable either way).
+    ``write_predictions_json``: a classified bucket's record carries the object class in
+    ``subject`` and the classifier's decoded call in ``attributes[attribute]``, the same shape
+    ground truth carries.
 
     A missing prediction file is the caller's concern (a missing observation, not an observed zero,
     see ``per_plant_series``), not this function's: it is only ever called for a file confirmed to
@@ -377,16 +382,16 @@ def count_by_class(json_path: Path, id_map: dict | None, positive_value: str) ->
 
     annotations = json_io.detection_annotations(json_path)
     total = len(annotations)
-    if not id_map or positive_value not in id_map:
+    if scope is None or not scope.classified or not id_map or positive_value not in id_map:
         return total, 0, total
     positive = 0
-    unclassified = 0
-    for a in annotations:
-        if a.subject not in id_map:
-            unclassified += 1
-        elif a.subject == positive_value:
+    for i, a in enumerate(annotations):
+        value = json_io.require_classified_record(
+            a, subject=scope.subject, attribute=scope.attribute, vocabulary=set(id_map),
+            source=f"{json_path}#{i}")
+        if value == positive_value:
             positive += 1
-    return total, positive, unclassified
+    return total, positive, 0
 
 
 def per_plant_series(
@@ -429,6 +434,7 @@ def per_plant_series(
         pred_dir = predictions_by_date.get(date_str)
         pred_path = Path(pred_dir) if pred_dir else None
         id_map = bucket_id_map(pred_path) if pred_path is not None else None
+        scope = bucket_scope(pred_path) if pred_path is not None else None
         read_stems = stems_delivery_reads(mapping[date_str], pred_dir) if pred_dir else set()
         # [total, positive, unclassified, missing, n_images] per plant: n_images is every stem
         # the mapping names for this (plant, date), missing is one this delivery doesn't read.
@@ -446,7 +452,7 @@ def per_plant_series(
                 acc[3] += 1
                 continue
             total, positive, unclassified = count_by_class(
-                pred_path / f"{stem}.json", id_map, positive_class_name)
+                pred_path / f"{stem}.json", id_map, positive_class_name, scope=scope)
             acc[0] += total
             acc[1] += positive
             acc[2] += unclassified

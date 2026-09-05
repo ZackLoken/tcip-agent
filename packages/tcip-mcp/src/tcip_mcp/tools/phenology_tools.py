@@ -311,10 +311,12 @@ def _match_gt_to_predictions(gt: list, preds: list, *, kind: str,
     disclosure).
 
     Unlike ``tcip_annotation.matching.compute_matches`` (which only matches within the same
-    ``subject`` name), a classification calibration must match a GT box (subject = the trait's
-    object type) against a prediction box whose ``subject`` is the classifier's
-    verdict, different names by design. Box geometries only (polygon GT is
-    out of scope for a box-detector's classification calibration).
+    ``subject`` name), a classification calibration matches on box geometry alone, not
+    ``subject``: a GT box carries the trait's object type in ``subject`` and its confirmed value
+    under ``attributes[attribute]``, and a prediction box under a classified scope carries the
+    same shape, so matching by ``subject`` name would already agree by construction rather than
+    testing anything (both sides read as the same object class). Box geometries only (polygon GT
+    is out of scope for a box-detector's classification calibration).
 
     ``kind``/``center_match_tolerance``/``iou_threshold`` come from
     ``evaluation.resolve_match_criterion``, the same resolver every other localization consumer
@@ -365,9 +367,9 @@ def _classification_items(gt_dir: str, pred_dir: str, *, trait_name: str, subjec
     hold only one kind of annotation, a dataset that also isolates an enabling subject (e.g.
     ``bush``, per the root CLAUDE.md's "a subject is not a trait" rule) would otherwise let an
     unrelated object's box enter the match pool and pair against the classifier's prediction
-    purely on proximity. Predictions are never subject-filtered here: a prediction's ``subject``
-    already carries the classifier's decoded verdict, not an object-type
-    name, so there is nothing to scope it against. ``attribute`` is the per-run fact naming which
+    purely on proximity. Predictions are held to the object class the same way ground truth is
+    (:func:`~tcip_annotation.json_io.require_classified_record`), never subject-filtered out of
+    that check. ``attribute`` is the per-run fact naming which
     GT attribute carries the trait's positive-class axis,
     threaded by the caller, never hardcoded here (a hardcoded attribute name would pin this
     producer to one trait). ``bbox`` is the matched instance's own GT geometry, carried through
@@ -377,6 +379,11 @@ def _classification_items(gt_dir: str, pred_dir: str, *, trait_name: str, subjec
     prediction (the detector itself missed or hallucinated an object) is not a classification-call
     disagreement and is excluded, this calibrates the classifier's call, not the detector's, the
     same separation the platform's own detect-then-classify decomposition makes elsewhere.
+
+    ``pred_dir``'s own recorded scope governs when it has one: no stamp at all (the hand-split
+    calibration/holdout workflow) leaves the caller's stated ``(subject, attribute)`` in force; a
+    classified stamp must agree with it, else this refuses naming both; a detector stamp refuses
+    outright, a detector bucket carries no value to calibrate.
 
     ``gt_dir`` is read as a measurement reference, so it goes through
     ``json_io.require_reference_ground_truth`` first: a GT dir pointed at a prediction bucket would
@@ -392,10 +399,30 @@ def _classification_items(gt_dir: str, pred_dir: str, *, trait_name: str, subjec
     from tcip_annotation import json_io
     from tcip_annotation.json_io import prediction_documents
     from tcip_annotation.state import BBox
+    from tcip_mcp.pipelines.postprocessing.phenology import bucket_id_map
+    from tcip_mcp.pipelines.resolution import bucket_scope
     from tcip_mcp.pipelines.training.evaluation import resolve_match_criterion
 
     gt_p, pred_p = Path(gt_dir), Path(pred_dir)
     json_io.require_reference_ground_truth(gt_p)  # the prediction side is never held to this
+    scope = bucket_scope(pred_p)
+    if scope is None:
+        vocabulary_map = None
+    elif scope.classified:
+        if (scope.subject, scope.attribute) != (subject, attribute):
+            raise ValueError(
+                f"{pred_p}'s stamp records scope (subject={scope.subject!r}, "
+                f"attribute={scope.attribute!r}), not the stated (subject={subject!r}, "
+                f"attribute={attribute!r})."
+            )
+        vocabulary_map = bucket_id_map(pred_p)
+    else:
+        raise ValueError(f"{pred_p} is a detector bucket: it carries no value to calibrate.")
+    if vocabulary_map is None:
+        from tcip_mcp.pipelines.data.label_queries import resolve_registry_id_map
+
+        _reg, vocabulary_map = resolve_registry_id_map(gt_dir, subject, attribute)
+    vocabulary = set(vocabulary_map or {})
     # gt_dir/pred_dir may themselves be prediction buckets (a calibration/holdout split of one),
     # so both are walked through prediction_documents, their own sidecar stamps excluded.
     paired = [f for f in prediction_documents(gt_p) if (pred_p / f.name).is_file()]
@@ -428,15 +455,17 @@ def _classification_items(gt_dir: str, pred_dir: str, *, trait_name: str, subjec
         ):
             gt_value = gt_a.attributes.get(attribute) if gt_a.attributes else None
             if gt_value is None:
-                # Never assessed for `attribute` yet -- a soft, expected gap,
-                # not a confirmed negative. Coercing an unassessed instance into "not positive"
-                # fabricates a disagreement against a perfect classifier.
+                # Never assessed for `attribute` yet: a soft, expected gap, not a confirmed
+                # negative, which would fabricate a disagreement against a perfect classifier.
                 continue
+            pred_value = json_io.require_classified_record(
+                pred_a, subject=subject, attribute=attribute, vocabulary=vocabulary,
+                source=f"{pred_file}")
             box = gt_a.geometry
             items.append({
                 "image_id": gt_file.stem,
                 "is_true_positive": gt_value == positive_value,
-                "is_pred_positive": pred_a.subject == positive_value,
+                "is_pred_positive": pred_value == positive_value,
                 "bbox": [box.x1, box.y1, box.x2, box.y2],
             })
     return items
@@ -741,13 +770,16 @@ def deliver_phenology_milestones(
                           f"own recorded id_map ({msg})."),
                 "n_plants": 0}
 
-    from tcip_annotation.json_io import UnreadableLabelDocument
+    from tcip_annotation.json_io import ClassifiedRecordRefused, UnreadableLabelDocument
+    from tcip_mcp.pipelines.resolution import StampScopeUnstated
+    from tcip_store import StoreError
 
     try:
         result = phenology.per_plant_phenology(
             mapping, predictions_by_date, positive_class_name=pos, spec=spec,
         )
-    except UnreadableLabelDocument as exc:
+    except (UnreadableLabelDocument, StampScopeUnstated, ClassifiedRecordRefused,
+            StoreError) as exc:
         return {"error": str(exc), "n_plants": 0}
     rows = result["rows"]
 
