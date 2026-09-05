@@ -20,7 +20,8 @@ from tcip_store import store
 from tcip_annotation.json_io import is_sidecar_name
 from tcip_mcp import dataset_layout, workspace
 from tcip_mcp.audit import audited
-from tcip_mcp.pipelines.image_utils import IMAGE_EXTS
+from tcip_mcp.pipelines.data.band_groups import MANIFEST_EXT
+from tcip_mcp.pipelines.image_utils import IMAGE_EXTS, bucket_logical_identities, stem_collision_key
 from tcip_mcp.server import mcp
 
 logger = logging.getLogger(__name__)
@@ -168,6 +169,50 @@ def _bucket_for(path: Path, date_from: str) -> tuple[str, str | None]:
     return date_from, None  # validated literal bucket
 
 
+def _collision_refusal(
+    dest_root: Path, resolved_sources: list[tuple[Path, str, str | None]],
+) -> str | None:
+    """The whole-call refusal naming every source that would create a second logical image under
+    a stem key another source, an existing raw file, or an existing band-group manifest already
+    holds in its bucket; ``None`` when every source is either a new stem or the exact re-ingest of
+    an existing file under the identical destination filename.
+
+    Reads each touched bucket's identities once (``bucket_logical_identities``, an absent
+    directory answering empty) and adds the batch's own sources as would-be raw identities under
+    their keys, so a key ending up held by more than one identity refuses. A source whose
+    destination filename equals the one existing raw identity already at its key is the exact
+    re-ingest of that file, not a second identity, and is left to the copy loop's own
+    ``dest.exists()`` skip.
+    """
+    buckets = sorted({bucket for _src, bucket, _unreadable in resolved_sources})
+    collisions: dict[str, dict[str, list[Path]]] = {}
+    for bucket in buckets:
+        # disk_identities is a fixed pre-call snapshot for the re-ingest carve-out below, never
+        # mutated: a batch-mate sharing a key must never read as one already on disk.
+        disk_identities = bucket_logical_identities(dataset_layout.image_dir(dest_root, bucket))
+        identities = {key: list(paths) for key, paths in disk_identities.items()}
+        for src_path, src_bucket, _unreadable in resolved_sources:
+            if src_bucket != bucket:
+                continue
+            key = stem_collision_key(src_path.stem)
+            dest = dataset_layout.image_path(dest_root, bucket, src_path.stem, src_path.suffix)
+            disk_existing = disk_identities.get(key, [])
+            if len(disk_existing) == 1 and disk_existing[0].suffix.lower() != MANIFEST_EXT \
+                    and disk_existing[0].name == dest.name:
+                continue  # the exact re-ingest of a file already on disk, not a second identity
+            identities.setdefault(key, []).append(src_path)
+            if len(identities[key]) > 1:
+                collisions.setdefault(bucket, {})[key] = identities[key]
+
+    if not collisions:
+        return None
+    lines = [
+        f"bucket {bucket!r}, stem {key!r}: " + ", ".join(str(p) for p in collisions[bucket][key])
+        for bucket in sorted(collisions) for key in sorted(collisions[bucket])
+    ]
+    return "stem collision, refusing the whole call before any byte is copied: " + "; ".join(lines)
+
+
 @mcp.tool()
 @audited
 def ingest_images(
@@ -185,8 +230,11 @@ def ingest_images(
     Turns a raw folder (or glob) of photos into the canonical layout
     (``images/<YYYY-MM-DD>/<stem><ext>``) under a workspace project. Copies by
     default; originals are left byte-identical; pass ``copy=False`` to move.
-    Refuses to overwrite an existing image (records the collision and skips it).
-    Does not annotate, split, choose a task, or write ``classes.json``.
+    Refuses the whole call, before anything is copied, when a source's destination stem would
+    create a second logical image under a key another source, an existing raw file, or an
+    existing band-group manifest already holds in that bucket; re-ingesting the exact same
+    destination file is not a second identity and is skipped instead, recorded in
+    ``skipped_collisions``. Does not annotate, split, choose a task, or write ``classes.json``.
 
     The capture date never gates ingestion: a file whose date cannot be read is copied and counted
     like any other, lands in ``undated/``, and is listed in ``unreadable_dates`` so the difference
@@ -203,7 +251,10 @@ def ingest_images(
             words. Ask the breeder rather than guessing it from a path or filename; refuses
             before a byte is copied if the project already records a different site. A call
             with no images under ``source`` refuses on that before the site is even read, so a
-            call carrying both faults reports the missing images.
+            call carrying both faults reports the missing images; a stem collision among the
+            sources, or against an existing image or band-group manifest, is checked next,
+            before the site too, so a call carrying both a collision and a conflicting site
+            reports the collision.
         project_path: Absolute destination path instead of ``workspace/<name>``.
         copy: Copy (True, default) or move (False) the source images.
         date_from: ``"exif"`` (each file's own capture date → ISO date, missing →
@@ -223,6 +274,8 @@ def ingest_images(
     move, band_groups}``, where ``unreadable_dates`` names each ingested file whose capture date
     could not be read and the reason, and ``reserved_name_skips`` names each source file not
     ingested because its own stem is reserved for a prediction bucket's own provenance stamp.
+    ``skipped_collisions`` names only an exact re-ingest (a source whose destination filename
+    already exists); any other stem collision refuses the call instead of appearing here.
     A band group whose *formed* stem (the siblings' common prefix, not any one source file's own
     stem) is reserved the same way is not written as a manifest either, its members staying the
     standalone files they were placed as; ``band_groups.reserved_name_skips`` names each one
@@ -254,6 +307,21 @@ def ingest_images(
     if not sources:
         return {"error": f"No images found under {source!r}"}
 
+    reserved_name_skips: list[dict] = []
+    resolved_sources: list[tuple[Path, str, str | None]] = []
+    for src_path in sources:
+        if is_sidecar_name(f"{src_path.stem}.json"):
+            # This stem is a bucket's own provenance stamp (json_io.SIDECAR_FILENAMES), reserved
+            # so no bucket walk can mistake one for a label.
+            reserved_name_skips.append({"stem": src_path.stem, "source": str(src_path)})
+            continue
+        bucket, date_unreadable = _bucket_for(src_path, date_from)
+        resolved_sources.append((src_path, bucket, date_unreadable))
+
+    collision_error = _collision_refusal(dest_root, resolved_sources)
+    if collision_error is not None:
+        return {"error": collision_error}
+
     try:
         # The scaffold's site write refuses before any byte is copied: a project already
         # recording a different site, or one whose record is damaged, is a full refusal.
@@ -266,26 +334,15 @@ def ingest_images(
     copied = 0
     moved = 0
     skipped_collisions: list[dict] = []
-    reserved_name_skips: list[dict] = []
     errors: list[dict] = []
     unreadable_dates: list[dict] = []
     touched_buckets: set[str] = set()
-    # Collisions are keyed by stem within a bucket (case-insensitively): two sources with the
-    # same stem but different extensions would otherwise silently share one label file.
-    placed: set[tuple[str, str]] = set()
 
-    for src_path in sources:
-        bucket, date_unreadable = _bucket_for(src_path, date_from)
-        stem_key = (bucket, src_path.stem.lower())
-        if is_sidecar_name(f"{src_path.stem}.json"):
-            # This stem is a bucket's own provenance stamp in every bucket (json_io.
-            # SIDECAR_FILENAMES), reserved so no bucket walk can mistake one for a label.
-            reserved_name_skips.append({"stem": src_path.stem, "source": str(src_path)})
-            continue
+    for src_path, bucket, date_unreadable in resolved_sources:
         dest = dataset_layout.image_path(dest_root, bucket, src_path.stem, src_path.suffix)
-        if stem_key in placed or dest.exists():
-            # No-overwrite: a stem collision (two sources → same bucket/stem) or a
-            # re-ingest. Report it; never clobber.
+        if dest.exists():
+            # No-overwrite: the exact re-ingest of a file already placed; every other stem
+            # collision was already refused above, whole-call.
             skipped_collisions.append(
                 {
                     "stem": src_path.stem,
@@ -296,10 +353,8 @@ def ingest_images(
             )
             continue
 
-        # One bad file (locked by antivirus, vanished, unreadable) must not abort the whole
-        # batch; record it and keep going. Reading bytes never mutates the original, and the
-        # blob becomes the image only once it is whole, so a crash mid-copy can't leave a torn
-        # image.
+        # A bad file (locked, vanished, unreadable) must not abort the batch; the blob becomes
+        # the image only once whole, so a crash mid-copy can't leave a torn image.
         try:
             data = src_path.read_bytes()
             store.put_blob(
@@ -321,7 +376,6 @@ def ingest_images(
                 logger.warning("ingest: could not remove source after move: %s", src_path)
                 copied += 1
 
-        placed.add(stem_key)
         touched_buckets.add(bucket)
         if date_unreadable:
             unreadable_dates.append({"source": str(src_path), "dest": str(dest),
@@ -342,7 +396,8 @@ def ingest_images(
             result = detect_and_write_band_groups(bucket_dir)
             for g in result["formed"]:
                 band_groups_result["formed"].append({**g, "bucket": bucket})
-            band_groups_result["refused"].extend(result["refused"])
+            for g in result["refused"]:
+                band_groups_result["refused"].append({**g, "bucket": bucket})
             band_groups_result["manifests"].extend(result["manifests"])
             for g in result["reserved_name_skips"]:
                 band_groups_result["reserved_name_skips"].append({**g, "bucket": bucket})
