@@ -55,10 +55,10 @@ def test_a_project_with_no_store_database_is_gated_on_nothing(tmp_path):
     assert doctor.staleness_findings(root) == {}
 
 
-def test_a_status_store_written_and_not_exported_makes_the_negatives_check_invalid(tmp_path):
-    """The confirmed-negative check reads image_status off disk. Behind the database, the file
-    it reads is the state of the last export, and an image marked negative since then reads as
-    unconfirmed."""
+def test_a_status_store_written_and_not_exported_makes_the_status_tokens_check_invalid(tmp_path):
+    """check_status_tokens reads image_status off disk, unlike check_negatives and
+    check_data_quality which read it through the seam. Behind the database, the file it reads
+    is the state of the last export, and a status recorded since then is invisible to it."""
     root = _project(tmp_path)
     with bound(SqliteBackend()):
         ts.replace(
@@ -69,8 +69,10 @@ def test_a_status_store_written_and_not_exported_makes_the_negatives_check_inval
 
     invalid = doctor.staleness_findings(root)
 
-    assert "check_negatives" in invalid
-    assert "image_status" in invalid["check_negatives"]
+    assert "check_status_tokens" in invalid
+    assert "image_status" in invalid["check_status_tokens"]
+    assert "check_negatives" not in invalid
+    assert "check_data_quality" not in invalid
 
 
 def test_the_gate_clears_once_the_files_have_been_written_out(tmp_path):
@@ -116,7 +118,7 @@ def test_a_stale_check_is_reported_as_an_error_naming_the_export_script(tmp_path
     with bound(FileBackend()):
         findings: list[tuple[str, str]] = []
         invalid = doctor.staleness_findings(root)
-        for check in (doctor.check_negatives,):
+        for check in (doctor.check_status_tokens,):
             reason = invalid.get(check.__name__)
             if reason:
                 findings.append(("error", reason))
@@ -142,9 +144,9 @@ def test_a_file_that_is_not_a_database_makes_the_check_invalid_rather_than_trace
     code = doctor.main()
     printed = capsys.readouterr().out
 
-    assert "not a SQLite database" in invalid["check_negatives"]
+    assert "not a SQLite database" in invalid["check_status_tokens"]
     assert code == 2
-    assert "check_negatives" in printed and "invalid, not clean" in printed
+    assert "check_status_tokens" in printed and "invalid, not clean" in printed
 
 
 def test_the_doctor_run_reports_the_invalid_check_and_exits_nonzero(tmp_path, monkeypatch, capsys):
@@ -162,6 +164,44 @@ def test_the_doctor_run_reports_the_invalid_check_and_exits_nonzero(tmp_path, mo
     printed = capsys.readouterr().out
 
     assert code == 2
-    assert "check_negatives" in printed
+    assert "check_status_tokens" in printed
     assert "scripts/export_store.py" in printed
     assert "invalid, not clean" in printed
+
+
+def test_check_negatives_still_runs_and_reports_behind_a_stale_export(tmp_path):
+    """check_negatives and check_data_quality read image_status through the seam, so a
+    confirmation the database holds since the last export is not invisible to them the way it
+    is to check_status_tokens: the admits-valid-work partner of the staleness gate."""
+    root = _project(tmp_path)
+    with bound(SqliteBackend()):
+        dataset_layout.replace_image_status_store(root, {})
+        export_files(root)  # the exported file says: no confirmations
+
+        # Recorded in the database after the export; the file on disk still says {}.
+        dataset_layout.replace_image_status_store(root, {
+            "catkin/2026-03-04": {"a_1.jpg": {
+                "status": "negative", "recorded_by": "user:breeder", "recorded_at": "t"}},
+        })
+
+        assert "check_negatives" not in doctor.staleness_findings(root)
+        assert "check_data_quality" not in doctor.staleness_findings(root)
+
+        findings: list[tuple[str, str]] = []
+        doctor.check_negatives(root, findings)
+        assert not any("not a confirmed negative" in msg for _, msg in findings)
+
+        quality_findings: list[tuple[str, str]] = []
+        doctor.check_data_quality(root, quality_findings)
+        assert quality_findings == []
+
+
+def test_gated_stores_names_exactly_the_checks_that_read_raw_files(tmp_path):
+    """The table is exactly the checks that read a document off disk instead of through the
+    seam: check_negatives and check_data_quality read image_status through
+    read_image_status_store and never belong here."""
+    root = _project(tmp_path)
+
+    assert set(doctor.gated_stores(root)) == {
+        "check_status_tokens", "check_region_completeness", "check_state", "check_provenance",
+    }

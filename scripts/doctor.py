@@ -151,6 +151,10 @@ def check_data_quality(root: Path, findings: list) -> None:
     unconfirmed-empty per-image label can be named by both); this check's own value is the
     per-file format decision and COCO-aware validation neither ``check_negatives`` nor
     ``check_reserved_names`` carries.
+
+    Reads the status store through the same seam ``check_negatives`` reads it through, so the
+    two agree on one root under whichever backend the process is bound to; not gated in
+    ``gated_stores`` for that reason, the same as any check reading entirely through the seam.
     """
     from tcip_annotation.format_io import detect_format
     from tcip_annotation.json_io import (
@@ -566,11 +570,12 @@ def gated_stores(root: Path) -> dict[str, tuple[tuple[Path, str], ...]]:
 
     Exactly what the checks above read off disk, no wider: a store the doctor never reads
     cannot make a check it does not run report anything. Live-state stores are not doctor
-    inputs and are not here.
+    inputs and are not here. ``check_negatives`` and ``check_data_quality`` read
+    ``image_status`` through ``read_image_status_store``, the storage seam, not the raw
+    document off disk, so a database-backed root's un-exported ``image_status.json`` never
+    makes either of them stale and neither belongs here.
     """
     return {
-        "check_negatives": ((root, "image_status"),),
-        "check_data_quality": ((root, "image_status"),),
         "check_status_tokens": ((root, "image_status"),),
         "check_region_completeness": (
             (root, "region_completeness"),
