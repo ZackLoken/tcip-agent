@@ -126,6 +126,7 @@ export function AnnotateToolbar({
   const setVisible = useStore((s) => s.setVisible);
   const setSnap = useStore((s) => s.setSnap);
   const setStream = useStore((s) => s.setStream);
+  const setCut = useStore((s) => s.setCut);
   const imageStatus = useStore((s) => s.imageStatus);
   const staleMarks = useStore((s) => s.imageStatus.staleMarks);
   const setStatusFilter = useStore((s) => s.setStatusFilter);
@@ -619,6 +620,13 @@ export function AnnotateToolbar({
               onClick={() => setStream(!annotateUi.stream)}
               disabled={mode !== "polygon"}
               title="Freehand: click to start laying vertices, click to pause, double-click to close (v)"
+            />
+            <Etool
+              label="Cut"
+              pressed={annotateUi.cut}
+              onClick={() => setCut(!annotateUi.cut)}
+              disabled={mode !== "polygon" || isLocked}
+              title="Click two points on either side of the selected polygon to split it (x)"
             />
             <Etool
               label="Show labels"

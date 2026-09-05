@@ -24,6 +24,8 @@ interface AnnotateUiState {
   snap: boolean;
   /** Stream toggle (polygon mode). */
   stream: boolean;
+  /** Cut toggle (polygon mode): arms the two-click split gesture. */
+  cut: boolean;
   /** Currently hovered polygon index (for vertex-handle rendering). */
   hoveredPolygonIdx: number | null;
   /** Active vertex drag: [polygonIdx, ringIdx, vertexIdx]; a vertex belongs to one ring of one
@@ -123,6 +125,7 @@ export interface RegistryStatusSlice {
   setVisible: (v: boolean) => void;
   setSnap: (v: boolean) => void;
   setStream: (v: boolean) => void;
+  setCut: (v: boolean) => void;
   setHoveredPolygon: (idx: number | null) => void;
   setDraggingVertex: (v: [number, number, number] | null) => void;
 
@@ -144,6 +147,7 @@ export const createRegistryStatusSlice: StateCreator<AppState, [], [], RegistryS
     visible: true,
     snap: false,
     stream: false,
+    cut: false,
     hoveredPolygonIdx: null,
     draggingVertex: null,
   },
@@ -197,6 +201,7 @@ export const createRegistryStatusSlice: StateCreator<AppState, [], [], RegistryS
   setVisible: (visible) => set((s) => ({ annotateUi: { ...s.annotateUi, visible } })),
   setSnap: (snap) => set((s) => ({ annotateUi: { ...s.annotateUi, snap } })),
   setStream: (stream) => set((s) => ({ annotateUi: { ...s.annotateUi, stream } })),
+  setCut: (cut) => set((s) => ({ annotateUi: { ...s.annotateUi, cut } })),
   setHoveredPolygon: (hoveredPolygonIdx) =>
     set((s) => ({ annotateUi: { ...s.annotateUi, hoveredPolygonIdx } })),
   setDraggingVertex: (draggingVertex) =>

@@ -999,6 +999,35 @@ describe("click-selection parity across the Snap/Stream toggles", () => {
   });
 });
 
+describe("Cut tool arming", () => {
+  it("x arms and disarms the cut flag in polygon mode", async () => {
+    await renderPolygonCanvas();
+    expect(useStore.getState().annotateUi.cut).toBe(false);
+    fireEvent.keyDown(window, { key: "x" });
+    expect(useStore.getState().annotateUi.cut).toBe(true);
+    fireEvent.keyDown(window, { key: "x" });
+    expect(useStore.getState().annotateUi.cut).toBe(false);
+  });
+
+  it("x does nothing outside polygon mode", async () => {
+    await renderPolygonCanvas();
+    act(() => useStore.getState().setMode("box"));
+    fireEvent.keyDown(window, { key: "x" });
+    expect(useStore.getState().annotateUi.cut).toBe(false);
+  });
+
+  it("x does nothing on a locked image", async () => {
+    await renderPolygonCanvas();
+    act(() => {
+      useStore.setState((s) => ({
+        imageStatus: { ...s.imageStatus, byImage: { "img1.jpg": "complete" } },
+      }));
+    });
+    fireEvent.keyDown(window, { key: "x" });
+    expect(useStore.getState().annotateUi.cut).toBe(false);
+  });
+});
+
 describe("clicks outside the image extent are inert", () => {
   it("box mode: a press-drag from outside authors no box", async () => {
     render(<AnnotateTab />);

@@ -723,6 +723,11 @@ export function AnnotateTab() {
       when: () => mode === "polygon",
     },
     {
+      keys: "x",
+      action: () => useStore.getState().setCut(!annotateUi.cut),
+      when: () => mode === "polygon" && !isLocked,
+    },
+    {
       keys: "delete",
       action: () => {
         if (canvas.selectedPolygonIdx !== null) deletePolygon(canvas.selectedPolygonIdx);
