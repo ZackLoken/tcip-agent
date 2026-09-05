@@ -973,6 +973,20 @@ class SqliteBackend:
             version_refused=tuple(version_refused),
         )
 
+    def clear_log(self, key: Key) -> int:
+        """Delete every committed row for this log, returning how many there were."""
+        with self._write((key,)) as conn:
+            parts = encode_parts(key.parts)
+            count = conn.execute(
+                "select count(*) from log_entries where store = ? and parts = ?",
+                (key.store, parts),
+            ).fetchone()[0]
+            conn.execute(
+                "delete from log_entries where store = ? and parts = ?", (key.store, parts)
+            )
+            self._bump(conn, key.store)
+        return int(count)
+
     # ── blobs, which stay files ─────────────────────────────────────────────────
 
     def read_blob_versioned(self, key: Key, *, default: Any = REQUIRED) -> Versioned:

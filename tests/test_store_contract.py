@@ -454,6 +454,29 @@ def test_a_cursor_resumes_with_no_gap_and_no_repeat(store):
     assert [r["i"] for r in ts.read_log(key, after=second.cursor).records] == []
 
 
+# ── clearing a log ───────────────────────────────────────────────────────────────
+
+
+def test_clear_log_removes_every_entry_and_reports_how_many_there_were(store):
+    key = store.key(LOG, "history")
+    for i in range(4):
+        ts.append(key, {"i": i})
+
+    removed = ts.clear_log(key)
+
+    assert removed == 4
+    assert ts.read_log(key).records == []
+    ts.append(key, {"i": "after"})
+    assert [r["i"] for r in ts.read_log(key).records] == ["after"]
+
+
+def test_clear_log_on_a_log_with_no_entries_removes_nothing(store):
+    key = store.key(LOG, "never-appended")
+
+    assert ts.clear_log(key) == 0
+    assert ts.read_log(key).records == []
+
+
 _LOG_FILE_MECHANICS = (
     "a torn tail is bytes left in a file by an appender that died mid-write, reached here "
     "through the path the file backend places the log at"
@@ -679,6 +702,9 @@ def test_an_operation_refuses_a_store_of_the_wrong_kind(store):
     with pytest.raises(ts.WrongKind) as appending_to_a_record:
         ts.append(record, {"n": 1})
     assert "replace" in str(appending_to_a_record.value)
+    with pytest.raises(ts.WrongKind) as clearing_a_record:
+        ts.clear_log(record)
+    assert "replace" in str(clearing_a_record.value)
 
     ts.replace(record, {"n": 1})
     ts.append(log, {"n": 1})
@@ -821,6 +847,8 @@ def test_an_append_inside_a_transaction_is_refused_and_the_same_append_outside_i
         with pytest.raises(ts.TransactionMisuse) as raised:
             ts.append(log, {"i": "inside"})
         assert "close the transaction first" in str(raised.value)
+        with pytest.raises(ts.TransactionMisuse):
+            ts.clear_log(log)
         txn.write(record, {"n": 1})
 
     ts.append(log, {"i": "outside"})

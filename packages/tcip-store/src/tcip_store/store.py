@@ -77,6 +77,8 @@ class Store(Protocol):
 
     def read_log(self, key: Key, *, after: str | None = None) -> LogPage: ...
 
+    def clear_log(self, key: Key) -> int: ...
+
     def read_blob_versioned(self, key: Key, *, default: Any = REQUIRED) -> Versioned: ...
 
     def put_blob(self, key: Key, data: bytes, *, expect: Version | None = None) -> Version: ...
@@ -338,6 +340,26 @@ def read_log(key: Key, *, after: str | None = None) -> LogPage:
     return backend.read_log(key, after=after)
 
 
+def clear_log(key: Key) -> int:
+    """Remove every entry from an append-only log and report how many entries it held.
+
+    For a one-off operator clearing development-era history before a root reaches its
+    intended readers (``scripts/clear_dev_history.py``), never a runtime path: nothing in
+    the platform's own doors calls this. Not a format change: the store's kind, codec and
+    schema_version ceiling are exactly what they were before and after, since only entries
+    are removed and the next ``append`` starts a log identical in shape to the one this
+    replaced; ``frozen-formats.json`` names no row for this operation because it changes
+    none of the fields that manifest states.
+
+    Raises ``TransactionMisuse`` if the calling thread holds an open transaction, matching
+    ``append``: a log is not transactional on either backend.
+    """
+    backend = _backend()
+    validate_key(key, expect_kind="log", operation="clear_log")
+    _refuse_inside_transaction("clear_log", _LOGS_ARE_NOT_TRANSACTIONAL)
+    return backend.clear_log(key)
+
+
 def read_blob_versioned(key: Key, *, default: Any = REQUIRED) -> Versioned:
     """A blob's bytes and its version token, read together so the pair cannot straddle a write.
 
@@ -439,6 +461,7 @@ __all__ = [
     "bind",
     "blob_path",
     "capabilities",
+    "clear_log",
     "delete",
     "exists",
     "keys",

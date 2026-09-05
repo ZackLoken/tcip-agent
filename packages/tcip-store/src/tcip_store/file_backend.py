@@ -697,6 +697,23 @@ class FileBackend:
             version_refused=tuple(version_refused),
         )
 
+    def clear_log(self, key: Key) -> int:
+        """Remove a log file outright, returning how many entries it held.
+
+        Repairs a torn tail first, so an appender's own in-flight fragment is never counted
+        as a whole entry. Deleting the file rather than truncating it to zero bytes is what
+        keeps an absent log and a never-appended one the same "nothing here" ``read_log``
+        already reports for either.
+        """
+        descriptor = get_descriptor(key.store)
+        path = self.path_for(key)
+        with self._conform_rail([key]), self._locked([key]):
+            self._repair_torn_tail(path)
+            data = self._read_bytes(path)
+            count = 0 if not data else data.count(b"\n")
+            self._remove_entry(path, durable=descriptor.durable)
+        return count
+
     # ── blobs ───────────────────────────────────────────────────────────────────
 
     def read_blob_versioned(self, key: Key, *, default: Any = REQUIRED) -> Versioned:
