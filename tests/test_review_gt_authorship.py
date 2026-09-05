@@ -90,6 +90,50 @@ def test_accepted_false_positive_becomes_ground_truth_without_a_model_score(
     assert "score" not in record
 
 
+def test_editing_an_fp_with_a_stray_gt_idx_appends_rather_than_overwrites(
+    client: TestClient, tmp_path: Path
+) -> None:
+    """Editing an ``fp`` is only ever a fresh record: a ``gt_idx`` carried on this det_type is not
+    this branch's paired-fp case (that exists only under a classified scope), so it must not be
+    read as naming an existing record to overwrite. The pre-existing GT record at that index stays
+    exactly as it was, and the edit lands as a new record instead."""
+    img = _image(tmp_path)
+    gt = tmp_path / "gt.json"
+    pred = tmp_path / "pred.json"
+    original = (10.0, 10.0, 50.0, 30.0)
+    write_annotations(str(gt), [Annotation(subject="catkin", geometry=BBox(*original))],
+                      IMG_W, IMG_H)
+    write_annotations(
+        str(pred),
+        [Annotation(subject="catkin", geometry=BBox(*PREDICTED_BOX), score=PREDICTED_SCORE)],
+        IMG_W, IMG_H,
+    )
+    dataset_root = _dataset_root(tmp_path)
+
+    resp = client.post("/api/review/action", json={
+        "dataset_root": str(dataset_root),
+        "image_name": "IMG_0000.JPG",
+        "image_path": str(img),
+        "gt_path": str(gt),
+        "pred_path": str(pred),
+        "det_type": "fp", "class_name": "catkin",
+        "conf": PREDICTED_SCORE, "iou": None,
+        "gt_idx": 0, "pred_idx": 0,
+        "bbox": list(PREDICTED_BOX),
+        "action": "edited",
+        "edited_box": list(EDITED_BOX),
+    })
+    assert resp.status_code == 200, resp.text
+
+    written = read_annotations(str(gt))
+    assert len(written) == 2
+    assert (written[0].geometry.x1, written[0].geometry.y1,
+            written[0].geometry.x2, written[0].geometry.y2) == original
+    assert (written[1].geometry.x1, written[1].geometry.y1,
+            written[1].geometry.x2, written[1].geometry.y2) == EDITED_BOX
+    assert written[1].score is None
+
+
 def test_first_verdict_baselines_the_label_file_under_its_original_directory(
     client: TestClient, tmp_path: Path
 ) -> None:

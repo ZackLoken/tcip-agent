@@ -631,7 +631,12 @@ def _apply_gt_mutation(
             geom = Polygon(rings=[[(float(p[0]), float(p[1])) for p in payload.edited_points]])
         if geom is None:
             return False, None
-        if payload.gt_idx is not None:
+        # An existing record is edited only for a tp/fn or a paired fp; any other gt_idx-carrying
+        # det_type falls to the fresh-record path below, matching this branch's own design.
+        edits_existing = payload.gt_idx is not None and (dt in ("tp", "fn")
+                                                         or (classifying and dt == "fp"))
+        if edits_existing:
+            assert payload.gt_idx is not None
             if not (0 <= payload.gt_idx < len(ctx.gt)):
                 raise ValueError(
                     f"gt_idx {payload.gt_idx} is out of range for this image's {len(ctx.gt)} "
