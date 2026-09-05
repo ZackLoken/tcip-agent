@@ -303,14 +303,16 @@ def _sweep_root(sweep_id: str) -> Path:
     return sweep_dir(sweep_id, root=root)
 
 
-def _disk_sweeps() -> list[dict]:
-    """Every sweep with a manifest under the HPO root, in directory-name order."""
+def _disk_sweeps(exclude: frozenset[str] = frozenset()) -> list[dict]:
+    """Every sweep with a manifest under the HPO root, in directory-name order, skipping a
+    directory named in ``exclude``: a live sweep's manifest is already read fresh by
+    :func:`_summary`, so a listing that also read it here would only discard the second read."""
     root = _sweeps_dir()
     if not root.is_dir():
         return []
     found: list[dict] = []
     for d in sorted(root.iterdir()):
-        if not d.is_dir():
+        if not d.is_dir() or d.name in exclude:
             continue
         manifest = _read_manifest(d.name)
         if isinstance(manifest, dict) and manifest.get("study_name"):
@@ -531,8 +533,8 @@ def list_sweeps() -> dict:
     from tcip_web import jobstore
 
     live = [_summary(j) for j in _registry.list(jobstore.current_root())]
-    live_ids = {s["sweep_id"] for s in live}
-    return {"sweeps": live + [d for d in _disk_sweeps() if d["sweep_id"] not in live_ids]}
+    live_ids = frozenset(s["sweep_id"] for s in live)
+    return {"sweeps": live + _disk_sweeps(exclude=live_ids)}
 
 
 @router.get("/sweeps/{sweep_id}")
