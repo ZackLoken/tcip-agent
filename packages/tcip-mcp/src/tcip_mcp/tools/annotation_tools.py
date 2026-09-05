@@ -204,8 +204,13 @@ def _load_image_annotations(image_path: str):
     """Load GT + predictions for one image and build a COCO per-image record.
 
     Returns ``(iou_type, record, (gt, preds), width, height)`` where ``gt`` / ``preds`` are
-    :class:`Annotation` lists; ``None`` if unreadable.
+    :class:`Annotation` lists; ``None`` if unreadable. When a prediction file is found, its
+    bucket's own recorded scope is read (never trusted implicitly): a neither-key or undecodable
+    stamp propagates by name (``StampScopeUnstated``, the seam's ``StoreError``) rather than
+    letting a pre-conform classified bucket's value-keyed records score as object classes; a bare
+    directory or any readable scope scores by ``subject`` as it does today.
     """
+    from tcip_mcp.pipelines.resolution import bucket_scope
     from tcip_mcp.pipelines.training.evaluation import records_from_annotation
 
     img = Path(image_path)
@@ -220,6 +225,7 @@ def _load_image_annotations(image_path: str):
         gt = load_annotations_any(str(gt_path), file_name=img.name)
     pred_path = find_prediction(image_path)
     if pred_path:
+        bucket_scope(Path(pred_path).parent)
         preds = read_labels(str(pred_path))
 
     iou_type, record = records_from_annotation(gt, preds, width=w, height=h)
@@ -448,6 +454,13 @@ def score_predictions(
     TP/FP/FN. Both regimes share ``coco_detection_metrics``; no GUI route calls this function,
     since the Review tab's own backend route reads ``compute_matches`` directly.
 
+    A classified bucket's predictions now carry the object class in ``subject`` (the same shape
+    ground truth carries), so this scores the localization of the object class, never the
+    classifier's own call: a valid number about finding the object, not about its confirmed state.
+    A prediction bucket whose own recorded stamp will not decode, or decodes with no
+    ``(subject, attribute)`` pair at all (a pre-conform classified bucket), refuses by name rather
+    than silently scoring its value-keyed records as if they were object classes.
+
     Args:
         path: Absolute path to an image file (single-image match) or a dataset root (aggregate).
         iou_threshold: IoU threshold for a positive match (the AP@0.5 comparability convention).
@@ -456,13 +469,16 @@ def score_predictions(
         trait: When set, the trait's derived localization criterion governs the reported TP/FP/FN
             count; map50 stays a labeled comparability metric. Absent -> the IoU convention governs.
     """
+    from tcip_mcp.pipelines.resolution import StampScopeUnstated
+    from tcip_store import StoreError
+
     p = Path(path)
     try:
         if p.is_file():
             return _evaluate_image(path, iou_threshold, conf_threshold, detail, trait)
         if p.is_dir():
             return _evaluate_folder(path, iou_threshold, conf_threshold, trait)
-    except UnreadableLabelDocument as exc:
+    except (UnreadableLabelDocument, StampScopeUnstated, StoreError) as exc:
         return {"error": str(exc)}
     return {"error": f"Path not found: {path}"}
 
