@@ -35,8 +35,8 @@ def test_split_write_refused_against_a_watchdog_failed_record_leaves_it_failed(t
 
     import pytest
 
-    eid = "exp-020-hazelnut-catkin-det"
-    create_experiment(eid, {"model_source": {"builder": "my_models:catkin_det"}})
+    eid = "exp-020-currant-bud-det"
+    create_experiment(eid, {"model_source": {"builder": "my_models:bud_det"}})
     update_status(eid, "running")
     # The reachable trigger: the wall-clock watchdog marks the run failed while the child worker
     # is still alive and mid dataset-build, before it ever reaches persist_split_manifest.
@@ -70,9 +70,9 @@ def test_update_status_refusal_audits_the_launch_root_not_the_current_one(tmp_pa
     launch_root.mkdir()
     other_root.mkdir()
 
-    eid = "exp-021-hazelnut-catkin-det"
+    eid = "exp-021-currant-bud-det"
     monkeypatch.setenv("TCIP_STATE_ROOT", str(launch_root))
-    create_experiment(eid, {"model_source": {"builder": "my_models:catkin_det"}})
+    create_experiment(eid, {"model_source": {"builder": "my_models:bud_det"}})
     update_status(eid, "completed")
 
     monkeypatch.setenv("TCIP_STATE_ROOT", str(other_root))
@@ -153,7 +153,7 @@ def test_id_map_patch_refused_against_a_terminal_record(tmp_path):
     update_status(eid, "failed", error="dataloader raised")
 
     with pytest.raises(ExperimentTerminal):
-        _patch_experiment_config_id_map(eid, "catkin", None, {"catkin": 0})
+        _patch_experiment_config_id_map(eid, "bud", None, {"bud": 0})
 
     refusals = _refusals(tmp_path)
     assert refusals and refusals[0]["arguments"]["op"] == "patch_experiment_config_id_map"
@@ -165,7 +165,7 @@ def test_id_map_patch_refused_against_a_terminal_record(tmp_path):
         ("_patch_experiment_config_tiling", {"tiling_cfg": {"tile_size": 224}},
          "patch_experiment_config_tiling"),
         ("_patch_experiment_config_id_map",
-         {"subject": "catkin", "attribute": None, "id_map": {"catkin": 0}},
+         {"subject": "bud", "attribute": None, "id_map": {"bud": 0}},
          "patch_experiment_config_id_map"),
         ("_patch_experiment_config_split",
          {"split_cfg": {"manifest_binding": {"date": "2024-01-01"}}},
@@ -204,8 +204,8 @@ def test_split_write_raises_when_the_refusal_audit_append_fails(tmp_path, monkey
 
     import pytest
 
-    eid = "exp-027-hazelnut-catkin-det-3"
-    create_experiment(eid, {"model_source": {"builder": "my_models:catkin_det"}})
+    eid = "exp-027-currant-bud-det-3"
+    create_experiment(eid, {"model_source": {"builder": "my_models:bud_det"}})
     update_status(eid, "running")
     update_status(eid, "failed", error="exceeded max_wall_clock_seconds (5)")
 
@@ -267,7 +267,7 @@ def test_id_map_patch_raises_when_the_refusal_audit_append_fails(tmp_path, monke
     monkeypatch.setattr("tcip_mcp.audit.record_event_or_raise", _boom)
 
     with pytest.raises(ExperimentTerminal) as excinfo:
-        _patch_experiment_config_id_map(eid, "catkin", None, {"catkin": 0})
+        _patch_experiment_config_id_map(eid, "bud", None, {"bud": 0})
     assert isinstance(excinfo.value.__cause__, OSError)
 
 
@@ -288,7 +288,7 @@ def test_overwrite_config_if_pristine_still_succeeds_over_a_pristine_experiment(
 def test_overwrite_config_if_pristine_still_refuses_a_non_pristine_experiment(tmp_path):
     from tcip_mcp.experiments import create_experiment, log_metrics, overwrite_config_if_pristine, update_status
 
-    eid = "exp-026-hazelnut-catkin-det-2"
+    eid = "exp-026-currant-bud-det-2"
     create_experiment(eid, {"a": 1})
     update_status(eid, "running")
     log_metrics(eid, 1, {"loss": 0.5})

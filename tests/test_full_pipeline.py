@@ -191,7 +191,7 @@ class TestFullClassificationPipeline:
 
 
 # ---------------------------------------------------------------------------
-# Test: detection pipeline with real catkin data
+# Test: detection pipeline with real bud data
 # ---------------------------------------------------------------------------
 
 # A real nested-schema dataset to run the detection pipeline against: set TCIP_SAMPLE_PROJECT to a
@@ -202,7 +202,7 @@ SAMPLE_PROJECT = Path(os.environ.get(
 
 
 def _sample_date() -> str | None:
-    """A capture date under SAMPLE_PROJECT that has both images and catkin annotations, or None."""
+    """A capture date under SAMPLE_PROJECT that has both images and bud annotations, or None."""
     if not (SAMPLE_PROJECT / "classes.json").is_file():
         return None
     from tcip_annotation import json_io
@@ -213,7 +213,7 @@ def _sample_date() -> str | None:
         if not (SAMPLE_PROJECT / "images" / date_dir.name).is_dir():
             continue
         for jf in date_dir.glob("*.json"):
-            if any(a.subject == "catkin" and a.geometry is not None
+            if any(a.subject == "bud" and a.geometry is not None
                    for a in json_io.read_annotations(str(jf))):
                 return date_dir.name
     return None
@@ -229,7 +229,7 @@ def detection_output_dir(tmp_path):
     reason="No nested-schema sample project (set TCIP_SAMPLE_PROJECT to a converted dataset)",
 )
 class TestDetectionPipelineRealData:
-    """End-to-end: build → train → infer → export CSV using real catkin images (nested schema)."""
+    """End-to-end: build → train → infer → export CSV using real bud images (nested schema)."""
 
     def test_build_train_infer_export(self, detection_output_dir, tmp_path):
         from tcip_mcp.pipelines.data.datasets import build_dataset
@@ -257,15 +257,15 @@ class TestDetectionPipelineRealData:
             "detection",
             images_dir=str(images_dir),
             labels_dir=str(labels_dir),
-            subject="catkin",
+            subject="bud",
         )
         # num_classes is derived from the dataset's classes.json via assign_class_ids (single-class
-        # catkin here), and num_samples from the catkin-annotated images on this date.
+        # bud here), and num_samples from the bud-annotated images on this date.
         assert dataset.num_classes == 1
         assert dataset.num_samples > 0
 
         # Verify samples load with the right structure. Sample 0 may be a confirmed negative (zero
-        # boxes is a valid training sample), so check the shape here and that catkin boxes exist
+        # boxes is a valid training sample), so check the shape here and that bud boxes exist
         # somewhere in the set rather than assuming the first sample is annotated.
         img, target = dataset[0]
         assert img.ndim == 3 and img.shape[0] == 3  # [C, H, W]
@@ -331,7 +331,7 @@ class TestDetectionPipelineRealData:
             assert "count" in r
 
         # --- Step 5: Export detection CSV ---
-        csv_path = str(out / "catkin_detections.csv")
+        csv_path = str(out / "bud_detections.csv")
         from tests import _operationalization_fixtures as fx
         from tests._binding_fixtures import write_bound_sidecar, write_prediction
         from tcip_mcp.pipelines.resolution import VALIDATED_HELD_OUT

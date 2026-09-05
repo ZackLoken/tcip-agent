@@ -46,7 +46,7 @@ def _detection_dataset(root: Path, prefixes=("srcA", "srcB", "srcC", "srcD"), ti
             _save_png(images_dir / f"{stem}.png")
             json_io.write_annotations(
                 str(labels_dir / f"{stem}.json"),
-                [Annotation(subject="catkin", geometry=BBox(19.2, 19.2, 44.8, 44.8))],
+                [Annotation(subject="bud", geometry=BBox(19.2, 19.2, 44.8, 44.8))],
                 IMG,
                 IMG,
                 keep_empty=True,
@@ -60,7 +60,7 @@ def test_auto_train_val_detection_splits(tmp_path: Path):
     data_cfg = {
         "images_dir": str(images_dir),
         "labels_dir": str(labels_dir),
-        "subject": "catkin",
+        "subject": "bud",
         "auto_val": True,
         "split": {"val_ratio": 0.4, "seed": 1},
     }
@@ -78,7 +78,7 @@ def test_auto_train_val_malformed_group_by_raises(tmp_path: Path):
     data_cfg = {
         "images_dir": str(images_dir),
         "labels_dir": str(labels_dir),
-        "subject": "catkin",
+        "subject": "bud",
         "auto_val": True,
         "split": {"group_by": "not_a_real_grouping_key"},
     }
@@ -94,7 +94,7 @@ def test_auto_train_val_malformed_val_ratio_degrades(tmp_path: Path):
     data_cfg = {
         "images_dir": str(images_dir),
         "labels_dir": str(labels_dir),
-        "subject": "catkin",
+        "subject": "bud",
         "auto_val": True,
         "split": {"val_ratio": "not_a_number"},
     }
@@ -185,14 +185,14 @@ def test_auto_train_val_tiny_dataset_guard(tmp_path: Path):
     _save_png(images_dir / "src_0_0.png")
     json_io.write_annotations(
         str(labels_dir / "src_0_0.json"),
-        [Annotation(subject="catkin", geometry=BBox(19.2, 19.2, 44.8, 44.8))],
+        [Annotation(subject="bud", geometry=BBox(19.2, 19.2, 44.8, 44.8))],
         IMG,
         IMG,
         keep_empty=True,
     )
 
     data_cfg = {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
-                "subject": "catkin", "auto_val": True}
+                "subject": "bud", "auto_val": True}
     _train_ds, val_ds, _ = auto_train_val("detection", data_cfg, None)
     assert val_ds is None  # single group -> no leakage-free val possible
 
@@ -206,11 +206,11 @@ def test_auto_train_val_single_source_untiled_still_no_val(tmp_path: Path):
     _save_png(images_dir / "src_0_0.png")
     json_io.write_annotations(
         str(labels_dir / "src_0_0.json"),
-        [Annotation(subject="catkin", geometry=BBox(19.2, 19.2, 44.8, 44.8))],
+        [Annotation(subject="bud", geometry=BBox(19.2, 19.2, 44.8, 44.8))],
         IMG, IMG, keep_empty=True,
     )
     data_cfg = {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
-                "subject": "catkin", "auto_val": True}
+                "subject": "bud", "auto_val": True}
     train_ds, val_ds, _ = auto_train_val("detection", data_cfg, None)
     assert val_ds is None
     assert not hasattr(train_ds, "tile_size")
@@ -227,7 +227,7 @@ def _big_single_source(root: Path, width: int, height: int) -> tuple[Path, Path,
     from torchvision.utils import save_image
     save_image(torch.rand(3, height, width) * 0.3, str(images_dir / f"{stem}.png"))
     boxes = [
-        Annotation(subject="catkin", geometry=BBox(x, y, x + 20, y + 20))
+        Annotation(subject="bud", geometry=BBox(x, y, x + 20, y + 20))
         for x in range(20, width - 20, 200) for y in range(20, height - 20, 200)
     ]
     json_io.write_annotations(str(labels_dir / f"{stem}.json"), boxes, width, height, keep_empty=True)
@@ -239,7 +239,7 @@ def test_auto_train_val_single_source_tiled_spatial_split(tmp_path: Path):
     degrading to no validation: the tiling=tiling leak this closes."""
     images_dir, labels_dir, stem = _big_single_source(tmp_path / "ds", 4000, 3000)
     data_cfg = {
-        "images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "catkin",
+        "images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "bud",
         "auto_val": True, "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
         "split": {"val_ratio": 0.25, "test_ratio": 0.1, "seed": 1},
     }
@@ -262,7 +262,7 @@ def test_spatial_manifest_persists_train_and_val_regions_too(tmp_path: Path):
     for every side, not only the reserved test area."""
     images_dir, labels_dir, stem = _big_single_source(tmp_path / "ds", 4000, 3000)
     data_cfg = {
-        "images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "catkin",
+        "images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "bud",
         "auto_val": True, "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
         "split": {"val_ratio": 0.25, "test_ratio": 0.1, "seed": 1},
     }
@@ -282,7 +282,7 @@ def test_auto_train_val_single_source_spatial_split_ignores_a_stray_keep_regions
     keep_regions kwarg the spatial split passes explicitly."""
     images_dir, labels_dir, stem = _big_single_source(tmp_path / "ds", 4000, 3000)
     data_cfg = {
-        "images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "catkin",
+        "images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "bud",
         "auto_val": True,
         "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2,
                   "keep_regions": [(0, 0, 100, 100)]},
@@ -303,11 +303,11 @@ def test_auto_train_val_degenerate_group_retries_at_stem_level(tmp_path: Path):
         _save_png(images_dir / f"{stem}.png")
         json_io.write_annotations(
             str(labels_dir / f"{stem}.json"),
-            [Annotation(subject="catkin", geometry=BBox(19.2, 19.2, 44.8, 44.8))],
+            [Annotation(subject="bud", geometry=BBox(19.2, 19.2, 44.8, 44.8))],
             IMG, IMG, keep_empty=True,
         )
     data_cfg = {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
-                "subject": "catkin", "auto_val": True,
+                "subject": "bud", "auto_val": True,
                 "split": {"val_ratio": 0.5, "seed": 1}}
     train_ds, val_ds, _ = auto_train_val("detection", data_cfg, None)
     assert val_ds is not None
@@ -327,12 +327,12 @@ def test_auto_train_val_explicit_group_key_map_not_overridden_by_retry(tmp_path:
         _save_png(images_dir / f"{stem}.png")
         json_io.write_annotations(
             str(labels_dir / f"{stem}.json"),
-            [Annotation(subject="catkin", geometry=BBox(19.2, 19.2, 44.8, 44.8))],
+            [Annotation(subject="bud", geometry=BBox(19.2, 19.2, 44.8, 44.8))],
             IMG, IMG, keep_empty=True,
         )
     group_key_map = {s: "one_group_for_everything" for s in stems}
     data_cfg = {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
-                "subject": "catkin", "auto_val": True,
+                "subject": "bud", "auto_val": True,
                 "split": {"val_ratio": 0.5, "seed": 1, "group_key_map": group_key_map}}
     train_ds, val_ds, _ = auto_train_val("detection", data_cfg, None)
     assert val_ds is None  # the explicit map still collapses everything into one group
@@ -347,7 +347,7 @@ def test_reserve_calibration_fraction_unset_is_byte_identical(tmp_path: Path):
     produced (same keys, same train/val/test regions for the same seed/layout)."""
     images_dir, labels_dir, stem = _big_single_source(tmp_path / "ds", 4000, 3000)
     data_cfg = {
-        "images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "catkin",
+        "images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "bud",
         "auto_val": True, "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
         "split": {"val_ratio": 0.25, "test_ratio": 0.1, "seed": 1},
     }
@@ -364,7 +364,7 @@ def test_reserve_calibration_fraction_adds_a_disjoint_calibration_region(tmp_pat
     disjoint from train/val/test."""
     images_dir, labels_dir, stem = _big_single_source(tmp_path / "ds", 4000, 3000)
     data_cfg = {
-        "images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "catkin",
+        "images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "bud",
         "auto_val": True, "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
         "split": {"val_ratio": 0.2, "test_ratio": 0.1, "seed": 1,
                   "reserve_calibration_fraction": 0.15},
@@ -399,7 +399,7 @@ def test_reserve_calibration_fraction_raises_on_unresolvable_extent(tmp_path: Pa
     # A readable document with no width/height recorded, distinct from an unreadable one.
     (labels_dir / "mosaic.json").write_text('{"annotations": []}', encoding="utf-8")
 
-    data_cfg = {"images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "catkin"}
+    data_cfg = {"images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "bud"}
     tiling = {"enabled": True, "tile_size": 128, "overlap": 0.2}
     split_cfg = {"val_ratio": 0.2, "test_ratio": 0.1, "reserve_calibration_fraction": 0.15}
     with pytest.raises(ValueError, match="reserve_calibration_fraction"):
@@ -421,7 +421,7 @@ def test_spatial_single_source_split_raises_on_an_unreadable_label_regardless_of
     _save_png(images_dir / "mosaic.png")
     (labels_dir / "mosaic.json").write_text("[]", encoding="utf-8")  # not a dict: unreadable
 
-    data_cfg = {"images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "catkin"}
+    data_cfg = {"images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "bud"}
     tiling = {"enabled": True, "tile_size": 128, "overlap": 0.2}
     split_cfg = {"val_ratio": 0.2, "test_ratio": 0.1}  # no reserve_calibration_fraction
     with pytest.raises(UnreadableLabelDocument):
@@ -433,7 +433,7 @@ def test_reserve_calibration_fraction_raises_on_infeasible_layout(tmp_path: Path
     size/tile size. Explicitly requested -> raises by name."""
     images_dir, labels_dir, stem = _big_single_source(tmp_path / "ds", 4000, 3000)
     data_cfg = {
-        "images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "catkin",
+        "images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "bud",
         "auto_val": True, "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
         # A calibration fraction that leaves nothing after val+test on a mosaic this size.
         "split": {"val_ratio": 0.45, "test_ratio": 0.45, "seed": 1,
@@ -460,12 +460,12 @@ def test_reserve_calibration_fraction_raises_on_empty_gt_bearing_side(tmp_path: 
     width, height = 4000, 300
     from torchvision.utils import save_image
     save_image(torch.rand(3, height, width) * 0.3, str(images_dir / f"{stem}.png"))
-    boxes = [Annotation(subject="catkin", geometry=BBox(x, 20, x + 20, 40))
+    boxes = [Annotation(subject="bud", geometry=BBox(x, 20, x + 20, 40))
             for x in range(1300, 3960, 40)]
     json_io.write_annotations(str(labels_dir / f"{stem}.json"), boxes, width, height, keep_empty=True)
 
     data_cfg = {
-        "images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "catkin",
+        "images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "bud",
         "auto_val": True,
         "tiling": {"enabled": True, "tile_size": 64, "overlap": 0.2, "skip_empty": True},
         "split": {"val_ratio": 0.2, "test_ratio": 0.1, "seed": 1,
@@ -480,7 +480,7 @@ def test_reserve_calibration_fraction_records_raster_content_identity(tmp_path: 
     raster_content_identity in the same spatial_manifest a claim-scope check later reads back."""
     images_dir, labels_dir, stem = _big_single_source(tmp_path / "ds", 4000, 3000)
     data_cfg = {
-        "images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "catkin",
+        "images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "bud",
         "auto_val": True, "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
         "split": {"val_ratio": 0.25, "test_ratio": 0.1, "seed": 1},
     }
@@ -497,7 +497,7 @@ def test_train_emits_val_loss_with_autoval(tmp_path: Path):
     data_cfg = {
         "images_dir": str(images_dir),
         "labels_dir": str(labels_dir),
-        "subject": "catkin",
+        "subject": "bud",
         "auto_val": True,
         "split": {"val_ratio": 0.4, "seed": 1},
     }

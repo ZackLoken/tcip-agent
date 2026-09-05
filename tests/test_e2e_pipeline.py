@@ -54,7 +54,7 @@ def project_dir(tmp_path: Path) -> Path:
 
     class_registry.write_registry(
         root / "classes.json",
-        ClassRegistry(subjects=(Subject(name="catkin", description="a hazelnut catkin"),)))
+        ClassRegistry(subjects=(Subject(name="bud", description="a currant bud"),)))
 
     # 5 synthetic images (640x480 grey) with GT labels and predictions
     for i in range(5):
@@ -65,15 +65,15 @@ def project_dir(tmp_path: Path) -> Path:
         # GT: 2 boxes per image, name-based per-image JSON (pixel xyxy).
         json_io.write_annotations(
             str(labels_dir / f"{name}.json"),
-            [Annotation(subject="catkin", geometry=BBox(288, 216, 352, 264)),
-             Annotation(subject="catkin", geometry=BBox(176, 132, 208, 156))],
+            [Annotation(subject="bud", geometry=BBox(288, 216, 352, 264)),
+             Annotation(subject="bud", geometry=BBox(176, 132, 208, 156))],
             640, 480,
         )
         # Predictions: 1 matching (TP) + 1 false positive (FP), the confidence in each score.
         json_io.write_annotations(
             str(preds_dir / f"{name}.json"),
-            [Annotation(subject="catkin", geometry=BBox(288, 216, 352, 264), score=0.92),
-             Annotation(subject="catkin", geometry=BBox(499.2, 374.4, 524.8, 393.6), score=0.60)],
+            [Annotation(subject="bud", geometry=BBox(288, 216, 352, 264), score=0.92),
+             Annotation(subject="bud", geometry=BBox(499.2, 374.4, 524.8, 393.6), score=0.60)],
             640, 480,
         )
 
@@ -120,9 +120,9 @@ class TestE2EPipeline:
 
         # ── Step 6: Modify annotations, add boxes and save ─────────
         new_anns = [
-            {"subject": "catkin", "bbox": [200, 200, 264, 248]},
-            {"subject": "catkin", "bbox": [128, 112, 160, 136]},
-            {"subject": "catkin", "bbox": [400, 300, 440, 340]},
+            {"subject": "bud", "bbox": [200, 200, 264, 248]},
+            {"subject": "bud", "bbox": [128, 112, 160, 136]},
+            {"subject": "bud", "bbox": [400, 300, 440, 340]},
         ]
         save_result = save_annotations(img_path, annotations=new_anns)
         assert save_result["count"] == 3  # 3 annotations written
@@ -165,7 +165,7 @@ class TestE2EPipeline:
 
         split_dir = tmp_path / "splits"
         split_result = draw_splits(root, output_path=str(split_dir), materialize=True,
-                                   subject="catkin", train_ratio=0.5, val_ratio=0.25,
+                                   subject="bud", train_ratio=0.5, val_ratio=0.25,
                                    calibration_ratio=0.25)
         assert split_result["total_stems"] == 5
         manifest = ts.read(split_manifest_key(split_dir))
@@ -216,7 +216,7 @@ class TestE2EPipelineEdgeCases:
             img = Image.new("RGB", (64, 64))
             img.save(images / f"img_{i:03d}.jpg")
         json_io.write_annotations(str(labels / "img_000.json"),
-                                  [Annotation(subject="catkin", geometry=BBox(28, 28, 36, 36))], 64, 64)
+                                  [Annotation(subject="bud", geometry=BBox(28, 28, 36, 36))], 64, 64)
 
         ds = scan_dataset(str(tmp_path))
         assert ds["image_count"] == 3
@@ -236,7 +236,7 @@ class TestE2EPipelineEdgeCases:
         img_path = images / "test.jpg"
         img.save(img_path)
         json_io.write_annotations(str(labels / "test.json"),
-                                  [Annotation(subject="catkin", geometry=BBox(288, 216, 352, 264))], 640, 480)
+                                  [Annotation(subject="bud", geometry=BBox(288, 216, 352, 264))], 640, 480)
 
         # No predictions directory: evaluate should handle gracefully
         result = score_predictions(str(img_path))
@@ -253,7 +253,7 @@ class TestE2EPipelineEdgeCases:
 
         # No labels dir exists yet
         result = save_annotations(str(img_path), annotations=[
-            {"subject": "catkin", "bbox": [10, 10, 50, 50]},
+            {"subject": "bud", "bbox": [10, 10, 50, 50]},
         ])
         assert result["count"] == 1
         assert (tmp_path / "annotations" / "new_img.json").is_file()

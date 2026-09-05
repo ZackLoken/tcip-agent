@@ -36,8 +36,8 @@ def _audit_refusals(root: Path) -> list[dict]:
 def test_failed_run_cannot_be_reopened_to_a_non_terminal_state(tmp_path):
     from tcip_mcp.experiments import create_experiment, update_status
 
-    eid = "exp-014-hazelnut-catkin-det"
-    create_experiment(eid, {"model_source": {"builder": "my_models:catkin_det"}})
+    eid = "exp-014-currant-bud-det"
+    create_experiment(eid, {"model_source": {"builder": "my_models:bud_det"}})
     update_status(eid, "running")
     update_status(eid, "failed", error="out of memory at epoch 4")
 

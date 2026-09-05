@@ -92,14 +92,14 @@ def test_detection_e2e(tmp_path: Path):
         # one centered box covering the middle of the image
         json_io.write_annotations(
             str(labels_dir / f"img{i}.json"),
-            [Annotation(subject="catkin", geometry=BBox(19.2, 19.2, 44.8, 44.8))],
+            [Annotation(subject="bud", geometry=BBox(19.2, 19.2, 44.8, 44.8))],
             IMG,
             IMG,
             keep_empty=True,
         )
 
     dataset = build_dataset(
-        "detection", images_dir=str(images_dir), labels_dir=str(labels_dir), subject="catkin"
+        "detection", images_dir=str(images_dir), labels_dir=str(labels_dir), subject="bud"
     )
     loader = DataLoader(dataset, batch_size=2, collate_fn=task_collate("detection"))
 
@@ -119,7 +119,7 @@ def test_instance_seg_e2e(tmp_path: Path):
         # a square polygon (>= 3 vertices)
         json_io.write_annotations(
             str(labels_dir / f"img{i}.json"),
-            [Annotation(subject="catkin",
+            [Annotation(subject="bud",
                         geometry=Polygon([[(19.2, 19.2), (44.8, 19.2), (44.8, 44.8), (19.2, 44.8)]]))],
             IMG,
             IMG,
@@ -127,7 +127,7 @@ def test_instance_seg_e2e(tmp_path: Path):
         )
 
     dataset = build_dataset(
-        "instance_seg", images_dir=str(images_dir), labels_dir=str(labels_dir), subject="catkin"
+        "instance_seg", images_dir=str(images_dir), labels_dir=str(labels_dir), subject="bud"
     )
     # Guard the polygon -> mask rasterization path (datasets.py). With the mask_rcnn
     # detector these masks now reach the Mask R-CNN mask loss during training.

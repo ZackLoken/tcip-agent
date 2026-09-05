@@ -12,7 +12,7 @@ torch = pytest.importorskip("torch")
 # ── persist the training run's class id_map ──────────────────────────
 
 
-def _write_classes_json(dataset_root, subject="catkin", attribute=None, values=None):
+def _write_classes_json(dataset_root, subject="bud", attribute=None, values=None):
     # classes.json lives at the dataset root, the parent of the canonical labels/images/annotations
     # segment (dataset_layout.py's _DATASET_SEGMENTS), not inside the labels dir itself.
     from pathlib import Path
@@ -29,33 +29,33 @@ def _write_classes_json(dataset_root, subject="catkin", attribute=None, values=N
 def test_resolve_run_id_map_works_with_no_dataset_object_at_all(tmp_path):
     """id_map resolution must not depend on ``train_ds.id_map``/``.subject``, which is silently
     absent for the COCO-assembled ``auto_val`` default and for every ``TiledDetectionDataset``
-    build (the shipped Phase-1 catkin path). This test passes no dataset object at all (only the
+    build (the shipped Phase-1 bud path). This test passes no dataset object at all (only the
     ``data_cfg`` a real run always has), for both the plain-subject and the attribute-scoped
     case."""
     from tcip_mcp.pipelines.training.subprocess_worker import _resolve_run_id_map
 
     proj1 = tmp_path / "proj1"
     (proj1 / "labels").mkdir(parents=True)
-    _write_classes_json(proj1, subject="catkin")
+    _write_classes_json(proj1, subject="bud")
     data_cfg = {"images_dir": str(proj1 / "images"), "labels_dir": str(proj1 / "labels"),
-               "subject": "catkin"}
+               "subject": "bud"}
     result = _resolve_run_id_map("detection", data_cfg)
-    assert result == ("catkin", None, {"catkin": 0})
+    assert result == ("bud", None, {"bud": 0})
 
     proj2 = tmp_path / "proj2"
     (proj2 / "labels").mkdir(parents=True)
-    _write_classes_json(proj2, subject="catkin", attribute="elongation",
-                        values=["dormant", "elongated"])
+    _write_classes_json(proj2, subject="bud", attribute="opening",
+                        values=["closed", "open"])
     data_cfg2 = {"images_dir": str(proj2 / "images"), "labels_dir": str(proj2 / "labels"),
-                "subject": "catkin", "attribute": "elongation"}
+                "subject": "bud", "attribute": "opening"}
     result2 = _resolve_run_id_map("detection", data_cfg2)
-    assert result2 == ("catkin", "elongation", {"dormant": 0, "elongated": 1})
+    assert result2 == ("bud", "opening", {"closed": 0, "open": 1})
 
 
 def test_resolve_run_id_map_none_for_non_detection_task_or_no_subject(tmp_path):
     from tcip_mcp.pipelines.training.subprocess_worker import _resolve_run_id_map
 
-    assert _resolve_run_id_map("classification", {"subject": "catkin", "labels_dir": "x"}) is None
+    assert _resolve_run_id_map("classification", {"subject": "bud", "labels_dir": "x"}) is None
     assert _resolve_run_id_map("detection", {"labels_dir": "x"}) is None  # no subject
 
 
@@ -72,18 +72,18 @@ def test_resolve_run_id_map_none_for_coco_or_bespoke_source(tmp_path):
 
     proj = tmp_path / "proj"
     (proj / "labels").mkdir(parents=True)
-    _write_classes_json(proj, subject="catkin")
+    _write_classes_json(proj, subject="bud")
 
     coco_cfg = {"images_dir": str(proj / "images"), "labels_dir": str(proj / "labels"),
-               "subject": "catkin", "coco_json": str(proj / "coco.json")}
+               "subject": "bud", "coco_json": str(proj / "coco.json")}
     assert _resolve_run_id_map("detection", coco_cfg) is None
 
     coco_fmt_cfg = {"images_dir": str(proj / "images"), "labels_dir": str(proj / "labels"),
-                    "subject": "catkin", "label_format": "coco"}
+                    "subject": "bud", "label_format": "coco"}
     assert _resolve_run_id_map("detection", coco_fmt_cfg) is None
 
     bespoke_cfg = {"images_dir": str(proj / "images"), "labels_dir": str(proj / "labels"),
-                   "subject": "catkin", "dataset_source": "tests.bespoke_models:build_dataset"}
+                   "subject": "bud", "dataset_source": "tests.bespoke_models:build_dataset"}
     assert _resolve_run_id_map("detection", bespoke_cfg) is None
 
 
@@ -93,7 +93,7 @@ def test_resolve_run_id_map_none_for_attribute_scope_with_no_registry(tmp_path):
 
     labels_dir = tmp_path / "labels"
     labels_dir.mkdir()  # no classes.json
-    data_cfg = {"labels_dir": str(labels_dir), "subject": "catkin", "attribute": "elongation"}
+    data_cfg = {"labels_dir": str(labels_dir), "subject": "bud", "attribute": "opening"}
     assert _resolve_run_id_map("detection", data_cfg) is None
 
 
@@ -106,12 +106,12 @@ def test_patch_experiment_config_id_map_merges_into_durable_config(tmp_path, mon
 
     create_experiment("exp1", {"model_source": {"builder": "x:y"}, "data": {"images_dir": "img"}})
 
-    _patch_experiment_config_id_map("exp1", "catkin", "elongation", {"dormant": 0, "elongated": 1})
+    _patch_experiment_config_id_map("exp1", "bud", "opening", {"closed": 0, "open": 1})
 
     cfg = ts.read(config_key("exp1"))
-    assert cfg["data"]["id_map"] == {"dormant": 0, "elongated": 1}
-    assert cfg["data"]["subject"] == "catkin"
-    assert cfg["data"]["attribute"] == "elongation"
+    assert cfg["data"]["id_map"] == {"closed": 0, "open": 1}
+    assert cfg["data"]["subject"] == "bud"
+    assert cfg["data"]["attribute"] == "opening"
     assert cfg["data"]["images_dir"] == "img"  # a merge, not a rewrite
     assert cfg["model_source"] == {"builder": "x:y"}  # untouched sibling key
 
@@ -121,7 +121,7 @@ def test_patch_experiment_config_id_map_never_sinks_a_run_with_no_experiment_dir
     from tcip_mcp.pipelines.training.subprocess_worker import _patch_experiment_config_id_map
 
     # No experiments/<id>/config.json exists at all: best-effort, must not raise.
-    _patch_experiment_config_id_map("no_such_exp", "catkin", None, {"catkin": 0})
+    _patch_experiment_config_id_map("no_such_exp", "bud", None, {"bud": 0})
 
 
 def test_is_manifest_bound_split_only_true_for_a_manifest_binding():
@@ -227,14 +227,14 @@ def test_launch_training_child_receives_resolved_experiment_id(tmp_path, monkeyp
     labels_dir.mkdir()
     Image.new("RGB", (32, 32)).save(images_dir / "img0.png")
     json_io.write_annotations(str(labels_dir / "img0.json"),
-                              [Annotation(subject="catkin", geometry=BBox(1, 1, 9, 9))], 32, 32)
+                              [Annotation(subject="bud", geometry=BBox(1, 1, 9, 9))], 32, 32)
 
     def _cfg(experiment_id: str) -> dict:
         return {
             "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
                              "builder_kwargs": {"num_classes": 1, "min_size": 64, "max_size": 128},
                              "task": "detection"},
-            "data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "catkin"},
+            "data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "bud"},
             "training": {"batch_size": 1, "stages": [{"freeze_to": -1, "epochs": 1}],
                          "mixed_precision": False, "device": "cpu"},
             "experiment_id": experiment_id,
