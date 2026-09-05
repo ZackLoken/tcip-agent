@@ -758,7 +758,18 @@ def scope_consistent_with_map(
     records ``{subject: 0}``, indistinguishable here from a detector map. No registry in the two
     projects on the share declares such a value; a caller stamping a detector pair over a one-key
     map this way should report the case to its operator rather than trust it silently.
+
+    An empty recorded ``id_map`` (``{}``, distinct from ``None``, absent) names no vocabulary
+    either pair could agree or disagree with: refused by name under both pairs, rather than read
+    as the detector branch's "not keyed by the subject" (a reason meant for a real, non-empty,
+    differently-keyed map) or silently admitted by the classified branch, which would otherwise
+    treat naming nothing as naming a value.
     """
+    if id_map is not None and not id_map:
+        return (
+            f"the pair ({subject!r}, {attribute!r}) claims a scope over a bucket whose recorded "
+            "id_map is empty: an empty map names no vocabulary a pair could agree or disagree with."
+        )
     keyed_by_subject_alone = id_map is None or set(id_map) == {subject}
     if attribute is None:
         if keyed_by_subject_alone:
