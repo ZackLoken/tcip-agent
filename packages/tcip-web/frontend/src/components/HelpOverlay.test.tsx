@@ -53,7 +53,7 @@ describe("HelpOverlay", () => {
     render(<HelpOverlay activeTab="annotate" />);
     fireEvent.keyDown(document.body, { key: "?" });
 
-    for (const key of ["Ctrl+Y", "v", "s", "0–9", "Double-click", "Right-click"]) {
+    for (const key of ["Ctrl+Y", "v", "s", "x", "0–9", "Double-click", "Right-click"]) {
       expect(screen.getByText(key)).toBeInTheDocument();
     }
   });

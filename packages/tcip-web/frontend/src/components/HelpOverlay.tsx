@@ -20,6 +20,7 @@ const ANNOTATE: Shortcut[] = [
   { key: "Ctrl+S", desc: "Save labels" },
   { key: "v", desc: "Toggle stream drawing: click starts/pauses laying, double-click closes" },
   { key: "s", desc: "Toggle vertex snapping (polygon mode)" },
+  { key: "x", desc: "Arm the cut tool: click two points on either side of the selected polygon" },
   { key: "0–9", desc: "Select the Nth registered subject (0 is the first)" },
   { key: "Enter", desc: "Close current polygon (or double-click)" },
   { key: "Delete", desc: "Delete the selected polygon, box or point" },

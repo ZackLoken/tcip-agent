@@ -626,7 +626,13 @@ export function AnnotateToolbar({
               pressed={annotateUi.cut}
               onClick={() => setCut(!annotateUi.cut)}
               disabled={mode !== "polygon" || isLocked}
-              title="Click two points on either side of the selected polygon to split it (x)"
+              title={
+                mode !== "polygon"
+                  ? "Cut: in polygon mode only"
+                  : isLocked
+                    ? "Cut: this image is confirmed; uncheck Complete to edit"
+                    : "Click two points on either side of the selected polygon to split it (x)"
+              }
             />
             <Etool
               label="Show labels"
