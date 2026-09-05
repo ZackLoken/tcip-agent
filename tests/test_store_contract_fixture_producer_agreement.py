@@ -99,6 +99,7 @@ def test_the_resolve_scale_sidecar_golden_carries_every_key_the_writer_stamps(tm
 
     fresh = read_scale_sidecar(pred_dir)
     golden = REGISTERED["resolve_scale_sidecar"].golden
+    assert isinstance(golden, dict)
     assert set(golden) == set(fresh)
 
     scale_golden, scale_fresh = golden["operating_point"]["scale"], fresh["operating_point"]["scale"]
