@@ -16,7 +16,7 @@
     "audit_log": {
       "kind": "log",
       "frozen": true,
-      "schema_version": 2,
+      "schema_version": 1,
       "cannot_carry_field": null
     },
     "backend_port": {
@@ -64,7 +64,7 @@
     "classifier_operating_point_sidecar": {
       "kind": "record",
       "frozen": true,
-      "schema_version": 2,
+      "schema_version": 1,
       "cannot_carry_field": null
     },
     "coco_documents": {
@@ -76,7 +76,7 @@
     "confidence_sweep": {
       "kind": "record",
       "frozen": true,
-      "schema_version": 2,
+      "schema_version": 1,
       "cannot_carry_field": null
     },
     "coverage_grid_zoom": {
@@ -166,7 +166,7 @@
     "experiment_validations": {
       "kind": "log",
       "frozen": true,
-      "schema_version": 2,
+      "schema_version": 1,
       "cannot_carry_field": null
     },
     "flat_image": {
@@ -250,7 +250,7 @@
     "model_registry": {
       "kind": "record",
       "frozen": true,
-      "schema_version": 2,
+      "schema_version": 1,
       "cannot_carry_field": null
     },
     "model_snapshot_file": {
@@ -268,13 +268,13 @@
     "operating_point_sidecar": {
       "kind": "record",
       "frozen": true,
-      "schema_version": 2,
+      "schema_version": 1,
       "cannot_carry_field": null
     },
     "ordinal_operating_point_sidecar": {
       "kind": "record",
       "frozen": true,
-      "schema_version": 2,
+      "schema_version": 1,
       "cannot_carry_field": null
     },
     "plant_mapping": {
@@ -334,13 +334,13 @@
     "regression_operating_point_sidecar": {
       "kind": "record",
       "frozen": true,
-      "schema_version": 2,
+      "schema_version": 1,
       "cannot_carry_field": null
     },
     "resolve_scale_sidecar": {
       "kind": "record",
       "frozen": true,
-      "schema_version": 2,
+      "schema_version": 1,
       "cannot_carry_field": null
     },
     "retrospectives": {
