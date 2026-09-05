@@ -162,6 +162,39 @@ def test_a_half_migrated_records_seen_at_scale_carries_through_unblanked(tmp_pat
     assert stored["cells_seen_at_scale"] == {"A1": 0.6, "B1": 0.3}
 
 
+def test_a_record_whose_stats_source_is_already_structured_still_conforms_its_other_keys(tmp_path: Path):
+    """A record written between the structured stats_source landing and the cells_seen_at_scale
+    rename carries the mapping already, beside an old working_scale_bar and a cells_swept list:
+    the mapping passes through and the other two are dropped, rather than the whole root refusing
+    because the source is not a string to map."""
+    _bind_sqlite()
+    module = _load_script()
+    structured = {"read": "none", "seed": None, "pixel_fraction": None, "overview_scale": None}
+    record = _old_shape_record(
+        cells_swept=["A1"], stats_source=structured, display_bounds=None,
+        working_scale_bar={"value": 0.63, "source": "minimum view scale this session"})
+    _seed_fresh(tmp_path, "bush/2026-03-01", "plot.tif", record)
+
+    outcomes, refused = module.conform_root(tmp_path, plan=False)
+
+    assert refused is False
+    assert outcomes == [
+        "bush/2026-03-01/plot.tif: conformed viewing and dropped 1 old swept cell name: no "
+        "scale can be anchored to a cell swept under a bar the record no longer holds"
+    ]
+    stored = ts.read(view_coverage_key(tmp_path))["bush/2026-03-01"]["plot.tif"]
+    assert stored["viewing"]["stats_source"] == structured
+    assert "working_scale_bar" not in stored["viewing"]
+    assert "cells_swept" not in stored
+    assert stored["cells_seen_at_scale"] == {}
+
+
+def test_a_structured_stats_source_the_model_rejects_refuses_by_name():
+    module = _load_script()
+    with pytest.raises(ValueError, match="StatsSource does not accept"):
+        module._parse_stats_source({"read": "guess", "seed": None})
+
+
 def test_an_empty_viewing_conforms_to_all_nulls_and_the_route_serves_it(tmp_path: Path):
     _bind_sqlite()
     module = _load_script()
