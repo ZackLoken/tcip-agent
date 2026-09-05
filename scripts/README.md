@@ -257,9 +257,12 @@ fresh root predates another change, not a capability to build on.
   an explicit `schema_version: 2` (a model registry index, a prediction bucket's sidecar
   documents, a `confidence_sweep` record) to carry no field, per the version-1 reset every frozen
   store now ships at. Names, and does not touch, any `audit_log`/`experiment_validations` line
-  still carrying `2` (both append-only), and names any `confidence_sweep` record whose own
-  content-derived key no longer matches once the field is stripped. `--plan` previews and writes
-  nothing.
+  still carrying `2` (both append-only; `clear_dev_history.py` clears dev-era `audit_log` lines,
+  `experiment_validations` is cleared or rewritten by nothing, and a stamp naming a refused row
+  there is re-earned through that document's own calibration door). For a `confidence_sweep`
+  record whose filename already equalled its own body's digest before the strip, names the
+  filename the rewrite orphans (nothing in the platform reads a stored curve back by that
+  identity today). `--plan` previews and writes nothing.
 - `conform_view_coverage_viewing.py` - conforms a dataset's stored `view_coverage` records'
   `viewing` sub-object to the current `CoverageViewing` shape, mapping the old string forms of
   `stats_source` and `display_bounds` to the new structured ones. `--plan` previews; a `viewing`
