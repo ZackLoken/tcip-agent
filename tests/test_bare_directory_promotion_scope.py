@@ -42,7 +42,7 @@ TRAIT = TraitSpec(
     majority_label="opening",
     sliver_policy="class_avg_size",
     sliver_frac=0.5,
-    delivers=("leaf_out_05per_date", "leaf_out_50per_date", "leaf_out_95per_date"),
+    delivers=("leaf_out_05per_date", "leaf_out_50per_date"),
     notes="A neutral fixture trait, not any real crop's own.",
 )
 
