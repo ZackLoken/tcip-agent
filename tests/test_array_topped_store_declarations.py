@@ -7,6 +7,8 @@ family) and declares a cleared ``cannot_carry_field``, covered separately below.
 
 from __future__ import annotations
 
+import os
+import sqlite3
 from pathlib import Path
 
 import tcip_store as ts
@@ -17,7 +19,29 @@ from tcip_mcp.model_registry import (
     registry_index_key,
 )
 from tcip_mcp.tools.project_tools import DATASET_REGISTRY_STORE, read_datasets, register_dataset
+from tcip_store.binding import BACKEND_ENV, DEFAULT_BACKEND, FILE_BACKEND
+from tcip_store.store import _backend
 from tcip_web import jobstore
+
+
+def _damage_record(key: ts.Key, data: bytes) -> None:
+    """Overwrite a record's raw bytes, wherever the bound backend keeps it, bypassing the seam's
+    own write-side schema_version check: the reader's explicit-``1`` accept branch has no producer
+    that stamps the field, so this is the only way to reach it. The record must already exist."""
+    name = os.environ.get(BACKEND_ENV) or DEFAULT_BACKEND
+    if name == FILE_BACKEND:
+        _backend().path_for(key).write_bytes(data)
+        return
+    from tcip_store.sqlite_backend import database_path, encode_parts
+
+    conn = sqlite3.connect(str(database_path(str(key.root))), isolation_level=None)
+    try:
+        conn.execute(
+            "update records set value = ? where store = ? and parts = ?",
+            (data, key.store, encode_parts(key.parts)),
+        )
+    finally:
+        conn.close()
 
 
 def _cannot_carry_stores() -> tuple[str, ...]:
@@ -51,6 +75,26 @@ def test_model_registry_document_composes_with_its_own_declaration(tmp_path: Pat
 
 def test_model_registry_index_reads_as_an_empty_list_for_a_fresh_project(tmp_path: Path):
     assert read_registry_index(tmp_path) == []
+
+
+def test_model_registry_document_with_an_explicit_schema_version_one_reads_the_same(
+    tmp_path: Path,
+):
+    """The reader's explicit-1 accept branch: a document stamped with the frozen ceiling's own
+    number, rather than left absent, is not a version this reader has never seen. No production
+    writer stamps the field (absence is the frozen default), so this plants it by rewriting the
+    record's own raw bytes, the same technique a document from before this store's version-1
+    reset is planted with elsewhere."""
+    ckpt = tmp_path / "m.pt"
+    ckpt.write_bytes(b"weights")
+    ModelRegistry(str(tmp_path)).register_model("a", str(ckpt), {}, metrics_source=None)
+
+    key = registry_index_key(tmp_path)
+    raw = ts.read(key)
+    descriptor = ts.get_descriptor(MODEL_REGISTRY_STORE)
+    _damage_record(key, descriptor.codec.encode({**raw, "schema_version": 1}))
+
+    assert read_registry_index(tmp_path) == raw["entries"]
 
 
 def test_dataset_registry_composes_with_its_own_declaration(tmp_path: Path):

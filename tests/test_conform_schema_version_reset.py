@@ -114,6 +114,29 @@ def test_registry_index_with_no_field_is_reported_unchanged(tmp_path: Path):
     assert "schema_version" not in ts.read(registry_index_key(root))
 
 
+def test_registry_index_as_a_bare_array_is_named_a_refusal_not_unchanged(tmp_path: Path):
+    """A bare top-level array carries no schema_version key to be above the ceiling on, so a
+    generic per-record read alone would call it unchanged; the real reader
+    (read_registry_index) refuses this shape outright, and this script must report that
+    refusal rather than mask it as a clean root."""
+    from tcip_mcp.model_registry import registry_index_key
+
+    root = tmp_path / "proj"
+    entries = [{"name": "m", "checkpoint_path": "x.pt", "sha256": "a" * 64}]
+    key = registry_index_key(root)
+    ts.replace(key, entries, expect=ts.Version.ABSENT)
+
+    module = _load_script()
+    lines, refused = module.check_root(root)
+
+    assert refused is True
+    assert any(
+        "model registry index: refused" in ln and "conform_model_registry_paths.py" in ln
+        for ln in lines
+    ), lines
+    assert ts.read(key) == entries
+
+
 def _register_bucket(root: Path) -> Path:
     """A registered dataset, coincident with ``root``, holding one prediction bucket dir."""
     from tcip_mcp.tools.project_tools import register_dataset
@@ -158,18 +181,53 @@ def test_sidecar_with_no_field_is_reported_unchanged(tmp_path: Path):
     assert any("resolve_scale.json: no schema_version 2 field, unchanged" in ln for ln in lines)
 
 
-def test_confidence_sweep_record_drops_the_field_and_names_the_floored_claim(tmp_path: Path):
+def test_confidence_sweep_record_drops_the_field_and_names_the_orphaned_filename(tmp_path: Path):
     """The discovery is a filesystem glob (the store is not declared enumerable), so this proof
     binds the file backend explicitly, matching the script's own documented backend limitation.
     Plants the raw bytes directly against that explicit binding, since the ambient
     ``TCIP_STORE_BACKEND`` this process started under (whichever the running gate leg set) is not
-    necessarily the one this test just bound."""
+    necessarily the one this test just bound. The record is filed under its own true digest
+    (computed the same way the platform's own writer would key it), so the note fires: the
+    filename genuinely matched the body before the strip and no longer does after."""
+    from tcip_store.file_backend import FileBackend
+    from tcip_mcp.tools.inference_tools import CONFIDENCE_SWEEP_STORE, calibration_curve_identity
+
+    root = tmp_path / "proj"
+    root.mkdir(parents=True)
+    body = {"trait": "leaf_count", "dataset_hash": "H", "checkpoint_sha256": "0" * 64,
+            "predictor_path": {}, "gate_evidence": {}, "calibration_evidence": {}}
+    poisoned_body = {**body, "schema_version": 2}
+    digest = calibration_curve_identity(poisoned_body)
+    key = ts.Key(CONFIDENCE_SWEEP_STORE, str(root.resolve()), (digest,))
+    ts.bind(FileBackend())
+    try:
+        ts.replace(key, body, expect=ts.Version.ABSENT)
+        encoded = ts.get_descriptor(key.store).codec.encode(poisoned_body)
+        FileBackend().path_for(key).write_bytes(encoded)
+
+        module = _load_script()
+        lines, refused = module.check_root(root)
+
+        assert refused is False
+        conform_lines = [ln for ln in lines if f"confidence_sweep {digest}" in ln]
+        assert any("dropped schema_version" in ln and "now an orphan under this filename" in ln
+                   for ln in conform_lines), conform_lines
+        stored = ts.read(key)
+        assert "schema_version" not in stored
+    finally:
+        ts.unbind()
+
+
+def test_confidence_sweep_record_whose_filename_never_matched_names_no_orphan(tmp_path: Path):
+    """A record filed under a digest that was never its own body's true digest (a dev-era key
+    scheme this reset did not create) is still conformed, but names no orphan note: the mismatch
+    predates this conform and is not one it caused."""
     from tcip_store.file_backend import FileBackend
     from tcip_mcp.tools.inference_tools import CONFIDENCE_SWEEP_STORE
 
     root = tmp_path / "proj"
     root.mkdir(parents=True)
-    digest = "a" * 64  # a dev-era key, never recomputed against this body
+    digest = "a" * 64  # never the body's own digest, before or after the strip
     key = ts.Key(CONFIDENCE_SWEEP_STORE, str(root.resolve()), (digest,))
     ts.bind(FileBackend())
     try:
@@ -184,8 +242,7 @@ def test_confidence_sweep_record_drops_the_field_and_names_the_floored_claim(tmp
 
         assert refused is False
         conform_lines = [ln for ln in lines if f"confidence_sweep {digest}" in ln]
-        assert any("dropped schema_version" in ln and "floors on its next read" in ln
-                   for ln in conform_lines), conform_lines
+        assert conform_lines == [f"confidence_sweep {digest}: dropped schema_version"]
         stored = ts.read(key)
         assert "schema_version" not in stored
     finally:
