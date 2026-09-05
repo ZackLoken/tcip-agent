@@ -25,7 +25,7 @@ Sections:
 
 ## Module ownership and dependency graph
 
-Source: the module inventory `scripts/build_module_inventory.py` produces, run at HEAD d6e28aee.
+Source: the module inventory `scripts/build_module_inventory.py` produces, run at HEAD 32bc6c58.
 Every count in this section is read from that regenerated inventory, not from any earlier
 snapshot; `scripts/check_architecture_doc.py --inventory-json <path>` re-runs the same generator
 and cross-checks its counts against this document's tables, this table's own module and line
