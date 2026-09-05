@@ -204,6 +204,11 @@ fresh root predates another change, not a capability to build on.
   record lacking exactly those two keys, since a delivery predating them was made under no
   acknowledgement; every other missing key is named, never rewritten, since its value was never
   computed for that delivery. `--plan` previews and writes nothing.
+- `conform_image_stem_collisions.py` - censuses a project's registered dataset roots for a
+  bucket already holding two logical identities under one case-folded stem, printing each with
+  its files, the one the un-corrected reader still serves and the records made against it.
+  `--plan` is the default; `--apply` takes one `--keep <path>` per collision and parks every
+  other file under `.tcip/collisions/<bucket>/`, recording the move. `--plan` writes nothing.
 - `conform_plant_mapping_records.py` - rewrites a project's stored plant-mapping records from
   the retired `plant_csvs` list to a `plant_registry` reference, registering the CSVs those
   records named under an operator-stated registry name (`--crop` and `--site` are the expert's
