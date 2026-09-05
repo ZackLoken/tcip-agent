@@ -21,7 +21,10 @@ record, reporting its count: no scale can be anchored to a cell swept under a ba
 longer holds, so those names are never fabricated a scale they were never recorded against. A
 record that already carries a ``cells_seen_at_scale`` mapping (a half-migrated write already
 under the new shape, needing only its ``viewing`` conformed) carries that mapping through
-unchanged rather than being blanked back to empty.
+unchanged rather than being blanked back to empty, and a ``viewing`` whose ``stats_source`` is
+already the structured mapping (written between the structured source landing and the
+``cells_seen_at_scale`` rename, beside an old ``working_scale_bar`` and ``cells_swept``) carries
+it through as it stands.
 
     python scripts/conform_view_coverage_viewing.py <dataset_root> [<dataset_root> ...]
     python scripts/conform_view_coverage_viewing.py --plan <dataset_root>
@@ -50,7 +53,7 @@ import tcip_store as ts  # noqa: E402
 from pydantic import ValidationError  # noqa: E402
 from tcip_mcp.dataset_layout import view_coverage_key  # noqa: E402
 from tcip_store.binding import bind_default  # noqa: E402
-from tcip_web.routes._coverage_models import CoverageRecord  # noqa: E402
+from tcip_web.routes._coverage_models import CoverageRecord, StatsSource  # noqa: E402
 
 # working_scale_bar stays a recognized key so an old viewing carrying it does not refuse as an
 # unknown key; _reshaped_viewing below drops it unconditionally rather than mapping it forward.
@@ -62,13 +65,21 @@ _SAMPLED_RE = re.compile(r"^sampled\(seed=(-?\d+), pixel_fraction=([^)]+)\)$")
 
 
 def _parse_stats_source(value: object) -> dict | None:
-    """The old ``stats_source`` shape (a bare string) mapped to the new structured one.
+    """The old ``stats_source`` shape (a bare string) mapped to the new structured one, or the
+    structured one carried through when the record already holds it (a record the route wrote
+    after the structured ``stats_source`` landed but before ``cells_seen_at_scale`` did, whose
+    ``viewing`` still needs its other keys conformed).
 
-    Raises ``ValueError`` naming ``value`` when it matches neither the three flat literals nor
-    either formatted shape the route ever emitted.
+    Raises ``ValueError`` naming ``value`` when it is neither a mapping ``StatsSource`` accepts,
+    nor one of the three flat literals, nor either formatted string shape the route ever emitted.
     """
     if value is None:
         return None
+    if isinstance(value, dict):
+        try:
+            return StatsSource.model_validate(value).model_dump()
+        except ValidationError as exc:
+            raise ValueError(f"stats_source is a mapping StatsSource does not accept: {exc}") from exc
     if not isinstance(value, str):
         raise ValueError(f"stats_source is not a string: {value!r}")
     if value in _STATS_SOURCE_LITERALS:
