@@ -552,7 +552,7 @@ def serve_image(
     )
     from tcip_mcp.pipelines.data.band_groups import BandGroupIncomplete, BandGroupRef
     from tcip_mcp.pipelines.derivations import probe_channels
-    from tcip_mcp.pipelines.image_utils import resolve_image_source
+    from tcip_mcp.pipelines.image_utils import AmbiguousImageStem, resolve_image_source
 
     src = _checked(path)
     if stretch not in STRETCH_MODES:
@@ -562,6 +562,8 @@ def serve_image(
         source = resolve_image_source(src.parent, src.stem)
     except BandGroupIncomplete as exc:
         raise HTTPException(409, str(exc)) from exc
+    except AmbiguousImageStem as exc:
+        raise HTTPException(400, str(exc)) from exc
 
     corners = (x0, y0, x1, y1)
     if any(c is None for c in corners) and any(c is not None for c in corners):
@@ -742,13 +744,15 @@ def get_bands(path: str = Query(...)) -> dict:
     """
     from tcip_mcp.pipelines.data.band_groups import BandGroupIncomplete, BandGroupRef
     from tcip_mcp.pipelines.derivations import probe_channels
-    from tcip_mcp.pipelines.image_utils import resolve_image_source
+    from tcip_mcp.pipelines.image_utils import AmbiguousImageStem, resolve_image_source
 
     src = _checked(path)
     try:
         source = resolve_image_source(src.parent, src.stem)
     except BandGroupIncomplete as exc:
         raise HTTPException(409, str(exc)) from exc
+    except AmbiguousImageStem as exc:
+        raise HTTPException(400, str(exc)) from exc
 
     n = probe_channels(source)
     if n <= 3 and not isinstance(source, BandGroupRef):

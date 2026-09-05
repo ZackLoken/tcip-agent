@@ -73,6 +73,7 @@ def check_negatives(root: Path, findings: list) -> None:
         confirmed_negative_names_any_subject, is_confirmed_negative, normalize_status_store,
         read_image_status_store, resolve_image_name,
     )
+    from tcip_mcp.pipelines.image_utils import AmbiguousImageStem
     from tcip_store import StoreError
 
     # Confirmations are dataset-native, and this check already assumes root == dataset_root.
@@ -87,6 +88,7 @@ def check_negatives(root: Path, findings: list) -> None:
     stems = _image_stems(root)
     ann_root = annotation_root(root)
     neg_names = confirmed_negative_names_any_subject(by_bucket)
+    ambiguous_reported: set[str] = set()
 
     for label in ann_root.rglob("*.json") if ann_root.is_dir() else []:
         if BASELINE_DIRNAME in label.parts:
@@ -97,7 +99,14 @@ def check_negatives(root: Path, findings: list) -> None:
             findings.append(("error", f"{label.relative_to(root)}: label file will not read: {exc}"))
             continue
         date = annotation_date(label)
-        name = resolve_image_name(root, date, label.stem)
+        try:
+            name = resolve_image_name(root, date, label.stem)
+        except AmbiguousImageStem as exc:
+            message = str(exc)
+            if message not in ambiguous_reported:
+                findings.append(("error", message))
+                ambiguous_reported.add(message)
+            continue
         if name is not None:
             for key, bucket in by_bucket.items():
                 if not is_confirmed_negative(bucket.get(name)):
@@ -164,6 +173,7 @@ def check_data_quality(root: Path, findings: list) -> None:
         annotation_date, confirmed_negative_names_any_subject, normalize_status_store,
         read_image_status_store, resolve_image_name,
     )
+    from tcip_mcp.pipelines.image_utils import AmbiguousImageStem
     from tcip_mcp.tools.data_tools import _scan_dataset
     from tcip_store import StoreError
 
@@ -174,6 +184,7 @@ def check_data_quality(root: Path, findings: list) -> None:
         return
 
     image_stems = {Path(p).stem for p in scan["images"]}
+    ambiguous_reported: set[str] = set()
 
     try:
         negatives = confirmed_negative_names_any_subject(
@@ -208,7 +219,14 @@ def check_data_quality(root: Path, findings: list) -> None:
                 findings.append(("error", f"{rel}: label file will not read: {exc}"))
                 continue
             if not anns:
-                name = resolve_image_name(str(root), annotation_date(label_path), stem)
+                try:
+                    name = resolve_image_name(str(root), annotation_date(label_path), stem)
+                except AmbiguousImageStem as exc:
+                    message = str(exc)
+                    if message not in ambiguous_reported:
+                        findings.append(("error", message))
+                        ambiguous_reported.add(message)
+                    continue
                 if name is None or name not in negatives:
                     findings.append(("error", f"{rel}: empty label file, not a confirmed "
                                     "negative for any subject; excluded from training"))

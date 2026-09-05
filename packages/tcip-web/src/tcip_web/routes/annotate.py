@@ -22,7 +22,9 @@ from tcip_annotation.json_io import (
     write_annotations,
 )
 from tcip_annotation.state import Annotation
-from tcip_mcp.pipelines.image_utils import image_dimensions, resolve_image_source
+from tcip_mcp.pipelines.image_utils import (
+    AmbiguousImageStem, image_dimensions, resolve_image_source,
+)
 from tcip_store import Version, VersionConflict
 from tcip_web.identity import resolve_user, user_id
 from tcip_web.paths import assert_path_allowed
@@ -83,9 +85,11 @@ def _image_dims(path: str) -> tuple[int, int]:
     if not p.is_file():
         raise HTTPException(404, f"image not found: {path}")
     # Channel-aware: resolve_image_source folds a `.bandgroup` manifest (or a genuinely
-    # multi-band raster) into the real frame image_dimensions measures, instead of a bare PIL
-    # header read misreporting its axes.
-    return image_dimensions(resolve_image_source(p.parent, p.stem))
+    # multi-band raster) into the frame image_dimensions measures, not a bare PIL header read.
+    try:
+        return image_dimensions(resolve_image_source(p.parent, p.stem))
+    except AmbiguousImageStem as exc:
+        raise HTTPException(400, str(exc)) from exc
 
 
 def _guard_label_path(path: Optional[str]) -> Optional[str]:

@@ -1034,9 +1034,10 @@ def build_mapping(
 
     A date's captures are enumerated through ``image_utils.list_logical_images``, so a band
     raster or a band group ingested under a mapped date is a capture the identity sees. That
-    enumeration raises :class:`~tcip_mcp.pipelines.image_utils.AmbiguousImageStem` when a
-    standalone file's stem collides with a band group's; this function lets it propagate, and
-    the calling door catches it and refuses in its own error shape.
+    enumeration raises :class:`~tcip_mcp.pipelines.image_utils.AmbiguousImageStem` when the
+    bucket holds more than one logical identity under one case-folded stem, standalone-versus-
+    standalone or standalone-versus-band-group alike; this function lets it propagate, and the
+    calling door catches it and refuses in its own error shape.
 
     Raises :class:`UngeoreferencedCaptureRefusal`: naming ``images_root`` when the requested
     dates carry no capture at all, and with :func:`ungeoreferenced_capture_message` (naming any

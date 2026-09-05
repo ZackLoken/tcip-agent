@@ -351,6 +351,7 @@ def get_grid(
     """
     from tcip_mcp.dataset_layout import parse_image_path, status_bucket, view_coverage_key
     from tcip_mcp.pipelines.data.band_groups import BandGroupIncomplete
+    from tcip_mcp.pipelines.image_utils import AmbiguousImageStem
     from tcip_mcp.pipelines.reference_grid import derive_lattice_tile_size
 
     src = _checked(path)
@@ -364,6 +365,8 @@ def get_grid(
         serving_geometry, serving_derivation = _grid_for_raster(src, None)
     except BandGroupIncomplete as exc:
         raise HTTPException(409, str(exc)) from exc
+    except AmbiguousImageStem as exc:
+        raise HTTPException(400, str(exc)) from exc
     serving = _rendered_grid(serving_geometry, serving_derivation)
 
     if tile_size is not None:

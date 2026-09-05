@@ -80,6 +80,15 @@ def _grid(client: TestClient, path: str, tile_size: int | None = None, **params)
 
 
 class TestGridRoute:
+    def test_grid_returns_400_for_a_stem_collision(self, client, dated_dataset):
+        _root, path = dated_dataset
+        Image.fromarray(np.zeros((80, 100, 3), dtype=np.uint8)).save(
+            Path(path).with_suffix(".jpg")
+        )
+
+        resp = client.get("/api/coverage/grid", params={"path": path})
+        assert resp.status_code == 400
+
     def test_grid_equals_reference_cells(self, client, dated_dataset):
         from tcip_mcp.pipelines.reference_grid import grid_geometry, reference_cells
 

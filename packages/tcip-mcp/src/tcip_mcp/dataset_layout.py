@@ -178,6 +178,10 @@ def resolve_image_name(dataset_root: str | Path, date: Optional[str], stem: str)
     the flat ``images/`` root while a dated bucket for the same date also exists on disk is a mixed
     layout this does not pair: :func:`resolve_images_dir` picks the dated bucket whenever one
     exists, with no per-stem fallback to the flat root.
+
+    Lets :class:`~tcip_mcp.pipelines.image_utils.AmbiguousImageStem` propagate uncaught: an
+    ambiguous directory is not one in which no image resolves, whatever stem is asked for, so it
+    is never folded into the ``None`` answer.
     """
     from tcip_mcp.pipelines.image_utils import logical_image_name, resolve_image_source
 
