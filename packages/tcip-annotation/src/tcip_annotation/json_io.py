@@ -991,6 +991,9 @@ def to_coco_dataset(
         for a, cid in zip(scoped, cids):
             if cid is None or a.geometry is None:
                 continue  # image-level label: counts the image as annotated, no detection/seg target
+            assert not isinstance(a.geometry, Point), (
+                "target_class_id already returned None for a Point geometry"
+            )
             box = bbox_of(a.geometry)
             rec: dict = {
                 "id": ann_id, "image_id": img_id, "category_id": cid, "iscrowd": 0,
