@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import {
   CartesianGrid,
   Legend,
@@ -13,10 +13,12 @@ import {
 import { StructuredRefusalError } from "@/api/http";
 import { openTrainingStream, trainingApi } from "@/api/training";
 import type { LaunchableConfig, MetricRow, SplitChoices, TrainingRunSummary } from "@/api/training";
+import { DisclosureChevron } from "@/components/CollapsibleSection";
 import { EmbeddedTool } from "@/components/EmbeddedTool";
 import { LaunchPicker, type DataPicker, type LaunchPickerRow } from "@/components/LaunchPicker";
 import { MAX_MARKED_RUNS, RunComparison, type MarkedRun } from "@/components/RunComparison";
 import { TabHeading } from "@/components/TabHeading";
+import { useDisclosure } from "@/hooks/useDisclosure";
 import { useEditableAgentRequest } from "@/hooks/useEditableAgentRequest";
 import { useEmbeddedToolRetry, type EmbeddedToolStepResult } from "@/hooks/useEmbeddedToolRetry";
 import { TERMINAL_STATUSES } from "@/lib/runStatus";
@@ -151,6 +153,9 @@ export function TrainingTab() {
   const [pendingCancel, setPendingCancel] = useState<ReadonlySet<string>>(new Set());
   const [cancelErrors, setCancelErrors] = useState<Record<string, string>>({});
   const streamRef = useRef<(() => void) | null>(null);
+  const { open: chartTableOpen, toggle: toggleChartTable } = useDisclosure();
+  const chartHeadingId = useId();
+  const chartNameId = useId();
 
   const marked: MarkedRun[] = runs
     .filter((r) => markedRunIds.has(r.run_id) && !unmarkableReason(r))
@@ -365,7 +370,7 @@ export function TrainingTab() {
     }
   }
 
-  const chartData = useMemo(() => {
+  const chartData = useMemo((): (MetricRow & { step: number })[] => {
     return metrics.map((m, i) => ({ step: m.epoch ?? m.step ?? i, ...m }));
   }, [metrics]);
 
@@ -413,8 +418,24 @@ export function TrainingTab() {
             </>
           ) : selectedRun ? (
             <>
-              <h2 className="tcip-heading">Live metrics</h2>
+              <h2 id={chartHeadingId} className="tcip-heading">
+                Live metrics
+              </h2>
               <span className="font-mono text-[12px] text-tcip-fg">{selectedRun}</span>
+              {chartData.length > 0 && (
+                <>
+                  <span className="flex-1" />
+                  <button
+                    type="button"
+                    onClick={toggleChartTable}
+                    aria-expanded={chartTableOpen}
+                    className="flex items-center gap-1 text-[11px] text-tcip-muted hover:text-tcip-fg"
+                  >
+                    <DisclosureChevron open={chartTableOpen} />
+                    as table
+                  </button>
+                </>
+              )}
             </>
           ) : (
             <span className="tcip-heading">Select a run to view metrics</span>
@@ -427,43 +448,52 @@ export function TrainingTab() {
             <div className="flex flex-col gap-4">
               <div className="h-[38vh] min-h-[220px] shrink-0">
                 {selectedRun && chartData.length > 0 ? (
-                  <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={chartData}>
-                      <CartesianGrid stroke={CHART.grid} strokeDasharray="3 3" />
-                      <XAxis
-                        dataKey="step"
-                        stroke={CHART.axis}
-                        style={{ fontSize: 11 }}
-                        label={{
-                          value: "epoch/step",
-                          position: "insideBottom",
-                          offset: -5,
-                          fill: CHART.axis,
-                        }}
-                      />
-                      <YAxis stroke={CHART.axis} style={{ fontSize: 11 }} />
-                      <Tooltip
-                        contentStyle={{
-                          background: CHART.tooltipBg,
-                          border: `1px solid ${CHART.tooltipBorder}`,
-                          borderRadius: 4,
-                          fontSize: 11,
-                        }}
-                      />
-                      <Legend wrapperStyle={{ fontSize: 11, color: CHART.legendText }} />
-                      {metricKeys.map((key, i) => (
-                        <Line
-                          key={key}
-                          type="monotone"
-                          dataKey={key}
-                          stroke={CHART_LINE_COLORS[i % CHART_LINE_COLORS.length]}
-                          dot={false}
-                          strokeWidth={1.5}
-                          isAnimationActive={false}
+                  <figure
+                    role="img"
+                    aria-labelledby={`${chartHeadingId} ${chartNameId}`}
+                    className="m-0 h-full"
+                  >
+                    <span id={chartNameId} className="sr-only">
+                      {`for ${selectedRun}: ${metricKeys.join(", ")}`}
+                    </span>
+                    <ResponsiveContainer width="100%" height="100%">
+                      <LineChart data={chartData}>
+                        <CartesianGrid stroke={CHART.grid} strokeDasharray="3 3" />
+                        <XAxis
+                          dataKey="step"
+                          stroke={CHART.axis}
+                          style={{ fontSize: 11 }}
+                          label={{
+                            value: "epoch/step",
+                            position: "insideBottom",
+                            offset: -5,
+                            fill: CHART.axis,
+                          }}
                         />
-                      ))}
-                    </LineChart>
-                  </ResponsiveContainer>
+                        <YAxis stroke={CHART.axis} style={{ fontSize: 11 }} />
+                        <Tooltip
+                          contentStyle={{
+                            background: CHART.tooltipBg,
+                            border: `1px solid ${CHART.tooltipBorder}`,
+                            borderRadius: 4,
+                            fontSize: 11,
+                          }}
+                        />
+                        <Legend wrapperStyle={{ fontSize: 11, color: CHART.legendText }} />
+                        {metricKeys.map((key, i) => (
+                          <Line
+                            key={key}
+                            type="monotone"
+                            dataKey={key}
+                            stroke={CHART_LINE_COLORS[i % CHART_LINE_COLORS.length]}
+                            dot={false}
+                            strokeWidth={1.5}
+                            isAnimationActive={false}
+                          />
+                        ))}
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </figure>
                 ) : (
                   <div className="flex items-center justify-center h-full text-tcip-muted text-[12px]">
                     {!selectedRun
@@ -474,6 +504,36 @@ export function TrainingTab() {
                   </div>
                 )}
               </div>
+
+              {selectedRun && chartData.length > 0 && chartTableOpen && (
+                <div className="overflow-auto max-h-64 shrink-0">
+                  <table className="w-full text-[11px]">
+                    <caption className="sr-only">{`${selectedRun} metrics as a table`}</caption>
+                    <thead>
+                      <tr className="border-b border-tcip-border">
+                        <th className="tcip-th">Step</th>
+                        {metricKeys.map((key) => (
+                          <th key={key} className="tcip-th">
+                            {key}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {chartData.map((row, i) => (
+                        <tr key={i} className="border-t border-tcip-border first:border-t-0">
+                          <td className="py-1 pr-3 tabular-nums">{row.step}</td>
+                          {metricKeys.map((key) => (
+                            <td key={key} className="pr-3 tabular-nums">
+                              {typeof row[key] === "number" ? row[key] : ""}
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
 
               {selectedRun && (
                 <div className="h-[60vh] min-h-[360px] shrink-0">

@@ -290,7 +290,7 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | packages/tcip-web/frontend/src/components/Canvas/CoverageOverlay.tsx | The coverage lattice drawn on the annotation canvas itself: a Konva layer content in image coordinates, culled to the viewport, listening={false} like every other canvas layer. | 2 | 1 |
 | packages/tcip-web/frontend/src/components/Canvas/zoom.test.ts | (none found) | 1 | 0 |
 | packages/tcip-web/frontend/src/components/Canvas/zoom.ts | Discrete zoom levels (5% .. | 0 | 3 |
-| packages/tcip-web/frontend/src/components/CollapsibleSection.tsx | The app's collapsible-section primitive: one chevron glyph and one trigger+content unit. | 1 | 7 |
+| packages/tcip-web/frontend/src/components/CollapsibleSection.tsx | The app's collapsible-section primitive: one chevron glyph and one trigger+content unit. | 1 | 8 |
 | packages/tcip-web/frontend/src/components/ColorPickerModal.tsx | Dark color picker: SI palette + basic palette + hex input, resolving to a hex string. | 0 | 1 |
 | packages/tcip-web/frontend/src/components/DeliveryEventsPanel.tsx | What has shipped from this project: one row per completed delivery, read-only. | 0 | 1 |
 | packages/tcip-web/frontend/src/components/EmbeddedTool.test.tsx | (none found) | 1 | 0 |
@@ -348,7 +348,7 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | packages/tcip-web/frontend/src/hooks/useCoverageGrid.ts | The coverage lattice for the open raster, fetched for every raster once its path is known: an ordinary image inside the display bound derives a trivial one-cell lattice, which still names its own derivation and carries the one cell the chrome names and attests. | 3 | 3 |
 | packages/tcip-web/frontend/src/hooks/useCoverageTracking.test.ts | (none found) | 6 | 0 |
 | packages/tcip-web/frontend/src/hooks/useCoverageTracking.ts | Wires the CoverageTracker into the Annotate tab: resets on the (image, subject, date, dataset, grid) identity, hydrates from the stored record, feeds it viewport passes and the viewing context, and exposes the swept set, the replace hold and the Complete warning facts. | 6 | 2 |
-| packages/tcip-web/frontend/src/hooks/useDisclosure.ts | Open/closed state for a collapsible region, optionally remembered across sessions. | 0 | 5 |
+| packages/tcip-web/frontend/src/hooks/useDisclosure.ts | Open/closed state for a collapsible region, optionally remembered across sessions. | 0 | 6 |
 | packages/tcip-web/frontend/src/hooks/useEditableAgentRequest.test.tsx | (none found) | 1 | 0 |
 | packages/tcip-web/frontend/src/hooks/useEditableAgentRequest.ts | A staged agent request that follows the dataset selection until the breeder edits it. | 0 | 4 |
 | packages/tcip-web/frontend/src/hooks/useEmbeddedToolRetry.test.ts | (none found) | 1 | 0 |
@@ -450,7 +450,7 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | packages/tcip-web/frontend/src/tabs/ReviewTab.tsx | (none found) | 30 | 2 |
 | packages/tcip-web/frontend/src/tabs/RunMonitorLayout.tsx | The shell the Training and Tuning tabs share: a fixed-width scrolling sidebar of runs beside a detail region. | 0 | 2 |
 | packages/tcip-web/frontend/src/tabs/TrainingTab.test.tsx | (none found) | 5 | 0 |
-| packages/tcip-web/frontend/src/tabs/TrainingTab.tsx | (none found) | 14 | 2 |
+| packages/tcip-web/frontend/src/tabs/TrainingTab.tsx | (none found) | 16 | 2 |
 | packages/tcip-web/frontend/src/tabs/TuningTab.test.tsx | (none found) | 6 | 0 |
 | packages/tcip-web/frontend/src/tabs/TuningTab.tsx | (none found) | 14 | 2 |
 | packages/tcip-web/frontend/src/tabs/agentPrompts.test.ts | (none found) | 1 | 0 |
