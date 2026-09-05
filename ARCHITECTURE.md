@@ -1105,16 +1105,16 @@ registered at HEAD.
 
 | method | path | handler | line |
 |---|---|---|---|
-| POST | `/sweeps` | `relaunch_sweep` | `routes/tuning.py:472` |
-| POST | `/sweeps/{sweep_id}/cancel` | `cancel_sweep_route` | `routes/tuning.py:512` |
-| GET | `/sweeps` | `list_sweeps` | `routes/tuning.py:523` |
-| GET | `/sweeps/{sweep_id}` | `get_sweep` | `routes/tuning.py:539` |
-| GET | `/sweeps/{sweep_id}/trials` | `list_trials` | `routes/tuning.py:580` |
-| GET | `/sweeps/{sweep_id}/trials/{trial_id}/metrics` | `get_trial_metrics` | `routes/tuning.py:601` |
-| GET | `/ray-dashboard` | `get_ray_dashboard` | `routes/tuning.py:628` |
-| POST | `/sweeps/{sweep_id}/tensorboard` | `launch_sweep_tensorboard` | `routes/tuning.py:714` |
-| POST | `/sweeps/{sweep_id}/trials/{trial_id}/tensorboard` | `launch_trial_tensorboard` | `routes/tuning.py:731` |
-| POST | `/sweeps/{sweep_id}/trials/{trial_id}/tensorboard/stop` | `stop_trial_tensorboard` | `routes/tuning.py:745` |
+| POST | `/sweeps` | `relaunch_sweep` | `routes/tuning.py:474` |
+| POST | `/sweeps/{sweep_id}/cancel` | `cancel_sweep_route` | `routes/tuning.py:514` |
+| GET | `/sweeps` | `list_sweeps` | `routes/tuning.py:525` |
+| GET | `/sweeps/{sweep_id}` | `get_sweep` | `routes/tuning.py:541` |
+| GET | `/sweeps/{sweep_id}/trials` | `list_trials` | `routes/tuning.py:582` |
+| GET | `/sweeps/{sweep_id}/trials/{trial_id}/metrics` | `get_trial_metrics` | `routes/tuning.py:603` |
+| GET | `/ray-dashboard` | `get_ray_dashboard` | `routes/tuning.py:630` |
+| POST | `/sweeps/{sweep_id}/tensorboard` | `launch_sweep_tensorboard` | `routes/tuning.py:716` |
+| POST | `/sweeps/{sweep_id}/trials/{trial_id}/tensorboard` | `launch_trial_tensorboard` | `routes/tuning.py:733` |
+| POST | `/sweeps/{sweep_id}/trials/{trial_id}/tensorboard/stop` | `stop_trial_tensorboard` | `routes/tuning.py:747` |
 
 ### routes/validation.py, prefix `/api/review` (1 route)
 
@@ -2275,7 +2275,7 @@ Phase 3 verdict: single.
 
 Must agree: the writer's row shape is what the reader and the stream consumer expect.
 Side A: `packages/tcip-mcp/src/tcip_mcp/experiments.py:948` (`def log_metrics(`, the one writer; the trainer and the envelope hand rows to the context's epoch sink instead of opening the file).
-Side B: `packages/tcip-web/src/tcip_web/routes/training.py:324` (`read_log(key, after=cursor)`, the training stream's incremental tail, pushed as a `TrainingMetricFrame` per row) and `routes/tuning.py:614` (`read_log(trial_metrics_key`, answered in the shape `_metrics_common.metrics_response` builds).
+Side B: `packages/tcip-web/src/tcip_web/routes/training.py:324` (`read_log(key, after=cursor)`, the training stream's incremental tail, pushed as a `TrainingMetricFrame` per row) and `routes/tuning.py:616` (`read_log(trial_metrics_key`, answered in the shape `_metrics_common.metrics_response` builds).
 Phase 3 verdict: single. An HPO trial with no experiment record still appends to its own trial log, one declared site in the epoch sink, pending the HPO store migration.
 
 ## S09. Web job registries persisted to .tcip/state/<name>.json  <!-- queued: P5-325 unify -->
