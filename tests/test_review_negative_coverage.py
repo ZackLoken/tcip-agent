@@ -253,7 +253,8 @@ def test_is_negative_for_subject_agrees_across_branches_after_a_same_size_edit(
     )
     populated = pred_file.read_bytes()
     os.utime(pred_file, (1_000_000, 1_000_000))
-    _seed_sidecar(d, {"checkpoint_sha256": CHECKPOINT_SHA, "id_map": {"catkin": 0}})
+    _seed_sidecar(d, {"checkpoint_sha256": CHECKPOINT_SHA, "id_map": {"catkin": 0},
+                      "subject": "catkin", "attribute": None})
 
     assert _is_negative_for_subject(str(d), "IMG_0007.JPG", None) is False
     assert _is_negative_for_subject(str(d), "IMG_0007.JPG", "catkin") is False
