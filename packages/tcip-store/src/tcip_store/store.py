@@ -394,7 +394,8 @@ def put_blob_from_path(key: Key, source: Path | str, *, expect: Version | None =
     """
     hasher = hashlib.sha256()
     with write_blob(key, expect=expect) as dst, open(source, "rb") as src:
-        while chunk := src.read(shutil.COPY_BUFSIZE):
+        # COPY_BUFSIZE is real at runtime; the stdlib stub omits it.
+        while chunk := src.read(getattr(shutil, "COPY_BUFSIZE")):
             dst.write(chunk)
             hasher.update(chunk)
     return Version(hasher.hexdigest())
