@@ -110,6 +110,7 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
             reason="No predictions are selected to validate. Choose a model with predictions for "
                    "this dataset, then try again.",
             buckets_stamped=[])
+    assert pred_dir is not None  # bucket_dirs is non-empty only when pred_dir was truthy above
 
     from tcip_mcp.pipelines.resolution import read_operating_point_sidecar, verify_stamp_binding
     from tcip_mcp.prediction_buckets import bucket_stems
@@ -250,8 +251,14 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
         next(iter(tile_size_derived_froms)) if len(tile_size_derived_froms) == 1
         and review_tile_size is not None else None)
     review_tiled = next(iter(tiled_vals)) if len(tiled_vals) == 1 else None
-    review_tiled_source = (next(iter(tiled_sources)) if len(tiled_sources) == 1
-                           and review_tiled is not None else "default")
+    _review_tiled_source_recorded = (
+        next(iter(tiled_sources)) if len(tiled_sources) == 1
+        and review_tiled is not None else None)
+    # A recorded but unrecognized (non-str, e.g. a stamp with no "source" sub-key) value falls
+    # back the same as a mixed or absent one: an honest default, never a fabricated source label.
+    review_tiled_source = (
+        _review_tiled_source_recorded if isinstance(_review_tiled_source_recorded, str)
+        else "default")
 
     # Refuse here, naming the bucket(s), rather than let the resolver's bare ValueError surface.
     if review_tile_size_source == "explicit" and review_tile_size_derived_from is None:
@@ -289,8 +296,25 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
         "subject": req.subject,
     }
     try:
+        # Named explicitly, not **resolver_inputs: that dict's values mix types for the evidence
+        # record above, not the one uniform type a **-unpack needs against differently-typed params.
         bundle = resolve_operating_point_from_review(
-            trait_name=req.trait, experiment_id=review_experiment_id, **resolver_inputs)
+            trait_name=req.trait,
+            experiment_id=review_experiment_id,
+            review_state=review_state,
+            only_completed=True,
+            bucket_identities=bucket_identities,
+            staged_conf_floor=staged_conf_floor,
+            tile_size=review_tile_size,
+            tile_size_source=review_tile_size_source,
+            tile_size_derived_from=review_tile_size_derived_from,
+            tiled=review_tiled,
+            tiled_source=review_tiled_source,
+            scope_root=req.dataset_root,
+            calibration_date=prediction_bucket_date(pred_dir),
+            experiment_id_ambiguous=len(bucket_exp_ids) > 1,
+            subject=req.subject,
+        )
     except TraitUnknownError:
         raise HTTPException(
             400,
