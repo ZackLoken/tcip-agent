@@ -166,6 +166,7 @@ def build_overviews(path: str | Path,
             child.wait(timeout=30)
             abandon(f"overview build for {path} cancelled")
     if child.returncode != 0:
+        assert child.stderr is not None, "stderr=subprocess.PIPE was passed to Popen above"
         abandon(f"overview build for {path} failed: {(child.stderr.read() or '').strip()}")
     if progress_cb is not None:
         progress_cb(1.0)
