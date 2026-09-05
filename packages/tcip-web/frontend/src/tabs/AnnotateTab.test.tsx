@@ -9,6 +9,7 @@ import * as CanvasStageMock from "@/components/Canvas/CanvasStage";
 import * as canvasSync from "@/lib/canvasSync";
 import { notifyCanvasStateRequest } from "@/lib/canvasSync";
 import type { CompletenessRecord } from "@/lib/coverage";
+import { CUT_RING_REFUSAL } from "@/lib/polygonGeometry";
 import { sessionsApi } from "@/api/sessions";
 import { useStore } from "@/store";
 import { AnnotateTab } from "@/tabs/AnnotateTab";
@@ -1025,6 +1026,106 @@ describe("Cut tool arming", () => {
     });
     fireEvent.keyDown(window, { key: "x" });
     expect(useStore.getState().annotateUi.cut).toBe(false);
+  });
+});
+
+describe("Cut gesture", () => {
+  function armOnPolyA(): void {
+    act(() => {
+      useStore.getState().selectPolygon(0);
+      useStore.getState().setCut(true);
+    });
+  }
+
+  it("with a polygon selected, the two clicks produce two polygons and the flag stays set", async () => {
+    const stage = await renderPolygonCanvas();
+    armOnPolyA();
+    fireEvent.click(stage, { clientX: 105, clientY: 0, button: 0 });
+    expect(useStore.getState().canvas.polygons).toHaveLength(2); // only the start is pending so far
+    fireEvent.click(stage, { clientX: 105, clientY: 250, button: 0 });
+    expect(useStore.getState().canvas.polygons).toHaveLength(3);
+    expect(useStore.getState().annotateUi.cut).toBe(true);
+  });
+
+  it("a first click near the selected outline places the start and inserts no vertex", async () => {
+    const stage = await renderPolygonCanvas();
+    armOnPolyA();
+    // 2px outside POLY_A's top edge: within the edge-insert threshold, so without the cut guard
+    // onDown would splice a new vertex into the ring here instead of arming the start.
+    fireEvent.mouseDown(stage, { clientX: 100, clientY: 8, button: 0 });
+    fireEvent.click(stage, { clientX: 100, clientY: 8, button: 0 });
+    expect(useStore.getState().canvas.polygons[0].rings[0]).toHaveLength(4);
+    fireEvent.click(stage, { clientX: 100, clientY: 250, button: 0 }); // the start was real
+    expect(useStore.getState().canvas.polygons).toHaveLength(3);
+  });
+
+  it("with none selected, the first click toasts", async () => {
+    const stage = await renderPolygonCanvas();
+    act(() => useStore.getState().setCut(true));
+    fireEvent.click(stage, { clientX: 500, clientY: 500, button: 0 });
+    expect(useStore.getState().toasts.at(-1)?.message).toBe(
+      "Select a polygon to cut, then click two points on either side of it.",
+    );
+  });
+
+  it("Escape clears the start and the flag", async () => {
+    const stage = await renderPolygonCanvas();
+    armOnPolyA();
+    fireEvent.click(stage, { clientX: 105, clientY: 0, button: 0 });
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(useStore.getState().annotateUi.cut).toBe(false);
+    // and the start really cleared: re-arming and clicking once is a fresh first click, not a cut
+    act(() => useStore.getState().setCut(true));
+    fireEvent.click(stage, { clientX: 105, clientY: 250, button: 0 });
+    expect(useStore.getState().canvas.polygons).toHaveLength(2);
+  });
+
+  it("right-click clears the start alone and deletes nothing", async () => {
+    const stage = await renderPolygonCanvas();
+    armOnPolyA();
+    fireEvent.click(stage, { clientX: 105, clientY: 0, button: 0 });
+    fireEvent.contextMenu(stage, { clientX: 105, clientY: 0 });
+    expect(useStore.getState().canvas.polygons).toHaveLength(2);
+    expect(useStore.getState().annotateUi.cut).toBe(true);
+    fireEvent.click(stage, { clientX: 105, clientY: 250, button: 0 }); // a fresh first click, not a cut
+    expect(useStore.getState().canvas.polygons).toHaveLength(2);
+  });
+
+  it("an image change clears the start and the flag", async () => {
+    const stage = await renderPolygonCanvas();
+    armOnPolyA();
+    fireEvent.click(stage, { clientX: 105, clientY: 0, button: 0 });
+    act(() => {
+      useStore
+        .getState()
+        .patchGui({ dataset: { ...useStore.getState().gui.dataset, current_image_index: 1 } });
+    });
+    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(2));
+    await flush();
+    expect(useStore.getState().annotateUi.cut).toBe(false);
+  });
+
+  it("a selection change between the clicks refuses", async () => {
+    const stage = await renderPolygonCanvas();
+    armOnPolyA();
+    fireEvent.click(stage, { clientX: 105, clientY: 0, button: 0 });
+    act(() => useStore.getState().selectPolygon(1));
+    fireEvent.click(stage, { clientX: 105, clientY: 250, button: 0 });
+    expect(useStore.getState().canvas.polygons).toHaveLength(2);
+    expect(useStore.getState().toasts.at(-1)?.message).toBe(
+      "The selection changed since the cut started; select the polygon again.",
+    );
+  });
+
+  it("a refused cut leaves the polygons unchanged and the flag set", async () => {
+    const stage = await renderPolygonCanvas();
+    armOnPolyA();
+    fireEvent.click(stage, { clientX: 105, clientY: 0, button: 0 });
+    fireEvent.click(stage, { clientX: 105, clientY: 5, button: 0 }); // never reaches the outline
+    expect(useStore.getState().canvas.polygons).toHaveLength(2);
+    expect(useStore.getState().canvas.polygons[0].rings[0]).toHaveLength(4);
+    expect(useStore.getState().annotateUi.cut).toBe(true);
+    expect(useStore.getState().toasts.at(-1)?.message).toBe(CUT_RING_REFUSAL);
   });
 });
 

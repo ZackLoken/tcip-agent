@@ -42,6 +42,7 @@ import {
 import { canvasToAnnotations } from "@/lib/labelSerde";
 import {
   computePolygonBboxes,
+  cutRing,
   findHitPoint,
   findHoveredPolygon,
   pointInRings,
@@ -52,7 +53,7 @@ import { applyEditDrag, hitTestEdit, MIN_BOX_SIDE, type EditDrag } from "@/lib/e
 import { useSubjectColors } from "@/lib/subjectColors";
 import { nextMode } from "@/lib/toolMode";
 import { useStore } from "@/store";
-import type { Box } from "@/store/types";
+import type { Box, PolygonShape } from "@/store/types";
 
 const SNAP_RADIUS_CANVAS = 15;
 const VERTEX_HANDLE_RADIUS = 4;
@@ -78,6 +79,7 @@ export function AnnotateTab() {
   const dragBox = useStore((s) => s.dragBox);
   const deleteBox = useStore((s) => s.deleteBox);
   const deletePolygon = useStore((s) => s.deletePolygon);
+  const splitPolygon = useStore((s) => s.splitPolygon);
   const updatePolygon = useStore((s) => s.updatePolygon);
   const dragVertex = useStore((s) => s.dragVertex);
   const addPoint = useStore((s) => s.addPoint);
@@ -104,6 +106,12 @@ export function AnnotateTab() {
 
   const [drawing, setDrawing] = useState<Box | null>(null);
   const [cursor, setCursor] = useState<[number, number] | null>(null);
+  // The cut tool's pending first click: never canvas.currentPolygon, which undo, the mirror and
+  // the stream/vertex-placement branches all read as an open polygon in progress.
+  const [cutStart, setCutStart] = useState<{
+    point: [number, number];
+    polygon: PolygonShape;
+  } | null>(null);
   const stageRef = useRef<Konva.Stage | null>(null);
   // Box editing (mirrors polygon vertex editing): a selected box shows handles; a press on
   // one starts a corner-resize / move drag. selectedBoxIdx is cleared on image change below.
@@ -289,7 +297,18 @@ export function AnnotateTab() {
     boxDragRef.current = null;
     pointDragRef.current = null;
     streamingRef.current = false;
+    setCutStart(null);
+    useStore.getState().setCut(false);
   }, [currentImageName]);
+
+  // Leaving polygon mode clears a pending cut and its flag: the gesture and the flag are only
+  // meaningful there, and a lingering armed cut would surprise the next mode's own clicks.
+  useEffect(() => {
+    if (mode !== "polygon") {
+      setCutStart(null);
+      useStore.getState().setCut(false);
+    }
+  }, [mode]);
 
   // ── Live canvas push (agent visibility: capture_live_canvas) ──────────────
   // The ref always holds the freshest closure so the debounced pusher never reads stale state.
@@ -343,6 +362,10 @@ export function AnnotateTab() {
         activeSubject: activeSubject ?? "",
         visible: annotateUi.visible,
         colorFor: subjectColor,
+        cutStart: cutStart
+          ? { point: cutStart.point, color: subjectColor(cutStart.polygon.subject) }
+          : null,
+        cursor,
       }),
     };
   };
@@ -373,6 +396,7 @@ export function AnnotateTab() {
     annotateUi.visible,
     annotateUi.draggingVertex,
     drawing,
+    cutStart,
   ]);
   useEffect(() => {
     canvasPusherRef.current.schedule(() => buildCanvasBodyRef.current(), false);
@@ -706,6 +730,18 @@ export function AnnotateTab() {
     return false;
   }
 
+  // No polygon selected when the cut tool's first click lands: nothing to cut. Refuse and say so,
+  // once (not per click), the same pattern requireSubject uses above.
+  const noCutSelectionNoticeRef = useRef<string | null>(null);
+  function requireCutSelection(): void {
+    if (noCutSelectionNoticeRef.current !== currentImageName) {
+      noCutSelectionNoticeRef.current = currentImageName;
+      useStore
+        .getState()
+        .pushToast("Select a polygon to cut, then click two points on either side of it.");
+    }
+  }
+
   useKeyboardShortcuts([
     { keys: "ctrl+z", action: () => undo(), when: () => !isLocked },
     { keys: "ctrl+shift+z", action: () => redo(), when: () => !isLocked },
@@ -746,6 +782,8 @@ export function AnnotateTab() {
         selectPolygon(null);
         setSelectedBoxIdx(null);
         selectPoint(null);
+        setCutStart(null);
+        useStore.getState().setCut(false);
       },
     },
     // Held-key auto-repeat (~30/s) would queue a full image render per tick: one flip per press.
@@ -884,6 +922,7 @@ export function AnnotateTab() {
     // handle radius of a vertex on the selected polygon), an edge insert,
     // or a new vertex add.
     if (canvas.currentPolygon.length === 0 && canvas.selectedPolygonIdx !== null) {
+      if (annotateUi.cut) return; // a cut click is never a vertex grab or an edge insert
       const pi = canvas.selectedPolygonIdx;
       const poly = canvas.polygons[pi];
       if (!poly) return;
@@ -1179,6 +1218,49 @@ export function AnnotateTab() {
       return;
     }
 
+    // Cut: an endpoint is outside the selected ring by definition, so without this branch the
+    // click would miss the polygon hit test below and deselect the very shape being cut.
+    if (annotateUi.cut) {
+      if (!cutStart) {
+        if (canvas.selectedPolygonIdx === null) {
+          requireCutSelection();
+          return;
+        }
+        setCutStart({ point: [ix, iy], polygon: canvas.polygons[canvas.selectedPolygonIdx] });
+        return;
+      }
+      const idx = canvas.selectedPolygonIdx;
+      const current = idx !== null ? canvas.polygons[idx] : null;
+      if (idx === null || current !== cutStart.polygon) {
+        setCutStart(null);
+        useStore
+          .getState()
+          .pushToast("The selection changed since the cut started; select the polygon again.");
+        return;
+      }
+      if (cutStart.polygon.rings.length > 1) {
+        setCutStart(null);
+        useStore
+          .getState()
+          .pushToast(
+            `This shape covers ${cutStart.polygon.rings.length} separate parts of one object; ` +
+              "the cut applies to a single outline. Cut a part in polygon mode after the others " +
+              "are removed, or redraw it.",
+          );
+        return;
+      }
+      const result = cutRing(cutStart.polygon.rings[0], cutStart.point, [ix, iy]);
+      if ("reason" in result) {
+        setCutStart(null);
+        useStore.getState().pushToast(result.reason);
+        return;
+      }
+      splitPolygon(idx, result.rings);
+      incrementAnnotationsAdded(1);
+      setCutStart(null);
+      return;
+    }
+
     // Stream (freehand): click starts laying vertices, click again pauses (the polygon stays
     // open, resume with another click), and double-click closes it, exactly like non-stream
     // drawing. The button is never held; right-click (onContextMenu) cancels outright.
@@ -1258,6 +1340,12 @@ export function AnnotateTab() {
       const hit = findHitPoint([ix, iy], canvas.points, POINT_HIT_CANVAS / (view.scale || 1));
       if (hit !== null) deletePoint(hit);
       else selectPoint(null);
+      return;
+    }
+    // A pending cut has no open polygon, so without this branch a right-click inside the
+    // selected polygon reaches its delete below and the cancel gesture deletes the parent.
+    if (cutStart) {
+      setCutStart(null);
       return;
     }
     // Right-click cancels an in-progress / streaming polygon first
@@ -1442,6 +1530,17 @@ export function AnnotateTab() {
                   points={canvas.currentPolygon}
                   cursor={cursor}
                   stroke={activeSubject ? subjectColor(activeSubject) : "#FFE7B1"}
+                  strokeW={polyStroke}
+                  vertR={vertR}
+                />
+              )}
+
+              {/* Pending cut: its start plus a dashed segment to the cursor */}
+              {mode === "polygon" && cutStart && (
+                <InProgressPolygon
+                  points={[cutStart.point]}
+                  cursor={cursor}
+                  stroke={subjectColor(cutStart.polygon.subject)}
                   strokeW={polyStroke}
                   vertR={vertR}
                 />
