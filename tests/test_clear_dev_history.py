@@ -6,6 +6,7 @@ leaving every other store untouched.
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 from pathlib import Path
 
@@ -154,6 +155,26 @@ def test_main_apply_with_by_but_no_reason_refuses_before_touching_anything(
     assert len(ts.keys(FRICTION_REPORT_STORE, str(tmp_path))) == 1
 
 
+def test_main_apply_and_plan_together_refuses_before_touching_anything(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bind_default()
+    module = _load_script()
+    _seed_dev_history(tmp_path)
+
+    monkeypatch.setattr(
+        sys, "argv",
+        ["clear_dev_history.py", "--apply", "--plan", "--by", "user:zack",
+         "--reason", "alpha handoff", str(tmp_path)],
+    )
+    with pytest.raises(SystemExit) as raised:
+        module.main()
+    assert raised.value.code == 2
+
+    assert len(ts.keys(FRICTION_REPORT_STORE, str(tmp_path))) == 1
+    assert len(ts.read_log(audit_log_key(tmp_path)).records) == 3
+
+
 def test_main_apply_over_a_seeded_root_exits_zero_and_records_the_closing_line(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -201,34 +222,91 @@ def test_a_failed_audit_append_after_clearing_exits_nonzero_naming_audit_entry_n
     assert ts.read_log(learning_capture_key(tmp_path)).records == []
 
 
-def test_stale_exported_loose_copies_are_removed_under_the_database_backend(
+def test_a_store_error_on_one_root_does_not_abort_the_others(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A second root a mis-bound backend refuses must not stop the first from clearing, and
+    must not surface as an uncaught traceback: main() names the refusal and moves on."""
+    from tcip_store.binding import BACKEND_ENV, FILE_BACKEND, SQLITE_BACKEND
+
+    root1 = tmp_path
+    root2 = tmp_path.parent / "project2"
+    root2.mkdir()
+
+    (root2 / ".tcip").mkdir()
+    monkeypatch.setenv(BACKEND_ENV, SQLITE_BACKEND)
+    sqlite_backend = bind_default()
+    try:
+        # An explicit scope=root2 append, not _seed_dev_history's tools (bare @audited, so
+        # platform-scoped): those would write against TCIP_STATE_ROOT, not root2 itself.
+        record_event_or_raise("seed", {}, scope=root2)
+    finally:
+        sqlite_backend.close()
+
+    monkeypatch.setenv(BACKEND_ENV, FILE_BACKEND)
+    file_backend = bind_default()
+    try:
+        module = _load_script()
+        _seed_dev_history(root1)
+
+        monkeypatch.setattr(
+            sys, "argv",
+            ["clear_dev_history.py", "--apply", "--by", "user:zack", "--reason", "alpha handoff",
+             str(root1), str(root2)],
+        )
+        exit_code = module.main()
+        output = capsys.readouterr().out
+
+        assert exit_code == 2
+        assert f"{root1}: closing audit line recorded" in output
+        assert f"{root2}: refused, StoreError:" in output
+        assert len(ts.read_log(audit_log_key(root1)).records) == 1
+    finally:
+        file_backend.close()
+
+
+def test_stale_exported_loose_copies_are_removed_by_the_next_export_after_clearing(
     tmp_path: Path,
 ) -> None:
-    # This case is about the sqlite backend's own exported-copy mechanics, so it binds the
-    # backend directly rather than through the ambient TCIP_STORE_BACKEND.
+    """clear_root leaves an already-exported loose copy on disk; a later export_store.py run
+    is what removes it, from the tombstone the seam's own deletes now leave behind. Binds a
+    backend of its own (this case is about sqlite's exported-copy mechanics, not the ambient
+    TCIP_STORE_BACKEND) and closes it itself, since the per-test fixture closes only its own.
+    """
     from tcip_store import bind
     from tcip_store.sqlite_backend import SqliteBackend
 
-    bind(SqliteBackend())
-    module = _load_script()
-    _seed_dev_history(tmp_path)
+    backend = SqliteBackend()
+    try:
+        bind(backend)
+        module = _load_script()
+        _seed_dev_history(tmp_path)
 
-    from tcip_store.export import export_root
+        from tcip_store.export import export_root
 
-    export_root(str(tmp_path))
-    reports_dir = tmp_path / ".tcip" / "reports"
-    retros_dir = tmp_path / ".tcip" / "retrospectives"
-    audit_file = tmp_path / ".tcip" / "audit.jsonl"
-    capture_file = tmp_path / ".tcip" / "learning_capture.jsonl"
-    assert any(reports_dir.iterdir())
-    assert any(retros_dir.iterdir())
-    assert audit_file.is_file()
-    assert capture_file.is_file()
+        export_root(str(tmp_path))
+        reports_dir = tmp_path / ".tcip" / "reports"
+        retros_dir = tmp_path / ".tcip" / "retrospectives"
+        audit_file = tmp_path / ".tcip" / "audit.jsonl"
+        capture_file = tmp_path / ".tcip" / "learning_capture.jsonl"
+        assert any(reports_dir.iterdir())
+        assert any(retros_dir.iterdir())
+        assert audit_file.is_file()
+        assert capture_file.is_file()
 
-    module.clear_root(tmp_path, by="user:zack", reason="alpha handoff")
+        module.clear_root(tmp_path, by="user:zack", reason="alpha handoff")
+        assert audit_file.is_file(), "clear_root itself must not touch the export"
 
-    assert not any(reports_dir.iterdir()) if reports_dir.is_dir() else True
-    assert not any(retros_dir.iterdir()) if retros_dir.is_dir() else True
-    assert not audit_file.is_file()
-    assert not capture_file.is_file()
-    assert database_file(str(tmp_path)).is_file()
+        export_root(str(tmp_path))
+
+        assert not any(reports_dir.iterdir()) if reports_dir.is_dir() else True
+        assert not any(retros_dir.iterdir()) if retros_dir.is_dir() else True
+        assert not capture_file.is_file()
+        # audit_log itself carries the closing line clear_root just wrote, so its exported
+        # file is re-materialized with that one line rather than deleted outright.
+        lines = audit_file.read_text(encoding="utf-8").splitlines()
+        assert len(lines) == 1
+        assert json.loads(lines[0])["tool"] == "clear_dev_history"
+        assert database_file(str(tmp_path)).is_file()
+    finally:
+        backend.close()
