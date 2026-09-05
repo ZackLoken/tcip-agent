@@ -77,6 +77,9 @@ export interface Annotation {
   created_at?: string | null;
   accepted_by?: string | null;
   accepted_at?: string | null;
+  // One of "person" | "tool" | "tool_accepted" | "unattributed", from the load route's
+  // authorship_of. A load-response fact, never sent back on save (AnnotationPayload carries none).
+  authorship?: string | null;
 }
 
 /** The wire shape the Annotate save route accepts (mirrors AnnotationPayload in annotate.py):
@@ -111,6 +114,8 @@ export interface Box {
   created_at?: string | null;
   accepted_by?: string | null;
   accepted_at?: string | null;
+  // The load route's authorship classification; drives the canvas symbology, never sent on save.
+  authorship?: string | null;
 }
 
 /** A polygon on the canvas: every ring of one annotation. The drawing tool authors exactly one ring
@@ -124,6 +129,7 @@ export interface PolygonShape {
   created_at?: string | null;
   accepted_by?: string | null;
   accepted_at?: string | null;
+  authorship?: string | null;
 }
 
 /** A point on the canvas: one labelled location, the whole annotation. No extent, so no derived
@@ -137,6 +143,7 @@ export interface PointShape {
   created_at?: string | null;
   accepted_by?: string | null;
   accepted_at?: string | null;
+  authorship?: string | null;
 }
 
 /** A review detection: an outcome (TP/FP/FN) referencing a GT and/or a prediction annotation by

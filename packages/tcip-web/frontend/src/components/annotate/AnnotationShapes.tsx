@@ -4,8 +4,10 @@ import { subjectColor } from "@/api/classes";
 import { BoxOverlay } from "@/components/annotate/BoxOverlay";
 import { PointOverlay } from "@/components/annotate/PointOverlay";
 import { PolygonOverlay } from "@/components/annotate/PolygonOverlay";
+import { authorshipLabel } from "@/lib/authorshipSymbology";
 import { pointShapeVisible } from "@/lib/canvasSync";
 import { derivedBoxFromPolygon } from "@/lib/polygonGeometry";
+import { useSubjectColors } from "@/lib/subjectColors";
 import type { Box, Mode, PointShape, PolygonShape } from "@/store/types";
 
 /**
@@ -68,11 +70,13 @@ export const AnnotationShapes = memo(function AnnotationShapes({
   pointTickOuter,
   scaleLineW,
 }: AnnotationShapesProps) {
+  useSubjectColors(); // re-render on a recolour: subjectColor() below is called fresh each render
   if (!renderLabels) return null;
   return (
     <>
       {/* Boxes (only the active subject in box mode). The legend carries the standing
-          symbology; a shape is named on the canvas only while selected or hovered. */}
+          symbology; a shape is named on the canvas only while selected or hovered. A tool's own
+          box that no person has accepted draws dotted, distinct from the derived box's dash. */}
       {mode === "box" &&
         boxes.map((b, i) =>
           b.subject === activeSubject ? (
@@ -82,10 +86,11 @@ export const AnnotationShapes = memo(function AnnotationShapes({
               stroke={i === selectedBoxIdx ? "#00BFFF" : subjectColor(b.subject)}
               width={boxStroke}
               labelSize={labelSize}
-              label={b.subject}
+              label={authorshipLabel(b.subject, b.authorship)}
               showLabel={i === selectedBoxIdx || i === hoveredBoxIdx}
               selected={i === selectedBoxIdx}
               handleR={selVertR}
+              dashed={b.authorship === "tool" ? "tool" : undefined}
             />
           ) : null,
         )}
@@ -94,7 +99,7 @@ export const AnnotationShapes = memo(function AnnotationShapes({
           polygon's detection footprint is visible while boxing. Render-only, derived from
           polygonBbox here and never added to canvas.boxes, so it can't be selected/edited/deleted or
           saved (handle-less). Dashed marks it as read-only, distinct from a real editable box
-          (solid), the same convention in-progress/under-review shapes already use. */}
+          (solid) and from a tool-authored shape's dotted stroke. */}
       {mode === "box" &&
         polygons.map((p, i) =>
           p.subject === activeSubject ? (
@@ -106,7 +111,7 @@ export const AnnotationShapes = memo(function AnnotationShapes({
               labelSize={labelSize}
               label={p.subject}
               showLabel={i === hoveredDerivedIdx}
-              dashed
+              dashed="derived"
             />
           ) : null,
         )}
@@ -130,8 +135,9 @@ export const AnnotationShapes = memo(function AnnotationShapes({
             vertexRadius={selected ? selVertR : vertR}
             showVertices={showVerts}
             labelSize={labelSize}
-            label={p.subject}
+            label={authorshipLabel(p.subject, p.authorship)}
             showLabel={selected || hovered}
+            dashed={p.authorship === "tool" ? "tool" : undefined}
           />
         );
       })}
@@ -158,8 +164,9 @@ export const AnnotationShapes = memo(function AnnotationShapes({
             tickOuter={pointTickOuter}
             lineW={scaleLineW * 1.6}
             labelSize={labelSize}
-            label={p.subject}
+            label={authorshipLabel(p.subject, p.authorship)}
             showLabel={selected || i === hoveredPointIdx}
+            dashed={p.authorship === "tool" ? "tool" : undefined}
           />
         );
       })}

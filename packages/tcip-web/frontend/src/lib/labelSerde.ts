@@ -45,13 +45,30 @@ export function annotationsToCanvas(annotations: Annotation[]): CanvasLabels {
         subject: a.subject,
         attributes,
         ...provenance(a),
+        authorship: a.authorship ?? null,
       });
     } else if (a.bbox) {
       const [x1, y1, x2, y2] = a.bbox;
-      boxes.push({ x1, y1, x2, y2, subject: a.subject, attributes, ...provenance(a) });
+      boxes.push({
+        x1,
+        y1,
+        x2,
+        y2,
+        subject: a.subject,
+        attributes,
+        ...provenance(a),
+        authorship: a.authorship ?? null,
+      });
     } else if (a.point) {
       const [x, y] = a.point;
-      points.push({ x, y, subject: a.subject, attributes, ...provenance(a) });
+      points.push({
+        x,
+        y,
+        subject: a.subject,
+        attributes,
+        ...provenance(a),
+        authorship: a.authorship ?? null,
+      });
     } else {
       imageAnnotations.push({ ...a, attributes });
     }

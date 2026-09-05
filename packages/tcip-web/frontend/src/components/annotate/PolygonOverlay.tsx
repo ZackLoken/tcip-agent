@@ -2,6 +2,7 @@ import { memo } from "react";
 import { Circle, Line } from "react-konva";
 
 import { HaloLabel } from "@/components/HaloLabel";
+import { dashPattern } from "@/lib/authorshipSymbology";
 import type { PolygonShape } from "@/store/types";
 
 export const PolygonOverlay = memo(function PolygonOverlay({
@@ -13,6 +14,7 @@ export const PolygonOverlay = memo(function PolygonOverlay({
   labelSize,
   label,
   showLabel,
+  dashed,
 }: {
   polygon: PolygonShape;
   stroke: string;
@@ -22,6 +24,8 @@ export const PolygonOverlay = memo(function PolygonOverlay({
   labelSize: number;
   label: string;
   showLabel?: boolean;
+  /** A tool's own polygon that no person has accepted draws dotted; every other polygon is solid. */
+  dashed?: "tool";
 }) {
   /** Every ring of the annotation draws, in the instance's own stroke: the shape a reviewer
    *  confirms is all of it, not the first contour. Selection/hover styling is shared, so touching
@@ -30,10 +34,18 @@ export const PolygonOverlay = memo(function PolygonOverlay({
   const rings = polygon.rings.filter((ring) => ring.length >= 2);
   if (!rings.length) return null;
   const [x0, y0] = rings[0][0];
+  const dash = dashed ? dashPattern(dashed, width) : undefined;
   return (
     <>
       {rings.map((ring, ri) => (
-        <Line key={`r-${ri}`} points={ring.flat()} closed stroke={stroke} strokeWidth={width} />
+        <Line
+          key={`r-${ri}`}
+          points={ring.flat()}
+          closed
+          stroke={stroke}
+          strokeWidth={width}
+          dash={dash}
+        />
       ))}
       {showVertices &&
         rings.map((ring, ri) =>

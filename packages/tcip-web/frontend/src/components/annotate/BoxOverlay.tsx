@@ -2,6 +2,7 @@ import { memo } from "react";
 import { Rect } from "react-konva";
 
 import { HaloLabel } from "@/components/HaloLabel";
+import { dashPattern, type DashKind } from "@/lib/authorshipSymbology";
 import type { Box } from "@/store/types";
 
 /** Per-shape memo: dragVertex/dragBox replace the whole polygons/boxes array on each RAF tick
@@ -27,7 +28,7 @@ export const BoxOverlay = memo(function BoxOverlay({
   showLabel?: boolean;
   selected?: boolean;
   handleR?: number;
-  dashed?: boolean;
+  dashed?: DashKind;
 }) {
   const corners: [number, number][] = [
     [box.x1, box.y1],
@@ -44,7 +45,7 @@ export const BoxOverlay = memo(function BoxOverlay({
         height={box.y2 - box.y1}
         stroke={stroke}
         strokeWidth={width}
-        dash={dashed ? [6 * width, 4 * width] : undefined}
+        dash={dashed ? dashPattern(dashed, width) : undefined}
       />
       {selected &&
         handleR &&

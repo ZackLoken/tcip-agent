@@ -451,6 +451,84 @@ describe("AnnotateTab subject rendering", () => {
   });
 });
 
+describe("AnnotateTab authorship symbology", () => {
+  it("a tool's own box draws dotted and names itself on hover; the other three stay solid", async () => {
+    useStore.getState().setRegistry({ subject_a: {} });
+    loadSpy.mockImplementation((imagePath) =>
+      Promise.resolve({
+        ...labelsFor(imagePath),
+        boxes: [
+          {
+            x1: 10,
+            y1: 10,
+            x2: 50,
+            y2: 50,
+            subject: "subject_a",
+            attributes: {},
+            authorship: "tool",
+          },
+          {
+            x1: 60,
+            y1: 10,
+            x2: 90,
+            y2: 50,
+            subject: "subject_a",
+            attributes: {},
+            authorship: "person",
+          },
+          {
+            x1: 10,
+            y1: 60,
+            x2: 50,
+            y2: 90,
+            subject: "subject_a",
+            attributes: {},
+            authorship: "tool_accepted",
+          },
+          {
+            x1: 60,
+            y1: 60,
+            x2: 90,
+            y2: 90,
+            subject: "subject_a",
+            attributes: {},
+            authorship: "unattributed",
+          },
+        ],
+      }),
+    );
+    render(<AnnotateTab />);
+    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
+    await flush();
+
+    const rects = screen.getAllByTestId("k-rect");
+    expect(rects).toHaveLength(4);
+    expect(rects[0]).toHaveAttribute("data-dash", "true"); // tool: dotted
+    expect(rects[1]).not.toHaveAttribute("data-dash"); // person: solid
+    expect(rects[2]).not.toHaveAttribute("data-dash"); // tool_accepted: solid
+    expect(rects[3]).not.toHaveAttribute("data-dash"); // unattributed: solid
+
+    // Hovering the tool box names it with the authorship it draws with (the move handler is
+    // rAF-throttled, so a real timer tick must land before the hover state updates).
+    fireEvent.mouseMove(screen.getByTestId("canvas-stage"), { clientX: 30, clientY: 30 });
+    await act(async () => void (await new Promise((r) => setTimeout(r, 25))));
+    expect(
+      screen
+        .getAllByTestId("k-text")
+        .some((t) => t.getAttribute("data-text") === "subject_a, tool"),
+    ).toBe(true);
+  });
+
+  it("the legend states the dotted stroke means a tool drew it, unaccepted", async () => {
+    useStore.getState().setRegistry({ subject_a: {} });
+    render(<AnnotateTab />);
+    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
+    await flush();
+
+    expect(screen.getByText("Dotted = drawn by a tool, not yet accepted")).toBeInTheDocument();
+  });
+});
+
 describe("AnnotateTab point tool", () => {
   const stage = () => screen.getByTestId("canvas-stage");
   // The move handler is rAF-throttled; jsdom fires rAF off a timer, so let one frame land.
