@@ -15,6 +15,7 @@
  * rule), so the server-side render (capture_live_canvas) is faithful by construction.
  */
 
+import { authorshipLabel } from "@/lib/authorshipSymbology";
 import { ringsBbox } from "@/lib/polygonGeometry";
 import type { ReviewColors } from "@/lib/reviewColors";
 import {
@@ -44,10 +45,15 @@ export interface CanvasShape {
   color: string;
   fill?: boolean;
   dashed?: boolean;
+  // Which pattern a dashed shape draws (a tool's own unaccepted shape vs. a derived box); absent
+  // for a solid shape. render_canvas_state reads only `dashed`, so this extra key is inert to it.
+  dash_kind?: "tool" | "derived";
   label?: string;
   tag?: string; // gt | tp | fp | fn | pred | in_progress
   created_by?: string | null;
   accepted_by?: string | null;
+  // The load route's authorship classification (person | tool | tool_accepted | unattributed).
+  authorship?: string | null;
 }
 
 export interface CanvasStateBody {
@@ -146,15 +152,18 @@ export function buildAnnotateShapes(args: {
 
   const shapes: CanvasShape[] = [];
   const pushPolygon = (p: PolygonShape, selected: boolean) => {
+    const isTool = p.authorship === "tool";
     p.rings.forEach((ring, i) => {
       shapes.push({
         kind: "polygon",
         points: rPts(ring),
         color: selected ? "#00BFFF" : args.colorFor(p.subject),
-        label: i === 0 ? p.subject : undefined,
+        ...(isTool ? { dashed: true, dash_kind: "tool" as const } : {}),
+        label: i === 0 ? authorshipLabel(p.subject, p.authorship) : undefined,
         tag: "gt",
         created_by: p.created_by ?? null,
         accepted_by: p.accepted_by ?? null,
+        authorship: p.authorship ?? null,
       });
     });
   };
@@ -172,14 +181,17 @@ export function buildAnnotateShapes(args: {
         })
       )
         return;
+      const isTool = p.authorship === "tool";
       shapes.push({
         kind: "point",
         points: [[r1(p.x), r1(p.y)]],
         color: selected ? "#00BFFF" : args.colorFor(p.subject),
-        label: p.subject,
+        ...(isTool ? { dashed: true, dash_kind: "tool" as const } : {}),
+        label: authorshipLabel(p.subject, p.authorship),
         tag: "gt",
         created_by: p.created_by ?? null,
         accepted_by: p.accepted_by ?? null,
+        authorship: p.authorship ?? null,
       });
     });
   };
@@ -225,14 +237,17 @@ export function buildAnnotateShapes(args: {
   args.boxes.forEach((b, i) => {
     if (!boxMode || b.subject !== args.activeSubject) return;
     const selected = i === (args.selectedBoxIdx ?? null);
+    const isTool = b.authorship === "tool";
     shapes.push({
       kind: "box",
       xyxy: [r1(b.x1), r1(b.y1), r1(b.x2), r1(b.y2)],
       color: selected ? "#00BFFF" : args.colorFor(b.subject),
-      label: b.subject,
+      ...(isTool ? { dashed: true, dash_kind: "tool" as const } : {}),
+      label: authorshipLabel(b.subject, b.authorship),
       tag: "gt",
       created_by: b.created_by ?? null,
       accepted_by: b.accepted_by ?? null,
+      authorship: b.authorship ?? null,
     });
   });
   // ...plus each active-subject polygon's read-only derived box, mirroring the canvas so the capture
@@ -248,10 +263,12 @@ export function buildAnnotateShapes(args: {
       xyxy: [r1(x1), r1(y1), r1(x2), r1(y2)],
       color: args.colorFor(p.subject),
       dashed: true,
-      label: p.subject,
+      dash_kind: "derived",
+      label: authorshipLabel(p.subject, p.authorship),
       tag: "gt",
       created_by: p.created_by ?? null,
       accepted_by: p.accepted_by ?? null,
+      authorship: p.authorship ?? null,
     });
   });
   // The other modes still show the selected polygon (the shape being inspected).
