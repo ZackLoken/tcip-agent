@@ -18,6 +18,7 @@ from tcip_annotation import BBox, Point, Polygon
 from tcip_annotation.json_io import (
     UnreadableLabelDocument,
     annotation_from_payload,
+    authorship_of,
     read_annotations_versioned,
     write_annotations,
 )
@@ -134,6 +135,8 @@ def _ann_dict(a: Annotation) -> dict:
     every ring rather than silently only the first. The canvas itself still only ever *draws* a
     single ring by hand (see ``AnnotationPayload.points`` below, the save side). ``point`` is the
     singular ``[x, y]`` of a placed prompt / keypoint, the same key the on-disk schema uses.
+    ``authorship`` is this load response's own field, derived from the four provenance fields
+    through :func:`authorship_of`; the label document itself carries no such field.
     """
     out: dict = {"subject": a.subject, "attributes": dict(a.attributes)}
     geom = a.geometry
@@ -149,6 +152,7 @@ def _ann_dict(a: Annotation) -> dict:
     out["created_at"] = a.created_at
     out["accepted_by"] = a.accepted_by
     out["accepted_at"] = a.accepted_at
+    out["authorship"] = authorship_of(a)
     return out
 
 
