@@ -48,7 +48,9 @@ class FocalLoss(BaseLoss):
         self.reduction = reduction
         if weight is not None and not torch.is_tensor(weight):
             weight = torch.tensor(weight, dtype=torch.float32)
-        # Registered as a buffer so it moves with the model via .to(device).
+        # Registered as a buffer so it moves with the model via .to(device); the annotation
+        # states the buffer's real type since nn.Module's own __getattr__ stub can't.
+        self.weight: torch.Tensor | None
         self.register_buffer("weight", weight)
 
     def forward(self, predictions, targets):
@@ -322,18 +324,24 @@ def build_loss(
         # term makes a per-term argument a TypeError from whichever term lacks it; dropping it
         # silently builds a loss that is not the one asked for.
         accepted = {p: _accepted_kwargs(p) for p in parts}
-        takes = lambda p, k: accepted[p] is None or k in accepted[p]  # noqa: E731
-        unusable = sorted(k for k in kwargs if not any(takes(p, k) for p in parts))
+
+        def _takes(p: str, k: str) -> bool:
+            accepted_p = accepted[p]
+            return accepted_p is None or k in accepted_p
+
+        unusable = sorted(k for k in kwargs if not any(_takes(p, k) for p in parts))
         if unusable:
             raise ValueError(
                 f"{unusable} not accepted by any term of '{name}'. Each term accepts: "
-                + "; ".join(f"{p}: {'any' if accepted[p] is None else sorted(accepted[p])}"
-                            for p in parts)
+                + "; ".join(
+                    f"{p}: {'any' if (accepted_p := accepted[p]) is None else sorted(accepted_p)}"
+                    for p in parts
+                )
             )
         sub_losses = [
             build_loss(p, num_classes=num_classes, weight_scheme=weight_scheme,
                        class_distribution=(class_distribution if p in _WEIGHTABLE_LOSSES else None),
-                       **{k: v for k, v in kwargs.items() if takes(p, k)})
+                       **{k: v for k, v in kwargs.items() if _takes(p, k)})
             for p in parts
         ]
         return CombinedLoss(sub_losses)
