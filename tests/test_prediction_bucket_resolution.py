@@ -10,11 +10,7 @@ from tcip_annotation.json_io import write_annotations
 from tcip_annotation.review_engine import ReviewContext, ReviewDetection, ReviewEngine
 
 from tcip_mcp.dataset_layout import models_with_predictions, prediction_dir
-from tcip_mcp.prediction_buckets import (
-    BucketHoldsDocuments,
-    bucket_key_of,
-    resolve_prediction_bucket,
-)
+from tcip_mcp.prediction_buckets import bucket_key_of, resolve_prediction_bucket
 
 DATE = "2026-02-11"
 
@@ -91,6 +87,8 @@ def test_document_holding_bucket_with_no_verdicts_refuses_naming_a_free_suggesti
     """A rail must admit valid work: the suggested bucket a document refusal names is itself
     free of both a verdict and a document, and writing into it (the platform's own producer)
     succeeds."""
+    from tcip_mcp.prediction_buckets import BucketHoldsDocuments
+
     dataset_root = tmp_path / "data"
     review_state_dir = tmp_path / "state"
     _write_bucket(dataset_root, "baseline", "img")
@@ -118,6 +116,8 @@ def test_document_refusal_exhaustion_names_no_suggestion(tmp_path):
     """Coverage of the exhausted variant search: when the requested bucket and every
     <name>@r<n> variant up to the ceiling already hold a document, the resolver refuses by name
     with no suggestion, rather than handing back an unchecked, never-searched directory."""
+    from tcip_mcp.prediction_buckets import BucketHoldsDocuments, resolve_writable_bucket
+
     dataset_root = tmp_path / "data"
     review_state_dir = tmp_path / "state"
     max_variants = 3
@@ -127,8 +127,6 @@ def test_document_refusal_exhaustion_names_no_suggestion(tmp_path):
         d = prediction_dir(dataset_root, name, DATE)
         d.mkdir(parents=True, exist_ok=True)
         write_annotations(d / "img.json", [], img_w=100, img_h=100, keep_empty=True)
-
-    from tcip_mcp.prediction_buckets import resolve_writable_bucket
 
     def _dirs_for(name: str):
         return [prediction_dir(dataset_root, name, DATE)]
