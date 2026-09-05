@@ -1123,7 +1123,8 @@ export function ReviewTab() {
       action: (e) => {
         if (!e.repeat) void recordAction("rejected");
       },
-      when: () => !!current && !edit && !reviewLocked && canReview,
+      // Same guard the Reject button is disabled on, so a classified tp/fn raises no dialog.
+      when: () => !!current && !edit && !rejectDisabled,
     },
     { keys: "e", action: () => startEdit(), when: () => !!current && !edit && canReview },
     {
