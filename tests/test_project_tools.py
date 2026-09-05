@@ -65,9 +65,9 @@ def _make_dataset(root: Path) -> None:
     (root / "annotations" / "2-11-26").mkdir(parents=True, exist_ok=True)
     json_io.write_annotations(
         str(root / "annotations" / "2-11-26" / "img_000.json"),
-        [Annotation(subject="catkin", geometry=BBox(1, 1, 9, 9))], 32, 32)
+        [Annotation(subject="bud", geometry=BBox(1, 1, 9, 9))], 32, 32)
     class_registry.write_registry(
-        root / "classes.json", ClassRegistry(subjects=(Subject(name="catkin"),)))
+        root / "classes.json", ClassRegistry(subjects=(Subject(name="bud"),)))
 
 
 def test_register_dataset_writes_identity_and_registers(tmp_path: Path):
@@ -76,16 +76,16 @@ def test_register_dataset_writes_identity_and_registers(tmp_path: Path):
     src = tmp_path / "proj"
     _make_dataset(src)
 
-    res = register_dataset(str(src), crop="hazelnut")
+    res = register_dataset(str(src), crop="currant")
     assert "error" not in res
-    assert res["crop"] == "hazelnut" and res["id"] and res["fingerprint"]
+    assert res["crop"] == "currant" and res["id"] and res["fingerprint"]
 
     # dataset.json holds {crop, id, fingerprint}.
     ident = json.loads((src / "dataset.json").read_text())
-    assert ident == {"crop": "hazelnut", "id": res["id"], "fingerprint": res["fingerprint"]}
+    assert ident == {"crop": "currant", "id": res["id"], "fingerprint": res["fingerprint"]}
     # the project registry knows the dataset.
     regs = read_datasets(src)
-    assert len(regs) == 1 and regs[0]["id"] == res["id"] and regs[0]["crop"] == "hazelnut"
+    assert len(regs) == 1 and regs[0]["id"] == res["id"] and regs[0]["crop"] == "currant"
 
 
 def test_register_dataset_requires_crop_and_keeps_id_stable(tmp_path: Path):
@@ -94,8 +94,8 @@ def test_register_dataset_requires_crop_and_keeps_id_stable(tmp_path: Path):
 
     assert "error" in register_dataset(str(src), crop="")  # crop is the expert's fact, required
 
-    first = register_dataset(str(src), crop="hazelnut")
-    again = register_dataset(str(src), crop="hazelnut")
+    first = register_dataset(str(src), crop="currant")
+    again = register_dataset(str(src), crop="currant")
     assert again["id"] == first["id"]  # id minted once, preserved across re-runs
     assert len(read_datasets(src)) == 1  # not duplicated in the registry
 
@@ -105,11 +105,11 @@ def test_register_dataset_reconciles_a_move_by_id(tmp_path: Path):
 
     src = tmp_path / "orig"
     _make_dataset(src)
-    reg = register_dataset(str(src), crop="hazelnut")
+    reg = register_dataset(str(src), crop="currant")
 
     moved = tmp_path / "moved"
     shutil.copytree(src, moved)  # same content, new path
-    register_dataset(str(moved), crop="hazelnut", project_root=str(src))
+    register_dataset(str(moved), crop="currant", project_root=str(src))
 
     regs = read_datasets(src)
     same = [r for r in regs if r["id"] == reg["id"]]
@@ -227,10 +227,10 @@ def test_inspect_project_reports_platform_root_divergence_from_marker(tmp_path: 
     from tcip_mcp import workspace
 
     ws = tmp_path / "ws"
-    proj = ws / "hazelnut_catkin_valley"
+    proj = ws / "currant_bud_valley"
     (proj / ".tcip").mkdir(parents=True)
     monkeypatch.setenv("TCIP_WORKSPACE", str(ws))
-    workspace.activate_project("hazelnut_catkin_valley")
+    workspace.activate_project("currant_bud_valley")
 
     stale_root = tmp_path / "stale"
     stale_root.mkdir()
@@ -249,10 +249,10 @@ def test_inspect_project_reports_no_divergence_when_root_matches_the_marker(
     from tcip_mcp import workspace
 
     ws = tmp_path / "ws"
-    proj = ws / "hazelnut_catkin_valley"
+    proj = ws / "currant_bud_valley"
     (proj / ".tcip").mkdir(parents=True)
     monkeypatch.setenv("TCIP_WORKSPACE", str(ws))
-    workspace.activate_project("hazelnut_catkin_valley")  # also repins TCIP_STATE_ROOT
+    workspace.activate_project("currant_bud_valley")  # also repins TCIP_STATE_ROOT
 
     status = inspect_project(str(proj))
     assert "platform_root_diverges_from_marker" not in status
@@ -266,11 +266,11 @@ def test_inspect_project_reports_the_current_platform_root_binding_after_a_repin
     from tcip_mcp import workspace
 
     ws = tmp_path / "ws"
-    proj = ws / "hazelnut_catkin_valley"
+    proj = ws / "currant_bud_valley"
     (proj / ".tcip").mkdir(parents=True)
     monkeypatch.setenv("TCIP_WORKSPACE", str(ws))
 
-    workspace.activate_project("hazelnut_catkin_valley")
+    workspace.activate_project("currant_bud_valley")
     status = inspect_project(str(proj))
 
     binding = status["platform_root_binding"]
@@ -353,10 +353,10 @@ def test_initialize_project_admits_a_conforming_name_under_the_workspace(tmp_pat
     ws = tmp_path / "ws"
     monkeypatch.setenv("TCIP_WORKSPACE", str(ws))
 
-    result = initialize_project(str(ws / "hazelnut_catkin_elongation"), site="north orchard")
+    result = initialize_project(str(ws / "currant_bud_opening"), site="north orchard")
 
     assert "error" not in result
-    assert (ws / "hazelnut_catkin_elongation" / ".tcip").is_dir()
+    assert (ws / "currant_bud_opening" / ".tcip").is_dir()
 
 
 def test_initialize_project_admits_a_non_conforming_name_outside_the_workspace(
@@ -399,7 +399,7 @@ def test_import_project_admits_a_conforming_destination_under_the_workspace(
     exported = archive_project(str(src), str(zip_path))
     assert "error" not in exported
 
-    dest = ws / "hazelnut_catkin_elongation"
+    dest = ws / "currant_bud_opening"
     imported = import_project(str(zip_path), str(dest))
 
     assert "error" not in imported
@@ -426,7 +426,7 @@ def test_export_import_roundtrip(tmp_path: Path):
     Image.new("RGB", (64, 64)).save(images / "img_000.jpg")
     json_io.write_annotations(
         str(labels / "img_000.json"),
-        [Annotation(subject="catkin", geometry=BBox(10, 10, 30, 30))], 64, 64,
+        [Annotation(subject="bud", geometry=BBox(10, 10, 30, 30))], 64, 64,
     )
     # A multispectral capture the sensor wrote one file per band for: the manifest beside the
     # bands is what makes those files one logical image, so the bundle has to carry all of them.
@@ -451,9 +451,9 @@ def test_export_import_roundtrip(tmp_path: Path):
     # archived annotations are unreadable on the other end. One nested classes.json at the root.
     class_registry.write_registry(
         src / "classes.json",
-        ClassRegistry(subjects=(Subject(name="catkin", description="a hazelnut catkin"),)),
+        ClassRegistry(subjects=(Subject(name="bud", description="a currant bud"),)),
     )
-    reg = register_dataset(str(src), crop="hazelnut")  # dataset.json identity travels with the data
+    reg = register_dataset(str(src), crop="currant")  # dataset.json identity travels with the data
 
     zip_path = tmp_path / "export.zip"
     exported = archive_project(str(src), str(zip_path))
@@ -495,12 +495,12 @@ def test_export_import_roundtrip(tmp_path: Path):
     ) == ["cap_001", "cap_002", "img_000"]
     # The registry survived, so the restored labels are still decodable.
     restored = class_registry.read_registry(dest / "classes.json")
-    assert [s.name for s in restored.subjects] == ["catkin"]
+    assert [s.name for s in restored.subjects] == ["bud"]
     # dataset.json travelled with the data: identity (id/crop/fingerprint) survives the round-trip.
     import json
 
     restored_id = json.loads((dest / "dataset.json").read_text())
-    assert restored_id == {"crop": "hazelnut", "id": reg["id"], "fingerprint": reg["fingerprint"]}
+    assert restored_id == {"crop": "currant", "id": reg["id"], "fingerprint": reg["fingerprint"]}
 
 
 def _bare_the_registry_entry(project_root: Path, entry: dict) -> str:
@@ -527,7 +527,7 @@ def test_store_bootstrap_project_roots_admits_a_bare_fingerprint_registry_entry(
     project.mkdir()
     dataset.mkdir()
     _make_dataset(dataset)
-    register_dataset(str(dataset), crop="hazelnut", project_root=str(project))
+    register_dataset(str(dataset), crop="currant", project_root=str(project))
     _bare_the_registry_entry(project, read_datasets(project)[0])
 
     with pytest.raises(ValueError, match="restamp_dataset_fingerprint.py"):
@@ -558,7 +558,7 @@ def test_project_roots_names_a_run_output_dir_a_split_manifest_and_a_prediction_
     project.mkdir()
     dataset.mkdir()
     _make_dataset(dataset)
-    register_dataset(str(dataset), crop="hazelnut", project_root=str(project))
+    register_dataset(str(dataset), crop="currant", project_root=str(project))
 
     # The producers below resolve every member key against the pinned platform root.
     monkeypatch.setenv("TCIP_STATE_ROOT", str(project))
@@ -661,7 +661,7 @@ def test_project_roots_keeps_both_layouts_when_one_directory_is_two_kinds_of_roo
     shared.mkdir()
     _make_dataset(shared)
     experiments.record_artifact("exp-shared", "curated_dataset", str(shared))
-    register_dataset(str(shared), crop="hazelnut", project_root=str(project))
+    register_dataset(str(shared), crop="currant", project_root=str(project))
 
     roots = project_roots(project)
 
@@ -705,7 +705,7 @@ def test_external_dataset_paths_admits_a_bare_fingerprint_registry_entry(tmp_pat
     project.mkdir()
     dataset.mkdir()
     _make_dataset(dataset)
-    register_dataset(str(dataset), crop="hazelnut", project_root=str(project))
+    register_dataset(str(dataset), crop="currant", project_root=str(project))
     entry = read_datasets(project)[0]
     assert entry["path"] == str(dataset.resolve())  # external entries store absolute
     _bare_the_registry_entry(project, entry)
@@ -1154,7 +1154,7 @@ def test_concurrent_registrations_both_survive_in_the_registry(tmp_path: Path):
     def register(name: str) -> None:
         try:
             upsert_dataset(project, {"id": _BarrierId(name), "path": str(tmp_path / name),
-                                     "crop": "hazelnut", "fingerprint": f"v1:{name}"})
+                                     "crop": "currant", "fingerprint": f"v1:{name}"})
         except BaseException as exc:  # recorded, never swallowed into a passing test
             failures.append(exc)
 
@@ -1178,7 +1178,7 @@ def test_an_undecodable_dataset_registry_refuses_and_an_absent_one_reads_empty(t
 
     assert read_datasets(project) == []  # a project with nothing registered yet
 
-    upsert_dataset(project, {"id": "aaa", "path": str(project), "crop": "hazelnut"})
+    upsert_dataset(project, {"id": "aaa", "path": str(project), "crop": "currant"})
     _damage_record(dataset_registry_key(project), b'[{"id": "aaa"')  # truncated mid-list
     with pytest.raises(tcip_store.DecodeError):
         read_datasets(project)
@@ -1200,7 +1200,7 @@ def test_an_identity_minted_while_this_registration_ran_is_adopted_not_overwritt
 
     src = tmp_path / "proj"
     _make_dataset(src)
-    committed = b'{"crop": "hazelnut", "id": "committed_id", "fingerprint": "written first"}\n'
+    committed = b'{"crop": "currant", "id": "committed_id", "fingerprint": "written first"}\n'
     real_uuid4 = uuid_module.uuid4
     raced: list[str] = []
 
@@ -1212,7 +1212,7 @@ def test_an_identity_minted_while_this_registration_ran_is_adopted_not_overwritt
 
     monkeypatch.setattr(uuid_module, "uuid4", racing_uuid4)
 
-    result = register_dataset(str(src), crop="hazelnut")
+    result = register_dataset(str(src), crop="currant")
 
     assert raced == ["minted"]
     assert "error" not in result
@@ -1229,7 +1229,7 @@ def test_an_undecodable_identity_document_refuses_rather_than_minting_a_fresh_id
     truncated = b'{"id": "known_id"'
     (src / "dataset.json").write_bytes(truncated)
 
-    refused = register_dataset(str(src), crop="hazelnut")
+    refused = register_dataset(str(src), crop="currant")
 
     assert "error" in refused and "dataset.json" in refused["error"]
     assert (src / "dataset.json").read_bytes() == truncated  # nothing written over it

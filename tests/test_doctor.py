@@ -36,7 +36,7 @@ def _project(tmp_path: Path) -> Path:
     ann.mkdir(parents=True)
     state = root / ".tcip" / "state"
     state.mkdir(parents=True)
-    write_registry(root / "classes.json", ClassRegistry(subjects=(Subject(name="catkin"),)))
+    write_registry(root / "classes.json", ClassRegistry(subjects=(Subject(name="bud"),)))
     for name in ("IMG_A", "IMG_B", "IMG_C"):
         Image.new("RGB", (32, 32)).save(root / "images" / "2026-02-11" / f"{name}.JPG")
     # A: confirmed negative (empty + status). B: empty without confirmation (the IMG_0150 case).
@@ -44,14 +44,14 @@ def _project(tmp_path: Path) -> Path:
     json_io.write_annotations(ann / "IMG_A.json", [], 32, 32, keep_empty=True)
     json_io.write_annotations(ann / "IMG_B.json", [], 32, 32, keep_empty=True)
     json_io.write_annotations(ann / "IMG_C.json",
-                              [Annotation(subject="catkin", geometry=BBox(1, 1, 9, 9))], 32, 32)
+                              [Annotation(subject="bud", geometry=BBox(1, 1, 9, 9))], 32, 32)
     # Scoped by subject/date: a confirmation belongs to the subject it was made in.
     import tcip_store as ts
     from tcip_store.file_backend import FileBackend
 
     ts.bind(FileBackend())
     replace_image_status_store(root, {
-        status_bucket("catkin", "2026-02-11"): status_records(
+        status_bucket("bud", "2026-02-11"): status_records(
             {"IMG_A.JPG": "negative", "IMG_B.JPG": "unannotated", "IMG_C.JPG": "negative"},
             recorded_by="user:breeder"),
     })
@@ -99,13 +99,13 @@ def test_doctor_admits_a_confirmed_negative_under_dated_labels_flat_images(tmp_p
     (root / "images").mkdir(parents=True)
     ann = root / "annotations" / "2026-02-11"
     ann.mkdir(parents=True)
-    write_registry(root / "classes.json", ClassRegistry(subjects=(Subject(name="catkin"),)))
+    write_registry(root / "classes.json", ClassRegistry(subjects=(Subject(name="bud"),)))
     Image.new("RGB", (32, 32)).save(root / "images" / "IMG_A.JPG")
     json_io.write_annotations(ann / "IMG_A.json", [], 32, 32, keep_empty=True)
 
     ts.bind(FileBackend())
     replace_image_status_store(root, {
-        status_bucket("catkin", "2026-02-11"): status_records(
+        status_bucket("bud", "2026-02-11"): status_records(
             {"IMG_A.JPG": "negative"}, recorded_by="user:breeder"),
     })
 
@@ -173,32 +173,32 @@ def test_doctor_flags_a_stale_region_completeness_attestation(tmp_path):
     ann_dir.mkdir(parents=True)
     state_dir = root / ".tcip" / "state"
     state_dir.mkdir(parents=True)
-    write_registry(root / "classes.json", ClassRegistry(subjects=(Subject(name="catkin"),)))
+    write_registry(root / "classes.json", ClassRegistry(subjects=(Subject(name="bud"),)))
     Image.new("RGB", (32, 32)).save(root / "images" / "2026-02-11" / "IMG_A.JPG")
     ann_path = ann_dir / "IMG_A.json"
     json_io.write_annotations(
-        ann_path, [Annotation(subject="catkin", geometry=BBox(1, 1, 9, 9))], 32, 32)
+        ann_path, [Annotation(subject="bud", geometry=BBox(1, 1, 9, 9))], 32, 32)
 
     grid = {"width": 32, "height": 32, "tile_size": 16, "overlap": 0.0, "cols": 2, "rows": 2}
     cell = next(c for c in reference_cells(32, 32, 16, clamp=True) if c.name == "A1")
-    stamped = cell_annotation_digest(json_io.read_annotations(str(ann_path)), "catkin", cell)
+    stamped = cell_annotation_digest(json_io.read_annotations(str(ann_path)), "bud", cell)
 
-    bucket = status_bucket("catkin", "IMG_A")
+    bucket = status_bucket("bud", "IMG_A")
     (state_dir / "region_completeness.json").write_text(json.dumps({
         bucket: {"grid": grid, "cells_complete": ["A1"], "attested_by": "user:breeder",
-                "attested_at": "t", "stem": "IMG_A", "date": "2026-02-11", "subject": "catkin"},
+                "attested_at": "t", "stem": "IMG_A", "date": "2026-02-11", "subject": "bud"},
     }))
     (state_dir / "region_completeness_digest.json").write_text(
         json.dumps({bucket: {"A1": stamped}}))
 
     # The label is edited after attestation: a real staleness scenario, not a fabricated one.
     json_io.write_annotations(
-        ann_path, [Annotation(subject="catkin", geometry=BBox(1, 1, 20, 20))], 32, 32)
+        ann_path, [Annotation(subject="bud", geometry=BBox(1, 1, 20, 20))], 32, 32)
 
     res = _run(root, file_layout=True)
     assert res.returncode == 2
     assert "region completeness" in res.stdout
-    assert "catkin" in res.stdout and "A1" in res.stdout
+    assert "bud" in res.stdout and "A1" in res.stdout
 
 
 def test_doctor_flags_an_unrecognized_region_completeness_entry(tmp_path):
@@ -214,7 +214,7 @@ def test_doctor_flags_an_unrecognized_region_completeness_entry(tmp_path):
 
     ts.bind(FileBackend())
     ts.replace(region_completeness_key(root),
-              {status_bucket("catkin", date): {"cells_complete": ["A1"]}},  # no "grid": unrecognized
+              {status_bucket("bud", date): {"cells_complete": ["A1"]}},  # no "grid": unrecognized
               expect=ts.Version.ABSENT)
 
     res = _run(root, file_layout=True)
@@ -230,11 +230,11 @@ def test_doctor_flags_incomplete_source_snapshot(tmp_path):
     ann = root / "annotations" / "d"
     ann.mkdir(parents=True)
     (root / ".tcip" / "state").mkdir(parents=True)
-    write_registry(root / "classes.json", ClassRegistry(subjects=(Subject(name="catkin"),)))
+    write_registry(root / "classes.json", ClassRegistry(subjects=(Subject(name="bud"),)))
     Image.new("RGB", (32, 32)).save(root / "images" / "d" / "IMG_A.JPG")
     json_io.write_annotations(
         ann / "IMG_A.json",
-        [Annotation(subject="catkin", geometry=BBox(1, 1, 9, 9), created_by="user:breeder")], 32, 32)
+        [Annotation(subject="bud", geometry=BBox(1, 1, 9, 9), created_by="user:breeder")], 32, 32)
 
     manifest_dir = root / ".tcip" / "experiments" / "exp1" / "model_src"
     manifest_dir.mkdir(parents=True)
@@ -255,11 +255,11 @@ def test_doctor_clean_project_exits_zero(tmp_path):
     ann = root / "annotations" / "d"
     ann.mkdir(parents=True)
     (root / ".tcip" / "state").mkdir(parents=True)
-    write_registry(root / "classes.json", ClassRegistry(subjects=(Subject(name="catkin"),)))
+    write_registry(root / "classes.json", ClassRegistry(subjects=(Subject(name="bud"),)))
     Image.new("RGB", (32, 32)).save(root / "images" / "d" / "IMG_A.JPG")
     json_io.write_annotations(
         ann / "IMG_A.json",
-        [Annotation(subject="catkin", geometry=BBox(1, 1, 9, 9), created_by="user:breeder")], 32, 32)
+        [Annotation(subject="bud", geometry=BBox(1, 1, 9, 9), created_by="user:breeder")], 32, 32)
     record_site(str(root), "north orchard")  # a clean project also carries a site record
     res = _run(root)
     assert res.returncode == 0, res.stdout
@@ -273,7 +273,7 @@ def _layout_project(tmp_path: Path, date: str | None, name: str = "resolved") ->
     annotation_dir(root, date).mkdir(parents=True)
     (root / ".tcip" / "state").mkdir(parents=True)
     write_registry(root / "classes.json",
-                   ClassRegistry(subjects=(Subject(name="catkin"), Subject(name="leaf"))))
+                   ClassRegistry(subjects=(Subject(name="bud"), Subject(name="leaf"))))
     return root
 
 
@@ -289,13 +289,13 @@ def test_labels_are_scanned_where_the_layout_resolver_places_them(tmp_path):
     Image.new("RGB", (48, 32)).save(image_dir(root, date) / "IMG_R.JPG")
     label = annotation_path(root, date, "IMG_R")
     json_io.write_annotations(
-        label, [Annotation(subject="catkin", geometry=BBox(2, 3, 18, 9))], 48, 32)
+        label, [Annotation(subject="bud", geometry=BBox(2, 3, 18, 9))], 48, 32)
     import tcip_store as ts
     from tcip_store.file_backend import FileBackend
 
     ts.bind(FileBackend())
     replace_image_status_store(root, {
-        status_bucket("catkin", date): status_records(
+        status_bucket("bud", date): status_records(
             {"IMG_R.JPG": "negative"}, recorded_by="user:breeder"),
     })
 
@@ -308,7 +308,7 @@ def test_labels_are_scanned_where_the_layout_resolver_places_them(tmp_path):
 
 def test_a_negative_confirmation_names_only_its_own_subject(tmp_path):
     """A confirmation is scoped to one subject: an image holding leaf annotations and confirmed
-    negative for both subjects contradicts the leaf confirmation only, and the catkin
+    negative for both subjects contradicts the leaf confirmation only, and the bud
     confirmation on the same image stands."""
     date = "2026-03-04"
     root = _layout_project(tmp_path, date)
@@ -321,7 +321,7 @@ def test_a_negative_confirmation_names_only_its_own_subject(tmp_path):
 
     ts.bind(FileBackend())
     replace_image_status_store(root, {
-        status_bucket("catkin", date): status_records({"IMG_S.JPG": "negative"}, recorded_by="user:breeder"),
+        status_bucket("bud", date): status_records({"IMG_S.JPG": "negative"}, recorded_by="user:breeder"),
         status_bucket("leaf", date): status_records({"IMG_S.JPG": "negative"}, recorded_by="user:breeder"),
     })
 
@@ -330,7 +330,7 @@ def test_a_negative_confirmation_names_only_its_own_subject(tmp_path):
     contradictions = _lines(res.stdout, "contradictory")
     assert len(contradictions) == 1, res.stdout
     assert "'leaf'" in contradictions[0]
-    assert "'catkin'" not in contradictions[0]
+    assert "'bud'" not in contradictions[0]
 
 
 def test_confirmations_are_matched_on_a_dateless_dataset(tmp_path):
@@ -340,17 +340,17 @@ def test_confirmations_are_matched_on_a_dateless_dataset(tmp_path):
     image_dir(root, None).mkdir(parents=True)
     annotation_dir(root, None).mkdir(parents=True)
     (root / ".tcip" / "state").mkdir(parents=True)
-    write_registry(root / "classes.json", ClassRegistry(subjects=(Subject(name="catkin"),)))
+    write_registry(root / "classes.json", ClassRegistry(subjects=(Subject(name="bud"),)))
     Image.new("RGB", (40, 24)).save(image_dir(root, None) / "IMG_F.JPG")
     json_io.write_annotations(
         annotation_path(root, None, "IMG_F"),
-        [Annotation(subject="catkin", geometry=BBox(3, 1, 20, 9))], 40, 24)
+        [Annotation(subject="bud", geometry=BBox(3, 1, 20, 9))], 40, 24)
     import tcip_store as ts
     from tcip_store.file_backend import FileBackend
 
     ts.bind(FileBackend())
     replace_image_status_store(root, {
-        status_bucket("catkin", None): status_records(
+        status_bucket("bud", None): status_records(
             {"IMG_F.JPG": "negative"}, recorded_by="user:breeder"),
     })
 
@@ -358,7 +358,7 @@ def test_confirmations_are_matched_on_a_dateless_dataset(tmp_path):
     assert res.returncode == 2, res.stdout
     contradictions = _lines(res.stdout, "contradictory")
     assert len(contradictions) == 1, res.stdout
-    assert "'catkin'" in contradictions[0]
+    assert "'bud'" in contradictions[0]
 
 
 def test_doctor_flags_a_bare_status_token(tmp_path):
@@ -374,7 +374,7 @@ def test_doctor_flags_a_bare_status_token(tmp_path):
     # A bare token is a shape replace_image_status_store's own writer refuses, so this fixture
     # writes it through the store primitive directly, bound to the file backend the subprocess reads.
     ts.bind(FileBackend())
-    ts.replace(image_status_key(root), {status_bucket("catkin", date): {"IMG_S.JPG": "unannotated"}},
+    ts.replace(image_status_key(root), {status_bucket("bud", date): {"IMG_S.JPG": "unannotated"}},
               expect=ts.Version.ABSENT)
 
     res = _run(root, file_layout=True)
@@ -393,14 +393,14 @@ def test_doctor_flags_a_stale_complete_token(tmp_path):
 
     ts.bind(FileBackend())
     replace_image_status_store(root, {
-        status_bucket("catkin", date): status_records(
+        status_bucket("bud", date): status_records(
             {"IMG_S.JPG": "complete"}, recorded_by="user:breeder"),
     })
 
     res = _run(root, file_layout=True)
     stale = _lines(res.stdout, "re-confirm")
     assert len(stale) == 1, res.stdout
-    assert "catkin" in stale[0] and "IMG_S.JPG" in stale[0]
+    assert "bud" in stale[0] and "IMG_S.JPG" in stale[0]
 
 
 def test_registry_findings_are_read_through_the_registrys_own_entry_shape(tmp_path):
@@ -411,7 +411,7 @@ def test_registry_findings_are_read_through_the_registrys_own_entry_shape(tmp_pa
     ckpt_dir.mkdir()
     registry = ModelRegistry(str(root))
     paths = {}
-    for name, payload in (("hazelnut_catkin_detector_v1", b"weights"),
+    for name, payload in (("currant_bud_detector_v1", b"weights"),
                           ("chestnut_burr_counter_v3", b"other weights")):
         ckpt = ckpt_dir / f"{name}.pt"
         ckpt.write_bytes(payload)
@@ -617,7 +617,7 @@ def test_doctor_flags_an_unreadable_label_behind_a_confirmed_negative(tmp_path):
 
     ts.bind(FileBackend())
     replace_image_status_store(root, {
-        status_bucket("catkin", date): status_records(
+        status_bucket("bud", date): status_records(
             {"IMG_S.JPG": "negative"}, recorded_by="user:breeder"),
     })
 
@@ -637,7 +637,7 @@ def test_doctor_flags_an_image_and_a_label_with_a_reserved_stem(tmp_path):
     Image.new("RGB", (32, 32)).save(image_dir(root, date) / "operating_point.jpg")
     json_io.write_annotations(
         annotation_path(root, date, "operating_point"),
-        [Annotation(subject="catkin", geometry=BBox(1, 1, 9, 9))], 32, 32,
+        [Annotation(subject="bud", geometry=BBox(1, 1, 9, 9))], 32, 32,
     )
 
     res = _run(root, file_layout=True)
@@ -659,7 +659,7 @@ def test_review_baselines_are_not_counted_as_label_records(tmp_path):
         Image.new("RGB", size).save(imgs / f"{name}.JPG")
     json_io.write_annotations(
         annotation_path(root, date, "IMG_A"),
-        [Annotation(subject="catkin", geometry=BBox(2, 3, 18, 9), created_by="user:breeder")], 48, 32)
+        [Annotation(subject="bud", geometry=BBox(2, 3, 18, 9), created_by="user:breeder")], 48, 32)
     json_io.write_annotations(
         annotation_path(root, date, "IMG_B"),
         [Annotation(subject="leaf", geometry=BBox(5, 1, 44, 12), created_by="user:breeder")], 48, 32)
@@ -693,7 +693,7 @@ def test_a_seam_written_confirmation_is_seen_by_check_negatives_and_check_data_q
     Image.new("RGB", (32, 32)).save(image_dir(root, date) / "IMG_S.JPG")
     json_io.write_annotations(annotation_path(root, date, "IMG_S"), [], 32, 32, keep_empty=True)
     replace_image_status_store(root, {
-        status_bucket("catkin", date): status_records(
+        status_bucket("bud", date): status_records(
             {"IMG_S.JPG": "negative"}, recorded_by="user:breeder"),
     })
 

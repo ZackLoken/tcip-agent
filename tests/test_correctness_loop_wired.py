@@ -114,7 +114,7 @@ def test_resolve_contract_dims_attribute_without_registry_raises_not_silently_fa
     subject that is given, with an attribute and no registry, must raise."""
     cfg = {
         "model_source": {"builder_kwargs": {"num_classes": 5}},
-        "data": {"subject": "catkin", "attribute": "elongation", "labels_dir": str(tmp_path / "labels")},
+        "data": {"subject": "bud", "attribute": "opening", "labels_dir": str(tmp_path / "labels")},
     }
     with pytest.raises(ValueError, match="classes.json"):
         resolve_contract_dims(cfg, "detection")

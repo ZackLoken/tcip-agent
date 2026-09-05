@@ -24,7 +24,7 @@ def _annotated_and_empty_groups() -> tuple[list[str], dict[str, int]]:
     weighting that reads tile count as foreground signal would satisfy a split's minimum
     foreground with one of them.
     """
-    annotated = [f"{g}_{i}_0" for g in ("catkinsA", "catkinsB") for i in range(4)]
+    annotated = [f"{g}_{i}_0" for g in ("budsA", "budsB") for i in range(4)]
     empty = [f"bare{g}_0_0" for g in range(12)]
     counts = {s: 2 for s in annotated}
     counts.update({s: 0 for s in empty})

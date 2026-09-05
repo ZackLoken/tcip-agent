@@ -123,7 +123,7 @@ def _det_dataset(tmp_path: Path, n: int = 1, size: int = 128):
         # YOLO "0 0.5 0.5 0.1 0.1" (normalized) -> pixel xyxy in a size×size image
         box = BBox(0.45 * size, 0.45 * size, 0.55 * size, 0.55 * size)
         json_io.write_annotations(str(labels_dir / f"img{i}.json"),
-                                  [Annotation(subject="catkin", geometry=box)], size, size, keep_empty=True)
+                                  [Annotation(subject="bud", geometry=box)], size, size, keep_empty=True)
     return images_dir, labels_dir
 
 
@@ -133,7 +133,7 @@ def test_tiled_detection_dataset_wrapper(tmp_path):
 
     images_dir, labels_dir = _det_dataset(tmp_path)
     ds = build_dataset("detection", images_dir=str(images_dir), labels_dir=str(labels_dir),
-                       subject="catkin", tiling={"enabled": True, "tile_size": 64, "overlap": 0.2})
+                       subject="bud", tiling={"enabled": True, "tile_size": 64, "overlap": 0.2})
     assert len(ds) >= 1  # 128px image -> multiple tiles
     img, target = ds[0]
     assert tuple(img.shape) == (3, 64, 64)
@@ -156,10 +156,10 @@ def test_tiled_dataset_derives_sliver_and_keeps_empty_tiles(tmp_path):
     Image.new("RGB", (256, 256), (120, 120, 120)).save(images_dir / "a.jpg")
     # YOLO "0 0.1 0.1 0.1 0.1" in a 256×256 image -> a 25.6px box in the top-left corner
     json_io.write_annotations(str(labels_dir / "a.json"),
-                              [Annotation(subject="catkin", geometry=BBox(12.8, 12.8, 38.4, 38.4))],
+                              [Annotation(subject="bud", geometry=BBox(12.8, 12.8, 38.4, 38.4))],
                               256, 256, keep_empty=True)
     ds = build_dataset("detection", images_dir=str(images_dir), labels_dir=str(labels_dir),
-                       subject="catkin", tiling={"enabled": True, "tile_size": 64, "overlap": 0.2})
+                       subject="bud", tiling={"enabled": True, "tile_size": 64, "overlap": 0.2})
     # class_avg_size is derived from the class-average box size. sliver_frac would be too, but a
     # single box is too few to measure a size spread from (derive_sliver_frac's own min_samples
     # guard), an honest "underivable", not a value dressed as derived, so it falls back to 0.5.
@@ -190,11 +190,11 @@ def test_tiled_dataset_derives_sliver_frac_with_enough_boxes(tmp_path):
     # 6 boxes with real size spread (10..90px char size), all near the top-left so tiling geometry
     # is not the point of this test.
     sizes = [10.0, 26.0, 42.0, 58.0, 74.0, 90.0]
-    anns = [Annotation(subject="catkin", geometry=BBox(2.0, 2.0 + 5.0 * i, 2.0 + s, 2.0 + 5.0 * i + s))
+    anns = [Annotation(subject="bud", geometry=BBox(2.0, 2.0 + 5.0 * i, 2.0 + s, 2.0 + 5.0 * i + s))
             for i, s in enumerate(sizes)]
     json_io.write_annotations(str(labels_dir / "a.json"), anns, 256, 256, keep_empty=True)
     ds = build_dataset("detection", images_dir=str(images_dir), labels_dir=str(labels_dir),
-                       subject="catkin", tiling={"enabled": True, "tile_size": 64, "overlap": 0.2})
+                       subject="bud", tiling={"enabled": True, "tile_size": 64, "overlap": 0.2})
     assert ds.sliver_frac_source == "GT characteristic-size spread (p10 / mean)"
     assert ds.sliver_frac == pytest.approx(derive_sliver_frac(sizes))
     assert ds.sliver_frac != 0.5  # genuinely derived, not the pinned constant it replaces
@@ -209,7 +209,7 @@ def test_tiled_dataset_collate_roundtrip(tmp_path):
 
     images_dir, labels_dir = _det_dataset(tmp_path)
     ds = build_dataset("detection", images_dir=str(images_dir), labels_dir=str(labels_dir),
-                       subject="catkin", tiling={"enabled": True, "tile_size": 64, "overlap": 0.2})
+                       subject="bud", tiling={"enabled": True, "tile_size": 64, "overlap": 0.2})
     loader = DataLoader(ds, batch_size=2, collate_fn=task_collate("detection"))
     imgs, targets = next(iter(loader))
     assert isinstance(imgs, list) and isinstance(targets, list)
@@ -225,7 +225,7 @@ def test_build_dataset_no_tiling_unchanged(tmp_path):
     from tcip_mcp.pipelines.data.datasets import build_dataset, DetectionDataset
 
     images_dir, labels_dir = _det_dataset(tmp_path, n=3, size=64)
-    ds = build_dataset("detection", images_dir=str(images_dir), labels_dir=str(labels_dir), subject="catkin")
+    ds = build_dataset("detection", images_dir=str(images_dir), labels_dir=str(labels_dir), subject="bud")
     assert isinstance(ds, DetectionDataset)
     assert len(ds) == 3  # no tiling -> one sample per image
 
@@ -263,7 +263,7 @@ def test_keep_regions_none_is_byte_identical_to_before(tmp_path):
     from tcip_mcp.pipelines.data.datasets import DetectionDataset, TiledDetectionDataset
 
     images_dir, labels_dir = _det_dataset(tmp_path, n=1, size=256)
-    base = DetectionDataset(str(images_dir), str(labels_dir), subject="catkin")
+    base = DetectionDataset(str(images_dir), str(labels_dir), subject="bud")
     plain = TiledDetectionDataset(base, tile_size=64, overlap=0.2)
     explicit_none = TiledDetectionDataset(base, tile_size=64, overlap=0.2, keep_regions=None)
     assert plain.tile_entries == explicit_none.tile_entries
@@ -276,7 +276,7 @@ def test_keep_regions_restricts_to_fully_inside_tiles(tmp_path):
     from tcip_mcp.pipelines.data.datasets import DetectionDataset, TiledDetectionDataset
 
     images_dir, labels_dir = _det_dataset(tmp_path, n=1, size=256)
-    base = DetectionDataset(str(images_dir), str(labels_dir), subject="catkin")
+    base = DetectionDataset(str(images_dir), str(labels_dir), subject="bud")
     full = TiledDetectionDataset(base, tile_size=64, overlap=0.2)
     left_half = TiledDetectionDataset(base, tile_size=64, overlap=0.2, keep_regions=[(0, 0, 128, 256)])
 
@@ -294,7 +294,7 @@ def test_keep_regions_two_views_share_one_base_and_partition_disjointly(tmp_path
     from tcip_mcp.pipelines.data.datasets import DetectionDataset, TiledDetectionDataset
 
     images_dir, labels_dir = _det_dataset(tmp_path, n=1, size=256)
-    base = DetectionDataset(str(images_dir), str(labels_dir), subject="catkin")
+    base = DetectionDataset(str(images_dir), str(labels_dir), subject="bud")
     left = TiledDetectionDataset(base, tile_size=64, overlap=0.2, keep_regions=[(0, 0, 128, 256)])
     right = TiledDetectionDataset(base, tile_size=64, overlap=0.2, keep_regions=[(128, 0, 256, 256)])
 

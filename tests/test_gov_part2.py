@@ -199,14 +199,14 @@ def test_capture_hook_stamps_the_workspace_active_project(tmp_path, monkeypatch)
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     monkeypatch.setenv("TCIP_WORKSPACE", str(workspace))
-    ts.replace(active_project_key(), "hazelnut_catkins_valley-farm", expect=ts.Version.ABSENT)
+    ts.replace(active_project_key(), "currant_buds_valley-farm", expect=ts.Version.ABSENT)
     monkeypatch.setattr(sys, "stdin",
                         io.StringIO(json.dumps({"session_id": "s2", "cwd": str(tmp_path)})))
     agent_learning_capture.main()
 
     key = agent_learning_capture.learning_capture_key(tmp_path)
     entry = ts.read_log(key).records[0]
-    assert entry["active_project"] == "hazelnut_catkins_valley-farm"
+    assert entry["active_project"] == "currant_buds_valley-farm"
 
     ts.delete(active_project_key())
     monkeypatch.setattr(sys, "stdin",

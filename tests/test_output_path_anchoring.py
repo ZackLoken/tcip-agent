@@ -62,11 +62,11 @@ def test_launch_training_defaults_into_the_platform_state_roots_experiment_store
         Image.new("RGB", (128, 128)).save(images_dir / f"t{i}.png")
         json_io.write_annotations(
             str(labels_dir / f"t{i}.json"),
-            [Annotation(subject="catkin", geometry=BBox(10, 10, 40, 40))], 128, 128)
+            [Annotation(subject="bud", geometry=BBox(10, 10, 40, 40))], 128, 128)
     Image.new("RGB", (128, 128)).save(val_images / "v0.png")
     json_io.write_annotations(
         str(val_labels / "v0.json"),
-        [Annotation(subject="catkin", geometry=BBox(10, 10, 40, 40))], 128, 128)
+        [Annotation(subject="bud", geometry=BBox(10, 10, 40, 40))], 128, 128)
     monkeypatch.setattr(
         "tcip_mcp.pipelines.training.tensorboard_manager.launch_tensorboard", lambda *a, **k: {})
 
@@ -74,7 +74,7 @@ def test_launch_training_defaults_into_the_platform_state_roots_experiment_store
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
                          "builder_kwargs": {"num_classes": 1, "min_size": 64, "max_size": 128},
                          "task": "detection"},
-        "data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "catkin",
+        "data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "bud",
                  "val_images_dir": str(val_images), "val_labels_dir": str(val_labels)},
         "training": {"batch_size": 1, "stages": [{"freeze_to": -1, "epochs": 1}],
                      "mixed_precision": False, "device": "cpu"},

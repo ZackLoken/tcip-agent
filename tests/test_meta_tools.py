@@ -27,7 +27,7 @@ def test_report_friction_writes_one_json_document(tmp_path: Path):
         str(tmp_path),
         category="missing_tool",
         detail="I needed a way to fetch trait profiles but no such tool exists.",
-        context={"trait": "efb_damage", "crop": "hazelnut"},
+        context={"trait": "efb_damage", "crop": "currant"},
     )
 
     assert result["category"] == "missing_tool"
@@ -221,7 +221,7 @@ def test_load_retrospectives_respects_limit(tmp_path: Path):
 def test_load_retrospectives_filter_substring(tmp_path: Path):
     write_retrospective(
         str(tmp_path),
-        project_id="hazelnut-efb",
+        project_id="currant-efb",
         task="EFB severity",
         worked="w",
         did_not_work="d",
@@ -234,9 +234,9 @@ def test_load_retrospectives_filter_substring(tmp_path: Path):
         did_not_work="d",
     )
 
-    result = load_project_memory("retrospectives", str(tmp_path), filter_substring="hazelnut")
+    result = load_project_memory("retrospectives", str(tmp_path), filter_substring="currant")
     assert result["count"] == 1
-    assert result["retrospectives"][0]["project_id"] == "hazelnut-efb"
+    assert result["retrospectives"][0]["project_id"] == "currant-efb"
 
     # Filter also matches on content
     result = load_project_memory("retrospectives", str(tmp_path), filter_substring="bur detection")
@@ -256,14 +256,14 @@ def test_load_reports_roundtrips_a_written_report(tmp_path: Path):
         str(tmp_path),
         category="missing_tool",
         detail="needed get_trait_profile",
-        context={"crop": "hazelnut"},
+        context={"crop": "currant"},
     )
     result = load_project_memory("reports", str(tmp_path))
     assert result["count"] == 1
     rep = result["reports"][0]
     assert rep["category"] == "missing_tool"
     assert rep["detail"] == "needed get_trait_profile"
-    assert rep["context"]["crop"] == "hazelnut"
+    assert rep["context"]["crop"] == "currant"
     assert rep["timestamp"]
 
 

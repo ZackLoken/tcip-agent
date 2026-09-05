@@ -57,12 +57,12 @@ def _detection_dataset(tmp_path, sizes):
     labels_dir = tmp_path / "labels"
     images_dir.mkdir()
     labels_dir.mkdir()
-    write_registry(Path(tmp_path) / "classes.json", ClassRegistry((Subject("catkin"),)))
+    write_registry(Path(tmp_path) / "classes.json", ClassRegistry((Subject("bud"),)))
     for i, (w, h) in enumerate(sizes):
         Image.new("RGB", (w, h)).save(images_dir / f"img{i}.png")
         json_io.write_annotations(str(labels_dir / f"img{i}.json"),
-                                  [Annotation(subject="catkin", geometry=BBox(1, 1, 9, 9))], w, h)
-    return DetectionDataset(str(images_dir), str(labels_dir), subject="catkin")
+                                  [Annotation(subject="bud", geometry=BBox(1, 1, 9, 9))], w, h)
+    return DetectionDataset(str(images_dir), str(labels_dir), subject="bud")
 
 
 def test_stamp_untiled_uniform_frames_record_train_native_size(tmp_path):

@@ -31,8 +31,8 @@ def _drain(ws) -> list[dict]:
 def test_logged_rows_reach_the_training_stream_reader_with_their_epoch_and_values(tmp_path):
     from tcip_mcp.experiments import create_experiment, log_metrics, update_status
 
-    run_id = "exp-021-hazelnut-catkin-det"
-    create_experiment(run_id, {"model_source": {"builder": "my_models:catkin_det"}})
+    run_id = "exp-021-currant-bud-det"
+    create_experiment(run_id, {"model_source": {"builder": "my_models:bud_det"}})
     log_metrics(run_id, 3, {"loss": 0.94, "val_map50": 0.28})
     log_metrics(run_id, 7, {"loss": 0.31, "val_map50": 0.66})
     update_status(run_id, "completed")  # a terminal run ends the stream after one tick

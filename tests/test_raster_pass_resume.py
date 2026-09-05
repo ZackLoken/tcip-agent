@@ -295,8 +295,8 @@ def test_a_redirected_interrupted_pass_resumes_in_its_own_bucket(tmp_path, monke
         json.dumps({"image": "mosaic", "width": 64, "height": 64, "annotations": []}))
     engine = ReviewEngine(dataset_root / ".tcip" / "state")
     ctx = ReviewContext(img_name="mosaic", img_width=64, img_height=64, preds=[
-        Annotation(subject="catkin", geometry=BBox(1.0, 1.0, 5.0, 5.0), score=0.9)])
-    det = ReviewDetection(det_type="fp", class_name="catkin", conf=0.9, iou=None, gt_idx=None,
+        Annotation(subject="bud", geometry=BBox(1.0, 1.0, 5.0, 5.0), score=0.9)])
+    det = ReviewDetection(det_type="fp", class_name="bud", conf=0.9, iou=None, gt_idx=None,
                           pred_idx=0, bbox=(1.0, 1.0, 5.0, 5.0))
     engine.record_detection_action(bucket_key_of(requested), det, ctx, action="accepted")
 
@@ -370,7 +370,7 @@ def test_content_identity_failure_after_open_refuses_naming_the_raster(tmp_path,
 
 
 def test_resume_completes_an_interrupted_block_calibrated_pass_running_the_calibration_pass_once(
-    tmp_path, monkeypatch, seed_catkin_trait_spec,
+    tmp_path, monkeypatch, seed_bud_trait_spec,
 ):
     """A block-calibrated resume applies the recorded conf/cross_tile_nms directly rather than
     re-running the reserved-band calibration a second time: the resolver that earns them runs
@@ -399,7 +399,7 @@ def test_resume_completes_an_interrupted_block_calibrated_pass_running_the_calib
 
     call_kwargs = {
         "raster_path": str(exp["raster_path"]), "conf_threshold": 0.0, "tile_size": BLOCK_TILE,
-        "overlap": 0.2, "tile_batch_size": 50, "device": "cpu", "trait": "catkin",
+        "overlap": 0.2, "tile_batch_size": 50, "device": "cpu", "trait": "bud_opening",
         "experiment_id": exp["experiment_id"],
     }
 

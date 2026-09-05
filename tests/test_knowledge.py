@@ -104,7 +104,7 @@ def test_a_name_carrying_a_slash_raises_value_error(tmp_path, monkeypatch):
     monkeypatch.setattr(knowledge, "KNOWLEDGE_DIR", tmp_path)
     bad = tmp_path / "slashed.md"
     bad.write_text(
-        '---\nname: "crops/hazelnut"\ndescription: "a name that is not a single segment"\n---\nbody\n',
+        '---\nname: "crops/currant"\ndescription: "a name that is not a single segment"\n---\nbody\n',
         encoding="utf-8",
     )
     with pytest.raises(ValueError) as excinfo:

@@ -16,7 +16,7 @@ from PIL import Image  # noqa: E402
 from tcip_annotation import json_io  # noqa: E402
 from tcip_annotation.state import Annotation, BBox  # noqa: E402
 
-CATKIN = "catkin"
+BUD = "bud"
 
 
 def _make_images(images_dir, stems, size):
@@ -28,7 +28,7 @@ def _make_images(images_dir, stems, size):
 def _write(labels_dir, stem, boxes, size):
     json_io.write_annotations(
         labels_dir / f"{stem}.json",
-        [Annotation(subject=CATKIN, geometry=BBox(*b)) for b in boxes],
+        [Annotation(subject=BUD, geometry=BBox(*b)) for b in boxes],
         size[0], size[1], keep_empty=True)
 
 
@@ -46,7 +46,7 @@ def test_a_boxs_width_and_height_survive_the_assembled_coco_round_trip(tmp_path)
     _make_images(images, ["img0"], size)
     _write(labels, "img0", [(10, 20, 70, 40), (80, 5, 95, 75)], size)
 
-    ds = build_dataset("detection", images_dir=str(images), labels_dir=str(labels), subject=CATKIN)
+    ds = build_dataset("detection", images_dir=str(images), labels_dir=str(labels), subject=BUD)
     assert ds.label_format == "coco"
     _img, target = ds[0]
     assert target["boxes"].tolist() == [[10.0, 20.0, 70.0, 40.0], [80.0, 5.0, 95.0, 75.0]]
@@ -80,7 +80,7 @@ def test_a_seam_fragment_is_not_indexed_as_a_whole_object(tmp_path, sliver_frac)
     _make_images(images, ["img0"], size)
     _write(labels, "img0", SEAM_BOXES, size)
 
-    base = DetectionDataset(str(images), str(labels), subject=CATKIN)
+    base = DetectionDataset(str(images), str(labels), subject=BUD)
     ds = TiledDetectionDataset(base, tile_size=64, overlap=0.0, sliver_frac=sliver_frac)
 
     assert ds.min_box_size > 0
@@ -107,7 +107,7 @@ def test_each_detection_sample_carries_its_own_index_as_image_id(tmp_path):
     for i, stem in enumerate(stems):
         _write(labels, stem, [(5 + 20 * k, 6, 25 + 20 * k, 44) for k in range(i + 1)], size)
 
-    ds = build_dataset("detection", images_dir=str(images), labels_dir=str(labels), subject=CATKIN)
+    ds = build_dataset("detection", images_dir=str(images), labels_dir=str(labels), subject=BUD)
     assert len(ds) == 3
     samples = [ds[i][1] for i in range(len(ds))]
     assert [t["image_id"] for t in samples] == [0, 1, 2]

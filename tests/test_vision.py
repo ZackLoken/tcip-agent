@@ -42,14 +42,14 @@ def viz_dataset(tmp_path: Path) -> Path:
         # Per-image JSON GT: two pixel-space boxes under two distinct subjects.
         json_io.write_annotations(
             labels_dir / f"{name}.json",
-            [Annotation(subject="catkin", geometry=BBox(288, 216, 352, 264)),
+            [Annotation(subject="bud", geometry=BBox(288, 216, 352, 264)),
              Annotation(subject="nut", geometry=BBox(176, 132, 208, 156))],
             640, 480,
         )
         # Per-image JSON predictions carry a score.
         json_io.write_annotations(
             preds_dir / f"{name}.json",
-            [Annotation(subject="catkin", geometry=BBox(288, 216, 352, 264), score=0.95),
+            [Annotation(subject="bud", geometry=BBox(288, 216, 352, 264), score=0.95),
              Annotation(subject="nut", geometry=BBox(496, 372, 528, 396), score=0.6)],
             640, 480,
         )
@@ -137,7 +137,7 @@ class TestRenderDetections:
         result = render_detections(
             pixels, boxes,
             native_size=native,
-            class_names={0: "catkin", 1: "nut"},
+            class_names={0: "bud", 1: "nut"},
             output_path=out,
         )
         assert Path(result).is_file()
@@ -303,9 +303,9 @@ class TestVisualizeAnnotations:
         from tcip_mcp.tools.vision_tools import visualize
 
         img = str(viz_dataset / "images" / "img_001.jpg")
-        result = visualize("annotations", img, task="detect", class_names="catkin,nut")
+        result = visualize("annotations", img, task="detect", class_names="bud,nut")
         assert "error" not in result
-        assert "catkin" in result["summary"] or "nut" in result["summary"]
+        assert "bud" in result["summary"] or "nut" in result["summary"]
 
     def test_missing_image(self):
         from tcip_mcp.tools.vision_tools import visualize
@@ -379,7 +379,7 @@ class TestVisualizePredictions:
         from tcip_mcp.tools.vision_tools import visualize
 
         img = str(viz_dataset / "images" / "img_001.jpg")
-        _seed_sidecar(viz_dataset / "predictions" / "live", {"id_map": {"catkin": 0, "nut": 1}})
+        _seed_sidecar(viz_dataset / "predictions" / "live", {"id_map": {"bud": 0, "nut": 1}})
 
         result = visualize("predictions", img)
         assert "error" in result
@@ -390,7 +390,7 @@ class TestVisualizePredictions:
 
         img = str(viz_dataset / "images" / "img_001.jpg")
         preds_dir = viz_dataset / "predictions" / "live"
-        _seed_sidecar(preds_dir, {"id_map": {"catkin": 0}})
+        _seed_sidecar(preds_dir, {"id_map": {"bud": 0}})
         _damage_sidecar(preds_dir)
 
         result = visualize("predictions", img)
@@ -437,7 +437,7 @@ class TestVisualizeComparison:
         from tcip_mcp.tools.vision_tools import visualize
 
         img = str(viz_dataset / "images" / "img_001.jpg")
-        _seed_sidecar(viz_dataset / "predictions" / "live", {"id_map": {"catkin": 0, "nut": 1}})
+        _seed_sidecar(viz_dataset / "predictions" / "live", {"id_map": {"bud": 0, "nut": 1}})
 
         result = visualize("comparison", img)
         assert "error" in result
@@ -448,7 +448,7 @@ class TestVisualizeComparison:
 
         img = str(viz_dataset / "images" / "img_001.jpg")
         preds_dir = viz_dataset / "predictions" / "live"
-        _seed_sidecar(preds_dir, {"id_map": {"catkin": 0}})
+        _seed_sidecar(preds_dir, {"id_map": {"bud": 0}})
         _damage_sidecar(preds_dir)
 
         result = visualize("comparison", img)
@@ -939,7 +939,7 @@ class TestAcceptProposalsTool:
 
         result = stage_proposals(
             image_path=str(viz_dataset / "images" / "img_003.jpg"),
-            assignments=[{"candidate_id": 0, "subject": "catkin"}],
+            assignments=[{"candidate_id": 0, "subject": "bud"}],
         )
         assert "error" in result
         assert "Run propose_annotations first" in result["error"]
@@ -984,7 +984,7 @@ class TestAcceptProposalsTool:
         result = stage_proposals(
             image_path=str(viz_dataset / "images" / "img_001.jpg"),
             assignments=[
-                {"candidate_id": 0, "subject": "catkin"},
+                {"candidate_id": 0, "subject": "bud"},
                 {"candidate_id": 1, "subject": "nut"},
             ],
         )
@@ -1000,7 +1000,7 @@ class TestAcceptProposalsTool:
         assert pred_file.is_file()
         anns = json_io.read_annotations(pred_file)
         assert len(anns) == 2
-        assert {a.subject for a in anns} == {"catkin", "nut"}
+        assert {a.subject for a in anns} == {"bud", "nut"}
 
         # Each staged object is SAM output: created_by="sam" and a numeric score.
         objs = json.loads(pred_file.read_text(encoding="utf-8"))["annotations"]
@@ -1172,7 +1172,7 @@ class TestFullSamPipeline:
             image_path=img_path,
             assignments=[
                 {"candidate_id": c["id"], "subject": subj}
-                for c, subj in zip(cands, ("catkin", "nut"))
+                for c, subj in zip(cands, ("bud", "nut"))
             ],
         )
         assert "error" not in accept_result
@@ -1295,7 +1295,7 @@ class TestFullPipelineIntegration:
         result = stage_proposals(
             image_path=img_path,
             assignments=[
-                {"candidate_id": 0, "subject": "catkin"},
+                {"candidate_id": 0, "subject": "bud"},
                 {"candidate_id": 1, "subject": "nut"},
             ],
         )
@@ -1306,7 +1306,7 @@ class TestFullPipelineIntegration:
         assert pred_file.is_file()
         anns = json_io.read_annotations(pred_file)
         assert len(anns) == 2
-        assert {a.subject for a in anns} == {"catkin", "nut"}
+        assert {a.subject for a in anns} == {"bud", "nut"}
         # Pixel coords within the 640x480 image; staged as SAM predictions (created_by="sam").
         for a in anns:
             b = bbox_of(a.geometry)
@@ -1360,7 +1360,7 @@ class TestFullPipelineIntegration:
         result = stage_proposals(
             image_path=img_path,
             assignments=[
-                {"candidate_id": 0, "subject": "catkin"},
+                {"candidate_id": 0, "subject": "bud"},
                 {"candidate_id": 2, "subject": "nut"},
             ],
         )
@@ -1372,7 +1372,7 @@ class TestFullPipelineIntegration:
         # views can never diverge because they are the same annotations.
         subjects_poly = sorted(a.subject for a in anns if a.geometry is not None)
         subjects_box = sorted(a.subject for a in anns if bbox_of(a.geometry) is not None)
-        assert subjects_poly == subjects_box == ["catkin", "nut"]
+        assert subjects_poly == subjects_box == ["bud", "nut"]
 
     def test_partial_accept_skips_rejected(
         self, pipeline_dataset: Path, monkeypatch: pytest.MonkeyPatch,
@@ -1386,7 +1386,7 @@ class TestFullPipelineIntegration:
         # Accept only candidate 1 out of 3
         result = stage_proposals(
             image_path=img_path,
-            assignments=[{"candidate_id": 1, "subject": "catkin"}],
+            assignments=[{"candidate_id": 1, "subject": "bud"}],
         )
         assert result["proposal_count"] == 1
 
@@ -1402,7 +1402,7 @@ class TestFullPipelineIntegration:
         result = stage_proposals(
             image_path=img_path,
             assignments=[
-                {"candidate_id": 999, "subject": "catkin"},  # non-existent
+                {"candidate_id": 999, "subject": "bud"},  # non-existent
                 {"candidate_id": 0, "subject": "nut"},        # valid
             ],
         )
@@ -1434,9 +1434,9 @@ class TestFullPipelineIntegration:
         result = stage_proposals(
             image_path=img_path,
             assignments=[
-                {"candidate_id": 0, "subject": "catkin"},
+                {"candidate_id": 0, "subject": "bud"},
                 {"candidate_id": 1, "subject": "nut"},
-                {"candidate_id": 2, "subject": "catkin"},
+                {"candidate_id": 2, "subject": "bud"},
             ],
         )
         assert "error" not in result
@@ -1614,7 +1614,7 @@ class TestSamPredictionStaging:
         self._propose(monkeypatch, img_path)
         result = stage_proposals(
             image_path=img_path,
-            assignments=[{"candidate_id": 0, "subject": "catkin"}],
+            assignments=[{"candidate_id": 0, "subject": "bud"}],
         )
         assert "error" not in result
         assert "format" not in result  # fmt param dropped in the JSON cutover
@@ -1623,7 +1623,7 @@ class TestSamPredictionStaging:
         pred = format_dataset / "predictions" / "sam" / "fmt_test.json"
         assert pred.is_file()
         anns = json_io.read_annotations(pred)
-        assert len(anns) == 1 and {a.subject for a in anns} == {"catkin"}
+        assert len(anns) == 1 and {a.subject for a in anns} == {"bud"}
         # The staged object carries a polygon (mask) with a derivable box: both views of one object.
         assert anns[0].geometry is not None
         assert bbox_of(anns[0].geometry) is not None
@@ -1638,7 +1638,7 @@ class TestSamPredictionStaging:
         self._propose(monkeypatch, img_path)
         stage_proposals(
             image_path=img_path,
-            assignments=[{"candidate_id": 0, "subject": "catkin"}],
+            assignments=[{"candidate_id": 0, "subject": "bud"}],
         )
         pred = format_dataset / "predictions" / "sam" / "fmt_test.json"
         data = json.loads(pred.read_text(encoding="utf-8"))

@@ -22,7 +22,7 @@ def _project(tmp_path: Path) -> Path:
     json_io.write_annotations(
         str(root / "annotations" / "2026-03-04" / "a_1.json"), [], 10, 10, keep_empty=True)
     class_registry.write_registry(
-        root / "classes.json", ClassRegistry(subjects=(Subject(name="catkin"),))
+        root / "classes.json", ClassRegistry(subjects=(Subject(name="bud"),))
     )
     return root
 
@@ -93,7 +93,7 @@ def test_directory_bundle_round_trip_yields_the_same_records_as_the_zip_round_tr
     src = tmp_path / "src_project"
     initialize_project(str(src), site="north orchard")
     manifest, npz_image = _populate_project(src)
-    reg = register_dataset(str(src), crop="hazelnut")
+    reg = register_dataset(str(src), crop="currant")
     assert "error" not in reg, reg
 
     bundle_dir = tmp_path / "bundle"
@@ -134,12 +134,12 @@ def test_directory_bundle_round_trip_yields_the_same_records_as_the_zip_round_tr
     from tcip_mcp import class_registry
 
     restored = class_registry.read_registry(dest / "classes.json")
-    assert [s.name for s in restored.subjects] == ["catkin"]
+    assert [s.name for s in restored.subjects] == ["bud"]
 
     import json
 
     restored_id = json.loads((dest / "dataset.json").read_text())
-    assert restored_id == {"crop": "hazelnut", "id": reg["id"], "fingerprint": reg["fingerprint"]}
+    assert restored_id == {"crop": "currant", "id": reg["id"], "fingerprint": reg["fingerprint"]}
 
 
 def _populate_project(src: Path) -> tuple[Path, Path]:
@@ -162,9 +162,9 @@ def _populate_project(src: Path) -> tuple[Path, Path]:
     labels.mkdir(parents=True)
     Image.new("RGB", (32, 32)).save(images / "a_1.jpg")
     json_io.write_annotations(
-        str(labels / "a_1.json"), [Annotation(subject="catkin", geometry=BBox(1, 1, 9, 9))], 32, 32)
+        str(labels / "a_1.json"), [Annotation(subject="bud", geometry=BBox(1, 1, 9, 9))], 32, 32)
     class_registry.write_registry(
-        src / "classes.json", ClassRegistry(subjects=(Subject(name="catkin"),)))
+        src / "classes.json", ClassRegistry(subjects=(Subject(name="bud"),)))
 
     # A multispectral capture written one file per band: the manifest beside the bands is what
     # makes those files one logical image, so a directory bundle has to carry all of them too.

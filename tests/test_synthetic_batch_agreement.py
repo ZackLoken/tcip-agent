@@ -69,11 +69,11 @@ def _real_detection_item(tmp_path):
     images_dir.mkdir()
     labels_dir.mkdir()
     write_registry(tmp_path / "classes.json",
-                   ClassRegistry((Subject("bush"), Subject("catkin"))))
+                   ClassRegistry((Subject("bush"), Subject("bud"))))
     Image.new("RGB", (96, 48)).save(images_dir / "a.png")
     json_io.write_annotations(str(labels_dir / "a.json"),
-                              [Annotation(subject="catkin", geometry=BBox(4, 6, 40, 19))], 96, 48)
-    return DetectionDataset(str(images_dir), str(labels_dir), subject="catkin")[0]
+                              [Annotation(subject="bud", geometry=BBox(4, 6, 40, 19))], 96, 48)
+    return DetectionDataset(str(images_dir), str(labels_dir), subject="bud")[0]
 
 
 def _real_detection_target(tmp_path):

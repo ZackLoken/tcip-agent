@@ -162,7 +162,7 @@ def _persist_synthetic_mapping(
     ts.replace(
         plant_mapping.plant_registry_key(project_root, registry_name),
         {
-            "name": registry_name, "crop": "hazelnut", "site": "test", "csvs": plant_csvs,
+            "name": registry_name, "crop": "currant", "site": "test", "csvs": plant_csvs,
             "n_plants": sum(e["n_plants"] for e in plant_csvs), "digest": registry_digest,
             "registered_by": "agent:test", "registered_at": "2026-02-11T00:00:00+00:00",
         },
@@ -320,7 +320,7 @@ def test_a_blank_plant_name_is_unattributed_by_the_one_predicate(tmp_path: Path)
     assert build.unattributed() == 1
 
     per_plant = phenology.per_plant_series(
-        {DATE: [blank, named]}, {}, positive_class_name="elongated")
+        {DATE: [blank, named]}, {}, positive_class_name="open")
     assert list(per_plant) == ["P1"]
 
 

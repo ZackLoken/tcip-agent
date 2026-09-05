@@ -95,7 +95,7 @@ def _payload(image_path: str, generation: int, shapes=None, **over) -> dict:
         "viewport": {"x": 0, "y": 0, "w": 200, "h": 100, "scale": 1.0},
         "mode": "polygon",
         "user": "breeder",
-        "classes": [{"id": 0, "name": "catkin", "color": "#FF0000"}],
+        "classes": [{"id": 0, "name": "bud", "color": "#FF0000"}],
         "counts": {"boxes": 0, "polygons": 1, "drawing_points": 0},
         "shapes": shapes,
     }
@@ -428,7 +428,7 @@ def _write_state(tmp_path: Path, img: str, shapes=SHAPES, *, shapes_image: str |
         "image": Path(img).name, "image_path": img,
         "viewport": {"x": 0, "y": 0, "w": 200, "h": 100}, "user": "breeder", "mode": "polygon",
         "cut_armed": cut_armed,
-        "classes": [{"id": 0, "name": "catkin", "color": "#FF0000"}],
+        "classes": [{"id": 0, "name": "bud", "color": "#FF0000"}],
     })
 
 
@@ -469,7 +469,7 @@ def test_capture_live_canvas_renders_pushed_state(tmp_path, monkeypatch):
     res = capture_live_canvas(refresh=False)
     assert "error" not in res
     assert Path(res["image_path"]).is_file()
-    assert res["classes"][0]["name"] == "catkin"
+    assert res["classes"][0]["name"] == "bud"
     assert res["shape_counts_by_tag"] == {"gt": 2, "in_progress": 1}
     assert res["shape_counts_by_creator"] == {"user:breeder": 1, "derived:user:breeder": 1}
     assert res["state_age_seconds"] >= 0
@@ -590,12 +590,12 @@ def test_capture_live_canvas_miss_case_also_answers_divergence(tmp_path, monkeyp
     as much as on a hit."""
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     other = tmp_path_factory.mktemp("elsewhere")
-    _mint_binding(other, generation=3, project_name="hazelnut_catkin_valley")
+    _mint_binding(other, generation=3, project_name="currant_bud_valley")
 
     from tcip_mcp.tools.vision_tools import capture_live_canvas
     res = capture_live_canvas(refresh=False)
     assert "error" in res
-    assert res["divergence"]["bound_project"] == "hazelnut_catkin_valley"
+    assert res["divergence"]["bound_project"] == "currant_bud_valley"
     assert res["divergence"]["bound_root"] == str(other)
 
 
@@ -606,7 +606,7 @@ def test_capture_live_canvas_render_last_known_renders_labelled_not_live(
     img = _make_image(tmp_path)
     _write_state(tmp_path, img)
     other = tmp_path_factory.mktemp("elsewhere")
-    _mint_binding(other, generation=3, project_name="hazelnut_catkin_valley")
+    _mint_binding(other, generation=3, project_name="currant_bud_valley")
 
     from tcip_mcp.tools.vision_tools import capture_live_canvas
     refused = capture_live_canvas(refresh=False)
@@ -615,7 +615,7 @@ def test_capture_live_canvas_render_last_known_renders_labelled_not_live(
     rendered = capture_live_canvas(refresh=False, render_last_known=True)
     assert "error" not in rendered
     assert Path(rendered["image_path"]).is_file()
-    assert rendered["divergence"]["bound_project"] == "hazelnut_catkin_valley"
+    assert rendered["divergence"]["bound_project"] == "currant_bud_valley"
     assert "not live" in rendered["summary"]
 
 

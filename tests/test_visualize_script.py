@@ -41,7 +41,7 @@ def _fixture(tmp_path: Path) -> Path:
     labels = tmp_path / "annotations"
     labels.mkdir()
     write_annotations(labels / "a.json",
-                      [Annotation(subject="catkin", geometry=BBox(1, 1, 40, 30))], 100, 80)
+                      [Annotation(subject="bud", geometry=BBox(1, 1, 40, 30))], 100, 80)
     return img
 
 

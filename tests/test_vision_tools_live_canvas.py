@@ -71,7 +71,7 @@ def _push_state(tmp_path: Path, image: str, *, received_at: float,
         "image": Path(image).name, "image_path": image,
         "viewport": {"x": 0, "y": 0, "w": FRAME_W, "h": FRAME_H},
         "user": "breeder", "mode": "polygon",
-        "classes": [{"id": 0, "name": "catkin", "color": "#FF0000"}],
+        "classes": [{"id": 0, "name": "bud", "color": "#FF0000"}],
     })
 
 

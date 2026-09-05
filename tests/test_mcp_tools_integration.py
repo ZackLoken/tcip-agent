@@ -33,12 +33,12 @@ def json_dataset(tmp_path: Path) -> Path:
         Image.new("RGB", (640, 480), color=(128, 128, 128)).save(images_dir / f"{name}.jpg")
         json_io.write_annotations(
             str(labels_dir / f"{name}.json"),
-            [Annotation(subject="catkin", geometry=BBox(288, 216, 352, 264)),
-             Annotation(subject="catkin", geometry=BBox(176, 132, 208, 156))], 640, 480)
+            [Annotation(subject="bud", geometry=BBox(288, 216, 352, 264)),
+             Annotation(subject="bud", geometry=BBox(176, 132, 208, 156))], 640, 480)
         json_io.write_annotations(
             str(preds_dir / f"{name}.json"),
-            [Annotation(subject="catkin", geometry=BBox(288, 216, 352, 264), score=0.9),
-             Annotation(subject="catkin", geometry=BBox(496, 372, 528, 396), score=0.7)], 640, 480)
+            [Annotation(subject="bud", geometry=BBox(288, 216, 352, 264), score=0.9),
+             Annotation(subject="bud", geometry=BBox(496, 372, 528, 396), score=0.7)], 640, 480)
     return tmp_path
 
 
@@ -68,7 +68,7 @@ class TestReadAnnotations:
         Image.new("RGB", (100, 100)).save(images_dir / "a.jpg")
         json_io.write_annotations(
             str(labels_dir / "a.json"),
-            [Annotation(subject="catkin", geometry=Polygon([
+            [Annotation(subject="bud", geometry=Polygon([
                 [(10.0, 10.0), (30.0, 10.0), (30.0, 30.0)],
                 [(60.0, 10.0), (80.0, 10.0), (80.0, 30.0)],
             ]))], 100, 100)
@@ -92,7 +92,7 @@ class TestReadAnnotations:
         Image.new("RGB", (100, 100)).save(images_dir / "a.jpg")
         json_io.write_annotations(
             str(labels_dir / "a.json"),
-            [Annotation(subject="catkin", geometry=BBox(1, 1, 9, 9))], 100, 100)
+            [Annotation(subject="bud", geometry=BBox(1, 1, 9, 9))], 100, 100)
 
         result = read_annotations(str(images_dir / "a.jpg"), fmt="coco")
         assert "error" in result
@@ -110,7 +110,7 @@ class TestReadAnnotations:
         labels_dir.mkdir()
         Image.new("RGB", (100, 100)).save(images_dir / "a.jpg")
         (labels_dir / "a.json").write_text(
-            '{"shapes": [{"label": "catkin", "points": [[1, 1], [8, 8]]}]}'
+            '{"shapes": [{"label": "bud", "points": [[1, 1], [8, 8]]}]}'
         )
 
         result = read_annotations(str(images_dir / "a.jpg"), fmt="coco")

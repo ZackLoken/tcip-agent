@@ -40,7 +40,7 @@ def test_dataset_scoped_decorator_write_carries_the_version_stamp_and_resolved_s
     noncanonical = str(dataset_root / "nested" / "..")
     assert ".." in noncanonical
 
-    subjects = {"catkin": {"description": "a hazelnut catkin"}}
+    subjects = {"bud": {"description": "a currant bud"}}
     assert "error" not in write_class_map(noncanonical, subjects=subjects)
 
     rows = list(ts.read_log(audit_module.audit_log_key(dataset_root)).records)

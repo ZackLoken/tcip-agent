@@ -12,7 +12,7 @@ from __future__ import annotations
 from pathlib import Path
 
 
-def _adopt(tmp_path, monkeypatch, name="hazelnut_catkin_valley") -> Path:
+def _adopt(tmp_path, monkeypatch, name="currant_bud_valley") -> Path:
     ws = tmp_path / "ws"
     ws.mkdir()
     monkeypatch.setenv("TCIP_WORKSPACE", str(ws))

@@ -14,9 +14,9 @@ def _seed_verdicts(state_dir: Path, *, bucket: str = BUCKET) -> Path:
     """Record one accepted and one rejected image's verdicts in the store at ``state_dir``."""
     state = {"verdicts": {
         (bucket, "imgA.png"): {"img_status": "completed", "detections": [
-            {"action": "accepted", "class_name": "catkin", "gt_bbox_norm": [0.5, 0.5, 0.2, 0.2], "pred_bbox_norm": None}]},
+            {"action": "accepted", "class_name": "bud", "gt_bbox_norm": [0.5, 0.5, 0.2, 0.2], "pred_bbox_norm": None}]},
         (bucket, "imgB.png"): {"img_status": "completed", "detections": [
-            {"action": "rejected", "class_name": "catkin", "gt_bbox_norm": None, "pred_bbox_norm": [0.8, 0.8, 0.1, 0.1]}]},
+            {"action": "rejected", "class_name": "bud", "gt_bbox_norm": None, "pred_bbox_norm": [0.8, 0.8, 0.1, 0.1]}]},
     }}
     # Seed through the engine so the fixture cannot drift from the real shard format.
     from tcip_annotation.review_engine import ReviewEngine

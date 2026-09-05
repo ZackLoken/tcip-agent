@@ -34,15 +34,15 @@ def test_write_predictions_json_roundtrip_and_negative(tmp_path):
     from tcip_mcp.pipelines.postprocessing.export import write_predictions_json
 
     id_map = class_registry.assign_class_ids(
-        ClassRegistry(subjects=(Subject(name="catkin"),)), "catkin")  # {catkin: 0}
+        ClassRegistry(subjects=(Subject(name="bud"),)), "bud")  # {bud: 0}
     p = tmp_path / "img.json"
     write_predictions_json(p, {
         "width": 100, "height": 100,
         "boxes": [[10.0, 10.0, 30.0, 30.0]], "scores": [0.9], "labels": [1], "count": 1,
-    }, subject="catkin", attribute=None, id_map=id_map)
+    }, subject="bud", attribute=None, id_map=id_map)
     data = json.loads(p.read_text())
     ann = data["annotations"][0]
-    assert ann["subject"] == "catkin"                       # 1-indexed label 1 -> id 0 -> "catkin"
+    assert ann["subject"] == "bud"                       # 1-indexed label 1 -> id 0 -> "bud"
     assert ann["bbox"] == [10.0, 10.0, 20.0, 20.0]
     assert ann["score"] == pytest.approx(0.9)
     preds = json_io.read_annotations(p)                     # symmetric read
@@ -52,7 +52,7 @@ def test_write_predictions_json_roundtrip_and_negative(tmp_path):
     neg = tmp_path / "empty.json"
     write_predictions_json(neg, {"width": 100, "height": 100,
                                  "boxes": [], "scores": [], "labels": [], "count": 0},
-                           subject="catkin", attribute=None)
+                           subject="bud", attribute=None)
     assert json.loads(neg.read_text())["annotations"] == []
 
 
@@ -132,7 +132,7 @@ def test_web_worker_resolves_id_map_from_predictor_config(tmp_path, monkeypatch)
         # A single-subject detector's config, the same shape run_inference reads
         # (predictor.config["data"]["subject"]), no classes.json needed, resolve_registry_id_map
         # synthesizes {subject: 0} for a plain single-class run.
-        config = {"data": {"subject": "catkin"}}
+        config = {"data": {"subject": "bud"}}
 
         def __init__(self, checkpoint_path=None, **kwargs):
             pass
@@ -155,7 +155,7 @@ def test_web_worker_resolves_id_map_from_predictor_config(tmp_path, monkeypatch)
     assert job.status == "completed"
     import json
     obj = json.loads((out_dir / "img.json").read_text())["annotations"][0]
-    assert obj["subject"] == "catkin"  # resolved via id_map, not the raw index "0"
+    assert obj["subject"] == "bud"  # resolved via id_map, not the raw index "0"
 
 
 def test_web_worker_prefers_the_checkpoints_own_recorded_id_map(tmp_path, monkeypatch):
@@ -176,11 +176,11 @@ def test_web_worker_prefers_the_checkpoints_own_recorded_id_map(tmp_path, monkey
     ckpt.write_bytes(b"stub")
 
     class FakePredictor:
-        # A recorded id_map naming class 1 "elongated", deliberately not what a live registry at
+        # A recorded id_map naming class 1 "open", deliberately not what a live registry at
         # images_dir would derive (there is no classes.json under images_dir at all), so a pass
         # here can only mean the recorded map was used, never a registry fallback.
-        config = {"data": {"subject": "catkin", "attribute": "elongation",
-                           "id_map": {"dormant": 0, "elongated": 1}}}
+        config = {"data": {"subject": "bud", "attribute": "opening",
+                           "id_map": {"closed": 0, "open": 1}}}
 
         def __init__(self, checkpoint_path=None, **kwargs):
             pass
@@ -207,14 +207,14 @@ def test_web_worker_prefers_the_checkpoints_own_recorded_id_map(tmp_path, monkey
     from tcip_mcp.pipelines.resolution import sidecar_key
 
     obj = json.loads((out_dir / "img.json").read_text())["annotations"][0]
-    # label 2 -> 0-indexed 1 -> the recorded map's "elongated"; a classified run's decoded name
+    # label 2 -> 0-indexed 1 -> the recorded map's "open"; a classified run's decoded name
     # lands under attributes[attribute], with subject carrying the object class.
-    assert obj["subject"] == "catkin"
-    assert obj["attributes"] == {"elongation": "elongated"}
+    assert obj["subject"] == "bud"
+    assert obj["attributes"] == {"opening": "open"}
     sidecar = tcip_store.read(sidecar_key(out_dir, "operating_point"))
-    assert sidecar["id_map"] == {"dormant": 0, "elongated": 1}
-    assert sidecar["subject"] == "catkin"
-    assert sidecar["attribute"] == "elongation"
+    assert sidecar["id_map"] == {"closed": 0, "open": 1}
+    assert sidecar["subject"] == "bud"
+    assert sidecar["attribute"] == "opening"
 
 
 def test_web_worker_runs_tiled_instance_seg_without_forcing_untiled(tmp_path, monkeypatch):
@@ -332,7 +332,7 @@ def _stub_predictor_for_conf_source(monkeypatch, tmp_path):
     ckpt.write_bytes(b"stub")
 
     class FakePredictor:
-        config = {"data": {"subject": "catkin"}}
+        config = {"data": {"subject": "bud"}}
 
         def __init__(self, checkpoint_path=None, **kwargs):
             pass

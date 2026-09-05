@@ -20,7 +20,7 @@ from tcip_mcp.tools.project_tools import archive_project, import_project
 from tcip_store.file_backend import FileBackend
 from tcip_store.sqlite_backend import SqliteBackend
 
-_NEGATIVE = {"catkin/2026-03-04": {"a_1.jpg": {"status": "negative", "by": "user:ü"}}}
+_NEGATIVE = {"bud/2026-03-04": {"a_1.jpg": {"status": "negative", "by": "user:ü"}}}
 """One confirmed negative: an image a human marked done with nothing on it."""
 
 
@@ -63,7 +63,7 @@ def _project(tmp_path: Path) -> Path:
         '{"annotations": []}', encoding="utf-8"
     )
     class_registry.write_registry(
-        root / "classes.json", ClassRegistry(subjects=(Subject(name="catkin"),))
+        root / "classes.json", ClassRegistry(subjects=(Subject(name="bud"),))
     )
     return root
 
@@ -117,7 +117,7 @@ def test_a_project_written_during_the_copy_takes_its_own_output_back(tmp_path, m
                 current = ts.read_versioned(dataset_layout.image_status_key(root))
                 ts.replace(
                     dataset_layout.image_status_key(root),
-                    {"catkin/2026-03-04": {"a_1.jpg": {"status": "complete", "by": "user:ü"}}},
+                    {"bud/2026-03-04": {"a_1.jpg": {"status": "complete", "by": "user:ü"}}},
                     expect=current.version,
                 )
                 return original(target)

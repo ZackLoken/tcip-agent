@@ -173,7 +173,7 @@ def _detection_project(tmp_path: Path, arr: np.ndarray, *, extrasamples: list[st
     tifffile.imwrite(str(images_dir / "img0.tif"), arr, **kwargs)
     h, w = arr.shape[:2]
     json_io.write_annotations(str(labels_dir / "img0.json"),
-                              [Annotation(subject="catkin", geometry=BBox(2, 2, 10, 10))],
+                              [Annotation(subject="bud", geometry=BBox(2, 2, 10, 10))],
                               w, h, keep_empty=True)
     return images_dir, labels_dir
 
@@ -186,7 +186,7 @@ def test_a_uint8_tiff_trains_augmented_through_detection(tmp_path: Path):
     arr = _grid(40, 32, 3)
     images_dir, labels_dir = _detection_project(tmp_path, arr)
     ds = build_dataset("detection", images_dir=str(images_dir), labels_dir=str(labels_dir),
-                       subject="catkin", transforms=_flip_transform())
+                       subject="bud", transforms=_flip_transform())
     got, _target = ds[0]
     flipped = torch.from_numpy(arr[:, ::-1].astype(np.float32) / 255.0).permute(2, 0, 1)
     assert torch.equal(got, flipped)
@@ -203,7 +203,7 @@ def test_a_uint8_windowed_tile_trains_augmented_through_tiling(tmp_path: Path):
         arr = _grid(96, 96, 3)
         images_dir, labels_dir = _detection_project(tmp_path, arr)
         ds = build_dataset("detection", images_dir=str(images_dir), labels_dir=str(labels_dir),
-                           subject="catkin", transforms=_flip_transform(),
+                           subject="bud", transforms=_flip_transform(),
                            tiling={"enabled": True, "tile_size": 64, "overlap": 0.2})
         got, _target = ds[0]  # tile at (0, 0)
         tile = arr[0:64, 0:64]
@@ -228,7 +228,7 @@ def test_a_declared_alpha_windowed_tile_trains_augmented(tmp_path: Path):
         arr = _grid(96, 96, 4)
         images_dir, labels_dir = _detection_project(tmp_path, arr, extrasamples=["unassalpha"])
         ds = build_dataset("detection", images_dir=str(images_dir), labels_dir=str(labels_dir),
-                           subject="catkin", num_channels=4, transforms=_flip_transform(),
+                           subject="bud", num_channels=4, transforms=_flip_transform(),
                            tiling={"enabled": True, "tile_size": 64, "overlap": 0.2})
         got, _target = ds[0]  # tile at (0, 0)
         tile = arr[0:64, 0:64]
@@ -253,7 +253,7 @@ def test_a_declared_spectral_fourth_band_windowed_tile_trains_unaugmented(tmp_pa
         arr = _grid(96, 96, 4)
         images_dir, labels_dir = _detection_project(tmp_path, arr, extrasamples=["unspecified"])
         ds = build_dataset("detection", images_dir=str(images_dir), labels_dir=str(labels_dir),
-                           subject="catkin", num_channels=4, transforms=_flip_transform(),
+                           subject="bud", num_channels=4, transforms=_flip_transform(),
                            tiling={"enabled": True, "tile_size": 64, "overlap": 0.2})
         got, _target = ds[0]  # tile at (0, 0)
         tile = arr[0:64, 0:64]

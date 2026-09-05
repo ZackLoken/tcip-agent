@@ -44,7 +44,7 @@ def _run(monkeypatch, capsys, stdin: str) -> str:
 def _workspace(tmp_path: Path, monkeypatch, *, reports=0, retros=0) -> str:
     """A workspace with a project active through the store, not a hand-written loose file."""
     ws = tmp_path / "ws"
-    proj = ws / "hazelnut_demo"
+    proj = ws / "currant_demo"
     (proj / ".tcip" / "reports").mkdir(parents=True)
     (proj / ".tcip" / "retrospectives").mkdir(parents=True)
     for i in range(reports):
@@ -55,7 +55,7 @@ def _workspace(tmp_path: Path, monkeypatch, *, reports=0, retros=0) -> str:
 
     from tcip_mcp import workspace
 
-    workspace.activate_project("hazelnut_demo")
+    workspace.activate_project("currant_demo")
     return str(proj)
 
 
@@ -66,7 +66,7 @@ def test_session_start_injects_ritual_directive_naming_the_active_project(
     out = _run(monkeypatch, capsys, '{"source":"startup"}')
     ctx = json.loads(out)["hookSpecificOutput"]["additionalContext"]
     assert json.loads(out)["hookSpecificOutput"]["hookEventName"] == "SessionStart"
-    assert "hazelnut_demo" in ctx
+    assert "currant_demo" in ctx
     for step in ("load_project_memory", "inspect_project", "doctor.py"):
         assert step in ctx
 
@@ -122,13 +122,13 @@ def test_session_start_hook_runs_as_a_real_subprocess(tmp_path, monkeypatch):
     import sys
 
     ws = tmp_path / "ws"
-    proj = ws / "hazelnut_demo"
+    proj = ws / "currant_demo"
     (proj / ".tcip").mkdir(parents=True)
     monkeypatch.setenv("TCIP_WORKSPACE", str(ws))
 
     from tcip_mcp import workspace
 
-    workspace.activate_project("hazelnut_demo")
+    workspace.activate_project("currant_demo")
 
     result = subprocess.run(
         [sys.executable, hook.__file__],
@@ -139,7 +139,7 @@ def test_session_start_hook_runs_as_a_real_subprocess(tmp_path, monkeypatch):
     )
     assert result.returncode == 0
     ctx = json.loads(result.stdout)["hookSpecificOutput"]["additionalContext"]
-    assert "hazelnut_demo" in ctx
+    assert "currant_demo" in ctx
     assert "No active project" not in ctx
 
 
@@ -150,7 +150,7 @@ def test_session_start_reads_a_marker_written_through_the_store(tmp_path, monkey
     _workspace(tmp_path, monkeypatch)
     out = _run(monkeypatch, capsys, '{"source":"startup"}')
     ctx = json.loads(out)["hookSpecificOutput"]["additionalContext"]
-    assert "hazelnut_demo" in ctx
+    assert "currant_demo" in ctx
     assert "No active project" not in ctx
 
 
@@ -161,7 +161,7 @@ def test_session_start_reads_the_loose_file_when_bound_to_the_file_backend(
     running under that same binding must read it and succeed, not refuse.
     """
     ws = tmp_path / "ws"
-    proj = ws / "hazelnut_demo"
+    proj = ws / "currant_demo"
     (proj / ".tcip").mkdir(parents=True)
     monkeypatch.setenv("TCIP_WORKSPACE", str(ws))
     monkeypatch.setenv("TCIP_STORE_BACKEND", "file")
@@ -171,11 +171,11 @@ def test_session_start_reads_the_loose_file_when_bound_to_the_file_backend(
     from tcip_store.file_backend import FileBackend
 
     tcip_store.bind(FileBackend())
-    workspace.activate_project("hazelnut_demo")
+    workspace.activate_project("currant_demo")
 
     out = _run(monkeypatch, capsys, '{"source":"startup"}')
     ctx = json.loads(out)["hookSpecificOutput"]["additionalContext"]
-    assert "hazelnut_demo" in ctx
+    assert "currant_demo" in ctx
     assert "could not be adopted" not in ctx
 
 
@@ -186,7 +186,7 @@ def test_session_start_names_the_store_refusal_for_a_loose_file_only_workspace(
     refused by the default (sqlite) backend rather than silently read as if it were fine.
     """
     ws = tmp_path / "ws"
-    proj = ws / "hazelnut_demo"
+    proj = ws / "currant_demo"
     (proj / ".tcip").mkdir(parents=True)
     monkeypatch.setenv("TCIP_WORKSPACE", str(ws))
 
@@ -197,7 +197,7 @@ def test_session_start_names_the_store_refusal_for_a_loose_file_only_workspace(
     monkeypatch.setenv("TCIP_STORE_BACKEND", "file")
     file_backend = FileBackend()
     tcip_store.bind(file_backend)
-    workspace.activate_project("hazelnut_demo")
+    workspace.activate_project("currant_demo")
     file_backend.close()
     monkeypatch.delenv("TCIP_STORE_BACKEND", raising=False)
 

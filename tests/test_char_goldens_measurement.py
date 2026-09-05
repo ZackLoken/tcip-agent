@@ -14,7 +14,7 @@ Rails pinned here (one section each):
   4. the currently divergent NMS / max_dets defaults across the three modules
   5. IoU-matching eval metrics at iou_threshold=0.5 (current criterion, to be replaced by a
      derived center-match tolerance)
-  6. deliver_phenology_milestones gate behavior (refuses without an elongation class; requires validated flags)
+  6. deliver_phenology_milestones gate behavior (refuses without an open class; requires validated flags)
 """
 
 from __future__ import annotations
@@ -42,11 +42,11 @@ from tests._binding_fixtures import (  # noqa: E402
     record_producing_run,
     write_bound_sidecar,
 )
-from tests._trait_fixtures import CATKIN  # noqa: E402
+from tests._trait_fixtures import BUD_OPENING  # noqa: E402
 from tests._dense_op_fixtures import good_cal_holdout  # noqa: E402
 
-# seed_catkin_operationalization writes the spec plus the confirmed crossing record this root needs.
-pytestmark = pytest.mark.usefixtures("seed_catkin_operationalization")
+# seed_bud_operationalization writes the spec plus the confirmed crossing record this root needs.
+pytestmark = pytest.mark.usefixtures("seed_bud_operationalization")
 
 
 # ── shared fixture helpers ────────────────────────────────────────────────
@@ -140,7 +140,7 @@ def test_golden_resolve_operating_point_validated_conf():
     cal, hold = good_cal_holdout()
     # tiled=False: this golden is about conf-calibration shippability, not tiling (tile_size
     # only gates a bundle when tiled).
-    b = resolve_operating_point("catkin", dataset_hash="h1",
+    b = resolve_operating_point("bud_opening", dataset_hash="h1",
                                 calibration_records=cal, holdout_records=hold,
                                 tiled=False, staged_conf_floor=0.01)
     conf = b.get("conf")
@@ -184,19 +184,19 @@ def test_golden_crossing_dates_interpolated():
 
 
 def test_golden_plant_milestones_shape_and_values():
-    ms = PH.plant_milestones(_PHENO_SERIES, CATKIN)
-    assert ms["catkin_05per_date"] == "2026-02-15"
-    assert ms["catkin_50per_date"] == "2026-03-01"
-    assert ms["catkin_95per_date"] == "2026-03-12"
-    # crossing-unconfirmed (breeders to confirm): elongation == the 95% majority crossing
-    assert ms["catkin_elongation_date"] == "2026-03-12"
+    ms = PH.plant_milestones(_PHENO_SERIES, BUD_OPENING)
+    assert ms["bud_05per_date"] == "2026-02-15"
+    assert ms["bud_50per_date"] == "2026-03-01"
+    assert ms["bud_95per_date"] == "2026-03-12"
+    # crossing-unconfirmed (breeders to confirm): opening == the 95% majority crossing
+    assert ms["bud_opening_date"] == "2026-03-12"
 
 
-_ID_MAP = {"dormant": 0, "elongated": 1}
+_ID_MAP = {"closed": 0, "open": 1}
 
 
-def _write_preds(d: Path, stem: str, subjects: list[str], *, attribute: str | None = "elongation",
-                 object_subject: str = "catkin") -> None:
+def _write_preds(d: Path, stem: str, subjects: list[str], *, attribute: str | None = "opening",
+                 object_subject: str = "bud") -> None:
     d.mkdir(parents=True, exist_ok=True)
     if attribute is None:
         anns = [Annotation(subject=s, geometry=BBox(1.0, 1.0, 3.0, 3.0), score=0.9)
@@ -207,8 +207,8 @@ def _write_preds(d: Path, stem: str, subjects: list[str], *, attribute: str | No
     json_io.write_annotations(d / f"{stem}.json", anns, 8, 8)
 
 
-def _write_id_map_sidecar(d: Path, id_map: dict, *, subject: str = "catkin",
-                          attribute: str | None = "elongation") -> None:
+def _write_id_map_sidecar(d: Path, id_map: dict, *, subject: str = "bud",
+                          attribute: str | None = "opening") -> None:
     from tcip_mcp.pipelines.resolution import write_sidecar
 
     write_sidecar(d, {"id_map": id_map, "subject": subject, "attribute": attribute},
@@ -217,9 +217,9 @@ def _write_id_map_sidecar(d: Path, id_map: dict, *, subject: str = "catkin",
 
 def test_golden_per_plant_phenology_series_and_milestones(tmp_path: Path):
     d1, d2 = tmp_path / "2026-02-11", tmp_path / "2026-03-09"
-    _write_preds(d1, "P1_a", ["dormant", "dormant", "dormant", "elongated"])  # 1/4 -> 0.25
+    _write_preds(d1, "P1_a", ["closed", "closed", "closed", "open"])  # 1/4 -> 0.25
     _write_id_map_sidecar(d1, _ID_MAP)
-    _write_preds(d2, "P1_b", ["elongated", "elongated", "elongated", "dormant"])  # 3/4 -> 0.75
+    _write_preds(d2, "P1_b", ["open", "open", "open", "closed"])  # 3/4 -> 0.75
     _write_id_map_sidecar(d2, _ID_MAP)
     mapping = {
         "2026-02-11": [{"stem": "P1_a", "plot_name": "P1", "accession_name": "acc-9"}],
@@ -227,7 +227,7 @@ def test_golden_per_plant_phenology_series_and_milestones(tmp_path: Path):
     }
     res = PH.per_plant_phenology(
         mapping, {"2026-02-11": str(d1), "2026-03-09": str(d2)},
-        positive_class_name="elongated", spec=CATKIN)
+        positive_class_name="open", spec=BUD_OPENING)
 
     # Both buckets are fully classified, so the fraction is produced and delivered.
     assert res["positive_class_assessed"] is True
@@ -243,7 +243,7 @@ def test_golden_per_plant_phenology_series_and_milestones(tmp_path: Path):
     assert [s["n_positive"] for s in row["series"]] == [1, 3]
     assert [s["ratio"] for s in row["series"]] == [0.25, 0.75]
     # 0.25 -> 0.75 crosses 50% at the midpoint between the two dates.
-    assert row["catkin_50per_date"] == "2026-02-24"
+    assert row["bud_50per_date"] == "2026-02-24"
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -275,7 +275,7 @@ def test_golden_stamp_shape_calibrated_validated():
     cal, hold = good_cal_holdout()
     # tiled=False: this golden is about conf-calibration shippability, not tiling (tile_size
     # only gates a bundle when tiled).
-    b = resolve_operating_point("catkin", dataset_hash="h1",
+    b = resolve_operating_point("bud_opening", dataset_hash="h1",
                                 calibration_records=cal, holdout_records=hold,
                                 tiled=False, staged_conf_floor=0.01)
     stamp = _stamp(b, validated=b.is_shippable, issues=b.shippable_issues())
@@ -320,7 +320,7 @@ def test_golden_validated_flag_path_calibrated_no_holdout_is_false():
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
 
     # Calibrated but never held-out-measured -> validated=false, not shippable.
-    b = resolve_operating_point("catkin", tiled=True, dataset_hash="h1",
+    b = resolve_operating_point("bud_opening", tiled=True, dataset_hash="h1",
                                 calibration_records=_sweep_records("c"))
     assert b.get("conf").validated_against == "false"
     assert b.is_shippable is False
@@ -334,7 +334,7 @@ def test_golden_content_shared_holdout_is_false():
     """
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
 
-    b = resolve_operating_point("catkin", tiled=True, dataset_hash="h1",
+    b = resolve_operating_point("bud_opening", tiled=True, dataset_hash="h1",
                                 calibration_records=_sweep_records("c"),
                                 holdout_records=_sweep_records("h"))
     conf = b.get("conf")
@@ -378,7 +378,7 @@ def test_golden_consolidated_operating_point_defaults():
 
     # The consolidated fallbacks flow through a resolved bundle with no calibration/overrides.
     # tile_size has no fallback to flow through at all here (no explicit/derived basis): None.
-    b = OP.resolve_operating_point("catkin", tiled=True, dataset_hash=None)
+    b = OP.resolve_operating_point("bud_opening", tiled=True, dataset_hash=None)
     assert b.get("cross_tile_nms")._raw == R.DEFAULT_NMS_IOU  # 0.3, was 0.5
     assert b.get("max_dets")._raw == R.DEFAULT_MAX_DETS        # 1000, was 300
     assert b.get("tile_size")._raw is None
@@ -455,15 +455,15 @@ def test_golden_evaluate_model_resolves_max_dets_per_regime_when_unset(tmp_path,
         labels_dir.mkdir()
         Image.new("RGB", (64, 64)).save(images_dir / "a.png")
         json_io.write_annotations(str(labels_dir / "a.json"),
-                                  [Annotation(subject="catkin", geometry=BBox(5, 5, 20, 20))],
+                                  [Annotation(subject="bud", geometry=BBox(5, 5, 20, 20))],
                                   64, 64)
         monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp))
         ckpt = registered_checkpoint(tmp, project_root=tmp)
 
         TT.evaluate_model(str(ckpt), str(images_dir), str(labels_dir), task="detection",
-                          subject="catkin", use_tiled_inference=True)
+                          subject="bud", use_tiled_inference=True)
         TT.evaluate_model(str(ckpt), str(images_dir), str(labels_dir), task="detection",
-                          subject="catkin")
+                          subject="bud")
     finally:
         runners.run_full_frame_evaluation = orig_gate
         runners.run_test_evaluation = orig_diag
@@ -536,7 +536,7 @@ def _write_stamp_bypassing_claim_rail(d: Path, stamp: dict, document: str) -> No
 
 
 def _write_op_sidecar(d: Path, *, dataset_root: Path, validated: bool, conf: float = 0.4,
-                      id_map: dict | None = None, subject: str = "catkin",
+                      id_map: dict | None = None, subject: str = "bud",
                       attribute: str | None = None,
                       checkpoint_sha256: str | None = None,
                       experiment_id: str | None = "exp-golden") -> None:
@@ -553,7 +553,7 @@ def _write_op_sidecar(d: Path, *, dataset_root: Path, validated: bool, conf: flo
         checkpoint_sha256 = record_producing_run(dataset_root, experiment_id)
     stamp = {
         "validated": validated,
-        "trait": "catkin",
+        "trait": "bud_opening",
         "operating_point": {"conf": {"value": conf, "validated_against": ref}},
         "id_map": id_map,
         "checkpoint_sha256": checkpoint_sha256,
@@ -570,12 +570,12 @@ def _write_op_sidecar(d: Path, *, dataset_root: Path, validated: bool, conf: flo
 
 
 def _write_classifier_sidecar(d: Path, *, dataset_root: Path, validated: bool,
-                              trait: str | None = "catkin") -> None:
+                              trait: str | None = "bud_opening") -> None:
     ref = "held_out_annotations" if validated else "false"
     d.mkdir(parents=True, exist_ok=True)
     stamp = {
         "validated": validated,
-        "operating_point": {"classifier": {"value": "elongated", "validated_against": ref}},
+        "operating_point": {"classifier": {"value": "open", "validated_against": ref}},
         "trait": trait,
     }
     if validated and trait:
@@ -586,14 +586,14 @@ def _write_classifier_sidecar(d: Path, *, dataset_root: Path, validated: bool,
         _write_stamp_bypassing_claim_rail(d, stamp, "classifier_operating_point")
 
 
-def _pheno_setup(tmp_path: Path, *, elongated: bool, op_validated: bool | None = None):
+def _pheno_setup(tmp_path: Path, *, classified: bool, op_validated: bool | None = None):
     root = tmp_path / "ds"
     d1 = root / "predictions" / "run" / "2026-02-11"
     d2 = root / "predictions" / "run" / "2026-03-09"
-    id_map = {"dormant": 0, "elongated": 1} if elongated else {"catkin": 0}
-    attribute = "elongation" if elongated else None
-    _write_preds(d1, "P1_a", ["catkin"] if not elongated else ["dormant"], attribute=attribute)
-    _write_preds(d2, "P1_b", ["elongated"] if elongated else ["catkin"], attribute=attribute)
+    id_map = {"closed": 0, "open": 1} if classified else {"bud": 0}
+    attribute = "opening" if classified else None
+    _write_preds(d1, "P1_a", ["bud"] if not classified else ["closed"], attribute=attribute)
+    _write_preds(d2, "P1_b", ["open"] if classified else ["bud"], attribute=attribute)
     if op_validated is not None:
         _write_op_sidecar(d1, dataset_root=root, validated=op_validated, id_map=id_map,
                           attribute=attribute)
@@ -614,13 +614,13 @@ def _pheno_setup(tmp_path: Path, *, elongated: bool, op_validated: bool | None =
     return mapping_name, d1, d2
 
 
-def test_golden_deliver_phenology_milestones_refuses_without_elongation_class(tmp_path: Path):
+def test_golden_deliver_phenology_milestones_refuses_without_opening_class(tmp_path: Path):
     from tcip_mcp.tools.phenology_tools import deliver_phenology_milestones
 
-    mapping_name, d1, d2 = _pheno_setup(tmp_path, elongated=False, op_validated=True)  # bare detector
-    out_csv = tmp_path / "out" / "catkin_phenology.csv"
+    mapping_name, d1, d2 = _pheno_setup(tmp_path, classified=False, op_validated=True)  # bare detector
+    out_csv = tmp_path / "out" / "bud_phenology.csv"
     res = deliver_phenology_milestones(
-        trait="catkin",
+        trait="bud_opening",
         mapping_name=mapping_name,
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv),
@@ -632,10 +632,10 @@ def test_golden_deliver_phenology_milestones_refuses_without_elongation_class(tm
 def test_golden_deliver_phenology_milestones_requires_both_validated_flags(tmp_path: Path):
     from tcip_mcp.tools.phenology_tools import deliver_phenology_milestones
 
-    mapping_name, d1, d2 = _pheno_setup(tmp_path, elongated=True)  # no operating_point.json sidecars
-    out_csv = tmp_path / "out" / "catkin_phenology.csv"
+    mapping_name, d1, d2 = _pheno_setup(tmp_path, classified=True)  # no operating_point.json sidecars
+    out_csv = tmp_path / "out" / "bud_phenology.csv"
     res = deliver_phenology_milestones(
-        trait="catkin",
+        trait="bud_opening",
         mapping_name=mapping_name,
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv),
@@ -650,10 +650,10 @@ def test_golden_deliver_phenology_milestones_asserted_op_validity_floored_by_mis
     # own conf.validated_against is "false"; a caller asserting "held_out_annotations" cannot override it.
     from tcip_mcp.tools.phenology_tools import deliver_phenology_milestones
 
-    mapping_name, d1, d2 = _pheno_setup(tmp_path, elongated=True, op_validated=False)
-    out_csv = tmp_path / "out" / "catkin_phenology.csv"
+    mapping_name, d1, d2 = _pheno_setup(tmp_path, classified=True, op_validated=False)
+    out_csv = tmp_path / "out" / "bud_phenology.csv"
     res = deliver_phenology_milestones(
-        trait="catkin",
+        trait="bud_opening",
         mapping_name=mapping_name,
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv),
@@ -670,11 +670,11 @@ def test_golden_deliver_phenology_milestones_delivers_when_both_validated(tmp_pa
 
     # The positive-state fraction is now produced, so a fully-validated call (classifier + count
     # operating point both validated on disk) delivers a real phenology CSV.
-    mapping_name, d1, d2 = _pheno_setup(tmp_path, elongated=True, op_validated=True)
+    mapping_name, d1, d2 = _pheno_setup(tmp_path, classified=True, op_validated=True)
     _write_classifier_sidecar(d1, dataset_root=tmp_path / "ds", validated=True)
-    out_csv = tmp_path / "out" / "catkin_phenology.csv"
+    out_csv = tmp_path / "out" / "bud_phenology.csv"
     res = deliver_phenology_milestones(
-        trait="catkin",
+        trait="bud_opening",
         mapping_name=mapping_name,
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv),

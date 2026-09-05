@@ -44,7 +44,7 @@ def _project(root: Path) -> Path:
         '{"annotations": []}', encoding="utf-8"
     )
     class_registry.write_registry(
-        root / "classes.json", ClassRegistry(subjects=(Subject(name="catkin"),))
+        root / "classes.json", ClassRegistry(subjects=(Subject(name="bud"),))
     )
     return root
 
@@ -73,7 +73,7 @@ def test_import_refuses_a_non_empty_destination_and_changes_nothing(tmp_path, mo
     with bound(SqliteBackend()):
         ts.replace(
             dataset_layout.image_status_key(dest),
-            {"catkin/2026-03-04": {"a_1.jpg": {"status": "negative", "by": "user:x"}}},
+            {"bud/2026-03-04": {"a_1.jpg": {"status": "negative", "by": "user:x"}}},
             expect=ts.Version.ABSENT,
         )
 
@@ -83,7 +83,7 @@ def test_import_refuses_a_non_empty_destination_and_changes_nothing(tmp_path, mo
         assert str(dest) in result["error"]
         assert (dest / "classes.json").read_bytes() == b"already here"
         assert ts.read(dataset_layout.image_status_key(dest)) == {
-            "catkin/2026-03-04": {"a_1.jpg": {"status": "negative", "by": "user:x"}}
+            "bud/2026-03-04": {"a_1.jpg": {"status": "negative", "by": "user:x"}}
         }
 
 
@@ -290,7 +290,7 @@ def test_import_refuses_a_corrupt_zip_without_stranding_a_staging_tree(tmp_path)
 
 def test_import_under_file_backend_lands_files_and_builds_no_database(tmp_path):
     root = _project(tmp_path / "source")
-    negative = {"catkin/2026-03-04": {"a_1.jpg": {"status": "negative", "by": "user:x"}}}
+    negative = {"bud/2026-03-04": {"a_1.jpg": {"status": "negative", "by": "user:x"}}}
     with bound(FileBackend()):
         ts.replace(dataset_layout.image_status_key(root), negative, expect=ts.Version.ABSENT)
         assert "error" not in archive_project(str(root), str(tmp_path / "bundle.zip"))
@@ -366,7 +366,7 @@ def test_dataset_registry_stores_the_relative_dot_after_import(tmp_path):
 
     with bound(FileBackend()):
         root = _project(tmp_path / "source")
-        registered = register_dataset(str(root), crop="hazelnut", project_root=str(root))
+        registered = register_dataset(str(root), crop="currant", project_root=str(root))
         assert "error" not in registered
 
         zip_path = tmp_path / "bundle.zip"
@@ -386,7 +386,7 @@ def test_dataset_registry_travels_with_nothing_rewritten(tmp_path):
     from tcip_mcp.tools.project_tools import dataset_entry_path, read_datasets, register_dataset
 
     root = _project(tmp_path / "source")
-    registered = register_dataset(str(root), crop="hazelnut", project_root=str(root))
+    registered = register_dataset(str(root), crop="currant", project_root=str(root))
     assert "error" not in registered
 
     zip_path = tmp_path / "bundle.zip"
@@ -404,7 +404,7 @@ def test_an_external_dataset_entry_stays_absolute_and_is_disclosed(tmp_path):
 
     root = _project(tmp_path / "source")
     external = _project(tmp_path / "external_dataset")
-    registered = register_dataset(str(external), crop="hazelnut", project_root=str(root))
+    registered = register_dataset(str(external), crop="currant", project_root=str(root))
     assert "error" not in registered
 
     zip_path = tmp_path / "bundle.zip"
@@ -438,10 +438,10 @@ def _annotated_dataset(root: Path, n: int) -> None:
         Image.new("RGB", (640, 480), color=(128, 128, 128)).save(images_dir / f"{stem}.jpg")
         json_io.write_annotations(
             labels_dir / f"{stem}.json",
-            [Annotation(subject="catkin", geometry=BBox(288, 216, 352, 264))], 640, 480,
+            [Annotation(subject="bud", geometry=BBox(288, 216, 352, 264))], 640, 480,
         )
     class_registry.write_registry(
-        root / "classes.json", ClassRegistry(subjects=(Subject(name="catkin"),))
+        root / "classes.json", ClassRegistry(subjects=(Subject(name="bud"),))
     )
 
 
@@ -459,7 +459,7 @@ def test_a_splits_root_nested_under_a_curated_root_archives_and_round_trips(tmp_
     _annotated_dataset(curated, 4)
     ts.replace(curated_manifest_key(curated), {"source": "review verdicts"}, expect=ts.Version.ABSENT)
 
-    splits_result = draw_splits(str(curated), subject="catkin", materialize=True,
+    splits_result = draw_splits(str(curated), subject="bud", materialize=True,
                                  train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
     assert "error" not in splits_result, splits_result
 
@@ -471,7 +471,7 @@ def test_a_splits_root_nested_under_a_curated_root_archives_and_round_trips(tmp_
     imported = import_project(str(zip_path), str(dest))
     assert "error" not in imported, imported
     assert (dest / "curated" / "curated_manifest.json").is_file()
-    assert ts.read(split_manifest_key(dest / "curated" / "splits"))["subject"] == "catkin"
+    assert ts.read(split_manifest_key(dest / "curated" / "splits"))["subject"] == "bud"
 
 
 def test_the_full_round_trip_reads_back_at_once_with_no_hand_adoption(tmp_path, monkeypatch):
@@ -497,7 +497,7 @@ def test_the_full_round_trip_reads_back_at_once_with_no_hand_adoption(tmp_path, 
     monkeypatch.setenv("TCIP_STATE_ROOT", str(root))
     _annotated_dataset(root, 4)
     assert "error" not in initialize_project(str(root), site="north orchard")
-    assert "error" not in register_dataset(str(root), crop="hazelnut", project_root=str(root))
+    assert "error" not in register_dataset(str(root), crop="currant", project_root=str(root))
     confirmed = seed_confirmed_count(root)
     assert confirmed["confirmed_by"]
 
@@ -529,7 +529,7 @@ def test_the_full_round_trip_reads_back_at_once_with_no_hand_adoption(tmp_path, 
     )
     study = hpo_result["study_name"]
 
-    splits_result = draw_splits(str(root), output_path=str(root / "splits_out"), subject="catkin",
+    splits_result = draw_splits(str(root), output_path=str(root / "splits_out"), subject="bud",
                                 train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
     assert "error" not in splits_result, splits_result
 
@@ -573,4 +573,4 @@ def test_the_full_round_trip_reads_back_at_once_with_no_hand_adoption(tmp_path, 
         assert ts.read(tt.trial_config_key(dest / ".tcip" / "hpo" / study, trial_dirs[0].name))
 
         manifest = ts.read(split_manifest_key(dest / "splits_out"))
-        assert manifest["subject"] == "catkin"
+        assert manifest["subject"] == "bud"

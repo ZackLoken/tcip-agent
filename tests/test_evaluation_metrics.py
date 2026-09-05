@@ -45,9 +45,9 @@ from tcip_mcp.pipelines.training.generic_trainer import (  # noqa: E402
     resolve_selection_metric,
 )
 
-# No built-in traits: seed_catkin_trait_spec (conftest.py) writes a real catkin.yml into this
-# test's pinned platform state root so trait="catkin" call sites keep resolving.
-pytestmark = pytest.mark.usefixtures("seed_catkin_trait_spec")
+# No built-in traits: seed_bud_trait_spec (conftest.py) writes a real bud_opening.yml into this
+# test's pinned platform state root so trait="bud_opening" call sites keep resolving.
+pytestmark = pytest.mark.usefixtures("seed_bud_trait_spec")
 
 
 # --------------------------------------------------------------------------
@@ -256,8 +256,8 @@ def test_dt_score_refuses_a_record_without_a_score_or_with_none_by_name():
 # (never silently switches) on divergence.
 
 def _write_bare_trait(name: str, **extra) -> None:
-    """A minimal trait spec with no localization recorded (unlike seed_catkin_trait_spec's
-    CATKIN, which already carries localization="center_match").
+    """A minimal trait spec with no localization recorded (unlike seed_bud_trait_spec's
+    BUD_OPENING, which already carries localization="center_match").
 
     Seeded at the directory the platform's own resolver returns for this test's pinned project
     root, so the fixture cannot state a specs location the registry does not read from.
@@ -597,14 +597,14 @@ def test_resolve_selection_metric_with_no_val_loader_accepts_only_loss():
 
 def test_resolve_selection_metric_rejects_incoherent_explicit_choice():
     with pytest.raises(ValueError, match="comparability-only"):
-        resolve_selection_metric("detection", "catkin", "map50")
+        resolve_selection_metric("detection", "bud_opening", "map50")
 
 
 def test_resolve_selection_metric_allows_coherent_explicit_choice():
     # A legitimate explicit choice must still succeed: a rail must admit valid work, not
     # only reject invalid work.
-    assert resolve_selection_metric("detection", "catkin", "f1") == "f1"
-    assert resolve_selection_metric("detection", "catkin", "recall") == "recall"
+    assert resolve_selection_metric("detection", "bud_opening", "f1") == "f1"
+    assert resolve_selection_metric("detection", "bud_opening", "recall") == "recall"
     assert resolve_selection_metric("detection", None, "map50") == "map50"  # no trait -> no gate
 
 
@@ -680,8 +680,8 @@ def test_higher_is_better_by_metric_matches_evaluate_and_governing_counts():
             m1 = 1 - m0
             loader = [(imgs, {"masks": torch.stack([m0, m1])})]
 
-        # "catkin" (seeded center_match) exercises evaluate()'s center-match branch for detection.
-        trait = "catkin" if task == "detection" else None
+        # "bud_opening" (seeded center_match) exercises evaluate()'s center-match branch for detection.
+        trait = "bud_opening" if task == "detection" else None
         result = evaluate(model, loader, device, task, trait=trait)
         returned.update(result)
 
@@ -975,10 +975,10 @@ def test_validate_detection_returns_metrics_and_objective(tmp_path):
     for i in range(4):
         _save_png(images_dir / f"img{i}.png")
         json_io.write_annotations(str(labels_dir / f"img{i}.json"),
-                                  [Annotation(subject="catkin", geometry=BBox(19.2, 19.2, 44.8, 44.8))],
+                                  [Annotation(subject="bud", geometry=BBox(19.2, 19.2, 44.8, 44.8))],
                                   IMG, IMG, keep_empty=True)
     ds = build_dataset("detection", images_dir=str(images_dir), labels_dir=str(labels_dir),
-                       subject="catkin")
+                       subject="bud")
     loader = DataLoader(ds, batch_size=2, collate_fn=task_collate("detection"))
 
     model_source = {"builder": "tests.bespoke_models:build_bespoke_detection",
@@ -1007,17 +1007,17 @@ def test_train_center_match_trait_records_governing_criterion(tmp_path):
     for i in range(4):
         _save_png(images_dir / f"img{i}.png")
         json_io.write_annotations(str(labels_dir / f"img{i}.json"),
-                                  [Annotation(subject="catkin", geometry=BBox(19.2, 19.2, 44.8, 44.8))],
+                                  [Annotation(subject="bud", geometry=BBox(19.2, 19.2, 44.8, 44.8))],
                                   IMG, IMG, keep_empty=True)
     ds = build_dataset("detection", images_dir=str(images_dir), labels_dir=str(labels_dir),
-                       subject="catkin")
+                       subject="bud")
     loader = DataLoader(ds, batch_size=2, collate_fn=task_collate("detection"))
 
     model_source = {"builder": "tests.bespoke_models:build_bespoke_detection",
                     "builder_kwargs": {"num_classes": 1, "min_size": IMG, "max_size": IMG * 2},
                     "task": "detection"}
     cfg = _cfg(model_source)
-    cfg["evaluation"] = {"trait": "catkin"}
+    cfg["evaluation"] = {"trait": "bud_opening"}
     run = create_run(cfg, str(tmp_path / "out"))
     run = train(run, loader, val_loader=loader, task="detection")
 
@@ -1026,7 +1026,7 @@ def test_train_center_match_trait_records_governing_criterion(tmp_path):
     assert "val_governing_criterion" in last
     assert last["val_map50_role"] == "comparability_only"
     assert last["selection_metric"] == "objective"
-    assert last["selection_trait"] == "catkin"
+    assert last["selection_trait"] == "bud_opening"
 
 
 def test_validate_classification_metrics(tmp_path):
@@ -1078,15 +1078,15 @@ def json_data_dir(tmp_path: Path) -> Path:
         Image.new("RGB", (640, 480), color=(128, 128, 128)).save(images_dir / f"{name}.jpg")
         json_io.write_annotations(
             str(labels_dir / f"{name}.json"),
-            [Annotation(subject="catkin", geometry=BBox(288, 216, 352, 264)),
-             Annotation(subject="catkin", geometry=BBox(176, 132, 208, 156))],
+            [Annotation(subject="bud", geometry=BBox(288, 216, 352, 264)),
+             Annotation(subject="bud", geometry=BBox(176, 132, 208, 156))],
             640, 480,
         )
         # 1 matching prediction (TP) + 1 elsewhere (FP), confidence in each annotation's score.
         json_io.write_annotations(
             str(preds_dir / f"{name}.json"),
-            [Annotation(subject="catkin", geometry=BBox(288, 216, 352, 264), score=0.9),
-             Annotation(subject="catkin", geometry=BBox(496, 372, 528, 396), score=0.7)],
+            [Annotation(subject="bud", geometry=BBox(288, 216, 352, 264), score=0.9),
+             Annotation(subject="bud", geometry=BBox(496, 372, 528, 396), score=0.7)],
             640, 480,
         )
     return tmp_path

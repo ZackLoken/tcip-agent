@@ -31,7 +31,7 @@ def test_conform_script_makes_the_projects_own_dataset_entry_relative(tmp_path: 
     project.mkdir()
     ts.replace(
         dataset_registry_key(project),
-        [{"id": "abc123", "path": str(project), "crop": "hazelnut", "fingerprint": "f"}],
+        [{"id": "abc123", "path": str(project), "crop": "currant", "fingerprint": "f"}],
         expect=ts.Version.ABSENT,
     )
 
@@ -50,7 +50,7 @@ def test_conform_script_leaves_an_external_dataset_absolute(tmp_path: Path):
     external.mkdir()
     ts.replace(
         dataset_registry_key(project),
-        [{"id": "abc123", "path": str(external), "crop": "hazelnut", "fingerprint": "f"}],
+        [{"id": "abc123", "path": str(external), "crop": "currant", "fingerprint": "f"}],
         expect=ts.Version.ABSENT,
     )
 
@@ -67,7 +67,7 @@ def test_conform_script_is_idempotent(tmp_path: Path):
     project.mkdir()
     ts.replace(
         dataset_registry_key(project),
-        [{"id": "abc123", "path": str(project), "crop": "hazelnut", "fingerprint": "f"}],
+        [{"id": "abc123", "path": str(project), "crop": "currant", "fingerprint": "f"}],
         expect=ts.Version.ABSENT,
     )
 

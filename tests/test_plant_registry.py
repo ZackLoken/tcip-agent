@@ -34,7 +34,7 @@ def test_registers_a_csv_and_persists_the_frozen_record(tmp_path: Path) -> None:
     csv_path = _plant_csv(tmp_path / "plants.csv")
 
     res = register_plant_registry(
-        name="valley-plants", csv_paths=[str(csv_path)], crop="hazelnut", site="north orchard")
+        name="valley-plants", csv_paths=[str(csv_path)], crop="currant", site="north orchard")
 
     assert "error" not in res, res
     assert res["name"] == "valley-plants"
@@ -57,7 +57,7 @@ def test_refuses_a_name_outside_name_segment(tmp_path: Path) -> None:
     csv_path = _plant_csv(tmp_path / "plants.csv")
 
     res = register_plant_registry(
-        name="Not Legal!", csv_paths=[str(csv_path)], crop="hazelnut", site="orchard")
+        name="Not Legal!", csv_paths=[str(csv_path)], crop="currant", site="orchard")
 
     assert "error" in res
     assert "lowercase" in res["error"]
@@ -65,7 +65,7 @@ def test_refuses_a_name_outside_name_segment(tmp_path: Path) -> None:
 
 def test_refuses_a_missing_file(tmp_path: Path) -> None:
     res = register_plant_registry(
-        name="valley", csv_paths=[str(tmp_path / "missing.csv")], crop="hazelnut", site="orchard")
+        name="valley", csv_paths=[str(tmp_path / "missing.csv")], crop="currant", site="orchard")
 
     assert "error" in res
     assert "plant CSV" in res["error"]
@@ -79,7 +79,7 @@ def test_refuses_naming_a_file_that_parses_no_georeferenced_plant(tmp_path: Path
     bad.write_text("plot_name,accession_name,WGS84_centroid_x,WGS84_centroid_y\n", encoding="utf-8")
 
     res = register_plant_registry(
-        name="valley", csv_paths=[str(good), str(bad)], crop="hazelnut", site="orchard")
+        name="valley", csv_paths=[str(good), str(bad)], crop="currant", site="orchard")
 
     assert "error" in res
     assert bad.name in res["error"]
@@ -91,11 +91,11 @@ def test_a_second_registration_under_the_same_name_and_content_is_a_no_op(tmp_pa
     csv_path = _plant_csv(tmp_path / "plants.csv")
 
     first = register_plant_registry(
-        name="valley", csv_paths=[str(csv_path)], crop="hazelnut", site="orchard")
+        name="valley", csv_paths=[str(csv_path)], crop="currant", site="orchard")
     assert "error" not in first, first
 
     second = register_plant_registry(
-        name="valley", csv_paths=[str(csv_path)], crop="hazelnut", site="orchard")
+        name="valley", csv_paths=[str(csv_path)], crop="currant", site="orchard")
 
     assert "error" not in second, second
     assert second["digest"] == first["digest"]
@@ -109,11 +109,11 @@ def test_a_second_registration_under_the_same_name_and_different_plants_refuses(
         tmp_path / "other.csv", [{"plot": "P9", "accession": "acc-Z", "lat": 1.0, "lon": 1.0}])
 
     first = register_plant_registry(
-        name="valley", csv_paths=[str(csv_path)], crop="hazelnut", site="orchard")
+        name="valley", csv_paths=[str(csv_path)], crop="currant", site="orchard")
     assert "error" not in first, first
 
     conflict = register_plant_registry(
-        name="valley", csv_paths=[str(other_csv)], crop="hazelnut", site="orchard")
+        name="valley", csv_paths=[str(other_csv)], crop="currant", site="orchard")
 
     assert "error" in conflict
     assert first["digest"] in conflict["error"]
@@ -131,7 +131,7 @@ def test_build_plant_mapping_reads_a_registered_registry(
     images_root, plant_csv, _ = _write_scene(dataset_root, dates=["2026-02-11"])
 
     reg = register_plant_registry(
-        name="valley-plants", csv_paths=[str(plant_csv)], crop="hazelnut", site="orchard")
+        name="valley-plants", csv_paths=[str(plant_csv)], crop="currant", site="orchard")
     assert "error" not in reg, reg
 
     res = build_plant_mapping(
@@ -167,7 +167,7 @@ def _deliver_scene(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[str
     dataset_root = _dataset(tmp_path)
     images_root, plant_csv, preds_by_date = _write_scene(dataset_root, dates=["2026-02-11"])
     reg = register_plant_registry(
-        name="valley-plants", csv_paths=[str(plant_csv)], crop="hazelnut", site="orchard")
+        name="valley-plants", csv_paths=[str(plant_csv)], crop="currant", site="orchard")
     assert "error" not in reg, reg
     build_res = build_plant_mapping(
         name="valley", images_root=str(images_root), plant_registry="valley-plants")

@@ -191,13 +191,13 @@ def test_run_inference_prefers_the_checkpoints_own_recorded_id_map(tmp_path, mon
                     "task": "detection"}
     from tcip_mcp.pipelines.model_build import build_model
     model = build_model({"model_source": model_source})
-    recorded_id_map = {"dormant": 0, "elongated": 1}
+    recorded_id_map = {"closed": 0, "open": 1}
     ckpt_path = tmp_path / "model_best.pt"
     _torch.save({
         "model_source": model_source,
         "model_state_dict": model.state_dict(),
         "config": {"model_source": model_source,
-                   "data": {"subject": "catkin", "attribute": "elongation",
+                   "data": {"subject": "bud", "attribute": "opening",
                             "id_map": recorded_id_map}},
     }, str(ckpt_path))
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))

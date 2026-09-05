@@ -21,9 +21,9 @@ import pytest
 torch = pytest.importorskip("torch")
 pytest.importorskip("torchvision")
 
-# No built-in traits: seed_catkin_trait_spec (conftest.py) writes a real catkin.yml into this
-# test's pinned platform state root so resolve_operating_point("catkin", ...) keeps resolving by default.
-pytestmark = pytest.mark.usefixtures("seed_catkin_trait_spec")
+# No built-in traits: seed_bud_trait_spec (conftest.py) writes a real bud.yml into this
+# test's pinned platform state root so resolve_operating_point("bud_opening", ...) keeps resolving by default.
+pytestmark = pytest.mark.usefixtures("seed_bud_trait_spec")
 
 # Component registration side-effects (backbones/necks/heads used by build_dataset + eval).
 import tcip_mcp.pipelines.components.backbones  # noqa: F401,E402
@@ -68,7 +68,7 @@ def test_bespoke_detector_end_to_end(tmp_path: Path):
     from tcip_mcp.pipelines.training.collation import task_collate
     from tcip_mcp.pipelines.training.run_registry import create_run
 
-    # 1. Synthetic detection data: elongated (tall) boxes so GT-derived anchors differ from defaults.
+    # 1. Synthetic detection data: open (tall) boxes so GT-derived anchors differ from defaults.
     images_dir = tmp_path / "images"
     labels_dir = tmp_path / "labels"
     labels_dir.mkdir(parents=True, exist_ok=True)
@@ -79,12 +79,12 @@ def test_bespoke_detector_end_to_end(tmp_path: Path):
         w, h = shapes[i % len(shapes)]
         x1, y1 = 32 - w / 2, 32 - h / 2
         json_io.write_annotations(str(labels_dir / f"img{i}.json"),
-                                  [Annotation(subject="catkin", geometry=BBox(x1, y1, x1 + w, y1 + h))],
+                                  [Annotation(subject="bud", geometry=BBox(x1, y1, x1 + w, y1 + h))],
                                   IMG, IMG, keep_empty=True)
         gt_wh.append((w, h))
 
     dataset = build_dataset("detection", images_dir=str(images_dir),
-                            labels_dir=str(labels_dir), subject="catkin")
+                            labels_dir=str(labels_dir), subject="bud")
     train_loader = DataLoader(dataset, batch_size=2, collate_fn=task_collate("detection"))
     val_loader = DataLoader(dataset, batch_size=2, collate_fn=task_collate("detection"))
 
@@ -171,7 +171,7 @@ def test_bespoke_detector_end_to_end(tmp_path: Path):
     assert overfit["passed"], overfit["issue"]
 
     records = records_over_loader(predictor.model, val_loader, torch.device("cpu"), "detection")
-    bundle = resolve_operating_point("catkin", tiled=True, dataset_hash="test",
+    bundle = resolve_operating_point("bud_opening", tiled=True, dataset_hash="test",
                                      calibration_records=records, holdout_records=records)
     assert "conf" in bundle.params                          # operating point resolved over bespoke outputs
 

@@ -22,13 +22,13 @@ def test_set_active_writes_marker(monkeypatch):
     monkeypatch.setattr(
         web_client, "post_panel_event", lambda *a, **k: {"delivered": False}
     )
-    (workspace.project_path("hazelnut_catkin_valley-farm") / ".tcip").mkdir(parents=True)
-    result = activate_project(name="hazelnut_catkin_valley-farm")
+    (workspace.project_path("currant_bud_valley-farm") / ".tcip").mkdir(parents=True)
+    result = activate_project(name="currant_bud_valley-farm")
     assert "error" not in result
-    assert result["name"] == "hazelnut_catkin_valley-farm"
+    assert result["name"] == "currant_bud_valley-farm"
     assert result["gui_notified"] is False
-    assert result["project_path"].endswith("hazelnut_catkin_valley-farm")
-    assert workspace.read_active_project() == "hazelnut_catkin_valley-farm"
+    assert result["project_path"].endswith("currant_bud_valley-farm")
+    assert workspace.read_active_project() == "currant_bud_valley-farm"
     # No backend answered at all: the docstring's down-backend case.
     assert result["backend_repinned"] is False
     assert result["backend_platform_root"] is None
@@ -92,7 +92,7 @@ def test_a_marker_that_does_not_decode_reads_as_no_active_project():
     tcip_store.bind(FileBackend())
     marker = workspace.active_marker_path()
     marker.parent.mkdir(parents=True, exist_ok=True)
-    marker.write_bytes("hazelnut_catkin_valley-farm\n".encode("utf-16"))
+    marker.write_bytes("currant_bud_valley-farm\n".encode("utf-16"))
 
     assert workspace.read_active_project() is None
 

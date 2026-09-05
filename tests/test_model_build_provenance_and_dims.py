@@ -58,7 +58,7 @@ def _param_shapes(model) -> dict:
 def _write_registry(dataset_root: Path) -> None:
     """A registry with three subjects of different shape, so no scope's class count is guessable
     from the file's overall size: 'leaf' carries a three-value ordinal axis, 'bush' a two-value
-    categorical one, and 'catkin' none at all."""
+    categorical one, and 'bud' none at all."""
     registry = class_registry.ClassRegistry(subjects=(
         class_registry.Subject(
             name="leaf",
@@ -68,7 +68,7 @@ def _write_registry(dataset_root: Path) -> None:
             name="bush",
             attributes=(class_registry.Attribute(
                 name="vigor", type="categorical", values=("low", "high")),)),
-        class_registry.Subject(name="catkin"),
+        class_registry.Subject(name="bud"),
     ))
     dataset_root.mkdir(parents=True, exist_ok=True)
     class_registry.write_registry(classes_path(dataset_root), registry)
@@ -90,7 +90,7 @@ def test_contract_dims_take_the_registry_count_without_the_loader_background_off
     same map, with no background class added: the +1 is the loader's own offset on the labels it
     builds, so applying it here too would prove the model against a head one class wider than the
     one that trains."""
-    dataset_root = tmp_path / "hazelnut_2026"
+    dataset_root = tmp_path / "currant_2026"
     labels_dir = dataset_root / "annotations"
     labels_dir.mkdir(parents=True)
     _write_registry(dataset_root)
@@ -118,11 +118,11 @@ def test_contract_dims_count_only_the_subject_for_a_single_class_scope(tmp_path)
 
     cfg = {
         "model_source": {"builder_kwargs": {"num_classes": 9}},
-        "data": {"subject": "catkin", "labels_dir": str(labels_dir)},
+        "data": {"subject": "bud", "labels_dir": str(labels_dir)},
     }
     dims = resolve_contract_dims(cfg, "instance_seg")
 
-    _registry, id_map = resolve_registry_id_map(str(labels_dir), "catkin", None)
+    _registry, id_map = resolve_registry_id_map(str(labels_dir), "bud", None)
     assert len(id_map) == 1
     assert dims["num_classes"] == len(id_map)
 

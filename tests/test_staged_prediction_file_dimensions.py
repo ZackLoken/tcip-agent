@@ -24,7 +24,7 @@ PORTRAIT = (480, 800)
 def _stage(root: Path, size: tuple[int, int], geometry: BBox) -> dict:
     return stage_prediction_shapes(
         str(root), "detector", DATE, "IMG_0007",
-        annotations=[Annotation(subject="catkin", geometry=geometry, score=0.72)],
+        annotations=[Annotation(subject="bud", geometry=geometry, score=0.72)],
         img_w=size[0], img_h=size[1],
     )
 
@@ -66,7 +66,7 @@ def test_stage_prediction_shapes_refuses_a_reserved_stem(tmp_path: Path) -> None
     with pytest.raises(ValueError, match="operating_point"):
         stage_prediction_shapes(
             str(tmp_path / "proj"), "detector", DATE, "operating_point",
-            annotations=[Annotation(subject="catkin", geometry=BBox(1.0, 1.0, 5.0, 5.0))],
+            annotations=[Annotation(subject="bud", geometry=BBox(1.0, 1.0, 5.0, 5.0))],
             img_w=100, img_h=100,
         )
     assert not (tmp_path / "proj").exists()

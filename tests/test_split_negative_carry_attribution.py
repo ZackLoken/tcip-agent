@@ -24,7 +24,7 @@ from tcip_mcp.dataset_layout import (
 from tcip_mcp.tools.data_tools import draw_splits
 
 DATE = "2-11-26"
-SUBJECT = "catkin"
+SUBJECT = "bud"
 NEGATIVE_STEM = "plotF_0_0"
 CONFIRMED_BY = "user:breeder"
 POPULATED_STEMS = ("plotA_0_0", "plotB_0_0", "plotC_0_0", "plotD_0_0", "plotE_0_0")
@@ -32,7 +32,7 @@ POPULATED_STEMS = ("plotA_0_0", "plotB_0_0", "plotC_0_0", "plotD_0_0", "plotE_0_
 
 def _dataset_with_one_confirmed_negative(root: Path) -> Path:
     """Six sources on a non-square frame: five carrying annotations, one an empty label a human
-    confirmed negative for ``catkin``. The counts per source differ so the split is not symmetric.
+    confirmed negative for ``bud``. The counts per source differ so the split is not symmetric.
     """
     from PIL import Image
 
@@ -43,7 +43,7 @@ def _dataset_with_one_confirmed_negative(root: Path) -> Path:
     images_dir.mkdir(parents=True)
     labels_dir.mkdir(parents=True)
     write_registry(root / "classes.json", ClassRegistry(subjects=(
-        Subject(name=SUBJECT, description="a hazelnut catkin"),
+        Subject(name=SUBJECT, description="a currant bud"),
     )))
 
     for i, stem in enumerate(POPULATED_STEMS):

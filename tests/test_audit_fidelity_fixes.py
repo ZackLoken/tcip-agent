@@ -33,7 +33,7 @@ def test_mcp_save_annotations_empty_refuses_and_preserves_gt(tmp_path):
 
     img = _img(tmp_path)
     det = tmp_path / "det.json"
-    json_io.write_annotations(det, [Annotation(subject="catkin", geometry=BBox(1, 1, 9, 9))],
+    json_io.write_annotations(det, [Annotation(subject="bud", geometry=BBox(1, 1, 9, 9))],
                               100, 80)  # existing GT
     res = save_annotations(str(img), annotations=[], path=str(det))
     assert "error" in res                                       # refused, never silently applied
@@ -60,9 +60,9 @@ def test_write_predictions_json_stamps_model_provenance(tmp_path):
     p = tmp_path / "pred.json"
     write_predictions_json(p, {"width": 100, "height": 80,
                                "boxes": [[10, 10, 30, 30]], "scores": [0.9], "labels": [1]},
-                           created_by="model:best_catkin", subject="catkin", attribute=None)
+                           created_by="model:best_bud", subject="bud", attribute=None)
     obj = json.loads(p.read_text())["annotations"][0]
-    assert obj["created_by"] == "model:best_catkin"
+    assert obj["created_by"] == "model:best_bud"
     assert obj["created_at"]
     assert obj["score"] == pytest.approx(0.9)
 
@@ -73,9 +73,9 @@ def test_backup_original_labels_captures_json(tmp_path):
     eng = ReviewEngine(state_dir=str(tmp_path / "state"))
     d = tmp_path / "detect"
     d.mkdir()
-    json_io.write_annotations(d / "a.json", [Annotation(subject="catkin", geometry=BBox(1, 1, 9, 9))],
+    json_io.write_annotations(d / "a.json", [Annotation(subject="bud", geometry=BBox(1, 1, 9, 9))],
                               100, 80)
-    json_io.write_annotations(d / "b.json", [Annotation(subject="catkin", geometry=BBox(2, 2, 8, 8))],
+    json_io.write_annotations(d / "b.json", [Annotation(subject="bud", geometry=BBox(2, 2, 8, 8))],
                               100, 80)
     captured = eng.backup_original_labels(str(d))
     assert captured == 2                                        # both canonical .json labels
@@ -92,7 +92,7 @@ def test_draw_splits_counts_json_objects_not_lines(tmp_path):
     labels.mkdir(parents=True)
 
     def _box() -> Annotation:
-        return Annotation(subject="catkin", geometry=BBox(1, 1, 9, 9))
+        return Annotation(subject="bud", geometry=BBox(1, 1, 9, 9))
 
     json_io.write_annotations(labels / "img_0.json", [_box(), _box(), _box()], 100, 80)
     json_io.write_annotations(labels / "img_1.json", [_box()], 100, 80)
@@ -112,7 +112,7 @@ def test_coco_roundtrip_preserves_provenance(tmp_path):
     from tcip_annotation.format_io import parse_coco_annotations, write_coco
     import json as _json
 
-    b = Annotation(subject="catkin", geometry=BBox(10, 10, 40, 40), created_by="derived:user:breeder",
+    b = Annotation(subject="bud", geometry=BBox(10, 10, 40, 40), created_by="derived:user:breeder",
                    created_at="2026-02-11T00:00:00+00:00", accepted_by="user:breeder")
     p = tmp_path / "dataset.json"
     write_coco(str(p), {"IMG_0001.JPG": ([b], 100, 80)})

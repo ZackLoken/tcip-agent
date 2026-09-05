@@ -73,18 +73,18 @@ def test_project_path_rejects_traversal():
 
 
 def test_project_path_under_workspace(_isolate_workspace):
-    p = workspace.project_path("hazelnut_catkin_valley-farm")
+    p = workspace.project_path("currant_bud_valley-farm")
     assert p.parent == _isolate_workspace.resolve()
-    assert p.name == "hazelnut_catkin_valley-farm"
+    assert p.name == "currant_bud_valley-farm"
 
 
 def test_active_marker_round_trip(_isolate_workspace):
-    (workspace.project_path("hazelnut_catkin_valley-farm") / ".tcip").mkdir(parents=True)
+    (workspace.project_path("currant_bud_valley-farm") / ".tcip").mkdir(parents=True)
     (workspace.project_path("chestnut_burr_site-b") / ".tcip").mkdir(parents=True)
 
     assert workspace.read_active_project() is None
-    workspace.activate_project("hazelnut_catkin_valley-farm")
-    assert workspace.read_active_project() == "hazelnut_catkin_valley-farm"
+    workspace.activate_project("currant_bud_valley-farm")
+    assert workspace.read_active_project() == "currant_bud_valley-farm"
     # Second writer wins cleanly (no torn file).
     workspace.activate_project("chestnut_burr_site-b")
     assert workspace.read_active_project() == "chestnut_burr_site-b"
@@ -124,7 +124,7 @@ def test_ingest_exif_buckets_and_undated(tmp_path):
     _make_image(src / "c.jpg", exif_date="2026:03:01 09:00:00")
     _make_image(src / "no_exif.png")  # no EXIF → undated
 
-    manifest = ingest_images(source=str(src), name="hazelnut_catkin_valley-farm", site="north orchard")
+    manifest = ingest_images(source=str(src), name="currant_bud_valley-farm", site="north orchard")
 
     assert "error" not in manifest
     assert manifest["buckets"] == {"2026-02-11": 2, "2026-03-01": 1}
@@ -154,7 +154,7 @@ def test_ingested_bytes_read_back_through_the_image_key(tmp_path):
     src = tmp_path / "raw"
     _make_image(src / "a.jpg", exif_date="2026:02:11 10:30:00")
 
-    manifest = ingest_images(source=str(src), name="hazelnut_catkin_valley-farm", site="north orchard")
+    manifest = ingest_images(source=str(src), name="currant_bud_valley-farm", site="north orchard")
     assert "error" not in manifest
 
     proj = Path(manifest["project_path"])

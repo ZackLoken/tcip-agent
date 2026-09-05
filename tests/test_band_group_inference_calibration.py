@@ -23,7 +23,7 @@ import tifffile
 torch = pytest.importorskip("torch")
 pytest.importorskip("torchvision")
 
-pytestmark = pytest.mark.usefixtures("seed_catkin_trait_spec")
+pytestmark = pytest.mark.usefixtures("seed_bud_trait_spec")
 
 TILE = 32
 
@@ -76,7 +76,7 @@ def _grouped_dataset(root: Path) -> tuple[Path, Path]:
     for stem in ("capture_001", "capture_002"):
         json_io.write_annotations(
             str(labels_dir / f"{stem}.json"),
-            [Annotation(subject="catkin", geometry=BBox(2, 2, 10, 10))], TILE, TILE, keep_empty=True,
+            [Annotation(subject="bud", geometry=BBox(2, 2, 10, 10))], TILE, TILE, keep_empty=True,
         )
     return images_dir, labels_dir
 
@@ -108,7 +108,7 @@ def test_calibrate_operating_point_over_a_grouped_image_does_not_crash(tmp_path,
     monkeypatch.setattr(raster_source, "open_raster", _spy_open_raster)
 
     bundle, dataset_hash, n_excluded, _evidence = calibrate_operating_point(
-        predictor, "catkin", str(labels_dir), str(images_dir),
+        predictor, "bud_opening", str(labels_dir), str(images_dir),
         tile=False, tile_size=TILE, overlap=0.2, tile_batch_size=8,
         global_nms_iou=0.5, postprocess="nms", cross_tile_nms=None, max_dets=100,
         holdout_ratio=0.0,  # both stems land in calibration -> one predict_batch call sees both

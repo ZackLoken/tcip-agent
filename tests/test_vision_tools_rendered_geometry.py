@@ -141,14 +141,14 @@ def mislocalized_prediction_dataset(tmp_path: Path, monkeypatch: pytest.MonkeyPa
     labels = tmp_path / "annotations"
     labels.mkdir()
     json_io.write_annotations(
-        labels / "miss.json", [Annotation(subject="catkin", geometry=BBox(*GT_BOX))], 300, 200,
+        labels / "miss.json", [Annotation(subject="bud", geometry=BBox(*GT_BOX))], 300, 200,
     )
 
     preds = tmp_path / "predictions" / "live"
     preds.mkdir(parents=True)
     json_io.write_annotations(
         preds / "miss.json",
-        [Annotation(subject="catkin", geometry=BBox(*PRED_BOX), score=0.4)], 300, 200,
+        [Annotation(subject="bud", geometry=BBox(*PRED_BOX), score=0.4)], 300, 200,
     )
     return tmp_path
 

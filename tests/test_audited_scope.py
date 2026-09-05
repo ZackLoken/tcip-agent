@@ -47,9 +47,9 @@ def dataset_root(tmp_path: Path) -> Path:
 
 
 def _subjects() -> dict:
-    return {"catkin": {"description": "a hazelnut catkin",
-                       "attributes": {"elongation": {"type": "categorical",
-                                                     "values": ["dormant", "elongated"]}}}}
+    return {"bud": {"description": "a currant bud",
+                       "attributes": {"opening": {"type": "categorical",
+                                                     "values": ["closed", "open"]}}}}
 
 
 def test_registry_write_records_in_the_dataset_named_by_its_root_argument(
@@ -73,7 +73,7 @@ def test_label_write_records_in_the_dataset_holding_the_image_it_names(
 
     image = dataset_root / "images" / CAPTURE_DATE / "IMG_0001.JPG"
     result = save_annotations(
-        str(image), annotations=[{"subject": "catkin", "bbox": [10, 10, 40, 40]}]
+        str(image), annotations=[{"subject": "bud", "bbox": [10, 10, 40, 40]}]
     )
     assert "error" not in result
 
@@ -154,7 +154,7 @@ def test_scope_argument_naming_no_dataset_leaves_the_call_a_platform_event(
 
     result = save_annotations(
         str(image),
-        annotations=[{"subject": "catkin", "bbox": [10, 10, 40, 40]}],
+        annotations=[{"subject": "bud", "bbox": [10, 10, 40, 40]}],
         path=str(loose / "out.json"),
     )
     assert "error" not in result

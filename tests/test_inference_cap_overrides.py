@@ -26,7 +26,7 @@ class _StubPredictor:
         self.max_dets = None
         self.score_threshold = 0.5
         self.model = object()
-        self.config = {"data": {"subject": "catkin", "id_map": {"catkin": 1}}}
+        self.config = {"data": {"subject": "bud", "id_map": {"bud": 1}}}
 
     def predict_batch(self, image_paths, **kwargs):
         return [{"boxes": [], "scores": [], "labels": [], "count": 0, "width": 100, "height": 100}
@@ -104,14 +104,14 @@ def inference_call(tmp_path, monkeypatch):
     return _call
 
 
-@pytest.mark.usefixtures("seed_catkin_trait_spec")
+@pytest.mark.usefixtures("seed_bud_trait_spec")
 def test_a_cap_stated_at_the_platform_default_resolves_as_an_explicit_override(inference_call):
     """The value a caller states is the value that ships, whatever it happens to equal: reading a
     stated cap back as unset would hand the caller a derived operating point they did not ask for,
     and therefore a different count."""
     from tcip_mcp.pipelines.resolution import DEFAULT_MAX_DETS, DEFAULT_NMS_IOU
 
-    result = inference_call(trait="catkin", calibration_labels_dir=inference_call.labels_dir,
+    result = inference_call(trait="bud_opening", calibration_labels_dir=inference_call.labels_dir,
                             global_nms_iou=DEFAULT_NMS_IOU, max_dets=DEFAULT_MAX_DETS)
 
     op = result["operating_point"]
@@ -123,10 +123,10 @@ def test_a_cap_stated_at_the_platform_default_resolves_as_an_explicit_override(i
     assert op["max_dets"]["value"] == DEFAULT_MAX_DETS
 
 
-@pytest.mark.usefixtures("seed_catkin_trait_spec")
+@pytest.mark.usefixtures("seed_bud_trait_spec")
 def test_an_unstated_cap_is_still_derived_from_the_calibration_data(inference_call):
     """The derivation an unstated cap gets is the whole point of leaving it unstated."""
-    result = inference_call(trait="catkin", calibration_labels_dir=inference_call.labels_dir)
+    result = inference_call(trait="bud_opening", calibration_labels_dir=inference_call.labels_dir)
 
     op = result["operating_point"]
     assert inference_call.forwarded["cross_tile_nms"] is None
@@ -137,10 +137,10 @@ def test_an_unstated_cap_is_still_derived_from_the_calibration_data(inference_ca
     assert "p99 GT objects/image" in op["max_dets"]["derived_from"]
 
 
-@pytest.mark.usefixtures("seed_catkin_trait_spec")
+@pytest.mark.usefixtures("seed_bud_trait_spec")
 def test_an_ordinary_stated_cap_still_lands_as_the_caller_stated_it(inference_call):
     """The common override path must keep working, not only the value that equals the default."""
-    result = inference_call(trait="catkin", calibration_labels_dir=inference_call.labels_dir,
+    result = inference_call(trait="bud_opening", calibration_labels_dir=inference_call.labels_dir,
                             global_nms_iou=0.42, max_dets=250)
 
     op = result["operating_point"]
