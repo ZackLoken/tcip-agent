@@ -757,7 +757,7 @@ Docstring is the function's docstring first line, verbatim.
 | tool | line | audited | docstring first line |
 |---|---|---|---|
 | `freeze_split_manifest` | `data_tools.py:223` | yes | Freeze a finished run's own drawn train/val partition into a ``split_manifest`` record, |
-| `draw_splits` | `data_tools.py:610` | yes | Compute a leakage-free, annotation-stratified train/val/calibration split. |
+| `draw_splits` | `data_tools.py:627` | yes | Compute a leakage-free, annotation-stratified train/val/calibration split. |
 
 ### experiment_tools.py (3 tools)
 
@@ -900,12 +900,12 @@ anything.
 
 | tool | line | audited | docstring first line |
 |---|---|---|---|
-| `launch_training` | `training_tools.py:707` | yes | Launch a training run in an isolated subprocess from a bespoke ``model_source`` builder. |
-| `monitor_training` | `training_tools.py:941` | yes | Check the status of a training run, or of a hyperparameter sweep. |
-| `cancel_training` | `training_tools.py:1343` | yes | Request graceful cancellation of a running training run. |
-| `run_hyperparameter_search` | `training_tools.py:2039` | yes | Run hyperparameter optimization on Ray Tune, training each trial for real. |
-| `cancel_hyperparameter_search` | `training_tools.py:2434` | yes | Request cooperative cancellation of a running HPO sweep. |
-| `evaluate_model` | `training_tools.py:3085` | yes | Evaluate a trained checkpoint on a (held-out) dataset and write test_results.json. |
+| `launch_training` | `training_tools.py:706` | yes | Launch a training run in an isolated subprocess from a bespoke ``model_source`` builder. |
+| `monitor_training` | `training_tools.py:940` | yes | Check the status of a training run, or of a hyperparameter sweep. |
+| `cancel_training` | `training_tools.py:1342` | yes | Request graceful cancellation of a running training run. |
+| `run_hyperparameter_search` | `training_tools.py:2051` | yes | Run hyperparameter optimization on Ray Tune, training each trial for real. |
+| `cancel_hyperparameter_search` | `training_tools.py:2446` | yes | Request cooperative cancellation of a running HPO sweep. |
+| `evaluate_model` | `training_tools.py:3097` | yes | Evaluate a trained checkpoint on a (held-out) dataset and write test_results.json. |
 
 ### vision_tools.py (1 tool)
 
@@ -1372,9 +1372,9 @@ Writers: `set_image_status`,
 (`trainable_stems`) before the split's manifest or file tree is written, then
 attributed to a split by
 `negative_carry = _compute_negative_carry(label_map, bare_parts, image_map, subject, only_date)`
-`packages/tcip-mcp/src/tcip_mcp/tools/data_tools.py:955`, then applied by
+`packages/tcip-mcp/src/tcip_mcp/tools/data_tools.py:972`, then applied by
 `_apply_negative_carry(negative_carry, out_dir, subject)`
-`packages/tcip-mcp/src/tcip_mcp/tools/data_tools.py:1039`).
+`packages/tcip-mcp/src/tcip_mcp/tools/data_tools.py:1056`).
 
 Readers: `tcip_mcp.pipelines.data.label_queries.confirmed_negative_names`,
 `packages/tcip-mcp/src/tcip_mcp/pipelines/data/label_queries.py:468`; `_status_bucket_for`,
@@ -1566,9 +1566,9 @@ path-sanitized, by the same standing choice.
 Readers: two production parsers, both reading through the storage seam's `read_log` rather than
 decoding lines by hand, and both refusing (never scanning past) a page reporting corruption or an
 unknown `schema_version`. `experiments._index_refused_mutations`,
-`packages/tcip-mcp/src/tcip_mcp/experiments.py:1551`, one scan of the platform audit log
+`packages/tcip-mcp/src/tcip_mcp/experiments.py:1598`, one scan of the platform audit log
 (`audit_log_key()`, no scope) indexing every `experiment_mutation_refused` entry by
-`arguments.experiment_id`, shared by `compare_experiments` (`experiments.py:1656`), across every experiment it
+`arguments.experiment_id`, shared by `compare_experiments` (`experiments.py:1703`), across every experiment it
 compares in one call; `page.corrupt`/`page.version_refused` both fail the whole call (`None`, not
 a partial index), so a caller who cannot see behind an unreadable entry never reports "no
 refusals" in its place. `plant_mapping._scan_receipts`
@@ -1595,38 +1595,38 @@ declared; the numbered range 10-15 carries six of them, and `env.json` and `vali
 are listed here with the rest rather than taking numbers of their own.
 
 - `config.json` (`config_key`, `experiments.py:117`): written by `create_experiment`,
-  `experiments.py:408` (`def create_experiment(`), `overwrite_config_if_pristine`,
+  `experiments.py:413` (`def create_experiment(`), `overwrite_config_if_pristine`,
   `experiments.py:486` (rewrites only while the record is still pristine, no metrics logged), and
   three best-effort merges the subprocess worker patches into the durable record after a run's
   own resolution is known, each a thin mutator over the one shared terminal-refusing procedure
-  `_patch_experiment_config`, `packages/tcip-mcp/src/tcip_mcp/pipelines/training/subprocess_worker.py:31`:
+  `_patch_experiment_config`, `packages/tcip-mcp/src/tcip_mcp/pipelines/training/subprocess_worker.py:34`:
   `_patch_experiment_config_tiling`,
-  `packages/tcip-mcp/src/tcip_mcp/pipelines/training/subprocess_worker.py:72`
+  `packages/tcip-mcp/src/tcip_mcp/pipelines/training/subprocess_worker.py:75`
   (`def _patch_experiment_config_tiling(`), `_patch_experiment_config_id_map`,
-  `packages/tcip-mcp/src/tcip_mcp/pipelines/training/subprocess_worker.py:90`
+  `packages/tcip-mcp/src/tcip_mcp/pipelines/training/subprocess_worker.py:93`
   (`def _patch_experiment_config_id_map(`), and `_patch_experiment_config_split`,
-  `packages/tcip-mcp/src/tcip_mcp/pipelines/training/subprocess_worker.py:113`
-  (`def _patch_experiment_config_split(`). Read by `get_experiment`, `experiments.py:1476`
-  (`def get_experiment(`), and `compare_experiments`, `experiments.py:1656`.
-- `status.json` (`status_key`, `experiments.py:144`): written by `create_experiment` (`experiments.py:408`),
-  `update_status`, `experiments.py:535` (`def update_status(`), `stamp_run_identity`
-  (`experiments.py:668`), `_touch_heartbeat`, `experiments.py:869` (`def _touch_heartbeat(`).
-  Read by `get_experiment` (`experiments.py:1476`), `reconstruct_run_status`, `experiments.py:816`
-  (`def reconstruct_run_status(`), `resolve_experiment_dir_for_run` (`experiments.py:692`).
+  `packages/tcip-mcp/src/tcip_mcp/pipelines/training/subprocess_worker.py:116`
+  (`def _patch_experiment_config_split(`). Read by `get_experiment`, `experiments.py:1523`
+  (`def get_experiment(`), and `compare_experiments`, `experiments.py:1703`.
+- `status.json` (`status_key`, `experiments.py:144`): written by `create_experiment` (`experiments.py:413`),
+  `update_status`, `experiments.py:546` (`def update_status(`), `stamp_run_identity`
+  (`experiments.py:686`), `_touch_heartbeat`, `experiments.py:887` (`def _touch_heartbeat(`).
+  Read by `get_experiment` (`experiments.py:1523`), `reconstruct_run_status`, `experiments.py:834`
+  (`def reconstruct_run_status(`), `resolve_experiment_dir_for_run` (`experiments.py:710`).
   `state` is terminal-locked once `"completed"`/`"failed"`.
-- `lineage.json` (`lineage_key`, `experiments.py:169`): written by `create_experiment` (`experiments.py:408`),
+- `lineage.json` (`lineage_key`, `experiments.py:169`): written by `create_experiment` (`experiments.py:413`),
   `complete_run`,
-  `experiments.py:602` (`def complete_run(`, the run's own `model_weights`/`model_weights_sha256`
+  `experiments.py:613` (`def complete_run(`, the run's own `model_weights`/`model_weights_sha256`
   digest, sealed into the transaction that completes the run) and `update_lineage`,
-  `experiments.py:1262` (every other field; refuses `model_weights`/`model_weights_sha256` as
-  `complete_run`'s alone). Read by `get_experiment` (`experiments.py:1476`) and `get_experiment_lineage`,
-  `experiments.py:1789`.
-- `artifacts.json` (`artifacts_key`, `experiments.py:193`): written by `create_experiment` (`experiments.py:408`),
-  `complete_run` (`experiments.py:602`, the `model_weights` entry: `path`, `sha256`, `recorded`) and
-  `record_artifact`, `experiments.py:1221`. Read by `get_experiment` (`experiments.py:1476`).
+  `experiments.py:1294` (every other field; refuses `model_weights`/`model_weights_sha256` as
+  `complete_run`'s alone). Read by `get_experiment` (`experiments.py:1523`) and `get_experiment_lineage`,
+  `experiments.py:1836`.
+- `artifacts.json` (`artifacts_key`, `experiments.py:193`): written by `create_experiment` (`experiments.py:413`),
+  `complete_run` (`experiments.py:613`, the `model_weights` entry: `path`, `sha256`, `recorded`) and
+  `record_artifact`, `experiments.py:1245`. Read by `get_experiment` (`experiments.py:1523`).
 - `metrics.jsonl` (`metrics_key`, `experiments.py:263`, append-only): written by
-  `log_metrics`, `experiments.py:948`. Read by `read_metrics`, `experiments.py:888`, which
-  `get_experiment` (`experiments.py:1476`, paginated) and `reconstruct_run_status` (`experiments.py:816`, last row only) go through.
+  `log_metrics`, `experiments.py:966`. Read by `read_metrics`, `experiments.py:906`, which
+  `get_experiment` (`experiments.py:1523`, paginated) and `reconstruct_run_status` (`experiments.py:834`, last row only) go through.
 - `env.json` (`env_key`, `experiments.py:217`): the library versions, seed and model kind a run is
   reproducible from, written once by the training envelope,
   `packages/tcip-mcp/src/tcip_mcp/pipelines/training/envelope.py:355`. No accessor in this module
@@ -1634,7 +1634,7 @@ are listed here with the rest rather than taking numbers of their own.
 - `split.json` (`split_key`, `experiments.py:240`): written by `split_construction.persist_split_manifest`,
   `packages/tcip-mcp/src/tcip_mcp/pipelines/data/split_construction.py:62`
   (`def persist_split_manifest(`). Read by `read_split_manifest`,
-  `experiments.py:1832`, which `pipelines/block_calibration.py` and `pipelines/operating_point.py`
+  `experiments.py:1879`, which `pipelines/block_calibration.py` and `pipelines/operating_point.py`
   both take the manifest from. Every run, bound to a manifest or not, records `date`, the labels
   directory's own capture date, `manifest_date_key`'s empty string for a flat tree (never `null`:
   a selection-disjointness check comparing dates must tell a flat run's own date apart from a
@@ -1655,9 +1655,9 @@ are listed here with the rest rather than taking numbers of their own.
   the draw and now without the durable experiment config, a checkpoint's embedded config or a
   trial's resolved config ever carrying a per-stem digest.
 - `validations.jsonl` (`validations_key`, `experiments.py:283`, append-only): the claims earned against this
-  run's evidence. Written only by the module-private `_append_validation`, `experiments.py:1053`
+  run's evidence. Written only by the module-private `_append_validation`, `experiments.py:1077`
   (no public raw appender; the storage seam's generic append remains reachable and is a stated
-  residual), which refuses a row missing any of `_VALIDATION_FIELDS` (`experiments.py:1000`),
+  residual), which refuses a row missing any of `_VALIDATION_FIELDS` (`experiments.py:1024`),
   `train_disjointness` among them: `{"checked": bool, "group_check": str | None}` for the four
   documents whose gate runs the check, `null` for `resolve_scale`. `selection_disjointness` is the
   parallel field for whether the calibration used to validate a checkpoint's own reference was kept
@@ -1675,9 +1675,9 @@ are listed here with the rest rather than taking numbers of their own.
   read a selection side from. `verify_stamp_binding` (`packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py:1806`) requires the five label-movement
   keys present, `null` admitted, on an applicable row it would otherwise pass: an applicable,
   checked, no-leak row missing any of them floors, the same as a leak does, so a row earned before
-  the keys existed cannot read as cleared. Read by `read_validations`, `experiments.py:1088`,
-  `find_validation`, `experiments.py:1106` (matching rows by recomputed `validation_digest`,
-  `experiments.py:1043`), and included whole by `get_experiment` (`experiments.py:1476`). The one member appendable
+  the keys existed cannot read as cleared. Read by `read_validations`, `experiments.py:1112`,
+  `find_validation`, `experiments.py:1130` (matching rows by recomputed `validation_digest`,
+  `experiments.py:1067`), and included whole by `get_experiment` (`experiments.py:1523`). The one member appendable
   after a terminal state, because a validation is a statement made about a run after it ended.
 
 Seam S07 ("Experiment record .tcip/experiments/<id>/", covering config/status/lineage/artifacts),
@@ -2021,7 +2021,7 @@ Path: `<output_path>/split_manifest.json`, addressed by `split_manifest_key`,
 `packages/tcip-mcp/src/tcip_mcp/tools/data_tools.py:38`, under whatever directory the caller
 asked the partition to be written to; no dataset resolver owns this layout.
 
-Writer: `draw_splits`, `data_tools.py:610`, when `output_path` is given or `materialize=True`.
+Writer: `draw_splits`, `data_tools.py:627`, when `output_path` is given or `materialize=True`.
 A finished run's own drawn train/val partition freezes into the identical shape through
 `freeze_split_manifest` (`data_tools.py:223`), the second writer; both compose their fields
 through the one `compose_split_manifest` (`data_tools.py:124`) that builds the dict and writes
@@ -2092,7 +2092,7 @@ config-only conflict and task checks (computed before any read, so an unreadable
 suppresses them) and the manifest-dependent checks (subject/attribute, date, images-root
 presence and movement, and an empty train/val side once narrowed to the run's own date).
 `preflight_config` calls both halves directly, in the same order, over a manifest it read
-itself; `training_tools.list_split_choices` (`training_tools.py:1172`), the relaunch data
+itself; `training_tools.list_split_choices` (`training_tools.py:1171`), the relaunch data
 picker's own reader wrapped by `GET /api/training/configs/{experiment_id}/splits`, calls the
 composed function per candidate manifest it read through the checked variant above, and builds
 each candidate's launch config through `training_tools.candidate_config_with_manifest`
@@ -2274,7 +2274,7 @@ Phase 3 verdict: single.
 ## S08. metrics.jsonl row format
 
 Must agree: the writer's row shape is what the reader and the stream consumer expect.
-Side A: `packages/tcip-mcp/src/tcip_mcp/experiments.py:948` (`def log_metrics(`, the one writer; the trainer and the envelope hand rows to the context's epoch sink instead of opening the file).
+Side A: `packages/tcip-mcp/src/tcip_mcp/experiments.py:966` (`def log_metrics(`, the one writer; the trainer and the envelope hand rows to the context's epoch sink instead of opening the file).
 Side B: `packages/tcip-web/src/tcip_web/routes/training.py:324` (`read_log(key, after=cursor)`, the training stream's incremental tail, pushed as a `TrainingMetricFrame` per row) and `routes/tuning.py:616` (`read_log(trial_metrics_key`, answered in the shape `_metrics_common.metrics_response` builds).
 Phase 3 verdict: single. An HPO trial with no experiment record still appends to its own trial log, one declared site in the epoch sink, pending the HPO store migration.
 
@@ -2441,7 +2441,7 @@ Phase 3 verdict: single.
 
 Must agree: the calibration holdout is disjoint from the split the run actually trained on, and,
 when a split manifest is in play, from the checkpoint's own selection (val) side too.
-Side A: `packages/tcip-mcp/src/tcip_mcp/experiments.py:1832` (`def read_split_manifest(`, the one path and parse beside the member's key constructor; the writer persists through the same key).
+Side A: `packages/tcip-mcp/src/tcip_mcp/experiments.py:1879` (`def read_split_manifest(`, the one path and parse beside the member's key constructor; the writer persists through the same key).
 Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/block_calibration.py` (precheck and resolver share one spatial-strip predicate over that reader) and `pipelines/operating_point.py` (`_train_disjointness` and `_selection_disjointness` both read through it and share `_resolve_group_stem_disjointness`, the one group/stem-overlap implementation).
 Phase 3 verdict: single.
 
@@ -2469,7 +2469,7 @@ Phase 3 verdict: single. One value is still spelled as a literal rather than bou
 ## S34. check_delivery_gate behind every delivery path
 
 Must agree: no delivered result ships an unvalidated parameter without an explicit acknowledgement.
-Side A: `packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py:3041` (`def check_delivery_gate(`, judging each dimension against `_DIMENSION_REFERENCES`, `packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py:3021`, so a reference clears only the dimension whose kind earned it, with `DeliveryGateResult.column_stamp`, `packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py:2926`, as the one derivation of what a deliverable's validity column carries).
+Side A: `packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py:3050` (`def check_delivery_gate(`, judging each dimension against `_DIMENSION_REFERENCES`, `packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py:3030`, so a reference clears only the dimension whose kind earned it, with `DeliveryGateResult.column_stamp`, `packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py:2935`, as the one derivation of what a deliverable's validity column carries).
 Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py:2074` (`def delivered_tail(`, the one composition every delivered tail's validity columns route through, deriving `own_column` from which of `_DIMENSION_TO_COLUMN`'s columns a door's own column list carries, never a second list stating so). `packages/tcip-mcp/src/tcip_mcp/pipelines/postprocessing/export.py:341` and `pipelines/postprocessing/aggregation.py:589` (`delivered_tail(provenance, operating_point_recon["bindings"], gate,`, each delivery door composing its tail through it rather than stamping the column itself); `packages/tcip-mcp/src/tcip_mcp/pipelines/postprocessing/export.py:455` (`summary = {`, `export_detection_csv`'s own gate-and-reconciliation summary, `tools/inference_tools.py`'s `deliver_per_image_counts` sourcing its `tile_size_validated` response field from that returned summary's own stamp in both regimes that read a bucket, while `operating_point_validated` sources from the delivered tail's own floored cell above instead, neither response field re-deriving its column itself); and `packages/tcip-mcp/src/tcip_mcp/pipelines/postprocessing/phenology.py:633` (`delivered_tail(`, inside `_write_phenology_delivery`, the one writer both phenology delivery doors call through, `tools/phenology_tools.py`'s `deliver_phenology_milestones` and `packages/tcip-web/src/tcip_web/routes/results.py`'s `export_csv`, rather than stamping the column themselves). The aggregated per-plant door also floors a claim-scope dimension read from each bucket's sidecar (`resolution.reconcile_claim_scope_validity`, whose accepted values, `CLAIM_SCOPE_REFERENCES`, are narrower than `VALIDATED_SHIPPABLE`, so an annotation reference cannot clear a raster-scope claim): a bucket that records no claim scope never acquires the dimension.
 Phase 3 verdict: single.
 
