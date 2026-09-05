@@ -8,6 +8,7 @@ differential LR between backbone and heads.
 from __future__ import annotations
 
 from copy import deepcopy
+from typing import Any, Callable, cast
 
 import torch
 from torch import nn
@@ -38,7 +39,9 @@ def _build_lamb(params, lr: float = 1e-3, weight_decay: float = 1e-2, **kw):
     return Lamb(params, lr=lr, weight_decay=weight_decay)
 
 
-_OPTIMIZER_BUILDERS = {
+# The four builders don't share one signature (sgd alone takes momentum), so the dict's value
+# type is stated explicitly rather than left to a join across mismatched signatures.
+_OPTIMIZER_BUILDERS: dict[str, Callable[..., torch.optim.Optimizer]] = {
     "sgd": _build_sgd,
     "adam": _build_adam,
     "adamw": _build_adamw,
@@ -59,7 +62,8 @@ def build_optimizer(
     param groups. Otherwise gives all params the head_lr.
     """
     if hasattr(model, "get_param_groups"):
-        param_groups = model.get_param_groups(backbone_lr, head_lr)
+        # A bespoke model's own opt-in method, not part of nn.Module's stub.
+        param_groups = cast(Any, model).get_param_groups(backbone_lr, head_lr)
     else:
         param_groups = [{"params": model.parameters(), "lr": head_lr}]
 
