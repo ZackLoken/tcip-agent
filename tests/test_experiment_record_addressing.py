@@ -29,7 +29,7 @@ def test_an_experiment_id_that_would_escape_the_store_is_refused(tmp_path):
 
 def test_an_ordinary_experiment_id_still_addresses_its_own_members(tmp_path):
     """The refusal above must not cost an ordinary run its record."""
-    experiment_id = "exp-014-hazelnut-catkin-det_run_20260114_a1b2"
+    experiment_id = "exp-014-currant-bud-det_run_20260114_a1b2"
     experiments.create_experiment(experiment_id, {"model_source": {"builder": "m:f"}})
     experiments.log_metrics(experiment_id, 1, {"loss": 0.5})
 

@@ -15,7 +15,7 @@ from pathlib import Path
 def _experiment(experiment_id: str, run_id: str, output_dir: str) -> None:
     from tcip_mcp.experiments import create_experiment, stamp_run_identity
 
-    create_experiment(experiment_id, {"model_source": {"builder": "my_models:catkin_det"}})
+    create_experiment(experiment_id, {"model_source": {"builder": "my_models:bud_det"}})
     stamp_run_identity(experiment_id, run_id, output_dir)
 
 
@@ -75,7 +75,7 @@ def test_reconstructed_run_reports_the_stamped_output_dir_not_the_experiment_dir
         update_status,
     )
 
-    eid = "exp-001-hazelnut-catkin-det"
+    eid = "exp-001-currant-bud-det"
     run_id = "run_20260114_9d21"
     output_dir = tmp_path / "training_runs" / run_id
     output_dir.mkdir(parents=True)

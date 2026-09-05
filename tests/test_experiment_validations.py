@@ -22,7 +22,7 @@ REFERENCE_IDENTITY = {
     "split_identity": "d41d8cd98f00b204",
 }
 
-TRAINING_CONFIG = {"model_source": {"builder": "my_models:catkin_det"}}
+TRAINING_CONFIG = {"model_source": {"builder": "my_models:bud_det"}}
 
 
 def _real_selection_disjointness() -> dict[str, Any]:
@@ -43,15 +43,15 @@ def _row(**overrides: Any) -> dict[str, Any]:
     body: dict[str, Any] = {
         "schema_version": 2,
         "document": "operating_point",
-        "trait": "catkin_50per_date",
+        "trait": "bud_50per_date",
         "claim": {"operating_point": {"conf": {"value": 0.42,
                                                "validated_against": "held_out_annotations"}}},
         "validated_against": "held_out_annotations",
         "checkpoint_sha256": "0" * 64,
-        "producing_experiment_id": "exp-021-hazelnut-catkin-det",
+        "producing_experiment_id": "exp-021-currant-bud-det",
         "reference_identity": REFERENCE_IDENTITY,
         "covered_buckets": {"predictions/live/2026-03-04": "7f3a1b9c2d4e5f60"},
-        "dataset_root": "/data/hazelnut_valley",
+        "dataset_root": "/data/currant_valley",
         "recorded_at": "2026-03-04T12:00:00+00:00",
         "train_disjointness": {"checked": True, "group_check": None},
         "selection_disjointness": _real_selection_disjointness(),
@@ -71,7 +71,7 @@ def test_a_second_validation_of_one_claim_appends_rather_than_replacing(tmp_path
         _append_validation, create_experiment, get_experiment, read_validations,
     )
 
-    experiment_id = "exp-021-hazelnut-catkin-det"
+    experiment_id = "exp-021-currant-bud-det"
     create_experiment(experiment_id, TRAINING_CONFIG)
 
     first = _append_validation(experiment_id, _row())
@@ -169,12 +169,12 @@ def test_the_same_calibration_content_resolves_to_one_experiment(tmp_path):
 
     first = ensure_calibration_experiment(
         document="classifier_operating_point", checkpoint_sha256=None,
-        reference_identity=REFERENCE_IDENTITY, trait="catkin_50per_date",
+        reference_identity=REFERENCE_IDENTITY, trait="bud_50per_date",
         config={"notes": "calibrated on the March holdout"},
     )
     again = ensure_calibration_experiment(
         document="classifier_operating_point", checkpoint_sha256=None,
-        reference_identity=REFERENCE_IDENTITY, trait="catkin_50per_date",
+        reference_identity=REFERENCE_IDENTITY, trait="bud_50per_date",
         config={"notes": "a second door, same content"},
     )
 
@@ -183,7 +183,7 @@ def test_the_same_calibration_content_resolves_to_one_experiment(tmp_path):
 
     config = ts.read(config_key(first))
     assert config["reference_identity"] == REFERENCE_IDENTITY
-    assert config["trait"] == "catkin_50per_date"
+    assert config["trait"] == "bud_50per_date"
     assert config["notes"] == "calibrated on the March holdout"
     assert "error" not in _append_validation(first, _row(document="classifier_operating_point"))
 
@@ -193,13 +193,13 @@ def test_a_calibration_against_a_different_reference_is_a_different_experiment(t
 
     on_march = ensure_calibration_experiment(
         document="classifier_operating_point", checkpoint_sha256=None,
-        reference_identity=REFERENCE_IDENTITY, trait="catkin_50per_date",
+        reference_identity=REFERENCE_IDENTITY, trait="bud_50per_date",
         config={"notes": "calibrated on the March holdout"},
     )
     on_april = ensure_calibration_experiment(
         document="classifier_operating_point", checkpoint_sha256=None,
         reference_identity={**REFERENCE_IDENTITY, "holdout_dataset_hash": "5c0e7a2b48d1f963"},
-        trait="catkin_50per_date", config={"notes": "calibrated on the April holdout"},
+        trait="bud_50per_date", config={"notes": "calibrated on the April holdout"},
     )
 
     assert on_april != on_march
@@ -214,7 +214,7 @@ def test_a_calibration_config_restating_an_identity_field_is_refused(tmp_path):
     with pytest.raises(ValueError) as refused:
         ensure_calibration_experiment(
             document="ordinal_operating_point", checkpoint_sha256="0" * 64,
-            reference_identity=REFERENCE_IDENTITY, trait="catkin_50per_date",
+            reference_identity=REFERENCE_IDENTITY, trait="bud_50per_date",
             config={"trait": "something_else", "notes": "free text"},
         )
     assert "trait" in str(refused.value)
@@ -222,11 +222,11 @@ def test_a_calibration_config_restating_an_identity_field_is_refused(tmp_path):
 
     experiment_id = ensure_calibration_experiment(
         document="ordinal_operating_point", checkpoint_sha256="0" * 64,
-        reference_identity=REFERENCE_IDENTITY, trait="catkin_50per_date",
+        reference_identity=REFERENCE_IDENTITY, trait="bud_50per_date",
         config={"notes": "free text", "operator_note": "run from the ordinal door"},
     )
     config = ts.read(config_key(experiment_id))
-    assert config["trait"] == "catkin_50per_date"
+    assert config["trait"] == "bud_50per_date"
     assert config["operator_note"] == "run from the ordinal door"
 
 def test_the_append_and_the_calibration_creation_each_leave_one_platform_audit_row(tmp_path):
@@ -243,12 +243,12 @@ def test_the_append_and_the_calibration_creation_each_leave_one_platform_audit_r
 
     calibration_id = ensure_calibration_experiment(
         document="classifier_operating_point", checkpoint_sha256=None,
-        reference_identity=REFERENCE_IDENTITY, trait="catkin_50per_date",
+        reference_identity=REFERENCE_IDENTITY, trait="bud_50per_date",
         config={"notes": "first calibration"},
     )
     ensure_calibration_experiment(
         document="classifier_operating_point", checkpoint_sha256=None,
-        reference_identity=REFERENCE_IDENTITY, trait="catkin_50per_date",
+        reference_identity=REFERENCE_IDENTITY, trait="bud_50per_date",
         config={"notes": "repeat resolves, creates nothing"},
     )
 
@@ -259,7 +259,7 @@ def test_the_append_and_the_calibration_creation_each_leave_one_platform_audit_r
     assert [r["arguments"]["experiment_id"] for r in created] == [calibration_id]
 
 
-@pytest.mark.usefixtures("seed_catkin_trait_spec")
+@pytest.mark.usefixtures("seed_bud_trait_spec")
 def test_a_version_2_row_earned_through_the_real_gate_round_trips(tmp_path):
     """The producer-fed round trip: a row earned through open_validation/seal_validation (the
     platform's own two-phase writer, not _append_validation directly) carries schema_version 2 and
@@ -286,15 +286,15 @@ def test_a_version_2_row_earned_through_the_real_gate_round_trips(tmp_path):
         evidence={"resolver": "resolve_operating_point",
                   "inputs": {"dataset_hash": "H", "calibration_records": cal,
                              "holdout_records": hold, "staged_conf_floor": 0.01, "tiled": False}},
-        trait="catkin", checkpoint_sha256="0" * 64, producing_experiment_id=None,
+        trait="bud_opening", checkpoint_sha256="0" * 64, producing_experiment_id=None,
         reference_inputs={"dataset_root": str(tmp_path), "label_dirs": {"calibration": labels_dir}},
     )
     stamp = operating_point_stamp(
         draft.result.to_provenance()["operating_point"], validated=True, validated_by=None,
         tile_size_validated=None, shippable_issues=draft.result.shippable_issues(), id_map=None,
-        trait="catkin", dataset_hash="H", checkpoint="best", checkpoint_sha256="0" * 64,
+        trait="bud_opening", dataset_hash="H", checkpoint="best", checkpoint_sha256="0" * 64,
         experiment_id=None, images_dir=None, raster_path=None,
-        produced_at="2026-03-04T12:00:00+00:00", subject="catkin", attribute=None,
+        produced_at="2026-03-04T12:00:00+00:00", subject="bud", attribute=None,
     )
     digest, stamped = seal_validation(draft, dataset_root=tmp_path, bucket_dirs=(), stamp_body=stamp)
     experiment_id = stamped["validated_by"]["experiment_id"]

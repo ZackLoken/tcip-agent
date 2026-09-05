@@ -15,7 +15,7 @@ pytest.importorskip("torchvision")
 
 from tcip_mcp.pipelines.model_build import build_model  # noqa: E402
 
-pytestmark = pytest.mark.usefixtures("seed_catkin_trait_spec")
+pytestmark = pytest.mark.usefixtures("seed_bud_trait_spec")
 
 
 def _bespoke_checkpoint(path: Path, *, stamp: dict | None = None, tile_size: int = 64) -> str:
@@ -196,12 +196,12 @@ def test_calibrate_operating_point_script_refuses_an_unregistered_checkpoint(tmp
     for i in range(3):
         json_io.write_annotations(
             str(labels_dir / f"img{i}.json"),
-            [Annotation(subject="catkin", geometry=BBox(10, 10, 40, 40))], 100, 100)
+            [Annotation(subject="bud", geometry=BBox(10, 10, 40, 40))], 100, 100)
 
     from scripts.calibrate_operating_point import main
 
     rc = main([
-        "--checkpoint", ckpt, "--trait", "catkin",
+        "--checkpoint", ckpt, "--trait", "bud",
         "--labels-dir", str(labels_dir), "--images-dir", str(images_dir),
         "--dataset-root", str(tmp_path), "--project-root", str(tmp_path),
     ])
@@ -228,7 +228,7 @@ def test_calibrate_scalar_operating_point_refuses_an_unregistered_checkpoint(
     from tcip_mcp.tools.calibration_tools import calibrate_scalar_operating_point
 
     r = calibrate_scalar_operating_point(
-        trait_name="catkin", task="ordinal", checkpoint_path=ckpt,
+        trait_name="bud_opening", task="ordinal", checkpoint_path=ckpt,
         images_dir=str(images_dir), csv_path=str(csv_path),
         criterion="quadratic_weighted_kappa", output_dir=str(out),
         dataset_root=str(tmp_path),
@@ -678,7 +678,7 @@ def _stand_in_calibration(monkeypatch, calibration_pipeline, labels_dir):
         "tiled": False, "tile_size": None, "tile_size_source": "default",
         "staged_conf_floor": 0.01,
     }
-    bundle = resolve_operating_point("catkin", experiment_id=None, **inputs)
+    bundle = resolve_operating_point("bud_opening", experiment_id=None, **inputs)
     evidence = {"resolver": "resolve_operating_point", "inputs": inputs,
                 "reference_inputs": {"label_dirs": {"calibration": str(labels_dir)}}}
     monkeypatch.setattr(calibration_pipeline, "calibrate_operating_point",
@@ -712,7 +712,7 @@ def test_run_inference_refuses_a_sweep_record_edited_after_the_run(tmp_path, mon
     monkeypatch.setattr(itools, "_run_inference_verified", _spy)
 
     out = tmp_path / "preds"
-    r = itools.run_inference(str(ckpt), str(images_dir), output_dir=str(out), trait="catkin",
+    r = itools.run_inference(str(ckpt), str(images_dir), output_dir=str(out), trait="bud_opening",
                              calibration_labels_dir=str(tmp_path))
     assert "error" not in r, r
 
@@ -726,7 +726,7 @@ def test_run_inference_refuses_a_sweep_record_edited_after_the_run(tmp_path, mon
 
     monkeypatch.setattr(itools, "_run_inference_verified", lambda *a, **kw: dict(captured))
     out2 = tmp_path / "preds2"
-    refused = itools.run_inference(str(ckpt), str(images_dir), output_dir=str(out2), trait="catkin",
+    refused = itools.run_inference(str(ckpt), str(images_dir), output_dir=str(out2), trait="bud_opening",
                                    calibration_labels_dir=str(tmp_path))
     assert "error" in refused
     assert identity in refused["error"]
@@ -757,7 +757,7 @@ def test_run_inference_refuses_a_sweep_record_edited_after_the_run_through_real_
     images_dir, _ = _images(tmp_path)
     _stand_in_calibration(monkeypatch, calibration_pipeline, tmp_path)
 
-    r1 = run_inference_verified(str(ckpt), images_dir=str(images_dir), trait="catkin",
+    r1 = run_inference_verified(str(ckpt), images_dir=str(images_dir), trait="bud_opening",
                                 calibration_labels_dir=str(tmp_path))
     assert "error" not in r1, r1
     identity = r1["calibration_evidence_key"]
@@ -779,7 +779,7 @@ def test_run_inference_refuses_a_sweep_record_edited_after_the_run_through_real_
     monkeypatch.setattr(store_mod, "replace", _skip_the_sweep_write)
 
     out = tmp_path / "preds"
-    refused = itools.run_inference(str(ckpt), str(images_dir), output_dir=str(out), trait="catkin",
+    refused = itools.run_inference(str(ckpt), str(images_dir), output_dir=str(out), trait="bud_opening",
                                    calibration_labels_dir=str(tmp_path))
     assert "error" in refused
     assert identity in refused["error"]
@@ -812,7 +812,7 @@ def test_run_inference_refuses_a_sweep_whose_evidence_the_codec_cannot_carry(
         Image.new("RGB", (size, size), (100, 100, 100)).save(images_dir / f"img{i}.png")
         box = BBox(size * 0.25, size * 0.25, size * 0.75, size * 0.75)
         json_io.write_annotations(str(labels_dir / f"img{i}.json"),
-                                  [Annotation(subject="catkin", geometry=box)], size, size)
+                                  [Annotation(subject="bud", geometry=box)], size, size)
 
     real_calibrate = calibration_pipeline.calibrate_operating_point
 
@@ -824,7 +824,7 @@ def test_run_inference_refuses_a_sweep_whose_evidence_the_codec_cannot_carry(
     monkeypatch.setattr(calibration_pipeline, "calibrate_operating_point", _nan_evidence)
 
     out = tmp_path / "preds"
-    refused = itools.run_inference(ckpt, str(images_dir), output_dir=str(out), trait="catkin",
+    refused = itools.run_inference(ckpt, str(images_dir), output_dir=str(out), trait="bud_opening",
                                    calibration_labels_dir=str(labels_dir))
     assert "error" in refused
     assert "could not be kept" in refused["error"]

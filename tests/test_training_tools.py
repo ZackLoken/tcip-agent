@@ -10,9 +10,9 @@ import pytest
 
 import tcip_store as ts
 
-# No built-in traits: seed_catkin_trait_spec (conftest.py) writes a real catkin.yml into this
-# test's pinned platform state root so trait="catkin" call sites keep resolving.
-pytestmark = pytest.mark.usefixtures("seed_catkin_trait_spec")
+# No built-in traits: seed_bud_trait_spec (conftest.py) writes a real bud.yml into this
+# test's pinned platform state root so trait="bud_opening" call sites keep resolving.
+pytestmark = pytest.mark.usefixtures("seed_bud_trait_spec")
 
 
 # --------------------------------------------------------------------------
@@ -206,14 +206,14 @@ def test_preflight_config_warns_when_most_candidates_wont_train(tmp_path):
     # 1 annotated, 3 unannotated (no label file at all) -> 75% of candidates won't train.
     Image.new("RGB", (20, 20)).save(imgs / "ann.jpg")
     json_io.write_annotations(lbls / "ann.json",
-                              [Annotation(subject="catkin", geometry=BBox(2, 2, 10, 10))], 20, 20)
+                              [Annotation(subject="bud", geometry=BBox(2, 2, 10, 10))], 20, 20)
     for stem in ("a", "b", "c"):
         Image.new("RGB", (20, 20)).save(imgs / f"{stem}.jpg")
 
     cfg = {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
                          "builder_kwargs": {"num_classes": 1}, "task": "detection"},
-        "data": {"images_dir": str(imgs), "labels_dir": str(lbls), "subject": "catkin"},
+        "data": {"images_dir": str(imgs), "labels_dir": str(lbls), "subject": "bud"},
         "training": {"batch_size": 2},
     }
     r = preflight_config(cfg)
@@ -239,15 +239,15 @@ def test_preflight_config_warns_of_a_negative_the_label_file_now_contradicts(tmp
     lbls.mkdir()
     Image.new("RGB", (20, 20)).save(imgs / "bush.jpg")
     json_io.write_annotations(lbls / "bush.json", [], 20, 20, keep_empty=True)
-    record_image_statuses(tmp_path, status_bucket("catkin", None), {"bush.jpg": CONFIRMED_NEGATIVE},
+    record_image_statuses(tmp_path, status_bucket("bud", None), {"bush.jpg": CONFIRMED_NEGATIVE},
                           recorded_by="user:breeder")
     json_io.write_annotations(
-        lbls / "bush.json", [Annotation(subject="catkin", geometry=BBox(2, 2, 10, 10))], 20, 20)
+        lbls / "bush.json", [Annotation(subject="bud", geometry=BBox(2, 2, 10, 10))], 20, 20)
 
     cfg = {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
                          "builder_kwargs": {"num_classes": 1}, "task": "detection"},
-        "data": {"images_dir": str(imgs), "labels_dir": str(lbls), "subject": "catkin"},
+        "data": {"images_dir": str(imgs), "labels_dir": str(lbls), "subject": "bud"},
         "training": {"batch_size": 2},
     }
     r = preflight_config(cfg)
@@ -268,12 +268,12 @@ def test_preflight_config_no_coverage_warning_when_everything_trains(tmp_path):
     lbls.mkdir()
     Image.new("RGB", (20, 20)).save(imgs / "ann.jpg")
     json_io.write_annotations(lbls / "ann.json",
-                              [Annotation(subject="catkin", geometry=BBox(2, 2, 10, 10))], 20, 20)
+                              [Annotation(subject="bud", geometry=BBox(2, 2, 10, 10))], 20, 20)
 
     cfg = {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
                          "builder_kwargs": {"num_classes": 1}, "task": "detection"},
-        "data": {"images_dir": str(imgs), "labels_dir": str(lbls), "subject": "catkin"},
+        "data": {"images_dir": str(imgs), "labels_dir": str(lbls), "subject": "bud"},
         "training": {"batch_size": 2},
     }
     assert preflight_config(cfg)["warnings"] == []
@@ -300,13 +300,13 @@ def test_preflight_config_blocks_rather_than_swallows_an_unreadable_label(tmp_pa
     Image.new("RGB", (20, 20)).save(imgs / "ann.jpg")
     Image.new("RGB", (20, 20)).save(imgs / "bad.jpg")
     json_io.write_annotations(lbls / "ann.json",
-                              [Annotation(subject="catkin", geometry=BBox(2, 2, 10, 10))], 20, 20)
+                              [Annotation(subject="bud", geometry=BBox(2, 2, 10, 10))], 20, 20)
     (lbls / "bad.json").write_bytes(b"{not json")
 
     cfg = {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
                          "builder_kwargs": {"num_classes": 1}, "task": "detection"},
-        "data": {"images_dir": str(imgs), "labels_dir": str(lbls), "subject": "catkin"},
+        "data": {"images_dir": str(imgs), "labels_dir": str(lbls), "subject": "bud"},
         "training": {"batch_size": 2},
     }
     r = preflight_config(cfg)
@@ -338,13 +338,13 @@ def test_preflight_config_blocks_a_document_only_the_admission_reader_refuses(tm
     Image.new("RGB", (20, 20)).save(imgs / "ann.jpg")
     Image.new("RGB", (20, 20)).save(val_imgs / "bad.jpg")
     json_io.write_annotations(lbls / "ann.json",
-                              [Annotation(subject="catkin", geometry=BBox(2, 2, 10, 10))], 20, 20)
+                              [Annotation(subject="bud", geometry=BBox(2, 2, 10, 10))], 20, 20)
     (val_lbls / "bad.json").write_text(bad_document, encoding="utf-8")
 
     cfg = {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
                          "builder_kwargs": {"num_classes": 1}, "task": "detection"},
-        "data": {"images_dir": str(imgs), "labels_dir": str(lbls), "subject": "catkin",
+        "data": {"images_dir": str(imgs), "labels_dir": str(lbls), "subject": "bud",
                  "val_images_dir": str(val_imgs), "val_labels_dir": str(val_lbls)},
         "training": {"batch_size": 2},
     }
@@ -372,13 +372,13 @@ def test_preflight_config_blocks_an_unreadable_label_in_val_labels_dir(tmp_path)
     Image.new("RGB", (20, 20)).save(imgs / "ann.jpg")
     Image.new("RGB", (20, 20)).save(val_imgs / "bad.jpg")
     json_io.write_annotations(lbls / "ann.json",
-                              [Annotation(subject="catkin", geometry=BBox(2, 2, 10, 10))], 20, 20)
+                              [Annotation(subject="bud", geometry=BBox(2, 2, 10, 10))], 20, 20)
     (val_lbls / "bad.json").write_bytes(b"{not json")
 
     cfg = {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
                          "builder_kwargs": {"num_classes": 1}, "task": "detection"},
-        "data": {"images_dir": str(imgs), "labels_dir": str(lbls), "subject": "catkin",
+        "data": {"images_dir": str(imgs), "labels_dir": str(lbls), "subject": "bud",
                  "val_images_dir": str(val_imgs), "val_labels_dir": str(val_lbls)},
         "training": {"batch_size": 2},
     }
@@ -464,12 +464,12 @@ def test_preflight_config_rejects_incoherent_selection_metric(tmp_path):
 
     # A comparability-only metric for a center-match trait is rejected.
     cfg = dict(base_cfg)
-    cfg["training"] = dict(cfg["training"], evaluation={"trait": "catkin", "selection_metric": "map50"})
+    cfg["training"] = dict(cfg["training"], evaluation={"trait": "bud_opening", "selection_metric": "map50"})
     r = preflight_config(cfg)
     assert any("comparability-only" in i for i in r["issues"])
 
     # A governing metric for the same trait is fine.
-    cfg["training"] = dict(cfg["training"], evaluation={"trait": "catkin", "selection_metric": "f1"})
+    cfg["training"] = dict(cfg["training"], evaluation={"trait": "bud_opening", "selection_metric": "f1"})
     assert preflight_config(cfg)["valid"] is True
 
     # No trait -> no coherence gate, even for a comparability metric.
@@ -630,7 +630,7 @@ def _reserve_cal_big_single_source(root, width=4000, height=3000, tile_size=128)
     labels_dir.mkdir(parents=True, exist_ok=True)
     stem = "mosaic"
     save_image(torch.rand(3, height, width) * 0.3, str(images_dir / f"{stem}.png"))
-    boxes = [Annotation(subject="catkin", geometry=BBox(x, y, x + 20, y + 20))
+    boxes = [Annotation(subject="bud", geometry=BBox(x, y, x + 20, y + 20))
             for x in range(20, width - 20, 200) for y in range(20, height - 20, 200)]
     json_io.write_annotations(str(labels_dir / f"{stem}.json"), boxes, width, height, keep_empty=True)
     return images_dir, labels_dir
@@ -681,7 +681,7 @@ def test_preflight_reserve_calibration_fraction_infeasible_layout_refuses_under_
     cfg = {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
                          "builder_kwargs": {"num_classes": 1}, "task": "detection"},
-        "data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "catkin",
+        "data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "bud",
                  "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
                  # Nothing left for a real train fraction at this mosaic size.
                  "split": {"val_ratio": 0.45, "test_ratio": 0.45, "seed": 1,
@@ -708,7 +708,7 @@ def test_preflight_reserve_calibration_fraction_reports_an_unreadable_label_by_n
     cfg = {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
                          "builder_kwargs": {"num_classes": 1}, "task": "detection"},
-        "data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "catkin",
+        "data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "bud",
                  "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
                  "split": {"val_ratio": 0.2, "test_ratio": 0.1, "seed": 1,
                           "reserve_calibration_fraction": 0.15}},
@@ -729,7 +729,7 @@ def test_preflight_reserve_calibration_fraction_admits_a_feasible_layout(tmp_pat
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
                          "builder_kwargs": {"num_classes": 1, "min_size": 128, "max_size": 256},
                          "task": "detection"},
-        "data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "catkin",
+        "data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "bud",
                  "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
                  "split": {"val_ratio": 0.2, "test_ratio": 0.1, "seed": 1,
                           "reserve_calibration_fraction": 0.15}},
@@ -1245,7 +1245,7 @@ def test_get_worst_predictions_reads_canonical_confidence(tmp_path, monkeypatch)
     """Prediction files are per-image JSON with a native ``score`` (json_io); confidence
     reads from that field, not from box geometry. Reading a normalized box height as confidence
     instead would make the (1 - avg_conf) ranking term ~1.0 for every image with small boxes
-    (e.g. catkins)."""
+    (e.g. buds)."""
     pytest.importorskip("torch")
     monkeypatch.chdir(tmp_path)
     from tcip_annotation import json_io
@@ -1260,11 +1260,11 @@ def test_get_worst_predictions_reads_canonical_confidence(tmp_path, monkeypatch)
     def write_image(stem: str, scores: list[float]) -> None:
         # Confidence lives in the JSON `score`; box geometry is irrelevant to this
         # count + confidence heuristic (no IoU matching), so the boxes can be anything.
-        pred_anns = [Annotation(subject="catkin", geometry=BBox(10.0, 10.0, 40.0, 22.0), score=s)
+        pred_anns = [Annotation(subject="bud", geometry=BBox(10.0, 10.0, 40.0, 22.0), score=s)
                      for s in scores]
         json_io.write_annotations(str(preds / f"{stem}.json"), pred_anns, 100, 100)
         # Matching GT count → missed = extra = 0, error is exactly (1 - avg_conf).
-        gt_anns = [Annotation(subject="catkin", geometry=BBox(20.0, 11.0, 40.0, 31.0)) for _ in scores]
+        gt_anns = [Annotation(subject="bud", geometry=BBox(20.0, 11.0, 40.0, 31.0)) for _ in scores]
         json_io.write_annotations(str(gts / f"{stem}.json"), gt_anns, 100, 100)
 
     write_image("confident", [0.9, 0.9])
@@ -1638,7 +1638,7 @@ def test_list_launchable_configs_state_agrees_with_the_runs_list_for_a_crashed_r
     from tcip_mcp.tools.training_tools import list_launchable_configs
 
     create_experiment("exp-crashed", {"model_source": {"builder": "m:f", "task": "detection"},
-                                      "data": {"images_dir": "/d", "subject": "catkin"}})
+                                      "data": {"images_dir": "/d", "subject": "bud"}})
     with tcip_store.transaction(status_key("exp-crashed")) as txn:
         txn.write(status_key("exp-crashed"), {"state": "running", "started": None, "ended": None})
 
