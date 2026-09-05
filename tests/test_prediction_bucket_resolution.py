@@ -22,9 +22,9 @@ def _record_verdict(review_state_dir, bucket_dir, stem: str) -> None:
         img_name=f"{stem}.png",
         img_width=100,
         img_height=100,
-        preds=[Annotation(subject="catkin", geometry=BBox(10.0, 10.0, 30.0, 30.0), score=0.9)],
+        preds=[Annotation(subject="bud", geometry=BBox(10.0, 10.0, 30.0, 30.0), score=0.9)],
     )
-    det = ReviewDetection(det_type="fp", class_name="catkin", conf=0.9, iou=None, gt_idx=None,
+    det = ReviewDetection(det_type="fp", class_name="bud", conf=0.9, iou=None, gt_idx=None,
                           pred_idx=0, bbox=(10.0, 10.0, 30.0, 30.0))
     engine.record_detection_action(bucket_key_of(bucket_dir), det, ctx, action="accepted")
 

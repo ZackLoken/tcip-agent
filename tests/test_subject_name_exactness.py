@@ -38,8 +38,8 @@ def test_subject_names_differing_only_by_case_stay_distinct(
             "project_root": str(tmp_path),
             "dataset_root": str(tmp_path),
             "subjects": {
-                "catkin": {"description": "the male flower"},
-                "Catkin": {"description": "a second spelling a human typed"},
+                "bud": {"description": "the male flower"},
+                "Bud": {"description": "a second spelling a human typed"},
                 "bush": {"description": "one plant crown"},
             },
             "version": None,
@@ -52,11 +52,11 @@ def test_subject_names_differing_only_by_case_stay_distinct(
         "/api/classes/load",
         params={"project_root": str(tmp_path), "dataset_root": str(tmp_path)},
     ).json()["subjects"]
-    assert set(subjects) == {"catkin", "Catkin", "bush"}
-    assert subjects["catkin"]["description"] == "the male flower"
-    assert subjects["Catkin"]["description"] == "a second spelling a human typed"
+    assert set(subjects) == {"bud", "Bud", "bush"}
+    assert subjects["bud"]["description"] == "the male flower"
+    assert subjects["Bud"]["description"] == "a second spelling a human typed"
     assert set(json.loads((tmp_path / "classes.json").read_text(encoding="utf-8"))) == {
-        "catkin", "Catkin", "bush"}
+        "bud", "Bud", "bush"}
 
 
 def test_registry_derived_from_labels_keeps_each_name_exactly_as_labelled(
@@ -69,8 +69,8 @@ def test_registry_derived_from_labels_keeps_each_name_exactly_as_labelled(
     write_annotations(
         str(labels / "IMG_A.json"),
         [
-            _box("catkin", 12, 30, 48, 140),
-            _box("Catkin", 300, 44, 372, 70),
+            _box("bud", 12, 30, 48, 140),
+            _box("Bud", 300, 44, 372, 70),
             _box("bush", 5, 9, 640, 480),
         ],
         900, 500,
@@ -80,7 +80,7 @@ def test_registry_derived_from_labels_keeps_each_name_exactly_as_labelled(
         "/api/classes/load",
         params={"project_root": str(tmp_path), "annotations_dir": str(labels)},
     ).json()
-    assert set(body["subjects"]) == {"catkin", "Catkin", "bush"}
+    assert set(body["subjects"]) == {"bud", "Bud", "bush"}
     assert body["unreadable"] == []
 
 
@@ -92,14 +92,14 @@ def test_registry_derivation_reports_a_document_it_cannot_read(
     rather than silently deriving nothing from it."""
     labels = tmp_path / "annotations" / "2026-03-02"
     labels.mkdir(parents=True)
-    write_annotations(str(labels / "IMG_A.json"), [_box("catkin", 12, 30, 48, 140)], 900, 500)
+    write_annotations(str(labels / "IMG_A.json"), [_box("bud", 12, 30, 48, 140)], 900, 500)
     write_annotations(str(labels / "IMG_B.json"), [_box("", 700, 100, 760, 220)], 900, 500)
 
     body = client.get(
         "/api/classes/load",
         params={"project_root": str(tmp_path), "annotations_dir": str(labels)},
     ).json()
-    assert set(body["subjects"]) == {"catkin"}
+    assert set(body["subjects"]) == {"bud"}
     assert body["unreadable"] == [str(labels / "IMG_B.json")]
 
 
@@ -111,14 +111,14 @@ def test_a_new_subject_is_addable_alongside_the_saved_ones(
     first = client.post(
         "/api/classes/save",
         json={"project_root": str(tmp_path), "dataset_root": str(tmp_path),
-              "subjects": {"catkin": {"description": "first pass"}}, "version": None},
+              "subjects": {"bud": {"description": "first pass"}}, "version": None},
     )
     assert first.status_code == 200, first.text
 
     second = client.post(
         "/api/classes/save",
         json={"project_root": str(tmp_path), "dataset_root": str(tmp_path),
-              "subjects": {"catkin": {"description": "corrected"},
+              "subjects": {"bud": {"description": "corrected"},
                            "hazel_leaf": {"description": "one leaf blade"}},
               "version": first.json()["version"]},
     )
@@ -129,6 +129,6 @@ def test_a_new_subject_is_addable_alongside_the_saved_ones(
         "/api/classes/load",
         params={"project_root": str(tmp_path), "dataset_root": str(tmp_path)},
     ).json()["subjects"]
-    assert set(subjects) == {"catkin", "hazel_leaf"}
-    assert subjects["catkin"]["description"] == "corrected"
+    assert set(subjects) == {"bud", "hazel_leaf"}
+    assert subjects["bud"]["description"] == "corrected"
     assert len(json.loads((tmp_path / "classes.json").read_text(encoding="utf-8"))) == 2

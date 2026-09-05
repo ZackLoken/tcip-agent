@@ -37,7 +37,7 @@ def _doctor():
 
 @pytest.mark.parametrize(
     ("subject", "date"),
-    [("catkin", "2026-02-11"), ("bush", "2026-03-02"), ("leaf", None)],
+    [("bud", "2026-02-11"), ("bush", "2026-03-02"), ("leaf", None)],
 )
 def test_the_doctor_reads_a_bucket_key_through_the_published_inverse(
     subject: str, date: str | None

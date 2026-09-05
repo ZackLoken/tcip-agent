@@ -46,10 +46,10 @@ def _prefixed_attributes() -> ClassRegistry:
     """One subject carrying two attributes whose names share a prefix, the longer declared first,
     with vocabularies of different size so the two scopes cannot be confused for one another."""
     return ClassRegistry(subjects=(
-        Subject(name="catkin", attributes=(
-            Attribute(name="elongation_stage", type="ordinal",
-                      values=("dormant", "swelling", "elongating", "shedding")),
-            Attribute(name="elongation", type="categorical", values=("elongated", "dormant")),
+        Subject(name="bud", attributes=(
+            Attribute(name="opening_stage", type="ordinal",
+                      values=("closed", "swelling", "elongating", "shedding")),
+            Attribute(name="opening", type="categorical", values=("open", "closed")),
         )),
     ))
 
@@ -59,11 +59,11 @@ def _case_variant_subjects() -> ClassRegistry:
     accepts a free-text subject name, so a case variant is an ordinary registry state: the two are
     distinct subjects and each scope must resolve to its own vocabulary."""
     return ClassRegistry(subjects=(
-        Subject(name="catkin", attributes=(
-            Attribute(name="elongation", type="categorical", values=("elongated", "dormant")),)),
-        Subject(name="Catkin", attributes=(
-            Attribute(name="elongation", type="ordinal",
-                      values=("dormant", "swelling", "elongating")),)),
+        Subject(name="bud", attributes=(
+            Attribute(name="opening", type="categorical", values=("open", "closed")),)),
+        Subject(name="Bud", attributes=(
+            Attribute(name="opening", type="ordinal",
+                      values=("closed", "swelling", "elongating")),)),
     ))
 
 
@@ -88,7 +88,7 @@ def test_digest_ignores_free_text_provenance():
     assert leaf is not None
     reworded = ClassRegistry(subjects=(
         Subject(name="bush", description="a bush crown, reworded"),
-        Subject(name="leaf", description="one hazelnut leaf, reworded", defined_by="user:breeder",
+        Subject(name="leaf", description="one currant leaf, reworded", defined_by="user:breeder",
                 defined_at="2026-01-02", attributes=leaf.attributes),
     ))
     assert attribute_schema_digest(reworded, "leaf") == attribute_schema_digest(base, "leaf")
@@ -131,66 +131,66 @@ def test_attribute_lookup_resolves_the_exactly_named_attribute():
     """With two attributes sharing a prefix, each scope resolves to the vocabulary it named, not to
     whichever declared name happens to start with it."""
     reg = _prefixed_attributes()
-    catkin = reg.subject("catkin")
-    assert catkin is not None
+    bud = reg.subject("bud")
+    assert bud is not None
 
-    exact = catkin.attribute("elongation")
+    exact = bud.attribute("opening")
     assert exact is not None
-    assert exact.name == "elongation"
+    assert exact.name == "opening"
     assert exact.type == "categorical"
-    assert exact.values == ("elongated", "dormant")
+    assert exact.values == ("open", "closed")
 
-    longer = catkin.attribute("elongation_stage")
+    longer = bud.attribute("opening_stage")
     assert longer is not None
-    assert longer.values == ("dormant", "swelling", "elongating", "shedding")
+    assert longer.values == ("closed", "swelling", "elongating", "shedding")
 
-    assert assign_class_ids(reg, "catkin", "elongation") == {"elongated": 0, "dormant": 1}
-    assert assign_class_ids(reg, "catkin", "elongation_stage") == {
-        "dormant": 0, "swelling": 1, "elongating": 2, "shedding": 3}
-    assert num_classes(reg, "catkin", "elongation") == 2
-    assert num_classes(reg, "catkin", "elongation_stage") == 4
+    assert assign_class_ids(reg, "bud", "opening") == {"open": 0, "closed": 1}
+    assert assign_class_ids(reg, "bud", "opening_stage") == {
+        "closed": 0, "swelling": 1, "elongating": 2, "shedding": 3}
+    assert num_classes(reg, "bud", "opening") == 2
+    assert num_classes(reg, "bud", "opening_stage") == 4
 
 
 def test_an_attribute_name_that_only_prefixes_a_declared_one_refuses():
     """A truncated scope name names no declared attribute and must refuse, rather than train over
     the longer attribute's ranks while reporting the name the caller asked for."""
     reg = ClassRegistry(subjects=(
-        Subject(name="catkin", attributes=(
-            Attribute(name="elongation_stage", type="ordinal",
-                      values=("dormant", "swelling", "elongating", "shedding")),)),
+        Subject(name="bud", attributes=(
+            Attribute(name="opening_stage", type="ordinal",
+                      values=("closed", "swelling", "elongating", "shedding")),)),
     ))
-    catkin = reg.subject("catkin")
-    assert catkin is not None
-    assert catkin.attribute("elongation") is None
+    bud = reg.subject("bud")
+    assert bud is not None
+    assert bud.attribute("opening") is None
 
-    with pytest.raises(RegistryError, match=r"attribute 'elongation' not on subject 'catkin'"):
-        assign_class_ids(reg, "catkin", "elongation")
+    with pytest.raises(RegistryError, match=r"attribute 'opening' not on subject 'bud'"):
+        assign_class_ids(reg, "bud", "opening")
 
 
 def test_subject_lookup_resolves_the_exactly_named_subject():
     """Subject names are matched verbatim: two names differing only in case are two subjects with
     their own vocabularies, and a name declared by neither refuses."""
     reg = _case_variant_subjects()
-    lower = reg.subject("catkin")
-    upper = reg.subject("Catkin")
+    lower = reg.subject("bud")
+    upper = reg.subject("Bud")
     assert lower is not None and upper is not None
-    assert lower.name == "catkin" and upper.name == "Catkin"
+    assert lower.name == "bud" and upper.name == "Bud"
 
-    lower_attr = lower.attribute("elongation")
-    upper_attr = upper.attribute("elongation")
+    lower_attr = lower.attribute("opening")
+    upper_attr = upper.attribute("opening")
     assert lower_attr is not None and upper_attr is not None
     assert lower_attr.type == "categorical" and upper_attr.type == "ordinal"
 
-    assert assign_class_ids(reg, "catkin", "elongation") == {"elongated": 0, "dormant": 1}
-    assert assign_class_ids(reg, "Catkin", "elongation") == {
-        "dormant": 0, "swelling": 1, "elongating": 2}
-    assert num_classes(reg, "catkin", "elongation") == 2
-    assert num_classes(reg, "Catkin", "elongation") == 3
-    assert attribute_schema_digest(reg, "catkin") != attribute_schema_digest(reg, "Catkin")
+    assert assign_class_ids(reg, "bud", "opening") == {"open": 0, "closed": 1}
+    assert assign_class_ids(reg, "Bud", "opening") == {
+        "closed": 0, "swelling": 1, "elongating": 2}
+    assert num_classes(reg, "bud", "opening") == 2
+    assert num_classes(reg, "Bud", "opening") == 3
+    assert attribute_schema_digest(reg, "bud") != attribute_schema_digest(reg, "Bud")
 
-    assert reg.subject("CATKIN") is None
-    with pytest.raises(RegistryError, match=r"subject 'CATKIN' not in registry"):
-        assign_class_ids(reg, "CATKIN")
+    assert reg.subject("BUD") is None
+    with pytest.raises(RegistryError, match=r"subject 'BUD' not in registry"):
+        assign_class_ids(reg, "BUD")
 
 
 def test_case_variant_subjects_survive_a_file_roundtrip_as_distinct_subjects(tmp_path: Path):
@@ -201,16 +201,16 @@ def test_case_variant_subjects_survive_a_file_roundtrip_as_distinct_subjects(tmp
     write_registry(path, reg)
 
     on_disk = json.loads(path.read_text(encoding="utf-8"))
-    assert set(on_disk) == {"catkin", "Catkin"}
+    assert set(on_disk) == {"bud", "Bud"}
 
     back = read_registry(path)
-    assert [s.name for s in back.subjects] == ["catkin", "Catkin"]
+    assert [s.name for s in back.subjects] == ["bud", "Bud"]
     assert back == reg
     assert registry_to_dict(back) == on_disk
 
-    lower = back.subject("catkin")
-    upper = back.subject("Catkin")
+    lower = back.subject("bud")
+    upper = back.subject("Bud")
     assert lower is not None and upper is not None
-    assert lower.attributes[0].values == ("elongated", "dormant")
-    assert upper.attributes[0].values == ("dormant", "swelling", "elongating")
-    assert class_registry.num_classes(back, "Catkin", "elongation") == 3
+    assert lower.attributes[0].values == ("open", "closed")
+    assert upper.attributes[0].values == ("closed", "swelling", "elongating")
+    assert class_registry.num_classes(back, "Bud", "opening") == 3

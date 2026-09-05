@@ -1131,13 +1131,13 @@ def test_trait_specs_shares_the_state_database_rather_than_gaining_its_own(store
     ``trait_specs`` itself the way the store's self-rooted predecessor did.
     """
     only_on(store, SQLITE, _DATABASE_MECHANICS)
-    spec_key = traits.trait_spec_key(traits.trait_specs_dir(store.root), "catkin")
+    spec_key = traits.trait_spec_key(traits.trait_specs_dir(store.root), "bud_opening")
     op_key = operationalization.operationalization_key(
-        operationalization.operationalizations_scope(store.root), "catkin", "phenology")
+        operationalization.operationalizations_scope(store.root), "bud_opening", "phenology")
 
-    ts.replace(spec_key, {"name": "catkin", "delivers": ["catkin_05per_date"]},
+    ts.replace(spec_key, {"name": "bud_opening", "delivers": ["leaf_out_05per_date"]},
                expect=ts.Version.ABSENT)
-    ts.replace(op_key, {"trait": "catkin", "delivery_kind": "phenology"}, expect=ts.Version.ABSENT)
+    ts.replace(op_key, {"trait": "bud_opening", "delivery_kind": "phenology"}, expect=ts.Version.ABSENT)
 
     databases = sorted(store.root.rglob(DATABASE_FILENAME))
     assert databases == [store.root / ".tcip" / "state" / ".tcip" / DATABASE_FILENAME]
@@ -1249,7 +1249,7 @@ CHECKPOINT_BYTES = b"PK\x03\x04not a real archive, only bytes handed to the stor
 
 CLASS_REGISTRY_BYTES = (
     '{\n'
-    '  "catkin": {\n'
+    '  "bud": {\n'
     '    "description": "a männlich flower",\n'
     '    "attributes": {}\n'
     '  }\n'
@@ -1263,7 +1263,7 @@ these same spellings, by ``test_document_store_bytes``."""
 DATASET_IDENTITY_BYTES = (
     '{\n'
     '  "dataset_id": "a1",\n'
-    '  "crop": "hazelnut",\n'
+    '  "crop": "currant",\n'
     '  "created": "2026-03-04T12:00:00+00:00"\n'
     '}\n'
 ).encode("utf-8")
@@ -1282,7 +1282,7 @@ BAND_GROUP_MANIFEST_BYTES = (
 ).encode("utf-8")
 SNAPSHOT_BYTES = "def build():\n    return 'ü'\n".encode("utf-8")
 IMAGE_BYTES = b"\xff\xd8\xff\xe0not a real frame, only bytes handed to the store\x00"
-LABEL_BYTES = '{"annotations": [{"subject": "catkin", "bbox": [1.0, 2.0, 3.5, 4.5]}]}'.encode("utf-8")
+LABEL_BYTES = '{"annotations": [{"subject": "bud", "bbox": [1.0, 2.0, 3.5, 4.5]}]}'.encode("utf-8")
 COCO_BYTES = '{"images": [{"file_name": "ü_2.jpg"}], "annotations": []}'.encode("utf-8")
 
 
@@ -1451,25 +1451,25 @@ def _real_job_registry_summary() -> list[dict]:
 
 REGISTERED = {
     "image_status": Registered(
-        {"catkin/2026-03-04": {"a_1.jpg": "negative", "ü_2.jpg": "complete"}},
+        {"bud/2026-03-04": {"a_1.jpg": "negative", "ü_2.jpg": "complete"}},
         dataset_layout.image_status_key, ".tcip/state/image_status.json"),
     "image_status_digest": Registered(
-        {"catkin/2026-03-04": {"a_1.jpg": "9f2c"}},
+        {"bud/2026-03-04": {"a_1.jpg": "9f2c"}},
         dataset_layout.image_status_digest_key, ".tcip/state/image_status_digest.json"),
     "view_coverage": Registered(
-        {"catkin/2026-03-04": {"a_1.jpg": {"grid": {"rows": 3, "cols": 3},
+        {"bud/2026-03-04": {"a_1.jpg": {"grid": {"rows": 3, "cols": 3},
                                            "cells_served_at_native": ["r1c1"],
                                            "cells_seen_at_scale": {"r1c1": 1.0}}}},
         dataset_layout.view_coverage_key, ".tcip/state/view_coverage.json"),
     "coverage_grid_zoom": Registered(
-        {"catkin": {"zoom": 1.5, "set_by": "user:ü", "set_at": "2026-03-04T00:00:00+00:00"}},
+        {"bud": {"zoom": 1.5, "set_by": "user:ü", "set_at": "2026-03-04T00:00:00+00:00"}},
         dataset_layout.coverage_grid_zoom_key, ".tcip/state/coverage_grid_zoom.json"),
     "region_completeness": Registered(
-        {"catkin/orthö": {"grid": {"rows": 2, "cols": 2}, "cells_complete": ["r1c1"],
+        {"bud/orthö": {"grid": {"rows": 2, "cols": 2}, "cells_complete": ["r1c1"],
                           "stem": "orthö"}},
         dataset_layout.region_completeness_key, ".tcip/state/region_completeness.json"),
     "region_completeness_digest": Registered(
-        {"catkin/orthö": {"r1c1": "3ab9"}},
+        {"bud/orthö": {"r1c1": "3ab9"}},
         dataset_layout.region_completeness_digest_key,
         ".tcip/state/region_completeness_digest.json"),
     "class_registry": Registered(
@@ -1496,7 +1496,7 @@ REGISTERED = {
         lambda root: jobstore.job_registry_key("inference_jobs"),
         ".tcip/state/inference_jobs.json", pin=_pin_platform_root),
     "workspace_active_project": Registered(
-        "hazelnut_catkin_valley\n", lambda root: workspace.active_project_key(), ".active",
+        "currant_bud_valley\n", lambda root: workspace.active_project_key(), ".active",
         pin=_pin_workspace),
     "gui_snapshot": Registered(
         {"active_tab": "annotate", "dataset": {"subject": "büsch"}},
@@ -1523,7 +1523,7 @@ REGISTERED = {
         "8765", lambda root: web_client.backend_port_key(), ".tcip/state/web_port.txt",
         pin=_pin_workspace),
     "canvas_open_binding": Registered(
-        {"generation": 1, "root": "C:/orchards/catkin", "project_name": "hazelnut_catkin_valley",
+        {"generation": 1, "root": "C:/orchards/bud", "project_name": "currant_bud_valley",
          "issued_at": "2026-03-04T12:00:00+00:00"},
         lambda root: web_client.canvas_open_binding_key(),
         ".tcip/state/canvas_open_binding.json", pin=_pin_workspace),
@@ -1566,10 +1566,10 @@ REGISTERED = {
         f".tcip/experiments/{EXPERIMENT}/metrics.jsonl", pin=_pin_platform_root,
         root_of=lambda root: Path(experiments.experiments_scope())),
     "operating_point_sidecar": Registered(
-        {"schema_version": 2, "trait": "catkin_50per_date", "dataset_hash": "9f2c1b0a4d6e8f31",
+        {"schema_version": 2, "trait": "bud_opening_50per_date", "dataset_hash": "9f2c1b0a4d6e8f31",
          "operating_point": {"conf": {"name": "conf", "value": 0.42, "source": "derived",
                                       "validated_against": "held_out_annotations"}},
-         "id_map": {"catkin": 0}, "validated": True, "shippable_issues": [],
+         "id_map": {"bud": 0}, "validated": True, "shippable_issues": [],
          "checkpoint": "ü_best", "raster_path": None},
         lambda root: resolution.sidecar_key(_stamp_bucket(root), "operating_point"),
         "predictions/live/2026-03-04/operating_point.json", root_of=_stamp_bucket),
@@ -1704,14 +1704,14 @@ REGISTERED = {
         lambda root: hpo.ray_dashboard_key(), ".tcip/state/ray_dashboard.json",
         pin=_pin_platform_root),
     "dataset_registry": Registered(
-        [{"id": "a1", "path": "dü", "crop": "hazelnut", "fingerprint": "9f2c"}],
+        [{"id": "a1", "path": "dü", "crop": "currant", "fingerprint": "9f2c"}],
         project_tools.dataset_registry_key, ".tcip/datasets.json"),
     "split_manifest": Registered(
         _real_split_manifest(),
         lambda root: data_tools.split_manifest_key(_split_dir(root)),
         "splits/split_manifest.json", root_of=_split_dir),
     "curated_manifest": Registered(
-        {"created": "2026-03-04T00:00:00+00:00", "subject": "catkin", "subjects": ["catkin"],
+        {"created": "2026-03-04T00:00:00+00:00", "subject": "bud", "subjects": ["bud"],
          "images": [{"image": "ü_2.jpg", "status": "hard_negative", "n_boxes": 0,
                      "rejected_count": 1, "label": "labels/ü_2.json"}]},
         lambda root: materialize.curated_manifest_key(_curated_dir(root)),
@@ -1755,7 +1755,7 @@ REGISTERED = {
         lambda root: plant_mapping.plant_mapping_key(root, "valley"),
         ".tcip/state/plant_mappings/valley.json", root_of=_plant_mapping_dir),
     "plant_registries": Registered(
-        {"name": "valley-plants", "crop": "hazelnut", "site": "north orchard",
+        {"name": "valley-plants", "crop": "currant", "site": "north orchard",
          "csvs": [{"path": "dü/plants.csv", "sha256": "0" * 64, "n_plants": 2}],
          "n_plants": 2, "digest": "0" * 64, "registered_by": "agent:register_plant_registry",
          "registered_at": "2026-03-04T12:00:00+00:00"},
@@ -1774,7 +1774,7 @@ REGISTERED = {
     "experiment_validations": Registered(
         # every field _VALIDATION_FIELDS requires, train_disjointness/selection_disjointness
         # included, the latter the full shape resolver_selection_disjointness actually returns
-        {"document": "operating_point", "trait": "catkin_50per_date",
+        {"document": "operating_point", "trait": "bud_opening_50per_date",
          "claim": {"operating_point": {"conf": {"value": 0.42}}},
          "validated_against": "held_out_annotations", "checkpoint_sha256": "0" * 64,
          "producing_experiment_id": EXPERIMENT,
@@ -1790,8 +1790,8 @@ REGISTERED = {
     "trait_operationalizations": Registered(
         {"trait": TRAIT_UNDER_TEST, "delivery_kind": DELIVERY_KIND_UNDER_TEST,
          "statement": "the date each büsch reached the measured state",
-         "mechanism": "the calibrated state classifier over isolated catkins",
-         "measured_subject": "catkin", "delivered_phenotypes": ["measure_one"],
+         "mechanism": "the calibrated state classifier over isolated buds",
+         "measured_subject": "bud", "delivered_phenotypes": ["measure_one"],
          "delivered_value_keys": [], "stated_by": "state_trait_operationalization",
          "stated_at": "2026-03-04T12:00:00+00:00", "relayed_note": "",
          "confirmed_by": "user:ü", "confirmed_at": "2026-03-04T12:30:00+00:00",

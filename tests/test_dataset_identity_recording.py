@@ -35,9 +35,9 @@ def _make_dataset(root: Path) -> None:
     Image.new("RGB", (32, 32)).save(root / "images" / "2-11-26" / "img_000.jpg")
     (root / "annotations" / "2-11-26").mkdir(parents=True, exist_ok=True)
     json_io.write_annotations(str(root / "annotations" / "2-11-26" / "img_000.json"),
-                              [Annotation(subject="catkin", geometry=BBox(1, 1, 9, 9))], 32, 32)
+                              [Annotation(subject="bud", geometry=BBox(1, 1, 9, 9))], 32, 32)
     class_registry.write_registry(root / "classes.json",
-                                  ClassRegistry(subjects=(Subject(name="catkin"),)))
+                                  ClassRegistry(subjects=(Subject(name="bud"),)))
 
 
 def test_create_experiment_records_identity_in_lineage(exp_dir):
@@ -99,7 +99,7 @@ def test_dataset_identity_helper_registered_vs_bespoke(tmp_path):
     from tcip_mcp.pipelines.data.split_construction import dataset_identity
 
     _make_dataset(tmp_path)
-    reg = register_dataset(str(tmp_path), crop="hazelnut")
+    reg = register_dataset(str(tmp_path), crop="currant")
     ds_id, fp = dataset_identity({"images_dir": str(tmp_path / "images" / "2-11-26")})
     assert ds_id == reg["id"] and fp == reg["fingerprint"]
     # bespoke / imageless run -> no fabricated identity

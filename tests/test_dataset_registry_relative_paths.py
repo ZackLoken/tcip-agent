@@ -35,9 +35,9 @@ def _make_dataset(root: Path) -> None:
     (root / "annotations" / "2-11-26").mkdir(parents=True, exist_ok=True)
     json_io.write_annotations(
         str(root / "annotations" / "2-11-26" / "img_000.json"),
-        [Annotation(subject="catkin", geometry=BBox(1, 1, 9, 9))], 32, 32)
+        [Annotation(subject="bud", geometry=BBox(1, 1, 9, 9))], 32, 32)
     class_registry.write_registry(
-        root / "classes.json", ClassRegistry(subjects=(Subject(name="catkin"),)))
+        root / "classes.json", ClassRegistry(subjects=(Subject(name="bud"),)))
 
 
 def _run_check(*args: str) -> subprocess.CompletedProcess:
@@ -56,7 +56,7 @@ def test_register_dataset_stores_a_relative_path_for_the_projects_own_tree(tmp_p
     src = tmp_path / "proj"
     _make_dataset(src)
 
-    registered = register_dataset(str(src), crop="hazelnut", project_root=str(src))
+    registered = register_dataset(str(src), crop="currant", project_root=str(src))
 
     assert "error" not in registered
     regs = read_datasets(src)
@@ -71,7 +71,7 @@ def test_dataset_entry_path_resolves_a_relative_entry_against_the_project_root(t
 
     src = tmp_path / "proj"
     _make_dataset(src)
-    register_dataset(str(src), crop="hazelnut", project_root=str(src))
+    register_dataset(str(src), crop="currant", project_root=str(src))
 
     entry = read_datasets(src)[0]
 
@@ -98,7 +98,7 @@ def test_register_dataset_stores_a_nested_relative_path_with_posix_separators(tm
     nested = project / "datasets" / "main"
     _make_dataset(nested)
 
-    registered = register_dataset(str(nested), crop="hazelnut", project_root=str(project))
+    registered = register_dataset(str(nested), crop="currant", project_root=str(project))
 
     assert "error" not in registered
     entries = read_datasets(project)
@@ -158,7 +158,7 @@ def test_project_roots_reaches_a_relatively_registered_datasets_state(tmp_path: 
     project = tmp_path / "proj"
     dataset = project / "datasets" / "main"
     _make_dataset(dataset)
-    register_dataset(str(dataset), crop="hazelnut", project_root=str(project))
+    register_dataset(str(dataset), crop="currant", project_root=str(project))
 
     roots = project_roots(project)
 
@@ -173,7 +173,7 @@ def test_project_roots_reaches_a_relatively_registered_datasets_state(tmp_path: 
 def test_check_dataset_identity_stays_quiet_for_a_self_registered_project(tmp_path: Path):
     src = tmp_path / "proj"
     _make_dataset(src)
-    register_dataset(str(src), crop="hazelnut", project_root=str(src))
+    register_dataset(str(src), crop="currant", project_root=str(src))
 
     result = _run_check(str(src), "--project", str(src))
 
@@ -186,7 +186,7 @@ def test_check_dataset_identity_still_fires_for_a_genuinely_moved_dataset(tmp_pa
 
     orig = tmp_path / "orig"
     _make_dataset(orig)
-    register_dataset(str(orig), crop="hazelnut", project_root=str(orig))
+    register_dataset(str(orig), crop="currant", project_root=str(orig))
 
     moved = tmp_path / "moved"
     shutil.copytree(orig, moved)
@@ -213,8 +213,8 @@ def test_resolve_statement_registry_names_the_resolved_root_not_the_stored_dot(t
     second = project / "datasets" / "second"
     _make_dataset(first)
     _make_dataset(second)
-    register_dataset(str(first), crop="hazelnut", project_root=str(project))
-    register_dataset(str(second), crop="hazelnut", project_root=str(project))
+    register_dataset(str(first), crop="currant", project_root=str(project))
+    register_dataset(str(second), crop="currant", project_root=str(project))
 
     try:
         resolve_statement_registry(str(project), "")
@@ -240,7 +240,7 @@ def test_evidence_roots_resolves_a_relatively_registered_dataset(tmp_path: Path)
     project = tmp_path / "proj"
     dataset = project / "datasets" / "main"
     _make_dataset(dataset)
-    register_dataset(str(dataset), crop="hazelnut", project_root=str(project))
+    register_dataset(str(dataset), crop="currant", project_root=str(project))
 
     roots = _evidence_roots(project)
 

@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-pytestmark = pytest.mark.usefixtures("seed_catkin_trait_spec")
+pytestmark = pytest.mark.usefixtures("seed_bud_trait_spec")
 
 torch = pytest.importorskip("torch")
 pytest.importorskip("pycocotools")
@@ -62,7 +62,7 @@ def _held_out_calibration(*, tiled: bool, tile_size: int | None = None,
         "tile_size_derived_from": tile_size_derived_from,
         "staged_conf_floor": 0.01,
     }
-    return resolve_operating_point("catkin", experiment_id=None, **inputs), inputs
+    return resolve_operating_point("bud_opening", experiment_id=None, **inputs), inputs
 
 
 def _export(tmp_path, monkeypatch, *, calibration, tile, tile_size=None):
@@ -89,7 +89,7 @@ def _export(tmp_path, monkeypatch, *, calibration, tile, tile_size=None):
     result = itools.run_inference(
         str(ckpt), images_dir=str(images_dir),
         output_dir=str(dataset_root / "predictions" / "baseline" / "2026-03-01"),
-        device="cpu", tile=tile, tile_size=tile_size, trait="catkin",
+        device="cpu", tile=tile, tile_size=tile_size, trait="bud_opening",
         calibration_labels_dir=str(images_dir))
     assert "error" not in result, result
     return result
@@ -107,7 +107,7 @@ def test_the_count_operating_points_validity_survives_the_round_trip_to_disk(tmp
     bucket = result["output_dir"]
 
     assert read_operating_point_sidecar(bucket) is not None
-    reconciled = reconcile_operating_point_validity([bucket], trait="catkin")
+    reconciled = reconcile_operating_point_validity([bucket], trait="bud_opening")
     assert reconciled["missing_sidecars"] == []
     assert reconciled["unvalidated_buckets"] == []
     assert reconciled["on_disk_validated"] is True
@@ -130,7 +130,7 @@ def test_the_validated_stamps_pointer_leads_to_a_record_that_answers_for_its_cla
 
     stamp = read_operating_point_sidecar(bucket)
     assert well_formed_validated_by(stamp) is not None
-    binding = verify_stamp_binding(stamp, bucket, document="operating_point", trait="catkin")
+    binding = verify_stamp_binding(stamp, bucket, document="operating_point", trait="bud_opening")
     assert binding.ok is True
     assert binding.claimed is True
     assert binding.note == ""
@@ -157,7 +157,7 @@ def test_a_registered_bespoke_checkpoint_exports_and_earns_its_own_calibration_r
     assert experiment_exists(pointer["experiment_id"])
     row = find_validation(pointer["experiment_id"], pointer["record_digest"])
     assert row["producing_experiment_id"] is None
-    assert row["trait"] == "catkin"
+    assert row["trait"] == "bud_opening"
     assert list(row["covered_buckets"]) == ["predictions/baseline/2026-03-01"]
 
 
@@ -178,7 +178,7 @@ def test_a_run_that_dies_before_its_record_leaves_predictions_that_floor(tmp_pat
     bucket = tmp_path / "dataset" / "predictions" / "baseline" / "2026-03-01"
     assert (bucket / "capture_a.json").is_file()
     assert not (bucket / "operating_point.json").exists()
-    assert reconcile_operating_point_validity([str(bucket)], trait="catkin")["validated"] == VALIDATED_FALSE
+    assert reconcile_operating_point_validity([str(bucket)], trait="bud_opening")["validated"] == VALIDATED_FALSE
 
 
 def test_a_run_that_dies_after_its_record_leaves_a_row_no_stamp_names(tmp_path, monkeypatch):
@@ -204,7 +204,7 @@ def test_a_run_that_dies_after_its_record_leaves_a_row_no_stamp_names(tmp_path, 
     bucket = tmp_path / "dataset" / "predictions" / "baseline" / "2026-03-01"
     assert find_validation(sealed["experiment_id"], sealed["record_digest"]) is not None
     assert not (bucket / "operating_point.json").exists()
-    assert reconcile_operating_point_validity([str(bucket)], trait="catkin")["validated"] == VALIDATED_FALSE
+    assert reconcile_operating_point_validity([str(bucket)], trait="bud_opening")["validated"] == VALIDATED_FALSE
 
 
 def test_the_tile_geometrys_basis_survives_the_round_trip_to_disk(tmp_path, monkeypatch):

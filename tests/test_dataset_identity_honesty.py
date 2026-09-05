@@ -26,9 +26,9 @@ def _dataset(root: Path) -> None:
     Image.new("RGB", (48, 32), color=(120, 90, 40)).save(root / "images" / _DATE / "IMG_1.png")
     Image.new("RGB", (64, 40), color=(20, 160, 70)).save(root / "images" / _DATE / "IMG_2.png")
     json_io.write_annotations(root / "annotations" / _DATE / "IMG_1.json",
-                              [Annotation(subject="catkin", geometry=BBox(4, 6, 22, 31))], 48, 32)
+                              [Annotation(subject="bud", geometry=BBox(4, 6, 22, 31))], 48, 32)
     json_io.write_annotations(root / "annotations" / _DATE / "IMG_2.json",
-                              [Annotation(subject="catkin", geometry=BBox(9, 3, 60, 28))], 64, 40)
+                              [Annotation(subject="bud", geometry=BBox(9, 3, 60, 28))], 64, 40)
 
 
 def test_a_dataset_whose_images_were_all_removed_reports_no_identity(tmp_path):

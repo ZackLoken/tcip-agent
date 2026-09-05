@@ -42,7 +42,7 @@ REGISTRY_VALUE = {
         "description": "a männlich flower",
         "defined_by": "breeder",
         "defined_at": "2026-03-04T12:00:00+00:00",
-        "attributes": {"state": {"type": "categorical", "values": ["dormant", "elongated"]}},
+        "attributes": {"state": {"type": "categorical", "values": ["closed", "open"]}},
     }
 }
 REGISTRY_BYTES = (
@@ -55,8 +55,8 @@ REGISTRY_BYTES = (
     '      "state": {\n'
     '        "type": "categorical",\n'
     '        "values": [\n'
-    '          "dormant",\n'
-    '          "elongated"\n'
+    '          "closed",\n'
+    '          "open"\n'
     '        ]\n'
     '      }\n'
     '    }\n'

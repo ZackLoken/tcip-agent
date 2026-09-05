@@ -26,7 +26,7 @@ def _write_prediction(bucket: Path, stem: str, score: float = 0.9) -> Path:
             "image": f"{stem}.png",
             "width": 100,
             "height": 100,
-            "annotations": [{"subject": "catkin", "bbox": [10, 10, 30, 30], "score": score}],
+            "annotations": [{"subject": "bud", "bbox": [10, 10, 30, 30], "score": score}],
         }),
         encoding="utf-8",
     )
