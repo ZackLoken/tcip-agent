@@ -117,9 +117,10 @@ uncharacterized, which is a claim about a quantity that has been defined.
 - `export_detection_csv` and `deliver_per_image_counts` take a required, keyword-only `trait` and rest on
   its `per_image_count` record, in either of `deliver_per_image_counts`'s two source regimes. That record
   names no delivered phenotype, because the per-image CSV carries no phenotype column; what it
-  names is the counted subject, checked against the recorded `id_map` of every bucket that
-  recorded one. A bucket-regime call also refuses a bucket whose own stamp names a different,
-  non-`None` trait, validated or not.
+  names is the counted subject, checked against the counted subjects of every bucket that
+  recorded one (a classified bucket's own scope subject, its recorded `id_map`'s keys otherwise,
+  since a classified map is keyed by attribute values, not object classes). A bucket-regime call
+  also refuses a bucket whose own stamp names a different, non-`None` trait, validated or not.
 - `export_aggregated_csv` and `deliver_orthomosaic_plant_counts` take `delivered_phenotype`, a
   crop-vocabulary delivered-phenotype name (the `delivered_phenotype` CSV column and the unit
   cross-check read it), and resolve it to the registered trait whose spec `delivers` it: none or

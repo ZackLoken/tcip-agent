@@ -60,9 +60,12 @@ class Annotation:
 
     ``subject`` is the object it is about (``bush``, ``leaf``, ``efb``).  ``geometry`` is a box, a
     polygon, a point, or ``None`` for an image/plant-level label.  ``attributes`` maps an attribute
-    name to its value name (e.g. ``{"elongation": "elongated"}``): names, never a numeric class id.
-    ``score`` set means this is a prediction.  Provenance travels with the annotation: who authored it
-    and, once a prediction is accepted into ground truth, who accepted it.
+    name to its value name (e.g. ``{"thorns": "present"}``): names, never a numeric class id.
+    ``score`` set means this is a prediction, and a prediction carries the same shape ground truth
+    does: a classified prediction's ``subject`` is still the object class, with the classifier's
+    decoded call sitting under ``attributes``, never the value alone in ``subject``. Provenance
+    travels with the annotation: who authored it and, once a prediction is accepted into ground
+    truth, who accepted it.
     """
 
     subject: str

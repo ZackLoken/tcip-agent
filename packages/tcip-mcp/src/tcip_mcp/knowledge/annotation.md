@@ -74,7 +74,7 @@ applied twice or skipped.
 | `segment_prompt` | Engine-assisted polygon generation from point/box/grid prompts (`engine='sam'` default) |
 | `push_panel_event` | Push an arbitrary event to a GUI panel over the tcip-web backend for a named `project_root`, not restricted to images/annotations; refuses when the GUI's open project does not agree |
 | `prioritize_review_queue` | Rank unlabeled images by active-learning uncertainty/diversity for the next review batch |
-| `materialize_review_dataset` | Turn human review verdicts into a curated training set (accepted/edited → labels, rejected → hard negatives) with experiment lineage |
+| `materialize_review_dataset` | Turn human review verdicts into a curated training set (accepted/edited → labels, rejected → hard negatives) with experiment lineage; under a classified bucket's own recorded scope a rejected value call is never a hard negative (the model named the wrong state, not the object's absence), so it lands in `unconfirmed_negatives` instead |
 
 ## Engine-assisted auto-labeling (the engine is a capability, not a fixed method)
 
@@ -168,7 +168,9 @@ Grid cell system:
 3. `annotation_tools.score_predictions` (library call, or `scripts/score_predictions.py`) pairs
    predictions to GT by IoU (default threshold: 0.5) and returns
    aggregate TP/FP/FN; `detail=True` adds a per-detection breakdown (each TP/FP/FN tagged with
-   its class id, box/polygon, IoU, and confidence)
+   its class id, box/polygon, IoU, and confidence). On a classified bucket (predictions carrying
+   the object class in `subject`) this scores the object's localization, never the classifier's
+   own call; a bucket whose stamp predates the recorded scope refuses by name
 4. Review in panel: accept correct predictions, correct errors, add missed objects. The recorded
    verdict action is one of `tcip_annotation.verdicts.VerdictAction`: accepted, rejected, edited,
    or swept (an explicit "checked this image, found nothing missed" attestation that mutates no
