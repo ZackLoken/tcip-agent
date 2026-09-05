@@ -109,7 +109,7 @@ export const AnnotationShapes = memo(function AnnotationShapes({
               stroke={subjectColor(p.subject)}
               width={boxStroke}
               labelSize={labelSize}
-              label={p.subject}
+              label={authorshipLabel(p.subject, p.authorship)}
               showLabel={i === hoveredDerivedIdx}
               dashed="derived"
             />
