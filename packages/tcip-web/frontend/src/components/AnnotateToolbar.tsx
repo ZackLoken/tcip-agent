@@ -154,7 +154,7 @@ export function AnnotateToolbar({
     return counts;
   }, [canvasBoxes, canvasPolygons, canvasPoints, canvasImageAnnotations]);
 
-  const currentImage = dataset.image_list[dataset.current_image_index] ?? UNSET_GLYPH;
+  const currentImage = dataset.image_list[dataset.current_image_index] ?? null;
   const currentStatus: ImageStatus | undefined = currentImage
     ? imageStatus.byImage[currentImage]
     : undefined;
@@ -494,9 +494,9 @@ export function AnnotateToolbar({
           </span>
           <span
             className="max-w-[150px] truncate font-mono text-[11px] text-tcip-fg"
-            title={currentImage}
+            title={currentImage ?? UNSET_GLYPH}
           >
-            {currentImage}
+            {currentImage ?? UNSET_GLYPH}
           </span>
           {currentIsStale && (
             <>
