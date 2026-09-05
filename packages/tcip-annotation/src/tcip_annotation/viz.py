@@ -333,10 +333,10 @@ def render_grid(
     for i, path in enumerate(image_paths):
         row, col = divmod(i, cols)
         try:
-            thumb = Image.open(path)
+            thumb: Image.Image = Image.open(path)
             thumb = auto_orient_image(thumb)
             thumb = thumb.convert("RGB")
-            thumb.thumbnail((cell_size, cell_size), Image.LANCZOS)
+            thumb.thumbnail((cell_size, cell_size), Image.Resampling.LANCZOS)
             # Center in cell
             x_off = col * cell_size + (cell_size - thumb.size[0]) // 2
             y_off = row * cell_size + (cell_size - thumb.size[1]) // 2
