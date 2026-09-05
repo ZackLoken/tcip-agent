@@ -17,14 +17,19 @@ rather than its exit code.
 
 Four verdicts, four exit codes, because an exit code alone cannot carry this:
 
-    GUARDS (0)         at least one selected test failed at the baseline, and the failing
-                       assertion is printed and recorded
+    GUARDS (0)         at least one selected test failed at the baseline on the assertion it
+                       names (the raised exception's own class is ``AssertionError`` or
+                       ``Failed``) or on an exception raised from outside ``tests/``, meaning the
+                       code under test raised; the failing assertion is printed and recorded
     VACUOUS (1)        every selected test passed at a baseline shown to precede the change
     INDETERMINATE (2)  every selected test passed, but the baseline is not shown to precede the
                        change, so passing says nothing about the test
     REFUSED (3)        no verdict is available: nothing was selected, everything was skipped, the
                        baseline could not collect the file, the baseline's own source was not what
-                       got imported, or pytest never reported an outcome
+                       got imported, pytest never reported an outcome, or every failure is
+                       fixture-shaped (a setup/teardown error, or an exception raised from inside
+                       ``tests/`` that is neither the test's own assertion nor a missing import) so
+                       the code under test was never reached
 
 A baseline is only usable if the change under test is absent from it. With uncommitted work that is
 ``HEAD``. In a history where one commit carries one file, the commit before the test file is inside
@@ -64,6 +69,7 @@ import json
 import os
 
 _state = {"collected": None, "collect_errors": [], "tests": [], "internal_error": None}
+_exc_types = {}  # (nodeid, when) -> the raised exception's own class name
 
 
 def _headline(text):
@@ -85,6 +91,32 @@ def pytest_collectreport(report):
         )
 
 
+def _crash_location(report):
+    """The crash frame's file and line, from ``longrepr.reprcrash`` when the report carries one.
+
+    Absent for a report whose ``longrepr`` is a plain string (a skip, an internal collection
+    shortcut) rather than an exception repr; the caller treats a missing location as unknown
+    rather than as evidence of anything.
+    """
+    crash = getattr(getattr(report, "longrepr", None), "reprcrash", None)
+    path = getattr(crash, "path", None) if crash is not None else None
+    lineno = getattr(crash, "lineno", None) if crash is not None else None
+    return path, lineno
+
+
+def pytest_exception_interact(node, call, report):
+    """Stash the raised exception's own class name, keyed by (nodeid, phase).
+
+    The headline text pytest's assertion rewriting prints omits the class name for a bare
+    comparison (``assert 3 == 6`` prints only ``assert 3 == 6``, never ``AssertionError: ...``),
+    while keeping it for ``in``/``not in`` and for any other exception, so headline text alone
+    cannot tell an assertion failure apart from another exception rewritten the same way. The
+    exception object itself always carries its own type, whatever the message looks like.
+    """
+    if call.excinfo is not None:
+        _exc_types[(report.nodeid, call.when)] = call.excinfo.typename
+
+
 def pytest_runtest_logreport(report):
     if report.when == "call":
         entry = {"nodeid": report.nodeid, "phase": "call", "outcome": report.outcome}
@@ -97,6 +129,7 @@ def pytest_runtest_logreport(report):
     if report.failed:
         entry["detail"] = report.longreprtext[-4000:]
         entry["headline"] = _headline(report.longreprtext)
+        entry["crash_path"], entry["crash_lineno"] = _crash_location(report)
     _state["tests"].append(entry)
 
 
@@ -105,6 +138,11 @@ def pytest_internalerror(excrepr):
 
 
 def pytest_sessionfinish(session, exitstatus):
+    # pytest_exception_interact fires after pytest_runtest_logreport for the same phase, so the
+    # exception type is looked up here rather than at entry-construction time.
+    for entry in _state["tests"]:
+        if entry.get("outcome") in ("failed", "error"):
+            entry["exc_typename"] = _exc_types.get((entry["nodeid"], entry["phase"]))
     _state["exitstatus"] = int(exitstatus)
     with open(os.environ["FAIL_BEFORE_OUTCOME_JSON"], "w", encoding="utf-8") as fh:
         json.dump(_state, fh)
@@ -332,7 +370,46 @@ def _is_unreached(headline: str) -> bool:
     return headline.startswith(("ModuleNotFoundError", "ImportError"))
 
 
-def _classify(observed: dict, baseline_precedes: bool) -> tuple[str, str]:
+def _crash_outside_test_tree(crash_path: str | None, tree: Path) -> bool:
+    """Whether the failure's crash frame sits outside ``tests/`` inside the materialized tree.
+
+    A frame under ``tests/`` is the test's own body or a fixture; one outside it is the code
+    under test raising. An unresolvable or missing path (a report with no exception repr) is
+    never treated as outside, since that would count silence as evidence.
+    """
+    if not crash_path:
+        return False
+    try:
+        rel = Path(crash_path).resolve().relative_to(tree.resolve())
+    except (OSError, ValueError):
+        return False
+    return not str(rel).replace("\\", "/").startswith(f"{TEST_TREE}/")
+
+
+def _failure_kind(entry: dict, tree: Path) -> str:
+    """One of ``unreached``, ``behavioral``, ``fixture``, for one failed or errored test.
+
+    ``unreached``: the import never resolved, the same weight as a collection error.
+    ``behavioral``: the test's own ``assert`` or ``pytest.fail``/``pytest.raises`` failed (the
+    raised exception's own class is ``AssertionError`` or ``Failed``, read from
+    ``exc_typename`` rather than the headline text: pytest's assertion rewriting omits the class
+    name from the headline for a bare comparison, so text alone cannot tell an assertion apart
+    from another exception formatted the same way), or the crash frame sits outside ``tests/``,
+    meaning the code under test raised. Everything else, a setup/teardown error or an exception
+    raised from inside the test tree that is neither of those two shapes, is ``fixture``: the
+    assertion the test names never ran, whatever else the traceback says.
+    """
+    headline = entry.get("headline", "")
+    if _is_unreached(headline):
+        return "unreached"
+    if entry.get("exc_typename") in ("AssertionError", "Failed"):
+        return "behavioral"
+    if _crash_outside_test_tree(entry.get("crash_path"), tree):
+        return "behavioral"
+    return "fixture"
+
+
+def _classify(observed: dict, baseline_precedes: bool, tree: Path) -> tuple[str, str]:
     if observed.get("internal_error"):
         return REFUSED, "pytest hit an internal error, so nothing it reported can be trusted."
     if observed["collect_errors"]:
@@ -352,8 +429,19 @@ def _classify(observed: dict, baseline_precedes: bool) -> tuple[str, str]:
             "module-level importorskip at the baseline will do this."
         )
     failed = [t for t in observed["tests"] if t["outcome"] in ("failed", "error")]
-    unreached = [t for t in failed if _is_unreached(t.get("headline", ""))]
-    behavioral = [t for t in failed if t not in unreached]
+    kinds = [_failure_kind(t, tree) for t in failed]
+    unreached = [t for t, k in zip(failed, kinds) if k == "unreached"]
+    fixture = [t for t, k in zip(failed, kinds) if k == "fixture"]
+    behavioral = [t for t, k in zip(failed, kinds) if k == "behavioral"]
+    if failed and not behavioral and fixture:
+        discount = (f" {len(unreached)} further failure(s) rest on a missing import."
+                    if unreached else "")
+        return REFUSED, (
+            f"all {len(failed)} failing tests are fixture-shaped: {len(fixture)} failed on an "
+            f"error other than the assertion the test names ({fixture[0].get('headline', '')}), "
+            "so the code under test was never reached and no behavior was compared. This is a run "
+            f"to redo, not evidence either way.{discount}"
+        )
     if failed and not behavioral:
         return REFUSED, (
             f"all {len(failed)} failing tests failed on a missing import rather than on an "
@@ -362,8 +450,12 @@ def _classify(observed: dict, baseline_precedes: bool) -> tuple[str, str]:
             "environment cannot produce evidence."
         )
     if behavioral:
-        discount = (f" {len(unreached)} further failures rest on a missing import and are not "
-                    "evidence.") if unreached else ""
+        discount_parts = []
+        if unreached:
+            discount_parts.append(f"{len(unreached)} further failure(s) rest on a missing import")
+        if fixture:
+            discount_parts.append(f"{len(fixture)} further failure(s) are fixture-shaped")
+        discount = f" {' and '.join(discount_parts)}, not evidence either way." if discount_parts else ""
         caveat = "" if baseline_precedes else (
             " No source file differs between the baseline and the tree this test comes from, so this "
             "is a fact about the baseline rather than proof that a change here is guarded."
@@ -485,10 +577,10 @@ def main() -> int:
                    for o in sorted({t["outcome"] for t in observed["tests"]})},
         "collect_errors": observed["collect_errors"],
         "failures": [{"nodeid": t["nodeid"], "headline": t.get("headline", ""),
-                      "kind": "unreached" if _is_unreached(t.get("headline", "")) else "behavioral"}
+                      "kind": _failure_kind(t, tree)}
                      for t in observed["tests"] if t["outcome"] in ("failed", "error")],
     }
-    verdict, why = _classify(observed, baseline_precedes)
+    verdict, why = _classify(observed, baseline_precedes, tree)
     record.update(verdict=verdict, why=why)
     return _report(record, args.json_out)
 
