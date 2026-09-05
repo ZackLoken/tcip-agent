@@ -405,18 +405,12 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
         (``_require_bare_bucket_subject``). A stored stamp's own pair (present or, for a pre-key
         stamp, absent) is carried forward unchanged by the plain ``dict(stored)`` below; the rail
         refuses a merge that ends up with neither key.
-
-        ``schema_version`` marks the promotion's own writing vintage, not every value the merged
-        record carries: a member ``stored`` already held under an older provenance vocabulary
-        (unchanged by this merge) keeps reading under that older spelling, exactly as
-        ``operating_point_stamp`` documents for its own producers.
         """
         merged = dict(stored)
         if not stored:
             merged["subject"] = req.subject
             merged["attribute"] = None
         merged.update({
-            "schema_version": 2,
             "operating_point": op_prov,
             "validated": result["validated"],
             "validated_reference": result["reference"],
