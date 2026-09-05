@@ -1118,9 +1118,12 @@ def test_review_action_resolves_class_id_from_bucket_id_map(
     pred_dir = tmp_path / "predictions"
     pred_dir.mkdir(parents=True)
     pred = pred_dir / "pred.json"
-    _write_pred(pred, [(40, 32, 60, 48, 0.9)])
+    write_annotations(str(pred), [Annotation(subject="catkin", geometry=BBox(40, 32, 60, 48),
+                                              score=0.9, attributes={"phenology_stage": "elongated"})],
+                       100, 80)
     _write_operating_point_sidecar(
         pred_dir, {"checkpoint_sha256": "sha", "experiment_id": None,
+                   "subject": "catkin", "attribute": "phenology_stage",
                    "id_map": {"dormant": 0, "elongated": 1}})
 
     resp = _review_action(
@@ -1145,11 +1148,13 @@ def test_review_action_records_unresolvable_class_id_as_none(
     pred_dir = tmp_path / "predictions"
     pred_dir.mkdir(parents=True)
     pred = pred_dir / "pred.json"
-    _write_pred(pred, [(40, 32, 60, 48, 0.9)])
-    (pred_dir / "operating_point.json").write_text(
-        json.dumps({"checkpoint_sha256": "sha", "experiment_id": None,
-                    "id_map": {"dormant": 0, "elongated": 1}}),
-        encoding="utf-8")
+    write_annotations(str(pred), [Annotation(subject="catkin", geometry=BBox(40, 32, 60, 48),
+                                              score=0.9, attributes={"phenology_stage": "dormant"})],
+                       100, 80)
+    _write_operating_point_sidecar(
+        pred_dir, {"checkpoint_sha256": "sha", "experiment_id": None,
+                   "subject": "catkin", "attribute": "phenology_stage",
+                   "id_map": {"dormant": 0, "elongated": 1}})
 
     resp = _review_action(
         client, img_path, gt, dataset_root,
