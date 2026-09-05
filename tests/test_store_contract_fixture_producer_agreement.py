@@ -8,13 +8,12 @@ golden hand-edited back to a stale shape is caught here rather than silently sta
 from __future__ import annotations
 
 from tcip_mcp.experiments import create_experiment, read_split_manifest
-from tcip_mcp.pipelines import resolution
 from tcip_mcp.pipelines.data import splits
 from tcip_mcp.pipelines.data.split_construction import persist_split_manifest
-from tcip_mcp.pipelines.operating_point import _selection_disjointness
 from tcip_mcp.tools import data_tools
 from tcip_web.routes.inference import InferenceJob, _summary
 
+from tests.test_experiment_validations import _real_selection_disjointness
 from tests.test_experiment_validations import _row as validation_row
 from tests.test_store_contract import LOCK_IDENTITY, REGISTERED
 
@@ -67,12 +66,6 @@ def test_the_job_registry_golden_carries_job_id_not_id(tmp_path):
     assert set(golden) == set(fresh)
 
 
-def _real_selection_disjointness() -> dict:
-    raw = _selection_disjointness(None, set(), set())
-    return resolution.resolver_selection_disjointness(
-        {"gate_evidence": {"selection_disjointness": raw}}, "operating_point")
-
-
 def test_the_experiment_validations_golden_carries_the_resolvers_full_selection_disjointness():
     golden = REGISTERED["experiment_validations"].golden["selection_disjointness"]
     fresh = _real_selection_disjointness()
@@ -86,10 +79,31 @@ def test_the_shared_validation_row_fixtures_selection_disjointness_agrees_too():
     assert row["selection_disjointness"] == _real_selection_disjointness()
 
 
-def test_the_resolve_scale_sidecar_golden_spells_unit_not_units():
-    scale = REGISTERED["resolve_scale_sidecar"].golden["operating_point"]["scale"]
+def test_the_resolve_scale_sidecar_golden_carries_every_key_the_writer_stamps(tmp_path):
+    """Re-derives the shape from ``calibrate_physical_scale`` itself, the smallest producer that
+    writes a ``resolve_scale.json``, rather than checking the golden only against itself."""
+    from tcip_mcp.pipelines.resolution import read_scale_sidecar
+    from tcip_mcp.tools.scale_tools import calibrate_physical_scale
 
-    assert "unit" in scale and "units" not in scale
+    from tests import _operationalization_fixtures as fx
+    from tests.test_delivery_gate import _author_scale_tolerance, _calibration_setup
+
+    fx.seed_delivery_traits(tmp_path)
+    _author_scale_tolerance(tmp_path, "plant_surface_area")
+    pred_dir, labels_dir, ref_csv, _stems, group_key_map, images_dir = _calibration_setup(
+        tmp_path, lengths_px=[100.0, 100.0, 100.0, 100.0])
+    calibrate_physical_scale(
+        trait="plant_surface_area", pred_dir=pred_dir, dataset_root=str(tmp_path / "ds"),
+        images_dir=images_dir, unit="mm", reference_subject="cal_bar", labels_dir=labels_dir,
+        reference_csv=ref_csv, group_key_map=group_key_map)
+
+    fresh = read_scale_sidecar(pred_dir)
+    golden = REGISTERED["resolve_scale_sidecar"].golden
+    assert set(golden) == set(fresh)
+
+    scale_golden, scale_fresh = golden["operating_point"]["scale"], fresh["operating_point"]["scale"]
+    assert set(scale_golden) == set(scale_fresh)
+    assert "unit" in scale_golden and "units" not in scale_golden
 
 
 def test_the_experiment_split_golden_carries_every_key_persist_split_manifest_writes(tmp_path):
