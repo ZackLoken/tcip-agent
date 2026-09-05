@@ -29,6 +29,7 @@ from tcip_mcp.pipelines.resolution import (
 from tcip_mcp.project_paths import resolve_output_path
 
 if TYPE_CHECKING:
+    from tcip_mcp.pipelines.data.band_groups import BandGroupRef
     from tcip_mcp.pipelines.resolution import Acknowledgement
 
 logger = logging.getLogger(__name__)
@@ -815,16 +816,20 @@ def _run_inference_verified(
     # overlap_source == "default" is unremarkable (no persisted overlap analog); only tile_size's
     # absence changes the object count's scale.
 
+    # Holds the union predict_batch itself accepts (a directory scan can resolve a BandGroupRef),
+    # never the narrower list[str] the image_paths parameter carries in from the caller.
+    resolved_paths: list[str | Path | BandGroupRef]
     if image_paths is None:
         if images_dir is None:
             return {"error": "Provide either image_paths or images_dir"}
         # Fold a `.bandgroup`-grouped capture into its one logical entry (list_logical_images),
-        # the same enumeration every other reader in this platform shares, instead of this door's
-        # own raw sibling-file listing enumerating each band file as its own (spurious) image.
+        # the same enumeration every other reader in this platform shares.
         from tcip_mcp.pipelines.image_utils import list_logical_images
 
         logical = list_logical_images(images_dir)
-        image_paths = [logical[stem] for stem in sorted(logical)]
+        resolved_paths = [logical[stem] for stem in sorted(logical)]
+    else:
+        resolved_paths = list(image_paths)
 
     # A classified run with no id_map cannot decode its own predictions: refuse before either
     # pass runs, so no calibration evidence is spent on a run that would refuse at the write.
@@ -881,7 +886,7 @@ def _run_inference_verified(
 
         from tcip_annotation.json_io import prediction_documents
 
-        inf_stems = [stem_of(pp) for pp in image_paths]
+        inf_stems = [stem_of(pp) for pp in resolved_paths]
         cal_label_stems = (
             set(evidence.get("calibration_stems", [])) if split_manifest_dir is not None
             else {pp.stem for pp in prediction_documents(calibration_labels_dir)}
@@ -910,13 +915,13 @@ def _run_inference_verified(
         # Channel firewall: probe one target raster and check its band count against the
         # checkpoint's in_chans via validate_resolved_bundle, so a channel-wrong inference surfaces in
         # the provenance rather than being silently coerced by the loader.
-        if image_paths:
+        if resolved_paths:
             from tcip_mcp.pipelines.derivations import probe_channels
             from tcip_mcp.pipelines.resolution import (
                 ResolvedBundle, default as _resolved_default, validate_resolved_bundle,
             )
             try:
-                probed = int(probe_channels(image_paths[0]))
+                probed = int(probe_channels(resolved_paths[0]))
             except Exception:
                 probed = None
             if probed is not None:
@@ -994,19 +999,19 @@ def _run_inference_verified(
     # available, full tiled inference over thousands of images is hours on CPU vs minutes on
     # a GPU. Install a CUDA torch build (see environment.yml) to use the card.
     cpu_warning = None
-    if device != "cpu" and (resolved_tile_bool or len(image_paths) > 8):
+    if device != "cpu" and (resolved_tile_bool or len(resolved_paths) > 8):
         import torch
 
         if not torch.cuda.is_available():
             cpu_warning = (
-                f"CUDA not available, running {len(image_paths)} image(s)"
+                f"CUDA not available, running {len(resolved_paths)} image(s)"
                 f"{' tiled' if resolved_tile_bool else ''} on CPU, which is much slower. Install a "
                 "CUDA torch build (see environment.yml) to use the GPU."
             )
             logger.warning(cpu_warning)
 
     results = predictor.predict_batch(
-        image_paths, tile=resolved_tile_bool, tile_size=resolved_tile, overlap=resolved_overlap,
+        resolved_paths, tile=resolved_tile_bool, tile_size=resolved_tile, overlap=resolved_overlap,
         tile_batch_size=tile_batch_size, global_nms_iou=applied_nms_iou, postprocess=postprocess,
         tile_resize=tile_resize,
     )
@@ -1217,6 +1222,9 @@ def _draft_count_claim(result: dict, *, trait: str | None, bucket: Path,
     if dataset_root is None:
         logger.warning(_NO_DATASET_ROOT_NOTE.format(bucket=bucket))
         return None, None
+    # result["validated"] is only ever set True while trait was truthy (_run_inference_verified
+    # gates its calibration pass on trait), so a validated result always carries one here.
+    assert trait is not None
     try:
         draft = _open_count_claim(
             evidence, trait=trait, checkpoint_sha256=result.get("checkpoint_sha256"),
@@ -1274,6 +1282,7 @@ def _publish_image_predictions(out: Path, result: dict, *, checkpoint_path: str,
     written: list[str] = []
     # The checkpoint's content hash, so an accepted prediction's GT names the exact model behind it.
     sha = result.get("checkpoint_sha256")
+    assert sha is not None  # _run_inference_verified always stamps its own checkpoint's real hash
     producer = prediction_producer(checkpoint_path, sha)
     id_map = result.get("id_map")
     subject, attribute = result.get("subject"), result.get("attribute")
@@ -1345,7 +1354,7 @@ def _publish_bucket_bracket(result: dict, *, out: Path, checkpoint_path: str, tr
     # Re-checked against the real predictor's own resolution: an earlier sniff (if any) is only an
     # early opt-out, this stays the authoritative gate.
     tile_ref = tile_size_gate_flag(result.get("operating_point"))
-    tile_flags = {"tile_size": tile_ref} if tile_ref is not None else {}
+    tile_flags: dict[str, str | None] = {"tile_size": tile_ref} if tile_ref is not None else {}
     gate = check_delivery_gate(tile_flags, allow_unvalidated_staging=allow_unvalidated_staging)
     if not gate.ok:
         return {"refusal": {"error": gate.reason, "tile_size_validated": tile_ref},
@@ -1793,7 +1802,7 @@ def _export_predictions_raster(
             op_provenance = op_bundle.to_provenance()["operating_point"]
 
             tile_ref = tile_size_gate_flag(op_provenance)
-            gate_flags = {"claim_scope": claim_scope_flag}
+            gate_flags: dict[str, str | None] = {"claim_scope": claim_scope_flag}
             if tile_ref is not None:
                 gate_flags["tile_size"] = tile_ref
             gate = check_delivery_gate(gate_flags, allow_unvalidated_staging=allow_unvalidated_staging)
@@ -1845,7 +1854,7 @@ def _export_predictions_raster(
         op_provenance = op_bundle.to_provenance()["operating_point"]
 
         tile_ref = tile_size_gate_flag(op_provenance)
-        tile_flags = {"tile_size": tile_ref} if tile_ref is not None else {}
+        tile_flags: dict[str, str | None] = {"tile_size": tile_ref} if tile_ref is not None else {}
         gate = check_delivery_gate(tile_flags, allow_unvalidated_staging=allow_unvalidated_staging)
         if not gate.ok:
             return {"error": gate.reason, "tile_size_validated": tile_ref}
@@ -2188,6 +2197,7 @@ def deliver_per_image_counts(
             "an existing, reviewed prediction bucket (a bucket regime call)."
         )}
     if live:
+        assert checkpoint_path is not None  # the regime check above already requires it when live
         if not Path(checkpoint_path).is_file():
             return {"error": f"Checkpoint not found: {checkpoint_path}"}
     else:
@@ -2231,6 +2241,10 @@ def deliver_per_image_counts(
             return {"error": reason, **exc.facts}
         except CountDeliveryRefused as exc:
             return {"error": str(exc), **exc.facts}
+
+    # live is True here (the bucket regime above always returns); the regime check higher up
+    # already requires both when live.
+    assert checkpoint_path is not None and images_dir is not None
 
     # Ahead of the pass, so a refused delivery has no counts of its own to hand back.
     try:
@@ -2360,6 +2374,7 @@ def deliver_per_image_counts(
             # disk backs it without a bucket, so it never answers for operating_point_validated.
             refusal["run_conf_validated_against"] = op_ref
         if bucket is not None:
+            assert resolution is not None  # bucket and resolution are set together, above
             refusal["bucket_published"] = bucket_published
             refusal["predictions_dir"] = str(bucket)
             refusal["bucket_redirected"] = resolution.redirected
@@ -2403,6 +2418,7 @@ def deliver_per_image_counts(
         # which floors false here since nothing on disk backs it without a bucket.
         out["run_conf_validated_against"] = op_ref
     if bucket is not None:
+        assert resolution is not None  # bucket and resolution are set together, above
         out["bucket_redirected"] = resolution.redirected
         out["verdict_guard_operative"] = bucket_root is not None
         out["dropped_nonpositive_boxes"] = dropped_boxes
