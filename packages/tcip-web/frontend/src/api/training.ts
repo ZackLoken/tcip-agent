@@ -15,7 +15,9 @@ export interface TrainingRunSummary {
   best_metric_name?: string | null;
   output_dir?: string;
   config_summary?: Record<string, unknown>;
-  external?: boolean; // reconstructed from experiment records: running in another process
+  /** Set on every run reconstructed from a disk record and absent from this process's own run
+   * registry, whatever its status; never a statement about who launched it. */
+  external?: boolean;
   /** Set once _ensure_experiment resolves this run's tracked experiment; null until then. */
   experiment_id?: string | null;
   /** Set when experiment tracking itself raised; null when it succeeded or never ran. */
