@@ -17,19 +17,27 @@ rather than its exit code.
 
 Four verdicts, four exit codes, because an exit code alone cannot carry this:
 
-    GUARDS (0)         at least one selected test failed at the baseline on the assertion it
-                       names (the raised exception's own class is ``AssertionError`` or
-                       ``Failed``) or on an exception raised from outside ``tests/``, meaning the
-                       code under test raised; the failing assertion is printed and recorded
+    GUARDS (0)         at least one selected test failed at the baseline in the call phase, on
+                       the assertion it names (the raised exception's own class is
+                       ``AssertionError`` or ``Failed``), on an exception raised from outside
+                       ``tests/`` (the code under test raised), or on any other exception a
+                       wrongly-constructed call raises except the call-signature-mismatch shape a
+                       fixture-shaped failure takes; the failing assertion is printed and recorded
     VACUOUS (1)        every selected test passed at a baseline shown to precede the change
     INDETERMINATE (2)  every selected test passed, but the baseline is not shown to precede the
                        change, so passing says nothing about the test
     REFUSED (3)        no verdict is available: nothing was selected, everything was skipped, the
                        baseline could not collect the file, the baseline's own source was not what
                        got imported, pytest never reported an outcome, or every failure is
-                       fixture-shaped (a setup/teardown error, or an exception raised from inside
-                       ``tests/`` that is neither the test's own assertion nor a missing import) so
-                       the code under test was never reached
+                       fixture-shaped so the code under test was never reached. A setup or
+                       teardown failure is always fixture-shaped, whatever raised it; a call-phase
+                       failure is fixture-shaped only when it is a ``TypeError`` raised inside
+                       ``tests/`` whose message is CPython's own wording for a call-signature
+                       mismatch (an unexpected keyword, a missing required argument, too many
+                       positional arguments), the shape a fixture or test calling something with
+                       an argument the baseline lacks takes. A call-phase
+                       failure that constructs its inputs wrongly in any other way, whatever the
+                       exception class, is behavioral: the code under test was reached
 
 A baseline is only usable if the change under test is absent from it. With uncommitted work that is
 ``HEAD``. In a history where one commit carries one file, the commit before the test file is inside
@@ -48,6 +56,7 @@ import argparse
 import io
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -386,27 +395,56 @@ def _crash_outside_test_tree(crash_path: str | None, tree: Path) -> bool:
     return not str(rel).replace("\\", "/").startswith(f"{TEST_TREE}/")
 
 
+_CALL_SIGNATURE_MISMATCH_PATTERNS = (
+    re.compile(r"got an unexpected keyword argument"),
+    re.compile(r"missing \d+ required (?:positional|keyword-only) arguments?"),
+    re.compile(r"takes \d+ positional arguments? but \d+ (?:was|were) given"),
+)
+
+
+def _is_call_signature_mismatch(headline: str) -> bool:
+    """Whether ``headline`` is CPython's own wording for a call supplying the wrong arguments to
+    a callable's signature: an unexpected keyword, a missing required argument (positional or
+    keyword-only), or too many positional arguments. This is the shape a fixture or test calling
+    a constructor with an argument the baseline lacks takes, never wording the code under test
+    composes on its own.
+    """
+    return any(p.search(headline) for p in _CALL_SIGNATURE_MISMATCH_PATTERNS)
+
+
 def _failure_kind(entry: dict, tree: Path) -> str:
     """One of ``unreached``, ``behavioral``, ``fixture``, for one failed or errored test.
 
     ``unreached``: the import never resolved, the same weight as a collection error.
+
+    A setup or teardown failure (``entry["phase"]`` is not ``"call"``) is always ``fixture``: the
+    test body never ran, whatever raised it, wherever the crash frame sits. The rest applies only
+    to a call-phase failure:
+
     ``behavioral``: the test's own ``assert`` or ``pytest.fail``/``pytest.raises`` failed (the
-    raised exception's own class is ``AssertionError`` or ``Failed``, read from
-    ``exc_typename`` rather than the headline text: pytest's assertion rewriting omits the class
-    name from the headline for a bare comparison, so text alone cannot tell an assertion apart
-    from another exception formatted the same way), or the crash frame sits outside ``tests/``,
-    meaning the code under test raised. Everything else, a setup/teardown error or an exception
-    raised from inside the test tree that is neither of those two shapes, is ``fixture``: the
-    assertion the test names never ran, whatever else the traceback says.
+    raised exception's own class is ``AssertionError`` or ``Failed``, read from ``exc_typename``
+    rather than the headline text: pytest's assertion rewriting omits the class name from the
+    headline for a bare comparison, so text alone cannot tell an assertion apart from another
+    exception formatted the same way), or the crash frame sits outside ``tests/``, meaning the
+    code under test raised. ``fixture``: a ``TypeError`` raised from inside ``tests/`` whose
+    message is a call-signature mismatch (:func:`_is_call_signature_mismatch`), the shape a
+    fixture constructor called with an argument the baseline lacks takes; the code under test was
+    never reached. Everything else in the call phase, whatever exception a wrongly-constructed
+    call raises, is ``behavioral``: the code under test was reached and its result inspected,
+    whatever went wrong from there.
     """
     headline = entry.get("headline", "")
     if _is_unreached(headline):
         return "unreached"
+    if entry.get("phase") != "call":
+        return "fixture"
     if entry.get("exc_typename") in ("AssertionError", "Failed"):
         return "behavioral"
     if _crash_outside_test_tree(entry.get("crash_path"), tree):
         return "behavioral"
-    return "fixture"
+    if entry.get("exc_typename") == "TypeError" and _is_call_signature_mismatch(headline):
+        return "fixture"
+    return "behavioral"
 
 
 def _classify(observed: dict, baseline_precedes: bool, tree: Path) -> tuple[str, str]:
@@ -437,10 +475,10 @@ def _classify(observed: dict, baseline_precedes: bool, tree: Path) -> tuple[str,
         discount = (f" {len(unreached)} further failure(s) rest on a missing import."
                     if unreached else "")
         return REFUSED, (
-            f"all {len(failed)} failing tests are fixture-shaped: {len(fixture)} failed on an "
-            f"error other than the assertion the test names ({fixture[0].get('headline', '')}), "
-            "so the code under test was never reached and no behavior was compared. This is a run "
-            f"to redo, not evidence either way.{discount}"
+            f"{len(fixture)} of {len(failed)} failing test(s) are fixture-shaped: {len(fixture)} "
+            f"failed on an error other than the assertion the test names "
+            f"({fixture[0].get('headline', '')}), so the code under test was never reached and "
+            f"no behavior was compared. This is a run to redo, not evidence either way.{discount}"
         )
     if failed and not behavioral:
         return REFUSED, (
@@ -461,9 +499,8 @@ def _classify(observed: dict, baseline_precedes: bool, tree: Path) -> tuple[str,
             "is a fact about the baseline rather than proof that a change here is guarded."
         )
         return GUARDS, (
-            f"{len(behavioral)} of {observed['collected']} selected tests failed on an assertion at "
-            f"the baseline, so they detect its behavior.{discount}{caveat} The failures are "
-            "recorded below."
+            f"{len(behavioral)} of {observed['collected']} selected tests failed on the behavior "
+            f"under test at the baseline.{discount}{caveat} The failures are recorded below."
         )
     if baseline_precedes:
         return VACUOUS, (
@@ -568,20 +605,24 @@ def main() -> int:
             ))
             record["pytest"]["stderr_tail"] = proc.stderr.strip().splitlines()[-15:]
             return _report(record, args.json_out)
+
+        # _failure_kind and _classify resolve crash_path against tree, so they run before the
+        # materialized tree is removed below.
+        record["observed"] = {
+            "collected": observed["collected"],
+            "counts": {o: sum(1 for t in observed["tests"] if t["outcome"] == o)
+                       for o in sorted({t["outcome"] for t in observed["tests"]})},
+            "collect_errors": observed["collect_errors"],
+            "failures": [{"nodeid": t["nodeid"], "headline": t.get("headline", ""),
+                          "kind": _failure_kind(t, tree), "crash_path": t.get("crash_path"),
+                          "crash_lineno": t.get("crash_lineno")}
+                         for t in observed["tests"] if t["outcome"] in ("failed", "error")],
+        }
+        verdict, why = _classify(observed, baseline_precedes, tree)
+        record.update(verdict=verdict, why=why)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
-    record["observed"] = {
-        "collected": observed["collected"],
-        "counts": {o: sum(1 for t in observed["tests"] if t["outcome"] == o)
-                   for o in sorted({t["outcome"] for t in observed["tests"]})},
-        "collect_errors": observed["collect_errors"],
-        "failures": [{"nodeid": t["nodeid"], "headline": t.get("headline", ""),
-                      "kind": _failure_kind(t, tree)}
-                     for t in observed["tests"] if t["outcome"] in ("failed", "error")],
-    }
-    verdict, why = _classify(observed, baseline_precedes, tree)
-    record.update(verdict=verdict, why=why)
     return _report(record, args.json_out)
 
 
@@ -603,6 +644,8 @@ def _report(record: dict, json_out: str | None) -> int:
     for failure in observed.get("failures", [])[:10]:
         print(f"  failing       {failure['nodeid']}  [{failure['kind']}]")
         print(f"                {failure['headline']}")
+        if failure.get("crash_path"):
+            print(f"                {failure['crash_path']}:{failure.get('crash_lineno')}")
     if json_out:
         Path(json_out).write_text(json.dumps(record, indent=2), encoding="utf-8")
         print(f"  record        {json_out}")
