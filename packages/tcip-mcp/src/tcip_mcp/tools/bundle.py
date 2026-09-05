@@ -180,15 +180,21 @@ def _registered_checkpoint_paths(tree: Path) -> frozenset[Path]:
     weights (``.tcip/experiments/<experiment_id>/`` by ``launch_training``'s own default), so a
     registered checkpoint is not confined to the ``.tcip/models/`` convenience location
     :func:`_blob_files`'s own glob covers. Propagates
-    :class:`~tcip_mcp.model_registry.RegistryVersionRefused`: an unconformed registry is a
-    refusal for the caller to act on, never an empty answer.
+    :class:`~tcip_mcp.model_registry.RegistryVersionRefused` and
+    :class:`tcip_store.SchemaVersionRefused`: an unconformed or above-ceiling registry is a
+    refusal for the caller to act on, never an empty answer. Every other
+    :class:`tcip_store.StoreError` (a genuinely absent index, one whose bytes will not decode, or
+    the conform rail's own refusal of a staging tree the caller has not adopted yet, when this
+    process is bound to the database backend) still reads as no checkpoints registered.
     """
-    from tcip_store import StoreError
+    from tcip_store import SchemaVersionRefused, StoreError
 
     from tcip_mcp.model_registry import read_registry_index
 
     try:
         entries = read_registry_index(tree)
+    except SchemaVersionRefused:
+        raise
     except StoreError:
         return frozenset()
     found: set[Path] = set()
@@ -211,16 +217,22 @@ def unresolved_registered_checkpoints(tree: Path) -> tuple[str, ...]:
     :func:`external_registered_checkpoints` for those. A relative entry a moved tree carries
     (``import_project``, past its own rename) that no longer names a real file is exactly the
     case this discloses, rather than the registry rewriting itself, which stays no door's job
-    here. Propagates :class:`~tcip_mcp.model_registry.RegistryVersionRefused`: an unconformed
-    registry is a refusal for the caller to act on, never an empty answer.
+    here. Propagates :class:`~tcip_mcp.model_registry.RegistryVersionRefused` and
+    :class:`tcip_store.SchemaVersionRefused`: an unconformed or above-ceiling registry is a
+    refusal for the caller to act on, never an empty answer. Every other
+    :class:`tcip_store.StoreError` (a genuinely absent index, one whose bytes will not decode, or
+    the conform rail's own refusal of a staging tree the caller has not adopted yet, when this
+    process is bound to the database backend) still reads as no unresolved entries.
     """
-    from tcip_store import StoreError
+    from tcip_store import SchemaVersionRefused, StoreError
 
     from tcip_mcp.model_registry import read_registry_index
     from tcip_mcp.registry_paths import is_external_form
 
     try:
         entries = read_registry_index(tree)
+    except SchemaVersionRefused:
+        raise
     except StoreError:
         return ()
     unresolved: list[str] = []
@@ -240,16 +252,20 @@ def external_registered_checkpoints(tree: Path) -> tuple[dict, ...]:
     An external entry is never expected to resolve under ``tree``, so its existence is reported
     per entry rather than folded into :func:`unresolved_registered_checkpoints`'s "should
     resolve under the tree and does not" claim. Propagates
-    :class:`~tcip_mcp.model_registry.RegistryVersionRefused`, the same as
-    :func:`unresolved_registered_checkpoints`.
+    :class:`~tcip_mcp.model_registry.RegistryVersionRefused` and
+    :class:`tcip_store.SchemaVersionRefused`, the same as
+    :func:`unresolved_registered_checkpoints`; every other
+    :class:`tcip_store.StoreError` still reads as no external entries.
     """
-    from tcip_store import StoreError
+    from tcip_store import SchemaVersionRefused, StoreError
 
     from tcip_mcp.model_registry import read_registry_index
     from tcip_mcp.registry_paths import is_external_form
 
     try:
         entries = read_registry_index(tree)
+    except SchemaVersionRefused:
+        raise
     except StoreError:
         return ()
     found: list[dict] = []

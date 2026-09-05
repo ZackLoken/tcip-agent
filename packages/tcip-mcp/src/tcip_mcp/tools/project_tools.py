@@ -742,12 +742,14 @@ def archive_project(
         return {"error": f"a store database under {root} could not be exported before "
                          f"archiving, so the bundle cannot be vouched for: {exc}"}
 
+    from tcip_store import SchemaVersionRefused
+
     from tcip_mcp.model_registry import RegistryVersionRefused
     from tcip_mcp.tools.bundle import BLOB_CHECKPOINTS, AnchorMisplaced, account_for, blob_home
 
     try:
         accounting = account_for(root)
-    except (AnchorMisplaced, RegistryVersionRefused) as exc:
+    except (AnchorMisplaced, RegistryVersionRefused, SchemaVersionRefused) as exc:
         return {"error": str(exc)}
 
     # A registered checkpoint is not confined to .tcip/models; blob_home is the one recognizer.
