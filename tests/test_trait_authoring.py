@@ -1,13 +1,14 @@
 """Config-driven multi-trait TraitSpec authoring + derived class-id + read-semantics.
 
 Pins the softened scope-tentative behavior: registering trait #2 is a breeder-authored config
-edit (cross-checked against the crops.yml controlled vocab, never agent-invented), the elongated
+edit (cross-checked against the crops.yml controlled vocab, never agent-invented), the open
 class id is a mapping fact derived from classes.json by name (never a pinned default), and the
-crossing-unconfirmed 95%-mapping marker travels with the delivery. There are no built-in traits: catkin is
-authored the same way as any other trait; this module's ``pytestmark``
-requests ``conftest.py``'s ``seed_catkin_trait_spec``, which writes a real config file matching
-``tests/_trait_fixtures.CATKIN`` into this test's pinned platform state root, so ``get_trait("catkin")``
-keeps resolving by default the way it did when a builtin was unconditionally present.
+crossing-unconfirmed 95%-mapping marker travels with the delivery. There are no built-in traits:
+bud_opening is authored the same way as any other trait; this module's ``pytestmark`` requests
+``conftest.py``'s ``seed_bud_trait_spec``, which writes a real config file matching
+``tests/_trait_fixtures.BUD_OPENING`` into this test's pinned platform state root, so
+``get_trait("bud_opening")`` keeps resolving by default the way it did when a builtin was
+unconditionally present.
 """
 
 from __future__ import annotations
@@ -25,9 +26,9 @@ from tcip_mcp.traits import (
     registered_traits,
 )
 from tests._binding_fixtures import write_bound_sidecar
-from tests._trait_fixtures import CATKIN
+from tests._trait_fixtures import BUD_OPENING
 
-pytestmark = pytest.mark.usefixtures("seed_catkin_trait_spec")
+pytestmark = pytest.mark.usefixtures("seed_bud_trait_spec")
 
 
 # ── R1: config-driven authoring, crops.yml-cross-checked ──────────────────
@@ -137,7 +138,7 @@ def test_config_spec_arbitrary_count_objective_is_accepted_at_registration(tmp_p
 
 
 def test_config_spec_unset_count_objective_is_empty_not_defaulted(tmp_path: Path):
-    # No silent default to catkin's historical value: an omitted count_objective stays honestly
+    # No silent default to bud_opening's historical value: an omitted count_objective stays honestly
     # empty, the same "not yet decided" shape as count_error_tolerance's None.
     specs_dir = tmp_path / "trait_specs"
     _write_spec(specs_dir, "undecided", {"delivers": ["leaf_length"]})
@@ -273,19 +274,19 @@ def test_registry_reads_every_config_file(tmp_path: Path, monkeypatch: pytest.Mo
     # fall back to if it stopped short).
     specs_dir = tmp_path / "trait_specs"
     monkeypatch.setattr(traits, "_TRAIT_SPECS_RELPATH", specs_dir)
-    _write_spec(specs_dir, "catkin", {"delivers": ["catkin_05per_date"]})
+    _write_spec(specs_dir, "bud", {"delivers": ["leaf_out_05per_date"]})
     _write_spec(specs_dir, "leaf", {"delivers": ["leaf_length"]})
-    assert set(registered_traits()) == {"catkin", "leaf"}
+    assert set(registered_traits()) == {"bud", "leaf"}
     assert get_trait("leaf").delivers == ("leaf_length",)
 
 
-def test_config_authored_catkin_is_the_real_definition(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def test_config_authored_bud_is_the_real_definition(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     # No built-in trait definition could outrank a config-authored spec record carrying the same
     # trait name, proven here by a value a real builtin would never have carried.
     specs_dir = tmp_path / "trait_specs"
     monkeypatch.setattr(traits, "_TRAIT_SPECS_RELPATH", specs_dir)
-    _write_spec(specs_dir, "catkin", {"delivers": ["catkin_05per_date"], "count_bias_tolerance_frac": 99.0})
-    assert get_trait("catkin").count_bias_tolerance_frac == 99.0
+    _write_spec(specs_dir, "bud", {"delivers": ["leaf_out_05per_date"], "count_bias_tolerance_frac": 99.0})
+    assert get_trait("bud").count_bias_tolerance_frac == 99.0
 
 
 def test_unknown_trait_still_hard_fails():
@@ -326,29 +327,29 @@ def test_get_trait_load_trait_specs_and_registered_traits_agree_on_a_record_conf
     import tcip_store as ts
 
     specs_dir = tmp_path / "trait_specs"
-    data = {k: (list(v) if isinstance(v, tuple) else v) for k, v in dataclasses.asdict(CATKIN).items()}
-    ts.replace(traits.trait_spec_key(specs_dir, "catkin"), data, expect=ts.Version.ABSENT)
+    data = {k: (list(v) if isinstance(v, tuple) else v)
+            for k, v in dataclasses.asdict(BUD_OPENING).items()}
+    ts.replace(traits.trait_spec_key(specs_dir, "bud_opening"), data, expect=ts.Version.ABSENT)
     monkeypatch.setattr(traits, "_TRAIT_SPECS_RELPATH", specs_dir)
 
-    assert get_trait("catkin") == CATKIN
-    assert load_trait_specs() == [CATKIN]
-    assert load_trait_specs(specs_dir=specs_dir) == [CATKIN]
-    assert registered_traits() == ["catkin"]
+    assert get_trait("bud_opening") == BUD_OPENING
+    assert load_trait_specs() == [BUD_OPENING]
+    assert load_trait_specs(specs_dir=specs_dir) == [BUD_OPENING]
+    assert registered_traits() == ["bud_opening"]
 
 
-def test_catkin_config_semantics_match_reference_fixture():
-    # This module's pytestmark seeds a real catkin spec record matching tests/_trait_fixtures.CATKIN.
-    # Config-loaded specs are rebuilt fresh per call (traits.py), never module-load singletons.
-    t = get_trait("catkin")
-    assert t == CATKIN
-    assert t.positive_class_name == "elongated"
+def test_bud_opening_config_semantics_match_reference_fixture():
+    # This module's pytestmark seeds a real bud_opening record matching _trait_fixtures.BUD_OPENING;
+    # config-loaded specs are rebuilt fresh per call (traits.py), never module-load singletons.
+    t = get_trait("bud_opening")
+    assert t == BUD_OPENING
+    assert t.positive_class_name == "open"
     assert t.localization_tolerance_frac == 0.5
     assert t.sliver_frac == 0.5
     assert t.majority_milestone == "95per"
     assert t.majority_provisional is True
     assert t.count_bias_tolerance_frac is None  # not yet authored by the domain expert
-    assert set(t.delivers) == {
-        "catkin_05per_date", "catkin_50per_date", "catkin_95per_date", "catkin_elongation_date"}
+    assert set(t.delivers) == {"leaf_out_05per_date", "leaf_out_50per_date"}
 
 
 def test_reference_fixture_delivers_are_all_in_crops_vocab():
@@ -356,7 +357,7 @@ def test_reference_fixture_delivers_are_all_in_crops_vocab():
     # else this whole suite would be exercising an off-vocab trait shape no real config could load.
     vocab = traits._crops_vocab()
     assert vocab, "crops.yml vocab should be loadable in the repo checkout"
-    for name in CATKIN.delivers:
+    for name in BUD_OPENING.delivers:
         assert name in vocab, name
 
 
@@ -408,11 +409,11 @@ def test_file_backend_locates_a_trait_spec_at_the_shared_state_trait_specs_path(
 # ── positive class id resolved from a prediction bucket's own recorded id_map ───────
 
 def _op_sidecar(dir_path: Path, id_map: dict | None, *, dataset_root: Path,
-                subject: str = "catkin", attribute: str | None = "elongation") -> None:
+                subject: str = "bud", attribute: str | None = "opening") -> None:
     dir_path.mkdir(parents=True, exist_ok=True)
     stamp = {
         "validated": True,
-        "trait": "catkin",
+        "trait": "bud_opening",
         "operating_point": {"conf": {"value": 0.4, "validated_against": "held_out_annotations"}},
         "id_map": id_map,
         "subject": subject,
@@ -427,26 +428,26 @@ def test_resolve_positive_class_id_by_name(tmp_path: Path):
     from tcip_mcp.tools.phenology_tools import _resolve_positive_class_id
 
     d = tmp_path / "preds"
-    _op_sidecar(d, {"dormant": 0, "elongated": 1}, dataset_root=tmp_path)
-    cid, msg = _resolve_positive_class_id("catkin", {"2026-02-11": str(d)})
+    _op_sidecar(d, {"closed": 0, "open": 1}, dataset_root=tmp_path)
+    cid, msg = _resolve_positive_class_id("bud_opening", {"2026-02-11": str(d)})
     assert cid == 1
-    assert "elongated" in msg
+    assert "open" in msg
 
 
 def test_resolve_positive_class_id_honest_fail_when_absent(tmp_path: Path):
     from tcip_mcp.tools.phenology_tools import _resolve_positive_class_id
 
     d = tmp_path / "preds"
-    _op_sidecar(d, {"dormant": 0, "catkin": 1}, dataset_root=tmp_path)  # no 'elongated' class
-    cid, msg = _resolve_positive_class_id("catkin", {"2026-02-11": str(d)})
+    _op_sidecar(d, {"closed": 0, "bud": 1}, dataset_root=tmp_path)  # no 'open' class
+    cid, msg = _resolve_positive_class_id("bud_opening", {"2026-02-11": str(d)})
     assert cid is None  # never silently defaults to 1
-    assert "elongated" in msg
+    assert "open" in msg
 
 
 def test_resolve_positive_class_id_no_map_is_none(tmp_path: Path):
     from tcip_mcp.tools.phenology_tools import _resolve_positive_class_id
 
-    cid, _ = _resolve_positive_class_id("catkin", {"2026-02-11": str(tmp_path / "missing")})
+    cid, _ = _resolve_positive_class_id("bud_opening", {"2026-02-11": str(tmp_path / "missing")})
     assert cid is None
 
 
@@ -459,16 +460,16 @@ def _pheno_fixture(tmp_path: Path, *, classified: bool):
     root = tmp_path / "ds"
     d1 = root / "predictions" / "run" / "2026-02-11"
     d2 = root / "predictions" / "run" / "2026-03-09"
-    id_map = {"dormant": 0, "elongated": 1} if classified else {"catkin": 0}
-    attribute = "elongation" if classified else None
-    attrs = {"elongation": "elongated"} if classified else {}
+    id_map = {"closed": 0, "open": 1} if classified else {"bud": 0}
+    attribute = "opening" if classified else None
+    attrs = {"opening": "open"} if classified else {}
     for d in (d1, d2):
         d.mkdir(parents=True, exist_ok=True)
         json_io.write_annotations(
             d / "P1.json",
-            [Annotation(subject="catkin", geometry=BBox(1.0, 1.0, 3.0, 3.0), score=0.9,
+            [Annotation(subject="bud", geometry=BBox(1.0, 1.0, 3.0, 3.0), score=0.9,
                        attributes=attrs)], 8, 8)
-        _op_sidecar(d, id_map, dataset_root=root, subject="catkin", attribute=attribute)
+        _op_sidecar(d, id_map, dataset_root=root, subject="bud", attribute=attribute)
     from tests._binding_fixtures import write_plant_mapping
 
     mapping_name = "valley"
@@ -479,7 +480,7 @@ def _pheno_fixture(tmp_path: Path, *, classified: bool):
     return mapping_name, d1, d2
 
 
-@pytest.mark.usefixtures("seed_catkin_operationalization")
+@pytest.mark.usefixtures("seed_bud_operationalization")
 def test_deliver_phenology_milestones_derives_class_id_and_delivers(tmp_path: Path):
     from tcip_mcp.pipelines.postprocessing import phenology
     from tcip_mcp.tools.phenology_tools import deliver_phenology_milestones
@@ -488,16 +489,16 @@ def test_deliver_phenology_milestones_derives_class_id_and_delivers(tmp_path: Pa
     out_csv = tmp_path / "out.csv"
     classifier_stamp = {
         "validated": True,
-        "operating_point": {"classifier": {"value": "elongated",
+        "operating_point": {"classifier": {"value": "open",
                                            "validated_against": "held_out_annotations"}},
-        "trait": "catkin",
+        "trait": "bud_opening",
     }
     write_bound_sidecar(d1, classifier_stamp, document="classifier_operating_point",
                         dataset_root=tmp_path / "ds", experiment_id="exp-classifier-derives-id",
-                        producing_experiment_id="exp-trait-authoring", trait="catkin")
+                        producing_experiment_id="exp-trait-authoring", trait="bud_opening")
 
     res = deliver_phenology_milestones(
-        trait="catkin",
+        trait="bud_opening",
         mapping_name=mapping_name,
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv),
@@ -509,16 +510,17 @@ def test_deliver_phenology_milestones_derives_class_id_and_delivers(tmp_path: Pa
     assert "error" not in res, res
     assert res["positive_class_assessed"] is True
     assert out_csv.exists()
-    assert "catkin_elongation_crossing_unconfirmed" in phenology.phenology_csv_columns(get_trait("catkin"))
+    assert ("bud_opening_crossing_unconfirmed"
+            in phenology.phenology_csv_columns(get_trait("bud_opening")))
 
 
-@pytest.mark.usefixtures("seed_catkin_operationalization")
+@pytest.mark.usefixtures("seed_bud_operationalization")
 def test_deliver_phenology_milestones_refuses_when_class_id_unresolvable(tmp_path: Path):
     from tcip_mcp.tools.phenology_tools import deliver_phenology_milestones
 
-    mapping_name, d1, d2 = _pheno_fixture(tmp_path, classified=False)  # no 'elongated' anywhere
+    mapping_name, d1, d2 = _pheno_fixture(tmp_path, classified=False)  # no 'open' anywhere
     res = deliver_phenology_milestones(
-        trait="catkin",
+        trait="bud_opening",
         mapping_name=mapping_name,
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(tmp_path / "out.csv"),

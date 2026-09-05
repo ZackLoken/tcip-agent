@@ -19,17 +19,16 @@ import pytest
 import tcip_store as ts
 from tcip_mcp.tools.phenology_tools import deliver_phenology_milestones
 
-CATKIN_SPEC = {
-    "name": "catkin",
-    "delivers": ["catkin_05per_date", "catkin_50per_date", "catkin_95per_date",
-                 "catkin_elongation_date"],
-    "positive_class_name": "elongated",
+BUD_SPEC = {
+    "name": "bud",
+    "delivers": ["leaf_out_05per_date", "leaf_out_50per_date"],
+    "positive_class_name": "open",
     "milestone_fractions": [0.05, 0.5, 0.95],
     "milestone_on": "positive_fraction",
     "majority_milestone": "95per",
     "majority_provisional": True,
-    "phenology_prefix": "catkin",
-    "majority_label": "elongation",
+    "phenology_prefix": "bud",
+    "majority_label": "opening",
 }
 
 PISTILLATE_SPEC = {
@@ -57,9 +56,9 @@ def _write_specs(project_root: Path) -> None:
     from tests._operationalization_fixtures import seed_confirmed_crossing
 
     specs_dir = project_root / traits._TRAIT_SPECS_RELPATH
-    for spec in (CATKIN_SPEC, PISTILLATE_SPEC):
+    for spec in (BUD_SPEC, PISTILLATE_SPEC):
         ts.replace(traits.trait_spec_key(specs_dir, spec["name"]), spec, expect=ts.Version.ABSENT)
-    for spec in (CATKIN_SPEC, PISTILLATE_SPEC):
+    for spec in (BUD_SPEC, PISTILLATE_SPEC):
         seed_confirmed_crossing(project_root, spec["name"])
 
 
@@ -161,16 +160,16 @@ def _registry(tmp_path: Path) -> None:
 
 
 def test_each_trait_carries_its_own_majority_mapping_marker(tmp_path: Path):
-    """Two traits, two different readings: catkin's majority phrase maps to its 95% crossing on an
+    """Two traits, two different readings: bud's majority phrase maps to its 95% crossing on an
     unconfirmed reading, pistillate's to its 50% crossing on a confirmed one. Each delivery carries
     its own prefix, its own label, and its own answer, with no column of the other trait's."""
-    catkin = _deliver(tmp_path, CATKIN_SPEC, validated=True)
+    bud = _deliver(tmp_path, BUD_SPEC, validated=True)
     pistillate = _deliver(tmp_path, PISTILLATE_SPEC, validated=True)
 
-    assert catkin["catkin_elongation_crossing_unconfirmed"] == "true"
+    assert bud["bud_opening_crossing_unconfirmed"] == "true"
     assert pistillate["pistillate_flowering_crossing_unconfirmed"] == "false"
-    assert "pistillate_flowering_crossing_unconfirmed" not in catkin
-    assert "catkin_elongation_crossing_unconfirmed" not in pistillate
+    assert "pistillate_flowering_crossing_unconfirmed" not in bud
+    assert "bud_opening_crossing_unconfirmed" not in pistillate
 
 
 def test_the_majority_mapping_marker_is_not_the_delivery_gates_verdict(tmp_path: Path):
@@ -186,10 +185,10 @@ def test_the_majority_mapping_marker_is_not_the_delivery_gates_verdict(tmp_path:
 
 
 def test_an_unconfirmed_majority_reading_survives_a_cleared_delivery_gate(tmp_path: Path):
-    """The other direction: clearing the gate validates the numbers, never the reading. catkin's
+    """The other direction: clearing the gate validates the numbers, never the reading. bud's
     majority mapping is still unconfirmed in a delivery whose measurement dimensions all cleared."""
-    catkin = _deliver(tmp_path, CATKIN_SPEC, validated=True)
+    bud = _deliver(tmp_path, BUD_SPEC, validated=True)
 
-    assert catkin["catkin_elongation_crossing_unconfirmed"] == "true"
-    assert catkin["operating_point_validated"] != "false"
-    assert catkin["positive_state_classifier_validated"] != "false"
+    assert bud["bud_opening_crossing_unconfirmed"] == "true"
+    assert bud["operating_point_validated"] != "false"
+    assert bud["positive_state_classifier_validated"] != "false"

@@ -28,10 +28,10 @@ TOOLS_DIR = REPO_ROOT / "packages" / "tcip-mcp" / "src" / "tcip_mcp" / "tools"
 TRAITS_MODULE = REPO_ROOT / "packages" / "tcip-mcp" / "src" / "tcip_mcp" / "traits.py"
 
 
-def _author(root: Path, trait: str = "catkin_e2e", **overrides: object) -> dict:
+def _author(root: Path, trait: str = "bud_opening_e2e", **overrides: object) -> dict:
     fields: dict[str, object] = dict(
-        delivers=("catkin_05per_date",),
-        positive_class_name="elongated",
+        delivers=("leaf_out_05per_date",),
+        positive_class_name="open",
         milestone_fractions=(0.05, 0.5),
         milestone_on="positive_fraction",
         rationale="the breeder described the state directly, in their own field-scoring terms",
@@ -53,13 +53,13 @@ def test_a_spec_with_no_statement_is_not_a_collision_and_the_call_proceeds_as_a_
     """The recorded partial-failure recovery state: a spec on record with no statement behind it
     (here, seeded directly to stand in for a second write that failed partway) is not refused."""
     directory = traits.trait_specs_dir(str(tmp_path))
-    key = traits.trait_spec_key(directory, "catkin_e2e")
-    ts.replace(key, {"name": "catkin_e2e", "delivers": ["catkin_05per_date"]}, expect=ts.Version.ABSENT)
+    key = traits.trait_spec_key(directory, "bud_opening_e2e")
+    ts.replace(key, {"name": "bud_opening_e2e", "delivers": ["leaf_out_05per_date"]}, expect=ts.Version.ABSENT)
 
     statement = _author(tmp_path)
 
-    assert statement["trait"] == "catkin_e2e"
-    assert traits.get_trait_for("catkin_e2e", str(tmp_path)).delivers == ("catkin_05per_date",)
+    assert statement["trait"] == "bud_opening_e2e"
+    assert traits.get_trait_for("bud_opening_e2e", str(tmp_path)).delivers == ("leaf_out_05per_date",)
 
 
 def test_authoring_a_delivers_entry_outside_the_vocabulary_refuses(tmp_path: Path) -> None:
@@ -81,11 +81,11 @@ def test_confirm_trait_spec_with_a_stale_record_seen_raises_the_moved_record_sha
 
     with pytest.raises(traits.TraitSpecStatementMoved) as excinfo:
         traits.confirm_trait_spec(
-            str(tmp_path), "catkin_e2e", user="breeder", record_seen="not the real hash",
+            str(tmp_path), "bud_opening_e2e", user="breeder", record_seen="not the real hash",
             identity_from_request=True,
         )
 
-    assert excinfo.value.record["trait"] == "catkin_e2e"
+    assert excinfo.value.record["trait"] == "bud_opening_e2e"
     assert excinfo.value.record_seen == traits.trait_spec_statement_seen_hash(statement)
 
 
@@ -98,12 +98,12 @@ def test_restating_a_trait_whose_confirmed_statement_was_lost_clears_the_prior_c
     statement = _author(tmp_path)
     seen = traits.trait_spec_statement_seen_hash(statement)
     confirmed = traits.confirm_trait_spec(
-        str(tmp_path), "catkin_e2e", user="breeder", record_seen=seen, identity_from_request=True,
+        str(tmp_path), "bud_opening_e2e", user="breeder", record_seen=seen, identity_from_request=True,
     )
     assert confirmed["confirmed_by"] == "user:breeder"
 
     scope = traits.trait_spec_statements_scope(tmp_path)
-    key = traits.trait_spec_statement_key(scope, "catkin_e2e")
+    key = traits.trait_spec_statement_key(scope, "bud_opening_e2e")
     ts.delete(key, expect=ts.read_versioned(key).version)
 
     restated = _author(tmp_path)
@@ -203,7 +203,7 @@ def test_a_restatement_over_an_existing_spec_carries_its_localization_and_sliver
     """
     _author(tmp_path)
     traits.write_trait_spec_fields(
-        "catkin_e2e",
+        "bud_opening_e2e",
         {
             "localization": traits.CENTER_MATCH,
             "localization_tolerance": "fixed",
@@ -214,13 +214,13 @@ def test_a_restatement_over_an_existing_spec_carries_its_localization_and_sliver
         project_root=tmp_path,
     )
     scope = traits.trait_spec_statements_scope(tmp_path)
-    key = traits.trait_spec_statement_key(scope, "catkin_e2e")
+    key = traits.trait_spec_statement_key(scope, "bud_opening_e2e")
     ts.delete(key, expect=ts.read_versioned(key).version)
 
-    _author(tmp_path, positive_class_name="dormant")
+    _author(tmp_path, positive_class_name="closed")
 
-    reloaded = traits.get_trait_for("catkin_e2e", str(tmp_path))
-    assert reloaded.positive_class_name == "dormant"  # the restatement's own authored field moved
+    reloaded = traits.get_trait_for("bud_opening_e2e", str(tmp_path))
+    assert reloaded.positive_class_name == "closed"  # the restatement's own authored field moved
     assert reloaded.localization == traits.CENTER_MATCH
     assert reloaded.localization_tolerance == "fixed"
     assert reloaded.localization_tolerance_frac == 0.25
@@ -237,36 +237,36 @@ def test_a_trait_authored_and_confirmed_through_this_surface_delivers_end_to_end
     as if it had been hand-authored."""
     from tcip_mcp.tools.phenology_tools import deliver_phenology_milestones
     from tests._operationalization_fixtures import seed_confirmed_crossing
-    from tests._trait_fixtures import CATKIN
+    from tests._trait_fixtures import BUD_OPENING
     from tests.test_phenology_tools import _delivery_setup
 
     statement = traits.author_trait_spec(
-        str(tmp_path), "catkin",
-        delivers=CATKIN.delivers,
-        positive_class_name="elongated",
+        str(tmp_path), "bud_opening",
+        delivers=BUD_OPENING.delivers,
+        positive_class_name="open",
         milestone_fractions=(0.05, 0.50, 0.95),
         milestone_on="positive_fraction",
-        phenology_prefix="catkin",
+        phenology_prefix="bud",
         majority_milestone="95per",
         majority_provisional=True,
-        majority_label="elongation",
-        notes=CATKIN.notes,
-        rationale="the breeder called elongation the frilled/salt-and-peppery texture change, "
+        majority_label="opening",
+        notes=BUD_OPENING.notes,
+        rationale="the breeder called opening the frilled/salt-and-peppery texture change, "
                   "never a bbox-ratio proxy, and wants the 5/50/95% crossings of that call",
     )
     seen = traits.trait_spec_statement_seen_hash(statement)
     confirmed = traits.confirm_trait_spec(
-        str(tmp_path), "catkin", user="breeder", record_seen=seen, identity_from_request=True,
+        str(tmp_path), "bud_opening", user="breeder", record_seen=seen, identity_from_request=True,
     )
     assert confirmed["confirmed_by"] == "user:breeder"
 
-    seed_confirmed_crossing(tmp_path, "catkin")
+    seed_confirmed_crossing(tmp_path, "bud_opening", measured_subject="bud")
 
     mapping_name, d1, d2 = _delivery_setup(tmp_path, experiment_id=None, checkpoint_sha256=None)
-    out_csv = tmp_path / "out" / "catkin_phenology.csv"
+    out_csv = tmp_path / "out" / "bud_phenology.csv"
 
     res = deliver_phenology_milestones(
-        trait="catkin", mapping_name=mapping_name,
+        trait="bud_opening", mapping_name=mapping_name,
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv), classifier_pred_dirs=[str(d1)],
         operating_point_conf=0.4, operating_point_validated="held_out_annotations",

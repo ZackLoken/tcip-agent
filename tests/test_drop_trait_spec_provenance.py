@@ -280,14 +280,15 @@ def test_end_to_end_against_a_fixture_shaped_like_the_real_on_disk_state(tmp_pat
     same three calls ``main()`` makes, in the same order."""
     backend = _bind_sqlite()
     live_spec = {
-        "name": "catkin", "delivers": ["catkin_05per_date"], "positive_class_name": "elongated",
+        "name": "bud_opening", "delivers": ["leaf_out_05per_date"], "positive_class_name": "open",
         "provenance": ["positive_class_name: domain_expert_confirmed"],
     }
-    _seed_live_record(tmp_path, "catkin", live_spec)
+    _seed_live_record(tmp_path, "bud_opening", live_spec)
     stray_db = _seed_stray_database(
-        tmp_path, "catkin", {"name": "catkin", "delivers": ["catkin_05per_date"]}, restore=backend
+        tmp_path, "bud_opening", {"name": "bud_opening", "delivers": ["leaf_out_05per_date"]},
+        restore=backend
     )
-    yaml_path = _seed_stale_yaml(tmp_path, "catkin")
+    yaml_path = _seed_stale_yaml(tmp_path, "bud_opening")
 
     module = _load_script()
     record_outcomes = module.drop_provenance_from_records(tmp_path, plan=False)
@@ -295,18 +296,18 @@ def test_end_to_end_against_a_fixture_shaped_like_the_real_on_disk_state(tmp_pat
     db_outcome = module.remove_stray_database(tmp_path, plan=False)
     yaml_outcomes = module.remove_stale_yaml(tmp_path, plan=False)
 
-    assert record_outcomes == ["catkin: dropped provenance"]
+    assert record_outcomes == ["bud_opening: dropped provenance"]
     assert db_outcome is not None and db_outcome.startswith("removed stray database")
     assert yaml_outcomes == [f"removed stale spec file {yaml_path}"]
 
     _bind_sqlite()  # the previous connection was closed above; re-bind to read the record back
-    key = traits.trait_spec_key(traits.trait_specs_dir(tmp_path), "catkin")
+    key = traits.trait_spec_key(traits.trait_specs_dir(tmp_path), "bud_opening")
     stored = ts.read(key)
     assert "provenance" not in stored
-    assert stored["positive_class_name"] == "elongated"
+    assert stored["positive_class_name"] == "open"
     assert not stray_db.is_file()
     assert not yaml_path.is_file()
-    assert [s.name for s in traits.load_trait_specs(project_root=tmp_path)] == ["catkin"]
+    assert [s.name for s in traits.load_trait_specs(project_root=tmp_path)] == ["bud_opening"]
 
 
 def test_a_root_whose_write_raises_is_refused_and_a_second_root_still_conforms(

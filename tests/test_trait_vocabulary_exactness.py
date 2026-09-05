@@ -31,12 +31,12 @@ def _write_spec(directory: Path, name: str, spec: dict) -> None:
 def _two_traits_with_different_semantics(directory: Path) -> None:
     """Two registered traits whose measurement semantics differ in every field a caller reads,
     so serving one where the other was asked for is observable rather than harmless."""
-    _write_spec(directory, "catkin", {
-        "delivers": ["catkin_95per_date"],
-        "positive_class_name": "elongated",
+    _write_spec(directory, "bud", {
+        "delivers": ["leaf_out_50per_date"],
+        "positive_class_name": "open",
         "count_bias_tolerance_frac": 0.02,
         "milestone_fractions": [0.05, 0.5, 0.95],
-        "phenology_prefix": "catkin",
+        "phenology_prefix": "bud",
     })
     _write_spec(directory, "leaf", {
         "delivers": ["leaf_length"],
@@ -47,7 +47,7 @@ def _two_traits_with_different_semantics(directory: Path) -> None:
     })
 
 
-@pytest.mark.parametrize("near_miss", ["Catkin", "CATKIN", "Leaf", "LEAF"])
+@pytest.mark.parametrize("near_miss", ["Bud", "BUD", "Leaf", "LEAF"])
 def test_get_trait_refuses_a_name_differing_only_by_case(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, near_miss: str,
 ):
@@ -57,7 +57,7 @@ def test_get_trait_refuses_a_name_differing_only_by_case(
     specs_dir = tmp_path / "trait_specs"
     monkeypatch.setattr(traits, "_TRAIT_SPECS_RELPATH", specs_dir)
     _two_traits_with_different_semantics(specs_dir)
-    assert registered_traits() == ["catkin", "leaf"]
+    assert registered_traits() == ["bud", "leaf"]
 
     with pytest.raises(TraitUnknownError, match=f"Unknown trait '{near_miss}'"):
         get_trait(near_miss)
@@ -70,8 +70,8 @@ def test_get_trait_resolves_the_exact_registered_name(tmp_path: Path, monkeypatc
     monkeypatch.setattr(traits, "_TRAIT_SPECS_RELPATH", specs_dir)
     _two_traits_with_different_semantics(specs_dir)
 
-    assert get_trait("catkin").count_bias_tolerance_frac == 0.02
-    assert get_trait("catkin").positive_class_name == "elongated"
+    assert get_trait("bud").count_bias_tolerance_frac == 0.02
+    assert get_trait("bud").positive_class_name == "open"
     assert get_trait("leaf").count_bias_tolerance_frac == 0.25
     assert get_trait("leaf").positive_class_name == "expanded"
 
@@ -83,8 +83,8 @@ def test_unknown_trait_refusal_lists_what_is_registered(tmp_path: Path, monkeypa
     monkeypatch.setattr(traits, "_TRAIT_SPECS_RELPATH", specs_dir)
     _two_traits_with_different_semantics(specs_dir)
 
-    with pytest.raises(TraitUnknownError, match=r"Registered traits: \['catkin', 'leaf'\]"):
-        get_trait("Catkin")
+    with pytest.raises(TraitUnknownError, match=r"Registered traits: \['bud', 'leaf'\]"):
+        get_trait("Bud")
 
 
 @pytest.mark.parametrize("truncated", ["catkin_05per", "leaf_len", "fruit_diamet"])

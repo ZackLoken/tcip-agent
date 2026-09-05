@@ -4,8 +4,8 @@ The positive-state fraction is the share of a plant's detected objects that are 
 positive/measured state, where that state is a classifier call (never a geometric proxy). These
 tests pin the authoritative trait definitions:
 
-    catkin_05/50/95per_date  = dates the elongated fraction crosses 5/50/95%
-    catkin_elongation_date   = date most catkins have elongated (crops.yml) = the 95% crossing
+    bud_05/50/95per_date  = dates the open fraction crosses 5/50/95%
+    bud_opening_date      = date most buds are open (the majority-label alias) = the 95% crossing
 
 and the id_map-key-membership coverage rule that decides whether a prediction
 bucket ever assessed the trait's positive class at all, and the per-detection membership check
@@ -32,7 +32,7 @@ from tcip_mcp.pipelines.postprocessing.plant_mapping import MappingBuild  # noqa
 from tcip_mcp.pipelines.resolution import Acknowledgement  # noqa: E402
 from tcip_mcp.traits import CENTER_MATCH, COUNT_UNBIASED, TraitSpec  # noqa: E402
 from tests._operationalization_fixtures import schema_basis  # noqa: E402
-from tests._trait_fixtures import CATKIN  # noqa: E402
+from tests._trait_fixtures import BUD_OPENING  # noqa: E402
 
 # A writer-level unit test's own placeholder disclosure, built through delivery_disclosure itself
 # so it carries every key the writer's cells read even as that shape grows.
@@ -45,7 +45,7 @@ _NO_MAPPING = MappingBuild(
 ).delivery_disclosure({"captures_unverified": [], "plant_csvs_unverified": []}, [])
 
 
-def _sidecar(dir_path: Path, id_map: dict | None, *, subject: str | None = "catkin",
+def _sidecar(dir_path: Path, id_map: dict | None, *, subject: str | None = "bud",
             attribute: str | None = None) -> None:
     """Write a bucket's operating_point.json exactly the way run_inference does: the only
     fact count_by_class reads to decide whether/how a bucket was classified."""
@@ -55,7 +55,7 @@ def _sidecar(dir_path: Path, id_map: dict | None, *, subject: str | None = "catk
 
 
 def _preds(dir_path: Path, stem: str, subjects: list[str], *, attribute: str | None = None,
-          object_subject: str = "catkin") -> None:
+          object_subject: str = "bud") -> None:
     """Detector shape (``attribute=None``): each decoded name lands straight in ``subject``.
     Classified shape: every record carries ``object_subject`` with its value under ``attribute``.
     """
@@ -148,26 +148,26 @@ def test_crossing_no_observations_is_none():
     assert phenology.crossing_date([], 0.95) is None
 
 
-def test_elongation_onset_is_first_nonzero_date():
+def test_opening_onset_is_first_nonzero_date():
     series = [("2024-05-01", 0.0), ("2024-05-05", 0.0), ("2024-05-09", 0.10), ("2024-05-13", 0.60)]
     assert phenology.positive_onset_date(series) == "2024-05-09"
 
 
-def test_elongation_onset_none_when_all_zero():
+def test_opening_onset_none_when_all_zero():
     series = [("2024-05-01", 0.0), ("2024-05-05", 0.0)]
     assert phenology.positive_onset_date(series) is None
 
 
 def test_plant_milestones_returns_four_dates_and_bounds():
     series = [("2024-05-01", 0.0), ("2024-05-06", 0.04), ("2024-05-11", 0.50), ("2024-05-21", 1.0)]
-    m = phenology.plant_milestones(series, CATKIN)
-    assert {"catkin_05per_date", "catkin_50per_date", "catkin_95per_date", "catkin_elongation_date"} <= set(m)
-    assert m["catkin_elongation_date"] == m["catkin_95per_date"]
-    assert m["catkin_50per_date"] == "2024-05-11"
-    assert m["catkin_50per_date_bound"] == "exact"
+    m = phenology.plant_milestones(series, BUD_OPENING)
+    assert {"bud_05per_date", "bud_50per_date", "bud_95per_date", "bud_opening_date"} <= set(m)
+    assert m["bud_opening_date"] == m["bud_95per_date"]
+    assert m["bud_50per_date"] == "2024-05-11"
+    assert m["bud_50per_date_bound"] == "exact"
 
 
-def test_plant_milestones_requires_spec_no_catkin_fallback():
+def test_plant_milestones_requires_spec_no_bud_opening_fallback():
     # No silent default: a caller that forgets to pass spec must fail loudly.
     import pytest
 
@@ -176,8 +176,8 @@ def test_plant_milestones_requires_spec_no_catkin_fallback():
 
 
 def test_milestone_date_columns_is_proper_subset_of_full_columns():
-    cols = phenology.phenology_csv_columns(CATKIN)
-    milestone_cols = phenology.milestone_date_columns(CATKIN)
+    cols = phenology.phenology_csv_columns(BUD_OPENING)
+    milestone_cols = phenology.milestone_date_columns(BUD_OPENING)
     assert set(milestone_cols) <= set(cols)
     assert "plant_id" not in milestone_cols
     assert "positive_state_classifier_validated" not in milestone_cols
@@ -187,17 +187,17 @@ def test_milestone_date_columns_is_proper_subset_of_full_columns():
 
 
 def test_count_by_class_bare_detector_bucket_refuses_never_full_coverage(tmp_path):
-    # A single-class detector's id_map ({"catkin": 0}) has no attribute axis at all: "catkin" is
-    # not the trait's positive value, so this must not be scored classified.
+    # A single-class detector's id_map ({"bud": 0}) has no attribute axis at all: "bud" is not
+    # the trait's positive value, so this must not be scored classified.
     p = tmp_path / "img.json"
     json_io.write_annotations(
-        p, [Annotation(subject="catkin", geometry=BBox(1, 1, 3, 3), score=0.9),
-            Annotation(subject="catkin", geometry=BBox(4, 4, 6, 6), score=0.8)],
+        p, [Annotation(subject="bud", geometry=BBox(1, 1, 3, 3), score=0.9),
+            Annotation(subject="bud", geometry=BBox(4, 4, 6, 6), score=0.8)],
         8, 8,
     )
-    id_map = {"catkin": 0}
-    scope = resolution.BucketScope(subject="catkin", attribute=None)
-    total, positive, unclassified = phenology.count_by_class(p, id_map, "elongated", scope=scope)
+    id_map = {"bud": 0}
+    scope = resolution.BucketScope(subject="bud", attribute=None)
+    total, positive, unclassified = phenology.count_by_class(p, id_map, "open", scope=scope)
     assert (total, positive, unclassified) == (2, 0, 2)  # whole bucket unclassified, not full coverage
 
 
@@ -206,39 +206,39 @@ def test_count_by_class_wrong_axis_bucket_refuses(tmp_path):
     # value set doesn't include the trait's positive value, so it must refuse, not be miscounted.
     p = tmp_path / "img.json"
     json_io.write_annotations(
-        p, [Annotation(subject="catkin", geometry=BBox(1, 1, 3, 3), score=0.9,
+        p, [Annotation(subject="bud", geometry=BBox(1, 1, 3, 3), score=0.9,
                        attributes={"damage": "mild"})], 8, 8,
     )
     id_map = {"none": 0, "mild": 1, "severe": 2}
-    scope = resolution.BucketScope(subject="catkin", attribute="damage")
-    total, positive, unclassified = phenology.count_by_class(p, id_map, "elongated", scope=scope)
+    scope = resolution.BucketScope(subject="bud", attribute="damage")
+    total, positive, unclassified = phenology.count_by_class(p, id_map, "open", scope=scope)
     assert (total, positive, unclassified) == (1, 0, 1)
 
 
 def test_count_by_class_absent_id_map_refuses(tmp_path):
     p = tmp_path / "img.json"
     json_io.write_annotations(
-        p, [Annotation(subject="catkin", geometry=BBox(1, 1, 3, 3), score=0.9,
-                       attributes={"elongation": "elongated"})], 8, 8,
+        p, [Annotation(subject="bud", geometry=BBox(1, 1, 3, 3), score=0.9,
+                       attributes={"opening": "open"})], 8, 8,
     )
-    total, positive, unclassified = phenology.count_by_class(p, None, "elongated", scope=None)
+    total, positive, unclassified = phenology.count_by_class(p, None, "open", scope=None)
     assert (total, positive, unclassified) == (1, 0, 1)
 
 
 def test_count_by_class_classified_bucket_splits_positive_negative(tmp_path):
     p = tmp_path / "img.json"
     json_io.write_annotations(
-        p, [Annotation(subject="catkin", geometry=BBox(1, 1, 3, 3), score=0.9,
-                       attributes={"elongation": "elongated"}),
-            Annotation(subject="catkin", geometry=BBox(4, 4, 6, 6), score=0.8,
-                       attributes={"elongation": "dormant"}),
-            Annotation(subject="catkin", geometry=BBox(1, 1, 3, 3), score=0.7,
-                       attributes={"elongation": "elongated"})],
+        p, [Annotation(subject="bud", geometry=BBox(1, 1, 3, 3), score=0.9,
+                       attributes={"opening": "open"}),
+            Annotation(subject="bud", geometry=BBox(4, 4, 6, 6), score=0.8,
+                       attributes={"opening": "closed"}),
+            Annotation(subject="bud", geometry=BBox(1, 1, 3, 3), score=0.7,
+                       attributes={"opening": "open"})],
         8, 8,
     )
-    id_map = {"dormant": 0, "elongated": 1}
-    scope = resolution.BucketScope(subject="catkin", attribute="elongation")
-    total, positive, unclassified = phenology.count_by_class(p, id_map, "elongated", scope=scope)
+    id_map = {"closed": 0, "open": 1}
+    scope = resolution.BucketScope(subject="bud", attribute="opening")
+    total, positive, unclassified = phenology.count_by_class(p, id_map, "open", scope=scope)
     assert (total, positive, unclassified) == (3, 2, 0)
 
 
@@ -249,22 +249,22 @@ def test_count_by_class_foreign_record_within_classified_bucket_refuses(tmp_path
 
     p = tmp_path / "img.json"
     json_io.write_annotations(
-        p, [Annotation(subject="catkin", geometry=BBox(1, 1, 3, 3), score=0.9,
-                       attributes={"elongation": "elongated"}),
-            Annotation(subject="catkin", geometry=BBox(4, 4, 6, 6), score=0.8)],
+        p, [Annotation(subject="bud", geometry=BBox(1, 1, 3, 3), score=0.9,
+                       attributes={"opening": "open"}),
+            Annotation(subject="bud", geometry=BBox(4, 4, 6, 6), score=0.8)],
         8, 8,
     )
-    id_map = {"dormant": 0, "elongated": 1}
-    scope = resolution.BucketScope(subject="catkin", attribute="elongation")
+    id_map = {"closed": 0, "open": 1}
+    scope = resolution.BucketScope(subject="bud", attribute="opening")
     with pytest.raises(ClassifiedRecordRefused, match="conform_classified_predictions"):
-        phenology.count_by_class(p, id_map, "elongated", scope=scope)
+        phenology.count_by_class(p, id_map, "open", scope=scope)
 
 
 def test_count_by_class_missing_file_reads_as_empty():
     # count_by_class degrades gracefully on a missing path (json_io.read_annotations answers []);
     # per_plant_series never calls it on one, checking is_file() and tracking n_missing itself.
     total, positive, unclassified = phenology.count_by_class(
-        Path("does-not-exist.json"), {"elongated": 1}, "elongated", scope=None)
+        Path("does-not-exist.json"), {"open": 1}, "open", scope=None)
     assert (total, positive, unclassified) == (0, 0, 0)
 
 
@@ -281,17 +281,17 @@ class _Assignment:
 def test_per_plant_phenology_builds_fraction_series_when_classified(tmp_path):
     d1 = tmp_path / "2024-05-01"
     d2 = tmp_path / "2024-05-15"
-    _preds(d1, "P1_a", ["dormant", "dormant"], attribute="elongation")
-    _sidecar(d1, {"dormant": 0, "elongated": 1}, attribute="elongation")
-    _preds(d2, "P1_b", ["elongated", "elongated"], attribute="elongation")
-    _sidecar(d2, {"dormant": 0, "elongated": 1}, attribute="elongation")
+    _preds(d1, "P1_a", ["closed", "closed"], attribute="opening")
+    _sidecar(d1, {"closed": 0, "open": 1}, attribute="opening")
+    _preds(d2, "P1_b", ["open", "open"], attribute="opening")
+    _sidecar(d2, {"closed": 0, "open": 1}, attribute="opening")
     mapping = {
         "2024-05-01": [_Assignment("P1_a", "P1", "acc-9")],
         "2024-05-15": [_Assignment("P1_b", "P1", "acc-9")],
     }
     preds = {"2024-05-01": str(d1), "2024-05-15": str(d2)}
 
-    out = phenology.per_plant_phenology(mapping, preds, positive_class_name="elongated", spec=CATKIN)
+    out = phenology.per_plant_phenology(mapping, preds, positive_class_name="open", spec=BUD_OPENING)
 
     assert out["positive_class_assessed"] is True
     row = out["rows"][0]
@@ -301,22 +301,22 @@ def test_per_plant_phenology_builds_fraction_series_when_classified(tmp_path):
     assert row["n_dates_unclassified"] == 0
     assert row["n_dates_missing_images"] == 0
     assert [s["n_positive"] for s in row["series"]] == [0, 2]
-    assert row["catkin_95per_date"] is not None
+    assert row["bud_95per_date"] is not None
 
 
 def test_per_plant_phenology_bare_detector_bucket_refuses_whole_delivery(tmp_path):
     d1 = tmp_path / "2024-05-01"
-    _preds(d1, "P1_a", ["catkin"])
-    _sidecar(d1, {"catkin": 0})
+    _preds(d1, "P1_a", ["bud"])
+    _sidecar(d1, {"bud": 0})
     mapping = {"2024-05-01": [_Assignment("P1_a", "P1", "acc-9")]}
     preds = {"2024-05-01": str(d1)}
 
-    out = phenology.per_plant_phenology(mapping, preds, positive_class_name="elongated", spec=CATKIN)
+    out = phenology.per_plant_phenology(mapping, preds, positive_class_name="open", spec=BUD_OPENING)
 
     assert out["positive_class_assessed"] is False
     row = out["rows"][0]
     assert row["n_dates_unclassified"] == 1
-    assert row["catkin_50per_date"] is None
+    assert row["bud_50per_date"] is None
 
 
 def test_per_plant_phenology_missing_image_is_disclosed_not_a_zero(tmp_path):
@@ -324,19 +324,19 @@ def test_per_plant_phenology_missing_image_is_disclosed_not_a_zero(tmp_path):
     # observed zero (which would count as "classified, 0/0" and silently pass coverage).
     d1 = tmp_path / "2024-05-01"
     d1.mkdir(parents=True, exist_ok=True)
-    _sidecar(d1, {"dormant": 0, "elongated": 1}, attribute="elongation")
+    _sidecar(d1, {"closed": 0, "open": 1}, attribute="opening")
     # no P1_a.json written: the mapping names it but nothing was ever inferred for it
     mapping = {"2024-05-01": [_Assignment("P1_a", "P1", "acc-9")]}
     preds = {"2024-05-01": str(d1)}
 
-    out = phenology.per_plant_phenology(mapping, preds, positive_class_name="elongated", spec=CATKIN)
+    out = phenology.per_plant_phenology(mapping, preds, positive_class_name="open", spec=BUD_OPENING)
 
     row = out["rows"][0]
     assert row["series"][0]["n_missing"] == 1
     assert row["series"][0]["ratio"] is None
     assert row["n_dates_missing_images"] == 1
     assert out["positive_class_assessed"] is False  # nothing anywhere was actually classified
-    assert row["catkin_50per_date"] is None
+    assert row["bud_50per_date"] is None
 
 
 def test_per_plant_phenology_multi_date_and_excludes_plant_with_one_bad_date(tmp_path):
@@ -345,24 +345,24 @@ def test_per_plant_phenology_multi_date_and_excludes_plant_with_one_bad_date(tmp
     # computed from the subset that happened to be usable.
     d1 = tmp_path / "2024-05-01"
     d2 = tmp_path / "2024-05-15"
-    _preds(d1, "P1_a", ["elongated"], attribute="elongation")
-    _sidecar(d1, {"dormant": 0, "elongated": 1}, attribute="elongation")
-    _preds(d2, "P1_b", ["catkin"])  # bare-detector date, unclassified
-    _sidecar(d2, {"catkin": 0})
+    _preds(d1, "P1_a", ["open"], attribute="opening")
+    _sidecar(d1, {"closed": 0, "open": 1}, attribute="opening")
+    _preds(d2, "P1_b", ["bud"])  # bare-detector date, unclassified
+    _sidecar(d2, {"bud": 0})
     mapping = {
         "2024-05-01": [_Assignment("P1_a", "P1", "acc-9")],
         "2024-05-15": [_Assignment("P1_b", "P1", "acc-9")],
     }
     preds = {"2024-05-01": str(d1), "2024-05-15": str(d2)}
 
-    out = phenology.per_plant_phenology(mapping, preds, positive_class_name="elongated", spec=CATKIN)
+    out = phenology.per_plant_phenology(mapping, preds, positive_class_name="open", spec=BUD_OPENING)
 
     row = out["rows"][0]
     assert row["n_dates"] == 2
     assert row["n_dates_unclassified"] == 1
     # The whole plant's milestones are None: one bad date excludes it, not a partial computation.
-    assert row["catkin_05per_date"] is None
-    assert row["catkin_95per_date"] is None
+    assert row["bud_05per_date"] is None
+    assert row["bud_95per_date"] is None
     # But at least one date elsewhere was classified, so the delivery-level flag is still True,
     # distinguishing "wired, some gaps" from "never wired at all".
     assert out["positive_class_assessed"] is True
@@ -370,11 +370,11 @@ def test_per_plant_phenology_multi_date_and_excludes_plant_with_one_bad_date(tmp
 
 def test_per_plant_series_accepts_dict_assignments(tmp_path):
     d1 = tmp_path / "2024-05-01"
-    _preds(d1, "P1_a", ["elongated"], attribute="elongation")
-    _sidecar(d1, {"dormant": 0, "elongated": 1}, attribute="elongation")
+    _preds(d1, "P1_a", ["open"], attribute="opening")
+    _sidecar(d1, {"closed": 0, "open": 1}, attribute="opening")
     mapping = {"2024-05-01": [{"stem": "P1_a", "plot_name": "P1", "accession_name": "acc-9"}]}
     preds = {"2024-05-01": str(d1)}
-    per_plant = phenology.per_plant_series(mapping, preds, positive_class_name="elongated")
+    per_plant = phenology.per_plant_series(mapping, preds, positive_class_name="open")
     assert "P1" in per_plant
     assert per_plant["P1"]["accession"] == "acc-9"
     assert per_plant["P1"]["series"][0][:3] == ("2024-05-01", 1, 1)  # total=1, positive=1
@@ -385,16 +385,16 @@ def test_per_plant_series_accepts_dict_assignments(tmp_path):
 
 def test_resolve_positive_class_id_from_bucket_id_map(tmp_path):
     d1 = tmp_path / "2024-05-01"
-    _sidecar(d1, {"dormant": 0, "elongated": 1}, attribute="elongation")
-    cid, msg = phenology.resolve_positive_class_id(CATKIN, {"2024-05-01": str(d1)})
+    _sidecar(d1, {"closed": 0, "open": 1}, attribute="opening")
+    cid, msg = phenology.resolve_positive_class_id(BUD_OPENING, {"2024-05-01": str(d1)})
     assert cid == 1
     assert "resolved" in msg
 
 
 def test_resolve_positive_class_id_no_bucket_has_it_refuses(tmp_path):
     d1 = tmp_path / "2024-05-01"
-    _sidecar(d1, {"catkin": 0})
-    cid, msg = phenology.resolve_positive_class_id(CATKIN, {"2024-05-01": str(d1)})
+    _sidecar(d1, {"bud": 0})
+    cid, msg = phenology.resolve_positive_class_id(BUD_OPENING, {"2024-05-01": str(d1)})
     assert cid is None
     assert "never assessed" in msg
 
@@ -414,10 +414,10 @@ def _real_delivery_flags(tmp_path: Path):
     _mapping_name, d1, d2 = _delivery_setup(
         tmp_path, experiment_id="exp-producer", checkpoint_sha256="a" * 64)
     pred_dirs = [str(d1), str(d2)]
-    recon = reconcile_operating_point_validity(pred_dirs, trait="catkin")
+    recon = reconcile_operating_point_validity(pred_dirs, trait="bud_opening")
     classifier_recon = reconcile_classifier_validity([str(d1)])
     classifier_state, _note = bind_classifier_validity(
-        classifier_recon["validated"], [str(d1)], pred_dirs, trait="catkin")
+        classifier_recon["validated"], [str(d1)], pred_dirs, trait="bud_opening")
     tile_recon = reconcile_tile_size_validity(pred_dirs)
     flags = phenology.phenology_delivery_flags(classifier_state, recon["validated"], tile_recon)
     return flags, recon["bindings"], pred_dirs
@@ -429,7 +429,7 @@ def test_write_phenology_csv_refuses_and_writes_nothing_when_a_dimension_is_unva
     refuses rather than delivering a silent bare number."""
     with pytest.raises(ValueError, match="unvalidated dimension"):
         phenology.write_phenology_csv(
-            "test", [], tmp_path / "out.csv", CATKIN,
+            "test", [], tmp_path / "out.csv", BUD_OPENING,
             flags={"classifier": None, "operating_point": None}, acknowledgement=None,
             basis=schema_basis(), operating_point_conf=None, producer={}, bindings={}, pred_dirs=[],
             project_root=tmp_path, plant_mapping=_NO_MAPPING)
@@ -446,13 +446,13 @@ def test_write_phenology_csv_refuses_when_flags_carry_no_classifier_dimension(tm
 
     with pytest.raises(ValueError, match="classifier"):
         phenology.write_phenology_csv(
-            "test", [], tmp_path / "out.csv", CATKIN, flags=incomplete, acknowledgement=None,
+            "test", [], tmp_path / "out.csv", BUD_OPENING, flags=incomplete, acknowledgement=None,
             basis=schema_basis(), operating_point_conf=0.4, producer={}, bindings=bindings,
             pred_dirs=pred_dirs, project_root=tmp_path, plant_mapping=_NO_MAPPING)
     assert not (tmp_path / "out.csv").exists()
 
     cells = phenology.write_phenology_csv(
-        "test", [], tmp_path / "out.csv", CATKIN, flags=flags, acknowledgement=None,
+        "test", [], tmp_path / "out.csv", BUD_OPENING, flags=flags, acknowledgement=None,
         basis=schema_basis(), operating_point_conf=0.4, producer={}, bindings=bindings,
         pred_dirs=pred_dirs, project_root=tmp_path, plant_mapping=_NO_MAPPING)
     assert cells["positive_state_classifier_validated"]
@@ -476,18 +476,18 @@ def test_write_phenology_csv_floors_operating_point_when_tile_size_is_operative_
 
     root = _ds_root(tmp_path)
     d1, d2 = _bucket(tmp_path, "2026-02-11"), _bucket(tmp_path, "2026-03-09")
-    _write_preds(d1, "P1_a", ["dormant"])
-    _write_preds(d2, "P1_b", ["elongated"])
+    _write_preds(d1, "P1_a", ["closed"])
+    _write_preds(d2, "P1_b", ["open"])
     for d in (d1, d2):
         _write_op_sidecar(d, dataset_root=root, validated=True, id_map=ID_MAP,
                           tile_size_prov=_tiled(VALIDATED_FALSE))
-    _write_classifier_sidecar(d1, dataset_root=root, validated=True, trait="catkin")
+    _write_classifier_sidecar(d1, dataset_root=root, validated=True, trait="bud_opening")
     pred_dirs = [str(d1), str(d2)]
 
-    recon = reconcile_operating_point_validity(pred_dirs, trait="catkin")
+    recon = reconcile_operating_point_validity(pred_dirs, trait="bud_opening")
     classifier_recon = reconcile_classifier_validity([str(d1)])
     classifier_state, _note = bind_classifier_validity(
-        classifier_recon["validated"], [str(d1)], pred_dirs, trait="catkin")
+        classifier_recon["validated"], [str(d1)], pred_dirs, trait="bud_opening")
     tile_recon = reconcile_tile_size_validity(pred_dirs)
     assert tile_recon["operative"] and tile_recon["validated"] == VALIDATED_FALSE
     assert recon["validated"] != VALIDATED_FALSE  # the count operating point itself cleared
@@ -495,7 +495,7 @@ def test_write_phenology_csv_floors_operating_point_when_tile_size_is_operative_
     flags = phenology.phenology_delivery_flags(classifier_state, recon["validated"], tile_recon)
 
     cells = phenology.write_phenology_csv(
-        "test", [], tmp_path / "out.csv", CATKIN, flags=flags,
+        "test", [], tmp_path / "out.csv", BUD_OPENING, flags=flags,
         acknowledgement=Acknowledgement(acknowledged_by="user:tester", reason="test acknowledgement"),
         basis=schema_basis(), operating_point_conf=0.4, producer={}, bindings=recon["bindings"],
         pred_dirs=pred_dirs, project_root=tmp_path, plant_mapping=_NO_MAPPING)
@@ -510,10 +510,10 @@ def test_write_phenology_csv_records_the_delivery_event_without_a_door_calling_i
     from tcip_mcp.pipelines import resolution
 
     flags, bindings, pred_dirs = _real_delivery_flags(tmp_path)
-    out_csv = tmp_path / "out" / "catkin_phenology.csv"
+    out_csv = tmp_path / "out" / "bud_phenology.csv"
 
     phenology.write_phenology_csv(
-        "test.direct_writer_call", [], out_csv, CATKIN, flags=flags, acknowledgement=None,
+        "test.direct_writer_call", [], out_csv, BUD_OPENING, flags=flags, acknowledgement=None,
         basis=schema_basis(), operating_point_conf=0.4, producer={}, bindings=bindings,
         pred_dirs=pred_dirs, project_root=tmp_path, plant_mapping=_NO_MAPPING)
 
@@ -522,7 +522,7 @@ def test_write_phenology_csv_records_the_delivery_event_without_a_door_calling_i
     records = [ts.read(k) for k in keys if ts.read(k)["door"] == "test.direct_writer_call"]
     assert len(records) == 1, records
     assert records[0]["output_path"] == str(out_csv)
-    assert records[0]["trait"] == "catkin"
+    assert records[0]["trait"] == "bud_opening"
 
 
 def test_write_phenology_csv_fully_validated_acknowledgement_leaves_the_tail_and_event_agreeing(
@@ -537,10 +537,10 @@ def test_write_phenology_csv_fully_validated_acknowledgement_leaves_the_tail_and
     from tcip_mcp.pipelines import resolution
 
     flags, bindings, pred_dirs = _real_delivery_flags(tmp_path)
-    out_csv = tmp_path / "out" / "catkin_phenology.csv"
+    out_csv = tmp_path / "out" / "bud_phenology.csv"
 
     cells = phenology.write_phenology_csv(
-        "test.fully_validated_ack", [], out_csv, CATKIN, flags=flags,
+        "test.fully_validated_ack", [], out_csv, BUD_OPENING, flags=flags,
         acknowledgement=Acknowledgement(acknowledged_by="user:tester", reason="just in case"),
         basis=schema_basis(), operating_point_conf=0.4, producer={}, bindings=bindings,
         pred_dirs=pred_dirs, project_root=tmp_path, plant_mapping=_NO_MAPPING)
@@ -564,12 +564,12 @@ def test_write_phenology_csv_cells_are_exactly_the_schemas_provenance_columns(tm
     flags, bindings, pred_dirs = _real_delivery_flags(tmp_path)
 
     cells = phenology.write_phenology_csv(
-        "test", [], tmp_path / "out.csv", CATKIN, flags=flags, acknowledgement=None,
+        "test", [], tmp_path / "out.csv", BUD_OPENING, flags=flags, acknowledgement=None,
         basis=schema_basis(), operating_point_conf=0.4, producer={}, bindings=bindings,
         pred_dirs=pred_dirs, project_root=tmp_path, plant_mapping=_NO_MAPPING)
 
     expected = (set(phenology.PROVENANCE_COLUMNS)
-                | {phenology.majority_crossing_unconfirmed_column(CATKIN), "delivery_event_recorded"})
+                | {phenology.majority_crossing_unconfirmed_column(BUD_OPENING), "delivery_event_recorded"})
     assert set(cells) == expected
     assert cells["delivery_event_recorded"] is True
 
@@ -582,7 +582,7 @@ def test_write_phenology_curve_csv_writes_the_curve_schema(tmp_path):
           "n_total": 2, "n_positive": 1, "n_unclassified": 0, "n_missing": 0, "ratio": 0.5}
 
     phenology.write_phenology_curve_csv(
-        "test", [row], tmp_path / "curve.csv", CATKIN, flags=flags, acknowledgement=None,
+        "test", [row], tmp_path / "curve.csv", BUD_OPENING, flags=flags, acknowledgement=None,
         basis=schema_basis(), operating_point_conf=0.4, producer={}, bindings=bindings,
         pred_dirs=pred_dirs, project_root=tmp_path, plant_mapping=_NO_MAPPING)
 
@@ -598,20 +598,20 @@ def test_write_phenology_csv_carries_every_milestone_bound(tmp_path):
     measured one, which would be a precision claim the data does not support."""
     # First observed point already at 100% -> every crossing is left-censored.
     series = [("2026-02-11", 1.0), ("2026-02-20", 1.0)]
-    milestones = phenology.plant_milestones(series, CATKIN)
-    assert milestones["catkin_05per_date_bound"] == "left_censored"
+    milestones = phenology.plant_milestones(series, BUD_OPENING)
+    assert milestones["bud_05per_date_bound"] == "left_censored"
 
     row = {"plant_id": "P1", "n_dates": 2, "n_observed_dates": 2, **milestones}
     flags, bindings, pred_dirs = _real_delivery_flags(tmp_path)
     phenology.write_phenology_csv(
-        "test", [row], tmp_path / "out.csv", CATKIN, flags=flags, acknowledgement=None,
+        "test", [row], tmp_path / "out.csv", BUD_OPENING, flags=flags, acknowledgement=None,
         basis=schema_basis(), operating_point_conf=0.4, producer={}, bindings=bindings,
         pred_dirs=pred_dirs, project_root=tmp_path, plant_mapping=_NO_MAPPING)
     written = (tmp_path / "out.csv").read_text(encoding="utf-8")
     header = written.splitlines()[0].split(",")
     values = written.splitlines()[1].split(",")
 
-    for col in phenology.milestone_date_columns(CATKIN):
+    for col in phenology.milestone_date_columns(BUD_OPENING):
         assert f"{col}_bound" in header, col
         assert values[header.index(f"{col}_bound")] == "left_censored", col
 
@@ -628,7 +628,7 @@ _SPEC_SHAPES = [
     # spec names it) and its value is honestly None, which is not the same as a phantom.
     TraitSpec(name="b", milestone_fractions=(0.1, 0.9), phenology_prefix="b",
               majority_milestone="95per", majority_label="peak"),
-    CATKIN,
+    BUD_OPENING,
 ]
 
 
@@ -637,7 +637,7 @@ def test_phenology_csv_columns_name_no_column_without_a_producer(spec):
     """Every trait-prefixed column the schema names must be filled by a producer, or the delivered
     CSV carries a permanently-blank column. The schema and the producer share ``_milestone_columns``,
     so this holds by construction for any spec shape, including one whose ``majority_milestone``
-    is unset (unlike CATKIN's, which is always set).
+    is unset (unlike BUD_OPENING's, which is always set).
     """
     series = [("2026-02-01", 0.0), ("2026-02-10", 0.5), ("2026-02-20", 1.0)]
     produced = set(phenology.plant_milestones(series, spec))
@@ -699,12 +699,12 @@ def test_excluded_plant_carries_the_same_milestone_keys_as_an_included_one(tmp_p
     bare dates.
     """
     d1, d2 = tmp_path / "2026-02-11", tmp_path / "2026-03-09"
-    id_map = {"dormant": 0, "elongated": 1}
+    id_map = {"closed": 0, "open": 1}
     for d in (d1, d2):
-        _sidecar(d, id_map, attribute="elongation")
-    _preds(d1, "GOOD", ["elongated", "dormant"], attribute="elongation")
-    _preds(d2, "GOOD", ["elongated", "elongated"], attribute="elongation")
-    _preds(d1, "BAD", ["elongated", "elongated"], attribute="elongation")
+        _sidecar(d, id_map, attribute="opening")
+    _preds(d1, "GOOD", ["open", "closed"], attribute="opening")
+    _preds(d2, "GOOD", ["open", "open"], attribute="opening")
+    _preds(d1, "BAD", ["open", "open"], attribute="opening")
     # BAD's second date is never predicted on: the missing image excludes its milestones.
     mapping = {
         "2026-02-11": [_Assignment("GOOD", "GOOD", "a"), _Assignment("BAD", "BAD", "b")],
@@ -712,11 +712,11 @@ def test_excluded_plant_carries_the_same_milestone_keys_as_an_included_one(tmp_p
     }
     res = phenology.per_plant_phenology(
         mapping, {"2026-02-11": str(d1), "2026-03-09": str(d2)},
-        positive_class_name="elongated", spec=CATKIN)
+        positive_class_name="open", spec=BUD_OPENING)
     by_plant = {r["plant_id"]: r for r in res["rows"]}
     assert by_plant["BAD"]["n_dates_missing_images"] == 1  # genuinely excluded
     assert set(by_plant["GOOD"]) == set(by_plant["BAD"])
-    assert "catkin_95per_date_bound" in by_plant["BAD"]
+    assert "bud_95per_date_bound" in by_plant["BAD"]
 
 
 def test_per_plant_series_counts_the_images_the_mapping_names(tmp_path):
@@ -725,13 +725,13 @@ def test_per_plant_series_counts_the_images_the_mapping_names(tmp_path):
     one.
     """
     d = tmp_path / "2026-02-11"
-    _sidecar(d, {"dormant": 0, "elongated": 1}, attribute="elongation")
+    _sidecar(d, {"closed": 0, "open": 1}, attribute="opening")
     for i in range(3):
-        _preds(d, f"IMG{i}", ["elongated", "dormant"], attribute="elongation")
+        _preds(d, f"IMG{i}", ["open", "closed"], attribute="opening")
     mapping = {"2026-02-11": [_Assignment(f"IMG{i}", "P1", "a") for i in range(3)]
                + [_Assignment("GONE", "P1", "a")]}  # named, no prediction file
     per_plant = phenology.per_plant_series(mapping, {"2026-02-11": str(d)},
-                                            positive_class_name="elongated")
+                                            positive_class_name="open")
     series = per_plant["P1"]["series"]
     (_date, total, positive, unclassified, missing, n_images) = series[0]
     assert (total, positive, unclassified, missing) == (6, 3, 0, 1)
@@ -745,14 +745,14 @@ def test_per_plant_series_excludes_unattributed_assignments_from_coverage(tmp_pa
     silently dropped from every plant's coverage; how often that happens is disclosed once, at
     delivery scope, by ``plant_mapping.MappingBuild.unattributed``, never recomputed here."""
     d = tmp_path / "2026-02-11"
-    _sidecar(d, {"dormant": 0, "elongated": 1}, attribute="elongation")
-    _preds(d, "P1_a", ["elongated"], attribute="elongation")
+    _sidecar(d, {"closed": 0, "open": 1}, attribute="opening")
+    _preds(d, "P1_a", ["open"], attribute="opening")
     mapping = {"2026-02-11": [
         _Assignment("P1_a", "P1", "acc-9"),
         _Assignment("STRAY", None, None),  # no plot_name: never assigned to any plant
     ]}
     per_plant = phenology.per_plant_series(
-        mapping, {"2026-02-11": str(d)}, positive_class_name="elongated")
+        mapping, {"2026-02-11": str(d)}, positive_class_name="open")
     assert list(per_plant) == ["P1"]
 
 
@@ -761,15 +761,15 @@ def test_per_plant_phenology_excludes_unattributed_assignments_from_rows(tmp_pat
     unattributed count of its own: that disclosure is ``plant_mapping.MappingBuild.unattributed``'s,
     at delivery scope, not a per-call return value."""
     d = tmp_path / "2026-02-11"
-    _sidecar(d, {"dormant": 0, "elongated": 1}, attribute="elongation")
-    _preds(d, "P1_a", ["elongated"], attribute="elongation")
+    _sidecar(d, {"closed": 0, "open": 1}, attribute="opening")
+    _preds(d, "P1_a", ["open"], attribute="opening")
     mapping = {"2026-02-11": [
         _Assignment("P1_a", "P1", "acc-9"),
         _Assignment("STRAY1", None, None),
         _Assignment("STRAY2", "", None),
     ]}
     out = phenology.per_plant_phenology(
-        mapping, {"2026-02-11": str(d)}, positive_class_name="elongated", spec=CATKIN)
+        mapping, {"2026-02-11": str(d)}, positive_class_name="open", spec=BUD_OPENING)
     assert [r["plant_id"] for r in out["rows"]] == ["P1"]
     assert "n_images_unmapped" not in out
 
@@ -781,7 +781,7 @@ def test_write_phenology_csv_carries_n_observed_dates(tmp_path):
           "n_dates_unclassified": 0, "n_dates_missing_images": 0}
     flags, bindings, pred_dirs = _real_delivery_flags(tmp_path)
     phenology.write_phenology_csv(
-        "test", [row], tmp_path / "out.csv", CATKIN, flags=flags, acknowledgement=None,
+        "test", [row], tmp_path / "out.csv", BUD_OPENING, flags=flags, acknowledgement=None,
         basis=schema_basis(), operating_point_conf=0.4, producer={}, bindings=bindings,
         pred_dirs=pred_dirs, project_root=tmp_path, plant_mapping=_NO_MAPPING)
     written = (tmp_path / "out.csv").read_text(encoding="utf-8")

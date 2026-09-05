@@ -34,8 +34,8 @@ from tcip_mcp.tools.phenology_tools import (
 )
 from tests._binding_fixtures import write_bound_sidecar
 
-# seed_catkin_operationalization writes the spec plus the confirmed crossing record this root needs.
-pytestmark = pytest.mark.usefixtures("seed_catkin_operationalization")
+# seed_bud_operationalization writes the spec plus the confirmed crossing record this root needs.
+pytestmark = pytest.mark.usefixtures("seed_bud_operationalization")
 
 
 def _plant_csv(path: Path) -> None:
@@ -138,7 +138,7 @@ def _write_mapping(project_root: Path, name: str, mapping: dict) -> None:
 
 
 def _write_preds(dir_path: Path, stem: str, subjects: list[str], *,
-                 attribute: str | None = "elongation", object_subject: str = "catkin") -> None:
+                 attribute: str | None = "opening", object_subject: str = "bud") -> None:
     """Detector shape (``attribute=None``): each decoded name lands straight in ``subject``.
     Classified shape (the default, matching :data:`ID_MAP`): every record carries
     ``object_subject`` with its value under ``attribute``."""
@@ -181,8 +181,8 @@ def _write_stamp_bypassing_claim_rail(dir_path: Path, stamp: dict, document: str
 def _write_op_sidecar(dir_path: Path, *, dataset_root: Path, validated: bool, conf: float = 0.4,
                       id_map: dict | None = None, experiment_id: str | None = None,
                       checkpoint_sha256: str | None = None,
-                      tile_size_prov: dict | None = None, trait: str = "catkin",
-                      subject: str = "catkin", attribute: str | None = "elongation") -> None:
+                      tile_size_prov: dict | None = None, trait: str = "bud_opening",
+                      subject: str = "bud", attribute: str | None = "opening") -> None:
     """The operating_point.json a calibrated run_inference writes.
 
     ``tile_size_prov`` is the tile_size param's own provenance entry, present for a run that
@@ -227,7 +227,7 @@ def _write_classifier_sidecar(dir_path: Path, *, dataset_root: Path, validated: 
     dir_path.mkdir(parents=True, exist_ok=True)
     stamp = {
         "validated": validated,
-        "operating_point": {"classifier": {"value": "elongated", "validated_against": ref}},
+        "operating_point": {"classifier": {"value": "open", "validated_against": ref}},
         "trait": trait,
         "experiment_id": experiment_id,
     }
@@ -239,26 +239,26 @@ def _write_classifier_sidecar(dir_path: Path, *, dataset_root: Path, validated: 
         _write_stamp_bypassing_claim_rail(dir_path, stamp, "classifier_operating_point")
 
 
-ID_MAP = {"dormant": 0, "elongated": 1}
+ID_MAP = {"closed": 0, "open": 1}
 
 
 def test_deliver_phenology_milestones_delivers_when_both_validated(tmp_path: Path) -> None:
     root = _ds_root(tmp_path)
     d1, d2 = _bucket(tmp_path, "2026-02-11"), _bucket(tmp_path, "2026-03-09")
-    _write_preds(d1, "P1_a", ["dormant"])
-    _write_preds(d2, "P1_b", ["elongated"])
+    _write_preds(d1, "P1_a", ["closed"])
+    _write_preds(d2, "P1_b", ["open"])
     _write_op_sidecar(d1, dataset_root=root, validated=True, id_map=ID_MAP)
     _write_op_sidecar(d2, dataset_root=root, validated=True, id_map=ID_MAP)
-    _write_classifier_sidecar(d1, dataset_root=root, validated=True, trait="catkin")
+    _write_classifier_sidecar(d1, dataset_root=root, validated=True, trait="bud_opening")
     mapping_name = "valley"
     _write_mapping(tmp_path, mapping_name, {
         "2026-02-11": [{"stem": "P1_a", "plot_name": "P1", "accession_name": "acc-9"}],
         "2026-03-09": [{"stem": "P1_b", "plot_name": "P1", "accession_name": "acc-9"}],
     })
-    out_csv = tmp_path / "out" / "catkin_phenology.csv"
+    out_csv = tmp_path / "out" / "bud_phenology.csv"
 
     res = deliver_phenology_milestones(
-        trait="catkin",
+        trait="bud_opening",
         mapping_name=mapping_name,
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv),
@@ -277,22 +277,22 @@ def test_deliver_phenology_milestones_reports_an_unreadable_prediction_by_name(t
     through the tool boundary and never silently read as this plant's date contributing nothing."""
     root = _ds_root(tmp_path)
     d1, d2 = _bucket(tmp_path, "2026-02-11"), _bucket(tmp_path, "2026-03-09")
-    _write_preds(d1, "P1_a", ["dormant"])
+    _write_preds(d1, "P1_a", ["closed"])
     d2.mkdir(parents=True, exist_ok=True)
     bad = d2 / "P1_b.json"
     bad.write_text("not json {][", encoding="utf-8")
     _write_op_sidecar(d1, dataset_root=root, validated=True, id_map=ID_MAP)
     _write_op_sidecar(d2, dataset_root=root, validated=True, id_map=ID_MAP)
-    _write_classifier_sidecar(d1, dataset_root=root, validated=True, trait="catkin")
+    _write_classifier_sidecar(d1, dataset_root=root, validated=True, trait="bud_opening")
     mapping_name = "valley"
     _write_mapping(tmp_path, mapping_name, {
         "2026-02-11": [{"stem": "P1_a", "plot_name": "P1", "accession_name": "acc-9"}],
         "2026-03-09": [{"stem": "P1_b", "plot_name": "P1", "accession_name": "acc-9"}],
     })
-    out_csv = tmp_path / "out" / "catkin_phenology.csv"
+    out_csv = tmp_path / "out" / "bud_phenology.csv"
 
     res = deliver_phenology_milestones(
-        trait="catkin",
+        trait="bud_opening",
         mapping_name=mapping_name,
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv),
@@ -314,26 +314,26 @@ def test_deliver_phenology_milestones_re_reads_the_registry_at_the_second_check(
 
     root = _ds_root(tmp_path)
     d1, d2 = _bucket(tmp_path, "2026-02-11"), _bucket(tmp_path, "2026-03-09")
-    _write_preds(d1, "P1_a", ["dormant"])
-    _write_preds(d2, "P1_b", ["elongated"])
+    _write_preds(d1, "P1_a", ["closed"])
+    _write_preds(d2, "P1_b", ["open"])
     _write_op_sidecar(d1, dataset_root=root, validated=True, id_map=ID_MAP)
     _write_op_sidecar(d2, dataset_root=root, validated=True, id_map=ID_MAP)
-    _write_classifier_sidecar(d1, dataset_root=root, validated=True, trait="catkin")
+    _write_classifier_sidecar(d1, dataset_root=root, validated=True, trait="bud_opening")
     mapping_name = "valley"
     _write_mapping(tmp_path, mapping_name, {
         "2026-02-11": [{"stem": "P1_a", "plot_name": "P1", "accession_name": "acc-9"}],
         "2026-03-09": [{"stem": "P1_b", "plot_name": "P1", "accession_name": "acc-9"}],
     })
-    out_csv = tmp_path / "out" / "catkin_phenology.csv"
+    out_csv = tmp_path / "out" / "bud_phenology.csv"
 
     declares_it = cr.ClassRegistry(subjects=(
-        cr.Subject(name="catkin", attributes=(
-            cr.Attribute(name="state", type="categorical", values=("dormant", "elongated")),
+        cr.Subject(name="bud", attributes=(
+            cr.Attribute(name="state", type="categorical", values=("closed", "open")),
         )),
     ))
     drops_it = cr.ClassRegistry(subjects=(
-        cr.Subject(name="catkin", attributes=(
-            cr.Attribute(name="state", type="categorical", values=("dormant",)),
+        cr.Subject(name="bud", attributes=(
+            cr.Attribute(name="state", type="categorical", values=("closed",)),
         )),
     ))
     calls = {"n": 0}
@@ -345,7 +345,7 @@ def test_deliver_phenology_milestones_re_reads_the_registry_at_the_second_check(
     monkeypatch.setattr("tcip_mcp.class_registry.registry_for_pred_dirs", racing_registry)
 
     res = deliver_phenology_milestones(
-        trait="catkin",
+        trait="bud_opening",
         mapping_name=mapping_name,
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv),
@@ -365,20 +365,20 @@ def test_deliver_phenology_milestones_floors_a_count_stamp_earned_for_a_differen
     different trait: the refusal names the sidecar and both traits."""
     root = _ds_root(tmp_path)
     d1, d2 = _bucket(tmp_path, "2026-02-11"), _bucket(tmp_path, "2026-03-09")
-    _write_preds(d1, "P1_a", ["dormant"])
-    _write_preds(d2, "P1_b", ["elongated"])
+    _write_preds(d1, "P1_a", ["closed"])
+    _write_preds(d2, "P1_b", ["open"])
     _write_op_sidecar(d1, dataset_root=root, validated=True, id_map=ID_MAP, trait="second_trait")
     _write_op_sidecar(d2, dataset_root=root, validated=True, id_map=ID_MAP, trait="second_trait")
-    _write_classifier_sidecar(d1, dataset_root=root, validated=True, trait="catkin")
+    _write_classifier_sidecar(d1, dataset_root=root, validated=True, trait="bud_opening")
     mapping_name = "valley"
     _write_mapping(tmp_path, mapping_name, {
         "2026-02-11": [{"stem": "P1_a", "plot_name": "P1", "accession_name": "acc-9"}],
         "2026-03-09": [{"stem": "P1_b", "plot_name": "P1", "accession_name": "acc-9"}],
     })
-    out_csv = tmp_path / "out" / "catkin_phenology.csv"
+    out_csv = tmp_path / "out" / "bud_phenology.csv"
 
     res = deliver_phenology_milestones(
-        trait="catkin",
+        trait="bud_opening",
         mapping_name=mapping_name,
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv),
@@ -389,7 +389,7 @@ def test_deliver_phenology_milestones_floors_a_count_stamp_earned_for_a_differen
 
     assert "error" in res
     assert not out_csv.exists()
-    assert "second_trait" in res["error"] and "catkin" in res["error"]
+    assert "second_trait" in res["error"] and "bud_opening" in res["error"]
     assert str(d1) in res["error"] or str(d2) in res["error"]
 
 
@@ -411,10 +411,10 @@ def test_deliver_phenology_milestones_reports_n_images_unattributed_when_never_a
             {"stem": "P1_b", "accession_name": "acc-9"},  # no plot_name -> unmapped
         ],
     })
-    out_csv = tmp_path / "out" / "catkin_phenology.csv"
+    out_csv = tmp_path / "out" / "bud_phenology.csv"
 
     res = deliver_phenology_milestones(
-        trait="catkin",
+        trait="bud_opening",
         mapping_name=mapping_name,
         predictions_by_date={"2026-02-11": str(d1)},
         output_csv_path=str(out_csv),
@@ -433,8 +433,8 @@ def test_deliver_phenology_milestones_rejects_classifier_stamp_from_unrelated_ru
     see this; the stamp's own recorded trait/experiment_id must agree with what's being delivered."""
     root = _ds_root(tmp_path)
     d1, d2 = _bucket(tmp_path, "2026-02-11"), _bucket(tmp_path, "2026-03-09")
-    _write_preds(d1, "P1_a", ["dormant"])
-    _write_preds(d2, "P1_b", ["elongated"])
+    _write_preds(d1, "P1_a", ["closed"])
+    _write_preds(d2, "P1_b", ["open"])
     _write_op_sidecar(d1, dataset_root=root, validated=True, id_map=ID_MAP, experiment_id="run-B")
     _write_op_sidecar(d2, dataset_root=root, validated=True, id_map=ID_MAP, experiment_id="run-B")
     # Genuinely validated (validated=True), but calibrated for a different trait and a different
@@ -447,10 +447,10 @@ def test_deliver_phenology_milestones_rejects_classifier_stamp_from_unrelated_ru
         "2026-02-11": [{"stem": "P1_a", "plot_name": "P1", "accession_name": "acc-9"}],
         "2026-03-09": [{"stem": "P1_b", "plot_name": "P1", "accession_name": "acc-9"}],
     })
-    out_csv = tmp_path / "out" / "catkin_phenology.csv"
+    out_csv = tmp_path / "out" / "bud_phenology.csv"
 
     res = deliver_phenology_milestones(
-        trait="catkin",
+        trait="bud_opening",
         mapping_name=mapping_name,
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv),
@@ -472,8 +472,8 @@ def test_deliver_phenology_milestones_rejects_classifier_stamp_with_no_trait_rec
     branch fires against a null -- both being null would otherwise bypass the binding check entirely."""
     root = _ds_root(tmp_path)
     d1, d2 = _bucket(tmp_path, "2026-02-11"), _bucket(tmp_path, "2026-03-09")
-    _write_preds(d1, "P1_a", ["dormant"])
-    _write_preds(d2, "P1_b", ["elongated"])
+    _write_preds(d1, "P1_a", ["closed"])
+    _write_preds(d2, "P1_b", ["open"])
     _write_op_sidecar(d1, dataset_root=root, validated=True, id_map=ID_MAP)
     _write_op_sidecar(d2, dataset_root=root, validated=True, id_map=ID_MAP)
     # Genuinely "validated", but with neither trait nor experiment_id recorded -- the shape a
@@ -484,10 +484,10 @@ def test_deliver_phenology_milestones_rejects_classifier_stamp_with_no_trait_rec
         "2026-02-11": [{"stem": "P1_a", "plot_name": "P1", "accession_name": "acc-9"}],
         "2026-03-09": [{"stem": "P1_b", "plot_name": "P1", "accession_name": "acc-9"}],
     })
-    out_csv = tmp_path / "out" / "catkin_phenology.csv"
+    out_csv = tmp_path / "out" / "bud_phenology.csv"
 
     res = deliver_phenology_milestones(
-        trait="catkin",
+        trait="bud_opening",
         mapping_name=mapping_name,
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv),
@@ -504,8 +504,8 @@ def test_deliver_phenology_milestones_rejects_classifier_stamp_with_no_trait_rec
 def test_deliver_phenology_milestones_refuses_unvalidated_classifier(tmp_path: Path) -> None:
     root = _ds_root(tmp_path)
     d1, d2 = _bucket(tmp_path, "2026-02-11"), _bucket(tmp_path, "2026-03-09")
-    _write_preds(d1, "P1_a", ["dormant"])
-    _write_preds(d2, "P1_b", ["elongated"])
+    _write_preds(d1, "P1_a", ["closed"])
+    _write_preds(d2, "P1_b", ["open"])
     _write_op_sidecar(d1, dataset_root=root, validated=True, id_map=ID_MAP)
     _write_op_sidecar(d2, dataset_root=root, validated=True, id_map=ID_MAP)
     # No classifier_operating_point.json anywhere -> classifier dimension floors to unvalidated.
@@ -514,9 +514,9 @@ def test_deliver_phenology_milestones_refuses_unvalidated_classifier(tmp_path: P
         "2026-02-11": [{"stem": "P1_a", "plot_name": "P1", "accession_name": "acc-9"}],
         "2026-03-09": [{"stem": "P1_b", "plot_name": "P1", "accession_name": "acc-9"}],
     })
-    out_csv = tmp_path / "out" / "catkin_phenology.csv"
+    out_csv = tmp_path / "out" / "bud_phenology.csv"
     res = deliver_phenology_milestones(
-        trait="catkin",
+        trait="bud_opening",
         mapping_name=mapping_name,
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv),
@@ -584,8 +584,8 @@ def test_an_acknowledged_delivery_stamps_the_unvalidated_dimension_false(tmp_pat
 
     root = _ds_root(tmp_path)
     d1, d2 = _bucket(tmp_path, "2026-02-11"), _bucket(tmp_path, "2026-03-09")
-    _write_preds(d1, "P1_a", ["dormant"])
-    _write_preds(d2, "P1_b", ["elongated"])
+    _write_preds(d1, "P1_a", ["closed"])
+    _write_preds(d2, "P1_b", ["open"])
     _write_op_sidecar(d1, dataset_root=root, validated=True, id_map=ID_MAP)
     _write_op_sidecar(d2, dataset_root=root, validated=True, id_map=ID_MAP)
     mapping_name = "valley"
@@ -593,9 +593,9 @@ def test_an_acknowledged_delivery_stamps_the_unvalidated_dimension_false(tmp_pat
         "2026-02-11": [{"stem": "P1_a", "plot_name": "P1", "accession_name": "acc-9"}],
         "2026-03-09": [{"stem": "P1_b", "plot_name": "P1", "accession_name": "acc-9"}],
     })
-    out_csv = tmp_path / "out" / "catkin_phenology.csv"
+    out_csv = tmp_path / "out" / "bud_phenology.csv"
     cells = _deliver_via_writer(
-        trait="catkin",
+        trait="bud_opening",
         mapping_name=mapping_name,
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=out_csv,
@@ -610,19 +610,19 @@ def test_deliver_phenology_milestones_refuses_asymmetric_validation(tmp_path: Pa
     # Classifier validated but the count operating point isn't. The gate requires both.
     root = _ds_root(tmp_path)
     d1, d2 = _bucket(tmp_path, "2026-02-11"), _bucket(tmp_path, "2026-03-09")
-    _write_preds(d1, "P1_a", ["dormant"])
-    _write_preds(d2, "P1_b", ["elongated"])
+    _write_preds(d1, "P1_a", ["closed"])
+    _write_preds(d2, "P1_b", ["open"])
     _write_op_sidecar(d1, dataset_root=root, validated=False, id_map=ID_MAP)
     _write_op_sidecar(d2, dataset_root=root, validated=False, id_map=ID_MAP)
-    _write_classifier_sidecar(d1, dataset_root=root, validated=True, trait="catkin")
+    _write_classifier_sidecar(d1, dataset_root=root, validated=True, trait="bud_opening")
     mapping_name = "valley"
     _write_mapping(tmp_path, mapping_name, {
         "2026-02-11": [{"stem": "P1_a", "plot_name": "P1", "accession_name": "acc-9"}],
         "2026-03-09": [{"stem": "P1_b", "plot_name": "P1", "accession_name": "acc-9"}],
     })
-    out_csv = tmp_path / "out" / "catkin_phenology.csv"
+    out_csv = tmp_path / "out" / "bud_phenology.csv"
     res = deliver_phenology_milestones(
-        trait="catkin",
+        trait="bud_opening",
         mapping_name=mapping_name,
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv),
@@ -637,8 +637,8 @@ def test_writer_acknowledge_stamps_each_dimension_independently(tmp_path: Path) 
 
     root = _ds_root(tmp_path)
     d1, d2 = _bucket(tmp_path, "2026-02-11"), _bucket(tmp_path, "2026-03-09")
-    _write_preds(d1, "P1_a", ["dormant"])
-    _write_preds(d2, "P1_b", ["elongated"])
+    _write_preds(d1, "P1_a", ["closed"])
+    _write_preds(d2, "P1_b", ["open"])
     _write_op_sidecar(d1, dataset_root=root, validated=True, id_map=ID_MAP)
     _write_op_sidecar(d2, dataset_root=root, validated=True, id_map=ID_MAP)
     # Classifier not validated; op point IS validated on disk.
@@ -647,9 +647,9 @@ def test_writer_acknowledge_stamps_each_dimension_independently(tmp_path: Path) 
         "2026-02-11": [{"stem": "P1_a", "plot_name": "P1", "accession_name": "acc-9"}],
         "2026-03-09": [{"stem": "P1_b", "plot_name": "P1", "accession_name": "acc-9"}],
     })
-    out_csv = tmp_path / "out" / "catkin_phenology.csv"
+    out_csv = tmp_path / "out" / "bud_phenology.csv"
     cells = _deliver_via_writer(
-        trait="catkin",
+        trait="bud_opening",
         mapping_name=mapping_name,
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=out_csv,
@@ -665,21 +665,21 @@ def _tile_gate_fixture(tmp_path: Path, tile_size_prov: dict | None) -> dict:
     """A fully-validated two-date phenology delivery, varying only the tile scale's own basis."""
     root = _ds_root(tmp_path)
     d1, d2 = _bucket(tmp_path, "2026-02-11"), _bucket(tmp_path, "2026-03-09")
-    _write_preds(d1, "P1_a", ["dormant"])
-    _write_preds(d2, "P1_b", ["elongated"])
+    _write_preds(d1, "P1_a", ["closed"])
+    _write_preds(d2, "P1_b", ["open"])
     _write_op_sidecar(d1, dataset_root=root, validated=True, id_map=ID_MAP, tile_size_prov=tile_size_prov)
     _write_op_sidecar(d2, dataset_root=root, validated=True, id_map=ID_MAP, tile_size_prov=tile_size_prov)
-    _write_classifier_sidecar(d1, dataset_root=root, validated=True, trait="catkin")
+    _write_classifier_sidecar(d1, dataset_root=root, validated=True, trait="bud_opening")
     mapping_name = "valley"
     _write_mapping(tmp_path, mapping_name, {
         "2026-02-11": [{"stem": "P1_a", "plot_name": "P1", "accession_name": "acc-9"}],
         "2026-03-09": [{"stem": "P1_b", "plot_name": "P1", "accession_name": "acc-9"}],
     })
     return {
-        "trait": "catkin",
+        "trait": "bud_opening",
         "mapping_name": mapping_name,
         "predictions_by_date": {"2026-02-11": str(d1), "2026-03-09": str(d2)},
-        "output_csv_path": str(tmp_path / "out" / "catkin_phenology.csv"),
+        "output_csv_path": str(tmp_path / "out" / "bud_phenology.csv"),
         "classifier_pred_dirs": [str(d1)],
     }
 
@@ -757,20 +757,20 @@ def test_writer_acknowledged_tile_size_floors_the_csv_classifier_stamp(
 
 
 def test_deliver_phenology_milestones_refuses_unclassified_predictions(tmp_path: Path) -> None:
-    # Predictions from a bare detector (no elongation axis at all) must refuse,
+    # Predictions from a bare detector (no opening axis at all) must refuse,
     # never report full coverage.
     root = _ds_root(tmp_path)
     d1 = _bucket(tmp_path, "2026-02-11")
-    _write_preds(d1, "P1_a", ["catkin"], attribute=None)
-    _write_op_sidecar(d1, dataset_root=root, validated=True, id_map={"catkin": 0}, attribute=None)
+    _write_preds(d1, "P1_a", ["bud"], attribute=None)
+    _write_op_sidecar(d1, dataset_root=root, validated=True, id_map={"bud": 0}, attribute=None)
     mapping_name = "valley"
     _write_mapping(tmp_path, mapping_name, {
         "2026-02-11": [{"stem": "P1_a", "plot_name": "P1", "accession_name": "acc-9"}],
     })
-    out_csv = tmp_path / "out" / "catkin_phenology.csv"
+    out_csv = tmp_path / "out" / "bud_phenology.csv"
 
     res = deliver_phenology_milestones(
-        trait="catkin",
+        trait="bud_opening",
         mapping_name=mapping_name,
         predictions_by_date={"2026-02-11": str(d1)},
         output_csv_path=str(out_csv),
@@ -782,7 +782,7 @@ def test_deliver_phenology_milestones_refuses_unclassified_predictions(tmp_path:
 
 def test_deliver_phenology_milestones_missing_mapping(tmp_path: Path) -> None:
     res = deliver_phenology_milestones(
-        trait="catkin",
+        trait="bud_opening",
         mapping_name="nope",
         predictions_by_date={},
         output_csv_path=str(tmp_path / "out.csv"),
@@ -811,7 +811,7 @@ def _write_calibration_image(
     same position per instance (spaced far apart from each other) so they match regardless of
     the exact derived center-match tolerance. ``calls`` is
     ``[(is_true_positive, is_pred_positive), ...]``; ``is_true_positive=None`` writes a GT
-    instance with no ``elongation`` attribute at all (never assessed), instead of a real value.
+    instance with no ``opening`` attribute at all (never assessed), instead of a real value.
     ``image_offset`` shifts every box in this image by a unique amount so distinct images never
     collide on content hash: two images with the same classification pattern must still carry
     different geometry, the same way two different real photos would.
@@ -820,11 +820,11 @@ def _write_calibration_image(
     for i, (is_tp, is_pred_pos) in enumerate(calls):
         x = image_offset + i * 20.0
         box = BBox(x, 0.0, x + 8.0, 8.0)
-        attrs = {} if is_tp is None else {"elongation": "elongated" if is_tp else "dormant"}
-        gt_anns.append(Annotation(subject="catkin", geometry=box, attributes=attrs))
+        attrs = {} if is_tp is None else {"opening": "open" if is_tp else "closed"}
+        gt_anns.append(Annotation(subject="bud", geometry=box, attributes=attrs))
         pred_anns.append(Annotation(
-            subject="catkin", geometry=box, score=0.9,
-            attributes={"elongation": "elongated" if is_pred_pos else "dormant"}))
+            subject="bud", geometry=box, score=0.9,
+            attributes={"opening": "open" if is_pred_pos else "closed"}))
     gt_dir.mkdir(parents=True, exist_ok=True)
     pred_dir.mkdir(parents=True, exist_ok=True)
     w = int(image_offset + len(calls) * 20.0) + 8
@@ -866,7 +866,7 @@ def test_calibrate_classifier_operating_point_passes_for_well_formed_reference(t
     _write_split(hold_gt, hold_pred, prefix="hold", n_images=20, per_image_calls=calls, offset=1000)
 
     res = calibrate_classifier_operating_point(
-        trait_name="catkin", subject="catkin", attribute="elongation",
+        trait_name="bud_opening", subject="bud", attribute="opening",
         calibration_gt_dir=str(cal_gt), calibration_pred_dir=str(cal_pred),
         holdout_gt_dir=str(hold_gt), holdout_pred_dir=str(hold_pred),
         output_dir=str(tmp_path / "out"), dataset_root=str(tmp_path), experiment_id=None,
@@ -906,7 +906,7 @@ def test_calibrate_classifier_operating_point_reports_an_undecodable_pred_stamp(
     from tcip_store.binding import BACKEND_ENV, DEFAULT_BACKEND, FILE_BACKEND
 
     key = sidecar_key(cal_pred, "operating_point")
-    ts.replace(key, {"id_map": {"catkin": 0}}, expect=ts.Version.ABSENT)
+    ts.replace(key, {"id_map": {"bud": 0}}, expect=ts.Version.ABSENT)
     name = os.environ.get(BACKEND_ENV) or DEFAULT_BACKEND
     if name == FILE_BACKEND:
         from tcip_store.store import _backend
@@ -927,7 +927,7 @@ def test_calibrate_classifier_operating_point_reports_an_undecodable_pred_stamp(
             conn.close()
 
     res = calibrate_classifier_operating_point(
-        trait_name="catkin", subject="catkin", attribute="elongation",
+        trait_name="bud_opening", subject="bud", attribute="opening",
         calibration_gt_dir=str(cal_gt), calibration_pred_dir=str(cal_pred),
         holdout_gt_dir=str(hold_gt), holdout_pred_dir=str(hold_pred),
         output_dir=str(tmp_path / "out"), dataset_root=str(tmp_path), experiment_id=None,
@@ -961,7 +961,7 @@ def test_calibrate_classifier_operating_point_earns_a_record_a_later_bucket_bind
     assert dataset_root_of(cal_gt) is None and dataset_root_of(cal_pred) is None
 
     res = calibrate_classifier_operating_point(
-        trait_name="catkin", subject="catkin", attribute="elongation",
+        trait_name="bud_opening", subject="bud", attribute="opening",
         calibration_gt_dir=str(cal_gt), calibration_pred_dir=str(cal_pred),
         holdout_gt_dir=str(hold_gt), holdout_pred_dir=str(hold_pred),
         output_dir=str(out), dataset_root=str(root), experiment_id=None,
@@ -971,7 +971,7 @@ def test_calibrate_classifier_operating_point_earns_a_record_a_later_bucket_bind
     stamp = read_classifier_operating_point_sidecar(out)
     assert stamp["checkpoint_sha256"] is None  # no bucket in the inputs carried one to copy
     binding = verify_stamp_binding(stamp, out, document="classifier_operating_point",
-                                   trait="catkin")
+                                   trait="bud_opening")
     assert binding.ok and binding.claimed, binding.note
     assert binding.experiment_id == res["validated_by"]["experiment_id"]
     assert binding.producing_experiment_id is None  # the calibration hangs off its own experiment
@@ -985,12 +985,12 @@ def test_calibrate_classifier_operating_point_earns_a_record_a_later_bucket_bind
     assert row["selection_disjointness"] is not None
 
     later = _bucket(tmp_path, "2026-03-09")
-    _write_preds(later, "P1_a", ["elongated"])
+    _write_preds(later, "P1_a", ["open"])
     _write_op_sidecar(later, dataset_root=root, validated=True, id_map=ID_MAP, experiment_id=None)
     state = reconcile_classifier_validity([str(out)])["validated"]
 
     assert state == VALIDATED_HELD_OUT
-    assert bind_classifier_validity(state, [str(out)], [str(later)], trait="catkin") == (
+    assert bind_classifier_validity(state, [str(out)], [str(later)], trait="bud_opening") == (
         VALIDATED_HELD_OUT, "")
 
 
@@ -1007,7 +1007,7 @@ def test_calibrate_classifier_operating_point_refuses_a_dataset_root_its_gt_dirs
     _write_split(hold_gt, hold_pred, prefix="hold", n_images=20, per_image_calls=calls, offset=1000)
 
     res = calibrate_classifier_operating_point(
-        trait_name="catkin", subject="catkin", attribute="elongation",
+        trait_name="bud_opening", subject="bud", attribute="opening",
         calibration_gt_dir=str(cal_gt), calibration_pred_dir=str(cal_pred),
         holdout_gt_dir=str(hold_gt), holdout_pred_dir=str(hold_pred),
         output_dir=str(tmp_path / "out"), dataset_root=str(stated), experiment_id=None,
@@ -1034,7 +1034,7 @@ def test_calibrate_classifier_operating_point_refuses_genuinely_shared_content_h
     _write_split(hold_gt, hold_pred, prefix="dup", n_images=20, per_image_calls=calls)
 
     res = calibrate_classifier_operating_point(
-        trait_name="catkin", subject="catkin", attribute="elongation",
+        trait_name="bud_opening", subject="bud", attribute="opening",
         calibration_gt_dir=str(cal_gt), calibration_pred_dir=str(cal_pred),
         holdout_gt_dir=str(hold_gt), holdout_pred_dir=str(hold_pred),
         output_dir=str(tmp_path / "out"), dataset_root=str(tmp_path), experiment_id=None,
@@ -1064,7 +1064,7 @@ def test_calibrate_classifier_operating_point_partial_flip_fails_compensating_er
     _write_split(hold_gt, hold_pred, prefix="hold", n_images=50, per_image_calls=flipped, offset=1000)
 
     res = calibrate_classifier_operating_point(
-        trait_name="catkin", subject="catkin", attribute="elongation",
+        trait_name="bud_opening", subject="bud", attribute="opening",
         calibration_gt_dir=str(cal_gt), calibration_pred_dir=str(cal_pred),
         holdout_gt_dir=str(hold_gt), holdout_pred_dir=str(hold_pred),
         output_dir=str(tmp_path / "out"), dataset_root=str(tmp_path), experiment_id=None,
@@ -1079,7 +1079,7 @@ def test_calibrate_classifier_operating_point_partial_flip_fails_compensating_er
     gate_evidence = sidecar["gate_evidence"]
     assert gate_evidence["kappa"] is not None
     assert gate_evidence["kappa"] <= gate_evidence["kappa_floor"]
-    assert gate_evidence["kappa_floor_source"] == "default"  # catkin sets none
+    assert gate_evidence["kappa_floor_source"] == "default"  # bud_opening sets none
 
 
 def test_resolve_classifier_operating_point_refuses_single_image_holdout() -> None:
@@ -1101,7 +1101,7 @@ def test_resolve_classifier_operating_point_refuses_single_image_holdout() -> No
         for i in range(20)
     ]
     res = resolve_classifier_operating_point(
-        "catkin", calibration_items=cal, holdout_items=hold, experiment_id=None)
+        "bud_opening", calibration_items=cal, holdout_items=hold, experiment_id=None)
 
     assert res["passed"] is False
     assert "insufficient_holdout_images" in res["failures"], res["failures"]
@@ -1111,8 +1111,8 @@ def test_resolve_classifier_operating_point_bias_is_scoped_to_present_images() -
     """count_bias/count_bias_std must be measured over the same population typical_positive_count
     is already scoped to (images carrying a true or predicted positive), the same present-scoped fix
     the pooled detector gate already has, mirroring _count_stats_at_conf's own `if gt or dt`. Before
-    the fix, an all-negative image (no true positive, no predicted positive -- a confirmed-dormant
-    catkin the classifier correctly called negative) contributed a certain zero to the bias mean/std
+    the fix, an all-negative image (no true positive, no predicted positive -- a confirmed-closed
+    bud the classifier correctly called negative) contributed a certain zero to the bias mean/std
     while never counting toward typical_positive_count, diluting a real systematic miscall by
     n_bias_images/n_present exactly as the detector path's own dilution did."""
     from tcip_mcp.pipelines.operating_point import resolve_classifier_operating_point
@@ -1139,7 +1139,7 @@ def test_resolve_classifier_operating_point_bias_is_scoped_to_present_images() -
                     "bbox": [-100.0 - i, 0.0, -90.0 - i, 10.0]})
 
     res = resolve_classifier_operating_point(
-        "catkin", calibration_items=cal, holdout_items=hold, experiment_id=None)
+        "bud_opening", calibration_items=cal, holdout_items=hold, experiment_id=None)
 
     assert res["gate_evidence"]["typical_positive_count"] == pytest.approx(100.0)
     assert res["gate_evidence"]["count_bias_n_images"] == 10  # scoped to the 10 informative images only
@@ -1179,7 +1179,7 @@ def test_resolve_classifier_operating_point_relative_tolerance_refuses_a_sparse_
     from tcip_mcp.pipelines.operating_point import resolve_classifier_operating_point
 
     sparse = resolve_classifier_operating_point(
-        "catkin", calibration_items=_classifier_items("c", 20, 1),
+        "bud_opening", calibration_items=_classifier_items("c", 20, 1),
         holdout_items=_classifier_items("h", 20, 1, miscall_images=[0], image_offset=20),
         experiment_id=None)
     assert sparse["gate_evidence"]["typical_positive_count"] == pytest.approx(1.0)
@@ -1187,7 +1187,7 @@ def test_resolve_classifier_operating_point_relative_tolerance_refuses_a_sparse_
     assert "count_bias_exceeds_tolerance" in sparse["failures"]
 
     dense = resolve_classifier_operating_point(
-        "catkin", calibration_items=_classifier_items("c", 20, 150),
+        "bud_opening", calibration_items=_classifier_items("c", 20, 150),
         holdout_items=_classifier_items("h", 20, 150, miscall_images=[0], image_offset=20),
         experiment_id=None)
     assert dense["gate_evidence"]["typical_positive_count"] == pytest.approx(150.0)
@@ -1207,10 +1207,10 @@ def test_resolve_classifier_operating_point_honors_trait_authored_agreement_floo
     from dataclasses import replace
 
     from tcip_mcp.pipelines import operating_point as op_mod
-    from tests._trait_fixtures import CATKIN
+    from tests._trait_fixtures import BUD_OPENING
 
-    strict_catkin = replace(CATKIN, classifier_agreement_floor=0.9)
-    monkeypatch.setattr(op_mod, "get_trait", lambda name: strict_catkin)
+    strict_bud_opening = replace(BUD_OPENING, classifier_agreement_floor=0.9)
+    monkeypatch.setattr(op_mod, "get_trait", lambda name: strict_bud_opening)
 
     # A holdout with kappa=0.8 -- clears the platform's interim default (0.41) but not the
     # trait's own stricter authored floor (0.9).
@@ -1226,7 +1226,7 @@ def test_resolve_classifier_operating_point_honors_trait_authored_agreement_floo
     cal = make_items(20, flips=set())
     hold = make_items(100, flips=set(range(10)))  # 10% symmetric flip -> kappa=0.8
     res = op_mod.resolve_classifier_operating_point(
-        "catkin", calibration_items=cal, holdout_items=hold, experiment_id=None)
+        "bud_opening", calibration_items=cal, holdout_items=hold, experiment_id=None)
 
     assert 0.75 < res["gate_evidence"]["kappa"] < 0.85, res["gate_evidence"]
     assert res["gate_evidence"]["kappa_floor"] == 0.9
@@ -1237,12 +1237,12 @@ def test_resolve_classifier_operating_point_honors_trait_authored_agreement_floo
 
 def test_resolve_classifier_operating_point_count_bias_tolerance_frac_source(monkeypatch) -> None:
     """TraitSpec.count_bias_tolerance_frac mirrors classifier_agreement_floor's own provenance
-    stamp: unauthored (CATKIN's own state) resolves to the platform's interim default fraction and
+    stamp: unauthored (BUD_OPENING's own state) resolves to the platform's interim default fraction and
     stamps that; a trait that authors its own value stamps ``"trait"`` instead."""
     from dataclasses import replace
 
     from tcip_mcp.pipelines import operating_point as op_mod
-    from tests._trait_fixtures import CATKIN
+    from tests._trait_fixtures import BUD_OPENING
 
     def make_items(n, flips):
         items = []
@@ -1256,16 +1256,16 @@ def test_resolve_classifier_operating_point_count_bias_tolerance_frac_source(mon
     cal = make_items(20, flips=set())
     hold = make_items(100, flips=set())  # clean, zero bias, so this stamp is reachable regardless
 
-    monkeypatch.setattr(op_mod, "get_trait", lambda name: CATKIN)
+    monkeypatch.setattr(op_mod, "get_trait", lambda name: BUD_OPENING)
     res_default = op_mod.resolve_classifier_operating_point(
-        "catkin", calibration_items=cal, holdout_items=hold, experiment_id=None)
+        "bud_opening", calibration_items=cal, holdout_items=hold, experiment_id=None)
     assert res_default["gate_evidence"]["count_bias_tolerance_frac"] == pytest.approx(0.01)
     assert res_default["gate_evidence"]["count_bias_tolerance_frac_source"] == "default"
 
-    authored_catkin = replace(CATKIN, count_bias_tolerance_frac=0.2)
-    monkeypatch.setattr(op_mod, "get_trait", lambda name: authored_catkin)
+    authored_bud_opening = replace(BUD_OPENING, count_bias_tolerance_frac=0.2)
+    monkeypatch.setattr(op_mod, "get_trait", lambda name: authored_bud_opening)
     res_trait = op_mod.resolve_classifier_operating_point(
-        "catkin", calibration_items=cal, holdout_items=hold, experiment_id=None)
+        "bud_opening", calibration_items=cal, holdout_items=hold, experiment_id=None)
     assert res_trait["gate_evidence"]["count_bias_tolerance_frac"] == pytest.approx(0.2)
     assert res_trait["gate_evidence"]["count_bias_tolerance_frac_source"] == "trait"
 
@@ -1293,7 +1293,7 @@ def test_resolve_ordinal_operating_point_passes_on_clean_disjoint_split() -> Non
     hold = _ordinal_items("h", ranks, ranks)  # perfect agreement -> kappa=1.0
 
     res = resolve_ordinal_operating_point(
-        "catkin", criterion="quadratic_weighted_kappa", calibration_items=cal, holdout_items=hold,
+        "bud_opening", criterion="quadratic_weighted_kappa", calibration_items=cal, holdout_items=hold,
         experiment_id=None)
 
     assert res["passed"] is True, res
@@ -1311,7 +1311,7 @@ def test_resolve_ordinal_operating_point_fails_closed_on_non_disjoint_split() ->
     hold = _ordinal_items("shared", ranks, ranks)  # identical image_ids -> not disjoint
 
     res = resolve_ordinal_operating_point(
-        "catkin", criterion="quadratic_weighted_kappa", calibration_items=cal, holdout_items=hold,
+        "bud_opening", criterion="quadratic_weighted_kappa", calibration_items=cal, holdout_items=hold,
         experiment_id=None)
 
     assert res["passed"] is False
@@ -1330,7 +1330,7 @@ def test_resolve_ordinal_operating_point_fails_closed_at_or_below_the_floor() ->
     hold = _ordinal_items("h", true_ranks, pred_ranks)
 
     res = resolve_ordinal_operating_point(
-        "catkin", criterion="quadratic_weighted_kappa", calibration_items=cal, holdout_items=hold,
+        "bud_opening", criterion="quadratic_weighted_kappa", calibration_items=cal, holdout_items=hold,
         experiment_id=None)
 
     assert res["gate_evidence"]["score"] is not None
@@ -1343,7 +1343,7 @@ def test_resolve_ordinal_operating_point_fails_closed_on_missing_items() -> None
     from tcip_mcp.pipelines.operating_point import resolve_ordinal_operating_point
 
     res = resolve_ordinal_operating_point(
-        "catkin", criterion="quadratic_weighted_kappa", calibration_items=None, holdout_items=None,
+        "bud_opening", criterion="quadratic_weighted_kappa", calibration_items=None, holdout_items=None,
         experiment_id=None)
 
     assert res["passed"] is False
@@ -1356,7 +1356,7 @@ def test_resolve_ordinal_operating_point_unknown_criterion_raises() -> None:
 
     with pytest.raises(ValueError, match="not a registered ordinal criterion"):
         resolve_ordinal_operating_point(
-            "catkin", criterion="not_a_real_criterion",
+            "bud_opening", criterion="not_a_real_criterion",
             calibration_items=[{"image_id": "c0", "true_rank": 0, "predicted_rank": 0}],
             holdout_items=[{"image_id": "h0", "true_rank": 0, "predicted_rank": 0}],
             experiment_id=None)
@@ -1370,7 +1370,7 @@ def test_resolve_regression_operating_point_passes_on_clean_disjoint_split() -> 
     hold = _regression_items("h", values, values)  # perfect fit -> r_squared=1.0
 
     res = resolve_regression_operating_point(
-        "catkin", criterion="r_squared", calibration_items=cal, holdout_items=hold,
+        "bud_opening", criterion="r_squared", calibration_items=cal, holdout_items=hold,
         experiment_id=None)
 
     assert res["passed"] is True, res
@@ -1388,7 +1388,7 @@ def test_resolve_regression_operating_point_fails_closed_on_non_disjoint_split()
     hold = _regression_items("shared", values, values)
 
     res = resolve_regression_operating_point(
-        "catkin", criterion="r_squared", calibration_items=cal, holdout_items=hold,
+        "bud_opening", criterion="r_squared", calibration_items=cal, holdout_items=hold,
         experiment_id=None)
 
     assert res["passed"] is False
@@ -1406,7 +1406,7 @@ def test_resolve_regression_operating_point_fails_closed_at_or_below_the_floor()
     hold = _regression_items("h", true_values, [10.0] * 20)  # constant prediction, no skill
 
     res = resolve_regression_operating_point(
-        "catkin", criterion="r_squared", calibration_items=cal, holdout_items=hold,
+        "bud_opening", criterion="r_squared", calibration_items=cal, holdout_items=hold,
         experiment_id=None)
 
     assert res["gate_evidence"]["score"] is not None
@@ -1419,7 +1419,7 @@ def test_resolve_regression_operating_point_fails_closed_on_missing_items() -> N
     from tcip_mcp.pipelines.operating_point import resolve_regression_operating_point
 
     res = resolve_regression_operating_point(
-        "catkin", criterion="r_squared", calibration_items=[], holdout_items=[],
+        "bud_opening", criterion="r_squared", calibration_items=[], holdout_items=[],
         experiment_id=None)
 
     assert res["passed"] is False
@@ -1432,7 +1432,7 @@ def test_resolve_regression_operating_point_unknown_criterion_raises() -> None:
 
     with pytest.raises(ValueError, match="not a registered regression criterion"):
         resolve_regression_operating_point(
-            "catkin", criterion="not_a_real_criterion",
+            "bud_opening", criterion="not_a_real_criterion",
             calibration_items=[{"image_id": "c0", "true_value": 1.0, "predicted_value": 1.0}],
             holdout_items=[{"image_id": "h0", "true_value": 1.0, "predicted_value": 1.0}],
             experiment_id=None)
@@ -1448,7 +1448,7 @@ def test_resolve_regression_operating_point_ccc_criterion_is_selectable() -> Non
     hold = _regression_items("h", values, values)  # perfect fit -> CCC=1.0 too
 
     res = resolve_regression_operating_point(
-        "catkin", criterion="concordance_correlation_coefficient", calibration_items=cal,
+        "bud_opening", criterion="concordance_correlation_coefficient", calibration_items=cal,
         holdout_items=hold, experiment_id=None)
 
     assert res["gate_evidence"]["criterion"] == "concordance_correlation_coefficient"
@@ -1469,7 +1469,7 @@ def test_calibrate_classifier_operating_point_foreign_checkpoint_stamp_still_rea
     _write_split(hold_gt, hold_pred, prefix="hold", n_images=20, per_image_calls=calls, offset=1000)
 
     res = calibrate_classifier_operating_point(
-        trait_name="catkin", subject="catkin", attribute="elongation",
+        trait_name="bud_opening", subject="bud", attribute="opening",
         calibration_gt_dir=str(cal_gt), calibration_pred_dir=str(cal_pred),
         holdout_gt_dir=str(hold_gt), holdout_pred_dir=str(hold_pred),
         output_dir=str(tmp_path / "out"), dataset_root=str(tmp_path), experiment_id=None,
@@ -1483,7 +1483,7 @@ def test_calibrate_classifier_operating_point_foreign_checkpoint_stamp_still_rea
 def test_calibrate_classifier_operating_point_unassessed_gt_never_fabricates_a_negative(
     tmp_path: Path,
 ) -> None:
-    """A GT instance never assessed for `attribute` (no elongation key at all)
+    """A GT instance never assessed for `attribute` (no opening key at all)
     must be excluded from the reference, never coerced into "not positive". A perfect classifier
     scored against a reference where every image also carries unassessed instances must still pass
     cleanly -- the unassessed instances contribute no fabricated disagreement."""
@@ -1502,7 +1502,7 @@ def test_calibrate_classifier_operating_point_unassessed_gt_never_fabricates_a_n
                 per_image_calls=perfect_plus_unassessed, offset=1000)
 
     res = calibrate_classifier_operating_point(
-        trait_name="catkin", subject="catkin", attribute="elongation",
+        trait_name="bud_opening", subject="bud", attribute="opening",
         calibration_gt_dir=str(cal_gt), calibration_pred_dir=str(cal_pred),
         holdout_gt_dir=str(hold_gt), holdout_pred_dir=str(hold_pred),
         output_dir=str(tmp_path / "out"), dataset_root=str(tmp_path), experiment_id=None,
@@ -1529,89 +1529,87 @@ def test_classification_items_derives_center_match_tolerance_across_the_whole_sp
     gt_dir.mkdir()
     pred_dir.mkdir()
     # Precondition guard: this test's math depends on
-    # the recorded kind (CATKIN's localization=CENTER_MATCH, seeded by seed_catkin_trait_spec)
+    # the recorded kind (BUD_OPENING's localization=CENTER_MATCH, seeded by seed_bud_trait_spec)
     # governing, not a live derivation; this is not redundant with derivation: this
     # split's average characteristic size (sqrt(200*200)=200 and sqrt(20*20)=20, mean 110px)
     # exceeds derive_localization_kind's ~45px crossover and would derive to iou_match if
     # unrecorded. resolve_match_criterion uses a recorded kind as-is (only warns on divergence,
     # never overrides it (see test_evaluation_metrics.py's dedicated coverage of that behavior),
-    # so this assertion is what actually fails fast, with a clear message, if the CATKIN fixture's
+    # so this assertion is what actually fails fast, with a clear message, if the BUD_OPENING fixture's
     # localization value ever changes and silently stops exercising the center-match code path
     # this test exists to cover.
-    spec = get_trait("catkin")
+    spec = get_trait("bud_opening")
     assert spec.localization == CENTER_MATCH and spec.localization_tolerance_frac == 0.5
 
     # "big": a 200x200 GT box -> char_size=200 -> per-image tolerance would be 100px; offset 40px
     # (comfortably under both the per-image AND the split-wide tolerance derived below).
     big_box = BBox(0.0, 0.0, 200.0, 200.0)
     json_io.write_annotations(gt_dir / "big.json", [
-        Annotation(subject="catkin", geometry=big_box, attributes={"elongation": "elongated"}),
+        Annotation(subject="bud", geometry=big_box, attributes={"opening": "open"}),
     ], 400, 400)
     json_io.write_annotations(pred_dir / "big.json", [
-        Annotation(subject="catkin", geometry=BBox(40.0, 0.0, 240.0, 200.0), score=0.9,
-                   attributes={"elongation": "elongated"}),
+        Annotation(subject="bud", geometry=BBox(40.0, 0.0, 240.0, 200.0), score=0.9,
+                   attributes={"opening": "open"}),
     ], 400, 400)
 
     # "small": a 20x20 GT box -> char_size=20 -> per-image tolerance would be only 10px; the
     # prediction is offset 15px, which a per-image derivation would drop as unmatched.
     small_box = BBox(1000.0, 0.0, 1020.0, 20.0)
     json_io.write_annotations(gt_dir / "small.json", [
-        Annotation(subject="catkin", geometry=small_box, attributes={"elongation": "dormant"}),
+        Annotation(subject="bud", geometry=small_box, attributes={"opening": "closed"}),
     ], 1100, 100)
     json_io.write_annotations(pred_dir / "small.json", [
-        Annotation(subject="catkin", geometry=BBox(1015.0, 0.0, 1035.0, 20.0), score=0.9,
-                   attributes={"elongation": "dormant"}),
+        Annotation(subject="bud", geometry=BBox(1015.0, 0.0, 1035.0, 20.0), score=0.9,
+                   attributes={"opening": "closed"}),
     ], 1100, 100)
 
     # Split-wide avg char_size = (200 + 20) / 2 = 110 -> tolerance = 0.5 * 110 = 55px, comfortably
     # above both the small image's 15px offset and the big image's 40px offset.
-    items = _classification_items(str(gt_dir), str(pred_dir), trait_name="catkin", subject="catkin",
-                                  positive_value="elongated", attribute="elongation")
+    items = _classification_items(str(gt_dir), str(pred_dir), trait_name="bud_opening", subject="bud",
+                                  positive_value="open", attribute="opening")
 
     by_image = {it["image_id"]: it for it in items}
     assert "small" in by_image, (
         "the small-object image's pair was dropped -- tolerance was derived per-image, not "
         "across the whole split"
     )
-    assert by_image["small"]["is_true_positive"] is False  # "dormant"
+    assert by_image["small"]["is_true_positive"] is False  # "closed"
     assert by_image["small"]["is_pred_positive"] is False
     assert "big" in by_image
-    assert by_image["big"]["is_true_positive"] is True  # "elongated"
+    assert by_image["big"]["is_true_positive"] is True  # "open"
 
 
 def test_classification_items_scopes_gt_to_the_run_subject(tmp_path: Path) -> None:
     """A labels dir isn't guaranteed to hold only one kind of
     annotation -- a dataset that also isolates an enabling subject (e.g. "bush", root CLAUDE.md's
     "a subject is not a trait") must not let that unrelated box enter the match pool. Here a "bush"
-    annotation sits exactly on the prediction's center (distance 0) while the real "catkin" GT is a
+    annotation sits exactly on the prediction's center (distance 0) while the real "bud" GT is a
     few px off -- if subject weren't scoped, greedy center-match (closest first) would steal the
-    match for "bush" and either drop the real catkin pair or attribute it to the wrong box/attribute
+    match for "bush" and either drop the real bud pair or attribute it to the wrong box/attribute
     entirely."""
     gt_dir, pred_dir = tmp_path / "gt", tmp_path / "pred"
     gt_dir.mkdir()
     pred_dir.mkdir()
 
-    # catkin center (125, 125), offset ~7px from the prediction -- comfortably inside tolerance.
-    # bush center (120, 120), an exact match to the prediction -- if it entered the pool, greedy
-    # center-match (ascending distance) would steal the match for bush (distance 0 beats ~7px)
-    # ahead of the real catkin pair, regardless of list order.
-    catkin_box = BBox(105.0, 105.0, 145.0, 145.0)
+    # bud center is ~7px from the prediction, inside tolerance; bush center is an exact match, so
+    # unscoped greedy center-match would steal it for bush ahead of the real bud pair.
+    bud_box = BBox(105.0, 105.0, 145.0, 145.0)
     bush_box = BBox(114.0, 114.0, 126.0, 126.0)
     json_io.write_annotations(gt_dir / "a.json", [
-        Annotation(subject="catkin", geometry=catkin_box, attributes={"elongation": "elongated"}),
+        Annotation(subject="bud", geometry=bud_box, attributes={"opening": "open"}),
         Annotation(subject="bush", geometry=bush_box),
     ], 400, 400)
     json_io.write_annotations(pred_dir / "a.json", [
-        Annotation(subject="catkin", geometry=BBox(114.0, 114.0, 126.0, 126.0), score=0.9,
-                   attributes={"elongation": "elongated"}),
+        Annotation(subject="bud", geometry=BBox(114.0, 114.0, 126.0, 126.0), score=0.9,
+                   attributes={"opening": "open"}),
     ], 400, 400)
 
-    items = _classification_items(str(gt_dir), str(pred_dir), trait_name="catkin", subject="catkin",
-                                  positive_value="elongated", attribute="elongation")
+    items = _classification_items(str(gt_dir), str(pred_dir), trait_name="bud_opening", subject="bud",
+                                  positive_value="open", attribute="opening")
 
     assert len(items) == 1
-    assert items[0]["bbox"] == [105.0, 105.0, 145.0, 145.0]  # the catkin box, not bush's
-    assert items[0]["is_true_positive"] is True  # catkin's own "elongated" attribute
+    assert items[0]["bbox"] == [105.0, 105.0, 145.0, 145.0]  # the bud box, not bush's
+    assert items[0]["is_true_positive"] is True  # bud's own "open" attribute
 
 
 # --------------------------------------------------------------------------
@@ -1659,7 +1657,7 @@ def test_calibrate_scalar_operating_point_ordinal_e2e(
     assert "error" not in reg, reg
 
     result = calibrate_scalar_operating_point(
-        trait_name="catkin", task="ordinal",
+        trait_name="bud_opening", task="ordinal",
         checkpoint_path=str(tmp_path / "out" / "model_best.pt"),
         images_dir=str(images_dir), csv_path=str(csv_path),
         criterion="quadratic_weighted_kappa", output_dir=str(tmp_path / "calib"),
@@ -1674,7 +1672,7 @@ def test_calibrate_scalar_operating_point_ordinal_e2e(
 
     sidecar = read_ordinal_operating_point_sidecar(tmp_path / "calib")
     assert sidecar["schema_version"] == 2
-    assert sidecar["trait"] == "catkin"
+    assert sidecar["trait"] == "bud_opening"
     assert sidecar["operating_point"]["ordinal"]["criterion"] == "quadratic_weighted_kappa"
     assert sidecar["operating_point"]["ordinal"]["validated_against"] == result["validated_against"]
     assert sidecar["validated"] == result["passed"]
@@ -1723,7 +1721,7 @@ def test_calibrate_scalar_operating_point_regression_e2e(
     assert "error" not in reg, reg
 
     result = calibrate_scalar_operating_point(
-        trait_name="catkin", task="regression",
+        trait_name="bud_opening", task="regression",
         checkpoint_path=str(tmp_path / "out" / "model_best.pt"),
         images_dir=str(images_dir), csv_path=str(csv_path),
         criterion="r_squared", output_dir=str(tmp_path / "calib"),
@@ -1738,7 +1736,7 @@ def test_calibrate_scalar_operating_point_regression_e2e(
 
     sidecar = read_regression_operating_point_sidecar(tmp_path / "calib")
     assert sidecar["schema_version"] == 2
-    assert sidecar["trait"] == "catkin"
+    assert sidecar["trait"] == "bud_opening"
     assert sidecar["operating_point"]["regression"]["criterion"] == "r_squared"
     assert sidecar["operating_point"]["regression"]["validated_against"] == result["validated_against"]
     assert sidecar["validated"] == result["passed"]
@@ -1749,7 +1747,7 @@ def test_calibrate_scalar_operating_point_unknown_task_returns_error(tmp_path: P
     from tcip_mcp.tools.calibration_tools import calibrate_scalar_operating_point
 
     result = calibrate_scalar_operating_point(
-        trait_name="catkin", task="classification", checkpoint_path="m.pt",
+        trait_name="bud_opening", task="classification", checkpoint_path="m.pt",
         images_dir=str(tmp_path), csv_path=str(tmp_path / "x.csv"), criterion="r_squared",
         output_dir=str(tmp_path / "calib"), dataset_root=str(tmp_path),
     )
@@ -1809,7 +1807,7 @@ def test_calibrate_scalar_operating_point_admits_a_loose_images_directory(
                         lambda *a, **kw: _RecordedRanks())
 
     res = calibrate_scalar_operating_point(
-        trait_name="catkin", task="ordinal", checkpoint_path=str(checkpoint),
+        trait_name="bud_opening", task="ordinal", checkpoint_path=str(checkpoint),
         images_dir=str(frames), csv_path=str(csv_path),
         criterion="quadratic_weighted_kappa", output_dir=str(out),
         dataset_root=str(tmp_path), group_by="stem",
@@ -1817,11 +1815,11 @@ def test_calibrate_scalar_operating_point_admits_a_loose_images_directory(
 
     assert res["passed"] is True, res
     stamp = read_ordinal_operating_point_sidecar(out)
-    binding = verify_stamp_binding(stamp, out, document="ordinal_operating_point", trait="catkin")
+    binding = verify_stamp_binding(stamp, out, document="ordinal_operating_point", trait="bud_opening")
     assert binding.ok and binding.claimed, binding.note
     assert binding.experiment_id == res["validated_by"]["experiment_id"]
     assert reconcile_ordinal_validity(
-        [str(out)], trait="catkin")["validated"] == VALIDATED_HELD_OUT
+        [str(out)], trait="bud_opening")["validated"] == VALIDATED_HELD_OUT
 
     # The door ran this checkpoint, so stamp and record both name it and the equality check holds.
     import hashlib
@@ -1850,7 +1848,7 @@ def test_calibrate_scalar_operating_point_refuses_a_dataset_root_its_images_cont
     _rank_csv(csv_path, {f"img{i}": i % 3 for i in range(4)})
 
     res = calibrate_scalar_operating_point(
-        trait_name="catkin", task="ordinal", checkpoint_path=str(tmp_path / "model_best.pt"),
+        trait_name="bud_opening", task="ordinal", checkpoint_path=str(tmp_path / "model_best.pt"),
         images_dir=str(ds / "images"), csv_path=str(csv_path),
         criterion="quadratic_weighted_kappa", output_dir=str(tmp_path / "calib"),
         dataset_root=str(stated),
@@ -1869,12 +1867,12 @@ def _delivery_setup(tmp_path: Path, *, experiment_id: str | None,
     """Two classified, count-validated buckets plus a mapping, ready for a phenology delivery."""
     root = _ds_root(tmp_path)
     d1, d2 = _bucket(tmp_path, "2026-02-11"), _bucket(tmp_path, "2026-03-09")
-    _write_preds(d1, "P1_a", ["dormant"])
-    _write_preds(d2, "P1_b", ["elongated"])
+    _write_preds(d1, "P1_a", ["closed"])
+    _write_preds(d2, "P1_b", ["open"])
     for d in (d1, d2):
         _write_op_sidecar(d, dataset_root=root, validated=True, id_map=ID_MAP,
                           experiment_id=experiment_id, checkpoint_sha256=checkpoint_sha256)
-    _write_classifier_sidecar(d1, dataset_root=root, validated=True, trait="catkin",
+    _write_classifier_sidecar(d1, dataset_root=root, validated=True, trait="bud_opening",
                               experiment_id=experiment_id)
     mapping_name = "valley"
     _write_mapping(tmp_path, mapping_name, {
@@ -1910,10 +1908,10 @@ def test_deliver_phenology_milestones_names_the_record_and_producer_a_bound_buck
     sha = record_producing_run(tmp_path, "exp-producer")
     mapping_name, d1, d2 = _delivery_setup(
         tmp_path, experiment_id="exp-producer", checkpoint_sha256=sha)
-    out_csv = tmp_path / "out" / "catkin_phenology.csv"
+    out_csv = tmp_path / "out" / "bud_phenology.csv"
 
     res = deliver_phenology_milestones(
-        trait="catkin", mapping_name=mapping_name,
+        trait="bud_opening", mapping_name=mapping_name,
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv), classifier_pred_dirs=[str(d1)],
         operating_point_conf=0.4, operating_point_validated="held_out_annotations",
@@ -1950,9 +1948,9 @@ def test_writer_delivers_a_forged_stamp_acknowledged_with_no_producer_names(
     for d in (d1, d2):
         update_sidecar(d, _forge, "operating_point")
 
-    out_csv = tmp_path / "out" / "catkin_phenology.csv"
+    out_csv = tmp_path / "out" / "bud_phenology.csv"
     cells = _deliver_via_writer(
-        trait="catkin",
+        trait="bud_opening",
         mapping_name=mapping_name,
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=out_csv,
@@ -1980,10 +1978,10 @@ def test_deliver_phenology_milestones_records_what_verification_found_in_the_dat
     sha = record_producing_run(tmp_path, "exp-producer")
     mapping_name, d1, d2 = _delivery_setup(
         tmp_path, experiment_id="exp-producer", checkpoint_sha256=sha)
-    out_csv = tmp_path / "out" / "catkin_phenology.csv"
+    out_csv = tmp_path / "out" / "bud_phenology.csv"
 
     res = deliver_phenology_milestones(
-        trait="catkin", mapping_name=mapping_name,
+        trait="bud_opening", mapping_name=mapping_name,
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv), classifier_pred_dirs=[str(d1)],
         operating_point_conf=0.4, operating_point_validated="held_out_annotations",
