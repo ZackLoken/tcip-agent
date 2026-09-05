@@ -1274,7 +1274,7 @@ Writers: `tcip_annotation.json_io.write_annotations`,
 Readers: `tcip_annotation.json_io.read_annotations`,
 `packages/tcip-annotation/src/tcip_annotation/json_io.py:538`;
 `tcip_annotation.format_io.load_annotations`,
-`packages/tcip-annotation/src/tcip_annotation/format_io.py:371`;
+`packages/tcip-annotation/src/tcip_annotation/format_io.py:372`;
 `tcip_mcp.dataset_layout.subjects_on_date`,
 `packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:1126`.
 
@@ -1296,7 +1296,7 @@ different consumer path in the same test.
 Path: caller-supplied, single dataset-level `.json` file, not per-image.
 
 Writers: `tcip_annotation.format_io.write_coco`,
-`packages/tcip-annotation/src/tcip_annotation/format_io.py:297`;
+`packages/tcip-annotation/src/tcip_annotation/format_io.py:298`;
 `tcip_annotation.format_io.save_annotations` (`fmt="coco"`), `format_io.py:283`;
 `tcip_annotation.json_io.to_coco_dataset` (returns dict, performs no file I/O),
 `packages/tcip-annotation/src/tcip_annotation/json_io.py:413`.
@@ -2690,7 +2690,7 @@ Phase 3 verdict: duplicated.
 
 Must agree: a documented call binds against the real function signature.
 Side A: `packages/tcip-mcp/src/tcip_mcp/knowledge/` (python fenced examples in the knowledge documents).
-Side B: `scripts/verify_doc_examples.py:32` (`_MD_FENCE = re.compile(r"```python\n(.*?)```", re.DOTALL)`).
+Side B: `scripts/verify_doc_examples.py:33` (`_MD_FENCE = re.compile(r"```python\n(.*?)```", re.DOTALL)`).
 Phase 3 verdict: single.
 
 ## S67. Local gate commands against the CI gate  <!-- queued: P5-308 unify -->
