@@ -210,8 +210,10 @@ class SemanticSegHead(BaseHead):
             nn.ReLU(inplace=True),
             nn.Conv2d(256, num_classes, 1),
         )
-        # Optional per-class weight applied to the CE term (Dice term is unweighted).
+        # Optional per-class weight applied to the CE term (Dice term is unweighted); the
+        # annotation states the buffer's real type since nn.Module's own __getattr__ stub can't.
         weight = torch.tensor(class_weights, dtype=torch.float32) if class_weights is not None else None
+        self.ce_weight: torch.Tensor | None
         self.register_buffer("ce_weight", weight)
 
     def forward(self, features, targets=None):
