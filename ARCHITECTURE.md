@@ -64,8 +64,8 @@ source file under a covered root that no row names.
 | packages/tcip-mcp/src/tcip_mcp/agent_identity.py | Which agent harness this MCP server process serves, declared at the handshake, and the session it minted; projected onto every audit line, statement record and HTTP push. | 0 | 7 |
 | packages/tcip-mcp/src/tcip_mcp/audit.py | Audit logging decorator for MCP tools, the log each event's scope routes it to, and the refusal a call raises when its own entry cannot be appended. | 5 | 35 |
 | packages/tcip-mcp/src/tcip_mcp/class_registry.py | The dataset's class registry, subjects, their attributes, and the deterministic name→id assignment a training run uses (and records, so predictions stay decodable). | 2 | 13 |
-| packages/tcip-mcp/src/tcip_mcp/dataset_layout.py | Canonical dataset-layout resolver: the single source of truth for where an image's ground-truth labels and model predictions live on disk. | 7 | 47 |
-| packages/tcip-mcp/src/tcip_mcp/experiments.py | Experiment tracking for ML training runs. | 11 | 18 |
+| packages/tcip-mcp/src/tcip_mcp/dataset_layout.py | Canonical dataset-layout resolver: the single source of truth for where an image's ground-truth labels and model predictions live on disk. | 7 | 48 |
+| packages/tcip-mcp/src/tcip_mcp/experiments.py | Experiment tracking for ML training runs. | 11 | 19 |
 | packages/tcip-mcp/src/tcip_mcp/identity.py | The platform's recorded-actor convention, in one place. | 0 | 3 |
 | packages/tcip-mcp/src/tcip_mcp/knowledge/__init__.py | The one canonical domain-knowledge directory and its one reader: list_documents, document_path, document_paths, read_document, crops_yml_path. | 0 | 5 |
 | packages/tcip-mcp/src/tcip_mcp/model_registry.py | Model registry, track trained models and their performance. | 7 | 19 |
@@ -167,7 +167,7 @@ source file under a covered root that no row names.
 | packages/tcip-mcp/src/tcip_mcp/tools/project_tools.py | Project management tools. | 19 | 13 |
 | packages/tcip-mcp/src/tcip_mcp/tools/proposal_tools.py | Proposal-workflow tools: turn a chosen auto-labeling engine's output into predictions for canvas review. | 19 | 2 |
 | packages/tcip-mcp/src/tcip_mcp/tools/scale_tools.py | Physical per-pixel scale calibration: the delivery-gating producer for ``resolve_scale.json``. | 10 | 1 |
-| packages/tcip-mcp/src/tcip_mcp/tools/training_tools.py | Training MCP tools, config validation, launch training, HPO, status. | 31 | 11 |
+| packages/tcip-mcp/src/tcip_mcp/tools/training_tools.py | Training MCP tools, config validation, launch training, HPO, status. | 31 | 12 |
 | packages/tcip-mcp/src/tcip_mcp/tools/vision_tools.py | Vision tools: render annotations and predictions for visual analysis. | 22 | 5 |
 | packages/tcip-mcp/src/tcip_mcp/traits.py | Trait knowledge, the human-defined *semantics* of each measurable trait (Tier C). | 7 | 23 |
 | packages/tcip-mcp/src/tcip_mcp/utils/__init__.py | Shared low-level utilities for tcip-mcp. | 0 | 0 |
@@ -465,7 +465,7 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 |---|---|---|---|
 | scripts/_paths.py | Shared path resolution for the one-off analysis scripts: no machine-specific hardcoding. | 0 | 5 |
 | scripts/_script_root.py | Resolve-or-refuse `$TCIP_STATE_ROOT` pinning shared by the demoted-tool scripts. | 1 | 10 |
-| scripts/_store_bootstrap.py | Re-exports the store catalogue from tcip_mcp.store_catalogue, and which roots a project's records live in. | 3 | 2 |
+| scripts/_store_bootstrap.py | Re-exports the store catalogue from tcip_mcp.store_catalogue, and which roots a project's records live in. | 6 | 2 |
 | scripts/adopt_store.py | Move a root's existing record and log files into a store database. | 6 | 0 |
 | scripts/archive_project.py | Export an annotation project as a portable bundle, a ZIP or, with `--output-dir`, a directory tree, through the demoted `archive_project` function. | 4 | 0 |
 | scripts/build_module_inventory.py | Builds a module inventory and real import graph for the repo's Python and TypeScript source trees. | 0 | 0 |
