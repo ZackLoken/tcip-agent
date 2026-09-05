@@ -67,7 +67,9 @@ def route_name(path: str, method: str) -> str:
     parts = []
     for segment in segments:
         if segment.startswith("{"):
-            parts.append("By" + _camel(_PARAM_RE.match(segment).group(1), upper_first=True))
+            match = _PARAM_RE.match(segment)
+            assert match is not None, f"malformed path parameter segment {segment!r}"
+            parts.append("By" + _camel(match.group(1), upper_first=True))
         else:
             parts.append(_camel(segment, upper_first=True))
     return prefix + ("".join(parts) or "Root")
@@ -93,6 +95,7 @@ def collect_routes(app) -> list[tuple[str, str, str]]:
     found: list[tuple[str, str, str]] = []
     for route in iter_api_routes(app):
         if isinstance(route, APIRoute):
+            assert route.methods is not None, "FastAPI's own APIRoute always populates methods"
             for method in sorted(route.methods - {"HEAD", "OPTIONS"}):
                 found.append((route_name(route.path, method), route.path, method))
         else:
