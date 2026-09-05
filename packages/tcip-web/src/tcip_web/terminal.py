@@ -314,7 +314,17 @@ class _WinPty:
 class _PosixPty:
     """stdlib pty + subprocess (used on Linux CI and any POSIX deployment)."""
 
+    # __init__'s body is unreachable to a Windows-targeted mypy run (its sys.platform guard),
+    # so these are declared here rather than left to its own inference.
+    _master: int
+    _proc: subprocess.Popen
+    _decoder: codecs.IncrementalDecoder
+
     def __init__(self, argv: list[str], cwd: str, rows: int, cols: int, env: dict[str, str]):
+        # _open_pty dispatches this class off os.name == "nt", so it never runs on Windows;
+        # the guard also tells mypy the POSIX-only stdlib members below are never checked there.
+        if sys.platform == "win32":
+            raise AssertionError("_PosixPty is POSIX-only")
         import fcntl
         import pty
         import struct
@@ -347,6 +357,8 @@ class _PosixPty:
         os.write(self._master, data.encode("utf-8"))
 
     def resize(self, rows: int, cols: int) -> None:
+        if sys.platform == "win32":
+            raise AssertionError("_PosixPty is POSIX-only")
         import fcntl
         import struct
         import termios
@@ -358,6 +370,8 @@ class _PosixPty:
         return self._proc.poll() is None
 
     def terminate(self) -> None:
+        if sys.platform == "win32":
+            raise AssertionError("_PosixPty is POSIX-only")
         import signal
 
         # Liveness guard: once poll() has reaped the child, its pid (and pgid) may have
