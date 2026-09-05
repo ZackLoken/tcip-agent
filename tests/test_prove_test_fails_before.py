@@ -6,6 +6,10 @@ tree pytest actually ran in, so a materialized baseline that should fail collect
 fixed tree's test instead and reported VACUOUS for a real guard. A relative and an absolute path
 naming the same file under tests/ must now report the same verdict, and a path outside tests/
 must refuse rather than be materialized anywhere.
+
+The two guard checks run against the real baseline commit ``BASELINE``, so the checkout they run
+in must carry the repository's history: CI's python job checks out with ``fetch-depth: 0`` for
+this module, and a depth-1 clone makes both report REFUSED rather than GUARDS.
 """
 
 from __future__ import annotations
