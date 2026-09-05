@@ -7,6 +7,7 @@ import { api } from "@/api/client";
 import { classesApi, type ImageStatus } from "@/api/classes";
 import { AnnotateToolbar } from "@/components/AnnotateToolbar";
 import { defaultBandSelection, type BandSelection } from "@/lib/bandSelection";
+import { UNSET_GLYPH } from "@/lib/glyphs";
 import { imagePath } from "@/lib/paths";
 import { useStore } from "@/store";
 import type { DatasetSelection } from "@/store/types";
@@ -502,6 +503,31 @@ describe("AnnotateToolbar Complete toggle, subject-scoped", () => {
       "C:/data/annotations/2026-01-01",
       undefined,
     );
+  });
+});
+
+describe("AnnotateToolbar current image identity", () => {
+  it("leaves the identity null for an empty image list, rather than a display constant a status write could read as a real name", () => {
+    const dataset: DatasetSelection = {
+      project_root: "C:/proj",
+      dataset_root: "C:/data",
+      subject: "subject_a",
+      date: "2026-01-01",
+      image_list: [],
+      current_image_index: 0,
+      images_dir: "C:/data/images/2026-01-01",
+      annotations_dir: "C:/data/annotations/2026-01-01",
+      predictions_dir: null,
+    };
+    useStore.setState((s) => ({
+      gui: { ...s.gui, dataset },
+      imageStatus: { ...s.imageStatus, byImage: { [UNSET_GLYPH]: "complete" } },
+    }));
+    renderToolbar();
+
+    // A per-image status keyed by the display glyph must never read back as this (nonexistent)
+    // image's own status.
+    expect(screen.getByLabelText("Complete")).not.toBeChecked();
   });
 });
 
