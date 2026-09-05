@@ -553,6 +553,88 @@ def test_a_cursor_taken_before_a_clear_reads_only_what_was_appended_after(store)
     assert not resumed.torn_tail
 
 
+_CLEAR_LOG_RACE = (
+    "clear_log removes the log file and advances the clear-base watermark as two separate "
+    "file changes on the file backend; the database backend has no such pair to race"
+)
+
+
+def test_a_reader_interleaved_between_clear_logs_two_file_changes_reads_consistently(
+    store, monkeypatch,
+):
+    """A reader that lands at the point clear_log is about to remove the log file (the
+    file backend's own lock is thread-reentrant, so a same-thread call from inside that
+    window runs rather than blocking) must not replay the cleared entries to the cursor
+    that was current before the clear. Removing the file first and only then advancing
+    the watermark is what keeps this window safe: a reader landing here still finds the
+    watermark unadvanced, so the whole of the old, still-present file reads as bytes it
+    has already seen rather than bytes past its own end."""
+    only_on(store, FILE, _CLEAR_LOG_RACE)
+    backend = store.backend
+    key = store.key(LOG, "interleaved-clear")
+    for i in range(3):
+        ts.append(key, {"i": i})
+    before = ts.read_log(key)
+
+    real_remove = backend._remove_entry
+    interleaved: dict[str, object] = {}
+
+    def read_then_remove(path, *, durable):
+        interleaved["page"] = ts.read_log(key, after=before.cursor)
+        real_remove(path, durable=durable)
+
+    monkeypatch.setattr(backend, "_remove_entry", read_then_remove)
+
+    removed = ts.clear_log(key)
+
+    assert removed == 3
+    page = interleaved["page"]
+    assert page.records == []
+    assert page.cursor == before.cursor
+
+
+def test_a_crash_between_clear_logs_two_file_changes_replays_no_entry(store, monkeypatch):
+    """A process that dies after the first of clear_log's two file changes completes for
+    real, and before the second one runs at all, must leave a state a later, fully
+    independent read_log call reads correctly for the pre-clear end cursor: nothing new,
+    never every cleared entry replayed. Removing the file before advancing the watermark
+    is what buys this: the crash leaves the watermark unadvanced over an already-vanished
+    file, never advanced over one still holding the bytes it now claims to be past."""
+    only_on(store, FILE, _CLEAR_LOG_RACE)
+    backend = store.backend
+    key = store.key(LOG, "crash-mid-clear")
+    for i in range(3):
+        ts.append(key, {"i": i})
+    before = ts.read_log(key)
+
+    class _SimulatedCrash(Exception):
+        pass
+
+    real_remove = backend._remove_entry
+    real_write_base = backend._write_clear_base
+    fired = {"done": False}
+
+    def crash_after_first_real_call(real_fn):
+        def wrapper(*args, **kwargs):
+            result = real_fn(*args, **kwargs)
+            if not fired["done"]:
+                fired["done"] = True
+                raise _SimulatedCrash
+            return result
+
+        return wrapper
+
+    monkeypatch.setattr(backend, "_remove_entry", crash_after_first_real_call(real_remove))
+    monkeypatch.setattr(backend, "_write_clear_base", crash_after_first_real_call(real_write_base))
+
+    with pytest.raises(_SimulatedCrash):
+        ts.clear_log(key)
+
+    resumed = ts.read_log(key, after=before.cursor)
+    assert resumed.records == []
+    assert resumed.cursor == before.cursor
+
+
 _LOG_FILE_MECHANICS = (
     "a torn tail is bytes left in a file by an appender that died mid-write, reached here "
     "through the path the file backend places the log at"

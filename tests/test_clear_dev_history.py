@@ -74,6 +74,10 @@ def test_a_plan_removes_nothing_and_lists_the_counts(tmp_path: Path):
     assert any("would remove 3 audit_log line(s)" in o for o in outcomes)
     assert any("would remove 1 learning_capture line(s)" in o for o in outcomes)
     assert any("nothing was written" in o for o in outcomes)
+    assert any(
+        "a database backs this root" in o and "python scripts/export_store.py" in o
+        for o in outcomes
+    )
     assert len(ts.keys(FRICTION_REPORT_STORE, str(tmp_path))) == 1
     assert len(ts.keys(RETROSPECTIVE_STORE, str(tmp_path))) == 1
     assert len(ts.read_log(audit_log_key(tmp_path)).records) == 3
@@ -192,6 +196,8 @@ def test_main_apply_over_a_seeded_root_exits_zero_and_records_the_closing_line(
 
     assert exit_code == 0
     assert "closing audit line recorded" in output
+    assert "a database backs this root" in output
+    assert "python scripts/export_store.py" in output
     assert len(ts.read_log(audit_log_key(tmp_path)).records) == 1
 
 
@@ -229,8 +235,9 @@ def test_a_store_error_on_one_root_does_not_abort_the_others(
     must not surface as an uncaught traceback: main() names the refusal and moves on."""
     from tcip_store.binding import BACKEND_ENV, FILE_BACKEND, SQLITE_BACKEND
 
-    root1 = tmp_path
-    root2 = tmp_path.parent / "project2"
+    root1 = tmp_path / "project1"
+    root2 = tmp_path / "project2"
+    root1.mkdir()
     root2.mkdir()
 
     (root2 / ".tcip").mkdir()
