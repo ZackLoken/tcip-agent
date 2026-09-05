@@ -117,6 +117,18 @@ def _pre_conform_classified_bucket(dataset_root: Path, *, date: str = "2026-01-0
     return bucket
 
 
+def _scoped_like_bucket(dataset_root: Path, *, id_map: dict, date: str = "like") -> Path:
+    """A fully scoped bucket (a real ``--like`` source): its own stamp already carries the
+    ``(subject, attribute)`` pair and ``id_map``."""
+    bucket = dataset_root / "predictions" / "classifier" / date
+    value = next(iter(id_map))
+    _write_doc(bucket, "imgA",
+              [Annotation(subject=SUBJECT, geometry=BBox(0, 0, 10, 10), attributes={ATTRIBUTE: value})])
+    _write_stamp(bucket, _base_stamp(id_map=id_map, experiment_id="exp-like",
+                                     subject=SUBJECT, attribute=ATTRIBUTE))
+    return bucket
+
+
 def _register(project_root: Path, dataset_root: Path, *, dataset_id: str = "ds-1") -> None:
     (project_root / ".tcip").mkdir(parents=True, exist_ok=True)
     upsert_dataset(project_root, {"id": dataset_id, "path": str(dataset_root), "crop": "hazelnut",
@@ -453,6 +465,65 @@ def test_the_like_source_conforms_a_bare_copy(tmp_path):
     assert doc[0].subject == SUBJECT
     assert doc[0].attributes == {ATTRIBUTE: "healthy"}
     assert module.read_stamp_state(bare_copy).kind == "absent"
+
+
+def test_a_disagreeing_like_id_map_refuses_against_the_bucket_own_recorded_map(tmp_path):
+    """``--like`` supplies a vocabulary only for a bare directory or a stamp recording none: a
+    bucket whose own stamp already records an ``id_map`` is rewritten against that map, and a
+    ``--like`` whose map differs from it refuses by name rather than silently overriding it.
+    """
+    bind_default()
+    module = _load_script()
+    dataset_root = tmp_path / "dataset"
+    bucket = dataset_root / "predictions" / "classifier" / "unstated"
+    _write_doc(bucket, "img1", [Annotation(subject="healthy", geometry=BBox(0, 0, 10, 10))])
+    _write_stamp(bucket, _base_stamp(id_map=VALUE_ID_MAP))  # no subject/attribute recorded yet
+
+    other_map = {"unripe": 0, "ripe": 1}
+    like_dir = _scoped_like_bucket(dataset_root, id_map=other_map, date="like")
+
+    from tcip_mcp.prediction_buckets import bucket_content_digest
+
+    before = bucket_content_digest(bucket)
+    outcome, refused, id_map, changed_root = module.conform_bucket(
+        bucket, root=None, plan=False, like_dir=like_dir,
+        operator_subject=None, operator_attribute=None, is_bare_named=False,
+    )
+
+    assert refused is True
+    assert "disagrees" in outcome
+    assert bucket_content_digest(bucket) == before
+    assert module.read_stamp_state(bucket).kind == "unstated"
+
+
+def test_a_like_id_map_agreeing_with_the_bucket_own_recorded_map_conforms_it(tmp_path):
+    """A matching ``--like`` map is admitted exactly as the bucket's own recorded map."""
+    bind_default()
+    module = _load_script()
+    dataset_root = tmp_path / "dataset"
+    bucket = dataset_root / "predictions" / "classifier" / "unstated"
+    _write_doc(bucket, "img1", [Annotation(subject="healthy", geometry=BBox(0, 0, 10, 10))])
+    _write_doc(bucket, "img2", [Annotation(subject="diseased", geometry=BBox(5, 5, 15, 15))])
+    _write_stamp(bucket, _base_stamp(id_map=VALUE_ID_MAP))
+
+    like_dir = _scoped_like_bucket(dataset_root, id_map=VALUE_ID_MAP, date="like")
+
+    outcome, refused, id_map, changed_root = module.conform_bucket(
+        bucket, root=None, plan=False, like_dir=like_dir,
+        operator_subject=None, operator_attribute=None, is_bare_named=False,
+    )
+
+    assert refused is False
+    assert "rewrote" in outcome
+    assert id_map == VALUE_ID_MAP
+    scope = bucket_scope(bucket)
+    assert (scope.subject, scope.attribute) == (SUBJECT, ATTRIBUTE)
+
+    from tcip_annotation.json_io import read_annotations
+
+    doc = read_annotations(str(bucket / "img1.json"))
+    assert doc[0].subject == SUBJECT
+    assert doc[0].attributes == {ATTRIBUTE: "healthy"}
 
 
 def test_a_bucket_holding_a_raw_index_or_foreign_value_record_is_reported_and_untouched(tmp_path):

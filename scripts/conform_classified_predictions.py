@@ -370,7 +370,18 @@ def conform_bucket(
         return (f"{verb} the detector pair ({subject!r}, None) from the {source}; documents "
                 "untouched", plan, None, scope_root)
 
-    id_map = like_id_map if like_id_map is not None else stamp.get("id_map")
+    recorded_map = stamp.get("id_map")
+    if recorded_map:
+        if like_id_map is not None and like_id_map != recorded_map:
+            return (
+                f"refused, --like's id_map {like_id_map!r} disagrees with this bucket's own "
+                f"recorded id_map {recorded_map!r}: a bucket whose stamp records a map is "
+                "rewritten against its own, never --like's; --like supplies a vocabulary only "
+                "for a bare directory or a stamp recording none", True, None, None,
+            )
+        id_map = recorded_map
+    else:
+        id_map = like_id_map
     if not isinstance(id_map, dict) or not id_map:
         return (f"refused, the {source} names a classified pair ({subject!r}, {attribute!r}) but "
                 "this bucket records no id_map to decode by; re-infer this run", True, None, None)
