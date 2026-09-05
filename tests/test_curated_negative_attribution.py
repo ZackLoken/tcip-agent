@@ -45,7 +45,7 @@ def _completed(detections: list[dict]) -> dict:
 
 _TWO_SUBJECTS = (
     Subject(name="bud", attributes=(
-        Attribute(name="stage", type="ordinal", values=("closed", "elongating", "shedding")),)),
+        Attribute(name="stage", type="ordinal", values=("closed", "partial", "shedding")),)),
     Subject(name="leaf", attributes=(
         Attribute(name="damage", type="categorical", values=("none", "blight")),)),
 )
@@ -109,12 +109,12 @@ def test_explicit_subject_outranks_the_derived_one(tmp_path):
 def test_multi_subject_review_leaves_negatives_unattributed(tmp_path):
     """With no threaded subject and several in the verdicts, no subject may claim the negatives."""
     src = tmp_path / "src"
-    _image(src, "catkins.png", (140, 35))
+    _image(src, "buds.png", (140, 35))
     _image(src, "leaves.png", (35, 140))
     _image(src, "neg.png", (60, 90))
     out = tmp_path / "out"
     state = {"image": {
-        "catkins.png": _completed([_accepted("bud", [0.5, 0.5, 0.2, 0.2])]),
+        "buds.png": _completed([_accepted("bud", [0.5, 0.5, 0.2, 0.2])]),
         "leaves.png": _completed([_accepted("leaf", [0.25, 0.75, 0.3, 0.1])]),
         "neg.png": _completed([_rejected("bud", [0.5, 0.5, 0.1, 0.1])]),
     }}
@@ -316,7 +316,7 @@ def test_classified_scope_refuses_a_confirmed_value_outside_the_bucket_vocabular
     scope = BucketScope(subject="bud", attribute="stage")
 
     r = materialize_dataset(
-        state, str(images), str(out), scope=scope, vocabulary={"closed", "elongating"})
+        state, str(images), str(out), scope=scope, vocabulary={"closed", "partial"})
 
     assert r["positive"] == 0
     assert [e["image"] for e in r["boundary_refused"]] == ["pos.png"]
@@ -338,9 +338,9 @@ def test_a_classified_scope_with_no_vocabulary_refuses_rather_than_writing_unche
     _image(images, "pos.png", (100, 30))
     out = tmp_path / "out"
     state = {"image": {
-        "pos.png": _completed([_accepted("dormant", [0.5, 0.5, 0.2, 0.2])]),
+        "pos.png": _completed([_accepted("closed", [0.5, 0.5, 0.2, 0.2])]),
     }}
-    scope = BucketScope(subject="catkin", attribute="stage")
+    scope = BucketScope(subject="bud", attribute="stage")
 
     r = materialize_dataset(state, str(images), str(out), scope=scope)
 
@@ -363,18 +363,18 @@ def test_a_classified_scope_with_its_vocabulary_admits_a_value_it_declares(tmp_p
     _image(images, "pos.png", (100, 30))
     out = tmp_path / "out"
     state = {"image": {
-        "pos.png": _completed([_accepted("dormant", [0.5, 0.5, 0.2, 0.2])]),
+        "pos.png": _completed([_accepted("closed", [0.5, 0.5, 0.2, 0.2])]),
     }}
-    scope = BucketScope(subject="catkin", attribute="stage")
+    scope = BucketScope(subject="bud", attribute="stage")
 
     r = materialize_dataset(
-        state, str(images), str(out), scope=scope, vocabulary={"dormant", "elongating"})
+        state, str(images), str(out), scope=scope, vocabulary={"closed", "partial"})
 
     assert r["positive"] == 1
     assert r["boundary_refused"] == []
     written = read_annotations(str(out / "annotations" / "pos.json"))
-    assert written[0].subject == "catkin"
-    assert written[0].attributes == {"stage": "dormant"}
+    assert written[0].subject == "bud"
+    assert written[0].attributes == {"stage": "closed"}
 
 
 def test_a_negative_no_one_reviewer_answers_for_names_the_harvest(tmp_path):
