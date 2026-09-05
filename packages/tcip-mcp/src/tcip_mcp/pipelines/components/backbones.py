@@ -33,6 +33,7 @@ model you are building, then wrap it::
 from __future__ import annotations
 
 import logging
+from typing import Any, cast
 
 import torch
 import torch.nn as nn
@@ -119,8 +120,9 @@ def _freeze_timm_stages(model: nn.Module, freeze_to: int) -> None:
     """Freeze timm backbone up to a feature stage index."""
     for p in model.parameters():
         p.requires_grad = True
-    # timm models expose feature_info with reduction info per stage
-    fi = model.feature_info
+    # timm models expose feature_info with reduction info per stage; its shape is a timm runtime
+    # detail nn.Module's stub can't see.
+    fi = cast(Any, model.feature_info)
     freeze_modules = set()
     for i in range(min(freeze_to, len(fi))):
         mod_name = fi[i]["module"]
