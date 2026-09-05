@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import inspect
 from collections import OrderedDict
-from typing import Any
+from typing import Any, cast
 
 import torch
 import torch.nn as nn
@@ -24,9 +24,12 @@ class BackboneNeckAdapter(nn.Module):
         super().__init__()
         self.backbone = backbone
         self.neck = neck
+        # neck.out_channels is a neck-specific attribute nn.Module's stub can't see; its concrete
+        # shape (int or sequence) is decided at runtime by which neck was composed.
+        neck_out_channels = cast(Any, neck).out_channels
         self.out_channels = (
-            neck.out_channels if isinstance(neck.out_channels, int)
-            else neck.out_channels[-1]
+            neck_out_channels if isinstance(neck_out_channels, int)
+            else neck_out_channels[-1]
         )
 
     def forward(self, x: torch.Tensor) -> OrderedDict:
