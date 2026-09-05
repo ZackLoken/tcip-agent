@@ -603,6 +603,91 @@ def test_annotate_load_refuses_an_unreadable_label(
     assert str(label_path) in resp.json()["detail"]
 
 
+def test_annotate_load_authorship_person_tool_and_unattributed(
+    client: TestClient, dataset_root: Path, tmp_path: Path,
+) -> None:
+    """The load route's authorship field classifies each record: a person's own created_by reads
+    person, a bare producer with no accepted_by reads tool, and no created_by at all reads
+    unattributed. Built through the platform's own writer, never hand-written JSON."""
+    img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
+    label_path = tmp_path / "labels" / "IMG_0000.json"
+    anns = [
+        Annotation(subject="bush", geometry=BBox(1, 1, 10, 10), created_by="user:breeder"),
+        Annotation(subject="bush", geometry=BBox(11, 11, 20, 20), created_by="sam"),
+        Annotation(subject="bush", geometry=BBox(21, 21, 30, 30)),
+    ]
+    write_annotations(str(label_path), anns, 100, 80)
+
+    body = client.get(
+        "/api/annotate/labels",
+        params={"image_path": str(img_path), "label_path": str(label_path)},
+    ).json()
+    by_bbox = {tuple(a["bbox"]): a["authorship"] for a in body["annotations"]}
+    assert by_bbox[(1.0, 1.0, 10.0, 10.0)] == "person"
+    assert by_bbox[(11.0, 11.0, 20.0, 20.0)] == "tool"
+    assert by_bbox[(21.0, 21.0, 30.0, 30.0)] == "unattributed"
+
+
+def test_annotate_load_authorship_agrees_with_is_unadjudicated_agent_authorship(
+    client: TestClient, dataset_root: Path, tmp_path: Path,
+) -> None:
+    """authorship_of and is_unadjudicated_agent_authorship classify every shape the same way: one
+    predicate, never two spellings of the agent-authorship rule."""
+    from tcip_annotation.json_io import is_unadjudicated_agent_authorship
+
+    img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
+    label_path = tmp_path / "labels" / "IMG_0000.json"
+    anns = [
+        Annotation(subject="bush", geometry=BBox(1, 1, 10, 10), created_by="user:breeder"),
+        Annotation(subject="bush", geometry=BBox(11, 11, 20, 20), created_by="sam"),
+        Annotation(subject="bush", geometry=BBox(21, 21, 30, 30)),
+        Annotation(subject="bush", geometry=BBox(31, 31, 40, 40),
+                  created_by="model:m1", accepted_by="user:breeder"),
+    ]
+    write_annotations(str(label_path), anns, 100, 80)
+
+    body = client.get(
+        "/api/annotate/labels",
+        params={"image_path": str(img_path), "label_path": str(label_path)},
+    ).json()
+    loaded = read_annotations(str(label_path))
+    assert len(body["annotations"]) == len(loaded)
+    for a_dict, a in zip(body["annotations"], loaded):
+        assert (a_dict["authorship"] == "tool") == is_unadjudicated_agent_authorship(a)
+
+
+def test_annotate_load_authorship_tool_accepted_through_review(
+    client: TestClient, dataset_root: Path, tmp_path: Path,
+) -> None:
+    """A model's own prediction, once a reviewer accepts it into ground truth, reads
+    tool_accepted: its created_by travels into GT and accepted_by is the reviewer's sign-off, so
+    it is no longer an unadjudicated tool call but it is still not the reviewer's own hand."""
+    img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
+    gt = tmp_path / "gt.json"
+    write_annotations(str(gt), [], 100, 80, keep_empty=True)
+    pred = tmp_path / "pred.json"
+    write_annotations(
+        str(pred),
+        [Annotation(subject="bush", geometry=BBox(40, 32, 60, 48), score=0.9,
+                   created_by="model:m1")],
+        100, 80,
+    )
+
+    resp = _review_action(
+        client, img_path, gt, dataset_root,
+        pred_path=str(pred), det_type="fp", action="accepted",
+    )
+    assert resp.status_code == 200
+
+    body = client.get(
+        "/api/annotate/labels",
+        params={"image_path": str(img_path), "label_path": str(gt)},
+    ).json()
+    assert len(body["annotations"]) == 1
+    assert body["annotations"][0]["created_by"] == "model:m1"
+    assert body["annotations"][0]["authorship"] == "tool_accepted"
+
+
 def test_annotate_save_empty_preserves_negative(
     client: TestClient, dataset_root: Path, tmp_path: Path
 ) -> None:

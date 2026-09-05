@@ -601,6 +601,24 @@ def is_unadjudicated_agent_authorship(a: Annotation) -> bool:
     return not a.accepted_by
 
 
+def authorship_of(a: Annotation) -> str:
+    """``a``'s authorship, one of ``"person"``, ``"tool"``, ``"tool_accepted"`` or ``"unattributed"``,
+    for a caller that draws or names it (a canvas symbology, a load response) rather than only
+    gating on it.
+
+    Built on :func:`is_unadjudicated_agent_authorship` for the ``tool`` classification, so a shape
+    this reads as ``"tool"`` and the reference/canopy admissibility rules read as agent-authored
+    are the same shape by construction, never two independent readings of the same ``created_by``.
+    """
+    if not a.created_by:
+        return "unattributed"
+    if is_unadjudicated_agent_authorship(a):
+        return "tool"
+    if a.created_by.startswith(PERSON_IDENTITY_PREFIX):
+        return "person"
+    return "tool_accepted"
+
+
 @dataclass
 class ProvenanceFacts:
     """The provenance classification over one list of annotations, computed once so
