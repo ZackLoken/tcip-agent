@@ -391,8 +391,14 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
         declared = declared_in_chans(model_source)
         images_dir = data_cfg.get("images_dir")
         if declared is not None and images_dir and Path(images_dir).is_dir():
+            from tcip_store import SchemaVersionRefused
+
             from tcip_mcp.pipelines.image_utils import list_logical_images
-            logical = list_logical_images(images_dir)
+            try:
+                logical = list_logical_images(images_dir)
+            except SchemaVersionRefused as exc:
+                issues.append(f"a .bandgroup manifest under {images_dir} could not be read: {exc}")
+                logical = {}
             sample = logical[sorted(logical)[0]] if logical else None
             if sample is not None:
                 from tcip_mcp.pipelines.derivations import probe_channels
@@ -466,8 +472,14 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
     if split_cfg_dict.get("group_by") or split_cfg_dict.get("group_key_map"):
         images_dir = data_cfg_dict.get("images_dir")
         if images_dir and Path(images_dir).is_dir():
+            from tcip_store import SchemaVersionRefused
+
             from tcip_mcp.pipelines.image_utils import list_logical_images
-            stems = sorted(list_logical_images(images_dir))
+            try:
+                stems = sorted(list_logical_images(images_dir))
+            except SchemaVersionRefused as exc:
+                issues.append(f"a .bandgroup manifest under {images_dir} could not be read: {exc}")
+                stems = []
             if stems:
                 from tcip_mcp.pipelines.data.splits import resolve_group_key_fn
                 try:

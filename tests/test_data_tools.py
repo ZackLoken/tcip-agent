@@ -252,6 +252,79 @@ def test_draw_splits_manifest_answers_an_ambiguous_image_stem_as_an_error(tmp_pa
     assert "plotA" in result["error"]
 
 
+def test_draw_splits_stats_only_answers_an_ambiguous_image_stem_as_an_error(tmp_path: Path):
+    """The stats-only branch (no output_path, no materialize) answers the identical stem
+    collision the manifest-writing branch already reports as an error, never a raw raise: both
+    branches route their image census through ``_scan_dataset``."""
+    import numpy as np
+
+    from tcip_mcp.pipelines.data.band_groups import write_band_group_manifest
+
+    root = tmp_path / "ds"
+    images_dir = root / "images" / "2-11-26"
+    images_dir.mkdir(parents=True)
+
+    band_a, band_b = images_dir / "plotA_B1.npy", images_dir / "plotA_B2.npy"
+    np.save(band_a, np.zeros((4, 4), dtype=np.uint8))
+    np.save(band_b, np.zeros((4, 4), dtype=np.uint8))
+    write_band_group_manifest(images_dir, "plotA", {"B1": band_a, "B2": band_b})
+    (images_dir / "plotA.jpg").write_bytes(b"\xff\xd8\xff")
+
+    result = draw_splits(str(root))
+
+    assert "error" in result
+    assert "plotA" in result["error"]
+
+
+def test_scan_dataset_answers_a_newer_written_bandgroup_manifest_as_an_error(tmp_path: Path):
+    """A ``.bandgroup`` manifest above this reader's ceiling propagates as
+    ``tcip_store.SchemaVersionRefused`` out of ``list_logical_images``, uncaught by design;
+    ``scan_dataset`` must answer that as a named error rather than letting it raise through the
+    tool boundary, the same contract it already holds for an ambiguous stem."""
+    from tcip_store.file_backend import FileBackend
+    import tcip_store as ts
+
+    from tcip_mcp.pipelines.data.band_groups import band_group_manifest_key
+
+    root = tmp_path / "ds"
+    images_dir = root / "images" / "2-11-26"
+    images_dir.mkdir(parents=True)
+
+    key = band_group_manifest_key(images_dir, "plotA")
+    path = FileBackend().path_for(key)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(ts.RECORD_JSON.encode(
+        {"schema_version": 2, "bands": {"B1": "plotA_B1.npy", "B2": "plotA_B2.npy"}}))
+
+    result = scan_dataset(str(root))
+
+    assert "error" in result
+    assert "schema_version 2, above the 1 this reader knows" in result["error"]
+
+
+def test_scan_dataset_answers_an_ambiguous_image_stem_as_an_error(tmp_path: Path):
+    """``scan_dataset`` answers the same stem collision as an error rather than letting
+    ``AmbiguousImageStem`` escape uncaught through the tool boundary."""
+    import numpy as np
+
+    from tcip_mcp.pipelines.data.band_groups import write_band_group_manifest
+
+    root = tmp_path / "ds"
+    images_dir = root / "images" / "2-11-26"
+    images_dir.mkdir(parents=True)
+
+    band_a, band_b = images_dir / "plotA_B1.npy", images_dir / "plotA_B2.npy"
+    np.save(band_a, np.zeros((4, 4), dtype=np.uint8))
+    np.save(band_b, np.zeros((4, 4), dtype=np.uint8))
+    write_band_group_manifest(images_dir, "plotA", {"B1": band_a, "B2": band_b})
+    (images_dir / "plotA.jpg").write_bytes(b"\xff\xd8\xff")
+
+    result = scan_dataset(str(root))
+
+    assert "error" in result
+    assert "plotA" in result["error"]
+
+
 def _add_extra_leaf_groups(images_dir: Path, labels_dir: Path, count: int) -> None:
     """Adds ``count`` more plain single-tile foreground groups (subject ``leaf``) beside a
     band-group fixture, so a manifest write over it clears the four-foreground-group floor."""

@@ -38,6 +38,34 @@ def _note_version(findings: list, where: str, store: str, doc) -> None:
         findings.append(("warn", f"{where}: {exc}"))
 
 
+def _report_stem_collision(findings: list, exc: Exception, seen: "set[str] | None") -> None:
+    """Append one collided-bucket finding, skipping a message this run already reported.
+
+    ``check_negatives``, ``check_data_quality`` and ``check_state`` each independently enumerate
+    the same ``images/`` tree, through ``_image_stems`` or ``_scan_dataset``, and can reach the
+    identical collision; a breeder reads about it once, not once per check that reaches it.
+    ``seen`` is ``None`` for a check run standalone (every existing single-check test), which
+    reports exactly as before.
+    """
+    message = str(exc)
+    if seen is not None:
+        if message in seen:
+            return
+        seen.add(message)
+    findings.append(("error", message))
+
+
+def _report_band_group_version_refusal(findings: list, root: Path, exc: Exception) -> None:
+    """Report a ``.bandgroup`` manifest whose ``schema_version`` this reader does not accept as
+    a finding naming the images tree it sits under, rather than letting the doctor crash: the
+    same soft-rail posture :func:`_note_version` already takes for every other versioned
+    document the doctor reads.
+    """
+    from tcip_mcp.dataset_layout import image_root
+
+    findings.append(("warn", f"{image_root(root)}: a .bandgroup manifest could not be read: {exc}"))
+
+
 def _image_stems(root: Path) -> dict[str, str]:
     """stem -> file name for every image under images/ (the flat form and every date bucket),
     through the platform's own bucket enumeration, so a stem collision within one bucket refuses
@@ -58,7 +86,7 @@ def _image_stems(root: Path) -> dict[str, str]:
     return out
 
 
-def check_negatives(root: Path, findings: list) -> None:
+def check_negatives(root: Path, findings: list, *, seen: "set[str] | None" = None) -> None:
     """A negative is empty labels + human Complete, per subject: flag every disk/status disagreement.
 
     Labels are one name-based file per image (all subjects); a confirmed negative is scoped to a
@@ -71,6 +99,11 @@ def check_negatives(root: Path, findings: list) -> None:
     ``gated_stores`` for that reason: the label files this check also walks are blobs, a real
     file under both backends, so neither read can be stale relative to the bound backend the way
     a raw document read would be behind the database.
+
+    ``seen`` carries a stem-collision message across this check, ``check_data_quality`` and
+    ``check_state``, all three of which enumerate the same ``images/`` tree, so one collision is
+    reported once for a run that passes the same set to all three (``main``'s own call), rather
+    than once per check that happens to reach it.
     """
     from tcip_annotation import json_io
     from tcip_annotation.json_io import UnreadableLabelDocument
@@ -81,7 +114,7 @@ def check_negatives(root: Path, findings: list) -> None:
         read_image_status_store, resolve_image_name,
     )
     from tcip_mcp.pipelines.image_utils import AmbiguousImageStem
-    from tcip_store import StoreError
+    from tcip_store import SchemaVersionRefused, StoreError
 
     # Confirmations are dataset-native, and this check already assumes root == dataset_root.
     try:
@@ -95,7 +128,10 @@ def check_negatives(root: Path, findings: list) -> None:
     try:
         stems = _image_stems(root)
     except AmbiguousImageStem as exc:
-        findings.append(("error", str(exc)))
+        _report_stem_collision(findings, exc, seen)
+        return
+    except SchemaVersionRefused as exc:
+        _report_band_group_version_refusal(findings, root, exc)
         return
     ann_root = annotation_root(root)
     neg_names = confirmed_negative_names_any_subject(by_bucket)
@@ -157,7 +193,7 @@ def check_negatives(root: Path, findings: list) -> None:
                             "(a confirmed negative should have an empty label file)"))
 
 
-def check_data_quality(root: Path, findings: list) -> None:
+def check_data_quality(root: Path, findings: list, *, seen: "set[str] | None" = None) -> None:
     """Per-file annotation quality, any supported format, folded in from the retired per-file
     quality tool: stem matching between images and labels, an empty per-image
     label with no human confirmation the image is a negative, a file whose format cannot be
@@ -177,6 +213,9 @@ def check_data_quality(root: Path, findings: list) -> None:
     ``gated_stores`` for that reason: the label files this check reads through ``_scan_dataset``
     are blobs, a real file under both backends, so neither read can be stale relative to the
     bound backend the way a raw document read would be behind the database.
+
+    ``seen`` is the same cross-check stem-collision set ``check_negatives`` takes, so the three
+    checks that enumerate ``images/`` report one collision once, not once each.
     """
     from tcip_annotation.format_io import detect_format
     from tcip_annotation.json_io import (
@@ -188,7 +227,7 @@ def check_data_quality(root: Path, findings: list) -> None:
     )
     from tcip_mcp.pipelines.image_utils import AmbiguousImageStem
     from tcip_mcp.tools.data_tools import _scan_dataset
-    from tcip_store import StoreError
+    from tcip_store import SchemaVersionRefused, StoreError
 
     try:
         scan = _scan_dataset(str(root))
@@ -196,7 +235,10 @@ def check_data_quality(root: Path, findings: list) -> None:
         findings.append(("error", f"data quality scan: {exc}"))
         return
     except AmbiguousImageStem as exc:
-        findings.append(("error", str(exc)))
+        _report_stem_collision(findings, exc, seen)
+        return
+    except SchemaVersionRefused as exc:
+        _report_band_group_version_refusal(findings, root, exc)
         return
 
     image_stems = {Path(p).stem for p in scan["images"]}
@@ -453,15 +495,21 @@ def check_provenance(root: Path, findings: list) -> None:
                                 f"{len(errors)} import error(s)"))
 
 
-def check_state(root: Path, findings: list) -> None:
+def check_state(root: Path, findings: list, *, seen: "set[str] | None" = None) -> None:
+    """``seen`` is the same cross-check stem-collision set ``check_negatives`` takes, so the
+    three checks that enumerate ``images/`` report one collision once, not once each."""
     from tcip_annotation.review_engine import REVIEW_VERDICTS_STORE
     from tcip_mcp.pipelines.image_utils import AmbiguousImageStem
+    from tcip_store import SchemaVersionRefused
 
     state = root / ".tcip" / "state"
     try:
         stems = _image_stems(root)
     except AmbiguousImageStem as exc:
-        findings.append(("error", str(exc)))
+        _report_stem_collision(findings, exc, seen)
+        return
+    except SchemaVersionRefused as exc:
+        _report_band_group_version_refusal(findings, root, exc)
         return
     shard_dir = state / "review"
     if shard_dir.is_dir():
@@ -668,6 +716,10 @@ def main() -> int:
 
     findings: list[tuple[str, str]] = []
     invalid = staleness_findings(root)
+    # Shared across the three checks that independently enumerate images/, so an images/ tree
+    # collision or an unreadable .bandgroup manifest is reported once, not once per check.
+    ambiguous_seen: set[str] = set()
+    checks_taking_seen = (check_negatives, check_data_quality, check_state)
     for check in (check_negatives, check_data_quality, check_status_tokens, check_reserved_names,
                  check_registry, check_provenance, check_state, check_region_completeness,
                  check_trait_specs, check_trait_spec_statements, check_project_record):
@@ -678,7 +730,10 @@ def main() -> int:
                             "invalid, not clean: write the files out with "
                             "'python scripts/export_store.py' and run the doctor again."))
             continue
-        check(root, findings)
+        if check in checks_taking_seen:
+            check(root, findings, seen=ambiguous_seen)
+        else:
+            check(root, findings)
 
     rank = {"error": 0, "warn": 1, "info": 2}
     findings.sort(key=lambda f: rank[f[0]])
