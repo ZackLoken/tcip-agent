@@ -3,8 +3,10 @@ carry a different name. Most of its copies cannot be derived at runtime (an acti
 YAML, a bare argument in a JSON array, prose with no invocation to inspect), so this holds an
 enumerated list of copy sites instead, checked against ``environment.yml``'s own name, and named
 as the enumeration it is: a copy added somewhere new is not caught until it is added here too.
-A separate test grepped the tracked tree for the name and asserts that grep's result equals this
-enumeration, so a site missing from the list fails loudly instead of going unchecked.
+A site is a file and the number of lines in it that carry the name, never a line number, so an
+edit above a copy moves nothing here; a copy left behind by a rename drops its file's count,
+and a copy added anywhere raises a count or adds a file, which the tree-wide comparison at the
+end reports by name.
 """
 
 from __future__ import annotations
@@ -25,18 +27,29 @@ def _environment_name() -> str:
     return data["name"]
 
 
-def _line(path: Path, line_no: int) -> str:
-    return path.read_text(encoding="utf-8").splitlines()[line_no - 1]
+def _standalone_name_pattern() -> "re.Pattern[str]":
+    """The name as its own token, never a hyphenated continuation of a longer identifier (an
+    "X-tcip-agent-client-name" HTTP header names something else)."""
+    return re.compile(r"(?<![\w-])" + re.escape(_environment_name()) + r"(?![\w-])")
 
 
-def test_ci_activate_environment_key_matches():
-    line = _line(REPO_ROOT / ".github" / "workflows" / "ci.yml", 27)
-    assert line.strip() == f"activate-environment: {_environment_name()}"
+def _count_in(path: Path) -> int:
+    pattern = _standalone_name_pattern()
+    lines = path.read_text(encoding="utf-8").splitlines()
+    return sum(1 for line in lines if pattern.search(line))
 
 
-def test_ci_ray_exit_windows_activate_environment_key_matches():
-    line = _line(REPO_ROOT / ".github" / "workflows" / "ci.yml", 154)
-    assert line.strip() == f"activate-environment: {_environment_name()}"
+def test_ci_activate_environment_keys_match():
+    """Every setup-miniconda step in the workflow activates the environment by its name; the
+    workflow is parsed rather than read by line so a step added above one moves nothing."""
+    data = yaml.safe_load((REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8"))
+    values = [
+        step["with"]["activate-environment"]
+        for job in data["jobs"].values()
+        for step in job.get("steps", [])
+        if isinstance(step.get("with"), dict) and "activate-environment" in step["with"]
+    ]
+    assert values == [_environment_name()] * 2
 
 
 def test_mcp_json_launch_argument_matches():
@@ -50,62 +63,30 @@ def test_environment_win_lock_name_matches():
     assert data["name"] == _environment_name()
 
 
-def _standalone_name_pattern() -> "re.Pattern[str]":
-    """The name as its own token, never a hyphenated continuation of a longer identifier (an
-    "X-tcip-agent-client-name" HTTP header names something else)."""
-    return re.compile(r"(?<![\w-])" + re.escape(_environment_name()) + r"(?![\w-])")
+# Repo-relative file and the number of its lines carrying the name, the structured files above
+# included so the tree-wide comparison is total; environment.yml's count is its key plus a prose line.
+_EXPECTED_COUNTS = {
+    ".github/workflows/ci.yml": 2,
+    ".mcp.json": 1,
+    "ARCHITECTURE.md": 3,
+    "CLAUDE.md": 1,
+    "CONTRIBUTING.md": 2,
+    "README.md": 2,
+    "environment.linux.lock.yml": 2,
+    "environment.yml": 2,
+    "packages/tcip-web/README.md": 2,
+    "scripts/distill_learnings.py": 1,
+    "scripts/smoke_fence_e2e.py": 1,
+    "scripts/smoke_phenology_e2e.py": 1,
+    "scripts/smoke_terminal_e2e.py": 1,
+    "scripts/watch_agent_chat.py": 1,
+}
 
 
-def _sites_in(path: Path) -> "list[tuple[Path, int]]":
-    """Every line of ``path`` carrying the standalone name, derived rather than pinned, for a
-    document whose line numbers move with every edit above them."""
-    pattern = _standalone_name_pattern()
-    lines = path.read_text(encoding="utf-8").splitlines()
-    return [(path, n) for n, line in enumerate(lines, start=1) if pattern.search(line)]
+@pytest.mark.parametrize("rel,count", _EXPECTED_COUNTS.items(), ids=list(_EXPECTED_COUNTS))
+def test_enumerated_copy_file_carries_the_name_the_expected_number_of_times(rel, count):
+    assert _count_in(REPO_ROOT / rel) == count
 
-
-_ARCHITECTURE_SITES = _sites_in(REPO_ROOT / "ARCHITECTURE.md")
-
-# Enumerated, not derived, since none of these lines carries a structured key the name could be
-# read from; ARCHITECTURE.md's sites are derived above because its line numbers shift under edits.
-_PROSE_COPY_SITES = [
-    (REPO_ROOT / "README.md", 73),
-    (REPO_ROOT / "README.md", 95),
-    (REPO_ROOT / "CONTRIBUTING.md", 14),
-    (REPO_ROOT / "CONTRIBUTING.md", 26),
-    (REPO_ROOT / "CLAUDE.md", 207),
-    (REPO_ROOT / "environment.yml", 4),
-    (REPO_ROOT / "environment.linux.lock.yml", 3),
-    (REPO_ROOT / "environment.linux.lock.yml", 8),
-    (REPO_ROOT / "packages" / "tcip-web" / "README.md", 44),
-    (REPO_ROOT / "packages" / "tcip-web" / "README.md", 45),
-    *_ARCHITECTURE_SITES,
-    (REPO_ROOT / "scripts" / "distill_learnings.py", 8),
-    (REPO_ROOT / "scripts" / "smoke_fence_e2e.py", 9),
-    (REPO_ROOT / "scripts" / "smoke_phenology_e2e.py", 16),
-    (REPO_ROOT / "scripts" / "smoke_terminal_e2e.py", 9),
-    (REPO_ROOT / "scripts" / "watch_agent_chat.py", 13),
-]
-
-
-@pytest.mark.parametrize(
-    "path,line_no", _PROSE_COPY_SITES,
-    ids=[f"{p.name}:{n}" for p, n in _PROSE_COPY_SITES],
-)
-def test_enumerated_prose_copy_carries_the_environment_name(path, line_no):
-    assert _environment_name() in _line(path, line_no)
-
-
-# environment.yml itself, read structurally by _environment_name() above rather than as a copy.
-_SOURCE_SITE = (REPO_ROOT / "environment.yml", 15)
-
-# The structured sites, each checked by its own dedicated test above rather than by a literal
-# line-content comparison.
-_STRUCTURED_SITES = [
-    (REPO_ROOT / ".github" / "workflows" / "ci.yml", 27),
-    (REPO_ROOT / ".github" / "workflows" / "ci.yml", 154),
-    (REPO_ROOT / ".mcp.json", 8),
-]
 
 # Out of scope: historical audit notes, the lock file (checked structurally above), the
 # gitignore's unrelated build-artifact directory entry, and this file's own regex literal.
@@ -123,31 +104,25 @@ def _tracked_files() -> "list[str]":
     return out.stdout.splitlines()
 
 
-def _name_occurrences() -> "set[tuple[str, int]]":
-    # A real copy is the standalone token, never a hyphenated continuation of a longer
-    # identifier (an "X-tcip-agent-client-name" HTTP header names something else).
-    pattern = re.compile(r"(?<![\w-])" + re.escape(_environment_name()) + r"(?![\w-])")
-    found: "set[tuple[str, int]]" = set()
+def _name_occurrences() -> "dict[str, int]":
+    found: "dict[str, int]" = {}
     for rel in _tracked_files():
         if rel in _EXCLUDED_FILES or rel.startswith(_EXCLUDED_PREFIXES):
             continue
         try:
-            text = (REPO_ROOT / rel).read_text(encoding="utf-8")
+            count = _count_in(REPO_ROOT / rel)
         except (UnicodeDecodeError, OSError):
             continue
-        for line_no, line in enumerate(text.splitlines(), start=1):
-            if pattern.search(line):
-                found.add((rel, line_no))
+        if count:
+            found[rel] = count
     return found
 
 
-def test_enumerated_copy_sites_match_every_occurrence_the_tree_carries():
-    expected = {
-        (str(path.relative_to(REPO_ROOT)).replace("\\", "/"), line_no)
-        for path, line_no in [_SOURCE_SITE, *_STRUCTURED_SITES, *_PROSE_COPY_SITES]
-    }
+def test_enumerated_copy_files_match_every_occurrence_the_tree_carries():
     actual = _name_occurrences()
-    assert actual == expected, (
-        f"missing from the enumeration: {actual - expected}; "
-        f"enumerated but not found by the grep: {expected - actual}"
-    )
+    differences = {
+        rel: (actual.get(rel), _EXPECTED_COUNTS.get(rel))
+        for rel in sorted(set(actual) | set(_EXPECTED_COUNTS))
+        if actual.get(rel) != _EXPECTED_COUNTS.get(rel)
+    }
+    assert not differences, f"tree count versus enumerated count, per file: {differences}"
