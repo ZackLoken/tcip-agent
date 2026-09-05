@@ -1591,7 +1591,7 @@ are listed here with the rest rather than taking numbers of their own.
 
 - `config.json` (`config_key`, `experiments.py:117`): written by `create_experiment`,
   `experiments.py:408` (`def create_experiment(`), `overwrite_config_if_pristine`,
-  `experiments.py:474` (rewrites only while the record is still pristine, no metrics logged), and
+  `experiments.py:486` (rewrites only while the record is still pristine, no metrics logged), and
   three best-effort merges the subprocess worker patches into the durable record after a run's
   own resolution is known, each a thin mutator over the one shared terminal-refusing procedure
   `_patch_experiment_config`, `packages/tcip-mcp/src/tcip_mcp/pipelines/training/subprocess_worker.py:31`:
@@ -1613,9 +1613,9 @@ are listed here with the rest rather than taking numbers of their own.
   `complete_run`,
   `experiments.py:602` (`def complete_run(`, the run's own `model_weights`/`model_weights_sha256`
   digest, sealed into the transaction that completes the run) and `update_lineage`,
-  `experiments.py:1191` (every other field; refuses `model_weights`/`model_weights_sha256` as
+  `experiments.py:1262` (every other field; refuses `model_weights`/`model_weights_sha256` as
   `complete_run`'s alone). Read by `get_experiment` (`experiments.py:1476`) and `get_experiment_lineage`,
-  `experiments.py:1597`.
+  `experiments.py:1789`.
 - `artifacts.json` (`artifacts_key`, `experiments.py:193`): written by `create_experiment` (`experiments.py:408`),
   `complete_run` (`experiments.py:602`, the `model_weights` entry: `path`, `sha256`, `recorded`) and
   `record_artifact`, `experiments.py:1221`. Read by `get_experiment` (`experiments.py:1476`).
@@ -1629,7 +1629,7 @@ are listed here with the rest rather than taking numbers of their own.
 - `split.json` (`split_key`, `experiments.py:240`): written by `split_construction.persist_split_manifest`,
   `packages/tcip-mcp/src/tcip_mcp/pipelines/data/split_construction.py:62`
   (`def persist_split_manifest(`). Read by `read_split_manifest`,
-  `experiments.py:1058`, which `pipelines/block_calibration.py` and `pipelines/operating_point.py`
+  `experiments.py:1832`, which `pipelines/block_calibration.py` and `pipelines/operating_point.py`
   both take the manifest from. Every run, bound to a manifest or not, records `date`, the labels
   directory's own capture date, `manifest_date_key`'s empty string for a flat tree (never `null`:
   a selection-disjointness check comparing dates must tell a flat run's own date apart from a
@@ -1672,7 +1672,7 @@ are listed here with the rest rather than taking numbers of their own.
   checked, no-leak row missing any of them floors, the same as a leak does, so a row earned before
   the keys existed cannot read as cleared. Read by `read_validations`, `experiments.py:1088`,
   `find_validation`, `experiments.py:1106` (matching rows by recomputed `validation_digest`,
-  `experiments.py:940`), and included whole by `get_experiment` (`experiments.py:1476`). The one member appendable
+  `experiments.py:1043`), and included whole by `get_experiment` (`experiments.py:1476`). The one member appendable
   after a terminal state, because a validation is a statement made about a run after it ended.
 
 Seam S07 ("Experiment record .tcip/experiments/<id>/", covering config/status/lineage/artifacts),
@@ -2203,7 +2203,7 @@ Phase 3 verdict: single.
 ## S03. Backend port discovery file .tcip/state/web_port.txt
 
 Must agree: the MCP process finds the port the web backend actually bound.
-Side A: `packages/tcip-mcp/src/tcip_mcp/web_client.py:61` (`BACKEND_PORT_STORE`, declared beside the reader because the reader cannot import `tcip_web`; `backend_port_key`, `web_client.py:72`, is the one address, read at `web_client.py:346`).
+Side A: `packages/tcip-mcp/src/tcip_mcp/web_client.py:57` (`BACKEND_PORT_STORE`, declared beside the reader because the reader cannot import `tcip_web`; `backend_port_key`, `web_client.py:72`, is the one address, read at `web_client.py:346`).
 Side B: `packages/tcip-web/src/tcip_web/__main__.py:43` (`def _write_port_file(port: int) -> None:`, publishing through that same key at `packages/tcip-web/src/tcip_web/__main__.py:53`, and logging rather than swallowing a failure, since the fallback silently misses an OS-picked port).
 Phase 3 verdict: single.
 
@@ -2451,7 +2451,7 @@ Phase 3 verdict: single.
 
 Must agree: the same model and images yield the same conf/NMS/max_dets/tile whichever entry point asks for them.
 Side A: `packages/tcip-mcp/src/tcip_mcp/pipelines/operating_point.py:798` (`def resolve_operating_point(`, the calibrated regime; a caller-supplied `max_dets` earns a derivation label only by naming where it came from, and otherwise records itself as a caller override).
-Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py:372` (`raw_operating_point`) and `resolution.py:515` (`block_calibrated_export_operating_point`), the two uncalibrated regimes. Every entry point takes its bundle from one of the three: `tools/inference_tools.py:304,797,982,1001`, `packages/tcip-web/src/tcip_web/routes/inference.py:234`, `pipelines/training/envelope.py:213`.
+Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py:443` (`raw_operating_point`) and `resolution.py:515` (`block_calibrated_export_operating_point`), the two uncalibrated regimes. Every entry point takes its bundle from one of the three: `tools/inference_tools.py:304,797,982,1001`, `packages/tcip-web/src/tcip_web/routes/inference.py:234`, `pipelines/training/envelope.py:213`.
 Phase 3 verdict: single.
 
 ## S33. Shared inference defaults DEFAULT_CONF / DEFAULT_NMS_IOU / DEFAULT_MAX_DETS
