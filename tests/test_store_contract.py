@@ -86,6 +86,7 @@ from tests._store_worker import (
     register_contract_stores,
     wait_for,
 )
+from tests.test_experiment_validations import _real_selection_disjointness
 
 register_contract_stores()
 
@@ -1390,14 +1391,17 @@ class Registered:
     root_of: Callable[[Path], Path] = lambda root: root
 
 
-def _construct_via_scratch_backend(build: Callable[[], dict]) -> dict:
-    """Call ``build`` with a throwaway file backend bound only for the call: these fixtures are
-    built at import time, before any test's own ``store`` fixture has bound one."""
+def _construct_via_scratch_backend(build: Callable[[Path], dict]) -> dict:
+    """Call ``build`` with a throwaway file backend bound only for the call, and a throwaway
+    directory removed once ``build`` returns: these fixtures are built at import time, before any
+    test's own ``store`` fixture has bound one, so this is the only bind/unbind and scratch
+    directory a caller here can use."""
     from tcip_store.file_backend import FileBackend
 
     ts.bind(FileBackend())
     try:
-        return build()
+        with tempfile.TemporaryDirectory() as scratch:
+            return build(Path(scratch))
     finally:
         ts.unbind()
 
@@ -1405,8 +1409,8 @@ def _construct_via_scratch_backend(build: Callable[[], dict]) -> dict:
 def _real_split_manifest() -> dict:
     """The shape ``data_tools.compose_split_manifest`` writes today, called for real into a
     throwaway directory so this golden cannot drift from the writer silently again."""
-    return _construct_via_scratch_backend(lambda: data_tools.compose_split_manifest(
-        Path(tempfile.mkdtemp()), seed=42, group_by="stem_prefix", dataset_fingerprint="7ac1",
+    return _construct_via_scratch_backend(lambda scratch: data_tools.compose_split_manifest(
+        scratch, seed=42, group_by="stem_prefix", dataset_fingerprint="7ac1",
         subject="bud", attribute=None, id_map={"bud": 0},
         members={"2026-03-04": {"labels_root": "ü/annotations", "images_root": "ü/images",
                                  "dataset_hash": "9f2c",
@@ -1420,21 +1424,8 @@ def _real_split_manifest() -> dict:
 def _real_cal_holdout_lock() -> dict:
     """The shape ``splits.resolve_locked_cal_holdout_split`` writes today, drawn for real over a
     throwaway directory rather than hand-typed."""
-    return _construct_via_scratch_backend(lambda: splits.resolve_locked_cal_holdout_split(
-        ["a_1", "b_2", "c_3", "d_4"], identity_hash=LOCK_IDENTITY,
-        scope_root=Path(tempfile.mkdtemp())))
-
-
-def _real_selection_disjointness() -> dict:
-    """The full shape ``resolution.resolver_selection_disjointness`` returns for a foreign
-    checkpoint with no split manifest named, read back through the same
-    ``operating_point._selection_disjointness`` path a live calibration takes, so this fixture
-    cannot silently drift to a partial shape the resolver never produces again."""
-    from tcip_mcp.pipelines.operating_point import _selection_disjointness
-
-    raw = _selection_disjointness(None, set(), set())
-    return resolution.resolver_selection_disjointness(
-        {"gate_evidence": {"selection_disjointness": raw}}, "operating_point")
+    return _construct_via_scratch_backend(lambda scratch: splits.resolve_locked_cal_holdout_split(
+        ["a_1", "b_2", "c_3", "d_4"], identity_hash=LOCK_IDENTITY, scope_root=scratch))
 
 
 def _real_job_registry_summary() -> list[dict]:
