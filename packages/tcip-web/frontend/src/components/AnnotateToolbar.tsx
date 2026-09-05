@@ -19,6 +19,7 @@ import { stepTarget, useImageNav } from "@/hooks/useImageNav";
 import { showsBandPicker, type BandSelection } from "@/lib/bandSelection";
 import { noWorkingScaleToast, replaceRequiredToastSentence } from "@/lib/coverage";
 import type { ReplaceRequired } from "@/lib/coverageTracker";
+import { UNSET_GLYPH } from "@/lib/glyphs";
 import { canvasHoldsSubject } from "@/lib/imageStatus";
 import { imagePath } from "@/lib/paths";
 import { useStore } from "@/store";
@@ -150,7 +151,7 @@ export function AnnotateToolbar({
     return counts;
   }, [canvasBoxes, canvasPolygons, canvasPoints, canvasImageAnnotations]);
 
-  const currentImage = dataset.image_list[dataset.current_image_index] ?? "—";
+  const currentImage = dataset.image_list[dataset.current_image_index] ?? UNSET_GLYPH;
   const currentStatus: ImageStatus | undefined = currentImage
     ? imageStatus.byImage[currentImage]
     : undefined;

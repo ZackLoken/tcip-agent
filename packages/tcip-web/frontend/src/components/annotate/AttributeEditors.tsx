@@ -1,4 +1,5 @@
 import type { AttributeDef } from "@/api/classes";
+import { UNSET_GLYPH } from "@/lib/glyphs";
 
 /** One `<select>` per declared attribute of the subject; empty resets the value. */
 export function AttributeEditors({
@@ -29,7 +30,7 @@ export function AttributeEditors({
             value={attributes[name] ?? ""}
             onChange={(e) => onChange(name, e.target.value)}
           >
-            <option value="">-</option>
+            <option value="">{UNSET_GLYPH}</option>
             {def.values.map((v) => (
               <option key={v} value={v}>
                 {v}

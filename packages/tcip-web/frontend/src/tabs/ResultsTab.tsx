@@ -35,6 +35,7 @@ import { DeliveryEventsPanel } from "@/components/DeliveryEventsPanel";
 import { flatStatementFields, StatementPanel } from "@/components/StatementPanel";
 import { TabHeading } from "@/components/TabHeading";
 import { useStore } from "@/store";
+import { UNSET_GLYPH } from "@/lib/glyphs";
 import { fieldValueText, STATEMENT_FIELD_LABELS } from "@/lib/statementFields";
 import { CHART, CHART_LINE_COLORS } from "@/tabs/chartTheme";
 
@@ -1634,7 +1635,7 @@ export function ResultsTab() {
                           className="border-t border-tcip-border first:border-t-0"
                         >
                           <td className="py-1.5 pr-3 font-mono">{r.plant_id}</td>
-                          <td className="pr-3">{r.accession ?? "—"}</td>
+                          <td className="pr-3">{r.accession ?? UNSET_GLYPH}</td>
                           <td className="pr-3 tabular-nums">{r.n_dates}</td>
                           <td className="pr-3">
                             {neverObserved ? (
@@ -1698,7 +1699,7 @@ export function ResultsTab() {
                                     : null;
                             return (
                               <td key={c} className="pr-3 tabular-nums">
-                                {date ?? "—"}
+                                {date ?? UNSET_GLYPH}
                                 {date && marker && (
                                   <span className={`ml-1 ${marker.className}`} title={marker.title}>
                                     {marker.symbol}

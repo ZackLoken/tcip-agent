@@ -11,6 +11,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { api, type ProjectSummary } from "@/api/client";
 import { SeasonRail } from "@/components/SeasonRail";
+import { UNSET_GLYPH } from "@/lib/glyphs";
 import { adoptWorkspaceProject, defaultDate, openProjectByName } from "@/lib/openProject";
 import { useStore } from "@/store";
 
@@ -240,7 +241,7 @@ export function ProjectPicker() {
                             value={date}
                             onChange={(e) => chooseDate(p, e.target.value)}
                           >
-                            {p.dates.length === 0 && <option value="">—</option>}
+                            {p.dates.length === 0 && <option value="">{UNSET_GLYPH}</option>}
                             {p.dates.map((d) => (
                               <option key={d} value={d}>
                                 {d}
@@ -256,7 +257,7 @@ export function ProjectPicker() {
                             onChange={(e) => setSubject(e.target.value)}
                           >
                             <option value="">
-                              {subjectsForDate(p, date).length ? "—" : "no labels"}
+                              {subjectsForDate(p, date).length ? UNSET_GLYPH : "no labels"}
                             </option>
                             {subjectsForDate(p, date).map((t) => (
                               <option key={t} value={t}>
@@ -273,7 +274,7 @@ export function ProjectPicker() {
                             onChange={(e) => setModel(e.target.value)}
                           >
                             <option value="">
-                              {modelsForDate(p, date).length ? "—" : "no preds"}
+                              {modelsForDate(p, date).length ? UNSET_GLYPH : "no preds"}
                             </option>
                             {modelsForDate(p, date).map((m) => (
                               <option key={m} value={m}>
