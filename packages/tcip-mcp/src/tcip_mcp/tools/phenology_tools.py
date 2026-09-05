@@ -602,6 +602,7 @@ def calibrate_classifier_operating_point(
         return {"error": disagreement}
 
     from tcip_annotation.json_io import UnreadableLabelDocument
+    from tcip_store import StoreError
 
     try:
         cal_items = _classification_items(calibration_gt_dir, calibration_pred_dir, trait_name=trait_name,
@@ -610,7 +611,7 @@ def calibrate_classifier_operating_point(
         hold_items = _classification_items(holdout_gt_dir, holdout_pred_dir, trait_name=trait_name,
                                            subject=subject, positive_value=spec.positive_class_name,
                                            attribute=attribute)
-    except (ValueError, UnreadableLabelDocument) as exc:
+    except (ValueError, UnreadableLabelDocument, StoreError) as exc:
         return {"error": str(exc)}
     result = resolve_classifier_operating_point(
         trait_name, calibration_items=cal_items, holdout_items=hold_items,

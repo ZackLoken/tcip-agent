@@ -2279,7 +2279,10 @@ def deliver_per_image_counts(
     if "error" in result:
         return result
 
-    from tcip_mcp.pipelines.resolution import VALIDATED_FALSE, accepted_references, tile_size_gate_flag
+    from tcip_mcp.pipelines.resolution import (
+        VALIDATED_FALSE, StampScopeUnstated, accepted_references, tile_size_gate_flag,
+    )
+    from tcip_store import StoreError
 
     op = result.get("operating_point") or {}
     conf_prov = op.get("conf") or {}
@@ -2323,6 +2326,8 @@ def deliver_per_image_counts(
             operating_point_validated=op_ref,
             pred_dirs=[str(bucket)] if bucket is not None else None,
         )
+    except (StampScopeUnstated, StoreError) as exc:
+        return {"error": str(exc)}
     except DeliveryRefused as exc:
         reason = str(exc)
         op_validated = exc.gate.stamp.get("operating_point", VALIDATED_FALSE)
@@ -2581,6 +2586,8 @@ def per_image_counts_from_bucket(
             operating_point_validated=None, pred_dirs=[str(bucket_path)],
             acknowledgement=acknowledgement, project_root=project_root,
         )
+    except (StampScopeUnstated, StoreError) as exc:
+        raise CountDeliveryRefused(str(exc)) from exc
     except DeliveryRefused as exc:
         exc.facts = {
             "operating_point_validated": exc.gate.stamp.get("operating_point", VALIDATED_FALSE),
