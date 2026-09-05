@@ -949,8 +949,8 @@ registered at HEAD.
 
 | method | path | handler | line |
 |---|---|---|---|
-| GET | `/labels` | `load_labels` | `routes/annotate.py:175` |
-| POST | `/labels` | `save_labels` | `routes/annotate.py:199` |
+| GET | `/labels` | `load_labels` | `routes/annotate.py:179` |
+| POST | `/labels` | `save_labels` | `routes/annotate.py:203` |
 
 ### routes/canvas.py, prefix `/api/canvas` (1 route)
 
@@ -1255,7 +1255,7 @@ Path: `<dataset_root>/annotations/[<date>/]<stem>.json` (ground truth);
 `<dataset_root>/predictions/<model>/[<date>/]<stem>.json` (predictions, identical schema).
 
 Writers: `tcip_annotation.json_io.write_annotations`,
-`packages/tcip-annotation/src/tcip_annotation/json_io.py:785`;
+`packages/tcip-annotation/src/tcip_annotation/json_io.py:803`;
 `tcip_annotation.format_io.save_annotations` (`fmt="json"`),
 `packages/tcip-annotation/src/tcip_annotation/format_io.py:283`;
 `tcip_annotation.review_engine.ReviewEngine.save_gt`,
@@ -1775,7 +1775,7 @@ Path: `<dataset_root>/predictions/<model_name>/[<date>/]`, via
 
 Writer: `stage_prediction_shapes`, `packages/tcip-mcp/src/tcip_mcp/prediction_buckets.py:387`, the
 underlying per-image files written via `tcip_annotation.json_io.write_annotations`,
-`packages/tcip-annotation/src/tcip_annotation/json_io.py:785` (format 1's writer).
+`packages/tcip-annotation/src/tcip_annotation/json_io.py:803` (format 1's writer).
 `resolve_prediction_bucket`, `prediction_buckets.py:353`, resolves a `(dataset_root, model_name,
 date)` triple to a writable directory; `resolve_writable_bucket`, `prediction_buckets.py:280`,
 redirects to the next free `<model_name>@r2`/`@r3` variant once any image in a bucket has a
@@ -2328,8 +2328,8 @@ Phase 3 verdict: single.
 ## S18. Bounding-box coordinate convention across the HTTP boundary
 
 Must agree: the browser and the route use corner coordinates while the file uses xywh, with the conversion happening once.
-Side A: `packages/tcip-web/src/tcip_web/routes/annotate.py:42` (`bbox: Optional[list[float]] = None          # [x1, y1, x2, y2], pixel`, the wire form).
-Side B: `packages/tcip-annotation/src/tcip_annotation/json_io.py:704` (`def xywh(`, the one corner-to-xywh conversion and the 2-decimal grid the stored document lives on, applied on write and, via the import at `packages/tcip-mcp/src/tcip_mcp/pipelines/training/evaluation.py:33` (`from tcip_annotation.json_io import xywh`), to every box scored against a stored label so both sides of a match sit on one grid; a wire box becomes a `BBox` in `annotation_from_payload`, line 175, and `_annotations_of`, line 227, is the inverse read).
+Side A: `packages/tcip-web/src/tcip_web/routes/annotate.py:43` (`bbox: Optional[list[float]] = None          # [x1, y1, x2, y2], pixel`, the wire form).
+Side B: `packages/tcip-annotation/src/tcip_annotation/json_io.py:722` (`def xywh(`, the one corner-to-xywh conversion and the 2-decimal grid the stored document lives on, applied on write and, via the import at `packages/tcip-mcp/src/tcip_mcp/pipelines/training/evaluation.py:33` (`from tcip_annotation.json_io import xywh`), to every box scored against a stored label so both sides of a match sit on one grid; a wire box becomes a `BBox` in `annotation_from_payload`, line 175, and `_annotations_of`, line 227, is the inverse read).
 Phase 3 verdict: single.
 
 ## S19. Annotation format detection scope (json, coco)
@@ -2579,8 +2579,8 @@ Phase 3 verdict: duplicated.
 ## S53. Optimistic-concurrency token for label saves
 
 Must agree: the token the browser echoes is the same token the backend minted for that label file.
-Side A: `packages/tcip-web/src/tcip_web/routes/annotate.py:194` (`"base_mtime": token,`, the token the load route mints; the save route compares the echoed one at `routes/annotate.py:200`).
-Side B: `packages/tcip-web/frontend/src/tabs/AnnotateTab.tsx:428` (`base_mtime: paths.mtime,`).
+Side A: `packages/tcip-web/src/tcip_web/routes/annotate.py:198` (`"base_mtime": token,`, the token the load route mints; the save route compares the echoed one at `routes/annotate.py:200`).
+Side B: `packages/tcip-web/frontend/src/tabs/AnnotateTab.tsx:430` (`base_mtime: paths.mtime,`).
 Phase 3 verdict: single.
 
 ## S54. Built frontend bundle location  <!-- queued: P5-305 unify -->
@@ -2622,7 +2622,7 @@ Phase 3 verdict: single.
 
 Must agree: every route that accepts a client-supplied path confines it to the same allowed roots.
 Side A: `packages/tcip-web/src/tcip_web/paths.py:46` (`def allowed_roots() -> list[Path]:`).
-Side B: `packages/tcip-web/src/tcip_web/routes/annotate.py:82` (`p = assert_path_allowed(path)`).
+Side B: `packages/tcip-web/src/tcip_web/routes/annotate.py:83` (`p = assert_path_allowed(path)`).
 Phase 3 verdict: single.
 
 ## S60. WebSocket origin check
