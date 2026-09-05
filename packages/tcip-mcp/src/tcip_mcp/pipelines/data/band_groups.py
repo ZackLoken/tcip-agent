@@ -154,11 +154,12 @@ def _identity_disagreement(
         raw_values = [tags_by_path[p].get(tag) for p in paths]
         if any(v is None for v in raw_values):
             continue  # this signal isn't recorded for this candidate group; nothing to cross-check
+        values = [v for v in raw_values if v is not None]  # none are, by the check just above
         try:
             if kind == "timestamp":
-                parsed = [datetime.fromisoformat(v).timestamp() for v in raw_values]
+                parsed = [datetime.fromisoformat(v).timestamp() for v in values]
             else:
-                parsed = [float(v) for v in raw_values]
+                parsed = [float(v) for v in values]
         except ValueError:
             continue  # an unparsable value can't be used as a signal; don't refuse on a parse issue
         any_checked = True
@@ -207,7 +208,10 @@ def _read_xmp_tags(path: Path) -> dict[str, str] | None:
         return None
     try:
         with tifffile.TiffFile(str(path)) as tif:
-            tag = tif.pages[0].tags.get(700)  # the standard TIFF XMP packet tag id
+            # tifffile types page 0 as TiffPage | TiffFrame; only TiffPage carries parsed tags,
+            # and a page with none reads exactly as a page with no XMP tag.
+            page_tags = getattr(tif.pages[0], "tags", None)
+            tag = page_tags.get(700) if page_tags is not None else None  # the TIFF XMP packet tag id
             if tag is None:
                 return None
             raw = tag.value
