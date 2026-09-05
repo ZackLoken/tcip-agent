@@ -1283,6 +1283,10 @@ def list_split_choices(experiment_id: str) -> dict:
     candidate_dirs: list[str] = []
     seen: set[str] = set()
     for other_id in experiment_ids_with_status():
+        if other_id == experiment_id:
+            # Its own manifest_dir is already own_manifest_dir, read once above; re-reading its
+            # config here to derive the identical fact a second time is work this listing skips.
+            continue
         other_config = read_member(config_key(other_id), {})
         if not isinstance(other_config, dict):
             continue
