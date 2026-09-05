@@ -40,7 +40,7 @@ import json
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 if TYPE_CHECKING:
     from tcip_store import Key, Version
@@ -132,7 +132,10 @@ def registry_from_dict(data: object) -> ClassRegistry:
             # The value invariant (known type, non-empty, distinct) lives on Attribute, one guard,
             # shared by the parser and any code that constructs an Attribute directly.
             try:
-                attrs.append(Attribute(name=aname, type=abody.get("type"), values=tuple(values)))
+                # abody is arbitrary decoded JSON; Attribute.__post_init__ is the real type gate
+                # (raises on a missing/invalid type), so the value is cast rather than validated here.
+                attrs.append(
+                    Attribute(name=aname, type=cast(str, abody.get("type")), values=tuple(values)))
             except ValueError as exc:
                 raise RegistryError(f"attribute {sname}.{aname}: {exc}") from exc
         subjects.append(Subject(
