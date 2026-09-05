@@ -178,7 +178,10 @@ endpoint is a trained model.
   test names; `VACUOUS` is said, not counted; `INDETERMINATE` and `REFUSED` are runs to redo. A
   coverage test is stated as coverage. Every admits-valid-work test constructs its input through
   the platform's own producer.
-- Gates per change, on the landed tree: `ruff check .`, both architecture checkers with `--fix`,
+- Gates per change, on the landed tree: `ruff check .`, both architecture checkers as CI runs
+  them (`build_module_inventory.py --out <json>` then `check_architecture_doc.py
+  --inventory-json <json>`, which checks the import counts only when given the inventory, and
+  `check_architecture_citations.py --fix`),
   `mypy`, the change's test files on both backends in batches of at most 20 with
   `--timeout=300`, the frontend gate in CI order if a frontend file changed. On the final tree:
   the same plus `docs/audit/ledger_check.py`, the batch's counts script, `scripts/list_tools.py`,
