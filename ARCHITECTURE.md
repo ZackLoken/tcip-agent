@@ -31,7 +31,7 @@ snapshot; `scripts/check_architecture_doc.py --inventory-json <path>` re-runs th
 and cross-checks its counts against this document's tables, this table's own module and line
 totals included.
 
-HEAD d6e28aee has 449 modules across the six scanned roots (137980 total lines):
+HEAD afb28e76 has 449 modules across the six scanned roots (137980 total lines):
 
 | Package (root) | Modules | Lines |
 |---|---|---|
