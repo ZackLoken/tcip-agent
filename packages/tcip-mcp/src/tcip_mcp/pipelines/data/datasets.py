@@ -594,6 +594,7 @@ class InstanceSegDataset(BaseImageDataset):
         out: list[tuple[list[list[tuple[float, float]]], int]] = []
         if self.label_format == "coco":
             from tcip_annotation import format_io
+            assert self._coco is not None, "__init__ always sets _coco when label_format is 'coco'"
             file_name = self._image_names.get(stem, "")
             anns, _, _ = format_io._coco_image_annotations(self._coco, file_name=file_name)
             for a in anns:
@@ -612,15 +613,15 @@ class InstanceSegDataset(BaseImageDataset):
             return out
         from tcip_annotation import json_io
         from tcip_annotation.state import Polygon
-        for a in json_io.read_annotations(str(self.labels_dir / f"{stem}.json")):
-            if a.subject != self.subject or not isinstance(a.geometry, Polygon):
+        for ann in json_io.read_annotations(str(self.labels_dir / f"{stem}.json")):
+            if ann.subject != self.subject or not isinstance(ann.geometry, Polygon):
                 continue
-            key = a.attributes.get(self.attribute) if self.attribute else self.subject
+            key = ann.attributes.get(self.attribute) if self.attribute else self.subject
             if key is None or self.id_map is None or key not in self.id_map:
                 raise ValueError(
                     f"annotation of subject {self.subject!r} has class key {key!r} not in the run's "
                     f"id map, the registry cannot decode its own labels")
-            out.append(([list(ring) for ring in a.geometry.rings], self.id_map[key] + 1))
+            out.append(([list(ring) for ring in ann.geometry.rings], self.id_map[key] + 1))
         return out
 
     @property
@@ -1072,7 +1073,9 @@ def build_dataset(task: str, dataset_source: dict | None = None, **kwargs) -> Da
     if dataset_source is not None:
         ds = build_from_dataset_source(dataset_source, task=task, **kwargs)
         if getattr(ds, "expected_channels", None) is None:
-            ds.expected_channels = num_channels
+            # ds's real type is whatever the agent's bespoke builder returned; setattr (like the
+            # getattr above) reaches it without narrowing this seam to BaseDataset's own shape.
+            setattr(ds, "expected_channels", num_channels)
         return ds
 
     cls = _DATASET_MAP.get(task)
@@ -1088,6 +1091,8 @@ def build_dataset(task: str, dataset_source: dict | None = None, **kwargs) -> Da
             # Name-based json: resolve the single id map once, set num_classes and assemble the COCO
             # from it, the loader, the categories, and resolve_contract_dims all read this one map.
             _registry, id_map = resolve_registry_id_map(kwargs["labels_dir"], subject, attribute)
+            # resolve_registry_id_map above already raises when subject is missing or empty.
+            assert subject, "resolve_registry_id_map raises above when subject is missing or empty"
             kwargs["id_map"] = id_map
             kwargs["num_classes"] = len(id_map)
             _autoresolve_json_labels(kwargs, subject=subject, attribute=attribute, id_map=id_map,
