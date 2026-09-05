@@ -170,6 +170,13 @@ beforeEach(() => {
   // The coverage-grid fetch is gated on a real canvas-host measurement (useCoverageGrid); jsdom's
   // own getBoundingClientRect is always zero, so every test needing that fetch stubs one here.
   vi.spyOn(canvasSync, "measureCanvasHost").mockReturnValue({ w: 1000, h: 800 });
+  // One jsdom instance per file, not per test: a recolour left by an earlier test must not leak
+  // into a later one's derived-colour assertions.
+  try {
+    localStorage.removeItem("tcip.annotate.subjectColors");
+  } catch {
+    /* not available in this environment, nothing to clear */
+  }
 });
 
 afterEach(cleanup);
@@ -749,6 +756,37 @@ describe("AnnotateTab legend", () => {
 
     act(() => useStore.getState().setMode("polygon"));
     expect(screen.queryByText("Dashed = polygon's box (read-only)")).not.toBeInTheDocument();
+  });
+
+  it("a recoloured subject's box stroke and the pushed canvas_meta swatch both follow", async () => {
+    useStore.getState().setRegistry({ subject_a: {} });
+    render(<AnnotateTab />);
+    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
+    await flush();
+
+    act(addBox);
+    expect(screen.getByTestId("k-rect")).toHaveAttribute("data-stroke", subjectColor("subject_a"));
+
+    fireEvent.click(screen.getByRole("button", { name: "subject_a" }));
+    const hexInput = screen.getByRole("textbox");
+    fireEvent.change(hexInput, { target: { value: "#123456" } });
+    fireEvent.keyDown(hexInput, { key: "Enter" });
+    fireEvent.click(screen.getByRole("button", { name: "OK" }));
+    await flush();
+
+    expect(subjectColor("subject_a")).toBe("#123456");
+    expect(screen.getByTestId("k-rect")).toHaveAttribute("data-stroke", "#123456");
+
+    useStore.setState({ bindingGeneration: 1 });
+    const pushSpy = vi
+      .spyOn(api.canvas, "pushState")
+      .mockResolvedValue({ status: "ok", shapes_written: true });
+    act(() => notifyCanvasStateRequest());
+    await flush();
+    const pushed = pushSpy.mock.calls.at(-1)?.[0];
+    expect(pushed?.classes).toEqual(
+      expect.arrayContaining([{ name: "subject_a", color: "#123456" }]),
+    );
   });
 });
 

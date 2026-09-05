@@ -46,6 +46,7 @@ import { zoomToRect } from "@/lib/viewGeometry";
 import { compositeParams, showsBandPicker } from "@/lib/bandSelection";
 import { datasetKey, loadDatasetVisibility, saveDatasetVisibility } from "@/lib/datasetUiState";
 import { detOutcomeGeometry } from "@/lib/reviewGeometry";
+import { useSubjectColors } from "@/lib/subjectColors";
 import { useStore } from "@/store";
 import type { MatchesResponse, ReviewImageStatus, ReviewStatusFilter } from "@/store/types";
 
@@ -386,10 +387,11 @@ export function ReviewTab() {
   // open a picker. Changing TP here recolours the TP count in the bottom toolbar too.
   const [reviewColors, setReviewColors] = useReviewColors();
   const registry = useStore((s) => s.registry.subjects);
-  const subjectSwatches = useMemo(
-    () => Object.keys(registry).map((name) => ({ name, color: subjectColor(name) })),
-    [registry],
-  );
+  const colorTick = useSubjectColors(); // bumps on a recolour, so swatches recompute below
+  const subjectSwatches = useMemo(() => {
+    void colorTick; // read only to force recompute; subjectColor() itself needs no argument for it
+    return Object.keys(registry).map((name) => ({ name, color: subjectColor(name) }));
+  }, [registry, colorTick]);
 
   // ── Live canvas push (agent visibility: capture_live_canvas) ──────────────
   // Which image the installed matches belong to: identity beats the loading flag (a failed or

@@ -35,11 +35,14 @@ interface Props {
   initialColor: string;
   onSubmit: (color: string) => void;
   onCancel: () => void;
+  /** Reverts to a caller-defined default (e.g. a subject's derived colour) instead of picking one;
+   *  omitted where there is no such default (e.g. Review's outcome colours). */
+  onReset?: () => void;
 }
 
 const HEX_RE = /^#[0-9a-fA-F]{6}$/;
 
-export function ColorPickerModal({ title, initialColor, onSubmit, onCancel }: Props) {
+export function ColorPickerModal({ title, initialColor, onSubmit, onCancel, onReset }: Props) {
   const [color, setColor] = useState(initialColor);
   const [hexDraft, setHexDraft] = useState(initialColor);
   const hexRef = useRef<HTMLInputElement | null>(null);
@@ -121,6 +124,11 @@ export function ColorPickerModal({ title, initialColor, onSubmit, onCancel }: Pr
           <button className="tcip-btn-primary flex-1" onClick={() => onSubmit(color)}>
             OK
           </button>
+          {onReset && (
+            <button className="tcip-btn flex-1" onClick={onReset}>
+              Reset
+            </button>
+          )}
           <button className="tcip-btn flex-1" onClick={onCancel}>
             Cancel
           </button>
