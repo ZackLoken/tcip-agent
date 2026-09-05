@@ -2,7 +2,7 @@
  * Dark color picker: SI palette + basic palette + hex input, resolving to a hex string.
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 
 const SI_PALETTE: [string, string][] = [
   ["SI Green", "#507754"],
@@ -46,6 +46,7 @@ export function ColorPickerModal({ title, initialColor, onSubmit, onCancel, onRe
   const [color, setColor] = useState(initialColor);
   const [hexDraft, setHexDraft] = useState(initialColor);
   const hexRef = useRef<HTMLInputElement | null>(null);
+  const titleId = useId();
 
   useEffect(() => {
     hexRef.current?.focus();
@@ -75,9 +76,17 @@ export function ColorPickerModal({ title, initialColor, onSubmit, onCancel, onRe
       className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center"
       onClick={onCancel}
     >
-      <div className="tcip-panel rounded-lg p-5 w-[400px]" onClick={(e) => e.stopPropagation()}>
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        className="tcip-panel rounded-lg p-5 w-[400px]"
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="flex items-center justify-between mb-3">
-          <div className="text-[13px] font-semibold">{title}</div>
+          <div id={titleId} className="text-[13px] font-semibold">
+            {title}
+          </div>
           <button className="tcip-btn text-[11px]" onClick={onCancel}>
             Cancel
           </button>
@@ -91,6 +100,7 @@ export function ColorPickerModal({ title, initialColor, onSubmit, onCancel, onRe
           />
           <input
             ref={hexRef}
+            aria-label="hex colour"
             className="tcip-input w-24 font-mono"
             value={hexDraft}
             onChange={(e) => setHexDraft(e.target.value)}
