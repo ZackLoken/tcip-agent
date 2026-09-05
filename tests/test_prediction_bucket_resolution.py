@@ -4,11 +4,17 @@ from __future__ import annotations
 
 import json
 
+import pytest
 from tcip_annotation import Annotation, BBox
+from tcip_annotation.json_io import write_annotations
 from tcip_annotation.review_engine import ReviewContext, ReviewDetection, ReviewEngine
 
 from tcip_mcp.dataset_layout import models_with_predictions, prediction_dir
-from tcip_mcp.prediction_buckets import bucket_key_of, resolve_prediction_bucket
+from tcip_mcp.prediction_buckets import (
+    BucketHoldsDocuments,
+    bucket_key_of,
+    resolve_prediction_bucket,
+)
 
 DATE = "2026-02-11"
 
@@ -60,3 +66,77 @@ def test_verdicted_bucket_redirects_to_a_discoverable_model_named_sibling(tmp_pa
     assert bucket == prediction_dir(dataset_root, "baseline@r2", DATE)
     _write_bucket(dataset_root, resolution.name, "img")
     assert "baseline@r2" in models_with_predictions(dataset_root, DATE)
+
+
+def test_verdict_redirect_skips_a_variant_that_already_holds_a_document(tmp_path):
+    """A caller that opts into refuse_documents redirects around a verdicted bucket the same way
+    it always has, but the variant search now also skips a candidate that holds a document with
+    no verdict of its own: a redirect must never land on a bucket a prior, unreviewed publish
+    already filled."""
+    dataset_root = tmp_path / "data"
+    review_state_dir = tmp_path / "state"
+    _write_bucket(dataset_root, "baseline", "img")
+    _record_verdict(review_state_dir, prediction_dir(dataset_root, "baseline", DATE), "img")
+    # @r2 already holds a document, but no verdict: a candidate the search must pass over.
+    _write_bucket(dataset_root, "baseline@r2", "img")
+
+    bucket, resolution = resolve_prediction_bucket(
+        dataset_root, "baseline", DATE, review_state_dir=review_state_dir, refuse_documents=True
+    )
+    assert resolution.redirected is True
+    assert bucket == prediction_dir(dataset_root, "baseline@r3", DATE)
+
+
+def test_document_holding_bucket_with_no_verdicts_refuses_naming_a_free_suggestion(tmp_path):
+    """A rail must admit valid work: the suggested bucket a document refusal names is itself
+    free of both a verdict and a document, and writing into it (the platform's own producer)
+    succeeds."""
+    dataset_root = tmp_path / "data"
+    review_state_dir = tmp_path / "state"
+    _write_bucket(dataset_root, "baseline", "img")
+
+    with pytest.raises(BucketHoldsDocuments) as excinfo:
+        resolve_prediction_bucket(
+            dataset_root, "baseline", DATE, review_state_dir=review_state_dir,
+            refuse_documents=True,
+        )
+    assert excinfo.value.document_stem_count == 1
+    assert excinfo.value.suggested == "baseline@r2"
+
+    # The admitting case: the suggested bucket is free, so writing into it succeeds.
+    bucket, resolution = resolve_prediction_bucket(
+        dataset_root, excinfo.value.suggested, DATE, review_state_dir=review_state_dir,
+        refuse_documents=True,
+    )
+    assert resolution.redirected is False
+    bucket.mkdir(parents=True, exist_ok=True)
+    write_annotations(bucket / "img2.json", [], img_w=100, img_h=100, keep_empty=True)
+    assert (bucket / "img2.json").is_file()
+
+
+def test_document_refusal_exhaustion_names_no_suggestion(tmp_path):
+    """Coverage of the exhausted variant search: when the requested bucket and every
+    <name>@r<n> variant up to the ceiling already hold a document, the resolver refuses by name
+    with no suggestion, rather than handing back an unchecked, never-searched directory."""
+    dataset_root = tmp_path / "data"
+    review_state_dir = tmp_path / "state"
+    max_variants = 3
+
+    names = ["baseline"] + [f"baseline@r{n}" for n in range(2, max_variants + 1)]
+    for name in names:
+        d = prediction_dir(dataset_root, name, DATE)
+        d.mkdir(parents=True, exist_ok=True)
+        write_annotations(d / "img.json", [], img_w=100, img_h=100, keep_empty=True)
+
+    from tcip_mcp.prediction_buckets import resolve_writable_bucket
+
+    def _dirs_for(name: str):
+        return [prediction_dir(dataset_root, name, DATE)]
+
+    with pytest.raises(BucketHoldsDocuments) as excinfo:
+        resolve_writable_bucket(
+            review_state_dir, "baseline", _dirs_for,
+            refuse_documents=True, max_variants=max_variants,
+        )
+    assert excinfo.value.suggested is None
+    assert "baseline" in str(excinfo.value)

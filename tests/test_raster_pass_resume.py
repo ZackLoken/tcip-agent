@@ -213,6 +213,35 @@ def test_overwrite_discards_recorded_progress_and_starts_over(tmp_path, monkeypa
     assert _progress_keys(out) == []
 
 
+def test_a_document_and_progress_record_left_coexisting_refuses_on_the_document(
+    tmp_path, monkeypatch,
+):
+    """A crash between the document write and the progress clear leaves both a document and a
+    progress record behind. The resolver's document refusal fires on any later call to this
+    bucket before resume or overwrite is ever consulted (the resolver runs ahead of both), and
+    the progress record stays exactly where it is, inert: only a run into this bucket reads it."""
+    import tcip_mcp.tools.inference_tools as itools
+
+    ckpt, raster_path = _setup(tmp_path, monkeypatch)
+    out = tmp_path / "preds"
+
+    def _raise_after_write(bucket):
+        raise RuntimeError("simulated crash between the document write and the progress clear")
+
+    monkeypatch.setattr(itools, "_clear_raster_pass_progress", _raise_after_write)
+    with pytest.raises(RuntimeError, match="simulated crash"):
+        _run(ckpt, raster_path, out)
+
+    assert (out / "mosaic.json").is_file()
+    assert _progress_keys(out)
+
+    for kwargs in ({}, {"resume": True}, {"overwrite": True}):
+        result = _run(ckpt, raster_path, out, **kwargs)
+        assert "error" in result, (kwargs, result)
+        assert result["document_stem_count"] == 1
+    assert _progress_keys(out)  # untouched by any of the three refusals above
+
+
 def test_resume_refuses_a_call_that_differs_from_the_recorded_pass(tmp_path, monkeypatch):
     ckpt, raster_path = _setup(tmp_path, monkeypatch)
     out = tmp_path / "preds"
