@@ -13,7 +13,12 @@ record kept as a loose file under the root's own ``.tcip/artifacts/``. That last
 filesystem glob, not a seam enumeration: the store is not declared ``enumerable``, so a root bound
 to the sqlite backend, whose rows live in ``store.db`` rather than as loose files, is not discovered
 by this walk. Export such a root first (``scripts/export_store.py``) before trusting a sqlite root's
-report of "nothing found" for that target.
+report of "nothing found" for that target. The walk also assumes the named root is the platform
+state root: production keys a ``confidence_sweep`` record under
+``tcip_mcp.project_paths.platform_state_root()``, not under whichever project root a caller names,
+and the two coincide only for an adopted project. Naming a root that is not the platform's current
+state root finds nothing for that target and reports it clean, even when the platform's own state
+root, elsewhere, holds records this script has not looked at.
 
 The seam's own read-side ceiling check refuses a ``schema_version: 2`` document outright, so this
 script never sees one through an ordinary read: it decodes such a document's raw bytes directly,
