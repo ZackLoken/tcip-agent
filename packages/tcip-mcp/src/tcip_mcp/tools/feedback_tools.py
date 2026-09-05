@@ -182,6 +182,17 @@ def materialize_review_dataset(
     When ``experiment_id`` is given, records the review session as experiment lineage. Output
     (``images/`` + ``annotations/``) chains straight into ``draw_splits`` / ``launch_training``.
 
+    The reviewed bucket's own recorded scope (``resolution.bucket_scope``) governs when there is
+    one: under a classified scope every positive is written with the object class in ``subject``
+    and the confirmed value under the scope's attribute, ``subject`` (if stated) must equal the
+    scope's own, and no rejected-only image is ever confirmed negative (a rejected value call is
+    never an absence of the object), landing in ``unconfirmed_negatives`` instead. The output then
+    needs the source dataset's own registry to train under that scope, copied over whether or not
+    any negative was confirmed; refuses by name when the source names no dataset root, that root
+    has no ``classes.json``, or the output already holds a registry. A bare directory or a detector
+    scope keeps today's behavior. No prediction file at all (a ground-truth-only review) reads no
+    scope, same as before.
+
     Args:
         dataset_root: Root of the dataset the review was recorded against. It scopes the verdict
             store read when ``review_state_dir`` is not stated (``<dataset_root>/.tcip/state``),
@@ -232,7 +243,7 @@ def materialize_review_dataset(
         if frozen is not None:
             return {"error": frozen}
 
-    from tcip_annotation.review_engine import ReviewEngine
+    from tcip_annotation.review_engine import NO_BUCKET, ReviewEngine
     engine = ReviewEngine(str(store_dir))
     resolved_bucket, refusal = _resolve_review_bucket(engine, bucket)
     if refusal is not None:
@@ -240,11 +251,35 @@ def materialize_review_dataset(
     review_state = {"image": engine.image_states(resolved_bucket)}
     state_path = engine.shard_dir
 
-    result = materialize_dataset(
-        review_state, source_images_dir, output_dir, subject=subject,
-        review_state_path=str(state_path), include_hard_negatives=include_hard_negatives,
-        copy_files=copy_files, only_completed=only_completed,
-    )
+    from tcip_mcp.pipelines.resolution import StampScopeUnstated, bucket_scope
+    from tcip_store import StoreError
+
+    scope = None
+    if resolved_bucket != NO_BUCKET:
+        bucket_path = Path(resolved_bucket)
+        if bucket_path.is_absolute():
+            scope_dir = bucket_path
+        elif review_state_dir:
+            return {"error": (
+                f"{resolved_bucket!r} is a relative bucket key, meaningful only against the "
+                f"dataset root its own store recorded it under; review_state_dir names a "
+                f"different store ({store_dir}), so state an absolute bucket path instead."
+            )}
+        else:
+            scope_dir = Path(dataset_root) / resolved_bucket
+        try:
+            scope = bucket_scope(scope_dir)
+        except (StampScopeUnstated, StoreError) as exc:
+            return {"error": str(exc)}
+
+    try:
+        result = materialize_dataset(
+            review_state, source_images_dir, output_dir, subject=subject,
+            review_state_path=str(state_path), include_hard_negatives=include_hard_negatives,
+            copy_files=copy_files, only_completed=only_completed, scope=scope,
+        )
+    except ValueError as exc:
+        return {"error": str(exc)}
     result["review_state"] = str(state_path)
     result["dataset_root"] = dataset_root
     result["review_state_stated"] = bool(review_state_dir)
