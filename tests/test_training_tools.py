@@ -1158,16 +1158,17 @@ def test_run_hpo_trial_swept_top_level_evaluation_is_not_reported_unconsumed(mon
 
 def test_run_hpo_trial_swept_dotted_selection_metric_is_not_reported_unconsumed(monkeypatch, tmp_path):
     """A dotted swept key (``evaluation.selection_metric``) is applied by ``_apply_hpo_params``
-    into the nested ``evaluation`` field it names, never as a literal top-level key, so the
-    dotted string itself is never read; it must count as consumed when the top-level segment
-    it lands under (``evaluation``) was read."""
+    into the nested ``evaluation`` field it names, never as a literal top-level key. It counts as
+    consumed once its own leaf is read off that nested block, the same read
+    ``generic_trainer.train()`` actually performs (``evaluation_section(config).get("selection_metric")``),
+    not merely because the block itself was touched."""
     pytest.importorskip("torch")
     from tcip_mcp.tools.training_tools import _run_hpo_trial, trial_config_key
     from tcip_mcp.pipelines.schemas import evaluation_section
 
     def fake_train(run, train_loader, val_loader, task="detection",
                    epoch_callback=None, resume_from=""):
-        evaluation_section(run.config)  # the same read generic_trainer.train() performs
+        evaluation_section(run.config).get("selection_metric")  # generic_trainer.train()'s own read
         run.best_metric = 1.0
         run.status = "completed"
         return run
@@ -1181,13 +1182,38 @@ def test_run_hpo_trial_swept_dotted_selection_metric_is_not_reported_unconsumed(
     assert "evaluation.selection_metric" not in resolved["unconsumed_params"]
 
 
+def test_run_hpo_trial_swept_dotted_leaf_under_a_read_block_is_still_reported_unconsumed(
+    monkeypatch, tmp_path,
+):
+    """A misspelled or otherwise-unread leaf under a block that IS read (``evaluation_section``
+    reads the whole ``evaluation`` dict but never drills into this particular key on it) is
+    reported by its own dotted name: reading the ancestor block is not the same fact as reading
+    the leaf itself."""
+    pytest.importorskip("torch")
+    from tcip_mcp.tools.training_tools import _run_hpo_trial, trial_config_key
+    from tcip_mcp.pipelines.schemas import evaluation_section
+
+    def fake_train(run, train_loader, val_loader, task="detection",
+                   epoch_callback=None, resume_from=""):
+        evaluation_section(run.config)  # reads the block, never this specific leaf on it
+        run.best_metric = 1.0
+        run.status = "completed"
+        return run
+
+    _patch_hpo_trial_machinery(monkeypatch, fake_train)
+    trial_dir = tmp_path / "trial_0"
+    _run_hpo_trial({"lr": 3e-4, "evaluation.bogus_leaf": "typo"}, [].append,
+                   _detection_base(), str(trial_dir))
+
+    resolved = ts.read(trial_config_key(trial_dir.parent, trial_dir.name))
+    assert resolved["unconsumed_params"] == ["evaluation.bogus_leaf"]
+
+
 def test_run_hpo_trial_swept_dotted_key_whose_segment_is_unread_is_reported_unconsumed(
     monkeypatch, tmp_path,
 ):
-    """A dotted swept key still counts as unconsumed when nothing reads the top-level segment
-    it lands under, the same as a plain top-level key nothing reads. Coverage: this already
-    passes before and after the axis-conflict fix, since a leaf mismatch under a read block is
-    a separate rule from consumption (see ``_AccessTrackingConfig``'s own docstring)."""
+    """A dotted swept key still counts as unconsumed when nothing reads even its own top-level
+    segment, the plainest case: no ancestor of the leaf was ever touched at all."""
     pytest.importorskip("torch")
     from tcip_mcp.tools.training_tools import _run_hpo_trial, trial_config_key
 
