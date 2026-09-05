@@ -165,6 +165,9 @@ def json_det_targets(path, subject, attribute, id_map):
             continue
         if cid is None or a.geometry is None or isinstance(a.geometry, Point):
             continue
+        # target_class_id returns UNLABELED (a str) only for the case handled above; a real
+        # target reaching here always carries its own int class id.
+        assert isinstance(cid, int)
         box = bbox_of(a.geometry)
         boxes.append([box.x1, box.y1, box.x2, box.y2])
         labels.append(cid + 1)

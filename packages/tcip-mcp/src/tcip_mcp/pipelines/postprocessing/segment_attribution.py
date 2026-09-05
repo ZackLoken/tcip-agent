@@ -34,7 +34,7 @@ from tcip_annotation.json_io import (
     provenance_facts,
 )
 from tcip_annotation.matching import _rings_to_shapely, box_ring, point_in_polygon
-from tcip_annotation.state import BBox, Point as AnnotationPoint, Polygon
+from tcip_annotation.state import Annotation, BBox, Point as AnnotationPoint, Polygon
 
 from tcip_mcp.pipelines.postprocessing.orthomosaic_mapping import (
     GeoTransform,
@@ -180,8 +180,14 @@ def load_canopy_segments(
             "boundary must be positively a person's, a reviewer's acceptance included"
         )
 
+    def _checked_polygon(a: Annotation) -> Polygon:
+        # Every refusal above already ran over the same annotations; reaching here means none
+        # of them had a None or Point geometry.
+        assert a.geometry is not None and not isinstance(a.geometry, AnnotationPoint)
+        return _polygon_of(a.geometry)
+
     return [
-        CanopySegment(segment_index=i, polygon=_polygon_of(a.geometry))
+        CanopySegment(segment_index=i, polygon=_checked_polygon(a))
         for i, a in enumerate(annotations)
     ]
 
