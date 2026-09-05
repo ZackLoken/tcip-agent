@@ -75,10 +75,11 @@ def test_preflight_config_types_a_non_dict_data_section_instead_of_raising():
 # preflight_config's overfit branch: reseed-run-restore, never gating
 
 def _frozen_detection_builder(**kwargs):
-    """An importable builder whose model has nothing to optimize (a legitimate stage-0 shape)."""
+    """An importable builder whose model has nothing to optimize (a legitimate stage-0 shape).
+    Forwards its kwargs so a caller's ``detector`` choice (``fcos``, say) actually lands."""
     from tests import bespoke_models
 
-    model = bespoke_models.build_bespoke_detection(num_classes=1, min_size=64, max_size=96)
+    model = bespoke_models.build_bespoke_detection(**kwargs)
     for p in model.parameters():
         p.requires_grad = False
     return model
