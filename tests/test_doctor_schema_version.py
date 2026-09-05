@@ -95,3 +95,26 @@ def test_doctor_unifies_check_negatives_with_check_status_tokens_on_a_version_re
     assert "schema_version 2, above the 1 this reader knows" in res.stdout
     assert "negatives cannot be verified" in res.stdout
     assert res.returncode != 2  # a warning, the same posture check_status_tokens already takes
+
+
+def test_doctor_reports_a_newer_written_bandgroup_manifest_instead_of_crashing(tmp_path):
+    """A ``.bandgroup`` manifest above this reader's ceiling propagates as
+    ``tcip_store.SchemaVersionRefused`` out of ``list_logical_images``, uncaught by design (a
+    newer grouped capture refuses the enumeration outright rather than silently dissolving into
+    its band files); every check that enumerates images/ through it must report that as a
+    finding naming the images tree, never let the doctor process crash."""
+    from tcip_mcp.pipelines.data.band_groups import band_group_manifest_key
+
+    root = tmp_path / "proj"
+    images_dir = root / "images" / "2-11-26"
+    images_dir.mkdir(parents=True)
+
+    _plant(band_group_manifest_key(images_dir, "plotA"),
+           {"schema_version": 2, "bands": {"B1": "plotA_B1.npy", "B2": "plotA_B2.npy"}})
+
+    res = _run(root)
+
+    assert "Traceback" not in res.stderr, res.stderr
+    assert "could not be read" in res.stdout
+    assert "schema_version 2, above the 1 this reader knows" in res.stdout
+    assert res.returncode != 2  # a warning, the doctor's soft-rail posture for a version refusal

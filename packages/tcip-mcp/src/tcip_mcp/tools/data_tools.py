@@ -438,8 +438,10 @@ def _scan_dataset(root: str) -> dict:
     :func:`~tcip_mcp.pipelines.image_utils.list_logical_images`: a stem collision within one
     bucket raises :class:`~tcip_mcp.pipelines.image_utils.AmbiguousImageStem` rather than this
     census silently keeping one raw file of the pair, and a grouped capture counts once, its own
-    manifest, never once per band file. Falls back to a raw walk of the whole dataset root only
-    when there is no canonical ``images/`` tree to route through at all.
+    manifest, never once per band file. Walks one level under ``images/``: the flat root itself
+    plus each direct date-bucket subdirectory (the same shape ``scripts/doctor.py``'s own
+    ``_image_stems`` walks), never a deeper recursive descent. Falls back to a raw walk of the
+    whole dataset root only when there is no canonical ``images/`` tree to route through at all.
     """
     from tcip_annotation.json_io import is_sidecar_name, prediction_documents
     from tcip_annotation.review_engine import BASELINE_DIRNAME
@@ -544,11 +546,15 @@ def scan_dataset(folder_path: str) -> dict:
         return {"error": f"Directory not found: {folder_path}"}
 
     from tcip_annotation.json_io import UnreadableLabelDocument
+    from tcip_mcp.pipelines.image_utils import AmbiguousImageStem
+    from tcip_store import SchemaVersionRefused
 
     try:
         scan = _scan_dataset(folder_path)
-    except UnreadableLabelDocument as exc:
+    except (UnreadableLabelDocument, AmbiguousImageStem) as exc:
         return {"error": str(exc)}
+    except SchemaVersionRefused as exc:
+        return {"error": f"a .bandgroup manifest under {folder_path} could not be read: {exc}"}
 
     image_stems = {Path(p).stem: p for p in scan["images"]}
     label_stems = {Path(p).stem for p in scan["labels"]}
@@ -739,6 +745,8 @@ def draw_splits(
         resolve_group_key_fn,
     )
     from tcip_mcp.pipelines.data.dataset_fingerprint import dataset_fingerprint
+    from tcip_mcp.pipelines.image_utils import AmbiguousImageStem
+    from tcip_store import SchemaVersionRefused
 
     kept_splits = SPLIT_NAMES
     out_dir = Path(output_path) if output_path else (Path(folder_path) / "splits" if materialize else None)
@@ -759,8 +767,10 @@ def draw_splits(
         # subject required, every image eligible.
         try:
             scan = _scan_dataset(folder_path)
-        except UnreadableLabelDocument as exc:
+        except (UnreadableLabelDocument, AmbiguousImageStem) as exc:
             return {"error": str(exc)}
+        except SchemaVersionRefused as exc:
+            return {"error": f"a .bandgroup manifest under {folder_path} could not be read: {exc}"}
         image_map = {Path(p).stem: p for p in scan["images"]}
         label_map = {Path(p).stem: p for p in scan["labels"]}
 
@@ -832,7 +842,7 @@ def draw_splits(
                          "or drop both output_path and materialize for a stats-only call."}
 
     from tcip_mcp.pipelines.data.label_queries import resolve_registry_id_map, trainable_stems
-    from tcip_mcp.pipelines.image_utils import AmbiguousImageStem, BandGroupIncomplete
+    from tcip_mcp.pipelines.image_utils import BandGroupIncomplete
     from tcip_mcp.pipelines.resolution import dataset_hash_and_label_digests
 
     date_dirs = _split_date_dirs(folder_path)
@@ -973,6 +983,8 @@ def draw_splits(
                     label_map, bare_parts, image_map, subject, only_date)
     except (UnreadableLabelDocument, AmbiguousImageStem, BandGroupIncomplete) as exc:
         return {"error": str(exc)}
+    except SchemaVersionRefused as exc:
+        return {"error": f"a .bandgroup manifest under {folder_path} could not be read: {exc}"}
 
     if not stems:
         from tcip_mcp.dataset_layout import image_dir as _image_dir, list_dates as _list_dates

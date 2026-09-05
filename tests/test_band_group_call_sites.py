@@ -344,3 +344,35 @@ def test_draw_splits_materialize_resolves_a_grouped_capture(grouped_dataset):
     resolved = resolve_image_source(split_dir, "capture_001")
     assert isinstance(resolved, BandGroupRef)
     assert all(p.is_file() for p in resolved.bands.values())
+
+
+def test_scan_dataset_counts_a_grouped_capture_once_not_once_per_band_file(grouped_dataset):
+    """``_scan_dataset``'s image census is built through ``list_logical_images``: a grouped
+    capture is one logical image, its own manifest, never one entry per sibling band file."""
+    from tcip_mcp.tools.data_tools import _scan_dataset
+
+    scan = _scan_dataset(str(grouped_dataset))
+    stems = {Path(p).stem for p in scan["images"]}
+    assert stems == {"capture_001", "plain_002"}
+    assert len(scan["images"]) == 2
+
+
+# ── tools/training_tools.py: preflight_config's channel firewall ─────────────────────────
+
+
+def test_preflight_channel_firewall_sums_a_grouped_captures_band_count(grouped_dataset):
+    """``probe_channels`` sums a ``BandGroupRef``'s own sibling bands rather than reading a
+    single file's header; the firewall's declared ``in_chans=2`` (the fixture's Green+Red group)
+    clears without an in_chans mismatch issue."""
+    pytest.importorskip("torch")
+    from tcip_mcp.dataset_layout import annotation_dir, image_dir
+    from tcip_mcp.tools.training_tools import preflight_config
+
+    cfg = {
+        "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
+                         "builder_kwargs": {"num_classes": 1, "in_chans": 2}, "task": "detection"},
+        "data": {"images_dir": str(image_dir(grouped_dataset, "2026-04-01")),
+                 "labels_dir": str(annotation_dir(grouped_dataset, "2026-04-01"))},
+    }
+    r = preflight_config(cfg)
+    assert not any("in_chans" in i for i in r["issues"]), r["issues"]
