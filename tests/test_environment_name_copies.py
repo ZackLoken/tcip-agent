@@ -35,7 +35,7 @@ def test_ci_activate_environment_key_matches():
 
 
 def test_ci_ray_exit_windows_activate_environment_key_matches():
-    line = _line(REPO_ROOT / ".github" / "workflows" / "ci.yml", 150)
+    line = _line(REPO_ROOT / ".github" / "workflows" / "ci.yml", 154)
     assert line.strip() == f"activate-environment: {_environment_name()}"
 
 
@@ -103,7 +103,7 @@ _SOURCE_SITE = (REPO_ROOT / "environment.yml", 15)
 # line-content comparison.
 _STRUCTURED_SITES = [
     (REPO_ROOT / ".github" / "workflows" / "ci.yml", 27),
-    (REPO_ROOT / ".github" / "workflows" / "ci.yml", 150),
+    (REPO_ROOT / ".github" / "workflows" / "ci.yml", 154),
     (REPO_ROOT / ".mcp.json", 8),
 ]
 
