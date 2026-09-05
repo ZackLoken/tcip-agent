@@ -632,9 +632,9 @@ class ReviewEngine:
                     class_name=cname,
                     conf=m.get("conf"),
                     iou=None,
-                    gt_idx=None,
+                    gt_idx=m.get("gt_idx"),
                     pred_idx=m["pred_idx"],
-                    bbox=self._detection_bbox(ctx, None, m["pred_idx"]),
+                    bbox=self._detection_bbox(ctx, m.get("gt_idx"), m["pred_idx"]),
                 ))
 
         if filter_type in ("all", "fn"):
@@ -648,8 +648,8 @@ class ReviewEngine:
                     conf=None,
                     iou=None,
                     gt_idx=m["gt_idx"],
-                    pred_idx=None,
-                    bbox=self._detection_bbox(ctx, m["gt_idx"], None),
+                    pred_idx=m.get("pred_idx"),
+                    bbox=self._detection_bbox(ctx, m["gt_idx"], m.get("pred_idx")),
                 ))
 
         return dets
@@ -712,9 +712,11 @@ class ReviewEngine:
         the review session touched it.
 
         Every entry also stamps ``missed_object_attested``: ``True`` only when both ``det.gt_idx``
-        and ``det.pred_idx`` are ``None`` at the moment of this call: the exact call-site shape only
-        the "mark missed object" tool produces (a verdict with no existing GT or prediction to key
-        off of, see ``ReviewTab.tsx``'s ``recordMissedObject``). Recorded here, from the caller's
+        and ``det.pred_idx`` are ``None`` at the moment of this call, the shape both the "mark
+        missed object" tool (a verdict with no existing GT or prediction to key off of, see
+        ``ReviewTab.tsx``'s ``recordMissedObject``) and the sweep attestation produce; a paired
+        false positive/negative under a classified trait review carries an index on at least one
+        side and never satisfies it. Recorded here, from the caller's
         own intent, rather than reconstructed later from the entry's persisted
         ``gt_bbox_norm``/``pred_bbox_norm`` shape: a rejected or accepted FN (an existing,
         already-indexed GT box being corrected or confirmed) ends up with the identical

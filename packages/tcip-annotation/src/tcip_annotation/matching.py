@@ -4,7 +4,9 @@ All functions are pure (no GUI dependencies). Ground truth and predictions are b
 :class:`~tcip_annotation.state.Annotation` lists: a prediction is an annotation whose ``score`` is
 set. :func:`compute_matches` groups by *class name* (an annotation's ``subject``); an integer class
 id never appears. :func:`compute_classified_trait_matches` reviews a classified trait's predictions
-(an object's confirmed/predicted *value*, not its existence) through the same engine.
+(an object's confirmed/predicted *value*, not its existence) through the same engine, then pairs
+each remaining false positive/negative to its geometry partner by one more geometry-only pass, so a
+correctly localized object with a wrong value carries both halves of that disagreement.
 """
 
 from __future__ import annotations
@@ -255,22 +257,27 @@ def compute_matches(
     return {"tp": tp_list, "fp": fp_list, "fn": fn_list}
 
 
-def _project_gt_for_classification(
-    gt: list[Annotation], *, subject: str, attribute: str,
+def _project_for_classification(
+    annotations: list[Annotation], *, subject: str, attribute: str,
 ) -> list[Annotation]:
-    """A same-length, same-order view of ``gt`` whose class identity is the confirmed ``attribute``
-    value rather than the object type, for :func:`compute_classified_trait_matches`.
+    """A same-length, same-order view of ``annotations`` whose class identity is the confirmed
+    ``attribute`` value rather than the object type, for ground truth's side of
+    :func:`compute_classified_trait_matches`.
 
-    Position ``i`` of the result corresponds to position ``i`` of ``gt``, so a ``gt_idx`` returned by
-    :func:`compute_matches` over this projection still addresses the caller's real, unprojected list.
-    An instance outside ``subject``'s scope, or never assessed for ``attribute`` yet (a soft, expected
-    gap, not a confirmed negative, the same rule ``phenology_tools._classification_items`` applies),
-    is stripped to a geometry-less placeholder so it can neither match nor be scored as either side of
-    a disagreement.
+    Position ``i`` of the result corresponds to position ``i`` of ``annotations``, so an index
+    returned by :func:`compute_matches` over this projection still addresses the caller's real,
+    unprojected list. A record outside ``subject``'s scope, or carrying no value under
+    ``attribute`` (never assessed yet, a soft, expected gap, not a confirmed negative, the same
+    rule ``phenology_tools._classification_items`` applies), reads through
+    :func:`~tcip_annotation.json_io.classified_value_of` as ``None`` and is stripped to a
+    geometry-less placeholder here so it can neither match nor be scored as either side of a
+    disagreement.
     """
+    from tcip_annotation.json_io import classified_value_of
+
     projected: list[Annotation] = []
-    for a in gt:
-        value = a.attributes.get(attribute) if (a.subject == subject and a.attributes) else None
+    for a in annotations:
+        value = classified_value_of(a, subject=subject, attribute=attribute)
         if value is None:
             projected.append(Annotation(subject=a.subject, geometry=None))
         else:
@@ -288,30 +295,65 @@ def compute_classified_trait_matches(
     *,
     subject: str,
     attribute: str,
+    vocabulary,
     iou_threshold: float = 0.5,
     conf_threshold: float = 0.25,
 ) -> dict:
     """Match predictions to GT for a classified trait: an object already isolated by ``subject``
     whose confirmed/predicted *value* along ``attribute`` is under review, not merely its existence.
 
-    A detector trained on an attribute-scoped class space (:func:`tcip_mcp.class_registry.
-    assign_class_ids`, one class per attribute value) makes one joint detect-and-classify call per
-    box: its own ``subject`` already carries the predicted value, never the object-type name GT
-    annotations carry (GT keeps the real object type on ``subject`` and the confirmed value in
-    ``attributes[attribute]``, the canonical on-disk schema, see ``json_io``'s module docstring).
-    Plain :func:`compute_matches` groups strictly by identical ``subject``, so these two vocabularies
-    never intersect and a correct classification could never register as a match.
+    A classified prediction carries the object class in ``subject`` and the classifier's decoded
+    call under ``attributes[attribute]``, the same shape ground truth carries. Every prediction is
+    held positively first, through :func:`~tcip_annotation.json_io.require_classified_record`
+    under ``vocabulary`` (the bucket's own recorded ``id_map`` keys): a record whose ``subject`` is
+    not the object class, which carries no value, or whose value is outside ``vocabulary``,
+    refuses rather than becoming a placeholder, since a classified bucket holds one subject and
+    every record its writer produced carries a value the map declares, so a record that does not is
+    a pre-conform record or a foreign document, never a legitimate gap. Ground truth projects
+    leniently instead (:func:`_project_for_classification`): a record outside ``subject`` or never
+    assessed for ``attribute`` becomes a geometry-less placeholder, so a document's other subjects
+    and unassessed instances stay unmatched as they do for a plain detection review.
 
-    This projects ``gt`` to the same value vocabulary the predictions already use
-    (:func:`_project_gt_for_classification`), then delegates to :func:`compute_matches` unchanged,
-    so every downstream consumer (the Review walkthrough, verdict recording, the review-confirmed
-    calibration reference) needs no separate classification-aware match logic: a ``tp`` is a
-    correctly classified instance, an ``fp`` is a value predicted where the confirmed value differs
-    (or nothing was confirmed there yet), and an ``fn`` is a confirmed value the model didn't predict
-    there, the identical accept/reject vocabulary reviewing a detection already uses.
+    Both sides projected to the value vocabulary are matched once through :func:`compute_matches`
+    unchanged: a ``tp`` is a correctly classified instance, an ``fp`` a value predicted where the
+    confirmed value differs (or nothing was confirmed there yet), and an ``fn`` a confirmed value
+    the model didn't predict there. The unmatched remainders (still carrying the object class, not
+    the value, on both sides) are then matched a second time, by geometry alone: a correct object
+    the first pass split into one ``fp``/``fn`` pair (predicted the wrong value) reunites here, and
+    the paired ``fp`` gains the partner's ``gt_idx`` while the paired ``fn`` gains the partner's
+    ``pred_idx`` (both otherwise absent, as a plain :func:`compute_matches` result never carries
+    them), so a caller can act on the object those two halves describe together, not manage two
+    orphaned records for one instance.
     """
-    projected = _project_gt_for_classification(gt, subject=subject, attribute=attribute)
-    return compute_matches(projected, preds, iou_threshold, conf_threshold)
+    from tcip_annotation.json_io import require_classified_record
+
+    projected_gt = _project_for_classification(gt, subject=subject, attribute=attribute)
+    projected_preds: list[Annotation] = []
+    for i, p in enumerate(preds):
+        value = require_classified_record(
+            p, subject=subject, attribute=attribute, vocabulary=vocabulary,
+            source=f"prediction {i}")
+        projected_preds.append(Annotation(
+            subject=value, geometry=p.geometry, attributes=p.attributes, score=p.score,
+            created_by=p.created_by, created_at=p.created_at,
+            accepted_by=p.accepted_by, accepted_at=p.accepted_at,
+        ))
+    matches = compute_matches(projected_gt, projected_preds, iou_threshold, conf_threshold)
+
+    fn_by_gt_idx = {fn["gt_idx"]: fn for fn in matches["fn"]}
+    fp_by_pred_idx = {fp["pred_idx"]: fp for fp in matches["fp"]}
+    unmatched_gt_indices = sorted(fn_by_gt_idx)
+    unmatched_pred_indices = sorted(fp_by_pred_idx)
+    remainder = compute_matches(
+        [gt[i] for i in unmatched_gt_indices], [preds[i] for i in unmatched_pred_indices],
+        iou_threshold, conf_threshold,
+    )
+    for pair in remainder["tp"]:
+        gt_idx = unmatched_gt_indices[pair["gt_idx"]]
+        pred_idx = unmatched_pred_indices[pair["pred_idx"]]
+        fp_by_pred_idx[pred_idx]["gt_idx"] = gt_idx
+        fn_by_gt_idx[gt_idx]["pred_idx"] = pred_idx
+    return matches
 
 
 def point_in_polygon(x: float, y: float, polygon: Polygon) -> bool:
