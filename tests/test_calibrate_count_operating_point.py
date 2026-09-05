@@ -102,12 +102,12 @@ def _label_pair(tmp_path):
     for stem in ("a", "b"):
         json_io.write_annotations(
             str(labels_dir / f"{stem}.json"),
-            [Annotation(subject="catkin", geometry=BBox(1, 1, 5, 5))], 10, 10)
+            [Annotation(subject="bud", geometry=BBox(1, 1, 5, 5))], 10, 10)
     return labels_dir
 
 
 def _existing_bucket(tmp_path, *, checkpoint_sha256="stub-sha256", tile_size_validated="false",
-                     conf_value=0.3, trait="catkin", with_prediction=True):
+                     conf_value=0.3, trait="bud_opening", with_prediction=True):
     from tcip_mcp.pipelines.resolution import (
         ResolvedBundle, derived, operating_point_stamp, write_sidecar,
     )
@@ -154,7 +154,7 @@ def _resolve_op_unshippable(trait_name, **kw):
 
 
 def test_calibrate_count_operating_point_earns_a_validated_stamp(
-    monkeypatch, tmp_path, seed_catkin_trait_spec,
+    monkeypatch, tmp_path, seed_bud_trait_spec,
 ):
     """The gate clears through the real ``resolve_operating_point`` (no resolver stub) over a
     dense held-out reference, and the merge earns a validated stamp only because the bucket's
@@ -171,7 +171,7 @@ def test_calibrate_count_operating_point_earns_a_validated_stamp(
     cal_stems = [r["image_id"] for r in cal_records]
     hold_stems = [r["image_id"] for r in hold_records]
 
-    probe = resolve_operating_point("catkin", dataset_hash="H", calibration_records=cal_records,
+    probe = resolve_operating_point("bud_opening", dataset_hash="H", calibration_records=cal_records,
                                     holdout_records=hold_records, tiled=False,
                                     staged_conf_floor=0.01)
     assert probe.is_shippable, probe.shippable_issues()
@@ -186,7 +186,7 @@ def test_calibrate_count_operating_point_earns_a_validated_stamp(
     from tcip_mcp.tools.calibration_tools import calibrate_count_operating_point
 
     result = calibrate_count_operating_point(
-        checkpoint_path="x.pt", trait="catkin", labels_dir=str(labels_dir),
+        checkpoint_path="x.pt", trait="bud_opening", labels_dir=str(labels_dir),
         images_dir=str(tmp_path / "images"), dataset_root=str(dataset_root),
         pred_dir=str(pred_dir),
     )
@@ -200,10 +200,10 @@ def test_calibrate_count_operating_point_earns_a_validated_stamp(
     assert on_disk["validated"] is True
     assert on_disk["operating_point"]["conf"]["value"] == pytest.approx(production_conf)
     assert on_disk["validated_by"]["experiment_id"]
-    assert on_disk["id_map"] == {"catkin": 0}
+    assert on_disk["id_map"] == {"bud_opening": 0}
     assert on_disk["images_dir"] == str(tmp_path / "images")
     assert on_disk["checkpoint_sha256"] == "stub-sha256"
-    assert on_disk["trait"] == "catkin"
+    assert on_disk["trait"] == "bud_opening"
     assert on_disk["shippable_issues"] == []
 
 
@@ -226,7 +226,7 @@ def test_calibrate_count_operating_point_refuses_when_earned_conf_differs_from_p
     from tcip_mcp.tools.calibration_tools import calibrate_count_operating_point
 
     result = calibrate_count_operating_point(
-        checkpoint_path="x.pt", trait="catkin", labels_dir=str(labels_dir),
+        checkpoint_path="x.pt", trait="bud_opening", labels_dir=str(labels_dir),
         images_dir=str(tmp_path / "images"), dataset_root=str(dataset_root),
         pred_dir=str(pred_dir),
     )
@@ -259,7 +259,7 @@ def test_calibrate_count_operating_point_folds_the_tile_floor_into_validated(mon
     from tcip_mcp.tools.calibration_tools import calibrate_count_operating_point
 
     result = calibrate_count_operating_point(
-        checkpoint_path="x.pt", trait="catkin", labels_dir=str(labels_dir),
+        checkpoint_path="x.pt", trait="bud_opening", labels_dir=str(labels_dir),
         images_dir=str(tmp_path / "images"), dataset_root=str(dataset_root),
         pred_dir=str(pred_dir),
     )
@@ -290,7 +290,7 @@ def test_calibrate_count_operating_point_writes_an_honest_unvalidated_stamp(monk
     from tcip_mcp.tools.calibration_tools import calibrate_count_operating_point
 
     result = calibrate_count_operating_point(
-        checkpoint_path="x.pt", trait="catkin", labels_dir=str(labels_dir),
+        checkpoint_path="x.pt", trait="bud_opening", labels_dir=str(labels_dir),
         images_dir=str(tmp_path / "images"), dataset_root=str(dataset_root),
         pred_dir=str(pred_dir),
     )
@@ -328,7 +328,7 @@ def test_calibrate_count_operating_point_does_not_write_trait_on_the_unvalidated
     from tcip_mcp.tools.calibration_tools import calibrate_count_operating_point
 
     result = calibrate_count_operating_point(
-        checkpoint_path="x.pt", trait="catkin", labels_dir=str(labels_dir),
+        checkpoint_path="x.pt", trait="bud_opening", labels_dir=str(labels_dir),
         images_dir=str(tmp_path / "images"), dataset_root=str(dataset_root),
         pred_dir=str(pred_dir),
     )
@@ -349,7 +349,7 @@ def test_calibrate_count_operating_point_refuses_a_bucket_outside_dataset_root(t
     outside.mkdir()
 
     result = calibrate_count_operating_point(
-        checkpoint_path="x.pt", trait="catkin", labels_dir=str(tmp_path / "labels"),
+        checkpoint_path="x.pt", trait="bud_opening", labels_dir=str(tmp_path / "labels"),
         images_dir=str(tmp_path / "images"), dataset_root=str(dataset_root),
         pred_dir=str(outside),
     )
@@ -366,7 +366,7 @@ def test_calibrate_count_operating_point_refuses_a_bucket_with_no_stamp(tmp_path
     pred_dir.mkdir(parents=True)
 
     result = calibrate_count_operating_point(
-        checkpoint_path="x.pt", trait="catkin", labels_dir=str(tmp_path / "labels"),
+        checkpoint_path="x.pt", trait="bud_opening", labels_dir=str(tmp_path / "labels"),
         images_dir=str(tmp_path / "images"), dataset_root=str(dataset_root),
         pred_dir=str(pred_dir),
     )
@@ -385,21 +385,21 @@ def test_calibrate_count_operating_point_refuses_a_raster_bucket(tmp_path):
     dataset_root = tmp_path / "dataset"
     pred_dir = dataset_root / "predictions"
     write_prediction(pred_dir, "mosaic")
-    op = ResolvedBundle(trait="catkin", dataset_hash="H", params={
+    op = ResolvedBundle(trait="bud_opening", dataset_hash="H", params={
         "conf": derived("conf", 0.3, requires_validation=True, validation_kind="annotations",
                         derived_from="x", validated_against="false"),
     }).to_provenance()["operating_point"]
     stamp = operating_point_stamp(
         op, validated=False, validated_by=None, tile_size_validated=None, shippable_issues=[],
-        id_map={"catkin": 0}, trait="catkin", dataset_hash="H", checkpoint="m",
+        id_map={"bud": 0}, trait="bud_opening", dataset_hash="H", checkpoint="m",
         checkpoint_sha256="stub-sha256", experiment_id=None, images_dir=None,
         raster_path=str(tmp_path / "mosaic.tif"), produced_at="2024-01-01T00:00:00Z",
-        subject="catkin", attribute=None,
+        subject="bud", attribute=None,
     )
     write_sidecar(pred_dir, stamp)
 
     result = calibrate_count_operating_point(
-        checkpoint_path="x.pt", trait="catkin", labels_dir=str(tmp_path / "labels"),
+        checkpoint_path="x.pt", trait="bud_opening", labels_dir=str(tmp_path / "labels"),
         images_dir=str(tmp_path / "images"), dataset_root=str(dataset_root),
         pred_dir=str(pred_dir),
     )
@@ -415,7 +415,7 @@ def test_calibrate_count_operating_point_refuses_a_bucket_with_no_prediction_doc
         tmp_path, tile_size_validated=None, with_prediction=False)
 
     result = calibrate_count_operating_point(
-        checkpoint_path="x.pt", trait="catkin", labels_dir=str(tmp_path / "labels"),
+        checkpoint_path="x.pt", trait="bud_opening", labels_dir=str(tmp_path / "labels"),
         images_dir=str(tmp_path / "images"), dataset_root=str(dataset_root),
         pred_dir=str(pred_dir),
     )
@@ -433,23 +433,23 @@ def test_calibrate_count_operating_point_refuses_an_already_validated_bucket(tmp
     dataset_root = tmp_path / "dataset"
     pred_dir = dataset_root / "predictions"
     write_prediction(pred_dir, "a")
-    op = ResolvedBundle(trait="catkin", dataset_hash="H", params={
+    op = ResolvedBundle(trait="bud_opening", dataset_hash="H", params={
         "conf": derived("conf", 0.4, requires_validation=True, validation_kind="annotations",
                         derived_from="x", validated_against="held_out_annotations"),
     }).to_provenance()["operating_point"]
     stamp = operating_point_stamp(
         op, validated=True, validated_by=None, tile_size_validated=None, shippable_issues=[],
-        id_map={"catkin": 0}, trait="catkin", dataset_hash="H", checkpoint="m",
+        id_map={"bud": 0}, trait="bud_opening", dataset_hash="H", checkpoint="m",
         checkpoint_sha256="stub-sha256", experiment_id=None,
         images_dir=str(tmp_path / "images"), raster_path=None,
-        produced_at="2024-01-01T00:00:00Z", subject="catkin", attribute=None,
+        produced_at="2024-01-01T00:00:00Z", subject="bud", attribute=None,
     )
     # A genuine, producer-filed record behind validated_by (tests._binding_fixtures does what
     # seal_validation does for a producer), not a hand-typed pointer naming no real record.
     write_bound_sidecar(pred_dir, stamp, dataset_root=dataset_root)
 
     result = calibrate_count_operating_point(
-        checkpoint_path="x.pt", trait="catkin", labels_dir=str(tmp_path / "labels"),
+        checkpoint_path="x.pt", trait="bud_opening", labels_dir=str(tmp_path / "labels"),
         images_dir=str(tmp_path / "images"), dataset_root=str(dataset_root),
         pred_dir=str(pred_dir),
     )
@@ -479,24 +479,24 @@ def test_calibrate_count_operating_point_treats_an_unbound_validated_claim_as_un
     dataset_root = tmp_path / "dataset"
     pred_dir = dataset_root / "predictions"
     write_prediction(pred_dir, "a")
-    op = ResolvedBundle(trait="catkin", dataset_hash="H", params={
+    op = ResolvedBundle(trait="bud_opening", dataset_hash="H", params={
         "conf": derived("conf", 0.4, requires_validation=True, validation_kind="annotations",
                         derived_from="x", validated_against="held_out_annotations"),
     }).to_provenance()["operating_point"]
     stamp = operating_point_stamp(
         op, validated=True,
         validated_by={"experiment_id": "exp-nonexistent", "record_digest": "deadbeef"},
-        tile_size_validated=None, shippable_issues=[], id_map={"catkin": 0}, trait="catkin",
+        tile_size_validated=None, shippable_issues=[], id_map={"bud": 0}, trait="bud_opening",
         dataset_hash="H", checkpoint="m", checkpoint_sha256="stub-sha256", experiment_id=None,
         images_dir=str(tmp_path / "images"), raster_path=None,
-        produced_at="2024-01-01T00:00:00Z", subject="catkin", attribute=None,
+        produced_at="2024-01-01T00:00:00Z", subject="bud", attribute=None,
     )
     write_sidecar(pred_dir, stamp)
 
     from tcip_mcp.tools.calibration_tools import calibrate_count_operating_point
 
     result = calibrate_count_operating_point(
-        checkpoint_path="x.pt", trait="catkin", labels_dir=str(labels_dir),
+        checkpoint_path="x.pt", trait="bud_opening", labels_dir=str(labels_dir),
         images_dir=str(tmp_path / "images"), dataset_root=str(dataset_root),
         pred_dir=str(pred_dir),
     )
@@ -528,7 +528,7 @@ def test_calibrate_count_operating_point_refuses_a_checkpoint_mismatch_before_th
     from tcip_mcp.tools.calibration_tools import calibrate_count_operating_point
 
     result = calibrate_count_operating_point(
-        checkpoint_path="x.pt", trait="catkin", labels_dir=str(tmp_path / "labels"),
+        checkpoint_path="x.pt", trait="bud_opening", labels_dir=str(tmp_path / "labels"),
         images_dir=str(tmp_path / "images"), dataset_root=str(dataset_root),
         pred_dir=str(pred_dir),
     )
@@ -553,7 +553,7 @@ def test_calibrate_count_operating_point_refuses_a_stamp_with_no_checkpoint_sha2
     dataset_root, pred_dir = _existing_bucket(tmp_path, checkpoint_sha256=None)
 
     result = calibrate_count_operating_point(
-        checkpoint_path="x.pt", trait="catkin", labels_dir=str(tmp_path / "labels"),
+        checkpoint_path="x.pt", trait="bud_opening", labels_dir=str(tmp_path / "labels"),
         images_dir=str(tmp_path / "images"), dataset_root=str(dataset_root),
         pred_dir=str(pred_dir),
     )
@@ -604,7 +604,7 @@ def test_calibrate_count_operating_point_refuses_a_stamp_validated_mid_pass(monk
     from tcip_mcp.tools.calibration_tools import calibrate_count_operating_point
 
     result = calibrate_count_operating_point(
-        checkpoint_path="x.pt", trait="catkin", labels_dir=str(labels_dir),
+        checkpoint_path="x.pt", trait="bud_opening", labels_dir=str(labels_dir),
         images_dir=str(tmp_path / "images"), dataset_root=str(dataset_root),
         pred_dir=str(pred_dir),
     )
@@ -631,7 +631,7 @@ def test_script_and_tool_call_the_same_count_calibration_function(monkeypatch, t
     from scripts.calibrate_operating_point import main
 
     with pytest.raises(RuntimeError, match="stub-count-calibration-called"):
-        main(["--checkpoint", "x.pt", "--trait", "catkin",
+        main(["--checkpoint", "x.pt", "--trait", "bud",
               "--labels-dir", str(tmp_path / "labels"), "--images-dir", str(tmp_path / "images"),
               "--dataset-root", str(tmp_path), "--project-root", str(tmp_path)])
     assert len(calls) == 1
@@ -650,14 +650,14 @@ def test_script_and_tool_call_the_same_count_calibration_function(monkeypatch, t
 
     with pytest.raises(RuntimeError, match="stub-count-calibration-called"):
         calibrate_count_operating_point(
-            checkpoint_path="x.pt", trait="catkin", labels_dir=str(tmp_path / "labels"),
+            checkpoint_path="x.pt", trait="bud_opening", labels_dir=str(tmp_path / "labels"),
             images_dir=str(tmp_path / "images"), dataset_root=str(dataset_root),
             pred_dir=str(pred_dir),
         )
     assert len(calls) == 2
 
 
-def _producer_bucket(tmp_path, *, subject="catkin", attribute=None):
+def _producer_bucket(tmp_path, *, subject="bud", attribute=None):
     """A stamped bucket built through the platform's own writers
     (``write_predictions_json``, ``operating_point_stamp``, ``write_sidecar``), scoped to
     ``(subject, attribute)``, for the scope-agreement tests below."""
@@ -702,7 +702,7 @@ def test_calibrate_count_operating_point_defaults_to_the_bucket_own_scope_when_n
 
     monkeypatch.setattr(model_registry_mod, "load_registered_checkpoint",
                         lambda path, *a, **kw: stub_verified_checkpoint(str(path)))
-    dataset_root, pred_dir = _producer_bucket(tmp_path, subject="catkin", attribute=None)
+    dataset_root, pred_dir = _producer_bucket(tmp_path, subject="bud", attribute=None)
 
     calls: list[dict] = []
 
@@ -714,13 +714,13 @@ def test_calibrate_count_operating_point_defaults_to_the_bucket_own_scope_when_n
 
     with pytest.raises(RuntimeError, match="stub-count-calibration-called"):
         calibrate_count_operating_point(
-            checkpoint_path="x.pt", trait="catkin", labels_dir=str(tmp_path / "labels"),
+            checkpoint_path="x.pt", trait="bud_opening", labels_dir=str(tmp_path / "labels"),
             images_dir=str(tmp_path / "images"), dataset_root=str(dataset_root),
             pred_dir=str(pred_dir),
         )
 
     assert len(calls) == 1
-    assert calls[0]["subject"] == "catkin"
+    assert calls[0]["subject"] == "bud"
     assert calls[0]["attribute"] is None
 
 
@@ -729,16 +729,16 @@ def test_calibrate_count_operating_point_refuses_a_disagreeing_stated_pair(tmp_p
     name, naming both pairs, rather than silently trusting the stated one."""
     from tcip_mcp.tools.calibration_tools import calibrate_count_operating_point
 
-    dataset_root, pred_dir = _producer_bucket(tmp_path, subject="catkin", attribute=None)
+    dataset_root, pred_dir = _producer_bucket(tmp_path, subject="bud", attribute=None)
 
     result = calibrate_count_operating_point(
-        checkpoint_path="x.pt", trait="catkin", labels_dir=str(tmp_path / "labels"),
+        checkpoint_path="x.pt", trait="bud_opening", labels_dir=str(tmp_path / "labels"),
         images_dir=str(tmp_path / "images"), dataset_root=str(dataset_root),
         pred_dir=str(pred_dir), subject="other-subject", attribute=None,
     )
 
     assert "error" in result
-    assert "catkin" in result["error"]
+    assert "bud" in result["error"]
     assert "other-subject" in result["error"]
 
 
@@ -754,7 +754,7 @@ def test_calibrate_count_operating_point_succeeds_when_stated_pair_matches_bucke
 
     monkeypatch.setattr(model_registry_mod, "load_registered_checkpoint",
                         lambda path, *a, **kw: stub_verified_checkpoint(str(path)))
-    dataset_root, pred_dir = _producer_bucket(tmp_path, subject="catkin", attribute=None)
+    dataset_root, pred_dir = _producer_bucket(tmp_path, subject="bud", attribute=None)
 
     calls: list[dict] = []
 
@@ -766,9 +766,9 @@ def test_calibrate_count_operating_point_succeeds_when_stated_pair_matches_bucke
 
     with pytest.raises(RuntimeError, match="stub-count-calibration-called"):
         calibrate_count_operating_point(
-            checkpoint_path="x.pt", trait="catkin", labels_dir=str(tmp_path / "labels"),
+            checkpoint_path="x.pt", trait="bud_opening", labels_dir=str(tmp_path / "labels"),
             images_dir=str(tmp_path / "images"), dataset_root=str(dataset_root),
-            pred_dir=str(pred_dir), subject="catkin", attribute=None,
+            pred_dir=str(pred_dir), subject="bud", attribute=None,
         )
 
     assert len(calls) == 1

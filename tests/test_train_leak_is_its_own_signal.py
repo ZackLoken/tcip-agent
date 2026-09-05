@@ -18,7 +18,7 @@ from tcip_mcp.experiments import split_key  # noqa: E402
 from tcip_mcp.pipelines.operating_point import resolve_operating_point  # noqa: E402
 from tcip_mcp.pipelines.resolution import VALIDATED_FALSE, VALIDATED_HELD_OUT  # noqa: E402
 
-pytestmark = pytest.mark.usefixtures("seed_catkin_trait_spec")
+pytestmark = pytest.mark.usefixtures("seed_bud_trait_spec")
 
 N_IMAGES = 4
 OBJECTS_PER_IMAGE = 8
@@ -48,7 +48,7 @@ def _write_split(experiment_id: str, train_stems: list[str]) -> None:
 
 def _resolve(experiment_id: str):
     return resolve_operating_point(
-        "catkin", tiled=True, dataset_hash="h", staged_conf_floor=0.05,
+        "bud_opening", tiled=True, dataset_hash="h", staged_conf_floor=0.05,
         experiment_id=experiment_id,
         calibration_records=_records(CAL_STEMS, 0.0),
         holdout_records=_records(HOLD_STEMS, 100000.0))

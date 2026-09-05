@@ -48,7 +48,7 @@ def test_save_annotations_stamps_created_by_when_given(tmp_path):
     from tcip_mcp.tools.annotation_tools import save_annotations
     img = _img(tmp_path)
     out = tmp_path / "labels.json"
-    save_annotations(str(img), annotations=[{"subject": "catkin", "bbox": [10, 10, 30, 30]}],
+    save_annotations(str(img), annotations=[{"subject": "bud", "bbox": [10, 10, 30, 30]}],
                      path=str(out), created_by="claude")
     obj = json.loads(out.read_text())["annotations"][0]
     assert obj["created_by"] == "claude"        # producer named by the agent
@@ -60,7 +60,7 @@ def test_save_annotations_no_provenance_by_default(tmp_path):
     from tcip_mcp.tools.annotation_tools import save_annotations
     img = _img(tmp_path)
     out = tmp_path / "labels.json"
-    save_annotations(str(img), annotations=[{"subject": "catkin", "bbox": [10, 10, 30, 30]}],
+    save_annotations(str(img), annotations=[{"subject": "bud", "bbox": [10, 10, 30, 30]}],
                      path=str(out))
     obj = json.loads(out.read_text())["annotations"][0]
     assert "created_by" not in obj
@@ -74,8 +74,8 @@ def test_save_annotations_per_shape_created_by_overrides(tmp_path):
     save_annotations(
         str(img),
         annotations=[
-            {"subject": "catkin", "bbox": [10, 10, 30, 30], "created_by": "sam"},
-            {"subject": "catkin", "bbox": [40, 40, 60, 60]},
+            {"subject": "bud", "bbox": [10, 10, 30, 30], "created_by": "sam"},
+            {"subject": "bud", "bbox": [40, 40, 60, 60]},
         ],
         path=str(out), created_by="claude",
     )
@@ -93,7 +93,7 @@ def test_the_read_path_carries_authorship_out_of_the_record():
     from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.tools.annotation_tools import _ann_dict
 
-    d = _ann_dict(Annotation(subject="catkin", geometry=BBox(1, 2, 3, 4),
+    d = _ann_dict(Annotation(subject="bud", geometry=BBox(1, 2, 3, 4),
                              created_by="model:m_best@c9f632ba98b2",
                              created_at="2026-01-01T00:00:00+00:00",
                              accepted_by="user:breeder",
@@ -111,6 +111,6 @@ def test_the_read_path_omits_provenance_a_record_does_not_carry():
     from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.tools.annotation_tools import _ann_dict
 
-    d = _ann_dict(Annotation(subject="catkin", geometry=BBox(1, 2, 3, 4)))
+    d = _ann_dict(Annotation(subject="bud", geometry=BBox(1, 2, 3, 4)))
 
     assert "created_by" not in d and "accepted_by" not in d

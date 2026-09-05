@@ -16,11 +16,11 @@ from tcip_mcp.pipelines.resolution import (
     validate_resolved_bundle,
 )
 from tcip_mcp.traits import TraitUnknownError, get_trait, registered_traits
-from tests._trait_fixtures import CATKIN
+from tests._trait_fixtures import BUD_OPENING
 
-# No built-in traits: seed_catkin_trait_spec (conftest.py) writes a real catkin.yml into this
-# test's pinned platform state root so get_trait("catkin") keeps resolving by default.
-pytestmark = pytest.mark.usefixtures("seed_catkin_trait_spec")
+# No built-in traits: seed_bud_trait_spec (conftest.py) writes a real bud_opening.yml into this
+# test's pinned platform state root so get_trait("bud_opening") keeps resolving by default.
+pytestmark = pytest.mark.usefixtures("seed_bud_trait_spec")
 
 
 # --- the firewall: an unvalidated param that requires validation is un-consumable ---
@@ -65,9 +65,9 @@ def _bucket(tmp_path, name, *, validated, ref=VALIDATED_HELD_OUT, conf=0.6):
     root = tmp_path / "ds"
     d = root / "predictions" / name
     stamp = {
-        "validated": validated, "trait": "catkin",
+        "validated": validated, "trait": "bud_opening",
         "operating_point": {"conf": {"value": conf, "validated_against": ref if validated else "false"}},
-        "subject": "catkin", "attribute": None,
+        "subject": "bud", "attribute": None,
     }
     if validated:
         write_prediction(d, "img_a")
@@ -82,7 +82,7 @@ def test_reconcile_missing_sidecar_floors_to_false(tmp_path):
     from tcip_mcp.pipelines.resolution import reconcile_operating_point_validity
     # A caller asserting validated cannot open the gate when no sidecar backs it.
     r = reconcile_operating_point_validity(
-        [str(tmp_path / "nope")], trait="catkin", asserted=VALIDATED_HELD_OUT)
+        [str(tmp_path / "nope")], trait="bud_opening", asserted=VALIDATED_HELD_OUT)
     assert r["validated"] == VALIDATED_FALSE
     assert r["missing_sidecars"] == [str(tmp_path / "nope")]
 
@@ -90,7 +90,7 @@ def test_reconcile_missing_sidecar_floors_to_false(tmp_path):
 def test_reconcile_all_validated_on_disk(tmp_path):
     from tcip_mcp.pipelines.resolution import reconcile_operating_point_validity
     dirs = [_bucket(tmp_path, "d1", validated=True), _bucket(tmp_path, "d2", validated=True)]
-    r = reconcile_operating_point_validity(dirs, trait="catkin")  # no caller assertion needed
+    r = reconcile_operating_point_validity(dirs, trait="bud_opening")  # no caller assertion needed
     assert r["validated"] == VALIDATED_HELD_OUT
     assert r["on_disk_validated"] is True
     assert r["conf"] == 0.6
@@ -100,7 +100,7 @@ def test_reconcile_one_unvalidated_bucket_floors_whole_curve(tmp_path):
     from tcip_mcp.pipelines.resolution import reconcile_operating_point_validity
     d1 = _bucket(tmp_path, "d1", validated=True)
     d2 = _bucket(tmp_path, "d2", validated=False)
-    r = reconcile_operating_point_validity([d1, d2], trait="catkin", asserted=VALIDATED_HELD_OUT)
+    r = reconcile_operating_point_validity([d1, d2], trait="bud_opening", asserted=VALIDATED_HELD_OUT)
     assert r["validated"] == VALIDATED_FALSE
     assert r["unvalidated_buckets"] == [d2]
 
@@ -109,7 +109,7 @@ def test_reconcile_asserted_false_lowers_on_disk_validated(tmp_path):
     from tcip_mcp.pipelines.resolution import reconcile_operating_point_validity
     dirs = [_bucket(tmp_path, "d1", validated=True)]
     # The floor: an explicit asserted='false' lowers even a validated-on-disk bucket.
-    r = reconcile_operating_point_validity(dirs, trait="catkin", asserted=VALIDATED_FALSE)
+    r = reconcile_operating_point_validity(dirs, trait="bud_opening", asserted=VALIDATED_FALSE)
     assert r["validated"] == VALIDATED_FALSE
 
 
@@ -118,7 +118,7 @@ def test_reconcile_review_confirmed_reference_preserved(tmp_path):
         VALIDATED_REVIEW_CONFIRMED, reconcile_operating_point_validity,
     )
     dirs = [_bucket(tmp_path, "d1", validated=True, ref=VALIDATED_REVIEW_CONFIRMED)]
-    r = reconcile_operating_point_validity(dirs, trait="catkin")
+    r = reconcile_operating_point_validity(dirs, trait="bud_opening")
     assert r["validated"] == VALIDATED_REVIEW_CONFIRMED  # provenance records which reference
     from tcip_mcp.pipelines.resolution import default
     assert default("lr", 1e-3).value == 1e-3
@@ -170,13 +170,13 @@ def test_validated_against_must_be_the_right_kind_for_the_param():
 
 def test_capture_scoped_param_is_not_comparable_without_a_capture_id():
     p = derived("mm_per_px", 0.5, derived_from="reference object", capture_scoped=True)
-    issues = ResolvedBundle("catkin", "h1", {"mm_per_px": p}).shippable_issues()
+    issues = ResolvedBundle("bud_opening", "h1", {"mm_per_px": p}).shippable_issues()
     assert any("capture" in s for s in issues)
     scoped = derived("mm_per_px", 0.5, derived_from="reference object",
                      capture_scoped=True, capture_id="cap1")
-    assert ResolvedBundle("catkin", "h1", {"mm_per_px": scoped}).shippable_issues(
+    assert ResolvedBundle("bud_opening", "h1", {"mm_per_px": scoped}).shippable_issues(
         target_capture_id="cap1") == []
-    assert any("never inherit" in s for s in ResolvedBundle("catkin", "h1", {"mm_per_px": scoped})
+    assert any("never inherit" in s for s in ResolvedBundle("bud_opening", "h1", {"mm_per_px": scoped})
                .shippable_issues(target_capture_id="cap2"))
 
 
@@ -298,14 +298,14 @@ def test_bundle_shippable_only_when_all_calibration_validated():
     val = derived("conf", 0.4, requires_validation=True, validation_kind="annotations", derived_from="sweep",
                   validated_against=VALIDATED_HELD_OUT)
     fact = derived("max_dets", 300, derived_from="p99")
-    assert not ResolvedBundle("catkin", "h1", {"conf": unval, "max_dets": fact}).is_shippable
-    assert ResolvedBundle("catkin", "h1", {"conf": val, "max_dets": fact}).is_shippable
+    assert not ResolvedBundle("bud_opening", "h1", {"conf": unval, "max_dets": fact}).is_shippable
+    assert ResolvedBundle("bud_opening", "h1", {"conf": val, "max_dets": fact}).is_shippable
 
 
 def test_dataset_scoped_calibration_not_inherited_across_hash():
     p = derived("conf", 0.4, requires_validation=True, validation_kind="annotations", derived_from="sweep",
                 validated_against=VALIDATED_HELD_OUT, dataset_scoped=True, dataset_hash="AAAA")
-    b = ResolvedBundle("catkin", "AAAA", {"conf": p})
+    b = ResolvedBundle("bud_opening", "AAAA", {"conf": p})
     assert b.shippable_issues(target_dataset_hash="AAAA") == []
     issues = b.shippable_issues(target_dataset_hash="BBBB")
     assert any("never inherit" in s for s in issues)
@@ -313,7 +313,7 @@ def test_dataset_scoped_calibration_not_inherited_across_hash():
 
 def test_provenance_roundtrip_is_serializable():
     import json
-    b = ResolvedBundle("catkin", "h1", {
+    b = ResolvedBundle("bud_opening", "h1", {
         "conf": derived("conf", 0.4, requires_validation=True, validation_kind="annotations", derived_from="sweep",
                         validated_against=VALIDATED_HELD_OUT),
     })
@@ -328,7 +328,7 @@ def test_dataset_hash_content_addressed(tmp_path):
 
     d = tmp_path / "labels"
     d.mkdir()
-    json_io.write_annotations(d / "a.json", [Annotation(subject="catkin", geometry=BBox(10, 10, 30, 30))],
+    json_io.write_annotations(d / "a.json", [Annotation(subject="bud", geometry=BBox(10, 10, 30, 30))],
                               100, 100)
     json_io.write_annotations(d / "b.json", [], 100, 100, keep_empty=True)  # negative still contributes
     h1 = dataset_hash(d)
@@ -337,7 +337,7 @@ def test_dataset_hash_content_addressed(tmp_path):
     # JSON-only: a stray legacy .txt is not part of the canonical GT identity and is ignored.
     (d / "a.txt").write_text("0 0.5 0.5 0.1 0.1\n")
     assert dataset_hash(d) == h1
-    json_io.write_annotations(d / "a.json", [Annotation(subject="catkin", geometry=BBox(10, 10, 40, 40))],
+    json_io.write_annotations(d / "a.json", [Annotation(subject="bud", geometry=BBox(10, 10, 40, 40))],
                               100, 100)  # change GT content
     assert dataset_hash(d) != h1  # canonical JSON content changes the identity (not read as empty)
 
@@ -351,7 +351,7 @@ def test_dataset_hash_with_no_stems_excludes_a_bucket_sidecar(tmp_path):
 
     d = tmp_path / "labels"
     d.mkdir()
-    json_io.write_annotations(d / "a.json", [Annotation(subject="catkin", geometry=BBox(10, 10, 30, 30))],
+    json_io.write_annotations(d / "a.json", [Annotation(subject="bud", geometry=BBox(10, 10, 30, 30))],
                               100, 100)
     before = dataset_hash(d)
     for name in SIDECAR_FILENAMES:
@@ -362,7 +362,7 @@ def test_dataset_hash_with_no_stems_excludes_a_bucket_sidecar(tmp_path):
 # --- validate_resolved_bundle live checks ---
 
 def test_validate_in_chans_vs_probed_bands():
-    b = ResolvedBundle("catkin", "h1", {
+    b = ResolvedBundle("bud_opening", "h1", {
         "in_chans": derived("in_chans", 3, derived_from="raster"),
     })
     assert validate_resolved_bundle(b, probed_channels=3) == []
@@ -372,7 +372,7 @@ def test_validate_in_chans_vs_probed_bands():
 
 def test_validate_eval_vs_inference_operating_point_mismatch():
     def bundle(conf):
-        return ResolvedBundle("catkin", "h1", {
+        return ResolvedBundle("bud_opening", "h1", {
             "conf": derived("conf", conf, requires_validation=True, validation_kind="annotations", derived_from="sweep",
                             validated_against=VALIDATED_HELD_OUT),
         })
@@ -385,8 +385,8 @@ def test_validate_eval_vs_inference_operating_point_mismatch():
 def test_validate_max_dets_divergence_is_a_named_exemption_not_a_silent_gap():
     # A block bundle's max_dets and its export bundle's max_dets diverge by design (see this
     # function's own docstring); a caller comparing exactly those two must exclude "max_dets".
-    block = ResolvedBundle("catkin", "h1", {"max_dets": derived("max_dets", 42, derived_from="p99")})
-    export = ResolvedBundle("catkin", "h1", {
+    block = ResolvedBundle("bud_opening", "h1", {"max_dets": derived("max_dets", 42, derived_from="p99")})
+    export = ResolvedBundle("bud_opening", "h1", {
         "max_dets": default("max_dets", None, derived_from="block calibration: uncapped"),
     })
     issues = validate_resolved_bundle(block, inference_bundle=export)
@@ -394,7 +394,7 @@ def test_validate_max_dets_divergence_is_a_named_exemption_not_a_silent_gap():
 
 
 def test_validate_export_refuses_unvalidated():
-    b = ResolvedBundle("catkin", "h1", {
+    b = ResolvedBundle("bud_opening", "h1", {
         "conf": derived("conf", 0.4, requires_validation=True, validation_kind="annotations", derived_from="sweep",
                         validated_against=VALIDATED_FALSE),
     })
@@ -407,7 +407,7 @@ def test_validate_bundle_surfaces_all_firewall_issues_at_export():
     # dataset while exporting, plus an in_chans mismatch. All three firewall checks must fire, so a
     # regression dropping any one (e.g. the shippable_issues(target_dataset_hash=...) fold-in)
     # can't slip past: each check is exercised in isolation elsewhere but never together.
-    b = ResolvedBundle("catkin", "AAAA", {
+    b = ResolvedBundle("bud_opening", "AAAA", {
         "in_chans": derived("in_chans", 3, derived_from="raster"),
         "conf": derived("conf", 0.4, requires_validation=True, validation_kind="annotations", derived_from="sweep",
                         validated_against=VALIDATED_FALSE, dataset_scoped=True, dataset_hash="AAAA"),
@@ -420,11 +420,11 @@ def test_validate_bundle_surfaces_all_firewall_issues_at_export():
 
 # --- trait knowledge ---
 
-def test_catkin_trait_semantics():
+def test_bud_opening_trait_semantics():
     # config-loaded specs are rebuilt fresh per call (traits.py), never module-load singletons, so
     # value equality against the same-valued local fixture, not identity.
-    t = get_trait("catkin")
-    assert t == CATKIN
+    t = get_trait("bud_opening")
+    assert t == BUD_OPENING
     assert t.count_objective == "count_unbiased"
     assert t.localization == "center_match"
     assert t.localization_tolerance == "half_class_avg_size"
@@ -437,8 +437,8 @@ def test_catkin_trait_semantics():
 def test_unknown_trait_lists_available():
     with pytest.raises(TraitUnknownError) as exc:
         get_trait("banana")
-    assert "catkin" in str(exc.value)
-    assert "catkin" in registered_traits()
+    assert "bud_opening" in str(exc.value)
+    assert "bud_opening" in registered_traits()
 
 
 # --- raw_operating_point: a stated conf/max_dets is never laundered into a default ---
@@ -478,12 +478,12 @@ def test_reconcile_operating_point_validity_floors_a_trait_mismatch(tmp_path):
     a note naming both."""
     from tcip_mcp.pipelines.resolution import reconcile_operating_point_validity
 
-    d = _bucket(tmp_path, "d1", validated=True)  # stamped trait="catkin"
+    d = _bucket(tmp_path, "d1", validated=True)  # stamped trait="bud_opening"
 
     mismatched = reconcile_operating_point_validity([d], trait="second_trait")
     assert mismatched["validated"] == VALIDATED_FALSE
     note = mismatched["binding_notes"][d]
-    assert "catkin" in note and "second_trait" in note
+    assert "bud_opening" in note and "second_trait" in note
 
 
 def test_reconcile_operating_point_validity_admits_a_matching_trait(tmp_path):
@@ -491,9 +491,9 @@ def test_reconcile_operating_point_validity_admits_a_matching_trait(tmp_path):
     validates."""
     from tcip_mcp.pipelines.resolution import reconcile_operating_point_validity
 
-    d = _bucket(tmp_path, "d1", validated=True)  # stamped trait="catkin"
+    d = _bucket(tmp_path, "d1", validated=True)  # stamped trait="bud_opening"
 
-    matched = reconcile_operating_point_validity([d], trait="catkin")
+    matched = reconcile_operating_point_validity([d], trait="bud_opening")
     assert matched["validated"] == VALIDATED_HELD_OUT
 
 
@@ -508,7 +508,7 @@ def test_reconcile_operating_point_validity_still_floors_an_unbacked_trait_none_
                       "operating_point": {"conf": {"validated_against": None}},
                       "subject": None, "attribute": None})
 
-    r = reconcile_operating_point_validity([str(d)], trait="catkin")
+    r = reconcile_operating_point_validity([str(d)], trait="bud_opening")
     assert r["validated"] == VALIDATED_FALSE
 
 
@@ -526,7 +526,7 @@ def test_resolve_operating_point_explicit_tile_size_with_no_text_refuses():
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
 
     with pytest.raises(ValueError, match="tile_size_derived_from"):
-        resolve_operating_point("catkin", tiled=True, dataset_hash=None, tile_size=512,
+        resolve_operating_point("bud_opening", tiled=True, dataset_hash=None, tile_size=512,
                                 tile_size_source="explicit")
 
 
@@ -534,7 +534,7 @@ def test_resolve_operating_point_explicit_tile_size_with_text_ships():
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
 
     bundle = resolve_operating_point(
-        "catkin", tiled=True, dataset_hash=None, tile_size=512, tile_size_source="explicit",
+        "bud_opening", tiled=True, dataset_hash=None, tile_size=512, tile_size_source="explicit",
         tile_size_derived_from="stated on a checkpoint that records no tile geometry")
     param = bundle.get("tile_size")
     assert param.source == "explicit"

@@ -37,10 +37,10 @@ def _stamp(*, validated_by=None, **overrides) -> dict:
         validated=True,
         tile_size_validated=None,
         shippable_issues=[],
-        id_map={"catkin": 0},
-        subject="catkin",
+        id_map={"bud": 0},
+        subject="bud",
         attribute=None,
-        trait="catkin",
+        trait="bud_opening",
         dataset_hash="abc123",
         checkpoint="best",
         checkpoint_sha256="f" * 64,
@@ -157,7 +157,7 @@ def test_the_key_set_rail_is_scoped_to_the_operating_point_document_only(tmp_pat
     constructor never declared."""
     bucket = tmp_path / "bucket"
     write_sidecar(
-        bucket, {"validated": False, "trait": "catkin", "failures": [], "gate_evidence": {}},
+        bucket, {"validated": False, "trait": "bud_opening", "failures": [], "gate_evidence": {}},
         "ordinal_operating_point",
     )
 
@@ -168,7 +168,7 @@ def test_an_old_vintage_sweep_data_keyed_sidecar_still_reads(tmp_path):
     since these unshaped documents carry no key-set rail at all to reject it on."""
     bucket = tmp_path / "bucket"
     write_sidecar(
-        bucket, {"validated": False, "trait": "catkin", "failures": [], "sweep_data": {"kappa": 0.5}},
+        bucket, {"validated": False, "trait": "bud_opening", "failures": [], "sweep_data": {"kappa": 0.5}},
         "classifier_operating_point",
     )
     from tcip_mcp.pipelines.resolution import read_classifier_operating_point_sidecar
@@ -384,7 +384,7 @@ def test_geometry_reference_strength_matches_the_mapping_it_is_defined_beside():
 # --- the block-calibrated whole-mosaic regime ---
 
 def _block_bundle() -> ResolvedBundle:
-    return ResolvedBundle(trait="catkin", dataset_hash="mosaic1", params={
+    return ResolvedBundle(trait="bud_opening", dataset_hash="mosaic1", params={
         "conf": ResolvedParam("conf", 0.42, source="derived", derived_from="count-unbiased",
                               requires_validation=True, validation_kind="annotations",
                               validated_against=VALIDATED_HELD_OUT),
@@ -398,7 +398,7 @@ def _block_bundle() -> ResolvedBundle:
 def test_block_calibrated_export_ships_at_what_the_reserved_bands_measured():
     block = _block_bundle()
     export = block_calibrated_export_operating_point(
-        block, trait="catkin", tile_size=640, tile_size_source="derived")
+        block, trait="bud_opening", tile_size=640, tile_size_source="derived")
 
     assert export.get("conf") is block.get("conf")
     assert export.get("cross_tile_nms") is block.get("cross_tile_nms")
@@ -409,7 +409,7 @@ def test_block_calibrated_export_does_not_inherit_the_band_scoped_detection_cap(
     """The block bundle's cap is one reserved band's density; adopting it would truncate the count
     over the whole mosaic, which is the phenotype."""
     export = block_calibrated_export_operating_point(
-        _block_bundle(), trait="catkin", tile_size=640, tile_size_source="derived")
+        _block_bundle(), trait="bud_opening", tile_size=640, tile_size_source="derived")
 
     assert export.get("max_dets").value is None
     assert "not transferred" in export.get("max_dets").derived_from
@@ -417,7 +417,7 @@ def test_block_calibrated_export_does_not_inherit_the_band_scoped_detection_cap(
 
 def test_block_calibrated_export_gates_its_tile_scale_like_every_other_door():
     export = block_calibrated_export_operating_point(
-        _block_bundle(), trait="catkin", tile_size=640, tile_size_source="derived")
+        _block_bundle(), trait="bud_opening", tile_size=640, tile_size_source="derived")
     tile = export.get("tile_size")
 
     assert tile.requires_validation is True

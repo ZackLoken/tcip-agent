@@ -23,7 +23,7 @@ from types import SimpleNamespace
 
 import pytest
 
-pytestmark = pytest.mark.usefixtures("seed_catkin_trait_spec")
+pytestmark = pytest.mark.usefixtures("seed_bud_trait_spec")
 
 torch = pytest.importorskip("torch")
 pytest.importorskip("pycocotools")
@@ -53,14 +53,14 @@ def _reference(root, stems, annotations):
     return images_dir, labels_dir
 
 
-def _prediction(subject="catkin", score=0.87, box=(2, 2, 10, 10), *, state=None):
+def _prediction(subject="bud", score=0.87, box=(2, 2, 10, 10), *, state=None):
     attributes = {"state": state} if state is not None else {}
     return Annotation(subject=subject, geometry=BBox(*box), score=score, created_by=PRODUCER,
                       created_at="2026-01-01T00:00:00+00:00", attributes=attributes)
 
 
 def _hand_annotation(box=(2, 2, 10, 10), **kw):
-    return Annotation(subject="catkin", geometry=BBox(*box), **kw)
+    return Annotation(subject="bud", geometry=BBox(*box), **kw)
 
 
 class _CalStub:
@@ -88,14 +88,14 @@ def _calibrate(labels_dir, images_dir):
     import tcip_mcp.pipelines.calibration as calibration
 
     return calibration.calibrate_operating_point(
-        _CalStub(), "catkin", str(labels_dir), str(images_dir), **_CAL_KWARGS)
+        _CalStub(), "bud_opening", str(labels_dir), str(images_dir), **_CAL_KWARGS)
 
 
 def _classification_items(gt_dir, pred_dir):
     from tcip_mcp.tools.phenology_tools import _classification_items
 
-    return _classification_items(str(gt_dir), str(pred_dir), trait_name="catkin", subject="catkin",
-                                 positive_value="elongated", attribute="state")
+    return _classification_items(str(gt_dir), str(pred_dir), trait_name="bud_opening", subject="bud",
+                                 positive_value="open", attribute="state")
 
 
 # --- the reference reads refuse a directory of the model's own predictions --------------------
@@ -122,7 +122,7 @@ def test_classifier_calibration_refuses_a_gt_dir_of_the_models_own_predictions(t
     stems = ["a", "b"]
     _images, gt_dir = _reference(tmp_path / "gt", stems, lambda s: [_prediction()])
     _pred_images, pred_dir = _reference(tmp_path / "pred", stems,
-                                        lambda s: [_prediction(subject="elongated")])
+                                        lambda s: [_prediction(subject="open")])
 
     with pytest.raises(ValueError) as exc:
         _classification_items(gt_dir, pred_dir)
@@ -138,10 +138,10 @@ def test_the_classifier_tool_reports_an_inadmissible_reference_as_a_refusal(tmp_
     stems = ["a", "b"]
     _gt_images, gt_dir = _reference(tmp_path / "gt", stems, lambda s: [_prediction()])
     _pred_images, pred_dir = _reference(tmp_path / "pred", stems,
-                                        lambda s: [_prediction(subject="elongated")])
+                                        lambda s: [_prediction(subject="open")])
 
     result = calibrate_classifier_operating_point(
-        trait_name="catkin", subject="catkin", attribute="state",
+        trait_name="bud_opening", subject="bud", attribute="state",
         calibration_gt_dir=str(gt_dir), calibration_pred_dir=str(pred_dir),
         holdout_gt_dir=str(gt_dir), holdout_pred_dir=str(pred_dir),
         output_dir=str(tmp_path / "out"), dataset_root=str(tmp_path / "gt"))
@@ -254,14 +254,14 @@ def test_the_classifier_reference_admits_ground_truth_beside_a_scored_prediction
     for stem in stems:
         json_io.write_annotations(
             str(gt_dir / f"{stem}.json"),
-            [Annotation(subject="catkin", geometry=BBox(2, 2, 12, 12),
-                        attributes={"state": "elongated"}),
-             Annotation(subject="catkin", geometry=BBox(16, 16, 26, 26),
-                        attributes={"state": "dormant"})], IMG, IMG)
+            [Annotation(subject="bud", geometry=BBox(2, 2, 12, 12),
+                        attributes={"state": "open"}),
+             Annotation(subject="bud", geometry=BBox(16, 16, 26, 26),
+                        attributes={"state": "closed"})], IMG, IMG)
     _pred_images, pred_dir = _reference(
         tmp_path / "pred", stems,
-        lambda s: [_prediction(box=(2, 2, 12, 12), state="elongated"),
-                   _prediction(box=(16, 16, 26, 26), state="dormant")])
+        lambda s: [_prediction(box=(2, 2, 12, 12), state="open"),
+                   _prediction(box=(16, 16, 26, 26), state="closed")])
 
     items = _classification_items(gt_dir, pred_dir)
 
@@ -289,7 +289,7 @@ def _floor_mismatched_bundle():
             miss_pattern=miss, fp_pattern=fp, score=0.9),
         "tiled": False, "staged_conf_floor": 0.001,
     }
-    return resolve_operating_point("catkin", experiment_id=None, **inputs), inputs
+    return resolve_operating_point("bud_opening", experiment_id=None, **inputs), inputs
 
 
 class _OneDetectionStub(_CalStub):
@@ -321,7 +321,7 @@ def _run_with_bundle(tmp_path, monkeypatch, calibration):
     ckpt = registered_checkpoint(tmp_path, project_root=tmp_path)
     return run_inference_verified(
         str(ckpt), image_paths=[str(image)], images_dir=str(tmp_path), device="cpu", tile=False,
-        trait="catkin", calibration_labels_dir=str(tmp_path))
+        trait="bud_opening", calibration_labels_dir=str(tmp_path))
 
 
 def test_a_conf_floor_mismatch_reaches_the_delivered_issues_without_changing_the_gate(
@@ -358,7 +358,7 @@ def test_a_reference_without_the_mismatch_carries_no_such_issue(tmp_path, monkey
             miss_pattern=miss, fp_pattern=fp, score=0.9, fp_score=0.05),
         "tiled": False, "staged_conf_floor": 0.01,
     }
-    bundle = resolve_operating_point("catkin", experiment_id=None, **inputs)
+    bundle = resolve_operating_point("bud_opening", experiment_id=None, **inputs)
     assert bundle.get("conf").gate_evidence["conf_floor_mismatch"] is False
 
     r = _run_with_bundle(tmp_path, monkeypatch, (bundle, inputs))

@@ -44,7 +44,7 @@ def test_enriching_a_resolved_param_with_richer_provenance_keeps_its_value_and_r
     """The rail must admit valid work: a bundle is enriched with provenance after it resolves, and
     rebinding a param to carry a fuller description must change neither the value nor the reference
     the delivery gate reads."""
-    bundle = ResolvedBundle("catkin", "AAAA", {"conf": derived(
+    bundle = ResolvedBundle("bud_opening", "AAAA", {"conf": derived(
         "conf", 0.62, derived_from="count-vs-conf sweep", requires_validation=True,
         validation_kind="annotations", validated_against=VALIDATED_HELD_OUT)})
     bundle.params["conf"] = dataclasses.replace(

@@ -21,11 +21,11 @@ import pytest
 
 from tests._binding_fixtures import write_bound_sidecar, write_prediction
 
-pytestmark = pytest.mark.usefixtures("seed_catkin_trait_spec")
+pytestmark = pytest.mark.usefixtures("seed_bud_trait_spec")
 
-TRAIT = "catkin"
+TRAIT = "bud_opening"
 CHECKPOINT_SHA = "a1" * 32
-PRODUCING_RUN = "exp-021-hazelnut-catkin-det"
+PRODUCING_RUN = "exp-021-currant-bud-det"
 
 
 def _op(*, conf: float = 0.42, reference: str = "held_out_annotations",
@@ -158,7 +158,7 @@ def test_edited_classifier_value_under_a_genuine_pointer_floors(tmp_path):
     assert reconcile_classifier_validity([str(pred_dir)])["validated"] == "held_out_annotations"
 
     edited = {**bound, "operating_point": {"classifier": {
-        "validated_against": "held_out_annotations", "value": "dormant"}}}
+        "validated_against": "held_out_annotations", "value": "closed"}}}
     _write_raw(pred_dir, edited, "classifier_operating_point")
 
     validity = reconcile_classifier_validity([str(pred_dir)])

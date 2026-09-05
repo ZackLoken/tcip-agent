@@ -26,7 +26,7 @@ from tcip_mcp.pipelines.resolution import (  # noqa: E402
     VALIDATED_REVIEW_CONFIRMED,
 )
 
-pytestmark = pytest.mark.usefixtures("seed_catkin_trait_spec")
+pytestmark = pytest.mark.usefixtures("seed_bud_trait_spec")
 
 N_IMAGES = 4
 OBJECTS_PER_IMAGE = 8
@@ -54,7 +54,7 @@ def test_split_policy_provenance_carries_each_locked_field_under_its_own_name():
     is visible rather than hidden behind two fields that happen to agree. The enrichment must also
     leave the resolved value and its validation stamp exactly as the gate produced them.
     """
-    b = resolve_operating_point("catkin", tiled=True, dataset_hash="h",
+    b = resolve_operating_point("bud_opening", tiled=True, dataset_hash="h",
                                 calibration_records=_records("c", 0.0))
     conf = b.params["conf"]
     value_before, stamp_before = conf._raw, conf.validated_against
@@ -82,7 +82,7 @@ def test_spatial_split_kind_provenance_names_the_split_and_its_own_geometry():
     """A block-calibrated bundle has no locked draw to read a policy off, only the mosaic's own
     recorded geometry, and each of those fields likewise has to land under its own name.
     """
-    b = resolve_operating_point("catkin", tiled=True, dataset_hash="h",
+    b = resolve_operating_point("bud_opening", tiled=True, dataset_hash="h",
                                 calibration_records=_records("c", 0.0))
     conf = b.params["conf"]
     attach_spatial_split_kind_provenance(b, {"seed": 3, "tile_size": 512, "overlap": 0.25})
@@ -108,11 +108,11 @@ def test_every_conf_label_the_registered_pickers_can_stamp_has_a_registered_impl
     recs = _records("c", 0.0)
     labels = set()
     for objective in sorted(COUNT_OBJECTIVE_PICKERS):
-        spec = TraitSpec(name="catkin", count_objective=objective,
-                         delivers=("catkin_50per_date",))
+        spec = TraitSpec(name="bud_opening", count_objective=objective,
+                         delivers=("leaf_out_50per_date",))
         monkeypatch.setattr(OP, "get_trait", lambda name, s=spec: s)
         for reference in (VALIDATED_HELD_OUT, VALIDATED_REVIEW_CONFIRMED):
-            b = resolve_operating_point("catkin", tiled=True, dataset_hash="h",
+            b = resolve_operating_point("bud_opening", tiled=True, dataset_hash="h",
                                         calibration_records=recs, validated_reference=reference)
             labels.add(b.params["conf"].derived_from)
 
@@ -130,7 +130,7 @@ def test_a_native_ratio_tile_source_reaches_the_resolver_intact():
     import tcip_mcp.pipelines.resolution as resolution_mod
 
     native_ref = getattr(resolution_mod, "VALIDATED_NATIVE_FRAME_GEOMETRY", None)
-    b = resolve_operating_point("catkin", tiled=True, dataset_hash="h",
+    b = resolve_operating_point("bud_opening", tiled=True, dataset_hash="h",
                                 tile_size=300, tile_size_source="native_ratio")
     p = b.params["tile_size"]
     assert p._raw == 300
@@ -138,7 +138,7 @@ def test_a_native_ratio_tile_source_reaches_the_resolver_intact():
     assert p.validated_against == native_ref
     assert p.is_shippable is True
 
-    no_basis = resolve_operating_point("catkin", tiled=True, dataset_hash="h",
+    no_basis = resolve_operating_point("bud_opening", tiled=True, dataset_hash="h",
                                        tile_size=300, tile_size_source="unavailable")
     assert no_basis.params["tile_size"]._raw is None  # the case native_ratio is not
 
@@ -155,7 +155,7 @@ def test_a_floor_mismatch_on_either_side_of_the_reference_is_surfaced():
     hold = _records("h", 100000.0)
     hold[0]["dt"].append({"bbox": [900000.0, 50.0, 40.0, 40.0], "category_id": 1, "score": 0.05})
 
-    b = resolve_operating_point("catkin", tiled=True, dataset_hash="h", staged_conf_floor=0.05,
+    b = resolve_operating_point("bud_opening", tiled=True, dataset_hash="h", staged_conf_floor=0.05,
                                 calibration_records=cal, holdout_records=hold)
     sweep = b.params["conf"].gate_evidence
 
@@ -179,7 +179,7 @@ def test_a_holdout_sharing_one_image_of_content_with_calibration_refuses():
     hold[0]["gt"] = [dict(a) for a in cal[0]["gt"]]  # one image of genuinely shared content
     hold[0]["dt"] = [dict(d) for d in cal[0]["dt"]]
 
-    b = resolve_operating_point("catkin", tiled=True, dataset_hash="h", staged_conf_floor=0.05,
+    b = resolve_operating_point("bud_opening", tiled=True, dataset_hash="h", staged_conf_floor=0.05,
                                 calibration_records=cal, holdout_records=hold)
     sweep = b.params["conf"].gate_evidence
 
@@ -219,12 +219,12 @@ def test_an_authored_ordinal_agreement_floor_governs_instead_of_the_platform_pla
     for i in range(6):
         pred[i] = min(4, pred[i] + 2)
 
-    authored = TraitSpec(name="catkin", ordinal_agreement_floor=0.9,
-                         delivers=("catkin_50per_date",))
+    authored = TraitSpec(name="bud_opening", ordinal_agreement_floor=0.9,
+                         delivers=("leaf_out_50per_date",))
     monkeypatch.setattr(OP, "get_trait", lambda name: authored)
 
     res = resolve_ordinal_operating_point(
-        "catkin", criterion="quadratic_weighted_kappa",
+        "bud_opening", criterion="quadratic_weighted_kappa",
         calibration_items=_ordinal_items("c", _RANKS, pred),
         holdout_items=_ordinal_items("h", _RANKS, pred), experiment_id=None)
 
@@ -250,12 +250,12 @@ def test_an_authored_regression_skill_floor_governs_instead_of_the_platform_plac
     true_values = [float(r) for r in _RANKS]
     pred_values = [t * 0.5 + 1.0 for t in true_values]
 
-    authored = TraitSpec(name="catkin", regression_skill_floor=0.9,
-                         delivers=("catkin_50per_date",))
+    authored = TraitSpec(name="bud_opening", regression_skill_floor=0.9,
+                         delivers=("leaf_out_50per_date",))
     monkeypatch.setattr(OP, "get_trait", lambda name: authored)
 
     res = resolve_regression_operating_point(
-        "catkin", criterion="r_squared",
+        "bud_opening", criterion="r_squared",
         calibration_items=_regression_items("c", true_values, pred_values),
         holdout_items=_regression_items("h", true_values, pred_values), experiment_id=None)
 
@@ -281,11 +281,11 @@ def test_a_trait_that_authors_no_scalar_floor_still_calibrates_against_the_place
     for i in range(6):
         pred[i] = min(4, pred[i] + 2)
 
-    unauthored = TraitSpec(name="catkin", delivers=("catkin_50per_date",))
+    unauthored = TraitSpec(name="bud_opening", delivers=("leaf_out_50per_date",))
     monkeypatch.setattr(OP, "get_trait", lambda name: unauthored)
 
     res = resolve_ordinal_operating_point(
-        "catkin", criterion="quadratic_weighted_kappa",
+        "bud_opening", criterion="quadratic_weighted_kappa",
         calibration_items=_ordinal_items("c", _RANKS, pred),
         holdout_items=_ordinal_items("h", _RANKS, pred), experiment_id=None)
 

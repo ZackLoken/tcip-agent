@@ -28,7 +28,7 @@ def _single_source_mosaic(root: Path, width: int = 4000, height: int = 3000) -> 
     labels_dir.mkdir(parents=True, exist_ok=True)
     stem = "mosaic"
     Image.new("RGB", (width, height), color=(70, 90, 60)).save(images_dir / f"{stem}.png")
-    boxes = [Annotation(subject="catkin", geometry=BBox(x, y, x + 20, y + 20))
+    boxes = [Annotation(subject="bud", geometry=BBox(x, y, x + 20, y + 20))
              for x in range(20, width - 20, 200) for y in range(20, height - 20, 200)]
     json_io.write_annotations(str(labels_dir / f"{stem}.json"), boxes, width, height,
                               keep_empty=True)
@@ -38,7 +38,7 @@ def _single_source_mosaic(root: Path, width: int = 4000, height: int = 3000) -> 
 def _data_cfg(images_dir: Path, labels_dir: Path, **split) -> dict:
     cfg = {"val_ratio": 0.25, "test_ratio": 0.1, "seed": 1}
     cfg.update(split)
-    return {"images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "catkin",
+    return {"images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "bud",
             "auto_val": True, "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
             "split": cfg}
 

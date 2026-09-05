@@ -34,7 +34,7 @@ def test_num_classes_from_distribution():
     assert num_classes_from_distribution({}) == 0
 
 
-def test_gt_aspect_ratios_covers_elongated():
+def test_gt_aspect_ratios_covers_open():
     # tall boxes (h/w ~ 4) -> the derived ratio set must include a tall ratio the default (0.5,1,2) lacks
     boxes = [(10.0, 40.0)] * 20
     ratios = gt_aspect_ratios(boxes)
@@ -366,20 +366,20 @@ def test_write_class_map(tmp_path):
     # The expert authors the nested registry: two ordered values of a categorical attribute.
     res = write_class_map(
         str(tmp_path),
-        subjects={"catkin": {"description": "a hazelnut catkin",
-                             "attributes": {"elongation": {"type": "categorical",
-                                                           "values": ["dormant", "elongated"]}}}},
+        subjects={"bud": {"description": "a currant bud",
+                             "attributes": {"opening": {"type": "categorical",
+                                                           "values": ["closed", "open"]}}}},
         output_path=str(out),
     )
     assert "error" not in res
-    assert res["subjects"] == ["catkin"]
+    assert res["subjects"] == ["bud"]
     assert res["classes_path"] == str(out)
-    # Declared order is the id order (assign_class_ids is the one name->id derivation): 0=dormant,
-    # 1=elongated, and the on-disk nested shape carries the same value order.
+    # Declared order is the id order (assign_class_ids is the one name->id derivation): 0=closed,
+    # 1=open, and the on-disk nested shape carries the same value order.
     reg = class_registry.read_registry(out)
-    assert class_registry.assign_class_ids(reg, "catkin", "elongation") == {"dormant": 0, "elongated": 1}
-    assert json.loads(out.read_text())["catkin"]["attributes"]["elongation"]["values"] == \
-        ["dormant", "elongated"]
+    assert class_registry.assign_class_ids(reg, "bud", "opening") == {"closed": 0, "open": 1}
+    assert json.loads(out.read_text())["bud"]["attributes"]["opening"]["values"] == \
+        ["closed", "open"]
 
 
 def test_write_class_map_no_labels(tmp_path):
@@ -427,9 +427,9 @@ def test_write_class_map_defaults_into_the_dataset(tmp_path):
 
     res = write_class_map(
         str(tmp_path),
-        subjects={"catkin": {"description": "a hazelnut catkin",
-                             "attributes": {"elongation": {"type": "categorical",
-                                                           "values": ["dormant", "elongated"]}}}},
+        subjects={"bud": {"description": "a currant bud",
+                             "attributes": {"opening": {"type": "categorical",
+                                                           "values": ["closed", "open"]}}}},
     )
     assert "error" not in res
     assert res["classes_path"] == str(tmp_path / "classes.json")

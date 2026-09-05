@@ -1,4 +1,4 @@
-"""Tier-A derivations on asymmetric data: sparse class ids, elongated boxes, skewed spacing.
+"""Tier-A derivations on asymmetric data: sparse class ids, open boxes, skewed spacing.
 
 A derivation that reads a symmetric artifact (dense ids, square boxes, evenly spaced objects)
 cannot show which statistic it actually computes, because every candidate statistic agrees there.
@@ -32,7 +32,7 @@ def test_num_classes_sizes_the_head_for_the_highest_id_not_the_ids_present():
     ([(10.0, 40.0)] * 20, 4.0),   # uniformly tall
     ([(40.0, 10.0)] * 20, 0.25),  # uniformly wide
 ])
-def test_anchor_ratios_keep_square_coverage_on_a_uniformly_elongated_dataset(boxes, label_ratio):
+def test_anchor_ratios_keep_square_coverage_on_a_uniformly_open_dataset(boxes, label_ratio):
     """The derived anchor set spans the GT's own shape distribution and still covers a square-ish
     object. A class whose p10 and p90 both sit away from 1.0 would otherwise leave anchors that
     match nothing near square, so an instance closer to square than the rest of its class loses
@@ -52,17 +52,17 @@ def test_localization_tolerance_normalizes_by_the_characteristic_size_its_siblin
     reads the sides instead splits them apart and the tolerance stops being comparable to the
     criterion that selected it."""
     square = [[(0, 0, 30, 30), (40, 0, 30, 30), (80, 0, 30, 30)]]
-    elongated = [[(0, 0, 10, 90), (40, 0, 10, 90), (80, 0, 10, 90)]]
+    open = [[(0, 0, 10, 90), (40, 0, 10, 90), (80, 0, 10, 90)]]
 
     assert float(np.mean(char_sizes_from_boxes(square))) == pytest.approx(30.0)
-    assert float(np.mean(char_sizes_from_boxes(elongated))) == pytest.approx(30.0)
+    assert float(np.mean(char_sizes_from_boxes(open))) == pytest.approx(30.0)
 
     tol_square = derive_localization_tolerance_frac(square)
-    tol_elongated = derive_localization_tolerance_frac(elongated)
-    assert tol_square is not None and tol_elongated is not None
+    tol_open = derive_localization_tolerance_frac(open)
+    assert tol_square is not None and tol_open is not None
     # 40px between neighboring centers, margin_frac 0.5, characteristic size 30.
     assert tol_square == pytest.approx(40 * 0.5 / 30)
-    assert tol_elongated == pytest.approx(tol_square)
+    assert tol_open == pytest.approx(tol_square)
     assert 0.1 < tol_square < 0.75  # strictly inside the clamp, so neither end flattens the pair
 
 

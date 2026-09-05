@@ -54,7 +54,7 @@ def test_gui_inference_stamp_records_what_the_agents_export_door_records(tmp_pat
     ckpt = registered_checkpoint(tmp_path, project_root=tmp_path)
 
     class FakePredictor:
-        config = {"data": {"subject": "catkin"}}
+        config = {"data": {"subject": "bud"}}
 
         def __init__(self, checkpoint_path=None, **kwargs):
             pass
@@ -105,7 +105,7 @@ def _records(counts: list[int]) -> list[dict]:
     ]
 
 
-@pytest.mark.usefixtures("seed_catkin_trait_spec")
+@pytest.mark.usefixtures("seed_bud_trait_spec")
 def test_caller_supplied_detection_cap_is_not_labeled_with_a_derivation_it_never_came_from():
     """A cap the caller states is an explicit override. Stamping the resolver's own density formula
     on it attributes a derivation to a number the resolver never derived, and the provenance is what
@@ -113,7 +113,7 @@ def test_caller_supplied_detection_cap_is_not_labeled_with_a_derivation_it_never
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
 
     bundle = resolve_operating_point(
-        "catkin", dataset_hash="d", calibration_records=_records([2, 3]),
+        "bud_opening", dataset_hash="d", calibration_records=_records([2, 3]),
         tiled=False, max_dets=250)
     cap = bundle.get("max_dets")
 
@@ -122,14 +122,14 @@ def test_caller_supplied_detection_cap_is_not_labeled_with_a_derivation_it_never
     assert cap.derived_from == "caller override"
 
 
-@pytest.mark.usefixtures("seed_catkin_trait_spec")
+@pytest.mark.usefixtures("seed_bud_trait_spec")
 def test_a_cap_the_resolver_derives_itself_still_says_how(tmp_path):
     """The rail that stops mislabeling a caller's number must still label the resolver's own, or it
     has traded one wrong provenance for a missing one."""
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
 
     bundle = resolve_operating_point(
-        "catkin", dataset_hash="d", calibration_records=_records([2, 3]), tiled=False)
+        "bud_opening", dataset_hash="d", calibration_records=_records([2, 3]), tiled=False)
     cap = bundle.get("max_dets")
 
     assert cap.source == "derived"

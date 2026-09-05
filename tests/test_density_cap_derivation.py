@@ -22,7 +22,7 @@ from tcip_mcp.pipelines.operating_point import (  # noqa: E402
     resolve_operating_point,
 )
 
-pytestmark = pytest.mark.usefixtures("seed_catkin_trait_spec")
+pytestmark = pytest.mark.usefixtures("seed_bud_trait_spec")
 
 
 def test_cap_admits_the_crowded_decile_of_a_skewed_count_distribution():
@@ -68,7 +68,7 @@ def test_resolved_max_dets_covers_the_densest_calibration_image():
     densest = max(len(r["gt"]) for r in recs)
     assert densest == 300  # the fixture really is skewed, not uniform
 
-    b = resolve_operating_point("catkin", tiled=True, dataset_hash="h", calibration_records=recs)
+    b = resolve_operating_point("bud_opening", tiled=True, dataset_hash="h", calibration_records=recs)
     max_dets = b.params["max_dets"]
 
     assert max_dets._raw == 411
