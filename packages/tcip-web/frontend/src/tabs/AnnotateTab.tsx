@@ -1647,7 +1647,7 @@ export function AnnotateTab() {
           Overview
         </button>
 
-        {!isLocked && <AttributePanel selectedBoxIdx={mode === "box" ? selectedBoxIdx : null} />}
+        <AttributePanel selectedBoxIdx={mode === "box" ? selectedBoxIdx : null} locked={isLocked} />
 
         <AnnotateLegend />
 

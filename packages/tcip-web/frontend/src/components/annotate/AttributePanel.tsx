@@ -11,7 +11,16 @@ import { useStore } from "@/store";
  *  polished editor is a later slice): the selected shape's attributes, the image-level ratings
  *  that ride in the same label file with no box, and the registry-growing controls a breeder
  *  otherwise has no way to reach without a shell. */
-export function AttributePanel({ selectedBoxIdx }: { selectedBoxIdx: number | null }) {
+export function AttributePanel({
+  selectedBoxIdx,
+  locked,
+}: {
+  selectedBoxIdx: number | null;
+  /** A confirmed (complete or negative) image: shape attributes and image-level ratings are both
+   *  edits of that image's content and stay off the panel, but declaring vocabulary on the active
+   *  subject is not an edit of the image and stays reachable. */
+  locked: boolean;
+}) {
   const activeSubject = useStore((s) => s.gui.active_subject);
   const registry = useStore((s) => s.registry.subjects);
   const registryVersion = useStore((s) => s.registry.version);
@@ -133,12 +142,14 @@ export function AttributePanel({ selectedBoxIdx }: { selectedBoxIdx: number | nu
   const [attrName, setAttrName] = useState("");
   const [attrType, setAttrType] = useState<"categorical" | "ordinal">("categorical");
   const [attrValues, setAttrValues] = useState("");
+  const [attrNameError, setAttrNameError] = useState<string | null>(null);
 
   function resetAttrDraft() {
     setAddingAttribute(false);
     setAttrName("");
     setAttrType("categorical");
     setAttrValues("");
+    setAttrNameError(null);
   }
 
   function submitAttrDraft() {
@@ -149,6 +160,10 @@ export function AttributePanel({ selectedBoxIdx }: { selectedBoxIdx: number | nu
       .map((v) => v.trim())
       .filter((v) => v.length > 0);
     if (!name || values.length === 0) return;
+    if (activeAttributes[name]) {
+      setAttrNameError(`${name} is already declared; add values to it with + value.`);
+      return;
+    }
     addAttribute(activeSubject, name, attrType, values);
     resetAttrDraft();
   }
@@ -178,7 +193,10 @@ export function AttributePanel({ selectedBoxIdx }: { selectedBoxIdx: number | nu
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selected?.kind, selected?.idx]);
 
-  const hasContent = !!selected || imageAnnotations.length > 0;
+  // Locked, only an active subject to declare vocabulary against is worth opening for.
+  const hasContent = locked
+    ? !!activeSubject
+    : !!activeSubject || !!selected || imageAnnotations.length > 0;
   if (dismissed || !hasContent) {
     return (
       <button
@@ -205,22 +223,23 @@ export function AttributePanel({ selectedBoxIdx }: { selectedBoxIdx: number | nu
           ✕
         </button>
       </div>
-      {selected ? (
-        <div className="mb-2">
-          <div className="mb-1 text-tcip-muted">
-            Selected <span className="font-semibold text-tcip-fg">{selected.shape.subject}</span>
+      {!locked &&
+        (selected ? (
+          <div className="mb-2">
+            <div className="mb-1 text-tcip-muted">
+              Selected <span className="font-semibold text-tcip-fg">{selected.shape.subject}</span>
+            </div>
+            <AttributeEditors
+              subject={selected.shape.subject}
+              attributes={selected.shape.attributes}
+              registry={registry}
+              onChange={setInstanceAttr}
+              onAddValue={(attr, value) => addValue(selected.shape.subject, attr, value)}
+            />
           </div>
-          <AttributeEditors
-            subject={selected.shape.subject}
-            attributes={selected.shape.attributes}
-            registry={registry}
-            onChange={setInstanceAttr}
-            onAddValue={(attr, value) => addValue(selected.shape.subject, attr, value)}
-          />
-        </div>
-      ) : (
-        <p className="mb-2 text-tcip-muted">Select a shape to set its attributes.</p>
-      )}
+        ) : (
+          <p className="mb-2 text-tcip-muted">Select a shape to set its attributes.</p>
+        ))}
 
       {activeSubject && (
         <div className="mb-2 rounded border border-tcip-border bg-tcip-bg/60 p-2">
@@ -238,8 +257,8 @@ export function AttributePanel({ selectedBoxIdx }: { selectedBoxIdx: number | nu
             const unassessed = activeSubjectShapes.filter((s) => !s.attributes[name]).length;
             return (
               <p key={name} className="text-tcip-muted">
-                {unassessed} of {activeSubjectShapes.length} {activeSubject} shapes carry no {name}{" "}
-                value.
+                {unassessed} of {activeSubjectShapes.length} {activeSubject} shapes on this image
+                carry no {name} value.
               </p>
             );
           })}
@@ -250,10 +269,15 @@ export function AttributePanel({ selectedBoxIdx }: { selectedBoxIdx: number | nu
                 className="tcip-input w-full text-[11px]"
                 placeholder="attribute name"
                 value={attrName}
-                onChange={(e) => setAttrName(e.target.value)}
+                onChange={(e) => {
+                  setAttrName(e.target.value);
+                  setAttrNameError(null);
+                }}
               />
+              {attrNameError && <p className="text-tcip-fp">{attrNameError}</p>}
               <select
                 className="tcip-select w-full text-[11px]"
+                aria-label="attribute type"
                 value={attrType}
                 onChange={(e) => setAttrType(e.target.value as "categorical" | "ordinal")}
               >
@@ -291,49 +315,54 @@ export function AttributePanel({ selectedBoxIdx }: { selectedBoxIdx: number | nu
         </div>
       )}
 
-      <CollapsibleSection
-        className="mt-2 rounded border border-tcip-border bg-tcip-bg/60 p-2"
-        title="Ratings for this whole image"
-        caption="Applies to the whole image, not to any shape."
-        open={ratingsOpen}
-        onToggle={() => setRatingsOpen((o) => !o)}
-      >
-        {imageAnnotations.length === 0 && (
-          <p className="mb-1 text-tcip-muted">None on this image.</p>
-        )}
-        {imageAnnotations.map((a, i) => (
-          <div key={i} className="mb-1.5 rounded border border-tcip-border p-1.5">
-            <div className="mb-1 flex items-center gap-1">
-              <span className="font-semibold text-tcip-fg">{a.subject}</span>
-              <button
-                type="button"
-                className="ml-auto text-tcip-muted hover:text-tcip-fp"
-                title="Remove this rating"
-                onClick={() => deleteImageAnnotation(i)}
-              >
-                ✕
-              </button>
-            </div>
-            <AttributeEditors
-              subject={a.subject}
-              attributes={a.attributes}
-              registry={registry}
-              onChange={(attr, value) =>
-                updateImageAnnotation(i, { ...a, attributes: withAttr(a.attributes, attr, value) })
-              }
-              onAddValue={(attr, value) => addValue(a.subject, attr, value)}
-            />
-          </div>
-        ))}
-        <button
-          type="button"
-          className="tcip-btn mt-1 w-full text-[11px]"
-          disabled={!activeSubject}
-          onClick={() => activeSubject && addImageAnnotation(activeSubject)}
+      {!locked && (
+        <CollapsibleSection
+          className="mt-2 rounded border border-tcip-border bg-tcip-bg/60 p-2"
+          title="Ratings for this whole image"
+          caption="Applies to the whole image, not to any shape."
+          open={ratingsOpen}
+          onToggle={() => setRatingsOpen((o) => !o)}
         >
-          + Rating for {activeSubject ?? "…"}
-        </button>
-      </CollapsibleSection>
+          {imageAnnotations.length === 0 && (
+            <p className="mb-1 text-tcip-muted">None on this image.</p>
+          )}
+          {imageAnnotations.map((a, i) => (
+            <div key={i} className="mb-1.5 rounded border border-tcip-border p-1.5">
+              <div className="mb-1 flex items-center gap-1">
+                <span className="font-semibold text-tcip-fg">{a.subject}</span>
+                <button
+                  type="button"
+                  className="ml-auto text-tcip-muted hover:text-tcip-fp"
+                  title="Remove this rating"
+                  onClick={() => deleteImageAnnotation(i)}
+                >
+                  ✕
+                </button>
+              </div>
+              <AttributeEditors
+                subject={a.subject}
+                attributes={a.attributes}
+                registry={registry}
+                onChange={(attr, value) =>
+                  updateImageAnnotation(i, {
+                    ...a,
+                    attributes: withAttr(a.attributes, attr, value),
+                  })
+                }
+                onAddValue={(attr, value) => addValue(a.subject, attr, value)}
+              />
+            </div>
+          ))}
+          <button
+            type="button"
+            className="tcip-btn mt-1 w-full text-[11px]"
+            disabled={!activeSubject}
+            onClick={() => activeSubject && addImageAnnotation(activeSubject)}
+          >
+            + Rating for {activeSubject ?? "…"}
+          </button>
+        </CollapsibleSection>
+      )}
     </div>
   );
 }
