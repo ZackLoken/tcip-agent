@@ -1,5 +1,5 @@
 """The relative-paths family's own proofs, beyond the battery of pre-existing suites re-run
-unmodified: the version-2 document boundary's refusal and its partners, the grammar-aware
+unmodified: the entries-mapping document boundary's refusal and its partners, the grammar-aware
 external test, the shared containment core between the checkpoint and dataset registries, and
 every response surface answering a resolved absolute path for a relative stored entry.
 """

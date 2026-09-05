@@ -134,9 +134,8 @@ def test_read_only_tool_records_in_the_platform_log_with_the_platform_entry_shap
     rows = _rows_for(platform_root, "scan_dataset")
     assert len(rows) == 1
     assert set(rows[0]) == {
-        "timestamp", "tool", "arguments", "status", "duration_ms", "schema_version",
+        "timestamp", "tool", "arguments", "status", "duration_ms",
     }
-    assert rows[0]["schema_version"] == 2
     assert rows[0]["arguments"] == {"folder_path": str(dataset_root)}
     assert _rows_for(dataset_root, "scan_dataset") == []
 

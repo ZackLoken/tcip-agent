@@ -94,10 +94,10 @@ def test_stamp_keys_matches_the_constructors_own_returned_keys():
     assert STAMP_KEYS == set(_stamp())
 
 
-def test_the_stamp_constructor_marks_its_own_writing_vintage():
-    """Every stamp the constructor returns carries schema_version 2, the value assertion the
-    key-set pin above cannot make, so the vintage marker cannot silently regress to absence."""
-    assert _stamp(validated=False)["schema_version"] == 2
+def test_the_stamp_constructor_carries_no_schema_version_field():
+    """The constructor stamps no schema_version: absence is the frozen version 1, and the first
+    writer of the field is whichever future change bumps this store's format."""
+    assert "schema_version" not in _stamp(validated=False)
 
 
 def test_write_sidecar_refuses_an_undeclared_top_level_key(tmp_path):

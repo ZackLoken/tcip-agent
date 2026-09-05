@@ -393,15 +393,15 @@ def test_route_validates_and_stamps_review_confirmed(client, tmp_path: Path):
     assert binding.train_disjointness == {"checked": False, "group_check": None}
 
 
-def test_route_promotion_stamps_schema_version_2_and_carries_an_old_vintage_member(
+def test_route_promotion_carries_an_old_vintage_member_and_stamps_no_schema_version(
     client, tmp_path: Path,
 ):
-    """The carried-subrecord contract: promotion writes schema_version 2 for the fields it itself
-    touches, but a top-level member the producing run already wrote under an older provenance
-    vocabulary (here a hand-built ``mask_binarize`` payload spelled with the retired ``has_sweep``
-    key) is not rewritten, so it still reads under that older spelling after promotion. The
-    version-2 validation row's own claim carries that same mixed member, since ``mask_binarize``
-    is one of operating_point's declared claim keys.
+    """The carried-subrecord contract: promotion writes no ``schema_version`` field for the
+    fields it itself touches, and a top-level member the producing run already wrote under an
+    older provenance vocabulary (here a hand-built ``mask_binarize`` payload spelled with the
+    retired ``has_sweep`` key) is not rewritten, so it still reads under that older spelling after
+    promotion. The validation row's own claim carries that same mixed member, since
+    ``mask_binarize`` is one of operating_point's declared claim keys.
     """
     import tcip_store
     from tcip_mcp.pipelines.resolution import sidecar_key
@@ -418,7 +418,7 @@ def test_route_promotion_stamps_schema_version_2_and_carries_an_old_vintage_memb
     assert resp.json()["validated"] is True
 
     sc = _read_sidecar(pred_dir)
-    assert sc["schema_version"] == 2
+    assert "schema_version" not in sc
     assert sc["mask_binarize"] == {"has_sweep": True, "threshold": 0.5}
 
     from tcip_mcp.experiments import find_validation
@@ -426,7 +426,7 @@ def test_route_promotion_stamps_schema_version_2_and_carries_an_old_vintage_memb
     pointer = sc["validated_by"]
     row = find_validation(pointer["experiment_id"], pointer["record_digest"])
     assert row is not None
-    assert row["schema_version"] == 2
+    assert "schema_version" not in row
     assert row["claim"]["mask_binarize"] == {"has_sweep": True, "threshold": 0.5}
 
 

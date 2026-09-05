@@ -178,7 +178,7 @@ def test_a_bespoke_module_exposing_its_own_knob_reaches_a_validated_point(tmp_pa
     body = store.read(calibration_curve_key(key))
     assert calibration_curve_identity(body) == key
     assert _calibration_evidence(r) == body["calibration_evidence"]
-    assert body["schema_version"] == 2
+    assert "schema_version" not in body
 
 
 def test_a_module_exposing_no_knob_refuses_unstated_not_censored(tmp_path, monkeypatch):

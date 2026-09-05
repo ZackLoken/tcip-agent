@@ -368,7 +368,7 @@ def test_missing_experiment_id_key_refuses_the_load(tmp_path, monkeypatch):
         "config": {}, "metrics": {}, "metrics_source": None, "tags": [],
     }  # experiment_id key deliberately absent
     with ts.transaction(key) as txn:
-        txn.write(key, {"schema_version": 2, "entries": [entry]})
+        txn.write(key, {"entries": [entry]})
 
     with pytest.raises(UnregisteredCheckpoint, match="experiment_id"):
         load_registered_checkpoint(ckpt, project_path=str(tmp_path))
