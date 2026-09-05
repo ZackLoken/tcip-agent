@@ -11,7 +11,6 @@ the claim-scope dimension the shared delivery gate reconciles from a bucket's ow
 from __future__ import annotations
 
 import csv
-import json
 from pathlib import Path
 
 import pytest
@@ -86,10 +85,7 @@ def _hand_written_bucket(tmp_path, name: str, stamp: dict) -> Path:
         str(d / "mosaic.json"),
         [Annotation(subject="0", geometry=BBox(8.0, 8.0, 12.0, 12.0), score=0.9)], 64, 64,
         keep_empty=True)
-    if stamp.get("validated"):
-        write_bound_sidecar(d, stamp, dataset_root=root, experiment_id=f"exp-{name}")
-    else:
-        (d / "operating_point.json").write_text(json.dumps(stamp), encoding="utf-8")
+    write_bound_sidecar(d, stamp, dataset_root=root, experiment_id=f"exp-{name}")
     return d
 
 
