@@ -149,16 +149,24 @@ def _write_positive_label(
     Under a classified ``scope`` (``resolution.BucketScope``), a verdict's ``class_name`` is the
     confirmed value, not the object: every record carries ``scope.subject`` with that value under
     ``scope.attribute``, the shape a classified bucket's own records carry, checked against
-    ``vocabulary`` (the bucket's own recorded ``id_map`` keys) when one is given, refusing a value
-    the bucket never declared rather than writing it. Without a classified ``scope``, ``class_name``
-    is the object class itself, written to ``subject`` as before.
+    ``vocabulary`` (the bucket's own recorded ``id_map`` keys), required under a classified scope
+    rather than defaulted away, since a confirmed value written with nothing to check it against is
+    the rail this scope exists to hold every reader to; the one production caller
+    (``materialize_review_dataset``) already resolves and threads it. Without a classified
+    ``scope``, ``class_name`` is the object class itself, written to ``subject`` as before.
     """
     # Denormalize the verdict log's [cx,cy,w,h] to pixel xyxy for the name-based per-image JSON.
     def _annotation(name: str, cx: float, cy: float, w: float, h: float) -> Annotation:
         box = BBox((cx - w / 2) * img_w, (cy - h / 2) * img_h,
                    (cx + w / 2) * img_w, (cy + h / 2) * img_h)
         if scope is not None and scope.classified:
-            if vocabulary is not None and name not in vocabulary:
+            if vocabulary is None:
+                raise ValueError(
+                    "a classified scope requires the bucket's own recorded vocabulary "
+                    "(the bucket's own id_map keys) to check a confirmed value against; "
+                    "none was given."
+                )
+            if name not in vocabulary:
                 raise ValueError(
                     f"{name!r} is not a value this bucket's own id_map declares "
                     f"({sorted(vocabulary)}): a confirmed value must be one the bucket's own "
@@ -317,9 +325,10 @@ def materialize_dataset(
     ``unconfirmed_negatives``. The output still needs the source dataset's registry to train under
     the scope, so it is copied over whether or not any negative was confirmed, raising by name when
     the source names no dataset root or that root's registry is missing, or when the output already
-    holds one. ``vocabulary`` (the bucket's own recorded ``id_map`` keys) checks a classified
-    verdict's confirmed value before it is written, when given; a value outside it is reported in
-    ``boundary_refused`` rather than written, the same posture a degenerate box already gets.
+    holds one. ``vocabulary`` (the bucket's own recorded ``id_map`` keys) is required under a
+    classified scope, refusing by name when absent, and checks a classified verdict's confirmed
+    value before it is written; a value outside it is reported in ``boundary_refused`` rather than
+    written, the same posture a degenerate box already gets.
     """
     if scope is not None and scope.classified and subject is not None and subject != scope.subject:
         raise ValueError(
