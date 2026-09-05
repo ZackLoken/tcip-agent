@@ -116,7 +116,7 @@ source file under a covered root that no row names.
 | packages/tcip-mcp/src/tcip_mcp/pipelines/pixel_size.py | The one place the platform turns a raster's georeferencing tags into a real-world pixel size in metres, shared by the completeness bar and the block-scale derivation. | 3 | 1 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/postprocessing/__init__.py | Postprocessing pipeline: temporal aggregation and CSV export. | 0 | 0 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/postprocessing/aggregation.py | Per-plant aggregation, temporal/spatial aggregation of per-image results. | 4 | 2 |
-| packages/tcip-mcp/src/tcip_mcp/pipelines/postprocessing/export.py | CSV export for per-plant phenotyping results. | 7 | 2 |
+| packages/tcip-mcp/src/tcip_mcp/pipelines/postprocessing/export.py | CSV export for per-plant phenotyping results. | 7 | 3 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/postprocessing/orthomosaic_mapping.py | Georeferencing for a whole-mosaic GeoTIFF. | 1 | 7 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/postprocessing/phenology.py | Canonical phenology measurement, the one implementation of a trait's positive-fraction milestones. | 4 | 4 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/postprocessing/plant_mapping.py | Plant-ID mapping across image capture dates. | 11 | 16 |
@@ -522,7 +522,7 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | scripts/score_predictions.py | Score on-disk predictions against on-disk ground truth, through the demoted `score_predictions` function. | 3 | 0 |
 | scripts/shp_to_plant_csv.py | Convert a plant-locations shapefile into ``read_plant_csvs``' CSV schema. | 1 | 0 |
 | scripts/smoke_fence_e2e.py | Live smoke: does the real fenced `claude` refuse to edit platform internals? | 3 | 0 |
-| scripts/smoke_phenology_e2e.py | Live e2e smoke: the agent's phenology pipeline on real geolocated images. | 13 | 0 |
+| scripts/smoke_phenology_e2e.py | Live e2e smoke: the agent's phenology pipeline on real geolocated images. | 12 | 0 |
 | scripts/smoke_terminal_e2e.py | One-shot smoke: the embedded agent terminal against the real `claude` CLI. | 2 | 0 |
 | scripts/triage_predictions.py | Sort a checkpoint's own predictions by confidence, through the demoted `triage_predictions` function. | 3 | 0 |
 | scripts/verify_citations.py | Check that literature citations point at real code, real papers, and real sentences. | 0 | 0 |
