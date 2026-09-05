@@ -537,6 +537,54 @@ def test_store_bootstrap_project_roots_admits_a_bare_fingerprint_registry_entry(
     assert (str(dataset.resolve()), ROOT) in roots
 
 
+def test_project_roots_names_a_run_output_dir_a_split_manifest_and_a_prediction_bucket(
+    tmp_path: Path, monkeypatch,
+):
+    """project_roots reaches every layout a project's own records name it under, not only the
+    registered dataset roots: an experiment's own recorded run output directory, the split
+    manifest a run bound to (its split.json's manifest_binding.manifest_dir), and a prediction
+    bucket under a registered dataset's own predictions/ tree."""
+    from types import SimpleNamespace
+
+    from tcip_store.layout_claims import PREDICTION_BUCKET, RUN, SPLITS
+
+    from scripts._store_bootstrap import project_roots
+    from tcip_mcp import experiments
+    from tcip_mcp.dataset_layout import prediction_dir
+    from tcip_mcp.pipelines.data.split_construction import persist_split_manifest
+
+    project = tmp_path / "project"
+    dataset = tmp_path / "dataset"
+    project.mkdir()
+    dataset.mkdir()
+    _make_dataset(dataset)
+    register_dataset(str(dataset), crop="hazelnut", project_root=str(project))
+
+    # The producers below resolve every member key against the pinned platform root.
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(project))
+
+    experiments.create_experiment("exp-1", {"model_source": {}})
+    run_dir = tmp_path / "runs" / "exp-1"
+    run_dir.mkdir(parents=True)
+    experiments.stamp_run_identity("exp-1", "exp-1", str(run_dir))
+
+    split_dir = tmp_path / "splits" / "frozen-exp-1"
+    split_dir.mkdir(parents=True)
+    persist_split_manifest(
+        "exp-1", SimpleNamespace(stems=["a"]), SimpleNamespace(stems=["b"]),
+        {"labels_dir": "", "split": {"manifest_binding": {"manifest_dir": str(split_dir)}}},
+    )
+
+    bucket = prediction_dir(dataset, "modelA", "2-11-26")
+    bucket.mkdir(parents=True)
+
+    roots = project_roots(project)
+
+    assert (str(run_dir.resolve()), RUN) in roots
+    assert (str(split_dir.resolve()), SPLITS) in roots
+    assert (str(bucket.resolve()), PREDICTION_BUCKET) in roots
+
+
 def test_external_dataset_paths_admits_a_bare_fingerprint_registry_entry(tmp_path: Path):
     """import_project calls this after extraction to disclose which registered datasets stayed
     external; a bare pre-prefix fingerprint left over from before the restamp family existed

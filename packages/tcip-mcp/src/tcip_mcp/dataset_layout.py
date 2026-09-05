@@ -1171,6 +1171,27 @@ def list_models(dataset_root: str | Path) -> list[str]:
     return sorted(p.name for p in preds.iterdir() if p.is_dir() and is_bucket_name(p.name))
 
 
+def prediction_bucket_dirs(dataset_root: str | Path) -> list[Path]:
+    """Every directory under ``predictions/`` a bucket's own sidecar could sit in: each model's
+    own directory, and each of its date subdirectories, whether or not either actually holds one.
+
+    The one walk ``doctor.py``'s registry check and ``scripts/_store_bootstrap.py``'s
+    ``project_roots`` both read through, so a directory one calls a bucket is a directory the
+    other calls one too.
+    """
+    pred_root = prediction_root(dataset_root)
+    if not pred_root.is_dir():
+        return []
+    found: list[Path] = []
+    for model in list_models(dataset_root):
+        model_dir = pred_root / model
+        if not model_dir.is_dir():
+            continue
+        found.append(model_dir)
+        found.extend(sorted(p for p in model_dir.iterdir() if p.is_dir()))
+    return found
+
+
 def _dir_has_label_file(d: Path) -> bool:
     """True if ``d`` holds at least one label file (any supported extension).
 
