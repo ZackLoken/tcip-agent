@@ -60,7 +60,7 @@ Examples use real `crops.yml` trait names; verify any trait against `crops.yml` 
 | Tool | Purpose |
 |------|---------|
 | logged `scripts/` script | Produces the Per-Plant CSV Schema above by chaining `launch_training` + `run_inference` then the importable postprocessing libs `aggregate_per_plant` / `export_aggregated_csv`; see `pipeline-design` skill for the chaining mechanics |
-| `run_inference` | Run a checkpoint over images or a raster and persist predictions as per-image JSON (COCO-shaped) or, for a raster, one whole-mosaic prediction file. A bucket (`output_dir`, the run's own prediction directory, not a score bin) with review verdicts is immutable; the run redirects to a fresh `<dir>@r2` bucket (see the response's `output_dir`); `overwrite=True` forces in-place but is refused when verdicts exist |
+| `run_inference` | Run a checkpoint over images or a raster and persist predictions as per-image JSON (COCO-shaped) or, for a raster, one whole-mosaic prediction file. A bucket (`output_dir`, the run's own prediction directory, not a score bin) with review verdicts is immutable; the run redirects to a fresh `<dir>@r2` bucket (see the response's `output_dir`); `overwrite=True` forces in-place but is refused when verdicts exist. A bucket that already holds a prediction document from an earlier publish, with no verdict yet recorded, refuses this run outright, whatever `overwrite` says, naming the document count and a suggested fresh bucket; a completed experiment's bucket in that state has no audited route to clear it for republication |
 | `deliver_phenology_milestones` | Per-plant bloom CSV (05/50/95-per-date) from classified preds + plant mapping; its own column schema; see `phenology` skill |
 | `register_plant_registry` | Names a plant-locations CSV set once (per-file `sha256`/`n_plants`, `crop`, `site`, a content digest over the parsed rows), so `deliver_orthomosaic_plant_counts` and `build_plant_mapping` read the same registered version by name (`plant_registry`) instead of re-asserting file paths |
 | `deliver_orthomosaic_plant_counts` | Per-plant detection counts from a persisted whole-raster prediction bucket plus a `plant_registry` name; georeferences the boxes and delivers through `export_aggregated_csv`, so it inherits the same gate and provenance columns; refuses a bucket that cannot vouch for the caller's raster. Nearest-neighbour by default; `canopy_subject` switches to containment in an accepted canopy boundary instead (refused alongside a stated `nn_tolerance_m`). Fewer rows than the registry names can ship under either regime, the absent plants named on the delivery event (outside the raster's frame under both; with no segment, or with an ambiguous detection, under the segment regime). This tool builds no acknowledgement, so an unvalidated dimension always refuses here; the Results tab's count export (`/api/results/export_count_csv`) is the one surface that can acknowledge and ship this kind unvalidated |
@@ -200,9 +200,11 @@ unaffected by a caller's project root.
   occlusion undercounts a canopy-borne quantity (the chestnut document does, for `n_burrs`/
   `burrs_density`), a raster count inherits that undercount.
 - `deliver_per_image_counts`'s live regime, given a `predictions_dir`, publishes into it through the same
-  bracket `run_inference` publishes with (tile gate, count-claim gate, frozen-lineage-pointer
-  refusal, write, lineage link, gated only by `allow_unvalidated_staging`, never a route to ship
-  the CSV unvalidated), then hands `export_detection_csv` that bucket; the CSV's own delivery gate
+  bracket `run_inference` publishes with (the same bucket-immutability resolution, refusing on a
+  verdict or on a document a prior run left with none; the tile gate, count-claim gate,
+  frozen-lineage-pointer refusal, write, lineage link, gated only by `allow_unvalidated_staging`,
+  never a route to ship the CSV unvalidated), then hands `export_detection_csv` that bucket; a
+  document refusal returns before the checkpoint is loaded. The CSV's own delivery gate
   then runs exactly once, inside the writer, never a second time at the door. Without a
   `predictions_dir`, the door calls the writer with no bucket at all, and the writer's own
   no-`pred_dirs` floor always refuses: an acknowledgement clears an unvalidated dimension, never
