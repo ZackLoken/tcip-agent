@@ -166,6 +166,10 @@ export function ProjectBreadcrumb() {
           title="This project has no dated images yet; ask the agent to ingest images first."
         >
           no dated images
+          <span className="sr-only">
+            {" "}
+            This project has no dated images yet; ask the agent to ingest images first.
+          </span>
         </span>
       )}
       <span className="mx-1.5 text-tcip-border">|</span>

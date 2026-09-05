@@ -164,6 +164,16 @@ describe("footer open state", () => {
     expect(screen.queryByTitle("Switch date")).not.toBeInTheDocument();
   });
 
+  it("carries the no-date explanation as visually hidden text in the reading order, not only a title", () => {
+    setDataset({ dataset_root: "/w/alpha", date: null });
+    render(<ProjectBreadcrumb />);
+    expect(
+      screen.getByText(
+        "This project has no dated images yet; ask the agent to ingest images first.",
+      ),
+    ).toBeInTheDocument();
+  });
+
   it("reads no project open only once nothing is open", () => {
     setDataset({ dataset_root: null, date: null });
     render(<ProjectBreadcrumb />);
