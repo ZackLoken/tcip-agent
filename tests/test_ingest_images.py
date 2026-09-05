@@ -291,7 +291,7 @@ def test_ingest_move_removes_originals(tmp_path):
     assert (Path(manifest["project_path"]) / "images" / "2026-02-11" / "a.jpg").is_file()
 
 
-def test_ingest_no_overwrite_reports_stem_collision(tmp_path):
+def test_ingest_two_sources_with_one_stem_refuse_the_whole_call(tmp_path):
     # Two source subfolders each holding dup.png (no EXIF → both target undated/dup.png).
     src = tmp_path / "raw"
     _make_image(src / "sub1" / "dup.png")
@@ -299,13 +299,25 @@ def test_ingest_no_overwrite_reports_stem_collision(tmp_path):
 
     manifest = ingest_images(source=str(src), name="proj_collision_case", site="north orchard")
 
-    assert manifest["undated"] == 1  # exactly one placed
-    assert len(manifest["skipped_collisions"]) == 1
-    coll = manifest["skipped_collisions"][0]
-    assert coll["stem"] == "dup"
-    assert coll["bucket"] == "undated"
-    # The placed file is intact.
-    assert (Path(manifest["project_path"]) / "images" / "undated" / "dup.png").is_file()
+    assert "error" in manifest
+    assert "dup.png" in manifest["error"]
+    assert "undated" in manifest["error"]
+    assert not workspace.project_path("proj_collision_case").exists()
+
+
+def test_ingest_same_stem_in_two_different_buckets_is_admitted(tmp_path):
+    """A rail must admit valid work: the collision key is scoped per bucket, so foo.jpg into one
+    date and foo.png into another land side by side, no collision."""
+    src = tmp_path / "raw"
+    _make_image(src / "foo.jpg", exif_date="2026:02:11 10:00:00")
+    _make_image(src / "foo.png", exif_date="2026:03:01 10:00:00")
+
+    manifest = ingest_images(source=str(src), name="proj_twobuckets_case", site="north orchard")
+
+    assert "error" not in manifest
+    proj = Path(manifest["project_path"])
+    assert (proj / "images" / "2026-02-11" / "foo.jpg").is_file()
+    assert (proj / "images" / "2026-03-01" / "foo.png").is_file()
 
 
 def test_ingest_refuses_a_stem_reserved_for_a_bucket_provenance_stamp(tmp_path):
@@ -339,18 +351,128 @@ def test_ingest_refuses_a_case_variant_of_a_reserved_stem(tmp_path):
     assert (Path(manifest["project_path"]) / "images" / "undated" / "ordinary.png").is_file()
 
 
-def test_ingest_same_stem_different_ext_is_a_collision(tmp_path):
-    # Labels pair by stem alone, so IMG_1.jpg and IMG_1.tif in one bucket must not both
-    # land (they'd share one label file). One placed, the other reported.
+def test_ingest_same_stem_different_ext_refuses_the_whole_call(tmp_path):
+    # Labels pair by stem alone, so IMG_1.jpg and IMG_1.png in one bucket would share one
+    # label file: neither has landed yet, so the whole call refuses rather than picking one.
     src = tmp_path / "raw"
     _make_image(src / "IMG_1.jpg", exif_date="2026:02:11 10:00:00")
     _make_image(src / "IMG_1.png")  # different ext; PNG has no EXIF → but force same bucket
 
     manifest = ingest_images(source=str(src), name="proj_stem_case", site="north orchard", date_from="2026-02-11")
 
-    assert manifest["copied"] == 1
-    assert len(manifest["skipped_collisions"]) == 1
-    assert manifest["skipped_collisions"][0]["stem"] == "IMG_1"
+    assert "error" in manifest
+    assert "IMG_1" in manifest["error"]
+    assert not workspace.project_path("proj_stem_case").exists()
+
+
+def test_ingest_stem_collision_across_two_calls_refuses_naming_both_files(tmp_path):
+    """The classic collision: one call places foo.jpg, a later call offers foo.png into the
+    same bucket. The bucket keeps holding foo.jpg alone; nothing from the second call lands."""
+    src1 = tmp_path / "raw1"
+    _make_image(src1 / "foo.jpg", exif_date="2026:02:11 10:00:00")
+    first = ingest_images(source=str(src1), name="proj_crosscall_case", site="north orchard")
+    assert "error" not in first
+
+    src2 = tmp_path / "raw2"
+    _make_image(src2 / "foo.png")
+    second = ingest_images(
+        source=str(src2), name="proj_crosscall_case", site="north orchard", date_from="2026-02-11",
+    )
+
+    assert "error" in second
+    assert "foo.jpg" in second["error"] and "foo.png" in second["error"]
+    proj = Path(first["project_path"])
+    assert (proj / "images" / "2026-02-11" / "foo.jpg").is_file()
+    assert not (proj / "images" / "2026-02-11" / "foo.png").exists()
+
+
+def test_ingest_case_variant_stem_collision_across_two_calls_refuses(tmp_path):
+    """Foo.jpg then foo.png: different exact stems, the same case-folded key."""
+    src1 = tmp_path / "raw1"
+    _make_image(src1 / "Foo.jpg", exif_date="2026:02:11 10:00:00")
+    first = ingest_images(source=str(src1), name="proj_casevariant_case", site="north orchard")
+    assert "error" not in first
+
+    src2 = tmp_path / "raw2"
+    _make_image(src2 / "foo.png")
+    second = ingest_images(
+        source=str(src2), name="proj_casevariant_case", site="north orchard", date_from="2026-02-11",
+    )
+
+    assert "error" in second
+    assert "Foo.jpg" in second["error"] and "foo.png" in second["error"]
+
+
+def test_ingest_admits_a_source_after_a_band_group_manifest_with_a_different_stem(tmp_path):
+    """A rail must admit valid work: a manifest at one stem never blocks an ordinary source at a
+    genuinely distinct stem in the same bucket."""
+    from tcip_mcp.pipelines.data.band_groups import write_band_group_manifest
+
+    src = tmp_path / "raw"
+    _make_image(src / "plain.png")
+    manifest = ingest_images(source=str(src), name="proj_manifestdistinct_case", site="north orchard")
+    assert "error" not in manifest
+
+    bucket_dir = Path(manifest["project_path"]) / "images" / "undated"
+    band_a = bucket_dir / "cap_G.tif"
+    band_b = bucket_dir / "cap_R.tif"
+    band_a.write_bytes(b"a")
+    band_b.write_bytes(b"b")
+    write_band_group_manifest(bucket_dir, "cap", {"Green": band_a, "Red": band_b})
+
+    src2 = tmp_path / "raw2"
+    _make_image(src2 / "other.png")
+    second = ingest_images(
+        source=str(src2), name="proj_manifestdistinct_case", site="north orchard",
+    )
+    assert "error" not in second
+    assert (bucket_dir / "other.png").is_file()
+
+
+def test_ingest_after_a_band_group_manifest_refuses_naming_the_manifest(tmp_path):
+    """cap.jpg after a cap.bandgroup manifest: the door refuses rather than admitting a source
+    that would mint the manifest-versus-raw ambiguity every reader already refuses."""
+    from tcip_mcp.pipelines.data.band_groups import write_band_group_manifest
+
+    src = tmp_path / "raw"
+    _make_image(src / "plain.png")
+    first = ingest_images(source=str(src), name="proj_manifest_case", site="north orchard")
+    assert "error" not in first
+
+    bucket_dir = Path(first["project_path"]) / "images" / "undated"
+    band_a = bucket_dir / "cap_G.tif"
+    band_b = bucket_dir / "cap_R.tif"
+    band_a.write_bytes(b"a")
+    band_b.write_bytes(b"b")
+    write_band_group_manifest(bucket_dir, "cap", {"Green": band_a, "Red": band_b})
+
+    src2 = tmp_path / "raw2"
+    _make_image(src2 / "cap.jpg")
+    second = ingest_images(source=str(src2), name="proj_manifest_case", site="north orchard")
+
+    assert "error" in second
+    assert "cap.bandgroup" in second["error"]
+    assert not (bucket_dir / "cap.jpg").exists()
+
+
+def test_ingest_a_collision_and_a_conflicting_site_reports_the_collision(tmp_path):
+    """The pre-scan runs before the site check, so a call carrying both faults names the
+    collision, not the site conflict."""
+    src1 = tmp_path / "raw1"
+    _make_image(src1 / "foo.jpg", exif_date="2026:02:11 10:00:00")
+    first = ingest_images(source=str(src1), name="proj_collisionsite_case", site="north orchard")
+    assert "error" not in first
+
+    src2 = tmp_path / "raw2"
+    _make_image(src2 / "foo.png")
+    second = ingest_images(
+        source=str(src2), name="proj_collisionsite_case", site="south orchard",
+        date_from="2026-02-11",
+    )
+
+    assert "error" in second
+    assert "collision" in second["error"]
+    assert "orchard" not in second["error"]
 
 
 def test_ingest_survives_a_bad_file_mid_batch(tmp_path, monkeypatch):
