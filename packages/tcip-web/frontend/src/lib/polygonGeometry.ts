@@ -152,15 +152,49 @@ export type Ring = [number, number][];
 /** `cutRing`'s outcome: the two pieces the cut produced, or the reason it could not answer for it. */
 export type CutRingResult = { rings: [Ring, Ring] } | { reason: string };
 
-/** The refusal `cutRing` returns for every crossing count but two, and for a piece its own
- *  post-conditions reject: a segment that misses, one that starts inside, one laid along an edge,
- *  a cut across both arms of a concave shape, and a walk whose pieces fail to partition the
- *  parent all read the same to a breeder, since none of them is a cut the geometry can answer for. */
-export const CUT_RING_REFUSAL =
-  "The cut must cross the selected outline exactly twice, starting and ending outside it. " +
-  "Cut a concave shape in more than one pass.";
+/** The smallest side, in image pixels, a drawn shape may keep: below it, a commit is refused
+ *  rather than writing a sliver. Lives here (not editGeometry.ts, which imports from this module)
+ *  so the box tool's own floor and the cut tool's piece floor share one primitive without a
+ *  circular import; editGeometry.ts re-exports it under its established name. */
+export const MIN_BOX_SIDE = 3;
+
+export const CUT_MISSES_REFUSAL =
+  "The cut segment does not cross the selected outline. Draw it so it passes through the shape, " +
+  "with both endpoints outside it.";
+
+export const CUT_ENDPOINT_INSIDE_REFUSAL =
+  "The cut's start or end point falls inside the selected outline. Place both points outside it, " +
+  "on either side of the shape.";
+
+export const CUT_ALONG_EDGE_REFUSAL =
+  "The cut runs along one of the outline's own edges rather than crossing it. Angle the segment " +
+  "so it cuts across the shape instead of tracing its boundary.";
+
+export const CUT_TOO_MANY_CROSSINGS_REFUSAL =
+  "The cut crosses the selected outline more than twice. Cut a concave shape in more than one " +
+  "pass, each pass crossing the outline exactly twice.";
+
+export const CUT_ZERO_LENGTH_REFUSAL =
+  "The cut's start and end point are the same location. Click two distinct points on either side " +
+  "of the selected outline.";
+
+export const CUT_PARTITION_FAILED_REFUSAL =
+  "The cut could not be resolved into two valid pieces of the selected outline. Try a straighter " +
+  "cut across the shape.";
+
+export const CUT_PIECE_TOO_SMALL_REFUSAL =
+  `A piece of the cut would be smaller than ${MIN_BOX_SIDE} pixels on a side. Move the cut ` +
+  "farther from the outline's edge so both pieces stay a usable size.";
 
 const AREA_TOLERANCE = 1e-6;
+
+/** Extra slack for the partition post-condition, as a fraction of the parent ring's own area per
+ *  vertex summed over: shoelace-sum rounding grows with both the area's magnitude and the number
+ *  of terms accumulated, so a fixed epsilon either false-refuses a large parent (its rounding
+ *  alone can exceed a tiny absolute bound) or lets a real mismatch through on a minuscule one.
+ *  1e-9 per vertex is an engineering bound sized for double-precision accumulation, not a value
+ *  measured from annotation data. */
+const PARTITION_TOLERANCE_PER_VERTEX = 1e-9;
 
 function cross2(ax: number, ay: number, bx: number, by: number): number {
   return ax * by - ay * bx;
@@ -197,6 +231,17 @@ function isValidPiece(piece: Ring): boolean {
   return distinct.length >= 3 && Math.abs(shoelaceArea(distinct)) > AREA_TOLERANCE;
 }
 
+/** True when some edge of the ring lies exactly on the infinite line through a/b (both its
+ *  vertices at side 0): the segment traces the outline's own boundary there rather than crossing
+ *  it, which is why that edge's own vertices are excluded from the crossing count above. */
+function hasCollinearEdge(sides: number[]): boolean {
+  const n = sides.length;
+  for (let i = 0; i < n; i++) {
+    if (sides[i] === 0 && sides[(i + 1) % n] === 0) return true;
+  }
+  return false;
+}
+
 /**
  * Splits `ring` into the two pieces the segment `a`-`b` cuts it into, or refuses. The cut is valid
  * only when both endpoints fall outside the ring and the segment crosses its boundary exactly
@@ -204,19 +249,29 @@ function isValidPiece(piece: Ring): boolean {
  * sides of the line through `a`/`b`; a vertex touched tangentially, with both neighbors on the
  * same side, is not a crossing, and an edge collinear with the segment contributes none either).
  * The two crossings, in ring order, become the shared chord between the two returned pieces, each
- * the walk along the original boundary from one crossing to the other.
+ * the walk along the original boundary from one crossing to the other. Each failure states its own
+ * cause and remedy (`CUT_MISSES_REFUSAL`, `CUT_ENDPOINT_INSIDE_REFUSAL`, `CUT_ALONG_EDGE_REFUSAL`,
+ * `CUT_TOO_MANY_CROSSINGS_REFUSAL`, `CUT_ZERO_LENGTH_REFUSAL`, `CUT_PIECE_TOO_SMALL_REFUSAL` and
+ * `CUT_PARTITION_FAILED_REFUSAL`), the concave-shape remedy reserved for the more-than-twice case.
+ * A piece below `MIN_BOX_SIDE` on either bbox side refuses rather than writing a sliver, and the
+ * area-sum post-condition's tolerance scales with the parent's own area and vertex count so
+ * shoelace rounding cannot false-refuse a large parent or mask a real mismatch on a tiny one.
  */
 export function cutRing(ring: Ring, a: [number, number], b: [number, number]): CutRingResult {
   const n = ring.length;
-  if (n < 3) return { reason: CUT_RING_REFUSAL };
-  if (pointInPolygon(a, ring) || pointInPolygon(b, ring)) return { reason: CUT_RING_REFUSAL };
+  // A ring under three vertices is not a real contour; every annotation this reaches carries at
+  // least three, so this reuses the plain miss sentence rather than earning one of its own.
+  if (n < 3) return { reason: CUT_MISSES_REFUSAL };
+  if (pointInPolygon(a, ring) || pointInPolygon(b, ring)) {
+    return { reason: CUT_ENDPOINT_INSIDE_REFUSAL };
+  }
 
   const [ax, ay] = a;
   const [bx, by] = b;
   const dx = bx - ax;
   const dy = by - ay;
   const abLenSq = dx * dx + dy * dy;
-  if (abLenSq === 0) return { reason: CUT_RING_REFUSAL };
+  if (abLenSq === 0) return { reason: CUT_ZERO_LENGTH_REFUSAL };
 
   // Which side of the line through a/b each vertex falls on; 0 means exactly on that line.
   const sides = ring.map(([x, y]) => Math.sign(cross2(dx, dy, x - ax, y - ay)));
@@ -258,7 +313,11 @@ export function cutRing(ring: Ring, a: [number, number], b: [number, number]): C
     // prev === next: a tangency (both neighbors on the same side), not a crossing.
   }
 
-  if (crossings.length !== 2) return { reason: CUT_RING_REFUSAL };
+  if (crossings.length !== 2) {
+    if (crossings.length > 2) return { reason: CUT_TOO_MANY_CROSSINGS_REFUSAL };
+    if (hasCollinearEdge(sides)) return { reason: CUT_ALONG_EDGE_REFUSAL };
+    return { reason: CUT_MISSES_REFUSAL };
+  }
   crossings.sort((c1, c2) => c1.order - c2.order);
   const [c1, c2] = crossings;
 
@@ -281,10 +340,24 @@ export function cutRing(ring: Ring, a: [number, number], b: [number, number]): C
     .concat(seq.slice(0, idx1 + 1))
     .map((p) => p.point);
 
-  if (!isValidPiece(pieceA) || !isValidPiece(pieceB)) return { reason: CUT_RING_REFUSAL };
+  if (!isValidPiece(pieceA) || !isValidPiece(pieceB))
+    return { reason: CUT_PARTITION_FAILED_REFUSAL };
+
+  const tooSmall = (piece: Ring): boolean => {
+    const [minX, minY, maxX, maxY] = polygonBbox(piece);
+    return maxX - minX < MIN_BOX_SIDE || maxY - minY < MIN_BOX_SIDE;
+  };
+  if (tooSmall(pieceA) || tooSmall(pieceB)) return { reason: CUT_PIECE_TOO_SMALL_REFUSAL };
+
   const parentArea = Math.abs(shoelaceArea(ring));
   const sumArea = Math.abs(shoelaceArea(pieceA)) + Math.abs(shoelaceArea(pieceB));
-  if (Math.abs(sumArea - parentArea) > AREA_TOLERANCE) return { reason: CUT_RING_REFUSAL };
+  const partitionTolerance = Math.max(
+    AREA_TOLERANCE,
+    parentArea * PARTITION_TOLERANCE_PER_VERTEX * n,
+  );
+  if (Math.abs(sumArea - parentArea) > partitionTolerance) {
+    return { reason: CUT_PARTITION_FAILED_REFUSAL };
+  }
 
   return { rings: [pieceA, pieceB] };
 }

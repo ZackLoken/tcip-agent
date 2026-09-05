@@ -4,12 +4,12 @@
  * tests) is unit-testable without Konva.
  */
 
-import { pointInPolygon, polygonBbox } from "@/lib/polygonGeometry";
+import { MIN_BOX_SIDE, pointInPolygon, polygonBbox } from "@/lib/polygonGeometry";
 import type { ReviewGeom } from "@/lib/reviewGeometry";
 
-/** The smallest side, in image pixels, a box may be drawn, resized or moved to and still be
- *  kept: below it, a commit is refused with a toast rather than writing a sliver. */
-export const MIN_BOX_SIDE = 3;
+// Re-exported under this module's established name; the constant itself lives in
+// polygonGeometry.ts so the cut tool's piece floor can share it without a circular import.
+export { MIN_BOX_SIDE };
 
 export type EditShape =
   | { kind: "box"; box: [number, number, number, number] }

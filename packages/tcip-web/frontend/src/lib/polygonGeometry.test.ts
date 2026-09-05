@@ -2,11 +2,18 @@ import { describe, expect, it } from "vitest";
 
 import {
   computePolygonBboxes,
-  CUT_RING_REFUSAL,
+  CUT_ALONG_EDGE_REFUSAL,
+  CUT_ENDPOINT_INSIDE_REFUSAL,
+  CUT_MISSES_REFUSAL,
+  CUT_PARTITION_FAILED_REFUSAL,
+  CUT_PIECE_TOO_SMALL_REFUSAL,
+  CUT_TOO_MANY_CROSSINGS_REFUSAL,
+  CUT_ZERO_LENGTH_REFUSAL,
   cutRing,
   derivedBoxFromPolygon,
   findHitPoint,
   findHoveredPolygon,
+  MIN_BOX_SIDE,
   pointInPolygon,
   pointInRings,
   pointToSegmentDist,
@@ -251,7 +258,7 @@ describe("cutRing", () => {
     expect(p1.length + p2.length).toBe(hex.length + 2); // B and E each shared by both pieces
   });
 
-  it("the two-spike tangency refuses (two grazing contacts are zero crossings)", () => {
+  it("the two-spike tangency refuses as a miss (two grazing contacts are zero crossings)", () => {
     // A naive count-the-touches implementation reads the two tangent spike tips as crossings.
     const comb: [number, number][] = [
       [0, 0],
@@ -263,22 +270,27 @@ describe("cutRing", () => {
       [0, -10],
     ];
     const r = cutRing(comb, [-5, 10], [25, 10]);
-    expect(r).toEqual({ reason: CUT_RING_REFUSAL });
+    expect(r).toEqual({ reason: CUT_MISSES_REFUSAL });
   });
 
-  it("a segment that misses the ring refuses with the stated reason", () => {
+  it("a segment that misses the ring refuses with its own reason", () => {
     const r = cutRing(SQUARE, [50, 50], [60, 60]);
-    expect(r).toEqual({ reason: CUT_RING_REFUSAL });
+    expect(r).toEqual({ reason: CUT_MISSES_REFUSAL });
   });
 
-  it("a segment starting inside the ring refuses with the stated reason", () => {
+  it("a segment starting inside the ring refuses with its own reason", () => {
     const r = cutRing(SQUARE, [5, 5], [20, 5]);
-    expect(r).toEqual({ reason: CUT_RING_REFUSAL });
+    expect(r).toEqual({ reason: CUT_ENDPOINT_INSIDE_REFUSAL });
   });
 
-  it("a segment laid along an edge refuses by the crossing count, not by accident", () => {
+  it("a segment laid along an edge refuses with its own reason, not the plain miss", () => {
     const r = cutRing(SQUARE, [-5, 0], [15, 0]);
-    expect(r).toEqual({ reason: CUT_RING_REFUSAL });
+    expect(r).toEqual({ reason: CUT_ALONG_EDGE_REFUSAL });
+  });
+
+  it("a zero-length segment (both clicks at the same point) refuses with its own reason", () => {
+    const r = cutRing(SQUARE, [50, 50], [50, 50]);
+    expect(r).toEqual({ reason: CUT_ZERO_LENGTH_REFUSAL });
   });
 
   const U_SHAPE: [number, number][] = [
@@ -292,9 +304,9 @@ describe("cutRing", () => {
     [0, 30],
   ];
 
-  it("a U cut across both arms refuses with the stated reason", () => {
+  it("a U cut across both arms refuses with its own more-than-twice reason", () => {
     const r = cutRing(U_SHAPE, [-5, 20], [35, 20]);
-    expect(r).toEqual({ reason: CUT_RING_REFUSAL });
+    expect(r).toEqual({ reason: CUT_TOO_MANY_CROSSINGS_REFUSAL });
   });
 
   it("a U cut through one arm is admitted", () => {
@@ -312,7 +324,32 @@ describe("cutRing", () => {
       [0, 10],
     ];
     const r = cutRing(bowtie, [5, -5], [5, 15]);
-    expect(r).toEqual({ reason: CUT_RING_REFUSAL });
+    expect(r).toEqual({ reason: CUT_PARTITION_FAILED_REFUSAL });
+  });
+
+  it("a piece thinner than MIN_BOX_SIDE refuses rather than writing a sliver", () => {
+    // 1px from the square's left edge: one piece's bbox is 1px wide, below the three-pixel floor.
+    const r = cutRing(SQUARE, [1, -5], [1, 15]);
+    expect(r).toEqual({ reason: CUT_PIECE_TOO_SMALL_REFUSAL });
+  });
+
+  it("a piece at exactly MIN_BOX_SIDE is admitted, not refused (a floor, not a margin)", () => {
+    const r = cutRing(SQUARE, [MIN_BOX_SIDE, -5], [MIN_BOX_SIDE, 15]);
+    expect("reason" in r).toBe(false);
+  });
+
+  it("a large-area cut is not spuriously refused by shoelace rounding at that scale", () => {
+    // A fixed epsilon this tiny is far below the rounding drift double-precision summation
+    // produces here; the tolerance scales with the parent's own area instead.
+    const big = 1_000_000;
+    const bigSquare: [number, number][] = [
+      [0, 0],
+      [big, 0],
+      [big, big],
+      [0, big],
+    ];
+    const r = cutRing(bigSquare, [big / 2, -5], [big / 2, big + 5]);
+    expect("reason" in r).toBe(false);
   });
 });
 
