@@ -607,6 +607,14 @@ def _write_phenology_delivery(
     columns (``";"``-joined, empty when nothing was unverified), ``images_unattributed`` and
     ``plant_attribution`` fill theirs directly, and the whole dict travels to the delivery event
     unchanged.
+
+    Raises:
+        ValueError: ``basis`` is not an ``OperationalizationBasis``, the gate refused, or ``flags``
+            carries no ``classifier`` dimension; nothing is written in any of these cases.
+        AuditEntryNotWritten (``tcip_mcp.audit``): the dataset-scoped delivery-event audit line
+            could not be appended, raised by ``record_delivery_binding_event`` after the CSV was
+            already written to ``out_path``. Both ``write_phenology_csv`` and
+            ``write_phenology_curve_csv`` inherit this, since both delegate here.
     """
     if not isinstance(basis, OperationalizationBasis):
         raise ValueError(

@@ -785,13 +785,19 @@ def export_csv(payload: ExportCsvPayload) -> Response:
     # The browser download lands wherever the breeder's browser puts it; the delivery itself
     # belongs to the project, so the same bytes are written to <project>/results_export/, audited.
     saved_path = measurement.project_root / "results_export" / Path(filename).name
-    cells = write_csv(
-        "results.export_csv", rows, saved_path, measurement.spec,
-        flags=measurement.flags, acknowledgement=acknowledgement, basis=measurement.basis,
-        operating_point_conf=measurement.validity["operating_point_conf"], producer=producer,
-        bindings=measurement.bindings, pred_dirs=measurement.pred_dirs,
-        project_root=measurement.project_root,
-        plant_mapping=measurement.plant_mapping_disclosure)
+    from tcip_mcp.audit import AuditEntryNotWritten
+
+    try:
+        cells = write_csv(
+            "results.export_csv", rows, saved_path, measurement.spec,
+            flags=measurement.flags, acknowledgement=acknowledgement, basis=measurement.basis,
+            operating_point_conf=measurement.validity["operating_point_conf"], producer=producer,
+            bindings=measurement.bindings, pred_dirs=measurement.pred_dirs,
+            project_root=measurement.project_root,
+            plant_mapping=measurement.plant_mapping_disclosure)
+    except AuditEntryNotWritten as exc:
+        raise HTTPException(
+            409, {"message": str(exc), "saved_path": str(saved_path)}) from exc
     body = saved_path.read_bytes()
     _audit(str(measurement.project_root), "results.export_csv", {
         "trait": payload.trait, "payload": payload.payload, "saved_path": str(saved_path),
@@ -892,6 +898,7 @@ def export_count_csv(payload: ExportCountCsvPayload) -> Response:
     ``filename`` overwrites the file, and the earlier event's own digest no longer describes it,
     the same contract ``export_csv`` has, with ``supersede_delivery`` the remedy.
     """
+    from tcip_mcp.audit import AuditEntryNotWritten
     from tcip_mcp.operationalization import OperationalizationRefused
     from tcip_mcp.pipelines.resolution import CountDeliveryRefused, DeliveryRefused
 
@@ -917,6 +924,9 @@ def export_count_csv(payload: ExportCountCsvPayload) -> Response:
         except CountDeliveryRefused as exc:
             raise HTTPException(400, {"kind": "count_delivery", "message": str(exc),
                                       **exc.facts}) from exc
+        except AuditEntryNotWritten as exc:
+            raise HTTPException(
+                409, {"message": str(exc), "saved_path": str(saved_path)}) from exc
     else:
         predictions_dir, raster_path = _belonging(
             root, payload.delivery.predictions_dir, payload.delivery.raster_path)
@@ -947,6 +957,9 @@ def export_count_csv(payload: ExportCountCsvPayload) -> Response:
         except CountDeliveryRefused as exc:
             raise HTTPException(400, {"kind": "count_delivery", "message": str(exc),
                                       **exc.facts}) from exc
+        except AuditEntryNotWritten as exc:
+            raise HTTPException(
+                409, {"message": str(exc), "saved_path": str(saved_path)}) from exc
 
     body = saved_path.read_bytes()
     _audit(str(root), "results.export_count_csv", {

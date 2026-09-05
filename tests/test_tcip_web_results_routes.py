@@ -916,6 +916,31 @@ def test_export_refuses_a_bucket_whose_id_map_never_carried_the_positive_class(
     assert "open" in resp.json()["detail"]
 
 
+def test_export_csv_answers_409_when_the_delivery_event_audit_line_cannot_be_appended(
+    client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The CSV is already on disk by the time the delivery-event audit line is appended; a
+    failed append must not vanish as a bare 500. The 409 names the unwritten entry and the file
+    that was written, and the file itself is left in place rather than rolled back."""
+    from tcip_mcp import audit as audit_module
+
+    body = _phenology_fixture(tmp_path, validated=True)
+
+    def _broken(tool, arguments=None, **kwargs):
+        raise audit_module.AuditEntryNotWritten(tool, RuntimeError("audit log unwritable"))
+
+    monkeypatch.setattr(audit_module, "record_event_or_raise", _broken)
+
+    resp = client.post("/api/results/export_csv",
+                       json={**body, "payload": "milestones", "filename": "unaudited.csv"})
+    assert resp.status_code == 409
+    detail = resp.json()["detail"]
+    saved = tmp_path / "results_export" / "unaudited.csv"
+    assert detail["saved_path"] == str(saved)
+    assert "could not be written" in detail["message"]
+    assert saved.exists()
+
+
 # ── Count CSV export ────────────────────────────────────────────────────
 
 _COUNT_ID_MAP = {"stem": 0}
@@ -1011,6 +1036,35 @@ def test_export_count_csv_per_image_delivers_under_acknowledgement(
     ).json()["records"]
     event = next(r for r in events if r["door"] == "export_detection_csv")
     assert event["acknowledged_by"] == "user:tester"
+
+
+def test_export_count_csv_answers_409_when_the_delivery_event_audit_line_cannot_be_appended(
+    client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The CSV is already on disk by the time the delivery-event audit line is appended; a
+    failed append must not vanish as a bare 500. The 409 names the unwritten entry and the file
+    that was written, and the file itself is left in place rather than rolled back."""
+    from tcip_mcp import audit as audit_module
+
+    def _broken(tool, arguments=None, **kwargs):
+        raise audit_module.AuditEntryNotWritten(tool, RuntimeError("audit log unwritable"))
+
+    monkeypatch.setattr(audit_module, "record_event_or_raise", _broken)
+
+    _seed_count_meaning(tmp_path)
+    bucket = _count_bucket(tmp_path, validated=True)
+    store.open_project(tmp_path.resolve())
+    resp = _export_count(client, {
+        "project_root": str(tmp_path),
+        "delivery": {"kind": "per_image_count", "predictions_dir": str(bucket), "trait": "stem"},
+        "filename": "unaudited_counts.csv",
+    })
+    assert resp.status_code == 409
+    detail = resp.json()["detail"]
+    saved = tmp_path / "results_export" / "unaudited_counts.csv"
+    assert detail["saved_path"] == str(saved)
+    assert "could not be written" in detail["message"]
+    assert saved.exists()
 
 
 def test_export_count_csv_per_image_delivers_validated_with_blank_pair(
