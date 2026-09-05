@@ -99,9 +99,9 @@ class PyModule:
         self.is_init = is_init
         self.root_label = root_label
         self.lines = 0
-        self.owns = None
-        self.owns_source = None  # "docstring" | "header_comment" | None
-        self.parse_error = None
+        self.owns: str | None = None
+        self.owns_source: str | None = None  # "docstring" | "header_comment" | None
+        self.parse_error: str | None = None
         self.imports: set[str] = set()  # repo-relative posix paths this module imports
         self.imported_by: set[str] = set()  # repo-relative posix paths that import this module
 
@@ -160,7 +160,7 @@ def extract_py_owns(source: str, tree: ast.Module) -> tuple[str | None, str | No
         return first_sentence_of_first_paragraph(doc), "docstring"
 
     lines = source.splitlines()
-    comment_lines = []
+    comment_lines: list[str] = []
     for line in lines:
         stripped = line.strip()
         if not stripped:
@@ -254,9 +254,9 @@ class TsModule:
     def __init__(self, path: Path):
         self.path = path
         self.lines = 0
-        self.owns = None
-        self.owns_source = None
-        self.parse_error = None
+        self.owns: str | None = None
+        self.owns_source: str | None = None
+        self.parse_error: str | None = None
         self.imports: set[str] = set()
         self.imported_by: set[str] = set()
         self.unresolved_local_specifiers: set[str] = set()
@@ -288,7 +288,7 @@ def extract_ts_owns(source: str) -> tuple[str | None, str | None]:
                 cleaned_lines.append(line)
         if cleaned_lines:
             return first_sentence_of_first_paragraph(" ".join(cleaned_lines)), "docstring"
-    comment_lines = []
+    comment_lines: list[str] = []
     for line in source.splitlines():
         stripped = line.strip()
         if not stripped:
