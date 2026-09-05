@@ -989,11 +989,11 @@ def import_project(bundle_path: str, destination: str) -> dict:
     directly against the extracted files
     (:func:`~tcip_mcp.model_registry.conform_registry_paths_on_disk`; the extracted tree is
     always loose files at this point regardless of which backend the process is bound to, since
-    adoption has not run yet): a legacy version-1 index wraps to version 2 and every entry's
-    ``checkpoint_path`` is respelled relative to the staging tree, so an archive made before this
-    respelling existed still lands with its weights loadable at the new location. A conform
-    refusal (an index this reader does not recognize at all) refuses the whole import before
-    anything is accounted for or moved, leaving the destination untouched.
+    adoption has not run yet): a bare top-level array wraps into the entries mapping and every
+    entry's ``checkpoint_path`` is respelled relative to the staging tree, so an archive made
+    before this respelling existed still lands with its weights loadable at the new location. A
+    conform refusal (an index this reader does not recognize at all) refuses the whole import
+    before anything is accounted for or moved, leaving the destination untouched.
 
     The response carries per-root adopted counts, blob counts per class, ``database_built``
     (whether adoption ran or the file layout was kept), ``dataset_paths_unresolved`` (the

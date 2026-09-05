@@ -1062,7 +1062,7 @@ STAMP_EXTENSION_KEYS: dict[str, str] = {
                        "worker): each prediction document stem mapped to its source image's "
                        "basename with extension",
 }
-"""Every top-level key a producer adds beside ``operating_point_stamp``'s own seventeen, one entry
+"""Every top-level key a producer adds beside ``operating_point_stamp``'s own sixteen, one entry
 per key naming which producer writes it. :func:`write_sidecar` refuses a fresh ``operating_point``
 stamp whose body carries a top-level key outside ``STAMP_KEYS | STAMP_EXTENSION_KEYS``;
 :func:`update_sidecar` refuses only a key the update itself introduces relative to the stored

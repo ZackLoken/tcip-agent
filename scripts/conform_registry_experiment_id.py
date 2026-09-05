@@ -31,8 +31,8 @@ predates ``metrics_source`` also predates ``experiment_id``: conform it here fir
 re-register it through ``register_model`` to add ``metrics_source`` (``best_model`` and
 ``scripts/doctor.py`` name this order for that entry).
 
-Reads and writes through the registry's own version-2 document boundary
-(``tcip_mcp.model_registry``): a version-1 (bare array) index refuses by name, naming
+Reads and writes through the registry's own entries-mapping document boundary
+(``tcip_mcp.model_registry``): a bare top-level array index refuses by name, naming
 ``scripts/conform_model_registry_paths.py`` as the remedy to run first, since this script's own
 conform assumes the wrap has already happened.
 
@@ -123,9 +123,9 @@ def _apply(root: Path) -> list[str]:
     """Write every conformed entry back inside the index's own transaction, returning the
     outcome lines.
 
-    Reads and writes through the version-2 document pair: a version-1 (bare array) index
+    Reads and writes through the entries-mapping document pair: a bare top-level array index
     refuses by name, naming ``scripts/conform_model_registry_paths.py`` as the remedy to run
-    first, since this script would otherwise iterate a version-2 mapping's own keys.
+    first, since this script would otherwise iterate the mapping's own top-level keys.
     """
     key = registry_index_key(root)
     outcomes: list[str] = []
