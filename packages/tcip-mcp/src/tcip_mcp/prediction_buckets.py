@@ -1,4 +1,5 @@
-"""Prediction-bucket immutability: never silently overwrite predictions a human reviewed.
+"""Prediction-bucket immutability: never silently overwrite predictions a human reviewed, and
+never silently publish a second run into a bucket a prior run already filled.
 
 A *bucket* is a directory (or set of task directories) holding per-image ``<stem>.json``
 prediction files, its identity the bucket directory's own path (relative to the dataset root
@@ -10,6 +11,13 @@ re-running inference or re-staging into it would orphan those verdicts
 (they reference the predictions by geometry). So the prediction writers resolve a run-scoped
 bucket through here: with verdicts present the default writes are redirected to the next free
 ``<name>@r2`` / ``@r3`` variant, and an explicit ``overwrite=True`` is refused with a count.
+
+A second, narrower rule applies only to the callers that opt into it
+(:func:`resolve_writable_bucket`'s ``refuse_documents``): a requested bucket that already holds
+prediction documents, with no verdict yet recorded against it, refuses outright rather than
+redirecting or overwriting, since a bucket left in that state was already published by a prior
+run this call would otherwise write beside or over. ``stage_prediction_shapes`` leaves this off,
+since it accumulates one stem per call into a bucket by contract.
 """
 
 from __future__ import annotations
@@ -159,17 +167,54 @@ def verdict_count(review_state_dir: Path | str, bucket: str, names: Iterable[str
 
 
 class BucketHasVerdicts(Exception):
-    """Raised on ``overwrite=True`` when the target bucket has review verdicts recorded."""
+    """Raised on ``overwrite=True`` when the target bucket has review verdicts recorded, or when
+    the variant search that would otherwise redirect around them finds every candidate up to the
+    search's ceiling taken."""
 
-    def __init__(self, name: str, count: int, suggested: str) -> None:
+    def __init__(self, name: str, count: int, suggested: str | None) -> None:
         self.name = name
         self.count = count
         self.suggested = suggested
-        super().__init__(
-            f"prediction bucket {name!r} has {count} review verdict(s) recorded against it; "
-            f"refusing to overwrite in place. Write to a new bucket (e.g. {suggested!r}) or "
-            f"reconcile the verdicts first."
-        )
+        if suggested is None:
+            message = (
+                f"prediction bucket {name!r} has {count} review verdict(s) recorded against it, "
+                f"and every {name}@r<n> variant up to the search's ceiling is taken too: refusing "
+                f"to overwrite in place with no free variant to redirect to or suggest."
+            )
+        else:
+            message = (
+                f"prediction bucket {name!r} has {count} review verdict(s) recorded against it; "
+                f"refusing to overwrite in place. Write to a new bucket (e.g. {suggested!r}) or "
+                f"reconcile the verdicts first."
+            )
+        super().__init__(message)
+
+
+class BucketHoldsDocuments(Exception):
+    """Raised, for the callers that opt into :func:`resolve_writable_bucket`'s
+    ``refuse_documents``, when the requested bucket already holds prediction documents with no
+    review verdict yet recorded against it: a prior run already published there, and this family
+    begins no second publish into a bucket in that state, whatever ``overwrite`` says."""
+
+    def __init__(self, name: str, document_stem_count: int, suggested: str | None) -> None:
+        self.name = name
+        self.document_stem_count = document_stem_count
+        self.suggested = suggested
+        if suggested is None:
+            message = (
+                f"prediction bucket {name!r} already holds {document_stem_count} prediction "
+                f"document(s), and every {name}@r<n> variant up to the search's ceiling holds a "
+                f"verdict or a document too: refusing to publish with no free variant to suggest."
+            )
+        else:
+            message = (
+                f"prediction bucket {name!r} already holds {document_stem_count} prediction "
+                f"document(s); no publish begins into a bucket that held prediction documents "
+                f"when this door resolved it (it may hold an earlier stamp with no document, "
+                f"which a fresh publish still replaces). Write to a new bucket instead (e.g. "
+                f"{suggested!r}, which holds neither a verdict nor a document)."
+            )
+        super().__init__(message)
 
 
 @dataclass
@@ -180,7 +225,17 @@ class BucketResolution:
     requested: str  # the originally requested bucket name
 
 
-def _bucket_verdicts(review_state_dir: Path | str, dirs: list[Path]) -> int:
+def bucket_document_stem_count(dirs: Iterable[Path]) -> int:
+    """The count :class:`BucketHoldsDocuments` names: the distinct image stems holding a
+    prediction document across the given bucket dir(s), the same union :func:`bucket_stems`
+    enumerates."""
+    return len(bucket_stems(*dirs))
+
+
+def _bucket_verdicts(review_state_dir: Path | str | None, dirs: list[Path]) -> int:
+    # No store to guard against: a bucket under no dataset root never reaches Path(None) below.
+    if review_state_dir is None:
+        return 0
     # Counted per directory under that directory's own bucket key: a namesake image reviewed under
     # another bucket must not freeze this one.
     total = 0
@@ -192,34 +247,88 @@ def _bucket_verdicts(review_state_dir: Path | str, dirs: list[Path]) -> int:
     return total
 
 
+def _first_free_variant(
+    review_state_dir: Path | str | None,
+    requested: str,
+    dirs_for: Callable[[str], list[Path]],
+    *,
+    refuse_documents: bool,
+    max_variants: int,
+) -> str | None:
+    """The first ``<requested>@r2`` .. ``@r<max_variants>`` variant free of a verdict (and, with
+    ``refuse_documents``, also free of a document), or ``None`` when every one up to the ceiling
+    is taken. The one search behind both a verdict redirect and either exception's suggestion, so
+    a candidate cannot pass as free under one predicate and fail under the other."""
+    for n in range(2, max_variants + 1):
+        cand = f"{requested}@r{n}"
+        cand_dirs = dirs_for(cand)
+        if _bucket_verdicts(review_state_dir, cand_dirs) != 0:
+            continue
+        if refuse_documents and bucket_document_stem_count(cand_dirs):
+            continue
+        return cand
+    return None
+
+
 def resolve_writable_bucket(
-    review_state_dir: Path | str,
+    review_state_dir: Path | str | None,
     requested: str,
     dirs_for: Callable[[str], list[Path]],
     *,
     overwrite: bool = False,
+    refuse_documents: bool = False,
     max_variants: int = 99,
 ) -> BucketResolution:
-    """Resolve which bucket to write to, honoring review-verdict immutability.
+    """Resolve which bucket to write to, honoring review-verdict immutability and, for the
+    callers that opt in, prediction-document immutability.
 
     ``dirs_for(name)`` returns the task dir(s) of the bucket variant ``name`` (one for a
-    single-dir bucket, detect+segment for a prediction bucket). With no verdicts on the
-    requested bucket, it is used as-is. With verdicts: ``overwrite=False`` (default) picks
-    the next ``<requested>@r2`` / ``@r3`` variant that has none; ``overwrite=True`` raises
-    :class:`BucketHasVerdicts`.
+    single-dir bucket, detect+segment for a prediction bucket). ``review_state_dir`` is ``None``
+    for a bucket under no dataset root, whose verdict guard is inoperative (:func:`_bucket_verdicts`
+    answers zero without touching disk); the document guard runs regardless, since it consults no
+    store.
+
+    With no verdicts on the requested bucket: used as-is, unless ``refuse_documents`` is set and
+    the bucket already holds a prediction document, which raises :class:`BucketHoldsDocuments`
+    whatever ``overwrite`` says, naming the document count and the suggested first variant free of
+    both a verdict and a document (or ``None``, see below). With verdicts on the requested bucket:
+    the verdict check runs first, ahead of any document check, so a bucket a reviewer has already
+    verdicted redirects (or refuses on ``overwrite=True``) the same way it always has, whether or
+    not it also holds a document; ``overwrite=False`` (default) picks the next ``<requested>@r2``
+    / ``@r3`` variant free of a verdict (and, with ``refuse_documents``, also free of a document);
+    ``overwrite=True`` raises :class:`BucketHasVerdicts`. Either exception's suggestion is the one
+    variant search: a candidate that holds neither a verdict nor a document (with the keyword off,
+    one that holds no verdict) is free. When no variant up to ``max_variants`` is free, the
+    unchecked next one is never returned as a target: the resolver raises the class it was
+    resolving for with ``suggested=None`` and a message saying every variant is taken, since a
+    redirect or a suggestion onto an unchecked directory is the overwrite this guard exists to
+    refuse.
+
+    What the door guarantees, stated at its size: no publish begins into a bucket that held
+    prediction documents when the door resolved it. It does not guarantee that a bucket never
+    comes to hold two runs' documents: the check runs at resolution, ahead of a pass that can take
+    minutes, so two doors racing into one bucket can each resolve it clean and interleave their
+    writes, the same window the verdict guard already has. Nor does a documentless bucket answer
+    for a verdict the review store still holds against it: ``_bucket_verdicts`` skips a directory
+    with no stems without consulting the store, so a bucket whose documents were removed after
+    review answers zero verdicts here regardless of what the store still holds.
     """
-    base = _bucket_verdicts(review_state_dir, dirs_for(requested))
+    requested_dirs = dirs_for(requested)
+    base = _bucket_verdicts(review_state_dir, requested_dirs)
     if base == 0:
+        if refuse_documents:
+            doc_count = bucket_document_stem_count(requested_dirs)
+            if doc_count:
+                suggested = _first_free_variant(
+                    review_state_dir, requested, dirs_for,
+                    refuse_documents=True, max_variants=max_variants)
+                raise BucketHoldsDocuments(requested, doc_count, suggested)
         return BucketResolution(name=requested, redirected=False, verdict_count=0, requested=requested)
 
-    suggested = f"{requested}@r{max_variants + 1}"  # fallback if every variant is somehow taken
-    for n in range(2, max_variants + 1):
-        cand = f"{requested}@r{n}"
-        if _bucket_verdicts(review_state_dir, dirs_for(cand)) == 0:
-            suggested = cand
-            break
-
-    if overwrite:
+    suggested = _first_free_variant(
+        review_state_dir, requested, dirs_for,
+        refuse_documents=refuse_documents, max_variants=max_variants)
+    if overwrite or suggested is None:
         raise BucketHasVerdicts(requested, base, suggested)
     return BucketResolution(name=suggested, redirected=True, verdict_count=base, requested=requested)
 
@@ -229,8 +338,9 @@ def resolve_prediction_bucket(
     model_name: str,
     date: str | None,
     *,
-    review_state_dir: str | Path,
+    review_state_dir: str | Path | None,
     overwrite: bool = False,
+    refuse_documents: bool = False,
 ) -> tuple[Path, BucketResolution]:
     """The prediction dir a run may write for ``(dataset_root, model_name, date)``.
 
@@ -239,7 +349,8 @@ def resolve_prediction_bucket(
     varies when the requested bucket carries review verdicts: the *model* one
     (``predictions/<model>@r2/<date>``), never the date. A model-named bucket is what
     ``list_models`` / ``models_with_predictions`` enumerate, so a redirected run stays
-    discoverable; a date-named sibling would be invisible to every reader.
+    discoverable; a date-named sibling would be invisible to every reader. ``refuse_documents``
+    forwards to :func:`resolve_writable_bucket`; the staging door leaves it off.
 
     Returns the dir to write and the resolution behind it (which bucket was requested,
     whether it was redirected, and the verdict count that forced the redirect).
@@ -250,7 +361,8 @@ def resolve_prediction_bucket(
         return [Path(prediction_dir(dataset_root, name, date))]
 
     resolution = resolve_writable_bucket(
-        review_state_dir, model_name, _bucket_dirs, overwrite=overwrite
+        review_state_dir, model_name, _bucket_dirs,
+        overwrite=overwrite, refuse_documents=refuse_documents,
     )
     return Path(prediction_dir(dataset_root, resolution.name, date)), resolution
 
@@ -273,6 +385,13 @@ def stage_prediction_shapes(
     default redirects to the next free ``<name>@r2`` variant; ``overwrite=True`` raises
     :class:`BucketHasVerdicts`). ``annotations`` are name-based prediction records (subject + geometry
     + score) already stamped with their producer; boxes and polygons live in the one per-image file.
+
+    This door leaves ``resolve_prediction_bucket``'s ``refuse_documents`` at its default off: a
+    staging bucket accumulates one stem per call by contract, so a stem this call adds beside
+    another call's own document is the bucket working as designed, never the second-publish the
+    document guard exists to refuse. ``run_inference`` and ``deliver_per_image_counts``, the two
+    doors that opt into that guard, never call this function.
+
     Returns the bucket actually written and the path.
     """
     from tcip_annotation import json_io
