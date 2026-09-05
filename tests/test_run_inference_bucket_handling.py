@@ -445,11 +445,12 @@ def test_run_inference_counts_a_canonical_buckets_verdicts_in_its_own_datasets_s
     assert json.loads((out / "img.json").read_text())["annotations"] == []
 
 
-def test_run_inference_writes_a_canonical_bucket_with_no_verdicts_in_place(
+def test_overwrite_true_into_an_existing_empty_bucket_is_the_ordinary_write(
     tmp_path, monkeypatch
 ) -> None:
-    """The same dataset-scoped guard must still admit the ordinary re-run: an unreviewed bucket is
-    written where it was asked for, overwrite and all, never redirected out from under its reader."""
+    """Coverage, not a distinct proof of overwrite=True's own effect: an empty, pre-created
+    bucket holds neither a verdict nor a document, so overwrite=True writes there exactly the
+    way any run does into a fresh directory, in place and never redirected."""
     from pathlib import Path
 
     from tcip_mcp.dataset_layout import prediction_dir
