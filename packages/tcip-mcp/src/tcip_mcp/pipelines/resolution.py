@@ -2318,16 +2318,20 @@ def record_delivery_binding_event(
     claims were answered for, and by which records. That cannot be obtained by changing the
     decorator's inputs, so a door emits it alongside. The event files against the dataset root the
     buckets share, since it describes records that travel with the data; a delivery whose buckets
-    share no dataset root files against the platform log instead.
+    share no dataset root files against the platform log instead. This mutation already committed
+    (the artifact shipped before this call runs) with no tool body of its own for ``@audited`` to
+    bracket, so a dropped append raises ``AuditEntryNotWritten`` rather than passing silently,
+    per the platform's audited-mutation invariant, instead of leaving the artifact's own delivery
+    unrecorded on the platform's canonical log.
 
     Beside that dataset-scoped audit line, a project-scoped ``delivery_events`` record is also
     written, carrying the real per-bucket ``StampBinding`` evidence this call already computed
     rather than a coarse gate stamp, so a delivery can be found again by the same ``trait``/
     ``delivery_kind`` vocabulary an operationalization or a trait-spec statement is found by. This
-    second write is best-effort, matching this function's own existing, already-shipped behavior:
-    a delivery event is a fact recorded after the artifact it describes already shipped, not a
-    confirmation, so a lost line here is a provenance gap surfaced by a warning, never a reason to
-    make an already-completed delivery look retryable.
+    second write, unlike the audit line above, stays best-effort on its own terms: a delivery
+    event is a fact recorded after the artifact it describes already shipped, not a confirmation,
+    so a lost line here is a provenance gap surfaced by a warning, never a reason to make an
+    already-completed delivery look retryable.
 
     ``project_root`` names the project this event belongs to, for a caller (a web route) whose
     process can serve more than one project: an MCP tool leaves it unset and gets the process-pinned
@@ -2362,18 +2366,23 @@ def record_delivery_binding_event(
     the same shape ``list_delivery_events`` reads back through) before the write. A shape violation
     is a deterministic defect in the caller, never an environmental failure the way an unwritable
     disk is, so it raises ``pydantic.ValidationError`` to the caller instead of falling into this
-    call's own best-effort warning path below, which covers the store write alone.
+    call's own best-effort warning path below, which covers only the project-scoped store write.
 
-    Returns whether the event write actually landed: ``True`` on a successful store write,
-    ``False`` when the best-effort write below failed (logged, never raised). A delivered file
-    already exists by the time this runs, so a caller cannot un-deliver on a ``False`` here; it can
-    only disclose the gap to whoever asked for the delivery.
+    Raises ``AuditEntryNotWritten`` (``tcip_mcp.audit``) when the dataset-scoped audit line
+    itself cannot be appended: the caller already delivered the artifact and cannot un-deliver
+    on this, but it must not read a caller-visible success out of the project-scoped record's
+    own return value below with the platform's canonical log silently missing the event.
+
+    Returns whether the project-scoped ``delivery_events`` write actually landed: ``True`` on a
+    successful store write, ``False`` when that best-effort write failed (logged, never raised).
+    A delivered file already exists by the time this runs, so a caller cannot un-deliver on a
+    ``False`` here; it can only disclose the gap to whoever asked for the delivery.
     """
-    from tcip_mcp.audit import record_event
+    from tcip_mcp.audit import record_event_or_raise
 
     roots = {_dataset_root_of(Path(d)) for d in (pred_dirs or [])}
     scope = roots.pop() if len(roots) == 1 else None
-    record_event(
+    record_event_or_raise(
         door,
         {"output_path": output_path, "pred_dirs": list(pred_dirs or [])},
         scope=scope,
