@@ -18,6 +18,13 @@ prediction documents, with no verdict yet recorded against it, refuses outright 
 redirecting or overwriting, since a bucket left in that state was already published by a prior
 run this call would otherwise write beside or over. ``stage_prediction_shapes`` leaves this off,
 since it accumulates one stem per call into a bucket by contract.
+
+A third change reaches every caller regardless of that keyword: when every ``<name>@r<n>``
+variant up to the search's ceiling already carries a verdict, the resolver no longer falls back
+to an unchecked, never-searched ``<name>@r100``; it raises :class:`BucketHasVerdicts` naming no
+suggestion. ``stage_prediction_shapes`` and the web route's own ``resolve_prediction_bucket``
+call never opt into the document guard, but a caller of either that exhausts every verdicted
+variant now meets this refusal where it previously wrote into ``@r100`` unchecked.
 """
 
 from __future__ import annotations
@@ -294,7 +301,7 @@ def resolve_writable_bucket(
     both a verdict and a document (or ``None``, see below). With verdicts on the requested bucket:
     the verdict check runs first, ahead of any document check, so a bucket a reviewer has already
     verdicted redirects (or refuses on ``overwrite=True``) the same way it always has, whether or
-    not it also holds a document; ``overwrite=False`` (default) picks the next ``<requested>@r2``
+    not it also holds a document. ``overwrite=False`` (default) picks the next ``<requested>@r2``
     / ``@r3`` variant free of a verdict (and, with ``refuse_documents``, also free of a document);
     ``overwrite=True`` raises :class:`BucketHasVerdicts`. Either exception's suggestion is the one
     variant search: a candidate that holds neither a verdict nor a document (with the keyword off,
@@ -302,7 +309,17 @@ def resolve_writable_bucket(
     unchecked next one is never returned as a target: the resolver raises the class it was
     resolving for with ``suggested=None`` and a message saying every variant is taken, since a
     redirect or a suggestion onto an unchecked directory is the overwrite this guard exists to
-    refuse.
+    refuse. This exhaustion refusal fires whether or not ``refuse_documents`` is set: a caller
+    that leaves it off (``stage_prediction_shapes``, the web route's own
+    ``resolve_prediction_bucket`` call) is gated on verdicts alone, but on exhaustion meets this
+    same raise rather than the unchecked ``@r100`` fallback it received before this change.
+
+    A raster pass' own progress records, kept under a bucket's ``<out>/.tcip/`` subdirectory,
+    never register as a document either: :func:`bucket_document_stem_count`'s
+    :func:`~tcip_annotation.json_io.prediction_documents` enumeration is a non-recursive
+    ``*.json`` listing with sidecars excluded, so a directory holding only a progress record and
+    no top-level document reads as empty to this check, and a resumed pass survives whichever
+    bucket the verdict check (or this one) resolved it to.
 
     What the door guarantees, stated at its size: no publish begins into a bucket that held
     prediction documents when the door resolved it. It does not guarantee that a bucket never
