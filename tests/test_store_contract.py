@@ -21,6 +21,7 @@ import os
 import sqlite3
 import subprocess
 import sys
+import tempfile
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -1389,6 +1390,65 @@ class Registered:
     root_of: Callable[[Path], Path] = lambda root: root
 
 
+def _construct_via_scratch_backend(build: Callable[[], dict]) -> dict:
+    """Call ``build`` with a throwaway file backend bound only for the call: these fixtures are
+    built at import time, before any test's own ``store`` fixture has bound one."""
+    from tcip_store.file_backend import FileBackend
+
+    ts.bind(FileBackend())
+    try:
+        return build()
+    finally:
+        ts.unbind()
+
+
+def _real_split_manifest() -> dict:
+    """The shape ``data_tools.compose_split_manifest`` writes today, called for real into a
+    throwaway directory so this golden cannot drift from the writer silently again."""
+    return _construct_via_scratch_backend(lambda: data_tools.compose_split_manifest(
+        Path(tempfile.mkdtemp()), seed=42, group_by="stem_prefix", dataset_fingerprint="7ac1",
+        subject="bud", attribute=None, id_map={"bud": 0},
+        members={"2026-03-04": {"labels_root": "ü/annotations", "images_root": "ü/images",
+                                 "dataset_hash": "9f2c",
+                                 "label_digests": {"a_1": "7f3a1b9c2d4e5f60"}}},
+        splits={"train": ["a_1"], "val": [], "calibration": []},
+        admission_counts={"a_1": 1}, calibration_foreground_groups_by_date={},
+        realized_ratios={"train": 1.0, "val": 0.0, "calibration": 0.0},
+    ))
+
+
+def _real_cal_holdout_lock() -> dict:
+    """The shape ``splits.resolve_locked_cal_holdout_split`` writes today, drawn for real over a
+    throwaway directory rather than hand-typed."""
+    return _construct_via_scratch_backend(lambda: splits.resolve_locked_cal_holdout_split(
+        ["a_1", "b_2", "c_3", "d_4"], identity_hash=LOCK_IDENTITY,
+        scope_root=Path(tempfile.mkdtemp())))
+
+
+def _real_selection_disjointness() -> dict:
+    """The full shape ``resolution.resolver_selection_disjointness`` returns for a foreign
+    checkpoint with no split manifest named, read back through the same
+    ``operating_point._selection_disjointness`` path a live calibration takes, so this fixture
+    cannot silently drift to a partial shape the resolver never produces again."""
+    from tcip_mcp.pipelines.operating_point import _selection_disjointness
+
+    raw = _selection_disjointness(None, set(), set())
+    return resolution.resolver_selection_disjointness(
+        {"gate_evidence": {"selection_disjointness": raw}}, "operating_point")
+
+
+def _real_job_registry_summary() -> list[dict]:
+    """The shape ``routes.inference._summary`` writes for one persisted job, called for real."""
+    from tcip_web.routes.inference import InferenceJob, _summary
+
+    job = InferenceJob(
+        job_id="j1", checkpoint_path="model_best.pt", images_dir="images/2026-03-04",
+        output_dir="predictions/live/2026-03-04", conf=0.5, iou=0.5,
+        slice_hw=(512, 512), overlap=0.2, status="completed", platform_root="C:/orchards/valley",
+    )
+    return [_summary(job)]
+
+
 REGISTERED = {
     "image_status": Registered(
         {"catkin/2026-03-04": {"a_1.jpg": "negative", "ü_2.jpg": "complete"}},
@@ -1432,7 +1492,7 @@ REGISTERED = {
         [{"name": "detector_v1", "sha256": "0" * 64, "metrics": {"val_map50": 0.61}}],
         model_registry.registry_index_key, ".tcip/models/registry.json"),
     "job_registry": Registered(
-        [{"id": "j1", "status": "completed"}],
+        _real_job_registry_summary(),
         lambda root: jobstore.job_registry_key("inference_jobs"),
         ".tcip/state/inference_jobs.json", pin=_pin_platform_root),
     "workspace_active_project": Registered(
@@ -1492,7 +1552,11 @@ REGISTERED = {
         f".tcip/experiments/{EXPERIMENT}/env.json", pin=_pin_platform_root,
         root_of=lambda root: Path(experiments.experiments_scope())),
     "experiment_split": Registered(
-        {"train": ["img_001"], "val": ["img_002"], "seed": 42},
+        # every key split_construction.persist_split_manifest always writes, not only the three
+        # a drawn run happens to vary
+        {"train": ["img_001"], "val": ["img_002"], "seed": 42, "dataset_hash": "9f2c1b0a4d6e8f31",
+         "dataset_id": "a1", "dataset_fingerprint": "7ac1", "group_by": "stem_prefix",
+         "date": "2026-03-04"},
         lambda root: experiments.split_key(EXPERIMENT),
         f".tcip/experiments/{EXPERIMENT}/split.json", pin=_pin_platform_root,
         root_of=lambda root: Path(experiments.experiments_scope())),
@@ -1533,11 +1597,21 @@ REGISTERED = {
         lambda root: resolution.sidecar_key(_stamp_bucket(root), "regression_operating_point"),
         "predictions/live/2026-03-04/regression_operating_point.json", root_of=_stamp_bucket),
     "resolve_scale_sidecar": Registered(
+        # every key scale_tools.calibrate_physical_scale's stamp literal writes, "unit" as the
+        # writer spells it rather than "units"
         {"schema_version": 2,
-         "operating_point": {"scale": {"validated_against": "physical_measurement",
-                                       "value": 0.271, "units": "mm/px",
-                                       "capture_id": "2026-03-04_handheld"}},
-         "validated": True},
+         "operating_point": {"scale": {
+             "name": "scale_mm_per_px", "value": 0.271, "unit": "mm", "source": "derived",
+             "derived_from": "mean of 3 'reference_object' reference object(s), the calibration "
+                              "half of the locked reference split",
+             "requires_validation": True, "validation_kind": "physical",
+             "validated_against": "physical_measurement",
+             "capture_scoped": True, "capture_id": "2026-03-04_handheld"}},
+         "validated": True, "validated_by": None, "failures": [],
+         "gate_evidence": {"calibration_implied_scales": {"a_1": 0.27}},
+         "trait": "büsch_length", "reference_subject": "reference_object",
+         "reference_csv": "references/scale_reference.csv",
+         "produced_at": "2026-03-04T12:00:00+00:00"},
         lambda root: resolution.sidecar_key(_stamp_bucket(root), "resolve_scale"),
         "predictions/live/2026-03-04/resolve_scale.json", root_of=_stamp_bucket),
     "raster_pass_progress": Registered(
@@ -1596,8 +1670,7 @@ REGISTERED = {
          "loss": None, "loss_state": "positive_infinity"},
         eval_runners.evaluation_results_key, "test_results.json"),
     "cal_holdout_split_lock": Registered(
-        {"identity_hash": LOCK_IDENTITY, "calibration": ["a_1"], "holdout": ["b_2"], "seed": 0,
-         "redraw_history": []},
+        _real_cal_holdout_lock(),
         lambda root: splits.cal_holdout_lock_key(LOCK_IDENTITY, scope_root=root),
         f".tcip/artifacts/cal_holdout_split_{LOCK_IDENTITY}.json"),
     "hpo_sweep_manifest": Registered(
@@ -1634,9 +1707,7 @@ REGISTERED = {
         [{"id": "a1", "path": "dü", "crop": "hazelnut", "fingerprint": "9f2c"}],
         project_tools.dataset_registry_key, ".tcip/datasets.json"),
     "split_manifest": Registered(
-        {"seed": 42, "dataset_hash": "9f2c", "group_by": "stem_prefix",
-         "labels_root": "ü/annotations", "dataset_fingerprint": "7ac1",
-         "splits": {"train": ["a_1", "ü_2"], "val": []}},
+        _real_split_manifest(),
         lambda root: data_tools.split_manifest_key(_split_dir(root)),
         "splits/split_manifest.json", root_of=_split_dir),
     "curated_manifest": Registered(
@@ -1701,13 +1772,17 @@ REGISTERED = {
         root_of=lambda root: resolution.delivery_events_scope(root)),
     # the experiment record's validation member
     "experiment_validations": Registered(
+        # every field _VALIDATION_FIELDS requires, train_disjointness/selection_disjointness
+        # included, the latter the full shape resolver_selection_disjointness actually returns
         {"document": "operating_point", "trait": "catkin_50per_date",
          "claim": {"operating_point": {"conf": {"value": 0.42}}},
          "validated_against": "held_out_annotations", "checkpoint_sha256": "0" * 64,
          "producing_experiment_id": EXPERIMENT,
          "reference_identity": {"calibration_dataset_hash": "9f2c1b0a4d6e8f31"},
          "covered_buckets": {"predictions/live/2026-03-04": "7f3a1b9c2d4e5f60"},
-         "dataset_root": "dü", "recorded_at": "2026-03-04T12:00:00+00:00"},
+         "dataset_root": "dü", "recorded_at": "2026-03-04T12:00:00+00:00",
+         "train_disjointness": {"checked": True, "group_check": None},
+         "selection_disjointness": _real_selection_disjointness()},
         lambda root: experiments.validations_key(EXPERIMENT),
         f".tcip/experiments/{EXPERIMENT}/validations.jsonl", pin=_pin_platform_root,
         root_of=lambda root: Path(experiments.experiments_scope())),
