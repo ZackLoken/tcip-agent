@@ -263,6 +263,40 @@ def test_a_harvested_negative_records_who_confirmed_it_and_when(tmp_path):
     assert record["recorded_at"].startswith("20")
 
 
+def test_classified_scope_never_confirms_a_negative_even_when_a_value_names_the_subject(tmp_path):
+    """Under a classified scope, ``rejected_subjects`` are the reviewed bucket's attribute
+    values, never object classes: a value spelled like the subject itself is a vocabulary
+    coincidence, not a claim the object is absent, so the rejected-only image is left
+    unconfirmed like any other one, never read as a confirmed negative of the object.
+    """
+    from tcip_mcp.pipelines.resolution import BucketScope
+
+    root = tmp_path / "dataset"
+    registry = ClassRegistry(subjects=_TWO_SUBJECTS)
+    root.mkdir()
+    class_registry.write_registry(root / "classes.json", registry)
+    images = root / "images"
+    _image(images, "pos.png", (100, 30))
+    _image(images, "neg.png", (30, 100))
+    out = tmp_path / "out"
+    state = {"image": {
+        "pos.png": _completed([_accepted("catkin", [0.5, 0.5, 0.2, 0.2])]),
+        # The confirmed value on this rejection happens to be spelled "catkin", the object
+        # class's own name: exactly the coincidence the classified branch must not confirm on.
+        "neg.png": _completed([_rejected("catkin", [0.4, 0.4, 0.2, 0.2])]),
+    }}
+    scope = BucketScope(subject="catkin", attribute="stage")
+
+    r = materialize_dataset(state, str(images), str(out), scope=scope)
+
+    assert r["hard_negative"] == 1
+    assert r["unconfirmed_negative"] == 1
+    assert [e["image"] for e in r["unconfirmed_negatives"]] == ["neg.png"]
+    assert "never that the object itself is absent" in r["unconfirmed_negatives"][0]["reason"]
+    assert not ts.exists(image_status_key(out))
+    assert confirmed_negative_names(out / "annotations", subject="catkin", date=None) == set()
+
+
 def test_a_negative_no_one_reviewer_answers_for_names_the_harvest(tmp_path):
     """Two reviewers disputing one image leaves the writing tool as the honest actor."""
     src = tmp_path / "src"
