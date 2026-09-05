@@ -205,7 +205,10 @@ def test_a_same_path_orthomosaic_export_against_a_completed_experiment_refuses_o
         tmp_path, monkeypatch):
     """The completed experiment's raster bucket already holds the first run's document: a
     second export into the same path refuses on the document predicate at resolution, before the
-    pointer's own same-value conjunct is ever reached."""
+    pointer's own same-value conjunct is ever reached. Unlike the images regime, no raster
+    analogue of that conjunct's own admitting case is built here: a raster pass always writes a
+    document, so there is no empty-enumeration construction for a raster path, and the conjunct
+    itself is one predicate proven once, by the images-regime test."""
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path / "proj"))
     (tmp_path / "proj" / ".tcip" / "state").mkdir(parents=True, exist_ok=True)
 
@@ -236,9 +239,13 @@ def test_a_same_path_orthomosaic_export_against_a_completed_experiment_refuses_o
 def test_raster_regime_refuses_a_second_export_into_a_document_holding_bucket(
         tmp_path, monkeypatch):
     """Two raster exports into one bucket, with no experiment and no verdict: the second refuses
-    naming the document count and a suggested fresh bucket, and the first bucket's document is
-    unchanged. The suggested bucket, once written into, admits a real re-run."""
+    naming the document count and a suggested fresh bucket, and the first bucket's own document is
+    unchanged (byte-identical, which proves that one file alone, not the bucket's stamp or any
+    other artifact). A spy on predict_tiled fails the test if the refused call reaches the pass.
+    The suggested bucket, once written into, admits a real re-run."""
     from pathlib import Path
+
+    from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
 
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path / "proj"))
     (tmp_path / "proj" / ".tcip" / "state").mkdir(parents=True, exist_ok=True)
@@ -255,12 +262,19 @@ def test_raster_regime_refuses_a_second_export_into_a_document_holding_bucket(
     assert "error" not in r1, r1
     first_doc = (out / "mosaic.json").read_bytes()
 
+    real_predict_tiled = GenericPredictor.predict_tiled
+
+    def _fail_if_reached(self, *a, **kw):
+        raise AssertionError("predict_tiled must not run on a refused publish")
+
+    monkeypatch.setattr(GenericPredictor, "predict_tiled", _fail_if_reached)
     r2 = run_inference(ckpt, output_dir=str(out), raster_path=str(raster_path),
                             conf_threshold=0.0, tile_size=TILE, overlap=0.2)
     assert "error" in r2
     assert r2["document_stem_count"] == 1
     assert (out / "mosaic.json").read_bytes() == first_doc
 
+    monkeypatch.setattr(GenericPredictor, "predict_tiled", real_predict_tiled)
     r3 = run_inference(ckpt, output_dir=str(r2["suggested_bucket"]), raster_path=str(raster_path),
                             conf_threshold=0.0, tile_size=TILE, overlap=0.2)
     assert "error" not in r3, r3
