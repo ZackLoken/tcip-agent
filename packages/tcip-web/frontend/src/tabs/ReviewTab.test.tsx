@@ -882,6 +882,20 @@ describe("ReviewTab under a classified scope", () => {
     expect(confirmSpy).not.toHaveBeenCalled();
   });
 
+  it("opens no dialog and posts nothing when 'r' is pressed on a tp", async () => {
+    const confirmSpy = vi.spyOn(window, "confirm");
+    const actionSpy = vi.spyOn(api.review, "action");
+    matchesSpy.mockResolvedValue(matchesRes([det({ det_type: "tp" })], { attribute: "ripeness" }));
+    render(<ReviewTab />);
+    await waitFor(() => expect(screen.getByText("1 / 1")).toBeInTheDocument());
+
+    // Without the change, the hotkey guards only on current/edit/reviewLocked/canReview, so 'r'
+    // raises the delete-confirmation dialog and posts a request the backend refuses.
+    fireEvent.keyDown(window, { key: "r" });
+    expect(confirmSpy).not.toHaveBeenCalled();
+    expect(actionSpy).not.toHaveBeenCalled();
+  });
+
   it("disables the missed-object control, naming the Annotate tab as the remedy", async () => {
     matchesSpy.mockResolvedValue(matchesRes([], { attribute: "ripeness" }));
     render(<ReviewTab />);
