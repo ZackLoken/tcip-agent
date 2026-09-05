@@ -62,7 +62,7 @@ source file under a covered root that no row names.
 | packages/tcip-mcp/src/tcip_mcp/__init__.py | TCIP MCP Server: domain tools for the phenotyping platform. | 0 | 0 |
 | packages/tcip-mcp/src/tcip_mcp/__main__.py | Entry point: ``python -m tcip_mcp``. | 1 | 0 |
 | packages/tcip-mcp/src/tcip_mcp/agent_identity.py | Which agent harness this MCP server process serves, declared at the handshake, and the session it minted; projected onto every audit line, statement record and HTTP push. | 0 | 7 |
-| packages/tcip-mcp/src/tcip_mcp/audit.py | Audit logging decorator for MCP tools, the log each event's scope routes it to, and the refusal a call raises when its own entry cannot be appended. | 5 | 37 |
+| packages/tcip-mcp/src/tcip_mcp/audit.py | Audit logging decorator for MCP tools, the log each event's scope routes it to, and the refusal a call raises when its own entry cannot be appended. | 5 | 38 |
 | packages/tcip-mcp/src/tcip_mcp/class_registry.py | The dataset's class registry, subjects, their attributes, and the deterministic name→id assignment a training run uses (and records, so predictions stay decodable). | 3 | 14 |
 | packages/tcip-mcp/src/tcip_mcp/dataset_layout.py | Canonical dataset-layout resolver: the single source of truth for where an image's ground-truth labels and model predictions live on disk. | 7 | 50 |
 | packages/tcip-mcp/src/tcip_mcp/experiments.py | Experiment tracking for ML training runs. | 11 | 20 |
@@ -136,7 +136,7 @@ source file under a covered root that no row names.
 | packages/tcip-mcp/src/tcip_mcp/pipelines/training/hpo.py | HPO, hyperparameter optimization on Ray Tune. | 7 | 3 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/training/optimizer_factory.py | Optimizer factory with differential learning rate support. | 0 | 2 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/training/run_registry.py | In-process registry of live training runs: ``TrainRun``, its cancel-sentinel protocol, and the create/attach/get/list/cancel operations over the process-global ``_RUNS`` map. | 1 | 3 |
-| packages/tcip-mcp/src/tcip_mcp/pipelines/training/subprocess_worker.py | The subprocess entry point ``launch_training`` spawns to run one bespoke training run's actual body, dataset/loader construction, the audited envelope, ``run_training_envelope()``, in an isolated OS process, so a leak/OOM/hang in one run can't take down the launching process or any other concurrent run's process. | 14 | 0 |
+| packages/tcip-mcp/src/tcip_mcp/pipelines/training/subprocess_worker.py | The subprocess entry point ``launch_training`` spawns to run one bespoke training run's actual body, dataset/loader construction, the audited envelope, ``run_training_envelope()``, in an isolated OS process, so a leak/OOM/hang in one run can't take down the launching process or any other concurrent run's process. | 15 | 0 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/training/tensorboard_manager.py | TensorBoard process management for training and HPO runs. | 0 | 3 |
 | packages/tcip-mcp/src/tcip_mcp/prediction_buckets.py | Prediction-bucket immutability: never silently overwrite predictions a human reviewed. | 7 | 10 |
 | packages/tcip-mcp/src/tcip_mcp/project_paths.py | Stable resolution of the platform state root, independent of a process's cwd. | 1 | 29 |

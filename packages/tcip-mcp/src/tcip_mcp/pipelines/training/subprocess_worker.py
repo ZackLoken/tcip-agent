@@ -14,7 +14,10 @@ from __future__ import annotations
 
 import argparse
 import logging
-from typing import Callable
+from typing import TYPE_CHECKING, Any, Callable
+
+if TYPE_CHECKING:
+    from tcip_mcp.pipelines.training.envelope import TrainContext
 
 logger = logging.getLogger(__name__)
 
@@ -172,15 +175,6 @@ def run(run_id: str, experiment_id: str, output_dir: str, resume_from: str) -> N
     """The training body, identical in substance to running synchronously in-process, just
     executing in this dedicated process instead."""
     from tcip_mcp.pipelines.raster_source import configure_gdal_cache
-    from tcip_mcp.pipelines.training.generic_trainer import (
-        seeded_loader_kwargs, stamp_effective_data_geometry,
-    )
-    from tcip_mcp.pipelines.training.collation import task_collate
-    from tcip_mcp.pipelines.training.run_registry import attach_run
-    from tcip_mcp.pipelines.data.split_construction import (
-        auto_train_val, dataset_identity, persist_split_manifest,
-    )
-    from tcip_mcp.pipelines.model_build import MODEL_SOURCE_KEY
 
     # This is its own process entry point: without this the whole run reads through GDAL's
     # stock cache default instead of the platform budget the server/backend entry points set.
@@ -191,6 +185,52 @@ def run(run_id: str, experiment_id: str, output_dir: str, resume_from: str) -> N
 
     bind_default()
 
+    from tcip_mcp.experiments import ExperimentTerminal
+
+    try:
+        ctx = _prepare_run_context(run_id, experiment_id, output_dir, resume_from, store)
+    except ExperimentTerminal:
+        # Already audited, and the record already terminal, by the raiser itself.
+        raise
+    except Exception as exc:
+        # No run_training_envelope has opened its own "training_run" audit event yet, so
+        # without this the record stays running and the crash goes unaudited.
+        logger.exception("Pre-training setup failed for run %s: %s", run_id, exc)
+        try:
+            from tcip_mcp.audit import record_event
+            from tcip_mcp.experiments import update_status
+
+            update_status(experiment_id, "failed", error=str(exc))
+            record_event("training_run", {"run_id": run_id, "experiment_id": experiment_id},
+                        status="failed")
+        except Exception:
+            logger.warning("could not reconcile run %s to failed after its own setup crash",
+                           run_id, exc_info=True)
+        raise
+
+    from tcip_mcp.pipelines.training.envelope import run_training_envelope
+
+    run_training_envelope(ctx)
+
+
+def _prepare_run_context(run_id: str, experiment_id: str, output_dir: str, resume_from: str,
+                         store: Any) -> "TrainContext":
+    """Build this run's ``TrainContext``: read the launch config, build the datasets and loaders,
+    patch the durable experiment record's own provenance, and persist the split manifest.
+
+    Isolated from :func:`run` so a crash anywhere here is reconciled to ``failed`` with its own
+    ``training_run`` audit event, through ``run``'s own except clause, before it crashes the
+    subprocess with its original traceback.
+    """
+    from tcip_mcp.pipelines.training.generic_trainer import (
+        seeded_loader_kwargs, stamp_effective_data_geometry,
+    )
+    from tcip_mcp.pipelines.training.collation import task_collate
+    from tcip_mcp.pipelines.training.run_registry import attach_run
+    from tcip_mcp.pipelines.data.split_construction import (
+        auto_train_val, dataset_identity, persist_split_manifest,
+    )
+    from tcip_mcp.pipelines.model_build import MODEL_SOURCE_KEY
     from tcip_mcp.tools.training_tools import launch_config_key
 
     config = store.read(launch_config_key(output_dir))
@@ -280,13 +320,12 @@ def run(run_id: str, experiment_id: str, output_dir: str, resume_from: str) -> N
                            dataset_id=ds_id, dataset_fingerprint=ds_fp,
                            label_digests=label_digests)
 
-    from tcip_mcp.pipelines.training.envelope import TrainContext, run_training_envelope
+    from tcip_mcp.pipelines.training.envelope import TrainContext
 
-    ctx = TrainContext(
+    return TrainContext(
         run=run_obj, train_loader=train_loader, val_loader=val_loader,
         task=task, resume_from=resume_from, experiment_id=experiment_id,
     )
-    run_training_envelope(ctx)
 
 
 def main() -> None:
