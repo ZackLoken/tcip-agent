@@ -339,7 +339,9 @@ def _spec_from_config(data: dict, vocab: set[str]) -> tuple[TraitSpec | None, st
     # operating_point.COUNT_OBJECTIVE_PICKERS. resolve_operating_point refuses at resolution time
     # if the name has no registered picker, which is the honest place for that check to live (it
     # needs the picker registry; this module stays torch-free and doesn't import it).
-    kwargs = {k: (tuple(v) if k in _TUPLE_FIELDS else v) for k, v in data.items()}
+    # data is arbitrary breeder-authored config; TraitSpec's constructor is the real gate (raises
+    # TypeError on an unknown or missing field), so values are typed Any rather than validated here.
+    kwargs: dict[str, Any] = {k: (tuple(v) if k in _TUPLE_FIELDS else v) for k, v in data.items()}
     try:
         return TraitSpec(**kwargs), None
     except TypeError as e:
@@ -454,7 +456,7 @@ def load_trait_specs_with_errors(
             errors.append({"file": filename, "reason": str(e), "kind": "version_refused"})
             continue
         if not isinstance(data, dict):
-            reason = "not a mapping"
+            reason: str | None = "not a mapping"
             logger.warning("trait spec %s skipped: %s", filename, reason)
             errors.append({"file": filename, "reason": reason})
             continue
