@@ -200,9 +200,10 @@ def supersede_delivery(
     Writes one frozen, enumerable ``delivery_supersessions`` record keyed by ``event_id`` (an
     event can carry at most one), naming the superseded event's own ``output_sha256`` (copied from
     its stored record, so the withdrawal cites exactly the bytes it withdraws), the replacement
-    event when one is given, the reason and who. The Results tab's delivery panel and
-    ``read_audit_log`` both render a superseded event through the same join
-    (``delivery_events_schema.with_supersessions``), never a second reconstruction of it.
+    event when one is given, the reason and who. The Results tab's delivery panel renders a
+    superseded event through the one join (``delivery_events_schema.with_supersessions``), and
+    any later reader joins there rather than reconstructing the pairing; ``read_audit_log``
+    reports the supersession's own audit line and joins nothing.
 
     Args:
         event_id: The delivery event this supersedes (``delivery_events``' own ``event_id``,
