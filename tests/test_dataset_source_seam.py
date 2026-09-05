@@ -114,9 +114,9 @@ def test_snapshot_records_dataset_builder(tmp_path: Path):
 
 
 def test_dataset_source_key_has_one_home():
-    """Structural (AST-only, no import of the module under test): the four modules that once
-    spelled the ``dataset_source`` config key as a bare literal now read it only through the
-    one constant, ``model_build.DATASET_SOURCE_KEY``.
+    """Structural (AST-only, no import of the module under test): the modules that once spelled
+    the ``dataset_source`` config key as a bare literal now read it only through the one
+    constant, ``model_build.DATASET_SOURCE_KEY``, or through a shared predicate built over it.
 
     Checked in Load context only, so the seventh site (``training_tools.py``'s
     ``kw["dataset_source"] = ...``, whose left side names ``build_dataset``'s parameter, not a
@@ -129,6 +129,11 @@ def test_dataset_source_key_has_one_home():
     ``from tcip_mcp.pipelines.model_build import DATASET_SOURCE_KEY``, not just a same-named
     local variable or an import from anywhere else. ``datasets.py`` no longer reads the key at
     all now that the constant has moved out of it, so it is checked for absence only.
+    ``subprocess_worker.py`` no longer reads the key itself either: its registry-derived check
+    now goes through ``pipelines.data.label_queries.targets_registry_derived``, the one predicate
+    the inference-side door's own remedy calls too, so it is checked here for the absence of a
+    raw literal only, not for loading the constant; ``label_queries.py``, where that predicate
+    lives, is the module that imports and loads it now.
     """
     import ast
     from pathlib import Path
@@ -138,12 +143,13 @@ def test_dataset_source_key_has_one_home():
     src_root = Path(tcip_mcp.__file__).resolve().parent
     files = {
         "pipelines/data/datasets.py": src_root / "pipelines" / "data" / "datasets.py",
+        "pipelines/data/label_queries.py": src_root / "pipelines" / "data" / "label_queries.py",
         "pipelines/model_build.py": src_root / "pipelines" / "model_build.py",
         "pipelines/training/subprocess_worker.py":
             src_root / "pipelines" / "training" / "subprocess_worker.py",
         "tools/training_tools.py": src_root / "tools" / "training_tools.py",
     }
-    imports_it = {"pipelines/training/subprocess_worker.py", "tools/training_tools.py"}
+    imports_it = {"pipelines/data/label_queries.py", "tools/training_tools.py"}
     uses_it = imports_it | {"pipelines/model_build.py"}
 
     for name, path in files.items():
