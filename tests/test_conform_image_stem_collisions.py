@@ -378,15 +378,22 @@ def test_main_apply_moves_the_other_file(tmp_path: Path, monkeypatch):
 
 
 def test_main_plan_and_apply_together_refuses(tmp_path: Path, monkeypatch):
+    """A valid ``--keep`` is given so the refusal is the flag combination itself, not a missing
+    ``--keep``: without the guard this would actually apply and exit 0."""
     module = _load_script()
     root = tmp_path / "proj"
     _project_with_dated_collision(root)
+    keep = root / "images" / "2026-02-11" / "foo.jpg"
+    other = root / "images" / "2026-02-11" / "foo.png"
 
     monkeypatch.setattr(
-        sys, "argv", ["conform_image_stem_collisions.py", "--plan", "--apply", str(root)],
+        sys, "argv",
+        ["conform_image_stem_collisions.py", "--plan", "--apply", "--keep", str(keep), str(root)],
     )
 
     assert module.main() == 2
+    assert keep.is_file()
+    assert other.is_file()
 
 
 def test_main_over_a_non_project_root_exits_2(tmp_path: Path, monkeypatch):
