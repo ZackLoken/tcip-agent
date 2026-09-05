@@ -197,6 +197,32 @@ def test_on_disk_conform_wraps_and_respells_directly_against_the_extracted_files
     assert raw["entries"][0]["checkpoint_path"] == ".tcip/models/m.pt"
 
 
+def test_on_disk_conform_reports_dropping_a_stray_schema_version_two(tmp_path: Path):
+    """An index already an entries mapping (no bare-array wrap needed) but still carrying a
+    dev-era ``schema_version: 2`` must earn its own outcome line, not be folded silently into
+    "already wrapped, nothing to say": the field vanishes from the write either way, so the drop
+    is the only trace this conform's caller has that anything changed."""
+    from tcip_mcp.model_registry import conform_registry_paths_on_disk, registry_index_path
+
+    root = tmp_path / "proj"
+    ckpt_dir = root / ".tcip" / "models"
+    ckpt_dir.mkdir(parents=True)
+    content = b"stray schema_version two weights"
+    ckpt = ckpt_dir / "m.pt"
+    ckpt.write_bytes(content)
+    digest = hashlib.sha256(content).hexdigest()
+    index_path = registry_index_path(root)
+    entry = _entry("m", ".tcip/models/m.pt", digest, len(content))
+    index_path.write_text(json.dumps({"schema_version": 2, "entries": [entry]}))
+
+    lines = conform_registry_paths_on_disk(root)
+
+    assert any("dropped a stray schema_version" in ln for ln in lines)
+    assert not any("wrapped the registry index" in ln for ln in lines)
+    raw = json.loads(index_path.read_text())
+    assert "schema_version" not in raw
+
+
 def test_on_disk_conform_over_an_absent_registry_answers_nothing(tmp_path: Path):
     from tcip_mcp.model_registry import conform_registry_paths_on_disk
 

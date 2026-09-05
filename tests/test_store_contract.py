@@ -635,6 +635,77 @@ def test_a_crash_between_clear_logs_two_file_changes_replays_no_entry(store, mon
     assert resumed.cursor == before.cursor
 
 
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "open design item, recorded in docs/current-task.md: clear_log's file removal and its "
+        ".clearbase watermark write are two separate files no ordering makes atomic across a "
+        "crash between them. The test above pins the crash's own immediate aftermath (nothing "
+        "replayed from the pre-crash cursor, right after the file vanishes); this one carries "
+        "the same crash one step further, once new entries appended afterward (the watermark "
+        "still unadvanced) push the recreated file's own length past the pre-crash cursor's "
+        "byte offset. A replay from that stale cursor should still see nothing from a log it "
+        "has no relationship to, but instead seeks into the new file's own bytes at an offset "
+        "that shares no entry boundary with them, decoding a real but unrelated fragment and "
+        "reporting it corrupt. The fix is a design decision (a base recorded inside the log "
+        "file's own bytes, atomic with the removal, or some other single-file scheme), not a "
+        "change this test drives; when it lands, this xfail starts passing and must be deleted "
+        "rather than left to mask the fix."
+    ),
+)
+def test_a_crash_between_clear_logs_two_file_changes_then_new_entries_misreads_as_corrupt(
+    store, monkeypatch,
+):
+    """One step past test_a_crash_between_clear_logs_two_file_changes_replays_no_entry's own
+    claim: after the identical simulated crash (file removed, watermark not advanced), append
+    fresh entries until the recreated file's own length passes the pre-crash cursor's byte
+    offset, then replay from that same pre-crash cursor. Nothing from an unrelated log's own
+    byte stream should ever surface as a decoded (or corrupt) entry; today it does."""
+    only_on(store, FILE, _CLEAR_LOG_RACE)
+    backend = store.backend
+    key = store.key(LOG, "crash-mid-clear-then-new-entries")
+    for i in range(3):
+        ts.append(key, {"i": i})
+    before = ts.read_log(key)
+    old_end = int(before.cursor)
+
+    class _SimulatedCrash(Exception):
+        pass
+
+    real_remove = backend._remove_entry
+    real_write_base = backend._write_clear_base
+    fired = {"done": False}
+
+    def crash_after_first_real_call(real_fn):
+        def wrapper(*args, **kwargs):
+            result = real_fn(*args, **kwargs)
+            if not fired["done"]:
+                fired["done"] = True
+                raise _SimulatedCrash
+            return result
+
+        return wrapper
+
+    monkeypatch.setattr(backend, "_remove_entry", crash_after_first_real_call(real_remove))
+    monkeypatch.setattr(backend, "_write_clear_base", crash_after_first_real_call(real_write_base))
+
+    with pytest.raises(_SimulatedCrash):
+        ts.clear_log(key)
+
+    path = store.path(key)
+    for i in range(200):
+        ts.append(key, {"i": f"new-{i}"})
+        if path.stat().st_size > old_end:
+            break
+    else:
+        pytest.fail("could not grow the recreated log past the pre-crash cursor's byte offset")
+
+    resumed = ts.read_log(key, after=before.cursor)
+
+    assert resumed.records == []
+    assert resumed.corrupt == ()
+
+
 _LOG_FILE_MECHANICS = (
     "a torn tail is bytes left in a file by an appender that died mid-write, reached here "
     "through the path the file backend places the log at"
