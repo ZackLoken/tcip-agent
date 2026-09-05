@@ -41,20 +41,55 @@ def positive_detections(image_result: dict) -> tuple[int, list[float]]:
     return keep.count(True), [s for s, k in zip(scores, keep) if k]
 
 
+def unmapped_label_ids(results: list[dict], id_map: dict[str, int] | None) -> list[int]:
+    """Every 0-indexed label id across ``results`` that ``id_map`` cannot decode, sorted; empty
+    when every one decodes, or when ``id_map`` is ``None`` (the detector-run case, where the raw
+    index is itself a legitimate, honest name).
+
+    The preflight a door that publishes several documents from one run makes ahead of its first
+    write: :func:`write_predictions_json` refuses one such id per document, partway through a
+    multi-image bucket, so a caller checks the whole run first and refuses before anything lands
+    rather than after part of it has. Only meaningful for a classified run (``attribute`` set); a
+    detector run's raw-index fallback never refuses on this, whatever it returns.
+    """
+    if id_map is None:
+        return []
+    known = set(id_map.values())
+    unmapped: set[int] = set()
+    for r in results:
+        for label in r.get("labels", []):
+            cid = max(int(label) - 1, 0)
+            if cid not in known:
+                unmapped.add(cid)
+    return sorted(unmapped)
+
+
 def write_predictions_json(
     json_path: str | Path, result: dict, created_by: str | None = None, *,
-    id_map: dict[str, int] | None = None,
+    subject: str | None, attribute: str | None, id_map: dict[str, int] | None = None,
 ) -> int:
     """Write a ``GenericPredictor`` detection result as a name-based per-image prediction file.
 
     ``result`` carries pixel-xyxy ``boxes``, 1-indexed ``labels`` (background=0), ``scores``, and
-    image ``width``/``height``. Each detection's numeric label is decoded to a name (its
-    ``subject``) via ``id_map`` (the run's *recorded* ``operating_point.json`` name→id map), so a
-    prediction on disk carries the same names its labels do, and decode is never a fresh
-    ``assign_class_ids``. Absent a recorded map, the raw 0-indexed id is used as the name (a degraded
-    but honest fallback, never a re-derivation). ``keep_empty=True`` so a processed image with zero
-    detections still yields an ``{"annotations": []}`` file. ``created_by`` stamps the producing model
-    on every prediction so the origin travels into GT when a human accepts it.
+    image ``width``/``height``. Each detection's numeric label is decoded via ``id_map`` (the run's
+    *recorded* ``operating_point.json`` name→id map), so a prediction on disk carries the same
+    names its labels do, and decode is never a fresh ``assign_class_ids``.
+
+    ``subject`` and ``attribute`` are the run's own scope (:func:`~tcip_mcp.tools.inference_tools.
+    run_scope`). With ``attribute`` set, every decoded name lands in ``attributes[attribute]`` and
+    ``subject`` carries the object class itself, so a classified prediction carries the shape
+    ground truth carries (``state.py``): a value under an attribute of a named object class, never
+    the value alone in ``subject``. With ``attribute=None`` the output is byte-identical to a
+    detector run's: ``subject`` carries the decoded name, ``attributes`` stays empty. An
+    ``attribute`` with no ``subject`` refuses (``ValueError``) before the first document is
+    written, since the record it would write carries a value under no object class. Absent a
+    recorded map, the raw 0-indexed id is used as the name (a degraded but honest fallback, never
+    a re-derivation) for a detector run; a classified run instead refuses (``ValueError``, naming
+    the id and the map's own ids) the first label it cannot decode, since a value no vocabulary
+    declares landing in ``attributes[attribute]`` would be a fabricated state. ``keep_empty=True``
+    so a processed image with zero detections still yields an ``{"annotations": []}`` file.
+    ``created_by`` stamps the producing model on every prediction so the origin travels into GT
+    when a human accepts it.
 
     When ``result`` carries ``masks`` (``instance_seg``, see
     :mod:`tcip_mcp.pipelines.inference.generic_predictor`), each mask is binarized via
@@ -102,6 +137,11 @@ def write_predictions_json(
             "stem is reserved this way can never be written as a bucket's per-image prediction "
             "document, since the stamp write would then destroy or refuse over it."
         )
+    if attribute is not None and subject is None:
+        raise ValueError(
+            f"{p.name}: attribute {attribute!r} was given with no subject; a value with no "
+            "object class names nothing a reader could hold this record to."
+        )
     w = result.get("width") or 0
     h = result.get("height") or 0
     created_at = datetime.now(timezone.utc).isoformat() if created_by else None
@@ -116,14 +156,26 @@ def write_predictions_json(
     for i, (box, score, label) in enumerate(zip(boxes, scores, labels)):
         x1, y1, x2, y2 = box
         cid = max(int(label) - 1, 0)  # undo the 1-indexed torchvision label -> 0-indexed run id
-        name = id_to_name.get(cid, str(cid))  # decode via the recorded map, never a fresh derivation
+        if attribute is not None:
+            if cid not in id_to_name:
+                raise ValueError(
+                    f"{p.name}: detection {i} decoded to id {cid}, not a key of this run's "
+                    f"recorded id_map ({sorted(id_to_name)}); a value no vocabulary declares "
+                    f"cannot be written under attribute {attribute!r}."
+                )
+            name = id_to_name[cid]
+        else:
+            name = id_to_name.get(cid, str(cid))  # decode via the recorded map, never a fresh derivation
         geometry: BBox | Polygon = BBox(x1, y1, x2, y2)
         if masks is not None and i < len(masks):
             geometry = _mask_geometry_for_export(masks[i], (x1, y1, x2, y2), name, image_size=(w, h))
         if not json_io.geometry_extent_ok(geometry):
             dropped += 1
             continue
-        preds.append(Annotation(subject=name, geometry=geometry, score=float(score),
+        pred_subject = subject if attribute is not None else name
+        pred_attributes = {attribute: name} if attribute is not None else {}
+        preds.append(Annotation(subject=pred_subject, geometry=geometry, score=float(score),
+                                attributes=pred_attributes,
                                 created_by=created_by, created_at=created_at))
         kept_indices.append(i)
     json_io.write_annotations(str(json_path), preds, int(w), int(h), keep_empty=True)
@@ -255,10 +307,11 @@ def export_detection_csv(
     Meaning door: a count nobody defined is not a measurement, so this refuses before it composes
     the gate's flags unless ``trait``'s ``per_image_count`` operationalization is recorded and
     breeder-confirmed. The counts are counts of that record's own ``measured_subject``, which is
-    checked against the ``id_map`` of every bucket that recorded one; a delivery whose buckets
-    recorded none, and one called with no ``pred_dirs`` at all, carries the subject unchecked
-    because nothing in it names what the labels decoded to. The record names no delivered
-    phenotype, because this CSV's columns name none.
+    checked against the object classes every bucket's own scope says its detections are of: a
+    classified bucket's own subject, an unscoped bucket's recorded ``id_map`` keys. A delivery
+    whose buckets contribute neither, and one called with no ``pred_dirs`` at all, carries the
+    subject unchecked because nothing in it names what the labels decoded to. The record names no
+    delivered phenotype, because this CSV's columns name none.
 
     Args:
         image_results: List of dicts with 'image', 'count', 'boxes', etc.
@@ -310,6 +363,7 @@ def export_detection_csv(
         VALIDATED_FALSE,
         DeliveryRefused,
         binding_notes_text,
+        bucket_scope,
         check_delivery_gate,
         delivered_tail,
         record_delivery_binding_event,
@@ -317,12 +371,21 @@ def export_detection_csv(
         reconcile_tile_size_validity,
     )
 
-    # Only buckets that recorded a map: one that recorded none says nothing about what was counted.
-    recorded_maps = {d: bucket_id_map(Path(d)) for d in (pred_dirs or [])}
-    id_maps = {d: m for d, m in recorded_maps.items() if m is not None} or None
+    # A bucket's own counted object classes: a classified stamp's subject, else its map's keys.
+    counted_subjects: dict[str, set[str]] = {}
+    for d in (pred_dirs or []):
+        scope = bucket_scope(Path(d))
+        if scope is not None and scope.classified:
+            if scope.subject is not None:
+                counted_subjects[d] = {scope.subject}
+            continue
+        recorded_map = bucket_id_map(Path(d))
+        if recorded_map:
+            counted_subjects[d] = set(recorded_map)
     spec, record, _specs_dir = resolve_trait_and_record(trait, PER_IMAGE_COUNT, project_root=project_root)
     # This door never delivers a crossing kind, so it has no registry to check a positive class against.
-    stated = check_operationalization(spec, record, PER_IMAGE_COUNT, id_maps=id_maps, registry=None)
+    stated = check_operationalization(
+        spec, record, PER_IMAGE_COUNT, counted_subjects=counted_subjects or None, registry=None)
     if not stated.ok:
         raise OperationalizationRefused(stated)
 
@@ -351,7 +414,8 @@ def export_detection_csv(
     spec_now, record_now, _ = resolve_trait_and_record(
         trait, PER_IMAGE_COUNT, project_root=project_root)
     still_stated = check_operationalization(
-        spec_now, record_now, PER_IMAGE_COUNT, id_maps=id_maps, registry=None, basis=stated.basis)
+        spec_now, record_now, PER_IMAGE_COUNT, counted_subjects=counted_subjects or None,
+        registry=None, basis=stated.basis)
     if not still_stated.ok:
         raise OperationalizationRefused(still_stated)
 
