@@ -19,7 +19,7 @@ def client() -> TestClient:
     return TestClient(app, base_url="http://127.0.0.1")
 
 
-def _catkin(x1, y1, x2, y2, *, subject: str = "catkin") -> Annotation:
+def _bud(x1, y1, x2, y2, *, subject: str = "bud") -> Annotation:
     return Annotation(subject=subject, geometry=BBox(x1, y1, x2, y2))
 
 
@@ -45,13 +45,13 @@ def test_save_then_load_round_trip(client: TestClient, tmp_path: Path) -> None:
             "project_root": str(tmp_path),
             "dataset_root": str(tmp_path),
             "subjects": {
-                "catkin": {
-                    "description": "a hazelnut catkin",
+                "bud": {
+                    "description": "a currant bud",
                     "attributes": {
-                        "elongation": {"type": "categorical", "values": ["dormant", "elongated"]}
+                        "opening": {"type": "categorical", "values": ["closed", "open"]}
                     },
                 },
-                "bush": {"description": "one hazelnut bush crown"},
+                "bush": {"description": "one currant bush crown"},
             },
             "version": None,
         },
@@ -64,11 +64,11 @@ def test_save_then_load_round_trip(client: TestClient, tmp_path: Path) -> None:
         params={"project_root": str(tmp_path), "dataset_root": str(tmp_path)},
     ).json()
     subjects = load["subjects"]
-    assert set(subjects) == {"catkin", "bush"}
-    assert subjects["catkin"]["attributes"]["elongation"]["values"] == ["dormant", "elongated"]
+    assert set(subjects) == {"bud", "bush"}
+    assert subjects["bud"]["attributes"]["opening"]["values"] == ["closed", "open"]
     # Lands in the dataset as one nested classes.json (no per-subject files, no numeric ids).
     on_disk = json.loads((tmp_path / "classes.json").read_text())
-    assert set(on_disk) == {"catkin", "bush"}
+    assert set(on_disk) == {"bud", "bush"}
 
 
 def test_save_refuses_an_empty_registry(client: TestClient, tmp_path: Path) -> None:
@@ -202,21 +202,21 @@ def test_save_refuses_malformed_registry(client: TestClient, tmp_path: Path) -> 
     r = client.post(
         "/api/classes/save",
         json={"project_root": str(tmp_path), "dataset_root": str(tmp_path),
-              "subjects": {"catkin": {"attributes": {"elongation": {"type": "categorical"}}}},
+              "subjects": {"bud": {"attributes": {"opening": {"type": "categorical"}}}},
               "version": None},
     )
     assert r.status_code == 400
 
 
 def test_registry_holds_multiple_subjects(client: TestClient, tmp_path: Path) -> None:
-    # catkin and bush each name their own object; the one nested registry keeps them distinct.
+    # bud and bush each name their own object; the one nested registry keeps them distinct.
     save = client.post(
         "/api/classes/save",
         json={
             "project_root": str(tmp_path),
             "dataset_root": str(tmp_path),
             "subjects": {
-                "catkin": {"description": "a catkin"},
+                "bud": {"description": "a bud"},
                 "bush": {"description": "a bush"},
             },
             "version": None,
@@ -228,7 +228,7 @@ def test_registry_holds_multiple_subjects(client: TestClient, tmp_path: Path) ->
         "/api/classes/load",
         params={"project_root": str(tmp_path), "dataset_root": str(tmp_path)},
     ).json()
-    assert load["subjects"]["catkin"]["description"] == "a catkin"
+    assert load["subjects"]["bud"]["description"] == "a bud"
     assert load["subjects"]["bush"]["description"] == "a bush"
     assert (tmp_path / "classes.json").is_file()
 
@@ -240,7 +240,7 @@ def test_dataset_root_derived_from_annotation_dir(client: TestClient, tmp_path: 
     r = client.post(
         "/api/classes/save",
         json={"project_root": str(tmp_path), "annotations_dir": str(ann),
-              "subjects": {"catkin": {"description": "a catkin"}}, "version": None},
+              "subjects": {"bud": {"description": "a bud"}}, "version": None},
     )
     assert r.status_code == 200
     assert (tmp_path / "classes.json").is_file()
@@ -255,14 +255,14 @@ def test_load_derives_subjects_from_labels_when_registry_absent(
     ann.mkdir(parents=True)
     write_annotations(
         str(ann / "IMG_A.json"),
-        [_catkin(50, 50, 60, 60), _catkin(20, 20, 30, 30, subject="bush")],
+        [_bud(50, 50, 60, 60), _bud(20, 20, 30, 30, subject="bush")],
         100, 100,
     )
     load = client.get(
         "/api/classes/load",
         params={"project_root": str(tmp_path), "annotations_dir": str(ann)},
     ).json()
-    assert set(load["subjects"]) == {"bush", "catkin"}
+    assert set(load["subjects"]) == {"bush", "bud"}
     assert load["unreadable"] == []
 
 
@@ -272,14 +272,14 @@ def test_load_reports_an_unreadable_label_and_still_derives_the_rest(
     """One corrupt label file costs its own name, never the whole draft-registry scan."""
     ann = tmp_path / "annotations" / "d"
     ann.mkdir(parents=True)
-    write_annotations(str(ann / "IMG_A.json"), [_catkin(50, 50, 60, 60)], 100, 100)
+    write_annotations(str(ann / "IMG_A.json"), [_bud(50, 50, 60, 60)], 100, 100)
     (ann / "IMG_B.json").write_text("not json {][", encoding="utf-8")
 
     load = client.get(
         "/api/classes/load",
         params={"project_root": str(tmp_path), "annotations_dir": str(ann)},
     ).json()
-    assert set(load["subjects"]) == {"catkin"}
+    assert set(load["subjects"]) == {"bud"}
     assert load["unreadable"] == [str(ann / "IMG_B.json")]
 
 
@@ -291,13 +291,13 @@ def test_load_reports_an_unreadable_label_beside_a_saved_registry(
     unreadable documents just because a registry was found."""
     ann = tmp_path / "annotations" / "d"
     ann.mkdir(parents=True)
-    write_annotations(str(ann / "IMG_A.json"), [_catkin(50, 50, 60, 60)], 100, 100)
+    write_annotations(str(ann / "IMG_A.json"), [_bud(50, 50, 60, 60)], 100, 100)
     (ann / "IMG_B.json").write_text("not json {][", encoding="utf-8")
 
     save = client.post(
         "/api/classes/save",
         json={"project_root": str(tmp_path), "dataset_root": str(tmp_path),
-              "subjects": {"catkin": {"description": "a catkin"}}, "version": None},
+              "subjects": {"bud": {"description": "a bud"}}, "version": None},
     )
     assert save.status_code == 200
 
@@ -306,7 +306,7 @@ def test_load_reports_an_unreadable_label_beside_a_saved_registry(
         params={"project_root": str(tmp_path), "dataset_root": str(tmp_path),
                 "annotations_dir": str(ann)},
     ).json()
-    assert set(load["subjects"]) == {"catkin"}
+    assert set(load["subjects"]) == {"bud"}
     assert load["unreadable"] == [str(ann / "IMG_B.json")]
 
 
@@ -337,7 +337,7 @@ def test_cached_label_annotations_raises_on_a_read_failure_other_than_absence(
     from tcip_web.label_annotations_cache import cached_label_annotations
 
     label = tmp_path / "a.json"
-    write_annotations(str(label), [_catkin(1, 1, 2, 2)], 10, 10)
+    write_annotations(str(label), [_bud(1, 1, 2, 2)], 10, 10)
 
     real_read_bytes = Path.read_bytes
 
@@ -364,7 +364,7 @@ def test_cached_label_annotations_detects_an_edit_that_lands_on_the_same_mtime(
     from tcip_web.label_annotations_cache import cached_label_annotations
 
     label = tmp_path / "a.json"
-    write_annotations(str(label), [_catkin(1, 1, 2, 2)], 10, 10)
+    write_annotations(str(label), [_bud(1, 1, 2, 2)], 10, 10)
     os.utime(label, (1_000_000, 1_000_000))
     first = cached_label_annotations(label)
     assert len(first) == 1
@@ -387,12 +387,12 @@ def test_cached_label_annotations_detects_a_same_size_edit_that_lands_on_the_sam
     from tcip_web.label_annotations_cache import cached_label_annotations
 
     label = tmp_path / "a.json"
-    write_annotations(str(label), [_catkin(1, 1, 2, 2, subject="catkin")], 10, 10)
+    write_annotations(str(label), [_bud(1, 1, 2, 2, subject="bud")], 10, 10)
     os.utime(label, (1_000_000, 1_000_000))
     first = cached_label_annotations(label)
-    assert [a.subject for a in first] == ["catkin"]
+    assert [a.subject for a in first] == ["bud"]
 
-    write_annotations(str(label), [_catkin(1, 1, 2, 2, subject="leafxx")], 10, 10)
+    write_annotations(str(label), [_bud(1, 1, 2, 2, subject="leafxx")], 10, 10)
     os.utime(label, (1_000_000, 1_000_000))  # identical mtime and byte count, different content
 
     second = cached_label_annotations(label)
@@ -405,7 +405,7 @@ def test_cached_label_annotations_hands_out_the_same_records_on_a_hit(tmp_path: 
     from tcip_web.label_annotations_cache import cached_label_annotations
 
     label = tmp_path / "a.json"
-    write_annotations(str(label), [_catkin(1, 1, 2, 2)], 10, 10)
+    write_annotations(str(label), [_bud(1, 1, 2, 2)], 10, 10)
 
     first = cached_label_annotations(label)
     second = cached_label_annotations(label)
@@ -417,12 +417,12 @@ def test_image_status_round_trip(client: TestClient, tmp_path: Path) -> None:
     post = client.post(
         "/api/classes/image_status",
         json={"project_root": str(tmp_path), "dataset_root": str(tmp_path),
-              "image_name": "IMG_0001.JPG", "status": "complete", "subject": "catkin"},
+              "image_name": "IMG_0001.JPG", "status": "complete", "subject": "bud"},
     )
     assert post.status_code == 200
     resp = client.get(
         "/api/classes/image_status",
-        params={"project_root": str(tmp_path), "dataset_root": str(tmp_path), "subject": "catkin"},
+        params={"project_root": str(tmp_path), "dataset_root": str(tmp_path), "subject": "bud"},
     )
     body = resp.json()
     assert body["statuses"]["IMG_0001.JPG"] == "complete"
@@ -446,7 +446,7 @@ def test_image_status_write_refuses_without_a_locatable_dataset(
     resp = client.post(
         "/api/classes/image_status",
         json={"project_root": str(tmp_path), "image_name": "IMG_0001.JPG",
-              "status": "complete", "subject": "catkin"},
+              "status": "complete", "subject": "bud"},
     )
     assert resp.status_code == 400
 
@@ -490,7 +490,7 @@ def test_image_status_lands_at_dataset_root_not_an_unrelated_project(
     client.post(
         "/api/classes/image_status",
         json={"project_root": str(project_root), "dataset_root": str(dataset_root),
-              "image_name": "IMG_0001.JPG", "status": "negative", "subject": "catkin"},
+              "image_name": "IMG_0001.JPG", "status": "negative", "subject": "bud"},
     )
     assert _status_store_exists(dataset_root)
     assert not _status_store_exists(project_root)
@@ -501,9 +501,9 @@ def test_derive_statuses_negatives_are_intentional(client: TestClient, tmp_path:
     # so an accidental empty file, or flipping through an image, doesn't become a training negative.
     ann = tmp_path / "annotations"
     ann.mkdir()
-    write_annotations(str(ann / "IMG_A.json"), [_catkin(50, 50, 60, 60)], 100, 100)  # objects, not completed
+    write_annotations(str(ann / "IMG_A.json"), [_bud(50, 50, 60, 60)], 100, 100)  # objects, not completed
     write_annotations(str(ann / "IMG_B.json"), [], 100, 100, keep_empty=True)  # present {"annotations": []}
-    write_annotations(str(ann / "IMG_E.json"), [_catkin(50, 50, 60, 60)], 100, 100)  # objects, completed
+    write_annotations(str(ann / "IMG_E.json"), [_bud(50, 50, 60, 60)], 100, 100)  # objects, completed
     # IMG_C.json missing; IMG_D completed but has no file (empty)
 
     resp = client.post(
@@ -511,7 +511,7 @@ def test_derive_statuses_negatives_are_intentional(client: TestClient, tmp_path:
         json={
             "project_root": str(tmp_path),
             "annotations_dir": str(ann),
-            "subject": "catkin",
+            "subject": "bud",
             "image_list": ["IMG_A.JPG", "IMG_B.JPG", "IMG_C.JPG", "IMG_D.JPG", "IMG_E.JPG"],
             "complete_override": ["IMG_D.JPG", "IMG_E.JPG"],
         },
@@ -530,13 +530,13 @@ def test_derive_statuses_reports_an_unreadable_label_and_still_derives_the_rest(
 ) -> None:
     ann = tmp_path / "annotations"
     ann.mkdir()
-    write_annotations(str(ann / "IMG_A.json"), [_catkin(50, 50, 60, 60)], 100, 100)
+    write_annotations(str(ann / "IMG_A.json"), [_bud(50, 50, 60, 60)], 100, 100)
     (ann / "IMG_B.json").write_text("not json {][", encoding="utf-8")
 
     resp = client.post(
         "/api/classes/image_status/derive",
         json={
-            "project_root": str(tmp_path), "annotations_dir": str(ann), "subject": "catkin",
+            "project_root": str(tmp_path), "annotations_dir": str(ann), "subject": "bud",
             "image_list": ["IMG_A.JPG", "IMG_B.JPG"], "complete_override": [],
         },
     )
@@ -557,14 +557,14 @@ def test_derive_statuses_cache_invalidates_on_label_write(client: TestClient, tm
     req = {
         "project_root": str(tmp_path),
         "annotations_dir": str(ann),
-        "subject": "catkin",
+        "subject": "bud",
         "image_list": ["IMG_A.JPG"],
         "complete_override": [],
     }
     first = client.post("/api/classes/image_status/derive", json=req).json()
     assert first["statuses"]["IMG_A.JPG"] == "unannotated"
 
-    write_annotations(str(label), [_catkin(50, 50, 60, 60)], 100, 100)
+    write_annotations(str(label), [_bud(50, 50, 60, 60)], 100, 100)
     os.utime(label, (2_000_000, 2_000_000))  # force a distinct mtime_ns from the first write
 
     second = client.post("/api/classes/image_status/derive", json=req).json()
@@ -581,15 +581,15 @@ def test_load_derives_subjects_excludes_a_bucket_sidecar(
 
     ann = tmp_path / "annotations" / "d"
     ann.mkdir(parents=True)
-    write_annotations(str(ann / "IMG_A.json"), [_catkin(50, 50, 60, 60)], 100, 100)
+    write_annotations(str(ann / "IMG_A.json"), [_bud(50, 50, 60, 60)], 100, 100)
     write_sidecar(ann, {"checkpoint_sha256": "sha", "experiment_id": None,
-                       "subject": "catkin", "attribute": None})
+                       "subject": "bud", "attribute": None})
 
     load = client.get(
         "/api/classes/load",
         params={"project_root": str(tmp_path), "annotations_dir": str(ann)},
     ).json()
-    assert set(load["subjects"]) == {"catkin"}
+    assert set(load["subjects"]) == {"bud"}
     assert load["unreadable"] == []
 
 
@@ -600,20 +600,20 @@ def test_load_derived_registry_cache_invalidates_on_label_write(
     ann = tmp_path / "annotations" / "d"
     ann.mkdir(parents=True)
     label = ann / "IMG_A.json"
-    write_annotations(str(label), [_catkin(50, 50, 60, 60)], 100, 100)
+    write_annotations(str(label), [_bud(50, 50, 60, 60)], 100, 100)
     os.utime(label, (1_000_000, 1_000_000))
 
     params = {"project_root": str(tmp_path), "annotations_dir": str(ann)}
     first = client.get("/api/classes/load", params=params).json()
-    assert set(first["subjects"]) == {"catkin"}
+    assert set(first["subjects"]) == {"bud"}
 
     write_annotations(
-        str(label), [_catkin(50, 50, 60, 60), _catkin(20, 20, 30, 30, subject="bush")], 100, 100
+        str(label), [_bud(50, 50, 60, 60), _bud(20, 20, 30, 30, subject="bush")], 100, 100
     )
     os.utime(label, (2_000_000, 2_000_000))
 
     second = client.get("/api/classes/load", params=params).json()
-    assert set(second["subjects"]) == {"bush", "catkin"}
+    assert set(second["subjects"]) == {"bush", "bud"}
 
 
 def test_save_classes_confines_dataset_root_to_allowed_roots(
@@ -623,7 +623,7 @@ def test_save_classes_confines_dataset_root_to_allowed_roots(
     resp = client.post(
         "/api/classes/save",
         json={"project_root": str(outside), "dataset_root": str(outside),
-              "subjects": {"catkin": {"description": "a catkin"}}, "version": None},
+              "subjects": {"bud": {"description": "a bud"}}, "version": None},
     )
     assert resp.status_code == 403
 
@@ -635,7 +635,7 @@ def test_image_status_confines_dataset_root_to_allowed_roots(
     resp = client.post(
         "/api/classes/image_status",
         json={"project_root": str(outside), "dataset_root": str(outside),
-              "image_name": "IMG_0001.JPG", "status": "complete", "subject": "catkin"},
+              "image_name": "IMG_0001.JPG", "status": "complete", "subject": "bud"},
     )
     assert resp.status_code == 403
 
@@ -647,7 +647,7 @@ def test_image_status_bulk_confines_dataset_root_to_allowed_roots(
     resp = client.post(
         "/api/classes/image_status/bulk",
         json={"project_root": str(outside), "dataset_root": str(outside),
-              "subject": "catkin", "statuses": {"A.JPG": "complete"}},
+              "subject": "bud", "statuses": {"A.JPG": "complete"}},
     )
     assert resp.status_code == 403
 
@@ -658,7 +658,7 @@ def test_get_image_status_confines_dataset_root_to_allowed_roots(
     outside = tmp_path_factory.mktemp("outside")
     resp = client.get(
         "/api/classes/image_status",
-        params={"project_root": str(outside), "dataset_root": str(outside), "subject": "catkin"},
+        params={"project_root": str(outside), "dataset_root": str(outside), "subject": "bud"},
     )
     assert resp.status_code == 403
 
@@ -671,7 +671,7 @@ def test_derive_image_status_confines_annotations_dir_to_allowed_roots(
     resp = client.post(
         "/api/classes/image_status/derive",
         json={"project_root": str(tmp_path), "annotations_dir": str(outside),
-              "subject": "catkin", "image_list": ["IMG_A.JPG"]},
+              "subject": "bud", "image_list": ["IMG_A.JPG"]},
     )
     assert resp.status_code == 403
 
@@ -686,7 +686,7 @@ def test_load_classes_confines_annotations_dir_before_scanning_it(
     outside = tmp_path_factory.mktemp("outside")
     ann = outside / "annotations"
     ann.mkdir()
-    write_annotations(str(ann / "SECRET.json"), [_catkin(1, 1, 2, 2, subject="leaked")], 10, 10)
+    write_annotations(str(ann / "SECRET.json"), [_bud(1, 1, 2, 2, subject="leaked")], 10, 10)
 
     def _must_not_be_called(path):
         raise AssertionError(f"the annotations dir must be guarded before any file is read: {path}")
@@ -709,7 +709,7 @@ def test_a_dataset_root_inside_the_workspace_clears_the_confinement_guard(
     resp = client.post(
         "/api/classes/image_status",
         json={"project_root": str(tmp_path), "dataset_root": str(tmp_path),
-              "image_name": "IMG_0001.JPG", "status": "complete", "subject": "catkin"},
+              "image_name": "IMG_0001.JPG", "status": "complete", "subject": "bud"},
     )
     assert resp.status_code == 200
 
@@ -735,7 +735,7 @@ def test_set_image_status_writes_a_dataset_scoped_audit_entry(
     client.post(
         "/api/classes/image_status",
         json={"project_root": str(project_root), "dataset_root": str(dataset_root),
-              "image_name": "IMG_0001.JPG", "status": "complete", "subject": "catkin"},
+              "image_name": "IMG_0001.JPG", "status": "complete", "subject": "bud"},
     )
     entries = _read_audit_entries(dataset_root)
     assert len(entries) == 1
@@ -756,7 +756,7 @@ def test_set_image_status_bulk_audit_entry_records_only_what_was_applied(
     client.post(
         "/api/classes/image_status/bulk",
         json={
-            "project_root": str(project_root), "dataset_root": str(dataset_root), "subject": "catkin",
+            "project_root": str(project_root), "dataset_root": str(dataset_root), "subject": "bud",
             "statuses": {"A.JPG": "complete", "B.JPG": "invalid_ignored"},
         },
     )
@@ -776,7 +776,7 @@ def test_save_classes_writes_a_dataset_scoped_audit_entry(client: TestClient, tm
     client.post(
         "/api/classes/save",
         json={"project_root": str(project_root), "dataset_root": str(dataset_root),
-              "subjects": {"catkin": {"description": "a catkin"}}, "version": None},
+              "subjects": {"bud": {"description": "a bud"}}, "version": None},
     )
     entries = _read_audit_entries(dataset_root)
     assert len(entries) == 1
@@ -791,7 +791,7 @@ def test_image_status_bulk_writes_no_audit_entry_when_every_status_is_invalid(
     """No real write happened, so no audit entry should claim one did."""
     client.post(
         "/api/classes/image_status/bulk",
-        json={"project_root": str(tmp_path), "dataset_root": str(tmp_path), "subject": "catkin",
+        json={"project_root": str(tmp_path), "dataset_root": str(tmp_path), "subject": "bud",
               "statuses": {"A.JPG": "invalid_ignored"}},
     )
     assert _read_audit_entries(tmp_path) == []
@@ -803,7 +803,7 @@ def test_image_status_bulk(client: TestClient, tmp_path: Path) -> None:
         json={
             "project_root": str(tmp_path),
             "dataset_root": str(tmp_path),
-            "subject": "catkin",
+            "subject": "bud",
             "statuses": {
                 "A.JPG": "complete",
                 "B.JPG": "partial",
@@ -814,7 +814,7 @@ def test_image_status_bulk(client: TestClient, tmp_path: Path) -> None:
     assert resp.json()["n"] == 3
     loaded = client.get(
         "/api/classes/image_status",
-        params={"project_root": str(tmp_path), "dataset_root": str(tmp_path), "subject": "catkin"},
+        params={"project_root": str(tmp_path), "dataset_root": str(tmp_path), "subject": "bud"},
     ).json()
     assert loaded["statuses"]["A.JPG"] == "complete"
     assert loaded["statuses"]["B.JPG"] == "partial"

@@ -110,8 +110,8 @@ def test_load_from_disk_holds_defaults_on_an_undecodable_snapshot(tmp_path: Path
     proj_b = tmp_path / "B"
 
     store.open_project(proj_a)
-    asyncio.run(store.mutate({"active_subject": "catkin"}))
-    assert store.state.active_subject == "catkin"
+    asyncio.run(store.mutate({"active_subject": "bud"}))
+    assert store.state.active_subject == "bud"
 
     tcip_store.replace(gui_snapshot_key(str(proj_b)), {"active_tab": "not-a-real-tab"},
                        expect=tcip_store.Version.ABSENT)

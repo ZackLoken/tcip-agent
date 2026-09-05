@@ -18,8 +18,8 @@ from tcip_web.state import store
 
 from tests._binding_fixtures import producer_checkpoint_sha256
 
-# seed_catkin_operationalization writes the spec plus the confirmed crossing record this root needs.
-pytestmark = pytest.mark.usefixtures("seed_catkin_operationalization")
+# seed_bud_operationalization writes the spec plus the confirmed crossing record this root needs.
+pytestmark = pytest.mark.usefixtures("seed_bud_operationalization")
 
 
 @pytest.fixture
@@ -34,13 +34,13 @@ def _write_preds(path: Path, subjects: list[str]) -> None:
     write_annotations(str(path), anns, 8, 8)
 
 
-_ID_MAP = {"dormant": 0, "elongated": 1}
+_ID_MAP = {"closed": 0, "open": 1}
 
 
 def test_list_traits_names_a_broken_spec_alongside_the_valid_one(
     client: TestClient, tmp_path: Path
 ) -> None:
-    """catkin is seeded valid by the fixture; a second, broken spec must still be visible by
+    """bud_opening is seeded valid by the fixture; a second, broken spec must still be visible by
     name and reason, not silently absent the way a dropped spec looks identical to none at all."""
     from tcip_mcp import traits
 
@@ -51,7 +51,7 @@ def test_list_traits_names_a_broken_spec_alongside_the_valid_one(
 
     resp = client.get("/api/results/traits", params={"project_root": str(tmp_path)})
     body = resp.json()
-    assert body["traits"] == ["catkin"]
+    assert body["traits"] == ["bud_opening"]
     assert len(body["invalid_specs"]) == 1
     assert body["invalid_specs"][0]["file"] == "unicorn.json"
     assert "unicorn_horn_length" in body["invalid_specs"][0]["reason"]
@@ -116,7 +116,7 @@ def _phenology_fixture(
     tmp_path: Path, *, validated: bool, images_per_plant: int = 1,
     fractions: tuple[float, ...] = (0.0, 0.10, 0.60, 1.0), id_map: dict | None = None,
     detections: int = 10, producing_experiment_id: str | None = "exp-1",
-    count_trait: str = "catkin",
+    count_trait: str = "bud_opening",
 ) -> dict:
     """A mapping + per-date prediction buckets, written through the platform's own writers.
 
@@ -133,27 +133,27 @@ def _phenology_fixture(
     project that is whole, rather than one whose spec lives somewhere else.
 
     ``count_trait`` is the trait the count operating point's own sidecar and validation record are
-    earned for, ``"catkin"`` by default (matching the delivered trait); a caller wanting a
+    earned for, ``"bud_opening"`` by default (matching the delivered trait); a caller wanting a
     stamp/record earned for a different trait than the one the body delivers under passes it, the
-    classifier stamp stays earned for ``"catkin"`` regardless, so only the count dimension mismatches.
+    classifier stamp stays earned for ``"bud_opening"`` regardless, so only the count dimension mismatches.
     """
     from tcip_mcp.pipelines.postprocessing.export import write_predictions_json
 
     from tests._binding_fixtures import record_producing_run, write_bound_sidecar
     from tests._operationalization_fixtures import seed_confirmed_crossing, write_spec
-    from tests._trait_fixtures import CATKIN
+    from tests._trait_fixtures import BUD_OPENING
 
-    write_spec(tmp_path, CATKIN)
-    seed_confirmed_crossing(tmp_path, CATKIN.name)
+    write_spec(tmp_path, BUD_OPENING)
+    seed_confirmed_crossing(tmp_path, BUD_OPENING.name, measured_subject="bud")
 
     # A stamp naming a producing run is only repeated in a delivery when that run really exists.
     checkpoint_sha256 = (record_producing_run(tmp_path, producing_experiment_id)
                          if validated and producing_experiment_id else "abc123")
     id_map = id_map or _ID_MAP
     dates = ["2026-02-11", "2026-02-25", "2026-03-10", "2026-03-24"][: len(fractions)]
-    positive = "elongated" if "elongated" in id_map else None
+    positive = "open" if "open" in id_map else None
     # A bare single-subject map is a detector bucket never assessed for any attribute.
-    attribute = "elongation" if positive else None
+    attribute = "opening" if positive else None
     # A covered-bucket key is relative to a dataset root, recognised by its annotations/predictions segment.
     root = tmp_path / "ds"
     mapping, preds = {}, {}
@@ -166,7 +166,7 @@ def _phenology_fixture(
                 stem = f"{plant}_{date_str}_{i}"
                 n_pos = int(round(frac * detections))
                 if positive:
-                    subjects = [positive] * n_pos + ["dormant"] * (detections - n_pos)
+                    subjects = [positive] * n_pos + ["closed"] * (detections - n_pos)
                 else:
                     subjects = [next(iter(id_map))] * detections
                 write_predictions_json(
@@ -174,10 +174,10 @@ def _phenology_fixture(
                     {"boxes": [[j, 0, j + 4, 4] for j in range(detections)],
                      "labels": [id_map[s] + 1 for s in subjects],
                      "scores": [0.9] * detections, "width": 100, "height": 100},
-                    subject="catkin", attribute=attribute, id_map=id_map)
+                    subject="bud", attribute=attribute, id_map=id_map)
                 assigns.append({"image_path": f"{stem}.tif", "stem": stem, "plot_name": plant,
                                 "accession_name": f"Acc{plant[-1]}", "distance_m": 1.0})
-        sidecar: dict = {"id_map": id_map, "subject": "catkin", "attribute": attribute}
+        sidecar: dict = {"id_map": id_map, "subject": "bud", "attribute": attribute}
         if validated:
             sidecar.update({
                 "validated": True,
@@ -190,13 +190,13 @@ def _phenology_fixture(
                                 experiment_id=f"exp-op-{date_str}",
                                 producing_experiment_id=producing_experiment_id, trait=count_trait)
             classifier_stamp = {
-                "validated": True, "trait": "catkin", "experiment_id": producing_experiment_id,
-                "operating_point": {"classifier": {"value": "elongated",
+                "validated": True, "trait": "bud_opening", "experiment_id": producing_experiment_id,
+                "operating_point": {"classifier": {"value": "open",
                                                    "validated_against": "held_out_annotations"}},
             }
             write_bound_sidecar(bucket, classifier_stamp, document="classifier_operating_point",
                                 dataset_root=root, experiment_id=f"exp-cls-{date_str}",
-                                producing_experiment_id=producing_experiment_id, trait="catkin")
+                                producing_experiment_id=producing_experiment_id, trait="bud_opening")
         else:
             write_sidecar(bucket, sidecar, "operating_point")
         mapping[date_str] = assigns
@@ -214,7 +214,7 @@ def _phenology_fixture(
     # The Results doors serve the project the GUI has open, the one this evidence belongs to.
     store.open_project(tmp_path.resolve())
     return {"project_root": str(tmp_path), "mapping_name": mapping_name,
-            "predictions_by_date": preds, "trait": "catkin"}
+            "predictions_by_date": preds, "trait": "bud_opening"}
 
 
 def _expected_validation_record(body: dict) -> str:
@@ -266,7 +266,7 @@ def test_phenology_measurement_flags_unclassified_predictions(
     # Bare single-class detector output: the bucket's id_map has no attribute axis, so the run
     # never assessed the positive-state class. Must disclose that rather than pass the counts off
     # as a phenology measurement, and must never report a fabricated ratio.
-    body = _phenology_fixture(tmp_path, validated=True, fractions=(0.0,), id_map={"catkin": 0},
+    body = _phenology_fixture(tmp_path, validated=True, fractions=(0.0,), id_map={"bud": 0},
                           detections=2)
     out = client.post("/api/results/phenology_measurement", json=body).json()
     assert out["positive_class_assessed"] is False
@@ -281,11 +281,11 @@ def test_phenology_measurement_finds_crossings(client: TestClient, tmp_path: Pat
     rows = client.post(
         "/api/results/phenology_measurement", json=body).json()["milestones"]["rows"]
     onset = next(r for r in rows if r["plant_id"] == "PLANT_A")
-    assert onset["catkin_05per_date"] is not None
-    assert onset["catkin_50per_date"] is not None
-    assert onset["catkin_95per_date"] is not None
-    # catkin_elongation_date = "most catkins elongated" (crops.yml) = the 95% majority crossing.
-    assert onset["catkin_elongation_date"] == onset["catkin_95per_date"]
+    assert onset["bud_05per_date"] is not None
+    assert onset["bud_50per_date"] is not None
+    assert onset["bud_95per_date"] is not None
+    # bud_opening_date = the majority-label alias = the 95% majority crossing.
+    assert onset["bud_opening_date"] == onset["bud_95per_date"]
 
 
 def test_phenology_measurement_ignores_undated_bucket(client: TestClient, tmp_path: Path) -> None:
@@ -307,7 +307,7 @@ def test_phenology_measurement_ignores_undated_bucket(client: TestClient, tmp_pa
     rows = client.post(
         "/api/results/phenology_measurement", json=body).json()["milestones"]["rows"]
     for row in rows:
-        for key in ("catkin_05per_date", "catkin_50per_date", "catkin_95per_date"):
+        for key in ("bud_05per_date", "bud_50per_date", "bud_95per_date"):
             assert row[key] != "0000-00-00"
             if row[key] is not None:
                 assert row[key].startswith("2026-")
@@ -325,13 +325,13 @@ def test_phenology_measurement_discloses_zero_observations_distinctly_from_valid
     assert row["n_dates_unclassified"] == 0
     assert row["n_dates_missing_images"] == 0
     assert row["n_observed_dates"] == 0
-    assert row["catkin_95per_date"] is None
+    assert row["bud_95per_date"] is None
 
 
 def test_phenology_doors_reject_a_malformed_payload_with_422_not_500(client: TestClient) -> None:
     # A payload missing required inputs is a structured 422, never an unhandled KeyError/500.
     for route in ("phenology_measurement", "export_csv"):
-        resp = client.post(f"/api/results/{route}", json={"trait": "catkin"})
+        resp = client.post(f"/api/results/{route}", json={"trait": "bud_opening"})
         assert resp.status_code == 422, route
 
 
@@ -466,7 +466,7 @@ def test_delivery_events_route_serves_a_registry_disclosure_without_a_resolved_k
     record_delivery_binding_event(
         "results.export_csv", None, [], {},
         measurement_documents=["operating_point"], scale_document=None, acknowledgement=None,
-        trait="catkin", delivery_kind="state_crossing_dates", project_root=tmp_path,
+        trait="bud_opening", delivery_kind="state_crossing_dates", project_root=tmp_path,
         plant_mapping={
             "name": "valley", "project_root": str(tmp_path), "dataset_id": "ds-1",
             "dataset_root": str(tmp_path / "ds"), "built_at": "2026-02-01T00:00:00+00:00",
@@ -586,10 +586,10 @@ def test_show_unvalidated_shows_a_fabricated_tile_scale_on_screen_but_never_open
 def test_export_refuses_when_nothing_was_ever_classified(client: TestClient, tmp_path: Path) -> None:
     # The same refusal deliver_phenology_milestones makes: with no positive-class axis anywhere, the fraction
     # is not a measurement. Previously only the frontend guarded this on the web side.
-    body = _phenology_fixture(tmp_path, validated=True, id_map={"catkin": 0})
+    body = _phenology_fixture(tmp_path, validated=True, id_map={"bud": 0})
     resp = _export(client, body, "milestones")
     assert resp.status_code == 400
-    assert "elongated" in resp.json()["detail"]
+    assert "open" in resp.json()["detail"]
 
 
 def test_the_old_declaration_bypass_no_longer_reaches_the_door(
@@ -637,8 +637,8 @@ def test_a_genuinely_unvalidated_classifier_refuses_even_when_the_count_is_valid
     body = _phenology_fixture(tmp_path, validated=True)
     for bucket in body["predictions_by_date"].values():
         write_sidecar(Path(bucket), {
-            "validated": False, "trait": "catkin",
-            "operating_point": {"classifier": {"value": "elongated", "validated_against": "false"}},
+            "validated": False, "trait": "bud_opening",
+            "operating_point": {"classifier": {"value": "open", "validated_against": "false"}},
         }, "classifier_operating_point")
     resp = client.post("/api/results/phenology_measurement", json=body)
     assert resp.status_code == 400
@@ -659,7 +659,7 @@ def test_exported_milestone_csv_carries_the_canonical_schema_and_its_provenance(
     resp = _export(client, body, "milestones")
     assert resp.status_code == 200
     header, first = resp.text.splitlines()[0].split(","), resp.text.splitlines()[1].split(",")
-    assert header == phenology_csv_columns(get_trait("catkin"))
+    assert header == phenology_csv_columns(get_trait("bud_opening"))
     cells = dict(zip(header, first))
     assert cells["operating_point_validated"] == "held_out_annotations"
     assert cells["positive_state_classifier_validated"] == "held_out_annotations"
@@ -691,7 +691,7 @@ def test_curve_and_milestone_projections_share_one_measurement(
     assert a_row["n_observed_dates"] == sum(1 for r in a_curve if r["ratio"] is not None)
     # The 95% crossing must fall inside the dates whose ratios actually bracket it.
     assert a_curve[-1]["ratio"] == 1.0
-    assert a_row["catkin_95per_date"] <= a_curve[-1]["date"]
+    assert a_row["bud_95per_date"] <= a_curve[-1]["date"]
 
 
 def test_phenology_measurement_response_carries_every_field_the_two_deleted_doors_did(
@@ -752,8 +752,8 @@ def _rewrite_classifier_sidecars(body: dict, **overrides) -> None:
 
     for bucket in body["predictions_by_date"].values():
         bucket_path = Path(bucket)
-        sidecar = {"validated": True, "trait": "catkin", "experiment_id": "exp-1",
-                   "operating_point": {"classifier": {"value": "elongated",
+        sidecar = {"validated": True, "trait": "bud_opening", "experiment_id": "exp-1",
+                   "operating_point": {"classifier": {"value": "open",
                                                       "validated_against": "held_out_annotations"}}}
         sidecar.update(overrides)
         root = dataset_root_of(bucket_path)
@@ -796,13 +796,13 @@ def test_a_classifier_calibrated_against_another_experiment_does_not_validate_th
 def test_a_correctly_bound_classifier_still_delivers(client: TestClient, tmp_path: Path) -> None:
     # The refusals above must not be satisfiable by a door that refuses every classifier stamp.
     body = _phenology_fixture(tmp_path, validated=True)
-    _rewrite_classifier_sidecars(body, trait="catkin", experiment_id="exp-1")
+    _rewrite_classifier_sidecars(body, trait="bud_opening", experiment_id="exp-1")
     resp = client.post("/api/results/export_csv",
                        json={**body, "payload": "milestones", "filename": "x.csv"})
     assert resp.status_code == 200
     # A foreign checkpoint names no producing run on either document; two absences agree, so nothing refuses.
     foreign = _phenology_fixture(tmp_path / "foreign", validated=True, producing_experiment_id=None)
-    _rewrite_classifier_sidecars(foreign, trait="catkin", experiment_id=None)
+    _rewrite_classifier_sidecars(foreign, trait="bud_opening", experiment_id=None)
     assert client.post("/api/results/export_csv",
                        json={**foreign, "payload": "milestones", "filename": "x.csv"}
                        ).status_code == 200
@@ -840,19 +840,19 @@ def test_export_csv_also_saves_the_delivery_into_the_projects_exports_dir(
     the same bytes this route already returned."""
     from tcip_mcp.pipelines.postprocessing import phenology
 
-    from tests._trait_fixtures import CATKIN
+    from tests._trait_fixtures import BUD_OPENING
 
     body = _phenology_fixture(tmp_path, validated=True)
     resp = client.post("/api/results/export_csv",
-                       json={**body, "payload": "milestones", "filename": "catkin_delivery.csv"})
+                       json={**body, "payload": "milestones", "filename": "bud_delivery.csv"})
     assert resp.status_code == 200
-    saved = tmp_path / "results_export" / "catkin_delivery.csv"
+    saved = tmp_path / "results_export" / "bud_delivery.csv"
     assert resp.headers["X-TCIP-Saved-To"] == str(saved)
     assert resp.headers["X-TCIP-Delivery-Event-Recorded"] == "true"
 
     lines = resp.content.decode("utf-8").splitlines()
     header = lines[0].split(",")
-    assert header == phenology.phenology_csv_columns(CATKIN)
+    assert header == phenology.phenology_csv_columns(BUD_OPENING)
     for line in lines[1:]:
         cells = dict(zip(header, line.split(",")))
         assert cells["operating_point_conf"] == "0.4"
@@ -863,7 +863,7 @@ def test_export_csv_also_saves_the_delivery_into_the_projects_exports_dir(
 
     audit = tcip_store.read_log(audit_log_key(tmp_path)).records
     assert any(e.get("tool") == "results.export_csv" for e in audit)
-    assert any("catkin_delivery.csv" in json.dumps(e) for e in audit)
+    assert any("bud_delivery.csv" in json.dumps(e) for e in audit)
 
 
 def test_the_curves_csv_carries_the_same_provenance_as_the_milestone_csv(
@@ -906,14 +906,14 @@ def test_export_refuses_a_bucket_whose_id_map_never_carried_the_positive_class(
     # recorded id_map. per_plant_phenology's positive_class_assessed flag is not a substitute: a date
     # with ZERO detections is trivially "fully classified", so an axis-less bucket with no
     # detections read as classified and the export door had nothing left to refuse on.
-    body = _phenology_fixture(tmp_path, validated=True, id_map={"catkin": 0}, detections=0)
+    body = _phenology_fixture(tmp_path, validated=True, id_map={"bud": 0}, detections=0)
     measured = client.post("/api/results/phenology_measurement", json=body)
     assert measured.status_code == 200
     assert measured.json()["positive_class_assessed"] is False
     resp = client.post("/api/results/export_csv",
                        json={**body, "payload": "milestones", "filename": "x.csv"})
     assert resp.status_code == 400
-    assert "elongated" in resp.json()["detail"]
+    assert "open" in resp.json()["detail"]
 
 
 # ── Count CSV export ────────────────────────────────────────────────────
@@ -1096,14 +1096,14 @@ def test_export_count_csv_refuses_an_unconfirmed_meaning(
 ) -> None:
     # No confirmation seeded: the core's own pre-check refuses before the bucket is touched.
     from tests._operationalization_fixtures import write_spec
-    from tests._trait_fixtures import CATKIN
+    from tests._trait_fixtures import BUD_OPENING
 
-    write_spec(tmp_path, CATKIN)
-    bucket = _count_bucket(tmp_path, validated=True, trait=CATKIN.name)
+    write_spec(tmp_path, BUD_OPENING)
+    bucket = _count_bucket(tmp_path, validated=True, trait=BUD_OPENING.name)
     store.open_project(tmp_path.resolve())
     resp = _export_count(client, {
         "project_root": str(tmp_path),
-        "delivery": {"kind": "per_image_count", "predictions_dir": str(bucket), "trait": CATKIN.name},
+        "delivery": {"kind": "per_image_count", "predictions_dir": str(bucket), "trait": BUD_OPENING.name},
         "filename": "counts.csv",
     })
     assert resp.status_code == 400
@@ -1346,7 +1346,7 @@ def _orthomosaic_fixture(
     plant_csv = _plant_grid_csv(project_root, raster_path, _PLANT_PIXELS)
     root = registry_root if registry_root is not None else project_root
     register_plant_registry_record(
-        root, "reg", [plant_csv], crop="hazelnut", site="orchard", registered_by="test")
+        root, "reg", [plant_csv], crop="currant", site="orchard", registered_by="test")
     return bucket_dir, raster_path, "reg"
 
 
@@ -1639,7 +1639,7 @@ def test_phenology_measurement_refuses_when_the_delivered_dataset_carries_no_reg
 
     resp = client.post("/api/results/phenology_measurement", json={
         "project_root": str(tmp_path), "mapping_name": "valley",
-        "predictions_by_date": {"2026-02-11": str(bucket)}, "trait": "catkin",
+        "predictions_by_date": {"2026-02-11": str(bucket)}, "trait": "bud_opening",
     })
 
     assert resp.status_code == 400
