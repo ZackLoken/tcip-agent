@@ -99,14 +99,17 @@ export function ProjectPicker() {
 
   useEffect(() => {
     let cancelled = false;
+    // Claim the attempt now, before the fetch: a picker that unmounts mid-fetch (every load
+    // where the app opens the project itself) must still count as having tried.
+    const alreadyAttempted = autoOpenAttempted;
+    autoOpenAttempted = true;
     api.projects
       .list()
       .then((res) => {
         if (cancelled) return;
         setProjects(res.projects);
         // Auto-open the active project on first app load.
-        if (!autoOpenAttempted) {
-          autoOpenAttempted = true;
+        if (!alreadyAttempted) {
           const active = res.projects.find((p) => p.name === res.active);
           const d = active ? defaultDate(active.dates) : "";
           // Auto-open only when the default date has labelled subjects, else preselect the
