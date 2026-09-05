@@ -413,7 +413,9 @@ _UNRESOLVABLE_TRAIN_DISJOINTNESS = {
 }
 
 
-def _spatial_strip_geometric_disjointness(spatial: dict, cal_rects: dict, hold_rects: dict) -> dict:
+def _spatial_strip_geometric_disjointness(
+    spatial: dict, cal_rects: dict | None, hold_rects: dict | None,
+) -> dict:
     """The geometric form of the spatial_strip check: a cal/holdout rect must be fully contained
     in a persisted non-train region (``val_region``/``test_region``/``calibration_region``, the
     last only present on a four-way split) and disjoint from every persisted train region, read
@@ -628,6 +630,8 @@ def _resolve_label_movement(
         stem for stem, digest in at_split.items() if at_run.get(stem) != digest)
     scoped = sorted(set(at_run) & cal_ids) if calibration_labels_dir is not None else []
     if scoped:
+        # scoped is non-empty only when calibration_labels_dir is not None (see the ternary above).
+        assert calibration_labels_dir is not None
         now = label_digests(calibration_labels_dir, scoped)
         labels_moved_run_to_now = sorted(
             stem for stem in scoped if now.get(stem) != at_run.get(stem))
@@ -1582,7 +1586,7 @@ def _resolve_scalar_operating_point(
     comparable = score is not None and score_state is None
     # score > 0.0 is the domain-input-free minimum (beat the criterion's chance baseline); floor
     # is the trait's authored bar or the platform's interim default, as in the kappa check.
-    compensating_error_ok = comparable and score > 0.0 and score > floor
+    compensating_error_ok = comparable and score is not None and score > 0.0 and score > floor
 
     failures: list[str] = []
     if not disjoint:
