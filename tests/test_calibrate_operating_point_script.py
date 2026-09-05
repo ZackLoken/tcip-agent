@@ -94,7 +94,7 @@ def test_script_and_mcp_path_share_the_same_cap_constant(monkeypatch, tmp_path):
 
     from scripts.calibrate_operating_point import main
 
-    rc = main(["--checkpoint", "x.pt", "--trait", "catkin",
+    rc = main(["--checkpoint", "x.pt", "--trait", "bud_opening",
               "--labels-dir", str(tmp_path / "labels"), "--images-dir", str(tmp_path / "images"),
               "--dataset-root", str(tmp_path), "--project-root", str(tmp_path)])
     assert rc == 0
@@ -162,7 +162,7 @@ def test_script_threads_applied_floor_and_shared_cap(monkeypatch, tmp_path):
 
     from scripts.calibrate_operating_point import main
 
-    rc = main(["--checkpoint", "x.pt", "--trait", "catkin",
+    rc = main(["--checkpoint", "x.pt", "--trait", "bud_opening",
               "--labels-dir", str(tmp_path / "labels"), "--images-dir", str(tmp_path / "images"),
               "--dataset-root", str(tmp_path), "--project-root", str(tmp_path)])
     assert rc == 0
@@ -227,7 +227,7 @@ def test_script_collection_cap_is_density_derived_not_the_flat_default(monkeypat
 
     from scripts.calibrate_operating_point import main
 
-    rc = main(["--checkpoint", "x.pt", "--trait", "catkin",
+    rc = main(["--checkpoint", "x.pt", "--trait", "bud_opening",
               "--labels-dir", str(tmp_path / "labels"), "--images-dir", str(tmp_path / "images"),
               "--dataset-root", str(tmp_path), "--project-root", str(tmp_path)])
     assert rc == 0
@@ -277,7 +277,7 @@ def test_script_writes_nothing_into_the_experiment_record(monkeypatch, tmp_path,
 
     from scripts.calibrate_operating_point import main
 
-    rc = main(["--checkpoint", "x.pt", "--trait", "catkin",
+    rc = main(["--checkpoint", "x.pt", "--trait", "bud_opening",
               "--labels-dir", str(tmp_path / "labels"), "--images-dir", str(tmp_path / "images"),
               "--dataset-root", str(tmp_path), "--project-root", str(tmp_path)])
     assert rc == 0
@@ -294,7 +294,7 @@ def test_script_refuses_an_agent_authored_reference_before_touching_a_model(monk
     labels.mkdir()
     (labels / "a.json").write_text(_json.dumps({
         "image": "a", "width": 100, "height": 100,
-        "annotations": [{"subject": "catkin", "bbox": [1, 1, 5, 5], "created_by": "claude"}],
+        "annotations": [{"subject": "bud", "bbox": [1, 1, 5, 5], "created_by": "claude"}],
     }), encoding="utf-8")
 
     def _never(*a, **kw):
@@ -305,7 +305,7 @@ def test_script_refuses_an_agent_authored_reference_before_touching_a_model(monk
     from scripts.calibrate_operating_point import main
 
     with pytest.raises(ValueError) as refused:
-        main(["--checkpoint", "x.pt", "--trait", "catkin",
+        main(["--checkpoint", "x.pt", "--trait", "bud_opening",
               "--labels-dir", str(labels), "--images-dir", str(tmp_path / "images"),
               "--dataset-root", str(tmp_path), "--project-root", str(tmp_path)])
     assert "created_by" in str(refused.value) or "claude" in str(refused.value)
@@ -334,7 +334,7 @@ def test_script_prints_and_exits_cleanly_for_fewer_than_two_labeled_stems(monkey
 
     from scripts.calibrate_operating_point import main
 
-    rc = main(["--checkpoint", "x.pt", "--trait", "catkin",
+    rc = main(["--checkpoint", "x.pt", "--trait", "bud_opening",
               "--labels-dir", str(tmp_path / "labels"), "--images-dir", str(tmp_path / "images"),
               "--dataset-root", str(tmp_path), "--project-root", str(tmp_path)])
 
@@ -347,7 +347,7 @@ def test_script_split_manifest_dir_requires_subject(tmp_path):
     refuses before touching a checkpoint or a dataset."""
     from scripts.calibrate_operating_point import main
 
-    rc = main(["--checkpoint", "x.pt", "--trait", "catkin",
+    rc = main(["--checkpoint", "x.pt", "--trait", "bud_opening",
               "--labels-dir", str(tmp_path / "labels"), "--images-dir", str(tmp_path / "images"),
               "--dataset-root", str(tmp_path), "--project-root", str(tmp_path),
               "--split-manifest-dir", str(tmp_path / "m")])
@@ -360,17 +360,17 @@ def test_script_split_manifest_dir_conflicts_with_group_by(tmp_path):
     choice between the two."""
     from scripts.calibrate_operating_point import main
 
-    rc = main(["--checkpoint", "x.pt", "--trait", "catkin",
+    rc = main(["--checkpoint", "x.pt", "--trait", "bud_opening",
               "--labels-dir", str(tmp_path / "labels"), "--images-dir", str(tmp_path / "images"),
               "--dataset-root", str(tmp_path), "--project-root", str(tmp_path),
               "--split-manifest-dir", str(tmp_path / "m"),
-              "--subject", "catkin", "--group-by", "stem"])
+              "--subject", "bud", "--group-by", "stem"])
 
     assert rc == 2
 
 
 def test_script_runs_end_to_end_with_a_checkpoint_registered_under_project_root(
-    tmp_path, seed_catkin_trait_spec,
+    tmp_path, seed_bud_trait_spec,
 ):
     """The admitting half of the registry rail: no stub anywhere on the checkpoint's own path,
     a real load_registered_checkpoint against --project-root, and the script completes."""
@@ -390,12 +390,12 @@ def test_script_runs_end_to_end_with_a_checkpoint_registered_under_project_root(
         Image.new("RGB", (64, 64), (100, 100, 100)).save(images_dir / f"img{i}.png")
         json_io.write_annotations(
             str(labels_dir / f"img{i}.json"),
-            [Annotation(subject="catkin", geometry=BBox(10, 10, 40, 40))], 64, 64)
+            [Annotation(subject="bud", geometry=BBox(10, 10, 40, 40))], 64, 64)
 
     from scripts.calibrate_operating_point import main
 
     rc = main([
-        "--checkpoint", ckpt, "--trait", "catkin", "--subject", "catkin",
+        "--checkpoint", ckpt, "--trait", "bud_opening", "--subject", "bud",
         "--labels-dir", str(labels_dir), "--images-dir", str(images_dir),
         "--dataset-root", str(tmp_path), "--project-root", str(tmp_path),
     ])

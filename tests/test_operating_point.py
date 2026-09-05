@@ -16,9 +16,9 @@ from tcip_mcp.pipelines.training.evaluation import (  # noqa: E402
     derive_operating_point_curve,
 )
 
-# No built-in traits: seed_catkin_trait_spec (conftest.py) writes a real catkin.yml into this
-# test's pinned platform state root so resolve_operating_point("catkin", ...) keeps resolving by default.
-pytestmark = pytest.mark.usefixtures("seed_catkin_trait_spec")
+# No built-in traits: seed_bud_trait_spec (conftest.py) writes a real bud.yml into this
+# test's pinned platform state root so resolve_operating_point("bud_opening", ...) keeps resolving by default.
+pytestmark = pytest.mark.usefixtures("seed_bud_trait_spec")
 
 _DENSE_RECORDS_DEFAULTS = inspect.signature(dense_records).parameters
 N_IMAGES = _DENSE_RECORDS_DEFAULTS["n_images"].default
@@ -184,7 +184,7 @@ def test_resolve_operating_point_validated_with_holdout():
     cal, hold = good_cal_holdout()
     # tiled=False: this test is about conf-calibration shippability, not tiling (tile_size
     # only gates a bundle when tiled).
-    b = resolve_operating_point("catkin", dataset_hash="h1",
+    b = resolve_operating_point("bud_opening", dataset_hash="h1",
                                 calibration_records=cal, holdout_records=hold,
                                 tiled=False, staged_conf_floor=0.01)
     conf = b.get("conf")
@@ -206,7 +206,7 @@ def test_resolve_operating_point_validated_with_holdout():
 def test_resolve_operating_point_overlapping_holdout_not_validated():
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
     # same image ids in calibration and holdout -> not a real held-out split -> not validated
-    b = resolve_operating_point("catkin", tiled=True, dataset_hash="h1",
+    b = resolve_operating_point("bud_opening", tiled=True, dataset_hash="h1",
                                 calibration_records=_records("c"), holdout_records=_records("c"))
     assert b.get("conf").validated_against == "false"
     assert not b.is_shippable
@@ -219,7 +219,7 @@ def test_resolve_operating_point_missing_image_ids_fails_closed():
     # closed) merely because empty id-sets make `disjoint` trivially True.
     recs = [{"width": 400, "height": 400, "gt": [_ann(100, 100)],
              "dt": [_ann(100, 100, score=0.9)]}]  # no image_id key
-    b = resolve_operating_point("catkin", tiled=True, dataset_hash="h1",
+    b = resolve_operating_point("bud_opening", tiled=True, dataset_hash="h1",
                                 calibration_records=recs, holdout_records=recs)
     assert b.get("conf").validated_against == "false"
     assert not b.is_shippable
@@ -233,7 +233,7 @@ def test_resolve_operating_point_biased_holdout_is_unshippable():
     biased_hold = dense_records(n_images=N_IMAGES, objects_per_image=OBJECTS_PER_IMAGE, id_prefix="h",
                                 shift=5.0, miss_pattern=[3] * N_IMAGES, fp_pattern=[0] * N_IMAGES,
                                 score=0.9)
-    b = resolve_operating_point("catkin", tiled=True, dataset_hash="h1",
+    b = resolve_operating_point("bud_opening", tiled=True, dataset_hash="h1",
                                 calibration_records=cal, holdout_records=biased_hold,
                                 staged_conf_floor=0.01)
     # measured on the disjoint split but failed (bias > tolerance) -> not validated, firewall holds
@@ -244,7 +244,7 @@ def test_resolve_operating_point_biased_holdout_is_unshippable():
 
 def test_resolve_operating_point_calibrated_but_no_holdout_is_unshippable():
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
-    b = resolve_operating_point("catkin", tiled=True, dataset_hash="h1", calibration_records=_records())
+    b = resolve_operating_point("bud_opening", tiled=True, dataset_hash="h1", calibration_records=_records())
     assert b.get("conf").validated_against == "false"
     assert not b.is_shippable
 
@@ -255,7 +255,7 @@ def test_resolve_operating_point_content_shared_holdout_is_false():
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
     # Same GT content as calibration (only image_id differs, no shift) -> disjoint by image_id but
     # the holdout can't function as an independent check; the content-overlap gate must refuse it.
-    b = resolve_operating_point("catkin", tiled=True, dataset_hash="h1",
+    b = resolve_operating_point("bud_opening", tiled=True, dataset_hash="h1",
                                 calibration_records=_records("c"), holdout_records=_records("h"))
     conf = b.get("conf")
     assert conf.validated_against == "false"
@@ -278,7 +278,7 @@ def test_resolve_operating_point_train_disjointness_fires(tmp_path, monkeypatch)
             "dt": [_ann(100, 100, score=0.9), _ann(300, 300, score=0.6)]}]
     hold = [{"width": 400, "height": 400, "image_id": "a_0_3", "gt": [_ann(100, 100 + 5)],
              "dt": [_ann(100, 100, score=0.9)]}]
-    b = resolve_operating_point("catkin", tiled=True, dataset_hash="h1", calibration_records=cal,
+    b = resolve_operating_point("bud_opening", tiled=True, dataset_hash="h1", calibration_records=cal,
                                 holdout_records=hold, experiment_id="exp1")
     conf = b.get("conf")
     assert conf.validated_against == "false"
@@ -292,7 +292,7 @@ def test_resolve_operating_point_train_disjointness_unresolvable_when_split_miss
     # A known experiment_id whose split.json can't be read fails closed (unresolvable), unlike the
     # experiment_id=None case (a foreign/unregistered checkpoint).
     cal, hold = good_cal_holdout()
-    b = resolve_operating_point("catkin", tiled=True, dataset_hash="h1",
+    b = resolve_operating_point("bud_opening", tiled=True, dataset_hash="h1",
                                 calibration_records=cal, holdout_records=hold,
                                 staged_conf_floor=0.01, experiment_id="does-not-exist")
     conf = b.get("conf")
@@ -316,7 +316,7 @@ def test_resolve_operating_point_train_disjointness_resolvable_no_leak_still_val
     cal, hold = good_cal_holdout()
     # tiled=False: this test is about conf-calibration shippability, not tiling (tile_size
     # only gates a bundle when tiled).
-    b = resolve_operating_point("catkin", dataset_hash="h1",
+    b = resolve_operating_point("bud_opening", dataset_hash="h1",
                                 calibration_records=cal, holdout_records=hold, tiled=False,
                                 staged_conf_floor=0.01, experiment_id="exp2")
     conf = b.get("conf")
@@ -341,10 +341,10 @@ def test_resolve_operating_point_cal_rects_none_is_byte_identical(tmp_path, monk
     })
     cal, hold = good_cal_holdout()
 
-    omitted = resolve_operating_point("catkin", tiled=False, dataset_hash="h1",
+    omitted = resolve_operating_point("bud_opening", tiled=False, dataset_hash="h1",
                                       calibration_records=cal, holdout_records=hold,
                                       staged_conf_floor=0.01, experiment_id="exp_rects_noop")
-    explicit_none = resolve_operating_point("catkin", tiled=False, dataset_hash="h1",
+    explicit_none = resolve_operating_point("bud_opening", tiled=False, dataset_hash="h1",
                                             calibration_records=cal, holdout_records=hold,
                                             staged_conf_floor=0.01, experiment_id="exp_rects_noop",
                                             cal_rects=None, hold_rects=None)
@@ -377,7 +377,7 @@ def test_resolve_operating_point_cal_rects_switches_to_geometric_check(tmp_path,
     cal_id = cal[0]["image_id"]
 
     leaked = resolve_operating_point(
-        "catkin", tiled=False, dataset_hash="h1", calibration_records=cal, holdout_records=hold,
+        "bud_opening", tiled=False, dataset_hash="h1", calibration_records=cal, holdout_records=hold,
         staged_conf_floor=0.01, experiment_id="exp_rects_geo",
         cal_rects={cal_id: (400, 100, 600, 300)},  # straddles train/val: not fully contained
     )
@@ -430,7 +430,7 @@ def test_selection_disjointness_leaked_whole_directory_calibration_of_a_bound_ch
 
     cal, hold = good_cal_holdout()
     b = resolve_operating_point(
-        "catkin", tiled=False, dataset_hash="h1", calibration_records=cal, holdout_records=hold,
+        "bud_opening", tiled=False, dataset_hash="h1", calibration_records=cal, holdout_records=hold,
         staged_conf_floor=0.01, experiment_id="exp_sel_leak_whole", calibration_date=date,
     )
     sd = b.get("conf").gate_evidence["selection_disjointness"]
@@ -457,7 +457,7 @@ def test_selection_disjointness_leaked_manifest_calibration_of_a_self_drawn_chec
 
     cal, hold = good_cal_holdout()
     b = resolve_operating_point(
-        "catkin", tiled=False, dataset_hash="h1", calibration_records=cal, holdout_records=hold,
+        "bud_opening", tiled=False, dataset_hash="h1", calibration_records=cal, holdout_records=hold,
         staged_conf_floor=0.01, experiment_id="exp_sel_leak_manifest",
         split_manifest_dir="some/manifest", calibration_date=date,
     )
@@ -478,7 +478,7 @@ def test_selection_disjointness_not_applicable_across_dates(tmp_path, monkeypatc
 
     cal, hold = good_cal_holdout()
     b = resolve_operating_point(
-        "catkin", tiled=False, dataset_hash="h1", calibration_records=cal, holdout_records=hold,
+        "bud_opening", tiled=False, dataset_hash="h1", calibration_records=cal, holdout_records=hold,
         staged_conf_floor=0.01, experiment_id="exp_sel_other_date",
         split_manifest_dir="some/manifest", calibration_date="2-12-01",
     )
@@ -499,7 +499,7 @@ def test_selection_disjointness_not_applicable_on_a_spatial_record(tmp_path, mon
 
     cal, hold = good_cal_holdout()
     b = resolve_operating_point(
-        "catkin", tiled=False, dataset_hash="h1", calibration_records=cal, holdout_records=hold,
+        "bud_opening", tiled=False, dataset_hash="h1", calibration_records=cal, holdout_records=hold,
         staged_conf_floor=0.01, experiment_id="exp_sel_spatial",
         split_manifest_dir="some/manifest", calibration_date=date,
     )
@@ -523,7 +523,7 @@ def test_selection_disjointness_not_applicable_on_an_external_val_record(tmp_pat
 
     cal, hold = good_cal_holdout()
     b = resolve_operating_point(
-        "catkin", tiled=False, dataset_hash="h1", calibration_records=cal, holdout_records=hold,
+        "bud_opening", tiled=False, dataset_hash="h1", calibration_records=cal, holdout_records=hold,
         staged_conf_floor=0.01, experiment_id="exp_sel_external",
         split_manifest_dir="some/manifest", calibration_date=date,
     )
@@ -545,7 +545,7 @@ def test_selection_disjointness_not_applicable_for_a_manifest_less_calibration(t
 
     cal, hold = good_cal_holdout()
     b = resolve_operating_point(
-        "catkin", tiled=False, dataset_hash="h1", calibration_records=cal, holdout_records=hold,
+        "bud_opening", tiled=False, dataset_hash="h1", calibration_records=cal, holdout_records=hold,
         staged_conf_floor=0.01, experiment_id="exp_sel_no_manifest",
     )
     sd = b.get("conf").gate_evidence["selection_disjointness"]
@@ -580,7 +580,7 @@ def test_selection_disjointness_not_applicable_for_a_flat_run_with_no_calibratio
     hold_items = [{"image_id": "h_0", "is_true_positive": True, "is_pred_positive": True,
                   "bbox": [0.0, 0.0, 10.0, 10.0]}]
     result = resolve_classifier_operating_point(
-        "catkin", calibration_items=cal_items, holdout_items=hold_items,
+        "bud_opening", calibration_items=cal_items, holdout_items=hold_items,
         experiment_id="exp_sel_flat_no_date",
     )
     sd = result["gate_evidence"]["selection_disjointness"]
@@ -616,7 +616,7 @@ def test_selection_disjointness_applicable_when_a_flat_calibration_matches_a_fla
     hold_items = [{"image_id": "h_0", "is_true_positive": True, "is_pred_positive": True,
                   "bbox": [0.0, 0.0, 10.0, 10.0]}]
     result = resolve_classifier_operating_point(
-        "catkin", calibration_items=cal_items, holdout_items=hold_items,
+        "bud_opening", calibration_items=cal_items, holdout_items=hold_items,
         experiment_id="exp_sel_flat_match", calibration_date=manifest_date_key(None),
     )
     sd = result["gate_evidence"]["selection_disjointness"]
@@ -633,7 +633,7 @@ def test_selection_disjointness_unresolvable_for_experiment_id_none_under_a_stat
 
     cal, hold = good_cal_holdout()
     b = resolve_operating_point(
-        "catkin", tiled=False, dataset_hash="h1", calibration_records=cal, holdout_records=hold,
+        "bud_opening", tiled=False, dataset_hash="h1", calibration_records=cal, holdout_records=hold,
         staged_conf_floor=0.01, experiment_id=None,
         split_manifest_dir="some/manifest", calibration_date="2-11-26",
     )
@@ -654,7 +654,7 @@ def test_resolve_operating_point_fabricated_tile_size_floors_shippability_even_w
     from tcip_mcp.pipelines.resolution import VALIDATED_FALSE
 
     cal, hold = good_cal_holdout()
-    b = resolve_operating_point("catkin", dataset_hash="h1", calibration_records=cal,
+    b = resolve_operating_point("bud_opening", dataset_hash="h1", calibration_records=cal,
                                 holdout_records=hold, tiled=True, tile_size=640,
                                 staged_conf_floor=0.01)
     conf = b.get("conf")
@@ -674,7 +674,7 @@ def test_resolve_operating_point_derived_tile_size_is_shippable():
     from tcip_mcp.pipelines.resolution import VALIDATED_PERSISTED_GEOMETRY
 
     cal, hold = good_cal_holdout()
-    b = resolve_operating_point("catkin", dataset_hash="h1", calibration_records=cal,
+    b = resolve_operating_point("bud_opening", dataset_hash="h1", calibration_records=cal,
                                 holdout_records=hold, tiled=True, tile_size=224,
                                 tile_size_source="derived", staged_conf_floor=0.01)
     tile = b.get("tile_size")
@@ -686,7 +686,7 @@ def test_resolve_operating_point_derived_tile_size_is_shippable():
 def test_resolve_operating_point_no_gt_placeholder_unshippable():
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
     from tcip_mcp.pipelines.resolution import UnvalidatedOperatingPointError
-    b = resolve_operating_point("catkin", tiled=True, dataset_hash="hX")
+    b = resolve_operating_point("bud_opening", tiled=True, dataset_hash="hX")
     with pytest.raises(UnvalidatedOperatingPointError):
         _ = b.value("conf")  # firewall
     assert b.get("conf").unvalidated_value(acknowledge_unvalidated=True) == 0.5
@@ -703,7 +703,7 @@ def _overlap_records(idp="d"):
 
 def test_resolve_operating_point_derives_cross_tile_nms_from_gt():
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
-    b = resolve_operating_point("catkin", tiled=True, dataset_hash="h1", calibration_records=_overlap_records())
+    b = resolve_operating_point("bud_opening", tiled=True, dataset_hash="h1", calibration_records=_overlap_records())
     p = b.get("cross_tile_nms")
     assert p.source == "derived"
     assert p.requires_validation is False  # a statistic from this dataset's own spread needs no validation
@@ -715,7 +715,7 @@ def test_resolve_operating_point_derives_cross_tile_nms_from_gt():
 def test_resolve_operating_point_explicit_cross_tile_nms_not_labeled_derived():
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
     # An explicit override is honest even when overlapping GT was present to derive from.
-    b = resolve_operating_point("catkin", tiled=True, dataset_hash="h1",
+    b = resolve_operating_point("bud_opening", tiled=True, dataset_hash="h1",
                                 calibration_records=_overlap_records(), cross_tile_nms=0.55)
     p = b.get("cross_tile_nms")
     assert p.source == "explicit"
@@ -727,11 +727,11 @@ def test_resolve_operating_point_explicit_cross_tile_nms_not_labeled_derived():
 def test_resolve_operating_point_cross_tile_nms_honest_default_when_underivable():
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
     # No GT at all -> honest default, never a derivation label on an underived number.
-    p_no_gt = resolve_operating_point("catkin", tiled=True, dataset_hash="h1").get("cross_tile_nms")
+    p_no_gt = resolve_operating_point("bud_opening", tiled=True, dataset_hash="h1").get("cross_tile_nms")
     assert p_no_gt.source == "default"
     assert "neighbor-IoU" not in p_no_gt.derived_from
     # Sparse, non-overlapping GT is likewise underivable -> still an honest default.
-    p_sparse = resolve_operating_point("catkin", tiled=True, dataset_hash="h1",
+    p_sparse = resolve_operating_point("bud_opening", tiled=True, dataset_hash="h1",
                                        calibration_records=_records("c")).get("cross_tile_nms")
     assert p_sparse.source == "default"
 
@@ -745,7 +745,7 @@ def test_resolve_operating_point_tile_size_derived():
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
     from tcip_mcp.pipelines.resolution import UnvalidatedOperatingPointError
 
-    b_no_claim = resolve_operating_point("catkin", tiled=True, dataset_hash="h1", tile_size=640)
+    b_no_claim = resolve_operating_point("bud_opening", tiled=True, dataset_hash="h1", tile_size=640)
     assert b_no_claim.get("tile_size").source == "default"
     # A "default"-sourced tile_size, when tiled, is a firewalled unvalidated dimension: the
     # caller's raw 640 is discarded, never fabricated into a trustworthy value.
@@ -755,17 +755,17 @@ def test_resolve_operating_point_tile_size_derived():
         _ = b_no_claim.get("tile_size").value
 
     b_derived = resolve_operating_point(
-        "catkin", tiled=True, dataset_hash="h1", tile_size=640, tile_size_source="derived")
+        "bud_opening", tiled=True, dataset_hash="h1", tile_size=640, tile_size_source="derived")
     assert b_derived.get("tile_size").source == "derived"
     assert b_derived.get("tile_size").value == 640
 
 
 def test_classification_metrics_per_class_and_bias():
     from tcip_mcp.pipelines.training.evaluation import classification_metrics
-    gt = torch.tensor([0, 0, 0, 0, 0, 0, 1, 1, 1, 1])    # 6 dormant, 4 elongated
-    pred = torch.tensor([0, 0, 0, 0, 1, 1, 1, 1, 1, 1])  # classifier predicts 6 as elongated
+    gt = torch.tensor([0, 0, 0, 0, 0, 0, 1, 1, 1, 1])    # 6 closed, 4 open
+    pred = torch.tensor([0, 0, 0, 0, 1, 1, 1, 1, 1, 1])  # classifier predicts 6 as open
     m = classification_metrics(pred, gt, num_classes=2)
     assert m["per_class"][1]["support"] == 4
-    # over-predicting the elongated class inflates the elongated fraction: bias (6-4)/4 = +0.5
+    # over-predicting the open class inflates the open fraction: bias (6-4)/4 = +0.5
     assert m["count_bias"][1] == pytest.approx(0.5)
     assert "accuracy" in m and "f1" in m  # existing keys preserved (additive)

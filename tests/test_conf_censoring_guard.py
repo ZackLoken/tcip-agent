@@ -26,9 +26,9 @@ from tcip_mcp.pipelines.operating_point import (  # noqa: E402
     resolve_operating_point,
 )
 
-# No built-in traits: seed_catkin_trait_spec (conftest.py) writes a real catkin.yml into this
-# test's pinned platform state root so resolve_operating_point("catkin", ...) keeps resolving by default.
-pytestmark = pytest.mark.usefixtures("seed_catkin_trait_spec")
+# No built-in traits: seed_bud_trait_spec (conftest.py) writes a real bud.yml into this
+# test's pinned platform state root so resolve_operating_point("bud_opening", ...) keeps resolving by default.
+pytestmark = pytest.mark.usefixtures("seed_bud_trait_spec")
 
 
 # ── unit: the two independent censoring predicates ─────────────────────────
@@ -67,7 +67,7 @@ def test_reference_floored_at_the_real_calibration_floor_still_validates():
     cal, hold = good_cal_holdout(fp_score=0.05)
     # tiled=False: this test is about conf-calibration shippability, not tiling (tile_size
     # only gates a bundle when tiled).
-    b = resolve_operating_point("catkin", dataset_hash="h1", calibration_records=cal,
+    b = resolve_operating_point("bud_opening", dataset_hash="h1", calibration_records=cal,
                                 holdout_records=hold, tiled=False, staged_conf_floor=0.01)
     conf = b.get("conf")
     assert conf._raw == pytest.approx(0.9)
@@ -83,7 +83,7 @@ def test_no_staged_conf_floor_asserted_fails_closed():
     # No floor asserted must fail closed (the honest default), named conf_floor_unstated,
     # distinct from conf_censored (a stated floor the pick does not clear).
     cal, hold = good_cal_holdout(fp_score=0.05)
-    b = resolve_operating_point("catkin", tiled=True, dataset_hash="h1", calibration_records=cal,
+    b = resolve_operating_point("bud_opening", tiled=True, dataset_hash="h1", calibration_records=cal,
                                 holdout_records=hold)
     conf = b.get("conf")
     assert conf.validated_against == "false"
@@ -97,7 +97,7 @@ def test_reference_truncated_above_the_picked_conf_is_refused():
     # Same geometry as the passing case, but the asserted floor sits at the picked conf, so the
     # sweep could not have seen anything below it, and it must refuse even though the holdout bias is 0.
     cal, hold = good_cal_holdout(fp_score=0.05)
-    b = resolve_operating_point("catkin", tiled=True, dataset_hash="h1", calibration_records=cal,
+    b = resolve_operating_point("bud_opening", tiled=True, dataset_hash="h1", calibration_records=cal,
                                 holdout_records=hold, staged_conf_floor=0.95)
     conf = b.get("conf")
     assert conf.validated_against == "false"
@@ -118,7 +118,7 @@ def test_asserted_vs_observed_floor_mismatch_is_surfaced_but_never_gates():
     cal, hold = good_cal_holdout(fp_score=0.5)
     # tiled=False: this test is about conf-calibration shippability, not tiling (tile_size
     # only gates a bundle when tiled).
-    b = resolve_operating_point("catkin", dataset_hash="h1", calibration_records=cal,
+    b = resolve_operating_point("bud_opening", dataset_hash="h1", calibration_records=cal,
                                 holdout_records=hold, tiled=False, staged_conf_floor=0.01)
     conf = b.get("conf")
     assert conf.validated_against == "held_out_annotations"

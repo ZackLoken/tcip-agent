@@ -17,7 +17,7 @@ from types import SimpleNamespace
 
 import pytest
 
-pytestmark = pytest.mark.usefixtures("seed_catkin_trait_spec")
+pytestmark = pytest.mark.usefixtures("seed_bud_trait_spec")
 
 torch = pytest.importorskip("torch")
 pytest.importorskip("pycocotools")
@@ -73,7 +73,7 @@ def _hesitant_detector_dataset(root: Path) -> tuple[Path, Path]:
     for i in range(N_STEMS):
         stem = f"{STEM_PREFIX}{i:02d}"
         Image.new("RGB", (IMG_W, IMG_H), color=(110, 120, 130)).save(images_dir / f"{stem}.png")
-        anns = [Annotation(subject="catkin", geometry=BBox(*_box(cx, cy)))
+        anns = [Annotation(subject="bud", geometry=BBox(*_box(cx, cy)))
                 for cx, cy in _object_centers(i)]
         json_io.write_annotations(str(labels_dir / f"{stem}.json"), anns, IMG_W, IMG_H,
                                   keep_empty=True)
@@ -95,7 +95,7 @@ class _HesitantDetectorStub:
         self.score_threshold = 0.5
         self.train_tile_size = None
         self.train_overlap = None
-        self.config = {"data": {"subject": "catkin"}}
+        self.config = {"data": {"subject": "bud"}}
         self.staged_model_thresholds: list[float] = []
         self.staged_predictor_thresholds: list[float] = []
         self.returned_scores: list[float] = []
@@ -135,7 +135,7 @@ def test_calibration_collection_pass_stages_below_the_shipping_conf(tmp_path):
     stub = _HesitantDetectorStub()
 
     bundle, _dh, n_excluded, _evidence = calibration.calibrate_operating_point(
-        stub, "catkin", str(labels_dir), str(images_dir),
+        stub, "bud_opening", str(labels_dir), str(images_dir),
         tile=False, tile_size=None, overlap=0.2, tile_batch_size=8,
         global_nms_iou=0.3, postprocess="nms", cross_tile_nms=None, max_dets=None,
         group_by="stem", seed=3, holdout_ratio=0.5,
@@ -160,24 +160,24 @@ def test_calibration_collection_pass_stages_below_the_shipping_conf(tmp_path):
     assert conf.validated_against == VALIDATED_HELD_OUT
 
 
-ATTRIBUTE_ID_MAP = {"elongated": 0, "dormant": 1, "shed": 2}
-ELONGATED_ID = ATTRIBUTE_ID_MAP["elongated"] + 1  # +1 for the detector's background class
+ATTRIBUTE_ID_MAP = {"open": 0, "closed": 1, "shed": 2}
+OPEN_ID = ATTRIBUTE_ID_MAP["open"] + 1  # +1 for the detector's background class
 SHED_ID = ATTRIBUTE_ID_MAP["shed"] + 1
-UNUSED_ID = ATTRIBUTE_ID_MAP["dormant"] + 1  # no instance in this fixture: a sparse vocabulary
-ELONGATED_PER_IMAGE = 4
+UNUSED_ID = ATTRIBUTE_ID_MAP["closed"] + 1  # no instance in this fixture: a sparse vocabulary
+OPEN_PER_IMAGE = 4
 SHED_PER_IMAGE = 2
 TWO_CLASS_W, TWO_CLASS_H = 700, 300
 TWO_CLASS_STEMS = 6
 
 
 def _two_class_boxes(i: int) -> list[tuple[str, tuple[float, float, float, float]]]:
-    """This image's objects: several ``elongated`` on the left, fewer ``shed`` on the right.
+    """This image's objects: several ``open`` on the left, fewer ``shed`` on the right.
 
     The two classes differ in both count and position, so a record whose detection ids are shifted
     off the ground truth's vocabulary produces different per-class numbers, never the same ones.
     """
     dx = float(i)
-    boxes = [("elongated", _box(50.0 + k * 60.0 + dx, 60.0)) for k in range(ELONGATED_PER_IMAGE)]
+    boxes = [("open", _box(50.0 + k * 60.0 + dx, 60.0)) for k in range(OPEN_PER_IMAGE)]
     boxes += [("shed", _box(500.0 + k * 60.0 + dx, 200.0)) for k in range(SHED_PER_IMAGE)]
     return boxes
 
@@ -192,7 +192,7 @@ def _two_class_dataset(root: Path) -> tuple[Path, Path]:
         stem = f"{STEM_PREFIX}{i:02d}"
         Image.new("RGB", (TWO_CLASS_W, TWO_CLASS_H), color=(90, 90, 90)).save(
             images_dir / f"{stem}.png")
-        anns = [Annotation(subject="catkin", geometry=BBox(*b), attributes={"state": value})
+        anns = [Annotation(subject="bud", geometry=BBox(*b), attributes={"state": value})
                 for value, b in _two_class_boxes(i)]
         json_io.write_annotations(str(labels_dir / f"{stem}.json"), anns,
                                   TWO_CLASS_W, TWO_CLASS_H, keep_empty=True)
@@ -208,7 +208,7 @@ class _TwoClassStub:
         self.score_threshold = 0.5
         self.train_tile_size = None
         self.train_overlap = None
-        self.config = {"data": {"subject": "catkin", "attribute": "state",
+        self.config = {"data": {"subject": "bud", "attribute": "state",
                                 "id_map": dict(ATTRIBUTE_ID_MAP)}}
 
     def predict_batch(self, paths, **kw):
@@ -218,8 +218,8 @@ class _TwoClassStub:
             boxes, scores, labels = [], [], []
             for value, b in _two_class_boxes(i):
                 boxes.append(b)
-                scores.append(0.9 if value == "elongated" else 0.6)
-                labels.append(ELONGATED_ID if value == "elongated" else SHED_ID)
+                scores.append(0.9 if value == "open" else 0.6)
+                labels.append(OPEN_ID if value == "open" else SHED_ID)
             results.append({"image": p, "width": TWO_CLASS_W, "height": TWO_CLASS_H,
                             "boxes": boxes, "scores": scores, "labels": labels,
                             "count": len(boxes)})
@@ -250,7 +250,7 @@ def test_calibration_records_name_detections_in_the_ground_truths_class_vocabula
     monkeypatch.setattr(operating_point, "resolve_operating_point", _capturing_resolve)
 
     calibration.calibrate_operating_point(
-        _TwoClassStub(), "catkin", str(labels_dir), str(images_dir),
+        _TwoClassStub(), "bud_opening", str(labels_dir), str(images_dir),
         tile=False, tile_size=None, overlap=0.2, tile_batch_size=8,
         global_nms_iou=0.3, postprocess="nms", cross_tile_nms=None, max_dets=None,
         group_by="stem", seed=5, holdout_ratio=0.5,
@@ -267,9 +267,9 @@ def test_calibration_records_name_detections_in_the_ground_truths_class_vocabula
             # This detector finds every object and nothing else, so the two sides agree exactly,
             # per class, only while both are named in the same vocabulary.
             assert dt_counts == gt_counts
-            assert gt_counts[ELONGATED_ID] == ELONGATED_PER_IMAGE
+            assert gt_counts[OPEN_ID] == OPEN_PER_IMAGE
             assert gt_counts[SHED_ID] == SHED_PER_IMAGE
 
     dt_ids = {d["category_id"] for r in cal_records for d in r["dt"]}
-    assert dt_ids == {ELONGATED_ID, SHED_ID}
+    assert dt_ids == {OPEN_ID, SHED_ID}
     assert UNUSED_ID not in dt_ids  # the map's middle value has no instance to name

@@ -48,11 +48,11 @@ class TestDatasets:
         from torchvision.utils import save_image
         save_image(img.float() / 255.0, str(imgs / "test.png"))
         json_io.write_annotations(str(lbls / "test.json"),
-                                  [Annotation(subject="catkin", geometry=BBox(25.6, 22.4, 38.4, 41.6)),
-                                   Annotation(subject="catkin", geometry=BBox(16.0, 16.0, 22.4, 22.4))],
+                                  [Annotation(subject="bud", geometry=BBox(25.6, 22.4, 38.4, 41.6)),
+                                   Annotation(subject="bud", geometry=BBox(16.0, 16.0, 22.4, 22.4))],
                                   64, 64, keep_empty=True)
 
-        ds = build_dataset("detection", images_dir=str(imgs), labels_dir=str(lbls), subject="catkin")
+        ds = build_dataset("detection", images_dir=str(imgs), labels_dir=str(lbls), subject="bud")
         assert ds.task_type == "detection"
         assert len(ds) == 1
 

@@ -17,9 +17,9 @@ import pytest
 torch = pytest.importorskip("torch")
 pytest.importorskip("pycocotools")
 
-# No built-in traits: seed_catkin_trait_spec (conftest.py) writes a real catkin.yml into this
-# test's pinned platform state root so trait/subject="catkin" call sites keep resolving.
-pytestmark = pytest.mark.usefixtures("seed_catkin_trait_spec")
+# No built-in traits: seed_bud_trait_spec (conftest.py) writes a real bud.yml into this
+# test's pinned platform state root so trait/subject="bud" call sites keep resolving.
+pytestmark = pytest.mark.usefixtures("seed_bud_trait_spec")
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -38,7 +38,7 @@ def _det_dataset(tmp_path, n=3, size=128):
     for i in range(n):
         Image.new("RGB", (size, size), color=(120, 120, 120)).save(images_dir / f"img{i}.png")
         json_io.write_annotations(str(labels_dir / f"img{i}.json"),
-                                  [Annotation(subject="catkin", geometry=BBox(10, 10, 40, 40))], size, size)
+                                  [Annotation(subject="bud", geometry=BBox(10, 10, 40, 40))], size, size)
     return images_dir, labels_dir
 
 
@@ -63,7 +63,7 @@ def test_gating_path_honors_explicit_max_dets_le_100(tmp_path, monkeypatch):
 
     ckpt = registered_checkpoint(tmp_path, project_root=tmp_path, name="gating-max-dets-le-100")
 
-    evaluate_model(str(ckpt), str(images_dir), str(labels_dir), task="detection", subject="catkin",
+    evaluate_model(str(ckpt), str(images_dir), str(labels_dir), task="detection", subject="bud",
                    use_tiled_inference=True, max_dets=50)
     assert captured["max_dets"] == 50  # honored verbatim, not bumped to 1000
 
@@ -86,7 +86,7 @@ def test_gating_path_defaults_max_dets_to_1000_when_unset(tmp_path, monkeypatch)
 
     ckpt = registered_checkpoint(tmp_path, project_root=tmp_path, name="gating-max-dets-default")
 
-    evaluate_model(str(ckpt), str(images_dir), str(labels_dir), task="detection", subject="catkin",
+    evaluate_model(str(ckpt), str(images_dir), str(labels_dir), task="detection", subject="bud",
                    use_tiled_inference=True)
     assert captured["max_dets"] == DEFAULT_MAX_DETS == 1000
 
@@ -111,7 +111,7 @@ def test_diagnostic_path_defaults_max_dets_to_100_when_unset(tmp_path, monkeypat
 
     ckpt = registered_checkpoint(tmp_path, project_root=tmp_path, name="diagnostic-max-dets-default")
 
-    evaluate_model(str(ckpt), str(images_dir), str(labels_dir), task="detection", subject="catkin")
+    evaluate_model(str(ckpt), str(images_dir), str(labels_dir), task="detection", subject="bud")
     assert captured["max_dets"] == 100
 
 
@@ -132,7 +132,7 @@ def test_diagnostic_path_honors_explicit_max_dets(tmp_path, monkeypatch):
 
     ckpt = registered_checkpoint(tmp_path, project_root=tmp_path, name="diagnostic-max-dets-explicit")
 
-    evaluate_model(str(ckpt), str(images_dir), str(labels_dir), task="detection", subject="catkin",
+    evaluate_model(str(ckpt), str(images_dir), str(labels_dir), task="detection", subject="bud",
                    max_dets=7)
     assert captured["max_dets"] == 7
 
@@ -155,7 +155,7 @@ def test_bare_checkpoint_path_reuses_its_own_stamped_tiling_and_subject(tmp_path
     images_dir, labels_dir = _det_dataset(tmp_path)
     ckpt = tmp_path / "model.pt"
     torch.save({"config": {"data": {"tiling": {"tile_size": 384, "overlap": 0.15},
-                                    "subject": "catkin", "attribute": None}}}, ckpt)
+                                    "subject": "bud", "attribute": None}}}, ckpt)
     from tcip_mcp.tools.model_tools import register_model
 
     result = register_model(name="bare-ckpt-stamped-tiling", checkpoint_path=str(ckpt), config={},
@@ -166,7 +166,7 @@ def test_bare_checkpoint_path_reuses_its_own_stamped_tiling_and_subject(tmp_path
                    use_tiled_inference=True)
     # subject wasn't passed explicitly; it resolves from the checkpoint's own stamped config, the
     # same reuse a run id already gets, not silently None for a bare checkpoint path.
-    assert captured["subject"] == "catkin"
+    assert captured["subject"] == "bud"
     assert captured["tile_size"] == 384
     assert captured["overlap"] == 0.15
 
@@ -189,7 +189,7 @@ def test_gate_translates_geometry_refusal_to_error_dict(tmp_path, monkeypatch):
     ckpt = registered_checkpoint(tmp_path, project_root=tmp_path, name="gate-geometry-refusal")
 
     r = evaluate_model(str(ckpt), str(images_dir), str(labels_dir), task="detection",
-                       subject="catkin", use_tiled_inference=True)
+                       subject="bud", use_tiled_inference=True)
     assert "error" in r
     assert "tiling=" in r["error"]
 
@@ -212,7 +212,7 @@ def test_gate_translates_unreadable_label_to_error_dict(tmp_path, monkeypatch):
     ckpt = registered_checkpoint(tmp_path, project_root=tmp_path, name="gate-unreadable-label")
 
     r = evaluate_model(str(ckpt), str(images_dir), str(labels_dir), task="detection",
-                       subject="catkin", use_tiled_inference=True)
+                       subject="bud", use_tiled_inference=True)
     assert "error" in r
     assert "IMG_0001.json" in r["error"]
 
@@ -234,7 +234,7 @@ def test_cap_hit_stamped_when_explicit_max_dets_truncates(tmp_path):
     labels_dir.mkdir()
     Image.new("RGB", (200, 200)).save(images_dir / "a.png")
     json_io.write_annotations(str(labels_dir / "a.json"),
-                              [Annotation(subject="catkin", geometry=BBox(10, 10, 30, 30))], 200, 200)
+                              [Annotation(subject="bud", geometry=BBox(10, 10, 30, 30))], 200, 200)
 
     class _ManyDetectionsStub:
         train_tile_size = 100
@@ -256,7 +256,7 @@ def test_cap_hit_stamped_when_explicit_max_dets_truncates(tmp_path):
     try:
         predictor_mod.build_predictor = lambda *a, **kw: _ManyDetectionsStub()
         r = run_full_frame_evaluation(checkpoint, str(images_dir), str(labels_dir),
-                                      str(tmp_path / "out"), subject="catkin", max_dets=2)
+                                      str(tmp_path / "out"), subject="bud", max_dets=2)
     finally:
         predictor_mod.build_predictor = build_predictor_orig
     assert r["max_dets"] == 2  # honored verbatim
@@ -289,16 +289,16 @@ def test_resolve_operating_point_tile_size_source_not_inferred_from_truthiness()
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
 
     # A truthy tile_size with no source claim defaults to "default", not silently "derived".
-    b_default = resolve_operating_point("catkin", tiled=True, dataset_hash=None, tile_size=640)
+    b_default = resolve_operating_point("bud_opening", tiled=True, dataset_hash=None, tile_size=640)
     assert b_default.get("tile_size").source == "default"
 
     b_derived = resolve_operating_point(
-        "catkin", tiled=True, dataset_hash=None, tile_size=224, tile_size_source="derived")
+        "bud_opening", tiled=True, dataset_hash=None, tile_size=224, tile_size_source="derived")
     assert b_derived.get("tile_size").source == "derived"
     assert b_derived.get("tile_size")._raw == 224
 
     b_explicit = resolve_operating_point(
-        "catkin", tiled=True, dataset_hash=None, tile_size=512, tile_size_source="explicit",
+        "bud_opening", tiled=True, dataset_hash=None, tile_size=512, tile_size_source="explicit",
         tile_size_derived_from="stated on a checkpoint that records no tile geometry")
     assert b_explicit.get("tile_size").source == "explicit"
 
@@ -306,10 +306,10 @@ def test_resolve_operating_point_tile_size_source_not_inferred_from_truthiness()
 def test_resolve_operating_point_tiled_source_explicit_vs_default():
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
 
-    b_default = resolve_operating_point("catkin", dataset_hash=None, tiled=True)
+    b_default = resolve_operating_point("bud_opening", dataset_hash=None, tiled=True)
     assert b_default.get("tiled").source == "default"
 
     b_explicit = resolve_operating_point(
-        "catkin", dataset_hash=None, tiled=False, tiled_source="explicit")
+        "bud_opening", dataset_hash=None, tiled=False, tiled_source="explicit")
     assert b_explicit.get("tiled").source == "explicit"
     assert b_explicit.get("tiled")._raw is False

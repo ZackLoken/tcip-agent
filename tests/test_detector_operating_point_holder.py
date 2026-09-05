@@ -18,7 +18,7 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
-pytestmark = pytest.mark.usefixtures("seed_catkin_trait_spec")
+pytestmark = pytest.mark.usefixtures("seed_bud_trait_spec")
 
 IMG = 32
 
@@ -127,7 +127,7 @@ def _labeled_reference(tmp_path):
         Image.new("RGB", (size, size), (100, 100, 100)).save(images_dir / f"img{i}.png")
         box = BBox(size * 0.25, size * 0.25, size * 0.75, size * 0.75)
         json_io.write_annotations(str(labels_dir / f"img{i}.json"),
-                                  [Annotation(subject="catkin", geometry=box)], size, size)
+                                  [Annotation(subject="bud", geometry=box)], size, size)
     return images_dir, labels_dir
 
 
@@ -157,7 +157,7 @@ def test_a_bespoke_module_exposing_its_own_knob_reaches_a_validated_point(tmp_pa
     images_dir, labels_dir = _labeled_reference(tmp_path)
 
     r = run_inference(ckpt, images_dir=str(images_dir), device="cpu", tile=False,
-                      trait="catkin", calibration_labels_dir=str(labels_dir))
+                      trait="bud_opening", calibration_labels_dir=str(labels_dir))
 
     assert "error" not in r, r
     assert r["validated"] is True
@@ -191,7 +191,7 @@ def test_a_module_exposing_no_knob_refuses_unstated_not_censored(tmp_path, monke
     images_dir, labels_dir = _labeled_reference(tmp_path)
 
     r = run_inference(ckpt, images_dir=str(images_dir), device="cpu", tile=False,
-                      trait="catkin", calibration_labels_dir=str(labels_dir))
+                      trait="bud_opening", calibration_labels_dir=str(labels_dir))
 
     assert "error" not in r, r
     assert r["validated"] is False

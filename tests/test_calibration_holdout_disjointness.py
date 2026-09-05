@@ -16,9 +16,9 @@ from pathlib import Path
 
 import pytest
 
-# no built-in traits, seed_catkin_trait_spec (conftest.py) writes a real catkin.yml into this
-# test's pinned platform state root so trait="catkin" call sites keep resolving.
-pytestmark = pytest.mark.usefixtures("seed_catkin_trait_spec")
+# no built-in traits, seed_bud_trait_spec (conftest.py) writes a real bud.yml into this
+# test's pinned platform state root so trait="bud_opening" call sites keep resolving.
+pytestmark = pytest.mark.usefixtures("seed_bud_trait_spec")
 
 torch = pytest.importorskip("torch")
 
@@ -44,7 +44,7 @@ def _detection_dataset(root: Path, stems: list[str]) -> tuple[Path, Path]:
         _save_png(images_dir / f"{s}.png")
         json_io.write_annotations(
             str(labels_dir / f"{s}.json"),
-            [Annotation(subject="catkin", geometry=BBox(2, 2, 10, 10))], IMG, IMG, keep_empty=True,
+            [Annotation(subject="bud", geometry=BBox(2, 2, 10, 10))], IMG, IMG, keep_empty=True,
         )
     return images_dir, labels_dir
 
@@ -85,7 +85,7 @@ def test_external_marker_not_permanently_blocked_when_disjoint(tmp_path, monkeyp
     tcip_store.replace(split_key("exp_ext"), {"train": ["train_a", "train_b"], "group_by": "external"})
 
     cal, hold = _good_dense_op_records()
-    b = resolve_operating_point("catkin", tiled=True, dataset_hash="h1",
+    b = resolve_operating_point("bud_opening", tiled=True, dataset_hash="h1",
                                 calibration_records=cal, holdout_records=hold,
                                 staged_conf_floor=0.01, experiment_id="exp_ext")
     conf = b.get("conf")
@@ -107,7 +107,7 @@ def test_external_marker_still_catches_a_real_leak(tmp_path, monkeypatch):
     # Training trained on "c_a", the same stem the calibration reference uses below.
     tcip_store.replace(split_key("exp_ext2"), {"train": ["c_a", "other_stem"], "group_by": "external"})
 
-    b = resolve_operating_point("catkin", tiled=True, dataset_hash="h1",
+    b = resolve_operating_point("bud_opening", tiled=True, dataset_hash="h1",
                                 calibration_records=_op_records("c"),
                                 holdout_records=_op_records("h", shift=3.0),
                                 experiment_id="exp_ext2")
@@ -131,7 +131,7 @@ def test_group_key_map_end_to_end_not_permanently_blocked(tmp_path):
     images_dir, labels_dir = _detection_dataset(tmp_path / "ds", stems)
     group_key_map = {"imgA0": "gA", "imgA1": "gA", "imgB0": "gB", "imgB1": "gB"}
     data_cfg = {
-        "images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "catkin",
+        "images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "bud",
         "auto_val": True,
         "split": {"val_ratio": 0.5, "seed": 1, "group_key_map": dict(group_key_map)},
     }
@@ -313,7 +313,7 @@ def test_train_disjointness_geometric_check_end_to_end_with_persisted_regions(tm
 
     images_dir, labels_dir, stem = _big_single_source(tmp_path / "ds", 4000, 3000)
     data_cfg = {
-        "images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "catkin",
+        "images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "bud",
         "auto_val": True, "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
         "split": {"val_ratio": 0.25, "test_ratio": 0.1, "seed": 1},
     }
@@ -348,7 +348,7 @@ def _big_single_source(root: Path, width: int, height: int) -> tuple[Path, Path,
     labels_dir.mkdir(parents=True, exist_ok=True)
     stem = "mosaic"
     save_image(torch.rand(3, height, width) * 0.3, str(images_dir / f"{stem}.png"))
-    boxes = [Annotation(subject="catkin", geometry=BBox(x, y, x + 20, y + 20))
+    boxes = [Annotation(subject="bud", geometry=BBox(x, y, x + 20, y + 20))
             for x in range(20, width - 20, 200) for y in range(20, height - 20, 200)]
     json_io.write_annotations(str(labels_dir / f"{stem}.json"), boxes, width, height, keep_empty=True)
     return images_dir, labels_dir, stem
@@ -367,7 +367,7 @@ def test_spatial_manifest_never_reads_as_a_bare_stem_leak(tmp_path):
 
     images_dir, labels_dir, stem = _big_single_source(tmp_path / "ds", 4000, 3000)
     data_cfg = {
-        "images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "catkin",
+        "images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "bud",
         "auto_val": True, "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
         "split": {"val_ratio": 0.25, "test_ratio": 0.1, "seed": 1},
     }
@@ -431,7 +431,7 @@ def test_review_confirmed_leak_now_detected(tmp_path, monkeypatch):
                          "detections": [_entry([0.5, 0.5, 0.05, 0.05], [0.5, 0.5, 0.05, 0.05], 0.05)]},
     }}
     bundle = resolve_operating_point_from_review(
-        review_state, "catkin", tiled=True, group_by="stem", experiment_id="exp_review",
+        review_state, "bud_opening", tiled=True, group_by="stem", experiment_id="exp_review",
         bucket_identities=[_IDENTITY], scope_root=tmp_path)
     td = bundle.get("conf").gate_evidence["train_disjointness"]
     assert td["leaked_groups"] == ["srcA"]  # matched despite the .jpg extension on the review id
@@ -449,7 +449,7 @@ def _review_bundle(gate_evidence: dict):
                    derived_from="count-unbiased center-match curve over review verdicts",
                    validated_against=VALIDATED_FALSE, dataset_scoped=True, dataset_hash="abc",
                    gate_evidence=gate_evidence)
-    return ResolvedBundle(trait="catkin", dataset_hash="abc", params={"conf": conf})
+    return ResolvedBundle(trait="bud_opening", dataset_hash="abc", params={"conf": conf})
 
 
 def test_describe_review_validation_unresolvable_message():
@@ -613,12 +613,12 @@ def test_missing_image_refuses_cleanly_not_keyerror(tmp_path):
     kwargs = dict(tile=False, tile_size=IMG, overlap=0.2, tile_batch_size=8,
                   global_nms_iou=0.3, postprocess="nms", cross_tile_nms=None, max_dets=None)
     # First call locks the split over all 4 stems.
-    calibration.calibrate_operating_point(_CalStub(), "catkin", str(labels_dir), str(images_dir), **kwargs)
+    calibration.calibrate_operating_point(_CalStub(), "bud_opening", str(labels_dir), str(images_dir), **kwargs)
 
     (images_dir / "b_0_1.png").unlink()  # an image vanishes after the lock
 
     with pytest.raises(ValueError, match="no longer present"):
-        calibration.calibrate_operating_point(_CalStub(), "catkin", str(labels_dir), str(images_dir), **kwargs)
+        calibration.calibrate_operating_point(_CalStub(), "bud_opening", str(labels_dir), str(images_dir), **kwargs)
 
 
 def test_calibrate_operating_point_lock_balances_on_the_checkpoints_own_subject(tmp_path, monkeypatch):
@@ -630,7 +630,7 @@ def test_calibrate_operating_point_lock_balances_on_the_checkpoints_own_subject(
 
     stems = ["a_0_0", "a_0_1", "b_0_0", "b_0_1"]
     images_dir, labels_dir = _detection_dataset(tmp_path / "ds", stems)
-    # b_0_1 carries only a different subject's annotation: zero catkin foreground.
+    # b_0_1 carries only a different subject's annotation: zero bud foreground.
     json_io.write_annotations(
         str(labels_dir / "b_0_1.json"),
         [Annotation(subject="leaf", geometry=BBox(2, 2, 10, 10))], IMG, IMG, keep_empty=True,
@@ -646,9 +646,9 @@ def test_calibrate_operating_point_lock_balances_on_the_checkpoints_own_subject(
     monkeypatch.setattr(splits_mod, "resolve_locked_cal_holdout_split", _capture)
 
     stub = _CalStub()
-    stub.config = {"data": {"subject": "catkin"}}
+    stub.config = {"data": {"subject": "bud"}}
     calibration.calibrate_operating_point(
-        stub, "catkin", str(labels_dir), str(images_dir),
+        stub, "bud_opening", str(labels_dir), str(images_dir),
         tile=False, tile_size=IMG, overlap=0.2, tile_batch_size=8,
         global_nms_iou=0.3, postprocess="nms", cross_tile_nms=None, max_dets=None,
         seed=1, holdout_ratio=0.5,
@@ -686,7 +686,7 @@ def test_declared_seed_and_holdout_ratio_reach_the_first_draw(tmp_path):
     images_dir, labels_dir = _detection_dataset(tmp_path / "ds", stems)
 
     bundle, _dh, _n_excluded, _evidence = calibration.calibrate_operating_point(
-        _CalStub(), "catkin", str(labels_dir), str(images_dir),
+        _CalStub(), "bud_opening", str(labels_dir), str(images_dir),
         tile=False, tile_size=IMG, overlap=0.2, tile_batch_size=8,
         global_nms_iou=0.3, postprocess="nms", cross_tile_nms=None, max_dets=None,
         seed=7, holdout_ratio=0.75,
@@ -717,11 +717,11 @@ def test_the_calibration_door_keeps_its_lock_across_an_active_project_repin(tmp_
 
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path / "before_adoption"))
     first, _dh, _n_excluded, _evidence = calibration.calibrate_operating_point(
-        _CalStub(), "catkin", str(labels_dir), str(images_dir), seed=1, **kwargs)
+        _CalStub(), "bud_opening", str(labels_dir), str(images_dir), seed=1, **kwargs)
 
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path / "adopted_project"))
     second, _dh2, _n_excluded2, _evidence2 = calibration.calibrate_operating_point(
-        _CalStub(), "catkin", str(labels_dir), str(images_dir), seed=2, **kwargs)
+        _CalStub(), "bud_opening", str(labels_dir), str(images_dir), seed=2, **kwargs)
 
     assert first.get("conf").gate_evidence["split_policy"]["seed"] == 1
     assert second.get("conf").gate_evidence["split_policy"]["seed"] == 1
@@ -744,27 +744,27 @@ def test_calibration_discloses_excluded_incomplete_attribute_count(tmp_path):
     root = tmp_path / "ds"
     images_dir, labels_dir = root / "images", root / "labels"
     write_registry(root / "classes.json", ClassRegistry(subjects=(
-        Subject(name="catkin", attributes=(
-            Attribute(name="state", type="categorical", values=("elongated", "dormant")),)),)))
+        Subject(name="bud", attributes=(
+            Attribute(name="state", type="categorical", values=("open", "closed")),)),)))
 
     stems = ["complete_a", "complete_b", "partial_a", "partial_b"]
     for s in stems:
         _save_png(images_dir / f"{s}.png")
     for s in ("complete_a", "complete_b"):
         json_io.write_annotations(str(labels_dir / f"{s}.json"), [
-            Annotation(subject="catkin", geometry=BBox(2, 2, 10, 10), attributes={"state": "elongated"}),
+            Annotation(subject="bud", geometry=BBox(2, 2, 10, 10), attributes={"state": "open"}),
         ], IMG, IMG)
     for s in ("partial_a", "partial_b"):
         json_io.write_annotations(str(labels_dir / f"{s}.json"), [
-            Annotation(subject="catkin", geometry=BBox(2, 2, 10, 10), attributes={"state": "elongated"}),
-            Annotation(subject="catkin", geometry=BBox(15, 15, 20, 20)),  # no `state` -- unlabeled
+            Annotation(subject="bud", geometry=BBox(2, 2, 10, 10), attributes={"state": "open"}),
+            Annotation(subject="bud", geometry=BBox(15, 15, 20, 20)),  # no `state` -- unlabeled
         ], IMG, IMG)
 
     stub = _CalStub()
-    stub.config = {"data": {"subject": "catkin", "attribute": "state"}}
+    stub.config = {"data": {"subject": "bud", "attribute": "state"}}
 
     _bundle, _dh, n_excluded, _evidence = calibration.calibrate_operating_point(
-        stub, "catkin", str(labels_dir), str(images_dir),
+        stub, "bud_opening", str(labels_dir), str(images_dir),
         tile=False, tile_size=IMG, overlap=0.2, tile_batch_size=8,
         global_nms_iou=0.3, postprocess="nms", cross_tile_nms=None, max_dets=None,
         group_by="stem", seed=0, holdout_ratio=0.5,
@@ -785,11 +785,11 @@ def test_calibration_attribute_registry_refusal_reaches_the_caller(tmp_path):
     images_dir, labels_dir = _detection_dataset(tmp_path / "ds", stems)
 
     stub = _CalStub()
-    stub.config = {"data": {"subject": "catkin", "attribute": "state"}}  # no classes.json written
+    stub.config = {"data": {"subject": "bud", "attribute": "state"}}  # no classes.json written
 
     with pytest.raises(ValueError, match="classes.json"):
         calibration.calibrate_operating_point(
-            stub, "catkin", str(labels_dir), str(images_dir),
+            stub, "bud_opening", str(labels_dir), str(images_dir),
             tile=False, tile_size=IMG, overlap=0.2, tile_batch_size=8,
             global_nms_iou=0.3, postprocess="nms", cross_tile_nms=None, max_dets=None,
             group_by="stem", seed=0, holdout_ratio=0.5,
@@ -813,14 +813,14 @@ def test_calibration_gt_id_map_prefers_the_training_recorded_map_over_a_fresh_re
     for s in stems:
         _save_png(images_dir / f"{s}.png")
         json_io.write_annotations(str(labels_dir / f"{s}.json"), [
-            Annotation(subject="catkin", geometry=BBox(2, 2, 10, 10), attributes={"state": "elongated"}),
+            Annotation(subject="bud", geometry=BBox(2, 2, 10, 10), attributes={"state": "open"}),
         ], IMG, IMG)
 
     stub = _CalStub()
     # A recorded map present: the registry read must never even be attempted, regardless of what
     # a fresh classes.json (absent here) would derive.
-    stub.config = {"data": {"subject": "catkin", "attribute": "state",
-                            "id_map": {"elongated": 0, "dormant": 1}}}
+    stub.config = {"data": {"subject": "bud", "attribute": "state",
+                            "id_map": {"open": 0, "closed": 1}}}
 
     def _boom(*a, **kw):
         raise AssertionError(
@@ -834,7 +834,7 @@ def test_calibration_gt_id_map_prefers_the_training_recorded_map_over_a_fresh_re
     # test_calibration_attribute_registry_refusal_reaches_the_caller pins -- this must instead
     # succeed, using only the recorded map.
     bundle, _dh, n_excluded, _evidence = calibration.calibrate_operating_point(
-        stub, "catkin", str(labels_dir), str(images_dir),
+        stub, "bud_opening", str(labels_dir), str(images_dir),
         tile=False, tile_size=IMG, overlap=0.2, tile_batch_size=8,
         global_nms_iou=0.3, postprocess="nms", cross_tile_nms=None, max_dets=None,
         group_by="stem", seed=0, holdout_ratio=0.5,
@@ -847,11 +847,11 @@ def test_recorded_training_id_map_helper_is_none_when_config_carries_no_map():
     import tcip_mcp.tools.inference_tools as itools
 
     stub = _CalStub()
-    stub.config = {"data": {"subject": "catkin", "attribute": "state"}}
+    stub.config = {"data": {"subject": "bud", "attribute": "state"}}
     assert itools._recorded_training_id_map(stub) is None
 
-    stub.config["data"]["id_map"] = {"elongated": 0, "dormant": 1}
-    assert itools._recorded_training_id_map(stub) == {"elongated": 0, "dormant": 1}
+    stub.config["data"]["id_map"] = {"open": 0, "closed": 1}
+    assert itools._recorded_training_id_map(stub) == {"open": 0, "closed": 1}
 
 
 # --- Minor: resolve_model_identity off a load_registered_checkpoint object. -------------------

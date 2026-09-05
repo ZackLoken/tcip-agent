@@ -19,7 +19,7 @@ pytest.importorskip("torchvision")
 from tcip_annotation import json_io  # noqa: E402
 from tcip_annotation.state import Annotation, BBox  # noqa: E402
 
-pytestmark = pytest.mark.usefixtures("seed_catkin_trait_spec")
+pytestmark = pytest.mark.usefixtures("seed_bud_trait_spec")
 
 TILE = 32
 WIDTH, HEIGHT = 3200, 200
@@ -102,12 +102,12 @@ def _build_experiment(tmp_path: Path, *, reserve_frac: float = 0.15,
     raster_path = images_dir / f"{stem}.tif"
     _write_mosaic(raster_path, georeferenced=bool(plant_csv_paths))
 
-    boxes = [Annotation(subject="catkin", geometry=BBox(x, 80, x + 15, 110))
+    boxes = [Annotation(subject="bud", geometry=BBox(x, 80, x + 15, 110))
             for x in range(10, WIDTH - 20, BOX_STEP)]
     json_io.write_annotations(str(labels_dir / f"{stem}.json"), boxes, WIDTH, HEIGHT, keep_empty=True)
 
     data_cfg = {
-        "images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "catkin",
+        "images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "bud",
         "auto_val": True, "tiling": {"enabled": True, "tile_size": TILE, "overlap": 0.2},
         "split": {"val_ratio": 0.2, "test_ratio": 0.15, "seed": 1,
                   "reserve_calibration_fraction": reserve_frac},
@@ -128,7 +128,7 @@ def _build_experiment(tmp_path: Path, *, reserve_frac: float = 0.15,
 
 
 def _attest_regions_complete(root: Path, stem: str, regions: list[list[tuple[int, int, int, int]]],
-                             *, subject: str = "catkin") -> None:
+                             *, subject: str = "bud") -> None:
     """Directly writes the region-completeness store (bypassing the HTTP route, same effect as a
     breeder attesting every intersecting cell complete): every reference-grid cell (at the
     training tile_size, clamped) that any rect in ``regions`` overlaps is marked complete, with a
@@ -183,7 +183,7 @@ def test_block_calibration_refuses_when_regions_unattested(tmp_path: Path):
                                 score_threshold=0.01, nms_iou=0.3, max_dets=1000)
     with pytest.raises(BlockCalibrationRefused, match="not fully attested complete"):
         resolve_block_calibration_records(
-            predictor, trait_name="catkin",
+            predictor, trait_name="bud_opening",
             experiment_id=exp["experiment_id"], global_nms_iou=0.3, export_tile_size=TILE)
 
 
@@ -205,7 +205,7 @@ def test_block_calibration_completeness_checked_before_feasibility(tmp_path: Pat
                                 score_threshold=0.01, nms_iou=0.3, max_dets=1000)
     with pytest.raises(BlockCalibrationRefused) as exc_info:
         resolve_block_calibration_records(
-            predictor, trait_name="catkin",
+            predictor, trait_name="bud_opening",
             experiment_id=exp["experiment_id"], global_nms_iou=0.3, k_cal=40, k_test=40, export_tile_size=TILE)
     msg = str(exc_info.value)
     assert "not fully attested complete" in msg
@@ -229,7 +229,7 @@ def test_block_calibration_refuses_when_export_tile_size_differs_from_manifest(t
                                 score_threshold=0.01, nms_iou=0.3, max_dets=1000)
     with pytest.raises(BlockCalibrationRefused) as exc_info:
         resolve_block_calibration_records(
-            predictor, trait_name="catkin",
+            predictor, trait_name="bud_opening",
             experiment_id=exp["experiment_id"], global_nms_iou=0.3, export_tile_size=TILE * 2)
     msg = str(exc_info.value)
     assert f"{TILE}px" in msg and f"{TILE * 2}px" in msg
@@ -252,7 +252,7 @@ def test_block_calibration_admits_valid_work_once_attested(tmp_path: Path):
     predictor = build_predictor(checkpoint, device="cpu",
                                 score_threshold=0.01, nms_iou=0.3, max_dets=1000)
     bundle, prov, _evidence = resolve_block_calibration_records(
-        predictor, trait_name="catkin",
+        predictor, trait_name="bud_opening",
         experiment_id=exp["experiment_id"], global_nms_iou=0.3, export_tile_size=TILE)
 
     conf = bundle.get("conf")
@@ -290,7 +290,7 @@ def test_block_calibration_prefers_plant_pitch_over_gt_spacing_when_configured(t
     predictor = build_predictor(checkpoint, device="cpu",
                                 score_threshold=0.01, nms_iou=0.3, max_dets=1000)
     _bundle, prov, _evidence = resolve_block_calibration_records(
-        predictor, trait_name="catkin",
+        predictor, trait_name="bud_opening",
         experiment_id=exp["experiment_id"], global_nms_iou=0.3, export_tile_size=TILE)
 
     assert prov["block_scale_source"].startswith("plant grid pitch"), prov["block_scale_source"]
@@ -312,7 +312,7 @@ def test_block_calibration_falls_back_to_gt_spacing_with_no_plant_csv_configured
     predictor = build_predictor(checkpoint, device="cpu",
                                 score_threshold=0.01, nms_iou=0.3, max_dets=1000)
     _bundle, prov, _evidence = resolve_block_calibration_records(
-        predictor, trait_name="catkin",
+        predictor, trait_name="bud_opening",
         experiment_id=exp["experiment_id"], global_nms_iou=0.3, export_tile_size=TILE)
 
     assert prov["block_scale_source"].startswith("GT object-spacing"), prov["block_scale_source"]
@@ -347,7 +347,7 @@ def test_a_saturated_band_cap_surfaces_as_cap_saturated_frac_provenance(
     predictor = build_predictor(checkpoint, device="cpu",
                                 score_threshold=0.01, nms_iou=0.3, max_dets=1000)
     bundle, prov, _evidence = resolve_block_calibration_records(
-        predictor, trait_name="catkin",
+        predictor, trait_name="bud_opening",
         experiment_id=exp["experiment_id"], global_nms_iou=0.3, export_tile_size=TILE)
 
     conf = bundle.get("conf")
@@ -395,7 +395,7 @@ def test_block_calibration_refuses_by_name_when_manifest_dims_exceed_the_real_ra
                                 score_threshold=0.01, nms_iou=0.3, max_dets=1000)
     with pytest.raises(BlockCalibrationRefused, match="do not match"):
         resolve_block_calibration_records(
-            predictor, trait_name="catkin",
+            predictor, trait_name="bud_opening",
             experiment_id=exp["experiment_id"], global_nms_iou=0.3, export_tile_size=TILE)
 
 
@@ -424,7 +424,7 @@ def test_block_calibration_refuses_by_name_when_manifest_dims_are_smaller_than_t
                                 score_threshold=0.01, nms_iou=0.3, max_dets=1000)
     with pytest.raises(BlockCalibrationRefused, match="do not match"):
         resolve_block_calibration_records(
-            predictor, trait_name="catkin",
+            predictor, trait_name="bud_opening",
             experiment_id=exp["experiment_id"], global_nms_iou=0.3, export_tile_size=TILE)
 
 
@@ -440,7 +440,7 @@ def test_max_dets_stamp_reflects_the_pooled_cal_and_test_density_cap(tmp_path: P
     label_path = exp["labels_dir"] / f"{exp['stem']}.json"
     existing = json_io.read_annotations(str(label_path))
     tx0, _ty0, tx1, _ty1 = manifest["test_region"][0]
-    dense = [Annotation(subject="catkin", geometry=BBox(x, 80, x + 15, 110))
+    dense = [Annotation(subject="bud", geometry=BBox(x, 80, x + 15, 110))
             for x in range(int(tx0) + 5, int(tx1) - 20, 2)]
     json_io.write_annotations(str(label_path), existing + dense, WIDTH, HEIGHT, keep_empty=True)
 
@@ -456,7 +456,7 @@ def test_max_dets_stamp_reflects_the_pooled_cal_and_test_density_cap(tmp_path: P
     predictor = build_predictor(checkpoint, device="cpu",
                                 score_threshold=0.01, nms_iou=0.3, max_dets=1000)
     bundle, prov, _evidence = resolve_block_calibration_records(
-        predictor, trait_name="catkin",
+        predictor, trait_name="bud_opening",
         experiment_id=exp["experiment_id"], global_nms_iou=0.3, export_tile_size=TILE)
 
     density_cap = derive_max_dets_from_counts(
@@ -483,7 +483,7 @@ def test_run_inference_raster_block_calibration_admits_and_uncaps_max_dets(tmp_p
     out_dir = tmp_path / "preds"
     result = run_inference(
         exp["checkpoint_path"], output_dir=str(out_dir), raster_path=str(exp["raster_path"]),
-        conf_threshold=0.0, tile_size=TILE, overlap=0.2, trait="catkin",
+        conf_threshold=0.0, tile_size=TILE, overlap=0.2, trait="bud_opening",
         experiment_id=exp["experiment_id"])
 
     assert "error" not in result, result
@@ -537,7 +537,7 @@ def test_run_inference_raster_earns_the_record_behind_a_validated_block_calibrat
 
     def _held_out_block_calibration(*args, **kwargs):
         _bundle, prov, _evidence = real_resolve(*args, **kwargs)
-        bundle = resolve_operating_point("catkin", experiment_id=exp["experiment_id"], **inputs)
+        bundle = resolve_operating_point("bud_opening", experiment_id=exp["experiment_id"], **inputs)
         evidence = {"resolver": "resolve_operating_point", "inputs": inputs,
                     "reference_inputs": {"label_dirs": {"reserved_regions": str(exp["labels_dir"])},
                                          "stated_values": {"stem": exp["stem"]}}}
@@ -555,15 +555,15 @@ def test_run_inference_raster_earns_the_record_behind_a_validated_block_calibrat
     out_dir = exp["root"] / "predictions" / "baseline" / "2026-01-01"
     result = run_inference(
         exp["checkpoint_path"], output_dir=str(out_dir), raster_path=str(exp["raster_path"]),
-        conf_threshold=0.0, tile_size=TILE, overlap=0.2, trait="catkin",
+        conf_threshold=0.0, tile_size=TILE, overlap=0.2, trait="bud_opening",
         experiment_id=exp["experiment_id"])
 
     assert "error" not in result, result
     assert result["validated"] is True
     stamp = read_operating_point_sidecar(out_dir)
-    assert verify_stamp_binding(stamp, out_dir, document="operating_point", trait="catkin").ok
+    assert verify_stamp_binding(stamp, out_dir, document="operating_point", trait="bud_opening").ok
     assert reconcile_operating_point_validity(
-        [str(out_dir)], trait="catkin")["validated"] == VALIDATED_HELD_OUT
+        [str(out_dir)], trait="bud_opening")["validated"] == VALIDATED_HELD_OUT
 
 
 def test_run_inference_raster_applies_a_legitimate_zero_cross_tile_nms(
@@ -611,7 +611,7 @@ def test_run_inference_raster_applies_a_legitimate_zero_cross_tile_nms(
     out_dir = tmp_path / "preds"
     result = run_inference(
         exp["checkpoint_path"], output_dir=str(out_dir), raster_path=str(exp["raster_path"]),
-        conf_threshold=0.0, tile_size=TILE, overlap=0.2, trait="catkin",
+        conf_threshold=0.0, tile_size=TILE, overlap=0.2, trait="bud_opening",
         experiment_id=exp["experiment_id"], global_nms_iou=0.3)
 
     assert "error" not in result, result
@@ -640,7 +640,7 @@ def test_run_inference_raster_claim_scope_refuses_cross_mosaic(tmp_path: Path):
     out_dir = tmp_path / "preds"
     result = run_inference(
         exp["checkpoint_path"], output_dir=str(out_dir), raster_path=str(other_raster),
-        conf_threshold=0.0, tile_size=TILE, overlap=0.2, trait="catkin",
+        conf_threshold=0.0, tile_size=TILE, overlap=0.2, trait="bud_opening",
         experiment_id=exp["experiment_id"])
     assert "error" in result
     assert not out_dir.exists()
@@ -664,7 +664,7 @@ def test_run_inference_raster_claim_scope_admits_a_georeferenced_self_export(
     out_dir = tmp_path / "preds"
     result = run_inference(
         exp["checkpoint_path"], output_dir=str(out_dir), raster_path=str(exp["raster_path"]),
-        conf_threshold=0.0, tile_size=TILE, overlap=0.2, trait="catkin",
+        conf_threshold=0.0, tile_size=TILE, overlap=0.2, trait="bud_opening",
         experiment_id=exp["experiment_id"])
 
     assert "error" not in result, result
@@ -691,7 +691,7 @@ def test_run_inference_raster_claim_scope_refuses_a_moved_tiepoint_copy(tmp_path
     out_dir = tmp_path / "preds"
     refused = run_inference(
         exp["checkpoint_path"], output_dir=str(out_dir), raster_path=str(moved),
-        conf_threshold=0.0, tile_size=TILE, overlap=0.2, trait="catkin",
+        conf_threshold=0.0, tile_size=TILE, overlap=0.2, trait="bud_opening",
         experiment_id=exp["experiment_id"])
     assert "error" in refused
     assert "georeferencing mismatch" in refused["error"]
@@ -699,7 +699,7 @@ def test_run_inference_raster_claim_scope_refuses_a_moved_tiepoint_copy(tmp_path
 
     acknowledged = run_inference(
         exp["checkpoint_path"], output_dir=str(out_dir), raster_path=str(moved),
-        conf_threshold=0.0, tile_size=TILE, overlap=0.2, trait="catkin",
+        conf_threshold=0.0, tile_size=TILE, overlap=0.2, trait="bud_opening",
         experiment_id=exp["experiment_id"], allow_unvalidated_staging=True)
     assert "error" not in acknowledged, acknowledged
     assert acknowledged["claim_scope_validated"] == VALIDATED_FALSE
@@ -726,7 +726,7 @@ def test_run_inference_raster_claim_scope_admits_a_band_group_trained_export_ove
     out_dir = tmp_path / "preds"
     result = run_inference(
         exp["checkpoint_path"], output_dir=str(out_dir), raster_path=str(georef_copy),
-        conf_threshold=0.0, tile_size=TILE, overlap=0.2, trait="catkin",
+        conf_threshold=0.0, tile_size=TILE, overlap=0.2, trait="bud_opening",
         experiment_id=exp["experiment_id"])
 
     assert "error" not in result, result
@@ -749,7 +749,7 @@ def test_run_inference_raster_without_reserved_region_names_the_real_gap(tmp_pat
     out_dir = tmp_path / "preds"
     result = run_inference(
         exp["checkpoint_path"], output_dir=str(out_dir), raster_path=str(exp["raster_path"]),
-        conf_threshold=0.0, tile_size=TILE, overlap=0.2, trait="catkin",
+        conf_threshold=0.0, tile_size=TILE, overlap=0.2, trait="bud_opening",
         experiment_id=exp["experiment_id"])
     assert "error" in result
     assert "reserved calibration" in result["error"]
@@ -939,7 +939,7 @@ def test_the_band_passes_run_under_the_max_dets_the_bundle_stamps(tmp_path: Path
                                 score_threshold=0.01, nms_iou=0.3,
                                 max_dets=constructed_max_dets)
     bundle, prov, _evidence = resolve_block_calibration_records(
-        predictor, trait_name="catkin",
+        predictor, trait_name="bud_opening",
         experiment_id=exp["experiment_id"], global_nms_iou=0.3, export_tile_size=TILE)
 
     stamped = bundle.get("max_dets")._raw
@@ -981,7 +981,7 @@ def test_the_recorded_staged_conf_floor_is_the_floor_the_band_passes_ran_under(
     predictor = build_predictor(checkpoint, device="cpu",
                                 score_threshold=constructed_threshold, nms_iou=0.3, max_dets=1000)
     bundle, prov, _evidence = resolve_block_calibration_records(
-        predictor, trait_name="catkin",
+        predictor, trait_name="bud_opening",
         experiment_id=exp["experiment_id"], global_nms_iou=0.3, export_tile_size=TILE)
 
     recorded_floor = bundle.get("conf").gate_evidence["staged_conf_floor"]
@@ -1012,7 +1012,7 @@ def _build_attribute_scoped_experiment(
 
     def _write_registry(values: tuple[str, ...]) -> None:
         write_registry(root / "classes.json", ClassRegistry(subjects=(
-            Subject(name="catkin", attributes=(
+            Subject(name="bud", attributes=(
                 Attribute(name="stage", type="categorical", values=values),)),)))
 
     root = tmp_path / "ds_attribute"
@@ -1023,13 +1023,13 @@ def _build_attribute_scoped_experiment(
     _write_mosaic(images_dir / f"{stem}.tif")
     _write_registry(trained_values)
 
-    boxes = [Annotation(subject="catkin", geometry=BBox(x, 80, x + 15, 110),
+    boxes = [Annotation(subject="bud", geometry=BBox(x, 80, x + 15, 110),
                         attributes={"stage": labeled_value})
             for x in range(10, WIDTH - 20, BOX_STEP)]
     json_io.write_annotations(str(labels_dir / f"{stem}.json"), boxes, WIDTH, HEIGHT, keep_empty=True)
 
     data_cfg = {
-        "images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "catkin",
+        "images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "bud",
         "attribute": "stage", "auto_val": True,
         "tiling": {"enabled": True, "tile_size": TILE, "overlap": 0.2},
         "split": {"val_ratio": 0.2, "test_ratio": 0.15, "seed": 1,
@@ -1071,8 +1071,8 @@ def test_ground_truth_decodes_through_the_checkpoints_own_recorded_id_map(tmp_pa
     was never trained to emit. The reserved regions carry only one attribute value, so the two
     orders put the whole reference in two different classes and cannot agree by accident."""
     exp = _build_attribute_scoped_experiment(
-        tmp_path, trained_values=("dormant", "elongated", "shed"),
-        reordered_values=("elongated", "dormant", "shed"), labeled_value="elongated")
+        tmp_path, trained_values=("closed", "open", "shed"),
+        reordered_values=("open", "closed", "shed"), labeled_value="open")
     manifest = exp["spatial_manifest"]
     _attest_regions_complete(
         exp["root"], exp["stem"], [manifest["calibration_region"], manifest["test_region"]])
@@ -1082,16 +1082,16 @@ def test_ground_truth_decodes_through_the_checkpoints_own_recorded_id_map(tmp_pa
     from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.pipelines.inference.predictor import build_predictor
 
-    live_id_map = assign_class_ids(read_registry(exp["root"] / "classes.json"), "catkin", "stage")
-    recorded_category = exp["recorded_id_map"]["elongated"] + 1
-    live_category = live_id_map["elongated"] + 1
+    live_id_map = assign_class_ids(read_registry(exp["root"] / "classes.json"), "bud", "stage")
+    recorded_category = exp["recorded_id_map"]["open"] + 1
+    live_category = live_id_map["open"] + 1
     assert recorded_category != live_category
 
     checkpoint = load_registered_checkpoint(exp["checkpoint_path"], project_path=str(tmp_path))
     predictor = build_predictor(checkpoint, device="cpu",
                                 score_threshold=0.01, nms_iou=0.3, max_dets=1000)
     bundle, _prov, _evidence = resolve_block_calibration_records(
-        predictor, trait_name="catkin",
+        predictor, trait_name="bud_opening",
         experiment_id=exp["experiment_id"], global_nms_iou=0.3, export_tile_size=TILE)
 
     per_class = bundle.get("conf").gate_evidence["holdout_bias"]["per_class"]
@@ -1122,8 +1122,8 @@ def test_block_calibration_refuses_when_no_id_map_can_be_resolved(tmp_path: Path
     prediction-writing door already calls carries that precondition, so this path refuses by name
     instead of restating the prefer-recorded-else-derive rule and reaching the registry read."""
     exp = _build_attribute_scoped_experiment(
-        tmp_path, trained_values=("dormant", "elongated", "shed"),
-        reordered_values=("dormant", "elongated", "shed"), labeled_value="elongated",
+        tmp_path, trained_values=("closed", "open", "shed"),
+        reordered_values=("closed", "open", "shed"), labeled_value="open",
         experiment_id="exp_block_no_id_map")
     _drop_the_checkpoints_recorded_id_map(exp["checkpoint_path"], project_root=tmp_path)
     (exp["root"] / "classes.json").unlink()
@@ -1139,7 +1139,7 @@ def test_block_calibration_refuses_when_no_id_map_can_be_resolved(tmp_path: Path
                                 score_threshold=0.01, nms_iou=0.3, max_dets=1000)
     with pytest.raises(BlockCalibrationRefused, match="records no name->id map"):
         resolve_block_calibration_records(
-            predictor, trait_name="catkin",
+            predictor, trait_name="bud_opening",
             experiment_id=exp["experiment_id"], global_nms_iou=0.3, export_tile_size=TILE)
 
 
@@ -1147,8 +1147,8 @@ def test_block_calibration_runs_on_a_recorded_id_map_with_no_registry_on_disk(tm
     """The refusal above must not swallow the legitimate case: a checkpoint that carries its own
     recorded map needs no registry at all, so calibration resolves with classes.json gone."""
     exp = _build_attribute_scoped_experiment(
-        tmp_path, trained_values=("dormant", "elongated", "shed"),
-        reordered_values=("dormant", "elongated", "shed"), labeled_value="elongated",
+        tmp_path, trained_values=("closed", "open", "shed"),
+        reordered_values=("closed", "open", "shed"), labeled_value="open",
         experiment_id="exp_block_recorded_no_registry")
     manifest = exp["spatial_manifest"]
     _attest_regions_complete(
@@ -1163,7 +1163,7 @@ def test_block_calibration_runs_on_a_recorded_id_map_with_no_registry_on_disk(tm
     predictor = build_predictor(checkpoint, device="cpu",
                                 score_threshold=0.01, nms_iou=0.3, max_dets=1000)
     bundle, prov, _evidence = resolve_block_calibration_records(
-        predictor, trait_name="catkin",
+        predictor, trait_name="bud_opening",
         experiment_id=exp["experiment_id"], global_nms_iou=0.3, export_tile_size=TILE)
 
     assert sum(prov["cal_gt_counts"].values()) > 0
@@ -1172,7 +1172,7 @@ def test_block_calibration_runs_on_a_recorded_id_map_with_no_registry_on_disk(tm
 
 def _attest_regions_complete_through_the_coverage_route(
     client, image_path: str, regions: list[list[tuple[int, int, int, int]]],
-    *, subject: str = "catkin",
+    *, subject: str = "bud",
 ) -> list[str]:
     """Attest every reference-grid cell the given regions touch through the coverage route the
     Annotate canvas's Attest control posts to, one cell per request, and return the attested
@@ -1225,13 +1225,13 @@ def test_regions_attested_through_the_coverage_route_admit_block_calibration(tmp
 
     for region in (manifest["calibration_region"], manifest["test_region"]):
         assert incomplete_cells_for_rect(
-            str(exp["root"]), "catkin", exp["stem"], tuple(region[0])) == []
+            str(exp["root"]), "bud", exp["stem"], tuple(region[0])) == []
 
     checkpoint = load_registered_checkpoint(exp["checkpoint_path"], project_path=str(tmp_path))
     predictor = build_predictor(checkpoint, device="cpu",
                                 score_threshold=0.01, nms_iou=0.3, max_dets=1000)
     bundle, prov, _evidence = resolve_block_calibration_records(
-        predictor, trait_name="catkin",
+        predictor, trait_name="bud_opening",
         experiment_id=exp["experiment_id"], global_nms_iou=0.3, export_tile_size=TILE)
 
     assert sum(prov["cal_gt_counts"].values()) > 0

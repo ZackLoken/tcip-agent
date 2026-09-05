@@ -12,7 +12,7 @@ from types import SimpleNamespace
 
 import pytest
 
-pytestmark = pytest.mark.usefixtures("seed_catkin_trait_spec")
+pytestmark = pytest.mark.usefixtures("seed_bud_trait_spec")
 
 torch = pytest.importorskip("torch")
 pytest.importorskip("pycocotools")
@@ -63,7 +63,7 @@ def _held_out_bundle():
             miss_pattern=miss, fp_pattern=fp, score=0.9, fp_score=0.05),
         "tiled": False, "staged_conf_floor": 0.01,
     }
-    return resolve_operating_point("catkin", experiment_id=None, **inputs), inputs
+    return resolve_operating_point("bud_opening", experiment_id=None, **inputs), inputs
 
 
 def _run(tmp_path, monkeypatch, in_chans):
@@ -82,7 +82,7 @@ def _run(tmp_path, monkeypatch, in_chans):
     ckpt = registered_checkpoint(tmp_path, project_root=tmp_path)
     return run_inference_verified(
         str(ckpt), image_paths=[_rgb_image(tmp_path)], images_dir=str(tmp_path), device="cpu",
-        tile=False, trait="catkin", calibration_labels_dir=str(tmp_path))
+        tile=False, trait="bud_opening", calibration_labels_dir=str(tmp_path))
 
 
 @pytest.mark.parametrize("checkpoint_channels", [5, 1])

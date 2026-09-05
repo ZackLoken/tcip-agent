@@ -9,7 +9,7 @@ from types import SimpleNamespace
 
 import pytest
 
-pytestmark = pytest.mark.usefixtures("seed_catkin_trait_spec")
+pytestmark = pytest.mark.usefixtures("seed_bud_trait_spec")
 
 torch = pytest.importorskip("torch")
 pytest.importorskip("pycocotools")
@@ -18,7 +18,7 @@ from tcip_annotation import json_io  # noqa: E402
 from tcip_annotation.state import Annotation, BBox  # noqa: E402
 
 IMG = 32
-SUBJECT = "catkin"
+SUBJECT = "bud"
 DATES = ("2-11-26", "2-12-01")
 _STEMS = ("a", "b", "c", "d", "e", "f", "g", "h")
 
@@ -240,7 +240,7 @@ def test_attach_split_policy_provenance_copies_the_manifest_dir():
 
     conf = derived("conf", 0.5, derived_from="test", requires_validation=True,
                    validation_kind="annotations", validated_against=None, gate_evidence={})
-    bundle = ResolvedBundle(trait="catkin", dataset_hash=None, params={"conf": conf})
+    bundle = ResolvedBundle(trait="bud_opening", dataset_hash=None, params={"conf": conf})
 
     attach_split_policy_provenance(bundle, {"group_by": "stem", "seed": 0, "holdout_ratio": 0.5,
                                             "identity_hash": "abc", "split_manifest_dir": "m/dir"})
@@ -298,7 +298,7 @@ def test_calibrate_operating_point_binds_to_the_manifests_calibration_side(tmp_p
     manifest = _draw(root, out)
 
     bundle, dh, _n_excl, evidence = calibration.calibrate_operating_point(
-        _CalStub(), "catkin", str(root / "annotations" / DATES[0]),
+        _CalStub(), "bud_opening", str(root / "annotations" / DATES[0]),
         str(root / "images" / DATES[0]), split_manifest_dir=str(out), **_CAL_KWARGS)
 
     calibration_this_date = set(_calibration_this_date(manifest))
@@ -323,7 +323,7 @@ def test_calibrate_operating_point_manifest_refuses_a_subject_mismatch(tmp_path:
 
     with pytest.raises(ValueError, match="subject"):
         calibration.calibrate_operating_point(
-            _CalStub(subject="a_different_subject"), "catkin",
+            _CalStub(subject="a_different_subject"), "bud_opening",
             str(root / "annotations" / DATES[0]), str(root / "images" / DATES[0]),
             split_manifest_dir=str(out), **_CAL_KWARGS)
 
@@ -416,7 +416,7 @@ def test_calibrate_operating_point_manifest_conflicts_with_group_by(tmp_path: Pa
 
     with pytest.raises(ValueError, match="group_by"):
         calibration.calibrate_operating_point(
-            _CalStub(), "catkin", str(root / "annotations" / DATES[0]),
+            _CalStub(), "bud_opening", str(root / "annotations" / DATES[0]),
             str(root / "images" / DATES[0]), split_manifest_dir=str(out), group_by="stem",
             **kwargs)
 
@@ -432,7 +432,7 @@ def test_calibrate_operating_point_manifest_refuses_an_images_root_mismatch(tmp_
 
     with pytest.raises(ValueError, match="images_root"):
         calibration.calibrate_operating_point(
-            _CalStub(), "catkin", str(root / "annotations" / DATES[0]), str(other_images),
+            _CalStub(), "bud_opening", str(root / "annotations" / DATES[0]), str(other_images),
             split_manifest_dir=str(out), **_CAL_KWARGS)
 
 
@@ -449,7 +449,7 @@ def test_calibrate_operating_point_manifest_requires_images_dir(tmp_path: Path):
 
     with pytest.raises(ValueError, match="images_dir"):
         calibration.calibrate_operating_point(
-            _CalStub(), "catkin", str(root / "annotations" / DATES[0]), None,
+            _CalStub(), "bud_opening", str(root / "annotations" / DATES[0]), None,
             split_manifest_dir=str(out), **kwargs)
 
 
@@ -466,7 +466,7 @@ def test_calibrate_operating_point_manifest_refuses_a_moved_images_root_by_name(
 
     with pytest.raises(ValueError, match="images_root"):
         calibration.calibrate_operating_point(
-            _CalStub(), "catkin", str(root / "annotations" / DATES[0]), str(moved),
+            _CalStub(), "bud_opening", str(root / "annotations" / DATES[0]), str(moved),
             split_manifest_dir=str(out), **_CAL_KWARGS)
 
 
@@ -486,7 +486,7 @@ def test_calibrate_operating_point_refuses_a_checkpoint_bound_to_a_different_man
 
     with pytest.raises(ValueError, match="bound to split manifest"):
         calibration.calibrate_operating_point(
-            bound, "catkin", str(root / "annotations" / DATES[0]),
+            bound, "bud_opening", str(root / "annotations" / DATES[0]),
             str(root / "images" / DATES[0]), split_manifest_dir=str(out), **_CAL_KWARGS)
 
 
@@ -513,7 +513,7 @@ def test_calibrate_operating_point_admits_a_bound_checkpoint_under_its_own_manif
         respellings = [str(out) + os.sep, str(out).replace(os.sep, "/"), os.path.relpath(out)]
         for spelling in respellings:
             _bundle, _dh, _n_excl, evidence = calibration.calibrate_operating_point(
-                bound, "catkin", str(root / "annotations" / DATES[0]),
+                bound, "bud_opening", str(root / "annotations" / DATES[0]),
                 str(root / "images" / DATES[0]), split_manifest_dir=spelling, **_CAL_KWARGS)
             assert evidence["reference_inputs"]["stated_values"]["split_manifest_dir"] == spelling
     finally:
@@ -683,7 +683,7 @@ def test_manifest_calibrations_evidence_earns_a_validated_record_through_export(
             n_images=n_images, objects_per_image=objects_per_image, id_prefix="h", shift=5.0,
             miss_pattern=miss, fp_pattern=fp, score=0.9, fp_score=0.05),
     }
-    bundle = resolve_operating_point(SUBJECT, experiment_id=None, **inputs)
+    bundle = resolve_operating_point("bud_opening", experiment_id=None, **inputs)
     evidence = {
         "resolver": "resolve_operating_point", "inputs": inputs,
         "reference_inputs": {
@@ -720,14 +720,14 @@ def test_manifest_calibrations_evidence_earns_a_validated_record_through_export(
     result = itools.run_inference(
         str(ckpt), images_dir=str(root / "images" / DATES[0]),
         output_dir=str(root / "predictions" / "baseline" / DATES[0]),
-        device="cpu", tile=False, trait=SUBJECT,
+        device="cpu", tile=False, trait="bud_opening",
         calibration_labels_dir=str(root / "annotations" / DATES[0]),
         split_manifest_dir=str(out))
     assert "error" not in result, result
     bucket = result["output_dir"]
 
     stamp = read_operating_point_sidecar(bucket)
-    binding = verify_stamp_binding(stamp, bucket, document="operating_point", trait=SUBJECT)
+    binding = verify_stamp_binding(stamp, bucket, document="operating_point", trait="bud_opening")
     assert binding.ok is True
     assert binding.claimed is True
 
@@ -786,7 +786,7 @@ def test_count_door_round_trip_earns_a_checked_selection_disjointness(tmp_path, 
             miss_pattern=miss, fp_pattern=fp, score=0.9, fp_score=0.05),
         "split_manifest_dir": str(out), "calibration_date": DATES[0],
     }
-    bundle = resolve_operating_point(SUBJECT, experiment_id=experiment_id, **inputs)
+    bundle = resolve_operating_point("bud_opening", experiment_id=experiment_id, **inputs)
     assert bundle.get("conf").gate_evidence["selection_disjointness"]["checked"] is True
     assert not bundle.get("conf").gate_evidence["selection_disjointness"]["leaked_groups"]
     assert not bundle.get("conf").gate_evidence["selection_disjointness"]["leaked_stems"]
@@ -824,14 +824,14 @@ def test_count_door_round_trip_earns_a_checked_selection_disjointness(tmp_path, 
     result = itools.run_inference(
         str(ckpt), images_dir=str(root / "images" / DATES[0]),
         output_dir=str(root / "predictions" / "bound" / DATES[0]),
-        device="cpu", tile=False, trait=SUBJECT,
+        device="cpu", tile=False, trait="bud_opening",
         calibration_labels_dir=str(root / "annotations" / DATES[0]),
         split_manifest_dir=str(out), experiment_id=experiment_id)
     assert "error" not in result, result
     bucket = result["output_dir"]
 
     stamp = read_operating_point_sidecar(bucket)
-    binding = verify_stamp_binding(stamp, bucket, document="operating_point", trait=SUBJECT)
+    binding = verify_stamp_binding(stamp, bucket, document="operating_point", trait="bud_opening")
     assert binding.ok is True
     assert binding.claimed is True
 

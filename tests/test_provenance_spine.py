@@ -198,11 +198,11 @@ def test_draw_splits_manifest_embeds_hash_and_seed(data_dir, tmp_path):
     Image.new("RGB", (640, 480), color=(128, 128, 128)).save(images_dir / "img_004.jpg")
     json_io.write_annotations(
         labels_dir / "img_004.json",
-        [Annotation(subject="catkin", geometry=BBox(288, 216, 352, 264))], 640, 480,
+        [Annotation(subject="bud", geometry=BBox(288, 216, 352, 264))], 640, 480,
     )
 
     out = tmp_path / "splits"
-    result = draw_splits(str(data_dir), output_path=str(out), seed=7, subject="catkin",
+    result = draw_splits(str(data_dir), output_path=str(out), seed=7, subject="bud",
                          train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
     assert result["seed"] == 7
     manifest = ts.read(split_manifest_key(out))
@@ -379,9 +379,9 @@ def test_delivered_tail_treats_a_none_valued_produced_at_key_as_absent(tmp_path)
 
 def test_phenology_columns_include_producer_identity():
     from tcip_mcp.pipelines.postprocessing.phenology import phenology_csv_columns
-    from tests._trait_fixtures import CATKIN
+    from tests._trait_fixtures import BUD_OPENING
 
-    columns = phenology_csv_columns(CATKIN)
+    columns = phenology_csv_columns(BUD_OPENING)
     assert "producer_model_sha256" in columns
     assert "producing_experiment_id" in columns
     assert "validation_record" in columns
