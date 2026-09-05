@@ -119,13 +119,40 @@ def _pre_conform_classified_bucket(dataset_root: Path, *, date: str = "2026-01-0
 
 def _scoped_like_bucket(dataset_root: Path, *, id_map: dict, date: str = "like") -> Path:
     """A fully scoped bucket (a real ``--like`` source): its own stamp already carries the
-    ``(subject, attribute)`` pair and ``id_map``."""
+    ``(subject, attribute)`` pair and ``id_map``, a shape a live classifier run mints, seeded
+    through the same producer, ``operating_point_stamp`` and ``write_sidecar``."""
+    from tcip_mcp.pipelines.resolution import operating_point_stamp, write_sidecar
+
     bucket = dataset_root / "predictions" / "classifier" / date
     value = next(iter(id_map))
     _write_doc(bucket, "imgA",
               [Annotation(subject=SUBJECT, geometry=BBox(0, 0, 10, 10), attributes={ATTRIBUTE: value})])
-    _write_stamp(bucket, _base_stamp(id_map=id_map, experiment_id="exp-like",
-                                     subject=SUBJECT, attribute=ATTRIBUTE))
+    stamp = operating_point_stamp(
+        {"conf": {"value": 0.5}}, validated=False, validated_by=None, tile_size_validated=None,
+        shippable_issues=[], id_map=id_map, trait=ATTRIBUTE, dataset_hash="h",
+        checkpoint="m", checkpoint_sha256="f" * 64, experiment_id="exp-like",
+        images_dir=None, raster_path=None, produced_at="2026-01-01T00:00:00+00:00",
+        subject=SUBJECT, attribute=ATTRIBUTE,
+    )
+    write_sidecar(bucket, stamp)
+    return bucket
+
+
+def _scoped_detector_like_bucket(dataset_root: Path, *, date: str = "like") -> Path:
+    """A fully scoped detector bucket (a real ``--like`` source with no attribute), the shape a
+    live detector run mints, seeded through the same producer."""
+    from tcip_mcp.pipelines.resolution import operating_point_stamp, write_sidecar
+
+    bucket = dataset_root / "predictions" / "detector" / date
+    _write_doc(bucket, "imgA", [Annotation(subject=SUBJECT, geometry=BBox(0, 0, 10, 10))])
+    stamp = operating_point_stamp(
+        {"conf": {"value": 0.5}}, validated=False, validated_by=None, tile_size_validated=None,
+        shippable_issues=[], id_map=DETECTOR_ID_MAP, trait=SUBJECT, dataset_hash="h",
+        checkpoint="m", checkpoint_sha256="f" * 64, experiment_id="exp-detector-like",
+        images_dir=None, raster_path=None, produced_at="2026-01-01T00:00:00+00:00",
+        subject=SUBJECT, attribute=None,
+    )
+    write_sidecar(bucket, stamp)
     return bucket
 
 
@@ -195,6 +222,32 @@ def test_a_sourced_attribute_with_no_subject_refuses_before_any_write(tmp_path):
 
     assert refused is True
     assert any("no subject" in o for o in outcomes), outcomes
+    assert bucket_content_digest(bucket) == before
+    assert module.read_stamp_state(bucket).kind == "unstated"
+
+
+def test_an_experiment_source_answering_neither_subject_nor_attribute_refuses_before_any_write(
+    tmp_path,
+):
+    """A bespoke run's experiment record can honestly answer no scope at all (both keys present,
+    both None): refused by name before any write, rather than admitted as a detector pair naming
+    no object class."""
+    bind_default()
+    module = _load_script()
+    project = tmp_path / "project"
+    dataset_root = tmp_path / "dataset"
+    _register(project, dataset_root)
+    bucket = _pre_conform_classified_bucket(dataset_root)
+    _write_experiment_config("exp-classified", project, {"subject": None, "attribute": None})
+
+    from tcip_mcp.prediction_buckets import bucket_content_digest
+
+    before = bucket_content_digest(bucket)
+    outcomes, refused = module.process_project_root(
+        project, plan=False, operator_subject=None, operator_attribute=None)
+
+    assert refused is True
+    assert any("names no subject" in o for o in outcomes), outcomes
     assert bucket_content_digest(bucket) == before
     assert module.read_stamp_state(bucket).kind == "unstated"
 
@@ -494,6 +547,31 @@ def test_the_like_source_conforms_a_bare_copy(tmp_path):
     assert module.read_stamp_state(bare_copy).kind == "absent"
 
 
+def test_a_detector_like_source_refuses_to_conform_a_bare_copy(tmp_path):
+    """A bare directory this script conforms holds a classified bucket's value-in-subject
+    records: a --like naming a detector bucket (its scope names no attribute) has nothing to move
+    the value under, and refuses by name rather than attempting a rewrite with no attribute."""
+    bind_default()
+    module = _load_script()
+    dataset_root = tmp_path / "dataset"
+    detector_like = _scoped_detector_like_bucket(dataset_root)
+
+    bare_copy = tmp_path / "hand_split" / "calibration"
+    _write_doc(bare_copy, "imgA", [Annotation(subject="healthy", geometry=BBox(0, 0, 10, 10))])
+
+    outcome, refused, id_map, changed = module.conform_bucket(
+        bare_copy, root=None, plan=False, like_dir=detector_like,
+        operator_subject=None, operator_attribute=None, is_bare_named=True,
+    )
+
+    assert refused is True
+    assert "detector bucket" in outcome
+    from tcip_annotation.json_io import read_annotations
+
+    doc = read_annotations(str(bare_copy / "imgA.json"))
+    assert doc[0].subject == "healthy"
+
+
 def test_a_disagreeing_like_id_map_refuses_against_the_bucket_own_recorded_map(tmp_path):
     """``--like`` supplies a vocabulary only for a bare directory or a stamp recording none: a
     bucket whose own stamp already records an ``id_map`` is rewritten against that map, and a
@@ -623,6 +701,118 @@ def test_a_value_keyed_ground_truth_record_is_reported_as_a_candidate(tmp_path):
         project, plan=False, operator_subject=None, operator_attribute=None)
 
     assert any("ground-truth candidate" in o and "healthy" in o for o in outcomes), outcomes
+
+
+def _platform_audit_entries(tool: str = "conform_classified_predictions") -> list[dict]:
+    from tcip_mcp.tools.meta_tools import read_audit_log
+
+    return read_audit_log(scope=None, tool=tool)["entries"]
+
+
+def test_a_bare_like_rewrite_writes_one_audit_entry_with_its_structured_fields(
+    tmp_path, monkeypatch,
+):
+    """A bare directory conformed through --like sits under no dataset root: its one audit entry
+    is filed to the platform log and carries the structured fields rule 8 names, not only the
+    free-text outcome."""
+    import tcip_mcp.audit as audit_module
+
+    platform_root = tmp_path / "platform"
+    platform_root.mkdir()
+    monkeypatch.setattr(audit_module, "AUDIT_ROOT", platform_root)
+    bind_default()
+    module = _load_script()
+    dataset_root = tmp_path / "dataset"
+    scoped = _scoped_like_bucket(dataset_root, id_map=VALUE_ID_MAP, date="source")
+
+    bare_copy = tmp_path / "hand_split" / "calibration"
+    _write_doc(bare_copy, "imgA", [Annotation(subject="healthy", geometry=BBox(0, 0, 10, 10))])
+
+    outcome, refused, _id_map, changed = module.conform_bucket(
+        bare_copy, root=None, plan=False, like_dir=scoped,
+        operator_subject=None, operator_attribute=None, is_bare_named=True,
+    )
+
+    assert refused is False
+    assert changed is True
+    entries = _platform_audit_entries()
+    assert len(entries) == 1
+    entry = entries[0]
+    assert entry["arguments"]["bucket"] == str(bare_copy)
+    assert entry["documents_rewritten"] == 1
+    assert entry["stamp_written"] is False
+    assert (entry["subject"], entry["attribute"]) == (SUBJECT, ATTRIBUTE)
+    assert entry["source"] == f"--like {scoped}"
+    assert "digest_before" not in entry
+
+
+def test_a_classified_rewrite_under_no_dataset_root_writes_one_entry_to_the_platform_log(
+    tmp_path, monkeypatch,
+):
+    """A bucket outside any dataset root's canonical layout (no predictions/images/annotations
+    segment in its path) has no dataset log to file under: the run's own audit entry lands in the
+    platform log, carrying both content digests since this branch rewrites documents.
+
+    Bound to the file backend explicitly: the sqlite backend's own per-root database file would
+    otherwise plant a ``.tcip`` under the bucket the moment its stamp is written, which
+    ``dataset_scope_of``'s own fallback then reads as the bucket carrying its own project state,
+    the same disagreement ``test_conform_registry_experiment_id.py`` binds around for its own
+    corruption test.
+    """
+    import tcip_mcp.audit as audit_module
+
+    monkeypatch.setenv("TCIP_STORE_BACKEND", "file")
+    platform_root = tmp_path / "platform"
+    platform_root.mkdir()
+    monkeypatch.setattr(audit_module, "AUDIT_ROOT", platform_root)
+    bind_default()
+    module = _load_script()
+    bucket = tmp_path / "standalone_run"
+    _write_doc(bucket, "img1", [Annotation(subject="healthy", geometry=BBox(0, 0, 10, 10))])
+    _write_doc(bucket, "img2", [Annotation(subject="diseased", geometry=BBox(5, 5, 15, 15))])
+    _write_stamp(bucket, _base_stamp(id_map=VALUE_ID_MAP))  # no subject/attribute recorded yet
+
+    outcome, refused, id_map, changed = module.conform_bucket(
+        bucket, root=None, plan=False, like_dir=None,
+        operator_subject=SUBJECT, operator_attribute=ATTRIBUTE, is_bare_named=False,
+    )
+
+    assert refused is False
+    assert changed is True
+    assert id_map == VALUE_ID_MAP
+    entries = _platform_audit_entries()
+    assert len(entries) == 1
+    entry = entries[0]
+    assert entry["documents_rewritten"] == 2
+    assert entry["stamp_written"] is True
+    assert (entry["subject"], entry["attribute"]) == (SUBJECT, ATTRIBUTE)
+    assert entry["source"] == "operator statement (--subject/--attribute)"
+    assert entry["digest_before"] != entry["digest_after"]
+
+
+def test_a_refused_bucket_writes_no_audit_entry(tmp_path, monkeypatch):
+    """A bucket this script refuses to conform (here, a --like naming a detector bucket for a
+    bare copy) writes nothing, changed or audited."""
+    import tcip_mcp.audit as audit_module
+
+    platform_root = tmp_path / "platform"
+    platform_root.mkdir()
+    monkeypatch.setattr(audit_module, "AUDIT_ROOT", platform_root)
+    bind_default()
+    module = _load_script()
+    dataset_root = tmp_path / "dataset"
+    detector_like = _scoped_detector_like_bucket(dataset_root)
+    bare_copy = tmp_path / "hand_split" / "calibration"
+    _write_doc(bare_copy, "imgA", [Annotation(subject="healthy", geometry=BBox(0, 0, 10, 10))])
+
+    outcome, refused, _id_map, changed = module.conform_bucket(
+        bare_copy, root=None, plan=False, like_dir=detector_like,
+        operator_subject=None, operator_attribute=None, is_bare_named=True,
+    )
+
+    assert refused is True
+    assert changed is False
+    assert _platform_audit_entries() == []
 
 
 def test_bucket_dirs_under_agrees_with_the_shared_walk_over_a_dot_prefixed_date_directory(tmp_path):
