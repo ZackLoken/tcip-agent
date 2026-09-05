@@ -114,6 +114,31 @@ def test_doctor_admits_a_confirmed_negative_under_dated_labels_flat_images(tmp_p
     assert "not a confirmed negative" not in res.stdout
 
 
+def test_doctor_reports_a_stem_collision_and_completes(tmp_path):
+    """A bucket already holding two identities for one stem key refuses at every reader; the
+    doctor names it as a finding instead of crashing on the exception."""
+    import tcip_store as ts
+    from tcip_store.file_backend import FileBackend
+
+    root = tmp_path / "proj"
+    images = root / "images" / "2026-02-11"
+    images.mkdir(parents=True)
+    ann = root / "annotations" / "2026-02-11"
+    ann.mkdir(parents=True)
+    write_registry(root / "classes.json", ClassRegistry(subjects=(Subject(name="bloom"),)))
+    Image.new("RGB", (32, 32)).save(images / "foo.jpg")
+    Image.new("RGB", (32, 32)).save(images / "foo.png")
+    json_io.write_annotations(ann / "foo.json", [], 32, 32, keep_empty=True)
+
+    ts.bind(FileBackend())
+
+    res = _run(root, file_layout=True)
+
+    assert res.returncode == 2
+    assert "foo.jpg" in res.stdout and "foo.png" in res.stdout
+    assert "Traceback" not in res.stderr
+
+
 def test_doctor_flags_a_trait_spec_that_failed_to_load(tmp_path):
     """A dropped trait spec reads identically to no trait at all from the registry alone;
     doctor.py is where the agent catches the difference at session start."""

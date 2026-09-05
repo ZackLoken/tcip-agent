@@ -41,7 +41,9 @@ from tcip_mcp.dataset_layout import (
     prediction_root,
     subjects_with_labels,
 )
-from tcip_mcp.pipelines.image_utils import list_logical_images, logical_image_name
+from tcip_mcp.pipelines.image_utils import (
+    AmbiguousImageStem, list_logical_images, logical_image_name,
+)
 from tcip_mcp.web_client import canvas_open_binding_key
 from tcip_web.label_annotations_cache import cached_label_annotations
 from tcip_web.paths import assert_path_allowed
@@ -253,9 +255,12 @@ async def select_dataset(req: SelectionRequest) -> dict:
         if date_dir.is_dir():
             # Sorted display names, band groups folded to one entry per capture, through the
             # one naming primitive gui_tools' own by-name callers resolve the same capture under.
-            image_list = sorted(
-                logical_image_name(src) for src in list_logical_images(date_dir).values()
-            )
+            try:
+                image_list = sorted(
+                    logical_image_name(src) for src in list_logical_images(date_dir).values()
+                )
+            except AmbiguousImageStem as exc:
+                raise HTTPException(400, str(exc)) from exc
 
     # Canonical layout (see tcip_mcp.dataset_layout): the single source of truth shared with the
     # agent tools, so agent writes land where the GUI reads. The browser composes none of these.

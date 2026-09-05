@@ -249,6 +249,26 @@ def test_dataset_select_populates_state(client: TestClient, dataset_root: Path, 
     assert sel["annotations_dir"].replace("\\", "/").endswith("annotations/2-11-26")
 
 
+def test_dataset_select_returns_400_for_a_stem_collision(
+    client: TestClient, dataset_root: Path, tmp_path: Path
+) -> None:
+    project = tmp_path / "proj"
+    project.mkdir()
+    Image.new("RGB", (100, 80)).save(dataset_root / "images" / "2-11-26" / "IMG_0000.PNG")
+
+    resp = client.post(
+        "/api/dataset/select",
+        json={
+            "project_root": str(project),
+            "dataset_root": str(dataset_root),
+            "subject": "catkin",
+            "date": "2-11-26",
+            "model_name": "baseline",
+        },
+    )
+    assert resp.status_code == 400
+
+
 def test_dataset_select_advisory_reflects_actual_labels(
     client: TestClient, dataset_root: Path, tmp_path: Path
 ) -> None:
@@ -500,6 +520,23 @@ def test_images_not_found(client: TestClient, tmp_path: Path) -> None:
     assert resp.status_code == 404
 
 
+def test_images_serve_returns_400_for_a_stem_collision(client: TestClient, dataset_root: Path) -> None:
+    img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
+    Image.new("RGB", (100, 80)).save(dataset_root / "images" / "2-11-26" / "IMG_0000.PNG")
+
+    resp = client.get("/api/images", params={"path": str(img_path)})
+    assert resp.status_code == 400
+    assert "IMG_0000.JPG" in resp.text and "IMG_0000.PNG" in resp.text
+
+
+def test_images_bands_returns_400_for_a_stem_collision(client: TestClient, dataset_root: Path) -> None:
+    img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
+    Image.new("RGB", (100, 80)).save(dataset_root / "images" / "2-11-26" / "IMG_0000.PNG")
+
+    resp = client.get("/api/images/bands", params={"path": str(img_path)})
+    assert resp.status_code == 400
+
+
 # ── /api/annotate ────────────────────────────────────────────────────────
 
 
@@ -534,6 +571,20 @@ def test_annotate_load_and_save_roundtrip(client: TestClient, dataset_root: Path
     # polygon as `rings`: a stored shape can be occlusion-split, so it is never flattened to one.
     assert sum("bbox" in a for a in anns) == 1
     assert sum("rings" in a for a in anns) == 1
+
+
+def test_annotate_load_returns_400_for_a_stem_collision(
+    client: TestClient, dataset_root: Path, tmp_path: Path,
+) -> None:
+    img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
+    Image.new("RGB", (100, 80)).save(dataset_root / "images" / "2-11-26" / "IMG_0000.PNG")
+    label_path = tmp_path / "labels" / "IMG_0000.json"
+
+    resp = client.get(
+        "/api/annotate/labels",
+        params={"image_path": str(img_path), "label_path": str(label_path)},
+    )
+    assert resp.status_code == 400
 
 
 def test_annotate_load_refuses_an_unreadable_label(
@@ -793,6 +844,31 @@ def _shard_state(state_dir: Path, img_name: str) -> dict:
 def _audit_entries(root: Path) -> list[dict]:
     """Every audit entry recorded in the log ``root`` names, through the seam."""
     return list(tcip_store.read_log(audit_log_key(root)).records)
+
+
+def test_review_matches_returns_400_for_a_stem_collision(
+    client: TestClient, dataset_root: Path, tmp_path: Path,
+) -> None:
+    img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
+    Image.new("RGB", (100, 80)).save(dataset_root / "images" / "2-11-26" / "IMG_0000.PNG")
+    gt = tmp_path / "gt.json"
+    _write_gt(gt, [(40, 32, 60, 48)])
+    pred = tmp_path / "pred.json"
+    _write_pred(pred, [(40, 32, 60, 48, 0.9)])
+
+    resp = client.post(
+        "/api/review/matches",
+        json={
+            "dataset_root": str(dataset_root),
+            "image_name": "IMG_0000.JPG",
+            "image_path": str(img_path),
+            "gt_path": str(gt),
+            "pred_path": str(pred),
+            "iou_threshold": 0.3,
+            "conf_threshold": 0.1,
+        },
+    )
+    assert resp.status_code == 400
 
 
 def test_review_matches_end_to_end(client: TestClient, dataset_root: Path, tmp_path: Path) -> None:
