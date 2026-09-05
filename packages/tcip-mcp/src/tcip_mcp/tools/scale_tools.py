@@ -248,7 +248,6 @@ def calibrate_physical_scale(
 
     n_cal_stems = len(result["gate_evidence"].get("calibration_implied_scales") or {})
     stamp = {
-        "schema_version": 2,
         "operating_point": {"scale": {
             "name": f"scale_{unit}_per_px", "value": result["value"], "unit": unit,
             "source": "derived",

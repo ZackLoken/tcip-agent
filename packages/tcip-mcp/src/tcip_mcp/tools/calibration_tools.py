@@ -416,7 +416,6 @@ def calibrate_scalar_operating_point(
     checkpoint_sha256 = resolve_model_identity(
         checkpoint, experiment_id=experiment_id)["sha256"]
     stamp = {
-        "schema_version": 2,
         "operating_point": {task: {"validated_against": result["validated_against"],
                                    "criterion": criterion}},
         "validated": result["passed"],
