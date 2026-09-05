@@ -273,6 +273,9 @@ def sampled_band_ranges(source: "str | Path | BandGroupRef", num_channels: int, 
             reservoir, seen = _reservoir_take(reservoir, seen, flat, reservoir_size, rng)
             covered += rect.width * rect.height
         fraction = covered / float(src.width * src.height)
+    # sample_windows always returns at least one window for a raster with positive dimensions
+    # (guaranteed by open_raster having opened it), so the loop above ran at least once.
+    assert lows is not None and highs is not None and reservoir is not None
     sampling = raster_source.WindowSampling(
         tuple((label, rect) for rect in windows), int(seed), float(fraction))
     return SampledBandRanges(
