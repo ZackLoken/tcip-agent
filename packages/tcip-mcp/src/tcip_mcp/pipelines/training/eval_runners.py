@@ -242,7 +242,6 @@ def run_full_frame_evaluation(
         _reg, _gt_id_map = resolve_registry_id_map(lbl_dir, subject, attribute)
     # Same negative rail training uses: an image with no label record has no GT, so scoring it
     # would turn every correct detection into a false positive and drag down this delivery number.
-    from tcip_mcp.pipelines.data.datasets import IMAGE_EXTS
     from tcip_mcp.pipelines.data.label_queries import image_name_map, trainable_stems
 
     names = image_name_map(img_dir)
@@ -252,10 +251,10 @@ def run_full_frame_evaluation(
             lbl_dir, img_dir, subject=subject, date=date, contradicted_out=contradicted_negatives)
         paths = [img_dir / names[s] for s in keep if s in names]
     else:
-        # No label store, so no rail to apply and no ground truth either. Filtering to nothing here
-        # would refuse a call that is merely metric-less, not wrong.
+        # No label store, so no rail to apply and no ground truth either; reuses names (already
+        # the shared bucket enumeration) rather than a second, raw directory walk.
         sample_counts = {}
-        paths = sorted(p for p in img_dir.iterdir() if p.suffix.lower() in IMAGE_EXTS)
+        paths = sorted(img_dir / filename for filename in names.values())
     per_image: list[dict] = []
     n_excluded_incomplete = 0
     for p in paths:
