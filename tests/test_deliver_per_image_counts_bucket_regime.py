@@ -690,12 +690,13 @@ def test_bucket_regime_refuses_a_non_dict_image_filenames_in_the_stamp(tmp_path)
     assert "image_filenames" in r["error"]
 
 
-def test_live_regime_success_response_discloses_stale_document_fallback(tmp_path, monkeypatch):
-    """A verdict-free bucket already holding a document from an earlier publish, whose stem this
-    run's fresh stamp map does not name, still gets counted (_bucket_csv_rows reads every document
-    on disk) but that row's image cell falls back to the bare stem; the success response discloses
-    the fallback through image_note rather than reading as a filename it is not."""
+def test_live_regime_second_publish_into_a_document_holding_bucket_refuses(tmp_path, monkeypatch):
+    """A verdict-free bucket already holding a document from an earlier publish refuses a second
+    live publish outright, naming the document count and a suggested fresh bucket; the first
+    publish's own document and stamp are unchanged afterwards."""
     import tcip_mcp.tools.inference_tools as itools
+    from tcip_mcp.pipelines.resolution import read_operating_point_sidecar
+    from tcip_mcp.prediction_buckets import bucket_content_digest
 
     bucket = tmp_path / "ds" / "predictions" / "baseline" / "2026-01-01"
     monkeypatch.setattr(itools, "_run_inference_verified",
@@ -704,7 +705,9 @@ def test_live_regime_success_response_discloses_stale_document_fallback(tmp_path
                                    str(tmp_path / "first.csv"), trait=fx.COUNT_TRAIT,
                                    calibration_labels_dir=str(tmp_path), predictions_dir=str(bucket))
     assert "error" not in first, first
-    assert "image_note" not in first
+
+    digest_before = bucket_content_digest(bucket)
+    stamp_before = read_operating_point_sidecar(bucket)
 
     monkeypatch.setattr(itools, "_run_inference_verified",
                         lambda *a, **kw: _earned_run_result(tmp_path, stem="b"))
@@ -712,16 +715,47 @@ def test_live_regime_success_response_discloses_stale_document_fallback(tmp_path
                                     str(tmp_path / "second.csv"), trait=fx.COUNT_TRAIT,
                                     calibration_labels_dir=str(tmp_path),
                                     predictions_dir=str(bucket))
-    assert "error" not in second, second
-    assert "['a']" in second["image_note"]
-    rows = {row["image"] for row in csv.DictReader((tmp_path / "second.csv").open())}
-    assert "a" in rows          # the stale document's cell fell back to the bare stem
-    assert "b.png" in rows
+    assert "error" in second
+    assert second["document_stem_count"] == 1
+    from pathlib import Path
+    assert Path(second["suggested_bucket"]).parent.name == "baseline@r2"
+    assert not (tmp_path / "second.csv").exists()
+    assert bucket_content_digest(bucket) == digest_before
+    assert read_operating_point_sidecar(bucket) == stamp_before
 
 
-def test_live_regime_gate_refusal_discloses_stale_document_fallback(tmp_path, monkeypatch):
-    """The same stale-document fallback, but the second run's own CSV delivery gate refuses
-    (unvalidated, unacknowledged): the DeliveryRefused refusal dict still carries image_note."""
+def test_live_regime_second_publish_refuses_on_documents_even_toward_an_unvalidated_run(
+    tmp_path, monkeypatch,
+):
+    """The same document refusal fires even when the second run's own operating point would not
+    have cleared the CSV's delivery gate: the document check runs first, before the pass or the
+    gate, so the refusal is the document one, not the gate's."""
+    import tcip_mcp.tools.inference_tools as itools
+    from tcip_mcp.prediction_buckets import bucket_content_digest
+
+    bucket = tmp_path / "ds" / "predictions" / "baseline" / "2026-01-01"
+    monkeypatch.setattr(itools, "_run_inference_verified",
+                        lambda *a, **kw: _earned_run_result(tmp_path, stem="a"))
+    first = itools.deliver_per_image_counts(_dummy_checkpoint(tmp_path), str(tmp_path),
+                                   str(tmp_path / "first.csv"), trait=fx.COUNT_TRAIT,
+                                   calibration_labels_dir=str(tmp_path), predictions_dir=str(bucket))
+    assert "error" not in first, first
+    digest_before = bucket_content_digest(bucket)
+
+    monkeypatch.setattr(itools, "_run_inference_verified",
+                        lambda *a, **kw: _unvalidated_run_result(stem="b"))
+    r = itools.deliver_per_image_counts(_dummy_checkpoint(tmp_path), str(tmp_path),
+                               str(tmp_path / "second.csv"), trait=fx.COUNT_TRAIT,
+                               predictions_dir=str(bucket))
+    assert "error" in r
+    assert r["document_stem_count"] == 1
+    assert bucket_content_digest(bucket) == digest_before
+
+
+def test_live_regime_second_publish_refuses_before_the_checkpoint_is_read(tmp_path, monkeypatch):
+    """The document refusal runs at bucket resolution, ahead of the checkpoint load: a second
+    call into a document-holding bucket never reaches load_registered_checkpoint."""
+    import tcip_mcp.model_registry as model_registry_mod
     import tcip_mcp.tools.inference_tools as itools
 
     bucket = tmp_path / "ds" / "predictions" / "baseline" / "2026-01-01"
@@ -732,13 +766,21 @@ def test_live_regime_gate_refusal_discloses_stale_document_fallback(tmp_path, mo
                                    calibration_labels_dir=str(tmp_path), predictions_dir=str(bucket))
     assert "error" not in first, first
 
-    monkeypatch.setattr(itools, "_run_inference_verified",
-                        lambda *a, **kw: _unvalidated_run_result(stem="b"))
-    r = itools.deliver_per_image_counts(_dummy_checkpoint(tmp_path), str(tmp_path),
-                               str(tmp_path / "second.csv"), trait=fx.COUNT_TRAIT,
-                               predictions_dir=str(bucket))
-    assert "error" in r
-    assert "['a']" in r["image_note"]
+    calls = {"n": 0}
+    real = model_registry_mod.load_registered_checkpoint
+
+    def _counting(path, *a, **kw):
+        calls["n"] += 1
+        return real(path, *a, **kw)
+
+    monkeypatch.setattr(model_registry_mod, "load_registered_checkpoint", _counting)
+
+    second = itools.deliver_per_image_counts(_dummy_checkpoint(tmp_path), str(tmp_path),
+                                    str(tmp_path / "second.csv"), trait=fx.COUNT_TRAIT,
+                                    predictions_dir=str(bucket))
+    assert "error" in second
+    assert second["document_stem_count"] == 1
+    assert calls["n"] == 0
 
 
 def test_bucket_regime_reads_a_real_published_bucket_with_no_torch_import(tmp_path):

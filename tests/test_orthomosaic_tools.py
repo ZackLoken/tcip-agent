@@ -201,11 +201,11 @@ def test_a_second_orthomosaic_export_against_a_completed_experiment_refuses_befo
     assert not out2.exists()
 
 
-def test_a_same_path_orthomosaic_export_against_a_completed_experiment_admits_the_second_run(
+def test_a_same_path_orthomosaic_export_against_a_completed_experiment_refuses_on_documents(
         tmp_path, monkeypatch):
-    """A rail must admit valid work: re-exporting into the same raster bucket path records the
-    same lineage value the completed experiment already holds, so the additive lock's same-value
-    conjunct admits it rather than refusing a legitimate re-run."""
+    """The completed experiment's raster bucket already holds the first run's document: a
+    second export into the same path refuses on the document predicate at resolution, before the
+    pointer's own same-value conjunct is ever reached."""
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path / "proj"))
     (tmp_path / "proj" / ".tcip" / "state").mkdir(parents=True, exist_ok=True)
 
@@ -229,7 +229,42 @@ def test_a_same_path_orthomosaic_export_against_a_completed_experiment_admits_th
     r2 = run_inference(ckpt, output_dir=str(out), raster_path=str(raster_path),
                             conf_threshold=0.0, tile_size=TILE, overlap=0.2,
                             experiment_id="expOrthoSame")
-    assert "error" not in r2, r2
+    assert "error" in r2
+    assert r2["document_stem_count"] == 1
+
+
+def test_raster_regime_refuses_a_second_export_into_a_document_holding_bucket(
+        tmp_path, monkeypatch):
+    """Two raster exports into one bucket, with no experiment and no verdict: the second refuses
+    naming the document count and a suggested fresh bucket, and the first bucket's document is
+    unchanged. The suggested bucket, once written into, admits a real re-run."""
+    from pathlib import Path
+
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path / "proj"))
+    (tmp_path / "proj" / ".tcip" / "state").mkdir(parents=True, exist_ok=True)
+
+    raster_path = tmp_path / "mosaic.tif"
+    _write_geo_raster(raster_path)
+    ckpt = _bespoke_detection_checkpoint(tmp_path)
+
+    from tcip_mcp.tools.inference_tools import run_inference
+
+    out = tmp_path / "preds"
+    r1 = run_inference(ckpt, output_dir=str(out), raster_path=str(raster_path),
+                            conf_threshold=0.0, tile_size=TILE, overlap=0.2)
+    assert "error" not in r1, r1
+    first_doc = (out / "mosaic.json").read_bytes()
+
+    r2 = run_inference(ckpt, output_dir=str(out), raster_path=str(raster_path),
+                            conf_threshold=0.0, tile_size=TILE, overlap=0.2)
+    assert "error" in r2
+    assert r2["document_stem_count"] == 1
+    assert (out / "mosaic.json").read_bytes() == first_doc
+
+    r3 = run_inference(ckpt, output_dir=str(r2["suggested_bucket"]), raster_path=str(raster_path),
+                            conf_threshold=0.0, tile_size=TILE, overlap=0.2)
+    assert "error" not in r3, r3
+    assert Path(r3["output_dir"]) == Path(r2["suggested_bucket"])
 
 
 def test_run_inference_raster_refuses_missing_checkpoint_cleanly(tmp_path, monkeypatch):

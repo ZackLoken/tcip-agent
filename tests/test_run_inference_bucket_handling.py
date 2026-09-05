@@ -181,11 +181,12 @@ def test_a_second_image_regime_export_against_a_completed_experiment_refuses_bef
     assert not out2.exists()
 
 
-def test_a_same_path_image_regime_export_against_a_completed_experiment_admits_the_second_run(
+def test_a_same_path_image_regime_export_against_a_completed_experiment_refuses_on_documents(
         tmp_path, monkeypatch):
-    """A rail must admit valid work: re-exporting into the same bucket path records the same
-    lineage value the completed experiment already holds, so the additive lock's same-value
-    conjunct admits it rather than refusing a legitimate re-run."""
+    """The completed experiment's bucket already holds the first run's document: a second run
+    into the same path refuses on the document predicate at resolution, before the pointer's own
+    same-value conjunct is ever reached (a redirect or a suggestion has nowhere to go either,
+    since the pointer refuses any other path for a terminal experiment)."""
     ckpt = tmp_path / "m.pt"
     ckpt.write_bytes(b"stub")
     images_dir = tmp_path / "images"
@@ -207,7 +208,75 @@ def test_a_same_path_image_regime_export_against_a_completed_experiment_admits_t
 
     r2 = run_inference(str(ckpt), str(images_dir), output_dir=str(out), tile=False,
                        experiment_id="expImgSame")
+    assert "error" in r2
+    assert r2["document_stem_count"] == 1
+
+
+def test_a_same_path_image_regime_export_against_a_completed_experiment_admits_via_an_empty_first_pass(
+        tmp_path, monkeypatch):
+    """A rail must admit valid work: a first run whose images_dir enumerates to no image
+    publishes a stamp and no document and still records the lineage pointer; once the experiment
+    completes, a second run in place over the real images is admitted, by the document predicate
+    (the bucket holds no document yet) and by the pointer's own same-value conjunct (the recorded
+    path is unchanged)."""
+    from pathlib import Path
+
+    ckpt = tmp_path / "m.pt"
+    ckpt.write_bytes(b"stub")
+    empty_images_dir = tmp_path / "empty_images"
+    empty_images_dir.mkdir()
+    real_images_dir = tmp_path / "images"
+    real_images_dir.mkdir()
+    Image.new("RGB", (100, 100), (120, 120, 120)).save(real_images_dir / "img.png")
+    _fake_predictor(monkeypatch)
+
+    from tcip_mcp.experiments import create_experiment, update_status
+    create_experiment("expImgEmptyFirst", {"model_source": {"builder": "x:y"}})
+    update_status("expImgEmptyFirst", "running")
+
+    from tcip_mcp.tools.inference_tools import run_inference
+
+    out = tmp_path / "out"
+    r1 = run_inference(str(ckpt), str(empty_images_dir), output_dir=str(out), tile=False,
+                       experiment_id="expImgEmptyFirst")
+    assert "error" not in r1, r1
+    assert r1["image_count"] == 0
+    assert not (out / "img.json").exists()
+    update_status("expImgEmptyFirst", "completed")
+
+    r2 = run_inference(str(ckpt), str(real_images_dir), output_dir=str(out), tile=False,
+                       experiment_id="expImgEmptyFirst")
     assert "error" not in r2, r2
+    assert Path(r2["output_dir"]) == out
+    assert (out / "img.json").is_file()
+
+
+def test_a_run_over_an_empty_images_directory_admits_a_second_run_in_place(tmp_path, monkeypatch):
+    """A run whose images_dir enumerates to no image publishes a stamp and no document, so a
+    second, real run into the same output_dir is admitted: the document predicate's boundary is
+    holds documents, not was published before."""
+    from pathlib import Path
+
+    ckpt = tmp_path / "m.pt"
+    ckpt.write_bytes(b"stub")
+    empty_images_dir = tmp_path / "empty_images"
+    empty_images_dir.mkdir()
+    real_images_dir = tmp_path / "images"
+    real_images_dir.mkdir()
+    Image.new("RGB", (100, 100), (120, 120, 120)).save(real_images_dir / "img.png")
+    _fake_predictor(monkeypatch)
+
+    from tcip_mcp.tools.inference_tools import run_inference
+
+    out = tmp_path / "out"
+    r1 = run_inference(str(ckpt), str(empty_images_dir), output_dir=str(out), tile=False)
+    assert "error" not in r1, r1
+    assert r1["image_count"] == 0
+    assert not (out / "img.json").exists()
+
+    r2 = run_inference(str(ckpt), str(real_images_dir), output_dir=str(out), tile=False)
+    assert "error" not in r2, r2
+    assert Path(r2["output_dir"]) == out
     assert (out / "img.json").is_file()
 
 
@@ -465,3 +534,162 @@ def test_resume_and_overwrite_together_refuse_by_name(tmp_path):
 
     assert "error" in result
     assert "resume=True" in result["error"] and "overwrite=True" in result["error"]
+
+
+# ── prediction-document immutability ────────────────────────────────────────
+
+
+def test_run_inference_refuses_a_second_publish_into_a_document_holding_bucket(
+    tmp_path, monkeypatch,
+):
+    """Two runs into one output_dir under a dataset root, with no experiment: the second refuses
+    naming the document count and the suggested @r2 path, before the checkpoint is read and
+    before any pass runs, leaving the first bucket's own documents and stamp unchanged. The
+    suggested bucket, once written into, admits a real re-run."""
+    from pathlib import Path
+
+    import tcip_mcp.model_registry as model_registry_mod
+    from tcip_mcp.dataset_layout import prediction_dir
+    from tcip_mcp.pipelines.resolution import read_operating_point_sidecar
+    from tcip_mcp.prediction_buckets import bucket_content_digest
+    from tcip_mcp.tools.inference_tools import run_inference
+
+    dataset_root = tmp_path / "dataset"
+    images_dir = dataset_root / "images" / "2026-01-01"
+    images_dir.mkdir(parents=True)
+    Image.new("RGB", (100, 100), (120, 120, 120)).save(images_dir / "img.png")
+    out = prediction_dir(dataset_root, "baseline", "2026-01-01")
+
+    checkpoint_calls = {"n": 0}
+    real_stub = model_registry_mod.load_registered_checkpoint
+
+    def _counting_stub(path, *a, **kw):
+        checkpoint_calls["n"] += 1
+        return real_stub(path, *a, **kw)
+
+    monkeypatch.setattr(model_registry_mod, "load_registered_checkpoint", _counting_stub)
+
+    predict_calls = {"n": 0}
+
+    class FakePredictor:
+        def __init__(self, checkpoint_path=None, **kwargs):
+            pass
+
+        def predict_batch(self, paths, **kw):
+            predict_calls["n"] += 1
+            return [{"image": p, "width": 100, "height": 100,
+                     "boxes": [[10.0, 10.0, 30.0, 30.0]], "scores": [0.9], "labels": [1], "count": 1}
+                    for p in paths]
+
+    monkeypatch.setattr(
+        "tcip_mcp.pipelines.inference.generic_predictor.GenericPredictor", FakePredictor)
+
+    ckpt = _ckpt(tmp_path)
+    r1 = run_inference(ckpt, str(images_dir), output_dir=str(out), tile=False)
+    assert "error" not in r1, r1
+    assert checkpoint_calls["n"] == 1
+    assert predict_calls["n"] == 1
+
+    digest_before = bucket_content_digest(out)
+    stamp_before = read_operating_point_sidecar(out)
+
+    r2 = run_inference(ckpt, str(images_dir), output_dir=str(out), tile=False)
+    assert "error" in r2
+    assert r2["document_stem_count"] == 1
+    assert Path(r2["suggested_bucket"]).parent.name == "baseline@r2"
+    assert not Path(r2["suggested_bucket"]).exists()
+    assert checkpoint_calls["n"] == 1  # unreached on the refused call
+    assert predict_calls["n"] == 1
+
+    assert bucket_content_digest(out) == digest_before
+    assert read_operating_point_sidecar(out) == stamp_before
+
+    # The admitting case: the suggested bucket is free of both a verdict and a document.
+    r3 = run_inference(ckpt, str(images_dir), output_dir=str(r2["suggested_bucket"]), tile=False)
+    assert "error" not in r3, r3
+    assert Path(r3["output_dir"]) == Path(r2["suggested_bucket"])
+
+
+def test_run_inference_no_dataset_root_pair_refuses_through_the_shared_resolver(
+    tmp_path, monkeypatch,
+):
+    """The no-dataset-root branch resolves through the same resolve_writable_bucket every other
+    branch does, not a second, hand-built resolution: a spy on it proves it is reached, and the
+    second run over the same bucket refuses on the document the first run left."""
+    import tcip_mcp.prediction_buckets as buckets_mod
+    from tcip_mcp.tools.inference_tools import run_inference
+
+    platform_root = tmp_path / "platform"
+    (platform_root / ".tcip" / "state").mkdir(parents=True)
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(platform_root))
+
+    images_dir = tmp_path / "captures"
+    images_dir.mkdir()
+    Image.new("RGB", (100, 100), (120, 120, 120)).save(images_dir / "img.png")
+    _fake_predictor(monkeypatch)
+    ckpt = _ckpt(tmp_path)
+
+    out = tmp_path / "scratch_preds"
+    r1 = run_inference(ckpt, str(images_dir), output_dir=str(out), tile=False)
+    assert "error" not in r1, r1
+    assert r1["verdict_guard_operative"] is False
+
+    calls = {"n": 0}
+    real_resolve = buckets_mod.resolve_writable_bucket
+
+    def _spy_resolve(*a, **kw):
+        calls["n"] += 1
+        return real_resolve(*a, **kw)
+
+    monkeypatch.setattr(buckets_mod, "resolve_writable_bucket", _spy_resolve)
+
+    r2 = run_inference(ckpt, str(images_dir), output_dir=str(out), tile=False)
+    assert "error" in r2
+    assert r2["document_stem_count"] == 1
+    assert calls["n"] == 1
+
+
+def test_dry_run_previews_the_document_refusal(tmp_path, monkeypatch):
+    """A preview previews the same document refusal a real call would hit, never a bucket a real
+    call would in fact refuse to write into."""
+    from tcip_mcp.dataset_layout import prediction_dir
+    from tcip_mcp.tools.inference_tools import run_inference
+
+    dataset_root = tmp_path / "dataset"
+    images_dir = dataset_root / "images" / "2026-01-01"
+    images_dir.mkdir(parents=True)
+    Image.new("RGB", (100, 100), (120, 120, 120)).save(images_dir / "img.png")
+    out = prediction_dir(dataset_root, "baseline", "2026-01-01")
+    _fake_predictor(monkeypatch)
+    ckpt = _ckpt(tmp_path)
+
+    r1 = run_inference(ckpt, str(images_dir), output_dir=str(out), tile=False)
+    assert "error" not in r1, r1
+
+    preview = run_inference(ckpt, output_dir=str(out), dry_run=True)
+    assert "error" in preview
+    assert preview["document_stem_count"] == 1
+
+
+def test_overwrite_true_still_refuses_a_document_holding_bucket_with_no_verdicts(
+    tmp_path, monkeypatch,
+):
+    """overwrite=True never rescues the document refusal: it only ever changes what happens on a
+    verdict, never on a document with none."""
+    from tcip_mcp.dataset_layout import prediction_dir
+    from tcip_mcp.tools.inference_tools import run_inference
+
+    dataset_root = tmp_path / "dataset"
+    images_dir = dataset_root / "images" / "2026-01-01"
+    images_dir.mkdir(parents=True)
+    Image.new("RGB", (100, 100), (120, 120, 120)).save(images_dir / "img.png")
+    out = prediction_dir(dataset_root, "baseline", "2026-01-01")
+    _fake_predictor(monkeypatch)
+    ckpt = _ckpt(tmp_path)
+
+    r1 = run_inference(ckpt, str(images_dir), output_dir=str(out), tile=False)
+    assert "error" not in r1, r1
+
+    r2 = run_inference(ckpt, str(images_dir), output_dir=str(out), tile=False, overwrite=True)
+    assert "error" in r2
+    assert r2["document_stem_count"] == 1
