@@ -10,6 +10,8 @@ from __future__ import annotations
 import inspect
 import logging
 import math
+from collections.abc import Sequence
+from typing import cast
 
 import torch
 from torch.utils.data import Sampler, WeightedRandomSampler as _TorchWeightedRandom
@@ -138,13 +140,16 @@ class WeightedRandomSampler(Sampler):
         dist = dataset.class_distribution
         n = len(dataset)
         if not dist:
+            # torch's own stub types weights as Sequence[float]; a Tensor is what the
+            # constructor actually accepts and converts internally.
             self._sampler = _TorchWeightedRandom(
-                torch.ones(n), num_samples=n, replacement=True
+                cast(Sequence[float], torch.ones(n)), num_samples=n, replacement=True
             )
             return
 
         weights = ClassBalancedSampler._compute_weights(dataset, dist, class_key)
-        self._sampler = _TorchWeightedRandom(weights, num_samples=n, replacement=True)
+        self._sampler = _TorchWeightedRandom(
+            cast(Sequence[float], weights), num_samples=n, replacement=True)
 
     def __iter__(self):
         return iter(self._sampler)
@@ -253,7 +258,7 @@ class TileLocalitySampler(Sampler):
         rows_by_stem: dict[str, dict[int, list[int]]] = {}
         for idx, (stem, _tile_x, tile_y) in enumerate(tile_entries):
             rows_by_stem.setdefault(stem, {}).setdefault(int(tile_y), []).append(idx)
-        pitches = []
+        pitches: list[int] = []
         for rows in rows_by_stem.values():
             ys = sorted(rows)
             pitches.extend(b - a for a, b in zip(ys, ys[1:]))
@@ -303,6 +308,9 @@ class TileLocalitySampler(Sampler):
         lanes: list[list[int]] = [[] for _ in range(self._lane_count)]
         for i, band in enumerate(bands):
             lanes[i % self._lane_count].extend(band)
+        # __init__ already refuses a lane_count > 1 with no batch_size; this branch is only
+        # reached when lane_count > 1 (the <= 1 case returns above).
+        assert self._batch_size is not None
         return iter(_interleave_lanes(lanes, self._batch_size))
 
     def __len__(self) -> int:
