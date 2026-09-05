@@ -213,7 +213,9 @@ class RasterSource(Protocol):
     height: int
     num_channels: int
     dtype: np.dtype
-    resident_bytes: int
+
+    @property
+    def resident_bytes(self) -> int: ...
 
     def read_region(self, rect: Rect, *,
                     target_size: tuple[int, int] | None = None) -> tuple[np.ndarray, ReadSpec]: ...
@@ -240,6 +242,12 @@ class _ClosableSource:
 
     def _release(self) -> None:
         """Drop whatever this backend holds open. Called once, by :meth:`close`."""
+
+    def read_region(self, rect: Rect, *,
+                    target_size: tuple[int, int] | None = None) -> tuple[np.ndarray, "ReadSpec"]:
+        """Return ``([H, W, C] pixels, ReadSpec)`` for ``rect``. Every subclass provides its own;
+        declared here only so :meth:`read_window` can call it through ``self``."""
+        raise NotImplementedError
 
     def read_window(self, y0: int, y1: int, x0: int, x1: int) -> np.ndarray:
         """The pixel window ``[y0:y1, x0:x1]``, in the row-first argument order the tiled
@@ -474,7 +482,7 @@ class _ArraySource(_ClosableSource):
     _backend = "array"
 
     def _describe(self, array: np.ndarray) -> None:
-        self._array = array
+        self._array: np.ndarray | None = array
         self.height = int(array.shape[0])
         self.width = int(array.shape[1])
         self.num_channels = int(array.shape[2]) if array.ndim > 2 else 1
@@ -482,10 +490,12 @@ class _ArraySource(_ClosableSource):
 
     @property
     def resident_bytes(self) -> int:
+        assert self._array is not None, "resident_bytes read after close(): a closed source holds no array"
         return int(self._array.nbytes)
 
     def read_region(self, rect: Rect, *,
                     target_size: tuple[int, int] | None = None) -> tuple[np.ndarray, ReadSpec]:
+        assert self._array is not None, "read_region called after close(): a closed source holds no array"
         _check_region(rect, self.height, self.width)
         region = np.array(self._array[rect.y0:rect.y1, rect.x0:rect.x1])
         return _serve_region(region, rect, self._backend, target_size)
@@ -706,7 +716,10 @@ class GdalSource(_ClosableSource):
             import tifffile
 
             with tifffile.TiffFile(str(self.path)) as tif:
-                cmap = tif.pages[0].tags.get("ColorMap")
+                # tifffile types page 0 as TiffPage | TiffFrame; only TiffPage carries parsed
+                # tags, and a page with none reads exactly as a page with no ColorMap tag.
+                tags = getattr(tif.pages[0], "tags", None)
+                cmap = tags.get("ColorMap") if tags is not None else None
                 if cmap is None:
                     return None
                 raw = np.asarray(cmap.value)
@@ -916,6 +929,8 @@ def open_raster(source: "str | Path | BandGroupRef", num_channels: int) -> Raste
     naming the containers that do carry band data.
     """
     if photographic_container(source, num_channels):
+        assert not isinstance(source, BandGroupRef), (
+            "photographic_container already returns False for a BandGroupRef")
         return PhotographicSource(source, num_channels)
     return open_array_source(source, num_channels)
 
