@@ -181,7 +181,9 @@ describe("splitPolygon", () => {
           created_at: "2024-01-01T00:00:00Z",
           accepted_by: "user:jordan",
           accepted_at: "2024-01-02T00:00:00Z",
-          authorship: "tool",
+          // The shape the load route actually produces for an accepted tool prediction
+          // (authorship_of: created_by a model plus accepted_by set derives "tool_accepted").
+          authorship: "tool_accepted",
         },
       ],
       points: [],
@@ -204,11 +206,25 @@ describe("splitPolygon", () => {
       expect(piece.created_at).toBe("2024-01-01T00:00:00Z");
       expect(piece.accepted_by).toBeNull();
       expect(piece.accepted_at).toBeNull();
+      // The sign-off dropped: the parent's tool_accepted reads as unreviewed tool work again.
       expect(piece.authorship).toBe("tool");
     }
     expect(s().canvas.selectedPolygonIdx).toBe(0); // the first piece
     expect(s().annotateUi.hoveredPolygonIdx).toBeNull();
     expect(s().canvas.dirty).toBe(true);
+  });
+
+  it("copies every other authorship value unchanged (only tool_accepted maps to tool)", () => {
+    loadOnePolygon();
+    useStore.setState((st) => ({
+      canvas: {
+        ...st.canvas,
+        polygons: [{ ...st.canvas.polygons[0], authorship: "person" }],
+      },
+    }));
+    s().splitPolygon(0, [PIECE_A, PIECE_B]);
+    expect(s().canvas.polygons[0].authorship).toBe("person");
+    expect(s().canvas.polygons[1].authorship).toBe("person");
   });
 
   it("one undo restores the parent and its selection", () => {

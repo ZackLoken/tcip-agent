@@ -310,6 +310,9 @@ export const createCanvasSlice: StateCreator<AppState, [], [], CanvasSlice> = (s
     set((s) => {
       const parent = s.canvas.polygons[idx];
       if (!parent) return s;
+      // Dropping the sign-off (below) means an accepted tool shape's pieces read as the tool's
+      // unreviewed work again; every other authorship value copies unchanged.
+      const pieceAuthorship = parent.authorship === "tool_accepted" ? "tool" : parent.authorship;
       const pieces: PolygonShape[] = rings.map((ring) => ({
         rings: [ring],
         subject: parent.subject,
@@ -318,7 +321,7 @@ export const createCanvasSlice: StateCreator<AppState, [], [], CanvasSlice> = (s
         created_at: parent.created_at,
         accepted_by: null,
         accepted_at: null,
-        authorship: parent.authorship,
+        authorship: pieceAuthorship,
       }));
       const polys = s.canvas.polygons.slice();
       polys.splice(idx, 1, ...pieces);
