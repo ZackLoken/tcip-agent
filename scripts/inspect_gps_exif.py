@@ -6,6 +6,7 @@ Tells us whether RTK was actually used (centimeter precision, HPositioningError
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any, cast
 
 from PIL import Image
 from PIL.ExifTags import GPSTAGS, TAGS
@@ -17,7 +18,8 @@ ROOT = vf_root() / "images"
 
 def read_gps(path: Path) -> dict:
     im = Image.open(path)
-    raw = im._getexif() or {}
+    # _getexif is a JpegImageFile/MpoImageFile accessor, absent from the ImageFile stub.
+    raw = cast(Any, im)._getexif() or {}
     for tag_id, value in raw.items():
         if TAGS.get(tag_id) == "GPSInfo":
             return {GPSTAGS.get(k, k): v for k, v in value.items()}
