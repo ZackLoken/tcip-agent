@@ -314,7 +314,7 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
         update_sidecar,
     )
     from tcip_mcp.prediction_buckets import review_state_dir_of
-    from tcip_store.errors import SchemaVersionRefused, StoreBusy
+    from tcip_store.errors import DecodeError, SchemaVersionRefused, StoreBusy
 
     op_prov = bundle.to_provenance()["operating_point"]
     ref_hash = review_reference_hash(
@@ -344,11 +344,42 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from None
 
+    def _require_bare_bucket_subject(bucket_dir: str, subject: str) -> None:
+        """A bare directory (no stamp at all) has no recorded map to carry a promoted stamp's
+        subject claim, so every prediction record in it must positively carry ``subject``.
+
+        Walks the directory the same way ``require_reference_ground_truth`` does
+        (``prediction_documents``, each document's own annotations); a directory holding another
+        subject refuses by name: a review reference is one subject's, and a staged bucket holding
+        several is promoted by staging one subject per bucket.
+        """
+        from tcip_annotation.json_io import prediction_documents, read_annotations
+
+        others: set[str] = set()
+        for path in prediction_documents(Path(bucket_dir)):
+            for a in read_annotations(str(path)):
+                if a.subject != subject:
+                    others.add(a.subject)
+        if others:
+            raise ValueError(
+                f"{bucket_dir} holds annotations of {sorted(others)} besides {subject!r}: a "
+                "review reference is one subject's. Stage one subject per bucket before "
+                "promoting it."
+            )
+
     def _stamp_body(stored: dict) -> dict:
         """This promotion merged over whatever the producing run left in ``stored``.
 
         The trait is written only when a gate was cleared, so a bucket carries the trait its claim
         was earned for and an honest placeholder claims no scope at all.
+
+        A bare directory (``stored`` empty, no producer ever stamped it) has no pair of its own to
+        carry forward: the review it promotes was a detector review (a bare directory admits no
+        classified one), so this writes ``subject=req.subject``/``attribute=None``, after the
+        caller has verified every record in the directory positively carries that subject
+        (``_require_bare_bucket_subject``). A stored stamp's own pair (present or, for a pre-key
+        stamp, absent) is carried forward unchanged by the plain ``dict(stored)`` below; the rail
+        refuses a merge that ends up with neither key.
 
         ``schema_version`` marks the promotion's own writing vintage, not every value the merged
         record carries: a member ``stored`` already held under an older provenance vocabulary
@@ -356,6 +387,9 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
         ``operating_point_stamp`` documents for its own producers.
         """
         merged = dict(stored)
+        if not stored:
+            merged["subject"] = req.subject
+            merged["attribute"] = None
         merged.update({
             "schema_version": 2,
             "operating_point": op_prov,
@@ -405,6 +439,8 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
             if bindings[d].claimed and bindings[d].ok:
                 continue  # a mixed set: a bucket whose validation a record answers for is left alone
             Path(d).mkdir(parents=True, exist_ok=True)
+            if not sidecars[d]:
+                _require_bare_bucket_subject(d, req.subject)
             # Sealed outside the stamp's lock: no store write may open inside another's transaction.
             earned = _stamp_body(sidecars[d])
             if draft is not None:
@@ -417,7 +453,7 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
         # Contention is a retryable infrastructure fault, never a malformed request; the
         # dataset select route's own StoreBusy handling is the platform's precedent.
         raise HTTPException(503, str(exc)) from exc
-    except (ValueError, SchemaVersionRefused) as exc:
+    except (ValueError, SchemaVersionRefused, DecodeError) as exc:
         raise HTTPException(400, str(exc)) from None
 
     # The sidecar this stamps sits in the prediction bucket, which travels with the dataset.
