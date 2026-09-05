@@ -87,21 +87,25 @@ def _frozen_detection_builder(**kwargs):
 def _detection_smoke_cfg(builder: str, tmp_path: Path) -> dict:
     """A smoke config over the bespoke detector at a small resize target: the detector's own
     transform resizes the 224 px contract input to ``min_size``, so 64 keeps two smoke builds
-    plus twenty overfit steps to seconds where the 800 px default took minutes."""
+    plus twenty overfit steps to seconds where the 800 px default took minutes. ``fcos`` builds
+    in a fraction of ``faster_rcnn``'s time over the same resnet18 backbone (single-stage, no
+    region-proposal network), and nothing either smoke test asserts is faster-rcnn-specific.
+    """
     imgs = tmp_path / "images"
     lbls = tmp_path / "labels"
     imgs.mkdir()
     lbls.mkdir()
     return {
         "model_source": {"builder": builder,
-                         "builder_kwargs": {"num_classes": 1, "min_size": 64, "max_size": 96},
+                         "builder_kwargs": {"num_classes": 1, "min_size": 64, "max_size": 96,
+                                            "detector": "fcos"},
                          "task": "detection"},
         "data": {"images_dir": str(imgs), "labels_dir": str(lbls)},
         "training": {"batch_size": 2},
     }
 
 
-def test_preflight_config_overfit_restores_rng_state(tmp_path):
+def test_preflight_config_overfit_restores_rng_state(tmp_path, monkeypatch):
     """The overfit branch's own reseed-run-restore leaves no net trace on the streams: a plain
     smoke build (overfit=False) and the same build with overfit=True, run from the same seed,
     must consume the streams identically once the overfit call returns. Comparing against a
@@ -109,12 +113,19 @@ def test_preflight_config_overfit_restores_rng_state(tmp_path):
     draw real entropy too, on both paths alike, so the only valid baseline is the sibling call
     that skips just the overfit branch."""
     pytest.importorskip("torch")
+    import functools
     import random
 
     import numpy as np
     import torch
 
+    from tcip_mcp.pipelines import model_contract
     from tcip_mcp.tools.training_tools import preflight_config
+
+    # RNG-stream identity holds after any positive step count; four steps exercise the same
+    # reseed-run-restore path as the default twenty for a fraction of the wall time.
+    monkeypatch.setattr(model_contract, "overfit_check",
+                        functools.partial(model_contract.overfit_check, steps=4))
 
     cfg = _detection_smoke_cfg("tests.bespoke_models:build_bespoke_detection", tmp_path)
 
