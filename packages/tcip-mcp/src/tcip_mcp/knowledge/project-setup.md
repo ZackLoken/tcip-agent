@@ -63,12 +63,15 @@ ingest_images(source="<raw folder or glob>", name="black-locust_tree_trunk-diame
   stitching engine's capture-date item). A file that states none goes to `images/undated/`.
   Override with `date_from="none"` (all undated) or a literal ISO date
   (`date_from="2026-02-11"`) when you know the capture date the camera didn't record.
-- Never overwrites: a stem collision (two source files → same bucket+stem) is skipped
-  and reported in `skipped_collisions`. Relay the manifest to the human:
-  `{total, buckets, undated, skipped_collisions, unreadable_dates}`, especially any
-  collisions, a large `undated` count (dates may need `date_from`), and `unreadable_dates`,
-  which separates files whose container could not be read at all from files that simply
-  state no date. Every file is ingested either way; the date never gates ingestion.
+- Never overwrites, and refuses a stem collision before copying a byte: two source files
+  landing on the same bucket+stem (case-folded), or a source colliding with an existing
+  image or `.bandgroup` manifest, refuses the whole call, naming both sides; re-ingesting
+  the exact same file already placed is the one exception, skipped and reported in
+  `skipped_collisions`. Relay the manifest to the human: `{total, buckets, undated,
+  skipped_collisions, unreadable_dates}`, especially a refusal, a large `undated` count
+  (dates may need `date_from`), and `unreadable_dates`, which separates files whose
+  container could not be read at all from files that simply state no date. Every admitted
+  file is ingested either way; the date never gates ingestion.
 
 `ingest_images` does not annotate, split, choose a task, or write `classes.json`; the
 next steps do. After it, `inspect_project` reports the capture dates and image count.
