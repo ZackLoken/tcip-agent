@@ -122,6 +122,86 @@ def test_list_logical_images_refuses_a_stem_collision_between_a_group_and_a_stan
         list_logical_images(d)
 
 
+def test_bucket_logical_identities_over_the_grouped_fixture(grouped_dir):
+    from tcip_mcp.pipelines.image_utils import bucket_logical_identities
+
+    identities = bucket_logical_identities(grouped_dir)
+    assert set(identities) == {"cap", "plain", "loose"}
+    assert identities["cap"] == [grouped_dir / "cap.bandgroup"]
+    assert identities["plain"] == [grouped_dir / "plain.jpg"]
+    assert identities["loose"] == [grouped_dir / "loose.tif"]
+
+
+def test_bucket_logical_identities_on_missing_dir_returns_empty(tmp_path):
+    from tcip_mcp.pipelines.image_utils import bucket_logical_identities
+
+    assert bucket_logical_identities(tmp_path / "nope") == {}
+
+
+def test_list_logical_images_refuses_two_raw_files_sharing_one_stem(tmp_path):
+    from tcip_mcp.pipelines.image_utils import AmbiguousImageStem, list_logical_images
+
+    d = tmp_path / "images"
+    d.mkdir()
+    (d / "foo.jpg").write_bytes(b"a")
+    (d / "foo.png").write_bytes(b"b")
+
+    with pytest.raises(AmbiguousImageStem) as raised:
+        list_logical_images(d)
+    message = str(raised.value)
+    assert "foo.jpg" in message and "foo.png" in message
+
+
+def test_list_logical_images_refuses_a_case_variant_stem_pair(tmp_path):
+    from tcip_mcp.pipelines.image_utils import AmbiguousImageStem, list_logical_images
+
+    d = tmp_path / "images"
+    d.mkdir()
+    (d / "Foo.jpg").write_bytes(b"a")
+    (d / "foo.png").write_bytes(b"b")
+
+    with pytest.raises(AmbiguousImageStem) as raised:
+        list_logical_images(d)
+    message = str(raised.value)
+    assert "Foo.jpg" in message and "foo.png" in message
+
+
+def test_list_logical_images_with_a_corrupt_manifest_beside_a_same_stem_raw_file_lists_it(
+    tmp_path,
+):
+    """A corrupt manifest claims nothing and is no identity: a raw file sharing its stem is not
+    ambiguous, unlike a readable manifest under the same stem."""
+    from PIL import Image
+
+    from tcip_mcp.pipelines.image_utils import list_logical_images
+
+    d = tmp_path / "images"
+    d.mkdir()
+    (d / "broken.bandgroup").write_text("not json", encoding="utf-8")
+    Image.new("RGB", (4, 4)).save(d / "broken.jpg")
+
+    logical = list_logical_images(d)
+    assert set(logical) == {"broken"}
+    assert logical["broken"] == d / "broken.jpg"
+
+
+def test_list_logical_images_propagates_schema_version_refused(tmp_path):
+    import json
+
+    import tcip_store as ts
+
+    from tcip_mcp.pipelines.image_utils import list_logical_images
+
+    d = tmp_path / "images"
+    d.mkdir()
+    (d / "cap.bandgroup").write_text(
+        json.dumps({"bands": {"Red": "a.tif"}, "schema_version": 2}), encoding="utf-8"
+    )
+
+    with pytest.raises(ts.SchemaVersionRefused):
+        list_logical_images(d)
+
+
 def test_list_logical_images_does_not_raise_when_stems_are_all_distinct(grouped_dir):
     """A rail must admit valid work: the ordinary (non-colliding) grouped_dir fixture used
     throughout this file must keep resolving cleanly; the new refusal is scoped to a genuine

@@ -29,61 +29,66 @@ if TYPE_CHECKING:
 
 __all__ = [
     "AmbiguousImageStem", "BandGroupIncomplete", "BandGroupRef", "IMAGE_EXTS",
-    "capture_kind", "crop_pad_tile", "display_source_path", "flat_image_key", "image_dimensions",
-    "list_logical_images", "load_image", "load_multiband", "logical_image_name", "pad_tile",
-    "pil_to_tensor", "place_logical_image", "resolve_image_source", "stem_of", "to_pil_if_faithful",
+    "bucket_logical_identities", "capture_kind", "crop_pad_tile", "display_source_path",
+    "flat_image_key", "image_dimensions", "list_logical_images", "load_image", "load_multiband",
+    "logical_image_name", "pad_tile", "pil_to_tensor", "place_logical_image",
+    "resolve_image_source", "stem_collision_key", "stem_of", "to_pil_if_faithful",
 ]
 
 
 class AmbiguousImageStem(ValueError):
-    """A directory listing found a raw standalone file whose own stem collides with a
-    ``.bandgroup`` manifest's canonical stem: two unrelated identities claiming the same name.
+    """A directory holds more than one logical identity under one case-folded stem
+    (:func:`stem_collision_key`): two raw files (``foo.jpg``, ``foo.png``, or a same-key case
+    variant such as ``Foo.jpg``), or a raw file and a ``.bandgroup`` manifest recorded under a
+    different exact stem than its own.
 
-    Raised from :func:`list_logical_images` rather than silently keeping only the manifest's entry
-    (which would make the standalone file vanish from every listing, including training, splits,
-    review, and gallery, with no error): CLAUDE.md's "no silent fallback on ambiguous identity" rule.
+    Raised from :func:`list_logical_images` rather than silently keeping only one identity (which
+    would make the other vanish from every listing, including training, splits, review, and
+    gallery, with no error): CLAUDE.md's "no silent fallback on ambiguous identity" rule.
     """
 
-# The recognized "this is an image" extensions shared by every enumeration/resolution call site
-# this consolidates onto list_logical_images/resolve_image_source. ``.npy``/``.npz`` are a
-# multi-band raster (nothing enumerated them before); ``.bandgroup`` is a manifest file that
-# stands in for the logical image it names.
+# ``.npy``/``.npz`` are a multi-band raster; ``.bandgroup`` a manifest standing in for the image it
+# names. Five raw directory walks stay outside this module's reach, named in docs/current-task.md.
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".heic", ".tif", ".tiff", ".npy", ".npz", MANIFEST_EXT}
 
 
-def list_logical_images(images_dir: str | Path) -> dict[str, "Path | BandGroupRef"]:
-    """Every logical image in ``images_dir``, by canonical stem.
+def stem_collision_key(name: str) -> str:
+    """The fold that decides whether two stems name one logical identity: ``str.lower()``.
 
-    Scans for ``.bandgroup`` manifests first: each becomes a :class:`BandGroupRef`, and its
-    referenced sibling filenames are excluded from the raw-file listing below, so a stem with an
-    existing manifest never also appears as its own single-band entry. An unreadable/corrupt
-    manifest is skipped (claims nothing), not raised: a directory listing must not fail whole
-    because one manifest is bad; ``resolve_image_source`` is where a caller pays for its own stem.
-    A manifest whose ``schema_version`` this reader does not accept is a different fact, not
-    corruption, and is not skipped: :func:`~tcip_mcp.pipelines.data.band_groups.read_band_group_manifest`
-    raises :class:`tcip_store.SchemaVersionRefused` for it, uncaught here, so a newer-written
-    grouped capture refuses the enumeration rather than silently dissolving into its individual
-    band files.
-
-    Raises :class:`AmbiguousImageStem` when a raw standalone file's stem collides with a
-    manifest's own canonical stem (and that file isn't one of the manifest's own sibling bands):
-    two unrelated identities can't share one name silently; the caller (agent or human) renames one.
+    A portability decision, not a guess at any one filesystem's own table: the label file every
+    reader resolves by stem is one file for ``Foo`` and ``foo`` on a case-insensitive filesystem,
+    so a dataset holding both is unreadable there whatever filesystem it was built on, and this
+    fold refuses the pair everywhere rather than only where it happens to break. Exact for ASCII
+    names; not ``casefold()`` and not a filesystem's own table, so a pair differing only by
+    Unicode normalization, or by a casefold-but-not-``lower()`` difference, is two keys here.
     """
-    d = Path(images_dir)
-    if not d.is_dir():
-        return {}
-    result: dict[str, Path | BandGroupRef] = {}
-    manifest_stems: set[str] = set()
+    return name.lower()
+
+
+def _scan_identities(d: Path) -> dict[str, list[tuple[Path, "BandGroupRef | None"]]]:
+    """One manifest glob and one ``d.iterdir()`` walk with one extension test, the shared
+    enumeration :func:`list_logical_images` and :func:`bucket_logical_identities` both build on,
+    so directory enumeration happens once per call rather than the two independent walks each
+    used to make. Keyed by :func:`stem_collision_key`; a key's list holds more than one entry
+    exactly when it is ambiguous.
+
+    A readable manifest is one identity under its own exact stem, paired with the parsed
+    :class:`BandGroupRef` so a caller building :func:`list_logical_images`'s result never re-reads
+    it; its claimed band files are that identity's members and no identity of their own. An
+    unreadable or corrupt manifest claims nothing and is no identity. A manifest whose
+    ``schema_version`` this reader does not accept raises :class:`tcip_store.SchemaVersionRefused`,
+    uncaught, before anything else. Every other file with a suffix in :data:`IMAGE_EXTS` that no
+    readable manifest claims is one raw identity under its own exact stem, paired with ``None``.
+    """
+    identities: dict[str, list[tuple[Path, BandGroupRef | None]]] = {}
     claimed: set[str] = set()
     for mp in sorted(d.glob(f"*{MANIFEST_EXT}")):
         try:
             ref = read_band_group_manifest(mp)
         except (OSError, ValueError):
             continue
-        result[ref.stem] = ref
-        manifest_stems.add(ref.stem)
+        identities.setdefault(stem_collision_key(ref.stem), []).append((ref.manifest_path, ref))
         claimed.update(p.name for p in ref.bands.values())
-    ambiguous: set[str] = set()
     for p in sorted(d.iterdir()):
         if not p.is_file():
             continue
@@ -92,17 +97,57 @@ def list_logical_images(images_dir: str | Path) -> dict[str, "Path | BandGroupRe
             continue
         if ext not in IMAGE_EXTS:
             continue
-        if p.stem in manifest_stems:
-            ambiguous.add(p.stem)
-            continue
-        if p.stem not in result:
-            result[p.stem] = p
+        identities.setdefault(stem_collision_key(p.stem), []).append((p, None))
+    return identities
+
+
+def bucket_logical_identities(images_dir: str | Path) -> dict[str, list[Path]]:
+    """The bucket's logical identities, grouped by :func:`stem_collision_key`: a key held by more
+    than one identity is ambiguous, the one rule :func:`list_logical_images`, the ingest door's
+    pre-scan and the conform script's census all check.
+
+    Each list entry is one identity's own defining path (a ``.bandgroup`` manifest's path, or a
+    raw file's own path); an absent directory answers empty. Never raises on an ambiguous key
+    itself: that is each caller's own decision (a refusal here, a reported collision there).
+    """
+    d = Path(images_dir)
+    if not d.is_dir():
+        return {}
+    return {key: [path for path, _ref in entries] for key, entries in _scan_identities(d).items()}
+
+
+def list_logical_images(images_dir: str | Path) -> dict[str, "Path | BandGroupRef"]:
+    """Every logical image in ``images_dir``, by exact stem.
+
+    Built from :func:`bucket_logical_identities`' own scan (:func:`_scan_identities`): a
+    :class:`BandGroupRef` for a manifest identity, that file's own path for a raw one. Raises
+    :class:`AmbiguousImageStem` naming every ambiguous key's own paths; folded uniqueness never
+    means case-insensitive lookup, so the returned mapping is keyed by the exact stem, exactly as
+    it was before the fold, since the refusal above makes a key's divergent identities unreachable.
+
+    A manifest whose ``schema_version`` this reader does not accept propagates as
+    :class:`tcip_store.SchemaVersionRefused`, uncaught, rather than as this refusal: a newer-written
+    grouped capture refuses the enumeration outright rather than silently dissolving into its
+    individual band files.
+    """
+    d = Path(images_dir)
+    if not d.is_dir():
+        return {}
+    scanned = _scan_identities(d)
+    ambiguous = {key: entries for key, entries in scanned.items() if len(entries) > 1}
     if ambiguous:
+        names = sorted(str(path) for entries in ambiguous.values() for path, _ref in entries)
         raise AmbiguousImageStem(
-            f"{d}: stem(s) {sorted(ambiguous)} name both a .bandgroup manifest's canonical stem "
-            "and an unrelated standalone file, refusing to silently keep only one. Rename the "
-            "standalone file(s), or the manifest, so each logical image has one unambiguous stem."
+            f"{d}: {names} name more than one logical image under one case-folded stem, "
+            "refusing to silently keep one. Rename so each logical image has its own stem."
         )
+    result: dict[str, Path | BandGroupRef] = {}
+    for entries in scanned.values():
+        path, ref = entries[0]
+        if ref is not None:
+            result[ref.stem] = ref
+        else:
+            result[path.stem] = path
     return result
 
 
@@ -123,9 +168,12 @@ def resolve_image_source(images_dir: str | Path, stem: str) -> "Path | BandGroup
     """``list_logical_images(images_dir)[stem]``: never a second implementation of "what images
     live here."
 
-    Raises ``FileNotFoundError`` for an unknown stem. For a ``BandGroupRef`` whose manifest
-    references a sibling file that no longer exists, raises ``BandGroupIncomplete`` here (the
-    resolver) rather than letting a bare decode error surface later inside a stacking loop.
+    Raises ``FileNotFoundError`` for an unknown stem, and ``AmbiguousImageStem`` (propagated from
+    ``list_logical_images``, uncaught here) when ``images_dir`` holds a collision, whether or not
+    ``stem`` is one of the colliding keys: the directory is unlistable, so no single stem in it
+    resolves cleanly. For a ``BandGroupRef`` whose manifest references a sibling file that no
+    longer exists, raises ``BandGroupIncomplete`` here (the resolver) rather than letting a bare
+    decode error surface later inside a stacking loop.
     """
     src = list_logical_images(images_dir).get(stem)
     if src is None:
