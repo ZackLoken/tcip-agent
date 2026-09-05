@@ -313,6 +313,7 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
         seal_validation,
         update_sidecar,
     )
+    from tcip_annotation.json_io import UnreadableLabelDocument
     from tcip_mcp.prediction_buckets import review_state_dir_of
     from tcip_store.errors import DecodeError, SchemaVersionRefused, StoreBusy
 
@@ -453,7 +454,7 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
         # Contention is a retryable infrastructure fault, never a malformed request; the
         # dataset select route's own StoreBusy handling is the platform's precedent.
         raise HTTPException(503, str(exc)) from exc
-    except (ValueError, SchemaVersionRefused, DecodeError) as exc:
+    except (ValueError, SchemaVersionRefused, DecodeError, UnreadableLabelDocument) as exc:
         raise HTTPException(400, str(exc)) from None
 
     # The sidecar this stamps sits in the prediction bucket, which travels with the dataset.
