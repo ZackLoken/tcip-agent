@@ -280,6 +280,47 @@ def test_a_store_error_on_one_root_does_not_abort_the_others(
         file_backend.close()
 
 
+def test_a_plan_refusal_on_the_first_root_still_plans_the_second(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A plan (the default, no --apply) over two roots where the first refuses must still plan
+    the second and exit nonzero, not traceback out of the loop: plan_root's own StoreError (a
+    sqlite conform-rail refusal here, the read-side counterpart to the write-side one
+    test_a_store_error_on_one_root_does_not_abort_the_others exercises under --apply) shares
+    main()'s refusal handling rather than escaping uncaught from the --plan branch."""
+    from tcip_store.binding import BACKEND_ENV, FILE_BACKEND, SQLITE_BACKEND
+
+    root1 = tmp_path / "project1"
+    root2 = tmp_path / "project2"
+    root1.mkdir()
+    root2.mkdir()
+
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(root1))
+    monkeypatch.setenv(BACKEND_ENV, FILE_BACKEND)
+    file_backend = bind_default()
+    try:
+        _seed_dev_history(root1)
+    finally:
+        file_backend.close()
+
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(root2))
+    monkeypatch.setenv(BACKEND_ENV, SQLITE_BACKEND)
+    sqlite_backend = bind_default()
+    try:
+        module = _load_script()
+        _seed_dev_history(root2)
+
+        monkeypatch.setattr(sys, "argv", ["clear_dev_history.py", str(root1), str(root2)])
+        exit_code = module.main()
+        output = capsys.readouterr().out
+
+        assert exit_code == 2
+        assert f"{root1}: refused, StoreError:" in output
+        assert f"{root2}: would remove 1 friction_reports record(s)" in output
+    finally:
+        sqlite_backend.close()
+
+
 def test_stale_exported_loose_copies_are_removed_by_the_next_export_after_clearing(
     tmp_path: Path,
 ) -> None:

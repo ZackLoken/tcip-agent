@@ -6,10 +6,15 @@ every response surface answering a resolved absolute path for a relative stored 
 
 from __future__ import annotations
 
+import os
+import sqlite3
+import zipfile
 from pathlib import Path
 
 import pytest
 import tcip_store as ts
+from tcip_store.binding import BACKEND_ENV, DEFAULT_BACKEND, FILE_BACKEND
+from tcip_store.store import _backend
 
 from tcip_mcp.model_registry import (
     ModelRegistry,
@@ -22,6 +27,32 @@ from tcip_mcp.registry_paths import is_external_form
 
 def _seed_v1(root: Path, entries: list[dict]) -> None:
     ts.replace(registry_index_key(root), entries, expect=ts.Version.ABSENT)
+
+
+def _plant_registry_schema_version_two(root: Path) -> None:
+    """Overwrite an already-written registry index's raw bytes to carry a stray
+    ``schema_version: 2``: the on-disk shape a dev-era writer, predating the version-1 reset,
+    left behind (the seam's own write-side check refuses the field on any ordinary write, so
+    this is the only way to plant it), following the same technique
+    ``test_conform_schema_version_reset.py``'s own ``_damage_record`` uses.
+    """
+    key = registry_index_key(root)
+    document = ts.read(key, default={"entries": []})
+    encoded = ts.get_descriptor(key.store).codec.encode({**document, "schema_version": 2})
+    name = os.environ.get(BACKEND_ENV) or DEFAULT_BACKEND
+    if name == FILE_BACKEND:
+        _backend().path_for(key).write_bytes(encoded)
+        return
+    from tcip_store.sqlite_backend import database_path, encode_parts
+
+    conn = sqlite3.connect(str(database_path(str(key.root))), isolation_level=None)
+    try:
+        conn.execute(
+            "update records set value = ? where store = ? and parts = ?",
+            (encoded, key.store, encode_parts(key.parts)),
+        )
+    finally:
+        conn.close()
 
 
 # ── the document-boundary refusal and its partners ─────────────────────────────────────────
@@ -83,6 +114,55 @@ def test_archive_project_refuses_loudly_on_an_unconformed_registry(tmp_path: Pat
 
     assert "error" in result
     assert "conform_model_registry_paths" in result["error"]
+
+
+def test_archive_project_refuses_a_schema_version_two_registry_naming_the_reset_script(
+    tmp_path: Path,
+):
+    """A registry above the ceiling (a stray dev-era ``schema_version: 2``) must refuse the same
+    way a bare array does, not be swallowed into an empty answer and archived without its
+    registered weights."""
+    from tcip_mcp.tools.project_tools import archive_project, initialize_project
+
+    project = tmp_path / "proj"
+    initialize_project(str(project), site="north orchard")
+    weights_dir = project / "weights"
+    weights_dir.mkdir()
+    ckpt = weights_dir / "m.pt"
+    ckpt.write_bytes(b"weights outside the .tcip/models convenience location")
+    ModelRegistry(str(project)).register_model("m", str(ckpt), {}, metrics_source=None)
+    _plant_registry_schema_version_two(project)
+    out = tmp_path / "out.zip"
+
+    result = archive_project(str(project), str(out))
+
+    assert "error" in result
+    assert "conform_schema_version_reset" in result["error"]
+    assert not out.exists()
+
+
+def test_archive_project_accounts_for_a_registered_checkpoint_outside_models_when_unpoisoned(
+    tmp_path: Path,
+):
+    """The admitting partner of the refusal above: the identical project, its registry never
+    poisoned, archives with the registered checkpoint accounted for rather than left behind."""
+    from tcip_mcp.tools.project_tools import archive_project, initialize_project
+
+    project = tmp_path / "proj"
+    initialize_project(str(project), site="north orchard")
+    weights_dir = project / "weights"
+    weights_dir.mkdir()
+    ckpt = weights_dir / "m.pt"
+    ckpt.write_bytes(b"weights outside the .tcip/models convenience location")
+    ModelRegistry(str(project)).register_model("m", str(ckpt), {}, metrics_source=None)
+    out = tmp_path / "out.zip"
+
+    result = archive_project(str(project), str(out), include_models=True)
+
+    assert "error" not in result, result
+    assert result["left_behind"]["unaccounted"] == 0
+    with zipfile.ZipFile(out) as zf:
+        assert "weights/m.pt" in zf.namelist()
 
 
 def test_doctor_reports_the_refusal_as_its_own_finding(tmp_path: Path):
