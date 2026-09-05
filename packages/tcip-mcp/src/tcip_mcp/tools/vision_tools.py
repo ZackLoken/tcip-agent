@@ -190,22 +190,36 @@ def _point_note(n: int) -> str:
     return f" ({n} point annotation(s) not drawn, no point renderer yet)" if n else ""
 
 
-def _box_dict(a: Annotation, index: Callable[[str], int]) -> dict:
+def _legend_name(a: Annotation, *, scope) -> str:
+    """The name a render's legend shows for ``a``: the classified value under a classified scope
+    (the object class alone would be one name for every prediction), else ``a.subject`` as today.
+    """
+    if scope is not None and scope.classified:
+        from tcip_annotation.json_io import classified_value_of
+
+        value = classified_value_of(a, subject=scope.subject, attribute=scope.attribute)
+        if value is not None:
+            return value
+    return a.subject
+
+
+def _box_dict(a: Annotation, index: Callable[[str], int], *, scope=None) -> dict:
     geometry = a.geometry
     assert not isinstance(geometry, Point) and geometry is not None, \
         "every caller passes a _boxable-filtered or box-rendered annotation"
     b = bbox_of(geometry)
-    d = {"x1": b.x1, "y1": b.y1, "x2": b.x2, "y2": b.y2, "class_id": index(a.subject)}
+    d = {"x1": b.x1, "y1": b.y1, "x2": b.x2, "y2": b.y2,
+        "class_id": index(_legend_name(a, scope=scope))}
     if a.score is not None:
         d["confidence"] = a.score
     return d
 
 
-def _poly_dict(a: Annotation, index: Callable[[str], int]) -> dict:
+def _poly_dict(a: Annotation, index: Callable[[str], int], *, scope=None) -> dict:
     geometry = a.geometry
     assert isinstance(geometry, Polygon), "called only for the segmentation task's own shapes"
     return {"rings": [[[p[0], p[1]] for p in ring] for ring in geometry.rings],
-            "class_id": index(a.subject)}
+            "class_id": index(_legend_name(a, scope=scope))}
 
 
 @audited
@@ -336,13 +350,18 @@ def _viz_predictions(
     class_names: str = "",
     conf_threshold: float = 0.0,
 ) -> dict:
-    """Render model predictions on a single image. See ``visualize``."""
+    """Render model predictions on a single image. See ``visualize``.
+
+    Under a classified bucket (its own recorded ``bucket_scope``), the legend keys each
+    detection by its decoded value, not the object class every one of them shares.
+    """
     img = Path(image_path)
     if not img.is_file():
         return {"error": f"Image not found: {image_path}"}
 
     stem = img.stem
     from tcip_mcp.dataset_layout import find_prediction
+    from tcip_mcp.pipelines.resolution import StampScopeUnstated, bucket_scope
 
     pred_file = find_prediction(image_path)
     if pred_file is None:
@@ -350,7 +369,8 @@ def _viz_predictions(
 
     try:
         preds = read_labels(str(pred_file))
-    except UnreadableLabelDocument as exc:
+        scope = bucket_scope(Path(pred_file).parent)
+    except (UnreadableLabelDocument, StampScopeUnstated, ts.StoreError) as exc:
         return {"error": str(exc)}
     if conf_threshold > 0:
         preds = [a for a in preds if (a.score is None or a.score >= conf_threshold)]
@@ -360,13 +380,15 @@ def _viz_predictions(
     read = _display_for_path(image_path)
     if task == "detect":
         shapes = _boxable(preds)
-        out = render_detections(read.pixels, [_box_dict(a, index) for a in shapes],
-                                native_size=read.native_size, class_names=_name_map(idx))
+        out = render_detections(
+            read.pixels, [_box_dict(a, index, scope=scope) for a in shapes],
+            native_size=read.native_size, class_names=_name_map(idx))
         summary = f"Rendered {len(shapes)} predictions on {img.name}" + _point_note(n_points)
     else:
         shapes = [a for a in preds if isinstance(a.geometry, Polygon)]
-        out = render_segmentations(read.pixels, [_poly_dict(a, index) for a in shapes],
-                                   native_size=read.native_size, class_names=_name_map(idx))
+        out = render_segmentations(
+            read.pixels, [_poly_dict(a, index, scope=scope) for a in shapes],
+            native_size=read.native_size, class_names=_name_map(idx))
         summary = f"Rendered {len(shapes)} prediction masks on {img.name}" + _point_note(n_points)
 
     return {
@@ -388,11 +410,17 @@ def _viz_comparison(
 ) -> dict:
     """Render GT vs prediction comparison with match indicators. See ``visualize``.
 
-    Green = ground truth, Red = predictions, Yellow lines = matched pairs.
+    Green = ground truth, Red = predictions, Yellow lines = matched pairs. The match lines come
+    from ``compute_matches`` over the two documents as written: on a conformed classified bucket
+    (predictions carrying the object class in ``subject``, the same shape ground truth carries)
+    they match by object class, while the legend still keys the prediction side by its decoded
+    value (:func:`_legend_name`), so a correctly localized, wrongly classified pair now shows as
+    a real match with two different legend colors rather than as an unrelated FP/FN.
     """
     from tcip_annotation.format_io import detect_format
     from tcip_annotation.matching import compute_matches
     from tcip_mcp.dataset_layout import find_gt_label, find_prediction
+    from tcip_mcp.pipelines.resolution import StampScopeUnstated, bucket_scope
 
     img = Path(image_path)
     if not img.is_file():
@@ -417,9 +445,10 @@ def _viz_comparison(
     if pred_file is not None:
         try:
             preds = _boxable(read_labels(str(pred_file)))
-        except UnreadableLabelDocument as exc:
+            scope = bucket_scope(Path(pred_file).parent)
+        except (UnreadableLabelDocument, StampScopeUnstated, ts.StoreError) as exc:
             return {"error": str(exc)}
-        pred_dicts = [_box_dict(a, index) for a in preds]
+        pred_dicts = [_box_dict(a, index, scope=scope) for a in preds]
         # Match at the caller's conf operating point (not compute_matches' silent 0.25 default).
         match_result = compute_matches(gt, preds, iou_threshold=iou_threshold,
                                        conf_threshold=conf_threshold)
