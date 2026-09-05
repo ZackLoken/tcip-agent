@@ -172,7 +172,11 @@ def write_predictions_json(
         if not json_io.geometry_extent_ok(geometry):
             dropped += 1
             continue
-        pred_subject = subject if attribute is not None else name
+        if attribute is not None:
+            assert subject is not None  # refused above when attribute is set with no subject
+            pred_subject = subject
+        else:
+            pred_subject = name
         pred_attributes = {attribute: name} if attribute is not None else {}
         preds.append(Annotation(subject=pred_subject, geometry=geometry, score=float(score),
                                 attributes=pred_attributes,

@@ -384,6 +384,7 @@ def count_by_class(
     total = len(annotations)
     if scope is None or not scope.classified or not id_map or positive_value not in id_map:
         return total, 0, total
+    assert scope.subject is not None and scope.attribute is not None  # classified implies both
     positive = 0
     for i, a in enumerate(annotations):
         value = json_io.require_classified_record(
