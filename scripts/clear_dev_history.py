@@ -7,7 +7,11 @@ their data, not every experiment this repo's own development ran against the sam
 removes exactly four things under a named root, through the storage seam and never around it:
 every ``friction_reports`` record, every ``retrospectives`` record, the ``audit_log`` log's
 entries, and the ``learning_capture`` log's entries. Nothing else: not annotations, images,
-predictions, models, experiments, caches, or any other store.
+predictions, models, experiments, caches, or any other store. On a file-backend root, clearing
+``audit_log`` or ``learning_capture`` leaves the seam's own hidden ``.clearbase`` sidecar beside
+each cleared log, the cursor watermark that keeps a cursor taken before this run comparable to
+one taken after; the sidecar is the seam's bookkeeping for the log it sits beside, not a fifth
+thing this script touches on its own account.
 
 When the root's state lives in a database (``TCIP_STORE_BACKEND=sqlite``, the default) and an
 earlier ``export_store.py`` run left loose copies of any of the four beside it, this script
@@ -65,7 +69,13 @@ from tcip_mcp.tools.meta_tools import (  # noqa: E402
     RETROSPECTIVE_STORE,
 )
 from tcip_store.binding import bind_default  # noqa: E402
+from tcip_store.file_backend import database_file  # noqa: E402
 from tcip_web.agent_learning_capture import learning_capture_key  # noqa: E402
+
+_DATABASE_EXPORT_NOTE = (
+    "When a database backs the root, an earlier export's loose copies of what this clears "
+    "still hold it until `python scripts/export_store.py <root>` runs."
+)
 
 
 def plan_root(root: Path) -> list[str]:
@@ -74,19 +84,37 @@ def plan_root(root: Path) -> list[str]:
     n_retros = len(ts.keys(RETROSPECTIVE_STORE, str(root)))
     n_audit = _log_length(audit_log_key(root))
     n_capture = _log_length(learning_capture_key(root))
-    return [
+    outcomes = [
         f"would remove {n_reports} friction_reports record(s)",
         f"would remove {n_retros} retrospectives record(s)",
         f"would remove {n_audit} audit_log line(s)",
         f"would remove {n_capture} learning_capture line(s)",
         "plan only: nothing was written, no audit line recorded",
     ]
+    if database_file(str(root)).is_file():
+        outcomes.append(_database_export_outcome_line(root, applied=False))
+    return outcomes
 
 
 def _log_length(key: ts.Key) -> int:
     """How many entries a log holds, decodable or not, excluding an in-flight torn tail."""
     page = ts.read_log(key)
     return len(page.records) + len(page.corrupt) + len(page.version_refused)
+
+
+def _database_export_outcome_line(root: Path, *, applied: bool) -> str:
+    """What a database-backed root's exported loose copies still hold, and the command that
+    reconciles them; ``applied`` picks the tense between an ``--apply`` run and a ``--plan``
+    preview of the same fact."""
+    holds = (
+        "still hold what this run just removed" if applied
+        else "would still hold what --apply removes"
+    )
+    return (
+        f"a database backs this root; any exported .tcip/audit.jsonl, "
+        f"learning_capture.jsonl, reports/*.json or retrospectives/*.md {holds} until "
+        f"python scripts/export_store.py {root} runs"
+    )
 
 
 def clear_root(root: Path, *, by: str, reason: str) -> list[str]:
@@ -130,11 +158,15 @@ def clear_root(root: Path, *, by: str, reason: str) -> list[str]:
         scope=root,
     )
     outcomes.append(f"closing audit line recorded (by={by})")
+    if database_file(str(root)).is_file():
+        outcomes.append(_database_export_outcome_line(root, applied=True))
     return outcomes
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap = argparse.ArgumentParser(
+        description=f"{__doc__.splitlines()[0]} {_DATABASE_EXPORT_NOTE}"
+    )
     ap.add_argument("roots", nargs="+", type=Path)
     mode = ap.add_mutually_exclusive_group()
     mode.add_argument(
