@@ -63,7 +63,7 @@ class RandomHorizontalFlip:
 
     def __call__(self, img: Image.Image, target: dict) -> tuple[Image.Image, dict]:
         if random.random() < self.p:
-            img = img.transpose(Image.FLIP_LEFT_RIGHT)
+            img = img.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
             w = img.width
             if "boxes" in target and len(target["boxes"]) > 0:
                 boxes = target["boxes"]
@@ -87,7 +87,7 @@ class RandomVerticalFlip:
 
     def __call__(self, img: Image.Image, target: dict) -> tuple[Image.Image, dict]:
         if random.random() < self.p:
-            img = img.transpose(Image.FLIP_TOP_BOTTOM)
+            img = img.transpose(Image.Transpose.FLIP_TOP_BOTTOM)
             h = img.height
             if "boxes" in target and len(target["boxes"]) > 0:
                 boxes = target["boxes"]
@@ -151,7 +151,7 @@ class RandomResizedCrop:
         x2 = x1 + crop_w
         y2 = y1 + crop_h
 
-        img = img.crop((x1, y1, x2, y2)).resize(self.size, Image.BILINEAR)
+        img = img.crop((x1, y1, x2, y2)).resize(self.size, Image.Resampling.BILINEAR)
 
         # Crop + nearest-resize masks in lockstep with the image
         if torch.is_tensor(target.get("masks")):
@@ -205,7 +205,7 @@ class Resize:
 
     def __call__(self, img: Image.Image, target: dict) -> tuple[Image.Image, dict]:
         w, h = img.size
-        img = img.resize(self.size, Image.BILINEAR)
+        img = img.resize(self.size, Image.Resampling.BILINEAR)
         if "boxes" in target and len(target["boxes"]) > 0:
             boxes = target["boxes"]
             if isinstance(boxes, torch.Tensor):
@@ -243,7 +243,7 @@ class RandomRotation:
 
         angle = random.uniform(-self.degrees, self.degrees)
         w, h = img.size
-        out = img.rotate(angle, resample=Image.BILINEAR, expand=False)
+        out = img.rotate(angle, resample=Image.Resampling.BILINEAR, expand=False)
 
         boxes = target.get("boxes")
         if isinstance(boxes, torch.Tensor) and len(boxes) > 0:
@@ -271,7 +271,7 @@ class RandomRotation:
                 rotated = [
                     torch.tensor(
                         np.array(Image.fromarray(m.cpu().numpy().astype("uint8")).rotate(
-                            angle, resample=Image.NEAREST, expand=False)),
+                            angle, resample=Image.Resampling.NEAREST, expand=False)),
                         dtype=masks.dtype,
                     )
                     for m in masks
@@ -282,7 +282,7 @@ class RandomRotation:
             import numpy as np
             target["masks"] = torch.tensor(
                 np.array(Image.fromarray(masks.cpu().numpy().astype("uint8")).rotate(
-                    angle, resample=Image.NEAREST, expand=False)),
+                    angle, resample=Image.Resampling.NEAREST, expand=False)),
                 dtype=masks.dtype,
             )
         return out, target
