@@ -200,7 +200,7 @@ def save_annotations(
     return {"written": [str(out_path)], "format": fmt, "count": len(typed)}
 
 
-def _load_image_annotations(image_path: str):
+def _load_image_annotations(image_path: str, *, _checked_bucket_dirs: set | None = None):
     """Load GT + predictions for one image and build a COCO per-image record.
 
     Returns ``(iou_type, record, (gt, preds), width, height)`` where ``gt`` / ``preds`` are
@@ -208,7 +208,9 @@ def _load_image_annotations(image_path: str):
     bucket's own recorded scope is read (never trusted implicitly): a neither-key or undecodable
     stamp propagates by name (``StampScopeUnstated``, the seam's ``StoreError``) rather than
     letting a pre-conform classified bucket's value-keyed records score as object classes; a bare
-    directory or any readable scope scores by ``subject`` as it does today.
+    directory or any readable scope scores by ``subject`` as it does today. ``_checked_bucket_dirs``
+    (a folder-scan caller's own set, threaded across its calls) skips a directory already read
+    this pass, since many images share one prediction bucket and the read is for its raise alone.
     """
     from tcip_mcp.pipelines.resolution import bucket_scope
     from tcip_mcp.pipelines.training.evaluation import records_from_annotation
@@ -225,7 +227,11 @@ def _load_image_annotations(image_path: str):
         gt = load_annotations_any(str(gt_path), file_name=img.name)
     pred_path = find_prediction(image_path)
     if pred_path:
-        bucket_scope(Path(pred_path).parent)
+        bucket_dir = Path(pred_path).parent
+        if _checked_bucket_dirs is None or bucket_dir not in _checked_bucket_dirs:
+            bucket_scope(bucket_dir)
+            if _checked_bucket_dirs is not None:
+                _checked_bucket_dirs.add(bucket_dir)
         preds = read_labels(str(pred_path))
 
     iou_type, record = records_from_annotation(gt, preds, width=w, height=h)
@@ -365,8 +371,9 @@ def _evaluate_folder(
     from tcip_mcp.pipelines.training.evaluation import coco_detection_metrics, records_from_annotation
 
     collected = []  # (iou_type, record, (gt, preds), w, h, img)
+    checked_bucket_dirs: set = set()
     for img in images:
-        loaded = _load_image_annotations(str(img))
+        loaded = _load_image_annotations(str(img), _checked_bucket_dirs=checked_bucket_dirs)
         if loaded is None:
             continue
         iou_type, record, raw, w, h = loaded

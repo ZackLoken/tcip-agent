@@ -34,10 +34,6 @@ def _write_preds(path: Path, subjects: list[str]) -> None:
     write_annotations(str(path), anns, 8, 8)
 
 
-def _write_id_map_sidecar(dir_path: Path, id_map: dict) -> None:
-    (dir_path / "operating_point.json").write_text(json.dumps({"id_map": id_map}), encoding="utf-8")
-
-
 _ID_MAP = {"dormant": 0, "elongated": 1}
 
 
