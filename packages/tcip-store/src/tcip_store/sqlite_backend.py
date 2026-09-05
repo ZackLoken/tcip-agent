@@ -923,13 +923,24 @@ class SqliteBackend:
     # ── logs ────────────────────────────────────────────────────────────────────
 
     def append(self, key: Key, record: Mapping[str, Any]) -> None:
+        """Add one entry, clearing any tombstone a prior ``clear_log`` on this key left.
+
+        A log this key names again is alive, so a pending "this key's exported file should
+        be deleted" tombstone from an earlier clear is now wrong: the next export must write
+        this fresh entry out as a normal file, not delete it, the same way ``_put`` already
+        clears a record's own tombstone the moment it is written again.
+        """
         descriptor = get_descriptor(key.store)
         data = _encode(descriptor, key, record)
         _refuse_embedded_newline(key, data)
         with self._write((key,)) as conn:
+            parts = encode_parts(key.parts)
             conn.execute(
                 "insert into log_entries (store, parts, entry, appended_at) values (?, ?, ?, ?)",
-                (key.store, encode_parts(key.parts), data, _now()),
+                (key.store, parts, data, _now()),
+            )
+            conn.execute(
+                "delete from tombstones where store = ? and parts = ?", (key.store, parts)
             )
             self._bump(conn, key.store)
 
@@ -974,7 +985,16 @@ class SqliteBackend:
         )
 
     def clear_log(self, key: Key) -> int:
-        """Delete every committed row for this log, returning how many there were."""
+        """Delete every committed row for this log, returning how many there were.
+
+        Tombstones the key when it held any rows, the same record ``_drop`` leaves for a
+        deleted record: ``export._materialize``'s delete pass is driven by tombstones alone,
+        so without one here a later export would neither rewrite this log's exported file
+        (nothing left in ``log_entries`` to write) nor delete it (nothing in ``tombstones`` to
+        act on), leaving stale bytes on disk that pass for current. Bumps the change counter
+        only when a row was actually removed, so clearing a log nothing ever wrote does not
+        manufacture a ``store_counters`` row that ``stale_stores`` would then call behind.
+        """
         with self._write((key,)) as conn:
             parts = encode_parts(key.parts)
             count = conn.execute(
@@ -984,7 +1004,13 @@ class SqliteBackend:
             conn.execute(
                 "delete from log_entries where store = ? and parts = ?", (key.store, parts)
             )
-            self._bump(conn, key.store)
+            if count:
+                conn.execute(
+                    "insert into tombstones (store, parts, deleted_at) values (?, ?, ?) "
+                    "on conflict(store, parts) do update set deleted_at = excluded.deleted_at",
+                    (key.store, parts, _now()),
+                )
+                self._bump(conn, key.store)
         return int(count)
 
     # ── blobs, which stay files ─────────────────────────────────────────────────
