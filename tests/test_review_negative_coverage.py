@@ -151,8 +151,8 @@ def test_complete_named_subject_on_an_image_with_only_another_subjects_gt_is_a_s
 def test_complete_named_subject_over_a_file_holding_only_another_subjects_predictions_is_covered(
     client: TestClient, tmp_path: Path
 ) -> None:
-    """A subject's own predictions being absent is a genuine negative for it, even when the same
-    file holds another subject's boxes."""
+    """A classified bucket's own subject with nothing recorded for it on this file is a genuine
+    negative, even when the same file holds another subject's boxes."""
     d = tmp_path / "predictions" / "baseline" / "2-11-26"
     d.mkdir(parents=True)
     write_annotations(
@@ -160,7 +160,9 @@ def test_complete_named_subject_over_a_file_holding_only_another_subjects_predic
         [Annotation(subject="leaf", geometry=BBox(12.0, 20.0, 52.0, 44.0), score=0.71)],
         IMG_W, IMG_H,
     )
-    _seed_sidecar(d, {"checkpoint_sha256": CHECKPOINT_SHA, "id_map": {"catkin": 0, "leaf": 1}})
+    _seed_sidecar(d, {"checkpoint_sha256": CHECKPOINT_SHA,
+                      "id_map": {"elongated": 0, "dormant": 1},
+                      "subject": "catkin", "attribute": "elongation"})
     dataset_root = _dataset_root(tmp_path)
 
     resp = client.post("/api/review/mark_complete", json={
@@ -194,15 +196,19 @@ def test_complete_named_subject_the_bucket_never_assessed_omits_the_coverage_ent
     assert "catkin" not in (state.get("adjudication_covered") or {})
 
 
-def test_a_second_complete_under_another_subject_leaves_the_firsts_claim_intact(
+def test_a_second_complete_naming_a_subject_the_classified_bucket_cannot_resolve_leaves_the_firsts_claim_intact(
     client: TestClient, tmp_path: Path
 ) -> None:
-    """A Complete confirming one subject and a later Complete confirming another, on the same
-    image, both land: the second must not overwrite the first's coverage claim."""
+    """A Complete confirming the classified bucket's own subject, and a later Complete on the same
+    image naming a subject the bucket cannot resolve (a classified stamp admits only its own
+    object class), both land: the second's unresolvable name must not overwrite the first's
+    coverage claim."""
     d = tmp_path / "predictions" / "baseline" / "2-11-26"
     d.mkdir(parents=True)
     write_annotations(str(d / "IMG_0070.json"), [], IMG_W, IMG_H, keep_empty=True)
-    _seed_sidecar(d, {"checkpoint_sha256": CHECKPOINT_SHA, "id_map": {"catkin": 0, "leaf": 1}})
+    _seed_sidecar(d, {"checkpoint_sha256": CHECKPOINT_SHA,
+                      "id_map": {"elongated": 0, "dormant": 1},
+                      "subject": "catkin", "attribute": "elongation"})
     dataset_root = _dataset_root(tmp_path)
 
     client.post("/api/review/mark_complete", json={
@@ -214,8 +220,7 @@ def test_a_second_complete_under_another_subject_leaves_the_firsts_claim_intact(
         "pred_dir": str(d), "subject": "leaf",
     })
     assert resp.status_code == 200
-    assert _shard(dataset_root, "IMG_0070.JPG")["adjudication_covered"] == {
-        "catkin": True, "leaf": True}
+    assert _shard(dataset_root, "IMG_0070.JPG")["adjudication_covered"] == {"catkin": True}
 
 
 def test_complete_with_no_subject_records_completion_with_a_null_status(
