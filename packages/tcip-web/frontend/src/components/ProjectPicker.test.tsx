@@ -301,6 +301,46 @@ describe("ProjectPicker", () => {
     expect(freshApi.projects.setActive).not.toHaveBeenCalled();
   });
 
+  it("attempts auto-open at most once per page load, even when the first mount does not survive its fetch", async () => {
+    vi.resetModules();
+    const { api: freshApi } = await import("@/api/client");
+    const { ProjectPicker: FreshProjectPicker } = await import("@/components/ProjectPicker");
+
+    // The first mount's fetch never resolves before it unmounts, mirroring every load where the
+    // app opens the project itself ahead of the picker settling.
+    vi.mocked(freshApi.projects.list).mockReturnValueOnce(new Promise(() => {}));
+    const { unmount } = render(<FreshProjectPicker />);
+    unmount();
+
+    vi.mocked(freshApi.projects.list).mockResolvedValue({
+      workspace: "/ws",
+      active: PROJECTS[0].name,
+      active_path: PROJECTS[0].path,
+      projects: PROJECTS,
+    });
+    vi.mocked(freshApi.dataset.select).mockResolvedValue({
+      status: "ok",
+      generation: 1,
+      selection: {
+        project_root: PROJECTS[0].path,
+        dataset_root: PROJECTS[0].path,
+        subject: "bush",
+        date: "2026-03-01",
+        image_list: [],
+        current_image_index: 0,
+        annotations_dir: null,
+        predictions_dir: null,
+      },
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any);
+
+    // A second mount in the same module, e.g. the footer's Switch Project, must not re-open it.
+    render(<FreshProjectPicker />);
+
+    await screen.findByText(PROJECTS[0].name);
+    expect(freshApi.dataset.select).not.toHaveBeenCalled();
+  });
+
   it("has no advanced folder-open escape hatch (project creation is agent-driven)", async () => {
     vi.mocked(api.projects.list).mockResolvedValue({
       workspace: "/ws",
