@@ -685,17 +685,26 @@ class FileBackend:
         self._apply_staged(temp, marker, durable=durable)
 
     def read_log(self, key: Key, *, after: str | None = None) -> LogPage:
+        """A log's entries from ``after`` onward, and the cursor to resume from next.
+
+        The clear-base marker and the log's own bytes are read under the same lock
+        ``clear_log`` holds while it moves them, so a reader never pairs a base that
+        already reflects a clear with bytes ``clear_log`` has not yet removed (or the
+        reverse): either read sees the whole pair from before the clear or the whole
+        pair from after it, never one half of each.
+        """
         descriptor = get_descriptor(key.store)
         path = self.path_for(key)
-        base = self._read_clear_base(path)
         start = int(after) if after else 0
-        physical_start = max(0, start - base)
-        try:
-            with open(path, "rb") as handle:
-                handle.seek(physical_start)
-                data = handle.read()
-        except FileNotFoundError:
-            return LogPage(records=[], cursor=str(max(start, base)))
+        with self._locked([key]):
+            base = self._read_clear_base(path)
+            physical_start = max(0, start - base)
+            try:
+                with open(path, "rb") as handle:
+                    handle.seek(physical_start)
+                    data = handle.read()
+            except FileNotFoundError:
+                return LogPage(records=[], cursor=str(max(start, base)))
         if not data:
             return LogPage(records=[], cursor=str(max(start, base)))
         torn = not data.endswith(b"\n")
@@ -728,10 +737,13 @@ class FileBackend:
         keeps an absent log and a never-appended one the same "nothing here" ``read_log``
         already reports for either.
 
-        Advances the log's cursor watermark by this file's size before deleting it, so a
-        cursor a reader took before this call stays comparable to one taken after: replaying
-        it against the log this call leaves behind reads as "nothing yet" or "everything
-        appended since", never a byte offset seeked into the wrong generation's bytes.
+        Removes the file before advancing the cursor watermark, so a crash between the two
+        never leaves the watermark ahead of a file that still holds the bytes it claims to
+        be past: the only observable partial state is the file already gone and the
+        watermark not yet advanced, which ``read_log`` (holding the same lock this method
+        does) reads as "nothing here yet", the same answer it already gives a log that was
+        never appended to, rather than replaying every entry the watermark claims to have
+        already passed.
         """
         descriptor = get_descriptor(key.store)
         path = self.path_for(key)
@@ -739,10 +751,10 @@ class FileBackend:
             self._repair_torn_tail(path)
             data = self._read_bytes(path)
             count = 0 if not data else data.count(b"\n")
-            if data:
-                base = self._read_clear_base(path)
-                self._write_clear_base(path, base + len(data), durable=descriptor.durable)
+            base = self._read_clear_base(path) if data else 0
             self._remove_entry(path, durable=descriptor.durable)
+            if data:
+                self._write_clear_base(path, base + len(data), durable=descriptor.durable)
         return count
 
     # ── blobs ───────────────────────────────────────────────────────────────────
