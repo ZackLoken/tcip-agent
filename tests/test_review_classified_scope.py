@@ -336,3 +336,111 @@ def test_reject_on_a_true_positive_under_a_classified_scope_refuses(
 
     assert resp.status_code == 400
     assert "detector-scope act" in resp.json()["detail"]
+
+
+def test_accept_with_an_out_of_vocabulary_value_refuses_with_nothing_written(
+    client: TestClient, tmp_path: Path,
+) -> None:
+    """An unpaired accept's ``class_name`` is checked against the bucket's own vocabulary before
+    anything is written: a value the id_map never declares refuses, leaving the GT file untouched."""
+    dataset_root = tmp_path / "data"
+    img = _image(dataset_root)
+    staged = _stage_classified_prediction(dataset_root, value="healthy")
+    bucket = Path(prediction_dir(dataset_root, "classifier", DATE))
+    _stamp_classified_bucket(bucket)
+    gt_dir = dataset_root / "annotations" / DATE
+    write_annotations(str(gt_dir / f"{STEM}.json"), [], IMG_W, IMG_H, keep_empty=True)
+    gt = gt_dir / f"{STEM}.json"
+    before = gt.read_bytes()
+
+    resp = client.post("/api/review/action", json={
+        "dataset_root": str(dataset_root), "image_name": f"{STEM}.jpg", "image_path": str(img),
+        "gt_path": str(gt), "pred_path": staged["path"],
+        "det_type": "fp", "class_name": "unknown-value", "conf": 0.9,
+        "iou": None, "gt_idx": None, "pred_idx": 0,
+        "bbox": list(BOX), "action": "accepted", "user": "breeder",
+        "iou_threshold": 0.3, "conf_threshold": 0.1,
+    })
+
+    assert resp.status_code == 400
+    assert "not a value this bucket's own id_map declares" in resp.json()["detail"]
+    assert gt.read_bytes() == before
+
+
+def test_edit_under_a_classified_scope_with_an_in_vocabulary_value_replaces_geometry_and_value(
+    client: TestClient, tmp_path: Path,
+) -> None:
+    """Editing a matched detection under a classified scope replaces both the geometry and the
+    confirmed value, with the reviewer as author and no sign-off."""
+    dataset_root = tmp_path / "data"
+    img = _image(dataset_root)
+    staged = _stage_classified_prediction(dataset_root, value="healthy")
+    bucket = Path(prediction_dir(dataset_root, "classifier", DATE))
+    _stamp_classified_bucket(bucket)
+    gt = _write_gt(dataset_root, value="healthy")
+
+    matches = client.post("/api/review/matches", json={
+        "dataset_root": str(dataset_root), "image_name": f"{STEM}.jpg", "image_path": str(img),
+        "gt_path": str(gt), "pred_path": staged["path"],
+        "iou_threshold": 0.3, "conf_threshold": 0.1,
+    }).json()
+    assert matches["n_tp"] == 1
+    tp = next(d for d in matches["detections"] if d["det_type"] == "tp")
+    new_box = (25.0, 25.0, 65.0, 65.0)
+
+    resp = client.post("/api/review/action", json={
+        "dataset_root": str(dataset_root), "image_name": f"{STEM}.jpg", "image_path": str(img),
+        "gt_path": str(gt), "pred_path": staged["path"],
+        "det_type": "tp", "class_name": "diseased", "conf": tp["conf"],
+        "iou": tp["iou"], "gt_idx": tp["gt_idx"], "pred_idx": tp["pred_idx"],
+        "bbox": list(BOX), "edited_box": list(new_box),
+        "action": "edited", "user": "breeder",
+        "iou_threshold": 0.3, "conf_threshold": 0.1,
+    })
+
+    assert resp.status_code == 200, resp.text
+    from tcip_annotation.json_io import read_annotations
+
+    written = read_annotations(str(gt))
+    assert len(written) == 1
+    assert written[0].subject == SUBJECT
+    assert written[0].attributes == {ATTRIBUTE: "diseased"}
+    assert written[0].geometry.x1 == new_box[0] and written[0].geometry.y1 == new_box[1]
+    assert written[0].created_by == "user:breeder"
+    assert written[0].accepted_by is None and written[0].accepted_at is None
+
+
+def test_edit_under_a_classified_scope_with_an_out_of_vocabulary_value_refuses(
+    client: TestClient, tmp_path: Path,
+) -> None:
+    """An edit's ``class_name`` is checked against the bucket's own vocabulary the same way an
+    accept's is: a value the id_map never declares refuses, leaving the GT file untouched."""
+    dataset_root = tmp_path / "data"
+    img = _image(dataset_root)
+    staged = _stage_classified_prediction(dataset_root, value="healthy")
+    bucket = Path(prediction_dir(dataset_root, "classifier", DATE))
+    _stamp_classified_bucket(bucket)
+    gt = _write_gt(dataset_root, value="healthy")
+    before = gt.read_bytes()
+
+    matches = client.post("/api/review/matches", json={
+        "dataset_root": str(dataset_root), "image_name": f"{STEM}.jpg", "image_path": str(img),
+        "gt_path": str(gt), "pred_path": staged["path"],
+        "iou_threshold": 0.3, "conf_threshold": 0.1,
+    }).json()
+    tp = next(d for d in matches["detections"] if d["det_type"] == "tp")
+    new_box = (25.0, 25.0, 65.0, 65.0)
+
+    resp = client.post("/api/review/action", json={
+        "dataset_root": str(dataset_root), "image_name": f"{STEM}.jpg", "image_path": str(img),
+        "gt_path": str(gt), "pred_path": staged["path"],
+        "det_type": "tp", "class_name": "unknown-value", "conf": tp["conf"],
+        "iou": tp["iou"], "gt_idx": tp["gt_idx"], "pred_idx": tp["pred_idx"],
+        "bbox": list(BOX), "edited_box": list(new_box),
+        "action": "edited", "user": "breeder",
+        "iou_threshold": 0.3, "conf_threshold": 0.1,
+    })
+
+    assert resp.status_code == 400
+    assert "not a value this bucket's own id_map declares" in resp.json()["detail"]
+    assert gt.read_bytes() == before
