@@ -313,7 +313,7 @@ def check_registry(root: Path, findings: list) -> None:
     """
     from tcip_store import StoreError
 
-    from tcip_mcp.dataset_layout import list_models, prediction_root
+    from tcip_mcp.dataset_layout import prediction_bucket_dirs
     from tcip_mcp.model_registry import RegistryVersionRefused, read_registry_index
     from tcip_mcp.pipelines.resolution import read_operating_point_sidecar
     from tcip_mcp.registry_paths import (
@@ -360,20 +360,13 @@ def check_registry(root: Path, findings: list) -> None:
     # A bucket predating the checkpoint-digest rail may name a digest no entry carries; visible
     # here, never floored. The sidecar is read through the store seam, not a plain-file glob.
     registered_shas = {m.get("sha256") for m in entry_list}
-    pred_root = prediction_root(root)
-    if pred_root.is_dir():
-        for model in list_models(root):
-            model_dir = pred_root / model
-            if not model_dir.is_dir():
-                continue
-            buckets = [model_dir, *sorted(p for p in model_dir.iterdir() if p.is_dir())]
-            for bucket in buckets:
-                sha = (read_operating_point_sidecar(bucket) or {}).get("checkpoint_sha256")
-                if sha and sha not in registered_shas:
-                    findings.append(("warn", f"{bucket.relative_to(root)}: prediction bucket's "
-                                    f"stamp names checkpoint {sha}, which no registry entry "
-                                    "names; register the checkpoint to make this bucket's "
-                                    "provenance verifiable going forward."))
+    for bucket in prediction_bucket_dirs(root):
+        sha = (read_operating_point_sidecar(bucket) or {}).get("checkpoint_sha256")
+        if sha and sha not in registered_shas:
+            findings.append(("warn", f"{bucket.relative_to(root)}: prediction bucket's "
+                            f"stamp names checkpoint {sha}, which no registry entry "
+                            "names; register the checkpoint to make this bucket's "
+                            "provenance verifiable going forward."))
 
 
 def check_provenance(root: Path, findings: list) -> None:
