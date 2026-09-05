@@ -73,7 +73,6 @@ register_store(
         codec=RECORD_JSON,
         concurrency="last_writer_wins",
         locator=_CalibrationCurveLocator(),
-        schema_version=2,
     )
 )
 
@@ -957,7 +956,6 @@ def _run_inference_verified(
         # The full curve can be large, persist it and return the path (provenance emits has_gate_evidence).
         # The record's own body is its identity, so a curve differing from a prior one is never lost.
         curve_body = {
-            "schema_version": 2,
             "trait": trait,
             "dataset_hash": cal_hash,
             "checkpoint_sha256": identity["sha256"],
