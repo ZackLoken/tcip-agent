@@ -653,13 +653,13 @@ export function TrainingTab() {
                     aria-pressed={selectedRun === r.run_id}
                     aria-label={runRowLabel(r)}
                     aria-describedby={r.external ? `origin-mark-${r.run_id}` : undefined}
-                    className="flex-1 text-left"
+                    className="flex-1 min-w-0 text-left"
                     onClick={() => setSelectedRun(r.run_id)}
                   >
                     <div className="font-mono text-[11px]">
                       {r.run_id}
                       {r.experiment_id && r.experiment_id !== r.run_id && (
-                        <span className="text-tcip-muted"> · {r.experiment_id}</span>
+                        <span className="text-tcip-muted break-all"> · {r.experiment_id}</span>
                       )}
                     </div>
                     <div className="text-[10px] text-tcip-muted flex justify-between">
