@@ -48,7 +48,8 @@ export interface TensorboardLaunch {
 export interface MetricRow {
   epoch?: number;
   step?: number;
-  [metric: string]: number | string | undefined;
+  // The producer (tcip_store.values) writes null for a non-finite metric value.
+  [metric: string]: number | string | null | undefined;
 }
 
 export interface LaunchableConfig {

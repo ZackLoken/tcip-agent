@@ -21,12 +21,18 @@ import { TabHeading } from "@/components/TabHeading";
 import { useDisclosure } from "@/hooks/useDisclosure";
 import { useEditableAgentRequest } from "@/hooks/useEditableAgentRequest";
 import { useEmbeddedToolRetry, type EmbeddedToolStepResult } from "@/hooks/useEmbeddedToolRetry";
+import { UNSET_GLYPH } from "@/lib/glyphs";
 import { TERMINAL_STATUSES } from "@/lib/runStatus";
 import { useStore } from "@/store";
 import { defaultTrainingRequest } from "@/tabs/agentPrompts";
 import { CHART, CHART_LINE_COLORS } from "@/tabs/chartTheme";
 import { RunMonitorEmpty, RunMonitorLayout } from "@/tabs/RunMonitorLayout";
-import { mergeMetric, runOrderLine, RUN_REFRESH_MS } from "@/tabs/trainingMetrics";
+import {
+  mergeMetric,
+  numericMetricKeys,
+  runOrderLine,
+  RUN_REFRESH_MS,
+} from "@/tabs/trainingMetrics";
 
 // Runs can only be stopped while still active; terminal/historical runs show no button.
 const TRAINING_CANCELLABLE: ReadonlySet<string> = new Set(["created", "running"]);
@@ -167,6 +173,7 @@ export function TrainingTab() {
   const { open: chartTableOpen, toggle: toggleChartTable } = useDisclosure();
   const chartHeadingId = useId();
   const chartNameId = useId();
+  const chartTableId = useId();
 
   const marked: MarkedRun[] = runs
     .filter((r) => markedRunIds.has(r.run_id) && !unmarkableReason(r))
@@ -276,6 +283,13 @@ export function TrainingTab() {
     setPickerOpen(false);
   }
 
+  // The run list's own poll keeps a status per run independent of the metrics stream; a ref
+  // (not a dependency) so reading it doesn't reopen the stream on every poll.
+  const runsRef = useRef<TrainingRunSummary[]>(runs);
+  useEffect(() => {
+    runsRef.current = runs;
+  }, [runs]);
+
   useEffect(() => {
     // Comparing owns its own per-run streams; suspend this one so the stream count stays the marked count.
     if (!selectedRun || !projectRoot || comparing) return;
@@ -283,6 +297,10 @@ export function TrainingTab() {
     // seed GET would just double-load the same rows. The WS is the single source now.
     setMetrics([]);
     streamRef.current?.();
+    // A run already terminal when this stream opened is a rediscovery, not a transition the
+    // breeder is watching; only a run still live at open time toasts on its own terminal frame.
+    const knownAtOpen = runsRef.current.find((r) => r.run_id === selectedRun)?.status;
+    const alreadyTerminal = TERMINAL_STATUSES.has(knownAtOpen ?? "");
     streamRef.current = openTrainingStream(projectRoot, selectedRun, (msg) => {
       if (msg.type === "metric" && msg.row) {
         setMetrics((prev) => mergeMetric(prev, msg.row as MetricRow));
@@ -294,7 +312,7 @@ export function TrainingTab() {
           return;
         }
         const st = msg.status?.status;
-        if (typeof st === "string")
+        if (typeof st === "string" && !alreadyTerminal)
           useStore.getState().pushToast(`Training ${selectedRun}: ${st}`, "info");
         void refreshRuns();
       }
@@ -382,8 +400,15 @@ export function TrainingTab() {
   }
 
   const chartData = useMemo((): (MetricRow & { step: number })[] => {
-    return metrics.map((m, i) => ({ step: m.epoch ?? m.step ?? i, ...m }));
+    return metrics.map((m, i) => ({ ...m, step: m.epoch ?? m.step ?? i }));
   }, [metrics]);
+
+  // Whether metrics[i] itself carried an ordinal, checked against the raw row since chartData's
+  // own step field has by then been overwritten with the derived value (real or index).
+  const hasOrdinal = useCallback(
+    (i: number) => typeof metrics[i]?.epoch === "number" || typeof metrics[i]?.step === "number",
+    [metrics],
+  );
 
   const selectedRunSummary = runs.find((r) => r.run_id === selectedRun);
   const selectedRunTerminal = TERMINAL_STATUSES.has(selectedRunSummary?.status ?? "");
@@ -397,9 +422,7 @@ export function TrainingTab() {
   const metricKeys = useMemo(() => {
     const keys = new Set<string>();
     metrics.forEach((row) => {
-      Object.entries(row).forEach(([k, v]) => {
-        if (typeof v === "number" && k !== "epoch" && k !== "step") keys.add(k);
-      });
+      numericMetricKeys(row).forEach((k) => keys.add(k));
     });
     return Array.from(keys);
   }, [metrics]);
@@ -440,6 +463,7 @@ export function TrainingTab() {
                     type="button"
                     onClick={toggleChartTable}
                     aria-expanded={chartTableOpen}
+                    aria-controls={chartTableId}
                     className="flex items-center gap-1 text-[11px] text-tcip-muted hover:text-tcip-fg"
                   >
                     <DisclosureChevron open={chartTableOpen} />
@@ -506,7 +530,10 @@ export function TrainingTab() {
                     </ResponsiveContainer>
                   </figure>
                 ) : (
-                  <div className="flex items-center justify-center h-full text-tcip-muted text-[12px]">
+                  <div
+                    role="status"
+                    className="flex items-center justify-center h-full text-tcip-muted text-[12px]"
+                  >
                     {!selectedRun
                       ? "No run selected."
                       : selectedRunTerminal
@@ -517,12 +544,12 @@ export function TrainingTab() {
               </div>
 
               {selectedRun && chartData.length > 0 && chartTableOpen && (
-                <div className="overflow-auto max-h-64 shrink-0">
+                <div id={chartTableId} className="overflow-auto max-h-64 shrink-0">
                   <table className="w-full text-[11px]">
                     <caption className="sr-only">{`${selectedRun} metrics as a table`}</caption>
                     <thead>
                       <tr className="border-b border-tcip-border">
-                        <th className="tcip-th">Step</th>
+                        <th className="tcip-th">epoch/step</th>
                         {metricKeys.map((key) => (
                           <th key={key} className="tcip-th">
                             {key}
@@ -533,10 +560,12 @@ export function TrainingTab() {
                     <tbody>
                       {chartData.map((row, i) => (
                         <tr key={i} className="border-t border-tcip-border first:border-t-0">
-                          <td className="py-1 pr-3 tabular-nums">{row.step}</td>
+                          <td className="py-1 pr-3 tabular-nums">
+                            {hasOrdinal(i) ? row.step : UNSET_GLYPH}
+                          </td>
                           {metricKeys.map((key) => (
                             <td key={key} className="pr-3 tabular-nums">
-                              {typeof row[key] === "number" ? row[key] : ""}
+                              {typeof row[key] === "number" ? row[key] : UNSET_GLYPH}
                             </td>
                           ))}
                         </tr>
