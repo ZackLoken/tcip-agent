@@ -803,3 +803,207 @@ def test_feedback_tools_register_in_manifest():
     names = list_registered_tools()
     assert "materialize_review_dataset" in names
     assert "prioritize_review_queue" in names
+
+
+# --- classified-scope materialization ---------------------------------------------------------
+
+CLASSIFIED_SUBJECT = "leaf"
+CLASSIFIED_ATTRIBUTE = "condition"
+CLASSIFIED_BUCKET = "predictions/classifier/2026-03-05"
+
+
+def _seed_classified_verdicts(state_dir: Path, *, bucket: str = CLASSIFIED_BUCKET) -> Path:
+    """One accepted 'healthy' call and one rejected 'diseased' call: a classified review's own
+    verdicts, whose class_name is the confirmed/predicted value, never the object's subject."""
+    state = {"verdicts": {
+        (bucket, "imgA.png"): {"img_status": "completed", "detections": [
+            {"action": "accepted", "class_name": "healthy",
+             "gt_bbox_norm": [0.5, 0.5, 0.2, 0.2], "pred_bbox_norm": None}]},
+        (bucket, "imgB.png"): {"img_status": "completed", "detections": [
+            {"action": "rejected", "class_name": "diseased",
+             "gt_bbox_norm": None, "pred_bbox_norm": [0.8, 0.8, 0.1, 0.1]}]},
+    }}
+    from tcip_annotation.review_engine import ReviewEngine
+
+    engine = ReviewEngine(str(state_dir))
+    engine.raw_state.update(state)
+    engine.save_review_state()
+    return state_dir
+
+
+def _stamp_classified_bucket(dataset_root: Path, bucket_rel: str = CLASSIFIED_BUCKET) -> Path:
+    from tcip_mcp.pipelines.resolution import write_sidecar
+
+    bucket_dir = dataset_root / bucket_rel
+    write_sidecar(bucket_dir, {"id_map": {"healthy": 0, "diseased": 1},
+                              "subject": CLASSIFIED_SUBJECT, "attribute": CLASSIFIED_ATTRIBUTE})
+    return bucket_dir
+
+
+def _source_dataset_with_registry(root: Path) -> Path:
+    """A dataset root carrying a real class registry, with the two reviewed images under its
+    own images/ (the segment dataset_root_of needs to locate the root back from it)."""
+    dataset_root = root / "source_dataset"
+    images = dataset_root / "images"
+    _source_images(images)
+    (dataset_root / "classes.json").write_text(
+        '{"leaf": {"attributes": {"condition": {"type": "categorical", '
+        '"values": ["healthy", "diseased"]}}}}',
+        encoding="utf-8",
+    )
+    return dataset_root
+
+
+def test_materialize_writes_positives_under_a_classified_scope_in_the_ground_truth_shape(tmp_path):
+    """The object class lands in subject, the confirmed value under the scope's own attribute,
+    never the verdict-name-derived subject a detector review would write."""
+    dataset_root = tmp_path / "dataset"
+    _seed_classified_verdicts(_own_store(dataset_root))
+    _stamp_classified_bucket(dataset_root)
+    source = _source_dataset_with_registry(tmp_path)
+
+    r = materialize_review_dataset(
+        str(dataset_root), str(source / "images"), str(tmp_path / "out"),
+        bucket=CLASSIFIED_BUCKET)
+
+    assert "error" not in r
+    assert r["positive"] == 1
+    assert r["subject"] == CLASSIFIED_SUBJECT
+    assert r["attribute"] == CLASSIFIED_ATTRIBUTE
+    from tcip_annotation.json_io import read_annotations
+
+    anns = read_annotations(str(tmp_path / "out" / "annotations" / "imgA.json"))
+    assert anns[0].subject == CLASSIFIED_SUBJECT
+    assert anns[0].attributes == {CLASSIFIED_ATTRIBUTE: "healthy"}
+
+
+def test_materialize_never_confirms_a_negative_under_a_classified_scope(tmp_path):
+    """A rejected value call names the model's wrong-state guess, never the object's absence, so
+    the rejected-only image is named in unconfirmed_negatives and no confirmed-negative status
+    is ever recorded for it, even though its label file is still an empty background."""
+    dataset_root = tmp_path / "dataset"
+    _seed_classified_verdicts(_own_store(dataset_root))
+    _stamp_classified_bucket(dataset_root)
+    source = _source_dataset_with_registry(tmp_path)
+    out = tmp_path / "out"
+
+    r = materialize_review_dataset(
+        str(dataset_root), str(source / "images"), str(out), bucket=CLASSIFIED_BUCKET)
+
+    assert "error" not in r
+    assert len(r["unconfirmed_negatives"]) == 1
+    assert r["unconfirmed_negatives"][0]["image"] == "imgB.png"
+    from tcip_mcp.dataset_layout import read_image_status_store
+
+    assert read_image_status_store(out) == {}
+
+
+def test_materialize_copies_the_source_registry_under_a_classified_scope(tmp_path):
+    dataset_root = tmp_path / "dataset"
+    _seed_classified_verdicts(_own_store(dataset_root))
+    _stamp_classified_bucket(dataset_root)
+    source = _source_dataset_with_registry(tmp_path)
+    out = tmp_path / "out"
+
+    r = materialize_review_dataset(
+        str(dataset_root), str(source / "images"), str(out), bucket=CLASSIFIED_BUCKET)
+
+    assert "error" not in r
+    assert (out / "classes.json").is_file()
+    assert (out / "classes.json").read_text(encoding="utf-8") == (
+        (source / "classes.json").read_text(encoding="utf-8"))
+
+
+def test_materialize_refuses_a_classified_scope_with_no_source_registry(tmp_path):
+    dataset_root = tmp_path / "dataset"
+    _seed_classified_verdicts(_own_store(dataset_root))
+    _stamp_classified_bucket(dataset_root)
+    src = _source_images(tmp_path / "src")  # a bare directory, no dataset root to derive from
+
+    r = materialize_review_dataset(
+        str(dataset_root), str(src), str(tmp_path / "out"), bucket=CLASSIFIED_BUCKET)
+
+    assert "error" in r
+    assert "register_dataset" in r["error"]
+
+
+def test_materialize_refuses_a_classified_scope_into_a_populated_output(tmp_path):
+    dataset_root = tmp_path / "dataset"
+    _seed_classified_verdicts(_own_store(dataset_root))
+    _stamp_classified_bucket(dataset_root)
+    source = _source_dataset_with_registry(tmp_path)
+    out = tmp_path / "out"
+    out.mkdir(parents=True)
+    (out / "classes.json").write_text('{"other": {}}', encoding="utf-8")
+
+    r = materialize_review_dataset(
+        str(dataset_root), str(source / "images"), str(out), bucket=CLASSIFIED_BUCKET)
+
+    assert "error" in r
+    assert "already holds a class registry" in r["error"]
+    assert (out / "classes.json").read_text(encoding="utf-8") == '{"other": {}}'
+
+
+def test_materialize_refuses_a_neither_key_stamp(tmp_path):
+    from tcip_mcp.pipelines.resolution import sidecar_key
+    import tcip_store
+
+    dataset_root = tmp_path / "dataset"
+    _seed_classified_verdicts(_own_store(dataset_root))
+    bucket_dir = dataset_root / CLASSIFIED_BUCKET
+    tcip_store.replace(sidecar_key(bucket_dir, "operating_point"),
+                       {"id_map": {"healthy": 0, "diseased": 1}}, expect=tcip_store.Version.ABSENT)
+    src = _source_images(tmp_path / "src")
+
+    r = materialize_review_dataset(
+        str(dataset_root), str(src), str(tmp_path / "out"), bucket=CLASSIFIED_BUCKET)
+
+    assert "error" in r
+    assert "conform_classified_predictions.py" in r["error"]
+
+
+def test_materialize_refuses_an_undecodable_stamp(tmp_path):
+    import os
+
+    from tcip_mcp.pipelines.resolution import sidecar_key
+    from tcip_store.binding import BACKEND_ENV, DEFAULT_BACKEND, FILE_BACKEND
+    from tcip_store.store import _backend
+
+    dataset_root = tmp_path / "dataset"
+    _seed_classified_verdicts(_own_store(dataset_root))
+    bucket_dir = _stamp_classified_bucket(dataset_root)
+    key = sidecar_key(bucket_dir, "operating_point")
+    if (os.environ.get(BACKEND_ENV) or DEFAULT_BACKEND) == FILE_BACKEND:
+        _backend().path_for(key).write_bytes(b"{not json")
+    else:
+        import sqlite3
+
+        from tcip_store.sqlite_backend import database_path, encode_parts
+
+        conn = sqlite3.connect(str(database_path(str(key.root))), isolation_level=None)
+        try:
+            conn.execute("update records set value = ? where store = ? and parts = ?",
+                        (b"{not json", key.store, encode_parts(key.parts)))
+        finally:
+            conn.close()
+    src = _source_images(tmp_path / "src")
+
+    r = materialize_review_dataset(
+        str(dataset_root), str(src), str(tmp_path / "out"), bucket=CLASSIFIED_BUCKET)
+
+    assert "error" in r
+
+
+def test_materialize_refuses_a_relative_bucket_key_against_a_stated_foreign_store(tmp_path):
+    """A relative bucket key is only ever meaningful against the root whose own store recorded
+    it; a caller stating a different review_state_dir must state an absolute path instead."""
+    dataset_root = tmp_path / "dataset"
+    dataset_root.mkdir()
+    external = _seed_verdicts(tmp_path / "elsewhere" / "state", bucket=BUCKET)  # relative key
+    src = _source_images(tmp_path / "src")
+
+    r = materialize_review_dataset(
+        str(dataset_root), str(src), str(tmp_path / "out"), review_state_dir=str(external))
+
+    assert "error" in r
+    assert "relative bucket key" in r["error"]
