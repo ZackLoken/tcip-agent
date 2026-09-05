@@ -77,6 +77,31 @@ def test_write_sidecar_refuses_a_classified_pair_over_a_map_keyed_by_the_subject
     assert read_operating_point_sidecar(bucket) is None
 
 
+def test_write_sidecar_refuses_a_detector_pair_over_an_empty_map(tmp_path: Path) -> None:
+    """An empty ``id_map`` (``{}``, distinct from ``None``, absent) names no vocabulary a detector
+    pair could agree or disagree with: refused by name, never read as "not keyed by the subject"
+    with an empty list printed."""
+    bucket = tmp_path / "bucket"
+    stamp = _stamp(subject=SUBJECT, attribute=None, id_map={})
+
+    with pytest.raises(ValueError, match="id_map is empty"):
+        write_sidecar(bucket, stamp)
+
+    assert read_operating_point_sidecar(bucket) is None
+
+
+def test_write_sidecar_refuses_a_classified_pair_over_an_empty_map(tmp_path: Path) -> None:
+    """The same empty-map refusal on the classified side: an empty map is never silently admitted
+    as consistent."""
+    bucket = tmp_path / "bucket"
+    stamp = _stamp(subject=SUBJECT, attribute=ATTRIBUTE, id_map={}, trait=ATTRIBUTE)
+
+    with pytest.raises(ValueError, match="id_map is empty"):
+        write_sidecar(bucket, stamp)
+
+    assert read_operating_point_sidecar(bucket) is None
+
+
 def test_write_sidecar_admits_a_detector_pair_over_its_own_map(tmp_path: Path) -> None:
     bucket = tmp_path / "bucket"
     stamp = _stamp(subject=SUBJECT, attribute=None, id_map=DETECTOR_MAP)
