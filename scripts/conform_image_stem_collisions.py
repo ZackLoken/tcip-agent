@@ -14,7 +14,8 @@ reader agree on exactly which keys are ambiguous.
 
 ``--plan`` is the default (an explicit ``--plan`` is accepted and behaves the same as omitting
 both flags); ``--apply`` is the opt-in, the inverse of every other ``conform_*.py`` script here,
-because this one moves a breeder's raw bytes rather than rewriting a record. ``--plan`` prints, for
+because this one moves a breeder's raw bytes rather than rewriting a record. The two flags are
+exclusive; passing both refuses before either mode runs. ``--plan`` prints, for
 each ambiguous key, every one of its files with size, modification time and content digest, which
 file (if any) today's un-corrected enumeration would still serve (the first by sorted filename
 among files sharing one exact stem; ``None`` when a raw file's exact stem already matches a
@@ -54,7 +55,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent / "packages" / "tcip-mcp" / "src"))
 sys.path.insert(0, str(Path(__file__).parent.parent / "packages" / "tcip-store" / "src"))
 
-from tcip_mcp.pipelines.data.band_groups import MANIFEST_EXT  # noqa: E402
+from tcip_mcp.pipelines.data.band_groups import MANIFEST_EXT, read_band_group_manifest  # noqa: E402
 from tcip_store.binding import bind_default  # noqa: E402
 
 FLAT_BUCKET_SENTINEL = ".flat"
@@ -253,13 +254,38 @@ def apply_collisions(collisions: list[Collision], keep_paths: list[Path]) -> int
         keep = own_paths[keep_resolved]
         others = [p for p in c.paths if p.resolve() != keep_resolved]
 
+        parked_manifests = [p for p in others if p.suffix.lower() == MANIFEST_EXT]
+        if parked_manifests:
+            for m in parked_manifests:
+                ref = read_band_group_manifest(m)
+                members = sorted(str(p) for p in ref.bands.values())
+                print(f"refused: {where}: --keep {keep} would park manifest {m}, leaving its "
+                      f"claimed band files {members} behind as standalone images; keep the "
+                      "manifest instead")
+            refused = True
+            continue
+
         served = served_today(c.paths)
-        if served is not None and served.resolve() != keep_resolved:
-            records = records_for_stem(c.dataset_root, c.bucket, served.stem)
-            if records:
-                print(f"refused: {where}: --keep {keep} is not the file served today ({served}), "
-                      f"and {', '.join(records)} exist for {served.stem!r}; resolve the records "
-                      "first")
+        if served is not None:
+            if served.resolve() != keep_resolved:
+                records = records_for_stem(c.dataset_root, c.bucket, served.stem)
+                if records:
+                    print(f"refused: {where}: --keep {keep} is not the file served today "
+                          f"({served}), and {', '.join(records)} exist for {served.stem!r}; "
+                          "resolve the records first")
+                    refused = True
+                    continue
+        else:
+            by_stem_records = {
+                stem: records_for_stem(c.dataset_root, c.bucket, stem) for stem in _key_stems(c.paths)
+            }
+            present = {stem: recs for stem, recs in by_stem_records.items() if recs}
+            if present:
+                details = "; ".join(
+                    f"{stem!r}: {', '.join(recs)}" for stem, recs in sorted(present.items())
+                )
+                print(f"refused: {where}: no single file is served today for this key, and "
+                      f"records exist ({details}); resolve the records first")
                 refused = True
                 continue
 
@@ -313,6 +339,10 @@ def main() -> int:
         "--keep", action="append", default=[], type=Path,
         help="the file to keep for one ambiguous key; pass once per key")
     args = ap.parse_args()
+
+    if args.plan and args.apply:
+        print("refused: --plan and --apply are exclusive; pass one")
+        return 2
 
     bind_default()
 
