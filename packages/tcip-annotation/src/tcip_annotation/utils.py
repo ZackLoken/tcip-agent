@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+from typing import Any, cast
+
 from PIL import Image, ExifTags
 
 logger = logging.getLogger(__name__)
@@ -17,7 +19,8 @@ def _read_orientation_tag(img: Image.Image) -> int | None:
     does not implement; the photographic path this serves admits only those containers.
     """
     try:
-        exif = img._getexif()
+        # _getexif is a JpegImageFile/MpoImageFile accessor, absent from the Image.Image stub.
+        exif = cast(Any, img)._getexif()
         if exif is None:
             return None
         orientation_key = None
