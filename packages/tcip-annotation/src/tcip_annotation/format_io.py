@@ -8,7 +8,9 @@ I/O boundary.
     name-based records)
   - coco: a single dataset-level ``.json`` (an ``"images"`` / ``"annotations"`` / ``"categories"``
     key); a genuine interop format, so its numeric ``category_id`` is decoded through the file's own
-    ``categories`` back to names on read and encoded from a name→id map on write.
+    ``categories`` back to names on read and encoded from a name→id map on write. A record's
+    ``attributes`` (a classified prediction's decoded value) round-trips through the file's own
+    ``attributes`` key; outside the freeze, this is a behavior change stated where it is made.
 
 Usage::
 
@@ -237,7 +239,11 @@ def parse_coco_annotations(
     not coerce to ``int``, or whose ``category_id`` has no name in this document's ``categories``,
     raises :class:`~tcip_annotation.json_io.UnreadableLabelDocument` naming the record's index,
     rather than reading the document short. A polygon geometry wins over a box when both are
-    present (the polygon is the source of truth).
+    present (the polygon is the source of truth). A record's ``attributes``, when present, is
+    restored when it is a mapping of strings to strings (the shape :func:`write_coco` emits), and
+    raises the same error, naming the record's index, for any other shape: a classified
+    prediction's value lives there, and losing it silently on a COCO round trip would launder a
+    classified record back into a bare object-class one.
     """
     anns, _, _ = _coco_image_annotations(coco, image_id, file_name)
     id2name = _coco_categories(coco)
@@ -269,7 +275,19 @@ def parse_coco_annotations(
             if isinstance(bb, list) and len(bb) == 4:
                 x, y, bw, bh = (float(v) for v in bb)
                 geometry = BBox(x, y, x + bw, y + bh)
-        out.append(Annotation(subject=subject, geometry=geometry, **_coco_prov(ann)))
+        attributes: dict[str, str] = {}
+        raw_attributes = ann.get("attributes")
+        if raw_attributes is not None:
+            if not (isinstance(raw_attributes, dict)
+                    and all(isinstance(k, str) and isinstance(v, str)
+                            for k, v in raw_attributes.items())):
+                raise UnreadableLabelDocument(
+                    f"record {i}'s attributes {raw_attributes!r} is not a mapping of strings to "
+                    "strings"
+                )
+            attributes = dict(raw_attributes)
+        out.append(Annotation(
+            subject=subject, geometry=geometry, attributes=attributes, **_coco_prov(ann)))
     return out
 
 
