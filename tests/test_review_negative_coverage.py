@@ -153,6 +153,8 @@ def test_complete_named_subject_over_a_file_holding_only_another_subjects_predic
 ) -> None:
     """A classified bucket's own subject with nothing recorded for it on this file is a genuine
     negative, even when the same file holds another subject's boxes."""
+    from tcip_mcp.pipelines.resolution import operating_point_stamp, write_sidecar
+
     d = tmp_path / "predictions" / "baseline" / "2-11-26"
     d.mkdir(parents=True)
     write_annotations(
@@ -160,9 +162,14 @@ def test_complete_named_subject_over_a_file_holding_only_another_subjects_predic
         [Annotation(subject="leaf", geometry=BBox(12.0, 20.0, 52.0, 44.0), score=0.71)],
         IMG_W, IMG_H,
     )
-    _seed_sidecar(d, {"checkpoint_sha256": CHECKPOINT_SHA,
-                      "id_map": {"elongated": 0, "dormant": 1},
-                      "subject": "catkin", "attribute": "elongation"})
+    stamp = operating_point_stamp(
+        {"conf": {"value": 0.5}}, validated=False, validated_by=None, tile_size_validated=None,
+        shippable_issues=[], id_map={"elongated": 0, "dormant": 1}, trait="elongation",
+        dataset_hash="H", checkpoint="m", checkpoint_sha256=CHECKPOINT_SHA,
+        experiment_id="exp-17", images_dir=None, raster_path=None,
+        produced_at="2026-01-01T00:00:00Z", subject="catkin", attribute="elongation",
+    )
+    write_sidecar(d, stamp)
     dataset_root = _dataset_root(tmp_path)
 
     resp = client.post("/api/review/mark_complete", json={
@@ -218,12 +225,19 @@ def test_a_second_complete_naming_a_subject_the_classified_bucket_cannot_resolve
     image naming a subject the bucket cannot resolve (a classified stamp admits only its own
     object class), both land: the second's unresolvable name must not overwrite the first's
     coverage claim."""
+    from tcip_mcp.pipelines.resolution import operating_point_stamp, write_sidecar
+
     d = tmp_path / "predictions" / "baseline" / "2-11-26"
     d.mkdir(parents=True)
     write_annotations(str(d / "IMG_0070.json"), [], IMG_W, IMG_H, keep_empty=True)
-    _seed_sidecar(d, {"checkpoint_sha256": CHECKPOINT_SHA,
-                      "id_map": {"elongated": 0, "dormant": 1},
-                      "subject": "catkin", "attribute": "elongation"})
+    stamp = operating_point_stamp(
+        {"conf": {"value": 0.5}}, validated=False, validated_by=None, tile_size_validated=None,
+        shippable_issues=[], id_map={"elongated": 0, "dormant": 1}, trait="elongation",
+        dataset_hash="H", checkpoint="m", checkpoint_sha256=CHECKPOINT_SHA,
+        experiment_id="exp-17", images_dir=None, raster_path=None,
+        produced_at="2026-01-01T00:00:00Z", subject="catkin", attribute="elongation",
+    )
+    write_sidecar(d, stamp)
     dataset_root = _dataset_root(tmp_path)
 
     first = client.post("/api/review/mark_complete", json={
