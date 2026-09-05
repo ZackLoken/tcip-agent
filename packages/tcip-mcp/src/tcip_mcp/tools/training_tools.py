@@ -1430,36 +1430,51 @@ _HPO_KNOWN_KEYS = {"lr", "batch_size", "weight_decay"}
 
 
 class _AccessTrackingConfig(dict):
-    """Dict subclass recording which top-level keys are ever read via ``__getitem__``/``get``/
+    """Dict subclass recording which dotted paths are ever read via ``__getitem__``/``get``/
     ``__contains__``, installed on ``run.config`` for one HPO trial's dispatch, so
     ``unconsumed_params`` reflects genuine runtime access (did anything read this key during
     this trial), not a static comparison against ``train()``'s known key list, which would
     falsely flag a bespoke ``training_source``'s own legitimate custom sweep key.
 
+    A nested dict value returned by ``__getitem__``/``get`` is itself wrapped the same way,
+    sharing this instance's own ``accessed`` set under its own dotted prefix, so
+    ``ctx.config["model_source"]["builder_kwargs"]["width"]`` records ``"model_source"``,
+    ``"model_source.builder_kwargs"`` and ``"model_source.builder_kwargs.width"`` in one read, and
+    a misspelled leaf under an otherwise-read block is reported by its own dotted name rather
+    than being hidden behind the block it lives in.
+
     Real, stated limitations (never gates the run, warn-only, so a false positive costs a log
-    line, not a failed trial): top-level only (a nested read like
-    ``ctx.config["optimizer"]["custom_key"]`` isn't seen), so a dotted swept key
-    (``"model_source.builder_kwargs.width"``) counts as consumed once its top-level segment
-    (``"model_source"``) is read, whatever its own leaf name; a misspelled leaf under an
-    otherwise-read block is therefore not reported unconsumed. ``dict(cfg)``/``**cfg`` copies
-    bypass the overrides entirely (CPython copies at the C level); whole-dict iteration
-    (``.items()``/``.values()``/``.keys()``) isn't tracked per-key.
+    line, not a failed trial): ``dict(cfg)``/``**cfg`` copies bypass the overrides entirely
+    (CPython copies at the C level, and the copy is a plain dict with no wrapping of its own);
+    whole-dict iteration (``.items()``/``.values()``/``.keys()``) isn't tracked per-key.
     """
 
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
+    def __init__(self, *args: Any, _prefix: str = "", _accessed: set[str] | None = None,
+                **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
-        self.accessed: set[str] = set()
+        self._prefix = _prefix
+        self.accessed: set[str] = set() if _accessed is None else _accessed
+
+    def _dotted(self, key: Any) -> str:
+        return f"{self._prefix}.{key}" if self._prefix else str(key)
+
+    def _wrap(self, key: Any, value: Any) -> Any:
+        if isinstance(value, dict) and not isinstance(value, _AccessTrackingConfig):
+            return _AccessTrackingConfig(value, _prefix=self._dotted(key), _accessed=self.accessed)
+        return value
 
     def __getitem__(self, key: Any) -> Any:
-        self.accessed.add(key)
-        return super().__getitem__(key)
+        self.accessed.add(self._dotted(key))
+        return self._wrap(key, super().__getitem__(key))
 
     def get(self, key: Any, default: Any = None) -> Any:
-        self.accessed.add(key)
-        return super().get(key, default)
+        self.accessed.add(self._dotted(key))
+        if not dict.__contains__(self, key):
+            return default
+        return self._wrap(key, super().__getitem__(key))
 
     def __contains__(self, key: Any) -> bool:
-        self.accessed.add(key)
+        self.accessed.add(self._dotted(key))
         return super().__contains__(key)
 
 
@@ -2009,12 +2024,10 @@ def _run_hpo_trial(config: dict, report, base_config: dict, trial_dir: str) -> N
         logger.warning("HPO trial failed: %s", e)
         report(losing_side)
     finally:
-        # Surface any swept param no consumer touched (warn-only); a dotted key counts as
-        # consumed when the top-level segment it lands under, not the dotted string itself, was read.
+        # Surface any swept param no consumer touched (warn-only); a dotted key is consumed only
+        # by its own full dotted path being read, never by an ancestor block being read.
         swept = set(config.keys()) - _HPO_KNOWN_KEYS
-        unconsumed = sorted(
-            key for key in swept if key.split(".", 1)[0] not in tracked_config.accessed
-        )
+        unconsumed = sorted(key for key in swept if key not in tracked_config.accessed)
         try:
             # trial_params is the sampled point itself, the only record of which axes this
             # sweep actually varied (the merged config cannot say that).
