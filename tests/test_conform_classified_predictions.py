@@ -1,0 +1,497 @@
+"""``scripts/conform_classified_predictions.py``: stamping a scope onto a classified prediction
+bucket that predates the writer rail, and rewriting a bucket's own documents from the old
+value-in-subject shape into the shape ``write_predictions_json`` now writes.
+
+Every bucket a live producer could no longer mint (a pre-rail stamp, a value-in-subject document)
+is seeded by writing straight through the store or the annotation writer, the same posture
+``test_review_negative_coverage.py`` takes for a neither-key stamp: the rail refuses these shapes
+outright, so there is no producer left to build them through.
+"""
+
+from __future__ import annotations
+
+import importlib.util
+import sys
+from pathlib import Path
+
+import tcip_store as ts
+from tcip_store.binding import bind_default
+
+from tcip_annotation.json_io import write_annotations
+from tcip_annotation.review_engine import ReviewEngine
+from tcip_annotation.state import Annotation, BBox
+
+from tcip_mcp.experiments import config_key
+from tcip_mcp.pipelines.resolution import bucket_scope, sidecar_key
+from tcip_mcp.prediction_buckets import review_state_dir_of
+from tcip_mcp.tools.project_tools import upsert_dataset
+
+SCRIPT = Path(__file__).parent.parent / "scripts" / "conform_classified_predictions.py"
+
+SUBJECT = "leaf"
+ATTRIBUTE = "condition"
+VALUE_ID_MAP = {"healthy": 0, "diseased": 1}
+DETECTOR_ID_MAP = {SUBJECT: 0}
+
+
+def _load_script():
+    spec = importlib.util.spec_from_file_location(
+        "conform_classified_predictions_under_test", SCRIPT)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def _base_stamp(*, id_map: dict, experiment_id: str = "exp-1", **overrides) -> dict:
+    stamp = {
+        "schema_version": 2, "trait": "condition", "dataset_hash": "h",
+        "operating_point": {"conf": {"value": 0.5}}, "id_map": id_map,
+        "validated": False, "validated_by": None, "tile_size_validated": None,
+        "shippable_issues": [], "checkpoint": "m", "checkpoint_sha256": "f" * 64,
+        "experiment_id": experiment_id, "images_dir": None, "raster_path": None,
+        "produced_at": "2026-01-01T00:00:00+00:00",
+    }
+    stamp.update(overrides)
+    return stamp
+
+
+def _write_stamp(bucket: Path, stamp: dict) -> None:
+    bucket.mkdir(parents=True, exist_ok=True)
+    ts.replace(sidecar_key(bucket, "operating_point"), stamp, expect=ts.Version.ABSENT)
+
+
+def _damage_record(key: ts.Key, data: bytes) -> None:
+    """Put ``data`` behind a record, wherever the bound backend keeps it (mirrors
+    test_project_tools.py's own helper: the record must already exist at the key)."""
+    import os
+
+    from tcip_store.binding import BACKEND_ENV, DEFAULT_BACKEND, FILE_BACKEND
+    from tcip_store.store import _backend
+
+    name = os.environ.get(BACKEND_ENV) or DEFAULT_BACKEND
+    if name == FILE_BACKEND:
+        _backend().path_for(key).write_bytes(data)
+        return
+    import sqlite3
+
+    from tcip_store.sqlite_backend import database_path, encode_parts
+
+    conn = sqlite3.connect(str(database_path(str(key.root))), isolation_level=None)
+    try:
+        conn.execute(
+            "update records set value = ? where store = ? and parts = ?",
+            (data, key.store, encode_parts(key.parts)),
+        )
+    finally:
+        conn.close()
+
+
+def _write_undecodable_stamp(bucket: Path) -> None:
+    bucket.mkdir(parents=True, exist_ok=True)
+    key = sidecar_key(bucket, "operating_point")
+    ts.replace(key, _base_stamp(id_map=VALUE_ID_MAP), expect=ts.Version.ABSENT)
+    _damage_record(key, b"{not json")
+
+
+def _write_doc(bucket: Path, stem: str, annotations: list[Annotation], w=100, h=80) -> Path:
+    bucket.mkdir(parents=True, exist_ok=True)
+    path = bucket / f"{stem}.json"
+    write_annotations(str(path), annotations, w, h, keep_empty=True)
+    return path
+
+
+def _write_experiment_config(experiment_id: str, root: Path, data: dict) -> None:
+    ts.replace(config_key(experiment_id, root=root), {"data": data}, expect=ts.Version.ABSENT)
+
+
+def _pre_conform_classified_bucket(root: Path, dataset_root: Path, *, date: str = "2026-01-01") -> Path:
+    """A classified bucket in the old shape: the value in ``subject``, a stamp recording the
+    value-keyed map but no ``(subject, attribute)`` pair, written before the writer rail existed.
+    """
+    bucket = dataset_root / "predictions" / "classifier" / date
+    _write_doc(bucket, "img1", [Annotation(subject="healthy", geometry=BBox(0, 0, 10, 10), score=0.9)])
+    _write_doc(bucket, "img2", [Annotation(subject="diseased", geometry=BBox(5, 5, 15, 15), score=0.8)])
+    _write_stamp(bucket, _base_stamp(id_map=VALUE_ID_MAP, experiment_id="exp-classified"))
+    return bucket
+
+
+def _register(project_root: Path, dataset_root: Path, *, dataset_id: str = "ds-1") -> None:
+    (project_root / ".tcip").mkdir(parents=True, exist_ok=True)
+    upsert_dataset(project_root, {"id": dataset_id, "path": str(dataset_root), "crop": "hazelnut",
+                                  "fingerprint": None})
+
+
+def _classes_json(dataset_root: Path) -> None:
+    dataset_root.mkdir(parents=True, exist_ok=True)
+    (dataset_root / "classes.json").write_text(
+        '{"leaf": {"attributes": {"condition": {"type": "categorical", '
+        '"values": ["healthy", "diseased"]}}}}',
+        encoding="utf-8",
+    )
+
+
+def test_a_classifier_bucket_is_rewritten_and_stamped(tmp_path):
+    bind_default()
+    module = _load_script()
+    project = tmp_path / "project"
+    dataset_root = tmp_path / "dataset"
+    _register(project, dataset_root)
+    bucket = _pre_conform_classified_bucket(project, dataset_root)
+    _write_experiment_config("exp-classified", project,
+                              {"subject": SUBJECT, "attribute": ATTRIBUTE, "id_map": VALUE_ID_MAP})
+
+    outcomes, refused = module.process_project_root(
+        project, plan=False, operator_subject=None, operator_attribute=None)
+
+    assert refused is False
+    assert any("rewrote 2 document(s)" in o for o in outcomes), outcomes
+    scope = bucket_scope(bucket)
+    assert scope.subject == SUBJECT and scope.attribute == ATTRIBUTE
+    from tcip_annotation.json_io import read_annotations
+
+    doc1 = read_annotations(str(bucket / "img1.json"))
+    assert doc1[0].subject == SUBJECT
+    assert doc1[0].attributes == {ATTRIBUTE: "healthy"}
+
+    from tcip_mcp.pipelines.postprocessing.phenology import count_by_class
+
+    total, positive, unclassified = count_by_class(
+        bucket / "img1.json", VALUE_ID_MAP, "healthy", scope=scope)
+    assert (total, positive, unclassified) == (1, 1, 0)
+
+
+def test_a_second_run_rewrites_nothing_and_reports_the_same_left_behind_set(tmp_path):
+    bind_default()
+    module = _load_script()
+    project = tmp_path / "project"
+    dataset_root = tmp_path / "dataset"
+    _register(project, dataset_root)
+    _pre_conform_classified_bucket(project, dataset_root)
+    _write_experiment_config("exp-classified", project,
+                              {"subject": SUBJECT, "attribute": ATTRIBUTE, "id_map": VALUE_ID_MAP})
+
+    first, _ = module.process_project_root(project, plan=False, operator_subject=None,
+                                           operator_attribute=None)
+    second, refused = module.process_project_root(project, plan=False, operator_subject=None,
+                                                   operator_attribute=None)
+
+    assert refused is False
+    assert any("conformed" in o and "rewrote" not in o for o in second), second
+
+
+def test_a_detector_bucket_is_stamped(tmp_path):
+    bind_default()
+    module = _load_script()
+    project = tmp_path / "project"
+    dataset_root = tmp_path / "dataset"
+    _register(project, dataset_root)
+    bucket = dataset_root / "predictions" / "detector" / "2026-01-02"
+    _write_doc(bucket, "img1", [Annotation(subject=SUBJECT, geometry=BBox(0, 0, 10, 10), score=0.9)])
+    _write_stamp(bucket, _base_stamp(id_map=DETECTOR_ID_MAP, experiment_id="exp-detector"))
+    _write_experiment_config("exp-detector", project, {"subject": SUBJECT, "attribute": None,
+                                                       "id_map": DETECTOR_ID_MAP})
+
+    outcomes, refused = module.process_project_root(
+        project, plan=False, operator_subject=None, operator_attribute=None)
+
+    assert refused is False
+    assert any("stamped the detector pair" in o for o in outcomes), outcomes
+    scope = bucket_scope(bucket)
+    assert scope.subject == SUBJECT and scope.attribute is None
+
+
+def test_a_reviewed_detector_bucket_is_stamped_with_digests_intact(tmp_path):
+    bind_default()
+    module = _load_script()
+    project = tmp_path / "project"
+    dataset_root = tmp_path / "dataset"
+    _register(project, dataset_root)
+    bucket = dataset_root / "predictions" / "detector" / "2026-01-03"
+    _write_doc(bucket, "img1", [Annotation(subject=SUBJECT, geometry=BBox(0, 0, 10, 10), score=0.9)])
+    _write_stamp(bucket, _base_stamp(id_map=DETECTOR_ID_MAP, experiment_id="exp-detector-2"))
+    _write_experiment_config("exp-detector-2", project, {"subject": SUBJECT, "attribute": None,
+                                                         "id_map": DETECTOR_ID_MAP})
+    key = ("predictions/detector/2026-01-03", "img1.json")
+    state_dir = review_state_dir_of(dataset_root)
+    engine = ReviewEngine(str(state_dir))
+    engine.raw_state.update({"verdicts": {key: {"img_status": "completed", "detections": [
+        {"action": "accepted", "class_name": SUBJECT,
+         "gt_bbox_norm": [0.5, 0.5, 0.2, 0.2], "pred_bbox_norm": None}]}}})
+    engine.save_review_state()
+
+    from tcip_mcp.prediction_buckets import bucket_content_digest
+
+    before = bucket_content_digest(bucket)
+    outcomes, refused = module.process_project_root(
+        project, plan=False, operator_subject=None, operator_attribute=None)
+
+    assert refused is False
+    assert any("stamp completion" in o or "stamped the detector pair" in o for o in outcomes), outcomes
+    assert bucket_content_digest(bucket) == before
+
+
+def test_a_stated_detector_scope_refused_over_a_bucket_whose_map_is_keyed_by_values(tmp_path):
+    bind_default()
+    module = _load_script()
+    project = tmp_path / "project"
+    dataset_root = tmp_path / "dataset"
+    _register(project, dataset_root)
+    bucket = dataset_root / "predictions" / "classifier" / "2026-01-04"
+    _write_doc(bucket, "img1", [Annotation(subject="healthy", geometry=BBox(0, 0, 10, 10), score=0.9)])
+    _write_stamp(bucket, _base_stamp(id_map=VALUE_ID_MAP, experiment_id="exp-no-record"))
+
+    outcomes, refused = module.process_project_root(
+        project, plan=False, operator_subject=SUBJECT, operator_attribute=None)
+
+    assert refused is True
+    assert any("refused" in o and "detector pair" in o for o in outcomes), outcomes
+
+
+def test_a_no_map_bucket_a_decimal_key_bucket_and_an_undecodable_stamp(tmp_path):
+    bind_default()
+    module = _load_script()
+    project = tmp_path / "project"
+    dataset_root = tmp_path / "dataset"
+    _register(project, dataset_root)
+
+    no_map = dataset_root / "predictions" / "classifier" / "no-map"
+    _write_doc(no_map, "img1", [Annotation(subject="healthy", geometry=BBox(0, 0, 10, 10), score=0.9)])
+    _write_stamp(no_map, _base_stamp(id_map=None, experiment_id="exp-a"))
+    _write_experiment_config("exp-a", project, {"subject": SUBJECT, "attribute": ATTRIBUTE})
+
+    decimal_key = dataset_root / "predictions" / "classifier" / "decimal-key"
+    _write_doc(decimal_key, "img1", [Annotation(subject="healthy", geometry=BBox(0, 0, 10, 10), score=0.9)])
+    _write_stamp(decimal_key, _base_stamp(id_map={"0": 0, "1": 1}, experiment_id="exp-b"))
+    _write_experiment_config("exp-b", project, {"subject": SUBJECT, "attribute": ATTRIBUTE})
+
+    undecodable = dataset_root / "predictions" / "classifier" / "bad-stamp"
+    _write_doc(undecodable, "img1", [Annotation(subject="healthy", geometry=BBox(0, 0, 10, 10), score=0.9)])
+    _write_undecodable_stamp(undecodable)
+
+    outcomes, refused = module.process_project_root(
+        project, plan=False, operator_subject=None, operator_attribute=None)
+
+    assert refused is True
+    joined = "\n".join(outcomes)
+    assert "no-map" in joined and "records no id_map" in joined
+    assert "decimal-key" in joined and "decimal key" in joined
+    assert "bad-stamp" in joined and "refused" in joined
+
+
+def test_a_stamped_bucket_holding_a_value_keyed_document_is_reported_with_re_inference(tmp_path):
+    bind_default()
+    module = _load_script()
+    project = tmp_path / "project"
+    dataset_root = tmp_path / "dataset"
+    _register(project, dataset_root)
+    bucket = dataset_root / "predictions" / "classifier" / "already-scoped"
+    _write_doc(bucket, "img1", [Annotation(subject=SUBJECT, geometry=BBox(0, 0, 10, 10), score=0.9,
+                                          attributes={ATTRIBUTE: "healthy"})])
+    _write_doc(bucket, "img2", [Annotation(subject="diseased", geometry=BBox(5, 5, 15, 15), score=0.8)])
+    _write_stamp(bucket, _base_stamp(id_map=VALUE_ID_MAP, subject=SUBJECT, attribute=ATTRIBUTE))
+
+    outcomes, refused = module.process_project_root(
+        project, plan=False, operator_subject=None, operator_attribute=None)
+
+    assert refused is False
+    assert any("conformed" in o and "value-keyed record" in o for o in outcomes), outcomes
+
+
+def test_a_reviewed_classified_bucket_is_reported_with_its_verdict_count_and_untouched(tmp_path):
+    bind_default()
+    module = _load_script()
+    project = tmp_path / "project"
+    dataset_root = tmp_path / "dataset"
+    _register(project, dataset_root)
+    bucket = _pre_conform_classified_bucket(project, dataset_root, date="reviewed")
+    _write_experiment_config("exp-classified", project,
+                              {"subject": SUBJECT, "attribute": ATTRIBUTE, "id_map": VALUE_ID_MAP})
+    key = ("predictions/classifier/reviewed", "img1.json")
+    state_dir = review_state_dir_of(dataset_root)
+    engine = ReviewEngine(str(state_dir))
+    engine.raw_state.update({"verdicts": {key: {"img_status": "completed", "detections": [
+        {"action": "accepted", "class_name": "healthy",
+         "gt_bbox_norm": [0.5, 0.5, 0.2, 0.2], "pred_bbox_norm": None}]}}})
+    engine.save_review_state()
+
+    from tcip_mcp.prediction_buckets import bucket_content_digest
+
+    before = bucket_content_digest(bucket)
+    outcomes, refused = module.process_project_root(
+        project, plan=False, operator_subject=None, operator_attribute=None)
+
+    assert refused is True
+    assert any("review verdict" in o for o in outcomes), outcomes
+    assert bucket_content_digest(bucket) == before
+
+
+def test_plan_mode_writes_nothing_and_reports_what_would_change(tmp_path):
+    bind_default()
+    module = _load_script()
+    project = tmp_path / "project"
+    dataset_root = tmp_path / "dataset"
+    _register(project, dataset_root)
+    bucket = _pre_conform_classified_bucket(project, dataset_root)
+    _write_experiment_config("exp-classified", project,
+                              {"subject": SUBJECT, "attribute": ATTRIBUTE, "id_map": VALUE_ID_MAP})
+
+    from tcip_mcp.prediction_buckets import bucket_content_digest
+
+    before = bucket_content_digest(bucket)
+    outcomes, refused = module.process_project_root(
+        project, plan=True, operator_subject=None, operator_attribute=None)
+
+    assert refused is True
+    assert any("would conform" in o for o in outcomes), outcomes
+    assert bucket_content_digest(bucket) == before
+
+
+def test_a_prediction_date_directory_with_no_images_counterpart_is_walked_and_conformed(tmp_path):
+    bind_default()
+    module = _load_script()
+    project = tmp_path / "project"
+    dataset_root = tmp_path / "dataset"
+    _register(project, dataset_root)
+    assert not (dataset_root / "images").exists()
+    bucket = _pre_conform_classified_bucket(project, dataset_root)
+    _write_experiment_config("exp-classified", project,
+                              {"subject": SUBJECT, "attribute": ATTRIBUTE, "id_map": VALUE_ID_MAP})
+
+    outcomes, refused = module.process_project_root(
+        project, plan=False, operator_subject=None, operator_attribute=None)
+
+    assert refused is False
+    assert any(str(bucket) in o and "rewrote" in o for o in outcomes), outcomes
+
+
+def test_the_experiment_source_is_read_under_the_walked_root_when_the_platform_root_is_pinned_elsewhere(
+    tmp_path, monkeypatch,
+):
+    bind_default()
+    module = _load_script()
+    project = tmp_path / "project"
+    dataset_root = tmp_path / "dataset"
+    _register(project, dataset_root)
+    _pre_conform_classified_bucket(project, dataset_root)
+    _write_experiment_config("exp-classified", project,
+                              {"subject": SUBJECT, "attribute": ATTRIBUTE, "id_map": VALUE_ID_MAP})
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(elsewhere))
+
+    outcomes, refused = module.process_project_root(
+        project, plan=False, operator_subject=None, operator_attribute=None)
+
+    assert refused is False
+    assert any("rewrote 2 document(s)" in o and "experiment" in o for o in outcomes), outcomes
+
+
+def test_a_bespoke_run_answering_no_scope_falls_through_to_the_operator(tmp_path):
+    bind_default()
+    module = _load_script()
+    project = tmp_path / "project"
+    dataset_root = tmp_path / "dataset"
+    _register(project, dataset_root)
+    bucket = _pre_conform_classified_bucket(project, dataset_root)
+    _write_experiment_config("exp-classified", project, {"dataset_source": "bespoke"})
+
+    outcomes, refused = module.process_project_root(
+        project, plan=False, operator_subject=SUBJECT, operator_attribute=ATTRIBUTE)
+
+    assert refused is False
+    assert any("rewrote 2 document(s)" in o and "operator statement" in o for o in outcomes), outcomes
+    assert bucket_scope(bucket).subject == SUBJECT
+
+
+def test_a_scopeless_bucket_with_no_source_is_refused_and_left_alone(tmp_path):
+    bind_default()
+    module = _load_script()
+    project = tmp_path / "project"
+    dataset_root = tmp_path / "dataset"
+    _register(project, dataset_root)
+    bucket = _pre_conform_classified_bucket(project, dataset_root)
+    _write_experiment_config("exp-classified", project, {"dataset_source": "bespoke"})
+
+    from tcip_mcp.prediction_buckets import bucket_content_digest
+
+    before = bucket_content_digest(bucket)
+    outcomes, refused = module.process_project_root(
+        project, plan=False, operator_subject=None, operator_attribute=None)
+
+    assert refused is True
+    assert any("no source" in o for o in outcomes), outcomes
+    assert bucket_content_digest(bucket) == before
+
+
+def test_the_like_source_conforms_a_bare_copy(tmp_path):
+    bind_default()
+    module = _load_script()
+    project = tmp_path / "project"
+    dataset_root = tmp_path / "dataset"
+    _register(project, dataset_root)
+    scoped = _pre_conform_classified_bucket(project, dataset_root, date="source")
+    _write_experiment_config("exp-classified", project,
+                              {"subject": SUBJECT, "attribute": ATTRIBUTE, "id_map": VALUE_ID_MAP})
+    module.process_project_root(project, plan=False, operator_subject=None, operator_attribute=None)
+    assert bucket_scope(scoped).subject == SUBJECT
+
+    bare_copy = tmp_path / "hand_split" / "calibration"
+    _write_doc(bare_copy, "imgA", [Annotation(subject="healthy", geometry=BBox(0, 0, 10, 10))])
+
+    outcome, refused, id_map, changed = module.conform_bucket(
+        bare_copy, root=None, plan=False, like_dir=scoped,
+        operator_subject=None, operator_attribute=None, is_bare_named=True,
+    )
+
+    assert refused is False
+    assert "rewrote" in outcome and "no stamp written" in outcome
+    from tcip_annotation.json_io import read_annotations
+
+    doc = read_annotations(str(bare_copy / "imgA.json"))
+    assert doc[0].subject == SUBJECT
+    assert doc[0].attributes == {ATTRIBUTE: "healthy"}
+    assert module.read_stamp_state(bare_copy).kind == "absent"
+
+
+def test_a_bucket_holding_a_raw_index_or_foreign_value_record_is_reported_and_untouched(tmp_path):
+    bind_default()
+    module = _load_script()
+    project = tmp_path / "project"
+    dataset_root = tmp_path / "dataset"
+    _register(project, dataset_root)
+    bucket = dataset_root / "predictions" / "classifier" / "foreign"
+    _write_doc(bucket, "img1", [Annotation(subject="healthy", geometry=BBox(0, 0, 10, 10), score=0.9)])
+    _write_doc(bucket, "img2", [Annotation(subject="0", geometry=BBox(5, 5, 15, 15), score=0.7)])
+    _write_stamp(bucket, _base_stamp(id_map=VALUE_ID_MAP, experiment_id="exp-foreign"))
+    _write_experiment_config("exp-foreign", project,
+                              {"subject": SUBJECT, "attribute": ATTRIBUTE, "id_map": VALUE_ID_MAP})
+
+    from tcip_mcp.prediction_buckets import bucket_content_digest
+
+    before = bucket_content_digest(bucket)
+    outcomes, refused = module.process_project_root(
+        project, plan=False, operator_subject=None, operator_attribute=None)
+
+    assert refused is True
+    assert any("unconformable" in o for o in outcomes), outcomes
+    assert bucket_content_digest(bucket) == before
+
+
+def test_a_value_keyed_ground_truth_record_is_reported_as_a_candidate(tmp_path):
+    bind_default()
+    module = _load_script()
+    project = tmp_path / "project"
+    dataset_root = tmp_path / "dataset"
+    _register(project, dataset_root)
+    _pre_conform_classified_bucket(project, dataset_root)
+    _write_experiment_config("exp-classified", project,
+                              {"subject": SUBJECT, "attribute": ATTRIBUTE, "id_map": VALUE_ID_MAP})
+    gt_dir = dataset_root / "annotations" / "2026-01-01"
+    _write_doc(gt_dir, "gt_img", [Annotation(subject="healthy", geometry=BBox(1, 1, 9, 9))])
+
+    outcomes, refused = module.process_project_root(
+        project, plan=False, operator_subject=None, operator_attribute=None)
+
+    assert any("ground-truth candidate" in o and "healthy" in o for o in outcomes), outcomes
