@@ -188,6 +188,45 @@ describe("AnnotateToolbar draw mode", () => {
   });
 });
 
+describe("AnnotateToolbar Cut button", () => {
+  function openEditor() {
+    const btn = screen.getByRole("button", { name: /Editor/ });
+    if (btn.getAttribute("aria-expanded") !== "true") fireEvent.click(btn);
+  }
+
+  it("states the disabled reason outside polygon mode", () => {
+    renderToolbar();
+    openEditor();
+    const cutButton = screen.getByRole("button", { name: "Cut" });
+    expect(cutButton).toBeDisabled();
+    expect(cutButton).toHaveAttribute("title", "Cut: in polygon mode only");
+  });
+
+  it("states the disabled reason on a locked (confirmed) image", () => {
+    render(<AnnotateToolbar onSave={() => {}} saveDisabled={false} dirty={false} isLocked />);
+    openEditor();
+    fireEvent.click(modeButton("Polygon"));
+    const cutButton = screen.getByRole("button", { name: "Cut" });
+    expect(cutButton).toBeDisabled();
+    expect(cutButton).toHaveAttribute(
+      "title",
+      "Cut: this image is confirmed; uncheck Complete to edit",
+    );
+  });
+
+  it("states the how-to once enabled, in polygon mode on an unlocked image", () => {
+    renderToolbar();
+    openEditor();
+    fireEvent.click(modeButton("Polygon"));
+    const cutButton = screen.getByRole("button", { name: "Cut" });
+    expect(cutButton).not.toBeDisabled();
+    expect(cutButton).toHaveAttribute(
+      "title",
+      "Click two points on either side of the selected polygon to split it (x)",
+    );
+  });
+});
+
 describe("AnnotateToolbar status filter", () => {
   it("lists the start state (Unannotated) before the terminal states, matching Review's convention", () => {
     renderToolbar();

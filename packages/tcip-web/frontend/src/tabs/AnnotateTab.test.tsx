@@ -9,7 +9,7 @@ import * as CanvasStageMock from "@/components/Canvas/CanvasStage";
 import * as canvasSync from "@/lib/canvasSync";
 import { notifyCanvasStateRequest } from "@/lib/canvasSync";
 import type { CompletenessRecord } from "@/lib/coverage";
-import { CUT_RING_REFUSAL } from "@/lib/polygonGeometry";
+import { CUT_MISSES_REFUSAL } from "@/lib/polygonGeometry";
 import { sessionsApi } from "@/api/sessions";
 import { useStore } from "@/store";
 import { AnnotateTab } from "@/tabs/AnnotateTab";
@@ -1188,6 +1188,29 @@ describe("Cut tool arming", () => {
     fireEvent.keyDown(window, { key: "x" });
     expect(useStore.getState().annotateUi.cut).toBe(false);
   });
+
+  it("arming and disarming each schedule a push carrying the current cut_armed value", async () => {
+    await renderPolygonCanvas();
+    useStore.setState({ bindingGeneration: 1 });
+    const pushSpy = vi
+      .spyOn(api.canvas, "pushState")
+      .mockResolvedValue({ status: "ok", shapes_written: true });
+    pushSpy.mockClear();
+
+    vi.useFakeTimers();
+    try {
+      act(() => useStore.getState().setCut(true));
+      act(() => vi.advanceTimersByTime(1600));
+      expect(pushSpy.mock.calls.at(-1)?.[0].cut_armed).toBe(true);
+
+      pushSpy.mockClear();
+      act(() => useStore.getState().setCut(false));
+      act(() => vi.advanceTimersByTime(1600));
+      expect(pushSpy.mock.calls.at(-1)?.[0].cut_armed).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe("Cut gesture", () => {
@@ -1266,16 +1289,40 @@ describe("Cut gesture", () => {
     expect(useStore.getState().annotateUi.cut).toBe(false);
   });
 
-  it("a selection change between the clicks refuses", async () => {
+  const POLYGON_CHANGED_SENTENCE =
+    "The polygon changed since the first click; the cut was cancelled. Select it and place both " +
+    "points again.";
+
+  it("a selection change between the clicks refuses with the polygon-changed sentence", async () => {
     const stage = await renderPolygonCanvas();
     armOnPolyA();
     fireEvent.click(stage, { clientX: 105, clientY: 0, button: 0 });
     act(() => useStore.getState().selectPolygon(1));
     fireEvent.click(stage, { clientX: 105, clientY: 250, button: 0 });
     expect(useStore.getState().canvas.polygons).toHaveLength(2);
-    expect(useStore.getState().toasts.at(-1)?.message).toBe(
-      "The selection changed since the cut started; select the polygon again.",
-    );
+    expect(useStore.getState().toasts.at(-1)?.message).toBe(POLYGON_CHANGED_SENTENCE);
+  });
+
+  it("an attribute edit between the clicks does not cancel the cut", async () => {
+    const stage = await renderPolygonCanvas();
+    armOnPolyA();
+    fireEvent.click(stage, { clientX: 105, clientY: 0, button: 0 });
+    act(() => {
+      const poly = useStore.getState().canvas.polygons[0];
+      useStore.getState().updatePolygon(0, { ...poly, attributes: { health: "good" } });
+    });
+    fireEvent.click(stage, { clientX: 105, clientY: 250, button: 0 });
+    expect(useStore.getState().canvas.polygons).toHaveLength(3); // the cut still landed
+  });
+
+  it("a vertex edit between the clicks refuses with the polygon-changed sentence", async () => {
+    const stage = await renderPolygonCanvas();
+    armOnPolyA();
+    fireEvent.click(stage, { clientX: 105, clientY: 0, button: 0 });
+    act(() => useStore.getState().dragVertex(0, 0, 0, [11, 11]));
+    fireEvent.click(stage, { clientX: 105, clientY: 250, button: 0 });
+    expect(useStore.getState().canvas.polygons).toHaveLength(2); // unchanged: the cut was cancelled
+    expect(useStore.getState().toasts.at(-1)?.message).toBe(POLYGON_CHANGED_SENTENCE);
   });
 
   it("a refused cut leaves the polygons unchanged and the flag set", async () => {
@@ -1286,7 +1333,77 @@ describe("Cut gesture", () => {
     expect(useStore.getState().canvas.polygons).toHaveLength(2);
     expect(useStore.getState().canvas.polygons[0].rings[0]).toHaveLength(4);
     expect(useStore.getState().annotateUi.cut).toBe(true);
-    expect(useStore.getState().toasts.at(-1)?.message).toBe(CUT_RING_REFUSAL);
+    expect(useStore.getState().toasts.at(-1)?.message).toBe(CUT_MISSES_REFUSAL);
+  });
+
+  it("after cutting one polygon, a click inside another selects it with no start placed", async () => {
+    const stage = await renderPolygonCanvas();
+    armOnPolyA();
+    fireEvent.click(stage, { clientX: 105, clientY: 0, button: 0 });
+    fireEvent.click(stage, { clientX: 105, clientY: 250, button: 0 });
+    expect(useStore.getState().canvas.polygons).toHaveLength(3); // POLY_A split, POLY_B untouched
+    expect(useStore.getState().annotateUi.cut).toBe(true);
+
+    // POLY_B now sits at index 2 (POLY_A's two pieces occupy 0 and 1).
+    fireEvent.click(stage, { clientX: 350, clientY: 350, button: 0 });
+    expect(useStore.getState().canvas.selectedPolygonIdx).toBe(2);
+    expect(useStore.getState().canvas.polygons).toHaveLength(3); // the click authored nothing
+
+    fireEvent.click(stage, { clientX: 305, clientY: 250, button: 0 });
+    fireEvent.click(stage, { clientX: 305, clientY: 450, button: 0 });
+    expect(useStore.getState().canvas.polygons).toHaveLength(4); // POLY_B cut too
+  });
+
+  it("disarming via setCut clears a pending start (the toolbar button's own action)", async () => {
+    const stage = await renderPolygonCanvas();
+    armOnPolyA();
+    fireEvent.click(stage, { clientX: 105, clientY: 0, button: 0 });
+    act(() => useStore.getState().setCut(false));
+    act(() => useStore.getState().setCut(true));
+    fireEvent.click(stage, { clientX: 105, clientY: 250, button: 0 }); // a fresh first click, not a cut
+    expect(useStore.getState().canvas.polygons).toHaveLength(2);
+  });
+
+  it("disarming via x clears a pending start", async () => {
+    const stage = await renderPolygonCanvas();
+    armOnPolyA();
+    fireEvent.click(stage, { clientX: 105, clientY: 0, button: 0 });
+    fireEvent.keyDown(window, { key: "x" });
+    act(() => useStore.getState().setCut(true));
+    fireEvent.click(stage, { clientX: 105, clientY: 250, button: 0 }); // a fresh first click, not a cut
+    expect(useStore.getState().canvas.polygons).toHaveLength(2);
+  });
+
+  it("confirming the image (locking it) clears the flag and the pending start", async () => {
+    const stage = await renderPolygonCanvas();
+    armOnPolyA();
+    fireEvent.click(stage, { clientX: 105, clientY: 0, button: 0 });
+    act(() => {
+      useStore.setState((s) => ({
+        imageStatus: { ...s.imageStatus, byImage: { "img1.jpg": "complete" } },
+      }));
+    });
+    expect(useStore.getState().annotateUi.cut).toBe(false);
+    act(() => {
+      useStore.setState((s) => ({ imageStatus: { ...s.imageStatus, byImage: {} } }));
+      useStore.getState().setCut(true);
+    });
+    fireEvent.click(stage, { clientX: 105, clientY: 250, button: 0 }); // a fresh first click, not a cut
+    expect(useStore.getState().canvas.polygons).toHaveLength(2);
+  });
+
+  it("a mode change away from polygon clears the flag and the pending start", async () => {
+    const stage = await renderPolygonCanvas();
+    armOnPolyA();
+    fireEvent.click(stage, { clientX: 105, clientY: 0, button: 0 });
+    act(() => useStore.getState().setMode("box"));
+    expect(useStore.getState().annotateUi.cut).toBe(false);
+    act(() => {
+      useStore.getState().setMode("polygon");
+      useStore.getState().setCut(true);
+    });
+    fireEvent.click(stage, { clientX: 105, clientY: 250, button: 0 }); // a fresh first click, not a cut
+    expect(useStore.getState().canvas.polygons).toHaveLength(2);
   });
 });
 

@@ -110,6 +110,7 @@ export function AnnotateTab() {
   // the stream/vertex-placement branches all read as an open polygon in progress.
   const [cutStart, setCutStart] = useState<{
     point: [number, number];
+    polygonIdx: number;
     polygon: PolygonShape;
   } | null>(null);
   const stageRef = useRef<Konva.Stage | null>(null);
@@ -310,6 +311,21 @@ export function AnnotateTab() {
     }
   }, [mode]);
 
+  // Disarming the cut flag, by the toolbar button or the x key, must not leave a pending start
+  // with a rubber band pointing at a tool no longer armed; neither caller has cutStart in scope.
+  useEffect(() => {
+    if (!annotateUi.cut) setCutStart(null);
+  }, [annotateUi.cut]);
+
+  // Confirming the image (Complete/Negative) locks editing: a pending cut and its flag must not
+  // survive into a state where every click on it is refused.
+  useEffect(() => {
+    if (isLocked) {
+      setCutStart(null);
+      useStore.getState().setCut(false);
+    }
+  }, [isLocked]);
+
   // ── Live canvas push (agent visibility: capture_live_canvas) ──────────────
   // The ref always holds the freshest closure so the debounced pusher never reads stale state.
   const colorTick = useSubjectColors(); // bumps on a recolour, so swatches recompute below
@@ -339,6 +355,7 @@ export function AnnotateTab() {
       viewport: host ? computeViewport(view, host, canvas.imgWidth, canvas.imgHeight) : null,
       mode,
       active_subject: activeSubject ?? undefined,
+      cut_armed: annotateUi.cut,
       dirty: canvas.dirty,
       user: useStore.getState().user || undefined,
       classes: subjectSwatches,
@@ -394,6 +411,7 @@ export function AnnotateTab() {
     activeSubject,
     selectedBoxIdx,
     annotateUi.visible,
+    annotateUi.cut,
     annotateUi.draggingVertex,
     drawing,
     cutStart,
@@ -1222,34 +1240,58 @@ export function AnnotateTab() {
     // click would miss the polygon hit test below and deselect the very shape being cut.
     if (annotateUi.cut) {
       if (!cutStart) {
+        // No start pending: a click inside any polygon (re)selects it (an endpoint must fall
+        // outside the ring); only a click outside every polygon places the start.
+        let hitIdx: number | null = null;
+        for (let pi = 0; pi < canvas.polygons.length; pi++) {
+          if (pointInRings([ix, iy], canvas.polygons[pi].rings)) {
+            hitIdx = pi;
+            break;
+          }
+        }
+        if (hitIdx !== null) {
+          selectPolygon(hitIdx);
+          return;
+        }
         if (canvas.selectedPolygonIdx === null) {
           requireCutSelection();
           return;
         }
-        setCutStart({ point: [ix, iy], polygon: canvas.polygons[canvas.selectedPolygonIdx] });
+        const polygonIdx = canvas.selectedPolygonIdx;
+        setCutStart({ point: [ix, iy], polygonIdx, polygon: canvas.polygons[polygonIdx] });
         return;
       }
+      // Compared by index and rings reference, not object identity: an attribute edit keeps the
+      // same rings array and must not cancel the cut; a geometry edit replaces it and must.
       const idx = canvas.selectedPolygonIdx;
       const current = idx !== null ? canvas.polygons[idx] : null;
-      if (idx === null || current !== cutStart.polygon) {
-        setCutStart(null);
-        useStore
-          .getState()
-          .pushToast("The selection changed since the cut started; select the polygon again.");
-        return;
-      }
-      if (cutStart.polygon.rings.length > 1) {
+      if (
+        idx === null ||
+        idx !== cutStart.polygonIdx ||
+        !current ||
+        current.rings !== cutStart.polygon.rings
+      ) {
         setCutStart(null);
         useStore
           .getState()
           .pushToast(
-            `This shape covers ${cutStart.polygon.rings.length} separate parts of one object; ` +
+            "The polygon changed since the first click; the cut was cancelled. Select it and " +
+              "place both points again.",
+          );
+        return;
+      }
+      if (current.rings.length > 1) {
+        setCutStart(null);
+        useStore
+          .getState()
+          .pushToast(
+            `This shape covers ${current.rings.length} separate parts of one object; ` +
               "the cut applies to a single outline. Cut a part in polygon mode after the others " +
               "are removed, or redraw it.",
           );
         return;
       }
-      const result = cutRing(cutStart.polygon.rings[0], cutStart.point, [ix, iy]);
+      const result = cutRing(current.rings[0], cutStart.point, [ix, iy]);
       if ("reason" in result) {
         setCutStart(null);
         useStore.getState().pushToast(result.reason);
