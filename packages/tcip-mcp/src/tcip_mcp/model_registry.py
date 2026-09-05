@@ -534,21 +534,37 @@ def _register_entry(
 def _document_entries_for_conform(raw: object) -> tuple[list[dict], bool]:
     """(entries, was_already_wrapped) for the conform script's own read.
 
-    Unlike :func:`_read_registry_document`, a bare top-level array is accepted here rather than
-    refused: it is exactly the pre-family shape this conform exists to wrap.
+    Unlike :func:`_read_registry_document`, two dev-era shapes are accepted here rather than
+    refused, since wrapping and respelling one of them is exactly this conform's own purpose: a
+    bare top-level array (the shape this store carried before the family that wrapped it), and a
+    mapping still carrying a stray ``schema_version: 2`` from before this store's version-1 reset
+    (:func:`conform_registry_paths_on_disk` reads such a document directly, bypassing the seam's
+    own ceiling refusal, precisely to reach this function). Both rewrite through
+    :func:`_write_registry_document`, which carries no ``schema_version`` field, so the field is
+    dropped on the same write that wraps or respells. Anything else refuses, naming what was
+    found rather than the whole document, since a caller of this function (``import_project``'s
+    own conform step) surfaces the refusal message to a remote caller.
     """
     if raw is None:
         return [], True
     if isinstance(raw, list):
         return raw, False
-    if (
-        isinstance(raw, dict)
-        and raw.get("schema_version") in (None, REGISTRY_SCHEMA_VERSION)
-        and isinstance(raw.get("entries"), list)
-    ):
-        return raw["entries"], True
+    if isinstance(raw, dict):
+        version = raw.get("schema_version")
+        entries = raw.get("entries")
+        if version in (None, REGISTRY_SCHEMA_VERSION, 2) and isinstance(entries, list):
+            return entries, True
+        if version not in (None, REGISTRY_SCHEMA_VERSION, 2):
+            raise RegistryVersionRefused(
+                f"the model registry index carries schema_version={version!r}, not one this "
+                "conform recognizes"
+            )
+        raise RegistryVersionRefused(
+            f"the model registry index's entries field is {type(entries).__name__}, not a list"
+        )
     raise RegistryVersionRefused(
-        f"the model registry index is not a recognized document to conform: {raw!r}"
+        f"the model registry index is a {type(raw).__name__}, neither a bare array nor an "
+        "entries mapping this conform recognizes"
     )
 
 
