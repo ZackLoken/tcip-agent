@@ -23,6 +23,7 @@ import io
 import logging
 import math
 from collections.abc import Iterable
+from typing import Any, cast
 
 import numpy as np
 import torch
@@ -1211,7 +1212,12 @@ def evaluate(
                 for head in getattr(model, "heads", []):
                     head.training = True
                 ld = model(images, targets)
-                total_loss += float(sum(ld.values()).item()) if isinstance(ld, dict) else float(ld)
+                # sum() over an untyped model's loss dict resolves, by mypy's overload matching on
+                # Any, to its int overload rather than the runtime Tensor the values actually are.
+                total_loss += (
+                    float(cast(Any, sum(ld.values())).item())
+                    if isinstance(ld, dict) else float(ld)
+                )
                 n_loss += 1
             # Prediction pass.
             model.eval()
@@ -1227,7 +1233,12 @@ def evaluate(
             # Loss pass (BN stays in eval via the top-level training flag trick).
             model.training = True
             ld = model(images, targets)
-            total_loss += float(sum(ld.values()).item()) if isinstance(ld, dict) else float(ld)
+            # sum() over an untyped model's loss dict resolves, by mypy's overload matching on
+            # Any, to its int overload rather than the runtime Tensor the values actually are.
+            total_loss += (
+                float(cast(Any, sum(ld.values())).item())
+                if isinstance(ld, dict) else float(ld)
+            )
             n_loss += 1
             # Prediction pass.
             model.eval()
