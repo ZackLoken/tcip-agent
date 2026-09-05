@@ -3,9 +3,11 @@ import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } fr
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 import { api } from "@/api/client";
+import { subjectColor } from "@/api/classes";
 import { resultsApi } from "@/api/inference";
 import { notifyCanvasStateRequest } from "@/lib/canvasSync";
 import { applyReviewFocus } from "@/lib/reviewFocus";
+import { setSubjectColorOverride } from "@/lib/subjectColors";
 import { useStore } from "@/store";
 import type { Annotation, Detection, MatchesResponse } from "@/store/types";
 import { ReviewTab } from "@/tabs/ReviewTab";
@@ -1480,6 +1482,39 @@ describe("ReviewTab canvas-push binding-presence gate", () => {
     expect(pushSpy).toHaveBeenCalled();
     expect(pushSpy.mock.calls[0][0].binding_generation).toBe(5);
     expect(useStore.getState().canvasBindingMissing).toBe(false);
+  });
+});
+
+describe("ReviewTab subject colours", () => {
+  afterEach(() => {
+    try {
+      localStorage.removeItem("tcip.annotate.subjectColors");
+    } catch {
+      /* not available in this environment, nothing to clear */
+    }
+  });
+
+  it("a per-browser recolour reaches the pushed canvas_meta swatch", async () => {
+    useStore.getState().setRegistry({ subject_a: {} });
+    useStore.setState({ bindingGeneration: 1 });
+    const pushSpy = vi
+      .spyOn(api.canvas, "pushState")
+      .mockResolvedValue({ status: "ok", shapes_written: true });
+    render(<ReviewTab />);
+    await waitFor(() => expect(matchesSpy).toHaveBeenCalledTimes(1));
+
+    act(() => notifyCanvasStateRequest());
+    await act(async () => {});
+    expect(pushSpy.mock.calls.at(-1)?.[0]?.classes).toEqual(
+      expect.arrayContaining([{ name: "subject_a", color: subjectColor("subject_a") }]),
+    );
+
+    act(() => setSubjectColorOverride("subject_a", "#123456"));
+    act(() => notifyCanvasStateRequest());
+    await act(async () => {});
+    expect(pushSpy.mock.calls.at(-1)?.[0]?.classes).toEqual(
+      expect.arrayContaining([{ name: "subject_a", color: "#123456" }]),
+    );
   });
 });
 

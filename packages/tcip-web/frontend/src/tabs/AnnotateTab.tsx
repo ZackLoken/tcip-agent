@@ -49,6 +49,7 @@ import {
   withRing,
 } from "@/lib/polygonGeometry";
 import { applyEditDrag, hitTestEdit, MIN_BOX_SIDE, type EditDrag } from "@/lib/editGeometry";
+import { useSubjectColors } from "@/lib/subjectColors";
 import { nextMode } from "@/lib/toolMode";
 import { useStore } from "@/store";
 import type { Box } from "@/store/types";
@@ -292,10 +293,11 @@ export function AnnotateTab() {
 
   // ── Live canvas push (agent visibility: capture_live_canvas) ──────────────
   // The ref always holds the freshest closure so the debounced pusher never reads stale state.
-  const subjectSwatches = useMemo(
-    () => Object.keys(registry).map((name) => ({ name, color: subjectColor(name) })),
-    [registry],
-  );
+  const colorTick = useSubjectColors(); // bumps on a recolour, so swatches recompute below
+  const subjectSwatches = useMemo(() => {
+    void colorTick; // read only to force recompute; subjectColor() itself needs no argument for it
+    return Object.keys(registry).map((name) => ({ name, color: subjectColor(name) }));
+  }, [registry, colorTick]);
   const buildCanvasBodyRef = useRef<() => CanvasStateBody | null>(() => null);
   buildCanvasBodyRef.current = () => {
     if (!imgPath || !dataset.project_root) return null;

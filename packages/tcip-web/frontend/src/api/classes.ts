@@ -8,6 +8,7 @@
 
 import { getJson, postJson } from "@/api/http";
 import { ROUTES } from "@/api/routes";
+import { subjectColorOverride } from "@/lib/subjectColors";
 
 /** One attribute of a subject: categorical (unordered) or ordinal (ranked). ``values`` are the
  *  declared value names, in order (the rank order for an ordinal). */
@@ -165,9 +166,19 @@ export const SUBJECT_COLORS = [
   "#00CED1",
 ];
 
+/** A subject's colour: this browser's override when it set one (see lib/subjectColors), else the
+ *  deterministic name -> hex derivation below. Every consumer calls this one function, so a
+ *  recolour reaches the canvas, the toolbar, the legend and the agent's mirror alike without any
+ *  of them re-deriving colour on their own. */
+export function subjectColor(name: string): string {
+  const override = subjectColorOverride(name);
+  if (override) return override;
+  return derivedSubjectColor(name);
+}
+
 /** Deterministic name -> hex: a subject (or attribute-value) name always maps to the same swatch,
  *  without storing colour anywhere. FNV-1a over the name, indexed into the palette. */
-export function subjectColor(name: string): string {
+export function derivedSubjectColor(name: string): string {
   let h = 2166136261;
   for (let i = 0; i < name.length; i++) {
     h ^= name.charCodeAt(i);
