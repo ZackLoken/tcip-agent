@@ -342,6 +342,7 @@ def _validate_delivery_buckets(
     for date, bucket in preds_by_date.items():
         sidecar = {
             "id_map": _ID_MAP, "validated": True, "trait": "currant_bloom",
+            "subject": "flower", "attribute": "bloom_state",
             "operating_point": {"conf": {"value": 0.4, "validated_against": "held_out_annotations"}},
             "experiment_id": producing, "checkpoint_sha256": "abc123",
         }
@@ -380,7 +381,8 @@ def test_a_partly_positioned_scene_builds_and_delivers_with_the_count_disclosed(
     _write_ungeoreferenced_image(images_root / DATE / "P3_extra.jpg")
     json_io.write_annotations(
         Path(preds_by_date[DATE]) / "P3_extra.json",
-        [Annotation(subject="open", geometry=BBox(1.0, 1.0, 3.0, 3.0), score=0.9)], 8, 8)
+        [Annotation(subject="flower", geometry=BBox(1.0, 1.0, 3.0, 3.0), score=0.9,
+                   attributes={"bloom_state": "open"})], 8, 8)
 
     registry = register_plant_registry_for([plant_csv])
     build_res = build_plant_mapping(
@@ -433,7 +435,8 @@ def test_a_delivery_naming_one_of_two_mapping_dates_carries_the_delivered_scope(
     _write_ungeoreferenced_image(images_root / dates[1] / "P3_extra.jpg")
     json_io.write_annotations(
         Path(preds_by_date[dates[1]]) / "P3_extra.json",
-        [Annotation(subject="open", geometry=BBox(1.0, 1.0, 3.0, 3.0), score=0.9)], 8, 8)
+        [Annotation(subject="flower", geometry=BBox(1.0, 1.0, 3.0, 3.0), score=0.9,
+                   attributes={"bloom_state": "open"})], 8, 8)
 
     registry = register_plant_registry_for([plant_csv])
     build_res = build_plant_mapping(

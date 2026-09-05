@@ -582,7 +582,8 @@ def test_load_derives_subjects_excludes_a_bucket_sidecar(
     ann = tmp_path / "annotations" / "d"
     ann.mkdir(parents=True)
     write_annotations(str(ann / "IMG_A.json"), [_catkin(50, 50, 60, 60)], 100, 100)
-    write_sidecar(ann, {"checkpoint_sha256": "sha", "experiment_id": None})
+    write_sidecar(ann, {"checkpoint_sha256": "sha", "experiment_id": None,
+                       "subject": "catkin", "attribute": None})
 
     load = client.get(
         "/api/classes/load",

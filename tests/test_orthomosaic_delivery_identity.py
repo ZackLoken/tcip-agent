@@ -95,7 +95,8 @@ def _hand_written_bucket(tmp_path, name: str, stamp: dict) -> Path:
 
 def _validated_count_stamp(*, claim_scope: str | None = None) -> dict:
     stamp = {"validated": True, "trait": fx.COUNT_TRAIT,
-             "operating_point": {"conf": {"value": 0.5, "validated_against": VALIDATED_HELD_OUT}}}
+             "operating_point": {"conf": {"value": 0.5, "validated_against": VALIDATED_HELD_OUT}},
+             "subject": fx.COUNT_SUBJECT, "attribute": None}
     if claim_scope is not None:
         stamp["claim_scope_validated"] = claim_scope
     return stamp

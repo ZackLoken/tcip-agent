@@ -98,8 +98,10 @@ def _write_scene(
                 base_time + timedelta(minutes=j))
             json_io.write_annotations(
                 bucket / f"{stem}.json",
-                [Annotation(subject="open", geometry=BBox(1.0, 1.0, 3.0, 3.0), score=0.9)], 8, 8)
-        write_sidecar(bucket, {"id_map": _ID_MAP}, "operating_point")
+                [Annotation(subject="flower", geometry=BBox(1.0, 1.0, 3.0, 3.0), score=0.9,
+                           attributes={"bloom_state": "open"})], 8, 8)
+        write_sidecar(bucket, {"id_map": _ID_MAP, "subject": "flower", "attribute": "bloom_state"},
+                     "operating_point")
         preds_by_date[date] = str(bucket)
 
     plant_csv = dataset_root.parent / f"{dataset_root.name}_plants.csv"
@@ -128,6 +130,7 @@ def _validate_buckets(
         write_bound_sidecar(
             bucket, {
                 "id_map": _ID_MAP, "validated": True, "trait": trait,
+                "subject": "flower", "attribute": "bloom_state",
                 "operating_point": {"conf": {"value": 0.6,
                                              "validated_against": VALIDATED_HELD_OUT}},
             },
@@ -269,10 +272,12 @@ def test_deliver_phenology_milestones_refuses_a_date_the_mapping_does_not_cover(
     extra.mkdir(parents=True)
     json_io.write_annotations(
         extra / "P1_20260301.json",
-        [Annotation(subject="open", geometry=BBox(1.0, 1.0, 3.0, 3.0), score=0.9)], 8, 8)
+        [Annotation(subject="flower", geometry=BBox(1.0, 1.0, 3.0, 3.0), score=0.9,
+                   attributes={"bloom_state": "open"})], 8, 8)
     from tcip_mcp.pipelines.resolution import write_sidecar
 
-    write_sidecar(extra, {"id_map": _ID_MAP}, "operating_point")
+    write_sidecar(extra, {"id_map": _ID_MAP, "subject": "flower", "attribute": "bloom_state"},
+                 "operating_point")
     preds_by_date[extra_date] = str(extra)
 
     res = deliver_phenology_milestones(

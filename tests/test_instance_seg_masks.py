@@ -482,7 +482,7 @@ def test_export_single_component_mask_writes_polygon(tmp_path):
         "masks": [mask.tolist()],
     }
     out = tmp_path / "img.json"
-    write_predictions_json(str(out), result)
+    write_predictions_json(str(out), result, subject="leaf", attribute=None)
     anns = json_io.read_annotations(str(out))
     assert len(anns) == 1
     assert isinstance(anns[0].geometry, Polygon)
@@ -506,7 +506,7 @@ def test_export_does_not_pollute_annotation_attributes_with_binarize_threshold(t
         "masks": [mask.tolist()],
     }
     out = tmp_path / "img.json"
-    write_predictions_json(str(out), result)
+    write_predictions_json(str(out), result, subject="leaf", attribute=None)
     anns = json_io.read_annotations(str(out))
     assert anns[0].attributes == {}
 
@@ -538,7 +538,7 @@ def test_export_multi_component_mask_writes_multi_ring_polygon(tmp_path):
         "masks": [mask.tolist()],
     }
     out = tmp_path / "img.json"
-    write_predictions_json(str(out), result)
+    write_predictions_json(str(out), result, subject="leaf", attribute=None)
     anns = json_io.read_annotations(str(out))
     assert len(anns) == 1
     assert isinstance(anns[0].geometry, Polygon)
@@ -557,7 +557,7 @@ def test_export_empty_mask_falls_back_to_bbox(tmp_path):
         "masks": [mask.tolist()],
     }
     out = tmp_path / "img.json"
-    write_predictions_json(str(out), result)
+    write_predictions_json(str(out), result, subject="leaf", attribute=None)
     anns = json_io.read_annotations(str(out))
     assert len(anns) == 1
     assert isinstance(anns[0].geometry, BBox)
@@ -581,7 +581,7 @@ def test_export_drops_a_mask_that_binarizes_to_a_sliver(tmp_path, monkeypatch):
         "masks": [[[0]]],
     }
     out = tmp_path / "img.json"
-    dropped = export.write_predictions_json(str(out), result)
+    dropped = export.write_predictions_json(str(out), result, subject="leaf", attribute=None)
 
     assert dropped == 1
     assert json_io.read_annotations(str(out)) == []
@@ -606,7 +606,7 @@ def test_export_drops_a_polygon_whose_vertices_all_round_to_one_point(tmp_path, 
         "masks": [[[0]]],
     }
     out = tmp_path / "img.json"
-    dropped = export.write_predictions_json(str(out), result)
+    dropped = export.write_predictions_json(str(out), result, subject="leaf", attribute=None)
 
     assert dropped == 1
     assert json_io.read_annotations(str(out)) == []
@@ -628,7 +628,7 @@ def test_export_no_masks_key_writes_bbox_as_before():
     fd, path = tempfile.mkstemp(suffix=".json")
     os.close(fd)
     try:
-        write_predictions_json(path, result)
+        write_predictions_json(path, result, subject="leaf", attribute=None)
         anns = json_io.read_annotations(path)
         assert len(anns) == 1
         assert isinstance(anns[0].geometry, BBox)
@@ -665,12 +665,12 @@ def test_resolve_binarize_threshold_is_a_real_caller_of_export(monkeypatch, tmp_
 
     out_low = tmp_path / "low.json"
     monkeypatch.setattr(mg, "resolve_binarize_threshold", lambda *a, **k: real_resolve(0.3))
-    write_predictions_json(str(out_low), result)
+    write_predictions_json(str(out_low), result, subject="leaf", attribute=None)
     anns_low = json_io.read_annotations(str(out_low))
 
     out_high = tmp_path / "high.json"
     monkeypatch.setattr(mg, "resolve_binarize_threshold", lambda *a, **k: real_resolve(0.6))
-    write_predictions_json(str(out_high), result)
+    write_predictions_json(str(out_high), result, subject="leaf", attribute=None)
     anns_high = json_io.read_annotations(str(out_high))
 
     assert isinstance(anns_low[0].geometry, Polygon)   # 0.45 >= 0.3 -> real blob

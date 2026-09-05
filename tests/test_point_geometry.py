@@ -241,14 +241,18 @@ def test_worst_predictions_does_not_count_a_point_as_a_detection(tmp_path: Path)
 
 def test_phenology_detection_counts_exclude_a_point(tmp_path: Path) -> None:
     from tcip_mcp.pipelines.postprocessing.phenology import count_by_class
+    from tcip_mcp.pipelines.resolution import BucketScope
 
     path = tmp_path / "IMG_0001.json"
     json_io.write_annotations(path, [
-        Annotation(subject="elongated", geometry=BOX, score=0.9),
-        Annotation(subject="elongated", geometry=Point(60.0, 60.0), score=0.9),
+        Annotation(subject="catkin", geometry=BOX, score=0.9,
+                  attributes={"elongation": "elongated"}),
+        Annotation(subject="catkin", geometry=Point(60.0, 60.0), score=0.9,
+                  attributes={"elongation": "elongated"}),
     ], 100, 80)
+    scope = BucketScope(subject="catkin", attribute="elongation")
     total, positive, unclassified = count_by_class(
-        path, {"elongated": 0, "dormant": 1}, "elongated")
+        path, {"elongated": 0, "dormant": 1}, "elongated", scope=scope)
     assert (total, positive, unclassified) == (1, 1, 0)
 
 

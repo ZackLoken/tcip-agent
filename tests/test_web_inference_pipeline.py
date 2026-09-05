@@ -39,7 +39,7 @@ def test_write_predictions_json_roundtrip_and_negative(tmp_path):
     write_predictions_json(p, {
         "width": 100, "height": 100,
         "boxes": [[10.0, 10.0, 30.0, 30.0]], "scores": [0.9], "labels": [1], "count": 1,
-    }, id_map=id_map)
+    }, subject="catkin", attribute=None, id_map=id_map)
     data = json.loads(p.read_text())
     ann = data["annotations"][0]
     assert ann["subject"] == "catkin"                       # 1-indexed label 1 -> id 0 -> "catkin"
@@ -51,7 +51,8 @@ def test_write_predictions_json_roundtrip_and_negative(tmp_path):
     # Negative invariant: a zero-detection image still yields an {"annotations": []} record.
     neg = tmp_path / "empty.json"
     write_predictions_json(neg, {"width": 100, "height": 100,
-                                 "boxes": [], "scores": [], "labels": [], "count": 0})
+                                 "boxes": [], "scores": [], "labels": [], "count": 0},
+                           subject="catkin", attribute=None)
     assert json.loads(neg.read_text())["annotations"] == []
 
 
@@ -206,9 +207,14 @@ def test_web_worker_prefers_the_checkpoints_own_recorded_id_map(tmp_path, monkey
     from tcip_mcp.pipelines.resolution import sidecar_key
 
     obj = json.loads((out_dir / "img.json").read_text())["annotations"][0]
-    assert obj["subject"] == "elongated"  # label 2 -> 0-indexed 1 -> the recorded map's "elongated"
+    # label 2 -> 0-indexed 1 -> the recorded map's "elongated"; a classified run's decoded name
+    # lands under attributes[attribute], with subject carrying the object class.
+    assert obj["subject"] == "catkin"
+    assert obj["attributes"] == {"elongation": "elongated"}
     sidecar = tcip_store.read(sidecar_key(out_dir, "operating_point"))
     assert sidecar["id_map"] == {"dormant": 0, "elongated": 1}
+    assert sidecar["subject"] == "catkin"
+    assert sidecar["attribute"] == "elongation"
 
 
 def test_web_worker_runs_tiled_instance_seg_without_forcing_untiled(tmp_path, monkeypatch):

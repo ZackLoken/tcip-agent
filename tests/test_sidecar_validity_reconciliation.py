@@ -66,7 +66,8 @@ def _bound_sidecar(bucket: Path, filename: str, param_key: str, *, recorded_refe
 
     param: dict[str, object] = {"requires_validation": True, "validated_against": recorded_reference}
     param.update(param_fields)
-    stamp = {"validated": True, "trait": "catkin", "operating_point": {param_key: param}}
+    stamp = {"validated": True, "trait": "catkin", "operating_point": {param_key: param},
+             "subject": "catkin", "attribute": None}
     pred_dirs: list[Path] = []
     if document == "operating_point":
         write_prediction(bucket, "img_a")

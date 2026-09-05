@@ -19,6 +19,7 @@ import pytest
 
 from tcip_annotation import json_io
 from tcip_annotation.state import Annotation, BBox
+from tcip_mcp.pipelines import resolution
 from tcip_mcp.pipelines.postprocessing import phenology
 from tests._binding_fixtures import write_bound_sidecar
 from tests._trait_fixtures import CATKIN
@@ -36,7 +37,8 @@ class _Assignment:
 
 def _write_preds(dir_path: Path, stem: str, subjects: list[str]) -> None:
     dir_path.mkdir(parents=True, exist_ok=True)
-    anns = [Annotation(subject=s, geometry=BBox(1.0 + i, 2.0, 4.0 + i, 9.0), score=0.9)
+    anns = [Annotation(subject="catkin", geometry=BBox(1.0 + i, 2.0, 4.0 + i, 9.0), score=0.9,
+                       attributes={"elongation": s})
             for i, s in enumerate(subjects)]
     json_io.write_annotations(dir_path / f"{stem}.json", anns, 40, 24)
 
@@ -55,6 +57,7 @@ def _write_sidecar(dir_path: Path, id_map: dict, *, dataset_root: Path, validate
         "operating_point": {"conf": {"value": conf, "validated_against": ref}},
         "id_map": id_map,
         "experiment_id": "exp-77",
+        "subject": "catkin", "attribute": "elongation",
     }
     if validated:
         write_bound_sidecar(dir_path, stamp, dataset_root=dataset_root,
@@ -196,13 +199,18 @@ def test_positive_detections_are_the_named_class_not_a_position_in_the_id_map(tm
     p = tmp_path / "img.json"
     json_io.write_annotations(
         p,
-        [Annotation(subject="elongated", geometry=BBox(1, 1, 4, 9), score=0.9),
-         Annotation(subject="dormant", geometry=BBox(6, 1, 9, 4), score=0.8),
-         Annotation(subject="elongated", geometry=BBox(11, 2, 14, 12), score=0.7)],
+        [Annotation(subject="catkin", geometry=BBox(1, 1, 4, 9), score=0.9,
+                   attributes={"elongation": "elongated"}),
+         Annotation(subject="catkin", geometry=BBox(6, 1, 9, 4), score=0.8,
+                   attributes={"elongation": "dormant"}),
+         Annotation(subject="catkin", geometry=BBox(11, 2, 14, 12), score=0.7,
+                   attributes={"elongation": "elongated"})],
         40, 24,
     )
 
-    total, positive, unclassified = phenology.count_by_class(p, SPARSE_ID_MAP, "elongated")
+    scope = resolution.BucketScope(subject="catkin", attribute="elongation")
+    total, positive, unclassified = phenology.count_by_class(
+        p, SPARSE_ID_MAP, "elongated", scope=scope)
 
     assert (total, positive, unclassified) == (3, 2, 0)
 
@@ -250,7 +258,9 @@ def test_a_bucket_the_prediction_writer_produced_reads_back_with_its_own_classes
 
     id_map = phenology.bucket_id_map(bucket)
     assert id_map == SPARSE_ID_MAP
-    counts = phenology.count_by_class(bucket / "P1_2026-03-05.json", id_map, "elongated")
+    scope = resolution.bucket_scope(bucket)
+    counts = phenology.count_by_class(
+        bucket / "P1_2026-03-05.json", id_map, "elongated", scope=scope)
     assert counts == (3, 2, 0)
 
 

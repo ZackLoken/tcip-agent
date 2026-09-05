@@ -195,16 +195,24 @@ def test_golden_plant_milestones_shape_and_values():
 _ID_MAP = {"dormant": 0, "elongated": 1}
 
 
-def _write_preds(d: Path, stem: str, subjects: list[str]) -> None:
+def _write_preds(d: Path, stem: str, subjects: list[str], *, attribute: str | None = "elongation",
+                 object_subject: str = "catkin") -> None:
     d.mkdir(parents=True, exist_ok=True)
-    anns = [Annotation(subject=s, geometry=BBox(1.0, 1.0, 3.0, 3.0), score=0.9) for s in subjects]
+    if attribute is None:
+        anns = [Annotation(subject=s, geometry=BBox(1.0, 1.0, 3.0, 3.0), score=0.9)
+                for s in subjects]
+    else:
+        anns = [Annotation(subject=object_subject, geometry=BBox(1.0, 1.0, 3.0, 3.0), score=0.9,
+                           attributes={attribute: s}) for s in subjects]
     json_io.write_annotations(d / f"{stem}.json", anns, 8, 8)
 
 
-def _write_id_map_sidecar(d: Path, id_map: dict) -> None:
+def _write_id_map_sidecar(d: Path, id_map: dict, *, subject: str = "catkin",
+                          attribute: str | None = "elongation") -> None:
     from tcip_mcp.pipelines.resolution import write_sidecar
 
-    write_sidecar(d, {"id_map": id_map}, "operating_point")
+    write_sidecar(d, {"id_map": id_map, "subject": subject, "attribute": attribute},
+                 "operating_point")
 
 
 def test_golden_per_plant_phenology_series_and_milestones(tmp_path: Path):
@@ -528,7 +536,8 @@ def _write_stamp_bypassing_claim_rail(d: Path, stamp: dict, document: str) -> No
 
 
 def _write_op_sidecar(d: Path, *, dataset_root: Path, validated: bool, conf: float = 0.4,
-                      id_map: dict | None = None,
+                      id_map: dict | None = None, subject: str = "catkin",
+                      attribute: str | None = None,
                       checkpoint_sha256: str | None = None,
                       experiment_id: str | None = "exp-golden") -> None:
     """The operating_point.json stamp run_inference writes beside a bucket's labels: the
@@ -549,6 +558,8 @@ def _write_op_sidecar(d: Path, *, dataset_root: Path, validated: bool, conf: flo
         "id_map": id_map,
         "checkpoint_sha256": checkpoint_sha256,
         "experiment_id": experiment_id,
+        "subject": subject,
+        "attribute": attribute,
     }
     if validated:
         write_bound_sidecar(d, stamp, dataset_root=dataset_root,
@@ -580,11 +591,14 @@ def _pheno_setup(tmp_path: Path, *, elongated: bool, op_validated: bool | None =
     d1 = root / "predictions" / "run" / "2026-02-11"
     d2 = root / "predictions" / "run" / "2026-03-09"
     id_map = {"dormant": 0, "elongated": 1} if elongated else {"catkin": 0}
-    _write_preds(d1, "P1_a", ["catkin"] if not elongated else ["dormant"])
-    _write_preds(d2, "P1_b", ["elongated"] if elongated else ["catkin"])
+    attribute = "elongation" if elongated else None
+    _write_preds(d1, "P1_a", ["catkin"] if not elongated else ["dormant"], attribute=attribute)
+    _write_preds(d2, "P1_b", ["elongated"] if elongated else ["catkin"], attribute=attribute)
     if op_validated is not None:
-        _write_op_sidecar(d1, dataset_root=root, validated=op_validated, id_map=id_map)
-        _write_op_sidecar(d2, dataset_root=root, validated=op_validated, id_map=id_map)
+        _write_op_sidecar(d1, dataset_root=root, validated=op_validated, id_map=id_map,
+                          attribute=attribute)
+        _write_op_sidecar(d2, dataset_root=root, validated=op_validated, id_map=id_map,
+                          attribute=attribute)
     else:
         # count-operating-point sidecar still needs an id_map for the coverage rule even when its
         # own validity isn't the thing under test: a bucket with no sidecar at all is the

@@ -122,10 +122,10 @@ def _existing_bucket(tmp_path, *, checkpoint_sha256="stub-sha256", tile_size_val
     }).to_provenance()["operating_point"]
     stamp = operating_point_stamp(
         op, validated=False, validated_by=None, tile_size_validated=tile_size_validated,
-        shippable_issues=[], id_map={"1": "catkin"}, trait=trait, dataset_hash="H",
+        shippable_issues=[], id_map={trait: 0}, trait=trait, dataset_hash="H",
         checkpoint="m", checkpoint_sha256=checkpoint_sha256, experiment_id=None,
         images_dir=str(tmp_path / "images"), raster_path=None,
-        produced_at="2024-01-01T00:00:00Z",
+        produced_at="2024-01-01T00:00:00Z", subject=trait, attribute=None,
     )
     write_sidecar(pred_dir, stamp)
     if with_prediction:
@@ -189,6 +189,7 @@ def test_calibrate_count_operating_point_earns_a_validated_stamp(
         checkpoint_path="x.pt", trait="catkin", labels_dir=str(labels_dir),
         images_dir=str(tmp_path / "images"), dataset_root=str(dataset_root),
         pred_dir=str(pred_dir),
+        subject="catkin", attribute=None,
     )
 
     assert "error" not in result, result
@@ -200,7 +201,7 @@ def test_calibrate_count_operating_point_earns_a_validated_stamp(
     assert on_disk["validated"] is True
     assert on_disk["operating_point"]["conf"]["value"] == pytest.approx(production_conf)
     assert on_disk["validated_by"]["experiment_id"]
-    assert on_disk["id_map"] == {"1": "catkin"}
+    assert on_disk["id_map"] == {"catkin": 0}
     assert on_disk["images_dir"] == str(tmp_path / "images")
     assert on_disk["checkpoint_sha256"] == "stub-sha256"
     assert on_disk["trait"] == "catkin"
@@ -229,6 +230,7 @@ def test_calibrate_count_operating_point_refuses_when_earned_conf_differs_from_p
         checkpoint_path="x.pt", trait="catkin", labels_dir=str(labels_dir),
         images_dir=str(tmp_path / "images"), dataset_root=str(dataset_root),
         pred_dir=str(pred_dir),
+        subject="catkin", attribute=None,
     )
 
     assert "error" in result
@@ -262,6 +264,7 @@ def test_calibrate_count_operating_point_folds_the_tile_floor_into_validated(mon
         checkpoint_path="x.pt", trait="catkin", labels_dir=str(labels_dir),
         images_dir=str(tmp_path / "images"), dataset_root=str(dataset_root),
         pred_dir=str(pred_dir),
+        subject="catkin", attribute=None,
     )
 
     assert "error" not in result, result
@@ -293,6 +296,7 @@ def test_calibrate_count_operating_point_writes_an_honest_unvalidated_stamp(monk
         checkpoint_path="x.pt", trait="catkin", labels_dir=str(labels_dir),
         images_dir=str(tmp_path / "images"), dataset_root=str(dataset_root),
         pred_dir=str(pred_dir),
+        subject="catkin", attribute=None,
     )
 
     assert "error" not in result, result
@@ -331,6 +335,7 @@ def test_calibrate_count_operating_point_does_not_write_trait_on_the_unvalidated
         checkpoint_path="x.pt", trait="catkin", labels_dir=str(labels_dir),
         images_dir=str(tmp_path / "images"), dataset_root=str(dataset_root),
         pred_dir=str(pred_dir),
+        subject="other-trait", attribute=None,
     )
 
     assert "error" not in result, result
@@ -352,6 +357,7 @@ def test_calibrate_count_operating_point_refuses_a_bucket_outside_dataset_root(t
         checkpoint_path="x.pt", trait="catkin", labels_dir=str(tmp_path / "labels"),
         images_dir=str(tmp_path / "images"), dataset_root=str(dataset_root),
         pred_dir=str(outside),
+        subject="catkin", attribute=None,
     )
 
     assert "error" in result
@@ -369,6 +375,7 @@ def test_calibrate_count_operating_point_refuses_a_bucket_with_no_stamp(tmp_path
         checkpoint_path="x.pt", trait="catkin", labels_dir=str(tmp_path / "labels"),
         images_dir=str(tmp_path / "images"), dataset_root=str(dataset_root),
         pred_dir=str(pred_dir),
+        subject="catkin", attribute=None,
     )
 
     assert "error" in result
@@ -391,9 +398,10 @@ def test_calibrate_count_operating_point_refuses_a_raster_bucket(tmp_path):
     }).to_provenance()["operating_point"]
     stamp = operating_point_stamp(
         op, validated=False, validated_by=None, tile_size_validated=None, shippable_issues=[],
-        id_map={"1": "catkin"}, trait="catkin", dataset_hash="H", checkpoint="m",
+        id_map={"catkin": 0}, trait="catkin", dataset_hash="H", checkpoint="m",
         checkpoint_sha256="stub-sha256", experiment_id=None, images_dir=None,
         raster_path=str(tmp_path / "mosaic.tif"), produced_at="2024-01-01T00:00:00Z",
+        subject="catkin", attribute=None,
     )
     write_sidecar(pred_dir, stamp)
 
@@ -401,6 +409,7 @@ def test_calibrate_count_operating_point_refuses_a_raster_bucket(tmp_path):
         checkpoint_path="x.pt", trait="catkin", labels_dir=str(tmp_path / "labels"),
         images_dir=str(tmp_path / "images"), dataset_root=str(dataset_root),
         pred_dir=str(pred_dir),
+        subject="catkin", attribute=None,
     )
 
     assert "error" in result
@@ -417,6 +426,7 @@ def test_calibrate_count_operating_point_refuses_a_bucket_with_no_prediction_doc
         checkpoint_path="x.pt", trait="catkin", labels_dir=str(tmp_path / "labels"),
         images_dir=str(tmp_path / "images"), dataset_root=str(dataset_root),
         pred_dir=str(pred_dir),
+        subject="catkin", attribute=None,
     )
 
     assert "error" in result
@@ -438,10 +448,10 @@ def test_calibrate_count_operating_point_refuses_an_already_validated_bucket(tmp
     }).to_provenance()["operating_point"]
     stamp = operating_point_stamp(
         op, validated=True, validated_by=None, tile_size_validated=None, shippable_issues=[],
-        id_map={"1": "catkin"}, trait="catkin", dataset_hash="H", checkpoint="m",
+        id_map={"catkin": 0}, trait="catkin", dataset_hash="H", checkpoint="m",
         checkpoint_sha256="stub-sha256", experiment_id=None,
         images_dir=str(tmp_path / "images"), raster_path=None,
-        produced_at="2024-01-01T00:00:00Z",
+        produced_at="2024-01-01T00:00:00Z", subject="catkin", attribute=None,
     )
     # A genuine, producer-filed record behind validated_by (tests._binding_fixtures does what
     # seal_validation does for a producer), not a hand-typed pointer naming no real record.
@@ -451,6 +461,7 @@ def test_calibrate_count_operating_point_refuses_an_already_validated_bucket(tmp
         checkpoint_path="x.pt", trait="catkin", labels_dir=str(tmp_path / "labels"),
         images_dir=str(tmp_path / "images"), dataset_root=str(dataset_root),
         pred_dir=str(pred_dir),
+        subject="catkin", attribute=None,
     )
 
     assert "error" in result
@@ -485,10 +496,10 @@ def test_calibrate_count_operating_point_treats_an_unbound_validated_claim_as_un
     stamp = operating_point_stamp(
         op, validated=True,
         validated_by={"experiment_id": "exp-nonexistent", "record_digest": "deadbeef"},
-        tile_size_validated=None, shippable_issues=[], id_map={"1": "catkin"}, trait="catkin",
+        tile_size_validated=None, shippable_issues=[], id_map={"catkin": 0}, trait="catkin",
         dataset_hash="H", checkpoint="m", checkpoint_sha256="stub-sha256", experiment_id=None,
         images_dir=str(tmp_path / "images"), raster_path=None,
-        produced_at="2024-01-01T00:00:00Z",
+        produced_at="2024-01-01T00:00:00Z", subject="catkin", attribute=None,
     )
     write_sidecar(pred_dir, stamp)
 
@@ -498,6 +509,7 @@ def test_calibrate_count_operating_point_treats_an_unbound_validated_claim_as_un
         checkpoint_path="x.pt", trait="catkin", labels_dir=str(labels_dir),
         images_dir=str(tmp_path / "images"), dataset_root=str(dataset_root),
         pred_dir=str(pred_dir),
+        subject="catkin", attribute=None,
     )
 
     assert "error" not in result, result
@@ -530,6 +542,7 @@ def test_calibrate_count_operating_point_refuses_a_checkpoint_mismatch_before_th
         checkpoint_path="x.pt", trait="catkin", labels_dir=str(tmp_path / "labels"),
         images_dir=str(tmp_path / "images"), dataset_root=str(dataset_root),
         pred_dir=str(pred_dir),
+        subject="catkin", attribute=None,
     )
 
     assert "error" in result
@@ -555,6 +568,7 @@ def test_calibrate_count_operating_point_refuses_a_stamp_with_no_checkpoint_sha2
         checkpoint_path="x.pt", trait="catkin", labels_dir=str(tmp_path / "labels"),
         images_dir=str(tmp_path / "images"), dataset_root=str(dataset_root),
         pred_dir=str(pred_dir),
+        subject="catkin", attribute=None,
     )
 
     assert "error" in result
@@ -606,6 +620,7 @@ def test_calibrate_count_operating_point_refuses_a_stamp_validated_mid_pass(monk
         checkpoint_path="x.pt", trait="catkin", labels_dir=str(labels_dir),
         images_dir=str(tmp_path / "images"), dataset_root=str(dataset_root),
         pred_dir=str(pred_dir),
+        subject="catkin", attribute=None,
     )
 
     assert "error" in result
@@ -652,5 +667,6 @@ def test_script_and_tool_call_the_same_count_calibration_function(monkeypatch, t
             checkpoint_path="x.pt", trait="catkin", labels_dir=str(tmp_path / "labels"),
             images_dir=str(tmp_path / "images"), dataset_root=str(dataset_root),
             pred_dir=str(pred_dir),
+            subject="catkin", attribute=None,
         )
     assert len(calls) == 2

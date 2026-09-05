@@ -67,6 +67,7 @@ def _bucket(tmp_path, name, *, validated, ref=VALIDATED_HELD_OUT, conf=0.6):
     stamp = {
         "validated": validated, "trait": "catkin",
         "operating_point": {"conf": {"value": conf, "validated_against": ref if validated else "false"}},
+        "subject": "catkin", "attribute": None,
     }
     if validated:
         write_prediction(d, "img_a")
@@ -504,7 +505,8 @@ def test_reconcile_operating_point_validity_still_floors_an_unbacked_trait_none_
 
     d = tmp_path / "raw_bucket"
     write_sidecar(d, {"validated": False, "trait": None,
-                      "operating_point": {"conf": {"validated_against": None}}})
+                      "operating_point": {"conf": {"validated_against": None}},
+                      "subject": None, "attribute": None})
 
     r = reconcile_operating_point_validity([str(d)], trait="catkin")
     assert r["validated"] == VALIDATED_FALSE

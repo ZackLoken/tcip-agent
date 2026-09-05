@@ -53,7 +53,7 @@ def _write_real_prediction(bucket, stem: str, *, score: float = 0.9) -> None:
     result = {"image": f"{stem}.png", "width": 100, "height": 100,
              "boxes": [[10.0, 10.0, 30.0, 30.0]], "scores": [score], "labels": [1], "count": 1}
     write_predictions_json(Path(bucket) / f"{stem}.json", result, created_by="test-producer",
-                           id_map={fx.COUNT_SUBJECT: 0})
+                           subject=fx.COUNT_SUBJECT, attribute=None, id_map={fx.COUNT_SUBJECT: 0})
 
 
 def _unvalidated_run_result(*, experiment_id=None, stem="a"):
@@ -128,7 +128,7 @@ def test_each_live_only_parameter_refuses_in_the_bucket_regime(tmp_path, name, v
 
     bucket = tmp_path / "preds"
     write_prediction(bucket, "a")
-    stamp = {"trait": fx.COUNT_TRAIT, "images_dir": str(tmp_path), "raster_path": None,
+    stamp = {"subject": fx.COUNT_SUBJECT, "attribute": None, "trait": fx.COUNT_TRAIT, "images_dir": str(tmp_path), "raster_path": None,
              "operating_point": {"conf": {"value": 0.5, "validated_against": VALIDATED_FALSE}}}
     write_bound_sidecar(bucket, stamp, dataset_root=tmp_path)
 
@@ -149,7 +149,7 @@ def test_a_live_only_parameter_stated_at_its_own_default_is_silently_admitted(tm
     dataset_root = tmp_path / "ds"
     bucket = dataset_root / "predictions" / "baseline" / "2026-01-01"
     _write_real_prediction(bucket, "a")
-    stamp = {"validated": True, "trait": fx.COUNT_TRAIT, "images_dir": str(tmp_path),
+    stamp = {"subject": fx.COUNT_SUBJECT, "attribute": None, "validated": True, "trait": fx.COUNT_TRAIT, "images_dir": str(tmp_path),
              "raster_path": None,
              "operating_point": {"conf": {"value": 0.5, "validated_against": VALIDATED_HELD_OUT}}}
     write_bound_sidecar(bucket, stamp, dataset_root=dataset_root)
@@ -186,7 +186,7 @@ def test_bucket_regime_refuses_a_mosaic_bucket(tmp_path):
 
     bucket = tmp_path / "mosaic_preds"
     write_prediction(bucket, "tile_0")
-    stamp = {"trait": fx.COUNT_TRAIT, "images_dir": None, "raster_path": "mosaic.tif",
+    stamp = {"subject": fx.COUNT_SUBJECT, "attribute": None, "trait": fx.COUNT_TRAIT, "images_dir": None, "raster_path": "mosaic.tif",
              "operating_point": {"conf": {"value": 0.5, "validated_against": VALIDATED_FALSE}}}
     write_bound_sidecar(bucket, stamp, dataset_root=tmp_path)
 
@@ -201,7 +201,7 @@ def test_bucket_regime_refuses_a_stamp_naming_neither_images_dir_nor_raster_path
 
     bucket = tmp_path / "bare_preds"
     write_prediction(bucket, "a")
-    stamp = {"trait": fx.COUNT_TRAIT, "images_dir": None, "raster_path": None,
+    stamp = {"subject": fx.COUNT_SUBJECT, "attribute": None, "trait": fx.COUNT_TRAIT, "images_dir": None, "raster_path": None,
              "operating_point": {"conf": {"value": 0.5, "validated_against": VALIDATED_FALSE}}}
     write_bound_sidecar(bucket, stamp, dataset_root=tmp_path)
 
@@ -219,7 +219,7 @@ def test_bucket_regime_refuses_a_stamp_naming_an_empty_string_images_dir(tmp_pat
 
     bucket = tmp_path / "empty_images_dir_preds"
     _write_real_prediction(bucket, "a")
-    stamp = {"trait": fx.COUNT_TRAIT, "images_dir": "", "raster_path": None,
+    stamp = {"subject": fx.COUNT_SUBJECT, "attribute": None, "trait": fx.COUNT_TRAIT, "images_dir": "", "raster_path": None,
              "operating_point": {"conf": {"value": 0.5, "validated_against": VALIDATED_FALSE}}}
     write_bound_sidecar(bucket, stamp, dataset_root=tmp_path)
 
@@ -248,7 +248,7 @@ def test_bucket_regime_refuses_a_trait_contradiction_even_unvalidated(tmp_path):
 
     bucket = tmp_path / "other_trait_preds"
     write_prediction(bucket, "a")
-    stamp = {"trait": other_trait, "images_dir": str(tmp_path), "raster_path": None,
+    stamp = {"subject": fx.COUNT_SUBJECT, "attribute": None, "trait": other_trait, "images_dir": str(tmp_path), "raster_path": None,
              "operating_point": {"conf": {"value": 0.5, "validated_against": VALIDATED_FALSE}}}
     write_bound_sidecar(bucket, stamp, dataset_root=tmp_path)
 
@@ -269,7 +269,7 @@ def test_bucket_regime_admits_a_stamp_naming_no_trait_at_all(tmp_path):
 
     bucket = tmp_path / "no_trait_preds"
     _write_real_prediction(bucket, "a")
-    stamp = {"trait": None, "images_dir": str(tmp_path), "raster_path": None,
+    stamp = {"subject": fx.COUNT_SUBJECT, "attribute": None, "trait": None, "images_dir": str(tmp_path), "raster_path": None,
              "operating_point": {"conf": {"value": 0.5, "validated_against": VALIDATED_FALSE}}}
     write_bound_sidecar(bucket, stamp, dataset_root=tmp_path)
 
@@ -286,7 +286,7 @@ def test_bucket_regime_refuses_a_stamped_bucket_with_no_prediction_documents(tmp
     import tcip_mcp.tools.inference_tools as itools
 
     bucket = tmp_path / "empty_preds"
-    stamp = {"trait": fx.COUNT_TRAIT, "images_dir": str(tmp_path), "raster_path": None,
+    stamp = {"subject": fx.COUNT_SUBJECT, "attribute": None, "trait": fx.COUNT_TRAIT, "images_dir": str(tmp_path), "raster_path": None,
              "operating_point": {"conf": {"value": 0.5, "validated_against": VALIDATED_HELD_OUT}}}
     write_bound_sidecar(bucket, stamp, dataset_root=tmp_path)
 
@@ -321,7 +321,7 @@ def test_bucket_regime_measured_subject_check_is_driven_by_a_recorded_id_map(tmp
 
     bucket = tmp_path / "id_mapped_preds"
     _write_real_prediction(bucket, "a")
-    stamp = {"trait": None, "images_dir": str(tmp_path), "raster_path": None,
+    stamp = {"subject": fx.COUNT_SUBJECT, "attribute": None, "trait": None, "images_dir": str(tmp_path), "raster_path": None,
              "id_map": {fx.COUNT_SUBJECT: 0},
              "operating_point": {"conf": {"value": 0.5, "validated_against": VALIDATED_FALSE}}}
     write_bound_sidecar(bucket, stamp, dataset_root=tmp_path)
@@ -346,7 +346,7 @@ def test_bucket_regime_returns_an_error_dict_for_an_unknown_trait(tmp_path):
 
     bucket = tmp_path / "ds" / "predictions" / "baseline" / "2026-01-01"
     _write_real_prediction(bucket, "a")
-    stamp = {"trait": "no-such-trait", "images_dir": str(tmp_path), "raster_path": None,
+    stamp = {"subject": fx.COUNT_SUBJECT, "attribute": None, "trait": "no-such-trait", "images_dir": str(tmp_path), "raster_path": None,
              "operating_point": {"conf": {"value": 0.5, "validated_against": VALIDATED_HELD_OUT}}}
     write_bound_sidecar(bucket, stamp, dataset_root=tmp_path)
 
@@ -470,7 +470,7 @@ def test_a_withdrawn_operationalization_mid_flow_is_count_free_in_the_bucket_reg
 
     bucket = tmp_path / "ds" / "predictions" / "baseline" / "2026-01-01"
     _write_real_prediction(bucket, "a")
-    stamp = {"trait": fx.COUNT_TRAIT, "images_dir": str(tmp_path), "raster_path": None,
+    stamp = {"subject": fx.COUNT_SUBJECT, "attribute": None, "trait": fx.COUNT_TRAIT, "images_dir": str(tmp_path), "raster_path": None,
              "operating_point": {"conf": {"value": 0.5, "validated_against": VALIDATED_HELD_OUT}}}
     write_bound_sidecar(bucket, stamp, dataset_root=tmp_path)
 
@@ -527,7 +527,7 @@ def test_a_withdrawn_operationalization_mid_flow_is_count_free_in_the_live_regim
 def test_a_gate_refusal_is_counts_bearing_in_the_bucket_regime(tmp_path):
     bucket = tmp_path / "ds" / "predictions" / "baseline" / "2026-01-01"
     _write_real_prediction(bucket, "a")
-    stamp = {"trait": fx.COUNT_TRAIT, "images_dir": str(tmp_path), "raster_path": None,
+    stamp = {"subject": fx.COUNT_SUBJECT, "attribute": None, "trait": fx.COUNT_TRAIT, "images_dir": str(tmp_path), "raster_path": None,
              "operating_point": {"conf": {"value": 0.5, "validated_against": VALIDATED_FALSE}}}
     write_bound_sidecar(bucket, stamp, dataset_root=tmp_path)
 
@@ -613,7 +613,7 @@ def test_bucket_regime_falls_back_to_the_stem_for_a_bucket_with_no_filename_map(
     dataset_root = tmp_path / "ds"
     bucket = dataset_root / "predictions" / "baseline" / "2026-01-01"
     _write_real_prediction(bucket, "a")
-    stamp = {"validated": True, "trait": fx.COUNT_TRAIT, "images_dir": str(tmp_path),
+    stamp = {"subject": fx.COUNT_SUBJECT, "attribute": None, "validated": True, "trait": fx.COUNT_TRAIT, "images_dir": str(tmp_path),
              "raster_path": None,
              "operating_point": {"conf": {"value": 0.5, "validated_against": VALIDATED_HELD_OUT}}}
     write_bound_sidecar(bucket, stamp, dataset_root=dataset_root)
@@ -639,7 +639,7 @@ def test_bucket_regime_partial_map_delivers_filenames_for_mapped_rows_and_stems_
     bucket = dataset_root / "predictions" / "baseline" / "2026-01-01"
     _write_real_prediction(bucket, "a")
     _write_real_prediction(bucket, "b")
-    stamp = {"validated": True, "trait": fx.COUNT_TRAIT, "images_dir": str(tmp_path),
+    stamp = {"subject": fx.COUNT_SUBJECT, "attribute": None, "validated": True, "trait": fx.COUNT_TRAIT, "images_dir": str(tmp_path),
              "raster_path": None, "image_filenames": {"a": "a.png"},
              "operating_point": {"conf": {"value": 0.5, "validated_against": VALIDATED_HELD_OUT}}}
     write_bound_sidecar(bucket, stamp, dataset_root=dataset_root)
@@ -661,7 +661,7 @@ def test_bucket_regime_gate_refusal_on_a_mapless_bucket_carries_the_image_note(t
 
     bucket = tmp_path / "preds"
     _write_real_prediction(bucket, "a")
-    stamp = {"trait": fx.COUNT_TRAIT, "images_dir": str(tmp_path), "raster_path": None,
+    stamp = {"subject": fx.COUNT_SUBJECT, "attribute": None, "trait": fx.COUNT_TRAIT, "images_dir": str(tmp_path), "raster_path": None,
              "operating_point": {"conf": {"value": 0.5, "validated_against": VALIDATED_FALSE}}}
     write_bound_sidecar(bucket, stamp, dataset_root=tmp_path)
 
@@ -679,7 +679,7 @@ def test_bucket_regime_refuses_a_non_dict_image_filenames_in_the_stamp(tmp_path)
 
     bucket = tmp_path / "preds"
     _write_real_prediction(bucket, "a")
-    stamp = {"trait": fx.COUNT_TRAIT, "images_dir": str(tmp_path), "raster_path": None,
+    stamp = {"subject": fx.COUNT_SUBJECT, "attribute": None, "trait": fx.COUNT_TRAIT, "images_dir": str(tmp_path), "raster_path": None,
              "image_filenames": ["a.png"],
              "operating_point": {"conf": {"value": 0.5, "validated_against": VALIDATED_FALSE}}}
     write_bound_sidecar(bucket, stamp, dataset_root=tmp_path)
@@ -816,7 +816,7 @@ def test_bucket_regime_reads_a_real_published_bucket_with_no_torch_import(tmp_pa
     dataset_root = tmp_path / "ds"
     bucket = dataset_root / "predictions" / "baseline" / "2026-01-01"
     _write_real_prediction(bucket, "a")
-    stamp = {"validated": True, "trait": fx.COUNT_TRAIT, "images_dir": str(tmp_path),
+    stamp = {"subject": fx.COUNT_SUBJECT, "attribute": None, "validated": True, "trait": fx.COUNT_TRAIT, "images_dir": str(tmp_path),
              "raster_path": None,
              "operating_point": {"conf": {"value": 0.5, "validated_against": VALIDATED_HELD_OUT}}}
     write_bound_sidecar(bucket, stamp, dataset_root=dataset_root)
@@ -895,7 +895,7 @@ def test_bucket_regime_delivers_validated_after_the_stamp_is_promoted(tmp_path):
 
     bucket = tmp_path / "ds" / "predictions" / "baseline" / "2026-01-01"
     _write_real_prediction(bucket, "a")
-    unvalidated_stamp = {"validated": False, "trait": fx.COUNT_TRAIT, "images_dir": str(tmp_path),
+    unvalidated_stamp = {"subject": fx.COUNT_SUBJECT, "attribute": None, "validated": False, "trait": fx.COUNT_TRAIT, "images_dir": str(tmp_path),
                         "raster_path": None,
                         "operating_point": {"conf": {"value": 0.5,
                                                      "validated_against": VALIDATED_FALSE}}}

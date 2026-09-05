@@ -156,6 +156,8 @@ def _phenology_fixture(
     id_map = id_map or _ID_MAP
     dates = ["2026-02-11", "2026-02-25", "2026-03-10", "2026-03-24"][: len(fractions)]
     positive = "elongated" if "elongated" in id_map else None
+    # A bare single-subject map is a detector bucket never assessed for any attribute.
+    attribute = "elongation" if positive else None
     # A covered-bucket key is relative to a dataset root, recognised by its annotations/predictions segment.
     root = tmp_path / "ds"
     mapping, preds = {}, {}
@@ -176,10 +178,10 @@ def _phenology_fixture(
                     {"boxes": [[j, 0, j + 4, 4] for j in range(detections)],
                      "labels": [id_map[s] + 1 for s in subjects],
                      "scores": [0.9] * detections, "width": 100, "height": 100},
-                    id_map=id_map)
+                    subject="catkin", attribute=attribute, id_map=id_map)
                 assigns.append({"image_path": f"{stem}.tif", "stem": stem, "plot_name": plant,
                                 "accession_name": f"Acc{plant[-1]}", "distance_m": 1.0})
-        sidecar: dict = {"id_map": id_map}
+        sidecar: dict = {"id_map": id_map, "subject": "catkin", "attribute": attribute}
         if validated:
             sidecar.update({
                 "validated": True,
@@ -941,8 +943,9 @@ def _count_bucket(
             bucket / f"img{i}.json",
             {"boxes": [[j, 0, j + 4, 4] for j in range(count)],
              "labels": [1] * count, "scores": [0.9] * count, "width": 100, "height": 100},
-            id_map=_COUNT_ID_MAP)
-    sidecar: dict = {"id_map": _COUNT_ID_MAP, "images_dir": str(root / "images"), "trait": trait}
+            subject="stem", attribute=None, id_map=_COUNT_ID_MAP)
+    sidecar: dict = {"id_map": _COUNT_ID_MAP, "images_dir": str(root / "images"), "trait": trait,
+                     "subject": "stem", "attribute": None}
     if validated:
         sidecar.update({
             "validated": True,
@@ -1152,12 +1155,19 @@ def test_export_count_csv_per_image_refuses_a_bucket_whose_id_map_omits_the_conf
 ) -> None:
     """The core's own pre-check never reads a bucket's id_map (it runs before the bucket is
     touched); a subject a bucket's recorded id_map does not name is caught only by the writer's
-    own check, and answers 400 with the structured detail rather than a 500."""
-    from tcip_mcp.pipelines.resolution import update_sidecar
+    own check, and answers 400 with the structured detail rather than a 500.
+
+    The stamp write rail refuses a detector pair whose recorded map disagrees with it, so this
+    inconsistent bucket (a stamp claiming "stem" over a map keyed "other") is seeded through the
+    store directly, past the rail, the way a pre-rail or hand-repaired stamp would arrive."""
+    from tcip_mcp.pipelines.resolution import sidecar_key
 
     _seed_count_meaning(tmp_path)  # confirms measured_subject="stem"
     bucket = _count_bucket(tmp_path, validated=True, trait="stem")
-    update_sidecar(bucket, lambda current: {**current, "id_map": {"other": 0}}, "operating_point")
+    key = sidecar_key(bucket, "operating_point")
+    with tcip_store.transaction(key) as txn:
+        current = txn.read(key, default={})
+        txn.write(key, {**current, "id_map": {"other": 0}})
     store.open_project(tmp_path.resolve())
     resp = _export_count(client, {
         "project_root": str(tmp_path),

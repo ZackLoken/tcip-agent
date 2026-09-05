@@ -490,12 +490,17 @@ def test_plain_compute_matches_can_never_produce_a_tp_for_a_classified_trait() -
     assert len(matches["fn"]) == 1 and len(matches["fp"]) == 1  # never even compared
 
 
+_ELONGATION_VOCABULARY = {"dormant", "elongated"}
+
+
 def test_compute_classified_trait_matches_produces_a_tp_for_a_correct_classification() -> None:
     gt = [Annotation(subject="catkin", geometry=BBox(100, 100, 200, 200),
                      attributes={"elongation": "elongated"})]
-    preds = [Annotation(subject="elongated", geometry=BBox(102, 102, 198, 198), score=0.9)]
+    preds = [Annotation(subject="catkin", geometry=BBox(102, 102, 198, 198), score=0.9,
+                       attributes={"elongation": "elongated"})]
     matches = compute_classified_trait_matches(
-        gt, preds, subject="catkin", attribute="elongation", iou_threshold=0.5, conf_threshold=0.25,
+        gt, preds, subject="catkin", attribute="elongation", vocabulary=_ELONGATION_VOCABULARY,
+        iou_threshold=0.5, conf_threshold=0.25,
     )
     assert len(matches["tp"]) == 1
     assert matches["fp"] == [] and matches["fn"] == []
@@ -505,14 +510,15 @@ def test_compute_classified_trait_matches_produces_a_tp_for_a_correct_classifica
 
 
 def test_compute_classified_trait_matches_a_misclassification_is_an_fp_and_fn_pair() -> None:
-    # The model found the object (geometry matches) but called it the wrong value: this decomposes
-    # into an FN for the true confirmed value and an FP for the wrongly predicted one, exactly the
-    # existing accept/reject vocabulary a detection review already uses, no new verdict shape needed.
+    # The model found the object but called it the wrong value: an FN for the confirmed value
+    # paired with an FP for the wrongly predicted one, the existing accept/reject vocabulary.
     gt = [Annotation(subject="catkin", geometry=BBox(100, 100, 200, 200),
                      attributes={"elongation": "dormant"})]
-    preds = [Annotation(subject="elongated", geometry=BBox(102, 102, 198, 198), score=0.9)]
+    preds = [Annotation(subject="catkin", geometry=BBox(102, 102, 198, 198), score=0.9,
+                       attributes={"elongation": "elongated"})]
     matches = compute_classified_trait_matches(
-        gt, preds, subject="catkin", attribute="elongation", iou_threshold=0.5, conf_threshold=0.25,
+        gt, preds, subject="catkin", attribute="elongation", vocabulary=_ELONGATION_VOCABULARY,
+        iou_threshold=0.5, conf_threshold=0.25,
     )
     assert matches["tp"] == []
     assert [m["class_name"] for m in matches["fn"]] == ["dormant"]
@@ -526,9 +532,11 @@ def test_compute_classified_trait_matches_excludes_unassessed_and_out_of_scope_i
         # a different, enabling subject sharing the same labels dir -- must not enter the match pool
         Annotation(subject="bush", geometry=BBox(300, 300, 400, 400), attributes={"elongation": "elongated"}),
     ]
-    preds = [Annotation(subject="elongated", geometry=BBox(102, 102, 198, 198), score=0.9)]
+    preds = [Annotation(subject="catkin", geometry=BBox(102, 102, 198, 198), score=0.9,
+                       attributes={"elongation": "elongated"})]
     matches = compute_classified_trait_matches(
-        gt, preds, subject="catkin", attribute="elongation", iou_threshold=0.5, conf_threshold=0.25,
+        gt, preds, subject="catkin", attribute="elongation", vocabulary=_ELONGATION_VOCABULARY,
+        iou_threshold=0.5, conf_threshold=0.25,
     )
     assert matches["tp"] == [] and matches["fn"] == []  # neither GT instance was ever a real match
     assert len(matches["fp"]) == 1  # the prediction itself is still walkable, nothing confirms it

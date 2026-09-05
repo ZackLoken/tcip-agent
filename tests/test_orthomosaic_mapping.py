@@ -466,7 +466,7 @@ def test_predict_tiled_windowed_source_tiled_mask_polygon_exports_at_correct_off
     result["masks"][0] = {"mask_patch": patch.tolist(), "offset_x": offset_x, "offset_y": offset_y}
 
     out = tmp_path / "pred.json"
-    write_predictions_json(out, result)
+    write_predictions_json(out, result, subject="leaf", attribute=None)
     anns = json_io.read_annotations(str(out))
     assert isinstance(anns[0].geometry, Polygon)
     xs = [x for ring in anns[0].geometry.rings for x, _ in ring]

@@ -210,7 +210,7 @@ def test_annotate_save_admits_every_selected_dataset_save(
 # ── the review action's edited box and accept branch ────────────────────────
 
 
-def _seed_review_dataset(tmp_path: Path, *, pred_box=(10, 10, 20, 20)) -> tuple[Path, Path]:
+def _seed_review_dataset(tmp_path: Path, *, pred_box=(10, 10, 20, 20), gt_box=None) -> tuple[Path, Path]:
     from tcip_mcp.class_registry import ClassRegistry, Subject, write_registry
 
     dataset_root = tmp_path
@@ -218,7 +218,10 @@ def _seed_review_dataset(tmp_path: Path, *, pred_box=(10, 10, 20, 20)) -> tuple[
     _write_image(img)
     write_registry(dataset_root / "classes.json", ClassRegistry(subjects=(Subject(name="leaf"),)))
     gt_path = dataset_root / "annotations" / "img_001.json"
-    write_annotations(str(gt_path), [], 200, 150, keep_empty=True)
+    gt_annotations = (
+        [Annotation(subject="leaf", geometry=BBox(*gt_box))] if gt_box is not None else []
+    )
+    write_annotations(str(gt_path), gt_annotations, 200, 150, keep_empty=True)
     pred_path = dataset_root / "predictions" / "m" / "img_001.json"
     x1, y1, x2, y2 = pred_box
     if x2 > x1 and y2 > y1:
@@ -257,7 +260,7 @@ def _action_payload(dataset_root: Path, gt_path: Path, pred_path: Path, **overri
 
 
 def test_review_action_refuses_an_inverted_edited_box(client: TestClient, tmp_path: Path) -> None:
-    gt_path, pred_path = _seed_review_dataset(tmp_path)
+    gt_path, pred_path = _seed_review_dataset(tmp_path, gt_box=(1, 1, 3, 3))
 
     resp = client.post(
         "/api/review/action",
@@ -268,11 +271,11 @@ def test_review_action_refuses_an_inverted_edited_box(client: TestClient, tmp_pa
     )
 
     assert resp.status_code == 400
-    assert json.loads(gt_path.read_text())["annotations"] == []
+    assert json.loads(gt_path.read_text())["annotations"][0]["bbox"] == [1, 1, 2, 2]
 
 
 def test_review_action_admits_an_ordered_edited_box(client: TestClient, tmp_path: Path) -> None:
-    gt_path, pred_path = _seed_review_dataset(tmp_path)
+    gt_path, pred_path = _seed_review_dataset(tmp_path, gt_box=(1, 1, 3, 3))
 
     resp = client.post(
         "/api/review/action",
@@ -324,7 +327,7 @@ def test_write_predictions_json_drops_a_degenerate_box_and_reports_the_count(tmp
         "labels": [1, 1],
     }
 
-    dropped = write_predictions_json(out, result, id_map={"leaf": 0})
+    dropped = write_predictions_json(out, result, subject="leaf", attribute=None, id_map={"leaf": 0})
 
     assert dropped == 1
     saved = json.loads(out.read_text(encoding="utf-8"))
@@ -346,7 +349,7 @@ def test_write_predictions_json_drops_a_box_that_rounds_to_zero_extent(tmp_path)
         "labels": [1, 1],
     }
 
-    dropped = write_predictions_json(out, result, id_map={"leaf": 0})
+    dropped = write_predictions_json(out, result, subject="leaf", attribute=None, id_map={"leaf": 0})
 
     assert dropped == 1
     assert len(read_annotations(out)) == 1
@@ -362,7 +365,7 @@ def test_write_predictions_json_refuses_a_reserved_stem(tmp_path):
     result = {"width": 100, "height": 100, "boxes": [[1, 1, 5, 5]], "scores": [0.9], "labels": [1]}
 
     with pytest.raises(ValueError, match="operating_point"):
-        write_predictions_json(out, result, id_map={"leaf": 0})
+        write_predictions_json(out, result, subject="leaf", attribute=None, id_map={"leaf": 0})
     assert not out.exists()
 
 
@@ -373,7 +376,7 @@ def test_write_predictions_json_still_writes_an_ordinary_stem(tmp_path):
     out = tmp_path / "IMG_0001.json"
     result = {"width": 100, "height": 100, "boxes": [[1, 1, 5, 5]], "scores": [0.9], "labels": [1]}
 
-    write_predictions_json(out, result, id_map={"leaf": 0})
+    write_predictions_json(out, result, subject="leaf", attribute=None, id_map={"leaf": 0})
     assert len(read_annotations(out)) == 1
 
 

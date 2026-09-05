@@ -26,6 +26,7 @@ if str(_MCP_SRC) not in sys.path:
 
 from tcip_annotation import json_io  # noqa: E402
 from tcip_annotation.state import Annotation, BBox  # noqa: E402
+from tcip_mcp.pipelines import resolution  # noqa: E402
 from tcip_mcp.pipelines.postprocessing import phenology  # noqa: E402
 from tcip_mcp.pipelines.postprocessing.plant_mapping import MappingBuild  # noqa: E402
 from tcip_mcp.pipelines.resolution import Acknowledgement  # noqa: E402
@@ -44,17 +45,27 @@ _NO_MAPPING = MappingBuild(
 ).delivery_disclosure({"captures_unverified": [], "plant_csvs_unverified": []}, [])
 
 
-def _sidecar(dir_path: Path, id_map: dict | None) -> None:
+def _sidecar(dir_path: Path, id_map: dict | None, *, subject: str | None = "catkin",
+            attribute: str | None = None) -> None:
     """Write a bucket's operating_point.json exactly the way run_inference does: the only
     fact count_by_class reads to decide whether/how a bucket was classified."""
     from tcip_mcp.pipelines.resolution import write_sidecar
 
-    write_sidecar(dir_path, {"id_map": id_map})
+    write_sidecar(dir_path, {"id_map": id_map, "subject": subject, "attribute": attribute})
 
 
-def _preds(dir_path: Path, stem: str, subjects: list[str]) -> None:
+def _preds(dir_path: Path, stem: str, subjects: list[str], *, attribute: str | None = None,
+          object_subject: str = "catkin") -> None:
+    """Detector shape (``attribute=None``): each decoded name lands straight in ``subject``.
+    Classified shape: every record carries ``object_subject`` with its value under ``attribute``.
+    """
     dir_path.mkdir(parents=True, exist_ok=True)
-    anns = [Annotation(subject=s, geometry=BBox(1.0, 1.0, 3.0, 3.0), score=0.9) for s in subjects]
+    if attribute is None:
+        anns = [Annotation(subject=s, geometry=BBox(1.0, 1.0, 3.0, 3.0), score=0.9)
+                for s in subjects]
+    else:
+        anns = [Annotation(subject=object_subject, geometry=BBox(1.0, 1.0, 3.0, 3.0), score=0.9,
+                           attributes={attribute: s}) for s in subjects]
     json_io.write_annotations(dir_path / f"{stem}.json", anns, 8, 8)
 
 
@@ -176,9 +187,8 @@ def test_milestone_date_columns_is_proper_subset_of_full_columns():
 
 
 def test_count_by_class_bare_detector_bucket_refuses_never_full_coverage(tmp_path):
-    # A single-class detector's id_map is {"catkin": 0}, no
-    # attribute axis at all. Every prediction decodes to subject="catkin". This must not be scored
-    # classified: "catkin" is not the trait's positive value.
+    # A single-class detector's id_map ({"catkin": 0}) has no attribute axis at all: "catkin" is
+    # not the trait's positive value, so this must not be scored classified.
     p = tmp_path / "img.json"
     json_io.write_annotations(
         p, [Annotation(subject="catkin", geometry=BBox(1, 1, 3, 3), score=0.9),
@@ -186,7 +196,8 @@ def test_count_by_class_bare_detector_bucket_refuses_never_full_coverage(tmp_pat
         8, 8,
     )
     id_map = {"catkin": 0}
-    total, positive, unclassified = phenology.count_by_class(p, id_map, "elongated")
+    scope = resolution.BucketScope(subject="catkin", attribute=None)
+    total, positive, unclassified = phenology.count_by_class(p, id_map, "elongated", scope=scope)
     assert (total, positive, unclassified) == (2, 0, 2)  # whole bucket unclassified, not full coverage
 
 
@@ -195,58 +206,65 @@ def test_count_by_class_wrong_axis_bucket_refuses(tmp_path):
     # value set doesn't include the trait's positive value, so it must refuse, not be miscounted.
     p = tmp_path / "img.json"
     json_io.write_annotations(
-        p, [Annotation(subject="mild", geometry=BBox(1, 1, 3, 3), score=0.9)], 8, 8,
+        p, [Annotation(subject="catkin", geometry=BBox(1, 1, 3, 3), score=0.9,
+                       attributes={"damage": "mild"})], 8, 8,
     )
     id_map = {"none": 0, "mild": 1, "severe": 2}
-    total, positive, unclassified = phenology.count_by_class(p, id_map, "elongated")
+    scope = resolution.BucketScope(subject="catkin", attribute="damage")
+    total, positive, unclassified = phenology.count_by_class(p, id_map, "elongated", scope=scope)
     assert (total, positive, unclassified) == (1, 0, 1)
 
 
 def test_count_by_class_absent_id_map_refuses(tmp_path):
     p = tmp_path / "img.json"
     json_io.write_annotations(
-        p, [Annotation(subject="elongated", geometry=BBox(1, 1, 3, 3), score=0.9)], 8, 8,
+        p, [Annotation(subject="catkin", geometry=BBox(1, 1, 3, 3), score=0.9,
+                       attributes={"elongation": "elongated"})], 8, 8,
     )
-    total, positive, unclassified = phenology.count_by_class(p, None, "elongated")
+    total, positive, unclassified = phenology.count_by_class(p, None, "elongated", scope=None)
     assert (total, positive, unclassified) == (1, 0, 1)
 
 
 def test_count_by_class_classified_bucket_splits_positive_negative(tmp_path):
     p = tmp_path / "img.json"
     json_io.write_annotations(
-        p, [Annotation(subject="elongated", geometry=BBox(1, 1, 3, 3), score=0.9),
-            Annotation(subject="dormant", geometry=BBox(4, 4, 6, 6), score=0.8),
-            Annotation(subject="elongated", geometry=BBox(1, 1, 3, 3), score=0.7)],
+        p, [Annotation(subject="catkin", geometry=BBox(1, 1, 3, 3), score=0.9,
+                       attributes={"elongation": "elongated"}),
+            Annotation(subject="catkin", geometry=BBox(4, 4, 6, 6), score=0.8,
+                       attributes={"elongation": "dormant"}),
+            Annotation(subject="catkin", geometry=BBox(1, 1, 3, 3), score=0.7,
+                       attributes={"elongation": "elongated"})],
         8, 8,
     )
     id_map = {"dormant": 0, "elongated": 1}
-    total, positive, unclassified = phenology.count_by_class(p, id_map, "elongated")
+    scope = resolution.BucketScope(subject="catkin", attribute="elongation")
+    total, positive, unclassified = phenology.count_by_class(p, id_map, "elongated", scope=scope)
     assert (total, positive, unclassified) == (3, 2, 0)
 
 
-def test_count_by_class_foreign_subject_within_classified_bucket_is_per_detection_unclassified(tmp_path):
-    # A classified bucket (id_map has the positive value) must still not
-    # silently coerce a detection whose own subject isn't a key of that map (a stale file from a
-    # prior run, or a raw-index decode fallback) into a classified negative.
+def test_count_by_class_foreign_record_within_classified_bucket_refuses(tmp_path):
+    # A record carrying no value under the classified attribute (a stale bare-detector document)
+    # refuses by name rather than reading as a classified negative.
+    from tcip_annotation.json_io import ClassifiedRecordRefused
+
     p = tmp_path / "img.json"
     json_io.write_annotations(
-        p, [Annotation(subject="elongated", geometry=BBox(1, 1, 3, 3), score=0.9),
-            Annotation(subject="catkin", geometry=BBox(4, 4, 6, 6), score=0.8),  # stale bare-detector file
-            Annotation(subject="2", geometry=BBox(1, 1, 3, 3), score=0.7)],  # raw-index fallback
+        p, [Annotation(subject="catkin", geometry=BBox(1, 1, 3, 3), score=0.9,
+                       attributes={"elongation": "elongated"}),
+            Annotation(subject="catkin", geometry=BBox(4, 4, 6, 6), score=0.8)],
         8, 8,
     )
     id_map = {"dormant": 0, "elongated": 1}
-    total, positive, unclassified = phenology.count_by_class(p, id_map, "elongated")
-    assert (total, positive, unclassified) == (3, 1, 2)
+    scope = resolution.BucketScope(subject="catkin", attribute="elongation")
+    with pytest.raises(ClassifiedRecordRefused, match="conform_classified_predictions"):
+        phenology.count_by_class(p, id_map, "elongated", scope=scope)
 
 
 def test_count_by_class_missing_file_reads_as_empty():
-    # count_by_class itself degrades gracefully (json_io.read_annotations on a missing path returns
-    # []), but per_plant_series never actually calls it on a missing path; it checks is_file() and
-    # tracks n_missing itself instead (see test_per_plant_phenology_missing_image_is_disclosed_not_a_zero),
-    # so a missing observation is disclosed there, not silently zero'd here.
+    # count_by_class degrades gracefully on a missing path (json_io.read_annotations answers []);
+    # per_plant_series never calls it on one, checking is_file() and tracking n_missing itself.
     total, positive, unclassified = phenology.count_by_class(
-        Path("does-not-exist.json"), {"elongated": 1}, "elongated")
+        Path("does-not-exist.json"), {"elongated": 1}, "elongated", scope=None)
     assert (total, positive, unclassified) == (0, 0, 0)
 
 
@@ -263,10 +281,10 @@ class _Assignment:
 def test_per_plant_phenology_builds_fraction_series_when_classified(tmp_path):
     d1 = tmp_path / "2024-05-01"
     d2 = tmp_path / "2024-05-15"
-    _preds(d1, "P1_a", ["dormant", "dormant"])
-    _sidecar(d1, {"dormant": 0, "elongated": 1})
-    _preds(d2, "P1_b", ["elongated", "elongated"])
-    _sidecar(d2, {"dormant": 0, "elongated": 1})
+    _preds(d1, "P1_a", ["dormant", "dormant"], attribute="elongation")
+    _sidecar(d1, {"dormant": 0, "elongated": 1}, attribute="elongation")
+    _preds(d2, "P1_b", ["elongated", "elongated"], attribute="elongation")
+    _sidecar(d2, {"dormant": 0, "elongated": 1}, attribute="elongation")
     mapping = {
         "2024-05-01": [_Assignment("P1_a", "P1", "acc-9")],
         "2024-05-15": [_Assignment("P1_b", "P1", "acc-9")],
@@ -306,7 +324,7 @@ def test_per_plant_phenology_missing_image_is_disclosed_not_a_zero(tmp_path):
     # observed zero (which would count as "classified, 0/0" and silently pass coverage).
     d1 = tmp_path / "2024-05-01"
     d1.mkdir(parents=True, exist_ok=True)
-    _sidecar(d1, {"dormant": 0, "elongated": 1})
+    _sidecar(d1, {"dormant": 0, "elongated": 1}, attribute="elongation")
     # no P1_a.json written: the mapping names it but nothing was ever inferred for it
     mapping = {"2024-05-01": [_Assignment("P1_a", "P1", "acc-9")]}
     preds = {"2024-05-01": str(d1)}
@@ -327,8 +345,8 @@ def test_per_plant_phenology_multi_date_and_excludes_plant_with_one_bad_date(tmp
     # computed from the subset that happened to be usable.
     d1 = tmp_path / "2024-05-01"
     d2 = tmp_path / "2024-05-15"
-    _preds(d1, "P1_a", ["elongated"])
-    _sidecar(d1, {"dormant": 0, "elongated": 1})
+    _preds(d1, "P1_a", ["elongated"], attribute="elongation")
+    _sidecar(d1, {"dormant": 0, "elongated": 1}, attribute="elongation")
     _preds(d2, "P1_b", ["catkin"])  # bare-detector date, unclassified
     _sidecar(d2, {"catkin": 0})
     mapping = {
@@ -352,8 +370,8 @@ def test_per_plant_phenology_multi_date_and_excludes_plant_with_one_bad_date(tmp
 
 def test_per_plant_series_accepts_dict_assignments(tmp_path):
     d1 = tmp_path / "2024-05-01"
-    _preds(d1, "P1_a", ["elongated"])
-    _sidecar(d1, {"dormant": 0, "elongated": 1})
+    _preds(d1, "P1_a", ["elongated"], attribute="elongation")
+    _sidecar(d1, {"dormant": 0, "elongated": 1}, attribute="elongation")
     mapping = {"2024-05-01": [{"stem": "P1_a", "plot_name": "P1", "accession_name": "acc-9"}]}
     preds = {"2024-05-01": str(d1)}
     per_plant = phenology.per_plant_series(mapping, preds, positive_class_name="elongated")
@@ -367,7 +385,7 @@ def test_per_plant_series_accepts_dict_assignments(tmp_path):
 
 def test_resolve_positive_class_id_from_bucket_id_map(tmp_path):
     d1 = tmp_path / "2024-05-01"
-    _sidecar(d1, {"dormant": 0, "elongated": 1})
+    _sidecar(d1, {"dormant": 0, "elongated": 1}, attribute="elongation")
     cid, msg = phenology.resolve_positive_class_id(CATKIN, {"2024-05-01": str(d1)})
     assert cid == 1
     assert "resolved" in msg
@@ -683,11 +701,11 @@ def test_excluded_plant_carries_the_same_milestone_keys_as_an_included_one(tmp_p
     d1, d2 = tmp_path / "2026-02-11", tmp_path / "2026-03-09"
     id_map = {"dormant": 0, "elongated": 1}
     for d in (d1, d2):
-        _sidecar(d, id_map)
-    _preds(d1, "GOOD", ["elongated", "dormant"])
-    _preds(d2, "GOOD", ["elongated", "elongated"])
-    _preds(d1, "BAD", ["elongated", "mystery"])  # unclassifiable -> plant excluded
-    _preds(d2, "BAD", ["elongated", "elongated"])
+        _sidecar(d, id_map, attribute="elongation")
+    _preds(d1, "GOOD", ["elongated", "dormant"], attribute="elongation")
+    _preds(d2, "GOOD", ["elongated", "elongated"], attribute="elongation")
+    _preds(d1, "BAD", ["elongated", "elongated"], attribute="elongation")
+    # BAD's second date is never predicted on: the missing image excludes its milestones.
     mapping = {
         "2026-02-11": [_Assignment("GOOD", "GOOD", "a"), _Assignment("BAD", "BAD", "b")],
         "2026-03-09": [_Assignment("GOOD", "GOOD", "a"), _Assignment("BAD", "BAD", "b")],
@@ -696,7 +714,7 @@ def test_excluded_plant_carries_the_same_milestone_keys_as_an_included_one(tmp_p
         mapping, {"2026-02-11": str(d1), "2026-03-09": str(d2)},
         positive_class_name="elongated", spec=CATKIN)
     by_plant = {r["plant_id"]: r for r in res["rows"]}
-    assert by_plant["BAD"]["n_dates_unclassified"] == 1  # genuinely excluded
+    assert by_plant["BAD"]["n_dates_missing_images"] == 1  # genuinely excluded
     assert set(by_plant["GOOD"]) == set(by_plant["BAD"])
     assert "catkin_95per_date_bound" in by_plant["BAD"]
 
@@ -707,9 +725,9 @@ def test_per_plant_series_counts_the_images_the_mapping_names(tmp_path):
     one.
     """
     d = tmp_path / "2026-02-11"
-    _sidecar(d, {"dormant": 0, "elongated": 1})
+    _sidecar(d, {"dormant": 0, "elongated": 1}, attribute="elongation")
     for i in range(3):
-        _preds(d, f"IMG{i}", ["elongated", "dormant"])
+        _preds(d, f"IMG{i}", ["elongated", "dormant"], attribute="elongation")
     mapping = {"2026-02-11": [_Assignment(f"IMG{i}", "P1", "a") for i in range(3)]
                + [_Assignment("GONE", "P1", "a")]}  # named, no prediction file
     per_plant = phenology.per_plant_series(mapping, {"2026-02-11": str(d)},
@@ -727,8 +745,8 @@ def test_per_plant_series_excludes_unattributed_assignments_from_coverage(tmp_pa
     silently dropped from every plant's coverage; how often that happens is disclosed once, at
     delivery scope, by ``plant_mapping.MappingBuild.unattributed``, never recomputed here."""
     d = tmp_path / "2026-02-11"
-    _sidecar(d, {"dormant": 0, "elongated": 1})
-    _preds(d, "P1_a", ["elongated"])
+    _sidecar(d, {"dormant": 0, "elongated": 1}, attribute="elongation")
+    _preds(d, "P1_a", ["elongated"], attribute="elongation")
     mapping = {"2026-02-11": [
         _Assignment("P1_a", "P1", "acc-9"),
         _Assignment("STRAY", None, None),  # no plot_name: never assigned to any plant
@@ -743,8 +761,8 @@ def test_per_plant_phenology_excludes_unattributed_assignments_from_rows(tmp_pat
     unattributed count of its own: that disclosure is ``plant_mapping.MappingBuild.unattributed``'s,
     at delivery scope, not a per-call return value."""
     d = tmp_path / "2026-02-11"
-    _sidecar(d, {"dormant": 0, "elongated": 1})
-    _preds(d, "P1_a", ["elongated"])
+    _sidecar(d, {"dormant": 0, "elongated": 1}, attribute="elongation")
+    _preds(d, "P1_a", ["elongated"], attribute="elongation")
     mapping = {"2026-02-11": [
         _Assignment("P1_a", "P1", "acc-9"),
         _Assignment("STRAY1", None, None),

@@ -60,7 +60,7 @@ def test_write_predictions_json_stamps_model_provenance(tmp_path):
     p = tmp_path / "pred.json"
     write_predictions_json(p, {"width": 100, "height": 80,
                                "boxes": [[10, 10, 30, 30]], "scores": [0.9], "labels": [1]},
-                           created_by="model:best_catkin")
+                           created_by="model:best_catkin", subject="catkin", attribute=None)
     obj = json.loads(p.read_text())["annotations"][0]
     assert obj["created_by"] == "model:best_catkin"
     assert obj["created_at"]

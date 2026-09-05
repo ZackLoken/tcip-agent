@@ -175,7 +175,8 @@ class TestFullClassificationPipeline:
         write_bound_sidecar(
             bucket, {"validated": True, "trait": fx.COUNT_TRAIT,
                     "operating_point": {"conf": {"value": 0.6,
-                                                 "validated_against": VALIDATED_HELD_OUT}}},
+                                                 "validated_against": VALIDATED_HELD_OUT}},
+                    "subject": fx.COUNT_SUBJECT, "attribute": None},
             dataset_root=tmp_path / "ds", experiment_id="exp-cls-smoke")
         export_detection_csv(csv_results, csv_path, trait=fx.COUNT_TRAIT,
                              operating_point_validated=VALIDATED_HELD_OUT,
@@ -341,7 +342,8 @@ class TestDetectionPipelineRealData:
         write_bound_sidecar(
             bucket, {"validated": True, "trait": fx.COUNT_TRAIT,
                     "operating_point": {"conf": {"value": 0.6,
-                                                 "validated_against": VALIDATED_HELD_OUT}}},
+                                                 "validated_against": VALIDATED_HELD_OUT}},
+                    "subject": fx.COUNT_SUBJECT, "attribute": None},
             dataset_root=tmp_path / "ds", experiment_id="exp-det-smoke")
         export_detection_csv(results, csv_path, trait=fx.COUNT_TRAIT,
                              operating_point_validated=VALIDATED_HELD_OUT,

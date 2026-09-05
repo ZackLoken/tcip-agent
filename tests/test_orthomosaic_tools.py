@@ -847,7 +847,8 @@ def test_deliver_orthomosaic_plant_counts_rotated_raster_refuses_cleanly(tmp_pat
         window_size=CONTENT_IDENTITY_WINDOW_SIZE, max_windows=CONTENT_IDENTITY_MAX_WINDOWS))
     from tcip_mcp.pipelines.resolution import write_sidecar
 
-    write_sidecar(bucket_dir, {"validated": False, "raster_content_identity": identity},
+    write_sidecar(bucket_dir, {"validated": False, "raster_content_identity": identity,
+                              "subject": "0", "attribute": None},
                  "operating_point")
 
     # Arbitrary geolocation, never derived from the rotated raster itself (which refuses to
