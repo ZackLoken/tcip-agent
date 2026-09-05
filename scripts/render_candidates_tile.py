@@ -62,12 +62,13 @@ def render(stem: str, box: tuple[float, float, float, float]) -> Path:
     crop = im.crop((px0, py0, px1, py1))
 
     scale = VIEW_WIDTH / crop.size[0]
-    crop = crop.resize((VIEW_WIDTH, int(crop.size[1] * scale)), Image.LANCZOS)
+    crop = crop.resize((VIEW_WIDTH, int(crop.size[1] * scale)), Image.Resampling.LANCZOS)
     W, H = crop.size
     region_w = x1n - x0n
     region_h = y1n - y0n
 
     draw = ImageDraw.Draw(crop)
+    font: ImageFont.FreeTypeFont | ImageFont.ImageFont
     try:
         font = ImageFont.truetype("arial.ttf", 28)
     except Exception:
