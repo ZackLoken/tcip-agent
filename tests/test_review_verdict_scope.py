@@ -44,7 +44,7 @@ def _stage(dataset_root: Path, model: str, date: str, stem: str = STEM) -> dict:
     """Stage one prediction into ``model``'s bucket for ``date``."""
     return stage_prediction_shapes(
         str(dataset_root), model, date, stem,
-        annotations=[Annotation(subject="catkin", geometry=BBox(*BOX), score=0.83)],
+        annotations=[Annotation(subject="bud", geometry=BBox(*BOX), score=0.83)],
         img_w=IMG_W, img_h=IMG_H,
     )
 
@@ -67,7 +67,7 @@ def _review(client: TestClient, dataset_root: Path, img: Path, pred_path: str, g
         "image_path": str(img),
         "gt_path": str(gt_path),
         "pred_path": pred_path,
-        "det_type": "fp", "class_name": "catkin",
+        "det_type": "fp", "class_name": "bud",
         "conf": 0.83, "iou": None,
         "gt_idx": None, "pred_idx": 0,
         "bbox": list(BOX),
@@ -84,7 +84,7 @@ def _sidecar(bucket: Path) -> None:
     """
     tcip_store.replace(sidecar_key(bucket, "operating_point"), {
         "checkpoint_sha256": "sha-detector", "experiment_id": None, "validated": False,
-        "id_map": {"catkin": 0}, "subject": "catkin", "attribute": None,
+        "id_map": {"bud": 0}, "subject": "bud", "attribute": None,
         "operating_point": {"tiled": {"value": False}, "conf": {"value": 0.25}},
     }, expect=tcip_store.Version.ABSENT)
 
@@ -183,7 +183,7 @@ def test_gui_verdict_is_visible_to_the_bucket_guard(client: TestClient, tmp_path
     assert not (project_root / ".tcip").exists()
 
 
-@pytest.mark.usefixtures("seed_catkin_trait_spec")
+@pytest.mark.usefixtures("seed_bud_trait_spec")
 def test_promotion_refuses_a_changed_prediction_file(client: TestClient, tmp_path: Path) -> None:
     """A promotion is earned over the prediction documents the reviewer actually saw. Replacing one,
     removing one, or adding one for an image that had none all break that, each leaving a reference
@@ -204,8 +204,8 @@ def test_promotion_refuses_a_changed_prediction_file(client: TestClient, tmp_pat
 
     def _promote() -> dict:
         resp = client.post("/api/review/validate_reference", json={
-            "dataset_root": str(dataset_root), "trait": "catkin", "pred_dir": str(bucket),
-            "subject": "catkin"})
+            "dataset_root": str(dataset_root), "trait": "bud_opening", "pred_dir": str(bucket),
+            "subject": "bud"})
         assert resp.status_code == 200, resp.text
         return resp.json()
 
@@ -253,15 +253,15 @@ def test_promotion_refuses_a_bucket_from_another_dataset_root(
     _sidecar(bucket)
 
     resp = client.post("/api/review/validate_reference", json={
-        "dataset_root": str(here), "trait": "catkin", "pred_dir": str(bucket),
-        "subject": "catkin"})
+        "dataset_root": str(here), "trait": "bud_opening", "pred_dir": str(bucket),
+        "subject": "bud"})
     assert resp.status_code == 400
     detail = resp.json()["detail"]
     assert str(here) in detail and str(elsewhere) in detail
     assert tcip_store.read(sidecar_key(bucket, "operating_point"))["validated"] is False
 
 
-@pytest.mark.usefixtures("seed_catkin_trait_spec")
+@pytest.mark.usefixtures("seed_bud_trait_spec")
 def test_every_review_surface_reads_the_dataset_root_the_request_states(
     client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -321,8 +321,8 @@ def test_every_review_surface_reads_the_dataset_root_the_request_states(
     assert calls and calls[0]["dataset_root"] == str(dataset_root)
 
     promo = client.post("/api/review/validate_reference", json={
-        "dataset_root": str(dataset_root), "trait": "catkin", "pred_dir": str(bucket),
-        "subject": "catkin"})
+        "dataset_root": str(dataset_root), "trait": "bud_opening", "pred_dir": str(bucket),
+        "subject": "bud"})
     assert promo.status_code == 200, promo.text
     assert promo.json()["reviewed_image_count"] == 1
 

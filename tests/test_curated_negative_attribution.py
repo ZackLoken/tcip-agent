@@ -44,8 +44,8 @@ def _completed(detections: list[dict]) -> dict:
 
 
 _TWO_SUBJECTS = (
-    Subject(name="catkin", attributes=(
-        Attribute(name="stage", type="ordinal", values=("dormant", "elongating", "shedding")),)),
+    Subject(name="bud", attributes=(
+        Attribute(name="stage", type="ordinal", values=("closed", "elongating", "shedding")),)),
     Subject(name="leaf", attributes=(
         Attribute(name="damage", type="categorical", values=("none", "blight")),)),
 )
@@ -59,11 +59,11 @@ def test_every_confirmed_negative_reaches_the_status_store(tmp_path):
         _image(src, name, (40, 120))
     out = tmp_path / "out"
     state = {"image": {
-        "pos.png": _completed([_accepted("catkin", [0.5, 0.5, 0.2, 0.3])]),
-        "neg_a.png": _completed([_rejected("catkin", [0.2, 0.8, 0.1, 0.1])]),
-        "neg_b.png": _completed([_rejected("catkin", [0.6, 0.3, 0.2, 0.1])]),
-        "neg_c.png": _completed([_rejected("catkin", [0.4, 0.4, 0.3, 0.2]),
-                                 _rejected("catkin", [0.9, 0.1, 0.05, 0.05])]),
+        "pos.png": _completed([_accepted("bud", [0.5, 0.5, 0.2, 0.3])]),
+        "neg_a.png": _completed([_rejected("bud", [0.2, 0.8, 0.1, 0.1])]),
+        "neg_b.png": _completed([_rejected("bud", [0.6, 0.3, 0.2, 0.1])]),
+        "neg_c.png": _completed([_rejected("bud", [0.4, 0.4, 0.3, 0.2]),
+                                 _rejected("bud", [0.9, 0.1, 0.05, 0.05])]),
     }}
 
     r = materialize_dataset(state, str(src), str(out))
@@ -72,13 +72,13 @@ def test_every_confirmed_negative_reaches_the_status_store(tmp_path):
     store_key = image_status_key(out)
     assert ts.exists(store_key)
     store = ts.read(store_key)
-    assert list(store) == [status_bucket("catkin", None)]
-    bucket = store[status_bucket("catkin", None)]
+    assert list(store) == [status_bucket("bud", None)]
+    bucket = store[status_bucket("bud", None)]
     assert sorted(bucket) == ["neg_a.png", "neg_b.png", "neg_c.png"]
     assert {name: rec["status"] for name, rec in bucket.items()} == {
         "neg_a.png": "negative", "neg_b.png": "negative", "neg_c.png": "negative"}
 
-    assert confirmed_negative_names(out / "annotations", subject="catkin", date=None) == {
+    assert confirmed_negative_names(out / "annotations", subject="bud", date=None) == {
         "neg_a.png", "neg_b.png", "neg_c.png"}
 
     # No source registry to stamp against, so nothing is stamped, and an unstamped confirmation is
@@ -93,17 +93,17 @@ def test_explicit_subject_outranks_the_derived_one(tmp_path):
     _image(src, "neg.png", (25, 100))
     out = tmp_path / "out"
     state = {"image": {
-        "pos.png": _completed([_accepted("catkin", [0.5, 0.5, 0.2, 0.2])]),
+        "pos.png": _completed([_accepted("bud", [0.5, 0.5, 0.2, 0.2])]),
         "neg.png": _completed([_rejected("bush", [0.3, 0.3, 0.4, 0.4])]),
     }}
 
     r = materialize_dataset(state, str(src), str(out), subject="bush")
     assert r["subject"] == "bush"
-    assert r["subjects"] == ["catkin"]
+    assert r["subjects"] == ["bud"]
     assert ts.read(curated_manifest_key(out))["subject"] == "bush"
 
     assert confirmed_negative_names(out / "annotations", subject="bush", date=None) == {"neg.png"}
-    assert confirmed_negative_names(out / "annotations", subject="catkin", date=None) == set()
+    assert confirmed_negative_names(out / "annotations", subject="bud", date=None) == set()
 
 
 def test_multi_subject_review_leaves_negatives_unattributed(tmp_path):
@@ -114,13 +114,13 @@ def test_multi_subject_review_leaves_negatives_unattributed(tmp_path):
     _image(src, "neg.png", (60, 90))
     out = tmp_path / "out"
     state = {"image": {
-        "catkins.png": _completed([_accepted("catkin", [0.5, 0.5, 0.2, 0.2])]),
+        "catkins.png": _completed([_accepted("bud", [0.5, 0.5, 0.2, 0.2])]),
         "leaves.png": _completed([_accepted("leaf", [0.25, 0.75, 0.3, 0.1])]),
-        "neg.png": _completed([_rejected("catkin", [0.5, 0.5, 0.1, 0.1])]),
+        "neg.png": _completed([_rejected("bud", [0.5, 0.5, 0.1, 0.1])]),
     }}
 
     r = materialize_dataset(state, str(src), str(out))
-    assert r["subjects"] == ["catkin", "leaf"]
+    assert r["subjects"] == ["bud", "leaf"]
     assert r["subject"] is None
     assert r["hard_negative"] == 1
 
@@ -130,7 +130,7 @@ def test_multi_subject_review_leaves_negatives_unattributed(tmp_path):
     assert "no single subject" in r["unconfirmed_negatives"][0]["reason"]
 
     assert not ts.exists(image_status_key(out))
-    for subject in ("catkin", "leaf"):
+    for subject in ("bud", "leaf"):
         assert confirmed_negative_names(out / "annotations", subject=subject, date=None) == set()
 
     # The image is still in the dataset, as an unconfirmed empty rather than a mis-keyed negative.
@@ -149,24 +149,24 @@ def test_negative_stamps_match_the_source_registry_schema(tmp_path):
     _image(images, "neg_b.png", (90, 30))
     out = tmp_path / "out"
     state = {"image": {
-        "pos.png": _completed([_accepted("catkin", [0.5, 0.5, 0.2, 0.2])]),
-        "neg_a.png": _completed([_rejected("catkin", [0.2, 0.2, 0.1, 0.1])]),
-        "neg_b.png": _completed([_rejected("catkin", [0.7, 0.4, 0.2, 0.3])]),
+        "pos.png": _completed([_accepted("bud", [0.5, 0.5, 0.2, 0.2])]),
+        "neg_a.png": _completed([_rejected("bud", [0.2, 0.2, 0.1, 0.1])]),
+        "neg_b.png": _completed([_rejected("bud", [0.7, 0.4, 0.2, 0.3])]),
     }}
 
     materialize_dataset(state, str(images), str(out))
 
-    catkin_digest = attribute_schema_digest(registry, "catkin")
+    bud_digest = attribute_schema_digest(registry, "bud")
     leaf_digest = attribute_schema_digest(registry, "leaf")
-    assert catkin_digest and leaf_digest and catkin_digest != leaf_digest
+    assert bud_digest and leaf_digest and bud_digest != leaf_digest
 
     stamps = ts.read(image_status_digest_key(out))
-    assert stamps[status_bucket("catkin", None)] == {
-        "neg_a.png": catkin_digest, "neg_b.png": catkin_digest}
+    assert stamps[status_bucket("bud", None)] == {
+        "neg_a.png": bud_digest, "neg_b.png": bud_digest}
 
     quarantined: set[str] = set()
     admitted = confirmed_negative_names(
-        out / "annotations", subject="catkin", date=None, quarantined_out=quarantined)
+        out / "annotations", subject="bud", date=None, quarantined_out=quarantined)
     assert admitted == {"neg_a.png", "neg_b.png"}
     assert quarantined == set()
 
@@ -182,40 +182,40 @@ def test_materialized_dataset_carries_its_own_registry_copy(tmp_path):
     _image(images, "neg.png", (55, 110))
     out = tmp_path / "out"
     state = {"image": {
-        "pos.png": _completed([_accepted("catkin", [0.5, 0.5, 0.2, 0.2])]),
-        "neg.png": _completed([_rejected("catkin", [0.4, 0.6, 0.1, 0.2])]),
+        "pos.png": _completed([_accepted("bud", [0.5, 0.5, 0.2, 0.2])]),
+        "neg.png": _completed([_rejected("bud", [0.4, 0.6, 0.1, 0.2])]),
     }}
 
     materialize_dataset(state, str(images), str(out))
 
     assert (out / "classes.json").is_file()
     copied = class_registry.read_registry(out / "classes.json")
-    assert {s.name for s in copied.subjects} == {"catkin", "leaf"}
-    assert attribute_schema_digest(copied, "catkin") == attribute_schema_digest(registry, "catkin")
+    assert {s.name for s in copied.subjects} == {"bud", "leaf"}
+    assert attribute_schema_digest(copied, "bud") == attribute_schema_digest(registry, "bud")
 
 
 def test_a_rejection_of_one_subject_never_confirms_another(tmp_path):
     """An image disputed only for another object is not this subject's confirmed negative.
 
-    The review affirmed catkins on one image and rejected a bush prediction on a second. Nothing
-    on the second image answers for catkins, so nothing may key it as a catkin negative: doing so
-    asserts an image full of catkins is empty of them.
+    The review affirmed buds on one image and rejected a bush prediction on a second. Nothing
+    on the second image answers for buds, so nothing may key it as a bud negative: doing so
+    asserts an image full of buds is empty of them.
     """
     src = tmp_path / "src"
-    _image(src, "catkins.png", (120, 40))
+    _image(src, "buds.png", (120, 40))
     _image(src, "disputed_bush.png", (40, 120))
     out = tmp_path / "out"
     state = {"image": {
-        "catkins.png": _completed([_accepted("catkin", [0.5, 0.5, 0.2, 0.3])]),
+        "buds.png": _completed([_accepted("bud", [0.5, 0.5, 0.2, 0.3])]),
         "disputed_bush.png": _completed([_rejected("bush", [0.2, 0.8, 0.6, 0.6])]),
     }}
 
     r = materialize_dataset(state, str(src), str(out))
 
-    assert confirmed_negative_names(out / "annotations", subject="catkin", date=None) == set()
+    assert confirmed_negative_names(out / "annotations", subject="bud", date=None) == set()
     assert confirmed_negative_names(out / "annotations", subject="bush", date=None) == set()
     assert r["subject"] is None
-    assert r["verdict_subjects"] == ["bush", "catkin"]
+    assert r["verdict_subjects"] == ["bud", "bush"]
     assert [e["image"] for e in r["unconfirmed_negatives"]] == ["disputed_bush.png"]
     assert r["unconfirmed_negatives"][0]["rejected_subjects"] == ["bush"]
 
@@ -223,20 +223,20 @@ def test_a_rejection_of_one_subject_never_confirms_another(tmp_path):
 def test_a_stated_subject_never_claims_another_subjects_rejections(tmp_path):
     """Keying the harvest under a subject does not make every rejected image its negative."""
     src = tmp_path / "src"
-    _image(src, "answers_for_catkin.png", (100, 30))
+    _image(src, "answers_for_bud.png", (100, 30))
     _image(src, "answers_for_bush.png", (30, 100))
     out = tmp_path / "out"
     state = {"image": {
-        "answers_for_catkin.png": _completed([_rejected("catkin", [0.5, 0.5, 0.2, 0.2])]),
+        "answers_for_bud.png": _completed([_rejected("bud", [0.5, 0.5, 0.2, 0.2])]),
         "answers_for_bush.png": _completed([_rejected("bush", [0.3, 0.3, 0.4, 0.4])]),
     }}
 
-    r = materialize_dataset(state, str(src), str(out), subject="catkin")
+    r = materialize_dataset(state, str(src), str(out), subject="bud")
 
-    assert confirmed_negative_names(out / "annotations", subject="catkin", date=None) == {
-        "answers_for_catkin.png"}
+    assert confirmed_negative_names(out / "annotations", subject="bud", date=None) == {
+        "answers_for_bud.png"}
     assert [e["image"] for e in r["unconfirmed_negatives"]] == ["answers_for_bush.png"]
-    assert "not for 'catkin'" in r["unconfirmed_negatives"][0]["reason"]
+    assert "not for 'bud'" in r["unconfirmed_negatives"][0]["reason"]
 
     # Left in the dataset as an unconfirmed empty, which is what nobody has answered for.
     assert json.loads((out / "annotations" / "answers_for_bush.json").read_text())[
@@ -250,13 +250,13 @@ def test_a_harvested_negative_records_who_confirmed_it_and_when(tmp_path):
     _image(src, "neg.png", (60, 90))
     out = tmp_path / "out"
     state = {"image": {
-        "pos.png": _completed([_accepted("catkin", [0.5, 0.5, 0.2, 0.2])]),
-        "neg.png": _completed([_rejected("catkin", [0.4, 0.4, 0.2, 0.2], reviewed_by="rowan")]),
+        "pos.png": _completed([_accepted("bud", [0.5, 0.5, 0.2, 0.2])]),
+        "neg.png": _completed([_rejected("bud", [0.4, 0.4, 0.2, 0.2], reviewed_by="rowan")]),
     }}
 
     materialize_dataset(state, str(src), str(out))
 
-    record = ts.read(image_status_key(out))[status_bucket("catkin", None)]["neg.png"]
+    record = ts.read(image_status_key(out))[status_bucket("bud", None)]["neg.png"]
     assert isinstance(record, dict), "a stored status is a record, not a bare token"
     assert record["status"] == "negative"
     assert record["recorded_by"] == "user:rowan"
@@ -280,12 +280,12 @@ def test_classified_scope_never_confirms_a_negative_even_when_a_value_names_the_
     _image(images, "neg.png", (30, 100))
     out = tmp_path / "out"
     state = {"image": {
-        "pos.png": _completed([_accepted("catkin", [0.5, 0.5, 0.2, 0.2])]),
-        # The confirmed value on this rejection happens to be spelled "catkin", the object
+        "pos.png": _completed([_accepted("bud", [0.5, 0.5, 0.2, 0.2])]),
+        # The confirmed value on this rejection happens to be spelled "bud", the object
         # class's own name: exactly the coincidence the classified branch must not confirm on.
-        "neg.png": _completed([_rejected("catkin", [0.4, 0.4, 0.2, 0.2])]),
+        "neg.png": _completed([_rejected("bud", [0.4, 0.4, 0.2, 0.2])]),
     }}
-    scope = BucketScope(subject="catkin", attribute="stage")
+    scope = BucketScope(subject="bud", attribute="stage")
 
     r = materialize_dataset(state, str(images), str(out), scope=scope)
 
@@ -294,7 +294,7 @@ def test_classified_scope_never_confirms_a_negative_even_when_a_value_names_the_
     assert [e["image"] for e in r["unconfirmed_negatives"]] == ["neg.png"]
     assert "never that the object itself is absent" in r["unconfirmed_negatives"][0]["reason"]
     assert not ts.exists(image_status_key(out))
-    assert confirmed_negative_names(out / "annotations", subject="catkin", date=None) == set()
+    assert confirmed_negative_names(out / "annotations", subject="bud", date=None) == set()
 
 
 def test_classified_scope_refuses_a_confirmed_value_outside_the_bucket_vocabulary(tmp_path):
@@ -313,10 +313,10 @@ def test_classified_scope_refuses_a_confirmed_value_outside_the_bucket_vocabular
     state = {"image": {
         "pos.png": _completed([_accepted("shedding", [0.5, 0.5, 0.2, 0.2])]),
     }}
-    scope = BucketScope(subject="catkin", attribute="stage")
+    scope = BucketScope(subject="bud", attribute="stage")
 
     r = materialize_dataset(
-        state, str(images), str(out), scope=scope, vocabulary={"dormant", "elongating"})
+        state, str(images), str(out), scope=scope, vocabulary={"closed", "elongating"})
 
     assert r["positive"] == 0
     assert [e["image"] for e in r["boundary_refused"]] == ["pos.png"]
@@ -384,16 +384,16 @@ def test_a_negative_no_one_reviewer_answers_for_names_the_harvest(tmp_path):
     _image(src, "neg.png", (90, 60))
     out = tmp_path / "out"
     state = {"image": {
-        "pos.png": _completed([_accepted("catkin", [0.5, 0.5, 0.2, 0.2])]),
+        "pos.png": _completed([_accepted("bud", [0.5, 0.5, 0.2, 0.2])]),
         "neg.png": _completed([
-            _rejected("catkin", [0.2, 0.2, 0.1, 0.1], reviewed_by="rowan"),
-            _rejected("catkin", [0.7, 0.7, 0.1, 0.1], reviewed_by="sam"),
+            _rejected("bud", [0.2, 0.2, 0.1, 0.1], reviewed_by="rowan"),
+            _rejected("bud", [0.7, 0.7, 0.1, 0.1], reviewed_by="sam"),
         ]),
     }}
 
     materialize_dataset(state, str(src), str(out))
 
-    record = ts.read(image_status_key(out))[status_bucket("catkin", None)]["neg.png"]
+    record = ts.read(image_status_key(out))[status_bucket("bud", None)]["neg.png"]
     assert isinstance(record, dict), "a stored status is a record, not a bare token"
     assert not record["recorded_by"].startswith("user:"), (
         "a tool producer stays bare, so a reader can tell it from a person's own Complete")

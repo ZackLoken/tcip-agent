@@ -17,7 +17,7 @@ from tcip_annotation import json_io  # noqa: E402
 from tcip_annotation.state import Annotation, BBox  # noqa: E402
 from tcip_mcp.dataset_layout import record_image_statuses, status_bucket  # noqa: E402
 
-CATKIN = "catkin"
+BUD = "bud"
 BUSH = "bush"
 IMAGE_W, IMAGE_H = 160, 90
 
@@ -34,32 +34,32 @@ def _write(labels_dir, stem, annotations):
                               keep_empty=True)
 
 
-def _box(x1, y1, x2, y2, *, subject=CATKIN):
+def _box(x1, y1, x2, y2, *, subject=BUD):
     return Annotation(subject=subject, geometry=BBox(x1, y1, x2, y2))
 
 
 def test_a_record_of_another_subject_is_not_this_subjects_annotation(tmp_path):
-    """Admission is per subject: an image annotated only for bushes has nothing a catkin run can
-    learn from and no human statement that it holds no catkins, so it is held out rather than
+    """Admission is per subject: an image annotated only for bushes has nothing a bud run can
+    learn from and no human statement that it holds no buds, so it is held out rather than
     trained as a zero-box negative. Each subject's own run still admits both of its images.
     """
     from tcip_mcp.pipelines.data.datasets import DetectionDataset
 
     images, labels = tmp_path / "images", tmp_path / "annotations"
     labels.mkdir(parents=True)
-    _make_images(images, ["catkins_only", "bushes_only", "both"])
-    _write(labels, "catkins_only", [_box(12, 8, 60, 30)])
+    _make_images(images, ["buds_only", "bushes_only", "both"])
+    _write(labels, "buds_only", [_box(12, 8, 60, 30)])
     _write(labels, "bushes_only", [_box(5, 5, 150, 85, subject=BUSH)])
     _write(labels, "both", [_box(20, 10, 44, 70), _box(0, 0, 159, 89, subject=BUSH)])
 
-    catkin_ds = DetectionDataset(str(images), str(labels), subject=CATKIN)
-    assert sorted(catkin_ds.stems) == ["both", "catkins_only"]
-    assert catkin_ds.sample_counts["annotated"] == 2
-    assert catkin_ds.sample_counts["skipped_unconfirmed_empty"] == 1
-    for idx, stem in enumerate(catkin_ds.stems):
-        _img, target = catkin_ds[idx]
+    bud_ds = DetectionDataset(str(images), str(labels), subject=BUD)
+    assert sorted(bud_ds.stems) == ["both", "buds_only"]
+    assert bud_ds.sample_counts["annotated"] == 2
+    assert bud_ds.sample_counts["skipped_unconfirmed_empty"] == 1
+    for idx, stem in enumerate(bud_ds.stems):
+        _img, target = bud_ds[idx]
         assert target["boxes"].shape[0] > 0, (
-            f"{stem} was admitted as annotated for {CATKIN} but carries no target of it")
+            f"{stem} was admitted as annotated for {BUD} but carries no target of it")
 
     bush_ds = DetectionDataset(str(images), str(labels), subject=BUSH)
     assert sorted(bush_ds.stems) == ["both", "bushes_only"]
@@ -79,9 +79,9 @@ def test_a_whole_image_note_does_not_make_an_image_trainable(tmp_path):
     _make_images(images, ["boxed", "rated_only"])
     _write(labels, "boxed", [_box(12, 8, 60, 30)])
     _write(labels, "rated_only",
-           [Annotation(subject=CATKIN, geometry=None, attributes={"vigor": "high"})])
+           [Annotation(subject=BUD, geometry=None, attributes={"vigor": "high"})])
 
-    ds = DetectionDataset(str(images), str(labels), subject=CATKIN)
+    ds = DetectionDataset(str(images), str(labels), subject=BUD)
     assert ds.stems == ["boxed"]
     assert ds.sample_counts["annotated"] == 1
     assert ds.sample_counts["skipped_unconfirmed_empty"] == 1
@@ -101,15 +101,15 @@ def test_the_only_status_that_confirms_a_negative_is_the_negative_one(tmp_path):
     _write(labels, "worked", [_box(12, 8, 60, 30), _box(70, 20, 96, 84)])
     _write(labels, "emptied", [])
     _write(labels, "confirmed_empty", [])
-    record_image_statuses(tmp_path, status_bucket(CATKIN, None), {
+    record_image_statuses(tmp_path, status_bucket(BUD, None), {
         "worked.jpg": "complete",
         "emptied.jpg": "complete",
         "confirmed_empty.jpg": "negative",
     }, recorded_by="user:breeder")
 
-    assert confirmed_negative_names(labels, subject=CATKIN, date=None) == {"confirmed_empty.jpg"}
+    assert confirmed_negative_names(labels, subject=BUD, date=None) == {"confirmed_empty.jpg"}
 
-    ds = DetectionDataset(str(images), str(labels), subject=CATKIN)
+    ds = DetectionDataset(str(images), str(labels), subject=BUD)
     assert sorted(ds.stems) == ["confirmed_empty", "worked"]
     assert ds.sample_counts["confirmed_negative"] == 1
     assert ds.sample_counts["skipped_unconfirmed_empty"] == 1

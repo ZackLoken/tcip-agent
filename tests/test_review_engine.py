@@ -42,12 +42,12 @@ def ctx() -> ReviewContext:
         img_width=1000,
         img_height=800,
         gt=[
-            Annotation(subject="catkin", geometry=BBox(100, 100, 200, 200)),
-            Annotation(subject="catkin", geometry=BBox(400, 400, 500, 500)),
+            Annotation(subject="bud", geometry=BBox(100, 100, 200, 200)),
+            Annotation(subject="bud", geometry=BBox(400, 400, 500, 500)),
         ],
         preds=[
-            Annotation(subject="catkin", geometry=BBox(105, 105, 205, 205), score=0.9),  # matches gt[0]
-            Annotation(subject="catkin", geometry=BBox(700, 700, 800, 800), score=0.8),  # FP
+            Annotation(subject="bud", geometry=BBox(105, 105, 205, 205), score=0.9),  # matches gt[0]
+            Annotation(subject="bud", geometry=BBox(700, 700, 800, 800), score=0.8),  # FP
         ],
     )
 
@@ -65,14 +65,14 @@ def unordered_ctx() -> ReviewContext:
         img_width=1200,
         img_height=500,
         gt=[
-            Annotation(subject="catkin", geometry=BBox(100, 100, 300, 200)),
-            Annotation(subject="catkin", geometry=BBox(700, 260, 900, 420)),
-            Annotation(subject="catkin", geometry=BBox(50, 400, 150, 460)),  # no prediction: an FN
+            Annotation(subject="bud", geometry=BBox(100, 100, 300, 200)),
+            Annotation(subject="bud", geometry=BBox(700, 260, 900, 420)),
+            Annotation(subject="bud", geometry=BBox(50, 400, 150, 460)),  # no prediction: an FN
         ],
         preds=[
-            Annotation(subject="catkin", geometry=BBox(704, 264, 904, 424), score=0.90),  # gt[1]
-            Annotation(subject="catkin", geometry=BBox(1000, 20, 1080, 100), score=0.80),  # an FP
-            Annotation(subject="catkin", geometry=BBox(104, 104, 304, 204), score=0.72),  # gt[0]
+            Annotation(subject="bud", geometry=BBox(704, 264, 904, 424), score=0.90),  # gt[1]
+            Annotation(subject="bud", geometry=BBox(1000, 20, 1080, 100), score=0.80),  # an FP
+            Annotation(subject="bud", geometry=BBox(104, 104, 304, 204), score=0.72),  # gt[0]
         ],
     )
 
@@ -218,10 +218,10 @@ def test_mark_image_reviewed_merges_a_second_subjects_coverage_without_erasing_t
 ) -> None:
     """A second Complete under another subject on the same image adds its own entry to the
     coverage map rather than overwriting what the first one confirmed."""
-    engine.mark_image_reviewed(BUCKET, "IMG_0300.JPG", adjudication_covered={"catkin": True})
+    engine.mark_image_reviewed(BUCKET, "IMG_0300.JPG", adjudication_covered={"bud": True})
     engine.mark_image_reviewed(BUCKET, "IMG_0300.JPG", adjudication_covered={"leaf": False})
     img_data = engine.raw_state["verdicts"][(BUCKET, "IMG_0300.JPG")]
-    assert img_data["adjudication_covered"] == {"catkin": True, "leaf": False}
+    assert img_data["adjudication_covered"] == {"bud": True, "leaf": False}
 
 
 def test_mark_image_reviewed_refuses_to_merge_over_a_non_map_existing_value(
@@ -229,10 +229,10 @@ def test_mark_image_reviewed_refuses_to_merge_over_a_non_map_existing_value(
 ) -> None:
     """A bare boolean already recorded for a shard is a shape no current writer produces; the
     merge raises by name rather than silently discarding it."""
-    engine.mark_image_reviewed(BUCKET, "IMG_0301.JPG", adjudication_covered={"catkin": True})
+    engine.mark_image_reviewed(BUCKET, "IMG_0301.JPG", adjudication_covered={"bud": True})
     engine.raw_state["verdicts"][(BUCKET, "IMG_0301.JPG")]["adjudication_covered"] = True
     with pytest.raises(ValueError, match="adjudication_covered"):
-        engine.mark_image_reviewed(BUCKET, "IMG_0301.JPG", adjudication_covered={"catkin": True})
+        engine.mark_image_reviewed(BUCKET, "IMG_0301.JPG", adjudication_covered={"bud": True})
 
 
 def test_build_detection_list_tp_fp_fn(engine: ReviewEngine, ctx: ReviewContext) -> None:
@@ -257,11 +257,11 @@ def test_build_detection_list_filter_type(engine: ReviewEngine, ctx: ReviewConte
 
 def test_build_detection_list_filter_class(engine: ReviewEngine, ctx: ReviewContext) -> None:
     matches = compute_matches(ctx.gt, ctx.preds, iou_threshold=0.5, conf_threshold=0.25)
-    all_catkin = engine.build_detection_list(ctx, matches, filter_class="catkin")
-    # The fixture's whole match set is catkin (1 TP, 1 FP, 1 FN), so naming that class must keep
+    all_bud = engine.build_detection_list(ctx, matches, filter_class="bud")
+    # The fixture's whole match set is bud (1 TP, 1 FP, 1 FN), so naming that class must keep
     # every one of them: an empty result would satisfy the per-item check vacuously.
-    assert len(all_catkin) == 3
-    assert all(d.class_name == "catkin" for d in all_catkin)
+    assert len(all_bud) == 3
+    assert all(d.class_name == "bud" for d in all_bud)
     none = engine.build_detection_list(ctx, matches, filter_class="nonexistent")
     assert none == []
 
@@ -275,24 +275,24 @@ def test_class_filter_keeps_the_named_class_and_drops_the_others(engine: ReviewE
         img_width=900,
         img_height=400,
         gt=[
-            Annotation(subject="catkin", geometry=BBox(100, 100, 300, 180)),
+            Annotation(subject="bud", geometry=BBox(100, 100, 300, 180)),
             Annotation(subject="leaf", geometry=BBox(500, 40, 700, 300)),
             Annotation(subject="leaf", geometry=BBox(60, 250, 200, 380)),
         ],
         preds=[
             Annotation(subject="leaf", geometry=BBox(504, 44, 704, 304), score=0.88),
-            Annotation(subject="catkin", geometry=BBox(760, 300, 860, 360), score=0.61),
+            Annotation(subject="bud", geometry=BBox(760, 300, 860, 360), score=0.61),
         ],
     )
     matches = compute_matches(ctx.gt, ctx.preds, iou_threshold=0.5, conf_threshold=0.25)
 
-    catkins = engine.build_detection_list(ctx, matches, filter_class="catkin")
+    buds = engine.build_detection_list(ctx, matches, filter_class="bud")
     leaves = engine.build_detection_list(ctx, matches, filter_class="leaf")
-    assert len(catkins) == 2  # the unmatched catkin GT and the catkin prediction that hit nothing
+    assert len(buds) == 2  # the unmatched bud GT and the bud prediction that hit nothing
     assert len(leaves) == 2  # the matched leaf and the leaf GT nothing was predicted for
-    assert {d.class_name for d in catkins} == {"catkin"}
+    assert {d.class_name for d in buds} == {"bud"}
     assert {d.class_name for d in leaves} == {"leaf"}
-    assert sorted(d.det_type for d in catkins) == ["fn", "fp"]
+    assert sorted(d.det_type for d in buds) == ["fn", "fp"]
     assert sorted(d.det_type for d in leaves) == ["fn", "tp"]
 
 
@@ -310,7 +310,7 @@ def test_record_and_find_reviewed(engine: ReviewEngine, ctx: ReviewContext) -> N
     assert entry["action"] == "accepted"
     assert entry["match_type"] == "TP"
     assert entry["reviewed_by"] == "alice"
-    assert entry["class_name"] == "catkin"
+    assert entry["class_name"] == "bud"
 
 
 def test_record_overrides_existing(engine: ReviewEngine, ctx: ReviewContext) -> None:
@@ -346,7 +346,7 @@ def test_record_stamps_missed_object_attested_for_a_genuine_new_attestation(
     # The "mark missed object" tool's exact call shape (ReviewTab.tsx's recordMissedObject) has
     # neither an existing GT nor an existing prediction to key off of. missed_object_attested is
     # stamped from that call-site fact directly, not reconstructed later from bbox geometry.
-    det = ReviewDetection(det_type="fn", class_name="catkin", conf=None, iou=None,
+    det = ReviewDetection(det_type="fn", class_name="bud", conf=None, iou=None,
                           gt_idx=None, pred_idx=None, bbox=(10, 10, 20, 20))
     engine.record_detection_action(BUCKET, det, ctx, action="edited")
     entry = engine.raw_state["verdicts"][(BUCKET, ctx.img_name)]["detections"][0]
@@ -416,7 +416,7 @@ def test_review_progress_counts_an_aliased_pair_as_one_reviewed_of_two(
     detection left."""
     aliased_ctx = replace(ctx, preds=[
         *ctx.preds,
-        Annotation(subject="catkin", geometry=BBox(700, 700, 800, 800), score=0.7),  # aliases the FP
+        Annotation(subject="bud", geometry=BBox(700, 700, 800, 800), score=0.7),  # aliases the FP
     ])
     matches = compute_matches(aliased_ctx.gt, aliased_ctx.preds, iou_threshold=0.5, conf_threshold=0.25)
     dets = engine.build_detection_list(aliased_ctx, matches)
@@ -435,7 +435,7 @@ def test_review_progress_counts_an_aliased_pair_as_one_reviewed_of_two(
 def test_backup_original_labels_per_file(engine: ReviewEngine, tmp_path: Path) -> None:
     labels_dir = tmp_path / "labels"
     labels_dir.mkdir()
-    orig = '{"annotations": [{"subject": "catkin", "bbox": [1, 1, 8, 8]}]}'
+    orig = '{"annotations": [{"subject": "bud", "bbox": [1, 1, 8, 8]}]}'
     (labels_dir / "IMG_0001.json").write_text(orig)
     assert engine.backup_original_labels(labels_dir) == 1
     backup = labels_dir / ".original" / "IMG_0001.json"
@@ -447,7 +447,7 @@ def test_backup_original_labels_per_file(engine: ReviewEngine, tmp_path: Path) -
     assert backup.read_text() == orig  # still original
 
     # A label added after the first backup still gets its own baseline captured
-    second = '{"annotations": [{"subject": "catkin", "bbox": [3, 3, 4, 4]}]}'
+    second = '{"annotations": [{"subject": "bud", "bbox": [3, 3, 4, 4]}]}'
     (labels_dir / "IMG_0002.json").write_text(second)
     assert engine.backup_original_labels(labels_dir) == 1
     assert (labels_dir / ".original" / "IMG_0002.json").read_text() == second
@@ -464,7 +464,7 @@ def test_backup_sweep_and_per_file_capture_share_one_baseline(
     labels_dir = tmp_path / "labels"
     labels_dir.mkdir()
     label = labels_dir / "IMG_0001.json"
-    first_writer_bytes = '{"annotations": [{"subject": "catkin", "bbox": [1, 1, 8, 8]}]}'
+    first_writer_bytes = '{"annotations": [{"subject": "bud", "bbox": [1, 1, 8, 8]}]}'
     label.write_text(first_writer_bytes)
 
     assert capture_label_baseline(label) is True
@@ -482,60 +482,60 @@ def test_plain_compute_matches_can_never_produce_a_tp_for_a_classified_trait() -
     # Plain compute_matches groups strictly by identical `subject`, so these two vocabularies never
     # intersect -- a correctly classified instance could never register as a match, regardless of
     # model quality.
-    gt = [Annotation(subject="catkin", geometry=BBox(100, 100, 200, 200),
-                     attributes={"elongation": "elongated"})]
-    preds = [Annotation(subject="elongated", geometry=BBox(102, 102, 198, 198), score=0.9)]
+    gt = [Annotation(subject="bud", geometry=BBox(100, 100, 200, 200),
+                     attributes={"opening": "open"})]
+    preds = [Annotation(subject="open", geometry=BBox(102, 102, 198, 198), score=0.9)]
     matches = compute_matches(gt, preds, iou_threshold=0.5, conf_threshold=0.25)
     assert matches["tp"] == []
     assert len(matches["fn"]) == 1 and len(matches["fp"]) == 1  # never even compared
 
 
-_ELONGATION_VOCABULARY = {"dormant", "elongated"}
+_OPENING_VOCABULARY = {"closed", "open"}
 
 
 def test_compute_classified_trait_matches_produces_a_tp_for_a_correct_classification() -> None:
-    gt = [Annotation(subject="catkin", geometry=BBox(100, 100, 200, 200),
-                     attributes={"elongation": "elongated"})]
-    preds = [Annotation(subject="catkin", geometry=BBox(102, 102, 198, 198), score=0.9,
-                       attributes={"elongation": "elongated"})]
+    gt = [Annotation(subject="bud", geometry=BBox(100, 100, 200, 200),
+                     attributes={"opening": "open"})]
+    preds = [Annotation(subject="bud", geometry=BBox(102, 102, 198, 198), score=0.9,
+                       attributes={"opening": "open"})]
     matches = compute_classified_trait_matches(
-        gt, preds, subject="catkin", attribute="elongation", vocabulary=_ELONGATION_VOCABULARY,
+        gt, preds, subject="bud", attribute="opening", vocabulary=_OPENING_VOCABULARY,
         iou_threshold=0.5, conf_threshold=0.25,
     )
     assert len(matches["tp"]) == 1
     assert matches["fp"] == [] and matches["fn"] == []
     tp = matches["tp"][0]
-    assert tp["class_name"] == "elongated"
+    assert tp["class_name"] == "open"
     assert tp["gt_idx"] == 0 and tp["pred_idx"] == 0  # indexes the caller's real, unprojected lists
 
 
 def test_compute_classified_trait_matches_a_misclassification_is_an_fp_and_fn_pair() -> None:
     # The model found the object but called it the wrong value: an FN for the confirmed value
     # paired with an FP for the wrongly predicted one, the existing accept/reject vocabulary.
-    gt = [Annotation(subject="catkin", geometry=BBox(100, 100, 200, 200),
-                     attributes={"elongation": "dormant"})]
-    preds = [Annotation(subject="catkin", geometry=BBox(102, 102, 198, 198), score=0.9,
-                       attributes={"elongation": "elongated"})]
+    gt = [Annotation(subject="bud", geometry=BBox(100, 100, 200, 200),
+                     attributes={"opening": "closed"})]
+    preds = [Annotation(subject="bud", geometry=BBox(102, 102, 198, 198), score=0.9,
+                       attributes={"opening": "open"})]
     matches = compute_classified_trait_matches(
-        gt, preds, subject="catkin", attribute="elongation", vocabulary=_ELONGATION_VOCABULARY,
+        gt, preds, subject="bud", attribute="opening", vocabulary=_OPENING_VOCABULARY,
         iou_threshold=0.5, conf_threshold=0.25,
     )
     assert matches["tp"] == []
-    assert [m["class_name"] for m in matches["fn"]] == ["dormant"]
-    assert [m["class_name"] for m in matches["fp"]] == ["elongated"]
+    assert [m["class_name"] for m in matches["fn"]] == ["closed"]
+    assert [m["class_name"] for m in matches["fp"]] == ["open"]
 
 
 def test_compute_classified_trait_matches_excludes_unassessed_and_out_of_scope_instances() -> None:
     gt = [
-        # never assessed for `elongation` yet: a soft, expected gap, not a confirmed negative
-        Annotation(subject="catkin", geometry=BBox(100, 100, 200, 200)),
+        # never assessed for `opening` yet: a soft, expected gap, not a confirmed negative
+        Annotation(subject="bud", geometry=BBox(100, 100, 200, 200)),
         # a different, enabling subject sharing the same labels dir -- must not enter the match pool
-        Annotation(subject="bush", geometry=BBox(300, 300, 400, 400), attributes={"elongation": "elongated"}),
+        Annotation(subject="bush", geometry=BBox(300, 300, 400, 400), attributes={"opening": "open"}),
     ]
-    preds = [Annotation(subject="catkin", geometry=BBox(102, 102, 198, 198), score=0.9,
-                       attributes={"elongation": "elongated"})]
+    preds = [Annotation(subject="bud", geometry=BBox(102, 102, 198, 198), score=0.9,
+                       attributes={"opening": "open"})]
     matches = compute_classified_trait_matches(
-        gt, preds, subject="catkin", attribute="elongation", vocabulary=_ELONGATION_VOCABULARY,
+        gt, preds, subject="bud", attribute="opening", vocabulary=_OPENING_VOCABULARY,
         iou_threshold=0.5, conf_threshold=0.25,
     )
     assert matches["tp"] == [] and matches["fn"] == []  # neither GT instance was ever a real match
@@ -565,7 +565,7 @@ def test_save_gt_writes_merged_file(engine: ReviewEngine, ctx: ReviewContext, tm
 
     # One merged per-image file holds every subject: a box and a polygon together.
     ctx.gt = [
-        Annotation(subject="catkin", geometry=BBox(100, 100, 200, 200)),
+        Annotation(subject="bud", geometry=BBox(100, 100, 200, 200)),
         Annotation(subject="leaf", geometry=Polygon([[(10.0, 10.0), (20.0, 10.0), (20.0, 20.0)]])),
         # An accepted occlusion-split prediction keeps both of its contours through the GT write.
         Annotation(subject="nut", geometry=Polygon([
@@ -579,7 +579,7 @@ def test_save_gt_writes_merged_file(engine: ReviewEngine, ctx: ReviewContext, tm
     read_back = read_annotations(str(path))
     assert len(read_back) == 3
     box_ann = next(a for a in read_back if isinstance(a.geometry, BBox))
-    assert box_ann.subject == "catkin"
+    assert box_ann.subject == "bud"
     poly_ann = next(a for a in read_back if a.subject == "leaf")
     assert poly_ann.geometry.rings == [[(10.0, 10.0), (20.0, 10.0), (20.0, 20.0)]]
     multi_ann = next(a for a in read_back if a.subject == "nut")
@@ -648,16 +648,16 @@ def test_gt_preexisting_keeps_the_state_from_before_the_review_session(
         img_width=1200,
         img_height=500,
         gt=[],
-        preds=[Annotation(subject="catkin", geometry=BBox(200, 60, 320, 140), score=0.77)],
+        preds=[Annotation(subject="bud", geometry=BBox(200, 60, 320, 140), score=0.77)],
     )
-    first = ReviewDetection(det_type="fp", class_name="catkin", conf=0.77, iou=None,
+    first = ReviewDetection(det_type="fp", class_name="bud", conf=0.77, iou=None,
                             gt_idx=None, pred_idx=0, bbox=(200, 60, 320, 140))
     engine.record_detection_action(BUCKET, first, empty, action="rejected")
     assert engine.raw_state["verdicts"][(BUCKET, "IMG_0900.JPG")]["gt_preexisting"] is False
 
     # The reviewer then draws a missed object, so the session's own ctx now carries ground truth.
-    authored = replace(empty, gt=[Annotation(subject="catkin", geometry=BBox(600, 200, 720, 300))])
-    second = ReviewDetection(det_type="fn", class_name="catkin", conf=None, iou=None,
+    authored = replace(empty, gt=[Annotation(subject="bud", geometry=BBox(600, 200, 720, 300))])
+    second = ReviewDetection(det_type="fn", class_name="bud", conf=None, iou=None,
                              gt_idx=0, pred_idx=None, bbox=(600, 200, 720, 300))
     engine.record_detection_action(BUCKET, second, authored, action="accepted")
     assert engine.raw_state["verdicts"][(BUCKET, "IMG_0900.JPG")]["gt_preexisting"] is False
@@ -725,11 +725,11 @@ def test_an_attested_miss_stays_attested_when_keyed_to_the_authored_geometry(
     to supply, would silently read as unattested.
     """
     drawn = (500.0, 100.0, 620.0, 180.0)
-    det = ReviewDetection(det_type="fn", class_name="catkin", conf=None, iou=None,
+    det = ReviewDetection(det_type="fn", class_name="bud", conf=None, iou=None,
                           gt_idx=None, pred_idx=None, bbox=drawn)
     authored = replace(
         unordered_ctx,
-        gt=[*unordered_ctx.gt, Annotation(subject="catkin", geometry=BBox(*drawn))],
+        gt=[*unordered_ctx.gt, Annotation(subject="bud", geometry=BBox(*drawn))],
     )
     engine.record_detection_action(BUCKET,
         det, unordered_ctx, action="edited",

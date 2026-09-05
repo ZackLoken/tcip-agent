@@ -85,10 +85,10 @@ def test_focus_review_lands_on_first_frame_with_predictions(tmp_path: Path) -> N
     date = "2026-02-11"
     imgs = [f"IMG_{i:04d}.JPG" for i in range(5)]
     _images(root, date, imgs)
-    _pred(root, "baseline", date, "IMG_0002", [("catkin", 0.9)])
-    _pred(root, "baseline", date, "IMG_0003", [("catkin", 0.8)])
+    _pred(root, "baseline", date, "IMG_0002", [("bud", 0.9)])
+    _pred(root, "baseline", date, "IMG_0003", [("bud", 0.8)])
 
-    res = focus_human_attention("review", str(_project_root(tmp_path)), str(root), "catkin", date, model_name="baseline")
+    res = focus_human_attention("review", str(_project_root(tmp_path)), str(root), "bud", date, model_name="baseline")
     assert "error" not in res
     assert res["image_index"] == 2  # first frame with predictions for this model
     assert res["image"] == "IMG_0002.JPG"
@@ -102,9 +102,9 @@ def test_focus_review_empty_prediction_file_is_not_a_target(tmp_path: Path) -> N
     date = "2026-02-11"
     _images(root, date, [f"IMG_{i:04d}.JPG" for i in range(3)])
     _pred(root, "baseline", date, "IMG_0000", [])  # empty (no detections), skip
-    _pred(root, "baseline", date, "IMG_0002", [("catkin", 0.9)])
+    _pred(root, "baseline", date, "IMG_0002", [("bud", 0.9)])
 
-    res = focus_human_attention("review", str(_project_root(tmp_path)), str(root), "catkin", date, model_name="baseline")
+    res = focus_human_attention("review", str(_project_root(tmp_path)), str(root), "bud", date, model_name="baseline")
     assert res["image_index"] == 2
     assert res["n_with_predictions"] == 1
 
@@ -115,11 +115,11 @@ def test_focus_review_navigates_past_an_unreadable_prediction_on_another_frame(t
     root = tmp_path / "proj"
     date = "2026-02-11"
     _images(root, date, [f"IMG_{i:04d}.JPG" for i in range(3)])
-    _pred(root, "baseline", date, "IMG_0002", [("catkin", 0.9)])
+    _pred(root, "baseline", date, "IMG_0002", [("bud", 0.9)])
     bad = Path(prediction_dir(root, "baseline", date)) / "IMG_0000.json"
     bad.write_bytes(b"{not json")
 
-    res = focus_human_attention("review", str(_project_root(tmp_path)), str(root), "catkin", date, model_name="baseline")
+    res = focus_human_attention("review", str(_project_root(tmp_path)), str(root), "bud", date, model_name="baseline")
 
     assert "error" not in res
     assert res["image"] == "IMG_0002.JPG"
@@ -134,7 +134,7 @@ def test_focus_review_refuses_an_explicitly_named_unreadable_frame(tmp_path: Pat
     bad.parent.mkdir(parents=True, exist_ok=True)
     bad.write_bytes(b"{not json")
 
-    res = focus_human_attention("review", str(_project_root(tmp_path)), str(root), "catkin", date, model_name="baseline",
+    res = focus_human_attention("review", str(_project_root(tmp_path)), str(root), "bud", date, model_name="baseline",
                image_index=0)
 
     assert "error" in res
@@ -145,9 +145,9 @@ def test_focus_review_explicit_index_and_filter(tmp_path: Path) -> None:
     root = tmp_path / "proj"
     date = "2026-02-11"
     _images(root, date, [f"IMG_{i:04d}.JPG" for i in range(4)])
-    _pred(root, "baseline", date, "IMG_0000", [("catkin", 0.9)])
+    _pred(root, "baseline", date, "IMG_0000", [("bud", 0.9)])
 
-    res = focus_human_attention("review", str(_project_root(tmp_path)), str(root), "catkin", date, model_name="baseline",
+    res = focus_human_attention("review", str(_project_root(tmp_path)), str(root), "bud", date, model_name="baseline",
                        image_index=3, detection_idx=2, filter_type="fp")
     assert res["image_index"] == 3
     assert res["detection_idx"] == 2
@@ -157,7 +157,7 @@ def test_focus_review_explicit_index_and_filter(tmp_path: Path) -> None:
 def test_focus_review_rejects_bad_filter(tmp_path: Path) -> None:
     root = tmp_path / "proj"
     _images(root, "2026-02-11", ["IMG_0000.JPG"])
-    res = focus_human_attention("review", str(_project_root(tmp_path)), str(root), "catkin", "2026-02-11", model_name="baseline", filter_type="bogus")
+    res = focus_human_attention("review", str(_project_root(tmp_path)), str(root), "bud", "2026-02-11", model_name="baseline", filter_type="bogus")
     assert "error" in res
 
 
@@ -167,7 +167,7 @@ def test_stage_proposals_writes_prediction_format_not_gt(tmp_path: Path) -> None
     _image(root, date, "IMG_0001", size=(640, 480))
     # Two distinct subject NAMES (the name-based replacement for two numeric class ids).
     boxes = [
-        {"subject": "catkin", "conf": 0.8, "cx": 0.5, "cy": 0.5, "w": 0.1, "h": 0.1},
+        {"subject": "bud", "conf": 0.8, "cx": 0.5, "cy": 0.5, "w": 0.1, "h": 0.1},
         {"subject": "leaf", "conf": 0.6, "cx": 0.25, "cy": 0.25, "w": 0.05, "h": 0.05},
     ]
     res = stage_proposals(_img_path(root, date, "IMG_0001"), model_name="claude", boxes=boxes)
@@ -180,7 +180,7 @@ def test_stage_proposals_writes_prediction_format_not_gt(tmp_path: Path) -> None
     # Normalized cx/cy/w/h denormalized against a 640x480 image, carrying per-object confidence.
     assert len(preds) == 2
     b0 = preds[0]
-    assert b0.subject == "catkin"
+    assert b0.subject == "bud"
     assert b0.score == pytest.approx(0.8)
     assert isinstance(b0.geometry, BBox)
     assert (b0.geometry.x1, b0.geometry.y1, b0.geometry.x2, b0.geometry.y2) == pytest.approx(
@@ -201,7 +201,7 @@ def test_stage_proposals_rejects_unnormalized_coords(tmp_path: Path) -> None:
     date = "2026-02-11"
     _image(root, date, "IMG_0001")
     # pixel coords (>1) must be caught, not written off-canvas.
-    boxes = [{"subject": "catkin", "conf": 0.9, "cx": 320.0, "cy": 240.0, "w": 40.0, "h": 40.0}]
+    boxes = [{"subject": "bud", "conf": 0.9, "cx": 320.0, "cy": 240.0, "w": 40.0, "h": 40.0}]
     res = stage_proposals(_img_path(root, date, "IMG_0001"), model_name="agent_proposals", boxes=boxes)
     assert "error" in res and "normal" in res["error"].lower()
 
@@ -214,10 +214,10 @@ def test_stage_proposals_rejects_path_traversal_into_gt(tmp_path: Path) -> None:
     date = "2026-02-11"
     _image(root, date, "IMG_0001")
     image_path = _img_path(root, date, "IMG_0001")
-    good = [{"subject": "catkin", "conf": 0.9, "cx": 0.5, "cy": 0.5, "w": 0.1, "h": 0.1}]
+    good = [{"subject": "bud", "conf": 0.9, "cx": 0.5, "cy": 0.5, "w": 0.1, "h": 0.1}]
     # Include a backslash segment (a Windows separator: "predictions\..\annotations" would
     # escape) and a whitespace/empty segment, both of which is_valid_name rejects.
-    for bad_model in ("../annotations/catkin", "..", "a/b", "D:/evil", "a\\b", " ", ""):
+    for bad_model in ("../annotations/bud", "..", "a/b", "D:/evil", "a\\b", " ", ""):
         res = stage_proposals(image_path, model_name=bad_model, boxes=good)
         assert "error" in res
     assert not (root / "annotations").exists()  # nothing leaked into ground truth
@@ -230,9 +230,9 @@ def test_focus_review_rejects_path_traversal(tmp_path: Path) -> None:
     # focus_human_attention(tab='review') is read-only, but a traversal model_name/date must still be rejected (it becomes
     # a path segment in prediction_dir/image_dir), the guard mirrors stage_proposals.
     for bad_model in ("../../annotations", "a\\b", ".."):
-        res = focus_human_attention("review", str(_project_root(tmp_path)), str(root), "catkin", date, model_name=bad_model)
+        res = focus_human_attention("review", str(_project_root(tmp_path)), str(root), "bud", date, model_name=bad_model)
         assert "error" in res
-    res = focus_human_attention("review", str(_project_root(tmp_path)), str(root), "catkin", "../evil", model_name="baseline")
+    res = focus_human_attention("review", str(_project_root(tmp_path)), str(root), "bud", "../evil", model_name="baseline")
     assert "error" in res
 
 
@@ -285,7 +285,7 @@ def test_stage_proposals_stages_boxes_and_polygons_together(tmp_path: Path) -> N
     root = tmp_path / "proj"
     date = "2026-02-11"
     _image(root, date, "IMG_0001", size=(640, 480))
-    boxes = [{"subject": "catkin", "conf": 0.7, "cx": 0.5, "cy": 0.5, "w": 0.1, "h": 0.1}]
+    boxes = [{"subject": "bud", "conf": 0.7, "cx": 0.5, "cy": 0.5, "w": 0.1, "h": 0.1}]
     polygons = [{"subject": "leaf", "conf": 0.8, "points": [[0.1, 0.1], [0.2, 0.1], [0.15, 0.2]]}]
     res = stage_proposals(_img_path(root, date, "IMG_0001"), model_name="claude",
                           boxes=boxes, polygons=polygons)
@@ -614,17 +614,17 @@ def _record_verdict(root: Path, model: str, date: str, img_name: str) -> None:
     engine = ReviewEngine(root / ".tcip" / "state")
     ctx = ReviewContext(
         img_name=img_name, img_width=640, img_height=480,
-        preds=[Annotation(subject="catkin", geometry=BBox(288.0, 216.0, 352.0, 264.0), score=0.8)],
+        preds=[Annotation(subject="bud", geometry=BBox(288.0, 216.0, 352.0, 264.0), score=0.8)],
     )
     det = ReviewDetection(
-        det_type="fp", class_name="catkin", conf=0.8, iou=None, gt_idx=None,
+        det_type="fp", class_name="bud", conf=0.8, iou=None, gt_idx=None,
         pred_idx=0, bbox=(288.0, 216.0, 352.0, 264.0),
     )
     engine.record_detection_action(
         bucket_key_of(prediction_dir(root, model, date)), det, ctx, action="accepted")
 
 
-_BOX = [{"subject": "catkin", "conf": 0.8, "cx": 0.5, "cy": 0.5, "w": 0.1, "h": 0.1}]
+_BOX = [{"subject": "bud", "conf": 0.8, "cx": 0.5, "cy": 0.5, "w": 0.1, "h": 0.1}]
 
 
 def test_stage_proposals_redirects_when_bucket_has_verdicts(tmp_path: Path) -> None:
@@ -686,7 +686,7 @@ def test_stage_proposals_refuses_a_reserved_stem_with_an_error_dict(tmp_path: Pa
     root = tmp_path / "proj"
     date = "2026-02-11"
     _image(root, date, "operating_point", size=(640, 480))
-    boxes = [{"subject": "catkin", "conf": 0.8, "cx": 0.5, "cy": 0.5, "w": 0.1, "h": 0.1}]
+    boxes = [{"subject": "bud", "conf": 0.8, "cx": 0.5, "cy": 0.5, "w": 0.1, "h": 0.1}]
     res = stage_proposals(_img_path(root, date, "operating_point"), model_name="claude", boxes=boxes)
     assert "error" in res
     assert "operating_point" in res["error"]

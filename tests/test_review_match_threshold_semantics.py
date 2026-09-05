@@ -55,14 +55,14 @@ def _image(tmp_path: Path) -> Path:
 
 
 def _write_gt(path: Path, boxes) -> None:
-    write_annotations(str(path), [Annotation(subject="catkin", geometry=BBox(*b)) for b in boxes],
+    write_annotations(str(path), [Annotation(subject="bud", geometry=BBox(*b)) for b in boxes],
                       IMG_W, IMG_H, keep_empty=True)
 
 
 def _write_pred(path: Path, preds) -> None:
     write_annotations(
         str(path),
-        [Annotation(subject="catkin", geometry=BBox(p[0], p[1], p[2], p[3]), score=p[4])
+        [Annotation(subject="bud", geometry=BBox(p[0], p[1], p[2], p[3]), score=p[4])
          for p in preds],
         IMG_W, IMG_H,
     )
@@ -119,7 +119,7 @@ def test_recorded_verdict_returns_matches_at_the_requested_operating_point(
         "image_path": str(img),
         "gt_path": str(gt),
         "pred_path": str(pred),
-        "det_type": "tp", "class_name": "catkin", "conf": 0.9, "iou": 1.0,
+        "det_type": "tp", "class_name": "bud", "conf": 0.9, "iou": 1.0,
         "gt_idx": 1, "pred_idx": 1,
         "bbox": [100.0, 40.0, 130.0, 76.0],
         "action": "accepted",
@@ -154,7 +154,7 @@ def test_completion_check_counts_detections_at_the_requested_operating_point(
         "image_path": str(img),
         "gt_path": str(gt),
         "pred_path": str(pred),
-        "det_type": "fn", "class_name": "catkin", "conf": None, "iou": None,
+        "det_type": "fn", "class_name": "bud", "conf": None, "iou": None,
         "gt_idx": 0, "pred_idx": None,
         "bbox": list(GT_BOXES[0]),
         "action": "accepted",

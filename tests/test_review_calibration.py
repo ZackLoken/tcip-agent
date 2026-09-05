@@ -25,10 +25,10 @@ from tcip_mcp.pipelines.resolution import (  # noqa: E402
     VALIDATED_REVIEW_CONFIRMED,
 )
 
-# No built-in traits: seed_catkin_trait_spec (conftest.py) writes a real catkin.yml into this
-# test's pinned platform state root so resolve_operating_point_from_review("catkin", ...) keeps
+# No built-in traits: seed_bud_trait_spec (conftest.py) writes a real bud.yml into this
+# test's pinned platform state root so resolve_operating_point_from_review("bud_opening", ...) keeps
 # resolving by default.
-pytestmark = pytest.mark.usefixtures("seed_catkin_trait_spec")
+pytestmark = pytest.mark.usefixtures("seed_bud_trait_spec")
 
 _DIMS = {"A.jpg": (400, 400), "B.jpg": (400, 400)}
 
@@ -141,7 +141,7 @@ def test_review_confirmed_stamps_when_the_same_gate_passes(tmp_path):
     # from routes/review.py); the seam here is a caller-supplied value.
     # tiled=False: this test is about conf-calibration shippability, not tiling; tile_size only
     # gates a bundle when tiled.
-    b = resolve_operating_point_from_review(_good_review_state(), "catkin", staged_conf_floor=0.01,
+    b = resolve_operating_point_from_review(_good_review_state(), "bud_opening", staged_conf_floor=0.01,
                                             tiled=False, bucket_identities=[_IDENTITY_A], scope_root=tmp_path)
     conf = b.get("conf")
     # A disjoint, uncensored, count-bias-passing review reference earns review_confirmed (distinct
@@ -156,7 +156,7 @@ def test_review_confirmed_stamps_when_the_same_gate_passes(tmp_path):
 def test_review_confirmed_fails_closed_without_a_staged_conf_floor(tmp_path):
     # With no staged_conf_floor asserted, even a geometrically perfect reference cannot validate:
     # the honest default, not a silent pass. Same fixture as the passing case above.
-    b = resolve_operating_point_from_review(_good_review_state(), "catkin",
+    b = resolve_operating_point_from_review(_good_review_state(), "bud_opening",
                                             tiled=True, bucket_identities=[_IDENTITY_A], scope_root=tmp_path)
     conf = b.get("conf")
     assert conf.validated_against == VALIDATED_FALSE
@@ -168,7 +168,7 @@ def test_review_confirmed_fails_closed_without_a_staged_conf_floor(tmp_path):
 def test_conf_censored_review_reference_refused_when_picked_conf_at_or_below_the_staged_floor(tmp_path):
     # The asserted floor sits at the picked conf: the sweep could not have seen anything below
     # it, so it must refuse even though the split is disjoint and the counts genuinely agree.
-    b = resolve_operating_point_from_review(_good_review_state(), "catkin", tiled=True, staged_conf_floor=0.95,
+    b = resolve_operating_point_from_review(_good_review_state(), "bud_opening", tiled=True, staged_conf_floor=0.95,
                                             bucket_identities=[_IDENTITY_A], scope_root=tmp_path)
     conf = b.get("conf")
     assert conf.validated_against == VALIDATED_FALSE
@@ -227,7 +227,7 @@ def test_unresolvable_class_id_refuses_the_whole_reference_not_a_silent_drop():
     # confirmed miss (FN) while keeping an in-vocabulary accepted-FP entry, making gt/dt agree by
     # construction and pass the count-bias gate on a reference missing real evidence.
     state = {"image": {"A.jpg": {"img_status": "completed", "gt_preexisting": True, "detections": [
-        {"match_type": "TP", "action": "accepted", "class_id": None, "class_name": "catkin",
+        {"match_type": "TP", "action": "accepted", "class_id": None, "class_name": "bud",
          "gt_bbox_norm": [0.25, 0.25, 0.05, 0.05], "pred_bbox_norm": [0.25, 0.25, 0.05, 0.05],
          "conf": 0.9, "producer_identity": _IDENTITY_A}
     ]}}}
@@ -240,7 +240,7 @@ def test_missing_class_id_key_also_refuses_not_defaulted_to_class_one():
     # must not silently default to category_id 1 for every entry; it must refuse instead of
     # guessing.
     state = {"image": {"A.jpg": {"img_status": "completed", "gt_preexisting": True, "detections": [
-        {"match_type": "TP", "action": "accepted", "class_name": "catkin",
+        {"match_type": "TP", "action": "accepted", "class_name": "bud",
          "gt_bbox_norm": [0.25, 0.25, 0.05, 0.05], "pred_bbox_norm": [0.25, 0.25, 0.05, 0.05],
          "conf": 0.9, "producer_identity": _IDENTITY_A}
     ]}}}
@@ -253,7 +253,7 @@ def test_class_id_unresolvable_message_is_drawn_from_the_shared_failure_vocabula
     # describe_review_validation's own _FAILURE_MESSAGES entries use, not an independently
     # authored string, so a breeder sees one consistent voice regardless of which check refused.
     state = {"image": {"A.jpg": {"img_status": "completed", "gt_preexisting": True, "detections": [
-        {"match_type": "TP", "action": "accepted", "class_id": None, "class_name": "catkin",
+        {"match_type": "TP", "action": "accepted", "class_id": None, "class_name": "bud",
          "gt_bbox_norm": [0.25, 0.25, 0.05, 0.05], "pred_bbox_norm": [0.25, 0.25, 0.05, 0.05],
          "conf": 0.9, "producer_identity": _IDENTITY_A}
     ]}}}
@@ -300,8 +300,8 @@ def test_confirmed_negative_image_carries_its_own_producer_identity():
 def test_covers_reads_the_subjects_own_entry():
     from tcip_mcp.pipelines.feedback.review_calibration import covers
 
-    slot = {"catkin": True, "leaf": False}
-    assert covers(slot, "catkin") is True
+    slot = {"bud": True, "leaf": False}
+    assert covers(slot, "bud") is True
     assert covers(slot, "leaf") is False
 
 
@@ -311,7 +311,7 @@ def test_covers_falls_back_to_the_star_entry_for_a_subject_less_complete():
     from tcip_mcp.pipelines.feedback.review_calibration import covers
 
     slot = {"*": True}
-    assert covers(slot, "catkin") is True
+    assert covers(slot, "bud") is True
     assert covers(slot, None) is True
 
 
@@ -319,13 +319,13 @@ def test_covers_reads_false_for_an_unrecorded_subject_and_no_star_entry():
     from tcip_mcp.pipelines.feedback.review_calibration import covers
 
     slot = {"leaf": True}
-    assert covers(slot, "catkin") is False
+    assert covers(slot, "bud") is False
 
 
 def test_covers_reads_false_for_no_recorded_map_at_all():
     from tcip_mcp.pipelines.feedback.review_calibration import covers
 
-    assert covers(None, "catkin") is False
+    assert covers(None, "bud") is False
 
 
 def test_covers_reads_the_subjects_own_false_entry_over_a_star_entry():
@@ -343,7 +343,7 @@ def test_covers_refuses_a_bare_boolean_by_name():
     from tcip_mcp.pipelines.feedback.review_calibration import covers
 
     with pytest.raises(ValueError, match="adjudication_covered"):
-        covers(True, "catkin")
+        covers(True, "bud")
 
 
 def test_zero_verdict_image_coverage_is_read_for_the_subject_the_reference_validates():
@@ -352,9 +352,9 @@ def test_zero_verdict_image_coverage_is_read_for_the_subject_the_reference_valid
     state = {"image": {"NEG.jpg": {
         "img_status": "completed", "detections": [],
         "producer_identity": _IDENTITY_A,
-        "adjudication_covered": {"catkin": True, "leaf": False},
+        "adjudication_covered": {"bud": True, "leaf": False},
     }}}
-    subject_recs = review_to_records(state, bucket_identities=[_IDENTITY_A], subject="catkin")
+    subject_recs = review_to_records(state, bucket_identities=[_IDENTITY_A], subject="bud")
     assert subject_recs[0]["adjudication_covered"] is True
     leaf_recs = review_to_records(state, bucket_identities=[_IDENTITY_A], subject="leaf")
     assert leaf_recs[0]["adjudication_covered"] is False
@@ -366,7 +366,7 @@ def test_zero_verdict_image_with_a_subject_less_star_entry_covers_the_validated_
         "producer_identity": _IDENTITY_A,
         "adjudication_covered": {"*": True},
     }}}
-    recs = review_to_records(state, bucket_identities=[_IDENTITY_A], subject="catkin")
+    recs = review_to_records(state, bucket_identities=[_IDENTITY_A], subject="bud")
     assert recs[0]["adjudication_covered"] is True
 
 
@@ -388,7 +388,7 @@ def test_previously_unlabeled_session_with_marked_misses_can_still_validate(tmp_
     # tolerance.
     state = _dense_review_state(gt_preexisting=False, miss_pattern=[1] * N_IMAGES,
                                 fp_pattern=[2] * N_IMAGES, objects_per_image=250)
-    b = resolve_operating_point_from_review(state, "catkin", tiled=True, staged_conf_floor=0.01,
+    b = resolve_operating_point_from_review(state, "bud_opening", tiled=True, staged_conf_floor=0.01,
                                             bucket_identities=[_IDENTITY_A], scope_root=tmp_path)
     conf = b.get("conf")
     assert conf.validated_against == VALIDATED_REVIEW_CONFIRMED
@@ -400,7 +400,7 @@ def test_previously_unlabeled_session_with_zero_adjudication_refuses_honestly(tm
     # object, must fail with an honest reason naming the new tool rather than falling through to
     # the generic "counts didn't agree" message.
     state = _dense_review_state(gt_preexisting=False, fp_pattern=[1] * N_IMAGES)
-    b = resolve_operating_point_from_review(state, "catkin", tiled=True, staged_conf_floor=0.01,
+    b = resolve_operating_point_from_review(state, "bud_opening", tiled=True, staged_conf_floor=0.01,
                                             bucket_identities=[_IDENTITY_A], scope_root=tmp_path)
     conf = b.get("conf")
     assert conf.validated_against == VALIDATED_FALSE
@@ -410,7 +410,7 @@ def test_previously_unlabeled_session_with_zero_adjudication_refuses_honestly(tm
 def test_gt_backed_session_passes_unaffected_by_the_coverage_gate(tmp_path):
     # A genuinely GT-backed review session (gt_preexisting=True, the default) must still pass,
     # unaffected by the adjudication-coverage gate.
-    b = resolve_operating_point_from_review(_good_review_state(), "catkin", tiled=True, staged_conf_floor=0.01,
+    b = resolve_operating_point_from_review(_good_review_state(), "bud_opening", tiled=True, staged_conf_floor=0.01,
                                             bucket_identities=[_IDENTITY_A], scope_root=tmp_path)
     conf = b.get("conf")
     assert conf.validated_against == VALIDATED_REVIEW_CONFIRMED

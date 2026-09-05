@@ -37,7 +37,7 @@ def _bucket(tmp_path: Path) -> Path:
     d.mkdir(parents=True)
     write_annotations(
         str(d / "IMG_0007.json"),
-        [Annotation(subject="catkin", geometry=BBox(12.0, 20.0, 52.0, 44.0), score=0.71)],
+        [Annotation(subject="bud", geometry=BBox(12.0, 20.0, 52.0, 44.0), score=0.71)],
         IMG_W, IMG_H,
     )
     write_annotations(str(d / "IMG_0031.json"), [], IMG_W, IMG_H, keep_empty=True)
@@ -128,8 +128,8 @@ def test_complete_on_an_image_the_bucket_never_wrote_is_a_covered_negative(
 def test_complete_named_subject_on_an_image_with_only_another_subjects_gt_is_a_scoped_negative(
     client: TestClient, tmp_path: Path
 ) -> None:
-    """A Complete naming 'catkin' on an image whose GT holds only 'leaf' objects is a genuine
-    negative of catkin, not the 'complete' a whole-file (subject-blind) check would produce."""
+    """A Complete naming 'bud' on an image whose GT holds only 'leaf' objects is a genuine
+    negative of bud, not the 'complete' a whole-file (subject-blind) check would produce."""
     dataset_root = _dataset_root(tmp_path)
     gt_dir = dataset_root / "annotations" / "2-11-26"
     gt_dir.mkdir(parents=True)
@@ -142,7 +142,7 @@ def test_complete_named_subject_on_an_image_with_only_another_subjects_gt_is_a_s
         "dataset_root": str(dataset_root),
         "image_name": "IMG_0050.JPG",
         "gt_path": str(gt_path),
-        "subject": "catkin",
+        "subject": "bud",
     })
     assert resp.status_code == 200
     assert resp.json()["annotation_status"] == "negative"
@@ -164,10 +164,10 @@ def test_complete_named_subject_over_a_file_holding_only_another_subjects_predic
     )
     stamp = operating_point_stamp(
         {"conf": {"value": 0.5}}, validated=False, validated_by=None, tile_size_validated=None,
-        shippable_issues=[], id_map={"elongated": 0, "dormant": 1}, trait="elongation",
+        shippable_issues=[], id_map={"open": 0, "closed": 1}, trait="bud_opening",
         dataset_hash="H", checkpoint="m", checkpoint_sha256=CHECKPOINT_SHA,
         experiment_id="exp-17", images_dir=None, raster_path=None,
-        produced_at="2026-01-01T00:00:00Z", subject="catkin", attribute="elongation",
+        produced_at="2026-01-01T00:00:00Z", subject="bud", attribute="opening",
     )
     write_sidecar(d, stamp)
     dataset_root = _dataset_root(tmp_path)
@@ -176,10 +176,10 @@ def test_complete_named_subject_over_a_file_holding_only_another_subjects_predic
         "dataset_root": str(dataset_root),
         "image_name": "IMG_0060.JPG",
         "pred_dir": str(d),
-        "subject": "catkin",
+        "subject": "bud",
     })
     assert resp.status_code == 200
-    assert _shard(dataset_root, "IMG_0060.JPG")["adjudication_covered"] == {"catkin": True}
+    assert _shard(dataset_root, "IMG_0060.JPG")["adjudication_covered"] == {"bud": True}
 
 
 def test_complete_named_subject_the_bucket_never_assessed_omits_the_coverage_entry(
@@ -210,12 +210,12 @@ def test_complete_named_subject_the_bucket_never_assessed_omits_the_coverage_ent
         "dataset_root": str(dataset_root),
         "image_name": "IMG_0007.JPG",
         "pred_dir": str(d),
-        "subject": "catkin",
+        "subject": "bud",
     })
     assert resp.status_code == 200
     assert resp.json()["image_status"] == "completed"
     state = _shard(dataset_root, "IMG_0007.JPG")
-    assert "catkin" not in (state.get("adjudication_covered") or {})
+    assert "bud" not in (state.get("adjudication_covered") or {})
 
 
 def test_a_second_complete_naming_a_subject_the_classified_bucket_cannot_resolve_leaves_the_firsts_claim_intact(
@@ -232,17 +232,17 @@ def test_a_second_complete_naming_a_subject_the_classified_bucket_cannot_resolve
     write_annotations(str(d / "IMG_0070.json"), [], IMG_W, IMG_H, keep_empty=True)
     stamp = operating_point_stamp(
         {"conf": {"value": 0.5}}, validated=False, validated_by=None, tile_size_validated=None,
-        shippable_issues=[], id_map={"elongated": 0, "dormant": 1}, trait="elongation",
+        shippable_issues=[], id_map={"open": 0, "closed": 1}, trait="bud_opening",
         dataset_hash="H", checkpoint="m", checkpoint_sha256=CHECKPOINT_SHA,
         experiment_id="exp-17", images_dir=None, raster_path=None,
-        produced_at="2026-01-01T00:00:00Z", subject="catkin", attribute="elongation",
+        produced_at="2026-01-01T00:00:00Z", subject="bud", attribute="opening",
     )
     write_sidecar(d, stamp)
     dataset_root = _dataset_root(tmp_path)
 
     first = client.post("/api/review/mark_complete", json={
         "dataset_root": str(dataset_root), "image_name": "IMG_0070.JPG",
-        "pred_dir": str(d), "subject": "catkin",
+        "pred_dir": str(d), "subject": "bud",
     })
     assert first.status_code == 200
     assert first.json()["image_status"] == "completed"
@@ -253,7 +253,7 @@ def test_a_second_complete_naming_a_subject_the_classified_bucket_cannot_resolve
     assert second.status_code == 200
     assert second.json()["image_status"] == "completed"
     state = _shard(dataset_root, "IMG_0070.JPG")
-    assert state["adjudication_covered"] == {"catkin": True}
+    assert state["adjudication_covered"] == {"bud": True}
     assert "leaf" not in state["adjudication_covered"]
 
 
@@ -287,16 +287,16 @@ def test_is_negative_for_subject_agrees_across_branches_after_a_same_size_edit(
     pred_file = d / "IMG_0007.json"
     write_annotations(
         str(pred_file),
-        [Annotation(subject="catkin", geometry=BBox(12.0, 20.0, 52.0, 44.0), score=0.71)],
+        [Annotation(subject="bud", geometry=BBox(12.0, 20.0, 52.0, 44.0), score=0.71)],
         IMG_W, IMG_H,
     )
     populated = pred_file.read_bytes()
     os.utime(pred_file, (1_000_000, 1_000_000))
-    _seed_sidecar(d, {"checkpoint_sha256": CHECKPOINT_SHA, "id_map": {"catkin": 0},
-                      "subject": "catkin", "attribute": None})
+    _seed_sidecar(d, {"checkpoint_sha256": CHECKPOINT_SHA, "id_map": {"bud": 0},
+                      "subject": "bud", "attribute": None})
 
     assert _is_negative_for_subject(str(d), "IMG_0007.JPG", None) is False
-    assert _is_negative_for_subject(str(d), "IMG_0007.JPG", "catkin") is False
+    assert _is_negative_for_subject(str(d), "IMG_0007.JPG", "bud") is False
 
     write_annotations(str(pred_file), [], IMG_W, IMG_H, keep_empty=True)
     emptied = pred_file.read_bytes()
@@ -307,7 +307,7 @@ def test_is_negative_for_subject_agrees_across_branches_after_a_same_size_edit(
     os.utime(pred_file, (1_000_000, 1_000_000))  # identical mtime and byte count as the populated write
 
     subject_less = _is_negative_for_subject(str(d), "IMG_0007.JPG", None)
-    named = _is_negative_for_subject(str(d), "IMG_0007.JPG", "catkin")
+    named = _is_negative_for_subject(str(d), "IMG_0007.JPG", "bud")
     assert subject_less is True
     assert named is True
     assert subject_less == named

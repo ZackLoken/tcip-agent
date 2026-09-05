@@ -1,6 +1,6 @@
 """One contour extractor: a SAM-assisted proposal keeps every region of a split mask.
 
-``state.Polygon`` is multi-ring because an occlusion-split object (a catkin behind a branch) is
+``state.Polygon`` is multi-ring because an occlusion-split object (a bud behind a branch) is
 genuinely more than one region. The prediction-export path honored that; the human-in-the-loop
 bootstrapping path (SAM proposal -> ``stage_proposals``) had its own contour extractor that kept only
 the largest contour, so the same object was whole as a prediction and truncated as SAM-assisted GT,
@@ -204,7 +204,7 @@ def test_split_sam_proposal_is_accepted_as_a_multi_ring_annotation(sam_project: 
     assert proposed["candidate_count"] == 1
 
     accepted = stage_proposals(image_path=img,
-                                assignments=[{"candidate_id": 0, "subject": "catkin"}])
+                                assignments=[{"candidate_id": 0, "subject": "bud"}])
     assert "error" not in accepted, accepted
     assert accepted["proposal_count"] == 1
 

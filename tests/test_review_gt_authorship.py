@@ -62,7 +62,7 @@ def test_accepted_false_positive_becomes_ground_truth_without_a_model_score(
     write_annotations(str(gt), [], IMG_W, IMG_H, keep_empty=True)
     write_annotations(
         str(pred),
-        [Annotation(subject="catkin", geometry=BBox(*PREDICTED_BOX), score=PREDICTED_SCORE)],
+        [Annotation(subject="bud", geometry=BBox(*PREDICTED_BOX), score=PREDICTED_SCORE)],
         IMG_W, IMG_H,
     )
     dataset_root = _dataset_root(tmp_path)
@@ -73,7 +73,7 @@ def test_accepted_false_positive_becomes_ground_truth_without_a_model_score(
         "image_path": str(img),
         "gt_path": str(gt),
         "pred_path": str(pred),
-        "det_type": "fp", "class_name": "catkin",
+        "det_type": "fp", "class_name": "bud",
         "conf": PREDICTED_SCORE, "iou": None,
         "gt_idx": None, "pred_idx": 0,
         "bbox": list(PREDICTED_BOX),
@@ -101,11 +101,11 @@ def test_editing_an_fp_with_a_stray_gt_idx_appends_rather_than_overwrites(
     gt = tmp_path / "gt.json"
     pred = tmp_path / "pred.json"
     original = (10.0, 10.0, 50.0, 30.0)
-    write_annotations(str(gt), [Annotation(subject="catkin", geometry=BBox(*original))],
+    write_annotations(str(gt), [Annotation(subject="bud", geometry=BBox(*original))],
                       IMG_W, IMG_H)
     write_annotations(
         str(pred),
-        [Annotation(subject="catkin", geometry=BBox(*PREDICTED_BOX), score=PREDICTED_SCORE)],
+        [Annotation(subject="bud", geometry=BBox(*PREDICTED_BOX), score=PREDICTED_SCORE)],
         IMG_W, IMG_H,
     )
     dataset_root = _dataset_root(tmp_path)
@@ -116,7 +116,7 @@ def test_editing_an_fp_with_a_stray_gt_idx_appends_rather_than_overwrites(
         "image_path": str(img),
         "gt_path": str(gt),
         "pred_path": str(pred),
-        "det_type": "fp", "class_name": "catkin",
+        "det_type": "fp", "class_name": "bud",
         "conf": PREDICTED_SCORE, "iou": None,
         "gt_idx": 0, "pred_idx": 0,
         "bbox": list(PREDICTED_BOX),
@@ -145,7 +145,7 @@ def test_first_verdict_baselines_the_label_file_under_its_original_directory(
     label_dir = tmp_path / "annotations" / "2-11-26"
     label_dir.mkdir(parents=True)
     gt = label_dir / "IMG_0000.json"
-    write_annotations(str(gt), [Annotation(subject="catkin", geometry=BBox(10.0, 10.0, 50.0, 30.0))],
+    write_annotations(str(gt), [Annotation(subject="bud", geometry=BBox(10.0, 10.0, 50.0, 30.0))],
                       IMG_W, IMG_H)
     dataset_root = _dataset_root(tmp_path)
 
@@ -154,7 +154,7 @@ def test_first_verdict_baselines_the_label_file_under_its_original_directory(
         "image_name": "IMG_0000.JPG",
         "image_path": str(img),
         "gt_path": str(gt),
-        "det_type": "fn", "class_name": "catkin",
+        "det_type": "fn", "class_name": "bud",
         "conf": None, "iou": None,
         "gt_idx": 0, "pred_idx": None,
         "bbox": [10.0, 10.0, 50.0, 30.0],
@@ -184,7 +184,7 @@ def _verdict(client: TestClient, dataset_root: Path, img: Path, gt: Path,
         "image_name": "IMG_0000.JPG",
         "image_path": str(img),
         "gt_path": str(gt),
-        "det_type": "fn", "class_name": "catkin",
+        "det_type": "fn", "class_name": "bud",
         "conf": None, "iou": None,
         "gt_idx": 0, "pred_idx": None,
         "bbox": list(box),
@@ -208,7 +208,7 @@ def test_a_second_verdict_keeps_the_baseline_the_first_one_captured(
     label_dir.mkdir(parents=True)
     gt = label_dir / "IMG_0000.json"
     original = (10.0, 10.0, 50.0, 30.0)
-    write_annotations(str(gt), [Annotation(subject="catkin", geometry=BBox(*original))],
+    write_annotations(str(gt), [Annotation(subject="bud", geometry=BBox(*original))],
                       IMG_W, IMG_H)
     dataset_root = _dataset_root(tmp_path)
 
@@ -245,7 +245,7 @@ def test_the_baseline_capture_waits_on_the_lock_its_record_is_written_under(
     label_dir = tmp_path / "annotations" / "2-11-26"
     label_dir.mkdir(parents=True)
     gt = label_dir / "IMG_0000.json"
-    write_annotations(str(gt), [Annotation(subject="catkin", geometry=BBox(10.0, 10.0, 50.0, 30.0))],
+    write_annotations(str(gt), [Annotation(subject="bud", geometry=BBox(10.0, 10.0, 50.0, 30.0))],
                       IMG_W, IMG_H)
 
     backend = FileBackend(lock_timeout_s=0.2)

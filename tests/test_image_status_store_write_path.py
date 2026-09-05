@@ -71,10 +71,10 @@ def test_a_status_write_lands_at_the_shared_locator_and_creates_no_second_store(
     from tcip_store.file_backend import FileBackend
 
     tcip_store.bind(FileBackend())
-    _single(client, tmp_path, "IMG_0001.JPG", "complete", "catkin")
+    _single(client, tmp_path, "IMG_0001.JPG", "complete", "bud")
 
     assert image_status_path(tmp_path).is_file()
-    assert _on_disk(tmp_path) == {"catkin": {"IMG_0001.JPG": "complete"}}
+    assert _on_disk(tmp_path) == {"bud": {"IMG_0001.JPG": "complete"}}
 
     tcip_dir = tmp_path / ".tcip"
     # The .lock artifact can outlive the write (filelock version, platform); it is not a state file.
@@ -90,16 +90,16 @@ def test_confirmations_for_other_subjects_and_dates_survive_a_later_write(
     """Every write folds into the store rather than replacing it, whichever route made it, so the
     buckets accumulate instead of the last writer winning the whole file."""
     _bulk(client, tmp_path, {"A.JPG": "complete", "B.JPG": "negative", "C.JPG": "partial"},
-          "catkin")
+          "bud")
     _single(client, tmp_path, "D.JPG", "negative", "bush")
-    _bulk(client, tmp_path, {"A.JPG": "negative", "E.JPG": "complete"}, "catkin", "2026-03-09")
-    _single(client, tmp_path, "F.JPG", "unannotated", "catkin")
+    _bulk(client, tmp_path, {"A.JPG": "negative", "E.JPG": "complete"}, "bud", "2026-03-09")
+    _single(client, tmp_path, "F.JPG", "unannotated", "bud")
 
     assert _stored(tmp_path) == {
-        "catkin": {"A.JPG": "complete", "B.JPG": "negative", "C.JPG": "partial",
+        "bud": {"A.JPG": "complete", "B.JPG": "negative", "C.JPG": "partial",
                    "F.JPG": "unannotated"},
         "bush": {"D.JPG": "negative"},
-        "catkin/2026-03-09": {"A.JPG": "negative", "E.JPG": "complete"},
+        "bud/2026-03-09": {"A.JPG": "negative", "E.JPG": "complete"},
     }
 
 
@@ -109,9 +109,9 @@ def test_the_read_route_returns_the_bucket_the_write_routes_built(
     """Reader and writer agree on which bucket a subject and date name, so a confirmation is read
     back under the same scope it was recorded under and never under a neighbouring one."""
     _bulk(client, tmp_path, {"A.JPG": "complete", "B.JPG": "negative", "C.JPG": "partial"},
-          "catkin")
+          "bud")
     _single(client, tmp_path, "D.JPG", "negative", "bush")
-    _bulk(client, tmp_path, {"A.JPG": "negative", "E.JPG": "complete"}, "catkin", "2026-03-09")
+    _bulk(client, tmp_path, {"A.JPG": "negative", "E.JPG": "complete"}, "bud", "2026-03-09")
 
     on_disk = _stored(tmp_path)
     assert len(on_disk) == 3
@@ -125,9 +125,9 @@ def test_the_read_route_returns_the_bucket_the_write_routes_built(
         assert resp.status_code == 200, resp.text
         return resp.json()["statuses"]
 
-    assert read("catkin", None) == on_disk["catkin"]
+    assert read("bud", None) == on_disk["bud"]
     assert read("bush", None) == on_disk["bush"]
-    assert read("catkin", "2026-03-09") == on_disk["catkin/2026-03-09"]
+    assert read("bud", "2026-03-09") == on_disk["bud/2026-03-09"]
 
 
 def test_a_status_the_readers_do_not_understand_is_refused_before_it_reaches_the_store(
@@ -142,12 +142,12 @@ def test_a_status_the_readers_do_not_understand_is_refused_before_it_reaches_the
     from tcip_mcp.dataset_layout import IMAGE_STATUSES, record_image_statuses
 
     with pytest.raises(ValueError, match="reviewed"):
-        record_image_statuses(tmp_path, "catkin", {"A.JPG": "reviewed"}, recorded_by="user:ada")
+        record_image_statuses(tmp_path, "bud", {"A.JPG": "reviewed"}, recorded_by="user:ada")
     assert not tcip_store.exists(image_status_key(tmp_path))
 
-    record_image_statuses(tmp_path, "catkin", {f"{s}.JPG": s for s in IMAGE_STATUSES},
+    record_image_statuses(tmp_path, "bud", {f"{s}.JPG": s for s in IMAGE_STATUSES},
                           recorded_by="user:ada")
-    assert _stored(tmp_path)["catkin"] == {f"{s}.JPG": s for s in IMAGE_STATUSES}
+    assert _stored(tmp_path)["bud"] == {f"{s}.JPG": s for s in IMAGE_STATUSES}
 
 
 def test_a_status_with_no_actor_behind_it_is_refused(tmp_path: Path) -> None:
@@ -156,7 +156,7 @@ def test_a_status_with_no_actor_behind_it_is_refused(tmp_path: Path) -> None:
     from tcip_mcp.dataset_layout import record_image_statuses
 
     with pytest.raises(ValueError, match="recorded_by"):
-        record_image_statuses(tmp_path, "catkin", {"A.JPG": "negative"}, recorded_by="")
+        record_image_statuses(tmp_path, "bud", {"A.JPG": "negative"}, recorded_by="")
     assert not image_status_path(tmp_path).exists()
 
 
@@ -169,15 +169,15 @@ def test_a_merge_refuses_rather_than_deleting_entries_it_cannot_read(tmp_path: P
     from tcip_mcp.dataset_layout import record_image_statuses
 
     tcip_store.replace(image_status_key(tmp_path),
-                       {"catkin": {"OLD_A.JPG": "negative", "OLD_B.JPG": "complete"}},
+                       {"bud": {"OLD_A.JPG": "negative", "OLD_B.JPG": "complete"}},
                        expect=tcip_store.Version.ABSENT)
 
     with pytest.raises(ValueError, match="does not recognize"):
-        record_image_statuses(tmp_path, "catkin", {"NEW.JPG": "negative"},
+        record_image_statuses(tmp_path, "bud", {"NEW.JPG": "negative"},
                               recorded_by="user:breeder")
 
     still_there = tcip_store.read(image_status_key(tmp_path))
-    assert still_there == {"catkin": {"OLD_A.JPG": "negative", "OLD_B.JPG": "complete"}}
+    assert still_there == {"bud": {"OLD_A.JPG": "negative", "OLD_B.JPG": "complete"}}
 
 
 def test_the_gui_route_records_the_person_whose_confirmation_it_is(
@@ -191,18 +191,18 @@ def test_the_gui_route_records_the_person_whose_confirmation_it_is(
     from tcip_mcp.pipelines.data.label_queries import confirmed_negative_names
 
     body = {"project_root": str(tmp_path), "dataset_root": str(tmp_path),
-            "image_name": "IMG_0009.JPG", "status": "negative", "subject": "catkin",
+            "image_name": "IMG_0009.JPG", "status": "negative", "subject": "bud",
             "user": "rowan"}
     assert client.post("/api/classes/image_status", json=body).status_code == 200
 
     stored = tcip_store.read(image_status_key(tmp_path))
-    record = stored["catkin"]["IMG_0009.JPG"]
+    record = stored["bud"]["IMG_0009.JPG"]
     assert record["status"] == "negative"
     assert record["recorded_by"] == "user:rowan"
     assert record["recorded_at"]
 
     (tmp_path / "annotations").mkdir(parents=True, exist_ok=True)
-    assert confirmed_negative_names(tmp_path / "annotations", subject="catkin", date=None) == {
+    assert confirmed_negative_names(tmp_path / "annotations", subject="bud", date=None) == {
         "IMG_0009.JPG"}
 
 
@@ -217,10 +217,10 @@ def test_a_materialized_output_carries_only_the_negatives_that_run_derived(tmp_p
     def negatives(*names: str) -> dict:
         return status_records(dict.fromkeys(names, "negative"), recorded_by="a_materializer")
 
-    replace_image_status_store(tmp_path, {"catkin": negatives("OLD.JPG")})
-    replace_image_status_store(tmp_path, {"catkin": negatives("NEW.JPG")})
+    replace_image_status_store(tmp_path, {"bud": negatives("OLD.JPG")})
+    replace_image_status_store(tmp_path, {"bud": negatives("NEW.JPG")})
 
-    assert _stored(tmp_path) == {"catkin": {"NEW.JPG": "negative"}}
+    assert _stored(tmp_path) == {"bud": {"NEW.JPG": "negative"}}
 
 
 def test_a_schema_stamp_leaves_every_other_image_stamp_in_place(tmp_path: Path) -> None:
@@ -231,11 +231,11 @@ def test_a_schema_stamp_leaves_every_other_image_stamp_in_place(tmp_path: Path) 
     """
     from tcip_mcp.dataset_layout import stamp_image_status_digests
 
-    stamp_image_status_digests(tmp_path, "catkin", ["A.JPG", "B.JPG"], "digest-one")
+    stamp_image_status_digests(tmp_path, "bud", ["A.JPG", "B.JPG"], "digest-one")
     stamp_image_status_digests(tmp_path, "bush", ["C.JPG"], "digest-two")
-    stamp_image_status_digests(tmp_path, "catkin", ["B.JPG"], "digest-three")
+    stamp_image_status_digests(tmp_path, "bud", ["B.JPG"], "digest-three")
 
     assert tcip_store.read(image_status_digest_key(tmp_path)) == {
         "bush": {"C.JPG": "digest-two"},
-        "catkin": {"A.JPG": "digest-one", "B.JPG": "digest-three"},
+        "bud": {"A.JPG": "digest-one", "B.JPG": "digest-three"},
     }

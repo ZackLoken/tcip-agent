@@ -43,8 +43,8 @@ def test_positive_boxes_denormalize_against_each_axis_extent(tmp_path):
     _image(src, "tall.png", (40, 100))
     out = tmp_path / "out"
     state = {"image": {
-        "wide.png": _completed([_accepted("catkin", [0.5, 0.25, 0.25, 0.5])]),
-        "tall.png": _completed([_accepted("catkin", [0.25, 0.6, 0.5, 0.2])]),
+        "wide.png": _completed([_accepted("bud", [0.5, 0.25, 0.25, 0.5])]),
+        "tall.png": _completed([_accepted("bud", [0.25, 0.6, 0.5, 0.2])]),
     }}
 
     materialize_dataset(state, str(src), str(out))
@@ -65,10 +65,10 @@ def test_positive_boxes_denormalize_against_each_axis_extent(tmp_path):
 
 def test_human_edited_box_takes_precedence_over_prediction(tmp_path):
     """An edited verdict carries both boxes; the human's corrected box is the label."""
-    entry = {"action": "edited", "class_name": "catkin",
+    entry = {"action": "edited", "class_name": "bud",
              "gt_bbox_norm": [0.25, 0.5, 0.4, 0.2], "pred_bbox_norm": [0.75, 0.25, 0.1, 0.1]}
     positives = partition_review_verdicts({"image": {"e.png": _completed([entry])}})["e.png"]["positives"]
-    assert positives == [("catkin", 0.25, 0.5, 0.4, 0.2)]
+    assert positives == [("bud", 0.25, 0.5, 0.4, 0.2)]
 
     src = tmp_path / "src"
     _image(src, "e.png", (100, 50))
@@ -89,8 +89,8 @@ def test_a_degenerate_positive_box_is_reported_by_name_not_raised(tmp_path):
     _image(src, "good.png", (100, 50))
     out = tmp_path / "out"
     state = {"image": {
-        "bad.png": _completed([_accepted("catkin", [0.5, 0.5, 0.0, 0.3])]),  # zero-width box
-        "good.png": _completed([_accepted("catkin", [0.5, 0.5, 0.2, 0.3])]),
+        "bad.png": _completed([_accepted("bud", [0.5, 0.5, 0.0, 0.3])]),  # zero-width box
+        "good.png": _completed([_accepted("bud", [0.5, 0.5, 0.2, 0.3])]),
     }}
 
     r = materialize_dataset(state, str(src), str(out))
@@ -112,12 +112,12 @@ def test_box_counts_track_every_positive_not_every_image(tmp_path):
     out = tmp_path / "out"
     state = {"image": {
         "three.png": _completed([
-            _accepted("catkin", [0.2, 0.2, 0.1, 0.1]),
-            _accepted("catkin", [0.5, 0.4, 0.2, 0.3]),
-            _accepted("catkin", [0.8, 0.7, 0.15, 0.05]),
+            _accepted("bud", [0.2, 0.2, 0.1, 0.1]),
+            _accepted("bud", [0.5, 0.4, 0.2, 0.3]),
+            _accepted("bud", [0.8, 0.7, 0.15, 0.05]),
         ]),
-        "one.png": _completed([_accepted("catkin", [0.5, 0.5, 0.2, 0.4])]),
-        "none.png": _completed([_rejected("catkin", [0.3, 0.3, 0.1, 0.1])]),
+        "one.png": _completed([_accepted("bud", [0.5, 0.5, 0.2, 0.4])]),
+        "none.png": _completed([_rejected("bud", [0.3, 0.3, 0.1, 0.1])]),
     }}
 
     r = materialize_dataset(state, str(src), str(out))
@@ -140,9 +140,9 @@ def test_unreviewed_images_stay_out_of_the_materialized_set(tmp_path):
     _image(src, "done.png", (70, 35))
     _image(src, "midway.png", (35, 70))
     state = {"image": {
-        "done.png": _completed([_accepted("catkin", [0.5, 0.5, 0.2, 0.2])]),
+        "done.png": _completed([_accepted("bud", [0.5, 0.5, 0.2, 0.2])]),
         "midway.png": {"img_status": "started", "detections": [
-            _accepted("catkin", [0.4, 0.4, 0.3, 0.3])]},
+            _accepted("bud", [0.4, 0.4, 0.3, 0.3])]},
     }}
 
     strict = tmp_path / "strict"
@@ -164,9 +164,9 @@ def test_hard_negative_inclusion_follows_the_caller_request(tmp_path):
     _image(src, "neg_one.png", (30, 90))
     _image(src, "neg_two.png", (75, 25))
     state = {"image": {
-        "pos.png": _completed([_accepted("catkin", [0.5, 0.5, 0.2, 0.2])]),
-        "neg_one.png": _completed([_rejected("catkin", [0.3, 0.7, 0.1, 0.2])]),
-        "neg_two.png": _completed([_rejected("catkin", [0.6, 0.2, 0.2, 0.1])]),
+        "pos.png": _completed([_accepted("bud", [0.5, 0.5, 0.2, 0.2])]),
+        "neg_one.png": _completed([_rejected("bud", [0.3, 0.7, 0.1, 0.2])]),
+        "neg_two.png": _completed([_rejected("bud", [0.6, 0.2, 0.2, 0.1])]),
     }}
 
     kept = tmp_path / "kept"
