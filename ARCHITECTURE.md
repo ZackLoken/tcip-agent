@@ -25,35 +25,38 @@ Sections:
 
 ## Module ownership and dependency graph
 
-Source: the module inventory `scripts/build_module_inventory.py` produces, run at HEAD 11e29635.
+Source: the module inventory `scripts/build_module_inventory.py` produces, run at HEAD d6e28aee.
 Every count in this section is read from that regenerated inventory, not from any earlier
 snapshot; `scripts/check_architecture_doc.py --inventory-json <path>` re-runs the same generator
-and cross-checks its counts against this document's tables.
+and cross-checks its counts against this document's tables, this table's own module and line
+totals included.
 
-HEAD 11e29635 has 401 modules across the six scanned roots (108953 total lines):
+HEAD d6e28aee has 449 modules across the six scanned roots (137980 total lines):
 
 | Package (root) | Modules | Lines |
 |---|---|---|
-| tcip-mcp | 107 | 48822 |
-| tcip-annotation | 12 | 4077 |
-| tcip-web | 36 | 11203 |
-| tcip-store | 13 | 4978 |
-| tcip-web-frontend | 182 | 31166 |
-| scripts | 51 | 8707 |
+| tcip-mcp | 114 | 57112 |
+| tcip-annotation | 12 | 4299 |
+| tcip-web | 36 | 12892 |
+| tcip-store | 13 | 5137 |
+| tcip-web-frontend | 209 | 46200 |
+| scripts | 65 | 12340 |
 
 `tcip-mcp`, `tcip-annotation`, `tcip-web`, and `tcip-store` are the four Python packages under
 `packages/`; `scripts` is `scripts/` at the repo root (not an installed package);
 `tcip-web-frontend` is the TypeScript/TSX tree under `packages/tcip-web/frontend/src`. These
-counts are the `counts.python_by_root` and `counts.typescript_total` fields of the generator's
-JSON output.
+counts are exactly the `counts.python_by_root` and `counts.typescript_total` fields of the
+generator's JSON output, and this table's own line totals are each root's modules summed the
+same way the generator counts them; there is no second definition of a module or a line count
+for this section to drift against.
 
 differs from the phase0 record: the Phase 0 inventory (gitignored dev tooling, not shipped)
 recorded python_total 149 (tcip-mcp 85, tcip-annotation 11, tcip-web 30, scripts 23) and
 typescript_total 123, over the four roots it scanned; `tcip-store` was not one of them. The
-regenerated inventory at the HEAD named above has python_total 218 (tcip-mcp 107,
-tcip-annotation 12, tcip-web 36, tcip-store 13, scripts 50) and typescript_total 182; the tables
-below name every module of every scanned root, and `scripts/check_architecture_doc.py` refuses a
-source file under a covered root that no row names.
+regenerated inventory at HEAD 11e29635 had python_total 218 (tcip-mcp 107, tcip-annotation 12,
+tcip-web 36, tcip-store 13, scripts 50) and typescript_total 182; the tables below name every
+module of every scanned root, and `scripts/check_architecture_doc.py` refuses a source file
+under a covered root that no row names.
 
 ## tcip-mcp
 
@@ -202,7 +205,7 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | packages/tcip-store/src/tcip_store/binding.py | Which backend a process binds at its entry point: the database unless `TCIP_STORE_BACKEND` names the file backend, and a refusal for any other name. | 3 | 43 |
 | packages/tcip-store/src/tcip_store/errors.py | Every typed refusal the seam raises, absence and corruption included. | 1 | 19 |
 | packages/tcip-store/src/tcip_store/export.py | Writing a root's database-held records and logs back out as the file layout, and the per-store counters that say when those files are behind. | 4 | 3 |
-| packages/tcip-store/src/tcip_store/file_backend.py | The filesystem backend: identity to path, atomic replace, file locks, append-only logs, blobs, and the conform rail's refusal of record writes, and of a colliding blob write, to a root a database holds. | 5 | 43 |
+| packages/tcip-store/src/tcip_store/file_backend.py | The filesystem backend: identity to path, atomic replace, file locks, append-only logs, blobs, and the conform rail's refusal of record writes, and of a colliding blob write, to a root a database holds. | 5 | 44 |
 | packages/tcip-store/src/tcip_store/layout_claims.py | Which store could own which path under a root, as data: the layout vocabulary, one claim per record and log store, the template-directed walk the conform rail and the adoption planner share, and the anchored match a blob write is checked against. | 3 | 12 |
 | packages/tcip-store/src/tcip_store/model.py | Identity and value types the seam speaks on every backend: Key, Version, Versioned, LogPage, Capabilities. | 0 | 7 |
 | packages/tcip-store/src/tcip_store/registry.py | The store catalogue: kind, key shape, the canonical JSON codec each kind encodes through and the exemption a store must state to carry another, concurrency policy, durability, enumeration, and the layout claim a store outside the platform table must declare, plus whether the store is frozen and its schema_version ceiling. | 4 | 8 |
@@ -480,7 +483,7 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | scripts/check_architecture_citations.py | Verify ARCHITECTURE.md's file:line citations against the code they quote, for CI. | 0 | 0 |
 | scripts/check_architecture_doc.py | Verify ARCHITECTURE.md's module-ownership tables against the tree, for CI. | 0 | 0 |
 | scripts/check_dataset_identity.py | Check a dataset's on-disk content against its recorded identity: detect changed / moved data. | 5 | 0 |
-| scripts/clear_dev_history.py | Remove a root's development-era `friction_reports`/`retrospectives` records and `audit_log`/`learning_capture` log entries before it reaches an alpha tester, reconciling any stale exported loose copy, and record one closing audit line naming the operator and the reason. | 6 | 0 |
+| scripts/clear_dev_history.py | Remove a root's development-era `friction_reports`/`retrospectives` records and `audit_log`/`learning_capture` log entries before it reaches an alpha tester, leaving a database-backed root's own exported loose copies for a later `export_store.py` run to reconcile, and record one closing audit line naming the operator and the reason. | 7 | 0 |
 | scripts/compute_disagreements.py | Summarize GT-vs-prediction disagreements per image at several conf thresholds. | 1 | 0 |
 | scripts/conform_cal_holdout_locks.py | Conform every pre-existing `cal_holdout_split_lock` record under a root to carry `split_manifest_dir`. | 3 | 0 |
 | scripts/conform_classified_predictions.py | Conform a project's classified prediction buckets to the writer rail's `(subject, attribute)` stamp and to the shape a classified prediction now writes, sourcing an unstated bucket's scope from its own training run, `--like` another bucket, or the operator. | 11 | 0 |
