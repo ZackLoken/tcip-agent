@@ -185,6 +185,20 @@ reaching for again versus one built narrowly for a specific past investigation.
   codex, antigravity) and records comparable answers: the exact prompt, argv, stdout/stderr, the
   extracted response, and run metadata describing what the harness was and how long it took.
 
+## One-off deletions
+
+- `clear_dev_history.py` - removes a root's development-era `friction_reports` records,
+  `retrospectives` records, and the `audit_log` and `learning_capture` logs' entries, before the
+  root reaches an alpha tester: the production audit trail a tester reads serves a different
+  purpose than the remediation program's own records. Leaves a stale exported loose copy of any
+  of the four under a database-backed root as it is; the seam's own deletes tombstone what they
+  remove, so the next `export_store.py` run is what reconciles the file, from that tombstone.
+  Writes one closing audit line naming the operator (`--by`) and the reason (`--reason`), both
+  required and never defaulted, carrying the counts removed, so the production log's first line
+  states that development history was cleared and by whom. Touches nothing else: not
+  annotations, images, predictions, models, experiments, caches, or any other store. `--plan` is
+  the default and mutually exclusive with `--apply`.
+
 ## One-off conforms
 
 Each script here carries existing on-disk records onto a shape one specific past change now
@@ -192,16 +206,6 @@ requires, and says so in its own docstring: a one-off operator fix, never a runt
 Run once against a root whose state predates the change it names; reaching for one again means a
 fresh root predates another change, not a capability to build on.
 
-- `clear_dev_history.py` - removes a root's development-era `friction_reports` records,
-  `retrospectives` records, and the `audit_log` and `learning_capture` logs' entries, before the
-  root reaches an alpha tester: the production audit trail a tester reads serves a different
-  purpose than the remediation program's own records. Reconciles a stale exported loose copy of
-  any of the four under a database-backed root, since the database's own bookkeeping already
-  marks the file behind the moment the clearing lands. Writes one closing audit line naming the
-  operator (`--by`) and the reason (`--reason`), both required and never defaulted, carrying the
-  counts removed, so the production log's first line states that development history was
-  cleared and by whom. Touches nothing else: not annotations, images, predictions, models,
-  experiments, caches, or any other store. `--plan` is the default when `--apply` is not given.
 - `conform_cal_holdout_locks.py` - conforms every pre-existing `cal_holdout_split_lock` record
   under a root to carry `split_manifest_dir`, the key every lock this family writes now
   declares. A one-off operator fix for a record written before this family, never a runtime
