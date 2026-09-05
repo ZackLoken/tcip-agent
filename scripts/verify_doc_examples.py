@@ -23,6 +23,7 @@ import inspect
 import re
 import textwrap
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -128,7 +129,7 @@ def _resolve_imports(tree: ast.AST) -> tuple[dict[str, object], list[str]]:
     return resolved, missing
 
 
-def _dispatch_target(func: object, node: ast.Call) -> tuple[object, str] | None:
+def _dispatch_target(func: object, node: ast.Call) -> tuple[Callable[..., object], str] | None:
     """Resolve a name-dispatching factory to the builder it would actually call.
 
     ``build_detector("faster_rcnn", ...)`` accepts anything through ``**kwargs``, so binding
