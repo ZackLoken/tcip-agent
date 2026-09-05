@@ -627,7 +627,6 @@ def calibrate_classifier_operating_point(
     out = resolve_output_path(output_dir)
     checkpoint_sha256 = _agreed_checkpoint_identity([calibration_pred_dir, holdout_pred_dir])
     stamp = {
-        "schema_version": 2,
         "operating_point": {"classifier": {"validated_against": result["validated_against"],
                                            "value": spec.positive_class_name}},
         "validated": result["passed"],
