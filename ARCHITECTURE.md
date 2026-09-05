@@ -304,7 +304,7 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | packages/tcip-web/frontend/src/components/LaunchPicker.test.tsx | (none found) | 2 | 0 |
 | packages/tcip-web/frontend/src/components/LaunchPicker.tsx | The config-picker launch surface, shared by the Training and Tuning tabs' headers: a list of rows read from records (never typed by the breeder) plus the agent request composer that remains reachable from both. | 1 | 3 |
 | packages/tcip-web/frontend/src/components/ProjectBreadcrumb.test.tsx | (none found) | 3 | 0 |
-| packages/tcip-web/frontend/src/components/ProjectBreadcrumb.tsx | Status-bar project breadcrumb: three fast-tracks in the lower-right corner: project name → a dropdown of recent projects (jump straight in), date → a dropdown of this project's dates (switch without the workspace), Switch Project → the full workspace (all projects). | 5 | 2 |
+| packages/tcip-web/frontend/src/components/ProjectBreadcrumb.tsx | Status-bar project breadcrumb: three fast-tracks in the lower-right corner: project name → a dropdown of recent projects (jump straight in), date → a dropdown of this project's dates (switch without the workspace), Switch Project → the full workspace (all projects). | 6 | 2 |
 | packages/tcip-web/frontend/src/components/ProjectPicker.test.tsx | (none found) | 3 | 0 |
 | packages/tcip-web/frontend/src/components/ProjectPicker.tsx | The front door. | 5 | 2 |
 | packages/tcip-web/frontend/src/components/RunComparison.test.tsx | (none found) | 3 | 0 |
@@ -318,7 +318,7 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | packages/tcip-web/frontend/src/components/TabBanner.tsx | (none found) | 1 | 2 |
 | packages/tcip-web/frontend/src/components/TabHeading.tsx | The one heading element every tab's main panel carries, so a screen reader lands on a named region when the tab mounts. | 2 | 7 |
 | packages/tcip-web/frontend/src/components/TerminalRail.test.tsx | (none found) | 3 | 0 |
-| packages/tcip-web/frontend/src/components/TerminalRail.tsx | The agent rail: the real Claude Code CLI, embedded. | 4 | 2 |
+| packages/tcip-web/frontend/src/components/TerminalRail.tsx | The agent rail: the real Claude Code CLI, embedded. | 5 | 2 |
 | packages/tcip-web/frontend/src/components/Toasts.test.tsx | (none found) | 2 | 0 |
 | packages/tcip-web/frontend/src/components/Toasts.tsx | (none found) | 1 | 2 |
 | packages/tcip-web/frontend/src/components/TopBar.test.tsx | (none found) | 2 | 0 |
@@ -427,7 +427,7 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | packages/tcip-web/frontend/src/store/slices/bandSelection.ts | Holds the breeder's chosen band composite per band-set signature, one entry per distinct band set seen this session. | 2 | 2 |
 | packages/tcip-web/frontend/src/store/slices/banners.ts | Holds the latest agent-pushed banner per tab plus the set of dismissed banner event ids, since the backend replays its whole per-panel event ring on reconnect. | 1 | 2 |
 | packages/tcip-web/frontend/src/store/slices/canvas.ts | Holds the per-image draft canvas state (boxes, polygons, points, image-level ratings, undo/redo stacks, dirty tracking) not synced to the backend until save. | 2 | 2 |
-| packages/tcip-web/frontend/src/store/slices/gui.ts | Holds the server-synchronized GUI state (dataset selection, view, mode, active subject, review filters) plus the ownership-aware snapshot merge that keeps backend- and browser-owned fields apart. | 2 | 2 |
+| packages/tcip-web/frontend/src/store/slices/gui.ts | Holds the server-synchronized GUI state (dataset selection, view, mode, active subject, review filters) plus the ownership-aware snapshot merge that keeps backend- and browser-owned fields apart. | 2 | 4 |
 | packages/tcip-web/frontend/src/store/slices/pendingTerminalMessage.ts | Holds a request staged for the agent terminal until the terminal rail sends it and clears it, so a component can hand the agent a task without exposing the raw control. | 1 | 2 |
 | packages/tcip-web/frontend/src/store/slices/registryStatus.ts | Holds the dataset's subject registry, per-image annotation status, per-image review status, Annotate tab UI flags, and per-image session-timing telemetry. | 3 | 3 |
 | packages/tcip-web/frontend/src/store/slices/review.ts | Holds the Review tab's fetched matches, loading state, and the agent's one-shot focus-detection request. | 3 | 2 |

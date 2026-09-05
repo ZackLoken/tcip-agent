@@ -13,6 +13,7 @@ import { api, type ProjectSummary } from "@/api/client";
 import { adoptProjectByName, openWorkspaceProject } from "@/lib/openProject";
 import { loadRecentProjects } from "@/lib/recentProjects";
 import { useStore } from "@/store";
+import { selectProjectOpen } from "@/store/slices/gui";
 import type { TabName } from "@/store/types";
 
 const DATASET_TABS: ReadonlySet<TabName> = new Set(["annotate", "review", "results"]);
@@ -29,6 +30,7 @@ function currentModel(predDir: string | null): string | null {
 
 export function ProjectBreadcrumb() {
   const dataset = useStore((s) => s.gui.dataset);
+  const projectOpen = useStore(selectProjectOpen);
   const user = useStore((s) => s.user);
   const clearDataset = useStore((s) => s.clearDataset);
   const activeTab = useStore((s) => s.gui.active_tab);
@@ -113,7 +115,9 @@ export function ProjectBreadcrumb() {
     }
   }
 
-  if (!dataset.dataset_root || !dataset.date) {
+  // dataset.dataset_root is re-checked alongside projectOpen only so TypeScript narrows it to a
+  // string below; both read the same field, so they can never disagree.
+  if (!projectOpen || !dataset.dataset_root) {
     return <span>no project open</span>;
   }
 
@@ -147,14 +151,23 @@ export function ProjectBreadcrumb() {
         {projectName}
       </button>
       <span className="mx-1.5 text-tcip-border">|</span>
-      <button
-        onClick={() => setMenu((m) => (m === "date" ? null : "date"))}
-        disabled={busy}
-        title="Switch date"
-        className="font-mono hover:text-tcip-fg transition-colors"
-      >
-        {dataset.date}
-      </button>
+      {dataset.date ? (
+        <button
+          onClick={() => setMenu((m) => (m === "date" ? null : "date"))}
+          disabled={busy}
+          title="Switch date"
+          className="font-mono hover:text-tcip-fg transition-colors"
+        >
+          {dataset.date}
+        </button>
+      ) : (
+        <span
+          className="font-mono text-tcip-muted"
+          title="This project has no dated images yet; ask the agent to ingest images first."
+        >
+          no dated images
+        </span>
+      )}
       <span className="mx-1.5 text-tcip-border">|</span>
       <button
         onClick={switchProject}

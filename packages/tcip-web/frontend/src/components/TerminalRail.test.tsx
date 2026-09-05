@@ -287,6 +287,20 @@ describe("TerminalRail", () => {
         useStore.getState().patchGui({ dataset });
       }
     });
+
+    it("does not show the starter hint for a project open with no dated images yet", async () => {
+      const dataset = useStore.getState().gui.dataset;
+      useStore.getState().patchGui({
+        dataset: { ...dataset, dataset_root: "/workspace/demo_trait_site", date: null },
+      });
+      try {
+        render(<TerminalRail />);
+        await screen.findByTestId("terminal-host");
+        expect(screen.queryByTestId("terminal-starter-hint")).not.toBeInTheDocument();
+      } finally {
+        useStore.getState().patchGui({ dataset });
+      }
+    });
   });
 
   describe("reconnect after a drop", () => {

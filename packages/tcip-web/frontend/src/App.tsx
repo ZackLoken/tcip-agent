@@ -59,6 +59,8 @@ function TabFallback() {
 
 function App() {
   const activeTab = useStore((s) => s.gui.active_tab);
+  // Distinct from selectProjectOpen: the canvas tabs this gates need an image directory, so an
+  // open project with no dated images still shows the picker here.
   const datasetReady = useStore((s) => !!s.gui.dataset.dataset_root && !!s.gui.dataset.date);
   const projectRoot = useStore((s) => s.gui.dataset.project_root);
   const datasetKey = useStore(

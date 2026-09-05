@@ -19,6 +19,7 @@ import { terminalApi, terminalWsUrl } from "@/api/terminal";
 import type { TerminalInputFrame, TerminalResizeFrame } from "@/api/types.generated";
 import { createReconnectingSocket } from "@/lib/reconnectingSocket";
 import { useStore } from "@/store";
+import { selectProjectOpen } from "@/store/slices/gui";
 
 type TerminalSendFrame = TerminalInputFrame | TerminalResizeFrame;
 
@@ -82,11 +83,9 @@ export function TerminalRail() {
   const pendingMessage = useStore((s) => s.pendingTerminalMessage);
   const clearPendingMessage = useStore((s) => s.clearPendingTerminalMessage);
 
-  // A first-time breeder's first view of this rail is otherwise a blank cursor in a full
-  // developer CLI. Show a starter hint until either a project is open (App.tsx's own signal,
-  // once the breeder/agent has a project going, they don't need an example prompt) or they've
-  // sent their first input (they're already engaging; the hint would just be in the way).
-  const projectOpen = useStore((s) => !!s.gui.dataset.dataset_root && !!s.gui.dataset.date);
+  // Show a starter hint until a project is open (selectProjectOpen, the fact the footer also
+  // names) or they've sent their first input; a first-time breeder otherwise meets a blank cursor.
+  const projectOpen = useStore(selectProjectOpen);
   const [hasInput, setHasInput] = useState(false);
   const showStarterHint = !!status?.available && !projectOpen && !hasInput;
 

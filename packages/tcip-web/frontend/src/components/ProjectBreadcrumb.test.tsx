@@ -136,6 +136,41 @@ describe("recent-projects menu", () => {
   });
 });
 
+describe("footer open state", () => {
+  function setDataset(overrides: { dataset_root: string | null; date: string | null }) {
+    useStore.setState((st) => ({
+      gui: {
+        ...st.gui,
+        dataset: {
+          ...st.gui.dataset,
+          project_root: overrides.dataset_root,
+          dataset_root: overrides.dataset_root,
+          subject: null,
+          date: overrides.date,
+          image_list: [],
+          current_image_index: 0,
+          annotations_dir: null,
+          predictions_dir: null,
+        },
+      },
+    }));
+  }
+
+  it("names the open project and shows no dated images in the date's place when it has no date", () => {
+    setDataset({ dataset_root: "/w/alpha", date: null });
+    render(<ProjectBreadcrumb />);
+    expect(screen.getByText("alpha")).toBeInTheDocument();
+    expect(screen.getByText("no dated images")).toBeInTheDocument();
+    expect(screen.queryByTitle("Switch date")).not.toBeInTheDocument();
+  });
+
+  it("reads no project open only once nothing is open", () => {
+    setDataset({ dataset_root: null, date: null });
+    render(<ProjectBreadcrumb />);
+    expect(screen.getByText("no project open")).toBeInTheDocument();
+  });
+});
+
 describe("switching date", () => {
   it("does not write the active-project marker (not an adoption)", async () => {
     vi.mocked(api.dataset.select).mockResolvedValue({
