@@ -178,16 +178,31 @@ def test_complete_named_subject_over_a_file_holding_only_another_subjects_predic
 def test_complete_named_subject_the_bucket_never_assessed_omits_the_coverage_entry(
     client: TestClient, tmp_path: Path
 ) -> None:
-    """A subject not among the bucket's own recorded class map cannot be judged negative or
-    positive: the coverage entry is omitted, and the Complete and its status write still
+    """A subject not among a detector bucket's own recorded class map cannot be judged negative
+    or positive: the coverage entry is omitted, and the Complete and its status write still
     proceed."""
-    bucket = _bucket(tmp_path)  # a sidecar with no id_map at all
+    from tcip_mcp.pipelines.resolution import operating_point_stamp, write_sidecar
+
+    d = tmp_path / "predictions" / "baseline" / "2-11-26"
+    d.mkdir(parents=True)
+    write_annotations(
+        str(d / "IMG_0007.json"),
+        [Annotation(subject="leaf", geometry=BBox(12.0, 20.0, 52.0, 44.0), score=0.71)],
+        IMG_W, IMG_H,
+    )
+    stamp = operating_point_stamp(
+        {"conf": {"value": 0.5}}, validated=False, validated_by=None, tile_size_validated=None,
+        shippable_issues=[], id_map={"leaf": 0}, trait="leaf", dataset_hash="H", checkpoint="m",
+        checkpoint_sha256=CHECKPOINT_SHA, experiment_id="exp-17", images_dir=None,
+        raster_path=None, produced_at="2026-01-01T00:00:00Z", subject="leaf", attribute=None,
+    )
+    write_sidecar(d, stamp)
     dataset_root = _dataset_root(tmp_path)
 
     resp = client.post("/api/review/mark_complete", json={
         "dataset_root": str(dataset_root),
         "image_name": "IMG_0007.JPG",
-        "pred_dir": str(bucket),
+        "pred_dir": str(d),
         "subject": "catkin",
     })
     assert resp.status_code == 200
@@ -211,16 +226,21 @@ def test_a_second_complete_naming_a_subject_the_classified_bucket_cannot_resolve
                       "subject": "catkin", "attribute": "elongation"})
     dataset_root = _dataset_root(tmp_path)
 
-    client.post("/api/review/mark_complete", json={
+    first = client.post("/api/review/mark_complete", json={
         "dataset_root": str(dataset_root), "image_name": "IMG_0070.JPG",
         "pred_dir": str(d), "subject": "catkin",
     })
-    resp = client.post("/api/review/mark_complete", json={
+    assert first.status_code == 200
+    assert first.json()["image_status"] == "completed"
+    second = client.post("/api/review/mark_complete", json={
         "dataset_root": str(dataset_root), "image_name": "IMG_0070.JPG",
         "pred_dir": str(d), "subject": "leaf",
     })
-    assert resp.status_code == 200
-    assert _shard(dataset_root, "IMG_0070.JPG")["adjudication_covered"] == {"catkin": True}
+    assert second.status_code == 200
+    assert second.json()["image_status"] == "completed"
+    state = _shard(dataset_root, "IMG_0070.JPG")
+    assert state["adjudication_covered"] == {"catkin": True}
+    assert "leaf" not in state["adjudication_covered"]
 
 
 def test_complete_with_no_subject_records_completion_with_a_null_status(
