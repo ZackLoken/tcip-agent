@@ -2547,7 +2547,7 @@ Phase 3 verdict: duplicated.
 
 Must agree: control-message type names and field names match, and output frames are treated as raw text rather than JSON.
 Side A: `packages/tcip-web/src/tcip_web/routes/terminal.py:332` (`@router.websocket("/ws/{session_id}")`).
-Side B: `packages/tcip-web/frontend/src/components/TerminalRail.tsx:322` (`send({ type: "input", data });`).
+Side B: `packages/tcip-web/frontend/src/components/TerminalRail.tsx:321` (`send({ type: "input", data });`).
 Phase 3 verdict: duplicated.
 
 ## S50. Inference job stream WebSocket  <!-- queued: P5-304 unify -->
