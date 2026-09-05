@@ -57,6 +57,39 @@ def viz_dataset(tmp_path: Path) -> Path:
     return tmp_path
 
 
+def _seed_sidecar(pred_dir: Path, sidecar: dict) -> None:
+    """A bucket's own stamp, written straight through the store: the rail refuses a fresh
+    write_sidecar call missing the (subject, attribute) pair."""
+    import tcip_store
+    from tcip_mcp.pipelines.resolution import sidecar_key
+
+    tcip_store.replace(sidecar_key(pred_dir, "operating_point"), sidecar, expect=tcip_store.Version.ABSENT)
+
+
+def _damage_sidecar(pred_dir: Path) -> None:
+    """Corrupt a bucket's already-seeded stamp in place, wherever the bound backend keeps it."""
+    import os
+
+    from tcip_mcp.pipelines.resolution import sidecar_key
+    from tcip_store.binding import BACKEND_ENV, DEFAULT_BACKEND, FILE_BACKEND
+    from tcip_store.store import _backend
+
+    key = sidecar_key(pred_dir, "operating_point")
+    if (os.environ.get(BACKEND_ENV) or DEFAULT_BACKEND) == FILE_BACKEND:
+        _backend().path_for(key).write_bytes(b"{not json")
+        return
+    import sqlite3
+
+    from tcip_store.sqlite_backend import database_path, encode_parts
+
+    conn = sqlite3.connect(str(database_path(str(key.root))), isolation_level=None)
+    try:
+        conn.execute("update records set value = ? where store = ? and parts = ?",
+                    (b"{not json", key.store, encode_parts(key.parts)))
+    finally:
+        conn.close()
+
+
 # â”€â”€ Rendering engine tests â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
@@ -342,6 +375,27 @@ class TestVisualizePredictions:
         assert "error" in result
         assert str(pred) in result["error"]
 
+    def test_a_neither_key_stamp_refuses_by_name(self, viz_dataset: Path):
+        from tcip_mcp.tools.vision_tools import visualize
+
+        img = str(viz_dataset / "images" / "img_001.jpg")
+        _seed_sidecar(viz_dataset / "predictions" / "live", {"id_map": {"catkin": 0, "nut": 1}})
+
+        result = visualize("predictions", img)
+        assert "error" in result
+        assert "conform_classified_predictions.py" in result["error"]
+
+    def test_an_undecodable_stamp_refuses_by_name(self, viz_dataset: Path):
+        from tcip_mcp.tools.vision_tools import visualize
+
+        img = str(viz_dataset / "images" / "img_001.jpg")
+        preds_dir = viz_dataset / "predictions" / "live"
+        _seed_sidecar(preds_dir, {"id_map": {"catkin": 0}})
+        _damage_sidecar(preds_dir)
+
+        result = visualize("predictions", img)
+        assert "error" in result
+
 
 class TestVisualizeComparison:
     def test_basic(self, viz_dataset: Path):
@@ -378,6 +432,27 @@ class TestVisualizeComparison:
         result = visualize("comparison", img)
         assert "error" in result
         assert str(pred) in result["error"]
+
+    def test_a_neither_key_stamp_refuses_by_name(self, viz_dataset: Path):
+        from tcip_mcp.tools.vision_tools import visualize
+
+        img = str(viz_dataset / "images" / "img_001.jpg")
+        _seed_sidecar(viz_dataset / "predictions" / "live", {"id_map": {"catkin": 0, "nut": 1}})
+
+        result = visualize("comparison", img)
+        assert "error" in result
+        assert "conform_classified_predictions.py" in result["error"]
+
+    def test_an_undecodable_stamp_refuses_by_name(self, viz_dataset: Path):
+        from tcip_mcp.tools.vision_tools import visualize
+
+        img = str(viz_dataset / "images" / "img_001.jpg")
+        preds_dir = viz_dataset / "predictions" / "live"
+        _seed_sidecar(preds_dir, {"id_map": {"catkin": 0}})
+        _damage_sidecar(preds_dir)
+
+        result = visualize("comparison", img)
+        assert "error" in result
 
 
 class TestDisplayRead:
