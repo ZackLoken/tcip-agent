@@ -89,6 +89,20 @@ class TestGridRoute:
         resp = client.get("/api/coverage/grid", params={"path": path})
         assert resp.status_code == 400
 
+    def test_completeness_reports_a_stem_collision_in_counts_error(self, client, dated_dataset):
+        """``get_completeness`` folds ``AmbiguousImageStem`` into ``counts_error`` (it is a
+        ``ValueError``), never a 400: the by-subject and working-scale fields still answer."""
+        _root, path = dated_dataset
+        Image.fromarray(np.zeros((80, 100, 3), dtype=np.uint8)).save(
+            Path(path).with_suffix(".jpg")
+        )
+
+        resp = client.get("/api/coverage/completeness", params={"path": path})
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["counts_grid"] is None
+        assert body["counts_error"] is not None and "logical image" in body["counts_error"]
+
     def test_grid_equals_reference_cells(self, client, dated_dataset):
         from tcip_mcp.pipelines.reference_grid import grid_geometry, reference_cells
 
