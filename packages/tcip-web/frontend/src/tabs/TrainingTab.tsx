@@ -44,10 +44,11 @@ function messageOf(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
-/** The row's own select control name: id and status alone, with the best value and its
- * metric appended exactly as the record carries them when both are present. */
+/** The row's own select control name: id, status and, for a run this backend process did not
+ * launch, the same origin mark the visible row carries, with the best value and its metric
+ * appended exactly as the record carries them when both are present. */
 function runRowLabel(run: TrainingRunSummary): string {
-  const base = `${run.run_id} ${run.status}`;
+  const base = `${run.run_id} ${run.status}${run.external ? ", other process" : ""}`;
   if (run.best_metric === undefined || run.best_metric === null || !run.best_metric_name) {
     return base;
   }
@@ -624,7 +625,11 @@ export function TrainingTab() {
                     <div className="text-[10px] text-tcip-muted flex justify-between">
                       <span>
                         {r.status}
-                        {r.external && r.status === "running" ? " · agent" : ""}
+                        {r.external && (
+                          <span title="This backend process did not launch this run.">
+                            {" · other process"}
+                          </span>
+                        )}
                       </span>
                       {r.best_metric !== undefined &&
                         r.best_metric !== null &&

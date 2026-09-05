@@ -236,6 +236,28 @@ describe("TrainingTab run list", () => {
   });
 });
 
+describe("TrainingTab run origin mark", () => {
+  it("states the run's origin on a running and a terminal status, visibly and in the accessible name", async () => {
+    vi.spyOn(trainingApi, "listRuns").mockResolvedValue({
+      runs: [
+        run({ run_id: "train-live-other", status: "running", external: true }),
+        run({ run_id: "train-done-other", status: "completed", external: true }),
+      ],
+    });
+
+    render(<TrainingTab />);
+    await screen.findByText("train-live-other");
+
+    expect(
+      screen.getByRole("button", { name: "train-live-other running, other process" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "train-done-other completed, other process" }),
+    ).toBeInTheDocument();
+    expect(screen.getAllByTitle("This backend process did not launch this run.")).toHaveLength(2);
+  });
+});
+
 describe("TrainingTab heading", () => {
   it("renders exactly one top-level heading naming the tab", async () => {
     vi.spyOn(trainingApi, "listRuns").mockResolvedValue({ runs: [] });
