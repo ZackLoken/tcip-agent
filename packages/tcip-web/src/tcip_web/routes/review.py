@@ -316,8 +316,11 @@ def _review_scope(
                      "the bucket's own")
         return BucketScope(subject=stated_subject, attribute=None)
     if scope.classified:
-        if stated_attribute is not None and (stated_subject, stated_attribute) != (
-                scope.subject, scope.attribute):
+        disagrees = (
+            (stated_subject is not None and stated_subject != scope.subject)
+            or (stated_attribute is not None and stated_attribute != scope.attribute)
+        )
+        if disagrees:
             raise HTTPException(400, (
                 f"this bucket's stamp records scope (subject={scope.subject!r}, "
                 f"attribute={scope.attribute!r}), not the stated (subject={stated_subject!r}, "

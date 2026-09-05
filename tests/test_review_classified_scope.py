@@ -129,6 +129,26 @@ def test_a_disagreeing_stated_pair_refuses(client: TestClient, tmp_path: Path) -
     assert "this bucket's stamp records scope" in resp.json()["detail"]
 
 
+def test_a_disagreeing_stated_subject_alone_refuses(client: TestClient, tmp_path: Path) -> None:
+    """A stated subject that disagrees with the bucket's own recorded scope refuses even when no
+    attribute is stated alongside it, rather than being silently replaced by the bucket's own."""
+    dataset_root = tmp_path / "data"
+    img = _image(dataset_root)
+    staged = _stage_classified_prediction(dataset_root, value="healthy")
+    bucket = Path(prediction_dir(dataset_root, "classifier", DATE))
+    _stamp_classified_bucket(bucket)
+    gt = _write_gt(dataset_root, value="diseased")
+
+    resp = client.post("/api/review/matches", json={
+        "dataset_root": str(dataset_root), "image_name": f"{STEM}.jpg", "image_path": str(img),
+        "gt_path": str(gt), "pred_path": staged["path"],
+        "subject": "a-different-subject",
+    })
+
+    assert resp.status_code == 400
+    assert "this bucket's stamp records scope" in resp.json()["detail"]
+
+
 def test_a_bare_directory_under_a_stated_attribute_refuses(
     client: TestClient, tmp_path: Path,
 ) -> None:
