@@ -34,8 +34,8 @@ def labelled_dataset(tmp_path: Path) -> Path:
     labels = tmp_path / "annotations"
     labels.mkdir()
     write_annotations(
-        str(labels / "img_catkins.json"),
-        [_box("catkin", 12, 30, 48, 140), _box("catkin", 300, 44, 372, 70)],
+        str(labels / "img_buds.json"),
+        [_box("bud", 12, 30, 48, 140), _box("bud", 300, 44, 372, 70)],
         900, 500,
     )
     write_annotations(str(labels / "img_bush.json"), [_box("bush", 5, 9, 640, 480)], 900, 500)
@@ -78,36 +78,36 @@ def test_an_image_finished_with_content_never_reads_back_as_a_confirmed_negative
     """Content for the subject makes a finished image ``complete``; content belonging only to some
     other subject leaves it empty for this one, which is what a confirmed negative means."""
     root = labelled_dataset
-    images = ["img_catkins.jpg", "img_bush.jpg", "img_blank.jpg", "img_missing.jpg"]
-    derived = _derive(client, root, "catkin", images,
-                      ["img_catkins.jpg", "img_bush.jpg", "img_blank.jpg"])
+    images = ["img_buds.jpg", "img_bush.jpg", "img_blank.jpg", "img_missing.jpg"]
+    derived = _derive(client, root, "bud", images,
+                      ["img_buds.jpg", "img_bush.jpg", "img_blank.jpg"])
     assert derived == {
-        "img_catkins.jpg": "complete",
+        "img_buds.jpg": "complete",
         "img_bush.jpg": "negative",
         "img_blank.jpg": "negative",
         "img_missing.jpg": "unannotated",
     }
 
-    _store(client, root, "catkin", derived)
-    negatives = confirmed_negative_names(root / "annotations", subject="catkin", date=None)
+    _store(client, root, "bud", derived)
+    negatives = confirmed_negative_names(root / "annotations", subject="bud", date=None)
     assert negatives == {"img_bush.jpg", "img_blank.jpg"}
-    assert "img_catkins.jpg" not in negatives
-    assert _read_back(client, root, "catkin")["img_catkins.jpg"] == "complete"
+    assert "img_buds.jpg" not in negatives
+    assert _read_back(client, root, "bud")["img_buds.jpg"] == "complete"
 
 
 def test_one_image_is_a_negative_for_one_subject_and_finished_for_another(
     client: TestClient, labelled_dataset: Path
 ) -> None:
-    """A confirmation is a statement about one subject on one image: the bush image is a catkin
-    negative while it is a finished bush image, and the catkin image is the mirror of that."""
+    """A confirmation is a statement about one subject on one image: the bush image is a bud
+    negative while it is a finished bush image, and the bud image is the mirror of that."""
     root = labelled_dataset
-    images = ["img_catkins.jpg", "img_bush.jpg"]
-    for subject in ("catkin", "bush"):
+    images = ["img_buds.jpg", "img_bush.jpg"]
+    for subject in ("bud", "bush"):
         _store(client, root, subject, _derive(client, root, subject, images, images))
 
-    assert confirmed_negative_names(root / "annotations", subject="catkin", date=None) == {"img_bush.jpg"}
-    assert confirmed_negative_names(root / "annotations", subject="bush", date=None) == {"img_catkins.jpg"}
-    assert _read_back(client, root, "catkin")["img_catkins.jpg"] == "complete"
+    assert confirmed_negative_names(root / "annotations", subject="bud", date=None) == {"img_bush.jpg"}
+    assert confirmed_negative_names(root / "annotations", subject="bush", date=None) == {"img_buds.jpg"}
+    assert _read_back(client, root, "bud")["img_buds.jpg"] == "complete"
     assert _read_back(client, root, "bush")["img_bush.jpg"] == "complete"
 
 
@@ -120,14 +120,14 @@ def test_confirmations_recorded_under_different_dates_stay_separate(
         resp = client.post(
             "/api/classes/image_status",
             json={"project_root": str(tmp_path), "dataset_root": str(tmp_path),
-                  "image_name": "IMG_0007.JPG", "status": status, "subject": "catkin",
+                  "image_name": "IMG_0007.JPG", "status": status, "subject": "bud",
                   "date": date},
         )
         assert resp.status_code == 200, resp.text
 
     def read(date: str | None) -> dict[str, str]:
         params = {"project_root": str(tmp_path), "dataset_root": str(tmp_path),
-                  "subject": "catkin"}
+                  "subject": "bud"}
         if date:
             params["date"] = date
         return client.get("/api/classes/image_status", params=params).json()["statuses"]

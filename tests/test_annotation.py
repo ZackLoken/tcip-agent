@@ -29,27 +29,27 @@ def test_read_annotations(tmp_path: Path):
         json.dumps({
             "image": "img_001", "width": 640, "height": 480,
             "annotations": [
-                {"subject": "catkin", "bbox": [100, 100, 50, 50]},
-                {"subject": "catkin", "bbox": [200, 200, 40, 40]},
+                {"subject": "bud", "bbox": [100, 100, 50, 50]},
+                {"subject": "bud", "bbox": [200, 200, 40, 40]},
             ],
         })
     )
     anns = read_annotations(str(label_path))
     assert len(anns) == 2
     assert all(isinstance(a.geometry, BBox) for a in anns)
-    assert {a.subject for a in anns} == {"catkin"}
+    assert {a.subject for a in anns} == {"bud"}
 
 
 def test_write_and_read_roundtrip(tmp_path: Path):
     anns = [
-        Annotation(subject="catkin", geometry=BBox(x1=100, y1=100, x2=200, y2=200)),
+        Annotation(subject="bud", geometry=BBox(x1=100, y1=100, x2=200, y2=200)),
         Annotation(subject="leaf", geometry=BBox(x1=300, y1=300, x2=350, y2=350)),
     ]
     path = tmp_path / "test.json"
     write_annotations(str(path), anns, 640, 480)
     read_back = read_annotations(str(path))
     assert len(read_back) == 2
-    assert {a.subject for a in read_back} == {"catkin", "leaf"}
+    assert {a.subject for a in read_back} == {"bud", "leaf"}
     # Check approximate roundtrip (floating point tolerance)
     for orig, read in zip(anns, read_back):
         assert abs(orig.geometry.x1 - read.geometry.x1) < 2
@@ -73,10 +73,10 @@ def test_box_iou_no_overlap():
 
 
 def test_compute_matches():
-    gt = [Annotation(subject="catkin", geometry=BBox(x1=0, y1=0, x2=10, y2=10))]
+    gt = [Annotation(subject="bud", geometry=BBox(x1=0, y1=0, x2=10, y2=10))]
     preds = [
-        Annotation(subject="catkin", geometry=BBox(x1=0, y1=0, x2=10, y2=10), score=0.9),
-        Annotation(subject="catkin", geometry=BBox(x1=50, y1=50, x2=60, y2=60), score=0.8),
+        Annotation(subject="bud", geometry=BBox(x1=0, y1=0, x2=10, y2=10), score=0.9),
+        Annotation(subject="bud", geometry=BBox(x1=50, y1=50, x2=60, y2=60), score=0.8),
     ]
     matches = compute_matches(gt, preds, iou_threshold=0.5, conf_threshold=0.25)
     assert len(matches["tp"]) == 1

@@ -24,9 +24,9 @@ from tcip_mcp.pipelines.feedback import review_to_records
 
 IMG_NAME = "IMG_0501.JPG"
 IMG_W, IMG_H = 1200, 500
-PRODUCER = {"checkpoint_sha256": "e3b0c44298fc1c14", "experiment_id": "exp-catkin-07"}
+PRODUCER = {"checkpoint_sha256": "e3b0c44298fc1c14", "experiment_id": "exp-bud-07"}
 # The prediction bucket the session reviewed, as prediction_buckets.bucket_key_of spells one.
-BUCKET = "predictions/exp-catkin-07/2026-02-11"
+BUCKET = "predictions/exp-bud-07/2026-02-11"
 
 
 def review_state(engine: ReviewEngine) -> dict:
@@ -42,14 +42,14 @@ def ctx() -> ReviewContext:
         img_width=IMG_W,
         img_height=IMG_H,
         gt=[
-            Annotation(subject="catkin", geometry=BBox(100, 100, 300, 200)),
-            Annotation(subject="catkin", geometry=BBox(700, 260, 900, 420)),
-            Annotation(subject="catkin", geometry=BBox(50, 400, 150, 460)),
+            Annotation(subject="bud", geometry=BBox(100, 100, 300, 200)),
+            Annotation(subject="bud", geometry=BBox(700, 260, 900, 420)),
+            Annotation(subject="bud", geometry=BBox(50, 400, 150, 460)),
         ],
         preds=[
-            Annotation(subject="catkin", geometry=BBox(704, 264, 904, 424), score=0.90),
-            Annotation(subject="catkin", geometry=BBox(1000, 20, 1080, 100), score=0.80),
-            Annotation(subject="catkin", geometry=BBox(104, 104, 304, 204), score=0.72),
+            Annotation(subject="bud", geometry=BBox(704, 264, 904, 424), score=0.90),
+            Annotation(subject="bud", geometry=BBox(1000, 20, 1080, 100), score=0.80),
+            Annotation(subject="bud", geometry=BBox(104, 104, 304, 204), score=0.72),
         ],
     )
 
@@ -124,7 +124,7 @@ def test_a_verdict_carries_the_identity_fields_the_reference_reads(
     for entry in entries:
         assert entry["det_status"] == "reviewed"
         assert entry["reviewed_by"] == "alice"
-        assert entry["class_name"] == "catkin"
+        assert entry["class_name"] == "bud"
         assert entry["class_id"] == 0
         assert entry["producer_identity"] == PRODUCER
         assert entry["conf_threshold"] == 0.25

@@ -34,7 +34,7 @@ def _scene(root: Path, date: str) -> None:
     adir.mkdir(parents=True, exist_ok=True)
     json_io.write_annotations(
         str(adir / "IMG_0001.json"),
-        [Annotation(subject="catkin", geometry=BBox(10.0, 10.0, 20.0, 20.0))],
+        [Annotation(subject="bud", geometry=BBox(10.0, 10.0, 20.0, 20.0))],
         100, 100,
     )
 
@@ -67,12 +67,12 @@ def test_focus_human_attention_refuses_under_a_foreign_binding(
     date = "2026-03-02"
     _scene(tmp_path, date)
     other = tmp_path_factory.mktemp("elsewhere")
-    _mint_binding(other, generation=3, project_name="hazelnut_catkin_valley")
+    _mint_binding(other, generation=3, project_name="currant_bud_valley")
 
-    res = focus_human_attention("annotate", str(tmp_path), str(tmp_path), "catkin", date)
+    res = focus_human_attention("annotate", str(tmp_path), str(tmp_path), "bud", date)
 
     assert "error" in res
-    assert res["bound_project"] == "hazelnut_catkin_valley"
+    assert res["bound_project"] == "currant_bud_valley"
     assert res["compared_root"] == str(tmp_path)
 
 
@@ -81,14 +81,14 @@ def test_push_panel_event_refuses_under_a_foreign_binding(
 ) -> None:
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     other = tmp_path_factory.mktemp("elsewhere")
-    _mint_binding(other, generation=3, project_name="hazelnut_catkin_valley")
+    _mint_binding(other, generation=3, project_name="currant_bud_valley")
 
     res = push_panel_event(panel="training", event_type="metrics_update", data={"epoch": 1},
                            project_root=str(tmp_path))
 
     assert "error" in res
     assert res["delivered"] is False
-    assert res["bound_project"] == "hazelnut_catkin_valley"
+    assert res["bound_project"] == "currant_bud_valley"
     assert res["panel"] == "training"
 
 
@@ -103,7 +103,7 @@ def test_focus_human_attention_delivers_under_a_matching_binding(
     _select(client, tmp_path)
     calls = _delivery_spy(monkeypatch)
 
-    res = focus_human_attention("annotate", str(tmp_path), str(tmp_path), "catkin", date)
+    res = focus_human_attention("annotate", str(tmp_path), str(tmp_path), "bud", date)
 
     assert "error" not in res, res
     assert res["image"] == "IMG_0001.JPG"
@@ -137,7 +137,7 @@ def test_focus_human_attention_refuses_with_no_binding_at_all(
     date = "2026-03-02"
     _scene(tmp_path, date)
 
-    res = focus_human_attention("annotate", str(tmp_path), str(tmp_path), "catkin", date)
+    res = focus_human_attention("annotate", str(tmp_path), str(tmp_path), "bud", date)
 
     assert "error" in res
     assert res["bound_project"] is None
@@ -197,7 +197,7 @@ def test_focus_human_attention_refuses_when_the_binding_cannot_be_read(
 
     monkeypatch.setattr(web_client_module.tcip_store, "read", _boom)
 
-    res = focus_human_attention("annotate", str(tmp_path), str(tmp_path), "catkin", date)
+    res = focus_human_attention("annotate", str(tmp_path), str(tmp_path), "bud", date)
 
     assert "error" in res
     assert "Could not read the canvas-open binding" in res["error"]

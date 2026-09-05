@@ -61,7 +61,7 @@ def test_action_confines_the_gt_file_it_writes(
         "dataset_root": str(_dataset_root(allowed)),
         "image_name": "IMG_0007.JPG",
         "image_path": str(_image(allowed)),
-        "det_type": "fn", "class_name": "catkin",
+        "det_type": "fn", "class_name": "bud",
         "conf": None, "iou": None,
         "gt_idx": 0, "pred_idx": None,
         "bbox": list(original),
@@ -76,7 +76,7 @@ def test_action_confines_the_gt_file_it_writes(
 
     inside = allowed / "annotations" / "2-11-26" / "IMG_0007.json"
     inside.parent.mkdir(parents=True)
-    write_annotations(str(inside), [Annotation(subject="catkin", geometry=BBox(*original))],
+    write_annotations(str(inside), [Annotation(subject="bud", geometry=BBox(*original))],
                       IMG_W, IMG_H)
     accepted = client.post("/api/review/action", json={**base, "gt_path": str(inside)})
     assert accepted.status_code == 200
@@ -89,7 +89,7 @@ def test_mark_complete_confines_the_paths_it_reads(
     client: TestClient, allowed: Path, outside: Path
 ) -> None:
     base = {"dataset_root": str(_dataset_root(allowed)), "image_name": "IMG_0007.JPG",
-             "subject": "catkin"}
+             "subject": "bud"}
 
     assert client.post("/api/review/mark_complete",
                        json={**base, "gt_path": str(outside / "gt.json")}).status_code == 403
@@ -98,7 +98,7 @@ def test_mark_complete_confines_the_paths_it_reads(
 
     gt = allowed / "annotations" / "2-11-26" / "IMG_0007.json"
     gt.parent.mkdir(parents=True)
-    write_annotations(str(gt), [Annotation(subject="catkin", geometry=BBox(12.0, 20.0, 52.0, 44.0))],
+    write_annotations(str(gt), [Annotation(subject="bud", geometry=BBox(12.0, 20.0, 52.0, 44.0))],
                       IMG_W, IMG_H)
     accepted = client.post("/api/review/mark_complete", json={**base, "gt_path": str(gt)})
     assert accepted.status_code == 200
@@ -113,7 +113,7 @@ def test_an_optional_path_the_client_omits_is_not_an_escape(
     resp = client.post("/api/review/mark_complete", json={
         "dataset_root": str(_dataset_root(allowed)),
         "image_name": "IMG_0007.JPG",
-        "subject": "catkin",
+        "subject": "bud",
     })
     assert resp.status_code == 200
     assert resp.json()["annotation_status"] == "negative"
@@ -133,7 +133,7 @@ def test_backup_labels_confines_the_directories_it_walks(
     label_dir = allowed / "annotations" / "2-11-26"
     label_dir.mkdir(parents=True)
     write_annotations(str(label_dir / "IMG_0007.json"),
-                      [Annotation(subject="catkin", geometry=BBox(12.0, 20.0, 52.0, 44.0))],
+                      [Annotation(subject="bud", geometry=BBox(12.0, 20.0, 52.0, 44.0))],
                       IMG_W, IMG_H)
     accepted = client.post("/api/review/backup_labels",
                            json={**base, "label_dirs": [str(label_dir)]})
@@ -146,7 +146,7 @@ def test_image_statuses_confines_the_label_directories_it_lists(
     client: TestClient, allowed: Path, outside: Path
 ) -> None:
     write_annotations(str(outside / "IMG_0007.json"),
-                      [Annotation(subject="catkin", geometry=BBox(12.0, 20.0, 52.0, 44.0),
+                      [Annotation(subject="bud", geometry=BBox(12.0, 20.0, 52.0, 44.0),
                                   score=0.71)],
                       IMG_W, IMG_H)
     dataset_root = str(_dataset_root(allowed))
@@ -158,7 +158,7 @@ def test_image_statuses_confines_the_label_directories_it_lists(
     bucket = allowed / "predictions" / "baseline" / "2-11-26"
     bucket.mkdir(parents=True)
     write_annotations(str(bucket / "IMG_0007.json"),
-                      [Annotation(subject="catkin", geometry=BBox(12.0, 20.0, 52.0, 44.0),
+                      [Annotation(subject="bud", geometry=BBox(12.0, 20.0, 52.0, 44.0),
                                   score=0.71)],
                       IMG_W, IMG_H)
     accepted = client.get("/api/review/image_statuses",
@@ -192,7 +192,7 @@ def test_generation_conf_confines_the_bucket_it_reads(
 def test_validate_reference_confines_the_bucket_it_stamps(
     client: TestClient, allowed: Path, outside: Path
 ) -> None:
-    base = {"dataset_root": str(_dataset_root(allowed)), "trait": "catkin", "subject": "catkin"}
+    base = {"dataset_root": str(_dataset_root(allowed)), "trait": "bud_opening", "subject": "bud"}
 
     refused = client.post("/api/review/validate_reference",
                           json={**base, "pred_dir": str(outside)})
