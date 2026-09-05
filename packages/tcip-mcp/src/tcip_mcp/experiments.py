@@ -960,7 +960,7 @@ def log_metrics(
     a non-finite loss is named here, where the caller can see which metric it was.
 
     ``check_json_value`` admits any JSON-encodable value, wider than the frontend's own
-    ``MetricRow`` type (``number | string | undefined`` per key), which renders only the metric
+    ``MetricRow`` type (``number | string | null | undefined`` per key), which renders only the metric
     shapes it recognizes and drops the rest silently.
 
     Stamps ``status.json["metrics_logged"] = True`` before appending, the record
