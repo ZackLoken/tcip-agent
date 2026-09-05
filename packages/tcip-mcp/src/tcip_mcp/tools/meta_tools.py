@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import re
 import secrets
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -484,7 +485,7 @@ def read_audit_log(
     except ValueError as exc:
         return {"error": str(exc), "scope_resolved": key.root}
 
-    def _matches(entry: dict) -> bool:
+    def _matches(entry: Mapping[str, Any]) -> bool:
         if tool is not None and entry.get("tool") != tool:
             return False
         if status is not None and entry.get("status") != status:
@@ -498,7 +499,7 @@ def read_audit_log(
 
     filtered = [entry for entry in page.records if _matches(entry)]
 
-    def _sort_key(entry: dict) -> datetime:
+    def _sort_key(entry: Mapping[str, Any]) -> datetime:
         return _parse_audit_timestamp(entry.get("timestamp")) or datetime.min.replace(
             tzinfo=timezone.utc
         )
