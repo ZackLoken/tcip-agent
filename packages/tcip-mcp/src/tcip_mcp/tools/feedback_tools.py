@@ -255,6 +255,7 @@ def materialize_review_dataset(
     from tcip_store import StoreError
 
     scope = None
+    vocabulary = None
     if resolved_bucket != NO_BUCKET:
         bucket_path = Path(resolved_bucket)
         if bucket_path.is_absolute():
@@ -271,12 +272,17 @@ def materialize_review_dataset(
             scope = bucket_scope(scope_dir)
         except (StampScopeUnstated, StoreError) as exc:
             return {"error": str(exc)}
+        if scope is not None and scope.classified:
+            from tcip_mcp.pipelines.postprocessing.phenology import bucket_id_map
+
+            vocabulary = set(bucket_id_map(scope_dir) or {})
 
     try:
         result = materialize_dataset(
             review_state, source_images_dir, output_dir, subject=subject,
             review_state_path=str(state_path), include_hard_negatives=include_hard_negatives,
             copy_files=copy_files, only_completed=only_completed, scope=scope,
+            vocabulary=vocabulary,
         )
     except ValueError as exc:
         return {"error": str(exc)}

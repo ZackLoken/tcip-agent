@@ -297,6 +297,33 @@ def test_classified_scope_never_confirms_a_negative_even_when_a_value_names_the_
     assert confirmed_negative_names(out / "annotations", subject="catkin", date=None) == set()
 
 
+def test_classified_scope_refuses_a_confirmed_value_outside_the_bucket_vocabulary(tmp_path):
+    """A ``vocabulary`` given to the harvest checks a classified verdict's confirmed value before
+    it is written: a value the bucket's own ``id_map`` never declared is reported, not written,
+    the same posture a degenerate box already gets."""
+    from tcip_mcp.pipelines.resolution import BucketScope
+
+    root = tmp_path / "dataset"
+    registry = ClassRegistry(subjects=_TWO_SUBJECTS)
+    root.mkdir()
+    class_registry.write_registry(root / "classes.json", registry)
+    images = root / "images"
+    _image(images, "pos.png", (100, 30))
+    out = tmp_path / "out"
+    state = {"image": {
+        "pos.png": _completed([_accepted("shedding", [0.5, 0.5, 0.2, 0.2])]),
+    }}
+    scope = BucketScope(subject="catkin", attribute="stage")
+
+    r = materialize_dataset(
+        state, str(images), str(out), scope=scope, vocabulary={"dormant", "elongating"})
+
+    assert r["positive"] == 0
+    assert [e["image"] for e in r["boundary_refused"]] == ["pos.png"]
+    assert "not a value" in r["boundary_refused"][0]["reason"]
+    assert "shedding" in r["boundary_refused"][0]["reason"]
+
+
 def test_a_negative_no_one_reviewer_answers_for_names_the_harvest(tmp_path):
     """Two reviewers disputing one image leaves the writing tool as the honest actor."""
     src = tmp_path / "src"

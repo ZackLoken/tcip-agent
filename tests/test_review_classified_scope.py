@@ -243,6 +243,41 @@ def test_action_refusal_leaves_the_label_file_unchanged(client: TestClient, tmp_
     assert gt.read_bytes() == before
 
 
+def test_accept_paired_to_a_foreign_subject_record_refuses(
+    client: TestClient, tmp_path: Path,
+) -> None:
+    """A paired accept's ``gt_idx`` must name a record of this bucket's own object class: a client
+    that names a foreign-subject record's index is refused by name rather than confirming a value
+    onto an object this review was never scoped to."""
+    dataset_root = tmp_path / "data"
+    img = _image(dataset_root)
+    staged = _stage_classified_prediction(dataset_root, value="healthy")
+    bucket = Path(prediction_dir(dataset_root, "classifier", DATE))
+    _stamp_classified_bucket(bucket)
+    gt_dir = dataset_root / "annotations" / DATE
+    write_annotations(
+        str(gt_dir / f"{STEM}.json"),
+        [Annotation(subject="bush", geometry=BBox(*BOX), created_by="user:breeder",
+                   created_at="2026-03-05T00:00:00+00:00")],
+        IMG_W, IMG_H,
+    )
+    gt = gt_dir / f"{STEM}.json"
+    before = gt.read_bytes()
+
+    resp = client.post("/api/review/action", json={
+        "dataset_root": str(dataset_root), "image_name": f"{STEM}.jpg", "image_path": str(img),
+        "gt_path": str(gt), "pred_path": staged["path"],
+        "det_type": "fp", "class_name": "healthy", "conf": 0.9,
+        "iou": None, "gt_idx": 0, "pred_idx": 0,
+        "bbox": list(BOX), "action": "accepted", "user": "breeder",
+        "iou_threshold": 0.3, "conf_threshold": 0.1,
+    })
+
+    assert resp.status_code == 400
+    assert "bush" in resp.json()["detail"]
+    assert gt.read_bytes() == before
+
+
 def test_reject_on_a_true_positive_under_a_classified_scope_refuses(
     client: TestClient, tmp_path: Path,
 ) -> None:

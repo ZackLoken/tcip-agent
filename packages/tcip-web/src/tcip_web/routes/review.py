@@ -559,8 +559,27 @@ def _is_reviewer_drawn_new_shape(payload: "ActionPayload") -> bool:
     return payload.gt_idx is None and payload.pred_idx is None and payload.action != "swept"
 
 
+def _check_classified_value(class_name: str, vocabulary: set) -> None:
+    """Refuse a value a classified bucket's own ``id_map`` does not declare."""
+    if class_name not in vocabulary:
+        raise ValueError(
+            f"{class_name!r} is not a value this bucket's own id_map declares "
+            f"({sorted(vocabulary)}): a reviewer can only confirm a value the vocabulary has."
+        )
+
+
+def _check_target_subject(existing: Annotation, scope) -> None:
+    """Refuse editing a record of a subject other than the classified scope's own object class."""
+    if existing.subject != scope.subject:
+        raise ValueError(
+            f"this record is of subject {existing.subject!r}, not {scope.subject!r}, this "
+            "bucket's own object class: a classified review only edits records of its own class."
+        )
+
+
 def _apply_gt_mutation(
     ctx: ReviewContext, payload: "ActionPayload", reviewer: str, now_iso: str, *, scope,
+    vocabulary: set,
 ) -> tuple[bool, Optional[int]]:
     """Author GT from a verdict; return ``(gt_changed, index the written annotation landed at in
     ctx.gt)``: the index is set only for edited/accepted writes. ``action="swept"`` (an explicit
@@ -568,8 +587,11 @@ def _apply_gt_mutation(
     below and always no-ops, GT is never mutated by sweeping.
 
     ``scope`` is the resolved review scope (``_review_scope``), never ``payload.subject``/
-    ``payload.attribute`` directly. Under a classified scope (``scope.attribute`` set) a verdict
-    judges the *value* of an object a person already placed; under a detector review it judges the
+    ``payload.attribute`` directly; ``vocabulary`` is the bucket's own recorded ``id_map`` keys
+    (``_bucket_vocabulary``). Under a classified scope (``scope.attribute`` set) a verdict judges
+    the *value* of an object a person already placed, checking a written ``payload.class_name``
+    against ``vocabulary`` and an edited record's own subject against ``scope.subject``, refusing
+    by name rather than trusting the client's string; under a detector review it judges the
     object's presence, as it always has.
 
     Accept on a false positive: a paired one (``payload.gt_idx`` set, its partner a ground-truth
@@ -613,6 +635,9 @@ def _apply_gt_mutation(
                     "ground-truth record(s): the record this edit targets no longer exists."
                 )
             existing = ctx.gt[payload.gt_idx]
+            if classifying:
+                _check_target_subject(existing, scope)
+                _check_classified_value(payload.class_name, vocabulary)
             attrs = dict(existing.attributes)
             if classifying:
                 attrs[scope.attribute] = payload.class_name
@@ -621,6 +646,8 @@ def _apply_gt_mutation(
                 created_at=now_iso, accepted_by=None, accepted_at=None)
             return True, payload.gt_idx
         # An unpaired false positive edited into ground truth: a fresh record.
+        if classifying:
+            _check_classified_value(payload.class_name, vocabulary)
         reviewed = {scope.attribute: payload.class_name} if classifying else {}
         new_subject = scope.subject if classifying else payload.class_name
         ctx.gt.append(Annotation(subject=new_subject, geometry=geom, attributes=reviewed,
@@ -649,12 +676,15 @@ def _apply_gt_mutation(
             # A paired false positive: the person's object, a wrong value confirmed. Keep their
             # geometry and authorship; replace only the confirmed value.
             existing = ctx.gt[payload.gt_idx]
+            _check_target_subject(existing, scope)
+            _check_classified_value(payload.class_name, vocabulary)
             attrs = dict(existing.attributes)
             attrs[scope.attribute] = payload.class_name
             ctx.gt[payload.gt_idx] = replace(
                 existing, attributes=attrs, accepted_by=reviewer, accepted_at=now_iso)
             return True, payload.gt_idx
         if classifying:
+            _check_classified_value(payload.class_name, vocabulary)
             accepted = replace(pred, score=None, attributes={scope.attribute: payload.class_name},
                                accepted_by=reviewer, accepted_at=now_iso)
         else:
@@ -697,7 +727,8 @@ def record_action(payload: ActionPayload) -> dict:
     # entry is recorded against the pristine ctx (its bbox lookups read gt_idx).
     work = replace(ctx, gt=list(ctx.gt))
     try:
-        changed, landed_idx = _apply_gt_mutation(work, payload, reviewer, now_iso, scope=scope)
+        changed, landed_idx = _apply_gt_mutation(
+            work, payload, reviewer, now_iso, scope=scope, vocabulary=vocabulary)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     if changed and not gt_path:
