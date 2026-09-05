@@ -668,7 +668,6 @@ _SIDECAR_STORES: dict[str, str] = {
             codec=RECORD_JSON,
             concurrency="cas",
             locator=_SIDECAR_LOCATOR,
-            schema_version=2,
         )
     ).name
     for document in (filename[: -len(".json")] for filename in sorted(_SIDECAR_FILENAMES))
@@ -986,16 +985,8 @@ def operating_point_stamp(
     :func:`seal_validation` returns, and ``None`` for a stamp that claims nothing. It has no default
     on purpose: a producer that stamps a validated bucket must have earned a record to name, and a
     producer that stamps an unvalidated one says so at its own call site.
-
-    ``schema_version`` marks the writing vintage of this stamp, not of every value it carries: the
-    review-promotion path merges its own fields into a stamp a producing run already wrote, and a
-    promoted record's ``schema_version`` says the promotion wrote under the current vocabulary while
-    an untouched carried subrecord (a stored ``mask_binarize`` spelled under an older provenance
-    vocabulary, say) may still read under that older spelling. That carried-subrecord reading is
-    deliberate, not a gap to close.
     """
     return {
-        "schema_version": 2,
         "trait": trait,
         "dataset_hash": dataset_hash,
         "operating_point": operating_point,
@@ -1036,14 +1027,13 @@ def prediction_producer(checkpoint_path: str, sha256: str) -> str:
 
 
 STAMP_KEYS: frozenset[str] = frozenset((
-    "schema_version", "trait", "dataset_hash", "operating_point", "id_map", "subject", "attribute",
+    "trait", "dataset_hash", "operating_point", "id_map", "subject", "attribute",
     "validated", "validated_by", "tile_size_validated", "shippable_issues", "checkpoint",
     "checkpoint_sha256", "experiment_id", "images_dir", "raster_path", "produced_at",
 ))
-"""``operating_point_stamp``'s own seventeen keys: the ones it returns unconditionally, before a
+"""``operating_point_stamp``'s own sixteen keys: the ones it returns unconditionally, before a
 producer's own ``**fields``. Declared literally rather than derived from the signature, since a
-parameter name matching its returned key is this constructor's own convention, not a guarantee (and
-``schema_version`` is a literal the function stamps, never a parameter at all);
+parameter name matching its returned key is this constructor's own convention, not a guarantee;
 ``tests/test_operating_point_sidecar_seam.py`` pins the two against each other."""
 
 STAMP_EXTENSION_KEYS: dict[str, str] = {
@@ -1758,7 +1748,6 @@ def seal_validation(
             draft.document, _CALIBRATION_EXPERIMENT_DERIVATION[None])},
     )
     body = {
-        "schema_version": 2,
         "document": draft.document,
         "trait": draft.trait,
         "claim": claim,
