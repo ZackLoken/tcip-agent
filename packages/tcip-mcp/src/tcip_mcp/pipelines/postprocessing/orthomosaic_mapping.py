@@ -17,7 +17,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import ClassVar, Sequence
+from typing import TYPE_CHECKING, ClassVar, Sequence, cast
+
+if TYPE_CHECKING:
+    import pyproj
+    import tifffile
 
 # GeoTIFF tag IDs this module reads (see the GeoTIFF spec; tifffile exposes each as a plain
 # TiffTag keyed by these codes, no prior art for any of them elsewhere in this codebase).
@@ -76,7 +80,10 @@ def read_geotransform(path: str | Path) -> GeoTransform:
 
     path = Path(path)
     with tifffile.TiffFile(str(path)) as tif:
-        tags = tif.pages[0].tags
+        # pages[0] is always the keyframe, a full TiffPage, per tifffile's own page-caching
+        # contract; only a later page can come back as a lighter TiffFrame sharing its tags.
+        page = cast("tifffile.TiffPage", tif.pages[0])
+        tags = page.tags
         if _MODEL_TRANSFORMATION_TAG in tags:
             raise RotatedRasterError(
                 f"{path}: carries a ModelTransformationTag (rotation/shear). The simple "
@@ -200,7 +207,7 @@ class OrthomosaicGeoreference:
 
     def __init__(self, transform: GeoTransform):
         self.transform = transform
-        self._to_wgs84 = None
+        self._to_wgs84: "pyproj.Transformer | None" = None
 
     @classmethod
     def from_file(cls, path: str | Path) -> "OrthomosaicGeoreference":
