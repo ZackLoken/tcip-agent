@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import importlib.util
 import pathlib
+import subprocess
 import sys
+
+import pytest
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 SCRIPT = REPO_ROOT / "scripts" / "check_architecture_doc.py"
@@ -261,15 +264,39 @@ def test_a_hash_that_is_not_a_real_commit_is_a_finding():
     assert skips == []
 
 
-def test_a_real_commit_not_on_this_checkouts_own_history_is_a_finding():
-    """d6e28aee is the worktree hash this fix-up's own bug report names: a real commit object,
-    reachable in the object database, that is not an ancestor of this checkout's own HEAD."""
-    checker = _load()
-    sentence = {"line_no": 1, "head": "d6e28aee"}
+def _git(repo: pathlib.Path, *args: str) -> str:
+    """Run one git command in ``repo`` and return its stdout, skipping the calling test when git
+    refuses: the throwaway repository the test builds is the fixture, so git being unable to
+    build it is an absent fixture, never a finding against the checker."""
+    result = subprocess.run(
+        ["git", "-c", "user.name=fixture", "-c", "user.email=fixture@example.invalid", *args],
+        cwd=str(repo), capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        pytest.skip(f"git could not build the two-branch fixture: {result.stderr.strip()}")
+    return result.stdout.strip()
 
-    findings, skips = checker.check_head_sentences(sentence, dict(sentence, modules=1, lines=1), REPO_ROOT)
+
+def test_a_real_commit_not_on_the_checkouts_own_history_is_a_finding(tmp_path):
+    """A commit that resolves in the object database but is not an ancestor of HEAD is the
+    shape a worktree's own hash takes once git am renumbers it onto main. The case is built in a
+    throwaway repository (a root commit, a diverging commit on a side branch, HEAD back at the
+    root) rather than named from this checkout's history, since a commit that exists only in one
+    machine's object database is a different finding, head_not_a_commit, on every other clone."""
+    checker = _load()
+    _git(tmp_path, "init", "-q")
+    _git(tmp_path, "commit", "-q", "--allow-empty", "-m", "root")
+    root = _git(tmp_path, "rev-parse", "HEAD")
+    _git(tmp_path, "checkout", "-q", "-b", "aside")
+    _git(tmp_path, "commit", "-q", "--allow-empty", "-m", "aside")
+    aside = _git(tmp_path, "rev-parse", "--short", "HEAD")
+    _git(tmp_path, "checkout", "-q", root)
+    sentence = {"line_no": 1, "head": aside}
+
+    findings, skips = checker.check_head_sentences(sentence, dict(sentence, modules=1, lines=1), tmp_path)
 
     assert [f["kind"] for f in findings] == ["head_not_an_ancestor"]
+    assert findings[0]["head"] == aside
     assert skips == []
 
 
