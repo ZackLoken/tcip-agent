@@ -14,6 +14,7 @@ from __future__ import annotations
 import logging
 from abc import ABC, abstractmethod
 from collections.abc import Callable
+from typing import Any, cast
 
 import numpy as np
 import torch
@@ -124,7 +125,8 @@ class DiversityScorer(BaseScorer):
         for path in image_paths:
             img = load_image(path, 3)  # EXIF-oriented: score/embed in the same frame the model trained on
             tensor = pil_to_tensor(img).unsqueeze(0).to(device)
-            feats = model.backbone(tensor)
+            # A bespoke model's own opt-in attribute, not part of nn.Module's stub (checked above).
+            feats = cast(Any, model).backbone(tensor)
             feat = list(feats.values())[-1] if isinstance(feats, dict) else feats
             emb = F.adaptive_avg_pool2d(feat, 1).flatten(1).cpu().numpy()
             embeddings.append(emb[0])
