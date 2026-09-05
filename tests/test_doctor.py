@@ -78,7 +78,7 @@ def test_doctor_flags_the_field_session_bug_family(tmp_path):
     reg = root / ".tcip" / "models"
     reg.mkdir(parents=True)
     (reg / "registry.json").write_text(json.dumps({"entries": [
-        {"name": "junk", "checkpoint_path": "C:\Temp\pytest-of-x\model.pt"}]}))
+        {"name": "junk", "checkpoint_path": r"C:\Temp\pytest-of-x\model.pt"}]}))
 
     res = _run(root, file_layout=True)
     assert res.returncode == 2  # errors present
