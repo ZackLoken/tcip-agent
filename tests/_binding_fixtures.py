@@ -193,7 +193,7 @@ def record_producing_run(weights_dir: str | Path, experiment_id: str) -> str:
 
 
 def register_plant_registry_for(
-    csv_paths: list[str | Path], *, name: str = "reg", crop: str = "hazelnut", site: str = "orchard",
+    csv_paths: list[str | Path], *, name: str = "reg", crop: str = "currant", site: str = "orchard",
 ) -> str:
     """Register ``csv_paths`` under ``name`` in whichever project the process is pinned to
     (``register_plant_registry``'s own resolution, the one ``build_plant_mapping`` and
@@ -268,7 +268,7 @@ def write_plant_mapping(
 # --- the export doors: a stand-in run whose validated count they can actually earn a record for ---
 
 def calibrated_run_fields(
-    trait: str = "catkin",
+    trait: str = "bud_opening",
     *,
     checkpoint_sha256: str,
     labels_dir: str | Path,

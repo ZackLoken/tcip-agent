@@ -3,7 +3,7 @@
 Some gate conditions (a dispersion/localization floor, a reference-sufficiency and equivalence
 criterion) cannot be exercised by a 1-2 object toy fixture: the failure modes are specifically
 about per-image variance and tail behavior across a realistic, dense reference (tens to
-hundreds of objects per image, per the catkin trait). ``dense_records`` builds such a reference with
+hundreds of objects per image, per the bud trait). ``dense_records`` builds such a reference with
 an exactly hand-verifiable per-image miss/false-positive pattern (deterministic, not randomized) so
 every derived statistic (count_bias_mean/std/p90, precision/recall) can be reasoned about directly
 from ``miss_pattern``/``fp_pattern`` rather than pinned by re-running the code under test.
