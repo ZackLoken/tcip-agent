@@ -86,3 +86,87 @@ def test_architecture_md_counts_match_a_fresh_inventory():
     findings = checker.check_counts(parsed, inventory)
 
     assert findings == []
+
+
+def _summary(mcp_modules: int, mcp_lines: int, *, sentence_modules: int, sentence_lines: int) -> str:
+    return (
+        f"HEAD 1234abcd has {sentence_modules} modules across the six scanned roots "
+        f"({sentence_lines} total lines):\n\n"
+        "| Package (root) | Modules | Lines |\n"
+        "|---|---|---|\n"
+        f"| tcip-mcp | {mcp_modules} | {mcp_lines} |\n"
+        "| tcip-annotation | 0 | 0 |\n"
+        "| tcip-web | 0 | 0 |\n"
+        "| tcip-store | 0 | 0 |\n"
+        "| tcip-web-frontend | 0 | 0 |\n"
+        "| scripts | 0 | 0 |\n"
+    )
+
+
+_ONE_MCP_MODULE_INVENTORY = {
+    "python_modules": [{"root": "tcip-mcp", "lines": 5}],
+    "typescript_modules": [],
+    "counts": {
+        "python_by_root": {
+            "tcip-mcp": 1, "tcip-annotation": 0, "tcip-web": 0, "tcip-store": 0, "scripts": 0,
+        },
+        "typescript_total": 0,
+    },
+}
+
+
+def test_a_summary_table_row_that_drifts_from_the_inventory_is_reported():
+    """The tcip-mcp row claims 10 lines for its one module; the inventory says that module is
+    5 lines. The sentence states the real total (1, 5) so only the row itself drifts."""
+    checker = _load()
+    md_text = _summary(1, 10, sentence_modules=1, sentence_lines=5)
+
+    sentence, rows = checker.parse_module_count_summary(md_text)
+    findings = checker.check_module_count_summary(sentence, rows, _ONE_MCP_MODULE_INVENTORY)
+
+    assert [f["kind"] for f in findings] == ["module_count_row_drift"]
+    assert findings[0]["package"] == "tcip-mcp"
+    assert findings[0]["doc"] == (1, 10)
+    assert findings[0]["real"] == (1, 5)
+
+
+def test_a_summary_sentence_whose_totals_drift_is_reported():
+    """Every row matches the inventory, but the introductory sentence still claims 2 modules
+    and 12 total lines against the rows' own 1 module and 5 lines: the sentence is checked
+    against the rows' real sum, not merely echoed back."""
+    checker = _load()
+    md_text = _summary(1, 5, sentence_modules=2, sentence_lines=12)
+
+    sentence, rows = checker.parse_module_count_summary(md_text)
+    findings = checker.check_module_count_summary(sentence, rows, _ONE_MCP_MODULE_INVENTORY)
+
+    assert [f["kind"] for f in findings] == ["module_count_sentence_drift"]
+    assert findings[0]["doc"] == (2, 12)
+    assert findings[0]["real"] == (1, 5)
+
+
+def test_a_summary_matching_the_inventory_passes():
+    checker = _load()
+    md_text = _summary(1, 5, sentence_modules=1, sentence_lines=5)
+
+    sentence, rows = checker.parse_module_count_summary(md_text)
+    findings = checker.check_module_count_summary(sentence, rows, _ONE_MCP_MODULE_INVENTORY)
+
+    assert findings == []
+
+
+def test_architecture_md_module_count_summary_matches_a_fresh_inventory():
+    """The gate's own self-check for the per-root Modules/Lines summary table and its
+    sentence, over the real tree: both must match what a freshly generated module inventory
+    finds, the same way test_architecture_md_counts_match_a_fresh_inventory holds the
+    per-module tables to it."""
+    checker = _load()
+    builder = _load_inventory_builder()
+
+    inventory = builder.build_inventory()
+    md_text = (REPO_ROOT / "ARCHITECTURE.md").read_text(encoding="utf-8")
+
+    sentence, rows = checker.parse_module_count_summary(md_text)
+    findings = checker.check_module_count_summary(sentence, rows, inventory)
+
+    assert findings == []
