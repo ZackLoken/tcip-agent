@@ -1188,10 +1188,13 @@ def _publish_image_predictions(out: Path, result: dict, *, checkpoint_path: str,
     """Write one prediction file per image, then earn and stamp over exactly what landed.
 
     True once the bucket's own document refusal has already run: the resolver refuses a publish
-    into a bucket a prior run's documents already occupy, so by the time this writes, ``out``
-    holds nothing but what this call is about to add, short of the residual race
+    into a bucket a prior run's documents already occupy. ``out`` can still hold what that
+    refusal does not check for: an earlier run's own ``operating_point.json`` with no document
+    (a stamp-only bucket the document predicate admits), a non-``operating_point`` sidecar the
+    document check never consults, or, for a directory reused across regimes, a raster pass'
+    progress record under its own ``.tcip/``. Short of those and the residual race
     ``resolve_writable_bucket``'s own docstring states (two publishers resolving the same clean
-    bucket before either writes).
+    bucket before either writes), ``out`` holds nothing but what this call is about to add.
 
     The steps ``run_inference`` and ``deliver_per_image_counts`` share once each has resolved its own
     bucket and run its own gate: both persist the same run's per-image detections into a bucket and

@@ -409,8 +409,7 @@ class LaunchInferencePayload(BaseModel):
     overlap: float | None = None
     max_dets: int | None = None
     postprocess: str = "nms"
-    # Write into the named bucket even if it exists. Refused if it has review verdicts; the
-    # default (False) auto-redirects to a fresh bucket so a re-run never orphans recorded verdicts.
+    # Write into the named bucket even if it exists; refused (409) on review verdicts, including when every @r<n> variant to the resolver's ceiling already carries one, which now refuses by name instead of falling back to an unchecked @r100. The default (False) auto-redirects to a fresh bucket so a re-run never orphans recorded verdicts.
     overwrite: bool = False
 
 
