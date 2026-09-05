@@ -93,7 +93,7 @@ CONDITIONS = {
     },
 }
 
-PARITY = {
+PARITY: dict[str, dict[str, str | None]] = {
     "claude": {"model": "opus", "effort": "high"},
     "codex": {"model": None, "effort": "high"},
     "antigravity": {"model": "gemini-3.1-pro-high", "effort": None},
@@ -485,9 +485,9 @@ def extract_response(family: str, stdout: str, last_message: pathlib.Path | None
         if event.get("type") == "item.completed":
             item = event.get("item")
             if isinstance(item, dict) and item.get("type") == "agent_message":
-                text = item.get("text")
-                if isinstance(text, str):
-                    agent_messages.append(text)
+                item_text = item.get("text")
+                if isinstance(item_text, str):
+                    agent_messages.append(item_text)
         for key in ("text", "message", "result", "delta"):
             value = event.get(key)
             if isinstance(value, str):
@@ -510,8 +510,8 @@ def run_one(family: str, question_id: str, condition_name: str, prompt: str,
     run_dir = out_root / question_id / condition_name / family
     run_dir.mkdir(parents=True, exist_ok=True)
 
-    images = tuple(image.resolve() for image in images or [])
-    body = image_preface(family, images) + (
+    resolved_images = tuple(image.resolve() for image in images or [])
+    body = image_preface(family, resolved_images) + (
         (GUIDANCE_PREFIX + prompt) if condition["guidance"] else prompt)
     prompt_file = run_dir / "prompt.txt"
     prompt_file.write_text(body, encoding="utf-8")
@@ -522,12 +522,14 @@ def run_one(family: str, question_id: str, condition_name: str, prompt: str,
         resolved_model, model_source = resolve_codex_model(resolved_model)
     resolved_effort = effective_effort(family, resolved_model, effort or PARITY[family]["effort"])
     argv, last = BUILDERS[family](prompt_file, run_dir, cwd, condition,
-                                  resolved_model, resolved_effort, timeout, images=images)
+                                  resolved_model, resolved_effort, timeout, images=resolved_images)
 
     (run_dir / "argv.txt").write_text("\n".join(argv), encoding="utf-8")
 
     started = now()
     clock = datetime.datetime.now()
+    stdout: str | bytes
+    stderr: str | bytes
     try:
         completed = subprocess.run(
             argv,
@@ -545,7 +547,9 @@ def run_one(family: str, question_id: str, condition_name: str, prompt: str,
         timed_out = False
     except subprocess.TimeoutExpired as exc:
         stdout = exc.stdout or ""
-        stderr = (exc.stderr or "") + f"\nTIMEOUT after {timeout}s"
+        # exc.stderr can be raw bytes even under text=True; normalize before concatenating the
+        # str suffix below, rather than risking a bytes + str TypeError on this rare path.
+        stderr = as_text(exc.stderr) + f"\nTIMEOUT after {timeout}s"
         code = -1
         timed_out = True
     except OSError as exc:
@@ -587,7 +591,7 @@ def run_one(family: str, question_id: str, condition_name: str, prompt: str,
         "guidance_injected": condition["guidance"],
         "prompt_sha256": hashlib.sha256(body.encode("utf-8")).hexdigest(),
         "prompt_chars": len(body),
-        "images": [str(image) for image in images],
+        "images": [str(image) for image in resolved_images],
         "started": started,
         "duration_s": round(duration, 1),
         "exit_code": code,
