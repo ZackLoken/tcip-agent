@@ -189,7 +189,6 @@ def test_calibrate_count_operating_point_earns_a_validated_stamp(
         checkpoint_path="x.pt", trait="catkin", labels_dir=str(labels_dir),
         images_dir=str(tmp_path / "images"), dataset_root=str(dataset_root),
         pred_dir=str(pred_dir),
-        subject="catkin", attribute=None,
     )
 
     assert "error" not in result, result
@@ -230,7 +229,6 @@ def test_calibrate_count_operating_point_refuses_when_earned_conf_differs_from_p
         checkpoint_path="x.pt", trait="catkin", labels_dir=str(labels_dir),
         images_dir=str(tmp_path / "images"), dataset_root=str(dataset_root),
         pred_dir=str(pred_dir),
-        subject="catkin", attribute=None,
     )
 
     assert "error" in result
@@ -264,7 +262,6 @@ def test_calibrate_count_operating_point_folds_the_tile_floor_into_validated(mon
         checkpoint_path="x.pt", trait="catkin", labels_dir=str(labels_dir),
         images_dir=str(tmp_path / "images"), dataset_root=str(dataset_root),
         pred_dir=str(pred_dir),
-        subject="catkin", attribute=None,
     )
 
     assert "error" not in result, result
@@ -296,7 +293,6 @@ def test_calibrate_count_operating_point_writes_an_honest_unvalidated_stamp(monk
         checkpoint_path="x.pt", trait="catkin", labels_dir=str(labels_dir),
         images_dir=str(tmp_path / "images"), dataset_root=str(dataset_root),
         pred_dir=str(pred_dir),
-        subject="catkin", attribute=None,
     )
 
     assert "error" not in result, result
@@ -335,7 +331,6 @@ def test_calibrate_count_operating_point_does_not_write_trait_on_the_unvalidated
         checkpoint_path="x.pt", trait="catkin", labels_dir=str(labels_dir),
         images_dir=str(tmp_path / "images"), dataset_root=str(dataset_root),
         pred_dir=str(pred_dir),
-        subject="other-trait", attribute=None,
     )
 
     assert "error" not in result, result
@@ -357,7 +352,6 @@ def test_calibrate_count_operating_point_refuses_a_bucket_outside_dataset_root(t
         checkpoint_path="x.pt", trait="catkin", labels_dir=str(tmp_path / "labels"),
         images_dir=str(tmp_path / "images"), dataset_root=str(dataset_root),
         pred_dir=str(outside),
-        subject="catkin", attribute=None,
     )
 
     assert "error" in result
@@ -375,7 +369,6 @@ def test_calibrate_count_operating_point_refuses_a_bucket_with_no_stamp(tmp_path
         checkpoint_path="x.pt", trait="catkin", labels_dir=str(tmp_path / "labels"),
         images_dir=str(tmp_path / "images"), dataset_root=str(dataset_root),
         pred_dir=str(pred_dir),
-        subject="catkin", attribute=None,
     )
 
     assert "error" in result
@@ -409,7 +402,6 @@ def test_calibrate_count_operating_point_refuses_a_raster_bucket(tmp_path):
         checkpoint_path="x.pt", trait="catkin", labels_dir=str(tmp_path / "labels"),
         images_dir=str(tmp_path / "images"), dataset_root=str(dataset_root),
         pred_dir=str(pred_dir),
-        subject="catkin", attribute=None,
     )
 
     assert "error" in result
@@ -426,7 +418,6 @@ def test_calibrate_count_operating_point_refuses_a_bucket_with_no_prediction_doc
         checkpoint_path="x.pt", trait="catkin", labels_dir=str(tmp_path / "labels"),
         images_dir=str(tmp_path / "images"), dataset_root=str(dataset_root),
         pred_dir=str(pred_dir),
-        subject="catkin", attribute=None,
     )
 
     assert "error" in result
@@ -461,7 +452,6 @@ def test_calibrate_count_operating_point_refuses_an_already_validated_bucket(tmp
         checkpoint_path="x.pt", trait="catkin", labels_dir=str(tmp_path / "labels"),
         images_dir=str(tmp_path / "images"), dataset_root=str(dataset_root),
         pred_dir=str(pred_dir),
-        subject="catkin", attribute=None,
     )
 
     assert "error" in result
@@ -509,7 +499,6 @@ def test_calibrate_count_operating_point_treats_an_unbound_validated_claim_as_un
         checkpoint_path="x.pt", trait="catkin", labels_dir=str(labels_dir),
         images_dir=str(tmp_path / "images"), dataset_root=str(dataset_root),
         pred_dir=str(pred_dir),
-        subject="catkin", attribute=None,
     )
 
     assert "error" not in result, result
@@ -542,7 +531,6 @@ def test_calibrate_count_operating_point_refuses_a_checkpoint_mismatch_before_th
         checkpoint_path="x.pt", trait="catkin", labels_dir=str(tmp_path / "labels"),
         images_dir=str(tmp_path / "images"), dataset_root=str(dataset_root),
         pred_dir=str(pred_dir),
-        subject="catkin", attribute=None,
     )
 
     assert "error" in result
@@ -568,7 +556,6 @@ def test_calibrate_count_operating_point_refuses_a_stamp_with_no_checkpoint_sha2
         checkpoint_path="x.pt", trait="catkin", labels_dir=str(tmp_path / "labels"),
         images_dir=str(tmp_path / "images"), dataset_root=str(dataset_root),
         pred_dir=str(pred_dir),
-        subject="catkin", attribute=None,
     )
 
     assert "error" in result
@@ -620,7 +607,6 @@ def test_calibrate_count_operating_point_refuses_a_stamp_validated_mid_pass(monk
         checkpoint_path="x.pt", trait="catkin", labels_dir=str(labels_dir),
         images_dir=str(tmp_path / "images"), dataset_root=str(dataset_root),
         pred_dir=str(pred_dir),
-        subject="catkin", attribute=None,
     )
 
     assert "error" in result
@@ -667,6 +653,122 @@ def test_script_and_tool_call_the_same_count_calibration_function(monkeypatch, t
             checkpoint_path="x.pt", trait="catkin", labels_dir=str(tmp_path / "labels"),
             images_dir=str(tmp_path / "images"), dataset_root=str(dataset_root),
             pred_dir=str(pred_dir),
-            subject="catkin", attribute=None,
         )
     assert len(calls) == 2
+
+
+def _producer_bucket(tmp_path, *, subject="catkin", attribute=None):
+    """A stamped bucket built through the platform's own writers
+    (``write_predictions_json``, ``operating_point_stamp``, ``write_sidecar``), scoped to
+    ``(subject, attribute)``, for the scope-agreement tests below."""
+    from tcip_mcp.pipelines.postprocessing.export import write_predictions_json
+    from tcip_mcp.pipelines.resolution import (
+        ResolvedBundle, derived, operating_point_stamp, write_sidecar,
+    )
+
+    dataset_root = tmp_path / "dataset"
+    pred_dir = dataset_root / "predictions"
+    pred_dir.mkdir(parents=True)
+    id_map = {subject: 0}
+    result = {"image": "a.png", "width": 100, "height": 100,
+             "boxes": [[10.0, 10.0, 30.0, 30.0]], "scores": [0.9], "labels": [1]}
+    write_predictions_json(pred_dir / "a.json", result, created_by="test-producer",
+                           subject=subject, attribute=attribute, id_map=id_map)
+    op = ResolvedBundle(trait=subject, dataset_hash="H", params={
+        "conf": derived("conf", 0.3, requires_validation=True, validation_kind="annotations",
+                        derived_from="x", validated_against="false"),
+    }).to_provenance()["operating_point"]
+    stamp = operating_point_stamp(
+        op, validated=False, validated_by=None, tile_size_validated=None, shippable_issues=[],
+        id_map=id_map, trait=subject, dataset_hash="H", checkpoint="m",
+        checkpoint_sha256="stub-sha256", experiment_id=None,
+        images_dir=str(tmp_path / "images"), raster_path=None,
+        produced_at="2024-01-01T00:00:00Z", subject=subject, attribute=attribute,
+    )
+    write_sidecar(pred_dir, stamp)
+    return dataset_root, pred_dir
+
+
+def test_calibrate_count_operating_point_defaults_to_the_bucket_own_scope_when_neither_key_stated(
+    monkeypatch, tmp_path,
+):
+    """Ordinary detector calibration over a bucket a producer stamped states neither key: the
+    bucket's own recorded scope governs the pass rather than refusing over the tool's own
+    ``(None, None)`` defaults."""
+    import tcip_mcp.model_registry as model_registry_mod
+
+    from tcip_mcp.tools.calibration_tools import calibrate_count_operating_point
+    from tests._verified_checkpoint_fixtures import stub_verified_checkpoint
+
+    monkeypatch.setattr(model_registry_mod, "load_registered_checkpoint",
+                        lambda path, *a, **kw: stub_verified_checkpoint(str(path)))
+    dataset_root, pred_dir = _producer_bucket(tmp_path, subject="catkin", attribute=None)
+
+    calls: list[dict] = []
+
+    def _stub(**kwargs):
+        calls.append(kwargs)
+        raise RuntimeError("stub-count-calibration-called")
+
+    monkeypatch.setattr("tcip_mcp.pipelines.count_calibration.resolve_count_operating_point", _stub)
+
+    with pytest.raises(RuntimeError, match="stub-count-calibration-called"):
+        calibrate_count_operating_point(
+            checkpoint_path="x.pt", trait="catkin", labels_dir=str(tmp_path / "labels"),
+            images_dir=str(tmp_path / "images"), dataset_root=str(dataset_root),
+            pred_dir=str(pred_dir),
+        )
+
+    assert len(calls) == 1
+    assert calls[0]["subject"] == "catkin"
+    assert calls[0]["attribute"] is None
+
+
+def test_calibrate_count_operating_point_refuses_a_disagreeing_stated_pair(tmp_path):
+    """A caller that states a pair disagreeing with the bucket's own recorded scope refuses by
+    name, naming both pairs, rather than silently trusting the stated one."""
+    from tcip_mcp.tools.calibration_tools import calibrate_count_operating_point
+
+    dataset_root, pred_dir = _producer_bucket(tmp_path, subject="catkin", attribute=None)
+
+    result = calibrate_count_operating_point(
+        checkpoint_path="x.pt", trait="catkin", labels_dir=str(tmp_path / "labels"),
+        images_dir=str(tmp_path / "images"), dataset_root=str(dataset_root),
+        pred_dir=str(pred_dir), subject="other-subject", attribute=None,
+    )
+
+    assert "error" in result
+    assert "catkin" in result["error"]
+    assert "other-subject" in result["error"]
+
+
+def test_calibrate_count_operating_point_succeeds_when_stated_pair_matches_bucket_scope(
+    monkeypatch, tmp_path,
+):
+    """A caller that states the bucket's own scope explicitly is admitted exactly as one stating
+    neither key."""
+    import tcip_mcp.model_registry as model_registry_mod
+
+    from tcip_mcp.tools.calibration_tools import calibrate_count_operating_point
+    from tests._verified_checkpoint_fixtures import stub_verified_checkpoint
+
+    monkeypatch.setattr(model_registry_mod, "load_registered_checkpoint",
+                        lambda path, *a, **kw: stub_verified_checkpoint(str(path)))
+    dataset_root, pred_dir = _producer_bucket(tmp_path, subject="catkin", attribute=None)
+
+    calls: list[dict] = []
+
+    def _stub(**kwargs):
+        calls.append(kwargs)
+        raise RuntimeError("stub-count-calibration-called")
+
+    monkeypatch.setattr("tcip_mcp.pipelines.count_calibration.resolve_count_operating_point", _stub)
+
+    with pytest.raises(RuntimeError, match="stub-count-calibration-called"):
+        calibrate_count_operating_point(
+            checkpoint_path="x.pt", trait="catkin", labels_dir=str(tmp_path / "labels"),
+            images_dir=str(tmp_path / "images"), dataset_root=str(dataset_root),
+            pred_dir=str(pred_dir), subject="catkin", attribute=None,
+        )
+
+    assert len(calls) == 1
