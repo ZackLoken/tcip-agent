@@ -42,9 +42,10 @@ missing or when ``--plan`` is given alongside it; a person's identity is normali
 
 Exit codes: 0 when every named root was planned or cleared; 2 when a root was refused (no
 ``.tcip`` directory, ``--plan`` given with ``--apply``, missing ``--by``/``--reason``, a
-``StoreError`` from the seam itself such as a busy lock or a mis-bound backend, or a failed
-closing audit append naming ``AuditEntryNotWritten``). Every root named on the command line is
-still processed, even after another root's refusal.
+``StoreError`` from the seam itself such as a busy lock or a mis-bound backend, an ``OSError``
+from the file backend's own unlink or marker replace, or a failed closing audit append naming
+``AuditEntryNotWritten``). Every root named on the command line is still processed, whether it is
+being planned or cleared, even after another root's refusal.
 """
 
 from __future__ import annotations
@@ -163,6 +164,23 @@ def clear_root(root: Path, *, by: str, reason: str) -> list[str]:
     return outcomes
 
 
+def _root_outcomes(root: Path, *, apply: bool, by: str, reason: str) -> tuple[list[str] | None, bool]:
+    """One root's outcome lines, or ``(None, True)`` once a refusal is printed: the identical
+    refusal handling for ``--plan`` and ``--apply``, so a root that fails while being planned
+    (a sqlite conform-rail refusal, a ``StoreBusy`` from the file backend's own locked
+    ``read_log``) is reported and skipped exactly like one that fails while being cleared,
+    never a traceback that stops every root named after it. ``OSError`` is named here too: the
+    file backend's own unlink or marker replace inside a clear can raise one that neither
+    ``AuditEntryNotWritten`` nor ``ts.StoreError`` would catch.
+    """
+    try:
+        outcomes = clear_root(root, by=by, reason=reason) if apply else plan_root(root)
+    except (AuditEntryNotWritten, ts.StoreError, OSError) as exc:
+        print(f"{root}: refused, {type(exc).__name__}: {exc}")
+        return None, True
+    return outcomes, False
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(
         description=f"{__doc__.splitlines()[0]} {_DATABASE_EXPORT_NOTE}"
@@ -201,15 +219,11 @@ def main() -> int:
             print(f"{root}: refused, no .tcip directory found; not a project root")
             refused_any = True
             continue
-        if args.apply:
-            try:
-                outcomes = clear_root(root, by=by, reason=reason)
-            except (AuditEntryNotWritten, ts.StoreError) as exc:
-                print(f"{root}: refused, {type(exc).__name__}: {exc}")
-                refused_any = True
-                continue
-        else:
-            outcomes = plan_root(root)
+        outcomes, refused = _root_outcomes(root, apply=args.apply, by=by, reason=reason)
+        if refused:
+            refused_any = True
+            continue
+        assert outcomes is not None
         for line in outcomes:
             print(f"{root}: {line}")
 
