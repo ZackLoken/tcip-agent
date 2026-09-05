@@ -5,6 +5,7 @@ import { metaApi, type FrictionReport, type Retrospective } from "@/api/meta";
 import { sessionsApi, type SessionEntry } from "@/api/sessions";
 import { CollapsibleSection } from "@/components/CollapsibleSection";
 import { TabHeading } from "@/components/TabHeading";
+import { UNSET_GLYPH } from "@/lib/glyphs";
 import { useStore } from "@/store";
 
 // Sized to this panel's own typography rather than the markdown renderer's defaults, and links
@@ -122,7 +123,7 @@ export function MetaTab() {
               >
                 <div className="flex items-center gap-2 text-[11px] text-tcip-muted">
                   <span className="tcip-badge bg-tcip-border/60 text-tcip-fg">
-                    {r.category || "—"}
+                    {r.category || UNSET_GLYPH}
                   </span>
                   <span className="font-mono">{r.timestamp ?? r.file}</span>
                 </div>
@@ -195,7 +196,7 @@ export function MetaTab() {
                   className="border-t border-tcip-border first:border-t-0"
                 >
                   <td className="py-1.5 pr-3 font-mono">{s.started}</td>
-                  <td className="pr-3">{s.user || "—"}</td>
+                  <td className="pr-3">{s.user || UNSET_GLYPH}</td>
                   <td className="pr-3 tabular-nums">{s.images_annotated}</td>
                   <td className="pr-3 tabular-nums">{s.total_annotations}</td>
                   <td
@@ -205,7 +206,9 @@ export function MetaTab() {
                     {fmtDuration(s.total_time_seconds)}
                   </td>
                   <td className="pr-3 tabular-nums">
-                    {s.avg_seconds_per_annotation ? `${s.avg_seconds_per_annotation}s` : "—"}
+                    {s.avg_seconds_per_annotation
+                      ? `${s.avg_seconds_per_annotation}s`
+                      : UNSET_GLYPH}
                   </td>
                 </tr>
               ))}
