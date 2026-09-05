@@ -934,3 +934,66 @@ def test_bucket_regime_delivers_validated_after_the_stamp_is_promoted(tmp_path):
     pointer = bound["validated_by"]
     rows = list(csv.DictReader((tmp_path / "after.csv").open()))
     assert rows[0]["validation_record"] == f"{pointer['experiment_id']}:{pointer['record_digest']}"
+
+
+def test_the_live_regimes_export_detection_csv_stamp_scope_unstated_becomes_the_tools_own_error(
+    tmp_path, monkeypatch,
+):
+    """A no-pair stamp survives no live publish (``operating_point_stamp`` requires the pair with
+    no default), so this call site's own conversion has no naturally reachable shape to test
+    through: ``export_detection_csv`` is monkeypatched directly to raise ``StampScopeUnstated``,
+    pinning that this ``{"error": ...}`` conversion names the conform script rather than
+    surfacing the seam's own error bare."""
+    import tcip_mcp.tools.inference_tools as itools
+    from tcip_mcp.pipelines.resolution import StampScopeUnstated
+
+    monkeypatch.setattr(itools, "_run_inference_verified",
+                        lambda *a, **kw: _unvalidated_run_result())
+
+    def _raise(*a, **kw):
+        raise StampScopeUnstated(
+            "bucket: operating_point.json carries no subject/attribute pair. Run "
+            "scripts/conform_classified_predictions.py over this bucket before reading its scope."
+        )
+
+    monkeypatch.setattr(itools, "export_detection_csv", _raise)
+
+    bucket = tmp_path / "ds" / "predictions" / "baseline" / "2026-01-01"
+    r = itools.deliver_per_image_counts(_dummy_checkpoint(tmp_path), str(tmp_path),
+                               str(tmp_path / "o.csv"), trait=fx.COUNT_TRAIT,
+                               predictions_dir=str(bucket))
+
+    assert "error" in r
+    assert "scripts/conform_classified_predictions.py" in r["error"]
+
+
+def test_per_image_counts_from_bucket_converts_export_detection_csvs_stamp_scope_unstated(
+    tmp_path, monkeypatch,
+):
+    """The bucket regime's own core converts the same raise into ``CountDeliveryRefused``: the
+    door's pre-check already refuses a no-pair stamp before this call site is ever reached, so
+    ``export_detection_csv`` is monkeypatched directly to pin the conversion itself."""
+    import tcip_mcp.tools.inference_tools as itools
+    from tcip_mcp.pipelines.resolution import CountDeliveryRefused, StampScopeUnstated
+
+    dataset_root = tmp_path / "ds"
+    bucket = dataset_root / "predictions" / "baseline" / "2026-01-01"
+    _write_real_prediction(bucket, "a")
+    stamp = {"subject": fx.COUNT_SUBJECT, "attribute": None, "validated": True,
+             "trait": fx.COUNT_TRAIT, "images_dir": str(tmp_path), "raster_path": None,
+             "operating_point": {"conf": {"value": 0.5, "validated_against": VALIDATED_HELD_OUT}}}
+    write_bound_sidecar(bucket, stamp, dataset_root=dataset_root)
+
+    def _raise(*a, **kw):
+        raise StampScopeUnstated(
+            f"{bucket}: operating_point.json carries no subject/attribute pair. Run "
+            "scripts/conform_classified_predictions.py over this bucket before reading its scope."
+        )
+
+    monkeypatch.setattr(itools, "export_detection_csv", _raise)
+
+    with pytest.raises(CountDeliveryRefused) as excinfo:
+        itools.per_image_counts_from_bucket(
+            str(bucket), str(tmp_path / "o.csv"), trait=fx.COUNT_TRAIT)
+
+    assert "scripts/conform_classified_predictions.py" in str(excinfo.value)
