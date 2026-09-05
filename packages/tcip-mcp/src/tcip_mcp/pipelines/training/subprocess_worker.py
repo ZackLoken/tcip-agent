@@ -200,7 +200,13 @@ def run(run_id: str, experiment_id: str, output_dir: str, resume_from: str) -> N
             from tcip_mcp.audit import record_event
             from tcip_mcp.experiments import update_status
 
-            update_status(experiment_id, "failed", error=str(exc))
+            try:
+                # A terminal record's own refusal-append can raise AuditEntryNotWritten here;
+                # that must not stop the training_run event below from being written.
+                update_status(experiment_id, "failed", error=str(exc))
+            except Exception:
+                logger.warning("could not mark run %s failed after its own setup crash",
+                               run_id, exc_info=True)
             record_event("training_run", {"run_id": run_id, "experiment_id": experiment_id},
                         status="failed")
         except Exception:

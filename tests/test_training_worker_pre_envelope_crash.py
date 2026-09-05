@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pytest
 import tcip_store as ts
+from tcip_mcp import audit as audit_module
 from tcip_mcp import experiments as exp
 from tcip_mcp.audit import audit_log_key
 from tcip_mcp.pipelines.data import split_construction as sc
@@ -106,3 +107,46 @@ def test_a_terminal_lock_refusal_reaching_run_is_left_to_its_own_audit_line(tmp_
 
     assert len(_refusal_events(tmp_path)) == 1
     assert _training_run_events(tmp_path) == []  # the crash-audit branch never ran
+
+
+def test_a_terminal_records_refusal_append_failure_still_gets_a_training_run_event(
+    tmp_path, monkeypatch,
+):
+    """A pre-envelope crash landing on a record already terminal in a different state
+    (``completed``) makes update_status refuse the ``failed`` transition and try to audit that
+    refusal; when the refusal's own append raises AuditEntryNotWritten, the training_run event
+    for the crash itself must still be written. A record already ``failed`` would not exercise
+    this: update_status's repeat-of-current-state branch never calls refuse_if_terminal at all."""
+    eid = "exp-worker-refusal-append-fails"
+    out = tmp_path / "run"
+    out.mkdir()
+    config = _write_launch_config(tmp_path, out)
+    exp.create_experiment(eid, config)
+    exp.update_status(eid, "running")
+    exp.update_status(eid, "completed")
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError("dataset build exploded again")
+
+    def _broken_record_event_or_raise(tool, arguments=None, **kwargs):
+        raise audit_module.AuditEntryNotWritten(tool, RuntimeError("audit log unwritable"))
+
+    monkeypatch.setattr(audit_module, "record_event_or_raise", _broken_record_event_or_raise)
+
+    original_ref = sc.auto_train_val
+    sc.auto_train_val = _boom
+    try:
+        with pytest.raises(RuntimeError, match="dataset build exploded again"):
+            worker.run("run-worker-refusal-append-fails", eid, str(out), "")
+    finally:
+        sc.auto_train_val = original_ref
+
+    status = ts.read(exp.status_key(eid, root=tmp_path))
+    assert status["state"] == "completed"  # the refused failed-transition never wrote
+
+    assert _refusal_events(tmp_path) == []  # the refusal's own append is what failed
+    events = _training_run_events(tmp_path)
+    assert len(events) == 1
+    assert events[0]["status"] == "failed"
+    assert events[0]["arguments"]["experiment_id"] == eid
+    assert events[0]["arguments"]["run_id"] == "run-worker-refusal-append-fails"
