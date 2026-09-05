@@ -239,10 +239,12 @@ def with_supersessions(
     Results tab's panel route, and ``read_audit_log``) composes through, so the two can never
     disagree about which record answers for which event.
     """
-    return [
-        {**event, "superseded": supersessions.get(event.get("event_id"))}
-        for event in events
-    ]
+    def _superseded(event: dict) -> dict | None:
+        event_id = event.get("event_id")
+        assert isinstance(event_id, str), "delivery event record is missing its own event_id"
+        return supersessions.get(event_id)
+
+    return [{**event, "superseded": _superseded(event)} for event in events]
 
 
 def validation_error_detail(exc: ValidationError) -> str:
