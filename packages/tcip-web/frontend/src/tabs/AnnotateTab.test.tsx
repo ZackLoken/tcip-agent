@@ -608,6 +608,100 @@ describe("AnnotateTab AttributePanel", () => {
   });
 });
 
+describe("AnnotateTab AttributePanel authoring", () => {
+  async function openPanelOnASelectedBox() {
+    useStore.getState().setRegistry({ subject_a: {} });
+    render(<AnnotateTab />);
+    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
+    await flush();
+    act(addBox);
+    fireEvent.mouseDown(screen.getByTestId("canvas-stage"), { clientX: 30, clientY: 30 });
+  }
+
+  async function declareAttribute() {
+    fireEvent.click(screen.getByRole("button", { name: "+ Attribute" }));
+    fireEvent.change(screen.getByPlaceholderText("attribute name"), {
+      target: { value: "size" },
+    });
+    fireEvent.change(screen.getByPlaceholderText(/one value per line/), {
+      target: { value: "small\nlarge" },
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Add" }));
+    });
+  }
+
+  it("posts the grown registry through classesApi.save with the loaded version and installs it", async () => {
+    await openPanelOnASelectedBox();
+    const saveSpy = vi.spyOn(classesApi, "save").mockResolvedValue({
+      status: "ok",
+      n_subjects: 1,
+      classes_path: "C:/data/classes.json",
+      version: "v2",
+      schema_change_sweep: { newly_stamped: {}, warning: null },
+    });
+
+    await declareAttribute();
+
+    expect(saveSpy).toHaveBeenCalledTimes(1);
+    expect(saveSpy.mock.calls[0][1]).toEqual({
+      subject_a: { attributes: { size: { type: "categorical", values: ["small", "large"] } } },
+    });
+    expect(saveSpy.mock.calls[0][4]).toBeNull(); // no version was ever loaded in this test
+    expect(useStore.getState().registry.version).toBe("v2");
+    expect(useStore.getState().registry.subjects.subject_a.attributes?.size.values).toEqual([
+      "small",
+      "large",
+    ]);
+  });
+
+  it("reloads the registry from the server when the save is refused, same as the subject add", async () => {
+    await openPanelOnASelectedBox();
+    vi.spyOn(classesApi, "save").mockRejectedValue(new Error("409 stale version"));
+    vi.spyOn(classesApi, "load").mockResolvedValue({
+      subjects: { subject_a: {} },
+      version: "v3",
+      unreadable: [],
+    });
+
+    await declareAttribute();
+
+    expect(useStore.getState().registry.subjects).toEqual({ subject_a: {} });
+    expect(useStore.getState().registry.version).toBe("v3");
+  });
+
+  it("toasts the schema_change_sweep the save response carries, naming the subject and count", async () => {
+    await openPanelOnASelectedBox();
+    vi.spyOn(classesApi, "save").mockResolvedValue({
+      status: "ok",
+      n_subjects: 1,
+      classes_path: "C:/data/classes.json",
+      version: "v2",
+      schema_change_sweep: { newly_stamped: { subject_a: 4 }, warning: null },
+    });
+
+    await declareAttribute();
+
+    expect(useStore.getState().toasts.at(-1)?.message).toMatch(/4 of subject_a's confirmations/);
+  });
+
+  it("counts the active subject's shapes carrying no value for each declared attribute", async () => {
+    await openPanelOnASelectedBox();
+    vi.spyOn(classesApi, "save").mockResolvedValue({
+      status: "ok",
+      n_subjects: 1,
+      classes_path: "C:/data/classes.json",
+      version: "v2",
+      schema_change_sweep: { newly_stamped: {}, warning: null },
+    });
+
+    await declareAttribute();
+
+    // The one drawn box carries no value for the attribute just declared.
+    expect(screen.getByText("1 of 1 subject_a shapes carry no size value.")).toBeInTheDocument();
+  });
+});
+
 describe("AnnotateTab ioError banner", () => {
   it("can be dismissed manually, independent of the conditional Reload button", async () => {
     render(<AnnotateTab />);
