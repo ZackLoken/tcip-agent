@@ -286,17 +286,21 @@ def _worker(job: InferenceJob) -> None:
 
         identity = resolve_model_identity(checkpoint)
 
-        # This run's name->id map: the same resolver the MCP door's run_inference calls
-        # (tcip_mcp.tools.inference_tools.resolve_decode_id_map): prefers the training run's own
-        # recorded map, falling back to the inference dataset's live registry, never a second
-        # implementation. Without this, every GUI-produced bucket decodes to raw index-string
-        # subjects and permanently fails the coverage/classifier-validity mechanism.
-        from tcip_mcp.tools.inference_tools import resolve_decode_id_map
+        # This run's name->id map and scope: the same resolvers run_inference calls, never a
+        # second implementation; a registry read failing for a real reason fails the job outright.
+        from tcip_mcp.tools.inference_tools import (
+            resolve_decode_id_map, run_scope, unmapped_classified_run,
+        )
 
-        try:
-            id_map = resolve_decode_id_map(predictor, job.images_dir)
-        except Exception:  # noqa: BLE001 (no run scope for the map; predictions decode by raw id)
-            id_map = None
+        subject, attribute = run_scope(predictor)
+        id_map = resolve_decode_id_map(predictor, job.images_dir)
+        # A classified run resolving no map fails with the composed remedy, never a silent decode.
+        classified_refusal = unmapped_classified_run(
+            {"subject": subject, "attribute": attribute}, id_map, images_dir=job.images_dir)
+        if classified_refusal is not None:
+            job.status = "failed"
+            job.error = classified_refusal
+            return
 
         from tcip_mcp.pipelines import image_utils
         from tcip_mcp.pipelines.resolution import (
@@ -313,6 +317,8 @@ def _worker(job: InferenceJob) -> None:
             tile_size_validated=gate.stamp.get("tile_size"),
             shippable_issues=op_bundle.shippable_issues(),
             id_map=id_map,
+            subject=subject,
+            attribute=attribute,
             trait=None,
             dataset_hash=op_bundle.dataset_hash,
             checkpoint=Path(job.checkpoint_path).stem,
@@ -344,17 +350,28 @@ def _worker(job: InferenceJob) -> None:
                 postprocess=job.postprocess,
                 tile_resize=tile_resize,
             )
+            if attribute is not None:
+                from tcip_mcp.pipelines.postprocessing.export import unmapped_label_ids
+
+                unmapped = unmapped_label_ids(results, id_map)
+                if unmapped:
+                    job.status = "failed"
+                    job.error = (
+                        f"{img.stem}: this classified run decoded to id(s) {unmapped}, not keys "
+                        f"of its recorded id_map ({sorted((id_map or {}).values())})."
+                    )
+                    break
             job.dropped_boxes += write_predictions_json(
                 output_dir / f"{img.stem}.json", results[0],
                 created_by=prediction_producer(job.checkpoint_path, identity["sha256"]),
-                id_map=id_map)
+                id_map=id_map, subject=subject, attribute=attribute)
             job.done += 1
 
-        # Last, never beside where it is built: a stamp certifies the prediction files it sits with,
-        # so a pass that dies partway leaves a bucket no reader can mistake for a certified one.
-        write_sidecar(output_dir, provenance)
-
-        job.status = "cancelled" if job.cancel_event.is_set() else "completed"
+        if job.status != "failed":
+            # Last, never beside where it is built: a stamp certifies the prediction files it
+            # sits with, so a partway-dead pass leaves a bucket no reader mistakes for certified.
+            write_sidecar(output_dir, provenance)
+            job.status = "cancelled" if job.cancel_event.is_set() else "completed"
     except Exception as exc:
         logger.exception("inference job %s failed", job.job_id)
         job.status = "failed"

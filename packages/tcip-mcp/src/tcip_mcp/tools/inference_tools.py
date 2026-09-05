@@ -17,6 +17,7 @@ from tcip_mcp.pipelines.postprocessing.export import (
     export_detection_csv,
     mask_binarize_provenance,
     positive_detections,
+    unmapped_label_ids,
     write_predictions_json,
 )
 from tcip_mcp.pipelines.resolution import (
@@ -159,6 +160,74 @@ def _recorded_training_id_map(predictor) -> dict | None:
     return None
 
 
+def run_scope(predictor) -> tuple[str | None, str | None]:
+    """A run's own recorded ``(subject, attribute)``, the same pair the training run stamps onto
+    its experiment config and every publishing door stamps onto the bucket's own
+    ``operating_point.json``.
+
+    Refuses by name a run that declares an attribute with no subject: a value with no object class
+    names nothing a reader could hold predictions to. Every door that publishes a bucket or reads a
+    checkpoint's scope calls this one function rather than re-reading ``config["data"]`` on its own.
+    """
+    data_cfg = (getattr(predictor, "config", {}) or {}).get("data") or {}
+    subject, attribute = data_cfg.get("subject"), data_cfg.get("attribute")
+    if attribute is not None and subject is None:
+        raise ValueError(
+            f"{getattr(predictor, 'path', predictor)!r} declares attribute {attribute!r} with no "
+            "subject: a value with no object class names nothing a reader could hold predictions "
+            "to. Retrain with data.subject stated beside data.attribute."
+        )
+    return subject, attribute
+
+
+def unmapped_classified_run(
+    data_cfg: dict, id_map: dict | None, *, images_dir: str | None,
+) -> str | None:
+    """The composed refusal for a run that declared an attribute and resolved no ``id_map`` to
+    decode predictions with, or ``None`` when there is nothing to refuse (a mapped run, or a run
+    with no attribute at all).
+
+    The remedy names the run's own shape, decided by :func:`~tcip_mcp.pipelines.data.label_queries.
+    targets_registry_derived`: a registry-derived run with an ``images_dir`` whose dataset holds
+    no ``classes.json`` is told to run ``write_class_map`` for that dataset; a registry-derived run
+    called with no ``images_dir`` at all (an ``image_paths``-only call) is told to pass one, since
+    no dataset can otherwise be named to decode it against; any other run (a bespoke
+    ``dataset_source``, a COCO-sourced run, or one with no registry to derive from) is told to
+    state ``data.id_map`` in its launch config beside ``data.subject``/``data.attribute`` and
+    retrain, the one route onto a bespoke run's checkpoint. The raster regime, which has no
+    ``images_dir`` concept at all, always calls this with ``images_dir=None``; a raster run's own
+    targets are never registry-derived, so its message always resolves to the retrain remedy.
+    """
+    if id_map is not None:
+        return None
+    attribute = data_cfg.get("attribute")
+    if attribute is None:
+        return None
+    subject = data_cfg.get("subject")
+    from tcip_mcp.pipelines.data.label_queries import targets_registry_derived
+
+    if targets_registry_derived(data_cfg):
+        if images_dir is None:
+            return (
+                f"this run decoded along attribute {attribute!r} of subject {subject!r} from a "
+                "registry-derived dataset, but no images_dir was given to read the decoding "
+                "dataset's classes.json from. Pass images_dir naming the dataset whose "
+                "classes.json decodes this run."
+            )
+        return (
+            f"this run decoded along attribute {attribute!r} of subject {subject!r} from a "
+            f"registry-derived dataset, but {images_dir!r} holds no classes.json to decode it "
+            "with. Run write_class_map for that dataset, then retry."
+        )
+    return (
+        f"this run decoded along attribute {attribute!r} of subject {subject!r}, but its launch "
+        "config recorded no id_map to decode predictions with. State data.id_map in the launch "
+        "config beside data.subject and data.attribute and retrain: the launch config is the one "
+        "producer of a map on a bespoke run's checkpoint, and re-registering the model does not "
+        "add one, since the predictor never reads the registry entry's own config."
+    )
+
+
 def resolve_decode_id_map(predictor, images_dir: str | None, *,
                           scope: tuple[str | None, str | None] | None = None) -> dict | None:
     """This run's name->id map for recording + decoding predictions.
@@ -192,29 +261,14 @@ def resolve_decode_id_map(predictor, images_dir: str | None, *,
     recorded = _recorded_training_id_map(predictor)
     if recorded is not None:
         return recorded
-    data_cfg = (getattr(predictor, "config", {}) or {}).get("data") or {}
-    subject, attribute = scope if scope is not None else (
-        data_cfg.get("subject"), data_cfg.get("attribute"))
+    subject, attribute = scope if scope is not None else run_scope(predictor)
     if not (subject and images_dir):
         return None
 
     from tcip_mcp.pipelines.data.label_queries import resolve_registry_id_map, resolved_classes_path
 
-    # Precondition check, not a broad except: attribute-scoped decode with no classes.json for
-    # this dataset is a legitimate, honest degraded case write_predictions_json already
-    # documents and accepts ("the raw 0-indexed id is used as the name... never a
-    # re-derivation"), id_map stays None rather than crashing on already-completed, valid
-    # prediction work. Reuses resolved_classes_path, the same "does a registry exist" check
-    # resolve_registry_id_map's own refusal is built on, not a second independent re-derivation
-    # of that fact.
-    # A registry that is present but fails to read/resolve for a real reason (corrupted file, an
-    # id-space mismatch) still propagates loudly, this precondition only short-circuits the one
-    # case that's supposed to degrade honestly, the same case resolve_registry_id_map's own
-    # attribute-without-registry ValueError names. Not the same shape as model_build.py's
-    # resolve_contract_dims precondition (that one gates on subject alone and lets the
-    # attribute-without-registry refusal reach the caller); this site's downstream consumer has
-    # its own documented accepted-degradation contract that resolve_contract_dims's caller does
-    # not.
+    # Precondition, not a broad except: an attribute-scoped run with no classes.json here returns
+    # None so unmapped_classified_run composes the write_class_map remedy, rather than crashing.
     if attribute is not None and resolved_classes_path(images_dir) is None:
         return None
     _reg, id_map = resolve_registry_id_map(images_dir, subject, attribute)
@@ -772,6 +826,15 @@ def _run_inference_verified(
         logical = list_logical_images(images_dir)
         image_paths = [logical[stem] for stem in sorted(logical)]
 
+    # A classified run with no id_map cannot decode its own predictions: refuse before either
+    # pass runs, so no calibration evidence is spent on a run that would refuse at the write.
+    _subject, _attribute = run_scope(predictor)
+    _door_id_map = resolve_decode_id_map(predictor, images_dir)
+    _refusal = unmapped_classified_run(
+        {"subject": _subject, "attribute": _attribute}, _door_id_map, images_dir=images_dir)
+    if _refusal is not None:
+        return {"error": _refusal}
+
     # Resolve the confidence operating point: with a trait + labeled calibration dir, derive it
     # per dataset (count-unbiased + held-out validated); otherwise the byte-identical raw path.
     extra: dict = {}
@@ -957,11 +1020,8 @@ def _run_inference_verified(
     # downstream deliverable can name the exact checkpoint (content hash) + run behind the count.
     from datetime import datetime, timezone
 
-    # This run's name→id map, reused for both recording and decode, so export records it in
-    # operating_point.json and decodes predictions to names through this one map, consistent
-    # within the run. The one resolution both writers that persist predictions to disk use (this tool
-    # and the web GUI's own inference worker, routes/inference.py), never a second implementation.
-    id_map = resolve_decode_id_map(predictor, images_dir)
+    # This run's name->id map, resolved once above (ahead of calibration) and reused for decode.
+    id_map = _door_id_map
     out = {
         "checkpoint": checkpoint.path,
         "checkpoint_sha256": identity["sha256"],
@@ -978,6 +1038,8 @@ def _run_inference_verified(
         "overlap_source": overlap_source,
         "operating_point": op_bundle.to_provenance()["operating_point"],
         "id_map": id_map,
+        "subject": _subject,
+        "attribute": _attribute,
         "results": results,
         **extra,
     }
@@ -1214,6 +1276,15 @@ def _publish_image_predictions(out: Path, result: dict, *, checkpoint_path: str,
     sha = result.get("checkpoint_sha256")
     producer = prediction_producer(checkpoint_path, sha)
     id_map = result.get("id_map")
+    subject, attribute = result.get("subject"), result.get("attribute")
+    if attribute is not None:
+        unmapped = unmapped_label_ids(result["results"], id_map)
+        if unmapped:
+            raise ValueError(
+                f"{out}: this classified run decoded to id(s) {unmapped}, not keys of its "
+                f"recorded id_map ({sorted((id_map or {}).values())}); refusing before any "
+                "document is written."
+            )
     has_masks = False
     dropped = 0
     for r in result["results"]:
@@ -1221,7 +1292,8 @@ def _publish_image_predictions(out: Path, result: dict, *, checkpoint_path: str,
         # Read before the write: a drop can empty a mask list that was genuinely there, and
         # has_masks must reflect what this run used, not what happened to survive the drop.
         has_masks = has_masks or bool(r.get("masks"))
-        dropped += write_predictions_json(out_json, r, created_by=producer, id_map=id_map)
+        dropped += write_predictions_json(
+            out_json, r, created_by=producer, id_map=id_map, subject=subject, attribute=attribute)
         written.append(str(out_json))
 
     image_filenames = {Path(r["image"]).stem: Path(r["image"]).name for r in result["results"]}
@@ -1232,6 +1304,8 @@ def _publish_image_predictions(out: Path, result: dict, *, checkpoint_path: str,
         tile_size_validated=tile_size_validated,
         shippable_issues=result.get("shippable_issues", []),
         id_map=id_map,
+        subject=subject,
+        attribute=attribute,
         trait=trait,
         dataset_hash=result.get("dataset_hash"),
         checkpoint=Path(checkpoint_path).stem,
@@ -1511,6 +1585,15 @@ def _export_predictions_raster(
         frozen = pointer_frozen(identity["experiment_id"], "lineage", "predictions", str(out))
         if frozen is not None:
             return {"error": frozen}
+
+    # No images_dir for a raster source; resolved ahead of the pass (never after it) so a
+    # classified run with no id_map refuses before the expensive tiled pass runs.
+    raster_subject, raster_attribute = run_scope(predictor)
+    id_map = resolve_decode_id_map(predictor, None)
+    raster_refusal = unmapped_classified_run(
+        {"subject": raster_subject, "attribute": raster_attribute}, id_map, images_dir=None)
+    if raster_refusal is not None:
+        return {"error": raster_refusal}
 
     # Resolved (resize included) before the raster is opened: an unreadable recorded augmentation
     # config, or a stated edge contradicting the checkpoint, refuses here, not mid-pass.
@@ -1815,20 +1898,25 @@ def _export_predictions_raster(
             progress=_record_raster_pass_batch if record_progress else None,
         )
 
-    # No images_dir for a raster source: a foreign checkpoint with no recorded id_map decodes to
-    # the raw 0-indexed id as its name, the same honest degraded fallback documented elsewhere.
-    id_map = resolve_decode_id_map(predictor, None)
-
     from datetime import datetime, timezone
 
     out.mkdir(parents=True, exist_ok=True)
     sha = identity["sha256"]
     producer = prediction_producer(checkpoint.path, sha)
     pred_path = out / f"{Path(raster_path).stem}.json"
+    if raster_attribute is not None:
+        unmapped = unmapped_label_ids([result], id_map)
+        if unmapped:
+            raise ValueError(
+                f"{pred_path}: this classified run decoded to id(s) {unmapped}, not keys of its "
+                f"recorded id_map ({sorted((id_map or {}).values())}); refusing before writing."
+            )
     # Read before the write: a drop can empty a mask list that was genuinely there, and has_masks
     # must reflect what this run used, not what happened to survive the drop.
     has_masks = bool(result.get("masks"))
-    dropped_boxes = write_predictions_json(pred_path, result, created_by=producer, id_map=id_map)
+    dropped_boxes = write_predictions_json(
+        pred_path, result, created_by=producer, id_map=id_map,
+        subject=raster_subject, attribute=raster_attribute)
 
     produced_at = datetime.now(timezone.utc).isoformat()
     op_stamp = operating_point_stamp(
@@ -1838,6 +1926,8 @@ def _export_predictions_raster(
         tile_size_validated=tile_size_validated,
         shippable_issues=bundle_shippable_issues,
         id_map=id_map,
+        subject=raster_subject,
+        attribute=raster_attribute,
         trait=trait or None,
         dataset_hash=bundle_dataset_hash,
         checkpoint=Path(checkpoint.path).stem,
@@ -2415,9 +2505,11 @@ def per_image_counts_from_bucket(
         resolve_trait_and_record,
     )
     from tcip_mcp.pipelines.resolution import (
-        VALIDATED_FALSE, CountDeliveryRefused, read_operating_point_sidecar, stamp_names_raster,
+        VALIDATED_FALSE, CountDeliveryRefused, StampScopeUnstated, bucket_scope,
+        read_operating_point_sidecar, stamp_names_raster,
     )
     from tcip_mcp.traits import TraitUnknownError
+    from tcip_store import StoreError
 
     try:
         spec, record, _specs_dir = resolve_trait_and_record(
@@ -2438,6 +2530,12 @@ def per_image_counts_from_bucket(
             "a stamp a platform producer wrote (run_inference, deliver_per_image_counts's own "
             "live-with-predictions_dir path, or the web inference worker), never a directory of "
             "label JSON with no stamp.")
+    try:
+        bucket_scope(bucket_path)
+    except StampScopeUnstated as exc:
+        raise CountDeliveryRefused(str(exc)) from exc
+    except StoreError as exc:
+        raise CountDeliveryRefused(str(exc)) from exc
     if stamp_names_raster(sidecar):
         raise CountDeliveryRefused(
             f"{bucket_path} is a whole-raster bucket (its stamp records raster_path): one mosaic "
