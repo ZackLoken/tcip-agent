@@ -539,7 +539,11 @@ def calibrate_count_operating_point(
             sit beneath; the labels' dataset root, or ``labels_dir`` itself when the layout
             places it under none.
         pred_dir: The already-published prediction bucket this claim covers.
-        subject / attribute: Scope the labeled reference to one object class / assessed attribute.
+        subject / attribute: The object class / assessed attribute the labeled reference is
+            scoped to; when ``pred_dir``'s stamp already records a scope, an omitted pair takes
+            the bucket's own recorded scope and a stated pair must equal it, refusing by name
+            otherwise, since evidence earned under one scope is never merged into a bucket
+            stamped for another.
         experiment_id: The checkpoint's own training-run id, if known, gates train-disjointness;
             ``None`` (a foreign/unregistered checkpoint) skips that check.
         group_by / group_key_map: The locked cal/holdout split's grouping policy; only the first
@@ -582,7 +586,10 @@ def calibrate_count_operating_point(
         existing_scope = bucket_scope(bucket)
     except (StampScopeUnstated, StoreError) as exc:
         return {"error": str(exc)}
-    if existing_scope is not None and (existing_scope.subject, existing_scope.attribute) != (
+    if subject is None and attribute is None:
+        if existing_scope is not None:
+            subject, attribute = existing_scope.subject, existing_scope.attribute
+    elif existing_scope is not None and (existing_scope.subject, existing_scope.attribute) != (
             subject, attribute):
         return {"error": (
             f"{bucket}'s stamp records scope (subject={existing_scope.subject!r}, "
