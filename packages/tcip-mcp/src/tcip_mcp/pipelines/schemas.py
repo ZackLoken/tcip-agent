@@ -111,8 +111,12 @@ def evaluation_section(config: dict) -> dict:
     ``preflight_config`` and the sweep's direction resolution all call this rather than each
     choosing between the two placements on its own.
 
-    The returned block is the caller's own object, top-level or nested, never copied; a caller
-    that wants to keep it must not mutate it in place.
+    The returned block is the caller's own object, top-level or nested, never copied, when
+    ``config`` is a plain dict. When ``config`` is a dict subclass whose ``get`` wraps a nested
+    read (an HPO trial's access-tracking config), the returned block is that subclass's own
+    freshly wrapped copy of the nested dict instead, per its own stated limitation: a write
+    through it is never visible on ``config``. Either way, a caller that wants to keep the block
+    must not mutate it in place and expect the mutation to be seen elsewhere.
     """
     top = config.get("evaluation", _NO_TOP_LEVEL_EVALUATION)
     if top is not _NO_TOP_LEVEL_EVALUATION:

@@ -82,6 +82,31 @@ def test_evaluation_section_returns_an_empty_dict_when_neither_is_present():
     assert evaluation_section({"training": {"batch_size": 4}}) == {}
 
 
+def test_evaluation_section_of_a_plain_dict_returns_the_original_nested_object():
+    """A plain dict's own ``get`` returns the actual stored object, never a copy: a write
+    through the returned block is visible on ``config`` afterward."""
+    from tcip_mcp.pipelines.schemas import evaluation_section
+
+    config = {"evaluation": {"selection_metric": "loss"}}
+    evaluation_section(config)["selection_metric"] = "f1"
+
+    assert config["evaluation"]["selection_metric"] == "f1"
+
+
+def test_evaluation_section_of_an_access_tracking_config_returns_a_wrapped_copy():
+    """An access-tracking config's own ``get`` wraps a nested read in a freshly constructed
+    ``_AccessTrackingConfig``, a copy of that nested dict's items, never a live view over the
+    original (``_AccessTrackingConfig``'s own stated limitation): a write through the returned
+    block is lost, unlike the plain-dict case above."""
+    from tcip_mcp.pipelines.schemas import evaluation_section
+    from tcip_mcp.tools.training_tools import _AccessTrackingConfig
+
+    config = _AccessTrackingConfig({"evaluation": {"selection_metric": "loss"}})
+    evaluation_section(config)["selection_metric"] = "f1"
+
+    assert config["evaluation"]["selection_metric"] == "loss"  # unchanged: the write hit a copy
+
+
 def test_evaluation_section_is_idempotent_on_an_already_normalized_config():
     """Coverage, not a guard: this shape is stable under any implementation that agrees with
     itself, since normalize_train_config's hoist is a no-op once the top-level key already

@@ -1457,7 +1457,15 @@ class _AccessTrackingConfig(dict):
     Real, stated limitations (never gates the run, warn-only, so a false positive costs a log
     line, not a failed trial): ``dict(cfg)``/``**cfg`` copies bypass the overrides entirely
     (CPython copies at the C level, and the copy is a plain dict with no wrapping of its own);
-    whole-dict iteration (``.items()``/``.values()``/``.keys()``) isn't tracked per-key.
+    whole-dict iteration (``.items()``/``.values()``/``.keys()``) isn't tracked per-key. A nested
+    value ``_wrap`` returns is itself a freshly constructed ``_AccessTrackingConfig``, its own
+    copy of that nested dict's items, never a live view over the original: a write through it
+    (``cfg["model_source"]["builder_kwargs"]["width"] = 8``) lands on that throwaway copy and is
+    never visible on ``cfg``. Only a write straight onto a config already held (``cfg["width"] =
+    8``, or a reference to a nested block kept before further indexing) lands. ``dict`` offers no
+    way to make a subclass instance alias another dict's own storage, so this only avoids
+    surprise by being read, not fixed without replacing the class with a proxy that stops being a
+    plain ``dict`` (breaking every consumer that relies on it being one).
     """
 
     def __init__(self, *args: Any, _prefix: str = "", _accessed: set[str] | None = None,
