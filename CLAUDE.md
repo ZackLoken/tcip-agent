@@ -192,7 +192,7 @@ endpoint is a trained model.
   gates, not work; the SAM and tile-geometry tests time out beside heavy load and pass alone.
   Every CI break since the sqlite default has been a Windows assumption the local gates cannot
   see; a test touching the filesystem outside `tmp_path` is the first reread.
-- mypy suppressions are enabled per module as a family touches it, never one global flip.
+- The production mypy gate is the full one; only `tests` keeps grandfathered codes, in `mypy.ini`.
 - Commits: one concern each, in dependency order, LF endings, messages stating the standing
   constraint the change installs (no session narrative, report ids, batch numbers or dates).
 - Every session ends with `write_retrospective`; when a claude-context server is configured for the
