@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   computePolygonBboxes,
+  CUT_RING_REFUSAL,
+  cutRing,
   derivedBoxFromPolygon,
   findHitPoint,
   findHoveredPolygon,
@@ -211,6 +213,106 @@ describe("withRing", () => {
     expect(next.subject).toBe("trunk");
     expect(next.attributes).toEqual({ health: "good" });
     expect(p.rings[0]).toEqual(SQUARE); // the input is not mutated
+  });
+});
+
+function area(ring: [number, number][]): number {
+  let sum = 0;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    sum += ring[j][0] * ring[i][1] - ring[i][0] * ring[j][1];
+  }
+  return Math.abs(sum) / 2;
+}
+
+describe("cutRing", () => {
+  it("a square cut vertically yields two four-vertex rectangles whose areas sum to the square's", () => {
+    const r = cutRing(SQUARE, [5, -5], [5, 15]);
+    if ("reason" in r) throw new Error(`expected a cut, got refused: ${r.reason}`);
+    const [p1, p2] = r.rings;
+    expect(p1).toHaveLength(4);
+    expect(p2).toHaveLength(4);
+    expect(area(p1) + area(p2)).toBeCloseTo(area(SQUARE));
+  });
+
+  it("a cut through two vertices transversally is admitted, each vertex counted once", () => {
+    // The vertical line x=0 passes exactly through B and E, each transversal (opposite-side neighbors).
+    const hex: [number, number][] = [
+      [-5, 0], // A
+      [0, -5], // B
+      [5, 0], // C
+      [5, 10], // D
+      [0, 15], // E
+      [-5, 10], // F
+    ];
+    const r = cutRing(hex, [0, -15], [0, 25]);
+    if ("reason" in r) throw new Error(`expected a cut, got refused: ${r.reason}`);
+    const [p1, p2] = r.rings;
+    expect(area(p1) + area(p2)).toBeCloseTo(area(hex));
+    expect(p1.length + p2.length).toBe(hex.length + 2); // B and E each shared by both pieces
+  });
+
+  it("the two-spike tangency refuses (two grazing contacts are zero crossings)", () => {
+    // A naive count-the-touches implementation reads the two tangent spike tips as crossings.
+    const comb: [number, number][] = [
+      [0, 0],
+      [5, 10],
+      [10, 0],
+      [15, 10],
+      [20, 0],
+      [20, -10],
+      [0, -10],
+    ];
+    const r = cutRing(comb, [-5, 10], [25, 10]);
+    expect(r).toEqual({ reason: CUT_RING_REFUSAL });
+  });
+
+  it("a segment that misses the ring refuses with the stated reason", () => {
+    const r = cutRing(SQUARE, [50, 50], [60, 60]);
+    expect(r).toEqual({ reason: CUT_RING_REFUSAL });
+  });
+
+  it("a segment starting inside the ring refuses with the stated reason", () => {
+    const r = cutRing(SQUARE, [5, 5], [20, 5]);
+    expect(r).toEqual({ reason: CUT_RING_REFUSAL });
+  });
+
+  it("a segment laid along an edge refuses by the crossing count, not by accident", () => {
+    const r = cutRing(SQUARE, [-5, 0], [15, 0]);
+    expect(r).toEqual({ reason: CUT_RING_REFUSAL });
+  });
+
+  const U_SHAPE: [number, number][] = [
+    [0, 0],
+    [30, 0],
+    [30, 30],
+    [20, 30],
+    [20, 10],
+    [10, 10],
+    [10, 30],
+    [0, 30],
+  ];
+
+  it("a U cut across both arms refuses with the stated reason", () => {
+    const r = cutRing(U_SHAPE, [-5, 20], [35, 20]);
+    expect(r).toEqual({ reason: CUT_RING_REFUSAL });
+  });
+
+  it("a U cut through one arm is admitted", () => {
+    const r = cutRing(U_SHAPE, [25, -5], [25, 35]);
+    expect("reason" in r).toBe(false);
+  });
+
+  it("a crafted walk whose piece areas do not sum to the parent's refuses on the post-condition", () => {
+    // A bowtie's signed area is 0 (its lobes cancel); cut through its own self-crossing, the
+    // pieces are valid triangles whose areas sum to 50, so the post-condition refuses it.
+    const bowtie: [number, number][] = [
+      [0, 0],
+      [10, 10],
+      [10, 0],
+      [0, 10],
+    ];
+    const r = cutRing(bowtie, [5, -5], [5, 15]);
+    expect(r).toEqual({ reason: CUT_RING_REFUSAL });
   });
 });
 

@@ -145,3 +145,146 @@ export function findHoveredPolygon(
   }
   return null;
 }
+
+/** One ring's boundary: a closed loop of vertices, the first not repeated at the end. */
+export type Ring = [number, number][];
+
+/** `cutRing`'s outcome: the two pieces the cut produced, or the reason it could not answer for it. */
+export type CutRingResult = { rings: [Ring, Ring] } | { reason: string };
+
+/** The refusal `cutRing` returns for every crossing count but two, and for a piece its own
+ *  post-conditions reject: a segment that misses, one that starts inside, one laid along an edge,
+ *  a cut across both arms of a concave shape, and a walk whose pieces fail to partition the
+ *  parent all read the same to a breeder, since none of them is a cut the geometry can answer for. */
+export const CUT_RING_REFUSAL =
+  "The cut must cross the selected outline exactly twice, starting and ending outside it. " +
+  "Cut a concave shape in more than one pass.";
+
+const AREA_TOLERANCE = 1e-6;
+
+function cross2(ax: number, ay: number, bx: number, by: number): number {
+  return ax * by - ay * bx;
+}
+
+/** The ring's signed area (shoelace formula); a caller that wants a plain area takes its absolute value. */
+function shoelaceArea(ring: Ring): number {
+  let sum = 0;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    sum += ring[j][0] * ring[i][1] - ring[i][0] * ring[j][1];
+  }
+  return sum / 2;
+}
+
+/** Drops a closing duplicate of the first vertex and any run of consecutive duplicates, so a
+ *  degenerate walk can't pass the vertex-count post-condition on repeated points. */
+function distinctRing(ring: Ring): Ring {
+  const out: Ring = [];
+  for (const p of ring) {
+    const last = out[out.length - 1];
+    if (!last || last[0] !== p[0] || last[1] !== p[1]) out.push(p);
+  }
+  while (out.length > 1) {
+    const first = out[0];
+    const last = out[out.length - 1];
+    if (first[0] === last[0] && first[1] === last[1]) out.pop();
+    else break;
+  }
+  return out;
+}
+
+function isValidPiece(piece: Ring): boolean {
+  const distinct = distinctRing(piece);
+  return distinct.length >= 3 && Math.abs(shoelaceArea(distinct)) > AREA_TOLERANCE;
+}
+
+/**
+ * Splits `ring` into the two pieces the segment `a`-`b` cuts it into, or refuses. The cut is valid
+ * only when both endpoints fall outside the ring and the segment crosses its boundary exactly
+ * twice (an interior crossing of an edge, or a vertex whose two neighboring edges lie on opposite
+ * sides of the line through `a`/`b`; a vertex touched tangentially, with both neighbors on the
+ * same side, is not a crossing, and an edge collinear with the segment contributes none either).
+ * The two crossings, in ring order, become the shared chord between the two returned pieces, each
+ * the walk along the original boundary from one crossing to the other.
+ */
+export function cutRing(ring: Ring, a: [number, number], b: [number, number]): CutRingResult {
+  const n = ring.length;
+  if (n < 3) return { reason: CUT_RING_REFUSAL };
+  if (pointInPolygon(a, ring) || pointInPolygon(b, ring)) return { reason: CUT_RING_REFUSAL };
+
+  const [ax, ay] = a;
+  const [bx, by] = b;
+  const dx = bx - ax;
+  const dy = by - ay;
+  const abLenSq = dx * dx + dy * dy;
+  if (abLenSq === 0) return { reason: CUT_RING_REFUSAL };
+
+  // Which side of the line through a/b each vertex falls on; 0 means exactly on that line.
+  const sides = ring.map(([x, y]) => Math.sign(cross2(dx, dy, x - ax, y - ay)));
+  // Each vertex's own projection fraction onto segment a-b (meaningful only where sides[k] === 0).
+  const params = ring.map(([x, y]) => ((x - ax) * dx + (y - ay) * dy) / abLenSq);
+
+  interface Crossing {
+    order: number; // vertex index for a vertex touch; edgeIndex + edge-fraction for an edge interior
+    point: [number, number];
+  }
+  const crossings: Crossing[] = [];
+
+  for (let i = 0; i < n; i++) {
+    const j = (i + 1) % n;
+    const si = sides[i];
+    const sj = sides[j];
+    if (si === 0 || sj === 0) continue; // a vertex on the line: resolved once, below, never here
+    if (si === sj) continue; // both strictly on the same side: this edge doesn't cross the line
+    const [x1, y1] = ring[i];
+    const [x2, y2] = ring[j];
+    const ex = x2 - x1;
+    const ey = y2 - y1;
+    const denom = dx * ey - dy * ex;
+    if (denom === 0) continue; // parallel; shouldn't happen with opposite sides, but stay defensive
+    const t = ((x1 - ax) * ey - (y1 - ay) * ex) / denom;
+    const u = ((x1 - ax) * dy - (y1 - ay) * dx) / denom;
+    if (t <= 0 || t >= 1 || u <= 0 || u >= 1) continue; // meets the infinite line, not segment a-b
+    crossings.push({ order: i + u, point: [ax + t * dx, ay + t * dy] });
+  }
+
+  for (let k = 0; k < n; k++) {
+    if (sides[k] !== 0) continue;
+    const t = params[k];
+    if (t <= 0 || t >= 1) continue; // collinear with the line through a/b, but off the segment itself
+    const prev = sides[(k - 1 + n) % n];
+    const next = sides[(k + 1) % n];
+    if (prev === 0 || next === 0) continue; // part of an edge collinear with a/b: no intersection
+    if (prev !== next) crossings.push({ order: k, point: ring[k] }); // transversal: counts once
+    // prev === next: a tangency (both neighbors on the same side), not a crossing.
+  }
+
+  if (crossings.length !== 2) return { reason: CUT_RING_REFUSAL };
+  crossings.sort((c1, c2) => c1.order - c2.order);
+  const [c1, c2] = crossings;
+
+  // The ring in walk order, with each edge-interior crossing inserted at its own edge; a vertex
+  // crossing needs no insertion; it is already ring[k], found by its integer order below.
+  const seq: { order: number; point: [number, number] }[] = ring.map((p, i) => ({
+    order: i,
+    point: p,
+  }));
+  for (const c of crossings) {
+    if (!Number.isInteger(c.order)) seq.push({ order: c.order, point: c.point });
+  }
+  seq.sort((p, q) => p.order - q.order);
+  const idx1 = seq.findIndex((p) => p.order === c1.order);
+  const idx2 = seq.findIndex((p) => p.order === c2.order);
+
+  const pieceA: Ring = seq.slice(idx1, idx2 + 1).map((p) => p.point);
+  const pieceB: Ring = seq
+    .slice(idx2)
+    .concat(seq.slice(0, idx1 + 1))
+    .map((p) => p.point);
+
+  if (!isValidPiece(pieceA) || !isValidPiece(pieceB)) return { reason: CUT_RING_REFUSAL };
+  const parentArea = Math.abs(shoelaceArea(ring));
+  const sumArea = Math.abs(shoelaceArea(pieceA)) + Math.abs(shoelaceArea(pieceB));
+  if (Math.abs(sumArea - parentArea) > AREA_TOLERANCE) return { reason: CUT_RING_REFUSAL };
+
+  return { rings: [pieceA, pieceB] };
+}
