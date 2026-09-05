@@ -529,10 +529,18 @@ def _measure_phenology(
     }
     flags = phenology.phenology_delivery_flags(classifier_state, recon["validated"], tile_recon)
     gate = check_delivery_gate(flags, acknowledgement=acknowledgement)
-    plants = phenology.per_plant_phenology(
-        mapping_raw, predictions_by_date,
-        positive_class_name=spec.positive_class_name, spec=spec,
-    )
+    from tcip_annotation.json_io import ClassifiedRecordRefused, UnreadableLabelDocument
+    from tcip_mcp.pipelines.resolution import StampScopeUnstated
+    from tcip_store import StoreError
+
+    try:
+        plants = phenology.per_plant_phenology(
+            mapping_raw, predictions_by_date,
+            positive_class_name=spec.positive_class_name, spec=spec,
+        )
+    except (UnreadableLabelDocument, StampScopeUnstated, ClassifiedRecordRefused,
+            StoreError) as exc:
+        raise HTTPException(400, str(exc)) from exc
     positive_class_id, _msg = phenology.resolve_positive_class_id(spec, predictions_by_date)
     return _PhenologyMeasurement(
         spec, plants, validity, gate, positive_class_id, root, stated.basis,

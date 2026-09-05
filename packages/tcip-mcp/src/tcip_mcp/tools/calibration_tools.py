@@ -558,11 +558,12 @@ def calibrate_count_operating_point(
     from tcip_mcp.pipelines.calibration import gate_evidence_summary
     from tcip_mcp.pipelines.count_calibration import resolve_count_operating_point
     from tcip_mcp.pipelines.resolution import (
-        bucket_relative_key, claim_payload, fold_tile_validation, open_validation,
-        read_operating_point_sidecar, seal_validation, stamp_names_raster, update_sidecar,
-        verify_stamp_binding,
+        StampScopeUnstated, bucket_relative_key, bucket_scope, claim_payload,
+        fold_tile_validation, open_validation, read_operating_point_sidecar, seal_validation,
+        stamp_names_raster, update_sidecar, verify_stamp_binding,
     )
     from tcip_mcp.project_paths import platform_state_root
+    from tcip_store import StoreError
     from tcip_store.errors import SchemaVersionRefused, StoreBusy
 
     root = Path(dataset_root).resolve()
@@ -577,6 +578,19 @@ def calibrate_count_operating_point(
         return {"error": f"{bucket} carries no operating_point.json stamp; "
                          "calibrate_count_operating_point earns a claim over an already-"
                          "published inference bucket, never an empty one."}
+    try:
+        existing_scope = bucket_scope(bucket)
+    except (StampScopeUnstated, StoreError) as exc:
+        return {"error": str(exc)}
+    if existing_scope is not None and (existing_scope.subject, existing_scope.attribute) != (
+            subject, attribute):
+        return {"error": (
+            f"{bucket}'s stamp records scope (subject={existing_scope.subject!r}, "
+            f"attribute={existing_scope.attribute!r}), not the (subject={subject!r}, "
+            f"attribute={attribute!r}) this calibration states: evidence earned under one scope "
+            "is never merged into a bucket stamped for another. State the bucket's own scope, or "
+            "calibrate a bucket that matches the scope you intend."
+        )}
     if stamp_names_raster(existing):
         return {"error": f"{bucket} is a whole-raster bucket (its stamp records raster_path): "
                          "the count-unbiased calibration reasons over per-image predictions, "

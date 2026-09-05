@@ -27,7 +27,7 @@ mechanism: a suggested answer becomes the answer, and the meaning is the breeder
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, NamedTuple
@@ -364,7 +364,7 @@ def check_operationalization(
     *,
     delivered_phenotype: str | None = None,
     value_keys: Sequence[Any] | None = None,
-    id_maps: Mapping[str, Mapping[str, Any]] | None = None,
+    counted_subjects: Mapping[str, Collection[Any]] | None = None,
     registry: ClassRegistry | None = None,
     basis: OperationalizationBasis | None = None,
 ) -> OperationalizationCheck:
@@ -375,8 +375,12 @@ def check_operationalization(
     answers whether there is a defined quantity at all; ``check_delivery_gate`` answers whether the
     quantity's error is characterized against a reference. The two refusals are never blurred.
 
-    ``delivered_phenotype``, ``value_keys`` and ``id_maps`` are what a door knows about the file it
-    is about to write, and each is checked only where the delivered artifact carries it. ``registry``
+    ``delivered_phenotype``, ``value_keys`` and ``counted_subjects`` are what a door knows about
+    the file it is about to write, and each is checked only where the delivered artifact carries
+    it. ``counted_subjects`` maps a prediction bucket to the object classes its detections are
+    of: a classified bucket's own scope subject for a classified stamp, its recorded map's keys
+    otherwise (never the map's keys for a classified bucket, whose keys are attribute values, not
+    object classes). ``registry``
     is the delivered dataset's class registry, checked only for a ``state_crossing_dates`` delivery:
     when given, a registry that no longer declares the confirmed positive class for the confirmed
     measured subject is reported through ``registry_problem``, never folded into ``superseded``,
@@ -431,7 +435,8 @@ def check_operationalization(
 
     binding = _check_bindings(
         spec, stated, delivery_kind,
-        delivered_phenotype=delivered_phenotype, value_keys=value_keys, id_maps=id_maps,
+        delivered_phenotype=delivered_phenotype, value_keys=value_keys,
+        counted_subjects=counted_subjects,
     )
     if binding is not None:
         return OperationalizationCheck(trait, delivery_kind, 5, binding)
@@ -453,7 +458,7 @@ def _check_bindings(
     *,
     delivered_phenotype: str | None,
     value_keys: Sequence[Any] | None,
-    id_maps: Mapping[str, Mapping[str, Any]] | None,
+    counted_subjects: Mapping[str, Collection[Any]] | None,
 ) -> str | None:
     """The refusal for whichever delivered binding fails, or ``None`` when they all hold."""
     covered_phenotypes = tuple(stated.get("delivered_phenotypes") or ())
@@ -473,10 +478,10 @@ def _check_bindings(
         if offending:
             return _state_5_value_key_text(spec, delivery_kind, offending, covered_keys)
 
-    if id_maps is not None and delivery_kind == PER_IMAGE_COUNT:
+    if counted_subjects is not None and delivery_kind == PER_IMAGE_COUNT:
         subject = str(stated.get("measured_subject") or "")
-        if not any(subject in (id_map or {}) for id_map in id_maps.values()):
-            return _state_5_subject_text(spec, subject, sorted(id_maps))
+        if not any(subject in (subjects or ()) for subjects in counted_subjects.values()):
+            return _state_5_subject_text(spec, subject, sorted(counted_subjects))
     return None
 
 
@@ -632,10 +637,10 @@ def _state_5_phenotype_text(
 def _state_5_subject_text(spec: TraitSpec, subject: str, buckets: Sequence[str]) -> str:
     return (
         f"Delivery refused for trait {spec.name!r}: its confirmed operationalization names "
-        f"{subject} as the measured subject, and no prediction bucket in this delivery recorded "
-        f"that subject in its id map ({list(buckets)}). The counts are of something else. Deliver "
-        f"from buckets that detected {subject}, or state and confirm an operationalization for the "
-        "subject these buckets actually carry."
+        f"{subject} as the measured subject, and no bucket in this delivery counted that subject "
+        f"({list(buckets)}). The counts are of something else. Deliver from buckets that detected "
+        f"{subject}, or state and confirm an operationalization for the subject these buckets "
+        "actually carry."
     )
 
 
