@@ -57,6 +57,12 @@ function datasetIdentityChanged(
   return a.dataset_root !== b.dataset_root || a.date !== b.date || a.subject !== b.subject;
 }
 
+/** True once a project is open (a dataset root is set), whether or not a date has been picked
+ *  yet; the one spelling of "a project is open" the footer and the terminal rail's starter hint
+ *  both read, so neither can drift from the other. */
+export const selectProjectOpen = (s: Pick<AppState, "gui">): boolean =>
+  !!s.gui.dataset.dataset_root;
+
 export interface GuiSlice {
   /** Server-synchronized state (mirrors backend GuiState). */
   gui: GuiState;
