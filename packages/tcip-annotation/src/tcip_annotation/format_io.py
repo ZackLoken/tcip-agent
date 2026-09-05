@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal, cast
 
 import tcip_store
 from tcip_store import Key, StoreDescriptor, register_store
@@ -249,11 +249,12 @@ def parse_coco_annotations(
     id2name = _coco_categories(coco)
     out: list[Annotation] = []
     for i, ann in enumerate(anns):
+        raw_category_id = cast(Any, ann.get("category_id"))
         try:
-            cid = int(ann.get("category_id"))
+            cid = int(raw_category_id)
         except (TypeError, ValueError):
             raise UnreadableLabelDocument(
-                f"record {i}'s category_id {ann.get('category_id')!r} will not coerce to int"
+                f"record {i}'s category_id {raw_category_id!r} will not coerce to int"
             ) from None
         subject = id2name.get(cid)
         if not subject:
