@@ -354,6 +354,9 @@ def export_detection_csv(
             ``per_image_count`` operationalization is unrecorded, not breeder-confirmed, or was
             withdrawn since the first check; carries the failed check and no counts, so a caller
             must not read a delivered count off this raise.
+        AuditEntryNotWritten (``tcip_mcp.audit``): the dataset-scoped delivery-event audit line
+            could not be appended, raised by ``record_delivery_binding_event`` after the CSV was
+            already written to ``output_path``.
     """
     from tcip_mcp.operationalization import (
         PER_IMAGE_COUNT,

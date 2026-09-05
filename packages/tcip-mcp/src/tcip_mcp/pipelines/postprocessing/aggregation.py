@@ -444,6 +444,9 @@ def export_aggregated_csv(
             delivered value off this raise.
         ValueError: any other refusal (a statement or unit problem the results carry); never
             carries a gate result, so a caller must not read a delivered count off this raise.
+        AuditEntryNotWritten (``tcip_mcp.audit``): the dataset-scoped delivery-event audit line
+            could not be appended, raised by ``record_delivery_binding_event`` after the CSV was
+            already written to ``output_path``.
     """
     from tcip_mcp.pipelines.resolution import (
         MEASUREMENT_DOCUMENTS,
