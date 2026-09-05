@@ -125,11 +125,11 @@ def test_load_splits_time_into_new_annotation_review_and_negative_confirmation(
     to total_time_seconds."""
     project_root = tmp_path / "proj"
     dataset_root = tmp_path / "data"
-    record_image_statuses(dataset_root, status_bucket("catkin", "2026-02-11"),
+    record_image_statuses(dataset_root, status_bucket("bud", "2026-02-11"),
                           {"IMG_NEG": "negative"}, recorded_by="user:breeder")
 
     pr = str(project_root)
-    common = {"project_root": pr, "dataset_root": str(dataset_root), "subject": "catkin",
+    common = {"project_root": pr, "dataset_root": str(dataset_root), "subject": "bud",
              "date": "2026-02-11"}
     client.post("/api/sessions/start", json={"project_root": pr, "user": "alice"})
     # IMG_NEG: confirmed negative, no new annotations.
@@ -181,7 +181,7 @@ def test_a_status_store_that_will_not_decode_reports_its_time_as_review(
     pr = str(project_root)
     client.post("/api/sessions/start", json={"project_root": pr, "user": "alice"})
     client.post("/api/sessions/image_event", json={
-        "project_root": pr, "dataset_root": str(dataset_root), "subject": "catkin",
+        "project_root": pr, "dataset_root": str(dataset_root), "subject": "bud",
         "date": "2026-02-11", "image_name": "IMG_UNREADABLE", "session_seconds_delta": 4.0,
         "annotations_added_delta": 0, "final_annotation_count": 0,
     })
@@ -205,7 +205,7 @@ def test_load_reflects_a_negative_confirmed_after_the_session_that_spent_time_en
     pr = str(project_root)
     client.post("/api/sessions/start", json={"project_root": pr, "user": "alice"})
     client.post("/api/sessions/image_event", json={
-        "project_root": pr, "dataset_root": str(dataset_root), "subject": "catkin",
+        "project_root": pr, "dataset_root": str(dataset_root), "subject": "bud",
         "date": "2026-02-11", "image_name": "IMG_LATE", "session_seconds_delta": 9.0,
         "annotations_added_delta": 0, "final_annotation_count": 0,
     })
@@ -214,7 +214,7 @@ def test_load_reflects_a_negative_confirmed_after_the_session_that_spent_time_en
     assert before["review_seconds"] == 9.0
     assert before["negative_confirmation_seconds"] == 0.0
 
-    record_image_statuses(dataset_root, status_bucket("catkin", "2026-02-11"),
+    record_image_statuses(dataset_root, status_bucket("bud", "2026-02-11"),
                           {"IMG_LATE": "negative"}, recorded_by="user:breeder")
 
     after = client.get("/api/sessions/load", params={"project_root": pr}).json()["sessions"][0]

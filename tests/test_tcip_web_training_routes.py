@@ -52,14 +52,14 @@ def test_list_configs_route_reports_a_launchable_config(tmp_path, monkeypatch) -
 
     create_experiment("exp-picker-1", {
         "model_source": {"builder": "my_models:chestnut_burr_det", "task": "detection"},
-        "data": {"images_dir": "/data/images", "subject": "catkin"},
+        "data": {"images_dir": "/data/images", "subject": "bud"},
     })
 
     rows = list_configs_route()["configs"]
     by_id = {r["experiment_id"]: r for r in rows}
     assert by_id["exp-picker-1"]["builder"] == "my_models:chestnut_burr_det"
     assert by_id["exp-picker-1"]["task"] == "detection"
-    assert by_id["exp-picker-1"]["subject"] == "catkin"
+    assert by_id["exp-picker-1"]["subject"] == "bud"
     assert by_id["exp-picker-1"]["state"] == "created"
     assert by_id["exp-picker-1"]["parent_experiment"] is None
 
