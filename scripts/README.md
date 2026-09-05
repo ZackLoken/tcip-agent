@@ -128,9 +128,9 @@ reaching for again versus one built narrowly for a specific past investigation.
 - `generate_favicon.ps1` - renders the browser-tab favicon from the source logo: crops its
   transparent margins, resizes the result to 512x512, and writes it plus a 32x32 copy to the
   frontend's public assets.
-- `conform_model_registry_paths.py` - conforms a project's model registry index to
-  `schema_version` 2 and respells every entry's `checkpoint_path` relative to the project root,
-  per the version-2 convention.
+- `conform_model_registry_paths.py` - conforms a project's model registry index into the
+  entries-mapping shape and respells every entry's `checkpoint_path` relative to the project
+  root, per the storage convention.
 - `conform_project_site.py` - writes or corrects one project's authored site record: the same
   create-only write `record_site` always is, or, with `--replace`, an unconditional overwrite
   for a site typed wrong once or a record damaged by hand.
@@ -249,6 +249,13 @@ fresh root predates another change, not a capability to build on.
   carrying a leftover `experiment:<id>` tag is refused, since the tag was never verified and no
   run record exists to check it against; re-register it through `register_model_from_experiment`
   instead.
+- `conform_schema_version_reset.py` - rewrites a root's frozen-store documents that still carry
+  an explicit `schema_version: 2` (a model registry index, a prediction bucket's sidecar
+  documents, a `confidence_sweep` record) to carry no field, per the version-1 reset every frozen
+  store now ships at. Names, and does not touch, any `audit_log`/`experiment_validations` line
+  still carrying `2` (both append-only), and names any `confidence_sweep` record whose own
+  content-derived key no longer matches once the field is stripped. `--plan` previews and writes
+  nothing.
 - `conform_view_coverage_viewing.py` - conforms a dataset's stored `view_coverage` records'
   `viewing` sub-object to the current `CoverageViewing` shape, mapping the old string forms of
   `stats_source` and `display_bounds` to the new structured ones. `--plan` previews; a `viewing`
