@@ -275,7 +275,6 @@ register_store(
         codec=LOG_JSON,
         enumerable=True,
         locator=_MEMBER_LOG,
-        schema_version=2,
     )
 )
 
@@ -1022,7 +1021,6 @@ def log_metrics(
 
 
 _VALIDATION_FIELDS = (
-    "schema_version",
     "document",
     "trait",
     "claim",
