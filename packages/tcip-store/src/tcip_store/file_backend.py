@@ -53,6 +53,9 @@ from tcip_store.schema_version import check_schema_version
 
 _TEMP_SUFFIX = ".tmp"
 _LOCK_SUFFIX = ".lock"
+_CLEAR_BASE_SUFFIX = ".clearbase"
+"""A cleared log's cursor watermark, so a cursor taken before the clear stays comparable to
+one taken after it even though the file it names started over at byte zero."""
 _TAIL_SCAN_BYTES = 8192
 """How far back an append looks for the last entry boundary at a time, so a repair costs the
 size of the tail rather than the size of the log."""
@@ -663,18 +666,38 @@ class FileBackend:
         except FileNotFoundError:
             return
 
+    def _clear_base_path(self, path: Path) -> Path:
+        """Where a log's cursor watermark sits, hidden beside the log it describes."""
+        return path.parent / f".{path.name}{_CLEAR_BASE_SUFFIX}"
+
+    def _read_clear_base(self, path: Path) -> int:
+        """The cumulative offset this log's cursor space starts from.
+
+        Zero for a log that was never cleared, which is why every cursor computed against it
+        below reduces to today's plain byte offset for the overwhelming majority of logs.
+        """
+        data = self._read_bytes(self._clear_base_path(path))
+        return int(data) if data else 0
+
+    def _write_clear_base(self, path: Path, base: int, *, durable: bool) -> None:
+        marker = self._clear_base_path(path)
+        temp = self._stage_bytes(marker, str(base).encode("ascii"), durable=durable)
+        self._apply_staged(temp, marker, durable=durable)
+
     def read_log(self, key: Key, *, after: str | None = None) -> LogPage:
         descriptor = get_descriptor(key.store)
         path = self.path_for(key)
+        base = self._read_clear_base(path)
         start = int(after) if after else 0
+        physical_start = max(0, start - base)
         try:
             with open(path, "rb") as handle:
-                handle.seek(start)
+                handle.seek(physical_start)
                 data = handle.read()
         except FileNotFoundError:
-            return LogPage(records=[], cursor=str(start))
+            return LogPage(records=[], cursor=str(max(start, base)))
         if not data:
-            return LogPage(records=[], cursor=str(start))
+            return LogPage(records=[], cursor=str(max(start, base)))
         torn = not data.endswith(b"\n")
         lines = data.split(b"\n")
         trailing = lines.pop()
@@ -691,7 +714,7 @@ class FileBackend:
                 corrupt.append(position)
         return LogPage(
             records=records,
-            cursor=str(start + consumed),
+            cursor=str(base + physical_start + consumed),
             torn_tail=torn,
             corrupt=tuple(corrupt),
             version_refused=tuple(version_refused),
@@ -704,6 +727,11 @@ class FileBackend:
         as a whole entry. Deleting the file rather than truncating it to zero bytes is what
         keeps an absent log and a never-appended one the same "nothing here" ``read_log``
         already reports for either.
+
+        Advances the log's cursor watermark by this file's size before deleting it, so a
+        cursor a reader took before this call stays comparable to one taken after: replaying
+        it against the log this call leaves behind reads as "nothing yet" or "everything
+        appended since", never a byte offset seeked into the wrong generation's bytes.
         """
         descriptor = get_descriptor(key.store)
         path = self.path_for(key)
@@ -711,6 +739,9 @@ class FileBackend:
             self._repair_torn_tail(path)
             data = self._read_bytes(path)
             count = 0 if not data else data.count(b"\n")
+            if data:
+                base = self._read_clear_base(path)
+                self._write_clear_base(path, base + len(data), durable=descriptor.durable)
             self._remove_entry(path, durable=descriptor.durable)
         return count
 
@@ -948,6 +979,7 @@ def _is_bookkeeping(name: str) -> bool:
     return (
         name in _DATABASE_ARTIFACTS
         or name.endswith(_LOCK_SUFFIX)
+        or name.endswith(_CLEAR_BASE_SUFFIX)
         or (name.startswith(".") and name.endswith(_TEMP_SUFFIX))
     )
 

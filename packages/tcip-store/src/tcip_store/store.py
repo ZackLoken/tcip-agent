@@ -351,8 +351,15 @@ def clear_log(key: Key) -> int:
     replaced; ``frozen-formats.json`` names no row for this operation because it changes
     none of the fields that manifest states.
 
-    Raises ``TransactionMisuse`` if the calling thread holds an open transaction, matching
-    ``append``: a log is not transactional on either backend.
+    A cursor taken before this call stays comparable to one taken after it: replaying it
+    against the log this call leaves behind returns exactly the entries appended since the
+    clear, never the cleared ones and never a misreading of new bytes as damaged, on either
+    backend.
+
+    Raises ``TransactionMisuse`` if the calling thread holds an open transaction, checked
+    here in the seam before either backend is called, matching ``append``: a log is not
+    transactional on either backend, and neither backend's own ``clear_log`` carries this
+    check itself.
     """
     backend = _backend()
     validate_key(key, expect_kind="log", operation="clear_log")
