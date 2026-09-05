@@ -2309,7 +2309,7 @@ Phase 3 verdict: single.
 
 Must agree: the browser's label path and the Python resolver's label path name the same file.
 Side A: `packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:1066` (`def label_filename(`, with `annotation_path`/`prediction_path` built on it).
-Side B: `packages/tcip-web/frontend/src/lib/paths.ts:45` (`labelPath`, the browser's one join site over the directories the backend resolves; a gate test pins the record extension against the resolver).
+Side B: `packages/tcip-web/frontend/src/lib/paths.ts:52` (`labelPath`, the browser's one join site over the directories the backend resolves; a gate test pins the record extension against the resolver).
 Phase 3 verdict: single. The browser still joins directory plus filename client-side at that one site; handing fully resolved per-image paths across the API would add a backend round trip to image navigation, an open owner question in the batch report.
 
 ## S16. ReviewEngine shard-store directory
