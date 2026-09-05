@@ -574,8 +574,7 @@ def _candidate_checkpoint_paths(root: Path, raw: str) -> set[Path]:
     A purpose-built enumeration, never bundle's ``_blob_files`` (whose sweep hashes a project's
     imagery and whose models glob is non-recursive): the ``.tcip/models`` tree recursively, the
     ``.tcip/experiments`` tree's checkpoint files, and any file under ``root`` the entry's own
-    version-1 relative suffix (everything from its last ``.tcip`` segment onward) or basename
-    names.
+    relative suffix (everything from its last ``.tcip`` segment onward) or basename names.
     """
     found: set[Path] = set()
     models_dir = root / ".tcip" / "models"
