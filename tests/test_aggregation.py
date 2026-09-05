@@ -273,7 +273,7 @@ def test_export_aggregated_csv(tmp_path):
     out_path = tmp_path / "out" / "aggregated.csv"
     bucket = _validated_bucket(tmp_path, "stem", tag="export")
     export_aggregated_csv(
-        results, str(out_path), delivered_phenotype="stem_count", crop="hazelnut",
+        results, str(out_path), delivered_phenotype="stem_count", crop="currant",
         pred_dirs=[bucket],
     )
 
@@ -283,7 +283,7 @@ def test_export_aggregated_csv(tmp_path):
         assert "trait_name" not in (reader.fieldnames or [])
 
     assert [r["plant_id"] for r in rows] == ["PLANT_001", "PLANT_002"]
-    assert rows[0]["crop"] == "hazelnut"
+    assert rows[0]["crop"] == "currant"
     assert rows[0]["delivered_phenotype"] == "stem_count"
     assert rows[0]["n_images"] == "3"
 
@@ -419,7 +419,7 @@ def test_units_never_fall_back_with_no_value_key_at_all():
     assert _resolve_units("bark_thickness", results, "operating_point") == ("", None)
 
 
-@pytest.mark.parametrize("value_key", ["plant_id", "detections_total", "elongated_fraction", "pct_open"])
+@pytest.mark.parametrize("value_key", ["plant_id", "detections_total", "open_fraction", "pct_open"])
 def test_unit_from_value_key_never_fabricates_from_an_unrelated_key(value_key):
     """The unit-suffix regex used to match any trailing underscore-word, so 'detections_total' read
     as unit='total' and 'plant_id' as unit='id'. Only a trailing token that is one of crops.yml's own

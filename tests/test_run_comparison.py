@@ -59,12 +59,12 @@ def test_compare_experiments_reports_task_and_subject_from_config(tmp_path, monk
 
     create_experiment("exp-task-subject", {
         "model_source": {"builder": "my_models:chestnut_burr_det", "task": "detection"},
-        "data": {"subject": "catkin"},
+        "data": {"subject": "bud"},
     })
 
     c = compare_experiments(["exp-task-subject"])["experiments"][0]
     assert c["task"] == "detection"
-    assert c["subject"] == "catkin"
+    assert c["subject"] == "bud"
 
 
 # ── registry: absent (with a reason), never silently empty, on an unreadable index ──────────

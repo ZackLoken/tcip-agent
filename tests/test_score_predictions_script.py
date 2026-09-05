@@ -34,11 +34,11 @@ def _fixture(tmp_path: Path) -> Path:
     labels = tmp_path / "annotations"
     labels.mkdir()
     write_annotations(labels / "IMG_0000.json",
-                      [Annotation(subject="catkin", geometry=BBox(1, 1, 40, 30))], 100, 80)
+                      [Annotation(subject="bud", geometry=BBox(1, 1, 40, 30))], 100, 80)
     preds = tmp_path / "predictions" / "baseline"
     preds.mkdir(parents=True)
     write_annotations(preds / "IMG_0000.json",
-                      [Annotation(subject="catkin", geometry=BBox(1, 1, 40, 30), score=0.9)],
+                      [Annotation(subject="bud", geometry=BBox(1, 1, 40, 30), score=0.9)],
                       100, 80)
     return img
 
@@ -60,7 +60,7 @@ def test_refuses_a_trait_scoped_run_from_an_unpinned_cwd(tmp_path):
     cwd = tmp_path / "operator_cwd"
     cwd.mkdir()
 
-    result = _run(["--path", str(img), "--trait", "catkin_count"], cwd=cwd, platform_root=None)
+    result = _run(["--path", str(img), "--trait", "bud_count"], cwd=cwd, platform_root=None)
 
     assert result.returncode != 0, result.stdout
     assert "TCIP_STATE_ROOT" in result.stderr
@@ -78,5 +78,5 @@ def test_scores_a_single_image_over_a_fixture_root_with_no_project_pinned(tmp_pa
     body = json.loads(result.stdout)
     assert "error" not in body
     assert len(body["matches"]["tp"]) == 1
-    assert body["matches"]["tp"][0]["class_name"] == "catkin"
+    assert body["matches"]["tp"][0]["class_name"] == "bud"
     assert not (cwd / ".tcip").exists()
