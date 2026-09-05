@@ -4,10 +4,13 @@ ARCHITECTURE.md is the adopter-facing map. Its module-ownership tables name a re
 with an in-repo-import count and an imported-by count. This check keeps the map from drifting
 away from the code: it parses every such table and asserts each named path exists. With a
 regenerated module-inventory JSON (the shape scripts under docs/audit produce), it also
-cross-checks the two counts per row and reports numeric drift, and checks the "Modules with zero
-importers" list the same way: every module the inventory records at imported_by_count 0 must
+cross-checks the two counts per row and reports numeric drift, checks the "Modules with zero
+importers" list the same way (every module the inventory records at imported_by_count 0 must
 appear in the list, every listed module must really be zero-importer, and the section's own
-header count must equal that real count.
+header count must equal that real count), and checks the per-root Modules/Lines summary table
+and its introductory sentence the same way again: each row's module and line count against
+`counts.python_by_root` / `counts.typescript_total` and the real per-root line sum, and the
+sentence's own totals against the sum of those rows.
 
 Row-level `queued:` HTML-comment markers are checked the same as any other row. Per
 ARCHITECTURE.md's own marker convention, a queued-marked sentence states a fact that is true
@@ -38,6 +41,18 @@ TABLE_HEADER = "| Module path | Ownership (one line) | In-repo imports | Importe
 ZERO_IMPORTERS_HEADER_RE = re.compile(r"^## Modules with zero importers \((?P<count>\d+)\)\s*$")
 ZERO_IMPORTERS_TABLE_HEADER = "| Root | Module path |"
 ZERO_IMPORTER_ROW_RE = re.compile(r"^\|\s*(?P<root>[^|]+?)\s*\|\s*(?P<path>[^|]+?)\s*\|\s*$")
+
+MODULE_COUNT_SENTENCE_RE = re.compile(
+    r"^HEAD (?P<head>[0-9a-f]+) has (?P<modules>\d+) modules across the six scanned roots "
+    r"\((?P<lines>\d+) total lines\):\s*$"
+)
+MODULE_COUNT_TABLE_HEADER = "| Package (root) | Modules | Lines |"
+MODULE_COUNT_ROW_RE = re.compile(r"^\|\s*(?P<package>[^|]+?)\s*\|\s*(?P<modules>\d+)\s*\|\s*(?P<lines>\d+)\s*\|\s*$")
+
+PYTHON_ROOT_PACKAGES = ("tcip-mcp", "tcip-annotation", "tcip-web", "tcip-store", "scripts")
+"""The `counts.python_by_root` keys, in the order the summary table lists them."""
+TYPESCRIPT_PACKAGE = "tcip-web-frontend"
+"""The summary table's row for `counts.typescript_total`; not a `python_by_root` key."""
 
 
 def parse_module_rows(md_text: str) -> list[dict]:
@@ -201,6 +216,99 @@ def check_counts(rows: list[dict], inventory: dict) -> list[dict]:
     return findings
 
 
+def parse_module_count_summary(md_text: str) -> tuple[dict | None, list[dict]]:
+    """The "HEAD <hash> has N modules ... (M total lines):" sentence and the per-root
+    Modules/Lines table beneath it. Returns ``(None, [])`` when the sentence is absent, since
+    a document without it has nothing here to check."""
+    lines = md_text.splitlines()
+    for i, line in enumerate(lines):
+        m = MODULE_COUNT_SENTENCE_RE.match(line.strip())
+        if not m:
+            continue
+        sentence = {
+            "line_no": i + 1,
+            "head": m.group("head"),
+            "modules": int(m.group("modules")),
+            "lines": int(m.group("lines")),
+        }
+        j = i + 1
+        while j < len(lines) and lines[j].strip() != MODULE_COUNT_TABLE_HEADER:
+            j += 1
+        j += 2  # table header + markdown separator row
+        rows: list[dict] = []
+        while j < len(lines) and lines[j].startswith("|"):
+            rm = MODULE_COUNT_ROW_RE.match(lines[j])
+            if rm:
+                rows.append(
+                    {
+                        "line_no": j + 1,
+                        "package": rm.group("package").strip(),
+                        "modules": int(rm.group("modules")),
+                        "lines": int(rm.group("lines")),
+                    }
+                )
+            j += 1
+        return sentence, rows
+    return None, []
+
+
+def check_module_count_summary(
+    sentence: dict | None, rows: list[dict], inventory: dict
+) -> list[dict]:
+    """The per-root Modules/Lines summary table and its sentence against the regenerated
+    inventory's own totals: each row's module count against `counts.python_by_root` (or
+    `counts.typescript_total` for the TypeScript row) and its line count against that root's
+    real line sum, then the sentence's totals against the sum of those same rows, so the
+    section carries one definition of a module and a line count, not a second one nothing
+    checks."""
+    if sentence is None:
+        return []
+    findings: list[dict] = []
+
+    real_lines_by_root: dict[str, int] = {}
+    for m in inventory.get("python_modules", []):
+        real_lines_by_root[m["root"]] = real_lines_by_root.get(m["root"], 0) + m["lines"]
+    real_lines_by_root[TYPESCRIPT_PACKAGE] = sum(
+        m["lines"] for m in inventory.get("typescript_modules", [])
+    )
+
+    real_modules_by_root: dict[str, int] = dict(inventory.get("counts", {}).get("python_by_root", {}))
+    real_modules_by_root[TYPESCRIPT_PACKAGE] = inventory.get("counts", {}).get("typescript_total", 0)
+
+    packages = (*PYTHON_ROOT_PACKAGES, TYPESCRIPT_PACKAGE)
+    by_package = {r["package"]: r for r in rows}
+    for package in packages:
+        row = by_package.get(package)
+        real_modules = real_modules_by_root.get(package, 0)
+        real_lines = real_lines_by_root.get(package, 0)
+        if row is None:
+            findings.append({"kind": "module_count_row_missing", "package": package})
+            continue
+        if row["modules"] != real_modules or row["lines"] != real_lines:
+            findings.append(
+                {
+                    "line_no": row["line_no"],
+                    "kind": "module_count_row_drift",
+                    "package": package,
+                    "doc": (row["modules"], row["lines"]),
+                    "real": (real_modules, real_lines),
+                }
+            )
+
+    real_total_modules = sum(real_modules_by_root.get(p, 0) for p in packages)
+    real_total_lines = sum(real_lines_by_root.get(p, 0) for p in packages)
+    if sentence["modules"] != real_total_modules or sentence["lines"] != real_total_lines:
+        findings.append(
+            {
+                "line_no": sentence["line_no"],
+                "kind": "module_count_sentence_drift",
+                "doc": (sentence["modules"], sentence["lines"]),
+                "real": (real_total_modules, real_total_lines),
+            }
+        )
+    return findings
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("architecture_md", nargs="?", default=str(_REPO_ROOT / "ARCHITECTURE.md"))
@@ -238,6 +346,7 @@ def main() -> int:
 
     count_findings: list[dict] = []
     zero_findings: list[dict] = []
+    module_count_findings: list[dict] = []
     if args.inventory_json and Path(args.inventory_json).exists():
         inventory = json.loads(Path(args.inventory_json).read_text(encoding="utf-8"))
         count_findings = check_counts(parsed, inventory)
@@ -261,7 +370,25 @@ def main() -> int:
         if not zero_findings:
             print("zero-importers: the list's header and membership match the regenerated inventory")
 
-    total = len(missing) + len(unparsed) + len(unnamed) + len(count_findings) + len(zero_findings)
+        summary_sentence, summary_rows = parse_module_count_summary(md_text)
+        module_count_findings = check_module_count_summary(summary_sentence, summary_rows, inventory)
+        for f in module_count_findings:
+            if f["kind"] == "module_count_row_missing":
+                print(f"MODULE COUNT ROW MISSING FROM SUMMARY TABLE: {f['package']}")
+            elif f["kind"] == "module_count_row_drift":
+                print(f"MODULE COUNT DRIFT ARCHITECTURE.md:{f['line_no']}  {f['package']}  "
+                      f"doc={f['doc']} real={f['real']}")
+            else:
+                print(f"MODULE COUNT SENTENCE DRIFT ARCHITECTURE.md:{f['line_no']}  "
+                      f"doc={f['doc']} real={f['real']}")
+        if not module_count_findings:
+            print("module counts: the per-root summary table and its sentence match the "
+                  "regenerated inventory")
+
+    total = (
+        len(missing) + len(unparsed) + len(unnamed) + len(count_findings) + len(zero_findings)
+        + len(module_count_findings)
+    )
     print(f"{'FAIL' if total else 'PASS'}: {total} problem(s)")
     return 1 if total else 0
 
