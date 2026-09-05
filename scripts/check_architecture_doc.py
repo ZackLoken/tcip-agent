@@ -27,6 +27,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -49,10 +50,13 @@ MODULE_COUNT_SENTENCE_RE = re.compile(
 MODULE_COUNT_TABLE_HEADER = "| Package (root) | Modules | Lines |"
 MODULE_COUNT_ROW_RE = re.compile(r"^\|\s*(?P<package>[^|]+?)\s*\|\s*(?P<modules>\d+)\s*\|\s*(?P<lines>\d+)\s*\|\s*$")
 
-PYTHON_ROOT_PACKAGES = ("tcip-mcp", "tcip-annotation", "tcip-web", "tcip-store", "scripts")
-"""The `counts.python_by_root` keys, in the order the summary table lists them."""
+SOURCE_SENTENCE_RE = re.compile(
+    r"^Source: the module inventory `scripts/build_module_inventory\.py` produces, run at HEAD "
+    r"(?P<head>[0-9a-f]+)\.$"
+)
+
 TYPESCRIPT_PACKAGE = "tcip-web-frontend"
-"""The summary table's row for `counts.typescript_total`; not a `python_by_root` key."""
+"""The summary table's row for the TypeScript module records; not a Python root."""
 
 
 def parse_module_rows(md_text: str) -> list[dict]:
@@ -218,24 +222,30 @@ def check_counts(rows: list[dict], inventory: dict) -> list[dict]:
 
 def parse_module_count_summary(md_text: str) -> tuple[dict | None, list[dict]]:
     """The "HEAD <hash> has N modules ... (M total lines):" sentence and the per-root
-    Modules/Lines table beneath it. Returns ``(None, [])`` when the sentence is absent, since
-    a document without it has nothing here to check."""
+    Modules/Lines table, found independently of each other rather than one anchored to the
+    other's position: a table left behind by a deleted or edited-away sentence still returns
+    its own rows, so :func:`check_module_count_summary` can flag that mismatch instead of
+    finding nothing to check. Either half missing from the document answers ``None`` or ``[]``
+    for its own half.
+    """
     lines = md_text.splitlines()
+    sentence: dict | None = None
     for i, line in enumerate(lines):
         m = MODULE_COUNT_SENTENCE_RE.match(line.strip())
-        if not m:
+        if m:
+            sentence = {
+                "line_no": i + 1,
+                "head": m.group("head"),
+                "modules": int(m.group("modules")),
+                "lines": int(m.group("lines")),
+            }
+            break
+
+    rows: list[dict] = []
+    for i, line in enumerate(lines):
+        if line.strip() != MODULE_COUNT_TABLE_HEADER:
             continue
-        sentence = {
-            "line_no": i + 1,
-            "head": m.group("head"),
-            "modules": int(m.group("modules")),
-            "lines": int(m.group("lines")),
-        }
-        j = i + 1
-        while j < len(lines) and lines[j].strip() != MODULE_COUNT_TABLE_HEADER:
-            j += 1
-        j += 2  # table header + markdown separator row
-        rows: list[dict] = []
+        j = i + 2  # table header + markdown separator row
         while j < len(lines) and lines[j].startswith("|"):
             rm = MODULE_COUNT_ROW_RE.match(lines[j])
             if rm:
@@ -248,34 +258,59 @@ def parse_module_count_summary(md_text: str) -> tuple[dict | None, list[dict]]:
                     }
                 )
             j += 1
-        return sentence, rows
-    return None, []
+        break
+    return sentence, rows
+
+
+def _real_module_stats(inventory: dict) -> tuple[dict[str, int], dict[str, int]]:
+    """Per-root module count and line-count sum, both counted from the inventory's own module
+    records (``python_modules`` for each Python root, ``typescript_modules`` for the frontend
+    package) rather than one column from a separately-serialized summary field
+    (``counts.python_by_root``) and the other from the records: one source of truth for both
+    columns of the summary table, so the two can never drift from each other even if a future
+    generator computed the summary field a different way.
+
+    The root universe itself still starts from ``counts.python_by_root``'s own keys (never its
+    values, which this function does not read): a root the generator scanned but that happens to
+    hold zero modules right now is still a known, checkable root rather than one this function
+    cannot tell apart from a root that was never scanned at all, since a module count of zero
+    leaves no record for the root-discovery loop below to find. The generator computes those
+    keys from the identical per-record scan (``sorted({r["root"] for r in py_records})``), so
+    this is not a second, independently-drifting definition of which roots exist, only of what
+    each one counts.
+    """
+    modules: dict[str, int] = dict.fromkeys(inventory.get("counts", {}).get("python_by_root", {}), 0)
+    lines: dict[str, int] = dict.fromkeys(modules, 0)
+    for m in inventory.get("python_modules", []):
+        modules[m["root"]] = modules.get(m["root"], 0) + 1
+        lines[m["root"]] = lines.get(m["root"], 0) + m["lines"]
+    ts_records = inventory.get("typescript_modules", [])
+    modules[TYPESCRIPT_PACKAGE] = len(ts_records)
+    lines[TYPESCRIPT_PACKAGE] = sum(m["lines"] for m in ts_records)
+    return modules, lines
 
 
 def check_module_count_summary(
     sentence: dict | None, rows: list[dict], inventory: dict
 ) -> list[dict]:
     """The per-root Modules/Lines summary table and its sentence against the regenerated
-    inventory's own totals: each row's module count against `counts.python_by_root` (or
-    `counts.typescript_total` for the TypeScript row) and its line count against that root's
-    real line sum, then the sentence's totals against the sum of those same rows, so the
-    section carries one definition of a module and a line count, not a second one nothing
-    checks."""
+    inventory's own totals: each row's module and line count against that root's real count
+    (:func:`_real_module_stats`, one source for both columns), then the sentence's totals
+    against the sum of those same rows, so the section carries one definition of a module and
+    a line count, not a second one nothing checks. The package set is the inventory's own root
+    names, never a hardcoded list, so a root the generator adds or drops is reflected here
+    without an edit to this checker; a doc row naming a package the inventory does not is its
+    own finding rather than silently skipped. A present table with no sentence above it is a
+    finding, matching a present sentence with no table beneath it (the ``module_count_row_missing``
+    findings below, one per package): a missing half is a defect in the document either way,
+    not a reason to answer nothing.
+    """
     if sentence is None:
-        return []
+        return [{"kind": "module_count_sentence_missing", "line_no": rows[0]["line_no"]}] if rows else []
     findings: list[dict] = []
 
-    real_lines_by_root: dict[str, int] = {}
-    for m in inventory.get("python_modules", []):
-        real_lines_by_root[m["root"]] = real_lines_by_root.get(m["root"], 0) + m["lines"]
-    real_lines_by_root[TYPESCRIPT_PACKAGE] = sum(
-        m["lines"] for m in inventory.get("typescript_modules", [])
-    )
-
-    real_modules_by_root: dict[str, int] = dict(inventory.get("counts", {}).get("python_by_root", {}))
-    real_modules_by_root[TYPESCRIPT_PACKAGE] = inventory.get("counts", {}).get("typescript_total", 0)
-
-    packages = (*PYTHON_ROOT_PACKAGES, TYPESCRIPT_PACKAGE)
+    real_modules_by_root, real_lines_by_root = _real_module_stats(inventory)
+    packages = sorted(real_modules_by_root)
     by_package = {r["package"]: r for r in rows}
     for package in packages:
         row = by_package.get(package)
@@ -294,9 +329,14 @@ def check_module_count_summary(
                     "real": (real_modules, real_lines),
                 }
             )
+    for package, row in by_package.items():
+        if package not in real_modules_by_root:
+            findings.append(
+                {"line_no": row["line_no"], "kind": "module_count_row_unknown_package", "package": package}
+            )
 
-    real_total_modules = sum(real_modules_by_root.get(p, 0) for p in packages)
-    real_total_lines = sum(real_lines_by_root.get(p, 0) for p in packages)
+    real_total_modules = sum(real_modules_by_root.values())
+    real_total_lines = sum(real_lines_by_root.values())
     if sentence["modules"] != real_total_modules or sentence["lines"] != real_total_lines:
         findings.append(
             {
@@ -307,6 +347,81 @@ def check_module_count_summary(
             }
         )
     return findings
+
+
+def parse_source_sentence(md_text: str) -> dict | None:
+    """The "Source: the module inventory ... produces, run at HEAD <hash>." sentence
+    introducing the module-ownership section, or ``None`` when the document carries no such
+    sentence."""
+    for i, line in enumerate(md_text.splitlines()):
+        m = SOURCE_SENTENCE_RE.match(line.strip())
+        if m:
+            return {"line_no": i + 1, "head": m.group("head")}
+    return None
+
+
+def _run_git(args: list[str], repo_root: Path) -> subprocess.CompletedProcess:
+    return subprocess.run(["git", *args], cwd=str(repo_root), capture_output=True, text=True)
+
+
+def _check_head_is_real(head: str, repo_root: Path, *, line_no: int) -> tuple[list[dict], list[str]]:
+    """Whether ``head`` names a real commit on this checkout's own history: a finding when it
+    does not resolve to a commit at all, or resolves but is not an ancestor of (or equal to)
+    the current HEAD; a stated skip, never a finding, when this tree carries no git history to
+    check the claim against (a source tarball, an exported snapshot). Returns
+    ``(findings, skip_notes)``.
+    """
+    if not (repo_root / ".git").exists():
+        return [], [f"HEAD hash check skipped for line {line_no}: {repo_root} is not a git checkout"]
+    verify = _run_git(["rev-parse", "--verify", f"{head}^{{commit}}"], repo_root)
+    if verify.returncode != 0:
+        return [{"kind": "head_not_a_commit", "line_no": line_no, "head": head}], []
+    ancestor = _run_git(["merge-base", "--is-ancestor", head, "HEAD"], repo_root)
+    if ancestor.returncode != 0:
+        return [{"kind": "head_not_an_ancestor", "line_no": line_no, "head": head}], []
+    return [], []
+
+
+def check_head_sentences(
+    source_sentence: dict | None, summary_sentence: dict | None, repo_root: Path,
+) -> tuple[list[dict], list[str]]:
+    """The two sentences that each name the commit the module-ownership section was generated
+    at (the "Source: ... run at HEAD <hash>." sentence introducing the section, and the "HEAD
+    <hash> has N modules ..." sentence over the summary table) must name the same commit, and
+    that commit must be real on this checkout's own history. Neither sentence existing is not
+    itself a finding; one existing without the other is, since a lone sentence's own claim then
+    goes unconfirmed by its partner. Returns ``(findings, skip_notes)``; a skip is printed, not
+    counted, when the tree carries no git history to check a hash against.
+    """
+    if source_sentence is None and summary_sentence is None:
+        return [], []
+    if source_sentence is None:
+        assert summary_sentence is not None
+        return [{"kind": "source_sentence_missing", "line_no": summary_sentence["line_no"]}], []
+    if summary_sentence is None:
+        return [{"kind": "module_count_sentence_missing", "line_no": source_sentence["line_no"]}], []
+
+    findings: list[dict] = []
+    if source_sentence["head"] != summary_sentence["head"]:
+        findings.append(
+            {
+                "kind": "head_mismatch",
+                "line_no": summary_sentence["line_no"],
+                "source_line_no": source_sentence["line_no"],
+                "source_head": source_sentence["head"],
+                "summary_head": summary_sentence["head"],
+            }
+        )
+
+    skips: list[str] = []
+    heads_to_check: dict[str, int] = {}
+    heads_to_check.setdefault(source_sentence["head"], source_sentence["line_no"])
+    heads_to_check.setdefault(summary_sentence["head"], summary_sentence["line_no"])
+    for head, line_no in heads_to_check.items():
+        head_findings, head_skips = _check_head_is_real(head, repo_root, line_no=line_no)
+        findings.extend(head_findings)
+        skips.extend(head_skips)
+    return findings, skips
 
 
 def main() -> int:
@@ -344,6 +459,31 @@ def main() -> int:
     else:
         print("coverage: every source file under a covered root is named by a table row")
 
+    source_sentence = parse_source_sentence(md_text)
+    summary_sentence, summary_rows = parse_module_count_summary(md_text)
+    head_findings, head_skips = check_head_sentences(source_sentence, summary_sentence, repo_root)
+    for note in head_skips:
+        print(note)
+    for f in head_findings:
+        if f["kind"] == "source_sentence_missing":
+            print(f"SOURCE SENTENCE MISSING ARCHITECTURE.md:{f['line_no']}: the summary sentence "
+                  "names no partner \"Source: ... run at HEAD\" sentence")
+        elif f["kind"] == "head_mismatch":
+            print(f"HEAD MISMATCH: source sentence at ARCHITECTURE.md:{f['source_line_no']} names "
+                  f"{f['source_head']}, summary sentence at ARCHITECTURE.md:{f['line_no']} names "
+                  f"{f['summary_head']}")
+        elif f["kind"] == "head_not_a_commit":
+            print(f"HEAD NOT A COMMIT ARCHITECTURE.md:{f['line_no']}: {f['head']!r} does not "
+                  "resolve to a commit in this checkout")
+        elif f["kind"] == "head_not_an_ancestor":
+            print(f"HEAD NOT AN ANCESTOR ARCHITECTURE.md:{f['line_no']}: {f['head']} is a real "
+                  "commit but not on this checkout's own history")
+        else:
+            print(f"MODULE COUNT SENTENCE MISSING ARCHITECTURE.md:{f['line_no']}: the source "
+                  "sentence names no partner \"HEAD ... has N modules\" sentence")
+    if not head_findings:
+        print("head sentences: the source and summary sentences name one real commit")
+
     count_findings: list[dict] = []
     zero_findings: list[dict] = []
     module_count_findings: list[dict] = []
@@ -370,14 +510,19 @@ def main() -> int:
         if not zero_findings:
             print("zero-importers: the list's header and membership match the regenerated inventory")
 
-        summary_sentence, summary_rows = parse_module_count_summary(md_text)
         module_count_findings = check_module_count_summary(summary_sentence, summary_rows, inventory)
         for f in module_count_findings:
             if f["kind"] == "module_count_row_missing":
                 print(f"MODULE COUNT ROW MISSING FROM SUMMARY TABLE: {f['package']}")
+            elif f["kind"] == "module_count_row_unknown_package":
+                print(f"MODULE COUNT ROW NAMES AN UNKNOWN PACKAGE ARCHITECTURE.md:{f['line_no']}: "
+                      f"{f['package']!r} is not one of the inventory's own roots")
             elif f["kind"] == "module_count_row_drift":
                 print(f"MODULE COUNT DRIFT ARCHITECTURE.md:{f['line_no']}  {f['package']}  "
                       f"doc={f['doc']} real={f['real']}")
+            elif f["kind"] == "module_count_sentence_missing":
+                print(f"MODULE COUNT SENTENCE MISSING ARCHITECTURE.md:{f['line_no']}: a summary "
+                      "table exists with no introductory \"HEAD ... has N modules\" sentence")
             else:
                 print(f"MODULE COUNT SENTENCE DRIFT ARCHITECTURE.md:{f['line_no']}  "
                       f"doc={f['doc']} real={f['real']}")
@@ -386,8 +531,8 @@ def main() -> int:
                   "regenerated inventory")
 
     total = (
-        len(missing) + len(unparsed) + len(unnamed) + len(count_findings) + len(zero_findings)
-        + len(module_count_findings)
+        len(missing) + len(unparsed) + len(unnamed) + len(head_findings) + len(count_findings)
+        + len(zero_findings) + len(module_count_findings)
     )
     print(f"{'FAIL' if total else 'PASS'}: {total} problem(s)")
     return 1 if total else 0
