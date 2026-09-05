@@ -431,9 +431,22 @@ def detect_and_write_band_groups(
     left exactly as the standalone files they were, and the group is reported in
     ``"reserved_name_skips"`` instead of ``"formed"``.
 
+    Checked next, against the bucket's own identities (``image_utils.bucket_logical_identities``,
+    read once before this loop and updated in place after each manifest this call writes): a key
+    (``image_utils.stem_collision_key`` of ``group["stem"]``, the canonical common-prefix stem for
+    an embedded-metadata group, the caller's own ``group_id`` for an explicit one) held by any
+    identity other than a manifest already recorded under this group's own exact stem, or one of
+    this group's own about-to-be-claimed members, puts the group under ``"refused"`` naming the
+    colliding file, and writes no manifest -- the same fold the ingest door's pre-scan refuses by,
+    so this pass never mints the ambiguity the door exists to keep out. A manifest already
+    recorded under the exact stem keeps the ``Version.ABSENT`` idempotence below rather than
+    counting as a collision.
+
     Returns ``{"formed": [...], "refused": [...], "manifests": [...], "reserved_name_skips": [...]}``.
     """
     from tcip_annotation.json_io import is_sidecar_name
+
+    from tcip_mcp.pipelines.image_utils import bucket_logical_identities, stem_collision_key
 
     d = Path(images_dir)
     if not d.is_dir():
@@ -456,6 +469,8 @@ def detect_and_write_band_groups(
 
     embedded_found, refused = detect_embedded_metadata_groups(candidates)
 
+    identities = bucket_logical_identities(d)
+
     formed: list[dict] = []
     manifests: list[str] = []
     reserved_name_skips: list[dict] = []
@@ -465,6 +480,23 @@ def detect_and_write_band_groups(
             reserved_name_skips.append(
                 {"stem": stem, "bands": sorted(group["bands"]), "source": group["source"]}
             )
+            continue
+        key = stem_collision_key(stem)
+        own_members = {p.name for p in group["bands"].values()}
+        collision = next(
+            (p for p in identities.get(key, [])
+             if not (p.suffix.lower() == MANIFEST_EXT and p.stem == stem)
+             and p.name not in own_members),
+            None,
+        )
+        if collision is not None:
+            refused.append({
+                "group_id": stem, "band": None,
+                "files": sorted(str(p) for p in group["bands"].values()),
+                "reason": f"stem {stem!r} collides with {collision} already in this bucket; "
+                          "writing a manifest here would mint the same ambiguity the ingest door "
+                          "refuses, so this group is refused instead",
+            })
             continue
         try:
             mp = write_band_group_manifest(
@@ -476,6 +508,7 @@ def detect_and_write_band_groups(
             continue  # idempotent: a recorded fact is not re-inferred, whoever recorded it
         formed.append({"stem": stem, "bands": sorted(group["bands"]), "source": group["source"]})
         manifests.append(str(mp))
+        identities[key] = [mp]
 
     return {
         "formed": formed, "refused": refused, "manifests": manifests,

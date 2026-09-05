@@ -348,6 +348,94 @@ def test_a_lone_file_with_a_group_id_forms_no_group(tmp_path):
     assert result["formed"] == []
 
 
+# ── stem-collision guard (the ownership-aware inventory) ─────────────────────────────────
+
+
+def test_a_group_whose_stem_a_standalone_file_holds_is_refused_through_ingest(tmp_path, monkeypatch):
+    """Through ingest_images(detect_band_groups=True): a group whose own canonical stem a raw
+    file already placed in the bucket holds is refused, naming that file; an unrelated group in
+    the same pass, with no such collision, still forms."""
+    monkeypatch.setenv("TCIP_WORKSPACE", str(tmp_path / "workspace"))
+    from tcip_mcp.tools.ingest_tools import ingest_images
+
+    src = tmp_path / "raw"
+    src.mkdir()
+    utc, lat, lon = "2023-05-23T17:06:28.931664", 43.196946355, -90.058003633
+    _write_band_file_with_identity(
+        src / "capA_G.tif", "gidA", "Green", 560, utc=utc, lat=lat, lon=lon,
+    )
+    _write_band_file_with_identity(
+        src / "capA_R.tif", "gidA", "Red", 650, utc=utc, lat=lat, lon=lon,
+    )
+    # A standalone raw file whose stem is exactly capA's own canonical stem.
+    tifffile.imwrite(str(src / "capA.tif"), np.zeros((4, 4), dtype=np.uint16))
+    _write_band_file_with_identity(
+        src / "capB_G.tif", "gidB", "Green", 560, utc=utc, lat=lat, lon=lon,
+    )
+    _write_band_file_with_identity(
+        src / "capB_R.tif", "gidB", "Red", 650, utc=utc, lat=lat, lon=lon,
+    )
+
+    manifest = ingest_images(
+        source=str(src), name="proj_bandcollide_case", site="north orchard",
+        date_from="none", detect_band_groups=True,
+    )
+    assert "error" not in manifest
+    bg = manifest["band_groups"]
+    assert len(bg["refused"]) == 1
+    refusal = bg["refused"][0]
+    assert refusal["group_id"] == "capA"
+    assert "capA.tif" in refusal["reason"]
+    assert {g["stem"] for g in bg["formed"]} == {"capB"}
+    bucket_dir = Path(manifest["project_path"]) / "images" / "undated"
+    assert not (bucket_dir / "capA.bandgroup").exists()
+    assert (bucket_dir / "capB.bandgroup").exists()
+
+
+def test_explicit_group_id_equal_to_one_of_its_own_members_stem_forms(tmp_path):
+    """A rail must admit valid work: the ownership-aware inventory excludes a group's own
+    about-to-be-claimed members from the collision check, so a group_id matching one of them
+    forms cleanly rather than refusing against its own file."""
+    from tcip_mcp.pipelines.data.band_groups import detect_and_write_band_groups
+    from tcip_mcp.pipelines.image_utils import list_logical_images
+
+    d = tmp_path / "images"
+    d.mkdir()
+    for name in ("cap.tif", "cap_other.tif"):
+        tifffile.imwrite(str(d / name), np.zeros((4, 4), dtype=np.uint16))
+
+    result = detect_and_write_band_groups(
+        d, explicit_groups={"cap": {"Blue": "cap.tif", "Green": "cap_other.tif"}},
+    )
+
+    assert result["refused"] == []
+    assert len(result["formed"]) == 1
+    assert result["formed"][0]["stem"] == "cap"
+    assert set(list_logical_images(d)) == {"cap"}
+
+
+def test_two_explicit_group_ids_folding_to_one_key_form_one_and_refuse_the_other(tmp_path):
+    from tcip_mcp.pipelines.data.band_groups import detect_and_write_band_groups
+
+    d = tmp_path / "images"
+    d.mkdir()
+    for name in ("a1.tif", "a2.tif", "b1.tif", "b2.tif"):
+        tifffile.imwrite(str(d / name), np.zeros((4, 4), dtype=np.uint16))
+
+    result = detect_and_write_band_groups(
+        d, explicit_groups={
+            "Cap": {"Blue": "a1.tif", "Green": "a2.tif"},
+            "cap": {"Blue": "b1.tif", "Green": "b2.tif"},
+        },
+    )
+
+    assert len(result["formed"]) == 1
+    assert len(result["refused"]) == 1
+    formed_stem = result["formed"][0]["stem"]
+    refused_group_id = result["refused"][0]["group_id"]
+    assert {formed_stem, refused_group_id} == {"Cap", "cap"}
+
+
 # ── explicit-manifest strategy ──────────────────────────────────────────────────────────
 
 
