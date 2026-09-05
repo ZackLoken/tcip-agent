@@ -31,16 +31,16 @@ snapshot; `scripts/check_architecture_doc.py --inventory-json <path>` re-runs th
 and cross-checks its counts against this document's tables, this table's own module and line
 totals included.
 
-HEAD afb28e76 has 449 modules across the six scanned roots (137980 total lines):
+HEAD 32bc6c58 has 449 modules across the six scanned roots (138048 total lines):
 
 | Package (root) | Modules | Lines |
 |---|---|---|
-| tcip-mcp | 114 | 57112 |
+| tcip-mcp | 114 | 57128 |
 | tcip-annotation | 12 | 4299 |
-| tcip-web | 36 | 12892 |
-| tcip-store | 13 | 5137 |
+| tcip-web | 36 | 12894 |
+| tcip-store | 13 | 5138 |
 | tcip-web-frontend | 209 | 46200 |
-| scripts | 65 | 12340 |
+| scripts | 65 | 12389 |
 
 `tcip-mcp`, `tcip-annotation`, `tcip-web`, and `tcip-store` are the four Python packages under
 `packages/`; `scripts` is `scripts/` at the repo root (not an installed package);
@@ -1105,8 +1105,8 @@ registered at HEAD.
 | POST | `/runs/{run_id}/cancel` | `cancel_run_route` | `routes/training.py:189` |
 | POST | `/compare` | `compare_runs_route` | `routes/training.py:209` |
 | POST | `/compare/best` | `compare_best_route` | `routes/training.py:223` |
-| GET | `/metric-directions` | `metric_directions_route` | `routes/training.py:274` |
-| WS | `/runs/{run_id}/stream` (full path `/api/training/runs/{run_id}/stream`) | `training_stream_ws` | `routes/training.py:364` |
+| GET | `/metric-directions` | `metric_directions_route` | `routes/training.py:276` |
+| WS | `/runs/{run_id}/stream` (full path `/api/training/runs/{run_id}/stream`) | `training_stream_ws` | `routes/training.py:366` |
 
 ### routes/tuning.py, prefix `/api/tuning` (10 routes)
 
@@ -1758,8 +1758,8 @@ same conform on the staging tree before accounting for it and before the rename.
 
 Readers: `read_registry_index`, `model_registry.py:138`, the read path for anything outside the
 module (`scripts/doctor.py:237`, `"metrics_source"`), and the entry-by-entry accessors built on
-it: `ModelRegistry.list_models`, `model_registry.py:850`; `get_model`, `model_registry.py:861`;
-`best_model`, `model_registry.py:868`; `verify_model`, `model_registry.py:824`. `best_model` takes `metric_key` and `higher_is_better` as required
+it: `ModelRegistry.list_models`, `model_registry.py:865`; `get_model`, `model_registry.py:876`;
+`best_model`, `model_registry.py:883`; `verify_model`, `model_registry.py:839`. `best_model` takes `metric_key` and `higher_is_better` as required
 keywords, no default and no name heuristic, and by default ranks only entries whose
 `metrics_source` is `"trainer"` (`include_unverified=True` also ranks the rest). The
 `rank_registered_models` tool (`tools/model_tools.py:123`) resolves `higher_is_better` from
@@ -2284,7 +2284,7 @@ Phase 3 verdict: single.
 
 Must agree: the writer's row shape is what the reader and the stream consumer expect.
 Side A: `packages/tcip-mcp/src/tcip_mcp/experiments.py:965` (`def log_metrics(`, the one writer; the trainer and the envelope hand rows to the context's epoch sink instead of opening the file).
-Side B: `packages/tcip-web/src/tcip_web/routes/training.py:324` (`read_log(key, after=cursor)`, the training stream's incremental tail, pushed as a `TrainingMetricFrame` per row) and `routes/tuning.py:616` (`read_log(trial_metrics_key`, answered in the shape `_metrics_common.metrics_response` builds).
+Side B: `packages/tcip-web/src/tcip_web/routes/training.py:326` (`read_log(key, after=cursor)`, the training stream's incremental tail, pushed as a `TrainingMetricFrame` per row) and `routes/tuning.py:616` (`read_log(trial_metrics_key`, answered in the shape `_metrics_common.metrics_response` builds).
 Phase 3 verdict: single. An HPO trial with no experiment record still appends to its own trial log, one declared site in the epoch sink, pending the HPO store migration.
 
 ## S09. Web job registries persisted to .tcip/state/<name>.json  <!-- queued: P5-325 unify -->
@@ -2598,7 +2598,7 @@ Phase 3 verdict: duplicated.
 ## S51. Training run stream WebSocket  <!-- queued: P5-297 unify -->
 
 Must agree: the status payload the MCP tool returns is renderable by the browser's training view.
-Side A: `packages/tcip-web/src/tcip_web/routes/training.py:363` (`@router.websocket("/runs/{run_id}/stream")`).
+Side A: `packages/tcip-web/src/tcip_web/routes/training.py:365` (`@router.websocket("/runs/{run_id}/stream")`).
 Side B: `packages/tcip-mcp/src/tcip_mcp/tools/training_tools.py` (`monitor_training` supplies the status payload).
 Phase 3 verdict: duplicated.
 
