@@ -203,7 +203,7 @@ def test_save_annotations_refuses_an_unrecognized_fmt(tmp_path):
     img = str(images_dir / "img_001.jpg")
 
     res = save_annotations(
-        img, annotations=[{"subject": "catkin", "bbox": [10, 10, 40, 40]}],
+        img, annotations=[{"subject": "bud", "bbox": [10, 10, 40, 40]}],
         fmt="xml", path=str(tmp_path / "x.json"))
     assert "error" in res and "fmt" in res["error"]
     assert not (tmp_path / "x.json").exists()

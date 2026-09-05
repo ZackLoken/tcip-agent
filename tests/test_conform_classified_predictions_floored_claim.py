@@ -63,7 +63,7 @@ def _write_doc(bucket: Path, stem: str, annotations: list[Annotation], w=100, h=
 
 def _register(project_root: Path, dataset_root: Path, *, dataset_id: str = "ds-1") -> None:
     (project_root / ".tcip").mkdir(parents=True, exist_ok=True)
-    upsert_dataset(project_root, {"id": dataset_id, "path": str(dataset_root), "crop": "hazelnut",
+    upsert_dataset(project_root, {"id": dataset_id, "path": str(dataset_root), "crop": "currant",
                                   "fingerprint": None})
 
 

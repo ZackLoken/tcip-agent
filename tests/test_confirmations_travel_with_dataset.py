@@ -126,7 +126,7 @@ def test_quarantine_excludes_a_confirmation_stamped_under_a_since_changed_schema
     # The subject's attribute schema changes (a new value added) after the confirmation was stamped.
     _write_registry(root, Subject(name="bud", attributes=(
         Attribute(name="opening", type="categorical",
-                 values=("closed", "elongating", "open")),
+                 values=("closed", "partial", "open")),
     )))
 
     quarantined: set[str] = set()
@@ -188,7 +188,7 @@ def test_trainable_stems_reports_quarantined_stale_definition(tmp_path):
     _confirm_negative(root, "bud", "img_001.jpg", digest=old_digest)
     _write_registry(root, Subject(name="bud", attributes=(
         Attribute(name="opening", type="categorical",
-                 values=("closed", "elongating", "open")),
+                 values=("closed", "partial", "open")),
     )))
 
     stems, counts = trainable_stems(root / "annotations", root / "images", subject="bud", date=None)
@@ -215,7 +215,7 @@ def test_quarantine_is_per_image_not_per_bucket(tmp_path):
     # The schema changes after img_001's confirmation.
     _write_registry(root, Subject(name="bud", attributes=(
         Attribute(name="opening", type="categorical",
-                 values=("closed", "elongating", "open")),
+                 values=("closed", "partial", "open")),
     )))
     new_digest = attribute_schema_digest(
         class_registry.read_registry(root / "classes.json"), "bud")

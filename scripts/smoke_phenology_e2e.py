@@ -65,14 +65,14 @@ PLANTS: list[_Plant] = [
     {"plot": "P1", "accession": "acc-A", "lat": 43.19670, "lon": -90.058000},
     {"plot": "P2", "accession": "acc-B", "lat": 43.19670, "lon": -90.058037},
 ]
-# Three capture dates; the elongated fraction rises 0.0 → 0.4 → 1.0.
+# Three capture dates; the open fraction rises 0.0 → 0.4 → 1.0.
 DATES = ["2026-02-11", "2026-02-25", "2026-03-11"]
 FRACTIONS = {"2026-02-11": 0.0, "2026-02-25": 0.4, "2026-03-11": 1.0}
 # The bucket's own recorded id_map: the positive class is resolved from this on disk, never a
-# pinned integer. Keyed by elongation's own value names; every detection here is one subject.
-SUBJECT = "catkin"
-ATTRIBUTE = "elongation"
-ID_MAP = {"dormant": 0, "elongated": 1}
+# pinned integer. Keyed by opening's own value names; every detection here is one subject.
+SUBJECT = "bud"
+ATTRIBUTE = "opening"
+ID_MAP = {"closed": 0, "open": 1}
 N_DETECTIONS = 10
 
 _failures = 0
@@ -112,16 +112,16 @@ def _write_geo_image(path: Path, lat: float, lon: float, when: datetime) -> None
     Image.new("RGB", (8, 8)).save(path, exif=exif)
 
 
-def _pred_result(n_elongated: int, n_total: int, *, width: int, height: int) -> dict:
+def _pred_result(n_open: int, n_total: int, *, width: int, height: int) -> dict:
     """One image's raw predictor-shaped result: n_total detections of one subject, the first
-    n_elongated one-indexed to id_map['elongated'], the rest to id_map['dormant'].
+    n_open one-indexed to id_map['open'], the rest to id_map['closed'].
 
     write_predictions_json decodes each label through this run's own recorded id_map into the
     shape ground truth carries: the object class in every record's subject, the decoded value
     under attributes[attribute], never the value alone written straight into subject.
     """
-    n_dormant = n_total - n_elongated
-    labels = [ID_MAP["elongated"] + 1] * n_elongated + [ID_MAP["dormant"] + 1] * n_dormant
+    n_closed = n_total - n_open
+    labels = [ID_MAP["open"] + 1] * n_open + [ID_MAP["closed"] + 1] * n_closed
     return {
         "width": width, "height": height,
         "boxes": [[1.0, 1.0, 3.0, 3.0] for _ in range(n_total)],
@@ -134,10 +134,10 @@ def _stem(plot: str, date: str) -> str:
     return f"{plot}_{date.replace('-', '')}"
 
 
-def _author_catkin_trait_spec(root: Path) -> None:
-    """Register the catkin trait under ``root`` and record a confirmed meaning for its delivery.
+def _author_bud_opening_trait_spec(root: Path) -> None:
+    """Register the bud_opening trait under ``root`` and record a confirmed meaning for its delivery.
 
-    The spec is ``tests/_trait_fixtures.CATKIN`` itself rather than a copy of its field values, so
+    The spec is ``tests/_trait_fixtures.BUD_OPENING`` itself rather than a copy of its field values, so
     a change to that definition cannot leave this smoke run exercising a stale one. The crossing
     door refuses a trait whose delivered number has no breeder-confirmed meaning, so this states
     one and confirms it through the same two writers a real project goes through; it also declares
@@ -148,9 +148,9 @@ def _author_catkin_trait_spec(root: Path) -> None:
 
     from tcip_mcp import traits
     from tests._operationalization_fixtures import seed_confirmed_crossing
-    from tests._trait_fixtures import CATKIN
+    from tests._trait_fixtures import BUD_OPENING
 
-    data = traits._encode_spec(CATKIN)
+    data = traits._encode_spec(BUD_OPENING)
     key = traits.trait_spec_key(traits.trait_specs_dir(root), data["name"])
     spec, reason = traits._validate_and_write_spec(key, data, expect=ts.Version.ABSENT)
     if spec is None:
@@ -170,7 +170,7 @@ def main() -> int:
         # A workspace/project split, its name fitting crop_subject_phenotype
         # (initialize_project holds a workspace project to that scheme).
         workspace_root = Path(td)
-        root = workspace_root / "hazelnut_catkin_phenology"
+        root = workspace_root / "currant_bud_phenology"
         root.mkdir(parents=True)
         dataset_root = root / "dataset"        # a registered dataset the mapping is built over
         images_root = dataset_root / "images"
@@ -189,7 +189,7 @@ def main() -> int:
 
             init = initialize_project(str(root), site="smoke test orchard")
             check("project initialized", "error" not in init, init.get("error", ""))
-            _author_catkin_trait_spec(root)
+            _author_bud_opening_trait_spec(root)
 
             # 1. Scene: geolocated images + per-image classified predictions.
             for date in DATES:
@@ -263,9 +263,9 @@ def main() -> int:
             # No MCP tool takes an acknowledgement; only the Results tab's export does.
             # This bucket's sidecar was never validated, so the door refuses unconditionally.
             print("\nStep 2: deliver_phenology_milestones refuses an unacknowledgeable unvalidated delivery")
-            csv_out = root / "delivery" / "catkin_phenology.csv"
+            csv_out = root / "delivery" / "bud_phenology.csv"
             r = deliver_phenology_milestones(
-                trait="catkin",
+                trait="bud_opening",
                 mapping_name=mapping_name,
                 predictions_by_date=preds_by_date,
                 output_csv_path=str(csv_out),
@@ -284,7 +284,7 @@ def main() -> int:
             client = TestClient(app, base_url="http://127.0.0.1")
             body = {
                 "project_root": str(root), "mapping_name": mapping_name,
-                "predictions_by_date": preds_by_date, "trait": "catkin",
+                "predictions_by_date": preds_by_date, "trait": "bud_opening",
             }
 
             screen = client.post(
@@ -301,9 +301,9 @@ def main() -> int:
                 row = next((r2 for r2 in milestone_rows if r2.get("plant_id") == "P1"), None)
                 check("P1 row present", row is not None)
                 if row:
-                    d05 = row.get("catkin_05per_date")
-                    d50 = row.get("catkin_50per_date")
-                    d95 = row.get("catkin_95per_date")
+                    d05 = row.get("bud_05per_date")
+                    d50 = row.get("bud_50per_date")
+                    d95 = row.get("bud_95per_date")
                     check("05/50/95per dates all populated (not a fabricated blank)",
                           all([d05, d50, d95]), f"05={d05} 50={d50} 95={d95}")
                     if d05 and d50 and d95:
@@ -314,7 +314,7 @@ def main() -> int:
                               f"range={DATES[0]}..{DATES[-1]} 05={d05} 95={d95}")
 
             export = client.post("/api/results/export_csv", json={
-                **body, "payload": "milestones", "filename": "catkin_phenology_ack.csv",
+                **body, "payload": "milestones", "filename": "bud_phenology_ack.csv",
                 "user": "user:smoketest",
                 "acknowledgement": {"reason": "smoke run over an uncalibrated scene"},
             })
@@ -323,7 +323,7 @@ def main() -> int:
             if export.status_code == 200:
                 saved_to = export.headers.get("X-TCIP-Saved-To", "")
                 check("the delivery landed under the project's own results_export/",
-                      saved_to == str(root / "results_export" / "catkin_phenology_ack.csv"),
+                      saved_to == str(root / "results_export" / "bud_phenology_ack.csv"),
                       saved_to)
                 delivered_rows = list(csv.DictReader(io.StringIO(export.text)))
                 check("the CSV carries the delivered rows", bool(delivered_rows))

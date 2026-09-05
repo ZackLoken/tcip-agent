@@ -20,7 +20,7 @@ from tcip_web.app import app
 
 BUD_TWO_STATES = {"opening": {"type": "categorical", "values": ["closed", "open"]}}
 BUD_THREE_STATES = {
-    "opening": {"type": "categorical", "values": ["closed", "elongating", "open"]}
+    "opening": {"type": "categorical", "values": ["closed", "partial", "open"]}
 }
 
 

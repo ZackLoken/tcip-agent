@@ -31,11 +31,11 @@ from tcip_web.app import app
 
 BUD_TWO_STATES = {"opening": {"type": "categorical", "values": ["closed", "open"]}}
 BUD_THREE_STATES = {
-    "opening": {"type": "categorical", "values": ["closed", "elongating", "open"]}
+    "opening": {"type": "categorical", "values": ["closed", "partial", "open"]}
 }
 BUD_FOUR_STATES = {
     "opening": {"type": "categorical",
-                   "values": ["closed", "swelling", "elongating", "open"]}
+                   "values": ["closed", "swelling", "partial", "open"]}
 }
 
 
@@ -220,7 +220,7 @@ def test_a_schema_change_with_nothing_to_stamp_writes_the_registry_and_no_digest
     assert not image_status_digest_path(dataset).exists()
     saved = json.loads(classes_path(dataset).read_text(encoding="utf-8"))
     assert saved["bud"]["attributes"]["opening"]["values"] == \
-        ["closed", "elongating", "open"]
+        ["closed", "partial", "open"]
 
 
 def _block_the_digest_store(root: Path) -> None:
@@ -252,7 +252,7 @@ def test_the_save_route_writes_the_registry_and_reports_a_sweep_it_could_not_com
     assert "re-review them before they train" in response["schema_change_sweep"]["warning"]
     saved = json.loads(classes_path(dataset).read_text(encoding="utf-8"))
     assert saved["bud"]["attributes"]["opening"]["values"] == \
-        ["closed", "elongating", "open"]
+        ["closed", "partial", "open"]
 
 
 def test_the_class_map_tool_writes_the_registry_and_reports_a_sweep_it_could_not_complete(
@@ -274,7 +274,7 @@ def test_the_class_map_tool_writes_the_registry_and_reports_a_sweep_it_could_not
     assert "re-review them before they train" in result["schema_change_sweep"]["warning"]
     saved = json.loads(classes_path(dataset).read_text(encoding="utf-8"))
     assert saved["bud"]["attributes"]["opening"]["values"] == \
-        ["closed", "elongating", "open"]
+        ["closed", "partial", "open"]
 
 
 def test_a_confirmation_stamped_under_current_code_reads_as_predating_the_next_change(

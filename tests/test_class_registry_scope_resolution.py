@@ -48,7 +48,7 @@ def _prefixed_attributes() -> ClassRegistry:
     return ClassRegistry(subjects=(
         Subject(name="bud", attributes=(
             Attribute(name="opening_stage", type="ordinal",
-                      values=("closed", "swelling", "elongating", "shedding")),
+                      values=("closed", "swelling", "partial", "shedding")),
             Attribute(name="opening", type="categorical", values=("open", "closed")),
         )),
     ))
@@ -63,7 +63,7 @@ def _case_variant_subjects() -> ClassRegistry:
             Attribute(name="opening", type="categorical", values=("open", "closed")),)),
         Subject(name="Bud", attributes=(
             Attribute(name="opening", type="ordinal",
-                      values=("closed", "swelling", "elongating")),)),
+                      values=("closed", "swelling", "partial")),)),
     ))
 
 
@@ -142,11 +142,11 @@ def test_attribute_lookup_resolves_the_exactly_named_attribute():
 
     longer = bud.attribute("opening_stage")
     assert longer is not None
-    assert longer.values == ("closed", "swelling", "elongating", "shedding")
+    assert longer.values == ("closed", "swelling", "partial", "shedding")
 
     assert assign_class_ids(reg, "bud", "opening") == {"open": 0, "closed": 1}
     assert assign_class_ids(reg, "bud", "opening_stage") == {
-        "closed": 0, "swelling": 1, "elongating": 2, "shedding": 3}
+        "closed": 0, "swelling": 1, "partial": 2, "shedding": 3}
     assert num_classes(reg, "bud", "opening") == 2
     assert num_classes(reg, "bud", "opening_stage") == 4
 
@@ -157,7 +157,7 @@ def test_an_attribute_name_that_only_prefixes_a_declared_one_refuses():
     reg = ClassRegistry(subjects=(
         Subject(name="bud", attributes=(
             Attribute(name="opening_stage", type="ordinal",
-                      values=("closed", "swelling", "elongating", "shedding")),)),
+                      values=("closed", "swelling", "partial", "shedding")),)),
     ))
     bud = reg.subject("bud")
     assert bud is not None
@@ -183,7 +183,7 @@ def test_subject_lookup_resolves_the_exactly_named_subject():
 
     assert assign_class_ids(reg, "bud", "opening") == {"open": 0, "closed": 1}
     assert assign_class_ids(reg, "Bud", "opening") == {
-        "closed": 0, "swelling": 1, "elongating": 2}
+        "closed": 0, "swelling": 1, "partial": 2}
     assert num_classes(reg, "bud", "opening") == 2
     assert num_classes(reg, "Bud", "opening") == 3
     assert attribute_schema_digest(reg, "bud") != attribute_schema_digest(reg, "Bud")
@@ -212,5 +212,5 @@ def test_case_variant_subjects_survive_a_file_roundtrip_as_distinct_subjects(tmp
     upper = back.subject("Bud")
     assert lower is not None and upper is not None
     assert lower.attributes[0].values == ("open", "closed")
-    assert upper.attributes[0].values == ("closed", "swelling", "elongating")
+    assert upper.attributes[0].values == ("closed", "swelling", "partial")
     assert class_registry.num_classes(back, "Bud", "opening") == 3
