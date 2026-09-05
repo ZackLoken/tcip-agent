@@ -168,23 +168,57 @@ export const SUBJECT_COLORS = [
   "#00CED1",
 ];
 
-/** A subject's colour: this browser's override when it set one (see lib/subjectColors), else the
- *  deterministic name -> hex derivation below. Every consumer calls this one function, so a
- *  recolour reaches the canvas, the toolbar, the legend and the agent's mirror alike without any
- *  of them re-deriving colour on their own. */
+/** A subject's colour: this browser's override (lib/subjectColors), else its collision-free slot
+ *  in the loaded registry, else the bare name -> hex derivation below. */
 export function subjectColor(name: string): string {
   const override = subjectColorOverride(name);
   if (override) return override;
+  const slot = registrySlots.get(name);
+  if (slot !== undefined) return SUBJECT_COLORS[slot];
   return derivedSubjectColor(name);
 }
 
-/** Deterministic name -> hex: a subject (or attribute-value) name always maps to the same swatch,
- *  without storing colour anywhere. FNV-1a over the name, indexed into the palette. */
-export function derivedSubjectColor(name: string): string {
+function fnv1aSlot(name: string, size: number): number {
   let h = 2166136261;
   for (let i = 0; i < name.length; i++) {
     h ^= name.charCodeAt(i);
     h = Math.imul(h, 16777619);
   }
-  return SUBJECT_COLORS[Math.abs(h) % SUBJECT_COLORS.length];
+  return Math.abs(h) % size;
+}
+
+/** Deterministic name -> hex: a subject (or attribute-value) name always maps to the same swatch,
+ *  without storing colour anywhere. FNV-1a over the name, indexed into the palette; a name inside
+ *  the loaded registry gets its collision-free slot from `subjectColor` instead. */
+export function derivedSubjectColor(name: string): string {
+  return SUBJECT_COLORS[fnv1aSlot(name, SUBJECT_COLORS.length)];
+}
+
+// The loaded registry's collision-free palette slots, name -> index, recomputed whole on every
+// registry load; a name outside it falls back to the bare hash above.
+let registrySlots: Map<string, number> = new Map();
+
+/** Assigns each of `subjectNames` its own palette slot where the palette has room: sorted names
+ *  take their FNV-1a slot when free, else the next free slot going forward (wrapping past the
+ *  last). Past `SUBJECT_COLORS.length` names, free slots run out and later names share one again,
+ *  exactly as the bare hash always could; a subject's derived colour therefore depends on the
+ *  registry it sits in, not on its name alone. Called once per registry load (`setRegistry`);
+ *  `subjectColor` reads the result, never recomputes it. */
+export function setSubjectColorRegistry(subjectNames: Iterable<string>): void {
+  const size = SUBJECT_COLORS.length;
+  const sorted = Array.from(new Set(subjectNames)).sort();
+  const taken = new Set<number>();
+  const slots = new Map<string, number>();
+  for (const name of sorted) {
+    const start = fnv1aSlot(name, size);
+    if (taken.size >= size) {
+      slots.set(name, start); // every slot spoken for: sharing is unavoidable past the palette
+      continue;
+    }
+    let slot = start;
+    while (taken.has(slot)) slot = (slot + 1) % size;
+    taken.add(slot);
+    slots.set(name, slot);
+  }
+  registrySlots = slots;
 }

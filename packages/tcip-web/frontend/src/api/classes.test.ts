@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { classesApi } from "@/api/classes";
+import { classesApi, derivedSubjectColor, setSubjectColorRegistry } from "@/api/classes";
+import { SUBJECT_COLORS, subjectColor } from "@/api/classes";
 
 function stubFetch(body: unknown = { status: "ok" }) {
   vi.stubGlobal(
@@ -17,6 +18,28 @@ function stubFetch(body: unknown = { status: "ok" }) {
 function sentBody(): Record<string, unknown> {
   return JSON.parse(String(vi.mocked(fetch).mock.calls[0][1]?.body));
 }
+
+describe("subjectColor collision-free registry slots", () => {
+  afterEach(() => {
+    setSubjectColorRegistry([]); // don't leak one test's registry into the next
+  });
+
+  it("confirms the premise: two names can share a bare hash slot before any registry loads", () => {
+    expect(derivedSubjectColor("fruit")).toBe(derivedSubjectColor("leaf"));
+  });
+
+  it("gives two colliding names in one registry two different colours", () => {
+    setSubjectColorRegistry(["fruit", "leaf"]);
+    expect(subjectColor("fruit")).not.toBe(subjectColor("leaf"));
+    expect(SUBJECT_COLORS).toContain(subjectColor("fruit"));
+    expect(SUBJECT_COLORS).toContain(subjectColor("leaf"));
+  });
+
+  it("leaves a lone subject on its own hash colour", () => {
+    setSubjectColorRegistry(["solo"]);
+    expect(subjectColor("solo")).toBe(derivedSubjectColor("solo"));
+  });
+});
 
 describe("image-status writes carry the app-set identity", () => {
   afterEach(() => {
