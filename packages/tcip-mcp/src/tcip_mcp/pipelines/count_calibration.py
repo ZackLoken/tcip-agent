@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from tcip_mcp.pipelines.resolution import ResolvedBundle
 
@@ -161,14 +161,17 @@ def resolve_count_operating_point(
 
     # Floor the in-model conf so hesitant detections survive to be swept, and raise the cap to
     # this split's own density; executes after build_predictor's construction-time cap and wins.
+    # The Predictor protocol (pipelines.inference.predictor) declares no .model/.device, though
+    # GenericPredictor, its only implementation today, carries both; owned by another batch.
     applied, _applied_attribute_path = set_detector_operating_point(
-        predictor.model, score_thresh=0.01, detections_per_img=density_cap)
+        cast(Any, predictor).model, score_thresh=0.01, detections_per_img=density_cap)
 
     def _records(sub: list[str]) -> list[dict]:
         ds = build_dataset("detection", images_dir=images_dir, labels_dir=labels_dir, stems=sub,
                            subject=subject, attribute=attribute)
         loader = DataLoader(ds, batch_size=4, collate_fn=task_collate("detection"))
-        return records_over_loader(predictor.model, loader, predictor.device, "detection")
+        return records_over_loader(
+            cast(Any, predictor).model, loader, cast(Any, predictor).device, "detection")
 
     resolver_inputs: dict[str, Any] = {
         "dataset_hash": dh,
