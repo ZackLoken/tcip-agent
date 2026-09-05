@@ -8,6 +8,7 @@ of vision_tools.py) all live in proposal_tools.py. This module keeps label I/O a
 from __future__ import annotations
 
 from pathlib import Path
+from typing import cast, get_args
 
 from tcip_annotation import (
     Annotation,
@@ -19,6 +20,7 @@ from tcip_annotation import (
     load_annotations_any,
     save_annotations_any,
 )
+from tcip_annotation.format_io import AnnotFormat
 from tcip_annotation.json_io import (
     _PROV_KEYS, UnreadableLabelDocument, annotation_from_payload,
 )
@@ -34,6 +36,14 @@ from tcip_mcp.pipelines.image_utils import image_dimensions, resolve_image_sourc
 from tcip_mcp.pipelines.resolution import DEFAULT_CONF
 from tcip_mcp.server import mcp
 from tcip_mcp.audit import audited
+
+
+def _checked_fmt(fmt: str) -> AnnotFormat | None:
+    """``fmt`` narrowed to :data:`AnnotFormat`, or ``None`` naming it not one of the two the
+    on-disk label formats admit (see the package ``CLAUDE.md``: json/coco only)."""
+    # get_args returns a runtime tuple, so the membership test below is not a static Literal
+    # narrowing; the cast reflects the check just made, not an unvalidated value.
+    return cast(AnnotFormat, fmt) if fmt in get_args(AnnotFormat) else None
 
 
 def _dims_for(image_path: str) -> tuple[int, int]:
@@ -96,6 +106,9 @@ def read_annotations(image_path: str, fmt: str | None = None) -> dict:
     img = Path(image_path)
     if not img.is_file():
         return {"error": f"Image not found: {image_path}"}
+    checked_fmt = _checked_fmt(fmt) if fmt is not None else None
+    if fmt is not None and checked_fmt is None:
+        return {"error": f"fmt must be one of {get_args(AnnotFormat)}, got {fmt!r}"}
 
     w, h = _dims_for(image_path)
     result: dict = {"image": image_path, "width": w, "height": h}
@@ -103,7 +116,7 @@ def read_annotations(image_path: str, fmt: str | None = None) -> dict:
     gt_path = find_gt_label(image_path, fmt=fmt)
     if gt_path is not None:
         try:
-            file_fmt = fmt or detect_format(str(gt_path))
+            file_fmt = checked_fmt or detect_format(str(gt_path))
             anns = load_annotations_any(str(gt_path), fmt=file_fmt, file_name=img.name)
         except (ValueError, UnreadableLabelDocument) as exc:
             return {"error": str(exc)}
@@ -162,6 +175,9 @@ def save_annotations(
     img = Path(image_path)
     if not img.is_file():
         return {"error": f"Image not found: {image_path}"}
+    checked_fmt = _checked_fmt(fmt)
+    if checked_fmt is None:
+        return {"error": f"fmt must be one of {get_args(AnnotFormat)}, got {fmt!r}"}
 
     anns_in = annotations or []
     if not anns_in:
@@ -187,7 +203,8 @@ def save_annotations(
 
     out_path = Path(path) if path else annotation_path_for_image(image_path, fmt, date=date)
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    save_annotations_any(str(out_path), typed, w, h, fmt=fmt, file_name=img.name, keep_empty=True)
+    save_annotations_any(
+        str(out_path), typed, w, h, fmt=checked_fmt, file_name=img.name, keep_empty=True)
 
     try:
         from tcip_mcp.web_client import PANEL_EVENT_LABELS_WRITTEN, post_panel_event

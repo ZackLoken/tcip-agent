@@ -193,6 +193,22 @@ def test_save_annotations_refuses_missing_subject(tmp_path):
     assert ok.get("count") == 1 and (tmp_path / "y.json").is_file()
 
 
+def test_save_annotations_refuses_an_unrecognized_fmt(tmp_path):
+    """An fmt outside {json, coco} is a named refusal, not an uncaught ValueError from the writer
+    this tool calls into."""
+    from tcip_mcp.tools.annotation_tools import save_annotations
+
+    images_dir = tmp_path / "images"
+    _write_image(images_dir, "img_001")
+    img = str(images_dir / "img_001.jpg")
+
+    res = save_annotations(
+        img, annotations=[{"subject": "catkin", "bbox": [10, 10, 40, 40]}],
+        fmt="xml", path=str(tmp_path / "x.json"))
+    assert "error" in res and "fmt" in res["error"]
+    assert not (tmp_path / "x.json").exists()
+
+
 # (g2) save_annotations prefers points over bbox (aligned with the web converters), so a payload
 # carrying both geometries writes the polygon, never collapsing it to a box-only record (which
 # would double-count against the polygon's own derived box on the next load).
