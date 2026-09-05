@@ -244,7 +244,7 @@ export function ProjectPicker() {
                             value={date}
                             onChange={(e) => chooseDate(p, e.target.value)}
                           >
-                            {p.dates.length === 0 && <option value="">{UNSET_GLYPH}</option>}
+                            {p.dates.length === 0 && <option value="">no dates</option>}
                             {p.dates.map((d) => (
                               <option key={d} value={d}>
                                 {d}
