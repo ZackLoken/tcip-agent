@@ -32,26 +32,29 @@ export function AttributeEditors({
     <>
       {entries.map(([name, def]) => (
         <div key={name} className="mb-1">
-          <label className="flex items-center gap-1.5">
-            <span className="w-20 shrink-0 truncate text-tcip-muted" title={name}>
-              {name}
-            </span>
-            <select
-              className="tcip-select flex-1 text-[11px]"
-              value={attributes[name] ?? ""}
-              onChange={(e) => onChange(name, e.target.value)}
-            >
-              <option value="">{UNSET_GLYPH}</option>
-              {def.values.map((v) => (
-                <option key={v} value={v}>
-                  {v}
-                </option>
-              ))}
-            </select>
+          <div className="flex items-center gap-1.5">
+            <label className="flex flex-1 items-center gap-1.5">
+              <span className="w-20 shrink-0 truncate text-tcip-muted" title={name}>
+                {name}
+              </span>
+              <select
+                className="tcip-select flex-1 text-[11px]"
+                value={attributes[name] ?? ""}
+                onChange={(e) => onChange(name, e.target.value)}
+              >
+                <option value="">{UNSET_GLYPH}</option>
+                {def.values.map((v) => (
+                  <option key={v} value={v}>
+                    {v}
+                  </option>
+                ))}
+              </select>
+            </label>
             {onAddValue && (
               <button
                 type="button"
                 title={`Declare a new ${name} value`}
+                aria-label={`Add a ${name} value`}
                 className="shrink-0 text-tcip-muted hover:text-tcip-fg"
                 onClick={() => {
                   setAddingValueFor(addingValueFor === name ? null : name);
@@ -61,7 +64,7 @@ export function AttributeEditors({
                 + value
               </button>
             )}
-          </label>
+          </div>
           {addingValueFor === name && (
             <div className="mt-1 flex items-center gap-1.5 pl-[5.5rem]">
               <input
