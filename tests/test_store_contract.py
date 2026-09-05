@@ -477,6 +477,82 @@ def test_clear_log_on_a_log_with_no_entries_removes_nothing(store):
     assert ts.read_log(key).records == []
 
 
+def test_clear_log_on_an_empty_log_leaves_no_stale_store_behind(store):
+    """Clearing a log nothing ever wrote must not manufacture a store_counters row: a store
+    with no row there was never written, and one appearing here would read as behind the
+    database it was never ahead of in the first place."""
+    only_on(store, SQLITE, "store_counters and stale_stores are the database backend's own "
+                            "bookkeeping; the file backend keeps no counter to leave untouched")
+    from tcip_store.export import stale_stores
+
+    key = store.key(LOG, "never-appended")
+
+    assert ts.clear_log(key) == 0
+    assert stale_stores(database_path(str(store.root)), (LOG,)) == ()
+
+
+def test_clearing_a_log_tombstones_it_so_a_later_export_removes_the_stale_copy(store):
+    """A log's own clear has to leave the same trail a record's delete already does: without
+    a tombstone, export_root's delete pass never learns this key's exported file is stale."""
+    only_on(store, SQLITE, "export_root and stale_stores reconcile a database backend's "
+                            "exported loose copies; the file backend keeps no such copies")
+    from tcip_store.export import export_root, stale_stores
+
+    key = store.key(LOG, "history")
+    exported_path = store.root / "logs" / "history.jsonl"
+    ts.append(key, {"i": 0})
+    export_root(str(store.root), report=lambda _line: None)
+    assert exported_path.is_file()
+    assert stale_stores(database_path(str(store.root)), (LOG,)) == ()
+
+    ts.clear_log(key)
+    export_root(str(store.root), report=lambda _line: None)
+
+    assert not exported_path.is_file()
+    assert stale_stores(database_path(str(store.root)), (LOG,)) == ()
+
+
+def test_appending_to_a_cleared_log_clears_its_stale_tombstone(store):
+    """A log's tombstone from an earlier clear must not survive a fresh append to the same
+    key: a live entry and a pending delete for the one target would collide in export_root,
+    which reads that combination as two mis-parted keys rather than one key written again."""
+    only_on(store, SQLITE, "tombstones are the database backend's own export bookkeeping; "
+                            "the file backend deletes and rewrites the log file directly")
+    from tcip_store.export import export_root
+
+    key = store.key(LOG, "reopened")
+    ts.append(key, {"i": 0})
+    export_root(str(store.root), report=lambda _line: None)
+    ts.clear_log(key)
+    ts.append(key, {"i": "again"})
+
+    export_root(str(store.root), report=lambda _line: None)
+
+    exported_path = store.root / "logs" / "reopened.jsonl"
+    lines = exported_path.read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 1
+    assert json.loads(lines[0])["i"] == "again"
+
+
+def test_a_cursor_taken_before_a_clear_reads_only_what_was_appended_after(store):
+    """A cursor held across a clear_log is not a corruption risk on either backend: replaying
+    it returns exactly the entries appended since the clear, never the cleared ones and never
+    a misreading of the new bytes as damaged."""
+    key = store.key(LOG, "cleared-and-resumed")
+    for i in range(3):
+        ts.append(key, {"i": i})
+    before = ts.read_log(key)
+    assert [r["i"] for r in before.records] == [0, 1, 2]
+
+    ts.clear_log(key)
+    ts.append(key, {"i": "after"})
+
+    resumed = ts.read_log(key, after=before.cursor)
+    assert [r["i"] for r in resumed.records] == ["after"]
+    assert resumed.corrupt == ()
+    assert not resumed.torn_tail
+
+
 _LOG_FILE_MECHANICS = (
     "a torn tail is bytes left in a file by an appender that died mid-write, reached here "
     "through the path the file backend places the log at"
@@ -533,6 +609,22 @@ def test_an_appender_repairs_a_log_that_is_nothing_but_a_fragment(store):
     page = ts.read_log(key)
     assert [r["i"] for r in page.records] == [1]
     assert not page.torn_tail and page.corrupt == ()
+
+
+def test_clear_log_repairs_a_torn_tail_before_counting_and_removing(store):
+    only_on(store, FILE, _LOG_FILE_MECHANICS)
+    key = store.key(LOG, "damaged")
+    for i in range(3):
+        ts.append(key, {"i": i})
+    path = store.path(key)
+    with open(path, "ab") as handle:
+        handle.write(b'{"i": 3, "par')
+
+    removed = ts.clear_log(key)
+
+    assert removed == 3
+    ts.append(key, {"i": "after"})
+    assert [r["i"] for r in ts.read_log(key).records] == ["after"]
 
 
 def test_a_committed_entry_is_never_a_torn_tail_and_a_damaged_one_is_still_reported(store):
@@ -847,8 +939,9 @@ def test_an_append_inside_a_transaction_is_refused_and_the_same_append_outside_i
         with pytest.raises(ts.TransactionMisuse) as raised:
             ts.append(log, {"i": "inside"})
         assert "close the transaction first" in str(raised.value)
-        with pytest.raises(ts.TransactionMisuse):
+        with pytest.raises(ts.TransactionMisuse) as clearing:
             ts.clear_log(log)
+        assert "close the transaction first" in str(clearing.value)
         txn.write(record, {"n": 1})
 
     ts.append(log, {"i": "outside"})
