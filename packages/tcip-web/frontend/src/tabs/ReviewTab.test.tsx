@@ -115,7 +115,12 @@ function det(over: Partial<Detection> = {}): Detection {
 
 function matchesRes(
   detections: Detection[],
-  extra: { gt?: Annotation[]; preds?: Annotation[] } = {},
+  extra: {
+    gt?: Annotation[];
+    preds?: Annotation[];
+    subject?: string | null;
+    attribute?: string | null;
+  } = {},
 ): MatchesResponse {
   return {
     img_width: 1000,
@@ -129,6 +134,8 @@ function matchesRes(
     image_status: "not_started",
     n_reviewed: detections.filter((d) => d.reviewed).length,
     n_total: detections.length,
+    subject: extra.subject ?? null,
+    attribute: extra.attribute ?? null,
   };
 }
 
@@ -803,6 +810,87 @@ describe("ReviewTab class filter", () => {
         expect.anything(),
       ),
     );
+  });
+
+  it("offers the confirmed/predicted values under a classified scope, not object-class subjects", async () => {
+    matchesSpy.mockResolvedValue(
+      matchesRes([det()], {
+        gt: [{ subject: "subject_a", bbox: [10, 10, 50, 50], attributes: { ripeness: "ripe" } }],
+        preds: [
+          {
+            subject: "subject_a",
+            bbox: [60, 60, 90, 90],
+            attributes: { ripeness: "unripe" },
+            score: 0.5,
+          },
+        ],
+        attribute: "ripeness",
+      }),
+    );
+    render(<ReviewTab />);
+    await waitFor(() => expect(matchesSpy).toHaveBeenCalled());
+    openFilters();
+
+    const select = screen.getByLabelText("Class filter") as HTMLSelectElement;
+    const values = Array.from(select.options).map((o) => o.value);
+    // Without the change, availableClasses reads a.subject on every record, so both entries
+    // collapse to one "subject_a" option instead of the two confirmed/predicted values.
+    expect(values).toEqual(["all", "ripe", "unripe"]);
+  });
+});
+
+describe("ReviewTab under a classified scope", () => {
+  it("names the confirmed value on accept and reject titles for a tp, and disables reject", async () => {
+    matchesSpy.mockResolvedValue(matchesRes([det({ det_type: "tp" })], { attribute: "ripeness" }));
+    render(<ReviewTab />);
+    await waitFor(() => expect(screen.getByText("1 / 1")).toBeInTheDocument());
+
+    // Without the change, these read "Keep this ground-truth object (A)" and "Delete this
+    // ground-truth object (R)", describing a presence verdict this review never adjudicated.
+    expect(screen.getByTitle("Keep this confirmed value (A)")).toBeInTheDocument();
+    const rejectBtn = screen.getByTitle(/detector-scope action/i);
+    expect(rejectBtn).toBeDisabled();
+  });
+
+  it("names the predicted value on accept and reject titles for an fp, and leaves reject enabled", async () => {
+    matchesSpy.mockResolvedValue(
+      matchesRes([det({ det_type: "fp", gt_idx: null, pred_idx: 0 })], { attribute: "ripeness" }),
+    );
+    render(<ReviewTab />);
+    await waitFor(() => expect(screen.getByText("1 / 1")).toBeInTheDocument());
+
+    // Without the change, these read "Add this prediction to ground truth (A)" and "Discard this
+    // prediction; ground truth unchanged (R)".
+    expect(
+      screen.getByTitle("Confirm this predicted value for the object (A)"),
+    ).toBeInTheDocument();
+    const rejectBtn = screen.getByTitle(
+      "Discard this predicted value; the confirmed value stays (R)",
+    );
+    expect(rejectBtn).not.toBeDisabled();
+  });
+
+  it("shows no confirm dialog for the disabled reject on a fn", async () => {
+    const confirmSpy = vi.spyOn(window, "confirm");
+    matchesSpy.mockResolvedValue(matchesRes([det({ det_type: "fn" })], { attribute: "ripeness" }));
+    render(<ReviewTab />);
+    await waitFor(() => expect(screen.getByText("1 / 1")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByTitle(/detector-scope action/i));
+    // Without the change, reject stays enabled on a fn under a classified scope, so this click
+    // would raise the delete-confirmation dialog the design says a classified review never shows.
+    expect(confirmSpy).not.toHaveBeenCalled();
+  });
+
+  it("disables the missed-object control, naming the Annotate tab as the remedy", async () => {
+    matchesSpy.mockResolvedValue(matchesRes([], { attribute: "ripeness" }));
+    render(<ReviewTab />);
+    await waitFor(() => expect(matchesSpy).toHaveBeenCalled());
+
+    // Without the change, the control stays enabled and posting a missed object under a
+    // classified scope would 400 only after the reviewer draws the box.
+    const btn = screen.getByTitle(/fabricate a state nobody assessed/i);
+    expect(btn).toBeDisabled();
   });
 });
 

@@ -176,6 +176,9 @@ export interface MatchesResponse {
   // n_total counts the whole image regardless of the active detection filter.
   n_reviewed: number;
   n_total: number;
+  // The bucket's own resolved review scope; both null means a bare directory, nothing else.
+  subject: string | null;
+  attribute: string | null;
 }
 
 /** The Annotate canvas' load payload, split from the unified annotation list by geometry kind. */

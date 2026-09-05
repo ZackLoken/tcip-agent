@@ -678,14 +678,25 @@ export function ReviewTab() {
 
   const current = matches?.detections[detectionIdx] ?? null;
 
-  // The class filter's own options: every subject actually present on this image, from the
-  // unfiltered gt/pred lists (matches.detections is already narrowed by the active filters, so it
-  // can't be the source, or picking a class would collapse the list that offers the others).
+  // Under a classified scope (matches.attribute set) a verdict judges an object's confirmed
+  // value, never its presence; class_name on every detection is that value.
+  const classifiedScope = !!matches?.attribute;
+
+  // The class filter's own options: matches.attribute's values under a classified scope, else
+  // every subject present (matches.detections is already narrowed by the active filters).
   const availableClasses = useMemo(() => {
     if (!matches) return [];
     const names = new Set<string>();
-    for (const a of matches.gt) names.add(a.subject);
-    for (const a of matches.preds) names.add(a.subject);
+    if (matches.attribute) {
+      const attr = matches.attribute;
+      for (const a of matches.gt)
+        if (a.attributes[attr] !== undefined) names.add(a.attributes[attr]);
+      for (const a of matches.preds)
+        if (a.attributes[attr] !== undefined) names.add(a.attributes[attr]);
+    } else {
+      for (const a of matches.gt) names.add(a.subject);
+      for (const a of matches.preds) names.add(a.subject);
+    }
     return Array.from(names).sort();
   }, [matches]);
 
@@ -1147,19 +1158,31 @@ export function ReviewTab() {
   const imgW = matches?.img_width ?? 0;
   const imgH = matches?.img_height ?? 0;
 
-  // Verdicts author ground truth: accept an FP adds the prediction to GT; reject a detection that
-  // has GT (TP/FN) deletes that GT box; accept a TP/FN keeps the existing GT. Edit adjusts the shape
-  // first, then accept commits it.
+  // Verdicts author ground truth: accept an FP adds the prediction to GT; reject a detection
+  // with GT (TP/FN) deletes that box; accept keeps existing GT.
   const acceptLabel = "Accept";
   const rejectLabel = "Reject";
-  const acceptTitle =
-    current?.det_type === "fp"
+  // Under a classified scope a verdict judges the confirmed value instead; removing the object
+  // is out of scope, so Reject on a tp/fn refuses and is disabled.
+  const acceptTitle = classifiedScope
+    ? current?.det_type === "fp"
+      ? "Confirm this predicted value for the object (A)"
+      : "Keep this confirmed value (A)"
+    : current?.det_type === "fp"
       ? "Add this prediction to ground truth (A)"
       : "Keep this ground-truth object (A)";
-  const rejectTitle =
-    current?.det_type === "fp"
+  const rejectRefusedTitle =
+    "Removing this object is a detector-scope action; add or remove it in the Annotate tab, " +
+    "then review its value here.";
+  const rejectTitle = classifiedScope
+    ? current?.det_type === "fp"
+      ? "Discard this predicted value; the confirmed value stays (R)"
+      : rejectRefusedTitle
+    : current?.det_type === "fp"
       ? "Discard this prediction; ground truth unchanged (R)"
       : "Delete this ground-truth object (R)";
+  const rejectDisabled =
+    reviewLocked || !canReview || (classifiedScope && current?.det_type !== "fp");
 
   return (
     <div className="flex-1 flex flex-col relative min-h-0">
@@ -1302,11 +1325,21 @@ export function ReviewTab() {
           <button
             className="tcip-btn"
             onClick={() => (drawingMiss ? cancelMarkMissedObject() : startMarkMissedObject())}
-            disabled={!imgName || reviewLocked || !!edit || !dataset.subject || !canReview}
+            disabled={
+              !imgName ||
+              reviewLocked ||
+              !!edit ||
+              !dataset.subject ||
+              !canReview ||
+              classifiedScope
+            }
             title={
-              drawingMiss
-                ? "Cancel drawing a missed object"
-                : "Draw a box around an object the model missed, even on an image with no existing detections"
+              classifiedScope
+                ? "Adding a new object here would fabricate a state nobody assessed; add it " +
+                  "through the Annotate tab, then review its value here."
+                : drawingMiss
+                  ? "Cancel drawing a missed object"
+                  : "Draw a box around an object the model missed, even on an image with no existing detections"
             }
           >
             {drawingMiss ? "Cancel drawing" : "＋ Mark missed object"}
@@ -1705,7 +1738,7 @@ export function ReviewTab() {
             <button
               className="tcip-btn-danger"
               onClick={() => void recordAction("rejected")}
-              disabled={reviewLocked || !canReview}
+              disabled={rejectDisabled}
               title={rejectTitle}
             >
               ✕&nbsp;&nbsp;{rejectLabel}

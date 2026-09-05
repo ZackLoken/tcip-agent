@@ -35,6 +35,8 @@ function matchesRes(over: Partial<MatchesResponse> = {}): MatchesResponse {
     image_status: "started",
     n_reviewed: 0,
     n_total: 0,
+    subject: null,
+    attribute: null,
     ...over,
   };
 }
