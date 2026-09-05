@@ -15,20 +15,19 @@ doors demoted from them, keeping ``@audited`` without registering), which name t
 carrying the dataset or project location with ``@audited(scope_arg=...)``, and :func:`record_event`
 / :func:`record_event_or_raise` for code that is neither.
 
-An entry's ``scope`` field is a version-2 line's own convention, stamped by :func:`_stamp_scope`,
-the one implementation :func:`audited`, :func:`record_event` and :func:`record_event_or_raise` all
-resolve a caller's scope through. When present, ``scope`` names the resolved root the entry was
-filed under, which can be a dataset's, a project's, or the platform's own (a writer that resolved
-and passed the platform root stamps it; presence never means non-platform); its absence on a
-version-2 line means the writer took the platform default. A line written before the version
-marker carries no schema_version (the frozen version 1) and only claims what it carries: the old
-scoped decorator writes stamped a resolved dataset ``scope`` and those values stand, while an old
-line with no ``scope`` says nothing either way about its category. Three disclosures for a moved log: a
-stamped absolute scope travels in a shared or imported archive exactly as the log body's other
-absolute paths already do, unredacted; ``scope`` records a write-time fact, never a location claim,
-so a relocated import's lines still name the exporting machine's own root and nothing reconciles
-them against where the archive now sits; and a project archive is provenance-preserving, not
-path-sanitized, by the same standing choice.
+An entry's ``scope`` field is stamped by :func:`_stamp_scope`, the one implementation
+:func:`audited`, :func:`record_event` and :func:`record_event_or_raise` all resolve a caller's
+scope through. When present, ``scope`` names the resolved root the entry was filed under, which
+can be a dataset's, a project's, or the platform's own (a writer that resolved and passed the
+platform root stamps it; presence never means non-platform); its absence means the writer took
+the platform default, never that the line is non-platform. Every line carries no
+``schema_version`` (the frozen version 1: absence is the store's own lazy default, held to it by
+``frozen-formats.json``). Three disclosures for a moved log: a stamped absolute scope travels in a
+shared or imported archive exactly as the log body's other absolute paths already do, unredacted;
+``scope`` records a write-time fact, never a location claim, so a relocated import's lines still
+name the exporting machine's own root and nothing reconciles them against where the archive now
+sits; and a project archive is provenance-preserving, not path-sanitized, by the same standing
+choice.
 
 An append the decorator cannot make is a refusal, not a warning, because the append runs after
 the tool body: see :class:`MutationCommittedWithoutAuditLine`.
@@ -67,7 +66,6 @@ register_store(
         kind="log",
         key_fields=("document",),
         frozen=True,
-        schema_version=2,
         codec=LOG_JSON,
         locator=_AUDIT_LOG,
     )
@@ -142,14 +140,12 @@ def _stamp_scope(entry: dict[str, Any], scope: str | Path | None) -> Key:
     stamped scope is the key's own root, so the root a line names and the root its Key addresses
     are one resolved value by construction, never two separately-resolved answers.
 
-    ``entry["schema_version"]`` is stamped ``2`` on every call. ``entry["scope"]`` is stamped
-    only when the caller passed a scope; the value may equal the platform root (a project door
-    after adoption, or a writer that resolved the platform root itself and passed it), so the
-    field means the writer named its root explicitly, and its absence means the writer took the
-    platform default, never that the line is non-platform.
+    ``entry["scope"]`` is stamped only when the caller passed a scope; the value may equal the
+    platform root (a project door after adoption, or a writer that resolved the platform root
+    itself and passed it), so the field means the writer named its root explicitly, and its
+    absence means the writer took the platform default, never that the line is non-platform.
     """
     key = audit_log_key(scope)
-    entry["schema_version"] = 2
     if scope is not None:
         entry["scope"] = key.root
     return key
