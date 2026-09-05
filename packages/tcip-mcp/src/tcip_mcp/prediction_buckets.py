@@ -19,6 +19,12 @@ redirecting or overwriting, since a bucket left in that state was already publis
 run this call would otherwise write beside or over. ``stage_prediction_shapes`` leaves this off,
 since it accumulates one stem per call into a bucket by contract.
 
+A staged bucket carries no ``operating_point.json`` stamp and so no recorded ``(subject,
+attribute)`` scope: each record's ``subject`` is whatever the caller named
+(:func:`~tcip_mcp.tools.proposal_tools.stage_proposals`), the platform validates no subject name,
+and every reader below reads a staged bucket's records under the caller's own statement rather
+than a stamp's.
+
 A third change reaches every caller regardless of that keyword: when every ``<name>@r<n>``
 variant up to the search's ceiling already carries a verdict, the resolver no longer falls back
 to an unchecked, never-searched ``<name>@r100``; it raises :class:`BucketHasVerdicts` naming no
