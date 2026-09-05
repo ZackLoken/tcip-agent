@@ -25,6 +25,8 @@ from tcip_mcp.pipelines.resolution import DEFAULT_NMS_IOU
 if TYPE_CHECKING:
     from pathlib import Path
 
+    import torch
+
     from tcip_mcp.model_registry import VerifiedCheckpoint
     from tcip_mcp.pipelines.data.band_groups import BandGroupRef
     from tcip_mcp.pipelines.inference.generic_predictor import WindowedRasterReader
@@ -66,6 +68,12 @@ class Predictor(Protocol):
 
     task: str
     in_chans: int
+    # The loaded module and its device, read by the count calibrator and the tiled regime, and
+    # the operating point the callers set on a predictor after resolving it against the data.
+    model: torch.nn.Module
+    device: torch.device
+    score_threshold: float
+    max_dets: int | None
 
     # Each image argument may be a plain path/string or a BandGroupRef (a band-grouped capture,
     # see pipelines.data.band_groups), the same image sources image_utils.list_logical_images/
