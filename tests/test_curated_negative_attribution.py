@@ -324,6 +324,59 @@ def test_classified_scope_refuses_a_confirmed_value_outside_the_bucket_vocabular
     assert "shedding" in r["boundary_refused"][0]["reason"]
 
 
+def test_a_classified_scope_with_no_vocabulary_refuses_rather_than_writing_unchecked(tmp_path):
+    """A classified scope requires the bucket's own vocabulary to check a confirmed value
+    against: with none given, the positive is reported in ``boundary_refused`` naming the
+    requirement, never written unchecked."""
+    from tcip_mcp.pipelines.resolution import BucketScope
+
+    root = tmp_path / "dataset"
+    registry = ClassRegistry(subjects=_TWO_SUBJECTS)
+    root.mkdir()
+    class_registry.write_registry(root / "classes.json", registry)
+    images = root / "images"
+    _image(images, "pos.png", (100, 30))
+    out = tmp_path / "out"
+    state = {"image": {
+        "pos.png": _completed([_accepted("dormant", [0.5, 0.5, 0.2, 0.2])]),
+    }}
+    scope = BucketScope(subject="catkin", attribute="stage")
+
+    r = materialize_dataset(state, str(images), str(out), scope=scope)
+
+    assert r["positive"] == 0
+    assert [e["image"] for e in r["boundary_refused"]] == ["pos.png"]
+    assert "requires the bucket's own recorded vocabulary" in r["boundary_refused"][0]["reason"]
+
+
+def test_a_classified_scope_with_its_vocabulary_admits_a_value_it_declares(tmp_path):
+    """The admitting case: a classified scope with its own bucket vocabulary writes a value that
+    vocabulary declares, the object class in ``subject`` and the value under the attribute."""
+    from tcip_annotation.json_io import read_annotations
+    from tcip_mcp.pipelines.resolution import BucketScope
+
+    root = tmp_path / "dataset"
+    registry = ClassRegistry(subjects=_TWO_SUBJECTS)
+    root.mkdir()
+    class_registry.write_registry(root / "classes.json", registry)
+    images = root / "images"
+    _image(images, "pos.png", (100, 30))
+    out = tmp_path / "out"
+    state = {"image": {
+        "pos.png": _completed([_accepted("dormant", [0.5, 0.5, 0.2, 0.2])]),
+    }}
+    scope = BucketScope(subject="catkin", attribute="stage")
+
+    r = materialize_dataset(
+        state, str(images), str(out), scope=scope, vocabulary={"dormant", "elongating"})
+
+    assert r["positive"] == 1
+    assert r["boundary_refused"] == []
+    written = read_annotations(str(out / "annotations" / "pos.json"))
+    assert written[0].subject == "catkin"
+    assert written[0].attributes == {"stage": "dormant"}
+
+
 def test_a_negative_no_one_reviewer_answers_for_names_the_harvest(tmp_path):
     """Two reviewers disputing one image leaves the writing tool as the honest actor."""
     src = tmp_path / "src"
