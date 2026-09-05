@@ -393,9 +393,9 @@ def orthomosaic_plant_counts(
         except ValueError as exc:
             raise CountDeliveryRefused(f"canopy_subject delivery refused: {exc}") from exc
 
-        assignments = assign_detections_to_segments(detections, tie)
+        segment_assignments = assign_detections_to_segments(detections, tie)
         ambiguous_segment_indices = {
-            idx for a in assignments if a.source == SEGMENT_ASSIGNMENT_SOURCES.overlapping
+            idx for a in segment_assignments if a.source == SEGMENT_ASSIGNMENT_SOURCES.overlapping
             for idx in a.overlapping_segment_indices
         }
         tied_by_index = {t.segment_index: t for t in tie.tied}
@@ -404,8 +404,10 @@ def orthomosaic_plant_counts(
             tied_by_index[idx].plot_name for idx in ambiguous_tied_indices)
 
         counts_by_segment: dict[int, int] = {}
-        for a in assignments:
+        for a in segment_assignments:
             if a.source == SEGMENT_ASSIGNMENT_SOURCES.containment:
+                # a containment assignment always carries the segment it was contained in
+                assert a.segment_index is not None
                 counts_by_segment[a.segment_index] = counts_by_segment.get(a.segment_index, 0) + 1
 
         records = [
@@ -423,17 +425,21 @@ def orthomosaic_plant_counts(
                 f"({tie.plants_without_segment}) while {len(tie.untied)} segment(s) contain no "
                 "plant")
 
-        n_mapped = sum(1 for a in assignments if a.source == SEGMENT_ASSIGNMENT_SOURCES.containment
+        n_mapped = sum(1 for a in segment_assignments
+                      if a.source == SEGMENT_ASSIGNMENT_SOURCES.containment
                       and a.segment_index not in ambiguous_tied_indices)
-        n_unmapped = len(assignments) - n_mapped
+        n_detections = len(segment_assignments)
+        n_unmapped = n_detections - n_mapped
 
         by_source = {
             "outside_segments": sum(
-                1 for a in assignments if a.source == SEGMENT_ASSIGNMENT_SOURCES.outside),
+                1 for a in segment_assignments if a.source == SEGMENT_ASSIGNMENT_SOURCES.outside),
             "overlapping_segments": sum(
-                1 for a in assignments if a.source == SEGMENT_ASSIGNMENT_SOURCES.overlapping),
+                1 for a in segment_assignments
+                if a.source == SEGMENT_ASSIGNMENT_SOURCES.overlapping),
             "segment_without_plant": sum(
-                1 for a in assignments if a.source == SEGMENT_ASSIGNMENT_SOURCES.without_plant),
+                1 for a in segment_assignments
+                if a.source == SEGMENT_ASSIGNMENT_SOURCES.without_plant),
         }
 
         assert document_path is not None  # canopy_subject implies the document was resolved above
@@ -483,11 +489,12 @@ def orthomosaic_plant_counts(
                 f"no registered plant lies inside this raster's frame ({raster_path}); every "
                 f"plant in {plant_csv_paths} projects outside it")
         resolved_tolerance = resolve_nn_tolerance_m(in_frame_plants, nn_tolerance_m)
-        assignments = assign_detections_to_plants(
+        detection_assignments = assign_detections_to_plants(
             detections, georef, in_frame_plants, nn_tolerance_m=resolved_tolerance["value"])
-        mapped = [a for a in assignments if a.plot_name is not None]
+        mapped = [a for a in detection_assignments if a.plot_name is not None]
         n_mapped = len(mapped)
-        n_unmapped = len(assignments) - n_mapped
+        n_detections = len(detection_assignments)
+        n_unmapped = n_detections - n_mapped
 
         mapped_plant_ids = {a.plot_name for a in mapped}
         records = [
@@ -528,7 +535,7 @@ def orthomosaic_plant_counts(
     provenance = {"producer_model_sha256": sidecar.get("checkpoint_sha256"),
                  "producing_experiment_id": sidecar.get("experiment_id")}
     counts_facts = {
-        "n_detections": len(assignments), "n_mapped": n_mapped, "n_unmapped": n_unmapped,
+        "n_detections": n_detections, "n_mapped": n_mapped, "n_unmapped": n_unmapped,
     }
 
     try:
