@@ -7,7 +7,7 @@ batch, and ONNX export.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Callable, Protocol
+from typing import TYPE_CHECKING, Callable, Protocol, cast
 
 import torch
 from PIL import Image
@@ -309,7 +309,7 @@ class GenericPredictor:
         collect_masks = self.task == "instance_seg" and require_masks
 
         per_tile_boxes, per_tile_scores, per_tile_labels, tile_info = [], [], [], []
-        per_tile_masks: list = [] if collect_masks else None
+        per_tile_masks: list[np.ndarray] | None = [] if collect_masks else None
         if prior is not None:
             for info, b, s, l in zip(
                 prior["tile_info"], prior["boxes"], prior["scores"], prior["labels"]):
@@ -339,6 +339,7 @@ class GenericPredictor:
                 per_tile_scores.append(out["scores"][keep].cpu().numpy())
                 per_tile_labels.append(out["labels"][keep].cpu().numpy())
                 if collect_masks:
+                    assert per_tile_masks is not None, "collect_masks is True only when per_tile_masks is a list"
                     m = out["masks"][keep]
                     if m.dim() == 4 and m.shape[1] == 1:  # torchvision MaskRCNN: [N, 1, H, W]
                         m = m[:, 0]
@@ -383,6 +384,7 @@ class GenericPredictor:
                            "transform chain skipped such samples too.", tuple(tile_resize))
 
         if collect_masks:
+            assert per_tile_masks is not None, "collect_masks is True only when per_tile_masks is a list"
             boxes, scores, labels, masks = reconstruct_core(
                 per_tile_boxes, per_tile_scores, per_tile_labels, tile_info, tile_size, stride,
                 per_tile_masks=per_tile_masks)
@@ -395,6 +397,7 @@ class GenericPredictor:
             pass
         elif postprocess == "nmm":
             if collect_masks:
+                assert masks is not None, "collect_masks is True only when masks is a list"
                 boxes, scores, labels, masks = global_merge(
                     boxes, scores, labels, global_nms_iou, per_det_masks=masks)
             else:
@@ -403,6 +406,7 @@ class GenericPredictor:
             keep = global_nms(boxes, scores, labels, global_nms_iou)
             boxes, scores, labels = boxes[keep], scores[keep], labels[keep]
             if collect_masks:
+                assert masks is not None, "collect_masks is True only when masks is a list"
                 masks = [masks[i] for i in keep]
 
         # Full-frame cap after the cross-tile merge (highest score first); the in-model
@@ -412,6 +416,7 @@ class GenericPredictor:
             top = np.argsort(scores)[::-1][: self.max_dets]
             boxes, scores, labels = boxes[top], scores[top], labels[top]
             if collect_masks:
+                assert masks is not None, "collect_masks is True only when masks is a list"
                 masks = [masks[i] for i in top]
 
         result = {
@@ -425,6 +430,7 @@ class GenericPredictor:
             "cap_hit": cap_hit,
         }
         if collect_masks:
+            assert masks is not None, "collect_masks is True only when masks is a list"
             result["masks"] = [
                 {"mask_patch": mp.patch.tolist(), "offset_x": mp.offset_x, "offset_y": mp.offset_y}
                 for mp in masks
@@ -519,24 +525,27 @@ class GenericPredictor:
                 "its files all at once and has no resume seam to feed them into."
             )
         if hasattr(source, "read_window"):
+            # hasattr is the actual duck-typing dispatch (see docstring); the cast only tells
+            # the checker what that check already established about source's real shape.
+            reader = cast("WindowedRasterReader", source)
             if self.task not in _DETECTION_TASKS:
                 raise ValueError(
                     f"predict_tiled only supports detection/instance_seg tasks for a windowed "
                     f"reader source, got {self.task!r}: there is no untiled predict() fallback for "
                     "a raster too large to decode whole."
                 )
-            self._refuse_channel_mismatch(source.num_channels)
+            self._refuse_channel_mismatch(reader.num_channels)
             edge = self._require_tile_size(tile_size)
 
             def _windowed_tile(tile_x: int, tile_y: int):
-                y0, y1 = tile_y, min(tile_y + edge, source.height)
-                x0, x1 = tile_x, min(tile_x + edge, source.width)
-                return pad_tile(source.read_window(y0, y1, x0, x1), edge)
+                y0, y1 = tile_y, min(tile_y + edge, reader.height)
+                x0, x1 = tile_x, min(tile_x + edge, reader.width)
+                return pad_tile(reader.read_window(y0, y1, x0, x1), edge)
 
             result = self._tiled_infer_core(
-                source.height, source.width, _windowed_tile, edge, overlap, tile_batch_size,
+                reader.height, reader.width, _windowed_tile, edge, overlap, tile_batch_size,
                 global_nms_iou, postprocess, require_masks=require_masks, tile_resize=tile_resize,
-                band_interpretations=getattr(source, "band_interpretations", None),
+                band_interpretations=getattr(reader, "band_interpretations", None),
                 prior=prior, progress=progress)
             result["image"] = source_label
             return result
@@ -570,7 +579,7 @@ class GenericPredictor:
         self.model.eval()
         torch.onnx.export(
             self.model,
-            dummy,
+            (dummy,),
             output_path,
             opset_version=opset,
             input_names=["images"],
