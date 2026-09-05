@@ -10,12 +10,12 @@ from tcip_mcp.tools.feedback_tools import materialize_review_dataset, prioritize
 BUCKET = "predictions/detector/2026-03-04"
 
 
-def _seed_verdicts(state_dir: Path) -> Path:
+def _seed_verdicts(state_dir: Path, *, bucket: str = BUCKET) -> Path:
     """Record one accepted and one rejected image's verdicts in the store at ``state_dir``."""
     state = {"verdicts": {
-        (BUCKET, "imgA.png"): {"img_status": "completed", "detections": [
+        (bucket, "imgA.png"): {"img_status": "completed", "detections": [
             {"action": "accepted", "class_name": "catkin", "gt_bbox_norm": [0.5, 0.5, 0.2, 0.2], "pred_bbox_norm": None}]},
-        (BUCKET, "imgB.png"): {"img_status": "completed", "detections": [
+        (bucket, "imgB.png"): {"img_status": "completed", "detections": [
             {"action": "rejected", "class_name": "catkin", "gt_bbox_norm": None, "pred_bbox_norm": [0.8, 0.8, 0.1, 0.1]}]},
     }}
     # Seed through the engine so the fixture cannot drift from the real shard format.
@@ -73,11 +73,15 @@ def test_materialize_consumes_a_stated_store_outside_the_dataset(tmp_path):
     """A review recorded outside the dataset is still curated, and the response says from where.
 
     The dataset here has no store of its own, so the shards can only have come from the stated
-    location, and the caller is told which one it was.
+    location, and the caller is told which one it was. The bucket key is stated as an absolute
+    path (a directory outside any dataset root, the shape bucket_key_of gives one): a relative
+    key is only ever meaningful against the root whose own store recorded it, never against a
+    different dataset_root the caller states alongside an external review_state_dir.
     """
     dataset_root = tmp_path / "dataset"
     dataset_root.mkdir()
-    external = _seed_verdicts(tmp_path / "elsewhere" / "state")
+    bucket_dir = str((tmp_path / "predictions" / "detector" / "2026-03-04").resolve())
+    external = _seed_verdicts(tmp_path / "elsewhere" / "state", bucket=bucket_dir)
     src = _source_images(tmp_path / "src")
 
     r = materialize_review_dataset(
@@ -134,7 +138,8 @@ def test_lineage_records_a_stated_store_beside_the_dataset_it_curates(tmp_path, 
 
     dataset_root = tmp_path / "dataset"
     dataset_root.mkdir()
-    external = _seed_verdicts(tmp_path / "elsewhere" / "state")
+    bucket_dir = str((tmp_path / "predictions" / "detector" / "2026-03-04").resolve())
+    external = _seed_verdicts(tmp_path / "elsewhere" / "state", bucket=bucket_dir)
     src = _source_images(tmp_path / "src")
 
     materialize_review_dataset(

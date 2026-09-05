@@ -132,21 +132,31 @@ def _find_source_image(source_images_dir: str, img_name: str) -> "Path | BandGro
         return None
 
 
-def _write_positive_label(path: Path, positives: list[tuple], img_w: int, img_h: int) -> str | None:
+def _write_positive_label(
+    path: Path, positives: list[tuple], img_w: int, img_h: int, *, scope=None,
+) -> str | None:
     """Write one image's positive boxes to its label file, returning the refusal message on
     failure rather than letting it propagate.
 
     A verdict's normalized box can denormalize to zero extent (the persistence boundary's own
     refusal, ``stored_box_extent_ok`` inside ``write_annotations``); caught here so one degenerate
     record does not abort a harvest of many images with an uncaught ``ValueError``.
+
+    Under a classified ``scope`` (``resolution.BucketScope``), a verdict's ``class_name`` is the
+    confirmed value, not the object: every record carries ``scope.subject`` with that value under
+    ``scope.attribute``, the shape a classified bucket's own records carry. Without one, ``class_name``
+    is the object class itself, written to ``subject`` as before.
     """
     # Denormalize the verdict log's [cx,cy,w,h] to pixel xyxy for the name-based per-image JSON.
-    anns = [
-        Annotation(subject=name,
-                   geometry=BBox((cx - w / 2) * img_w, (cy - h / 2) * img_h,
-                                 (cx + w / 2) * img_w, (cy + h / 2) * img_h))
-        for (name, cx, cy, w, h) in positives
-    ]
+    def _annotation(name: str, cx: float, cy: float, w: float, h: float) -> Annotation:
+        box = BBox((cx - w / 2) * img_w, (cy - h / 2) * img_h,
+                   (cx + w / 2) * img_w, (cy + h / 2) * img_h)
+        if scope is not None and scope.classified:
+            return Annotation(subject=scope.subject, geometry=box,
+                              attributes={scope.attribute: name})
+        return Annotation(subject=name, geometry=box)
+
+    anns = [_annotation(*p) for p in positives]
     try:
         write_annotations(str(path), anns, img_w, img_h, keep_empty=True)
     except ValueError as exc:
@@ -210,6 +220,7 @@ def materialize_dataset(
     copy_files: bool = True,
     only_completed: bool = False,
     producer_model: dict | None = None,
+    scope=None,
 ) -> dict:
     """Write ``output_dir/images/`` + ``output_dir/annotations/`` + manifest.
 
@@ -231,10 +242,29 @@ def materialize_dataset(
     subject at hand would assert the human found that object absent on an image they never gave a
     verdict about, which is how an image full of one object reaches training as a zero-box sample of
     it.
+
+    ``scope`` (``resolution.BucketScope``) is the reviewed bucket's own recorded scope, resolved by
+    the caller. Under a classified scope, ``subject`` is a claim that must equal ``scope.subject``
+    (raises :class:`ValueError` naming both when it disagrees); the verdict-derived subject above is
+    never consulted, since a verdict's ``class_name`` there is a confirmed value, not an object
+    class. No rejected-only image is ever confirmed negative: a rejected value call says the model
+    called the wrong state, never that the object itself is absent, so every one lands in
+    ``unconfirmed_negatives``. The output still needs the source dataset's registry to train under
+    the scope, so it is copied over whether or not any negative was confirmed, raising by name when
+    the source names no dataset root or that root's registry is missing, or when the output already
+    holds one.
     """
+    if scope is not None and scope.classified and subject is not None and subject != scope.subject:
+        raise ValueError(
+            f"the reviewed bucket's own recorded scope names subject {scope.subject!r}, not the "
+            f"stated {subject!r}: materialize a bucket whose scope matches the subject you intend."
+        )
     partition = partition_review_verdicts(review_state, only_completed=only_completed)
     verdict_subjects = {s for info in partition.values() for s in info["subjects"]}
-    neg_subject = subject or (next(iter(verdict_subjects)) if len(verdict_subjects) == 1 else None)
+    if scope is not None and scope.classified:
+        neg_subject = scope.subject
+    else:
+        neg_subject = subject or (next(iter(verdict_subjects)) if len(verdict_subjects) == 1 else None)
     out = Path(output_dir)
     images_out = image_root(out)
     labels_out = annotation_root(out)
@@ -273,7 +303,7 @@ def materialize_dataset(
         img_w, img_h = image_dimensions(src)
 
         if status == "positive":
-            refusal = _write_positive_label(label_path, info["positives"], img_w, img_h)
+            refusal = _write_positive_label(label_path, info["positives"], img_w, img_h, scope=scope)
             if refusal is not None:
                 counts["boundary_refused"] += 1
                 boundary_refused.append({"image": record_name, "reason": refusal})
@@ -301,10 +331,8 @@ def materialize_dataset(
         bucket_key = status_bucket(neg_subject or "", None)
         replace_image_status_store(out, {bucket_key: negatives})
 
-        # Give the materialized dataset its own registry copy + a fresh per-image schema stamp, so
-        # quarantine can actually protect these review-harvested negatives later; without this,
-        # confirmed_negative_names has no classes.json to compare against and quarantine can never
-        # fire here (a permanent no-op, not the "admit until proven stale" default it should be).
+        # A registry copy + a fresh per-image schema stamp, so quarantine (which needs
+        # confirmed_negative_names' own classes.json) can protect these negatives later.
         from tcip_mcp.class_registry import (
             RegistryError, attribute_schema_digest, copy_registry, read_registry,
         )
@@ -330,6 +358,7 @@ def materialize_dataset(
         "output_dir": str(out),
         "producer_model": producer_model,
         "subject": neg_subject,
+        "attribute": scope.attribute if scope is not None and scope.classified else None,
         "counts": counts,
         "subjects": sorted(subjects),
         "verdict_subjects": sorted(verdict_subjects),
@@ -346,6 +375,7 @@ def materialize_dataset(
         "unconfirmed_negatives": unconfirmed,
         "boundary_refused": boundary_refused,
         "subject": neg_subject,
+        "attribute": scope.attribute if scope is not None and scope.classified else None,
         "output_dir": str(out),
         "structure": f"{out}/images/ + {out}/annotations/",
         "manifest": str(curated_manifest_path(out)),
