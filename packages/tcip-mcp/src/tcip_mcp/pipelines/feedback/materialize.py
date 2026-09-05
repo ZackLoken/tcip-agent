@@ -213,6 +213,44 @@ def _attribute_negatives(
     return confirmed, sorted(unconfirmed, key=lambda e: e["image"])
 
 
+def _copy_source_registry_for_classified_scope(source_images_dir: str, output_dir: str) -> None:
+    """Copy the source dataset's own class registry onto ``output_dir``, before anything else is
+    written: a classified scope's output cannot train without the registry that decodes it,
+    unlike a detector harvest's best-effort copy inside its own confirmed-negatives branch.
+
+    Raises :class:`ValueError`, naming the primitive that fixes it, when ``source_images_dir``
+    names no dataset root, that root's registry does not decode, or ``output_dir`` already holds
+    one: an existing output registry is never silently overwritten by a second harvest into it.
+    """
+    from tcip_mcp.class_registry import RegistryError, copy_registry, read_registry
+    from tcip_mcp.dataset_layout import classes_path, dataset_root_of
+
+    src_root = dataset_root_of(source_images_dir)
+    src_classes = classes_path(src_root) if src_root is not None else None
+    if src_classes is None or not src_classes.is_file():
+        raise ValueError(
+            f"{source_images_dir} names no dataset root with a class registry to copy: a "
+            "classified scope's output cannot train without the registry that decodes it. "
+            "Register the source dataset (register_dataset) and author its class map "
+            "(write_class_map) first."
+        )
+    try:
+        read_registry(src_classes)
+    except (OSError, RegistryError) as exc:
+        raise ValueError(
+            f"{src_classes} does not decode as a class registry ({exc}); repair it before "
+            "materializing this classified review."
+        ) from exc
+    out_classes = classes_path(output_dir)
+    if out_classes.is_file():
+        raise ValueError(
+            f"{output_dir} already holds a class registry at {out_classes}; materializing a "
+            "classified review into it again would silently overwrite the registry an earlier "
+            "harvest wrote there."
+        )
+    copy_registry(src_classes, out_classes)
+
+
 def materialize_dataset(
     review_state: dict,
     source_images_dir: str,
@@ -263,6 +301,8 @@ def materialize_dataset(
             f"the reviewed bucket's own recorded scope names subject {scope.subject!r}, not the "
             f"stated {subject!r}: materialize a bucket whose scope matches the subject you intend."
         )
+    if scope is not None and scope.classified:
+        _copy_source_registry_for_classified_scope(source_images_dir, output_dir)
     partition = partition_review_verdicts(review_state, only_completed=only_completed)
     verdict_subjects = {s for info in partition.values() for s in info["subjects"]}
     if scope is not None and scope.classified:
