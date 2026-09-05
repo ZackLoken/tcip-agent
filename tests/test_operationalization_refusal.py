@@ -398,9 +398,9 @@ def delivered_golden(body: dict, produced_at: bytes) -> bytes:
            + captures_unverified + b",," + dates_delivered + b",0,image,,\r\n")
     return (
         b"plant_id,accession,n_dates,n_observed_dates,n_dates_unclassified,n_dates_missing_images,"
-        b"catkin_elongation_date,catkin_05per_date,catkin_50per_date,catkin_95per_date,"
-        b"catkin_elongation_date_bound,catkin_05per_date_bound,catkin_50per_date_bound,"
-        b"catkin_95per_date_bound,catkin_elongation_crossing_unconfirmed,operating_point_conf,"
+        b"bud_opening_date,bud_05per_date,bud_50per_date,bud_95per_date,"
+        b"bud_opening_date_bound,bud_05per_date_bound,bud_50per_date_bound,"
+        b"bud_95per_date_bound,bud_opening_crossing_unconfirmed,operating_point_conf,"
         b"operating_point_validated,positive_state_classifier_validated,unvalidated_dimensions,"
         b"producer_model_sha256,"
         b"producing_experiment_id,produced_at,validation_record,plant_mapping_sha256,"
@@ -420,7 +420,7 @@ def client() -> TestClient:
 
 
 def _delivery(tmp_path: Path, **kwargs) -> dict:
-    """A registered, stated and confirmed catkin project with buckets the doors can deliver from.
+    """A registered, stated and confirmed bud_opening project with buckets the doors can deliver from.
 
     The pinned platform root is this test's ``tmp_path``, and the body names the same root, so the
     tool door and the web doors read one project rather than two.
@@ -486,7 +486,7 @@ def test_unconfirmed_crossing_door_refuses(tmp_path: Path):
     The refusal names who confirms and where, and the delivery writes nothing.
     """
     body = _delivery(tmp_path, validated=True)
-    _withdraw(tmp_path, "catkin")
+    _withdraw(tmp_path, "bud_opening")
     out_csv = tmp_path / "delivered.csv"
 
     res = _compute(body, out_csv, **_validated_call(body))
@@ -499,13 +499,13 @@ def test_unconfirmed_crossing_door_refuses(tmp_path: Path):
 def test_superseded_confirmation_names_the_field(tmp_path: Path):
     """A confirmation covers the values it was given, so a moved field refuses naming both of them."""
     body = _delivery(tmp_path, validated=True)
-    _hand_edit_spec(tmp_path, "catkin", positive_class_name="dormant")
+    _hand_edit_spec(tmp_path, "bud_opening", positive_class_name="closed")
     out_csv = tmp_path / "delivered.csv"
 
     res = _compute(body, out_csv, **_validated_call(body))
 
     assert "positive_class_name has changed since" in res["error"]
-    assert "'elongated'" in res["error"] and "'dormant'" in res["error"]
+    assert "'open'" in res["error"] and "'closed'" in res["error"]
     assert not out_csv.exists()
 
 
@@ -517,8 +517,8 @@ def test_empty_constituting_field_refuses_before_class_id(tmp_path: Path):
     precondition runs first, so the refusal describes what is actually missing.
     """
     body = _delivery(tmp_path, validated=True)
-    _hand_edit_spec(tmp_path, "catkin", positive_class_name="")
-    fx.seed_confirmed_crossing(tmp_path, "catkin")
+    _hand_edit_spec(tmp_path, "bud_opening", positive_class_name="")
+    fx.seed_confirmed_crossing(tmp_path, "bud_opening", measured_subject="bud")
     out_csv = tmp_path / "delivered.csv"
 
     res = _compute(body, out_csv, **_validated_call(body))
@@ -531,7 +531,7 @@ def test_empty_constituting_field_refuses_before_class_id(tmp_path: Path):
 def test_both_web_doors_refuse_identically(client: TestClient, tmp_path: Path):
     """One precondition, one refusal body: a curve the breeder sees is never one Download refuses."""
     body = _delivery(tmp_path, validated=True)
-    _withdraw(tmp_path, "catkin")
+    _withdraw(tmp_path, "bud_opening")
 
     details = [_web_refusal(client, body, route)
                for route in ("phenology_measurement", "export_csv")]
@@ -539,7 +539,7 @@ def test_both_web_doors_refuse_identically(client: TestClient, tmp_path: Path):
     assert all(d == details[0] for d in details), details
     assert details[0]["kind"] == "operationalization"
     assert details[0]["state"] == 2
-    assert details[0]["trait"] == "catkin"
+    assert details[0]["trait"] == "bud_opening"
     assert details[0]["delivery_kind"] == op.STATE_CROSSING_DATES
     assert not (tmp_path / "results_export").exists()
 
@@ -551,7 +551,7 @@ def test_hand_edited_spec_is_caught_at_read_time(client: TestClient, tmp_path: P
     directly, and the door still refuses, because the confirmation records the values it covered.
     """
     body = _delivery(tmp_path, validated=True)
-    _hand_edit_spec(tmp_path, "catkin", milestone_fractions=[0.5])
+    _hand_edit_spec(tmp_path, "bud_opening", milestone_fractions=[0.5])
 
     detail = _web_refusal(client, body, "phenology_measurement")
 
@@ -569,7 +569,7 @@ def test_acknowledge_does_not_clear_the_precondition_at_every_door(
     acknowledged number whose meaning is unstated is refused there too.
     """
     body = _delivery(tmp_path, validated=True)
-    _withdraw(tmp_path, "catkin")
+    _withdraw(tmp_path, "bud_opening")
     out_csv = tmp_path / "delivered.csv"
 
     with pytest.raises(TypeError, match="acknowledge_unvalidated"):
@@ -618,7 +618,7 @@ def test_confirmation_withdrawn_during_delivery_refuses_before_the_write(
     real = phenology.per_plant_phenology
 
     def withdraw_then_measure(*args, **kwargs):
-        _withdraw(tmp_path, "catkin")
+        _withdraw(tmp_path, "bud_opening")
         return real(*args, **kwargs)
 
     monkeypatch.setattr(phenology, "per_plant_phenology", withdraw_then_measure)
@@ -644,7 +644,7 @@ def test_spec_edited_during_delivery_refuses_before_the_write(
     real = phenology.per_plant_phenology
 
     def edit_then_measure(*args, **kwargs):
-        _hand_edit_spec(tmp_path, "catkin", milestone_on="detected_count")
+        _hand_edit_spec(tmp_path, "bud_opening", milestone_on="detected_count")
         return real(*args, **kwargs)
 
     monkeypatch.setattr(phenology, "per_plant_phenology", edit_then_measure)
@@ -664,11 +664,11 @@ def test_write_phenology_csv_refuses_without_a_basis(tmp_path: Path):
     """
     from tcip_mcp.pipelines.postprocessing import phenology
 
-    from tests._trait_fixtures import CATKIN
+    from tests._trait_fixtures import BUD_OPENING
 
     with pytest.raises(ValueError) as excinfo:
         phenology.write_phenology_csv(
-            "test", [], tmp_path / "out.csv", CATKIN, flags={}, acknowledgement=None,
+            "test", [], tmp_path / "out.csv", BUD_OPENING, flags={}, acknowledgement=None,
             basis=None, operating_point_conf=None, producer={}, bindings={}, pred_dirs=[],
             project_root=tmp_path, plant_mapping=_NO_MAPPING)
 
@@ -716,27 +716,27 @@ def test_write_phenology_csv_with_a_basis_writes_the_delivered_schema(tmp_path: 
         reconcile_tile_size_validity,
     )
 
-    from tests._trait_fixtures import CATKIN
+    from tests._trait_fixtures import BUD_OPENING
 
     body = _delivery(tmp_path, validated=True)
-    spec, record, _ = fx.resolve(tmp_path, "catkin", op.STATE_CROSSING_DATES)
+    spec, record, _ = fx.resolve(tmp_path, "bud_opening", op.STATE_CROSSING_DATES)
     check = op.check_operationalization(spec, record, op.STATE_CROSSING_DATES)
     pred_dirs = list(body["predictions_by_date"].values())
-    recon = reconcile_operating_point_validity(pred_dirs, trait="catkin")
+    recon = reconcile_operating_point_validity(pred_dirs, trait="bud_opening")
     classifier_recon = reconcile_classifier_validity(pred_dirs)
     classifier_state, _note = bind_classifier_validity(
-        classifier_recon["validated"], pred_dirs, pred_dirs, trait="catkin")
+        classifier_recon["validated"], pred_dirs, pred_dirs, trait="bud_opening")
     tile_recon = reconcile_tile_size_validity(pred_dirs)
     flags = phenology.phenology_delivery_flags(classifier_state, recon["validated"], tile_recon)
     row = {"plant_id": "P1", "accession": "acc-9", "n_dates": 2, "n_observed_dates": 2}
 
     phenology.write_phenology_csv(
-        "test", [row], tmp_path / "out.csv", CATKIN, flags=flags, acknowledgement=None,
+        "test", [row], tmp_path / "out.csv", BUD_OPENING, flags=flags, acknowledgement=None,
         basis=check.basis, operating_point_conf=0.4, producer={}, bindings=recon["bindings"],
         pred_dirs=pred_dirs, project_root=tmp_path, plant_mapping=_NO_MAPPING)
 
     header = (tmp_path / "out.csv").read_text(encoding="utf-8").splitlines()[0].split(",")
-    assert header == phenology.phenology_csv_columns(CATKIN)
+    assert header == phenology.phenology_csv_columns(BUD_OPENING)
 
 
 def test_a_crossing_unconfirmed_majority_reading_delivers_and_flipping_it_invalidates_nothing(
@@ -751,7 +751,7 @@ def test_a_crossing_unconfirmed_majority_reading_delivers_and_flipping_it_invali
     out_csv = tmp_path / "delivered.csv"
     assert "error" not in _compute(body, out_csv, **_validated_call(body))
 
-    _hand_edit_spec(tmp_path, "catkin", majority_provisional=False)
+    _hand_edit_spec(tmp_path, "bud_opening", majority_provisional=False)
     flipped = tmp_path / "flipped.csv"
 
     res = _compute(body, flipped, **_validated_call(body))
@@ -788,7 +788,7 @@ def test_an_unstated_and_gate_unvalidated_delivery_reports_the_precondition_alon
     evidence beside the missing definition would point the agent at the wrong repair.
     """
     body = _delivery(tmp_path, validated=False)
-    _withdraw(tmp_path, "catkin")
+    _withdraw(tmp_path, "bud_opening")
 
     detail = _web_refusal(client, body, "phenology_measurement")
 

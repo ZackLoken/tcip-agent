@@ -1,12 +1,12 @@
 """A second registered trait, driven
 through both delivery doors (the JSON curve/milestone doors and export_csv), asserting its own
-schema and that an unvalidated row is refused. ``registered_traits()`` returning only ``catkin``
-was the standing gap this closes.
+schema and that an unvalidated row is refused. ``registered_traits()`` returning only
+``bud_opening`` was the standing gap this closes.
 
 ``currant_bloom`` is authored here, in this test file's own pinned platform state root, honestly
 tentative: no domain expert has confirmed it, and it exists to prove the delivery mechanism
 generalizes to a real *second* trait, not to describe a validated measurement. It deliberately
-leaves ``majority_milestone``/``majority_label`` empty rather than copied from catkin, since
+leaves ``majority_milestone``/``majority_label`` empty rather than copied from bud_opening, since
 crops.yml names no "majority" bloom date for currant, proving ``_milestone_columns`` produces the
 smaller, no-majority column set for a real second trait, not only for local ``TraitSpec`` shapes
 constructed to prove the structural invariant.
@@ -44,7 +44,7 @@ def _seed_currant_bloom_trait(tmp_path: Path) -> None:
         "milestone_fractions": [0.05, 0.50, 0.95],
         "milestone_on": "positive_fraction",
         # No majority alias: crops.yml names no single "most blooms open" date for currant, unlike
-        # catkin's catkin_elongation_date. Left empty rather than copied from catkin.
+        # bud_opening's bud_opening_date. Left empty rather than copied from bud_opening.
         "majority_milestone": "",
         "majority_provisional": False,
         "phenology_prefix": "bloom",
@@ -57,7 +57,7 @@ def _seed_currant_bloom_trait(tmp_path: Path) -> None:
                  "generalizes to a second trait. Not a domain-expert-confirmed measurement.",
     }
     ts.replace(traits.trait_spec_key(specs_dir, "currant_bloom"), spec, expect=ts.Version.ABSENT)
-    # A second trait needs its own confirmed meaning too: nothing about the record is catkin-shaped.
+    # A second trait needs its own confirmed meaning too: nothing about the record is bud_opening-shaped.
     from tests._operationalization_fixtures import seed_confirmed_crossing
 
     seed_confirmed_crossing(tmp_path, "currant_bloom")
@@ -146,7 +146,7 @@ def _export(client: TestClient, body: dict, payload: str = "milestones", **extra
                        json={**body, "payload": payload, "filename": "x.csv", **extra})
 
 
-def test_currant_bloom_is_registered_and_distinct_from_catkin(tmp_path: Path):
+def test_currant_bloom_is_registered_and_distinct_from_bud_opening(tmp_path: Path):
     # $TCIP_STATE_ROOT is already pinned to tmp_path by conftest.py's autouse _pin_platform_root.
     from tcip_mcp.traits import get_trait, registered_traits
 
@@ -154,7 +154,7 @@ def test_currant_bloom_is_registered_and_distinct_from_catkin(tmp_path: Path):
     assert "currant_bloom" in registered_traits()
     t = get_trait("currant_bloom")
     assert t.delivers == ("bloom_05per_date", "bloom_50per_date", "bloom_95per_date")
-    assert t.majority_milestone == ""  # no majority alias, unlike catkin
+    assert t.majority_milestone == ""  # no majority alias, unlike bud_opening
 
 
 def test_currant_bloom_json_doors_deliver_its_own_schema_when_validated(
@@ -167,10 +167,10 @@ def test_currant_bloom_json_doors_deliver_its_own_schema_when_validated(
     assert out["has_unvalidated_dimensions"] is False
     assert out["curves"]["rows"] and out["milestones"]["rows"]
     onset = next(r for r in out["milestones"]["rows"] if r["plant_id"] == "BUSH_A")
-    # currant_bloom's own column names, not catkin's, and no majority alias column at all.
+    # currant_bloom's own column names, not bud_opening's, and no majority alias column at all.
     assert "bloom_05per_date" in onset and "bloom_50per_date" in onset and "bloom_95per_date" in onset
-    assert "catkin_elongation_date" not in onset
-    assert "bloom_elongation_date" not in onset  # no phantom majority column either
+    assert "bud_opening_date" not in onset
+    assert "bloom_opening_date" not in onset  # no phantom majority column either
 
 
 def test_currant_bloom_export_csv_delivers_its_own_schema(client: TestClient, tmp_path: Path) -> None:
@@ -179,7 +179,7 @@ def test_currant_bloom_export_csv_delivers_its_own_schema(client: TestClient, tm
     assert resp.status_code == 200
     header = resp.text.splitlines()[0].split(",")
     assert "bloom_05per_date" in header and "bloom_95per_date" in header
-    assert not any(c.startswith("catkin_") for c in header)
+    assert not any(c.startswith("bud_") for c in header)
 
 
 def test_currant_bloom_refuses_unvalidated_evidence_on_every_door(
