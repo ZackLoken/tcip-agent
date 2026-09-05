@@ -262,7 +262,9 @@ class TsModule:
         self.unresolved_local_specifiers: set[str] = set()
 
 
-TS_FROM_CLAUSE = re.compile(r"(?:^|\n)\s*(?:import|export)\s+(?:type\s+)?[^;\n]*?\bfrom\s+['\"]([^'\"]+)['\"]")
+TS_FROM_CLAUSE = re.compile(
+    r"(?:^|\n)\s*(?:import|export)\s+(?:type\s+)?[^;]*?\bfrom\s+['\"]([^'\"]+)['\"]"
+)
 TS_SIDE_EFFECT = re.compile(r"(?:^|\n)\s*import\s+['\"]([^'\"]+)['\"]")
 TS_DYNAMIC = re.compile(r"\bimport\(\s*['\"]([^'\"]+)['\"]")
 TS_BLOCK_COMMENT = re.compile(r"^\s*/\*\*?(.*?)\*/", re.DOTALL)
