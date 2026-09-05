@@ -481,6 +481,7 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | scripts/check_dataset_identity.py | Check a dataset's on-disk content against its recorded identity: detect changed / moved data. | 5 | 0 |
 | scripts/compute_disagreements.py | Summarize GT-vs-prediction disagreements per image at several conf thresholds. | 1 | 0 |
 | scripts/conform_cal_holdout_locks.py | Conform every pre-existing `cal_holdout_split_lock` record under a root to carry `split_manifest_dir`. | 3 | 0 |
+| scripts/conform_classified_predictions.py | Conform a project's classified prediction buckets to the writer rail's `(subject, attribute)` stamp and to the shape a classified prediction now writes, sourcing an unstated bucket's scope from its own training run, `--like` another bucket, or the operator. | 11 | 0 |
 | scripts/conform_dataset_registry_paths.py | Conform a project's dataset registry onto the relative-path row: rewrite each entry's stored path through the same identity-based rule `register_dataset` now uses. | 3 | 0 |
 | scripts/conform_delivery_events.py | Check a project's stored `delivery_events` records against the current `DeliveryEventRecord` shape and name, by event_id, any that no longer validate; write-forwards a record missing its acknowledgement keys (both null) and a registry disclosure missing `plants_outside_raster` (recomputed from the event's own registry and raster identity). | 6 | 0 |
 | scripts/conform_image_stem_collisions.py | Census a project's registered dataset roots for a bucket already holding two logical identities under one case-folded stem, printing each with its files, the one an un-corrected reader still serves, and the records made against it; `--apply` parks every file but the one named by `--keep` under `.tcip/collisions/<bucket>/` and records the move. | 7 | 0 |
@@ -669,6 +670,7 @@ A module counts as zero-importer when no other module in its own scanned tree re
 | scripts | scripts/check_dataset_identity.py |
 | scripts | scripts/compute_disagreements.py |
 | scripts | scripts/conform_cal_holdout_locks.py |
+| scripts | scripts/conform_classified_predictions.py |
 | scripts | scripts/conform_dataset_registry_paths.py |
 | scripts | scripts/conform_delivery_events.py |
 | scripts | scripts/conform_job_registry_roots.py |

@@ -1,0 +1,544 @@
+"""Conform a project's classified prediction buckets to the writer rail's shape: an
+``operating_point.json`` stamp carrying its ``(subject, attribute)`` pair, and per-image documents
+that carry the decoded value under ``attributes[attribute]`` with the object class in ``subject``,
+the shape ``write_predictions_json`` now writes and every reader now holds a bucket to.
+
+A logged operator script in the shape of ``conform_delivery_events.py``: bind, walk, one outcome
+line per unit, exit 2 on any refusal. Its units are prediction buckets. For each named project
+root, every registered dataset (``read_datasets``) is walked and, under each dataset's own
+prediction tree, every model directory and every directory one level below it that holds a stamp
+record or prediction documents is a bucket. ``list_dates`` is not used: it lists the buckets under
+``images/``, and a prediction date whose image folder was removed or renamed would fall outside
+that walk and refuse at every reader with nothing in this report naming it. ``--bucket DIR``,
+repeatable, names a directory outside that walk (a bespoke ``output_dir``, a hand-split copy); a
+bare one (no stamp at all) is conformed only paired with ``--like DIR``, another bucket whose stamp
+already carries the pair and a recorded ``id_map``, given in the same order as its ``--bucket``.
+
+Per stamped bucket, in order:
+
+1. A stamp already carrying both keys is reported conformed; its documents are still scanned for a
+   value-keyed record under the classified pair, reported with re-inference as the remedy, never
+   rewritten. A second run over an already-conformed tree rewrites and stamps nothing.
+2. A stamp decoding with no usable pair sources its scope: the experiment the stamp names
+   (``config_key``/``read_member``, read under the root being walked), else ``--like``, else the
+   operator (``--subject``/``--attribute``, recorded as an operator statement). No source
+   answering leaves the bucket exactly as it is.
+3. A sourced detector pair (``attribute`` ``None``) is stamped only when
+   ``scope_consistent_with_map`` (the rail's own predicate, called here rather than re-spelled)
+   admits it over the bucket's recorded ``id_map``; otherwise the stated pair is refused and
+   reported, never written over a map that says the bucket classified.
+4. A sourced classified pair over a bucket recording no ``id_map``, or one keyed by a
+   decimal-integer-string (the raw-index name, indistinguishable from a value), is reported with
+   re-inference as the remedy; nothing is stamped or rewritten.
+5. A sourced classified pair over a bucket carrying review verdicts is reported with the count;
+   nothing is stamped or rewritten, since the platform never rewrites predictions a human reviewed.
+   A bucket under no dataset root has no verdict store to ask, the same inoperative guard
+   ``run_inference`` states for such a bucket, and this is reported rather than silently skipped.
+6. Otherwise every document is read whole and every record classified: already carrying the object
+   class with a mapped value under the attribute (conformed); carrying a ``subject`` that is a key
+   of the map (a rewrite); anything else (unconformable). Any unconformable record reports the
+   whole bucket by file and index, re-inference as the remedy, neither rewritten nor stamped. A
+   bucket with none is rewritten (or, if every record was already conformed, left as it is) and
+   stamped.
+7. After a rewrite, the new content's binding is checked (``verify_stamp_binding``): a count claim
+   the bucket carried floors when its covered digest no longer matches, reported beside the
+   stamp's own stored ``validated`` so a stale ``true`` is never read as still validated.
+8. One audit entry per bucket that changed, under its dataset root or the platform log for a
+   bucket under none.
+
+For each dataset root walked, the script also reports, never rewrites, ground-truth records whose
+``subject`` is a key of a conformed bucket's ``id_map`` or a declared attribute value of the
+dataset's own registry: a legitimate subject of that name is possible, and only a person can tell
+one apart from an accept made through the Review tab before this platform recorded a scope.
+
+``--plan`` previews every outcome without writing anything; a bucket that would change under a
+real run counts toward the exit code the same way an unconformed one does.
+
+    python scripts/conform_classified_predictions.py <project_root> [<project_root> ...]
+    python scripts/conform_classified_predictions.py --plan <project_root>
+    python scripts/conform_classified_predictions.py --bucket <dir> --like <scoped_dir>
+
+Exit codes: 0 when every stamped bucket in every named root (and every named ``--bucket``) is
+already conformed or was just conformed; 2 if any bucket refuses, cannot be conformed, or (under
+``--plan``) would change.
+"""
+
+from __future__ import annotations
+
+import argparse
+import sys
+from dataclasses import dataclass, replace
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent.parent / "packages" / "tcip-mcp" / "src"))
+sys.path.insert(0, str(Path(__file__).parent.parent / "packages" / "tcip-annotation" / "src"))
+sys.path.insert(0, str(Path(__file__).parent.parent / "packages" / "tcip-store" / "src"))
+
+from tcip_annotation import json_io  # noqa: E402
+from tcip_annotation.json_io import UnreadableLabelDocument  # noqa: E402
+from tcip_annotation.state import Annotation  # noqa: E402
+from tcip_store import StoreError  # noqa: E402
+from tcip_store.binding import bind_default  # noqa: E402
+
+from tcip_mcp.audit import dataset_scope_of, record_event_or_raise  # noqa: E402
+from tcip_mcp.class_registry import RegistryError, read_registry  # noqa: E402
+from tcip_mcp.dataset_layout import (  # noqa: E402
+    annotation_root, classes_path, is_bucket_name, prediction_root,
+)
+from tcip_mcp.experiments import config_key, read_member  # noqa: E402
+from tcip_mcp.pipelines.resolution import (  # noqa: E402
+    BucketScope, StampScopeUnstated, bucket_scope, read_operating_point_sidecar,
+    scope_consistent_with_map, update_sidecar, verify_stamp_binding,
+)
+from tcip_mcp.prediction_buckets import (  # noqa: E402
+    bucket_content_digest, bucket_key_of, bucket_stems, review_state_dir_of, verdict_count,
+)
+from tcip_mcp.tools.project_tools import dataset_entry_path, read_datasets  # noqa: E402
+
+TOOL_NAME = "conform_classified_predictions"
+
+
+def _looks_like_bucket(d: Path) -> bool:
+    """Whether ``d`` holds a stamp record or prediction documents: this script's own definition
+    of a bucket, checked before a directory is treated as one."""
+    if not d.is_dir():
+        return False
+    if json_io.prediction_documents(d):
+        return True
+    return any(f.is_file() and json_io.is_sidecar_name(f.name) for f in d.glob("*.json"))
+
+
+def bucket_dirs_under(dataset_root: Path) -> list[Path]:
+    """Every bucket directory under ``dataset_root``'s own prediction tree: each model directory
+    (a redirected ``<model>@r2`` variant included) and each directory one level below it, the
+    layout's dated form. Mirrors ``tcip_mcp.dataset_layout.prediction_bucket_dirs``, not yet
+    extracted on this tree; the landing's fix-up switches this walk to call that function.
+    """
+    root = prediction_root(dataset_root)
+    if not root.is_dir():
+        return []
+    found: list[Path] = []
+    for model_dir in sorted(p for p in root.iterdir() if p.is_dir() and is_bucket_name(p.name)):
+        siblings = sorted(p for p in model_dir.iterdir() if p.is_dir() and is_bucket_name(p.name))
+        for candidate in [model_dir, *siblings]:
+            if _looks_like_bucket(candidate):
+                found.append(candidate)
+    return found
+
+
+@dataclass
+class StampState:
+    """A bucket's own stamp, decoded once: ``kind`` is one of ``absent`` (no stamp at all),
+    ``undecodable`` (a present stamp the seam will not decode), ``unstated`` (decodes but carries
+    no usable ``(subject, attribute)`` pair) or ``scoped`` (a usable pair already)."""
+
+    kind: str
+    stamp: dict | None
+    scope: BucketScope | None
+    error: str | None = None
+
+
+def read_stamp_state(bucket_dir: Path) -> StampState:
+    stamp = read_operating_point_sidecar(bucket_dir)
+    try:
+        scope = bucket_scope(bucket_dir)
+    except StampScopeUnstated:
+        return StampState("unstated", stamp, None)
+    except StoreError as exc:
+        return StampState("undecodable", None, None, str(exc))
+    if scope is None:
+        return StampState("absent", None, None)
+    return StampState("scoped", stamp, scope)
+
+
+def _experiment_source(
+    stamp: dict, *, root: Path | None,
+) -> tuple[str, str | None, str | None] | None:
+    """``('experiment', subject, attribute)`` when the run's own experiment record answers both,
+    else ``None``: a bespoke or COCO-sourced run's record, or one with no experiment_id at all,
+    does not answer."""
+    experiment_id = stamp.get("experiment_id")
+    if not experiment_id:
+        return None
+    config = read_member(config_key(str(experiment_id), root=root))
+    if not isinstance(config, dict):
+        return None
+    data_cfg = config.get("data")
+    if not isinstance(data_cfg, dict) or "subject" not in data_cfg or "attribute" not in data_cfg:
+        return None
+    return "experiment", data_cfg["subject"], data_cfg["attribute"]
+
+
+def _like_source(like_dir: Path | None) -> tuple[str, str, str | None, dict[str, int]] | None:
+    """``('--like <dir>', subject, attribute, id_map)`` from another bucket's own scope and
+    recorded map, or ``None`` when ``like_dir`` is not given or does not answer both."""
+    if like_dir is None:
+        return None
+    try:
+        scope = bucket_scope(like_dir)
+    except (StampScopeUnstated, StoreError):
+        return None
+    if scope is None or scope.subject is None:
+        return None
+    stamp = read_operating_point_sidecar(like_dir) or {}
+    id_map = stamp.get("id_map")
+    if not isinstance(id_map, dict) or not id_map:
+        return None
+    return f"--like {like_dir}", scope.subject, scope.attribute, dict(id_map)
+
+
+def _operator_source(
+    subject: str | None, attribute: str | None,
+) -> tuple[str, str, str | None] | None:
+    if subject is None:
+        return None
+    return "operator statement (--subject/--attribute)", subject, attribute
+
+
+def source_scope(
+    stamp: dict, *, root: Path | None, like_dir: Path | None,
+    operator_subject: str | None, operator_attribute: str | None,
+) -> tuple[str, str, str | None, dict | None] | None:
+    """``(source, subject, attribute, like_id_map)`` from the first source that answers: the run's
+    own experiment record, ``--like``, then the operator's stated pair. ``like_id_map`` is the
+    ``--like`` bucket's own recorded map, used as this bucket's vocabulary only when the source is
+    ``--like`` itself (a bare copy has none of its own to check against)."""
+    experiment = _experiment_source(stamp, root=root)
+    if experiment is not None:
+        source, subject, attribute = experiment
+        return source, subject, attribute, None
+    like = _like_source(like_dir)
+    if like is not None:
+        source, subject, attribute, id_map = like
+        return source, subject, attribute, id_map
+    operator = _operator_source(operator_subject, operator_attribute)
+    if operator is not None:
+        source, subject, attribute = operator
+        return source, subject, attribute, None
+    return None
+
+
+def _decimal_key(id_map: dict) -> str | None:
+    for key in id_map:
+        if isinstance(key, str) and key.lstrip("-").isdigit():
+            return key
+    return None
+
+
+@dataclass
+class RecordVerdict:
+    conformed: bool = False
+    rewrite: str | None = None  # the old subject (the value) a rewrite would replace
+    unconformable: bool = False
+
+
+def classify_record(a: Annotation, *, subject: str, attribute: str, id_map: dict) -> RecordVerdict:
+    if a.subject == subject and a.attributes.get(attribute) in id_map:
+        return RecordVerdict(conformed=True)
+    if a.subject in id_map:
+        return RecordVerdict(rewrite=a.subject)
+    return RecordVerdict(unconformable=True)
+
+
+def rewritten_annotation(
+    a: Annotation, *, subject: str, attribute: str, old_subject: str,
+) -> Annotation:
+    return replace(a, subject=subject, attributes={**a.attributes, attribute: old_subject})
+
+
+def unconformable_records(
+    bucket_dir: Path, *, subject: str, attribute: str, id_map: dict,
+) -> list[str]:
+    hits: list[str] = []
+    for path in json_io.prediction_documents(bucket_dir):
+        for i, a in enumerate(json_io.read_annotations(str(path))):
+            v = classify_record(a, subject=subject, attribute=attribute, id_map=id_map)
+            if v.unconformable:
+                hits.append(f"{path} record {i}: subject {a.subject!r}")
+    return hits
+
+
+def rewrite_bucket(bucket_dir: Path, *, subject: str, attribute: str, id_map: dict) -> int:
+    """Rewrite every value-keyed record in ``bucket_dir``'s documents into the conformed shape,
+    preserving each document's own width/height. Returns the number of documents rewritten."""
+    rewritten = 0
+    for path in json_io.prediction_documents(bucket_dir):
+        document = json_io.load_label_document(str(path))
+        annotations = json_io.annotations_of_document(document)
+        verdicts = [classify_record(a, subject=subject, attribute=attribute, id_map=id_map)
+                   for a in annotations]
+        if not any(v.rewrite is not None for v in verdicts):
+            continue
+        new_annotations = [
+            rewritten_annotation(a, subject=subject, attribute=attribute, old_subject=v.rewrite)
+            if v.rewrite is not None else a
+            for a, v in zip(annotations, verdicts)
+        ]
+        json_io.write_annotations(
+            str(path), new_annotations, int(document.get("width") or 0),
+            int(document.get("height") or 0), keep_empty=True,
+        )
+        rewritten += 1
+    return rewritten
+
+
+def _stamp_completed(bucket_dir: Path, *, subject: str | None, attribute: str | None) -> None:
+    update_sidecar(bucket_dir, lambda cur: {**cur, "subject": subject, "attribute": attribute})
+
+
+def scan_value_keyed_records(bucket_dir: Path, scope: BucketScope, id_map: dict | None) -> list[str]:
+    """Every record under ``bucket_dir`` whose ``subject`` is a key of ``id_map`` rather than the
+    scope's own object class: reported as a hand edit, never rewritten (rule 1)."""
+    if not id_map:
+        return []
+    hits: list[str] = []
+    for path in json_io.prediction_documents(bucket_dir):
+        for i, a in enumerate(json_io.read_annotations(str(path))):
+            if a.subject != scope.subject and a.subject in id_map:
+                hits.append(f"{path} record {i}: subject {a.subject!r} is a value of this "
+                            f"bucket's own id_map, not its object class {scope.subject!r}")
+    return hits
+
+
+def conform_bare_bucket(
+    bucket_dir: Path, *, like_dir: Path | None, plan: bool,
+) -> tuple[str, bool]:
+    like = _like_source(like_dir)
+    if like is None:
+        return ("no stamp; a bare directory named with --bucket is conformed only paired with "
+                "--like naming a scoped bucket with a recorded id_map", True)
+    _source, subject, attribute, id_map = like
+    unconformable = unconformable_records(bucket_dir, subject=subject, attribute=attribute,
+                                          id_map=id_map)
+    if unconformable:
+        return (f"unconformable, re-infer this bucket: {'; '.join(unconformable)}", True)
+    if plan:
+        return (f"would rewrite from --like {like_dir}'s vocabulary, no stamp written (a bare "
+                "directory's regime stays the caller's own statement)", True)
+    docs_rewritten = rewrite_bucket(bucket_dir, subject=subject, attribute=attribute, id_map=id_map)
+    return (f"rewrote {docs_rewritten} document(s) from --like {like_dir}'s vocabulary, no stamp "
+            "written (a bare directory's regime stays the caller's own statement)", False)
+
+
+def conform_bucket(
+    bucket_dir: Path, *, root: Path | None, plan: bool, like_dir: Path | None,
+    operator_subject: str | None, operator_attribute: str | None, is_bare_named: bool,
+) -> tuple[str, bool, dict | None, Path | None]:
+    """Conform one bucket. Returns ``(outcome, refused, id_map_if_conformed, dataset_root)``."""
+    state = read_stamp_state(bucket_dir)
+
+    if state.kind == "undecodable":
+        return (f"refused, {state.error}; re-infer or hand-repair this bucket's own "
+                "operating_point.json through the store's own tools", True, None, None)
+
+    if state.kind == "absent":
+        if not is_bare_named:
+            return ("no stamp; not a bucket this script conforms", False, None, None)
+        outcome, refused = conform_bare_bucket(bucket_dir, like_dir=like_dir, plan=plan)
+        return (outcome, refused, None, None)
+
+    if state.kind == "scoped":
+        assert state.scope is not None
+        hits = scan_value_keyed_records(bucket_dir, state.scope, (state.stamp or {}).get("id_map"))
+        if hits:
+            return (f"conformed; {len(hits)} value-keyed record(s) reported for re-inference: "
+                    + "; ".join(hits), False, None, None)
+        return ("conformed", False, None, None)
+
+    assert state.kind == "unstated"
+    stamp = state.stamp or {}
+    sourced = source_scope(
+        stamp, root=root, like_dir=like_dir,
+        operator_subject=operator_subject, operator_attribute=operator_attribute,
+    )
+    if sourced is None:
+        return ("stamp decodes with no usable (subject, attribute) pair, and no source (the run's "
+                "own experiment record, --like, the operator) answered; left as it is",
+                True, None, None)
+    source, subject, attribute, like_id_map = sourced
+
+    if attribute is None:
+        recorded_map = stamp.get("id_map")
+        reason = scope_consistent_with_map(subject, None, recorded_map)
+        if reason is not None:
+            return (f"refused, the {source} names a detector pair but {reason}", True, None, None)
+        if not plan:
+            _stamp_completed(bucket_dir, subject=subject, attribute=None)
+        verb = "would stamp" if plan else "stamped"
+        scope_root = dataset_scope_of(bucket_dir)
+        return (f"{verb} the detector pair ({subject!r}, None) from the {source}; documents "
+                "untouched", plan, None, scope_root)
+
+    id_map = like_id_map if like_id_map is not None else stamp.get("id_map")
+    if not isinstance(id_map, dict) or not id_map:
+        return (f"refused, the {source} names a classified pair ({subject!r}, {attribute!r}) but "
+                "this bucket records no id_map to decode by; re-infer this run", True, None, None)
+    bad_key = _decimal_key(id_map)
+    if bad_key is not None:
+        return (f"refused, this bucket's own id_map carries the decimal key {bad_key!r}, "
+                "indistinguishable from a raw-index name; re-infer this run", True, None, None)
+
+    dataset_root = dataset_scope_of(bucket_dir)
+    no_dataset_note = ""
+    if dataset_root is not None:
+        vcount = verdict_count(review_state_dir_of(dataset_root), bucket_key_of(bucket_dir),
+                                bucket_stems(bucket_dir))
+        if vcount:
+            return (f"refused, {vcount} review verdict(s) recorded against this bucket; the "
+                    "platform never rewrites predictions a human reviewed. Re-run inference into "
+                    "a fresh bucket and review it anew", True, None, dataset_root)
+    else:
+        no_dataset_note = " (this bucket sits under no dataset root, so no verdict store guards it)"
+
+    unconformable = unconformable_records(bucket_dir, subject=subject, attribute=attribute,
+                                          id_map=id_map)
+    if unconformable:
+        return (f"refused, {len(unconformable)} unconformable record(s), re-inference is the "
+                "remedy: " + "; ".join(unconformable), True, None, dataset_root)
+
+    if plan:
+        return (f"would conform the classified pair ({subject!r}, {attribute!r}) from the "
+                f"{source}{no_dataset_note}", True, None, dataset_root)
+
+    old_digest = bucket_content_digest(bucket_dir)
+    docs_rewritten = rewrite_bucket(bucket_dir, subject=subject, attribute=attribute, id_map=id_map)
+    _stamp_completed(bucket_dir, subject=subject, attribute=attribute)
+    if docs_rewritten == 0:
+        return (f"stamped the classified pair ({subject!r}, {attribute!r}) from the "
+                f"{source}{no_dataset_note}; every record was already conformed", False, id_map,
+                dataset_root)
+    new_digest = bucket_content_digest(bucket_dir)
+    new_stamp = read_operating_point_sidecar(bucket_dir) or {}
+    binding = verify_stamp_binding(new_stamp, bucket_dir, document="operating_point")
+    floor_note = ""
+    if binding.claimed and not binding.ok:
+        floor_note = (
+            f"; a count claim over this bucket floors: {binding.note} (stored validated="
+            f"{new_stamp.get('validated')!r}, effective binding=floored; re-earn through "
+            "calibrate_count_operating_point)"
+        )
+    return (f"rewrote {docs_rewritten} document(s) and stamped the classified pair "
+            f"({subject!r}, {attribute!r}) from the {source}{no_dataset_note}; digest "
+            f"{old_digest} -> {new_digest}{floor_note}", False, id_map, dataset_root)
+
+
+def ground_truth_candidates(dataset_root: Path, conformed_id_maps: list[dict]) -> list[str]:
+    """Every ground-truth record whose ``subject`` is a key of a conformed bucket's ``id_map`` or a
+    declared attribute value of the dataset's own registry: reported as a candidate, never
+    rewritten (a legitimate subject of that name is possible)."""
+    candidate_names: set[str] = set()
+    for id_map in conformed_id_maps:
+        candidate_names.update(id_map)
+    cp = classes_path(dataset_root)
+    if cp.is_file():
+        try:
+            registry = read_registry(cp)
+        except (OSError, RegistryError):
+            registry = None
+        if registry is not None:
+            for subject in registry.subjects:
+                for attribute in subject.attributes:
+                    candidate_names.update(attribute.values)
+    if not candidate_names:
+        return []
+    root = annotation_root(dataset_root)
+    if not root.is_dir():
+        return []
+    hits: list[str] = []
+    for d in [root, *sorted(p for p in root.iterdir() if p.is_dir())]:
+        for path in json_io.prediction_documents(d):
+            try:
+                annotations = json_io.read_annotations(str(path))
+            except UnreadableLabelDocument:
+                continue
+            for i, a in enumerate(annotations):
+                if a.subject in candidate_names:
+                    hits.append(f"{path} record {i}: subject {a.subject!r} is a candidate "
+                                "(a conformed bucket's value, or a declared attribute value)")
+    return hits
+
+
+def _audit_bucket(bucket_dir: Path, dataset_root: Path, outcome: str) -> None:
+    record_event_or_raise(
+        TOOL_NAME, {"bucket": str(bucket_dir)}, status="ok", scope=dataset_root, outcome=outcome,
+    )
+
+
+def process_project_root(
+    root: Path, *, plan: bool, operator_subject: str | None, operator_attribute: str | None,
+) -> tuple[list[str], bool]:
+    outcomes: list[str] = []
+    refused = False
+    if not (root / ".tcip").is_dir():
+        return ([f"{root}: refused, no .tcip directory found; not a project root"], True)
+    datasets = read_datasets(root)
+    if not datasets:
+        return ([f"{root}: no registered datasets"], False)
+    for entry in datasets:
+        dataset_root = dataset_entry_path(root, entry)
+        conformed_id_maps: list[dict] = []
+        for bucket_dir in bucket_dirs_under(dataset_root):
+            outcome, this_refused, id_map, changed_scope = conform_bucket(
+                bucket_dir, root=root, plan=plan, like_dir=None,
+                operator_subject=operator_subject, operator_attribute=operator_attribute,
+                is_bare_named=False,
+            )
+            outcomes.append(f"{bucket_dir}: {outcome}")
+            if this_refused:
+                refused = True
+            elif id_map is not None:
+                conformed_id_maps.append(id_map)
+            if not plan and changed_scope is not None:
+                _audit_bucket(bucket_dir, changed_scope, outcome)
+        for hit in ground_truth_candidates(dataset_root, conformed_id_maps):
+            outcomes.append(f"{dataset_root}: ground-truth candidate, {hit}")
+    return outcomes, refused
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap.add_argument("roots", nargs="*", type=Path)
+    ap.add_argument("--plan", action="store_true", help="preview only; nothing is written")
+    ap.add_argument("--bucket", action="append", default=[], type=Path,
+                    help="a bucket directory outside the project walk, repeatable")
+    ap.add_argument("--like", action="append", default=[], type=Path,
+                    help="paired with --bucket in order, a scoped bucket a bare copy is like")
+    ap.add_argument("--subject", default=None, help="operator-stated subject for an unsourced pair")
+    ap.add_argument("--attribute", default=None,
+                    help="operator-stated attribute for an unsourced pair (omit for a detector pair)")
+    args = ap.parse_args()
+
+    if args.like and len(args.like) != len(args.bucket):
+        ap.error("--like must be given once per --bucket, in the same order")
+
+    bind_default()
+
+    refused_any = False
+    for root in args.roots:
+        root = root.resolve()
+        outcomes, refused = process_project_root(
+            root, plan=args.plan, operator_subject=args.subject, operator_attribute=args.attribute,
+        )
+        if refused:
+            refused_any = True
+        for line in outcomes:
+            print(line)
+
+    for i, bucket_dir in enumerate(args.bucket):
+        bucket_dir = bucket_dir.resolve()
+        like_dir = args.like[i].resolve() if args.like else None
+        outcome, this_refused, _id_map, changed_scope = conform_bucket(
+            bucket_dir, root=None, plan=args.plan, like_dir=like_dir,
+            operator_subject=args.subject, operator_attribute=args.attribute, is_bare_named=True,
+        )
+        print(f"{bucket_dir}: {outcome}")
+        if this_refused:
+            refused_any = True
+        if not args.plan and changed_scope is not None:
+            _audit_bucket(bucket_dir, changed_scope, outcome)
+
+    return 2 if refused_any else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

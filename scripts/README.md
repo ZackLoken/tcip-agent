@@ -196,6 +196,13 @@ fresh root predates another change, not a capability to build on.
   under a root to carry `split_manifest_dir`, the key every lock this family writes now
   declares. A one-off operator fix for a record written before this family, never a runtime
   migration.
+- `conform_classified_predictions.py` - conforms a project's classified prediction buckets to the
+  writer rail's `(subject, attribute)` stamp and to the shape a classified prediction now writes
+  (the object class in `subject`, the decoded value under `attributes[attribute]`): stamps a
+  bucket whose scope is sourced from its own training run, `--like` another bucket, or the
+  operator, and rewrites a bucket's value-in-subject documents once every record in it conforms.
+  Reports, never rewrites, a reviewed bucket, an unconformable record and a ground-truth record
+  that may itself be a mislabeled value. `--plan` previews and writes nothing.
 - `conform_dataset_registry_paths.py` - conforms a project's dataset registry entries onto the
   relative-path row `register_dataset` now writes, for a project registered before that change.
 - `conform_delivery_events.py` - checks a project's stored `delivery_events` records against the
