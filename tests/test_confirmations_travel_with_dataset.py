@@ -44,7 +44,7 @@ def _confirm_negative(root: Path, subject: str, image_name: str, *, date=None,
         stamp_image_status_digests(root, bucket, [image_name], digest)
 
 
-def _dataset(tmp_path: Path, *, negative: bool = False, subjects=(Subject(name="catkin"),)):
+def _dataset(tmp_path: Path, *, negative: bool = False, subjects=(Subject(name="bud"),)):
     _write_registry(tmp_path, *subjects)
     images_dir = tmp_path / "images"
     labels_dir = tmp_path / "annotations"
@@ -52,7 +52,7 @@ def _dataset(tmp_path: Path, *, negative: bool = False, subjects=(Subject(name="
     _write_image(images_dir, "img_001")
     json_io.write_annotations(labels_dir / "img_001.json", [], 64, 64, keep_empty=True)
     if negative:
-        _confirm_negative(tmp_path, "catkin", "img_001.jpg")
+        _confirm_negative(tmp_path, "bud", "img_001.jpg")
     return tmp_path
 
 
@@ -64,7 +64,7 @@ def test_dataset_fingerprint_changes_with_confirmed_negatives(tmp_path):
     before = dataset_fingerprint(root)
     assert before is not None
 
-    _confirm_negative(root, "catkin", "img_001.jpg")
+    _confirm_negative(root, "bud", "img_001.jpg")
     after = dataset_fingerprint(root)
     assert after is not None
     assert after != before, (
@@ -95,14 +95,14 @@ def test_confirmed_negative_names_ignores_an_unrelated_ancestor_store(tmp_path):
     unrelated_ancestor = tmp_path
     dataset_root = tmp_path / "shared_dataset"
     dataset_root.mkdir()
-    _write_registry(dataset_root, Subject(name="catkin"))
+    _write_registry(dataset_root, Subject(name="bud"))
     labels_dir = dataset_root / "annotations"
     labels_dir.mkdir()
     json_io.write_annotations(labels_dir / "img_002.json", [], 64, 64, keep_empty=True)
 
-    _confirm_negative(unrelated_ancestor, "catkin", "img_002.jpg")  # a foreign, ancestor-only store
+    _confirm_negative(unrelated_ancestor, "bud", "img_002.jpg")  # a foreign, ancestor-only store
 
-    got = confirmed_negative_names(labels_dir, subject="catkin", date=None)
+    got = confirmed_negative_names(labels_dir, subject="bud", date=None)
     assert got == set(), (
         "a store found by walking up to an unrelated ancestor must never be silently borrowed, "
         "even when the dataset itself has no confirmations of its own"
@@ -115,22 +115,22 @@ def test_quarantine_excludes_a_confirmation_stamped_under_a_since_changed_schema
     from tcip_mcp.pipelines.data.label_queries import confirmed_negative_names
 
     root = _dataset(tmp_path, negative=False, subjects=(
-        Subject(name="catkin", attributes=(
-            Attribute(name="elongation", type="categorical", values=("dormant", "elongated")),
+        Subject(name="bud", attributes=(
+            Attribute(name="opening", type="categorical", values=("closed", "open")),
         )),
     ))
     old_registry = class_registry.read_registry(root / "classes.json")
-    old_digest = attribute_schema_digest(old_registry, "catkin")
-    _confirm_negative(root, "catkin", "img_001.jpg", digest=old_digest)
+    old_digest = attribute_schema_digest(old_registry, "bud")
+    _confirm_negative(root, "bud", "img_001.jpg", digest=old_digest)
 
     # The subject's attribute schema changes (a new value added) after the confirmation was stamped.
-    _write_registry(root, Subject(name="catkin", attributes=(
-        Attribute(name="elongation", type="categorical",
-                 values=("dormant", "elongating", "elongated")),
+    _write_registry(root, Subject(name="bud", attributes=(
+        Attribute(name="opening", type="categorical",
+                 values=("closed", "elongating", "open")),
     )))
 
     quarantined: set[str] = set()
-    got = confirmed_negative_names(root / "annotations", subject="catkin", date=None,
+    got = confirmed_negative_names(root / "annotations", subject="bud", date=None,
                                    quarantined_out=quarantined)
     assert got == set()
     assert quarantined == {"img_001.jpg"}
@@ -141,15 +141,15 @@ def test_quarantine_does_not_fire_when_schema_is_unchanged(tmp_path):
     from tcip_mcp.pipelines.data.label_queries import confirmed_negative_names
 
     root = _dataset(tmp_path, negative=False, subjects=(
-        Subject(name="catkin", attributes=(
-            Attribute(name="elongation", type="categorical", values=("dormant", "elongated")),
+        Subject(name="bud", attributes=(
+            Attribute(name="opening", type="categorical", values=("closed", "open")),
         )),
     ))
-    digest = attribute_schema_digest(class_registry.read_registry(root / "classes.json"), "catkin")
-    _confirm_negative(root, "catkin", "img_001.jpg", digest=digest)
+    digest = attribute_schema_digest(class_registry.read_registry(root / "classes.json"), "bud")
+    _confirm_negative(root, "bud", "img_001.jpg", digest=digest)
 
     quarantined: set[str] = set()
-    got = confirmed_negative_names(root / "annotations", subject="catkin", date=None,
+    got = confirmed_negative_names(root / "annotations", subject="bud", date=None,
                                    quarantined_out=quarantined)
     assert got == {"img_001.jpg"}
     assert quarantined == set()
@@ -164,10 +164,10 @@ def test_unstamped_confirmation_is_admitted_not_quarantined(tmp_path):
     from tcip_mcp.pipelines.data.label_queries import confirmed_negative_names
 
     root = _dataset(tmp_path, negative=False)
-    _confirm_negative(root, "catkin", "img_001.jpg")  # no digest= kwarg -> no sidecar written
+    _confirm_negative(root, "bud", "img_001.jpg")  # no digest= kwarg -> no sidecar written
 
     quarantined: set[str] = set()
-    got = confirmed_negative_names(root / "annotations", subject="catkin", date=None,
+    got = confirmed_negative_names(root / "annotations", subject="bud", date=None,
                                    quarantined_out=quarantined)
     assert got == {"img_001.jpg"}
     assert quarantined == set()
@@ -179,19 +179,19 @@ def test_trainable_stems_reports_quarantined_stale_definition(tmp_path):
     from tcip_mcp.pipelines.data.label_queries import trainable_stems
 
     root = _dataset(tmp_path, negative=False, subjects=(
-        Subject(name="catkin", attributes=(
-            Attribute(name="elongation", type="categorical", values=("dormant", "elongated")),
+        Subject(name="bud", attributes=(
+            Attribute(name="opening", type="categorical", values=("closed", "open")),
         )),
     ))
     old_digest = attribute_schema_digest(
-        class_registry.read_registry(root / "classes.json"), "catkin")
-    _confirm_negative(root, "catkin", "img_001.jpg", digest=old_digest)
-    _write_registry(root, Subject(name="catkin", attributes=(
-        Attribute(name="elongation", type="categorical",
-                 values=("dormant", "elongating", "elongated")),
+        class_registry.read_registry(root / "classes.json"), "bud")
+    _confirm_negative(root, "bud", "img_001.jpg", digest=old_digest)
+    _write_registry(root, Subject(name="bud", attributes=(
+        Attribute(name="opening", type="categorical",
+                 values=("closed", "elongating", "open")),
     )))
 
-    stems, counts = trainable_stems(root / "annotations", root / "images", subject="catkin", date=None)
+    stems, counts = trainable_stems(root / "annotations", root / "images", subject="bud", date=None)
     assert stems == []
     assert counts["quarantined_stale_definition"] == 1
     assert counts["skipped_unconfirmed_empty"] == 0
@@ -204,28 +204,28 @@ def test_quarantine_is_per_image_not_per_bucket(tmp_path):
     from tcip_mcp.pipelines.data.label_queries import confirmed_negative_names
 
     root = _dataset(tmp_path, negative=False, subjects=(
-        Subject(name="catkin", attributes=(
-            Attribute(name="elongation", type="categorical", values=("dormant", "elongated")),
+        Subject(name="bud", attributes=(
+            Attribute(name="opening", type="categorical", values=("closed", "open")),
         )),
     ))
     old_digest = attribute_schema_digest(
-        class_registry.read_registry(root / "classes.json"), "catkin")
-    _confirm_negative(root, "catkin", "img_001.jpg", digest=old_digest)
+        class_registry.read_registry(root / "classes.json"), "bud")
+    _confirm_negative(root, "bud", "img_001.jpg", digest=old_digest)
 
     # The schema changes after img_001's confirmation.
-    _write_registry(root, Subject(name="catkin", attributes=(
-        Attribute(name="elongation", type="categorical",
-                 values=("dormant", "elongating", "elongated")),
+    _write_registry(root, Subject(name="bud", attributes=(
+        Attribute(name="opening", type="categorical",
+                 values=("closed", "elongating", "open")),
     )))
     new_digest = attribute_schema_digest(
-        class_registry.read_registry(root / "classes.json"), "catkin")
+        class_registry.read_registry(root / "classes.json"), "bud")
 
     # An unrelated image is confirmed under the new (current) schema, into the same bucket; the
     # re-stamp must not silently un-quarantine img_001 too.
-    _confirm_negative(root, "catkin", "img_002.jpg", digest=new_digest)
+    _confirm_negative(root, "bud", "img_002.jpg", digest=new_digest)
 
     quarantined: set[str] = set()
-    got = confirmed_negative_names(root / "annotations", subject="catkin", date=None,
+    got = confirmed_negative_names(root / "annotations", subject="bud", date=None,
                                    quarantined_out=quarantined)
     assert got == {"img_002.jpg"}, "img_002 was stamped fresh and must be admitted"
     assert quarantined == {"img_001.jpg"}, (
@@ -241,22 +241,22 @@ def test_materialize_dataset_carries_a_quarantine_capable_stamp(tmp_path):
     from tcip_mcp.pipelines.feedback.materialize import materialize_dataset
 
     src_root = tmp_path / "src"
-    _write_registry(src_root, Subject(name="catkin", attributes=(
-        Attribute(name="elongation", type="categorical", values=("dormant", "elongated")),
+    _write_registry(src_root, Subject(name="bud", attributes=(
+        Attribute(name="opening", type="categorical", values=("closed", "open")),
     )))
     src_images = src_root / "images"
     _write_image(src_images, "imgB")
     expected_digest = class_registry.attribute_schema_digest(
-        class_registry.read_registry(src_root / "classes.json"), "catkin")
+        class_registry.read_registry(src_root / "classes.json"), "bud")
 
     review_state = {"image": {
         "imgB.jpg": {"img_status": "completed", "detections": [
-            {"action": "rejected", "class_name": "catkin", "gt_bbox_norm": None,
+            {"action": "rejected", "class_name": "bud", "gt_bbox_norm": None,
              "pred_bbox_norm": [0.5, 0.5, 0.1, 0.1]}]},
     }}
     out = tmp_path / "out"
-    materialize_dataset(review_state, str(src_images), str(out), subject="catkin")
+    materialize_dataset(review_state, str(src_images), str(out), subject="bud")
 
     assert (out / "classes.json").is_file(), "the materialized dataset must be self-describing"
-    stamps = tcip_store.read(image_status_digest_key(out), default={}).get("catkin", {})
+    stamps = tcip_store.read(image_status_digest_key(out), default={}).get("bud", {})
     assert stamps.get("imgB.jpg") == expected_digest

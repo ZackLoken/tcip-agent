@@ -97,7 +97,7 @@ def _multiband_detection_fixture(tmp_path, width=40, height=24, bands=5, patch=(
     arr[py:py + 6, px:px + 6, :] = 255
     tifffile.imwrite(images_dir / "a.tif", arr)
     json_io.write_annotations(str(labels_dir / "a.json"),
-                              [Annotation(subject="catkin", geometry=BBox(px, py, px + 6, py + 6))],
+                              [Annotation(subject="bud", geometry=BBox(px, py, px + 6, py + 6))],
                               width, height, keep_empty=True)
     return images_dir, labels_dir
 
@@ -114,7 +114,7 @@ def test_tiled_detection_reads_multiband_and_keeps_boxes_on_their_pixels(tmp_pat
 
     images_dir, labels_dir = _multiband_detection_fixture(tmp_path)
     ds = build_dataset("detection", images_dir=str(images_dir), labels_dir=str(labels_dir),
-                       subject="catkin", num_channels=5,
+                       subject="bud", num_channels=5,
                        tiling={"enabled": True, "tile_size": 16, "overlap": 0.0})
     assert ds.expected_channels == 5
 
@@ -157,12 +157,12 @@ def test_tiled_dataset_refuses_labels_authored_in_a_different_frame(tmp_path):
     pil_w, pil_h = get_image_dimensions(str(images_dir / "a.tif"))
     assert (pil_w, pil_h) == (5, 40), "fixture assumes PIL misreads this multi-band raster"
     json_io.write_annotations(str(labels_dir / "a.json"),
-                              [Annotation(subject="catkin", geometry=BBox(1, 12, 4, 18))], pil_w, pil_h,
+                              [Annotation(subject="bud", geometry=BBox(1, 12, 4, 18))], pil_w, pil_h,
                               keep_empty=True)
 
     with pytest.raises(ValueError, match="the labels record a 5x40 image but it decodes as 40x24"):
         build_dataset("detection", images_dir=str(images_dir), labels_dir=str(labels_dir),
-                      subject="catkin", num_channels=5,
+                      subject="bud", num_channels=5,
                       tiling={"enabled": True, "tile_size": 16, "overlap": 0.0})
 
 
@@ -189,7 +189,7 @@ def test_ctx_tiled_dataset_inherits_the_band_count(tmp_path):
 
     images_dir, labels_dir = _multiband_detection_fixture(tmp_path)
     base = build_dataset("detection", images_dir=str(images_dir), labels_dir=str(labels_dir),
-                         subject="catkin", num_channels=5)
+                         subject="bud", num_channels=5)
     assert TiledDetectionDataset(base, tile_size=16).expected_channels == 5
 
 
@@ -208,11 +208,11 @@ def test_tiled_detection_handles_channel_first_rasters(tmp_path):
     arr[12:18, 28:34, :] = 255
     tifffile.imwrite(images_dir / "a.tif", np.transpose(arr, (2, 0, 1)))  # [C, H, W]
     json_io.write_annotations(str(labels_dir / "a.json"),
-                              [Annotation(subject="catkin", geometry=BBox(28, 12, 34, 18))], 40, 24,
+                              [Annotation(subject="bud", geometry=BBox(28, 12, 34, 18))], 40, 24,
                               keep_empty=True)
 
     ds = build_dataset("detection", images_dir=str(images_dir), labels_dir=str(labels_dir),
-                       subject="catkin", num_channels=5,
+                       subject="bud", num_channels=5,
                        tiling={"enabled": True, "tile_size": 16, "overlap": 0.0})
     with_boxes = [(t, tgt) for t, tgt in (ds[i] for i in range(len(ds))) if len(tgt["boxes"])]
     assert with_boxes, "the GT box did not survive tiling on a channel-first raster"

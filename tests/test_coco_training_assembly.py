@@ -19,7 +19,7 @@ from tcip_mcp.class_registry import (  # noqa: E402
     Attribute, ClassRegistry, Subject, assign_class_ids,
 )
 
-CATKIN = "catkin"
+BUD = "bud"
 
 
 def _make_images(images_dir, stems):
@@ -28,23 +28,23 @@ def _make_images(images_dir, stems):
         Image.new("RGB", (100, 100)).save(images_dir / f"{s}.jpg")
 
 
-def _box(x1, y1, x2, y2, *, subject=CATKIN, score=None, **attrs):
+def _box(x1, y1, x2, y2, *, subject=BUD, score=None, **attrs):
     """A name-based detection annotation (a prediction when ``score`` is set)."""
     return Annotation(subject=subject, geometry=BBox(x1, y1, x2, y2), score=score,
                       attributes=dict(attrs))
 
 
-def _poly(points, *, subject=CATKIN, **attrs):
+def _poly(points, *, subject=BUD, **attrs):
     """A one-ring polygon annotation: the ordinary case, one contour."""
     return Annotation(subject=subject, geometry=Polygon([points]), attributes=dict(attrs))
 
 
-def _multi_poly(rings, *, subject=CATKIN, **attrs):
+def _multi_poly(rings, *, subject=BUD, **attrs):
     """One occlusion-split instance: several disjoint rings, still a single annotation."""
     return Annotation(subject=subject, geometry=Polygon(list(rings)), attributes=dict(attrs))
 
 
-def _reg_id_map(subject=CATKIN, attribute=None, values=()):
+def _reg_id_map(subject=BUD, attribute=None, values=()):
     """A registry + its ``assign_class_ids`` map (the single name→id map) for a training scope."""
     attrs = ((Attribute(name=attribute, type="categorical", values=tuple(values)),)
              if attribute else ())
@@ -95,7 +95,7 @@ def test_dir_label_format_treats_the_old_objects_schema_as_unrecognized(tmp_path
     from tcip_mcp.pipelines.data.label_queries import dir_label_format
     d = tmp_path / "detect"
     d.mkdir()
-    (d / "a.json").write_text(json.dumps({"objects": [{"label": "catkin"}]}))
+    (d / "a.json").write_text(json.dumps({"objects": [{"label": "bud"}]}))
     assert dir_label_format(d) is None
 
 
@@ -121,14 +121,14 @@ def test_assemble_coco_pairs_labels_with_images(tmp_path):
     labels.mkdir()
     _make_images(images, ["img0", "img1"])
     # Two classes now ride a categorical attribute of one subject (not two class_ids on the box).
-    _reg, id_map = _reg_id_map(attribute="elongation", values=("dormant", "elongated"))
+    _reg, id_map = _reg_id_map(attribute="opening", values=("closed", "open"))
     json_io.write_annotations(
         labels / "img0.json",
-        [_box(10, 10, 50, 50, elongation="dormant"), _box(0, 0, 20, 20, elongation="elongated")],
+        [_box(10, 10, 50, 50, opening="closed"), _box(0, 0, 20, 20, opening="open")],
         100, 100)
     json_io.write_annotations(labels / "img1.json", [], 100, 100, keep_empty=True)  # confirmed negative
 
-    coco = assemble_coco(labels, images, subject=CATKIN, date=None, attribute="elongation", id_map=id_map)
+    coco = assemble_coco(labels, images, subject=BUD, date=None, attribute="opening", id_map=id_map)
     # img1's empty file is not human-confirmed negative -> excluded (treated as unannotated)
     assert {im["file_name"] for im in coco["images"]} == {"img0.jpg"}
     assert len(coco["annotations"]) == 2
@@ -148,7 +148,7 @@ def test_assemble_coco_with_no_stems_excludes_a_bucket_sidecar(tmp_path):
     json_io.write_annotations(labels / "img0.json", [_box(10, 10, 50, 50)], 100, 100)
     (labels / "operating_point.json").write_text("{}")
 
-    coco = assemble_coco(labels, images, subject=CATKIN, date=None, id_map=id_map)
+    coco = assemble_coco(labels, images, subject=BUD, date=None, id_map=id_map)
 
     assert {im["file_name"] for im in coco["images"]} == {"img0.jpg"}
 
@@ -161,10 +161,10 @@ def test_assemble_coco_includes_only_confirmed_negatives(tmp_path):
     _make_images(images, ["img0", "img1"])
     json_io.write_annotations(labels / "img0.json", [], 100, 100, keep_empty=True)  # confirmed below
     json_io.write_annotations(labels / "img1.json", [], 100, 100, keep_empty=True)  # emptied mid-work
-    record_image_statuses(tmp_path, status_bucket(CATKIN, None),
+    record_image_statuses(tmp_path, status_bucket(BUD, None),
                           {"img0.jpg": "negative", "img1.jpg": "partial"}, recorded_by="user:breeder")
     _reg, id_map = _reg_id_map()
-    coco = assemble_coco(labels, images, subject=CATKIN, date=None, id_map=id_map)
+    coco = assemble_coco(labels, images, subject=BUD, date=None, id_map=id_map)
     assert {im["file_name"] for im in coco["images"]} == {"img0.jpg"}  # human-confirmed only
 
 
@@ -178,7 +178,7 @@ def test_assemble_coco_skips_stem_without_image(tmp_path):
     json_io.write_annotations(labels / "img0.json", [_box(10, 10, 50, 50)], 100, 100)
     json_io.write_annotations(labels / "orphan.json", [_box(5, 5, 9, 9)], 100, 100)  # no image
 
-    coco = assemble_coco(labels, images, subject=CATKIN, date=None, id_map=id_map)
+    coco = assemble_coco(labels, images, subject=BUD, date=None, id_map=id_map)
     assert [im["file_name"] for im in coco["images"]] == ["img0.jpg"]
 
 
@@ -199,14 +199,14 @@ def test_class_distribution_on_a_shared_coco_scopes_to_its_own_stems(tmp_path):
     for i, stem in enumerate(stems):
         json_io.write_annotations(labels / f"{stem}.json", [_box(10, 10, 30, 30)] * (i + 1), 100, 100)
 
-    _reg, id_map = resolve_registry_id_map(labels, CATKIN, None)
-    shared_coco = assemble_coco(labels, images, subject=CATKIN, date=None, id_map=id_map)  # over all 4 stems
+    _reg, id_map = resolve_registry_id_map(labels, BUD, None)
+    shared_coco = assemble_coco(labels, images, subject=BUD, date=None, id_map=id_map)  # over all 4 stems
 
     train_ds = build_dataset("detection", images_dir=str(images), labels_dir=str(labels),
-                             subject=CATKIN, coco_data=shared_coco, label_format="coco",
+                             subject=BUD, coco_data=shared_coco, label_format="coco",
                              stems=stems[:2])
     val_ds = build_dataset("detection", images_dir=str(images), labels_dir=str(labels),
-                           subject=CATKIN, coco_data=shared_coco, label_format="coco",
+                           subject=BUD, coco_data=shared_coco, label_format="coco",
                            stems=stems[2:])
 
     assert train_ds._coco is val_ds._coco is shared_coco  # the actual sharing this bug depends on
@@ -232,7 +232,7 @@ def test_auto_train_val_refuses_a_dataset_level_coco_misrouted_as_labels_dir(tmp
 
     with pytest.raises(ValueError, match="data.labels_dir="):
         auto_train_val("detection", {"images_dir": str(images), "labels_dir": str(labels),
-                                      "subject": CATKIN}, None)
+                                      "subject": BUD}, None)
     assert "training without validation" not in caplog.text
 
 
@@ -257,7 +257,7 @@ def test_auto_train_val_raises_on_a_corrupt_explicit_validation_label(tmp_path):
         auto_train_val("detection", {
             "images_dir": str(train_images), "labels_dir": str(train_labels),
             "val_images_dir": str(val_images), "val_labels_dir": str(val_labels),
-            "subject": CATKIN,
+            "subject": BUD,
         }, None)
 
 
@@ -271,7 +271,7 @@ def test_build_dataset_detection_autoresolves_json(tmp_path):
     _make_images(images, ["img0"])
     json_io.write_annotations(labels / "img0.json", [_box(10, 10, 50, 50)], 100, 100)
 
-    ds = build_dataset("detection", images_dir=str(images), labels_dir=str(labels), subject=CATKIN)
+    ds = build_dataset("detection", images_dir=str(images), labels_dir=str(labels), subject=BUD)
     assert ds.label_format == "coco"  # auto-routed
     _, target = ds[0]
     assert target["boxes"].shape == (1, 4)
@@ -294,7 +294,7 @@ def test_build_dataset_refuses_a_dataset_level_coco_misrouted_as_labels_dir(tmp_
         {"images": [{"id": 1, "file_name": "img0.jpg"}], "annotations": [], "categories": []}))
 
     with pytest.raises(ValueError, match="coco_json") as excinfo:
-        build_dataset("detection", images_dir=str(images), labels_dir=str(labels), subject=CATKIN)
+        build_dataset("detection", images_dir=str(images), labels_dir=str(labels), subject=BUD)
     assert "dataset.json" in str(excinfo.value)
     assert "move it out" in str(excinfo.value)
 
@@ -311,7 +311,7 @@ def test_autoresolve_json_labels_no_ops_without_an_images_dir(tmp_path):
         {"images": [{"id": 1, "file_name": "img0.jpg"}], "annotations": [], "categories": []}))
 
     kwargs = {"labels_dir": str(labels), "images_dir": ""}
-    _autoresolve_json_labels(kwargs, subject=CATKIN, attribute=None, id_map={CATKIN: 0}, date=None)
+    _autoresolve_json_labels(kwargs, subject=BUD, attribute=None, id_map={BUD: 0}, date=None)
     assert "coco_data" not in kwargs and "label_format" not in kwargs
 
 
@@ -325,7 +325,7 @@ def test_build_dataset_respects_explicit_format(tmp_path):
     json_io.write_annotations(labels / "img0.json", [_box(10, 10, 50, 50)], 100, 100)
 
     ds = build_dataset("detection", images_dir=str(images), labels_dir=str(labels),
-                       subject=CATKIN, label_format="yolo")
+                       subject=BUD, label_format="yolo")
     assert ds.label_format == "yolo"  # honored, even though .json is present
 
 
@@ -339,7 +339,7 @@ def test_build_dataset_instance_seg_autoresolves_json(tmp_path):
         labels / "img0.json",
         [_poly([(10, 10), (50, 10), (50, 50), (10, 50)])], 100, 100)
 
-    ds = build_dataset("instance_seg", images_dir=str(images), labels_dir=str(labels), subject=CATKIN)
+    ds = build_dataset("instance_seg", images_dir=str(images), labels_dir=str(labels), subject=BUD)
     assert ds.label_format == "coco"
     _, target = ds[0]
     assert target["boxes"].shape == (1, 4)
@@ -368,7 +368,7 @@ def _assert_one_mask_over_both_lobes(target) -> None:
 
 @pytest.mark.parametrize("via", ["coco", "json"])
 def test_instance_seg_rasterizes_a_two_ring_instance_into_one_mask(tmp_path, via):
-    """An occlusion-split instance (a catkin behind a branch) is one object with two regions. Both
+    """An occlusion-split instance (a bud behind a branch) is one object with two regions. Both
     label paths must rasterize every ring into that instance's single mask."""
     from tcip_mcp.pipelines.data.datasets import InstanceSegDataset
     from tcip_mcp.pipelines.data.label_queries import assemble_coco
@@ -378,10 +378,10 @@ def test_instance_seg_rasterizes_a_two_ring_instance_into_one_mask(tmp_path, via
     _make_images(images, ["img0"])
     json_io.write_annotations(labels / "img0.json", [_multi_poly([LOBE_A, LOBE_B])], 100, 100)
 
-    kwargs = {"subject": CATKIN}
+    kwargs = {"subject": BUD}
     if via == "coco":
         _reg, id_map = _reg_id_map()
-        kwargs["coco_data"] = assemble_coco(labels, images, subject=CATKIN, date=None, id_map=id_map)
+        kwargs["coco_data"] = assemble_coco(labels, images, subject=BUD, date=None, id_map=id_map)
         kwargs["id_map"] = id_map
 
     ds = InstanceSegDataset(str(images), str(labels), **kwargs)
@@ -400,7 +400,7 @@ def test_instance_seg_two_single_ring_instances_stay_two_masks(tmp_path):
     json_io.write_annotations(
         labels / "img0.json", [_poly(LOBE_A), _poly(LOBE_B)], 100, 100)
 
-    ds = InstanceSegDataset(str(images), str(labels), subject=CATKIN)
+    ds = InstanceSegDataset(str(images), str(labels), subject=BUD)
     _, target = ds[0]
     assert target["masks"].shape[0] == 2
     assert target["boxes"].tolist() == [[10.0, 10.0, 30.0, 30.0], [60.0, 10.0, 80.0, 30.0]]
@@ -417,7 +417,7 @@ def test_assemble_coco_keeps_both_rings_of_an_instance(tmp_path):
     json_io.write_annotations(labels / "img0.json", [_multi_poly([LOBE_A, LOBE_B])], 100, 100)
 
     _reg, id_map = _reg_id_map()
-    coco = assemble_coco(labels, images, subject=CATKIN, date=None, id_map=id_map)
+    coco = assemble_coco(labels, images, subject=BUD, date=None, id_map=id_map)
     (ann,) = coco["annotations"]
     assert ann["segmentation"] == [
         [10.0, 10.0, 30.0, 10.0, 30.0, 30.0, 10.0, 30.0],
@@ -446,7 +446,7 @@ def _rail_fixture(tmp_path):
     json_io.write_annotations(labels / "ann.json", [_box(4, 4, 12, 12)], 100, 100, keep_empty=True)
     json_io.write_annotations(labels / "empty.json", [], 100, 100, keep_empty=True)
     json_io.write_annotations(labels / "neg.json", [], 100, 100, keep_empty=True)
-    record_image_statuses(tmp_path, status_bucket(CATKIN, None), {"neg.jpg": "negative"},
+    record_image_statuses(tmp_path, status_bucket(BUD, None), {"neg.jpg": "negative"},
                           recorded_by="user:breeder")
     return images, labels
 
@@ -462,10 +462,10 @@ def test_only_annotated_and_confirmed_negatives_train(tmp_path, label_format):
     from tcip_mcp.pipelines.data.label_queries import assemble_coco
 
     images, labels = _rail_fixture(tmp_path)
-    kwargs = {"images_dir": str(images), "labels_dir": str(labels), "subject": CATKIN}
+    kwargs = {"images_dir": str(images), "labels_dir": str(labels), "subject": BUD}
     if label_format == "coco":
         _reg, id_map = _reg_id_map()
-        kwargs["coco_data"] = assemble_coco(labels, images, subject=CATKIN, date=None, id_map=id_map)
+        kwargs["coco_data"] = assemble_coco(labels, images, subject=BUD, date=None, id_map=id_map)
         kwargs["label_format"] = "coco"
     elif label_format:
         kwargs["label_format"] = label_format
@@ -488,7 +488,7 @@ def test_a_corrupt_confirmed_negative_refuses_the_direct_json_loader(tmp_path):
 
     with pytest.raises(UnreadableLabelDocument):
         build_dataset("detection", images_dir=str(images), labels_dir=str(labels),
-                     subject=CATKIN, label_format="json")
+                     subject=BUD, label_format="json")
 
 
 def test_caller_supplied_stems_are_filtered_too(tmp_path):
@@ -497,7 +497,7 @@ def test_caller_supplied_stems_are_filtered_too(tmp_path):
 
     images, labels = _rail_fixture(tmp_path)
     ds = build_dataset("detection", images_dir=str(images), labels_dir=str(labels),
-                       subject=CATKIN, stems=["ann", "empty", "nolabel", "neg"])
+                       subject=BUD, stems=["ann", "empty", "nolabel", "neg"])
     assert sorted(ds.stems) == ["ann", "neg"]
 
 
@@ -511,7 +511,7 @@ def test_no_trainable_samples_raises_rather_than_training_on_nothing(tmp_path):
     json_io.write_annotations(labels / "a.json", [], 100, 100, keep_empty=True)  # unconfirmed empty
 
     with pytest.raises(ValueError, match="no trainable samples"):
-        build_dataset("detection", images_dir=str(images), labels_dir=str(labels), subject=CATKIN)
+        build_dataset("detection", images_dir=str(images), labels_dir=str(labels), subject=BUD)
 
 
 def test_instance_seg_applies_the_same_rail(tmp_path):
@@ -526,7 +526,7 @@ def test_instance_seg_applies_the_same_rail(tmp_path):
                               keep_empty=True)
 
     ds = build_dataset("instance_seg", images_dir=str(images), labels_dir=str(labels),
-                       subject=CATKIN)
+                       subject=BUD)
     assert ds.stems == ["ann"]
 
 
@@ -541,16 +541,16 @@ def test_instance_seg_dataset_excludes_partially_labeled_stem_from_training(tmp_
     _make_images(images_dir, ["complete", "partial"])
     labels_dir.mkdir()
     json_io.write_annotations(labels_dir / "complete.json", [
-        _poly([(4, 4), (12, 4), (12, 12), (4, 12)], elongation="elongated"),
+        _poly([(4, 4), (12, 4), (12, 12), (4, 12)], opening="open"),
     ], 100, 100)
     json_io.write_annotations(labels_dir / "partial.json", [
-        _poly([(4, 4), (12, 4), (12, 12), (4, 12)], elongation="dormant"),
-        _poly([(40, 40), (60, 40), (60, 60), (40, 60)]),  # unlabeled -- no elongation attribute
+        _poly([(4, 4), (12, 4), (12, 12), (4, 12)], opening="closed"),
+        _poly([(40, 40), (60, 40), (60, 60), (40, 60)]),  # unlabeled -- no opening attribute
     ], 100, 100)
-    _reg, id_map = _reg_id_map(attribute="elongation", values=("elongated", "dormant"))
+    _reg, id_map = _reg_id_map(attribute="opening", values=("open", "closed"))
 
-    ds = InstanceSegDataset(str(images_dir), str(labels_dir), subject=CATKIN,
-                            attribute="elongation", id_map=id_map)
+    ds = InstanceSegDataset(str(images_dir), str(labels_dir), subject=BUD,
+                            attribute="opening", id_map=id_map)
 
     assert ds.stems == ["complete"]
     assert ds.sample_counts["skipped_incomplete_attribute"] == 1
@@ -580,15 +580,15 @@ def test_confirmed_negative_survives_an_uppercase_extension(tmp_path, ext):
     json_io.write_annotations(labels / "IMG_0001.json", [_box(4, 4, 12, 12)], 100, 100,
                               keep_empty=True)
     json_io.write_annotations(labels / "IMG_0002.json", [], 100, 100, keep_empty=True)
-    record_image_statuses(tmp_path, status_bucket(CATKIN, None), {f"IMG_0002{ext}": "negative"},
+    record_image_statuses(tmp_path, status_bucket(BUD, None), {f"IMG_0002{ext}": "negative"},
                           recorded_by="user:breeder")
 
     _reg, id_map = _reg_id_map()
     # The assembled COCO carries the real names, so to_coco_dataset can match the store.
-    coco = assemble_coco(labels, images, subject=CATKIN, date=None, id_map=id_map)
+    coco = assemble_coco(labels, images, subject=BUD, date=None, id_map=id_map)
     assert {im["file_name"] for im in coco["images"]} == {f"IMG_0001{ext}", f"IMG_0002{ext}"}
 
-    ds = build_dataset("detection", images_dir=str(images), labels_dir=str(labels), subject=CATKIN)
+    ds = build_dataset("detection", images_dir=str(images), labels_dir=str(labels), subject=BUD)
     assert sorted(ds.stems) == ["IMG_0001", "IMG_0002"], ds.stems
     assert ds.sample_counts["confirmed_negative"] == 1
 
@@ -617,7 +617,7 @@ def test_sample_counts_distinguish_unannotated_from_unconfirmed_empty(tmp_path):
     from tcip_mcp.pipelines.data.datasets import build_dataset
 
     images, labels = _rail_fixture(tmp_path)
-    ds = build_dataset("detection", images_dir=str(images), labels_dir=str(labels), subject=CATKIN)
+    ds = build_dataset("detection", images_dir=str(images), labels_dir=str(labels), subject=BUD)
     assert ds.sample_counts == {"annotated": 1, "confirmed_negative": 1, "skipped_unannotated": 1,
                                 "skipped_unconfirmed_empty": 1, "skipped_incomplete_attribute": 0,
                                 "quarantined_stale_definition": 0}
@@ -635,7 +635,7 @@ def test_external_coco_zero_annotation_image_still_needs_a_human_complete(tmp_pa
         "categories": [{"id": 1, "name": "c0"}],
     }
     ds = build_dataset("detection", images_dir=str(images), labels_dir=str(labels),
-                       subject=CATKIN, coco_data=external, label_format="coco")
+                       subject=BUD, coco_data=external, label_format="coco")
     assert ds.stems == ["ann"], "an unconfirmed zero-annotation COCO image must not train"
     assert ds.sample_counts["confirmed_negative"] == 0
 
@@ -652,17 +652,17 @@ def test_a_confirmation_does_not_leak_across_subjects(tmp_path):
     _make_images(images, ["ann", "shared"])
     # Every subject's annotation records share one per-image file; subject is a field in the record.
     json_io.write_annotations(labels / "ann.json",
-                              [_box(4, 4, 12, 12, subject="catkin"),
+                              [_box(4, 4, 12, 12, subject="bud"),
                                _box(4, 4, 12, 12, subject="bush")], 100, 100, keep_empty=True)
     json_io.write_annotations(labels / "shared.json", [], 100, 100, keep_empty=True)
-    # Confirmed negative for catkin only; the breeder never judged it for bush.
-    record_image_statuses(tmp_path, status_bucket("catkin", None), {"shared.jpg": "negative"},
+    # Confirmed negative for bud only; the breeder never judged it for bush.
+    record_image_statuses(tmp_path, status_bucket("bud", None), {"shared.jpg": "negative"},
                           recorded_by="user:breeder")
 
-    assert confirmed_negative_names(labels, subject="catkin", date=None) == {"shared.jpg"}
+    assert confirmed_negative_names(labels, subject="bud", date=None) == {"shared.jpg"}
     assert confirmed_negative_names(labels, subject="bush", date=None) == set()
     assert sorted(build_dataset("detection", images_dir=str(images), labels_dir=str(labels),
-                                subject="catkin").stems) == ["ann", "shared"]
+                                subject="bud").stems) == ["ann", "shared"]
     assert build_dataset("detection", images_dir=str(images), labels_dir=str(labels),
                          subject="bush").stems == ["ann"]
 
@@ -678,7 +678,7 @@ def test_unresolvable_subject_refuses_rather_than_dropping_negatives(tmp_path):
 
     labels = tmp_path / "labels"
     labels.mkdir(parents=True)
-    record_image_statuses(tmp_path, status_bucket("catkin", None), {"a.jpg": "negative"},
+    record_image_statuses(tmp_path, status_bucket("bud", None), {"a.jpg": "negative"},
                           recorded_by="user:breeder")
 
     with pytest.raises(ValueError, match="needs an explicit subject"):
@@ -696,7 +696,7 @@ def test_a_derived_tree_without_negatives_does_not_refuse(tmp_path):
 
     labels = tmp_path / "labels"
     labels.mkdir(parents=True)
-    record_image_statuses(tmp_path, status_bucket("catkin", None), {"a.jpg": "complete"},
+    record_image_statuses(tmp_path, status_bucket("bud", None), {"a.jpg": "complete"},
                           recorded_by="user:breeder")
 
     assert confirmed_negative_names(labels, subject=None, date=None) == set()
@@ -716,19 +716,19 @@ def test_split_tree_carries_its_confirmed_negatives(tmp_path):
         stem = f"i{n:02d}"
         boxes = [] if n % 2 else [_box(4, 4, 12, 12)]
         json_io.write_annotations(labels / f"{stem}.json", boxes, 100, 100, keep_empty=True)
-    record_image_statuses(tmp_path, status_bucket("catkin", None),
+    record_image_statuses(tmp_path, status_bucket("bud", None),
                           {f"i{n:02d}.jpg": "negative" for n in range(1, 10, 2)},
                           recorded_by="user:breeder")
 
     out = tmp_path / "splits"
-    draw_splits(str(tmp_path), output_path=str(out), materialize=True, subject="catkin",
+    draw_splits(str(tmp_path), output_path=str(out), materialize=True, subject="bud",
                train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
 
     carried = set()
     for split in ("train", "val", "calibration"):
         d = out / split / "labels"
         if d.is_dir():
-            carried |= confirmed_negative_names(d, subject="catkin", date=None)
+            carried |= confirmed_negative_names(d, subject="bud", date=None)
     assert carried, "the split tree lost every human-confirmed negative"
 
 
@@ -745,12 +745,12 @@ def test_split_tree_carries_a_quarantine_capable_stamp(tmp_path):
     labels = tmp_path / "annotations"
     labels.mkdir(parents=True)
     registry = ClassRegistry(subjects=(
-        Subject(name="catkin", attributes=(
-            Attribute(name="elongation", type="categorical", values=("dormant", "elongated")),
+        Subject(name="bud", attributes=(
+            Attribute(name="opening", type="categorical", values=("closed", "open")),
         )),
     ))
     write_registry(tmp_path / "classes.json", registry)
-    expected_digest = class_registry.attribute_schema_digest(registry, "catkin")
+    expected_digest = class_registry.attribute_schema_digest(registry, "bud")
 
     _make_images(images, [f"i{n:02d}" for n in range(10)])
     for n in range(10):
@@ -758,12 +758,12 @@ def test_split_tree_carries_a_quarantine_capable_stamp(tmp_path):
         boxes = [] if n % 2 else [_box(4, 4, 12, 12)]
         json_io.write_annotations(labels / f"{stem}.json", boxes, 100, 100, keep_empty=True)
     neg_names = {f"i{n:02d}.jpg" for n in range(1, 10, 2)}
-    record_image_statuses(tmp_path, status_bucket("catkin", None),
+    record_image_statuses(tmp_path, status_bucket("bud", None),
                           dict.fromkeys(neg_names, "negative"), recorded_by="user:breeder")
-    stamp_image_status_digests(tmp_path, status_bucket("catkin", None), neg_names, expected_digest)
+    stamp_image_status_digests(tmp_path, status_bucket("bud", None), neg_names, expected_digest)
 
     out = tmp_path / "splits"
-    draw_splits(str(tmp_path), output_path=str(out), materialize=True, subject="catkin",
+    draw_splits(str(tmp_path), output_path=str(out), materialize=True, subject="bud",
                train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
 
     found = False
@@ -772,7 +772,7 @@ def test_split_tree_carries_a_quarantine_capable_stamp(tmp_path):
         digest_key = image_status_digest_key(split_root)
         if not ts.exists(digest_key):
             continue
-        stamps = ts.read(digest_key).get(status_bucket("catkin", None), {})
+        stamps = ts.read(digest_key).get(status_bucket("bud", None), {})
         carried_here = set(stamps) & neg_names
         if carried_here:
             assert (split_root / "classes.json").is_file()
@@ -796,26 +796,26 @@ def test_quarantined_negative_reads_the_same_reason_on_both_label_paths(tmp_path
     labels = tmp_path / "annotations"
     labels.mkdir(parents=True)
     registry = ClassRegistry(subjects=(
-        Subject(name=CATKIN, attributes=(
-            Attribute(name="elongation", type="categorical", values=("dormant", "elongated")),
+        Subject(name=BUD, attributes=(
+            Attribute(name="opening", type="categorical", values=("closed", "open")),
         )),
     ))
     write_registry(tmp_path / "classes.json", registry)
-    current_digest = class_registry.attribute_schema_digest(registry, CATKIN)
+    current_digest = class_registry.attribute_schema_digest(registry, BUD)
 
     _make_images(images, ["a"])
     json_io.write_annotations(labels / "a.json", [], 100, 100, keep_empty=True)
 
-    record_image_statuses(tmp_path, status_bucket(CATKIN, None), {"a.jpg": "negative"},
+    record_image_statuses(tmp_path, status_bucket(BUD, None), {"a.jpg": "negative"},
                           recorded_by="user:breeder")
     # Stamped with a digest that does not match the current schema -> quarantined, not trusted.
     assert current_digest != "stale-digest"
-    stamp_image_status_digests(tmp_path, status_bucket(CATKIN, None), ["a.jpg"], "stale-digest")
+    stamp_image_status_digests(tmp_path, status_bucket(BUD, None), ["a.jpg"], "stale-digest")
 
     _, id_map = _reg_id_map()
-    _, counts_json = trainable_stems(str(labels), str(images), subject=CATKIN, date=None)
-    coco = assemble_coco(labels, images, subject=CATKIN, date=None, id_map=id_map)
-    _, counts_coco = trainable_stems(str(labels), str(images), subject=CATKIN, date=None, coco=coco)
+    _, counts_json = trainable_stems(str(labels), str(images), subject=BUD, date=None)
+    coco = assemble_coco(labels, images, subject=BUD, date=None, id_map=id_map)
+    _, counts_coco = trainable_stems(str(labels), str(images), subject=BUD, date=None, coco=coco)
 
     assert counts_json["quarantined_stale_definition"] == 1
     assert counts_json == counts_coco
@@ -829,23 +829,23 @@ def test_json_det_targets_skips_unlabeled_instead_of_raising(tmp_path):
 
     path = tmp_path / "IMG_A.json"
     json_io.write_annotations(path, [
-        Annotation(subject="catkin", geometry=BBox(10, 10, 30, 30),
-                  attributes={"elongation": "dormant"}),
-        Annotation(subject="catkin", geometry=BBox(40, 40, 60, 60), attributes={}),  # unlabeled
+        Annotation(subject="bud", geometry=BBox(10, 10, 30, 30),
+                  attributes={"opening": "closed"}),
+        Annotation(subject="bud", geometry=BBox(40, 40, 60, 60), attributes={}),  # unlabeled
     ], 100, 100)
 
-    id_map = {"elongated": 0, "dormant": 1}
-    boxes, labels, n_unlabeled = json_det_targets(str(path), "catkin", "elongation", id_map)
-    assert len(boxes) == 1 and labels == [2]  # 0-indexed 1 ("dormant") + 1 for background
+    id_map = {"open": 0, "closed": 1}
+    boxes, labels, n_unlabeled = json_det_targets(str(path), "bud", "opening", id_map)
+    assert len(boxes) == 1 and labels == [2]  # 0-indexed 1 ("closed") + 1 for background
     assert n_unlabeled == 1  # the second instance, disclosed rather than silently dropped
 
     undecodable = tmp_path / "IMG_B.json"
     json_io.write_annotations(undecodable, [
-        Annotation(subject="catkin", geometry=BBox(10, 10, 30, 30),
-                  attributes={"elongation": "not-a-real-value"}),
+        Annotation(subject="bud", geometry=BBox(10, 10, 30, 30),
+                  attributes={"opening": "not-a-real-value"}),
     ], 100, 100)
     with pytest.raises(ValueError):
-        json_det_targets(str(undecodable), "catkin", "elongation", id_map)
+        json_det_targets(str(undecodable), "bud", "opening", id_map)
 
 
 def test_detection_dataset_excludes_partially_labeled_stem_from_training(tmp_path):
@@ -860,16 +860,16 @@ def test_detection_dataset_excludes_partially_labeled_stem_from_training(tmp_pat
     _make_images(images_dir, ["complete", "partial"])
     labels_dir.mkdir()
     json_io.write_annotations(labels_dir / "complete.json", [
-        _box(10, 10, 30, 30, elongation="elongated"),
+        _box(10, 10, 30, 30, opening="open"),
     ], 100, 100)
     json_io.write_annotations(labels_dir / "partial.json", [
-        _box(10, 10, 30, 30, elongation="dormant"),
-        _box(40, 40, 60, 60),  # unlabeled -- no elongation attribute at all
+        _box(10, 10, 30, 30, opening="closed"),
+        _box(40, 40, 60, 60),  # unlabeled -- no opening attribute at all
     ], 100, 100)
-    _reg, id_map = _reg_id_map(attribute="elongation", values=("elongated", "dormant"))
+    _reg, id_map = _reg_id_map(attribute="opening", values=("open", "closed"))
 
-    ds = DetectionDataset(str(images_dir), str(labels_dir), subject=CATKIN,
-                          attribute="elongation", id_map=id_map)
+    ds = DetectionDataset(str(images_dir), str(labels_dir), subject=BUD,
+                          attribute="opening", id_map=id_map)
 
     assert ds.stems == ["complete"]
     # The drop must be recorded in the partition's own counts, under its real reason: filtering
@@ -896,18 +896,18 @@ def test_detection_dataset_excludes_incomplete_attribute_on_the_real_build_datas
     _make_images(images_dir, ["complete_a", "complete_b", "partial"])
     labels_dir.mkdir(parents=True)
     write_registry(root / "classes.json", ClassRegistry(subjects=(
-        Subject(name=CATKIN, attributes=(
-            Attribute(name="elongation", type="categorical", values=("elongated", "dormant")),)),)))
+        Subject(name=BUD, attributes=(
+            Attribute(name="opening", type="categorical", values=("open", "closed")),)),)))
     for stem in ("complete_a", "complete_b"):
         json_io.write_annotations(labels_dir / f"{stem}.json", [
-            _box(10, 10, 30, 30, elongation="elongated")], 100, 100)
+            _box(10, 10, 30, 30, opening="open")], 100, 100)
     json_io.write_annotations(labels_dir / "partial.json", [
-        _box(10, 10, 30, 30, elongation="dormant"),
+        _box(10, 10, 30, 30, opening="closed"),
         _box(40, 40, 60, 60),  # unlabeled
     ], 100, 100)
 
     built = build_dataset(task="detection", images_dir=str(images_dir), labels_dir=str(labels_dir),
-                          subject=CATKIN, attribute="elongation")
+                          subject=BUD, attribute="opening")
     ds = built.dataset if hasattr(built, "dataset") else built
 
     assert ds.label_format == "coco"  # build_dataset forces the coco path, not the json-guarded one
@@ -928,17 +928,17 @@ def test_tiled_detection_indexes_no_tile_from_an_attribute_incomplete_image(tmp_
     images_dir, labels_dir = root / "images", root / "annotations"
     _make_images(images_dir, ["complete", "partial"])
     labels_dir.mkdir(parents=True)
-    reg, _id_map = _reg_id_map(attribute="elongation", values=("elongated", "dormant"))
+    reg, _id_map = _reg_id_map(attribute="opening", values=("open", "closed"))
     write_registry(root / "classes.json", reg)
     json_io.write_annotations(labels_dir / "complete.json", [
-        _box(10, 10, 30, 30, elongation="elongated")], 100, 100)
+        _box(10, 10, 30, 30, opening="open")], 100, 100)
     json_io.write_annotations(labels_dir / "partial.json", [
-        _box(10, 10, 30, 30, elongation="dormant"),
+        _box(10, 10, 30, 30, opening="closed"),
         _box(40, 40, 60, 60),  # unlabeled
     ], 100, 100)
 
     tiled = build_dataset(task="detection", images_dir=str(images_dir), labels_dir=str(labels_dir),
-                          subject=CATKIN, attribute="elongation",
+                          subject=BUD, attribute="opening",
                           tiling={"enabled": True, "tile_size": 64, "overlap": 0.0})
 
     assert set(tiled.stems) == {"complete"}  # tiles are per-index, so this is every tile's source

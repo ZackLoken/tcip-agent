@@ -419,12 +419,12 @@ def test_run_full_frame_evaluation_tiled_instance_seg_scores_boxes(instance_seg_
     _image(images_dir, "a.png")
     labels_dir.mkdir(parents=True)
     json_io.write_annotations(str(labels_dir / "a.json"),
-                              [Annotation(subject="catkin", geometry=BBox(54, 54, 74, 74))], 128, 128)
+                              [Annotation(subject="bud", geometry=BBox(54, 54, 74, 74))], 128, 128)
 
     _register_instance_seg_ckpt(instance_seg_ckpt, tmp_path)
     checkpoint = load_registered_checkpoint(instance_seg_ckpt, project_path=str(tmp_path))
     r = run_full_frame_evaluation(checkpoint, str(images_dir), str(labels_dir),
-                                  str(tmp_path / "out"), subject="catkin",
+                                  str(tmp_path / "out"), subject="bud",
                                   tile_size=TILE, overlap=0.2)
     assert r["eval_regime"] == "full-frame-tiled-inference"
     assert r["scored_images"] == 1

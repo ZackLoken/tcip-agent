@@ -36,9 +36,9 @@ def test_region_completeness_digest_path_locator(tmp_path):
 
 class TestNormalizeRegionCompletenessStore:
     def test_valid_records_pass_through(self):
-        raw = {"catkin/mosaic": {"grid": {"width": 100}, "cells_complete": ["A1", "B2"],
+        raw = {"bud/mosaic": {"grid": {"width": 100}, "cells_complete": ["A1", "B2"],
                                  "attested_by": "user:z", "attested_at": "t", "stem": "mosaic",
-                                 "date": None, "subject": "catkin"}}
+                                 "date": None, "subject": "bud"}}
         assert normalize_region_completeness_store(raw) == raw
 
     def test_non_dict_input_yields_empty(self):
@@ -46,28 +46,28 @@ class TestNormalizeRegionCompletenessStore:
         assert normalize_region_completeness_store([1, 2]) == {}
 
     def test_entry_missing_grid_is_dropped(self):
-        raw = {"catkin/mosaic": {"cells_complete": ["A1"]}}
+        raw = {"bud/mosaic": {"cells_complete": ["A1"]}}
         assert normalize_region_completeness_store(raw) == {}
 
     def test_entry_with_non_dict_grid_is_dropped(self):
-        raw = {"catkin/mosaic": {"grid": "not-a-dict", "cells_complete": []}}
+        raw = {"bud/mosaic": {"grid": "not-a-dict", "cells_complete": []}}
         assert normalize_region_completeness_store(raw) == {}
 
     def test_entry_with_non_list_cells_complete_is_dropped(self):
-        raw = {"catkin/mosaic": {"grid": {}, "cells_complete": "A1"}}
+        raw = {"bud/mosaic": {"grid": {}, "cells_complete": "A1"}}
         assert normalize_region_completeness_store(raw) == {}
 
     def test_entry_with_non_string_cell_names_is_dropped(self):
-        raw = {"catkin/mosaic": {"grid": {}, "cells_complete": ["A1", 2]}}
+        raw = {"bud/mosaic": {"grid": {}, "cells_complete": ["A1", 2]}}
         assert normalize_region_completeness_store(raw) == {}
 
     def test_one_bad_entry_does_not_drop_a_good_sibling(self):
         raw = {
-            "catkin/mosaic": {"grid": {}, "cells_complete": ["A1"]},
+            "bud/mosaic": {"grid": {}, "cells_complete": ["A1"]},
             "bush/other": {"cells_complete": ["A1"]},  # missing grid
         }
         got = normalize_region_completeness_store(raw)
-        assert list(got) == ["catkin/mosaic"]
+        assert list(got) == ["bud/mosaic"]
 
 
 class TestCellAnnotationDigest:
@@ -77,40 +77,40 @@ class TestCellAnnotationDigest:
 
     def test_empty_cell_is_deterministic(self):
         cell = self._cell()
-        assert cell_annotation_digest([], "catkin", cell) == cell_annotation_digest(
-            [], "catkin", cell)
+        assert cell_annotation_digest([], "bud", cell) == cell_annotation_digest(
+            [], "bud", cell)
 
     def test_two_calls_over_identical_content_agree(self):
         cell = self._cell()
-        anns = [Annotation(subject="catkin", geometry=BBox(1, 1, 9, 9))]
-        assert cell_annotation_digest(anns, "catkin", cell) == cell_annotation_digest(
-            anns, "catkin", cell)
+        anns = [Annotation(subject="bud", geometry=BBox(1, 1, 9, 9))]
+        assert cell_annotation_digest(anns, "bud", cell) == cell_annotation_digest(
+            anns, "bud", cell)
 
     def test_a_moved_annotation_changes_the_digest(self):
         cell = self._cell()
-        before = [Annotation(subject="catkin", geometry=BBox(1, 1, 9, 9))]
-        after = [Annotation(subject="catkin", geometry=BBox(1, 1, 20, 20))]
-        assert cell_annotation_digest(before, "catkin", cell) != cell_annotation_digest(
-            after, "catkin", cell)
+        before = [Annotation(subject="bud", geometry=BBox(1, 1, 9, 9))]
+        after = [Annotation(subject="bud", geometry=BBox(1, 1, 20, 20))]
+        assert cell_annotation_digest(before, "bud", cell) != cell_annotation_digest(
+            after, "bud", cell)
 
     def test_a_deleted_annotation_changes_the_digest(self):
         cell = self._cell()
-        before = [Annotation(subject="catkin", geometry=BBox(1, 1, 9, 9))]
-        assert cell_annotation_digest(before, "catkin", cell) != cell_annotation_digest(
-            [], "catkin", cell)
+        before = [Annotation(subject="bud", geometry=BBox(1, 1, 9, 9))]
+        assert cell_annotation_digest(before, "bud", cell) != cell_annotation_digest(
+            [], "bud", cell)
 
     def test_a_different_subjects_annotation_in_the_same_cell_does_not_count(self):
         cell = self._cell()
         anns = [Annotation(subject="bush", geometry=BBox(1, 1, 9, 9))]
-        assert cell_annotation_digest(anns, "catkin", cell) == cell_annotation_digest(
-            [], "catkin", cell)
+        assert cell_annotation_digest(anns, "bud", cell) == cell_annotation_digest(
+            [], "bud", cell)
 
     def test_an_annotation_outside_the_cell_does_not_count(self):
         # A1 is [0,64)x[0,64); this box centers well outside it.
         cell = self._cell()
-        far = [Annotation(subject="catkin", geometry=BBox(90, 90, 100, 100))]
-        assert cell_annotation_digest(far, "catkin", cell) == cell_annotation_digest(
-            [], "catkin", cell)
+        far = [Annotation(subject="bud", geometry=BBox(90, 90, 100, 100))]
+        assert cell_annotation_digest(far, "bud", cell) == cell_annotation_digest(
+            [], "bud", cell)
 
 
 class TestCellAnnotationDigests:
@@ -125,31 +125,31 @@ class TestCellAnnotationDigests:
     def test_agrees_with_the_per_cell_digest_across_a_populated_grid(self):
         cells = self._cells()
         anns = [
-            Annotation(subject="catkin", geometry=BBox(1, 1, 9, 9)),      # A1
-            Annotation(subject="catkin", geometry=BBox(70, 1, 78, 9)),    # B1
-            Annotation(subject="catkin", geometry=BBox(1, 70, 9, 78)),    # A2
-            Annotation(subject="catkin", geometry=BBox(70, 70, 78, 78)),  # B2
+            Annotation(subject="bud", geometry=BBox(1, 1, 9, 9)),      # A1
+            Annotation(subject="bud", geometry=BBox(70, 1, 78, 9)),    # B1
+            Annotation(subject="bud", geometry=BBox(1, 70, 9, 78)),    # A2
+            Annotation(subject="bud", geometry=BBox(70, 70, 78, 78)),  # B2
             Annotation(subject="bush", geometry=BBox(1, 1, 9, 9)),        # A1, wrong subject
         ]
-        got = cell_annotation_digests(anns, "catkin", cells, tile_size=64)
-        expected = {c.name: cell_annotation_digest(anns, "catkin", c) for c in cells}
+        got = cell_annotation_digests(anns, "bud", cells, tile_size=64)
+        expected = {c.name: cell_annotation_digest(anns, "bud", c) for c in cells}
         assert got == expected
         assert len(got) == 4  # A1, A2, B1, B2 -- the grid this fixture actually derives
 
     def test_empty_cell_list_returns_empty(self):
-        assert cell_annotation_digests([], "catkin", [], tile_size=64) == {}
+        assert cell_annotation_digests([], "bud", [], tile_size=64) == {}
 
     def test_a_cell_with_no_annotations_still_gets_a_real_digest(self):
         cells = self._cells()
-        got = cell_annotation_digests([], "catkin", cells, tile_size=64)
+        got = cell_annotation_digests([], "bud", cells, tile_size=64)
         assert set(got) == {c.name for c in cells}
         assert all(got.values())  # every value is a real, non-empty digest string
 
     def test_nonzero_overlap_falls_back_to_the_per_cell_path_and_still_agrees(self):
         cells = self._cells(overlap=0.2)
-        anns = [Annotation(subject="catkin", geometry=BBox(1, 1, 9, 9))]
-        got = cell_annotation_digests(anns, "catkin", cells, tile_size=64, overlap=0.2)
-        expected = {c.name: cell_annotation_digest(anns, "catkin", c) for c in cells}
+        anns = [Annotation(subject="bud", geometry=BBox(1, 1, 9, 9))]
+        got = cell_annotation_digests(anns, "bud", cells, tile_size=64, overlap=0.2)
+        expected = {c.name: cell_annotation_digest(anns, "bud", c) for c in cells}
         assert got == expected
 
 
@@ -162,18 +162,18 @@ class TestAnnotationsByCell:
 
     def test_bins_by_cell_and_filters_by_subject(self):
         cells = self._cells()
-        catkin_a1 = Annotation(subject="catkin", geometry=BBox(1, 1, 9, 9))
-        catkin_b1 = Annotation(subject="catkin", geometry=BBox(70, 1, 78, 9))
+        bud_a1 = Annotation(subject="bud", geometry=BBox(1, 1, 9, 9))
+        bud_b1 = Annotation(subject="bud", geometry=BBox(70, 1, 78, 9))
         bush_a1 = Annotation(subject="bush", geometry=BBox(2, 2, 10, 10))
-        got = annotations_by_cell([catkin_a1, catkin_b1, bush_a1], "catkin", cells, tile_size=64)
-        assert got["A1"] == [catkin_a1]
-        assert got["B1"] == [catkin_b1]
+        got = annotations_by_cell([bud_a1, bud_b1, bush_a1], "bud", cells, tile_size=64)
+        assert got["A1"] == [bud_a1]
+        assert got["B1"] == [bud_b1]
         assert got["A2"] == []
         assert got["B2"] == []
 
     def test_every_cell_in_the_grid_gets_an_entry_even_when_empty(self):
         cells = self._cells()
-        got = annotations_by_cell([], "catkin", cells, tile_size=64)
+        got = annotations_by_cell([], "bud", cells, tile_size=64)
         assert set(got) == {c.name for c in cells}
         assert all(v == [] for v in got.values())
 
@@ -183,19 +183,19 @@ class TestAnnotationsByCell:
         against the shared binning directly."""
         cells = self._cells()
         anns = [
-            Annotation(subject="catkin", geometry=BBox(1, 1, 9, 9)),
-            Annotation(subject="catkin", geometry=BBox(70, 1, 78, 9)),
+            Annotation(subject="bud", geometry=BBox(1, 1, 9, 9)),
+            Annotation(subject="bud", geometry=BBox(70, 1, 78, 9)),
         ]
-        digests = cell_annotation_digests(anns, "catkin", cells, tile_size=64)
-        by_cell = annotations_by_cell(anns, "catkin", cells, tile_size=64)
+        digests = cell_annotation_digests(anns, "bud", cells, tile_size=64)
+        by_cell = annotations_by_cell(anns, "bud", cells, tile_size=64)
         for cell in cells:
-            expected = cell_annotation_digest(by_cell[cell.name], "catkin", cell)
+            expected = cell_annotation_digest(by_cell[cell.name], "bud", cell)
             assert digests[cell.name] == expected
 
     def test_nonzero_overlap_falls_back_to_per_cell_containment(self):
         cells = self._cells(overlap=0.2)
-        ann = Annotation(subject="catkin", geometry=BBox(1, 1, 9, 9))
-        got = annotations_by_cell([ann], "catkin", cells, tile_size=64, overlap=0.2)
+        ann = Annotation(subject="bud", geometry=BBox(1, 1, 9, 9))
+        got = annotations_by_cell([ann], "bud", cells, tile_size=64, overlap=0.2)
         assert got["A1"] == [ann]
 
 
@@ -209,12 +209,12 @@ class TestAnnotationCountsByCell:
     def test_counts_every_subject_present_in_one_pass(self):
         cells = self._cells()
         anns = [
-            Annotation(subject="catkin", geometry=BBox(1, 1, 9, 9)),
-            Annotation(subject="catkin", geometry=BBox(2, 2, 10, 10)),
+            Annotation(subject="bud", geometry=BBox(1, 1, 9, 9)),
+            Annotation(subject="bud", geometry=BBox(2, 2, 10, 10)),
             Annotation(subject="bush", geometry=BBox(70, 1, 78, 9)),
         ]
         got = annotation_counts_by_cell(anns, cells, tile_size=64)
-        assert got == {"catkin": {"A1": 2}, "bush": {"B1": 1}}
+        assert got == {"bud": {"A1": 2}, "bush": {"B1": 1}}
 
     def test_no_annotations_yields_no_subjects(self):
         cells = self._cells()
@@ -241,50 +241,50 @@ class TestStaleCells:
     def test_no_stamp_at_all_is_reported_stale(self, tmp_path):
         grid, _cells = self._grid_and_cells()
         self._write_label(tmp_path / "annotations", "mosaic",
-                          [Annotation(subject="catkin", geometry=BBox(1, 1, 9, 9))])
+                          [Annotation(subject="bud", geometry=BBox(1, 1, 9, 9))])
         record = {"grid": grid, "cells_complete": ["A1"], "stem": "mosaic", "date": None}
-        assert stale_cells(tmp_path, record, {}, "catkin") == ["A1"]
+        assert stale_cells(tmp_path, record, {}, "bud") == ["A1"]
 
     def test_matching_stamp_is_not_stale(self, tmp_path):
         grid, cells = self._grid_and_cells()
-        anns = [Annotation(subject="catkin", geometry=BBox(1, 1, 9, 9))]
+        anns = [Annotation(subject="bud", geometry=BBox(1, 1, 9, 9))]
         self._write_label(tmp_path / "annotations", "mosaic", anns)
         a1 = next(c for c in cells if c.name == "A1")
-        digest = self._digest_as_stamped(tmp_path / "annotations", "mosaic", "catkin", a1)
+        digest = self._digest_as_stamped(tmp_path / "annotations", "mosaic", "bud", a1)
         record = {"grid": grid, "cells_complete": ["A1"], "stem": "mosaic", "date": None}
-        assert stale_cells(tmp_path, record, {"A1": digest}, "catkin") == []
+        assert stale_cells(tmp_path, record, {"A1": digest}, "bud") == []
 
     def test_an_edit_inside_an_attested_cell_is_detected(self, tmp_path):
         grid, cells = self._grid_and_cells()
         a1 = next(c for c in cells if c.name == "A1")
-        original = [Annotation(subject="catkin", geometry=BBox(1, 1, 9, 9))]
+        original = [Annotation(subject="bud", geometry=BBox(1, 1, 9, 9))]
         self._write_label(tmp_path / "annotations", "mosaic", original)
-        digest = self._digest_as_stamped(tmp_path / "annotations", "mosaic", "catkin", a1)
+        digest = self._digest_as_stamped(tmp_path / "annotations", "mosaic", "bud", a1)
         # The label file is edited after attestation: the box moves.
-        edited = [Annotation(subject="catkin", geometry=BBox(1, 1, 30, 30))]
+        edited = [Annotation(subject="bud", geometry=BBox(1, 1, 30, 30))]
         self._write_label(tmp_path / "annotations", "mosaic", edited)
         record = {"grid": grid, "cells_complete": ["A1"], "stem": "mosaic", "date": None}
-        assert stale_cells(tmp_path, record, {"A1": digest}, "catkin") == ["A1"]
+        assert stale_cells(tmp_path, record, {"A1": digest}, "bud") == ["A1"]
 
     def test_a_deletion_inside_an_attested_cell_is_detected(self, tmp_path):
         grid, cells = self._grid_and_cells()
         a1 = next(c for c in cells if c.name == "A1")
-        original = [Annotation(subject="catkin", geometry=BBox(1, 1, 9, 9))]
+        original = [Annotation(subject="bud", geometry=BBox(1, 1, 9, 9))]
         self._write_label(tmp_path / "annotations", "mosaic", original)
-        digest = self._digest_as_stamped(tmp_path / "annotations", "mosaic", "catkin", a1)
+        digest = self._digest_as_stamped(tmp_path / "annotations", "mosaic", "bud", a1)
         self._write_label(tmp_path / "annotations", "mosaic", [], keep_empty=True)
         record = {"grid": grid, "cells_complete": ["A1"], "stem": "mosaic", "date": None}
-        assert stale_cells(tmp_path, record, {"A1": digest}, "catkin") == ["A1"]
+        assert stale_cells(tmp_path, record, {"A1": digest}, "bud") == ["A1"]
 
     def test_an_edit_outside_the_attested_cell_does_not_flag_it(self, tmp_path):
         grid, cells = self._grid_and_cells()
         a1 = next(c for c in cells if c.name == "A1")
-        original = [Annotation(subject="catkin", geometry=BBox(1, 1, 9, 9))]
+        original = [Annotation(subject="bud", geometry=BBox(1, 1, 9, 9))]
         self._write_label(tmp_path / "annotations", "mosaic", original)
-        digest = self._digest_as_stamped(tmp_path / "annotations", "mosaic", "catkin", a1)
+        digest = self._digest_as_stamped(tmp_path / "annotations", "mosaic", "bud", a1)
         # A new annotation lands in a different cell (B2, [64,128)x[64,128)); A1's content is
         # untouched, so A1's own attestation must not be disturbed by an edit elsewhere.
-        edited = original + [Annotation(subject="catkin", geometry=BBox(70, 70, 80, 80))]
+        edited = original + [Annotation(subject="bud", geometry=BBox(70, 70, 80, 80))]
         self._write_label(tmp_path / "annotations", "mosaic", edited)
         record = {"grid": grid, "cells_complete": ["A1"], "stem": "mosaic", "date": None}
-        assert stale_cells(tmp_path, record, {"A1": digest}, "catkin") == []
+        assert stale_cells(tmp_path, record, {"A1": digest}, "bud") == []

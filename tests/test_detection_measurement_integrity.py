@@ -20,9 +20,9 @@ from tcip_mcp.pipelines.training.evaluation import (  # noqa: E402
     evaluate,
 )
 
-# No built-in traits: seed_catkin_trait_spec (conftest.py) writes a real
-# catkin.yml into this test's pinned platform state root so trait="catkin" call sites keep resolving.
-pytestmark = pytest.mark.usefixtures("seed_catkin_trait_spec")
+# No built-in traits: seed_bud_trait_spec (conftest.py) writes a real
+# bud.yml into this test's pinned platform state root so trait="bud_opening" call sites keep resolving.
+pytestmark = pytest.mark.usefixtures("seed_bud_trait_spec")
 
 
 def _stub_checkpoint(path: str = "ckpt.pt"):
@@ -170,7 +170,7 @@ def _det_dataset(tmp_path, n=3, size=128):
     for i in range(n):
         Image.new("RGB", (size, size), color=(120, 120, 120)).save(images_dir / f"img{i}.png")
         json_io.write_annotations(str(labels_dir / f"img{i}.json"),
-                                  [Annotation(subject="catkin", geometry=BBox(10, 10, 40, 40))], size, size)
+                                  [Annotation(subject="bud", geometry=BBox(10, 10, 40, 40))], size, size)
     return images_dir, labels_dir
 
 
@@ -203,7 +203,7 @@ def test_run_id_reuses_training_tiling(tmp_path, monkeypatch):
     registered_checkpoint(out, project_root=str(tmp_path), filename="model_best.pt")
 
     captured = _capture_run_test_evaluation(monkeypatch)
-    evaluate_model(run.run_id, str(images_dir), str(labels_dir), task="detection", subject="catkin")
+    evaluate_model(run.run_id, str(images_dir), str(labels_dir), task="detection", subject="bud")
     assert isinstance(captured["ds"], TiledDetectionDataset)
     assert captured["ds"].num_samples > 3  # more tiles than the 3 source images
     assert captured["tiling"] == {"enabled": True, "tile_size": 64}
@@ -219,7 +219,7 @@ def test_explicit_checkpoint_stays_untiled(tmp_path, monkeypatch):
     ckpt = registered_checkpoint(tmp_path, project_root=str(tmp_path), filename="model.pt")
 
     captured = _capture_run_test_evaluation(monkeypatch)
-    evaluate_model(ckpt, str(images_dir), str(labels_dir), task="detection", subject="catkin")
+    evaluate_model(ckpt, str(images_dir), str(labels_dir), task="detection", subject="bud")
     assert isinstance(captured["ds"], DetectionDataset)
     assert not isinstance(captured["ds"], TiledDetectionDataset)
     assert captured["tiling"] is None
@@ -235,7 +235,7 @@ def test_explicit_tiling_override_on_checkpoint(tmp_path, monkeypatch):
     ckpt = registered_checkpoint(tmp_path, project_root=str(tmp_path), filename="model.pt")
 
     captured = _capture_run_test_evaluation(monkeypatch)
-    evaluate_model(ckpt, str(images_dir), str(labels_dir), task="detection", subject="catkin",
+    evaluate_model(ckpt, str(images_dir), str(labels_dir), task="detection", subject="bud",
                    tiling={"enabled": True, "tile_size": 64})
     assert isinstance(captured["ds"], TiledDetectionDataset)
 
@@ -256,7 +256,7 @@ def test_full_frame_counts_straddling_object_once(tmp_path, monkeypatch):
     Image.new("RGB", (128, 128)).save(images_dir / "a.png")
     # object straddling the x=64 tile seam
     json_io.write_annotations(str(labels_dir / "a.json"),
-                              [Annotation(subject="catkin", geometry=BBox(54, 54, 74, 74))], 128, 128)
+                              [Annotation(subject="bud", geometry=BBox(54, 54, 74, 74))], 128, 128)
 
     class _Stub:
         def predict_tiled(self, path, **kw):
@@ -268,7 +268,7 @@ def test_full_frame_counts_straddling_object_once(tmp_path, monkeypatch):
     # gate now refuses unless the caller states the geometry explicitly (the affordance a rail must
     # admit; see test_gate_refuses_unresolvable_tile_geometry for the refusal itself).
     r = run_full_frame_evaluation(_stub_checkpoint(), str(images_dir), str(labels_dir), str(tmp_path / "out"),
-                                  subject="catkin", tile_size=64, overlap=0.2)
+                                  subject="bud", tile_size=64, overlap=0.2)
     assert r["eval_regime"] == "full-frame-tiled-inference"
     # counted once against un-fragmented full-frame GT (tile-level would split/duplicate it)
     assert r["tp"] == 1 and r["fp"] == 0 and r["fn"] == 0
@@ -296,11 +296,11 @@ def test_evaluate_scores_a_contradicted_negative_on_its_actual_content_and_names
     labels_dir.mkdir()
     Image.new("RGB", (128, 128)).save(images_dir / "a.png")
     json_io.write_annotations(str(labels_dir / "a.json"), [], 128, 128, keep_empty=True)
-    record_image_statuses(tmp_path, status_bucket("catkin", None), {"a.png": CONFIRMED_NEGATIVE},
+    record_image_statuses(tmp_path, status_bucket("bud", None), {"a.png": CONFIRMED_NEGATIVE},
                           recorded_by="user:breeder")
     json_io.write_annotations(
         str(labels_dir / "a.json"),
-        [Annotation(subject="catkin", geometry=BBox(54, 54, 74, 74))], 128, 128,
+        [Annotation(subject="bud", geometry=BBox(54, 54, 74, 74))], 128, 128,
     )
 
     class _Stub:
@@ -310,7 +310,7 @@ def test_evaluate_scores_a_contradicted_negative_on_its_actual_content_and_names
 
     monkeypatch.setattr(predictor_mod, "build_predictor", lambda *a, **kw: _Stub())
     r = run_full_frame_evaluation(_stub_checkpoint(), str(images_dir), str(labels_dir), str(tmp_path / "out"),
-                                  subject="catkin", tile_size=64, overlap=0.2)
+                                  subject="bud", tile_size=64, overlap=0.2)
     assert r["contradicted_negatives"] == ["a.png"]
     # scored against the real content, not held out as a still-trusted negative
     assert r["scored_images"] == 1 and r["tp"] == 1 and r["fn"] == 0
@@ -335,7 +335,7 @@ def test_attribute_registry_refusal_reaches_the_caller(tmp_path, monkeypatch):
     labels_dir.mkdir()
     Image.new("RGB", (128, 128)).save(images_dir / "a.png")
     json_io.write_annotations(str(labels_dir / "a.json"),
-                              [Annotation(subject="catkin", geometry=BBox(54, 54, 74, 74))], 128, 128)
+                              [Annotation(subject="bud", geometry=BBox(54, 54, 74, 74))], 128, 128)
 
     class _Stub:
         def predict_tiled(self, path, **kw):
@@ -345,7 +345,7 @@ def test_attribute_registry_refusal_reaches_the_caller(tmp_path, monkeypatch):
     monkeypatch.setattr(predictor_mod, "build_predictor", lambda *a, **kw: _Stub())
     with pytest.raises(ValueError, match="classes.json"):
         run_full_frame_evaluation(_stub_checkpoint(), str(images_dir), str(labels_dir), str(tmp_path / "out"),
-                                  subject="catkin", attribute="elongation", tile_size=64, overlap=0.2)
+                                  subject="bud", attribute="opening", tile_size=64, overlap=0.2)
 
 
 # ======================================================================
@@ -468,7 +468,7 @@ def test_gate_derives_tile_geometry_from_checkpoint(tmp_path):
     labels_dir.mkdir()
     Image.new("RGB", (100, 100)).save(images_dir / "a.png")
     json_io.write_annotations(str(labels_dir / "a.json"),
-                              [Annotation(subject="catkin", geometry=BBox(10, 10, 30, 30))], 100, 100)
+                              [Annotation(subject="bud", geometry=BBox(10, 10, 30, 30))], 100, 100)
     captured: dict = {}
 
     class _DerivedGeometryStub:
@@ -485,7 +485,7 @@ def test_gate_derives_tile_geometry_from_checkpoint(tmp_path):
     try:
         predictor_mod.build_predictor = lambda *a, **kw: _DerivedGeometryStub()
         r = run_full_frame_evaluation(_stub_checkpoint(), str(images_dir), str(labels_dir),
-                                      str(tmp_path / "out"), subject="catkin")
+                                      str(tmp_path / "out"), subject="bud")
     finally:
         predictor_mod.build_predictor = predictor_mod_build
     assert captured["tile_size"] == 224 and captured["overlap"] == pytest.approx(0.1)
@@ -507,7 +507,7 @@ def test_run_inference_no_registry_refuses_naming_write_class_map(tmp_path, monk
     Image.new("RGB", (100, 100)).save(images_dir / "a.png")
 
     class _Stub:
-        config = {"data": {"subject": "catkin", "attribute": "state"}}
+        config = {"data": {"subject": "bud", "attribute": "state"}}
 
         def predict_batch(self, paths, **kw):
             return [{"image": p, "width": 100, "height": 100,
@@ -539,7 +539,7 @@ def test_run_inference_corrupted_registry_still_propagates(tmp_path, monkeypatch
     Image.new("RGB", (100, 100)).save(images_dir / "a.png")
 
     class _Stub:
-        config = {"data": {"subject": "catkin", "attribute": "state"}}
+        config = {"data": {"subject": "bud", "attribute": "state"}}
 
         def predict_batch(self, paths, **kw):
             return [{"image": p, "width": 100, "height": 100,
@@ -620,10 +620,10 @@ def test_launch_training_persists_effective_tile_geometry(tmp_path, monkeypatch)
     for i in range(2):
         Image.new("RGB", (128, 128)).save(images_dir / f"t{i}.png")
         json_io.write_annotations(str(labels_dir / f"t{i}.json"),
-                                  [Annotation(subject="catkin", geometry=BBox(10, 10, 40, 40))], 128, 128)
+                                  [Annotation(subject="bud", geometry=BBox(10, 10, 40, 40))], 128, 128)
     Image.new("RGB", (128, 128)).save(val_images / "v0.png")
     json_io.write_annotations(str(val_labels / "v0.json"),
-                              [Annotation(subject="catkin", geometry=BBox(10, 10, 40, 40))], 128, 128)
+                              [Annotation(subject="bud", geometry=BBox(10, 10, 40, 40))], 128, 128)
 
     monkeypatch.setattr(
         "tcip_mcp.pipelines.training.tensorboard_manager.launch_tensorboard", lambda *a, **k: {})
@@ -632,7 +632,7 @@ def test_launch_training_persists_effective_tile_geometry(tmp_path, monkeypatch)
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
                          "builder_kwargs": {"num_classes": 1, "min_size": 64, "max_size": 128},
                          "task": "detection"},
-        "data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "catkin",
+        "data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "bud",
                  "val_images_dir": str(val_images), "val_labels_dir": str(val_labels),
                  "tiling": {"enabled": True}},  # no tile_size -> effective default must be persisted
         "training": {"batch_size": 1, "stages": [{"freeze_to": -1, "epochs": 1}],
@@ -772,7 +772,7 @@ def _stand_in_calibration(monkeypatch, calibration_pipeline, labels_dir, **overr
     cal, hold = _good_dense_cal_holdout()
     inputs = {"dataset_hash": "H", "calibration_records": cal, "holdout_records": hold,
               "staged_conf_floor": 0.01, **overrides}
-    bundle = resolve_operating_point("catkin", experiment_id=None, **inputs)
+    bundle = resolve_operating_point("bud_opening", experiment_id=None, **inputs)
     evidence = {"resolver": "resolve_operating_point", "inputs": inputs,
                 "reference_inputs": {"label_dirs": {"calibration": str(labels_dir)}}}
     monkeypatch.setattr(calibration_pipeline, "calibrate_operating_point",
@@ -798,7 +798,7 @@ def test_calibration_wires_resolved_conf(tmp_path, monkeypatch):
     ckpt.write_bytes(b"x")
     img = _one_image(tmp_path)
     r = run_inference_verified(str(ckpt), image_paths=[img], images_dir=str(tmp_path),
-                               device="cpu", tile=False, trait="catkin",
+                               device="cpu", tile=False, trait="bud_opening",
                                calibration_labels_dir=str(tmp_path))
     assert r["conf_source"] == "calibration"
     assert r["validated"] is True                                   # held-out passed
@@ -828,10 +828,10 @@ def test_sweep_artifact_is_content_addressed_not_label_hash_only(tmp_path, monke
     img = _one_image(tmp_path)
 
     r_untiled = run_inference_verified(str(ckpt), image_paths=[img], images_dir=str(tmp_path),
-                                       device="cpu", tile=False, trait="catkin",
+                                       device="cpu", tile=False, trait="bud_opening",
                                        calibration_labels_dir=str(tmp_path))
     r_tiled = run_inference_verified(str(ckpt), image_paths=[img], images_dir=str(tmp_path),
-                                     device="cpu", tile=True, tile_size=256, trait="catkin",
+                                     device="cpu", tile=True, tile_size=256, trait="bud_opening",
                                      calibration_labels_dir=str(tmp_path))
 
     assert r_untiled["calibration_curve_path"] != r_tiled["calibration_curve_path"]  # distinct predictor paths, distinct files
@@ -868,7 +868,7 @@ def test_run_inference_sidecar_carries_sweep_pointer(tmp_path, monkeypatch):
 
     out = itools.run_inference(
         str(ckpt), images_dir=str(tmp_path), output_dir="dataset/predictions/baseline/2026-01-01",
-        device="cpu", tile=False, trait="catkin", calibration_labels_dir=str(tmp_path))
+        device="cpu", tile=False, trait="bud_opening", calibration_labels_dir=str(tmp_path))
     assert "error" not in out, out
     sidecar = read_operating_point_sidecar(out["output_dir"])
     assert sidecar["calibration_curve_path"]
@@ -893,10 +893,10 @@ def test_cross_dataset_inheritance_flagged(tmp_path, monkeypatch):
     # Real labeled inference target; bundle is (mockingly) scoped to a foreign hash "H".
     img = _one_image(tmp_path)
     json_io.write_annotations(str(tmp_path / f"{Path(img).stem}.json"),
-                              [Annotation(subject="catkin", geometry=BBox(10, 10, 40, 40))], 100, 100)
+                              [Annotation(subject="bud", geometry=BBox(10, 10, 40, 40))], 100, 100)
     inputs = {"tiled": True, "dataset_hash": "H", "calibration_records": _op_records("c"),
               "holdout_records": _op_records("h", shift=3.0)}
-    bundle = resolve_operating_point("catkin", experiment_id=None, **inputs)
+    bundle = resolve_operating_point("bud_opening", experiment_id=None, **inputs)
     evidence = {"resolver": "resolve_operating_point", "inputs": inputs,
                 "reference_inputs": {"label_dirs": {"calibration": str(tmp_path)}}}
     monkeypatch.setattr(calibration_pipeline, "calibrate_operating_point",
@@ -907,7 +907,7 @@ def test_cross_dataset_inheritance_flagged(tmp_path, monkeypatch):
     ckpt = tmp_path / "m.pt"
     ckpt.write_bytes(b"x")
     r = run_inference_verified(str(ckpt), image_paths=[img], images_dir=str(tmp_path),
-                               device="cpu", tile=False, trait="catkin",
+                               device="cpu", tile=False, trait="bud_opening",
                                calibration_labels_dir=str(tmp_path))
     assert r["cross_dataset_check"] == "same-labeled-set"
     assert any("inherited across a different dataset" in i for i in r["shippable_issues"])
@@ -928,7 +928,7 @@ def test_manifest_calibration_subset_of_inference_target_is_still_comparable(tmp
     cal, hold = _good_dense_cal_holdout()
     inputs = {"tiled": False, "dataset_hash": "H", "calibration_records": cal,
              "holdout_records": hold, "staged_conf_floor": 0.01}
-    bundle = resolve_operating_point("catkin", experiment_id=None, **inputs)
+    bundle = resolve_operating_point("bud_opening", experiment_id=None, **inputs)
     evidence = {
         "resolver": "resolve_operating_point", "inputs": inputs,
         "reference_inputs": {
@@ -949,7 +949,7 @@ def test_manifest_calibration_subset_of_inference_target_is_still_comparable(tmp
     ckpt.write_bytes(b"x")
     r = run_inference_verified(
         str(ckpt), image_paths=[str(img_a), str(img_b)], images_dir=str(tmp_path), device="cpu",
-        tile=False, trait="catkin", calibration_labels_dir=str(tmp_path),
+        tile=False, trait="bud_opening", calibration_labels_dir=str(tmp_path),
         split_manifest_dir=str(tmp_path / "m"))
 
     assert r["cross_dataset_check"] == "same-labeled-set"
@@ -982,7 +982,7 @@ def test_manifest_calibration_firewall_hashes_the_universe(
     dh = dataset_hash(tmp_path, stems=universe)
     inputs = {"tiled": False, "dataset_hash": dh, "calibration_records": cal,
              "holdout_records": hold, "staged_conf_floor": 0.01}
-    bundle = resolve_operating_point("catkin", experiment_id=None, **inputs)
+    bundle = resolve_operating_point("bud_opening", experiment_id=None, **inputs)
     evidence = {
         "resolver": "resolve_operating_point", "inputs": inputs,
         "reference_inputs": {
@@ -1010,7 +1010,7 @@ def test_manifest_calibration_firewall_hashes_the_universe(
 
     r = run_inference_verified(
         str(ckpt), image_paths=image_paths, images_dir=str(tmp_path), device="cpu",
-        tile=False, trait="catkin", **kwargs)
+        tile=False, trait="bud_opening", **kwargs)
 
     assert r["cross_dataset_check"] == expected_check
     assert r["validated"] is True
@@ -1032,7 +1032,7 @@ def test_manifest_calibration_reports_its_exclusion_counts_on_the_response(tmp_p
     cal, hold = _good_dense_cal_holdout()
     inputs = {"tiled": False, "dataset_hash": "H", "calibration_records": cal,
               "holdout_records": hold, "staged_conf_floor": 0.01}
-    bundle = resolve_operating_point("catkin", experiment_id=None, **inputs)
+    bundle = resolve_operating_point("bud_opening", experiment_id=None, **inputs)
     evidence = {
         "resolver": "resolve_operating_point", "inputs": inputs,
         "reference_inputs": {
@@ -1054,7 +1054,7 @@ def test_manifest_calibration_reports_its_exclusion_counts_on_the_response(tmp_p
     ckpt.write_bytes(b"x")
     r = run_inference_verified(
         str(ckpt), image_paths=[str(img)], images_dir=str(tmp_path), device="cpu",
-        tile=False, trait="catkin", calibration_labels_dir=str(tmp_path),
+        tile=False, trait="bud_opening", calibration_labels_dir=str(tmp_path),
         split_manifest_dir=str(tmp_path / "m"))
 
     assert r["n_excluded_training_stems"] == 2
@@ -1078,7 +1078,7 @@ def test_unlabeled_target_is_not_comparable_but_shippable(tmp_path, monkeypatch)
     ckpt = tmp_path / "m.pt"
     ckpt.write_bytes(b"x")
     r = run_inference_verified(str(ckpt), image_paths=[_one_image(tmp_path)], images_dir=str(tmp_path),
-                               device="cpu", tile=False, trait="catkin",
+                               device="cpu", tile=False, trait="bud_opening",
                                calibration_labels_dir=str(tmp_path))  # no labels beside the image
     assert r["cross_dataset_check"] == "not-comparable-unlabeled-target"
     assert r["shippable_issues"] == []
@@ -1102,7 +1102,7 @@ def test_calibration_follows_delivery_tile_regime(tmp_path, monkeypatch):
     for i in range(4):
         Image.new("RGB", (128, 128)).save(images_dir / f"img{i}.png")
         json_io.write_annotations(str(labels_dir / f"img{i}.json"),
-                                  [Annotation(subject="catkin", geometry=BBox(10, 10, 40, 40))], 128, 128)
+                                  [Annotation(subject="bud", geometry=BBox(10, 10, 40, 40))], 128, 128)
 
     calls: list[dict] = []
 
@@ -1133,7 +1133,7 @@ def test_calibration_follows_delivery_tile_regime(tmp_path, monkeypatch):
     ckpt.write_bytes(b"x")
 
     run_inference(str(ckpt), images_dir=str(images_dir), device="cpu", tile=True,
-                  trait="catkin", calibration_labels_dir=str(labels_dir))
+                  trait="bud_opening", calibration_labels_dir=str(labels_dir))
     # Every predictor pass, both calibration splits and the delivery pass, ran tiled at the same
     # geometry, not an untiled calibration sweep.
     assert len(calls) >= 3
@@ -1163,7 +1163,7 @@ def test_calibrated_run_refuses_when_tile_size_has_no_real_basis(tmp_path, monke
     for i in range(4):
         Image.new("RGB", (128, 128)).save(images_dir / f"img{i}.png")
         json_io.write_annotations(str(labels_dir / f"img{i}.json"),
-                                  [Annotation(subject="catkin", geometry=BBox(10, 10, 40, 40))], 128, 128)
+                                  [Annotation(subject="bud", geometry=BBox(10, 10, 40, 40))], 128, 128)
 
     class _NoGeometryStub:
         def __init__(self):
@@ -1183,12 +1183,12 @@ def test_calibrated_run_refuses_when_tile_size_has_no_real_basis(tmp_path, monke
     ckpt.write_bytes(b"x")
 
     r = run_inference(str(ckpt), images_dir=str(images_dir), device="cpu", tile=True,
-                      trait="catkin", calibration_labels_dir=str(labels_dir))
+                      trait="bud_opening", calibration_labels_dir=str(labels_dir))
     assert "error" in r
     assert "tile_size" in r["error"]
 
 
-def test_run_inference_validated_from_bundle(tmp_path, monkeypatch, seed_catkin_trait_spec):
+def test_run_inference_validated_from_bundle(tmp_path, monkeypatch, seed_bud_trait_spec):
     import tcip_mcp.model_registry as model_registry_mod
     import tcip_mcp.tools.inference_tools as itools
     from tcip_mcp.pipelines.resolution import read_operating_point_sidecar
@@ -1212,7 +1212,7 @@ def test_run_inference_validated_from_bundle(tmp_path, monkeypatch, seed_catkin_
     monkeypatch.setattr(model_registry_mod, "load_registered_checkpoint",
                         lambda *a, **kw: _stub_checkpoint(str(ckpt)))
     out_dir = tmp_path / "dataset" / "predictions" / "baseline" / "2026-01-01"
-    r = itools.run_inference(str(ckpt), str(tmp_path), output_dir=str(out_dir), trait="catkin",
+    r = itools.run_inference(str(ckpt), str(tmp_path), output_dir=str(out_dir), trait="bud_opening",
                              calibration_labels_dir=str(tmp_path))
     assert "error" not in r, r
     stamp = read_operating_point_sidecar(out_dir)

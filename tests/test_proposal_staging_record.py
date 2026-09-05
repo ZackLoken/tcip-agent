@@ -72,7 +72,7 @@ def test_two_dated_buckets_with_the_same_stem_stage_and_read_back_independently(
     assert proposed_second["staged"] is True
 
     accepted = stage_proposals(
-        image_path=str(first), assignments=[{"candidate_id": 0, "subject": "catkin"}])
+        image_path=str(first), assignments=[{"candidate_id": 0, "subject": "bud"}])
     assert "error" not in accepted, accepted
 
     anns = json_io.read_annotations(
@@ -99,7 +99,7 @@ def test_accept_refuses_when_the_images_content_has_changed_since_the_proposal_r
     _make_image(img_path, fill=(200, 10, 10))
 
     accepted = stage_proposals(
-        image_path=str(img_path), assignments=[{"candidate_id": 0, "subject": "catkin"}])
+        image_path=str(img_path), assignments=[{"candidate_id": 0, "subject": "bud"}])
     assert "error" in accepted
     assert str(img_path) in accepted["error"]
 
@@ -165,7 +165,7 @@ def test_propose_then_accept_stages_a_prediction_at_the_expected_location(
     assert proposed["staged"] is True
 
     accepted = stage_proposals(
-        image_path=str(img_path), assignments=[{"candidate_id": 0, "subject": "catkin"}])
+        image_path=str(img_path), assignments=[{"candidate_id": 0, "subject": "bud"}])
     assert "error" not in accepted, accepted
 
     pred_dir = tmp_path / "predictions" / "sam"
@@ -200,7 +200,7 @@ def test_propose_then_accept_through_a_band_groups_manifest_path(
     assert proposed["staged"] is True
 
     accepted = stage_proposals(
-        image_path=str(manifest), assignments=[{"candidate_id": 0, "subject": "catkin"}])
+        image_path=str(manifest), assignments=[{"candidate_id": 0, "subject": "bud"}])
     assert "error" not in accepted, accepted
 
     anns = json_io.read_annotations(tmp_path / "predictions" / "sam" / "capture.json")
@@ -254,7 +254,7 @@ def test_a_second_accept_of_the_same_staged_run_succeeds(
     assert "error" not in proposed, proposed
 
     first = stage_proposals(
-        image_path=str(img_path), assignments=[{"candidate_id": 0, "subject": "catkin"}])
+        image_path=str(img_path), assignments=[{"candidate_id": 0, "subject": "bud"}])
     assert "error" not in first, first
 
     second = stage_proposals(
@@ -281,7 +281,7 @@ def test_a_second_proposal_run_replaces_the_first_and_accept_reads_the_newest(
     assert "error" not in second, second
 
     accepted = stage_proposals(
-        image_path=str(img_path), assignments=[{"candidate_id": 0, "subject": "catkin"}])
+        image_path=str(img_path), assignments=[{"candidate_id": 0, "subject": "bud"}])
     assert "error" not in accepted, accepted
 
     anns = json_io.read_annotations(tmp_path / "predictions" / "sam" / "rerun.json")
@@ -310,7 +310,7 @@ def test_a_re_run_finding_nothing_clears_the_previous_runs_record(
     assert second["staged"] is False
 
     accepted = stage_proposals(
-        image_path=str(img_path), assignments=[{"candidate_id": 0, "subject": "catkin"}])
+        image_path=str(img_path), assignments=[{"candidate_id": 0, "subject": "bud"}])
     assert "error" in accepted
     assert "propose_annotations" in accepted["error"]
 
@@ -337,7 +337,7 @@ def test_accept_reports_an_unsampleable_image_as_an_error_dict(
     monkeypatch.setattr(raster_source, "raster_content_identity", _raises)
 
     accepted = stage_proposals(
-        image_path=str(img_path), assignments=[{"candidate_id": 0, "subject": "catkin"}])
+        image_path=str(img_path), assignments=[{"candidate_id": 0, "subject": "bud"}])
     assert "error" in accepted
     assert str(img_path) in accepted["error"]
 
@@ -356,7 +356,7 @@ def test_stage_proposals_refuses_a_reserved_stem_with_an_error_dict(
     assert "error" not in proposed, proposed
 
     accepted = stage_proposals(
-        image_path=str(image), assignments=[{"candidate_id": 0, "subject": "catkin"}])
+        image_path=str(image), assignments=[{"candidate_id": 0, "subject": "bud"}])
     assert "error" in accepted
     assert "operating_point" in accepted["error"]
     assert not (tmp_path / "predictions" / "sam" / "2026-01-01" / "operating_point.json").exists()

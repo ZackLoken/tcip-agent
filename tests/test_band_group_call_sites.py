@@ -48,7 +48,7 @@ def grouped_dataset(tmp_path: Path) -> Path:
 
     class_registry.write_registry(
         root / "classes.json",
-        ClassRegistry(subjects=(Subject(name="catkin", description="a hazelnut catkin"),)),
+        ClassRegistry(subjects=(Subject(name="bud", description="a currant bud"),)),
     )
 
     _write_group(images_dir, "capture_001")
@@ -57,7 +57,7 @@ def grouped_dataset(tmp_path: Path) -> Path:
     for stem in ("capture_001", "plain_002"):
         json_io.write_annotations(
             labels_dir / f"{stem}.json",
-            [Annotation(subject="catkin", geometry=BBox(2, 2, 6, 6))],
+            [Annotation(subject="bud", geometry=BBox(2, 2, 6, 6))],
             16, 16,
         )
     return root
@@ -83,7 +83,7 @@ def test_detection_dataset_trains_on_a_grouped_capture(grouped_dataset):
     ds = DetectionDataset(
         images_dir=str(image_dir(grouped_dataset, "2026-04-01")),
         labels_dir=str(annotation_dir(grouped_dataset, "2026-04-01")),
-        subject="catkin",
+        subject="bud",
     )
     ds.expected_channels = 2  # the group's own band count (probe_channels would derive this)
     assert "capture_001" in ds.stems
@@ -157,7 +157,7 @@ def test_focus_annotate_lands_on_the_grouped_capture_by_manifest_name(grouped_da
     from tests.test_canvas_liveview import _mint_binding
 
     _mint_binding(grouped_dataset)
-    res = focus_human_attention("annotate", str(grouped_dataset), str(grouped_dataset), "catkin", "2026-04-01")
+    res = focus_human_attention("annotate", str(grouped_dataset), str(grouped_dataset), "bud", "2026-04-01")
     assert "error" not in res
     assert res["n_images"] == 2
     # Sorted names: "capture_001.bandgroup" < "plain_002.jpg"
@@ -262,7 +262,7 @@ def test_materialize_dataset_copies_every_sibling_and_the_manifest(tmp_path):
     _write_group(src, "cap")
 
     state = {"image": {"cap.bandgroup": {"img_status": "completed", "detections": [
-        {"action": "accepted", "class_name": "catkin",
+        {"action": "accepted", "class_name": "bud",
          "gt_bbox_norm": [0.5, 0.5, 0.2, 0.2], "pred_bbox_norm": None},
     ]}}}
     out = tmp_path / "out"
@@ -293,7 +293,7 @@ def test_materialize_dataset_dims_from_the_grouped_capture(tmp_path):
     _write_group(src, "cap")  # 16x16
 
     state = {"image": {"cap.bandgroup": {"img_status": "completed", "detections": [
-        {"action": "accepted", "class_name": "catkin",
+        {"action": "accepted", "class_name": "bud",
          "gt_bbox_norm": [0.5, 0.5, 0.25, 0.25], "pred_bbox_norm": None},
     ]}}}
     out = tmp_path / "out"
@@ -328,12 +328,12 @@ def test_draw_splits_materialize_resolves_a_grouped_capture(grouped_dataset):
         Image.new("RGB", (16, 16), (5, 5, 5)).save(images_dir / f"{stem}.jpg")
         json_io.write_annotations(
             labels_dir / f"{stem}.json",
-            [Annotation(subject="catkin", geometry=BBox(2, 2, 6, 6))], 16, 16,
+            [Annotation(subject="bud", geometry=BBox(2, 2, 6, 6))], 16, 16,
         )
 
     out = grouped_dataset / "splits"
     result = draw_splits(str(grouped_dataset), output_path=str(out), materialize=True,
-                         subject="catkin", train_ratio=0.5, val_ratio=0.25,
+                         subject="bud", train_ratio=0.5, val_ratio=0.25,
                          calibration_ratio=0.25)
     assert "error" not in result, result
 

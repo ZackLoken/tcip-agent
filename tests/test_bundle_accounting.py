@@ -22,9 +22,9 @@ def _dataset_tree(root: Path) -> None:
     (root / "annotations" / "2026-03-04").mkdir(parents=True, exist_ok=True)
     json_io.write_annotations(
         str(root / "annotations" / "2026-03-04" / "a_1.json"),
-        [Annotation(subject="catkin", geometry=BBox(1, 1, 9, 9))], 16, 16)
-    class_registry.write_registry(root / "classes.json", ClassRegistry(subjects=(Subject(name="catkin"),)))
-    (root / "dataset.json").write_text('{"crop": "hazelnut", "id": "x", "fingerprint": "y"}',
+        [Annotation(subject="bud", geometry=BBox(1, 1, 9, 9))], 16, 16)
+    class_registry.write_registry(root / "classes.json", ClassRegistry(subjects=(Subject(name="bud"),)))
+    (root / "dataset.json").write_text('{"crop": "currant", "id": "x", "fingerprint": "y"}',
                                        encoding="utf-8")
 
 
@@ -52,11 +52,11 @@ def test_a_state_record_is_claimed_under_the_state_root(tmp_path: Path):
     _dataset_tree(root)
     trait_specs = root / ".tcip" / "state" / "trait_specs"
     trait_specs.mkdir(parents=True)
-    (trait_specs / "catkin.json").write_text("{}", encoding="utf-8")
+    (trait_specs / "bud.json").write_text("{}", encoding="utf-8")
 
     accounting = account_for(root)
 
-    assert str(trait_specs / "catkin.json") in _plan_paths(accounting)
+    assert str(trait_specs / "bud.json") in _plan_paths(accounting)
     assert not accounting.unaccounted
 
 

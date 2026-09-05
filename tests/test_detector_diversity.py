@@ -96,13 +96,13 @@ def test_detection_anchor_free_e2e(tmp_path: Path):
         save_image(torch.rand(3, 64, 64), str(images_dir / f"img{i}.png"))
         json_io.write_annotations(
             str(labels_dir / f"img{i}.json"),
-            [Annotation(subject="catkin", geometry=BBox(19.2, 19.2, 44.8, 44.8))],
+            [Annotation(subject="bud", geometry=BBox(19.2, 19.2, 44.8, 44.8))],
             64,
             64,
             keep_empty=True,
         )
 
-    ds = build_dataset("detection", images_dir=str(images_dir), labels_dir=str(labels_dir), subject="catkin")
+    ds = build_dataset("detection", images_dir=str(images_dir), labels_dir=str(labels_dir), subject="bud")
     loader = DataLoader(ds, batch_size=2, collate_fn=task_collate("detection"))
 
     model_source = {

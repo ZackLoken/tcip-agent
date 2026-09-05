@@ -18,13 +18,13 @@ def _review_state():
     # Keys match tcip_annotation.review_engine.record_detection_action entries.
     return {"image": {
         "imgA.png": {"img_status": "completed", "detections": [
-            {"action": "accepted", "match_type": "TP", "class_name": "catkin",
+            {"action": "accepted", "match_type": "TP", "class_name": "bud",
              "gt_bbox_norm": [0.5, 0.5, 0.2, 0.2], "pred_bbox_norm": [0.5, 0.5, 0.2, 0.2]},
-            {"action": "rejected", "match_type": "FP", "class_name": "catkin",
+            {"action": "rejected", "match_type": "FP", "class_name": "bud",
              "gt_bbox_norm": None, "pred_bbox_norm": [0.8, 0.8, 0.1, 0.1]},
         ]},
         "imgB.png": {"img_status": "completed", "detections": [
-            {"action": "rejected", "match_type": "FP", "class_name": "catkin",
+            {"action": "rejected", "match_type": "FP", "class_name": "bud",
              "gt_bbox_norm": None, "pred_bbox_norm": [0.3, 0.3, 0.1, 0.1]},
         ]},
         "imgC.png": {"img_status": "started", "detections": [
@@ -44,12 +44,12 @@ def test_partition_positives_rejections_and_hard_negatives():
 
 def test_partition_fp_accept_uses_pred_box():
     state = {"image": {"x.png": {"img_status": "completed", "detections": [
-        {"action": "accepted", "match_type": "FP", "class_name": "catkin",
+        {"action": "accepted", "match_type": "FP", "class_name": "bud",
          "gt_bbox_norm": None, "pred_bbox_norm": [0.6, 0.6, 0.2, 0.2]},
     ]}}}
     pos = partition_review_verdicts(state)["x.png"]["positives"]
     assert len(pos) == 1
-    assert pos[0][0] == "catkin" and pos[0][1] == pytest.approx(0.6)
+    assert pos[0][0] == "bud" and pos[0][1] == pytest.approx(0.6)
 
 
 def test_materialize_writes_labels_manifest_and_empty_negatives(tmp_path):
@@ -61,16 +61,16 @@ def test_materialize_writes_labels_manifest_and_empty_negatives(tmp_path):
     out = tmp_path / "out"
     state = {"image": {
         "imgA.png": {"img_status": "completed", "detections": [
-            {"action": "accepted", "class_name": "catkin", "gt_bbox_norm": [0.5, 0.5, 0.2, 0.2], "pred_bbox_norm": None}]},
+            {"action": "accepted", "class_name": "bud", "gt_bbox_norm": [0.5, 0.5, 0.2, 0.2], "pred_bbox_norm": None}]},
         "imgB.png": {"img_status": "completed", "detections": [
-            {"action": "rejected", "class_name": "catkin", "gt_bbox_norm": None, "pred_bbox_norm": [0.8, 0.8, 0.1, 0.1]}]},
+            {"action": "rejected", "class_name": "bud", "gt_bbox_norm": None, "pred_bbox_norm": [0.8, 0.8, 0.1, 0.1]}]},
     }}
     r = materialize_dataset(state, str(src), str(out))
     assert (r["positive"], r["hard_negative"], r["total_boxes"]) == (1, 1, 1)
 
     from tcip_annotation import json_io
     anns_a = json_io.read_annotations(str(out / "annotations" / "imgA.json"))
-    assert len(anns_a) == 1 and anns_a[0].subject == "catkin"
+    assert len(anns_a) == 1 and anns_a[0].subject == "bud"
 
     label_b = out / "annotations" / "imgB.json"
     assert label_b.is_file() and json.loads(label_b.read_text())["annotations"] == []  # empty hard-negative label
@@ -86,7 +86,7 @@ def test_materialize_skips_missing_source_images(tmp_path):
     src = tmp_path / "src"
     src.mkdir()  # empty
     state = {"image": {"ghost.png": {"img_status": "completed", "detections": [
-        {"action": "accepted", "class_name": "catkin", "gt_bbox_norm": [0.5, 0.5, 0.2, 0.2], "pred_bbox_norm": None}]}}}
+        {"action": "accepted", "class_name": "bud", "gt_bbox_norm": [0.5, 0.5, 0.2, 0.2], "pred_bbox_norm": None}]}}}
     r = materialize_dataset(state, str(src), str(tmp_path / "out"))
     assert r["missing_images"] == 1 and r["positive"] == 0
     assert not (tmp_path / "out" / "images" / "ghost.png").exists()
@@ -117,14 +117,14 @@ def test_hard_negatives_survive_into_training(tmp_path):
     out = tmp_path / "out"
     state = {"image": {
         "imgA.png": {"img_status": "completed", "detections": [
-            {"action": "accepted", "class_name": "catkin", "gt_bbox_norm": [0.5, 0.5, 0.2, 0.2],
+            {"action": "accepted", "class_name": "bud", "gt_bbox_norm": [0.5, 0.5, 0.2, 0.2],
              "pred_bbox_norm": None}]},
         "imgB.png": {"img_status": "completed", "detections": [
-            {"action": "rejected", "class_name": "catkin", "gt_bbox_norm": None,
+            {"action": "rejected", "class_name": "bud", "gt_bbox_norm": None,
              "pred_bbox_norm": [0.8, 0.8, 0.1, 0.1]}]},
     }}
     materialize_dataset(state, str(src), str(out))
 
     labels_out = out / "annotations"
-    assert confirmed_negative_names(labels_out, subject="catkin", date=None) == {"imgB.png"}
+    assert confirmed_negative_names(labels_out, subject="bud", date=None) == {"imgB.png"}
     assert json.loads((labels_out / "imgB.json").read_text())["annotations"] == []

@@ -43,7 +43,7 @@ def _write_labels(labels_dir: Path, stem: str, size_wh: tuple[int, int]) -> None
     w, h = size_wh
     box = BBox(0.3 * w, 0.3 * h, 0.5 * w, 0.5 * h)
     json_io.write_annotations(str(labels_dir / f"{stem}.json"),
-                              [Annotation(subject="catkin", geometry=box)], w, h,
+                              [Annotation(subject="bud", geometry=box)], w, h,
                               keep_empty=True)
 
 
@@ -74,7 +74,7 @@ def _tiff_project(tmp_path: Path, height: int = 200, width: int = 200, dtype=np.
 
 def _tiled(images_dir, labels_dir, **kwargs) -> TiledDetectionDataset:
     base = DetectionDataset(images_dir=str(images_dir), labels_dir=str(labels_dir),
-                            subject="catkin")
+                            subject="bud")
     return TiledDetectionDataset(base, tile_size=64, overlap=0.2, **kwargs)
 
 
@@ -167,7 +167,7 @@ def test_photographic_construction_opens_no_raster_backend(tmp_path, monkeypatch
     raster layer would decode every frame at construction."""
     images_dir, labels_dir = _jpeg_project(tmp_path)
     base = DetectionDataset(images_dir=str(images_dir), labels_dir=str(labels_dir),
-                            subject="catkin")
+                            subject="bud")
 
     def _refuse(*_a, **_k):
         raise AssertionError("construction must not open a raster backend for photographic sources")

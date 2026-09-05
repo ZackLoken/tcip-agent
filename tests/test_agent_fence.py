@@ -130,7 +130,7 @@ def test_both_guards_classify_targets_through_the_shared_fence_declaration():
         assert kind in ("protected", "breeder"), f"the declared path {target} is not fenced"
     # A breeder's own project file sharing a repo-root basename is not platform code: anchoring
     # the single-file rules to the repo root admits it.
-    own = "/c/Users/breeder/tcip-projects/hazelnut/README.md"
+    own = "/c/Users/breeder/tcip-projects/currant/README.md"
     assert agent_fence_rules.classify(own, root=root, mode="dev") is None
 
 
@@ -319,7 +319,7 @@ def test_both_guards_deny_delete_on_every_path_kind(path_kind):
         "echo hello > /tmp/scratch.txt",  # a write, but not into repo internals
         # fd redirects / non-protected targets are not writes into internals: the mandated
         # diagnostics and their redirect variants must fall through.
-        "python scripts/doctor.py C:/Users/breeder/tcip-projects/hazelnut 2>&1",  # mandated command
+        "python scripts/doctor.py C:/Users/breeder/tcip-projects/currant 2>&1",  # mandated command
         "python scripts/doctor.py /c/proj 2>/dev/null",
         "python scripts/list_tools.py",  # no redirect at all
         "python scripts/list_tools.py > /tmp/tools.txt",  # real redirect, non-protected target
@@ -728,8 +728,8 @@ def test_bash_guard_fails_closed_on_an_opaque_target_off_an_allow_listed_prefix(
         "cat packages/tcip-mcp/server.py > /tmp/out.txt",  # allow-listed prefix, but a concrete free target
         # A breeder editing their own project file that shares a repo-root basename is not
         # platform code: anchoring the single-file rules to the repo root admits it.
-        "echo x > /c/Users/breeder/tcip-projects/hazelnut/README.md",
-        "echo x > /c/Users/breeder/tcip-projects/hazelnut/pyproject.toml",
+        "echo x > /c/Users/breeder/tcip-projects/currant/README.md",
+        "echo x > /c/Users/breeder/tcip-projects/currant/pyproject.toml",
         # The interpreter option scan ends at -m / the script, so pytest's own -c is not inline exec.
         "python -m pytest -c pyproject.toml",
         # A redirect to a concrete non-protected target, even via a resolved local variable.
@@ -760,8 +760,8 @@ def test_ps_guard_denies_redirect_and_quote_insertion_bypasses(cmd):
     [
         # A breeder editing their own project file sharing a repo-root basename is not platform
         # code: anchoring the single-file rules to the repo root admits it.
-        'Set-Content C:\\Users\\breeder\\tcip-projects\\hazelnut\\README.md "x"',
-        'Set-Content C:\\Users\\breeder\\tcip-projects\\hazelnut\\pyproject.toml "x"',
+        'Set-Content C:\\Users\\breeder\\tcip-projects\\currant\\README.md "x"',
+        'Set-Content C:\\Users\\breeder\\tcip-projects\\currant\\pyproject.toml "x"',
         # Copying a protected source to a free destination is a read, not a platform mutation.
         "Copy-Item packages\\tcip-mcp\\server.py -Destination C:\\tmp\\x.py",
     ],

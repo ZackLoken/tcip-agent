@@ -59,7 +59,7 @@ def _multi_source_dataset(root: Path) -> Path:
             stem = f"{pref}_{t}_0"
             Image.new("RGB", (64, 64), (128, 128, 128)).save(images_dir / f"{stem}.jpg")
             json_io.write_annotations(str(labels_dir / f"{stem}.json"),
-                                      [Annotation(subject="catkin", geometry=BBox(10, 10, 30, 30))], 64, 64)
+                                      [Annotation(subject="bud", geometry=BBox(10, 10, 30, 30))], 64, 64)
     return root
 
 
@@ -77,10 +77,10 @@ def test_draw_splits_stats_golden(tmp_path: Path):
 
     root = _multi_source_dataset(tmp_path / "ds")
     out = tmp_path / "m"
-    result = draw_splits(str(root), output_path=str(out), seed=1, subject="catkin",
+    result = draw_splits(str(root), output_path=str(out), seed=1, subject="bud",
                          train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
     result.pop("manifest_dir")
-    assert result.pop("subject") == "catkin"
+    assert result.pop("subject") == "bud"
     assert result.pop("attribute") is None
     admission_counts = result.pop("admission_counts")
     assert admission_counts["annotated"] == 12
@@ -103,7 +103,7 @@ def test_draw_splits_materialize_tree_golden(tmp_path: Path):
     ts.bind(FileBackend())
     root = _multi_source_dataset(tmp_path / "ds")
     out = tmp_path / "s"
-    result = draw_splits(str(root), output_path=str(out), seed=1, materialize=True, subject="catkin",
+    result = draw_splits(str(root), output_path=str(out), seed=1, materialize=True, subject="bud",
                          train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
     assert result["splits"] == {"train": 3, "val": 3, "calibration": 6}
     assert result["total_stems"] == 12

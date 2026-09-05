@@ -82,7 +82,7 @@ def test_force_redraw_with_labels_dir_rescans_stems(tmp_path: Path):
     for i in range(4):
         json_io.write_annotations(
             str(labels_dir / f"img{i}.json"),
-            [Annotation(subject="catkin", geometry=BBox(1, 1, 5, 5))], 8, 8)
+            [Annotation(subject="bud", geometry=BBox(1, 1, 5, 5))], 8, 8)
 
     result = redraw_calibration_holdout(
         dataset_root=str(tmp_path), labels_dir=str(labels_dir), seed=1,
@@ -103,7 +103,7 @@ def test_force_redraw_answers_an_error_dict_over_an_unreadable_label(tmp_path: P
     labels_dir.mkdir()
     json_io.write_annotations(
         str(labels_dir / "img0.json"),
-        [Annotation(subject="catkin", geometry=BBox(1, 1, 5, 5))], 8, 8)
+        [Annotation(subject="bud", geometry=BBox(1, 1, 5, 5))], 8, 8)
     bad = labels_dir / "img1.json"
     bad.write_bytes(b"{not json")
 

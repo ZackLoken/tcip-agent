@@ -24,7 +24,7 @@ from tcip_web.paths import assert_path_allowed
 from tcip_web.state import store
 
 from tests._operationalization_fixtures import seed_confirmed_crossing, write_spec
-from tests._trait_fixtures import CATKIN
+from tests._trait_fixtures import BUD_OPENING
 from tests.test_results_mapping_summary_and_audit_anchoring import _capture_fixture
 from tests.test_tcip_web_results_routes import _phenology_fixture
 
@@ -123,7 +123,7 @@ def test_a_dataset_registered_to_a_workspace_project_is_admitted_wherever_it_liv
     (external / "images").mkdir(parents=True)
     with pytest.raises(ValueError):
         assert_path_allowed(str(external / "images"))
-    upsert_dataset(project, {"id": "ds-1", "path": str(external), "crop": "hazelnut",
+    upsert_dataset(project, {"id": "ds-1", "path": str(external), "crop": "currant",
                              "fingerprint": "v1:f"})
     assert assert_path_allowed(str(external / "images")) == (external / "images").resolve()
 
@@ -139,7 +139,7 @@ def test_a_dataset_registered_as_the_projects_own_tree_contributes_no_relative_r
     from tcip_web.paths import allowed_roots
 
     project = _project(tmp_path)
-    registered = register_dataset(str(project), crop="hazelnut", project_root=str(project))
+    registered = register_dataset(str(project), crop="currant", project_root=str(project))
     assert "error" not in registered
 
     roots = allowed_roots()
@@ -277,24 +277,24 @@ def test_an_annotations_link_inside_an_allowed_root_loads_in_both_routes(
     real_annotations = tmp_path.parent / "nas" / "annotations_store" / date
     real_annotations.mkdir(parents=True)
     write_annotations(str(real_annotations / "IMG_0001.json"),
-                      [Annotation(subject="catkin", geometry=BBox(1, 1, 5, 5))], 10, 10)
+                      [Annotation(subject="bud", geometry=BBox(1, 1, 5, 5))], 10, 10)
     ann_dir = project / "annotations"
     ann_dir.mkdir()
     _link_to(ann_dir / date, real_annotations)
 
     by_date, problem = _subjects_by_date(project, [date])
-    assert by_date[date] == ["catkin"]
+    assert by_date[date] == ["bud"]
     assert problem is None
 
     load = client.get("/api/classes/load", params={
         "project_root": str(project), "dataset_root": str(project),
         "annotations_dir": str(ann_dir / date)})
     assert load.status_code == 200
-    assert set(load.json()["subjects"]) == {"catkin"}
+    assert set(load.json()["subjects"]) == {"bud"}
 
     select = client.post("/api/dataset/select", json={
         "project_root": str(project), "dataset_root": str(project),
-        "subject": "catkin", "date": date})
+        "subject": "bud", "date": date})
     assert select.status_code == 200
     assert select.json()["annotations_present"] is True
     assert select.json()["label_problem"] is None
@@ -314,7 +314,7 @@ def test_an_annotations_link_outside_every_allowed_root_is_refused_by_both_route
     real_annotations = outside / "nas" / "annotations_store" / date
     real_annotations.mkdir(parents=True)
     write_annotations(str(real_annotations / "IMG_0001.json"),
-                      [Annotation(subject="catkin", geometry=BBox(1, 1, 5, 5))], 10, 10)
+                      [Annotation(subject="bud", geometry=BBox(1, 1, 5, 5))], 10, 10)
     ann_dir = project / "annotations"
     ann_dir.mkdir()
     _link_to(ann_dir / date, real_annotations)
@@ -332,7 +332,7 @@ def test_an_annotations_link_outside_every_allowed_root_is_refused_by_both_route
     # date's label problem rather than scanning what the other two routes refuse.
     select = client.post("/api/dataset/select", json={
         "project_root": str(project), "dataset_root": str(project),
-        "subject": "catkin", "date": date})
+        "subject": "bud", "date": date})
     assert select.status_code == 200
     assert select.json()["annotations_present"] is False
     assert "outside the allowed roots" in (select.json()["label_problem"] or "")
@@ -421,7 +421,7 @@ def test_a_label_write_is_refused_before_it_happens_when_its_dataset_root_is_out
 # ── the Results doors belong to the open project ──────────────────────────
 
 
-@pytest.mark.usefixtures("seed_catkin_operationalization", "closed_project")
+@pytest.mark.usefixtures("seed_bud_operationalization", "closed_project")
 def test_a_results_door_refuses_until_a_project_is_open_and_then_serves_its_own_evidence(
     client: TestClient, tmp_path: Path,
 ) -> None:
@@ -435,7 +435,7 @@ def test_a_results_door_refuses_until_a_project_is_open_and_then_serves_its_own_
     assert client.post("/api/results/phenology_measurement", json=body).status_code == 200
 
 
-@pytest.mark.usefixtures("seed_catkin_operationalization", "closed_project")
+@pytest.mark.usefixtures("seed_bud_operationalization", "closed_project")
 def test_a_delivery_cannot_name_one_project_while_another_is_open(
     client: TestClient, tmp_path: Path,
 ) -> None:
@@ -448,7 +448,7 @@ def test_a_delivery_cannot_name_one_project_while_another_is_open(
     assert not (other / "results_export").exists()
 
 
-@pytest.mark.usefixtures("seed_catkin_operationalization", "closed_project")
+@pytest.mark.usefixtures("seed_bud_operationalization", "closed_project")
 def test_a_delivery_from_another_projects_evidence_is_refused_by_name(
     client: TestClient, tmp_path: Path,
 ) -> None:
@@ -456,8 +456,8 @@ def test_a_delivery_from_another_projects_evidence_is_refused_by_name(
     the managed allow-set, neither belonging to B. No export and no audit line lands in B."""
     body = _phenology_fixture(tmp_path, validated=True, fractions=(0.75, 1.0), detections=4)
     b = _project(tmp_path / "b")
-    write_spec(b, CATKIN)
-    seed_confirmed_crossing(b, CATKIN.name)
+    write_spec(b, BUD_OPENING)
+    seed_confirmed_crossing(b, BUD_OPENING.name, measured_subject="bud")
     _open(client, b)
 
     diverted = {**body, "project_root": str(b)}
@@ -472,7 +472,7 @@ def test_a_delivery_from_another_projects_evidence_is_refused_by_name(
                    for r in tcip_store.read_log(audit_log_key(b)).records)
 
 
-@pytest.mark.usefixtures("seed_catkin_operationalization", "closed_project")
+@pytest.mark.usefixtures("seed_bud_operationalization", "closed_project")
 def test_a_delivery_from_a_dataset_registered_to_the_open_project_is_admitted(
     client: TestClient, tmp_path: Path, outside: Path,
 ) -> None:
@@ -492,13 +492,13 @@ def test_a_delivery_from_a_dataset_registered_to_the_open_project_is_admitted(
     assert refused.status_code == 403
     assert "does not belong to project" in refused.json()["detail"]
 
-    upsert_dataset(tmp_path, {"id": "ds-1", "path": str(copied), "crop": "hazelnut",
+    upsert_dataset(tmp_path, {"id": "ds-1", "path": str(copied), "crop": "currant",
                               "fingerprint": "v1:f"})
     resp = client.post("/api/results/phenology_measurement", json=relocated)
     assert resp.status_code not in (403, 409), resp.text
 
 
-@pytest.mark.usefixtures("seed_catkin_operationalization", "closed_project")
+@pytest.mark.usefixtures("seed_bud_operationalization", "closed_project")
 def test_a_mapping_build_writes_and_audits_under_the_open_project_only(
     client: TestClient, tmp_path: Path, outside: Path,
 ) -> None:

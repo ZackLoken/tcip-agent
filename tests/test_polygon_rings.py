@@ -1,7 +1,7 @@
 """``state.Polygon`` is multi-ring, and ``bbox_of`` reads the whole instance.
 
 A polygon annotation holds one or more simple closed contours. Most are one ring (a person draws one
-contour); an occlusion-split instance (a catkin behind a branch, a leaf crossed by a stem) is
+contour); an occlusion-split instance (a bud behind a branch, a leaf crossed by a stem) is
 genuinely more than one region, and every consumer that derives a box from a polygon must see all of
 it. ``bbox_of`` is that derivation, so it is where a first-ring-only read would quietly shrink every
 downstream box, area, crop and spatial-index entry.

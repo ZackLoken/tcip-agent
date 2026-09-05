@@ -35,7 +35,7 @@ def dataset_root(tmp_path: Path) -> Path:
 
 
 def _subjects() -> dict:
-    return {"catkin": {"description": "a hazelnut catkin"}}
+    return {"bud": {"description": "a currant bud"}}
 
 
 def test_read_audit_log_filters_by_tool_and_status_newest_first(

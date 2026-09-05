@@ -15,7 +15,7 @@ pytest.importorskip("torchvision")
 
 
 def _two_subject_dataset(root: Path) -> tuple[Path, Path]:
-    """Images carrying two subjects with deliberately different counts: 2 catkins, 5 leaves."""
+    """Images carrying two subjects with deliberately different counts: 2 buds, 5 leaves."""
     from PIL import Image
 
     from tcip_annotation import json_io
@@ -28,14 +28,14 @@ def _two_subject_dataset(root: Path) -> tuple[Path, Path]:
     labels_dir.mkdir(parents=True, exist_ok=True)
     class_registry.write_registry(
         root / "classes.json",
-        ClassRegistry(subjects=(Subject(name="catkin"), Subject(name="leaf"))))
+        ClassRegistry(subjects=(Subject(name="bud"), Subject(name="leaf"))))
     for i in range(3):
         Image.new("RGB", (160, 96), color=(100, 130, 90)).save(images_dir / f"img{i}.png")
-        catkins = [Annotation(subject="catkin", geometry=BBox(5 + 12 * k, 5, 15 + 12 * k, 20))
+        buds = [Annotation(subject="bud", geometry=BBox(5 + 12 * k, 5, 15 + 12 * k, 20))
                    for k in range(2)]
         leaves = [Annotation(subject="leaf", geometry=BBox(6 + 20 * k, 40, 24 + 20 * k, 70))
                   for k in range(5)]
-        json_io.write_annotations(str(labels_dir / f"img{i}.json"), catkins + leaves, 160, 96)
+        json_io.write_annotations(str(labels_dir / f"img{i}.json"), buds + leaves, 160, 96)
     return images_dir, labels_dir
 
 
@@ -70,7 +70,7 @@ def test_run_id_evaluation_scopes_ground_truth_to_the_runs_own_subject(
     dataset = captured["ds"]
     assert dataset.subject == "leaf"
     assert len(dataset) == 3
-    assert len(dataset[0][1]["boxes"]) == 5  # the leaves, not the two catkins on the same image
+    assert len(dataset[0][1]["boxes"]) == 5  # the leaves, not the two buds on the same image
 
 
 def test_a_caller_supplied_subject_still_wins_over_the_runs_own(
@@ -99,7 +99,7 @@ def test_a_caller_supplied_subject_still_wins_over_the_runs_own(
     monkeypatch.setattr(runners, "run_test_evaluation", _fake)
 
     res = evaluate_model(run.run_id, str(images_dir), str(labels_dir), task="detection",
-                         subject="catkin")
+                         subject="bud")
     assert "error" not in res, res
-    assert captured["ds"].subject == "catkin"
+    assert captured["ds"].subject == "bud"
     assert len(captured["ds"][0][1]["boxes"]) == 2

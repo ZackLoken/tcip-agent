@@ -19,7 +19,7 @@ from tcip_annotation import json_io  # noqa: E402
 from tcip_annotation.state import Annotation, BBox  # noqa: E402
 from tcip_mcp.pipelines.operating_point import _train_disjointness  # noqa: E402
 
-pytestmark = pytest.mark.usefixtures("seed_catkin_trait_spec")
+pytestmark = pytest.mark.usefixtures("seed_bud_trait_spec")
 
 MOSAIC_W, MOSAIC_H = 4000, 3000
 
@@ -82,7 +82,7 @@ def _mosaic_dataset(root: Path) -> tuple[Path, Path, str]:
     labels_dir.mkdir(parents=True, exist_ok=True)
     stem = "mosaic"
     Image.new("RGB", (MOSAIC_W, MOSAIC_H), color=(90, 90, 90)).save(images_dir / f"{stem}.png")
-    boxes = [Annotation(subject="catkin", geometry=BBox(x, y, x + 20, y + 20))
+    boxes = [Annotation(subject="bud", geometry=BBox(x, y, x + 20, y + 20))
              for x in range(20, MOSAIC_W - 20, 200) for y in range(20, MOSAIC_H - 20, 200)]
     json_io.write_annotations(str(labels_dir / f"{stem}.json"), boxes, MOSAIC_W, MOSAIC_H,
                               keep_empty=True)
@@ -104,7 +104,7 @@ def test_persisted_four_way_geometry_admits_its_calibration_region_and_refuses_t
 
     images_dir, labels_dir, stem = _mosaic_dataset(tmp_path / "ds")
     data_cfg = {
-        "images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "catkin",
+        "images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "bud",
         "auto_val": True, "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
         "split": {"val_ratio": 0.2, "test_ratio": 0.1, "seed": 1,
                   "reserve_calibration_fraction": 0.15},

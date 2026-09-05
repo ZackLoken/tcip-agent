@@ -63,7 +63,7 @@ def test_a_status_store_written_and_not_exported_makes_the_status_tokens_check_i
     with bound(SqliteBackend()):
         ts.replace(
             dataset_layout.image_status_key(root),
-            {"catkin/2026-03-04": {"a_1.jpg": {"status": "negative", "by": "user:ü"}}},
+            {"bud/2026-03-04": {"a_1.jpg": {"status": "negative", "by": "user:ü"}}},
             expect=ts.Version.ABSENT,
         )
 
@@ -82,7 +82,7 @@ def test_the_gate_clears_once_the_files_have_been_written_out(tmp_path):
     with bound(SqliteBackend()):
         ts.replace(
             dataset_layout.image_status_key(root),
-            {"catkin/2026-03-04": {"a_1.jpg": {"status": "negative", "by": "user:ü"}}},
+            {"bud/2026-03-04": {"a_1.jpg": {"status": "negative", "by": "user:ü"}}},
             expect=ts.Version.ABSENT,
         )
         export_files(root)
@@ -97,7 +97,7 @@ def test_a_store_no_check_reads_never_gates_a_check(tmp_path):
     with bound(SqliteBackend()):
         ts.replace(
             dataset_layout.view_coverage_key(root),
-            {"catkin/2026-03-04": {}},
+            {"bud/2026-03-04": {}},
             expect=ts.Version.ABSENT,
         )
 
@@ -111,7 +111,7 @@ def test_a_stale_check_is_reported_as_an_error_naming_the_export_script(tmp_path
     with bound(SqliteBackend()):
         ts.replace(
             dataset_layout.image_status_key(root),
-            {"catkin/2026-03-04": {"a_1.jpg": {"status": "negative", "by": "user:ü"}}},
+            {"bud/2026-03-04": {"a_1.jpg": {"status": "negative", "by": "user:ü"}}},
             expect=ts.Version.ABSENT,
         )
 
@@ -155,7 +155,7 @@ def test_the_doctor_run_reports_the_invalid_check_and_exits_nonzero(tmp_path, mo
     with bound(SqliteBackend()):
         ts.replace(
             dataset_layout.image_status_key(root),
-            {"catkin/2026-03-04": {"a_1.jpg": {"status": "negative", "by": "user:ü"}}},
+            {"bud/2026-03-04": {"a_1.jpg": {"status": "negative", "by": "user:ü"}}},
             expect=ts.Version.ABSENT,
         )
     monkeypatch.setattr("sys.argv", ["doctor.py", str(root)])
@@ -180,7 +180,7 @@ def test_check_negatives_still_runs_and_reports_behind_a_stale_export(tmp_path):
 
         # Recorded in the database after the export; the file on disk still says {}.
         dataset_layout.replace_image_status_store(root, {
-            "catkin/2026-03-04": {"a_1.jpg": {
+            "bud/2026-03-04": {"a_1.jpg": {
                 "status": "negative", "recorded_by": "user:breeder", "recorded_at": "t"}},
         })
 

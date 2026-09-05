@@ -16,7 +16,7 @@ torch = pytest.importorskip("torch")
 pytest.importorskip("torchvision")
 pytest.importorskip("tifffile")
 
-pytestmark = pytest.mark.usefixtures("seed_catkin_trait_spec")
+pytestmark = pytest.mark.usefixtures("seed_bud_trait_spec")
 
 TILE = 32
 
@@ -49,7 +49,7 @@ def test_the_whole_mosaic_pass_runs_at_the_cap_its_sidecar_records(tmp_path, mon
     out_dir = tmp_path / "preds"
     result = run_inference(
         exp["checkpoint_path"], output_dir=str(out_dir), raster_path=str(exp["raster_path"]),
-        conf_threshold=0.0, tile_size=TILE, overlap=0.2, trait="catkin",
+        conf_threshold=0.0, tile_size=TILE, overlap=0.2, trait="bud_opening",
         experiment_id=exp["experiment_id"])
 
     assert "error" not in result, result
@@ -82,7 +82,7 @@ def test_a_raster_trait_export_with_no_reserved_region_names_the_audited_deliver
     out_dir = tmp_path / "preds"
     result = run_inference(
         exp["checkpoint_path"], output_dir=str(out_dir), raster_path=str(exp["raster_path"]),
-        conf_threshold=0.0, tile_size=TILE, overlap=0.2, trait="catkin",
+        conf_threshold=0.0, tile_size=TILE, overlap=0.2, trait="bud_opening",
         experiment_id=exp["experiment_id"])
 
     assert "error" in result

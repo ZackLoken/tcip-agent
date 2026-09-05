@@ -394,7 +394,7 @@ def test_image_extent_from_labels(tmp_path):
     labels_dir.mkdir()
     json_io.write_annotations(
         str(labels_dir / "mosaic1.json"),
-        [Annotation(subject="catkin", geometry=BBox(1, 1, 5, 5))], 4000, 3000,
+        [Annotation(subject="bud", geometry=BBox(1, 1, 5, 5))], 4000, 3000,
     )
     assert image_extent_from_labels(labels_dir, "mosaic1") == (4000, 3000)
     assert image_extent_from_labels(labels_dir, "missing") is None

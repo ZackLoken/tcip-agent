@@ -16,7 +16,7 @@ from tcip_mcp.model_registry import ModelRegistry, registry_index_key
 
 # Distinct payload sizes per run, so a size or hash attributed to the wrong entry is visible.
 _RUNS = {
-    "hazelnut_catkin_detector_v1": b"run-a-weights",
+    "currant_bud_detector_v1": b"run-a-weights",
     "chestnut_leaf_area_seg_v2": b"run-b-weights-with-a-longer-payload",
     "currant_bush_detector_v1": b"run-c",
 }
@@ -35,7 +35,7 @@ def test_registered_models_are_recorded_in_the_index_not_copied_into_the_registr
         run_dir.mkdir(parents=True)
         ckpt = run_dir / "model_best.pt"
         ckpt.write_bytes(content)
-        reg.register_model(name, str(ckpt), {"data": {"subject": "catkin"}},
+        reg.register_model(name, str(ckpt), {"data": {"subject": "bud"}},
                            metrics={"val_map50": 0.42}, metrics_source="caller")
 
     models_dir = root / ".tcip" / "models"
@@ -67,18 +67,18 @@ def test_registering_a_name_again_supersedes_its_earlier_entry(tmp_path: Path) -
     companion = tmp_path / "leaf_model.pt"
     companion.write_bytes(b"a separate run")
 
-    reg.register_model("hazelnut_catkin_detector_v1", str(ckpt_v1), {},
+    reg.register_model("currant_bud_detector_v1", str(ckpt_v1), {},
                        metrics={"val_map50": 0.61}, metrics_source="caller")
     reg.register_model("chestnut_leaf_area_seg_v2", str(companion), {},
                        metrics={"val_map50": 0.55}, metrics_source="caller")
-    reg.register_model("hazelnut_catkin_detector_v1", str(ckpt_v2), {},
+    reg.register_model("currant_bud_detector_v1", str(ckpt_v2), {},
                        metrics={"val_map50": 0.74}, metrics_source="caller")
 
     inventory = ModelRegistry(str(root)).list_models()
     assert len(inventory) == 2
-    assert [m["name"] for m in inventory].count("hazelnut_catkin_detector_v1") == 1
+    assert [m["name"] for m in inventory].count("currant_bud_detector_v1") == 1
 
-    superseding = ModelRegistry(str(root)).get_model("hazelnut_catkin_detector_v1")
+    superseding = ModelRegistry(str(root)).get_model("currant_bud_detector_v1")
     assert superseding["sha256"] == hashlib.sha256(second).hexdigest()
     assert superseding["file_size_bytes"] == len(second)
     assert superseding["metrics"]["val_map50"] == 0.74

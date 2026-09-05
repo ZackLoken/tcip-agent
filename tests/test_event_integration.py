@@ -115,7 +115,7 @@ class TestPostPanelEventRoute:
             json={
                 "event_type": "review_focus",
                 "data": {
-                    "subject": "catkin",
+                    "subject": "bud",
                     "date": "2-11-26",
                     "model_name": "m1",
                     "image_index": 3,
@@ -141,14 +141,14 @@ class TestPostPanelEventRoute:
             "/api/events/app",
             json={
                 "event_type": "annotate_focus",
-                "data": {"subject": "bush", "date": "2-11-26", "mode": "polygon", "active_subject": "catkin"},
+                "data": {"subject": "bush", "date": "2-11-26", "mode": "polygon", "active_subject": "bud"},
             },
         )
         assert resp.status_code == 200
         state = client.get("/api/state").json()
         assert state["active_tab"] == "annotate"
         assert state["mode"] == "polygon"
-        assert state["active_subject"] == "catkin"
+        assert state["active_subject"] == "bud"
 
     def test_annotate_focus_with_an_unknown_mode_answers_400(self, client: TestClient) -> None:
         before = client.get("/api/state").json()["mode"]
@@ -183,7 +183,7 @@ class TestPostPanelEventRoute:
 
         monkeypatch.setattr(web_client, "post_panel_event", _capture)
         _mint_binding(data_dir)
-        res = focus_human_attention("annotate", str(data_dir), str(data_dir), "catkin", "2-11-26",
+        res = focus_human_attention("annotate", str(data_dir), str(data_dir), "bud", "2-11-26",
                                     mode="point", image_index=2)
         assert "error" not in res, res
         assert posted["event_type"] == "annotate_focus"
@@ -195,7 +195,7 @@ class TestPostPanelEventRoute:
         state = client.get("/api/state").json()
         assert state["active_tab"] == "annotate"
         assert state["mode"] == "point"
-        assert state["active_subject"] == "catkin"
+        assert state["active_subject"] == "bud"
 
 
 class TestActiveProjectChangedRoute:
@@ -486,11 +486,11 @@ class TestTrainingToolOutputSchema:
             Image.new("RGB", (128, 128)).save(images_dir / f"t{i}.png")
             json_io.write_annotations(
                 str(labels_dir / f"t{i}.json"),
-                [Annotation(subject="catkin", geometry=BBox(10, 10, 40, 40))], 128, 128)
+                [Annotation(subject="bud", geometry=BBox(10, 10, 40, 40))], 128, 128)
         Image.new("RGB", (128, 128)).save(val_images / "v0.png")
         json_io.write_annotations(
             str(val_labels / "v0.json"),
-            [Annotation(subject="catkin", geometry=BBox(10, 10, 40, 40))], 128, 128)
+            [Annotation(subject="bud", geometry=BBox(10, 10, 40, 40))], 128, 128)
 
         class _NoChild:
             """Stands in for the training subprocess: this test is about what the launch reports,
@@ -509,7 +509,7 @@ class TestTrainingToolOutputSchema:
                              "builder_kwargs": {"num_classes": 1, "min_size": 64, "max_size": 128},
                              "task": "detection"},
             "data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
-                     "subject": "catkin", "val_images_dir": str(val_images),
+                     "subject": "bud", "val_images_dir": str(val_images),
                      "val_labels_dir": str(val_labels)},
             "training": {"batch_size": 1, "stages": [{"freeze_to": -1, "epochs": 1}],
                          "mixed_precision": False, "device": "cpu"},
@@ -582,7 +582,7 @@ class TestInferenceToolOutputSchema:
         assert op["tiled_source"] == "explicit"
 
     def test_run_inference_writes_one_file_per_image_carrying_that_images_detections(
-        self, tmp_path: Path, monkeypatch, seed_catkin_trait_spec,
+        self, tmp_path: Path, monkeypatch, seed_bud_trait_spec,
     ) -> None:
         """A prediction bucket holds one file per image the pass saw, named for that image's own
         stem and holding that image's own detections.
@@ -618,7 +618,7 @@ class TestInferenceToolOutputSchema:
 
         out = tmp_path / "dataset" / "predictions" / "baseline" / "2026-01-01"
         res = itools.run_inference(str(ckpt), images_dir=str(tmp_path), output_dir=str(out),
-                                   trait="catkin")
+                                   trait="bud_opening")
 
         assert "error" not in res, res
         assert res["image_count"] == len(counts)

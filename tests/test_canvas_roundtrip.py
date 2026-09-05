@@ -60,7 +60,7 @@ class TestBoxRoundtrip:
         )
 
         # Draw boxes (simulating canvas click-drag)
-        state.annotations.append(Annotation(subject="catkin", geometry=BBox(x1=100, y1=50, x2=250, y2=200)))
+        state.annotations.append(Annotation(subject="bud", geometry=BBox(x1=100, y1=50, x2=250, y2=200)))
         state.annotations.append(Annotation(subject="nut", geometry=BBox(x1=400, y1=300, x2=550, y2=420)))
         assert len(state.annotations) == 2
 
@@ -71,7 +71,7 @@ class TestBoxRoundtrip:
         # Read back
         read_back = read_annotations(label_path)
         assert len(read_back) == 2
-        assert {a.subject for a in read_back} == {"catkin", "nut"}
+        assert {a.subject for a in read_back} == {"bud", "nut"}
 
         # Verify coordinates (within float precision)
         for orig, loaded in zip(state.annotations, read_back):
@@ -85,7 +85,7 @@ class TestBoxRoundtrip:
         """Draw boxes, verify save: state management is tested elsewhere."""
         state = AnnotationState(img_width=640, img_height=480)
 
-        state.annotations.append(Annotation(subject="catkin", geometry=BBox(x1=10, y1=10, x2=100, y2=100)))
+        state.annotations.append(Annotation(subject="bud", geometry=BBox(x1=10, y1=10, x2=100, y2=100)))
         state.annotations.append(Annotation(subject="nut", geometry=BBox(x1=200, y1=200, x2=300, y2=300)))
         assert len(state.annotations) == 2
 
@@ -112,7 +112,7 @@ class TestPolygonRoundtrip:
 
         # Draw a triangle polygon (simulating canvas vertex clicks)
         poly = Polygon(rings=[[(100.0, 50.0), (250.0, 200.0), (50.0, 200.0)]])
-        state.annotations.append(Annotation(subject="catkin", geometry=poly))
+        state.annotations.append(Annotation(subject="bud", geometry=poly))
         assert len(state.annotations) == 1
 
         # Save
@@ -122,7 +122,7 @@ class TestPolygonRoundtrip:
         # Read back
         read_back = read_annotations(label_path)
         assert len(read_back) == 1
-        assert read_back[0].subject == "catkin"
+        assert read_back[0].subject == "bud"
         assert isinstance(read_back[0].geometry, Polygon)
         assert len(read_back[0].geometry.rings[0]) == 3
 
@@ -136,7 +136,7 @@ class TestPolygonRoundtrip:
         state = AnnotationState(img_width=640, img_height=480)
 
         state.annotations.append(Annotation(
-            subject="catkin", geometry=Polygon(rings=[[(10, 10), (100, 10), (100, 100), (10, 100)]])))
+            subject="bud", geometry=Polygon(rings=[[(10, 10), (100, 10), (100, 100), (10, 100)]])))
         state.annotations.append(Annotation(
             subject="bud", geometry=Polygon(rings=[[(200, 200), (300, 200), (300, 300), (200, 300)]])))
 
@@ -145,7 +145,7 @@ class TestPolygonRoundtrip:
 
         read_back = read_annotations(label_path)
         assert len(read_back) == 2
-        assert {a.subject for a in read_back} == {"catkin", "bud"}
+        assert {a.subject for a in read_back} == {"bud", "bud"}
 
     def test_occlusion_split_prediction_survives_the_round_trip(self, img_dir: Path) -> None:
         """A model-predicted mask the review canvas overlays can be occlusion-split: one instance,
@@ -157,7 +157,7 @@ class TestPolygonRoundtrip:
         pred_path = str(img_dir / "predictions" / "test_001.json")
         write_annotations(
             pred_path,
-            [Annotation(subject="catkin", geometry=Polygon(rings=rings), score=0.88)],
+            [Annotation(subject="bud", geometry=Polygon(rings=rings), score=0.88)],
             640, 480)
 
         read_back = read_annotations(pred_path)
@@ -176,7 +176,7 @@ class TestSingleFileSave:
         """Save a box and a polygon together, verify both survive in one file."""
         state = AnnotationState(img_width=640, img_height=480)
 
-        state.annotations.append(Annotation(subject="catkin", geometry=BBox(x1=50, y1=50, x2=200, y2=150)))
+        state.annotations.append(Annotation(subject="bud", geometry=BBox(x1=50, y1=50, x2=200, y2=150)))
         state.annotations.append(Annotation(
             subject="nut", geometry=Polygon(rings=[[(300, 100), (400, 100), (400, 200), (300, 200)]])))
 
@@ -187,7 +187,7 @@ class TestSingleFileSave:
         assert len(read_back) == 2
         box_ann = next(a for a in read_back if isinstance(a.geometry, BBox))
         poly_ann = next(a for a in read_back if isinstance(a.geometry, Polygon))
-        assert box_ann.subject == "catkin"
+        assert box_ann.subject == "bud"
         assert poly_ann.subject == "nut"
 
 
@@ -201,16 +201,16 @@ class TestPredictionOverlay:
         """Load GT + predictions, compute matches, verify overlay data."""
         # Write GT
         gt = [
-            Annotation(subject="catkin", geometry=BBox(x1=100, y1=50, x2=250, y2=200)),
-            Annotation(subject="catkin", geometry=BBox(x1=400, y1=300, x2=550, y2=420)),
+            Annotation(subject="bud", geometry=BBox(x1=100, y1=50, x2=250, y2=200)),
+            Annotation(subject="bud", geometry=BBox(x1=400, y1=300, x2=550, y2=420)),
         ]
         gt_path = str(img_dir / "labels" / "test_001.json")
         write_annotations(gt_path, gt, 640, 480)
 
         # Write predictions (one matching, one FP)
         preds = [
-            Annotation(subject="catkin", geometry=BBox(x1=105, y1=55, x2=245, y2=195), score=0.92),
-            Annotation(subject="catkin", geometry=BBox(x1=10, y1=10, x2=50, y2=50), score=0.75),
+            Annotation(subject="bud", geometry=BBox(x1=105, y1=55, x2=245, y2=195), score=0.92),
+            Annotation(subject="bud", geometry=BBox(x1=10, y1=10, x2=50, y2=50), score=0.75),
         ]
         pred_path = str(img_dir / "predictions" / "test_001.json")
         write_annotations(pred_path, preds, 640, 480)
@@ -229,7 +229,7 @@ class TestPredictionOverlay:
         """Verify different classes get distinct subject names for color mapping."""
         state = AnnotationState(img_width=640, img_height=480)
 
-        subjects = ["catkin", "bud", "leaf", "nut", "bush"]
+        subjects = ["bud", "bud", "leaf", "nut", "bush"]
         for i, subj in enumerate(subjects):
             state.annotations.append(
                 Annotation(subject=subj, geometry=BBox(x1=i * 100, y1=10, x2=i * 100 + 80, y2=90)))

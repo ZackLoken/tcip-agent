@@ -467,7 +467,7 @@ def _native_frame_gt(images_dir: Path, labels_dir: Path) -> None:
     Image.new("RGB", (IMAGE, IMAGE), (120, 120, 120)).save(images_dir / "a.png")
     json_io.write_annotations(
         str(labels_dir / "a.json"),
-        [Annotation(subject="catkin", geometry=BBox(*b)) for b in sorted(_expected_middle_half_boxes())],
+        [Annotation(subject="bud", geometry=BBox(*b)) for b in sorted(_expected_middle_half_boxes())],
         IMAGE, IMAGE)
 
 
@@ -512,12 +512,12 @@ def test_delivery_grade_evaluation_admits_a_native_frame_basis_and_reproduces_th
         predictor_mod.build_predictor = lambda *a, **kw: _persisted_regime_predictor()
         persisted = run_full_frame_evaluation(
             checkpoint, str(images_dir), str(labels_dir), str(tmp_path / "out_persisted"),
-            subject="catkin")
+            subject="bud")
 
         predictor_mod.build_predictor = lambda *a, **kw: _native_frame_regime_predictor()
         native = run_full_frame_evaluation(
             checkpoint, str(images_dir), str(labels_dir), str(tmp_path / "out_native"),
-            subject="catkin")
+            subject="bud")
     finally:
         predictor_mod.build_predictor = build
 
@@ -578,7 +578,7 @@ def test_delivery_grade_evaluation_forwards_the_native_frame_resize_into_predict
     try:
         predictor_mod.build_predictor = _spy_predictor
         r = run_full_frame_evaluation(stub_verified_checkpoint("ckpt.pt"), str(images_dir),
-                                      str(labels_dir), str(tmp_path / "out"), subject="catkin")
+                                      str(labels_dir), str(tmp_path / "out"), subject="bud")
     finally:
         predictor_mod.build_predictor = build
 

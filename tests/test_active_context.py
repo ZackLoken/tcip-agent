@@ -13,9 +13,9 @@ def _setup(tmp_path, monkeypatch, *, with_gui=True):
     ws = tmp_path / "ws"
     ws.mkdir()
     monkeypatch.setenv("TCIP_WORKSPACE", str(ws))
-    proj = ws / "hazelnut_catkin_valley"
+    proj = ws / "currant_bud_valley"
     (proj / ".tcip" / "state").mkdir(parents=True)
-    tcip_store.replace(active_project_key(), "hazelnut_catkin_valley")
+    tcip_store.replace(active_project_key(), "currant_bud_valley")
     if with_gui:
         gui = {
             "active_tab": "annotate",
@@ -23,7 +23,7 @@ def _setup(tmp_path, monkeypatch, *, with_gui=True):
             "dataset": {
                 "project_root": str(proj),
                 "dataset_root": str(proj),
-                "subject": "catkin",
+                "subject": "bud",
                 "date": "2026-02-11",
                 "image_list": ["IMG_0132.JPG", "IMG_0133.JPG"],
                 "current_image_index": 1,
@@ -45,8 +45,8 @@ def test_view_gui_state_reads_gui(tmp_path, monkeypatch):
     _setup(tmp_path, monkeypatch)
     from tcip_mcp.tools.project_tools import view_gui_state
     ctx = view_gui_state()
-    assert ctx["active_project"] == "hazelnut_catkin_valley"
-    assert ctx["subject"] == "catkin"
+    assert ctx["active_project"] == "currant_bud_valley"
+    assert ctx["subject"] == "bud"
     assert ctx["date"] == "2026-02-11"
     assert ctx["active_tab"] == "annotate"
     assert ctx["current_image_index"] == 1
@@ -58,7 +58,7 @@ def test_view_gui_state_no_gui_yet(tmp_path, monkeypatch):
     _setup(tmp_path, monkeypatch, with_gui=False)
     from tcip_mcp.tools.project_tools import view_gui_state
     ctx = view_gui_state()
-    assert ctx["active_project"] == "hazelnut_catkin_valley"
+    assert ctx["active_project"] == "currant_bud_valley"
     assert "note" in ctx
 
 

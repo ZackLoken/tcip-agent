@@ -55,12 +55,12 @@ def _canonical_dataset(root: Path, date: str = "2-11-26") -> tuple[Path, Path]:
     images_dir.mkdir(parents=True)
     labels_dir.mkdir(parents=True)
     class_registry.write_registry(root / "classes.json",
-                                  ClassRegistry(subjects=(Subject(name="catkin"),)))
+                                  ClassRegistry(subjects=(Subject(name="bud"),)))
     for i in range(2):
         Image.new("RGB", (96, 64), color=(110, 120, 130)).save(images_dir / f"img_{i}.png")
         json_io.write_annotations(
             str(labels_dir / f"img_{i}.json"),
-            [Annotation(subject="catkin", geometry=BBox(8, 6, 40, 22))], 96, 64)
+            [Annotation(subject="bud", geometry=BBox(8, 6, 40, 22))], 96, 64)
     return images_dir, labels_dir
 
 
@@ -70,7 +70,7 @@ def _detection_config(images_dir: Path, labels_dir: Path) -> dict:
                          "builder_kwargs": {"num_classes": 1, "min_size": 64, "max_size": 96},
                          "task": "detection"},
         "data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
-                 "subject": "catkin", "auto_val": False},
+                 "subject": "bud", "auto_val": False},
         "training": {"batch_size": 1, "stages": [{"freeze_to": -1, "epochs": 1}],
                      "mixed_precision": False, "device": "cpu"},
     }
@@ -143,7 +143,7 @@ def test_launched_run_records_the_datasets_identity_in_its_lineage(
 
     ds_root = tmp_path / "ds"
     images_dir, labels_dir = _canonical_dataset(ds_root)
-    registered = register_dataset(str(ds_root), crop="hazelnut")
+    registered = register_dataset(str(ds_root), crop="currant")
     assert registered["id"] and registered["fingerprint"]
 
     res = training_tools_launch(_detection_config(images_dir, labels_dir), "")
@@ -249,7 +249,7 @@ def test_launch_with_overfit_check_over_a_diverging_model_proceeds_with_a_json_s
                          "builder_kwargs": {"num_classes": 1, "min_size": 64, "max_size": 96},
                          "task": "detection"},
         "data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
-                 "subject": "catkin", "auto_val": False},
+                 "subject": "bud", "auto_val": False},
         "training": {"batch_size": 1, "stages": [{"freeze_to": -1, "epochs": 1}],
                      "mixed_precision": False, "device": "cpu"},
     }

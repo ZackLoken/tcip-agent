@@ -67,7 +67,7 @@ def test_plan_previews_without_writing(tmp_path: Path) -> None:
     _write_plant_csv(csv_path)
     before = _write_old_shaped_record(tmp_path, "valley", csv_path)
 
-    outcomes, writes = module.plan_root(tmp_path, "valley-plants", crop="hazelnut", site="north")
+    outcomes, writes = module.plan_root(tmp_path, "valley-plants", crop="currant", site="north")
 
     assert any("conformed" in o for o in outcomes)
     assert writes
@@ -87,7 +87,7 @@ def test_main_conforms_the_record_and_registers_the_csv(
 
     monkeypatch.setattr(sys, "argv", [
         "conform_plant_mapping_records.py", str(tmp_path), "valley-plants",
-        "--crop", "hazelnut", "--site", "north orchard",
+        "--crop", "currant", "--site", "north orchard",
     ])
     exit_code = module.main()
     output = capsys.readouterr().out
@@ -103,7 +103,7 @@ def test_main_conforms_the_record_and_registers_the_csv(
     registry = plant_mapping.load_registry(tmp_path, "valley-plants")
     assert registry is not None
     assert registry["digest"] == stored["plant_registry"]["digest"]
-    assert registry["crop"] == "hazelnut"
+    assert registry["crop"] == "currant"
     assert registry["site"] == "north orchard"
 
     build = plant_mapping.load_mapping(tmp_path, "valley")
@@ -124,7 +124,7 @@ def test_a_record_already_conformed_is_reported_unchanged(tmp_path: Path) -> Non
         "supersedes": None,
     })
 
-    outcomes, writes = module.plan_root(tmp_path, "valley-plants", crop="hazelnut", site="north")
+    outcomes, writes = module.plan_root(tmp_path, "valley-plants", crop="currant", site="north")
 
     assert writes == []
     assert any("already conformed" in o for o in outcomes)
@@ -135,7 +135,7 @@ def test_a_stored_path_no_longer_on_disk_refuses(tmp_path: Path) -> None:
     missing_csv = tmp_path / "gone.csv"
     _write_old_shaped_record(tmp_path, "valley", missing_csv)
 
-    outcomes, writes = module.plan_root(tmp_path, "valley-plants", crop="hazelnut", site="north")
+    outcomes, writes = module.plan_root(tmp_path, "valley-plants", crop="currant", site="north")
 
     assert writes == []
     assert any("refused" in o for o in outcomes)
@@ -147,7 +147,7 @@ def test_a_registry_name_outside_name_segment_refuses(tmp_path: Path) -> None:
     _write_plant_csv(csv_path)
     _write_old_shaped_record(tmp_path, "valley", csv_path)
 
-    outcomes, writes = module.plan_root(tmp_path, "Not Legal!", crop="hazelnut", site="north")
+    outcomes, writes = module.plan_root(tmp_path, "Not Legal!", crop="currant", site="north")
 
     assert writes == []
     assert any("refused" in o and "lowercase" in o for o in outcomes)
@@ -186,7 +186,7 @@ def test_main_prints_delivery_events_a_conform_would_strand(
 
     monkeypatch.setattr(sys, "argv", [
         "conform_plant_mapping_records.py", str(tmp_path), "valley-plants",
-        "--crop", "hazelnut", "--site", "north orchard", "--plan",
+        "--crop", "currant", "--site", "north orchard", "--plan",
     ])
     exit_code = module.main()
     output = capsys.readouterr().out

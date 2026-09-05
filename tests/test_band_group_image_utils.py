@@ -15,7 +15,7 @@ import pytest
 import tifffile
 
 REAL_DJI_DIR = Path(
-    r"C:\Users\breeder\tcip-projects\hazelnut_multispectral_valley-farm-2023\images\2023-05-23"
+    r"C:\Users\breeder\tcip-projects\currant_multispectral_valley-farm-2023\images\2023-05-23"
 )
 requires_real_dji_data = pytest.mark.skipif(
     not REAL_DJI_DIR.is_dir(),
