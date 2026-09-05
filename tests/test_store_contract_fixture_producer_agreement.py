@@ -20,7 +20,7 @@ from tests.test_store_contract import LOCK_IDENTITY, REGISTERED
 
 
 def test_the_split_manifest_golden_nests_dataset_hash_and_labels_root_under_members(tmp_path):
-    """``make_splits``' descendant, ``compose_split_manifest``, writes ``dataset_hash`` and
+    """``draw_splits``' writer, ``compose_split_manifest``, writes ``dataset_hash`` and
     ``labels_root`` only inside a date's own ``members`` block, never at the record's top level."""
     fresh = data_tools.compose_split_manifest(
         tmp_path / "splits", seed=42, group_by="stem_prefix", dataset_fingerprint="7ac1",
