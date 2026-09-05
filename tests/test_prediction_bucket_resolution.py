@@ -87,17 +87,16 @@ def test_document_holding_bucket_with_no_verdicts_refuses_naming_a_free_suggesti
     """A rail must admit valid work: the suggested bucket a document refusal names is itself
     free of both a verdict and a document, and writing into it (the platform's own producer)
     succeeds."""
-    from tcip_mcp.prediction_buckets import BucketHoldsDocuments
-
     dataset_root = tmp_path / "data"
     review_state_dir = tmp_path / "state"
     _write_bucket(dataset_root, "baseline", "img")
 
-    with pytest.raises(BucketHoldsDocuments) as excinfo:
+    with pytest.raises(Exception) as excinfo:
         resolve_prediction_bucket(
             dataset_root, "baseline", DATE, review_state_dir=review_state_dir,
             refuse_documents=True,
         )
+    assert type(excinfo.value).__name__ == "BucketHoldsDocuments"
     assert excinfo.value.document_stem_count == 1
     assert excinfo.value.suggested == "baseline@r2"
 
@@ -116,7 +115,7 @@ def test_document_refusal_exhaustion_names_no_suggestion(tmp_path):
     """Coverage of the exhausted variant search: when the requested bucket and every
     <name>@r<n> variant up to the ceiling already hold a document, the resolver refuses by name
     with no suggestion, rather than handing back an unchecked, never-searched directory."""
-    from tcip_mcp.prediction_buckets import BucketHoldsDocuments, resolve_writable_bucket
+    from tcip_mcp.prediction_buckets import resolve_writable_bucket
 
     dataset_root = tmp_path / "data"
     review_state_dir = tmp_path / "state"
@@ -131,10 +130,11 @@ def test_document_refusal_exhaustion_names_no_suggestion(tmp_path):
     def _dirs_for(name: str):
         return [prediction_dir(dataset_root, name, DATE)]
 
-    with pytest.raises(BucketHoldsDocuments) as excinfo:
+    with pytest.raises(Exception) as excinfo:
         resolve_writable_bucket(
             review_state_dir, "baseline", _dirs_for,
             refuse_documents=True, max_variants=max_variants,
         )
+    assert type(excinfo.value).__name__ == "BucketHoldsDocuments"
     assert excinfo.value.suggested is None
     assert "baseline" in str(excinfo.value)
