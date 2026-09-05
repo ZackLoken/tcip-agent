@@ -432,7 +432,9 @@ def resolve_block_calibration_records(
     from tcip_mcp.pipelines.resolution import dataset_hash
 
     dh = dataset_hash(labels_dir)
-    resolver_inputs = {
+    # Explicit dict[str, Any] so the **resolver_inputs splat below checks against each of
+    # resolve_operating_point's differently-typed keyword parameters.
+    resolver_inputs: dict[str, Any] = {
         "dataset_hash": dh, "calibration_records": cal_records, "holdout_records": test_records,
         "tiled": True, "tiled_source": "default", "cross_tile_nms": None, "max_dets": density_cap,
         "max_dets_derived_from": (
