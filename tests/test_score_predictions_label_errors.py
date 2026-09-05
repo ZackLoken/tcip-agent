@@ -29,7 +29,7 @@ def test_score_predictions_single_image_reports_an_unreadable_gt(tmp_path: Path)
     bad = labels / "IMG_0000.json"
     bad.write_bytes(b"{not json")
     write_annotations(preds / "IMG_0000.json",
-                      [Annotation(subject="catkin", geometry=BBox(1, 1, 5, 5), score=0.9)], 100, 80)
+                      [Annotation(subject="bud", geometry=BBox(1, 1, 5, 5), score=0.9)], 100, 80)
 
     res = score_predictions(str(img))
 
@@ -46,7 +46,7 @@ def test_score_predictions_folder_reports_an_unreadable_prediction(tmp_path: Pat
     preds.mkdir(parents=True)
     _write_image(images / "IMG_0000.jpg")
     write_annotations(labels / "IMG_0000.json",
-                      [Annotation(subject="catkin", geometry=BBox(1, 1, 5, 5))], 100, 80)
+                      [Annotation(subject="bud", geometry=BBox(1, 1, 5, 5))], 100, 80)
     bad = preds / "IMG_0000.json"
     bad.write_bytes(b"{not json")
 
@@ -102,10 +102,10 @@ def test_score_predictions_single_image_refuses_a_neither_key_stamp(tmp_path: Pa
     img = images / "IMG_0000.jpg"
     _write_image(img)
     write_annotations(labels / "IMG_0000.json",
-                      [Annotation(subject="catkin", geometry=BBox(1, 1, 5, 5))], 100, 80)
+                      [Annotation(subject="bud", geometry=BBox(1, 1, 5, 5))], 100, 80)
     write_annotations(preds / "IMG_0000.json",
-                      [Annotation(subject="elongated", geometry=BBox(1, 1, 5, 5), score=0.9)], 100, 80)
-    _seed_sidecar(preds, {"id_map": {"elongated": 0}})
+                      [Annotation(subject="open", geometry=BBox(1, 1, 5, 5), score=0.9)], 100, 80)
+    _seed_sidecar(preds, {"id_map": {"open": 0}})
 
     res = score_predictions(str(img))
 
@@ -122,10 +122,10 @@ def test_score_predictions_folder_refuses_an_undecodable_stamp(tmp_path: Path) -
     preds.mkdir(parents=True)
     _write_image(images / "IMG_0000.jpg")
     write_annotations(labels / "IMG_0000.json",
-                      [Annotation(subject="catkin", geometry=BBox(1, 1, 5, 5))], 100, 80)
+                      [Annotation(subject="bud", geometry=BBox(1, 1, 5, 5))], 100, 80)
     write_annotations(preds / "IMG_0000.json",
-                      [Annotation(subject="elongated", geometry=BBox(1, 1, 5, 5), score=0.9)], 100, 80)
-    _seed_sidecar(preds, {"id_map": {"elongated": 0}})
+                      [Annotation(subject="open", geometry=BBox(1, 1, 5, 5), score=0.9)], 100, 80)
+    _seed_sidecar(preds, {"id_map": {"open": 0}})
     _damage_sidecar(preds)
 
     res = score_predictions(str(root))
@@ -149,14 +149,14 @@ def test_score_predictions_over_a_conformed_classified_bucket_scores_the_object_
     img = images / "IMG_0000.jpg"
     _write_image(img)
     write_annotations(labels / "IMG_0000.json",
-                      [Annotation(subject="catkin", geometry=BBox(1, 1, 5, 5))], 100, 80)
+                      [Annotation(subject="bud", geometry=BBox(1, 1, 5, 5))], 100, 80)
     write_annotations(
         preds / "IMG_0000.json",
-        [Annotation(subject="catkin", geometry=BBox(1, 1, 5, 5), score=0.9,
-                   attributes={"elongation": "elongated"})],
+        [Annotation(subject="bud", geometry=BBox(1, 1, 5, 5), score=0.9,
+                   attributes={"opening": "open"})],
         100, 80,
     )
-    write_sidecar(preds, {"id_map": {"elongated": 0}, "subject": "catkin", "attribute": "elongation"})
+    write_sidecar(preds, {"id_map": {"open": 0}, "subject": "bud", "attribute": "opening"})
 
     res = score_predictions(str(img))
 

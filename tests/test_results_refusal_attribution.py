@@ -20,7 +20,7 @@ from tcip_web.state import store
 
 from tests.test_tcip_web_results_routes import _phenology_fixture
 
-pytestmark = pytest.mark.usefixtures("seed_catkin_operationalization")
+pytestmark = pytest.mark.usefixtures("seed_bud_operationalization")
 
 DOORS = ("phenology_measurement",)
 
@@ -55,8 +55,8 @@ def _unvalidate_classifier(body: dict) -> None:
         key = sidecar_key(bucket, "classifier_operating_point")
         with tcip_store.transaction(key) as txn:
             txn.write(key, {
-                "validated": False, "trait": "catkin", "experiment_id": "exp-1",
-                "operating_point": {"classifier": {"value": "elongated",
+                "validated": False, "trait": "bud_opening", "experiment_id": "exp-1",
+                "operating_point": {"classifier": {"value": "open",
                                                    "validated_against": VALIDATED_FALSE}},
             })
 
@@ -108,7 +108,7 @@ def test_a_count_stamp_earned_for_a_different_trait_names_the_sidecar_and_both_t
 
     for route in DOORS:
         detail = _refusal_detail(client, body, route)
-        assert "second_trait" in detail and "catkin" in detail, route
+        assert "second_trait" in detail and "bud" in detail, route
         assert any(bucket in detail for bucket in body["predictions_by_date"].values()), route
 
 

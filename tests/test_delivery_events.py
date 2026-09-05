@@ -21,7 +21,7 @@ from tcip_mcp.tools.phenology_tools import deliver_phenology_milestones
 from tests._binding_fixtures import record_producing_run
 from tests.test_phenology_tools import _delivery_setup, _ds_root
 
-pytestmark = pytest.mark.usefixtures("seed_catkin_operationalization")
+pytestmark = pytest.mark.usefixtures("seed_bud_operationalization")
 
 
 def _delivery_event_records(project_root: Path | None = None) -> list[dict]:
@@ -36,10 +36,10 @@ def test_a_completed_crossing_delivery_writes_a_delivery_events_record_with_the_
     sha = record_producing_run(tmp_path, "exp-producer")
     mapping_name, d1, d2 = _delivery_setup(
         tmp_path, experiment_id="exp-producer", checkpoint_sha256=sha)
-    out_csv = tmp_path / "out" / "catkin_phenology.csv"
+    out_csv = tmp_path / "out" / "bud_phenology.csv"
 
     res = deliver_phenology_milestones(
-        trait="catkin", mapping_name=mapping_name,
+        trait="bud_opening", mapping_name=mapping_name,
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv), classifier_pred_dirs=[str(d1)],
         operating_point_conf=0.4, operating_point_validated="held_out_annotations",
@@ -58,7 +58,7 @@ def test_a_completed_crossing_delivery_writes_a_delivery_events_record_with_the_
     records = [r for r in _delivery_event_records() if r["door"] == "deliver_phenology_milestones"]
     assert len(records) == 1, records
     record = records[0]
-    assert record["trait"] == "catkin"
+    assert record["trait"] == "bud_opening"
     assert record["delivery_kind"] == STATE_CROSSING_DATES
     assert record["output_path"] == str(out_csv)
 
@@ -86,7 +86,7 @@ def test_two_deliveries_of_the_same_trait_and_kind_both_enumerate_distinctly(
     second_csv = tmp_path / "out" / "second.csv"
     for out_csv in (first_csv, second_csv):
         res = deliver_phenology_milestones(
-            trait="catkin", mapping_name=mapping_name,
+            trait="bud_opening", mapping_name=mapping_name,
             predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
             output_csv_path=str(out_csv), classifier_pred_dirs=[str(d1)],
             operating_point_conf=0.4, operating_point_validated="held_out_annotations",
@@ -97,7 +97,7 @@ def test_two_deliveries_of_the_same_trait_and_kind_both_enumerate_distinctly(
     assert len(records) == 2, records
     assert records[0]["event_id"] != records[1]["event_id"]
     assert {r["output_path"] for r in records} == {str(first_csv), str(second_csv)}
-    assert {r["trait"] for r in records} == {"catkin"}
+    assert {r["trait"] for r in records} == {"bud_opening"}
     assert {r["delivery_kind"] for r in records} == {STATE_CROSSING_DATES}
 
 
@@ -153,7 +153,7 @@ def test_phenology_measurement_records_no_delivery_event_for_an_unclassified_loo
     client = TestClient(app, base_url="http://127.0.0.1")
 
     unclassified = _phenology_fixture(
-        tmp_path, validated=True, fractions=(0.0,), id_map={"catkin": 0}, detections=2)
+        tmp_path, validated=True, fractions=(0.0,), id_map={"bud": 0}, detections=2)
     resp = client.post("/api/results/phenology_measurement", json=unclassified)
     assert resp.status_code == 200, resp.text
     assert resp.json()["positive_class_assessed"] is False

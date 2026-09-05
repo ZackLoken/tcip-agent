@@ -578,7 +578,7 @@ def test_export_aggregated_csv_discards_an_acknowledgement_that_cleared_nothing(
 # ── export_aggregated_csv wired to the ordinal/regression sidecar producer ────
 
 def _scalar_bucket(tmp_path, name, task, *, validated, ref=VALIDATED_HELD_OUT, criterion="r_squared",
-                   trait="catkin"):
+                   trait="bud_opening"):
     d = tmp_path / name
     d.mkdir(parents=True, exist_ok=True)
     document = f"{task}_operating_point"
@@ -884,7 +884,7 @@ def _fake_run_inference_result(*, conf_ref, tile_size_prov=None):
     }
 
 
-def _earned_run_inference_result(tmp_path, *, trait="catkin", **calibration):
+def _earned_run_inference_result(tmp_path, *, trait="bud_opening", **calibration):
     """A stand-in run that left behind the evidence a door earns its validation record from.
 
     A door cannot stamp a validated bucket from a bare assertion that the run validated, so a test
@@ -922,7 +922,7 @@ def test_run_inference_refuses_fabricated_tile_size_even_with_validated_conf(tmp
 
 
 def test_run_inference_ships_when_tile_size_has_a_real_basis(
-    tmp_path, monkeypatch, seed_catkin_trait_spec,
+    tmp_path, monkeypatch, seed_bud_trait_spec,
 ):
     """The rail must admit valid work, not only reject invalid work."""
     import tcip_mcp.tools.inference_tools as itools
@@ -932,7 +932,7 @@ def test_run_inference_ships_when_tile_size_has_a_real_basis(
     monkeypatch.setattr(itools, "_run_inference_verified", lambda *a, **kw: _earned_run_inference_result(
         tmp_path, tiled=True, tile_size=224, tile_size_source="derived"))
     out = tmp_path / "ds" / "predictions" / "baseline" / "2026-01-01"
-    r = itools.run_inference(_dummy_checkpoint(tmp_path), str(tmp_path), output_dir=str(out), trait="catkin")
+    r = itools.run_inference(_dummy_checkpoint(tmp_path), str(tmp_path), output_dir=str(out), trait="bud_opening")
     assert "error" not in r, r
     assert r["tile_size_validated"] == VALIDATED_PERSISTED_GEOMETRY
     assert r["validated"] is True
@@ -944,7 +944,7 @@ def test_run_inference_ships_when_tile_size_has_a_real_basis(
 
 
 def test_run_inference_never_gates_tile_size_when_untiled(
-    tmp_path, monkeypatch, seed_catkin_trait_spec,
+    tmp_path, monkeypatch, seed_bud_trait_spec,
 ):
     """An untiled run's tile_size is never operative: it must not manufacture a refusal just
     because the run's own bundle happens to carry a non-gating tile_size entry."""
@@ -953,7 +953,7 @@ def test_run_inference_never_gates_tile_size_when_untiled(
     monkeypatch.setattr(itools, "_run_inference_verified",
                         lambda *a, **kw: _earned_run_inference_result(tmp_path, tiled=False))
     out = tmp_path / "ds" / "predictions" / "baseline" / "2026-01-01"
-    r = itools.run_inference(_dummy_checkpoint(tmp_path), str(tmp_path), output_dir=str(out), trait="catkin")
+    r = itools.run_inference(_dummy_checkpoint(tmp_path), str(tmp_path), output_dir=str(out), trait="bud_opening")
     assert "error" not in r, r
     assert r["tile_size_validated"] is None
     assert r["validated"] is True

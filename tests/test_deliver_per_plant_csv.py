@@ -178,7 +178,7 @@ def test_deliver_per_plant_csv_refuses_unvalidated_then_delivers_once_validated(
     predictions_by_date = {date: str(pred_dir)}
 
     refused = deliver_per_plant_csv(
-        results, str(out_csv), delivered_phenotype="stem_count", crop="hazelnut",
+        results, str(out_csv), delivered_phenotype="stem_count", crop="currant",
         pipeline_version="v1", plant_mapping=mapping_name,
         predictions_by_date=predictions_by_date)
     assert "error" in refused
@@ -195,7 +195,7 @@ def test_deliver_per_plant_csv_refuses_unvalidated_then_delivers_once_validated(
     write_bound_sidecar(pred_dir, stamp, dataset_root=dataset_root, experiment_id="exp-promoted")
 
     delivered = deliver_per_plant_csv(
-        results, str(out_csv), delivered_phenotype="stem_count", crop="hazelnut",
+        results, str(out_csv), delivered_phenotype="stem_count", crop="currant",
         pipeline_version="v1", plant_mapping=mapping_name,
         predictions_by_date=predictions_by_date)
     assert "error" not in delivered, delivered
@@ -209,7 +209,7 @@ def test_deliver_per_plant_csv_refuses_unvalidated_then_delivers_once_validated(
     rows_out = {r["plant_id"]: r for r in csv.DictReader(out_csv.open(newline=""))}
     assert rows_out["P1"]["value"] == "2"
     assert rows_out["P2"]["value"] == "1"
-    assert rows_out["P1"]["crop"] == "hazelnut"
+    assert rows_out["P1"]["crop"] == "currant"
     assert rows_out["P1"]["pipeline_version"] == "v1"
 
     import tcip_store
@@ -256,7 +256,7 @@ def test_deliver_per_plant_csv_refuses_an_unknown_plant_mapping_by_name(tmp_path
     out_csv = tmp_path / "o.csv"
 
     res = deliver_per_plant_csv(
-        results, str(out_csv), delivered_phenotype="stem_count", crop="hazelnut",
+        results, str(out_csv), delivered_phenotype="stem_count", crop="currant",
         pipeline_version="v1", plant_mapping="no-such-mapping",
         predictions_by_date={"2026-02-11": str(tmp_path)})
     assert "error" in res
@@ -280,7 +280,7 @@ def test_deliver_per_plant_csv_refuses_a_named_mapping_with_no_verification_inpu
     out_csv = tmp_path / "o.csv"
 
     res = deliver_per_plant_csv(
-        results, str(out_csv), delivered_phenotype="stem_count", crop="hazelnut",
+        results, str(out_csv), delivered_phenotype="stem_count", crop="currant",
         pipeline_version="v1", plant_mapping="valley")
     assert "error" in res
     assert "predictions_by_date" in res["error"]
@@ -301,7 +301,7 @@ def test_deliver_per_plant_csv_refuses_a_malformed_record_through_the_writer(tmp
     out_csv = tmp_path / "o.csv"
 
     res = deliver_per_plant_csv(
-        results, str(out_csv), delivered_phenotype="stem_count", crop="hazelnut",
+        results, str(out_csv), delivered_phenotype="stem_count", crop="currant",
         pipeline_version="v1", plant_mapping="")
     assert "error" in res
     assert "no" in res["error"] and "observation" in res["error"]
@@ -336,7 +336,7 @@ def test_deliver_per_plant_csv_refuses_a_predictions_by_date_the_mapping_does_no
 
     uncovered_date = "2026-03-01"
     res = deliver_per_plant_csv(
-        results, str(out_csv), delivered_phenotype="stem_count", crop="hazelnut",
+        results, str(out_csv), delivered_phenotype="stem_count", crop="currant",
         pipeline_version="v1", plant_mapping="valley",
         predictions_by_date={
             date: str(dataset_root / "predictions" / "run" / date),
@@ -384,7 +384,7 @@ def test_deliver_per_plant_csv_refuses_predictions_under_a_different_dataset_tha
     out_csv = tmp_path / "o.csv"
 
     res = deliver_per_plant_csv(
-        results, str(out_csv), delivered_phenotype="stem_count", crop="hazelnut",
+        results, str(out_csv), delivered_phenotype="stem_count", crop="currant",
         pipeline_version="v1", plant_mapping="valley",
         predictions_by_date={date: str(other_dataset_root / "predictions" / "run" / date)})
     assert "error" in res
@@ -420,7 +420,7 @@ def test_deliver_per_plant_csv_refuses_a_mapping_with_no_capture_at_all_for_a_de
     out_csv = tmp_path / "o.csv"
 
     res = deliver_per_plant_csv(
-        results, str(out_csv), delivered_phenotype="stem_count", crop="hazelnut",
+        results, str(out_csv), delivered_phenotype="stem_count", crop="currant",
         pipeline_version="v1", plant_mapping="valley", predictions_by_date=preds_by_date)
     assert "error" in res
     assert "recorded no capture at all" in res["error"]
@@ -459,7 +459,7 @@ def test_deliver_per_plant_csv_refuses_a_delivered_plant_id_outside_the_mapping(
     out_csv = tmp_path / "o.csv"
 
     res = deliver_per_plant_csv(
-        results, str(out_csv), delivered_phenotype="stem_count", crop="hazelnut",
+        results, str(out_csv), delivered_phenotype="stem_count", crop="currant",
         pipeline_version="v1", plant_mapping="valley",
         predictions_by_date={date: str(pred_dir)})
     assert "error" in res
@@ -506,7 +506,7 @@ def test_deliver_per_plant_csv_refuses_when_a_capture_added_since_the_mapping_wa
     out_csv = tmp_path / "o.csv"
 
     res = deliver_per_plant_csv(
-        results, str(out_csv), delivered_phenotype="stem_count", crop="hazelnut",
+        results, str(out_csv), delivered_phenotype="stem_count", crop="currant",
         pipeline_version="v1", plant_mapping="valley",
         predictions_by_date={date: str(pred_dir)})
     assert "error" in res

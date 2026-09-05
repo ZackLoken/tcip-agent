@@ -321,9 +321,9 @@ def test_run_inference_redirects_a_bespoke_bucket_against_its_own_datasets_verdi
 
     engine = ReviewEngine(dataset_root / ".tcip" / "state")
     ctx = ReviewContext(img_name="img.png", img_width=100, img_height=100,
-                        preds=[Annotation(subject="catkin", geometry=BBox(10.0, 10.0, 30.0, 30.0),
+                        preds=[Annotation(subject="bud", geometry=BBox(10.0, 10.0, 30.0, 30.0),
                                           score=0.9)])
-    det = ReviewDetection(det_type="fp", class_name="catkin", conf=0.9, iou=None, gt_idx=None,
+    det = ReviewDetection(det_type="fp", class_name="bud", conf=0.9, iou=None, gt_idx=None,
                           pred_idx=0, bbox=(10.0, 10.0, 30.0, 30.0))
     engine.record_detection_action(bucket_key_of(out), det, ctx, action="accepted")
 
@@ -407,9 +407,9 @@ def _canonical_bucket_with_a_verdict(tmp_path, monkeypatch) -> tuple:
 
     engine = ReviewEngine(dataset_root / ".tcip" / "state")
     ctx = ReviewContext(img_name="img.png", img_width=100, img_height=100,
-                        preds=[Annotation(subject="catkin", geometry=BBox(10.0, 10.0, 30.0, 30.0),
+                        preds=[Annotation(subject="bud", geometry=BBox(10.0, 10.0, 30.0, 30.0),
                                           score=0.9)])
-    det = ReviewDetection(det_type="fp", class_name="catkin", conf=0.9, iou=None, gt_idx=None,
+    det = ReviewDetection(det_type="fp", class_name="bud", conf=0.9, iou=None, gt_idx=None,
                           pred_idx=0, bbox=(10.0, 10.0, 30.0, 30.0))
     engine.record_detection_action(bucket_key_of(out), det, ctx, action="accepted")
 
