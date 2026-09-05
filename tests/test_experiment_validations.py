@@ -282,7 +282,7 @@ def test_a_version_2_row_earned_through_the_real_gate_round_trips(tmp_path):
         tile_size_validated=None, shippable_issues=draft.result.shippable_issues(), id_map=None,
         trait="catkin", dataset_hash="H", checkpoint="best", checkpoint_sha256="0" * 64,
         experiment_id=None, images_dir=None, raster_path=None,
-        produced_at="2026-03-04T12:00:00+00:00",
+        produced_at="2026-03-04T12:00:00+00:00", subject="catkin", attribute=None,
     )
     digest, stamped = seal_validation(draft, dataset_root=tmp_path, bucket_dirs=(), stamp_body=stamp)
     experiment_id = stamped["validated_by"]["experiment_id"]

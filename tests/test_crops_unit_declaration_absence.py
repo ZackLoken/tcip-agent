@@ -49,6 +49,8 @@ def _validated_bucket(tmp_path: Path, trait: str, *, document: str = "operating_
                                         "validation_kind": "annotations",
                                         "validated_against": VALIDATED_HELD_OUT}},
     }
+    if document == "operating_point":
+        stamp["subject"], stamp["attribute"] = trait, None
     write_bound_sidecar(bucket, stamp, document=document, dataset_root=root,
                         experiment_id=f"exp-validated-{tag}")
     return str(bucket)

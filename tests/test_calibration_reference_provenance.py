@@ -53,9 +53,10 @@ def _reference(root, stems, annotations):
     return images_dir, labels_dir
 
 
-def _prediction(subject="catkin", score=0.87, box=(2, 2, 10, 10)):
+def _prediction(subject="catkin", score=0.87, box=(2, 2, 10, 10), *, state=None):
+    attributes = {"state": state} if state is not None else {}
     return Annotation(subject=subject, geometry=BBox(*box), score=score, created_by=PRODUCER,
-                      created_at="2026-01-01T00:00:00+00:00")
+                      created_at="2026-01-01T00:00:00+00:00", attributes=attributes)
 
 
 def _hand_annotation(box=(2, 2, 10, 10), **kw):
@@ -259,8 +260,8 @@ def test_the_classifier_reference_admits_ground_truth_beside_a_scored_prediction
                         attributes={"state": "dormant"})], IMG, IMG)
     _pred_images, pred_dir = _reference(
         tmp_path / "pred", stems,
-        lambda s: [_prediction(subject="elongated", box=(2, 2, 12, 12)),
-                   _prediction(subject="dormant", box=(16, 16, 26, 26))])
+        lambda s: [_prediction(box=(2, 2, 12, 12), state="elongated"),
+                   _prediction(box=(16, 16, 26, 26), state="dormant")])
 
     items = _classification_items(gt_dir, pred_dir)
 

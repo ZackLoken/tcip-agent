@@ -407,13 +407,16 @@ def test_file_backend_locates_a_trait_spec_at_the_shared_state_trait_specs_path(
 
 # ── positive class id resolved from a prediction bucket's own recorded id_map ───────
 
-def _op_sidecar(dir_path: Path, id_map: dict | None, *, dataset_root: Path) -> None:
+def _op_sidecar(dir_path: Path, id_map: dict | None, *, dataset_root: Path,
+                subject: str = "catkin", attribute: str | None = "elongation") -> None:
     dir_path.mkdir(parents=True, exist_ok=True)
     stamp = {
         "validated": True,
         "trait": "catkin",
         "operating_point": {"conf": {"value": 0.4, "validated_against": "held_out_annotations"}},
         "id_map": id_map,
+        "subject": subject,
+        "attribute": attribute,
     }
     write_bound_sidecar(dir_path, stamp, dataset_root=dataset_root,
                         experiment_id=f"exp-record-{dir_path.name}",
@@ -457,13 +460,15 @@ def _pheno_fixture(tmp_path: Path, *, classified: bool):
     d1 = root / "predictions" / "run" / "2026-02-11"
     d2 = root / "predictions" / "run" / "2026-03-09"
     id_map = {"dormant": 0, "elongated": 1} if classified else {"catkin": 0}
-    subject = "elongated" if classified else "catkin"
+    attribute = "elongation" if classified else None
+    attrs = {"elongation": "elongated"} if classified else {}
     for d in (d1, d2):
         d.mkdir(parents=True, exist_ok=True)
         json_io.write_annotations(
             d / "P1.json",
-            [Annotation(subject=subject, geometry=BBox(1.0, 1.0, 3.0, 3.0), score=0.9)], 8, 8)
-        _op_sidecar(d, id_map, dataset_root=root)
+            [Annotation(subject="catkin", geometry=BBox(1.0, 1.0, 3.0, 3.0), score=0.9,
+                       attributes=attrs)], 8, 8)
+        _op_sidecar(d, id_map, dataset_root=root, subject="catkin", attribute=attribute)
     from tests._binding_fixtures import write_plant_mapping
 
     mapping_name = "valley"

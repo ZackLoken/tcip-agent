@@ -261,6 +261,8 @@ def _write_sidecar(pred_dir: Path, identity: dict, *, generation_conf: float | N
         "experiment_id": identity["experiment_id"],
         "validated": False,
         "operating_point": op,
+        "subject": "catkin",
+        "attribute": None,
     }
     import tcip_store
     from tcip_mcp.pipelines.resolution import sidecar_key

@@ -184,6 +184,7 @@ def _count_bucket(tmp_path, name, *, validated=True):
             "value": 0.55,
             "validated_against": VALIDATED_HELD_OUT if validated else VALIDATED_FALSE,
         }},
+        "subject": fx.COUNT_SUBJECT, "attribute": None,
     }
     if validated:
         write_bound_sidecar(d, stamp, dataset_root=root, experiment_id=f"exp-{name}")

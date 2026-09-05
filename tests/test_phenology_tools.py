@@ -137,9 +137,18 @@ def _write_mapping(project_root: Path, name: str, mapping: dict) -> None:
     write_plant_mapping(project_root, name, mapping, dataset_root=_ds_root(project_root))
 
 
-def _write_preds(dir_path: Path, stem: str, subjects: list[str]) -> None:
+def _write_preds(dir_path: Path, stem: str, subjects: list[str], *,
+                 attribute: str | None = "elongation", object_subject: str = "catkin") -> None:
+    """Detector shape (``attribute=None``): each decoded name lands straight in ``subject``.
+    Classified shape (the default, matching :data:`ID_MAP`): every record carries
+    ``object_subject`` with its value under ``attribute``."""
     dir_path.mkdir(parents=True, exist_ok=True)
-    anns = [Annotation(subject=s, geometry=BBox(1.0, 1.0, 3.0, 3.0), score=0.9) for s in subjects]
+    if attribute is None:
+        anns = [Annotation(subject=s, geometry=BBox(1.0, 1.0, 3.0, 3.0), score=0.9)
+                for s in subjects]
+    else:
+        anns = [Annotation(subject=object_subject, geometry=BBox(1.0, 1.0, 3.0, 3.0), score=0.9,
+                           attributes={attribute: s}) for s in subjects]
     json_io.write_annotations(dir_path / f"{stem}.json", anns, 8, 8)
 
 
@@ -172,13 +181,16 @@ def _write_stamp_bypassing_claim_rail(dir_path: Path, stamp: dict, document: str
 def _write_op_sidecar(dir_path: Path, *, dataset_root: Path, validated: bool, conf: float = 0.4,
                       id_map: dict | None = None, experiment_id: str | None = None,
                       checkpoint_sha256: str | None = None,
-                      tile_size_prov: dict | None = None, trait: str = "catkin") -> None:
+                      tile_size_prov: dict | None = None, trait: str = "catkin",
+                      subject: str = "catkin", attribute: str | None = "elongation") -> None:
     """The operating_point.json a calibrated run_inference writes.
 
     ``tile_size_prov`` is the tile_size param's own provenance entry, present for a run that
     actually tiled; omitted here for an untiled run, which carries no gating tile scale.
     ``experiment_id`` doubles as the record's producing_experiment_id when ``validated``: the run
-    that produced these predictions is the run a genuinely-bound claim names.
+    that produced these predictions is the run a genuinely-bound claim names. ``subject`` and
+    ``attribute`` default to the classified scope :data:`ID_MAP` decodes; a caller writing a bare
+    detector map states ``attribute=None``.
     """
     ref = "held_out_annotations" if validated else "false"
     dir_path.mkdir(parents=True, exist_ok=True)
@@ -192,6 +204,8 @@ def _write_op_sidecar(dir_path: Path, *, dataset_root: Path, validated: bool, co
         "id_map": id_map,
         "experiment_id": experiment_id,
         "checkpoint_sha256": checkpoint_sha256,
+        "subject": subject,
+        "attribute": attribute,
     }
     if validated:
         write_bound_sidecar(dir_path, stamp, dataset_root=dataset_root,
@@ -747,8 +761,8 @@ def test_deliver_phenology_milestones_refuses_unclassified_predictions(tmp_path:
     # never report full coverage.
     root = _ds_root(tmp_path)
     d1 = _bucket(tmp_path, "2026-02-11")
-    _write_preds(d1, "P1_a", ["catkin"])
-    _write_op_sidecar(d1, dataset_root=root, validated=True, id_map={"catkin": 0})
+    _write_preds(d1, "P1_a", ["catkin"], attribute=None)
+    _write_op_sidecar(d1, dataset_root=root, validated=True, id_map={"catkin": 0}, attribute=None)
     mapping_name = "valley"
     _write_mapping(tmp_path, mapping_name, {
         "2026-02-11": [{"stem": "P1_a", "plot_name": "P1", "accession_name": "acc-9"}],
@@ -808,8 +822,9 @@ def _write_calibration_image(
         box = BBox(x, 0.0, x + 8.0, 8.0)
         attrs = {} if is_tp is None else {"elongation": "elongated" if is_tp else "dormant"}
         gt_anns.append(Annotation(subject="catkin", geometry=box, attributes=attrs))
-        pred_anns.append(Annotation(subject="elongated" if is_pred_pos else "dormant",
-                                    geometry=box, score=0.9))
+        pred_anns.append(Annotation(
+            subject="catkin", geometry=box, score=0.9,
+            attributes={"elongation": "elongated" if is_pred_pos else "dormant"}))
     gt_dir.mkdir(parents=True, exist_ok=True)
     pred_dir.mkdir(parents=True, exist_ok=True)
     w = int(image_offset + len(calls) * 20.0) + 8
@@ -1486,7 +1501,8 @@ def test_classification_items_derives_center_match_tolerance_across_the_whole_sp
         Annotation(subject="catkin", geometry=big_box, attributes={"elongation": "elongated"}),
     ], 400, 400)
     json_io.write_annotations(pred_dir / "big.json", [
-        Annotation(subject="elongated", geometry=BBox(40.0, 0.0, 240.0, 200.0), score=0.9),
+        Annotation(subject="catkin", geometry=BBox(40.0, 0.0, 240.0, 200.0), score=0.9,
+                   attributes={"elongation": "elongated"}),
     ], 400, 400)
 
     # "small": a 20x20 GT box -> char_size=20 -> per-image tolerance would be only 10px; the
@@ -1496,7 +1512,8 @@ def test_classification_items_derives_center_match_tolerance_across_the_whole_sp
         Annotation(subject="catkin", geometry=small_box, attributes={"elongation": "dormant"}),
     ], 1100, 100)
     json_io.write_annotations(pred_dir / "small.json", [
-        Annotation(subject="dormant", geometry=BBox(1015.0, 0.0, 1035.0, 20.0), score=0.9),
+        Annotation(subject="catkin", geometry=BBox(1015.0, 0.0, 1035.0, 20.0), score=0.9,
+                   attributes={"elongation": "dormant"}),
     ], 1100, 100)
 
     # Split-wide avg char_size = (200 + 20) / 2 = 110 -> tolerance = 0.5 * 110 = 55px, comfortably
@@ -1538,7 +1555,8 @@ def test_classification_items_scopes_gt_to_the_run_subject(tmp_path: Path) -> No
         Annotation(subject="bush", geometry=bush_box),
     ], 400, 400)
     json_io.write_annotations(pred_dir / "a.json", [
-        Annotation(subject="elongated", geometry=BBox(114.0, 114.0, 126.0, 126.0), score=0.9),
+        Annotation(subject="catkin", geometry=BBox(114.0, 114.0, 126.0, 126.0), score=0.9,
+                   attributes={"elongation": "elongated"}),
     ], 400, 400)
 
     items = _classification_items(str(gt_dir), str(pred_dir), trait_name="catkin", subject="catkin",

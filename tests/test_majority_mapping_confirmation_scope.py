@@ -65,6 +65,7 @@ def _write_specs(project_root: Path) -> None:
 
 def _predictions(
     project_root: Path, root: Path, positive_class: str, id_map: dict, *, trait: str,
+    attribute: str,
 ) -> tuple[str, dict]:
     """Two dates of classified predictions for one plant, plus the plant mapping that names it.
 
@@ -84,12 +85,15 @@ def _predictions(
         d.mkdir(parents=True, exist_ok=True)
         json_io.write_annotations(
             d / "P1.json",
-            [Annotation(subject=positive_class, geometry=BBox(1.0, 1.0, 4.0, 7.0), score=0.9)], 16, 9)
+            [Annotation(subject=trait, geometry=BBox(1.0, 1.0, 4.0, 7.0), score=0.9,
+                       attributes={attribute: positive_class})], 16, 9)
         stamp = {
             "validated": True,
             "trait": trait,
             "operating_point": {"conf": {"value": 0.4, "validated_against": "held_out_annotations"}},
             "id_map": id_map,
+            "subject": trait,
+            "attribute": attribute,
         }
         write_bound_sidecar(d, stamp, dataset_root=root, experiment_id=f"exp-op-{trait}-{date}",
                             producing_experiment_id="exp-1", trait=trait)
@@ -126,7 +130,8 @@ def _deliver(tmp_path: Path, spec: dict, *, validated: bool) -> dict:
     root = tmp_path / spec["name"]
     mapping_name, dirs = _predictions(
         tmp_path, root, spec["positive_class_name"],
-        {"other": 0, spec["positive_class_name"]: 1}, trait=spec["name"])
+        {"other": 0, spec["positive_class_name"]: 1}, trait=spec["name"],
+        attribute=spec["majority_label"])
     classifier_dirs = None
     if validated:
         first = dirs["2026-02-11"]

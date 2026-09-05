@@ -26,6 +26,7 @@ from tcip_mcp.pipelines.resolution import (
     Acknowledgement,
     DeliveryRefused,
     check_delivery_gate,
+    write_sidecar,
 )
 from tcip_mcp import operationalization as op
 from tests import _operationalization_fixtures as fx
@@ -315,7 +316,8 @@ def test_export_detection_csv_and_the_persisted_document_agree_on_a_degenerate_b
         }
 
     pred_path = tmp_path / "img_a.json"
-    dropped = write_predictions_json(pred_path, _raw(), id_map={fx.COUNT_SUBJECT: 0})
+    dropped = write_predictions_json(pred_path, _raw(), subject=fx.COUNT_SUBJECT, attribute=None,
+                                     id_map={fx.COUNT_SUBJECT: 0})
     assert dropped == 1
     persisted = json.loads(pred_path.read_text())["annotations"]
 
@@ -355,11 +357,12 @@ def _detection_bucket(tmp_path, name, *, validated, ref=VALIDATED_HELD_OUT, conf
     op = {"conf": {"value": conf, "validated_against": ref if validated else VALIDATED_FALSE}}
     if tile_size_prov is not None:
         op["tile_size"] = tile_size_prov
-    stamp = {"validated": validated, "trait": fx.COUNT_TRAIT, "operating_point": op}
+    stamp = {"validated": validated, "trait": fx.COUNT_TRAIT, "operating_point": op,
+             "subject": fx.COUNT_SUBJECT, "attribute": None}
     if validated:
         write_bound_sidecar(d, stamp, dataset_root=root, experiment_id=f"exp-{name}")
     else:
-        (d / "operating_point.json").write_text(json.dumps(stamp), encoding="utf-8")
+        write_sidecar(d, stamp)
     return str(d)
 
 
@@ -844,9 +847,10 @@ def test_deliver_per_image_counts_bucket_regime_takes_no_acknowledgement(tmp_pat
         bucket / "a.json", {"image": "a.png", "width": 100, "height": 100,
                            "boxes": [[10.0, 10.0, 30.0, 30.0]], "scores": [0.9], "labels": [1],
                            "count": 1},
-        created_by="test-producer", id_map={fx.COUNT_SUBJECT: 0})
+        created_by="test-producer", subject=fx.COUNT_SUBJECT, attribute=None,
+        id_map={fx.COUNT_SUBJECT: 0})
     stamp = {"trait": fx.COUNT_TRAIT, "images_dir": str(tmp_path), "raster_path": None,
-             "validated": True,
+             "validated": True, "subject": fx.COUNT_SUBJECT, "attribute": None,
              "operating_point": {
                  "conf": {"value": 0.6, "validated_against": VALIDATED_HELD_OUT},
                  "tile_size": {"value": 640, "requires_validation": True,
@@ -1172,12 +1176,11 @@ def _write_bucket(tmp_path, name, *, conf_ref, tile_size_prov=None, validated=No
     if tile_size_prov is not None:
         op["tile_size"] = tile_size_prov
     is_validated = (conf_ref == VALIDATED_HELD_OUT) if validated is None else validated
-    stamp = {"validated": is_validated, "trait": trait, "operating_point": op}
+    stamp = {"validated": is_validated, "trait": trait, "operating_point": op,
+             "subject": fx.COUNT_SUBJECT, "attribute": None}
     if is_validated:
         write_bound_sidecar(d, stamp, dataset_root=root, experiment_id=f"exp-{name}")
     else:
-        from tcip_mcp.pipelines.resolution import write_sidecar
-
         write_sidecar(d, stamp)
     return str(d)
 

@@ -96,10 +96,10 @@ def _currant_bloom_fixture(
                 {"boxes": [[j, 0, j + 4, 4] for j in range(detections)],
                  "labels": [_ID_MAP[s] + 1 for s in subjects],
                  "scores": [0.9] * detections, "width": 100, "height": 100},
-                id_map=_ID_MAP)
+                subject="flower", attribute="bloom_state", id_map=_ID_MAP)
             assigns.append({"image_path": f"{stem}.tif", "stem": stem, "plot_name": plant,
                             "accession_name": f"Acc{plant[-1]}", "distance_m": 1.0})
-        sidecar: dict = {"id_map": _ID_MAP}
+        sidecar: dict = {"id_map": _ID_MAP, "subject": "flower", "attribute": "bloom_state"}
         if validated:
             sidecar.update({
                 "validated": True,

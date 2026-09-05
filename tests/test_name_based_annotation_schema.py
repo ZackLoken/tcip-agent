@@ -167,7 +167,7 @@ def test_decode_inverts_the_recorded_map(tmp_path):
     out = tmp_path / "pred.json"
     write_predictions_json(
         out, {"boxes": [[10, 10, 40, 40]], "scores": [0.9], "labels": [1], "width": 640, "height": 480},
-        created_by="model:x", id_map=id_map)
+        created_by="model:x", subject="catkin", attribute=None, id_map=id_map)
     preds = json_io.read_annotations(str(out))
     assert len(preds) == 1
     inv = class_registry.decode_class_ids(id_map)

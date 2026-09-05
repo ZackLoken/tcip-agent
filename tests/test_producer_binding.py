@@ -48,6 +48,7 @@ def _count_stamp(**overrides) -> dict:
         id_map=None, trait=TRAIT, dataset_hash="h1", checkpoint="best",
         checkpoint_sha256=CHECKPOINT_SHA, experiment_id=PRODUCING_RUN, images_dir=None,
         raster_path=None, produced_at="2026-03-04T12:00:00+00:00",
+        subject=TRAIT, attribute=None,
     )
     op = overrides.pop("operating_point", _op())
     fields.update(overrides)
@@ -524,7 +525,7 @@ def _earned_bucket(root: Path, *, conf_records=None, stems=("img_a",)):
         tile_size_validated=None, shippable_issues=draft.result.shippable_issues(), id_map=None,
         trait=TRAIT, dataset_hash="h1", checkpoint="best", checkpoint_sha256=CHECKPOINT_SHA,
         experiment_id=None, images_dir=None, raster_path=None,
-        produced_at="2026-03-04T12:00:00+00:00",
+        produced_at="2026-03-04T12:00:00+00:00", subject=TRAIT, attribute=None,
     )
     digest, stamped = seal_validation(draft, dataset_root=root, bucket_dirs=[pred_dir],
                                       stamp_body=body)

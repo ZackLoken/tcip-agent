@@ -161,7 +161,8 @@ def test_a_measured_subject_absent_from_every_id_map_refuses(project: Path):
     spec, record, _ = _confirmed_count(project)
 
     result = op.check_operationalization(
-        spec, record, op.PER_IMAGE_COUNT, id_maps={"predictions/live/2026-03-04": {"leaf": 0}}
+        spec, record, op.PER_IMAGE_COUNT,
+        counted_subjects={"predictions/live/2026-03-04": {"leaf"}}
     )
 
     assert result.state == 5
@@ -847,7 +848,9 @@ def _bucket_recording(tmp_path: Path, id_map: dict) -> str:
 
     bucket = tmp_path / "ds" / "predictions" / "run"
     bucket.mkdir(parents=True)
-    write_sidecar(bucket, {"validated": False, "id_map": id_map}, "operating_point")
+    subject = next(iter(id_map)) if len(id_map) == 1 else None
+    write_sidecar(bucket, {"validated": False, "id_map": id_map,
+                          "subject": subject, "attribute": None}, "operating_point")
     return str(bucket)
 
 
@@ -866,11 +869,13 @@ def _validated_bucket(
     root = tmp_path / "ds"
     bucket = root / "predictions" / name
     write_prediction(bucket, "img_a")
+    subject = next(iter(id_map)) if id_map else trait
     stamp: dict = {
         "validated": True, "trait": trait,
         "operating_point": {param_key: {"value": 0.4, "requires_validation": True,
                                         "validation_kind": "annotations",
                                         "validated_against": VALIDATED_HELD_OUT}},
+        "subject": subject, "attribute": None,
     }
     if id_map is not None:
         stamp["id_map"] = id_map
