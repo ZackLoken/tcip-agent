@@ -531,30 +531,45 @@ def _register_entry(
     return entry
 
 
-def _document_entries_for_conform(raw: object) -> tuple[list[dict], bool]:
-    """(entries, was_already_wrapped) for the conform script's own read.
+_STRAY_SCHEMA_VERSION_TWO = 2
+"""A registry index's own stray ``schema_version`` value from before this store's version-1
+reset: this conform's one-time acceptance window, dropped at the store's first real bump. The
+seam's own read-side ceiling refuses this value outright (``REGISTRY_SCHEMA_VERSION`` is 1), so
+only :func:`conform_registry_paths_on_disk`'s raw-bytes read ever reaches
+:func:`_document_entries_for_conform` carrying it; once this store's ceiling moves again, a
+document actually stamped with the store's new second version must refuse here exactly as the
+seam already refuses it, never be silently downgraded by this conform reusing this same literal."""
+
+
+def _document_entries_for_conform(raw: object) -> tuple[list[dict], bool, bool]:
+    """(entries, was_already_wrapped, had_stray_schema_version_two) for the conform script's own
+    read.
 
     Unlike :func:`_read_registry_document`, two dev-era shapes are accepted here rather than
     refused, since wrapping and respelling one of them is exactly this conform's own purpose: a
     bare top-level array (the shape this store carried before the family that wrapped it), and a
     mapping still carrying a stray ``schema_version: 2`` from before this store's version-1 reset
     (:func:`conform_registry_paths_on_disk` reads such a document directly, bypassing the seam's
-    own ceiling refusal, precisely to reach this function). Both rewrite through
-    :func:`_write_registry_document`, which carries no ``schema_version`` field, so the field is
-    dropped on the same write that wraps or respells. Anything else refuses, naming what was
-    found rather than the whole document, since a caller of this function (``import_project``'s
-    own conform step) surfaces the refusal message to a remote caller.
+    own ceiling refusal, precisely to reach this function; the acceptance is
+    :func:`conform_registry_paths_on_disk`'s alone, since :func:`conform_registry_paths`'s ordinary
+    seam read already refuses a stray 2 before this function is ever called with one). Both
+    rewrite through :func:`_write_registry_document`, which carries no ``schema_version`` field, so
+    the field is dropped on the same write that wraps or respells; ``had_stray_schema_version_two``
+    tells the caller that drop actually happened, so it can be disclosed as its own outcome line
+    rather than silently folded into "already wrapped, nothing to say". Anything else refuses,
+    naming what was found rather than the whole document, since a caller of this function
+    (``import_project``'s own conform step) surfaces the refusal message to a remote caller.
     """
     if raw is None:
-        return [], True
+        return [], True, False
     if isinstance(raw, list):
-        return raw, False
+        return raw, False, False
     if isinstance(raw, dict):
         version = raw.get("schema_version")
         entries = raw.get("entries")
-        if version in (None, REGISTRY_SCHEMA_VERSION, 2) and isinstance(entries, list):
-            return entries, True
-        if version not in (None, REGISTRY_SCHEMA_VERSION, 2):
+        if version in (None, REGISTRY_SCHEMA_VERSION, _STRAY_SCHEMA_VERSION_TWO) and isinstance(entries, list):
+            return entries, True, version == _STRAY_SCHEMA_VERSION_TWO
+        if version not in (None, REGISTRY_SCHEMA_VERSION, _STRAY_SCHEMA_VERSION_TWO):
             raise RegistryVersionRefused(
                 f"the model registry index carries schema_version={version!r}, not one this "
                 "conform recognizes"
@@ -683,6 +698,20 @@ def _conform_entries(
     return conformed, lines
 
 
+def _wrap_and_drop_lines(*, already_wrapped: bool, had_stray_two: bool, plan: bool) -> list[str]:
+    """The outcome lines :func:`_document_entries_for_conform`'s own findings earn, in the tense
+    ``plan`` calls for: a bare array wrapped into the entries mapping, a stray
+    ``schema_version: 2`` dropped, both, or neither. One implementation shared by
+    :func:`conform_registry_paths` and :func:`conform_registry_paths_on_disk`, so the two
+    conforms cannot silently disagree on what counts as worth disclosing."""
+    lines = []
+    if not already_wrapped:
+        lines.append(("wrapping" if plan else "wrapped") + " the registry index into the entries mapping")
+    if had_stray_two:
+        lines.append(("dropping" if plan else "dropped") + f" a stray schema_version: {_STRAY_SCHEMA_VERSION_TWO}")
+    return lines
+
+
 def conform_registry_paths(root: str | Path, *, plan: bool = False) -> list[str]:
     """Wrap ``root``'s registry index into the entries mapping and respell every entry's
     checkpoint_path relative to ``root``, in one transaction (the same discipline as
@@ -711,17 +740,18 @@ def conform_registry_paths(root: str | Path, *, plan: bool = False) -> list[str]
     hash_cache: dict[Path, str] = {}
 
     if plan:
-        entries, already_wrapped = _document_entries_for_conform(tcip_store.read(key, default=None))
+        entries, already_wrapped, had_stray_two = _document_entries_for_conform(
+            tcip_store.read(key, default=None))
         _conformed, lines = _conform_entries(entries, root_path, plan=True, hash_cache=hash_cache)
-        wrap_line = [] if already_wrapped else ["wrapping the registry index into the entries mapping"]
-        return wrap_line + lines
+        prefix = _wrap_and_drop_lines(already_wrapped=already_wrapped, had_stray_two=had_stray_two, plan=True)
+        return prefix + lines
 
     with tcip_store.transaction(key) as txn:
-        entries, already_wrapped = _document_entries_for_conform(txn.read(key, default=None))
+        entries, already_wrapped, had_stray_two = _document_entries_for_conform(txn.read(key, default=None))
         conformed, lines = _conform_entries(entries, root_path, plan=False, hash_cache=hash_cache)
         txn.write(key, _write_registry_document(conformed))
-    wrap_line = [] if already_wrapped else ["wrapped the registry index into the entries mapping"]
-    return wrap_line + lines
+    prefix = _wrap_and_drop_lines(already_wrapped=already_wrapped, had_stray_two=had_stray_two, plan=False)
+    return prefix + lines
 
 
 def conform_registry_paths_on_disk(root: str | Path) -> list[str]:
@@ -734,6 +764,12 @@ def conform_registry_paths_on_disk(root: str | Path) -> list[str]:
     unconformed root) or, once adopted, leaves a cached connection open on a directory the door
     is about to rename, which Windows refuses. Never used against a live, already-adopted
     project; :func:`conform_registry_paths` is that entry point.
+
+    Reading the raw bytes directly, bypassing the seam's own schema_version ceiling check, is
+    what lets this route accept a document still carrying a stray ``schema_version: 2`` from
+    before this store's version-1 reset (the seam's own entry point refuses that value outright,
+    on read as on write): this is the one conform that accepts it, since ``import_project`` is
+    the only door this function serves.
     """
     root_path = Path(root).resolve()
     path = registry_index_path(root_path)
@@ -743,11 +779,11 @@ def conform_registry_paths_on_disk(root: str | Path) -> list[str]:
         raw = json.loads(path.read_bytes().decode("utf-8"))
     except (OSError, UnicodeDecodeError, ValueError) as exc:
         raise RegistryVersionRefused(f"{path} will not decode as JSON: {exc}") from exc
-    entries, already_wrapped = _document_entries_for_conform(raw)
+    entries, already_wrapped, had_stray_two = _document_entries_for_conform(raw)
     conformed, lines = _conform_entries(entries, root_path, plan=False, hash_cache={})
     path.write_bytes(RECORD_JSON.encode(_write_registry_document(conformed)))
-    wrap_line = [] if already_wrapped else ["wrapped the registry index into the entries mapping"]
-    return wrap_line + lines
+    prefix = _wrap_and_drop_lines(already_wrapped=already_wrapped, had_stray_two=had_stray_two, plan=False)
+    return prefix + lines
 
 
 def _resolve_entry_checkpoint(project_path: str, entry: dict) -> dict:
