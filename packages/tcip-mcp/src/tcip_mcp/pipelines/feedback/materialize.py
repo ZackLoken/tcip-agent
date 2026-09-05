@@ -137,7 +137,7 @@ def _find_source_image(source_images_dir: str, img_name: str) -> "Path | BandGro
 
 
 def _write_positive_label(
-    path: Path, positives: list[tuple], img_w: int, img_h: int, *, scope=None,
+    path: Path, positives: list[tuple], img_w: int, img_h: int, *, scope=None, vocabulary=None,
 ) -> str | None:
     """Write one image's positive boxes to its label file, returning the refusal message on
     failure rather than letting it propagate.
@@ -148,7 +148,9 @@ def _write_positive_label(
 
     Under a classified ``scope`` (``resolution.BucketScope``), a verdict's ``class_name`` is the
     confirmed value, not the object: every record carries ``scope.subject`` with that value under
-    ``scope.attribute``, the shape a classified bucket's own records carry. Without one, ``class_name``
+    ``scope.attribute``, the shape a classified bucket's own records carry, checked against
+    ``vocabulary`` (the bucket's own recorded ``id_map`` keys) when one is given, refusing a value
+    the bucket never declared rather than writing it. Without a classified ``scope``, ``class_name``
     is the object class itself, written to ``subject`` as before.
     """
     # Denormalize the verdict log's [cx,cy,w,h] to pixel xyxy for the name-based per-image JSON.
@@ -156,12 +158,18 @@ def _write_positive_label(
         box = BBox((cx - w / 2) * img_w, (cy - h / 2) * img_h,
                    (cx + w / 2) * img_w, (cy + h / 2) * img_h)
         if scope is not None and scope.classified:
+            if vocabulary is not None and name not in vocabulary:
+                raise ValueError(
+                    f"{name!r} is not a value this bucket's own id_map declares "
+                    f"({sorted(vocabulary)}): a confirmed value must be one the bucket's own "
+                    "vocabulary has."
+                )
             return Annotation(subject=scope.subject, geometry=box,
                               attributes={scope.attribute: name})
         return Annotation(subject=name, geometry=box)
 
-    anns = [_annotation(*p) for p in positives]
     try:
+        anns = [_annotation(*p) for p in positives]
         write_annotations(str(path), anns, img_w, img_h, keep_empty=True)
     except ValueError as exc:
         return str(exc)
@@ -277,6 +285,7 @@ def materialize_dataset(
     only_completed: bool = False,
     producer_model: dict | None = None,
     scope=None,
+    vocabulary: set | None = None,
 ) -> dict:
     """Write ``output_dir/images/`` + ``output_dir/annotations/`` + manifest.
 
@@ -308,7 +317,9 @@ def materialize_dataset(
     ``unconfirmed_negatives``. The output still needs the source dataset's registry to train under
     the scope, so it is copied over whether or not any negative was confirmed, raising by name when
     the source names no dataset root or that root's registry is missing, or when the output already
-    holds one.
+    holds one. ``vocabulary`` (the bucket's own recorded ``id_map`` keys) checks a classified
+    verdict's confirmed value before it is written, when given; a value outside it is reported in
+    ``boundary_refused`` rather than written, the same posture a degenerate box already gets.
     """
     if scope is not None and scope.classified and subject is not None and subject != scope.subject:
         raise ValueError(
@@ -361,7 +372,8 @@ def materialize_dataset(
         img_w, img_h = image_dimensions(src)
 
         if status == "positive":
-            refusal = _write_positive_label(label_path, info["positives"], img_w, img_h, scope=scope)
+            refusal = _write_positive_label(
+                label_path, info["positives"], img_w, img_h, scope=scope, vocabulary=vocabulary)
             if refusal is not None:
                 counts["boundary_refused"] += 1
                 boundary_refused.append({"image": record_name, "reason": refusal})
