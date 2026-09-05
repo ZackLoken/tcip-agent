@@ -1,5 +1,6 @@
 import type { StateCreator } from "zustand";
 
+import { pathInDir } from "@/lib/paths";
 import type { AppState } from "@/store/appState";
 import type { Annotation, Box, ImageLabels, PointShape, PolygonShape } from "@/store/types";
 
@@ -70,6 +71,13 @@ const EMPTY_CANVAS: CanvasState = {
   savedSignature: contentSignature({ boxes: [], polygons: [], points: [], imageAnnotations: [] }),
   loadedImagePath: null,
 };
+
+/** Whether the loaded canvas belongs to the open dataset's own image directory: nothing clears
+ *  the canvas when another project opens, so a project with no images would otherwise keep
+ *  showing the previous project's image facts. The one place that fact is asked, so a status
+ *  read and a future consumer can't drift into two different answers. */
+export const selectCanvasMatchesDataset = (s: Pick<AppState, "gui" | "canvas">): boolean =>
+  pathInDir(s.canvas.loadedImagePath, s.gui.dataset.images_dir);
 
 function snapshot(c: CanvasState): CanvasSnapshot {
   return {

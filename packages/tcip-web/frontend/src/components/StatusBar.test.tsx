@@ -116,3 +116,44 @@ describe("StatusBar review readout", () => {
     expect(screen.queryByText(/reviewed$/)).not.toBeInTheDocument();
   });
 });
+
+describe("StatusBar canvas facts", () => {
+  beforeEach(() => {
+    useStore.getState().setActiveTab("annotate");
+    useStore.setState((s) => ({
+      gui: { ...s.gui, dataset: { ...s.gui.dataset, images_dir: "/data/images/2026-01-01" } },
+    }));
+  });
+
+  it("shows the image size and shape counts for a canvas loaded from the open dataset", () => {
+    useStore.setState((s) => ({
+      canvas: {
+        ...s.canvas,
+        loadedImagePath: "/data/images/2026-01-01/img1.jpg",
+        imgWidth: 800,
+        imgHeight: 600,
+        boxes: [{ x1: 0, y1: 0, x2: 10, y2: 10, subject: "fruit", attributes: {} }],
+      },
+    }));
+    render(<StatusBar />);
+
+    expect(screen.getByText("Image: 800×600")).toBeInTheDocument();
+    expect(screen.getByText(/boxes/)).toBeInTheDocument();
+  });
+
+  it("hides the image size and shape counts for a canvas loaded from another dataset", () => {
+    useStore.setState((s) => ({
+      canvas: {
+        ...s.canvas,
+        loadedImagePath: "/data/images/2025-11-02/img1.jpg",
+        imgWidth: 800,
+        imgHeight: 600,
+        boxes: [{ x1: 0, y1: 0, x2: 10, y2: 10, subject: "fruit", attributes: {} }],
+      },
+    }));
+    render(<StatusBar />);
+
+    expect(screen.queryByText(/Image: /)).not.toBeInTheDocument();
+    expect(screen.queryByText(/boxes/)).not.toBeInTheDocument();
+  });
+});

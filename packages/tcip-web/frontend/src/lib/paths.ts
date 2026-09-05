@@ -41,6 +41,13 @@ export function imagePath(dataset: DatasetSelection, imageName: string | null): 
   return imageName && dataset.images_dir ? inImagesDir(dataset.images_dir, imageName) : null;
 }
 
+/** Whether a path names a file directly inside a directory, both already-resolved strings from
+ *  the same backend (so a shared separator convention needs no normalizing here). Null either
+ *  side answers false rather than throwing, since a canvas or a dataset can carry no path yet. */
+export function pathInDir(path: string | null, dir: string | null): boolean {
+  return !!path && !!dir && path.startsWith(`${dir}/`);
+}
+
 /** One image's ground-truth record on the selected date, or null when there is no label dir. */
 export function labelPath(dataset: DatasetSelection, imageName: string | null): string | null {
   return imageName ? inDir(dataset.annotations_dir, stemOf(imageName) + RECORD_EXT) : null;
