@@ -440,7 +440,10 @@ def detect_and_write_band_groups(
     colliding file, and writes no manifest -- the same fold the ingest door's pre-scan refuses by,
     so this pass never mints the ambiguity the door exists to keep out. A manifest already
     recorded under the exact stem keeps the ``Version.ABSENT`` idempotence below rather than
-    counting as a collision.
+    counting as a collision. Writing a manifest also removes its own claimed members from the
+    keys they sat under as raw identities, so a later group in this same pass whose stem equals a
+    now-claimed member's stem is checked against the bucket as it now stands, not as it stood
+    before this group formed.
 
     Returns ``{"formed": [...], "refused": [...], "manifests": [...], "reserved_name_skips": [...]}``.
     """
@@ -509,6 +512,15 @@ def detect_and_write_band_groups(
         formed.append({"stem": stem, "bands": sorted(group["bands"]), "source": group["source"]})
         manifests.append(str(mp))
         identities[key] = [mp]
+        for member_path in group["bands"].values():
+            member_key = stem_collision_key(member_path.stem)
+            if member_key == key:
+                continue
+            remaining = [p for p in identities.get(member_key, []) if p.name != member_path.name]
+            if remaining:
+                identities[member_key] = remaining
+            else:
+                identities.pop(member_key, None)
 
     return {
         "formed": formed, "refused": refused, "manifests": manifests,

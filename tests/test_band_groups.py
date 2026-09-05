@@ -386,6 +386,7 @@ def test_a_group_whose_stem_a_standalone_file_holds_is_refused_through_ingest(tm
     refusal = bg["refused"][0]
     assert refusal["group_id"] == "capA"
     assert "capA.tif" in refusal["reason"]
+    assert refusal["bucket"] == "undated"
     assert {g["stem"] for g in bg["formed"]} == {"capB"}
     bucket_dir = Path(manifest["project_path"]) / "images" / "undated"
     assert not (bucket_dir / "capA.bandgroup").exists()
@@ -434,6 +435,31 @@ def test_two_explicit_group_ids_folding_to_one_key_form_one_and_refuse_the_other
     formed_stem = result["formed"][0]["stem"]
     refused_group_id = result["refused"][0]["group_id"]
     assert {formed_stem, refused_group_id} == {"Cap", "cap"}
+
+
+def test_a_group_that_claims_a_members_stem_lets_a_later_group_form_under_it(tmp_path):
+    """A rail must admit valid work: the first group's own claimed member (``y.tif``) leaves its
+    raw identity behind once the manifest is written, so a second group in the same pass whose
+    own stem equals that member's stem forms cleanly rather than refusing against a member the
+    first group already claims."""
+    from tcip_mcp.pipelines.data.band_groups import detect_and_write_band_groups
+    from tcip_mcp.pipelines.image_utils import list_logical_images
+
+    d = tmp_path / "images"
+    d.mkdir()
+    for name in ("y.tif", "other.tif", "y_band1.tif", "y_band2.tif"):
+        tifffile.imwrite(str(d / name), np.zeros((4, 4), dtype=np.uint16))
+
+    result = detect_and_write_band_groups(
+        d, explicit_groups={
+            "capA": {"Blue": "y.tif", "Green": "other.tif"},
+            "y": {"Blue": "y_band1.tif", "Green": "y_band2.tif"},
+        },
+    )
+
+    assert result["refused"] == []
+    assert {g["stem"] for g in result["formed"]} == {"capA", "y"}
+    assert set(list_logical_images(d)) == {"capA", "y"}
 
 
 # ── explicit-manifest strategy ──────────────────────────────────────────────────────────
