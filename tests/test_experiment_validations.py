@@ -25,6 +25,19 @@ REFERENCE_IDENTITY = {
 TRAINING_CONFIG = {"model_source": {"builder": "my_models:catkin_det"}}
 
 
+def _real_selection_disjointness() -> dict[str, Any]:
+    """The full shape resolution.resolver_selection_disjointness returns for a foreign
+    checkpoint with no split manifest named, read back through the same
+    operating_point._selection_disjointness path a live calibration takes, rather than a
+    hand-typed subset the resolver never actually produces."""
+    from tcip_mcp.pipelines import resolution
+    from tcip_mcp.pipelines.operating_point import _selection_disjointness
+
+    raw = _selection_disjointness(None, set(), set())
+    return resolution.resolver_selection_disjointness(
+        {"gate_evidence": {"selection_disjointness": raw}}, "operating_point")
+
+
 def _row(**overrides: Any) -> dict[str, Any]:
     """One complete validation row, with the fields a case varies replaced."""
     body: dict[str, Any] = {
@@ -41,8 +54,7 @@ def _row(**overrides: Any) -> dict[str, Any]:
         "dataset_root": "/data/hazelnut_valley",
         "recorded_at": "2026-03-04T12:00:00+00:00",
         "train_disjointness": {"checked": True, "group_check": None},
-        "selection_disjointness": {"applicable": False, "reason": "no split manifest named",
-                                   "checked": False, "group_check": None},
+        "selection_disjointness": _real_selection_disjointness(),
     }
     body.update(overrides)
     return body
