@@ -1,13 +1,14 @@
 """Model registry, track trained models and their performance.
 
-The index document is version 2, ``{schema_version: 2, entries: [...]}``: a stored
-``checkpoint_path`` is relative POSIX exactly when the checkpoint lives under the registry's own
-scope root, absolute exactly when it does not, so a pre-family absolute-under-root spelling can
-never read as a designed-external claim. Every response surface (``list_models``, ``get_model``,
-``best_model``, both ``register_model`` returns) answers the resolved absolute path on a copy,
-never this internal storage spelling. ``scripts/conform_model_registry_paths.py`` wraps a
-version-1 (bare array) index and respells every entry; a document neither shape refuses through
-:class:`RegistryVersionRefused` naming that script.
+The index document is ``{entries: [...]}``, no ``schema_version`` field until this store's first
+bump (absence is the frozen version 1): a stored ``checkpoint_path`` is relative POSIX exactly
+when the checkpoint lives under the registry's own scope root, absolute exactly when it does not,
+so a pre-family absolute-under-root spelling can never read as a designed-external claim. Every
+response surface (``list_models``, ``get_model``, ``best_model``, both ``register_model`` returns)
+answers the resolved absolute path on a copy, never this internal storage spelling.
+``scripts/conform_model_registry_paths.py`` wraps a bare top-level array (the shape this store
+carried before the family that wrapped it) into the mapping shape and respells every entry; a
+document neither shape refuses through :class:`RegistryVersionRefused` naming that script.
 """
 
 from __future__ import annotations
@@ -52,7 +53,11 @@ _INDEX_DOC = RootedFileLocator(prefix=(".tcip", "models"), suffix=".json")
 
 MODEL_REGISTRY_STORE = "model_registry"
 _INDEX_PARTS = ("registry",)
-REGISTRY_SCHEMA_VERSION = 2
+REGISTRY_SCHEMA_VERSION = 1
+"""The ceiling this reader knows, per ``frozen-formats.json``. Never written into a document: the
+index carries no ``schema_version`` field for as long as it stays at this ceiling (absence is the
+frozen default), and this constant exists only for the store's registration and for accepting a
+document that does carry an explicit ``1``."""
 register_store(
     StoreDescriptor(
         name=MODEL_REGISTRY_STORE,
@@ -68,8 +73,8 @@ register_store(
 
 
 class RegistryVersionRefused(ValueError):
-    """The registry index document is not a version this reader accepts: a bare top-level array
-    (the frozen version 1 shape, known but not yet conformed to version 2), or a mapping whose
+    """The registry index document is not a shape this reader accepts: a bare top-level array
+    (the shape this store carried before the family that wrapped it), or a mapping whose
     ``schema_version``/``entries`` shape this reader does not recognize.
 
     Deliberately not a :class:`~tcip_store.StoreError`: a blanket ``StoreError`` catch (bundle's,
@@ -80,38 +85,39 @@ class RegistryVersionRefused(ValueError):
 
 
 def _read_registry_document(raw: object) -> dict:
-    """The registry's version-2 document, decoded from whatever the store handed back.
+    """The registry's entries-mapping document, decoded from whatever the store handed back.
 
-    ``raw`` absent (``None``, first use) answers the empty version 2 document: absence stays
-    legitimate first use, never a refusal. A present bare list is the frozen version 1 shape,
-    known but not conformed, refused by name with the remedy rather than accepted or treated as
-    unknown. A mapping with a missing, non-2, or malformed shape (``schema_version`` wrong,
-    ``entries`` missing or not a list) refuses naming what it found.
+    ``raw`` absent (``None``, first use) answers the empty document: absence stays legitimate
+    first use, never a refusal. A present bare list is the shape this store carried before the
+    family that wrapped it, refused by name with the remedy rather than accepted or treated as
+    unknown. A mapping is accepted with no ``schema_version`` key or with one equal to the frozen
+    default; any other shape (a ``schema_version`` above the ceiling, ``entries`` missing or not a
+    list) refuses naming what it found.
     """
     if raw is None:
-        return {"schema_version": REGISTRY_SCHEMA_VERSION, "entries": []}
+        return {"entries": []}
     if isinstance(raw, list):
         raise RegistryVersionRefused(
-            "the model registry index is a top-level JSON array (schema_version 1, the shape "
-            "this store carried before the family that wrapped it): conform it with "
+            "the model registry index is a top-level JSON array, the shape this store carried "
+            "before the family that wrapped it: conform it with "
             "scripts/conform_model_registry_paths.py before this registry can be read"
         )
     if (
         not isinstance(raw, dict)
-        or raw.get("schema_version") != REGISTRY_SCHEMA_VERSION
+        or raw.get("schema_version") not in (None, REGISTRY_SCHEMA_VERSION)
         or not isinstance(raw.get("entries"), list)
     ):
         raise RegistryVersionRefused(
-            f"the model registry index is not a recognized schema_version {REGISTRY_SCHEMA_VERSION} "
-            f"document: {raw!r}"
+            f"the model registry index is not a recognized entries-mapping document: {raw!r}"
         )
     return raw
 
 
 def _write_registry_document(entries: list[dict]) -> dict:
-    """The version-2 document a write puts on disk for ``entries``. Every write is version 2;
-    there is no code path that writes version 1 any more."""
-    return {"schema_version": REGISTRY_SCHEMA_VERSION, "entries": entries}
+    """The document a write puts on disk for ``entries``. Carries no ``schema_version`` field:
+    absence is the frozen default, and the first writer of the field is whichever future change
+    bumps this format."""
+    return {"entries": entries}
 
 
 def registry_index_key(project_path: str | Path) -> Key:
@@ -138,7 +144,7 @@ def read_registry_index(project_path: str | Path) -> list[dict]:
     registered nothing reads as an empty list; an index that exists but does not decode
     raises ``DecodeError``, because a corrupt registry is not a project with no models.
     Raises :class:`RegistryVersionRefused` for a document this reader does not recognize (a
-    bare version-1 array included): conform it with ``scripts/conform_model_registry_paths.py``.
+    bare top-level array included): conform it with ``scripts/conform_model_registry_paths.py``.
     """
     raw = tcip_store.read(registry_index_key(project_path), default=None)
     return _read_registry_document(raw)["entries"]
@@ -398,8 +404,8 @@ def _write_registry_entry(txn: tcip_store.Txn, key: Key, entry: dict) -> dict | 
     Returns the superseded entry (``None`` for a first registration under this name), for the
     caller to audit once the transaction has closed. Refuses (:class:`EntryOwnedByRun`) a replace
     whose superseded entry names a run other than this write's own. Reads and writes through the
-    version-2 document pair: an unconformed version-1 document raises :class:`RegistryVersionRefused`
-    naming the conform script before anything is written.
+    entries-mapping document pair: an unwrapped bare-array document raises
+    :class:`RegistryVersionRefused` naming the conform script before anything is written.
     """
     index = _read_registry_document(txn.read(key, default=None))["entries"]
     superseded = next((e for e in index if e["name"] == entry["name"]), None)
@@ -459,7 +465,7 @@ def _register_entry(
     The stored ``checkpoint_path`` is spelled through
     :func:`~tcip_mcp.registry_paths.checkpoint_registry_path_for` against this project's own root
     (the registry's scope by definition): relative POSIX when the checkpoint resolves under it,
-    absolute when it does not, version 2's own carrier of internal versus external. A checkpoint
+    absolute when it does not, the one carrier of internal versus external. A checkpoint
     outside the project (``sha256`` given but the file gone by the time this runs) keeps the
     caller's own string verbatim, since there is nothing to resolve or spell against.
 
@@ -526,10 +532,10 @@ def _register_entry(
 
 
 def _document_entries_for_conform(raw: object) -> tuple[list[dict], bool]:
-    """(entries, was_already_v2) for the conform script's own read.
+    """(entries, was_already_wrapped) for the conform script's own read.
 
     Unlike :func:`_read_registry_document`, a bare top-level array is accepted here rather than
-    refused: it is exactly the version-1 shape this conform exists to wrap.
+    refused: it is exactly the pre-family shape this conform exists to wrap.
     """
     if raw is None:
         return [], True
@@ -537,7 +543,7 @@ def _document_entries_for_conform(raw: object) -> tuple[list[dict], bool]:
         return raw, False
     if (
         isinstance(raw, dict)
-        and raw.get("schema_version") == REGISTRY_SCHEMA_VERSION
+        and raw.get("schema_version") in (None, REGISTRY_SCHEMA_VERSION)
         and isinstance(raw.get("entries"), list)
     ):
         return raw["entries"], True
@@ -663,8 +669,8 @@ def _conform_entries(
 
 
 def conform_registry_paths(root: str | Path, *, plan: bool = False) -> list[str]:
-    """Wrap ``root``'s registry index to version 2 and respell every entry's checkpoint_path
-    relative to ``root``, in one transaction (the same discipline as
+    """Wrap ``root``'s registry index into the entries mapping and respell every entry's
+    checkpoint_path relative to ``root``, in one transaction (the same discipline as
     ``scripts/conform_registry_experiment_id.py``).
 
     Per entry: a stored path that resolves under ``root`` with a matching ``sha256`` is
@@ -683,23 +689,23 @@ def conform_registry_paths(root: str | Path, *, plan: bool = False) -> list[str]
     ``plan=True`` computes every outcome without writing. Idempotent: a second run changes
     nothing, since an already-correctly-spelled entry's respelled form always equals its stored
     one. Raises :class:`RegistryVersionRefused` for a document neither a bare array nor a
-    recognized version-2 mapping.
+    recognized entries mapping.
     """
     root_path = Path(root).resolve()
     key = registry_index_key(root_path)
     hash_cache: dict[Path, str] = {}
 
     if plan:
-        entries, already_v2 = _document_entries_for_conform(tcip_store.read(key, default=None))
+        entries, already_wrapped = _document_entries_for_conform(tcip_store.read(key, default=None))
         _conformed, lines = _conform_entries(entries, root_path, plan=True, hash_cache=hash_cache)
-        wrap_line = [] if already_v2 else ["wrapping the registry index to schema_version 2"]
+        wrap_line = [] if already_wrapped else ["wrapping the registry index into the entries mapping"]
         return wrap_line + lines
 
     with tcip_store.transaction(key) as txn:
-        entries, already_v2 = _document_entries_for_conform(txn.read(key, default=None))
+        entries, already_wrapped = _document_entries_for_conform(txn.read(key, default=None))
         conformed, lines = _conform_entries(entries, root_path, plan=False, hash_cache=hash_cache)
         txn.write(key, _write_registry_document(conformed))
-    wrap_line = [] if already_v2 else ["wrapped the registry index to schema_version 2"]
+    wrap_line = [] if already_wrapped else ["wrapped the registry index into the entries mapping"]
     return wrap_line + lines
 
 
@@ -722,10 +728,10 @@ def conform_registry_paths_on_disk(root: str | Path) -> list[str]:
         raw = json.loads(path.read_bytes().decode("utf-8"))
     except (OSError, UnicodeDecodeError, ValueError) as exc:
         raise RegistryVersionRefused(f"{path} will not decode as JSON: {exc}") from exc
-    entries, already_v2 = _document_entries_for_conform(raw)
+    entries, already_wrapped = _document_entries_for_conform(raw)
     conformed, lines = _conform_entries(entries, root_path, plan=False, hash_cache={})
     path.write_bytes(RECORD_JSON.encode(_write_registry_document(conformed)))
-    wrap_line = [] if already_v2 else ["wrapped the registry index to schema_version 2"]
+    wrap_line = [] if already_wrapped else ["wrapped the registry index into the entries mapping"]
     return wrap_line + lines
 
 
