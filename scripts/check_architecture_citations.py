@@ -7,10 +7,16 @@ document quietly pointing at the wrong line.
 
 A citation is checked when a backticked `path:line` (or `path:a,b` / `path:a-b`) sits next to a
 backticked fragment: either the fragment opens a parenthetical directly after the citation, the
-seam ledger's form, or the fragment ends within three characters before it, the form the format
-sections and the surface tables use. A citation with no such neighbour quotes nothing to check,
-so it is counted and reported as unanchored rather than assumed correct; citations into
-``tests/`` and ``docs/`` are the bulk of those, pointing at evidence rather than quoting a line.
+seam ledger's form, or the fragment ends within four characters before it, the form the format
+sections and the surface tables use (a comma-ended wrapped line plus a two-space indent is the
+longest such gap seen so far). A citation with no such neighbour quotes nothing to check, so it
+is counted and reported as unanchored rather than assumed correct; citations into ``tests/`` and
+``docs/`` are the bulk of those, pointing at evidence rather than quoting a line.
+
+A citation may name only a file's basename rather than its full repo-relative path; this
+resolves so long as exactly one tracked file carries that basename. When the tree carries the
+basename twice, the short form fails as ambiguous (`verdicts.py` under both `tcip_annotation` and
+`pipelines/feedback` is the standing example): write the fuller path to resolve it.
 
 The check is quote-tolerant, because a moved line is not a wrong statement:
 
@@ -19,11 +25,15 @@ The check is quote-tolerant, because a moved line is not a wrong statement:
   so only the number is stale. ``--fix`` rewrites the number in place.
 - failed: the fragment is nowhere in the file, or the path resolves to no file or to several.
   Only this needs a human, because the statement itself, not its line, has gone stale.
+- oversized span: a backtick-delimited span past ``SPAN_LENGTH_CAP`` characters, reported as its
+  own finding since one usually means an inline literal that should be split rather than quoted
+  whole.
 
-Exit 0 when nothing failed, 1 otherwise. Re-anchorable citations do not fail the run on their
-own; they are reported, and ``--strict`` promotes them to failures for a pass that means to
-leave the document exactly anchored. Defaults resolve ARCHITECTURE.md and the repo root relative
-to this script, so CI invokes it as `python scripts/check_architecture_citations.py`.
+Exit 0 when nothing failed, 1 otherwise (an oversized span counts as a failure). Re-anchorable
+citations do not fail the run on their own; they are reported, and ``--strict`` promotes them to
+failures for a pass that means to leave the document exactly anchored. Defaults resolve
+ARCHITECTURE.md and the repo root relative to this script, so CI invokes it as
+`python scripts/check_architecture_citations.py`.
 """
 
 from __future__ import annotations
@@ -42,15 +52,17 @@ SKIP_DIRS = frozenset(
      ".mypy_cache", ".ruff_cache", ".pytest_cache"}
 )
 
-#: Code spans in document order; empty ones and ones wrapping across a line both occur here, and
-#: skipping either desynchronizes every backtick pair after it, dropping citations from the check.
-SPAN_RE = re.compile(r"`([^`]{0,300}?)`", re.DOTALL)
+#: Code spans in document order, consecutive backticks always pairing so no repetition cap; a
+#: capped one once let a long span find no closing backtick and desynchronize every pair after.
+SPAN_RE = re.compile(r"`([^`]*)`", re.DOTALL)
+SPAN_LENGTH_CAP = 300
 CITATION_RE = re.compile(
     r"^(?P<path>[\w./@-]+\.(?:tsx|ts|py|json|ya?ml|cmd|css))"
     r":(?P<nums>\d+(?:\s*[,-]\s*\d+)*)$"
 )
-#: What may sit between a fragment and the citation it anchors: a comma, a table pipe, a newline.
-LEFT_GAP_RE = re.compile(r"^[\s,;(|]{0,3}$")
+#: Between a fragment and the citation it anchors: a comma, a table pipe, a newline, plus up to
+#: two more characters, so a comma-ended line still anchors a citation two spaces into the next.
+LEFT_GAP_RE = re.compile(r"^[\s,;(|]{0,4}$")
 OPENS_PARENTHETICAL_RE = re.compile(r"^\s*\(\s*$")
 DEF_RE = re.compile(r"^(?:async\s+)?(?:def|class)\s+(\w+)")
 ASSIGN_RE = re.compile(r"^([\w.]+)\s*[:=][^=]")
@@ -189,6 +201,12 @@ def check(doc_path: Path, repo_root: Path) -> tuple[list[dict], int]:
     unanchored = 0
     file_lines: dict[Path, list[str]] = {}
 
+    for start, _end, span_text in spans:
+        if len(span_text) > SPAN_LENGTH_CAP:
+            findings.append({
+                "status": "oversized_span", "doc_line": doc_line_of(start), "length": len(span_text),
+            })
+
     for i, (start, _end, span_text) in enumerate(spans):
         m = CITATION_RE.match(span_text)
         if not m:
@@ -273,12 +291,16 @@ def main() -> int:
     repo_root = Path(args.repo_root)
     findings, unanchored = check(doc_path, repo_root)
 
+    oversized = [f for f in findings if f["status"] == "oversized_span"]
     verified = [f for f in findings if f["status"] == "verified"]
     moved = [f for f in findings if f["status"] == "re-anchorable"]
     failed = [f for f in findings if f["status"] == "failed"]
 
-    print(f"checked {len(findings)} anchored citations "
+    print(f"checked {len(verified) + len(moved) + len(failed)} anchored citations "
           f"({unanchored} carry no quoted fragment and are not checked)")
+    for f in oversized:
+        print(f"OVERSIZED SPAN ARCHITECTURE.md:{f['doc_line']}  {f['length']} characters "
+              f"(over the {SPAN_LENGTH_CAP}-character cap; split it)")
     for f in moved:
         print(f"RE-ANCHORABLE ARCHITECTURE.md:{f['doc_line']}  {f['cite']}")
         print(f"  {f['fragment']!r} is not on the cited line; found at "
@@ -290,8 +312,9 @@ def main() -> int:
     if args.fix and moved:
         print(f"\n--fix rewrote {apply_fix(doc_path, findings)} citation(s)")
 
-    print(f"verified {len(verified)}, re-anchorable {len(moved)}, failed {len(failed)}")
-    total = len(failed) + (len(moved) if args.strict else 0)
+    print(f"verified {len(verified)}, re-anchorable {len(moved)}, failed {len(failed)}, "
+          f"oversized spans {len(oversized)}")
+    total = len(failed) + len(oversized) + (len(moved) if args.strict else 0)
     print(f"{'FAIL' if total else 'PASS'}: {total} problem(s)")
     return 1 if total else 0
 
