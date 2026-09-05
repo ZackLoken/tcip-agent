@@ -147,14 +147,14 @@ describe("TrainingTab run list", () => {
     ).toBeInTheDocument();
   });
 
-  it("names the row's own select control with the id and status alone", async () => {
+  it("names the row's own select control with the id, its experiment id and status", async () => {
     vi.spyOn(trainingApi, "listRuns").mockResolvedValue({
       runs: [run({ run_id: "train-named-row", status: "running", experiment_id: "exp-other" })],
     });
 
     render(<TrainingTab />);
     expect(
-      await screen.findByRole("button", { name: "train-named-row running" }),
+      await screen.findByRole("button", { name: "train-named-row · exp-other running" }),
     ).toBeInTheDocument();
   });
 
@@ -237,11 +237,19 @@ describe("TrainingTab run list", () => {
 });
 
 describe("TrainingTab run origin mark", () => {
+  const ORIGIN_MARK_EXPLANATION =
+    "This app was restarted or another launcher started this run; this app process did not start it.";
+
   it("states the run's origin on a running and a terminal status, visibly and in the accessible name", async () => {
     vi.spyOn(trainingApi, "listRuns").mockResolvedValue({
       runs: [
         run({ run_id: "train-live-other", status: "running", external: true }),
-        run({ run_id: "train-done-other", status: "completed", external: true }),
+        run({
+          run_id: "train-done-other",
+          status: "completed",
+          external: true,
+          experiment_id: "exp-done-other",
+        }),
       ],
     });
 
@@ -249,12 +257,31 @@ describe("TrainingTab run origin mark", () => {
     await screen.findByText("train-live-other");
 
     expect(
-      screen.getByRole("button", { name: "train-live-other running, other process" }),
+      screen.getByRole("button", { name: "train-live-other running, started elsewhere" }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: "train-done-other completed, other process" }),
+      screen.getByRole("button", {
+        name: "train-done-other · exp-done-other completed, started elsewhere",
+      }),
     ).toBeInTheDocument();
-    expect(screen.getAllByTitle("This backend process did not launch this run.")).toHaveLength(2);
+    expect(screen.getAllByTitle(ORIGIN_MARK_EXPLANATION)).toHaveLength(2);
+  });
+
+  it("makes the origin mark's explanation reachable by assistive technology, not only a pointer title", async () => {
+    vi.spyOn(trainingApi, "listRuns").mockResolvedValue({
+      runs: [run({ run_id: "train-live-other", status: "running", external: true })],
+    });
+
+    render(<TrainingTab />);
+    const button = await screen.findByRole("button", {
+      name: "train-live-other running, started elsewhere",
+    });
+
+    const describedBy = button.getAttribute("aria-describedby");
+    expect(describedBy).toBeTruthy();
+    expect(document.getElementById(describedBy as string)).toHaveTextContent(
+      ORIGIN_MARK_EXPLANATION,
+    );
   });
 });
 

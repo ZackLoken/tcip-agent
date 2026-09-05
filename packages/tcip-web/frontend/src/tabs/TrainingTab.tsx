@@ -44,16 +44,26 @@ function messageOf(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
-/** The row's own select control name: id, status and, for a run this backend process did not
- * launch, the same origin mark the visible row carries, with the best value and its metric
- * appended exactly as the record carries them when both are present. */
+/** The row's own select control name: id, its experiment id when the two differ (exactly as the
+ * visible row states it), status and, for a run this backend process did not launch, the same
+ * origin mark the visible row carries, with the best value and its metric appended exactly as
+ * the record carries them when both are present. */
 function runRowLabel(run: TrainingRunSummary): string {
-  const base = `${run.run_id} ${run.status}${run.external ? ", other process" : ""}`;
+  const idPart =
+    run.experiment_id && run.experiment_id !== run.run_id
+      ? `${run.run_id} · ${run.experiment_id}`
+      : run.run_id;
+  const base = `${idPart} ${run.status}${run.external ? ", started elsewhere" : ""}`;
   if (run.best_metric === undefined || run.best_metric === null || !run.best_metric_name) {
     return base;
   }
   return `${base}, best ${run.best_metric_name} ${run.best_metric}`;
 }
+
+/** The sentence a run's origin mark states, in both the pointer's title and the accessible
+ * description: what the record can answer for (this process did not launch it), never who did. */
+const ORIGIN_MARK_EXPLANATION =
+  "This app was restarted or another launcher started this run; this app process did not start it.";
 
 const NO_OTHER_PARTITION =
   "this listing found no other recorded partition the config can bind to; the agent can draw one.";
@@ -613,6 +623,7 @@ export function TrainingTab() {
                     type="button"
                     aria-pressed={selectedRun === r.run_id}
                     aria-label={runRowLabel(r)}
+                    aria-describedby={r.external ? `origin-mark-${r.run_id}` : undefined}
                     className="flex-1 text-left"
                     onClick={() => setSelectedRun(r.run_id)}
                   >
@@ -626,9 +637,12 @@ export function TrainingTab() {
                       <span>
                         {r.status}
                         {r.external && (
-                          <span title="This backend process did not launch this run.">
-                            {" · other process"}
-                          </span>
+                          <>
+                            <span title={ORIGIN_MARK_EXPLANATION}>{" · started elsewhere"}</span>
+                            <span id={`origin-mark-${r.run_id}`} className="sr-only">
+                              {ORIGIN_MARK_EXPLANATION}
+                            </span>
+                          </>
                         )}
                       </span>
                       {r.best_metric !== undefined &&
