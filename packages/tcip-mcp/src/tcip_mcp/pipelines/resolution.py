@@ -234,6 +234,9 @@ class ResolvedParam:
         """
         if not self.requires_validation:
             return True
+        assert self.validation_kind is not None, (
+            "requires_validation=True guarantees a real validation_kind, enforced in __post_init__"
+        )
         return self.validated_against in accepted_references(self.validation_kind)
 
     @property
@@ -760,6 +763,8 @@ def scope_consistent_with_map(
     if attribute is None:
         if keyed_by_subject_alone:
             return None
+        # Reached only when keyed_by_subject_alone is False, which is impossible for id_map=None.
+        assert id_map is not None
         return (
             f"the pair ({subject!r}, None) claims a detector bucket, but its recorded id_map is "
             f"keyed by {sorted(id_map)}, not just {subject!r}: this looks like a classified bucket"
@@ -1170,7 +1175,7 @@ def stamp_names_raster(sidecar: dict | None) -> bool:
     ``calibration_tools.calibrate_count_operating_point``, rather than each spelling the same
     ``raster_path is not None`` check on its own.
     """
-    return bool(sidecar) and sidecar.get("raster_path") is not None
+    return sidecar is not None and sidecar.get("raster_path") is not None
 
 
 def _sidecar_reference(
@@ -1562,7 +1567,7 @@ def open_validation(
         )
     spec = resolvers[name]
     inputs = dict(evidence.get("inputs") or {})
-    owned = {spec.trait_param, spec.experiment_param} & set(inputs)
+    owned = {p for p in (spec.trait_param, spec.experiment_param) if p is not None} & set(inputs)
     if owned:
         raise ValueError(
             f"evidence inputs for {document} restate {', '.join(sorted(owned))}: the trait and the "
@@ -1939,9 +1944,13 @@ def verify_stamp_binding(
                 f"verify_stamp_binding needs images_dir to recompute the imagery digest a "
                 f"resolve_scale claim at {bucket!r} covers."
             )
-        recomputed = (bucket_content_digest(resolved, memo=digest_memo)
-                     if document == "operating_point"
-                     else bucket_stems_digest(resolved, images_dir=images_dir))
+        if document == "operating_point":
+            recomputed = bucket_content_digest(resolved, memo=digest_memo)
+        else:
+            # document == "resolve_scale" here; the check above already raised if images_dir
+            # were None for that document.
+            assert images_dir is not None
+            recomputed = bucket_stems_digest(resolved, images_dir=images_dir)
         if recomputed != covered[key]:
             what = "prediction files" if document == "operating_point" else "image set"
             return floored(
@@ -2770,10 +2779,13 @@ def reconcile_scale_validity(
         sc = read_scale_sidecar(d)
         ref = _sidecar_reference(sc, param_key=param_key, validation_kind=validation_kind)
         if ref in accepted and capture_id is not None:
+            # ref clears only when _sidecar_reference found sc truthy and validated.
+            assert sc is not None
             recorded = ((sc.get("operating_point") or {}).get(param_key) or {}).get("capture_id")
             if recorded is not None and recorded != capture_id:
                 ref = VALIDATED_FALSE
         if ref in accepted:
+            assert sc is not None
             stamped_unit = ((sc.get("operating_point") or {}).get(param_key) or {}).get("unit")
             if stamped_unit != unit:
                 ref = VALIDATED_FALSE
