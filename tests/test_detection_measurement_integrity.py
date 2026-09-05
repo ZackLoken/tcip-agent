@@ -493,12 +493,11 @@ def test_gate_derives_tile_geometry_from_checkpoint(tmp_path):
     assert r["overlap"] == pytest.approx(0.1) and r["overlap_source"] == "derived"
 
 
-def test_run_inference_no_registry_degrades_honestly_not_a_crash(tmp_path, monkeypatch):
-    """An attribute-scoped run against a dataset with no classes.json
-    must not crash: write_predictions_json already documents id_map=None as an accepted, honest
-    degraded fallback ("the raw 0-indexed id is used as the name... never a re-derivation"). The
-    precondition check guarding this path must admit it, not turn it into a hard failure that
-    discards completed prediction work."""
+def test_run_inference_no_registry_refuses_naming_write_class_map(tmp_path, monkeypatch):
+    """An attribute-scoped run against a dataset with no classes.json refuses before the pass
+    runs, naming write_class_map as the remedy: a classified run with an unresolvable id_map can
+    no longer fall back to a raw-index name, since a value outside any vocabulary is worse than a
+    refusal."""
     import tcip_mcp.pipelines.inference.predictor as predictor_mod
     from tests._verified_checkpoint_fixtures import run_inference_verified as run_inference
 
@@ -520,8 +519,8 @@ def test_run_inference_no_registry_degrades_honestly_not_a_crash(tmp_path, monke
     ckpt.write_bytes(b"x")
 
     r = run_inference(str(ckpt), images_dir=str(images_dir), device="cpu")
-    assert "error" not in r
-    assert r["image_count"] == 1  # the completed detection work was not discarded
+    assert "error" in r
+    assert "write_class_map" in r["error"]
 
 
 def test_run_inference_corrupted_registry_still_propagates(tmp_path, monkeypatch):
