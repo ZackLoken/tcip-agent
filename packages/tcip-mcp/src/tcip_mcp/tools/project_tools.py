@@ -993,7 +993,11 @@ def import_project(bundle_path: str, destination: str) -> dict:
     always loose files at this point regardless of which backend the process is bound to, since
     adoption has not run yet): a bare top-level array wraps into the entries mapping and every
     entry's ``checkpoint_path`` is respelled relative to the staging tree, so an archive made
-    before this respelling existed still lands with its weights loadable at the new location. A
+    before this respelling existed still lands with its weights loadable at the new location.
+    Reading the raw bytes directly, bypassing the seam's own schema_version ceiling check, this
+    same conform also accepts an index still carrying a stray ``schema_version: 2`` from before
+    this store's version-1 reset, which the seam's own entry point refuses outright: this import
+    door is the one place a dev-era archive carrying that stray value still lands readable. A
     conform refusal (an index this reader does not recognize at all) refuses the whole import
     before anything is accounted for or moved, leaving the destination untouched.
 
