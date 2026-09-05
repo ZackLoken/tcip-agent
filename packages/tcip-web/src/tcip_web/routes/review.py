@@ -344,6 +344,8 @@ def _compute_matches(
     if attribute is None:
         return compute_matches(gt, preds, iou_threshold, conf_threshold)
     _check_classification_scope(subject, attribute)
+    # _check_classification_scope already refused an attribute with no subject
+    assert subject is not None
     return compute_classified_trait_matches(
         gt, preds, subject=subject, attribute=attribute, vocabulary=vocabulary or set(),
         iou_threshold=iou_threshold, conf_threshold=conf_threshold,
