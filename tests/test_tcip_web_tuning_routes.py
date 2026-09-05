@@ -226,6 +226,32 @@ def test_a_live_sweep_is_not_listed_twice_by_its_own_manifest(client, hpo_root, 
     assert "platform_root" in matching[0]  # the live row won, not the disk-only one
 
 
+def test_a_live_sweeps_manifest_is_read_only_once_by_one_listing(
+    client, hpo_root, monkeypatch,
+) -> None:
+    """The disk scan must skip a sweep id a live registry entry already covers: ``_summary``
+    already reads that sweep's manifest fresh, so a second read in ``_disk_sweeps`` only to be
+    discarded by the live/disk merge is work the listing does not need."""
+    from tcip_web.routes import tuning
+
+    _write_sweep(hpo_root, "hpo_dup00002", status="completed")
+    monkeypatch.setitem(tuning._registry.jobs, "hpo_dup00002",
+                        tuning.HPOJob(sweep_id="hpo_dup00002", status="running"))
+
+    reads: list[str] = []
+    original_read_manifest = tuning._read_manifest
+
+    def _counting_read_manifest(sweep_id, **kwargs):
+        reads.append(sweep_id)
+        return original_read_manifest(sweep_id, **kwargs)
+
+    monkeypatch.setattr(tuning, "_read_manifest", _counting_read_manifest)
+
+    client.get("/api/tuning/sweeps")
+
+    assert reads.count("hpo_dup00002") == 1
+
+
 def test_get_sweep_reads_the_manifest_when_the_sweep_is_not_in_memory(client, hpo_root) -> None:
     _write_sweep(hpo_root, "hpo_done0001", status="completed",
                  result={"best_params": {"lr": 0.01}, "best_value": 0.2})
