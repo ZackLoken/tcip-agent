@@ -26,18 +26,27 @@ are named rather than silently conformed:
   append-only, and a line predating the reset carries the fact it was written under, not a mistake
   to correct. This script only counts and names how many lines of each ``read_log`` reports
   version-refused (a line the ceiling drop puts out of this reader's reach; it never reaches
-  ``page.records`` for its own field to be re-inspected here); dev-era logs are cleared by a
-  separate step, outside this script.
+  ``page.records`` for its own field to be re-inspected here). ``audit_log``'s dev-era lines are
+  cleared by ``scripts/clear_dev_history.py``; ``experiment_validations`` is not among the four
+  stores that script clears, and this script never rewrites it either, so a refused line there
+  stays refused for good: a stamp naming it cannot be answered for through this ceiling, and the
+  remedy is the one an unanswered claim always has, re-earn it through that document's own
+  calibration door (``verify_stamp_binding`` already floors an unanswerable claim with that
+  remedy).
 - A ``confidence_sweep`` record's own key is a content digest over its body
   (``tcip_mcp.tools.inference_tools.calibration_curve_identity``). Stripping ``schema_version``
-  changes the digest a fresh read recomputes for it, so the conformed record no longer matches the
-  key it stays filed under. This script still conforms it, per its own governing rule, and names
-  every such record as a validated stamp whose claim floors: any bucket's stored
-  ``calibration_evidence_key`` naming this record's old digest will not resolve the rewritten body
-  back to that same digest, so the count gate's own tamper check
-  (``inference_tools._calibration_evidence``) refuses it on the next read. Neither the operating-
-  point-family sidecars nor the registry index carry a content-derived key, so nothing else this
-  script touches floors a claim this way.
+  changes the digest a fresh read recomputes for it, so a record whose filename already equalled
+  its own body's digest before the strip no longer matches the key it stays filed under once this
+  script conforms it: an orphan a future identity check would reject. Nothing in the platform
+  reads a stored curve back by that identity today: ``calibration_evidence_key`` lives only in a
+  run's own in-memory response (``resolution.STAMP_KEYS``/``STAMP_EXTENSION_KEYS`` carry no such
+  field, and no sidecar or bucket document persists it), so this conform floors no claim actually
+  recorded anywhere; it still conforms the record, per its own governing rule, and names the
+  outcome only when the filename genuinely matched the body's digest before the strip. A record
+  whose filename was never its own body's digest carries no such note: that mismatch predates
+  this conform and is not one it caused. Neither the operating-point-family sidecars nor the
+  registry index carry a content-derived key, so nothing else this script touches raises this
+  question at all.
 
 ``--plan`` previews every outcome without writing anything.
 
@@ -103,49 +112,50 @@ def _raw_bytes(key: Key) -> bytes | None:
 
 
 def _conform_poisoned_record(
-    key: Key, *, label: str, plan: bool, note_fn: Callable[[dict], str] | None = None,
-) -> str:
+    key: Key, *, label: str, plan: bool, note_fn: Callable[[dict, dict], str] | None = None,
+) -> tuple[str, bool]:
     """A document the seam refuses outright on read (its own schema_version sits above the new
     ceiling): decode its raw bytes directly, strip a schema_version of exactly ``2``, and write
     the stripped body back through the seam's own compare-and-set, keyed off the raw bytes' own
     content hash (the same ``Version`` every backend computes) so a concurrent write to the same
     poisoned record is still detected rather than silently lost. A version other than ``2`` is
-    named, never guessed at.
+    named, never guessed at. Returns ``(line, refused)``.
 
-    ``note_fn``, when given, is called with the stripped body and appends its own text to the
-    outcome line (both the ``would drop`` preview and the actual conform), for a caller whose
-    store carries a consequence beyond the field drop itself (a content-derived key that no
-    longer matches once the field is gone).
+    ``note_fn``, when given, is called with the decoded (still-poisoned) body and the stripped
+    body, and appends its own text to the outcome line (both the ``would drop`` preview and the
+    actual conform), for a caller whose store carries a consequence beyond the field drop itself
+    that depends on how the record was keyed before the strip.
     """
     raw_bytes = _raw_bytes(key)
     if raw_bytes is None:
-        return f"{label}: no schema_version 2 field, unchanged"
+        return f"{label}: no schema_version 2 field, unchanged", False
     descriptor = ts.get_descriptor(key.store)
     assert descriptor.codec is not None, f"{key.store} is a record store; every record declares a codec"
     try:
         decoded = descriptor.codec.decode(raw_bytes)
     except Exception as exc:
-        return f"{label}: refused, will not decode even bypassing the version check ({exc})"
+        return f"{label}: refused, will not decode even bypassing the version check ({exc})", True
     if not isinstance(decoded, dict):
-        return f"{label}: refused, above the ceiling and not a mapping to strip a field from"
+        return f"{label}: refused, above the ceiling and not a mapping to strip a field from", True
     version = decoded.get("schema_version")
     if version != 2:
         return (f"{label}: refused, schema_version={version!r} is above the ceiling and not "
-                "the 2 this reset conforms; left as stored")
+                "the 2 this reset conforms; left as stored"), True
     stripped = {k: v for k, v in decoded.items() if k != "schema_version"}
-    note = note_fn(stripped) if note_fn is not None else ""
+    note = note_fn(decoded, stripped) if note_fn is not None else ""
     if plan:
-        return f"{label}: would drop schema_version{note}"
+        return f"{label}: would drop schema_version{note}", False
     expect = ts.Version(hashlib.sha256(raw_bytes).hexdigest())
     try:
         ts.replace(key, stripped, expect=expect)
     except ts.VersionConflict:
-        return f"{label}: refused, changed under the lock before this could be conformed; re-run"
-    return f"{label}: dropped schema_version{note}"
+        return f"{label}: refused, changed under the lock before this could be conformed; re-run", True
+    return f"{label}: dropped schema_version{note}", False
 
 
-def _conform_record(key: Key, *, label: str, plan: bool) -> str:
+def _conform_record(key: Key, *, label: str, plan: bool) -> tuple[str, bool]:
     """Strip a stray ``schema_version: 2`` from one record, reporting the outcome by ``label``.
+    Returns ``(line, refused)``.
 
     An ordinary read that succeeds never carries the field: the seam's own read-side check
     already refuses anything above the ceiling, so a document actually stamped ``2`` is only
@@ -156,17 +166,31 @@ def _conform_record(key: Key, *, label: str, plan: bool) -> str:
     except ts.SchemaVersionRefused:
         return _conform_poisoned_record(key, label=label, plan=plan)
     except StoreError as exc:
-        return f"{label}: refused, {exc}"
-    return f"{label}: no schema_version 2 field, unchanged"
+        return f"{label}: refused, {exc}", True
+    return f"{label}: no schema_version 2 field, unchanged", False
 
 
-def _conform_registry_index(root: Path, *, plan: bool) -> str:
-    from tcip_mcp.model_registry import registry_index_key
+def _conform_registry_index(root: Path, *, plan: bool) -> tuple[str, bool]:
+    """The registry index's own outcome, routed through the real reader first: a bare top-level
+    array (the pre-family shape) is not a document :func:`_conform_record`'s generic ``ts.read``
+    would ever flag, since it carries no ``schema_version`` key to be above the ceiling on, so
+    reporting it "unchanged" would leave a document ``read_registry_index`` refuses outright
+    looking clean. Routing every read through the real reader first catches that case as the
+    refusal it is, naming ``scripts/conform_model_registry_paths.py`` as this script does not
+    conform that shape. Any other read failure (a stray schema_version 2 included) falls through
+    to :func:`_conform_record` below, which re-reads and reports it properly."""
+    from tcip_mcp.model_registry import RegistryVersionRefused, read_registry_index, registry_index_key
 
+    try:
+        read_registry_index(root)
+    except RegistryVersionRefused as exc:
+        return f"model registry index: refused, {exc}", True
+    except StoreError:
+        pass
     return _conform_record(registry_index_key(root), label="model registry index", plan=plan)
 
 
-def _conform_sidecars(root: Path, *, plan: bool) -> list[str]:
+def _conform_sidecars(root: Path, *, plan: bool) -> list[tuple[str, bool]]:
     from tcip_mcp.dataset_layout import prediction_bucket_dirs
     from tcip_mcp.pipelines.resolution import sidecar_key
     from tcip_mcp.tools.project_tools import dataset_entry_path, read_datasets
@@ -174,9 +198,9 @@ def _conform_sidecars(root: Path, *, plan: bool) -> list[str]:
     try:
         datasets = read_datasets(root)
     except StoreError as exc:
-        return [f"dataset registry: refused, {exc}"]
+        return [(f"dataset registry: refused, {exc}", True)]
 
-    lines: list[str] = []
+    lines: list[tuple[str, bool]] = []
     for entry in datasets:
         dataset_root = dataset_entry_path(root, entry)
         for pred_dir in prediction_bucket_dirs(dataset_root):
@@ -186,30 +210,38 @@ def _conform_sidecars(root: Path, *, plan: bool) -> list[str]:
     return lines
 
 
-def _confidence_sweep_floor_note(digest: str, calibration_curve_identity) -> Callable[[dict], str]:
-    """A note naming the floor a content-derived key suffers once its stamped body changes."""
+def _confidence_sweep_floor_note(digest: str, calibration_curve_identity) -> Callable[[dict, dict], str]:
+    """A note naming the orphaned filename a content-derived key suffers once its stamped body
+    changes, fired only when the record's filename genuinely was that digest before the strip: a
+    filename that never matched its own body's digest is a pre-existing fact this conform did not
+    cause, and carries no note."""
 
-    def note(stripped: dict) -> str:
+    def note(original: dict, stripped: dict) -> str:
+        matched_before = calibration_curve_identity(original) == digest
+        if not matched_before:
+            return ""
         recomputed = calibration_curve_identity(stripped)
         if recomputed == digest:
             return ""
         return (
             f"; its own key is a content digest over its body, so it no longer matches digest "
-            f"{digest!r} once schema_version is gone (recomputes to {recomputed!r}): any bucket "
-            "naming this record as its calibration_evidence_key floors on its next read"
+            f"{digest!r} once schema_version is gone (recomputes to {recomputed!r}): the record is "
+            "now an orphan under this filename. Nothing in the platform reads a stored curve back "
+            "by this identity today (calibration_evidence_key lives only in a run's own in-memory "
+            "response), so no recorded claim floors"
         )
 
     return note
 
 
-def _conform_confidence_sweep(root: Path, *, plan: bool) -> list[str]:
+def _conform_confidence_sweep(root: Path, *, plan: bool) -> list[tuple[str, bool]]:
     from tcip_mcp.tools.inference_tools import (
         CONFIDENCE_SWEEP_STORE, _CalibrationCurveLocator, calibration_curve_identity,
     )
 
     locator = _CalibrationCurveLocator()
     artifacts_dir = root / ".tcip" / "artifacts"
-    lines: list[str] = []
+    lines: list[tuple[str, bool]] = []
     if not artifacts_dir.is_dir():
         return lines
     for path in sorted(artifacts_dir.iterdir()):
@@ -230,15 +262,17 @@ def _conform_confidence_sweep(root: Path, *, plan: bool) -> list[str]:
                 note_fn=_confidence_sweep_floor_note(digest, calibration_curve_identity),
             ))
         except StoreError as exc:
-            lines.append(f"{label}: refused, {exc}")
+            lines.append((f"{label}: refused, {exc}", True))
         else:
-            lines.append(f"{label}: no schema_version 2 field, unchanged")
+            lines.append((f"{label}: no schema_version 2 field, unchanged", False))
     return lines
 
 
 def _name_log_lines(root: Path) -> list[str]:
     """Count, never touch, every ``audit_log``/``experiment_validations`` line still carrying
-    ``schema_version: 2``: both are append-only, so a stray line is named, not rewritten."""
+    ``schema_version: 2``: both are append-only, so a stray line is named, not rewritten. Never
+    counted toward ``check_root``'s own refusal: a version-refused log line is a fact about the
+    root's history, not a target this script failed to conform."""
     from tcip_mcp.audit import AUDIT_LOG_STORE, audit_log_key
     from tcip_mcp.experiments import EXPERIMENT_VALIDATIONS_STORE, experiments_scope
 
@@ -253,8 +287,8 @@ def _name_log_lines(root: Path) -> list[str]:
         count = len(page.version_refused)
         lines.append(
             f"{AUDIT_LOG_STORE}: {count} line(s) refuse at a schema_version above the ceiling "
-            "this reader knows, left untouched (append-only; dev-era logs are cleared by a "
-            "separate step)" if count else
+            "this reader knows, left untouched (append-only; scripts/clear_dev_history.py is "
+            "the separate step that clears dev-era audit_log lines)" if count else
             f"{AUDIT_LOG_STORE}: no version-refused lines"
         )
 
@@ -272,31 +306,41 @@ def _name_log_lines(root: Path) -> list[str]:
         if count:
             lines.append(
                 f"{EXPERIMENT_VALIDATIONS_STORE} {experiment_id}: {count} line(s) refuse at a "
-                "schema_version above the ceiling this reader knows, left untouched "
-                "(append-only; dev-era logs are cleared by a separate step)"
+                "schema_version above the ceiling this reader knows, left untouched: append-only, "
+                "and this store is neither cleared nor rewritten by scripts/clear_dev_history.py "
+                "or anything else. A stamp naming a refused row cannot be answered for through "
+                "this ceiling; the remedy is the one an unanswered claim always has, re-earn it "
+                "through this document's own calibration door (verify_stamp_binding already "
+                "floors an unanswerable claim with that remedy)"
             )
     return lines
 
 
 def check_root(root: Path, *, plan: bool = False) -> tuple[list[str], bool]:
-    """Every outcome line for ``root``, and whether any target refused outright."""
+    """Every outcome line for ``root``, and whether any target refused outright.
+
+    Every helper below states its own refusal as an explicit boolean rather than leaving this
+    function to guess one from the word "refused" appearing in prose: a bucket path or a stray
+    filename that happens to contain that word must never flip the exit code, and a rewording of
+    any outcome line must never change it either.
+    """
     if not (root / ".tcip").is_dir():
         return ["refused, no .tcip directory found; not a project root"], True
 
     lines: list[str] = []
     refused = False
 
-    registry_line = _conform_registry_index(root, plan=plan)
+    registry_line, registry_refused = _conform_registry_index(root, plan=plan)
     lines.append(registry_line)
-    refused = refused or "refused" in registry_line
+    refused = refused or registry_refused
 
-    sidecar_lines = _conform_sidecars(root, plan=plan)
-    lines.extend(sidecar_lines)
-    refused = refused or any("refused" in line for line in sidecar_lines)
+    for line, line_refused in _conform_sidecars(root, plan=plan):
+        lines.append(line)
+        refused = refused or line_refused
 
-    sweep_lines = _conform_confidence_sweep(root, plan=plan)
-    lines.extend(sweep_lines)
-    refused = refused or any("refused" in line for line in sweep_lines)
+    for line, line_refused in _conform_confidence_sweep(root, plan=plan):
+        lines.append(line)
+        refused = refused or line_refused
 
     lines.extend(_name_log_lines(root))
     return lines, refused
