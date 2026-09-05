@@ -29,6 +29,7 @@ import sys
 import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import TypedDict
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _PKG_SRC = [_REPO_ROOT / "packages" / pkg / "src" for pkg in
@@ -52,8 +53,15 @@ from tcip_mcp.tools.phenology_tools import (  # noqa: E402
 from tcip_web.app import app  # noqa: E402
 from tcip_web.state import store  # noqa: E402
 
+class _Plant(TypedDict):
+    plot: str
+    accession: str
+    lat: float
+    lon: float
+
+
 # Two plants ~3 m apart in one row (1 deg lon ≈ 81 km at 43°N, so 3.7e-5 deg ≈ 3 m).
-PLANTS = [
+PLANTS: list[_Plant] = [
     {"plot": "P1", "accession": "acc-A", "lat": 43.19670, "lon": -90.058000},
     {"plot": "P2", "accession": "acc-B", "lat": 43.19670, "lon": -90.058037},
 ]
