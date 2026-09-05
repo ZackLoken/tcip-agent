@@ -25,22 +25,22 @@ Sections:
 
 ## Module ownership and dependency graph
 
-Source: the module inventory `scripts/build_module_inventory.py` produces, run at HEAD 32bc6c58.
+Source: the module inventory `scripts/build_module_inventory.py` produces, run at HEAD 39063f68.
 Every count in this section is read from that regenerated inventory, not from any earlier
 snapshot; `scripts/check_architecture_doc.py --inventory-json <path>` re-runs the same generator
 and cross-checks its counts against this document's tables, this table's own module and line
 totals included.
 
-HEAD 32bc6c58 has 449 modules across the six scanned roots (138048 total lines):
+HEAD 39063f68 has 449 modules across the six scanned roots (138265 total lines):
 
 | Package (root) | Modules | Lines |
 |---|---|---|
-| tcip-mcp | 114 | 57128 |
+| tcip-mcp | 114 | 57186 |
 | tcip-annotation | 12 | 4299 |
 | tcip-web | 36 | 12894 |
 | tcip-store | 13 | 5138 |
 | tcip-web-frontend | 209 | 46200 |
-| scripts | 65 | 12389 |
+| scripts | 65 | 12548 |
 
 `tcip-mcp`, `tcip-annotation`, `tcip-web`, and `tcip-store` are the four Python packages under
 `packages/`; `scripts` is `scripts/` at the repo root (not an installed package);
@@ -1758,8 +1758,8 @@ same conform on the staging tree before accounting for it and before the rename.
 
 Readers: `read_registry_index`, `model_registry.py:138`, the read path for anything outside the
 module (`scripts/doctor.py:237`, `"metrics_source"`), and the entry-by-entry accessors built on
-it: `ModelRegistry.list_models`, `model_registry.py:865`; `get_model`, `model_registry.py:876`;
-`best_model`, `model_registry.py:883`; `verify_model`, `model_registry.py:839`. `best_model` takes `metric_key` and `higher_is_better` as required
+it: `ModelRegistry.list_models`, `model_registry.py:901`; `get_model`, `model_registry.py:912`;
+`best_model`, `model_registry.py:919`; `verify_model`, `model_registry.py:875`. `best_model` takes `metric_key` and `higher_is_better` as required
 keywords, no default and no name heuristic, and by default ranks only entries whose
 `metrics_source` is `"trainer"` (`include_unverified=True` also ranks the rest). The
 `rank_registered_models` tool (`tools/model_tools.py:123`) resolves `higher_is_better` from
