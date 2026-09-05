@@ -180,6 +180,7 @@ verdict store it read are recorded.
 
 def _attribute_negatives(
     negative_verdicts: dict[str, dict], neg_subject: str | None, verdict_subjects: set[str],
+    *, classified: bool = False,
 ) -> tuple[dict[str, dict[str, str]], list[dict]]:
     """Split rejected-only images into the confirmations to write and the ones nobody may claim.
 
@@ -187,6 +188,13 @@ def _attribute_negatives(
     subject. Every other one is returned in the second list with what its rejections did answer
     for, so the caller can say which images were left unconfirmed and why instead of keying them
     under a subject no verdict on them mentions.
+
+    Under a classified scope (``classified=True``), ``rejected_subjects`` are the reviewed
+    bucket's attribute values, never object classes, so membership in them is never consulted
+    for a confirmation: an attribute value that happens to be named like the object class is a
+    vocabulary coincidence, not a claim the object is absent, and every rejected-only image lands
+    unconfirmed with that reason stated explicitly, rather than confirming by accident when no
+    value collides with the subject's name.
 
     A confirmation is attributed to the reviewer whose rejections established it when the image's
     rejections name exactly one, and to :data:`MATERIALIZER_IDENTITY` when they name none or
@@ -196,13 +204,19 @@ def _attribute_negatives(
     unconfirmed: list[dict] = []
     for name, info in negative_verdicts.items():
         rejected_subjects = info["rejected_subjects"]
-        if neg_subject and neg_subject in rejected_subjects:
+        if not classified and neg_subject and neg_subject in rejected_subjects:
             reviewers = info["reviewers"]
             recorded_by = (user_identity(reviewers[0]) if len(reviewers) == 1
                            else MATERIALIZER_IDENTITY)
             confirmed.update(status_records({name: CONFIRMED_NEGATIVE}, recorded_by=recorded_by))
             continue
-        if neg_subject:
+        if classified:
+            reason = (
+                f"its rejections name value(s) {rejected_subjects or 'none'} under a classified "
+                "scope: a rejected value call is the model naming the wrong state, never that "
+                "the object itself is absent"
+            )
+        elif neg_subject:
             reason = (f"its rejections answer for {rejected_subjects or 'no subject'}, not for "
                       f"{neg_subject!r}, the subject this materialization keys negatives under")
         else:
@@ -367,7 +381,9 @@ def materialize_dataset(
         })
 
     # Training trusts a human-confirmed negative, never a bare empty file (a label may be emptied mid-work).
-    negatives, unconfirmed = _attribute_negatives(negative_verdicts, neg_subject, verdict_subjects)
+    negatives, unconfirmed = _attribute_negatives(
+        negative_verdicts, neg_subject, verdict_subjects,
+        classified=scope is not None and scope.classified)
     counts["unconfirmed_negative"] = len(unconfirmed)
     if negatives:
         from tcip_mcp.dataset_layout import replace_image_status_store, status_bucket
