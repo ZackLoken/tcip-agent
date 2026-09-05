@@ -239,12 +239,19 @@ def test_accept_on_the_paired_fp_replaces_the_value_and_keeps_geometry_and_autho
 
 
 def test_action_refusal_leaves_the_label_file_unchanged(client: TestClient, tmp_path: Path) -> None:
-    """The post-mutation recompute runs over the in-memory documents before any write: a
-    prediction value outside the bucket's own vocabulary refuses the whole request, and the GT
-    file on disk is exactly what it was before the call, never a write behind the 400."""
+    """The staged prediction is a pre-conform record, its ``subject`` the value rather than this
+    bucket's object class. The pre-mutation checks only test the accepted value against the
+    vocabulary, so an in-vocabulary ``class_name`` admits it and the mutation appends a GT record;
+    the post-mutation recompute then holds every prediction record positively to the object class
+    and refuses this one. The GT file on disk is exactly what it was before the call, never a
+    write behind the 400."""
     dataset_root = tmp_path / "data"
     img = _image(dataset_root)
-    staged = _stage_classified_prediction(dataset_root, value="unknown-value")
+    staged = stage_prediction_shapes(
+        str(dataset_root), "classifier", DATE, STEM,
+        annotations=[Annotation(subject="healthy", geometry=BBox(*BOX), score=0.9)],
+        img_w=IMG_W, img_h=IMG_H,
+    )
     bucket = Path(prediction_dir(dataset_root, "classifier", DATE))
     _stamp_classified_bucket(bucket)
     gt = _write_gt(dataset_root, value="diseased")
@@ -253,7 +260,7 @@ def test_action_refusal_leaves_the_label_file_unchanged(client: TestClient, tmp_
     resp = client.post("/api/review/action", json={
         "dataset_root": str(dataset_root), "image_name": f"{STEM}.jpg", "image_path": str(img),
         "gt_path": str(gt), "pred_path": staged["path"],
-        "det_type": "fp", "class_name": "unknown-value", "conf": 0.9,
+        "det_type": "fp", "class_name": "healthy", "conf": 0.9,
         "iou": None, "gt_idx": None, "pred_idx": 0,
         "bbox": list(BOX), "action": "accepted", "user": "breeder",
         "iou_threshold": 0.3, "conf_threshold": 0.1,
