@@ -373,6 +373,10 @@ def test_ingest_stem_collision_across_two_calls_refuses_naming_both_files(tmp_pa
     first = ingest_images(source=str(src1), name="proj_crosscall_case", site="north orchard")
     assert "error" not in first
 
+    proj = Path(first["project_path"])
+    placed = proj / "images" / "2026-02-11" / "foo.jpg"
+    original_bytes = placed.read_bytes()
+
     src2 = tmp_path / "raw2"
     _make_image(src2 / "foo.png")
     second = ingest_images(
@@ -381,9 +385,9 @@ def test_ingest_stem_collision_across_two_calls_refuses_naming_both_files(tmp_pa
 
     assert "error" in second
     assert "foo.jpg" in second["error"] and "foo.png" in second["error"]
-    proj = Path(first["project_path"])
-    assert (proj / "images" / "2026-02-11" / "foo.jpg").is_file()
+    assert placed.is_file()
     assert not (proj / "images" / "2026-02-11" / "foo.png").exists()
+    assert placed.read_bytes() == original_bytes
 
 
 def test_ingest_case_variant_stem_collision_across_two_calls_refuses(tmp_path):
@@ -393,6 +397,10 @@ def test_ingest_case_variant_stem_collision_across_two_calls_refuses(tmp_path):
     first = ingest_images(source=str(src1), name="proj_casevariant_case", site="north orchard")
     assert "error" not in first
 
+    proj = Path(first["project_path"])
+    placed = proj / "images" / "2026-02-11" / "Foo.jpg"
+    original_bytes = placed.read_bytes()
+
     src2 = tmp_path / "raw2"
     _make_image(src2 / "foo.png")
     second = ingest_images(
@@ -401,6 +409,9 @@ def test_ingest_case_variant_stem_collision_across_two_calls_refuses(tmp_path):
 
     assert "error" in second
     assert "Foo.jpg" in second["error"] and "foo.png" in second["error"]
+    assert placed.is_file()
+    assert not (proj / "images" / "2026-02-11" / "foo.png").exists()
+    assert placed.read_bytes() == original_bytes
 
 
 def test_ingest_admits_a_source_after_a_band_group_manifest_with_a_different_stem(tmp_path):
