@@ -37,44 +37,44 @@ def _write_registry(root: Path, *subjects: Subject) -> ClassRegistry:
 def test_registry_decodes_its_own_labels(tmp_path):
     from tcip_mcp.pipelines.data.label_queries import assemble_coco
 
-    registry = _write_registry(tmp_path, Subject(name="catkin"))
+    registry = _write_registry(tmp_path, Subject(name="bud"))
     images_dir = tmp_path / "images"
     labels_dir = tmp_path / "annotations"
     _write_image(images_dir, "img_001")
     labels_dir.mkdir(parents=True)
     json_io.write_annotations(
         labels_dir / "img_001.json",
-        [Annotation(subject="catkin", geometry=BBox(10, 10, 40, 40))], 640, 480)
+        [Annotation(subject="bud", geometry=BBox(10, 10, 40, 40))], 640, 480)
 
-    id_map = class_registry.assign_class_ids(registry, "catkin")
-    coco = assemble_coco(labels_dir, images_dir, subject="catkin", date=None, id_map=id_map)
+    id_map = class_registry.assign_class_ids(registry, "bud")
+    coco = assemble_coco(labels_dir, images_dir, subject="bud", date=None, id_map=id_map)
 
     # The COCO categories are the assign_class_ids map, and every emitted annotation decodes back to
     # the name its label carried: the registry reads its own labels without guessing.
     assert {c["name"]: c["id"] for c in coco["categories"]} == id_map
     inv = class_registry.decode_class_ids(id_map)
     assert coco["annotations"], "the labeled image produced no COCO annotation"
-    assert all(inv[a["category_id"]] == "catkin" for a in coco["annotations"])
+    assert all(inv[a["category_id"]] == "bud" for a in coco["annotations"])
 
 
 # (b) a geometry-less annotation round-trips and its image is not collapsed to empty/negative.
 def test_geometryless_annotation_roundtrips_and_marks_image_annotated(tmp_path):
     from tcip_mcp.pipelines.data.label_queries import assemble_coco
 
-    registry = _write_registry(tmp_path, Subject(name="catkin"))
+    registry = _write_registry(tmp_path, Subject(name="bud"))
     images_dir = tmp_path / "images"
     labels_dir = tmp_path / "annotations"
     _write_image(images_dir, "img_001")
     labels_dir.mkdir(parents=True)
     json_io.write_annotations(
-        labels_dir / "img_001.json", [Annotation(subject="catkin")], 640, 480)
+        labels_dir / "img_001.json", [Annotation(subject="bud")], 640, 480)
 
     # Round-trips losslessly: subject preserved, geometry None.
     back = json_io.read_annotations(str(labels_dir / "img_001.json"))
-    assert len(back) == 1 and back[0].subject == "catkin" and back[0].geometry is None
+    assert len(back) == 1 and back[0].subject == "bud" and back[0].geometry is None
 
-    id_map = class_registry.assign_class_ids(registry, "catkin")
-    coco = assemble_coco(labels_dir, images_dir, subject="catkin", date=None, id_map=id_map)
+    id_map = class_registry.assign_class_ids(registry, "bud")
+    coco = assemble_coco(labels_dir, images_dir, subject="bud", date=None, id_map=id_map)
     # The image is annotated (it carries a subject annotation), so it is present as an image and is
     # not collapsed to an empty negative; the geometry-less label just has no detection target.
     assert [im["file_name"] for im in coco["images"]] == ["img_001.jpg"]
@@ -86,7 +86,7 @@ def test_num_classes_agree_on_one_assign_class_ids_map(tmp_path):
     from tcip_mcp.pipelines.data.datasets import build_dataset
     from tcip_mcp.pipelines.data.label_queries import assemble_coco
 
-    registry = _write_registry(tmp_path, Subject(name="catkin"))
+    registry = _write_registry(tmp_path, Subject(name="bud"))
     images_dir = tmp_path / "images"
     labels_dir = tmp_path / "annotations"
     for stem in ("a", "b"):
@@ -95,14 +95,14 @@ def test_num_classes_agree_on_one_assign_class_ids_map(tmp_path):
     for stem in ("a", "b"):
         json_io.write_annotations(
             labels_dir / f"{stem}.json",
-            [Annotation(subject="catkin", geometry=BBox(10, 10, 40, 40))], 640, 480)
+            [Annotation(subject="bud", geometry=BBox(10, 10, 40, 40))], 640, 480)
 
-    id_map = class_registry.assign_class_ids(registry, "catkin")
-    coco = assemble_coco(labels_dir, images_dir, subject="catkin", date=None, id_map=id_map)
+    id_map = class_registry.assign_class_ids(registry, "bud")
+    coco = assemble_coco(labels_dir, images_dir, subject="bud", date=None, id_map=id_map)
     ds = build_dataset("detection", images_dir=str(images_dir), labels_dir=str(labels_dir),
-                       subject="catkin")
+                       subject="bud")
 
-    assert ds.num_classes == class_registry.num_classes(registry, "catkin") == len(coco["categories"])
+    assert ds.num_classes == class_registry.num_classes(registry, "bud") == len(coco["categories"])
     assert len(id_map) == ds.num_classes == 1
 
 
@@ -112,11 +112,11 @@ def test_confirmed_negatives_thread_subject_and_refuse_when_unthreaded(tmp_path)
 
     labels_dir = tmp_path / "annotations" / "2-11-26"
     labels_dir.mkdir(parents=True)
-    # A human confirmed img_009 an empty negative for catkin on this date.
-    record_image_statuses(tmp_path, status_bucket("catkin", "2-11-26"),
+    # A human confirmed img_009 an empty negative for bud on this date.
+    record_image_statuses(tmp_path, status_bucket("bud", "2-11-26"),
                           {"img_009.jpg": "negative"}, recorded_by="user:breeder")
 
-    got = confirmed_negative_names(labels_dir, subject="catkin", date="2-11-26")
+    got = confirmed_negative_names(labels_dir, subject="bud", date="2-11-26")
     assert got == {"img_009.jpg"}
 
     # A different subject's bucket is not this subject's negative (scoping holds).
@@ -133,7 +133,7 @@ def test_loader_filters_by_subject_and_geometry(tmp_path):
 
     from tcip_mcp.pipelines.data.datasets import build_dataset
 
-    _write_registry(tmp_path, Subject(name="catkin"), Subject(name="bush"))
+    _write_registry(tmp_path, Subject(name="bud"), Subject(name="bush"))
     images_dir = tmp_path / "images"
     labels_dir = tmp_path / "annotations"
     _write_image(images_dir, "img_001")
@@ -141,38 +141,38 @@ def test_loader_filters_by_subject_and_geometry(tmp_path):
     json_io.write_annotations(
         labels_dir / "img_001.json",
         [
-            Annotation(subject="catkin", geometry=BBox(10, 10, 40, 40)),   # a legitimate target
+            Annotation(subject="bud", geometry=BBox(10, 10, 40, 40)),   # a legitimate target
             Annotation(subject="bush", geometry=BBox(50, 50, 90, 90)),      # wrong subject -> drop
-            Annotation(subject="catkin"),                                   # geometry-less -> drop
+            Annotation(subject="bud"),                                   # geometry-less -> drop
         ],
         640, 480)
 
     ds = build_dataset("detection", images_dir=str(images_dir), labels_dir=str(labels_dir),
-                       subject="catkin")
+                       subject="bud")
     assert ds.num_classes == 1
     _img, target = ds[0]
-    # Only the one legitimate catkin box survives; the wrong-subject and geometry-less rows are gone.
+    # Only the one legitimate bud box survives; the wrong-subject and geometry-less rows are gone.
     assert target["boxes"].shape[0] == 1
-    assert torch.equal(target["labels"], torch.tensor([1], dtype=torch.int64))  # 0-idx catkin +1 bg
+    assert torch.equal(target["labels"], torch.tensor([1], dtype=torch.int64))  # 0-idx bud +1 bg
 
 
 # (f) the loader's assign_class_ids map == decode_class_ids of the recorded operating_point map.
 def test_decode_inverts_the_recorded_map(tmp_path):
     from tcip_mcp.pipelines.postprocessing.export import write_predictions_json
 
-    registry = _write_registry(tmp_path, Subject(name="catkin"))
-    id_map = class_registry.assign_class_ids(registry, "catkin")  # the run's single map
+    registry = _write_registry(tmp_path, Subject(name="bud"))
+    id_map = class_registry.assign_class_ids(registry, "bud")  # the run's single map
 
     # A prediction with a 1-indexed detector label decodes to its name through the recorded map.
     out = tmp_path / "pred.json"
     write_predictions_json(
         out, {"boxes": [[10, 10, 40, 40]], "scores": [0.9], "labels": [1], "width": 640, "height": 480},
-        created_by="model:x", subject="catkin", attribute=None, id_map=id_map)
+        created_by="model:x", subject="bud", attribute=None, id_map=id_map)
     preds = json_io.read_annotations(str(out))
     assert len(preds) == 1
     inv = class_registry.decode_class_ids(id_map)
     # loader-side map (id_map) inverted == the name the recorded-map decode wrote on disk.
-    assert preds[0].subject == inv[0] == "catkin"
+    assert preds[0].subject == inv[0] == "bud"
 
 
 # (g) save_annotations refuses a missing subject.
@@ -188,7 +188,7 @@ def test_save_annotations_refuses_missing_subject(tmp_path):
     assert not (tmp_path / "x.json").exists()
 
     # A real subject still writes (the rail admits valid work).
-    ok = save_annotations(img, annotations=[{"subject": "catkin", "bbox": [10, 10, 40, 40]}],
+    ok = save_annotations(img, annotations=[{"subject": "bud", "bbox": [10, 10, 40, 40]}],
                           path=str(tmp_path / "y.json"))
     assert ok.get("count") == 1 and (tmp_path / "y.json").is_file()
 
@@ -225,7 +225,7 @@ def test_save_annotations_prefers_points_over_bbox(tmp_path):
     res = save_annotations(
         img,
         annotations=[{
-            "subject": "catkin",
+            "subject": "bud",
             "points": [[10, 20], [110, 20], [110, 220]],
             "bbox": [10, 20, 110, 220],
         }],
@@ -246,7 +246,7 @@ def test_save_annotations_prefers_points_over_bbox(tmp_path):
     box_out = tmp_path / "emptypts.json"
     res2 = save_annotations(
         img,
-        annotations=[{"subject": "catkin", "points": [], "bbox": [10, 20, 110, 220]}],
+        annotations=[{"subject": "bud", "points": [], "bbox": [10, 20, 110, 220]}],
         path=str(box_out),
     )
     assert res2.get("count") == 1
@@ -270,7 +270,7 @@ def test_save_annotations_accepts_rings(tmp_path):
     res = save_annotations(
         img,
         annotations=[{
-            "subject": "catkin",
+            "subject": "bud",
             "rings": [
                 [{"x": 10, "y": 20}, {"x": 110, "y": 20}, {"x": 110, "y": 220}],
                 [{"x": 300, "y": 300}, {"x": 340, "y": 300}, {"x": 340, "y": 340}],
@@ -289,7 +289,7 @@ def test_save_annotations_accepts_rings(tmp_path):
     out2 = tmp_path / "rings_listshape.json"
     res2 = save_annotations(
         img,
-        annotations=[{"subject": "catkin", "rings": [[[1, 2], [3, 2], [3, 4]]]}],
+        annotations=[{"subject": "bud", "rings": [[[1, 2], [3, 2], [3, 4]]]}],
         path=str(out2),
     )
     assert res2.get("count") == 1
@@ -301,7 +301,7 @@ def test_save_annotations_accepts_rings(tmp_path):
     res3 = save_annotations(
         img,
         annotations=[{
-            "subject": "catkin",
+            "subject": "bud",
             "rings": [[{"x": 1, "y": 2}, {"x": 3, "y": 2}, {"x": 3, "y": 4}]],
             "points": [[10, 20], [110, 20], [110, 220]],
             "bbox": [10, 20, 110, 220],
@@ -318,21 +318,21 @@ def test_save_annotations_accepts_rings(tmp_path):
 def test_geometryless_only_image_is_not_a_trainable_stem_on_either_path(tmp_path):
     from tcip_mcp.pipelines.data.label_queries import assemble_coco, trainable_stems
 
-    registry = _write_registry(tmp_path, Subject(name="catkin"))
+    registry = _write_registry(tmp_path, Subject(name="bud"))
     images_dir = tmp_path / "images"
     labels_dir = tmp_path / "annotations"
     for stem in ("boxed", "geomless"):
         _write_image(images_dir, stem)
     labels_dir.mkdir(parents=True)
     json_io.write_annotations(labels_dir / "boxed.json",
-                              [Annotation(subject="catkin", geometry=BBox(10, 10, 40, 40))], 640, 480)
-    # geomless: a catkin annotation with NO geometry (an image-level label, not a box).
-    json_io.write_annotations(labels_dir / "geomless.json", [Annotation(subject="catkin")], 640, 480)
+                              [Annotation(subject="bud", geometry=BBox(10, 10, 40, 40))], 640, 480)
+    # geomless: a bud annotation with NO geometry (an image-level label, not a box).
+    json_io.write_annotations(labels_dir / "geomless.json", [Annotation(subject="bud")], 640, 480)
 
-    id_map = class_registry.assign_class_ids(registry, "catkin")
-    coco = assemble_coco(labels_dir, images_dir, subject="catkin", date=None, id_map=id_map)
-    stems_direct, _ = trainable_stems(labels_dir, images_dir, subject="catkin", date=None)          # coco=None path
-    stems_coco, _ = trainable_stems(labels_dir, images_dir, subject="catkin", date=None, coco=coco)  # COCO path
+    id_map = class_registry.assign_class_ids(registry, "bud")
+    coco = assemble_coco(labels_dir, images_dir, subject="bud", date=None, id_map=id_map)
+    stems_direct, _ = trainable_stems(labels_dir, images_dir, subject="bud", date=None)          # coco=None path
+    stems_coco, _ = trainable_stems(labels_dir, images_dir, subject="bud", date=None, coco=coco)  # COCO path
 
     assert stems_direct == stems_coco == ["boxed"]  # the two paths agree; geomless-only is dropped
 
@@ -345,12 +345,12 @@ def test_records_from_annotation_honors_a_global_name_id():
     from tcip_annotation.state import Annotation as Ann
     from tcip_annotation.state import BBox as B
 
-    name_id = {"bush": 1, "catkin": 2}  # one global map
-    # An image whose only subject is catkin: a per-image-local map would give catkin id 1; the global
-    # map must keep it 2, matching every other image's catkin.
+    name_id = {"bush": 1, "bud": 2}  # one global map
+    # An image whose only subject is bud: a per-image-local map would give bud id 1; the global
+    # map must keep it 2, matching every other image's bud.
     _iou, rec = records_from_annotation(
-        [Ann(subject="catkin", geometry=B(0, 0, 10, 10))],
-        [Ann(subject="catkin", geometry=B(0, 0, 10, 10), score=0.9)],
+        [Ann(subject="bud", geometry=B(0, 0, 10, 10))],
+        [Ann(subject="bud", geometry=B(0, 0, 10, 10), score=0.9)],
         width=100, height=100, name_id=name_id)
     assert {r["category_id"] for r in rec["gt"]} == {2}
     assert {r["category_id"] for r in rec["dt"]} == {2}
@@ -363,7 +363,7 @@ def test_records_from_annotation_honors_a_global_name_id():
 def test_uppercase_extension_image_still_yields_boxes(tmp_path):
     from tcip_mcp.pipelines.data.datasets import build_dataset
 
-    _write_registry(tmp_path, Subject(name="catkin"))
+    _write_registry(tmp_path, Subject(name="bud"))
     images_dir = tmp_path / "images"
     labels_dir = tmp_path / "annotations"
     images_dir.mkdir(parents=True)
@@ -371,11 +371,11 @@ def test_uppercase_extension_image_still_yields_boxes(tmp_path):
     labels_dir.mkdir(parents=True)
     json_io.write_annotations(
         labels_dir / "IMG_1.json",
-        [Annotation(subject="catkin", geometry=BBox(10, 10, 40, 40))], 640, 480)
+        [Annotation(subject="bud", geometry=BBox(10, 10, 40, 40))], 640, 480)
 
     ds = build_dataset("detection", images_dir=str(images_dir), labels_dir=str(labels_dir),
-                       subject="catkin")
+                       subject="bud")
     assert ds.num_samples == 1
     _img, target = ds[0]
-    assert target["boxes"].shape[0] == 1  # the catkin box survived the COCO name match
+    assert target["boxes"].shape[0] == 1  # the bud box survived the COCO name match
     assert len(target["labels"]) == 1

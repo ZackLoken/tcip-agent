@@ -40,7 +40,7 @@ def test_detect_format_dir_excludes_a_bucket_sidecar(tmp_path):
 
 def test_detect_format_per_image_json(tmp_path):
     js = tmp_path / "IMG_0001.json"
-    js.write_text('{"image": "IMG_0001", "annotations": [{"subject": "catkin", "bbox": [1, 1, 9, 9]}]}')
+    js.write_text('{"image": "IMG_0001", "annotations": [{"subject": "bud", "bbox": [1, 1, 9, 9]}]}')
     assert detect_format(str(js)) == "json"
 
 
@@ -202,7 +202,7 @@ def test_write_coco_polygon_roundtrip(tmp_path):
 
 # ── COCO multi-ring (occlusion-split instance) ───────────────────────────────
 
-# Two disjoint lobes of one instance: a leaf crossed by a stem, a catkin behind a branch.
+# Two disjoint lobes of one instance: a leaf crossed by a stem, a bud behind a branch.
 LOBE_A = [(10.0, 10.0), (30.0, 10.0), (30.0, 50.0), (10.0, 50.0)]
 LOBE_B = [(70.0, 12.0), (90.0, 12.0), (90.0, 48.0), (70.0, 48.0)]
 
@@ -293,7 +293,7 @@ def test_load_annotations_refuses_a_per_image_document_asked_for_as_coco(tmp_pat
     (no images/categories) must not silently answer zero results; it must name the mismatch."""
     js = tmp_path / "IMG_0001.json"
     js.write_text(json.dumps({"image": "IMG_0001", "width": 100, "height": 100,
-                              "annotations": [{"subject": "catkin", "bbox": [1, 1, 8, 8]}]}))
+                              "annotations": [{"subject": "bud", "bbox": [1, 1, 8, 8]}]}))
     with pytest.raises(ValueError, match="coco"):
         load_annotations(str(js), fmt="coco", file_name="IMG_0001.json")
 
@@ -318,17 +318,17 @@ def test_load_annotations_accepts_a_coco_document_declared_as_coco(tmp_path):
 def test_load_annotations_accepts_a_per_image_document_declared_as_json(tmp_path):
     js = tmp_path / "IMG_0001.json"
     js.write_text(json.dumps({"image": "IMG_0001", "width": 100, "height": 100,
-                              "annotations": [{"subject": "catkin", "bbox": [1, 1, 8, 8]}]}))
+                              "annotations": [{"subject": "bud", "bbox": [1, 1, 8, 8]}]}))
     anns = load_annotations(str(js), fmt="json")
     assert len(anns) == 1
-    assert anns[0].subject == "catkin"
+    assert anns[0].subject == "bud"
 
 
 def test_load_annotations_refuses_a_document_carrying_neither_shapes_markers(tmp_path):
     """A document whose keys are neither the per-image nor the COCO shape satisfies no stated
     fmt: it is refused under every fmt asked of it, not read as an empty store."""
     odd = tmp_path / "labels.json"
-    odd.write_text(json.dumps({"shapes": [{"label": "catkin", "points": [[1, 1], [8, 8]]}]}))
+    odd.write_text(json.dumps({"shapes": [{"label": "bud", "points": [[1, 1], [8, 8]]}]}))
     with pytest.raises(ValueError, match="neither"):
         load_annotations(str(odd), fmt="coco", file_name="a.jpg")
     with pytest.raises(ValueError, match="neither"):

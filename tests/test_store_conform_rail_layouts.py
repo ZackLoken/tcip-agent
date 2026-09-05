@@ -70,7 +70,7 @@ def test_a_project_root_holding_a_stray_csv_and_a_nested_dataset_is_admitted(tmp
     locator whether it could parse a path claimed the spreadsheet and the dataset's own
     documents, and refused this root permanently."""
     (tmp_path / "plants.csv").write_text("plot,accession\n1,ü\n", encoding="utf-8")
-    dataset = tmp_path / "datasets" / "hazelnut"
+    dataset = tmp_path / "datasets" / "currant"
     (dataset / "images" / "2026-03-04").mkdir(parents=True)
     (dataset / "annotations" / "2026-03-04").mkdir(parents=True)
     (dataset / "images" / "2026-03-04" / "a_1.jpg").write_bytes(b"\xff\xd8\xff")
@@ -79,9 +79,9 @@ def test_a_project_root_holding_a_stray_csv_and_a_nested_dataset_is_admitted(tmp
     (dataset / "dataset.json").write_text('{"identity": "ü"}', encoding="utf-8")
 
     with bound(SqliteBackend()):
-        ts.replace(_image_status(tmp_path), {"catkin": {}}, expect=ts.Version.ABSENT)
+        ts.replace(_image_status(tmp_path), {"bud": {}}, expect=ts.Version.ABSENT)
 
-        assert ts.read(_image_status(tmp_path)) == {"catkin": {}}
+        assert ts.read(_image_status(tmp_path)) == {"bud": {}}
     assert database_path(str(tmp_path)).is_file()
 
 
@@ -94,12 +94,12 @@ def test_a_workspace_root_holding_only_foreign_files_is_admitted(tmp_path, monke
     monkeypatch.setenv("TCIP_WORKSPACE", str(tmp_path))
     (tmp_path / "notes.txt").write_text("ü", encoding="utf-8")
     (tmp_path / "measurements.csv").write_text("a,b\n1,2\n", encoding="utf-8")
-    (tmp_path / "hazelnut_2026").mkdir()
+    (tmp_path / "currant_2026").mkdir()
 
     with bound(SqliteBackend()):
-        ts.replace(workspace.active_project_key(), "hazelnut_2026")
+        ts.replace(workspace.active_project_key(), "currant_2026")
 
-        assert ts.read(workspace.active_project_key()).strip() == "hazelnut_2026"
+        assert ts.read(workspace.active_project_key()).strip() == "currant_2026"
 
 
 # ── one directory, more than one kind of root ────────────────────────────────
@@ -119,13 +119,13 @@ def test_a_directory_that_is_two_kinds_of_root_is_served_end_to_end(tmp_path):
 
     with bound(SqliteBackend()):
         ts.replace(manifest, {"images": ["a_1.jpg"]})
-        ts.replace(digest, {"catkin/2026-03-04": {"a_1.jpg": "9f2c"}}, expect=ts.Version.ABSENT)
+        ts.replace(digest, {"bud/2026-03-04": {"a_1.jpg": "9f2c"}}, expect=ts.Version.ABSENT)
         with ts.transaction(manifest, digest) as txn:
             txn.write(manifest, {"images": ["a_1.jpg", "b_2.jpg"]})
-            txn.write(digest, {"catkin/2026-03-04": {"a_1.jpg": "9f2c", "b_2.jpg": "1ab3"}})
+            txn.write(digest, {"bud/2026-03-04": {"a_1.jpg": "9f2c", "b_2.jpg": "1ab3"}})
 
         assert ts.read(manifest) == {"images": ["a_1.jpg", "b_2.jpg"]}
-        assert ts.read(digest)["catkin/2026-03-04"]["b_2.jpg"] == "1ab3"
+        assert ts.read(digest)["bud/2026-03-04"]["b_2.jpg"] == "1ab3"
 
     with bound(SqliteBackend()):
         assert ts.read(manifest) == {"images": ["a_1.jpg", "b_2.jpg"]}
@@ -138,8 +138,8 @@ def test_a_second_kinds_files_refuse_on_the_connection_that_already_served_the_f
     from tcip_mcp.pipelines.feedback import materialize
 
     with bound(SqliteBackend()):
-        ts.replace(_image_status(tmp_path), {"catkin": {}}, expect=ts.Version.ABSENT)
-        assert ts.read(_image_status(tmp_path)) == {"catkin": {}}
+        ts.replace(_image_status(tmp_path), {"bud": {}}, expect=ts.Version.ABSENT)
+        assert ts.read(_image_status(tmp_path)) == {"bud": {}}
         (tmp_path / "curated_manifest.json").write_text('{"images": []}', encoding="utf-8")
 
         with pytest.raises(ts.StoreError) as raised:
@@ -177,10 +177,10 @@ def test_a_file_of_a_store_the_database_never_held_refuses_beside_it(tmp_path):
     accounting is per store: a store the database has never held is the one whose file no
     export can explain, and reading past it answers every one of its entries with absence."""
     with bound(SqliteBackend()):
-        ts.replace(_image_status(tmp_path), {"catkin": {}}, expect=ts.Version.ABSENT)
+        ts.replace(_image_status(tmp_path), {"bud": {}}, expect=ts.Version.ABSENT)
     state = tmp_path / ".tcip" / "state"
     state.mkdir(parents=True, exist_ok=True)
-    (state / "view_coverage.json").write_text('{"catkin/2026-03-04": {}}', encoding="utf-8")
+    (state / "view_coverage.json").write_text('{"bud/2026-03-04": {}}', encoding="utf-8")
 
     with bound(SqliteBackend()):
         with pytest.raises(ts.StoreError) as raised:
@@ -196,7 +196,7 @@ def test_a_process_that_imported_one_owning_module_still_sees_another_stores_fil
     Asked of the registry, a process that never imported the owning module read this root as
     fresh, created a database over its confirmed negatives, and answered them as absent."""
     with bound(FileBackend()):
-        ts.replace(_image_status(tmp_path), {"catkin/2026-03-04": {}}, expect=ts.Version.ABSENT)
+        ts.replace(_image_status(tmp_path), {"bud/2026-03-04": {}}, expect=ts.Version.ABSENT)
     program = (
         "import json, sys\n"
         "import tcip_annotation.review_engine\n"
@@ -248,7 +248,7 @@ def test_a_blob_written_onto_a_records_claimed_path_beside_a_database_is_refused
     directions, since a store's first write can mint markers on a cached connection and a read
     can serve honest absence while the file idles, neither of which reaches another process."""
     with bound(SqliteBackend()):
-        ts.replace(_image_status(tmp_path), {"catkin": {}}, expect=ts.Version.ABSENT)
+        ts.replace(_image_status(tmp_path), {"bud": {}}, expect=ts.Version.ABSENT)
 
     with bound(FileBackend()):
         with pytest.raises(ts.StoreError) as held_store:
@@ -289,14 +289,14 @@ def test_a_stores_first_write_is_refused_while_a_file_it_claims_predates_it(tmp_
     from tcip_mcp import dataset_layout
 
     with bound(SqliteBackend()):
-        ts.replace(_image_status(tmp_path), {"catkin": {}}, expect=ts.Version.ABSENT)
+        ts.replace(_image_status(tmp_path), {"bud": {}}, expect=ts.Version.ABSENT)
         state = tmp_path / ".tcip" / "state"
         state.mkdir(parents=True, exist_ok=True)
-        (state / "view_coverage.json").write_text('{"catkin": {}}', encoding="utf-8")
+        (state / "view_coverage.json").write_text('{"bud": {}}', encoding="utf-8")
 
         with pytest.raises(ts.StoreError) as raised:
             ts.replace(
-                dataset_layout.view_coverage_key(tmp_path), {"catkin": {}},
+                dataset_layout.view_coverage_key(tmp_path), {"bud": {}},
                 expect=ts.Version.ABSENT,
             )
 
@@ -311,15 +311,15 @@ def test_a_stores_first_write_lands_when_no_file_of_its_own_predates_it(tmp_path
     from tcip_mcp import dataset_layout
 
     with bound(SqliteBackend()):
-        ts.replace(_image_status(tmp_path), {"catkin": {}}, expect=ts.Version.ABSENT)
+        ts.replace(_image_status(tmp_path), {"bud": {}}, expect=ts.Version.ABSENT)
 
         ts.replace(
             dataset_layout.view_coverage_key(tmp_path),
-            {"catkin/2026-03-04": {"a_1.jpg": {"grid": {"rows": 1, "cols": 1}}}},
+            {"bud/2026-03-04": {"a_1.jpg": {"grid": {"rows": 1, "cols": 1}}}},
             expect=ts.Version.ABSENT,
         )
 
-        assert ts.read(dataset_layout.view_coverage_key(tmp_path))["catkin/2026-03-04"]
+        assert ts.read(dataset_layout.view_coverage_key(tmp_path))["bud/2026-03-04"]
 
 
 def test_an_ordinary_blob_write_beside_a_database_takes_no_lock_and_creates_no_state_dir(
@@ -333,7 +333,7 @@ def test_an_ordinary_blob_write_beside_a_database_takes_no_lock_and_creates_no_s
     from tcip_store import file_backend as file_backend_module
 
     with bound(SqliteBackend()):
-        ts.replace(_image_status(tmp_path), {"catkin": {}}, expect=ts.Version.ABSENT)
+        ts.replace(_image_status(tmp_path), {"bud": {}}, expect=ts.Version.ABSENT)
     output = tmp_path / "exports" / "2026-03-04"
     output.mkdir(parents=True)
     locked: list[str] = []
@@ -396,7 +396,7 @@ def test_a_colliding_blob_write_and_a_database_creation_never_both_land(tmp_path
             backend = SqliteBackend()
             try:
                 ready.wait(timeout=30)
-                backend.replace(_image_status(root), {"catkin": {}}, expect=ts.Version.ABSENT)
+                backend.replace(_image_status(root), {"bud": {}}, expect=ts.Version.ABSENT)
                 outcomes["create"] = "created"
             except ts.StoreError as exc:
                 outcomes["create"] = f"refused: {exc}"

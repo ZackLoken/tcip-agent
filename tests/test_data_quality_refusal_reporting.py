@@ -41,7 +41,7 @@ def test_an_undetectable_label_store_is_an_error_naming_the_format_failure(tmp_p
     for stem in ("plotA_0_0", "plotA_0_1"):
         _write_image(root / "images" / DATE / f"{stem}.jpg", 96, 64)
         (labels_dir / f"{stem}.json").write_text(
-            json.dumps({"shapes": [{"label": "catkin", "points": [[3, 5], [40, 52]]}]}),
+            json.dumps({"shapes": [{"label": "bud", "points": [[3, 5], [40, 52]]}]}),
             encoding="utf-8",
         )
 
@@ -67,7 +67,7 @@ def test_a_label_with_no_matching_image_is_an_error(tmp_path: Path):
     for stem in ("plotA_0_0", "plotB_0_0", "plotZ_9_9"):
         json_io.write_annotations(
             labels_dir / f"{stem}.json",
-            [Annotation(subject="catkin", geometry=BBox(11, 7, 39, 51))],
+            [Annotation(subject="bud", geometry=BBox(11, 7, 39, 51))],
             96, 64,
         )
 
@@ -93,7 +93,7 @@ def test_a_coco_image_missing_from_the_images_dir_is_a_warning(tmp_path: Path):
             {"id": 1, "image_id": 1, "category_id": 1, "bbox": [11, 7, 28, 44], "area": 1232,
              "iscrowd": 0},
         ],
-        "categories": [{"id": 1, "name": "catkin"}],
+        "categories": [{"id": 1, "name": "bud"}],
     }), encoding="utf-8")
 
     findings = _check(root)
@@ -114,11 +114,11 @@ def test_format_is_decided_per_file_not_once_for_the_whole_directory(tmp_path: P
     (labels_dir / "0_coco.json").write_text(json.dumps({
         "images": [{"id": 1, "file_name": "plotA_0_0.jpg", "width": 96, "height": 64}],
         "annotations": [],
-        "categories": [{"id": 1, "name": "catkin"}],
+        "categories": [{"id": 1, "name": "bud"}],
     }), encoding="utf-8")
     json_io.write_annotations(
         labels_dir / "1_orphan.json",
-        [Annotation(subject="catkin", geometry=BBox(1, 1, 8, 8))], 100, 100,
+        [Annotation(subject="bud", geometry=BBox(1, 1, 8, 8))], 100, 100,
     )
 
     findings = _check(root)
@@ -155,7 +155,7 @@ def test_a_confirmed_negative_empty_label_stays_clean(tmp_path: Path):
     _write_image(root / "images" / DATE / "plotA_0_0.jpg", 96, 64)
     json_io.write_annotations(labels_dir / "plotA_0_0.json", [], 96, 64, keep_empty=True)
     replace_image_status_store(root, {
-        status_bucket("catkin", DATE): status_records(
+        status_bucket("bud", DATE): status_records(
             {"plotA_0_0.jpg": "negative"}, recorded_by="user:breeder"),
     })
 
@@ -187,7 +187,7 @@ def test_a_root_coco_candidate_sits_beside_the_per_image_tree_not_in_place_of_it
         _write_image(root / "images" / DATE / f"{stem}.jpg", 96, 64)
         json_io.write_annotations(labels_dir / f"{stem}.json", [], 96, 64, keep_empty=True)
     (root / "annotations.json").write_text(json.dumps({
-        "images": [], "annotations": [], "categories": [{"id": 1, "name": "catkin"}],
+        "images": [], "annotations": [], "categories": [{"id": 1, "name": "bud"}],
     }), encoding="utf-8")
 
     findings = _check(root)
@@ -210,7 +210,7 @@ def test_an_npz_capture_confirmed_negative_is_recognized(tmp_path: Path):
     (root / "images" / DATE / "plotA_0_0.npz").write_bytes(b"\x00")
     json_io.write_annotations(labels_dir / "plotA_0_0.json", [], 8, 8, keep_empty=True)
     replace_image_status_store(root, {
-        status_bucket("catkin", DATE): status_records(
+        status_bucket("bud", DATE): status_records(
             {"plotA_0_0.npz": "negative"}, recorded_by="user:breeder"),
     })
 
@@ -233,7 +233,7 @@ def test_an_undecodable_label_is_a_finding_beside_a_readable_json_and_a_readable
 
     json_io.write_annotations(
         labels_dir / "plotA_0_0.json",
-        [Annotation(subject="catkin", geometry=BBox(11, 7, 39, 51))], 96, 64,
+        [Annotation(subject="bud", geometry=BBox(11, 7, 39, 51))], 96, 64,
     )
     (labels_dir / "plotB_0_0.json").write_bytes(b"{not json")
     (root / "annotations.json").write_text(json.dumps({

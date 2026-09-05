@@ -61,7 +61,7 @@ def test_scan_dataset_reports_a_reserved_stem_the_census_still_counted(tmp_path:
     labels_dir.mkdir(parents=True)
     json_io.write_annotations(
         labels_dir / "operating_point.json",
-        [Annotation(subject="catkin", geometry=BBox(1, 1, 5, 5))], 32, 32,
+        [Annotation(subject="bud", geometry=BBox(1, 1, 5, 5))], 32, 32,
     )
     reserved_label = str(labels_dir / "operating_point.json")
 
@@ -87,7 +87,7 @@ def test_scan_dataset_reports_a_reserved_stem_image_with_no_label(tmp_path: Path
     assert scan_result["unlabelled_images"] == 2
 
 
-def _add_extra_catkin_groups(data_dir: Path, count: int) -> None:
+def _add_extra_bud_groups(data_dir: Path, count: int) -> None:
     """Adds ``count`` more single-tile foreground groups under ``data_dir``'s own date, for its
     own subject, without touching the shared ``data_dir`` fixture other tests depend on: a
     manifest write needs at least four foreground groups to clear ``draw_splits``' floor, one
@@ -101,14 +101,14 @@ def _add_extra_catkin_groups(data_dir: Path, count: int) -> None:
         Image.new("RGB", (640, 480), color=(128, 128, 128)).save(images_dir / f"{stem}.jpg")
         json_io.write_annotations(
             labels_dir / f"{stem}.json",
-            [Annotation(subject="catkin", geometry=BBox(288, 216, 352, 264))], 640, 480,
+            [Annotation(subject="bud", geometry=BBox(288, 216, 352, 264))], 640, 480,
         )
 
 
 def test_draw_splits_materialize(data_dir: Path, tmp_path: Path):
-    _add_extra_catkin_groups(data_dir, 1)
+    _add_extra_bud_groups(data_dir, 1)
     out = tmp_path / "splits"
-    result = draw_splits(str(data_dir), output_path=str(out), materialize=True, subject="catkin",
+    result = draw_splits(str(data_dir), output_path=str(out), materialize=True, subject="bud",
                          train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
     assert "error" not in result, result
     assert result["total_stems"] == 4
@@ -127,11 +127,11 @@ def test_draw_splits_materialize(data_dir: Path, tmp_path: Path):
 
 
 def test_draw_splits_basic(data_dir: Path, tmp_path: Path):
-    _add_extra_catkin_groups(data_dir, 1)
+    _add_extra_bud_groups(data_dir, 1)
     out = tmp_path / "manifests"
     # The fixture's 4 stems (img_001..003 plus one grown group) are 4 distinct foreground
     # groups, exactly the manifest floor (one each for train/val, two for calibration).
-    result = draw_splits(str(data_dir), output_path=str(out), subject="catkin",
+    result = draw_splits(str(data_dir), output_path=str(out), subject="bud",
                          train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
     assert "error" not in result, result
     assert result["total_stems"] == 4
@@ -142,7 +142,7 @@ def test_draw_splits_basic(data_dir: Path, tmp_path: Path):
     manifest = ts.read(split_manifest_key(out))
     for split in ("train", "val", "calibration"):
         assert manifest["splits"][split]
-    assert manifest["subject"] == "catkin"
+    assert manifest["subject"] == "bud"
     assert manifest["attribute"] is None
     date_block = manifest["members"]["2-11-26"]
     assert Path(date_block["labels_root"]).is_dir()
@@ -154,11 +154,11 @@ def test_draw_splits_basic(data_dir: Path, tmp_path: Path):
 def test_draw_splits_refuses_a_version_refused_class_registry_as_an_error(data_dir: Path, tmp_path: Path):
     from tcip_mcp.dataset_layout import class_registry_key
 
-    _add_extra_catkin_groups(data_dir, 1)
+    _add_extra_bud_groups(data_dir, 1)
     ts.put_blob(
         class_registry_key(data_dir), ts.RECORD_JSON.encode({"schema_version": 99})
     )
-    result = draw_splits(str(data_dir), output_path=str(tmp_path / "manifests"), subject="catkin",
+    result = draw_splits(str(data_dir), output_path=str(tmp_path / "manifests"), subject="bud",
                          train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
     assert "error" in result, result
     assert "schema_version" in result["error"]
@@ -178,7 +178,7 @@ def test_draw_splits_reports_an_unreadable_label_by_name(data_dir: Path, tmp_pat
     bad = next((data_dir / "annotations" / "2-11-26").glob("*.json"))
     bad.write_bytes(b"{not json")
 
-    result = draw_splits(str(data_dir), output_path=str(tmp_path / "manifests"), subject="catkin",
+    result = draw_splits(str(data_dir), output_path=str(tmp_path / "manifests"), subject="bud",
                          train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
 
     assert "error" in result
@@ -194,7 +194,7 @@ def test_draw_splits_reports_an_unreadable_label_sorted_last(
     bad = sorted((data_dir / "annotations" / "2-11-26").glob("*.json"))[-1]
     bad.write_bytes(b"{not json")
 
-    result = draw_splits(str(data_dir), output_path=str(tmp_path / "manifests"), subject="catkin",
+    result = draw_splits(str(data_dir), output_path=str(tmp_path / "manifests"), subject="bud",
                          train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
 
     assert "error" in result
@@ -456,9 +456,9 @@ def test_draw_splits_manifest_answer_carries_each_dates_hash(data_dir: Path, tmp
     """A manifest call's answer identifies the labels it partitioned per capture date, the same
     hashes the written manifest's ``members`` blocks record, so the caller need not open the
     record to cite what the draw covered."""
-    _add_extra_catkin_groups(data_dir, 1)
+    _add_extra_bud_groups(data_dir, 1)
     out = tmp_path / "manifests"
-    result = draw_splits(str(data_dir), output_path=str(out), subject="catkin",
+    result = draw_splits(str(data_dir), output_path=str(out), subject="bud",
                          train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
     assert "error" not in result, result
 
@@ -487,7 +487,7 @@ def test_draw_splits_manifest_write_refuses_a_zero_calibration_ratio(tmp_path: P
     root = _multi_source_dataset(tmp_path / "ds")
     out = tmp_path / "m"
 
-    result = draw_splits(str(root), output_path=str(out), subject="catkin")
+    result = draw_splits(str(root), output_path=str(out), subject="bud")
 
     assert "error" in result
     assert "calibration_ratio" in result["error"]
@@ -498,7 +498,7 @@ def test_draw_splits_manifest_carries_all_three_split_sides(tmp_path: Path):
     root = _multi_source_dataset(tmp_path / "ds")
     out = tmp_path / "m"
 
-    result = draw_splits(str(root), output_path=str(out), seed=1, subject="catkin",
+    result = draw_splits(str(root), output_path=str(out), seed=1, subject="bud",
                          train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
 
     assert "error" not in result, result
@@ -518,7 +518,7 @@ def test_draw_splits_floor_refuses_before_any_write_regardless_of_stratify_foreg
     root = _multi_source_dataset(tmp_path / "ds", prefixes=("srcA", "srcB", "srcC"))
     out = tmp_path / "m"
 
-    result = draw_splits(str(root), output_path=str(out), subject="catkin", seed=1,
+    result = draw_splits(str(root), output_path=str(out), subject="bud", seed=1,
                          train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25,
                          stratify_foreground=False)
 
@@ -533,7 +533,7 @@ def test_draw_splits_manifest_write_refuses_a_zero_ratio_on_any_side_by_name(tmp
     root = _multi_source_dataset(tmp_path / "ds")
     out = tmp_path / "m"
 
-    result = draw_splits(str(root), output_path=str(out), subject="catkin", seed=1,
+    result = draw_splits(str(root), output_path=str(out), subject="bud", seed=1,
                          train_ratio=0.75, val_ratio=0.0, calibration_ratio=0.25)
 
     assert "error" in result
@@ -669,7 +669,7 @@ def _multi_source_dataset(root: Path, prefixes=("srcA", "srcB", "srcC", "srcD"),
             stem = f"{pref}_{t}_0"
             Image.new("RGB", (64, 64), (128, 128, 128)).save(images_dir / f"{stem}.jpg")
             json_io.write_annotations(labels_dir / f"{stem}.json",
-                                      [Annotation(subject="catkin", geometry=BBox(19, 13, 45, 51))],
+                                      [Annotation(subject="bud", geometry=BBox(19, 13, 45, 51))],
                                       64, 64)
     return root
 
@@ -679,7 +679,7 @@ def test_draw_splits_groups_tiles_together(tmp_path: Path):
 
     root = _multi_source_dataset(tmp_path / "ds")
     out = tmp_path / "m"
-    result = draw_splits(str(root), output_path=str(out), seed=1, subject="catkin",
+    result = draw_splits(str(root), output_path=str(out), seed=1, subject="bud",
                          train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
     assert result["groups"] == 4  # 4 source prefixes, not 12 tiles
 
@@ -704,7 +704,7 @@ def test_draw_splits_group_key_map_never_straddles(tmp_path: Path):
     }
     result = draw_splits(str(root), output_path=str(out), seed=1,
                          train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25,
-                         group_by="tile_prefix", group_key_map=group_key_map, subject="catkin")
+                         group_by="tile_prefix", group_key_map=group_key_map, subject="bud")
     assert "error" not in result, result
     assert result["group_by"] == "explicit_map"
 
@@ -723,7 +723,7 @@ def test_draw_splits_unrecognized_group_by_refuses_without_writing(tmp_path: Pat
     dataset without anyone noticing; it must refuse loudly and write nothing instead."""
     root = _multi_source_dataset(tmp_path / "ds")
     out = tmp_path / "m"
-    result = draw_splits(str(root), output_path=str(out), group_by="not_a_real_key", subject="catkin",
+    result = draw_splits(str(root), output_path=str(out), group_by="not_a_real_key", subject="bud",
                          train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
     assert "error" in result
     assert not out.exists() or not (out / "split_manifest.json").is_file()
@@ -1217,13 +1217,13 @@ def test_read_split_manifest_dir_admits_the_writers_own_record(tmp_path: Path):
     required set never rejects the writer's own output."""
     root = _multi_source_dataset(tmp_path / "ds")
     out = tmp_path / "m"
-    write_result = draw_splits(str(root), output_path=str(out), seed=1, subject="catkin",
+    write_result = draw_splits(str(root), output_path=str(out), seed=1, subject="bud",
                                train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
     assert "error" not in write_result
 
     manifest = read_split_manifest_dir(out)
 
-    assert manifest["subject"] == "catkin"
+    assert manifest["subject"] == "bud"
     assert manifest["seed"] == 1
 
 
@@ -1236,14 +1236,14 @@ def test_read_split_manifest_dir_refuses_each_missing_required_key_by_name(tmp_p
 
     root = _multi_source_dataset(tmp_path / "ds")
     written = draw_splits(str(root), output_path=str(tmp_path / "m_all"), seed=1,
-                          subject="catkin", train_ratio=0.5, val_ratio=0.25,
+                          subject="bud", train_ratio=0.5, val_ratio=0.25,
                           calibration_ratio=0.25)
     assert "error" not in written, written
     keys_a_written_manifest_carries = tuple(ts.read(split_manifest_key(tmp_path / "m_all")))
     assert set(keys_a_written_manifest_carries) == set(_SPLIT_MANIFEST_REQUIRED_KEYS)
     for missing_key in keys_a_written_manifest_carries:
         out = tmp_path / f"m_{missing_key}"
-        result = draw_splits(str(root), output_path=str(out), seed=1, subject="catkin",
+        result = draw_splits(str(root), output_path=str(out), seed=1, subject="bud",
                              train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
         assert "error" not in result
 
@@ -1261,7 +1261,7 @@ def test_read_split_manifest_dir_refuses_a_two_sided_record(tmp_path: Path):
     reader refuses it by name rather than silently reading it as a two-sided manifest."""
     root = _multi_source_dataset(tmp_path / "ds")
     out = tmp_path / "m"
-    result = draw_splits(str(root), output_path=str(out), seed=1, subject="catkin",
+    result = draw_splits(str(root), output_path=str(out), seed=1, subject="bud",
                          train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
     assert "error" not in result, result
 
@@ -1280,7 +1280,7 @@ def test_read_split_manifest_dir_refuses_overlapping_sides(tmp_path: Path):
     calibrate against."""
     root = _multi_source_dataset(tmp_path / "ds")
     out = tmp_path / "m"
-    result = draw_splits(str(root), output_path=str(out), seed=1, subject="catkin",
+    result = draw_splits(str(root), output_path=str(out), seed=1, subject="bud",
                          train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
     assert "error" not in result, result
 

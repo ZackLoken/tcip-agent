@@ -66,7 +66,7 @@ def _registry(root: Path) -> None:
     """A registry declaring three subjects in an order that is not alphabetical."""
     write_registry(
         classes_path(root),
-        ClassRegistry(subjects=(Subject(name="leaf"), Subject(name="bush"), Subject(name="catkin"))),
+        ClassRegistry(subjects=(Subject(name="leaf"), Subject(name="bush"), Subject(name="bud"))),
     )
 
 
@@ -75,7 +75,7 @@ def test_registry_subjects_keep_their_declared_order(tmp_path: Path) -> None:
     assigned in; re-ordering it would reindex a training run's classes against its labels."""
     root = tmp_path
     _registry(root)
-    assert list_subjects(root) == ["leaf", "bush", "catkin"]
+    assert list_subjects(root) == ["leaf", "bush", "bud"]
     assert list_subjects(tmp_path / "no_such_dataset") == []
 
 
@@ -106,12 +106,12 @@ def test_declared_subjects_and_subjects_labelled_on_a_date_are_not_interchangeab
     _registry(root)
     json_io.write_annotations(
         str(annotation_dir(root, "2026-02-11") / "IMG_1.json"),
-        [Annotation(subject="catkin", geometry=BBox(1, 2, 7, 19))], 120, 90)
+        [Annotation(subject="bud", geometry=BBox(1, 2, 7, 19))], 120, 90)
     json_io.write_annotations(
         str(annotation_dir(root, "2026-03-02") / "IMG_2.json"),
         [Annotation(subject="bush", geometry=BBox(3, 4, 40, 11))], 120, 90)
 
-    assert list_subjects(root) == ["leaf", "bush", "catkin"]
-    assert subjects_with_labels(root, "2026-02-11") == ["catkin"]
+    assert list_subjects(root) == ["leaf", "bush", "bud"]
+    assert subjects_with_labels(root, "2026-02-11") == ["bud"]
     assert subjects_with_labels(root, "2026-03-02") == ["bush"]
     assert subjects_with_labels(root, "2026-04-01") == []

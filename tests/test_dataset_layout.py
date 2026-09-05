@@ -82,21 +82,21 @@ def _touch(path: Path, text: str = "") -> None:
 def test_subjects_with_labels_is_per_date(tmp_path: Path) -> None:
     root = tmp_path
     # Subjects are read from the per-image label records (the path no longer encodes them).
-    # catkin labelled on 2026-02-11 only; bush labelled on 2026-03-02 only.
+    # bud labelled on 2026-02-11 only; bush labelled on 2026-03-02 only.
     json_io.write_annotations(
         str(annotation_dir(root, "2026-02-11") / "IMG_1.json"),
-        [Annotation(subject="catkin", geometry=BBox(1, 1, 9, 9))], 100, 100)
+        [Annotation(subject="bud", geometry=BBox(1, 1, 9, 9))], 100, 100)
     json_io.write_annotations(
         str(annotation_dir(root, "2026-03-02") / "IMG_9.json"),
         [Annotation(subject="bush", geometry=BBox(1, 1, 9, 9))], 100, 100)
-    # A second image on 2026-03-02 carries catkin, so that date offers both subjects.
+    # A second image on 2026-03-02 carries bud, so that date offers both subjects.
     json_io.write_annotations(
         str(annotation_dir(root, "2026-03-02") / "IMG_5.json"),
-        [Annotation(subject="catkin", geometry=BBox(1, 1, 9, 9))], 100, 100)
+        [Annotation(subject="bud", geometry=BBox(1, 1, 9, 9))], 100, 100)
 
-    assert subjects_with_labels(root, "2026-02-11") == ["catkin"]
-    # 2026-03-02 has bush and catkin → both, sorted.
-    assert subjects_with_labels(root, "2026-03-02") == ["bush", "catkin"]
+    assert subjects_with_labels(root, "2026-02-11") == ["bud"]
+    # 2026-03-02 has bush and bud → both, sorted.
+    assert subjects_with_labels(root, "2026-03-02") == ["bud", "bush"]
     # A date with no labels for any subject → nothing to offer.
     assert subjects_with_labels(root, "2026-03-24") == []
 
@@ -107,11 +107,11 @@ def test_subjects_on_date_excludes_a_bucket_sidecar(tmp_path: Path) -> None:
     root = tmp_path
     json_io.write_annotations(
         str(annotation_dir(root, "2026-02-11") / "IMG_1.json"),
-        [Annotation(subject="catkin", geometry=BBox(1, 1, 9, 9))], 100, 100)
+        [Annotation(subject="bud", geometry=BBox(1, 1, 9, 9))], 100, 100)
     (annotation_dir(root, "2026-02-11") / "operating_point.json").write_text(
         '{"not": "a label"}', encoding="utf-8")
 
-    assert subjects_on_date(root, "2026-02-11") == ["catkin"]
+    assert subjects_on_date(root, "2026-02-11") == ["bud"]
 
 
 def test_subjects_on_date_raises_on_an_unreadable_label(tmp_path: Path) -> None:
@@ -186,7 +186,7 @@ def test_a_bucket_key_takes_apart_into_the_subject_and_date_it_was_built_from() 
     """The published inverse round-trips every bucket the writer can build, dateless included."""
     from tcip_mcp.dataset_layout import bucket_subject_date, status_bucket
 
-    for subject, date in (("catkin", "2026-03-02"), ("bush", None)):
+    for subject, date in (("bud", "2026-03-02"), ("bush", None)):
         assert bucket_subject_date(status_bucket(subject, date)) == (subject, date)
 
 

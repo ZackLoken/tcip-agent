@@ -198,7 +198,7 @@ def test_a_restored_archive_reads_back_at_once_with_no_hand_adoption(tmp_path, m
     source = tmp_path / "source"
     (source / "images" / "2026-03-04").mkdir(parents=True)
     (source / "images" / "2026-03-04" / "a_1.jpg").write_bytes(b"\xff\xd8\xff")
-    negative = {"catkin/2026-03-04": {"a_1.jpg": {"status": "negative", "by": "user:ü"}}}
+    negative = {"bud/2026-03-04": {"a_1.jpg": {"status": "negative", "by": "user:ü"}}}
     restored = tmp_path / "restored"
     platform_files = tmp_path / "platform_files"
     platform_database = tmp_path / "platform_database"

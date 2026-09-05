@@ -46,7 +46,7 @@ def _write_bucket(dataset_root: Path, model: str, stems: list[str]) -> Path:
                     "width": IMG_W,
                     "height": IMG_H,
                     "annotations": [
-                        {"subject": "catkin", "bbox": [10.0, 12.0, 40.0, 60.0], "score": 0.7}
+                        {"subject": "bud", "bbox": [10.0, 12.0, 40.0, 60.0], "score": 0.7}
                     ],
                 }
             ),
@@ -61,11 +61,11 @@ def _record_verdicts(review_state_dir: Path, bucket_dir: Path, stem: str,
     detection."""
     review_state_dir.mkdir(parents=True, exist_ok=True)
     engine = ReviewEngine(review_state_dir)
-    preds = [Annotation(subject="catkin", geometry=BBox(*b), score=0.7) for b in boxes]
+    preds = [Annotation(subject="bud", geometry=BBox(*b), score=0.7) for b in boxes]
     ctx = ReviewContext(img_name=f"{stem}.jpg", img_width=IMG_W, img_height=IMG_H, preds=preds)
     for i, box in enumerate(boxes):
         det = ReviewDetection(
-            det_type="fp", class_name="catkin", conf=0.7, iou=None,
+            det_type="fp", class_name="bud", conf=0.7, iou=None,
             gt_idx=None, pred_idx=i, bbox=box,
         )
         engine.record_detection_action(bucket_key_of(bucket_dir), det, ctx, action="accepted")
@@ -153,7 +153,7 @@ def test_staging_sees_the_verdicts_the_review_route_recorded(
     img_dir.mkdir(parents=True)
     img = img_dir / "IMG_0007.jpg"
     Image.new("RGB", (IMG_W, IMG_H), color=(80, 120, 90)).save(img)
-    preds = [Annotation(subject="catkin", geometry=BBox(12.0, 20.0, 52.0, 44.0), score=0.83)]
+    preds = [Annotation(subject="bud", geometry=BBox(12.0, 20.0, 52.0, 44.0), score=0.83)]
 
     first = stage_prediction_shapes(
         str(root), "detector", DATE, "IMG_0007",
@@ -168,7 +168,7 @@ def test_staging_sees_the_verdicts_the_review_route_recorded(
         "image_path": str(img),
         "gt_path": str(tmp_path / "gt.json"),
         "pred_path": first["path"],
-        "det_type": "fp", "class_name": "catkin",
+        "det_type": "fp", "class_name": "bud",
         "conf": 0.83, "iou": None,
         "gt_idx": None, "pred_idx": 0,
         "bbox": [12.0, 20.0, 52.0, 44.0],

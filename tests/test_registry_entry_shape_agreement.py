@@ -31,7 +31,7 @@ _TS_FIELD_RE = re.compile(r"^\s+(\w+)(\??):", re.M)
 
 # Checkpoints of distinct size and content, so an entry can never be matched by accident.
 _RUNS = {
-    "hazelnut_catkin_detector_v1": b"weights-a",
+    "currant_bud_detector_v1": b"weights-a",
     "chestnut_leaf_area_seg_v2": b"weights-b-longer-payload",
 }
 
@@ -57,7 +57,7 @@ def polluted_project(tmp_path: Path) -> tuple[Path, ModelRegistry]:
         ckpt = leak_dir / f"{name}.pt"
         ckpt.write_bytes(content)
         reg.register_model(
-            name, str(ckpt), {"data": {"subject": "catkin"}},
+            name, str(ckpt), {"data": {"subject": "bud"}},
             metrics={"val_map50": 0.5 + 0.1 * i}, tags=["detector", f"experiment:run{i}"],
             metrics_source="caller",
         )
@@ -119,9 +119,9 @@ def test_identity_resolution_matches_a_registered_checkpoint_by_content(
     trained = tmp_path / "model_best.pt"
     torch.save({"model_state_dict": {}, "note": "the checkpoint that produced the phenotype"},
               trained)
-    create_experiment("catkin_run3", {"model_source": {"builder": "x:y"}})
-    assert "error" not in complete_run("catkin_run3", str(trained))
-    assert "error" not in register_model_from_experiment("catkin_run3", str(trained))
+    create_experiment("bud_run3", {"model_source": {"builder": "x:y"}})
+    assert "error" not in complete_run("bud_run3", str(trained))
+    assert "error" not in register_model_from_experiment("bud_run3", str(trained))
 
     delivered = tmp_path / "delivery" / "model_copy.pt"
     delivered.parent.mkdir()
@@ -130,7 +130,7 @@ def test_identity_resolution_matches_a_registered_checkpoint_by_content(
     checkpoint = load_registered_checkpoint(delivered, project_path=str(root))
     identity = resolve_model_identity(checkpoint)
     assert identity["sha256"] == hashlib.sha256(trained.read_bytes()).hexdigest()
-    assert identity["experiment_id"] == "catkin_run3"
+    assert identity["experiment_id"] == "bud_run3"
     assert identity["checkpoint"] == "model_copy"
 
 
@@ -155,7 +155,7 @@ def test_doctor_reports_an_index_that_will_not_decode_rather_than_reading_it_as_
     reg = ModelRegistry(str(root))
     ckpt = tmp_path / "model_best.pt"
     ckpt.write_bytes(b"weights-a")
-    reg.register_model("hazelnut_catkin_detector_v1", str(ckpt), {}, metrics_source=None)
+    reg.register_model("currant_bud_detector_v1", str(ckpt), {}, metrics_source=None)
 
     index = root / ".tcip" / "models" / "registry.json"
     index.write_text(index.read_text(encoding="utf-8")[:-8], encoding="utf-8")
@@ -207,7 +207,7 @@ def test_every_field_the_browser_reads_off_an_entry_is_one_the_registry_writes(
     ckpt = tmp_path / "model_best.pt"
     ckpt.write_bytes(b"weights-a")
     entry = ModelRegistry(str(root)).register_model(
-        "hazelnut_catkin_detector_v1", str(ckpt), {"data": {"subject": "catkin"}},
+        "currant_bud_detector_v1", str(ckpt), {"data": {"subject": "bud"}},
         metrics={"val_map50": 0.5}, tags=["detector"], metrics_source="caller",
     )
 

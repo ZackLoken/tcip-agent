@@ -16,7 +16,7 @@ from tcip_annotation.state import Annotation, BBox
 from tcip_mcp.tools.data_tools import scan_dataset
 
 DATE = "2-11-26"
-SUBJECT = "catkin"
+SUBJECT = "bud"
 
 
 def _write_image(path: Path, width: int, height: int) -> None:
