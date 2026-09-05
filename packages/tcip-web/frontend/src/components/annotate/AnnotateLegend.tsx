@@ -58,6 +58,13 @@ export function AnnotateLegend() {
               <span className="text-tcip-muted">Dashed = polygon&apos;s box (read-only)</span>
             </li>
           )}
+          <li className="flex items-center gap-2.5 text-[12px]">
+            <span
+              className="inline-block h-[13px] w-[18px] shrink-0 rounded-[2px] border-[2.5px] border-dotted"
+              style={{ borderColor: "currentColor" }}
+            />
+            <span className="text-tcip-muted">Dotted = drawn by a tool, not yet accepted</span>
+          </li>
         </ul>
       </div>
       <button

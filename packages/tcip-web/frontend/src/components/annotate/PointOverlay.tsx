@@ -2,6 +2,7 @@ import { memo } from "react";
 import { Circle, Line } from "react-konva";
 
 import { HaloLabel } from "@/components/HaloLabel";
+import { dashPattern } from "@/lib/authorshipSymbology";
 import type { PointShape } from "@/store/types";
 
 /**
@@ -23,6 +24,7 @@ export const PointOverlay = memo(function PointOverlay({
   labelSize,
   label,
   showLabel,
+  dashed,
 }: {
   point: PointShape;
   stroke: string;
@@ -33,6 +35,8 @@ export const PointOverlay = memo(function PointOverlay({
   labelSize: number;
   label: string;
   showLabel?: boolean;
+  /** A tool's own point that no person has accepted draws dotted; every other point is solid. */
+  dashed?: "tool";
 }) {
   const { x, y } = point;
   const ticks: [number, number, number, number][] = [
@@ -41,10 +45,17 @@ export const PointOverlay = memo(function PointOverlay({
     [x - tickInner, y, x - tickOuter, y],
     [x + tickInner, y, x + tickOuter, y],
   ];
+  const dash = dashed ? dashPattern(dashed, lineW) : undefined;
   return (
     <>
       {ticks.map(([x1, y1, x2, y2], i) => (
-        <Line key={`t-${i}`} points={[x1, y1, x2, y2]} stroke={stroke} strokeWidth={lineW} />
+        <Line
+          key={`t-${i}`}
+          points={[x1, y1, x2, y2]}
+          stroke={stroke}
+          strokeWidth={lineW}
+          dash={dash}
+        />
       ))}
       <Circle x={x} y={y} radius={coreR} fill={stroke} stroke="#ffffff" strokeWidth={lineW * 0.6} />
       {showLabel && (

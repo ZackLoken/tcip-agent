@@ -198,6 +198,51 @@ describe("labelSerde multi-ring polygons", () => {
   });
 });
 
+describe("labelSerde authorship", () => {
+  it("carries authorship onto every canvas shape kind, from the load response", () => {
+    const canvas = annotationsToCanvas([
+      { subject: "subject_a", bbox: [0, 0, 10, 10], attributes: {}, authorship: "tool" },
+      {
+        subject: "subject_a",
+        rings: [
+          [
+            [0, 0],
+            [10, 0],
+            [10, 10],
+          ],
+        ],
+        attributes: {},
+        authorship: "person",
+      },
+      { subject: "tip", point: [1, 2], attributes: {}, authorship: "unattributed" },
+    ]);
+    expect(canvas.boxes[0].authorship).toBe("tool");
+    expect(canvas.polygons[0].authorship).toBe("person");
+    expect(canvas.points[0].authorship).toBe("unattributed");
+  });
+
+  it("never carries authorship back into a save payload, on any shape kind", () => {
+    const canvas = annotationsToCanvas([
+      { subject: "subject_a", bbox: [0, 0, 10, 10], attributes: {}, authorship: "tool" },
+      {
+        subject: "subject_a",
+        rings: [
+          [
+            [0, 0],
+            [10, 0],
+            [10, 10],
+          ],
+        ],
+        attributes: {},
+        authorship: "tool",
+      },
+      { subject: "tip", point: [1, 2], attributes: {}, authorship: "tool" },
+    ]);
+    const saved = canvasToAnnotations(canvas);
+    expect(saved.every((a) => !("authorship" in a))).toBe(true);
+  });
+});
+
 describe("labelSerde points", () => {
   it("loads a point annotation into the points bucket, never a box or a polygon", () => {
     // A point has no extent: bucketing it as a box would hand a fabricated zero-area target to
@@ -220,6 +265,7 @@ describe("labelSerde points", () => {
         created_at: null,
         accepted_by: null,
         accepted_at: null,
+        authorship: null,
       },
     ]);
     expect(canvas.boxes).toHaveLength(0);
