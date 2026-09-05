@@ -617,6 +617,41 @@ def test_list_split_choices_never_names_a_null_valued_split_key_as_replaced(
     assert entry["replaced_split_keys"] == ["seed"]
 
 
+def test_list_split_choices_reads_the_picked_experiments_own_config_only_once(
+    tmp_path: Path, monkeypatch,
+):
+    """``experiment_ids_with_status`` enumerates every experiment including the one being
+    listed for; its own manifest_dir is already known from the read taken above the loop, so
+    the loop must skip it rather than reading its config a second time only to derive the
+    identical fact and discard it as its own binding. ``images_dir``/``labels_dir`` must be
+    recorded, or the function returns before ever reaching that loop."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
+    import tcip_mcp.experiments as experiments_module
+    from tcip_mcp.experiments import create_experiment
+    from tcip_mcp.tools.training_tools import list_split_choices
+
+    root = _two_subject_two_date_dataset(tmp_path / "ds")
+    picked_cfg = _bespoke_config(root / "images" / DATES[0], root / "annotations" / DATES[0])
+    create_experiment("exp-picked-once", picked_cfg)
+    other_cfg = _bespoke_config(root / "images" / DATES[0], root / "annotations" / DATES[0])
+    create_experiment("exp-other-once", other_cfg)
+
+    reads: list[str] = []
+    original_read_member = experiments_module.read_member
+
+    def _counting_read_member(key, *a, **k):
+        reads.append(key.parts[0])
+        return original_read_member(key, *a, **k)
+
+    monkeypatch.setattr(experiments_module, "read_member", _counting_read_member)
+
+    list_split_choices("exp-picked-once")
+
+    assert reads.count("exp-picked-once") == 1
+    assert reads.count("exp-other-once") == 1
+
+
 def test_list_split_choices_does_not_offer_the_own_manifest_under_a_different_spelling(
     tmp_path: Path, monkeypatch,
 ):
