@@ -328,8 +328,8 @@ def experiment_exists(experiment_id: str, *, root: Path | str | None = None) -> 
     return store.exists(config_key(experiment_id, root=root))
 
 
-def _current_state(experiment_id: str) -> str | None:
-    status = read_member(status_key(experiment_id), {})
+def _current_state(experiment_id: str, *, root: Path | str | None = None) -> str | None:
+    status = read_member(status_key(experiment_id, root=root), {})
     return status.get("state") if isinstance(status, dict) else None
 
 
@@ -387,7 +387,8 @@ def _audit_refused(
 
 
 def audit_refusal_reraising(experiment_id: str, op: str, detail: dict[str, Any],
-                            refusal: ExperimentTerminal) -> None:
+                            refusal: ExperimentTerminal, *,
+                            root: Path | str | None = None) -> None:
     """Audit a refusal and re-raise it, whether or not the audit line itself could be written.
 
     For every caller that lets an :class:`ExperimentTerminal` propagate rather than report it as
@@ -397,9 +398,13 @@ def audit_refusal_reraising(experiment_id: str, op: str, detail: dict[str, Any],
     the refusal it was recording, so a failed append is chained onto ``refusal`` (``raise refusal
     from audit_exc``) instead: the refusal always reaches the caller and the append failure
     stays visible on it.
+
+    ``root`` names a platform root other than this process's own, the same escape hatch
+    :func:`update_status` offers a caller resolving a run under a root other than the one it
+    started under.
     """
     try:
-        _audit_refused(experiment_id, op, detail)
+        _audit_refused(experiment_id, op, detail, root=root)
     except Exception as audit_exc:
         raise refusal from audit_exc
     raise refusal
@@ -483,7 +488,9 @@ def metrics_logged_of(status: dict[str, Any] | None) -> bool:
     return bool(status.get("metrics_logged")) if isinstance(status, dict) else False
 
 
-def overwrite_config_if_pristine(experiment_id: str, config: dict[str, Any]) -> dict[str, Any]:
+def overwrite_config_if_pristine(
+    experiment_id: str, config: dict[str, Any], *, root: Path | str | None = None,
+) -> dict[str, Any]:
     """Rewrite ``config.json`` with the config actually launched, but only while the experiment is
     still pristine (state == "created" and no epochs logged yet).
 
@@ -499,11 +506,15 @@ def overwrite_config_if_pristine(experiment_id: str, config: dict[str, Any]) -> 
     same status record this opens one transaction over, closing the race a log-key read outside
     the transaction could not: a ``log_metrics`` call now decides pristineness by writing to that
     same record, under the same lock, rather than a key no record transaction can name.
+
+    ``root`` names a platform root other than this process's own, the same escape hatch
+    :func:`update_status` offers a caller resolving a run under a root other than the one it
+    started under.
     """
     check_json_value(config, path="config")
-    if not experiment_exists(experiment_id):
+    if not experiment_exists(experiment_id, root=root):
         return {"error": f"Experiment not found: {experiment_id}"}
-    cfg_key, st_key = config_key(experiment_id), status_key(experiment_id)
+    cfg_key, st_key = config_key(experiment_id, root=root), status_key(experiment_id, root=root)
     state: str | None = None
     metrics_logged = False
     refused = False
@@ -516,7 +527,7 @@ def overwrite_config_if_pristine(experiment_id: str, config: dict[str, Any]) -> 
             txn.write(cfg_key, config)
     if refused:
         _audit_refused(experiment_id, "overwrite_config_if_pristine",
-                       {"state": state, "metrics_logged": metrics_logged})
+                       {"state": state, "metrics_logged": metrics_logged}, root=root)
         return {"error": f"Experiment {experiment_id} is no longer pristine; refusing to "
                          f"overwrite its config.json."}
     return {"experiment_id": experiment_id, "overwritten": True}
@@ -599,7 +610,9 @@ def update_status(
     return {"experiment_id": experiment_id, "state": state}
 
 
-def complete_run(experiment_id: str, final_weights: str) -> dict[str, Any]:
+def complete_run(
+    experiment_id: str, final_weights: str, *, root: Path | str | None = None,
+) -> dict[str, Any]:
     """Mark a run completed and record its final weights pointer and their digest, as one
     transaction.
 
@@ -619,8 +632,12 @@ def complete_run(experiment_id: str, final_weights: str) -> dict[str, Any]:
     it. The digest is what this call observed of the file, sealed into the transaction that makes
     the run terminal, so nothing a caller does to the path afterwards changes what the run
     recorded.
+
+    ``root`` names a platform root other than this process's own, the same escape hatch
+    :func:`update_status` offers a caller resolving a run under a root other than the one it
+    started under.
     """
-    if not experiment_exists(experiment_id):
+    if not experiment_exists(experiment_id, root=root):
         return {"error": f"Experiment not found: {experiment_id}"}
 
     from tcip_mcp.model_registry import _compute_sha256
@@ -633,7 +650,8 @@ def complete_run(experiment_id: str, final_weights: str) -> dict[str, Any]:
                 "final_weights": final_weights}
 
     art_key, lin_key, st_key = (
-        artifacts_key(experiment_id), lineage_key(experiment_id), status_key(experiment_id),
+        artifacts_key(experiment_id, root=root), lineage_key(experiment_id, root=root),
+        status_key(experiment_id, root=root),
     )
     current: str | None = None
     try:
@@ -657,7 +675,7 @@ def complete_run(experiment_id: str, final_weights: str) -> dict[str, Any]:
             _mark_completed(status)
             txn.write(st_key, status)
     except ExperimentTerminal as exc:
-        _audit_refused(experiment_id, "complete_run", {"final_weights": final_weights})
+        _audit_refused(experiment_id, "complete_run", {"final_weights": final_weights}, root=root)
         return {"error": f"{exc} Final weights at {final_weights!r} were not recorded.",
                 "final_weights": final_weights, "state": current}
 
@@ -866,14 +884,14 @@ def _heartbeat_fresh(hb_iso: str | None, stale_seconds: float = 600.0) -> bool:
     return (datetime.now(timezone.utc) - hb).total_seconds() <= stale_seconds
 
 
-def _touch_heartbeat(experiment_id: str) -> None:
+def _touch_heartbeat(experiment_id: str, *, root: Path | str | None = None) -> None:
     """Best-effort: stamp the current time into ``status.json['heartbeat']``.
 
     Called each epoch so a run still training in another process (e.g. the MCP agent) reads
     as live to a web client reconstructing run state, instead of being flagged interrupted.
     Never raises, a heartbeat failure must not break metric logging.
     """
-    key = status_key(experiment_id)
+    key = status_key(experiment_id, root=root)
     if not store.exists(key):
         return
     try:
@@ -949,6 +967,8 @@ def log_metrics(
     experiment_id: str,
     epoch: int,
     metrics: dict[str, Any],
+    *,
+    root: Path | str | None = None,
 ) -> dict[str, Any]:
     """Append epoch metrics to the run's metrics log and refresh its liveness heartbeat.
 
@@ -968,19 +988,23 @@ def log_metrics(
     goes before the append, not after, so a marker written but then an append that fails still
     reads non-pristine, never the reverse. A failure inside that marker transaction is left to
     raise rather than caught: no marker means no row follows it, the safe direction.
+
+    ``root`` names a platform root other than this process's own, the same escape hatch
+    :func:`update_status` offers a caller resolving a run under a root other than the one it
+    started under.
     """
     check_json_value(metrics, path="metrics")
-    if not experiment_exists(experiment_id):
+    if not experiment_exists(experiment_id, root=root):
         return {"error": f"Experiment not found: {experiment_id}"}
 
     # Terminal-state lock: a completed/failed run's metric history is frozen, no new epochs.
     try:
-        refuse_if_terminal(experiment_id, "log_metrics", _current_state(experiment_id))
+        refuse_if_terminal(experiment_id, "log_metrics", _current_state(experiment_id, root=root))
     except ExperimentTerminal as exc:
-        _audit_refused(experiment_id, "log_metrics", {"epoch": epoch})
+        _audit_refused(experiment_id, "log_metrics", {"epoch": epoch}, root=root)
         return {"error": str(exc)}
 
-    key = status_key(experiment_id)
+    key = status_key(experiment_id, root=root)
     with store.transaction(key) as txn:
         status = txn.read(key, default={})
         status["metrics_logged"] = True
@@ -991,8 +1015,8 @@ def log_metrics(
         "timestamp": datetime.now(timezone.utc).isoformat(),
         **metrics,
     }
-    store.append(metrics_key(experiment_id), entry)
-    _touch_heartbeat(experiment_id)
+    store.append(metrics_key(experiment_id, root=root), entry)
+    _touch_heartbeat(experiment_id, root=root)
 
     return {"experiment_id": experiment_id, "epoch": epoch, "logged": True}
 
@@ -1222,12 +1246,19 @@ def record_artifact(
     experiment_id: str,
     name: str,
     path: str,
+    *,
+    root: Path | str | None = None,
 ) -> dict[str, Any]:
-    """Register an artifact (model weights, predictions, etc.)."""
-    if not experiment_exists(experiment_id):
+    """Register an artifact (model weights, predictions, etc.).
+
+    ``root`` names a platform root other than this process's own, the same escape hatch
+    :func:`update_status` offers a caller resolving a run under a root other than the one it
+    started under.
+    """
+    if not experiment_exists(experiment_id, root=root):
         return {"error": f"Experiment not found: {experiment_id}"}
 
-    key, state = artifacts_key(experiment_id), status_key(experiment_id)
+    key, state = artifacts_key(experiment_id, root=root), status_key(experiment_id, root=root)
     current: str | None = None
     refused_overwrite = False
     with store.transaction(key, state) as txn:
@@ -1245,7 +1276,8 @@ def record_artifact(
         try:
             refuse_if_terminal(experiment_id, "record_artifact", current)
         except ExperimentTerminal as exc:
-            _audit_refused(experiment_id, "record_artifact", {"artifact": name, "path": path})
+            _audit_refused(experiment_id, "record_artifact", {"artifact": name, "path": path},
+                          root=root)
             return {"error": f"{exc} Artifact {name!r} is already recorded and is immutable; "
                              f"the file at {path!r} was not recorded.",
                     "artifact": name}
@@ -1261,6 +1293,8 @@ any field lands, never merged in and never silently dropped."""
 
 def update_lineage(
     experiment_id: str,
+    *,
+    root: Path | str | None = None,
     **updates: Any,
 ) -> dict[str, Any]:
     """Update lineage fields (predictions, data_source, review_session, etc.).
@@ -1276,6 +1310,10 @@ def update_lineage(
     other, legitimate updates it was given. It is deferred and raised at the end instead, once
     those have landed, so the append failure still reaches the caller rather than being logged
     away, and never at the cost of a write that should have gone through.
+
+    ``root`` names a platform root other than this process's own, the same escape hatch
+    :func:`update_status` offers a caller resolving a run under a root other than the one it
+    started under.
     """
     check_json_value(updates, path="updates")
     completion_fields = sorted(f for f in _COMPLETION_ONLY_LINEAGE_FIELDS if f in updates)
@@ -1284,7 +1322,7 @@ def update_lineage(
             f"update_lineage: {', '.join(completion_fields)} is complete_run's alone to write; "
             "no other caller populates the run's recorded digest."
         )
-    if not experiment_exists(experiment_id):
+    if not experiment_exists(experiment_id, root=root):
         return {"error": f"Experiment not found: {experiment_id}"}
 
     # Dataset identity is set once at creation and is immutable, never a lineage edge to backfill: the additive-only lock below would otherwise permit a first write to an empty identity field even post-terminal.
@@ -1293,11 +1331,12 @@ def update_lineage(
     identity_audit_exc: Exception | None = None
     if identity_updates:
         try:
-            _audit_refused(experiment_id, "update_lineage_identity", {"fields": sorted(identity_updates)})
+            _audit_refused(experiment_id, "update_lineage_identity",
+                          {"fields": sorted(identity_updates)}, root=root)
         except Exception as exc:
             identity_audit_exc = exc
 
-    key, state = lineage_key(experiment_id), status_key(experiment_id)
+    key, state = lineage_key(experiment_id, root=root), status_key(experiment_id, root=root)
     refused: dict[str, Any] = {}
     with store.transaction(key, state) as txn:
         lineage = txn.read(key, default={})
@@ -1317,7 +1356,8 @@ def update_lineage(
     if refused:
         # Names the orphaned values themselves: for a path-like field (predictions) that value
         # is the file this refusal left unrecorded.
-        _audit_refused(experiment_id, "update_lineage", {"fields": sorted(refused), **refused})
+        _audit_refused(experiment_id, "update_lineage", {"fields": sorted(refused), **refused},
+                      root=root)
     if identity_audit_exc is not None:
         raise identity_audit_exc
     return {"experiment_id": experiment_id, "lineage": lineage}
@@ -1329,6 +1369,7 @@ def register_model_from_experiment(
     *,
     project_path: str = "",
     name: str | None = None,
+    root: Path | str | None = None,
 ) -> dict[str, Any]:
     """Bind the registry's own entry to the run that produced it: the digest completion recorded.
 
@@ -1364,20 +1405,26 @@ def register_model_from_experiment(
     A name a prior run bound is not evicted by this call unless ``experiment_id`` is that same
     run: the registry's own eviction rail refuses, returned here as an error naming the run that
     holds the name (see ``model_registry.EntryOwnedByRun``).
+
+    ``root`` names the platform root the experiment's own keys hang off, other than this
+    process's own, the same escape hatch :func:`update_status` offers a caller resolving a run
+    under a root other than the one it started under; the default is this process's pinned
+    platform root, and ``project_path``'s own check is against whichever one applies.
     """
-    if not experiment_exists(experiment_id):
+    if not experiment_exists(experiment_id, root=root):
         return {"error": f"Experiment not found: {experiment_id}"}
 
     from tcip_mcp.pipelines.data.splits import same_directory
     from tcip_mcp.project_paths import platform_state_root
 
-    root = str(platform_state_root())
-    if project_path and not same_directory(project_path, root):
+    platform_root = str(Path(root).resolve()) if root is not None else str(platform_state_root())
+    if project_path and not same_directory(project_path, platform_root):
         return {"error": f"register_model_from_experiment: project_path {project_path!r} is not "
-                         f"the root experiment {experiment_id!r}'s own keys hang off ({root!r})."}
+                         f"the root experiment {experiment_id!r}'s own keys hang off "
+                         f"({platform_root!r})."}
     # Resolved once confirmed the same root: the index key refuses a non-absolute one, so a
     # relative or forward-slash spelling of the root must still reach it.
-    registry_root = str(Path(project_path).resolve()) if project_path else root
+    registry_root = str(Path(project_path).resolve()) if project_path else platform_root
 
     ckpt = Path(checkpoint_path)
     if not ckpt.is_file():
@@ -1390,16 +1437,16 @@ def register_model_from_experiment(
 
     digest = _sha256_of_bytes(data)
 
-    status = read_member(status_key(experiment_id), {})
+    status = read_member(status_key(experiment_id, root=root), {})
     state = status.get("state") if isinstance(status, dict) else None
-    lineage = read_member(lineage_key(experiment_id), {})
+    lineage = read_member(lineage_key(experiment_id, root=root), {})
     recorded_digest = lineage.get("model_weights_sha256") if isinstance(lineage, dict) else None
     recorded_path = lineage.get("model_weights") if isinstance(lineage, dict) else None
     if state != "completed" or not recorded_digest:
         _audit_refused(experiment_id, "register_model_from_experiment", {
             "checkpoint_path": checkpoint_path, "caller_sha256": digest,
             "recorded_sha256": recorded_digest, "recorded_path": recorded_path,
-        })
+        }, root=root)
         return {"error": f"experiment {experiment_id!r} has not completed with a recorded "
                          f"digest (state={state!r}): its run has not said what it produced. "
                          "complete_run records the digest when the run finishes."}
@@ -1408,13 +1455,13 @@ def register_model_from_experiment(
         _audit_refused(experiment_id, "register_model_from_experiment", {
             "checkpoint_path": checkpoint_path, "caller_sha256": digest,
             "recorded_sha256": recorded_digest, "recorded_path": recorded_path,
-        })
+        }, root=root)
         return {"error": f"{checkpoint_path} (sha256 {digest}) is not the bytes experiment "
                          f"{experiment_id!r}'s completion recorded (sha256 {recorded_digest}, at "
                          f"{recorded_path!r}): the caller's path must be the recorded path or a "
                          "byte-identical copy of it."}
 
-    config = read_member(config_key(experiment_id), {})
+    config = read_member(config_key(experiment_id, root=root), {})
 
     # Metrics stored in the checkpoint describe the epoch it was saved at (never a later epoch's).
     # Read through the same unpickle+version-check load_registered_checkpoint uses.
