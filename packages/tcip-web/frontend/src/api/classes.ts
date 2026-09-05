@@ -36,10 +36,12 @@ export type ImageStatus = "complete" | "partial" | "negative" | "unannotated";
 
 /** What a registry save's attribute-vocabulary change did to existing confirmations: for each
  *  affected subject, how many of its confirmations were stamped with the outgoing schema (so a
- *  later read tells them apart from ones made under the new vocabulary), and a warning naming any
- *  the sweep itself could not complete. */
+ *  later read tells them apart from ones made under the new vocabulary), how many of its
+ *  confirmations (already stamped, by this write or an earlier one) now predate the vocabulary in
+ *  effect, and a warning naming any the sweep itself could not complete. */
 export interface SchemaChangeSweep {
   newly_stamped: Record<string, number>;
+  predating_vocabulary: Record<string, number>;
   warning: string | null;
 }
 

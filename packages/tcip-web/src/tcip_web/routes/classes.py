@@ -170,7 +170,9 @@ def save_classes(payload: SaveClassesPayload) -> dict:
     invalidates the confirmations made under the old one, so once the write lands the outgoing
     digest is recorded onto that subject's still-unstamped confirmations; they then read as
     predating the change instead of as made under the new vocabulary. That never blocks the write
-    it accompanies; what it stamped, and any warning, ride back in ``schema_change_sweep``.
+    it accompanies; what it stamped, the confirmations that now predate the vocabulary in effect
+    (a confirmation already stamped, whether by this write or an earlier one, whose digest is not
+    the subject's new digest), and any warning, ride back in ``schema_change_sweep``.
     """
     from tcip_store import Version, VersionConflict
 
@@ -202,7 +204,8 @@ def save_classes(payload: SaveClassesPayload) -> dict:
     _audit_dataset_write(
         root, "gui_save_classes",
         {"classes_path": str(path), "n_subjects": len(registry.subjects),
-         "confirmations_stamped_with_outgoing_schema": sweep["newly_stamped"]},
+         "confirmations_stamped_with_outgoing_schema": sweep["newly_stamped"],
+         "confirmations_predating_vocabulary": sweep["predating_vocabulary"]},
     )
     return {"status": "ok", "n_subjects": len(registry.subjects), "classes_path": str(path),
             "version": result["version"].token, "schema_change_sweep": sweep}

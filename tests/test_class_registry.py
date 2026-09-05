@@ -251,7 +251,8 @@ def test_replace_registry_first_write_succeeds_and_reports_no_sweep(tmp_path):
     path = tmp_path / "classes.json"
     result = replace_registry(path, _leaf_bush(), expect=Version.ABSENT)
     assert read_registry(path) == _leaf_bush()
-    assert result["schema_change_sweep"] == {"newly_stamped": {}, "warning": None}
+    assert result["schema_change_sweep"] == {
+        "newly_stamped": {}, "predating_vocabulary": {}, "warning": None}
     assert result["version"] == read_version(path)
 
 

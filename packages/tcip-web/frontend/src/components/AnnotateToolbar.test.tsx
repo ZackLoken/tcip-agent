@@ -230,7 +230,7 @@ describe("AnnotateToolbar subject authoring", () => {
       n_subjects: 2,
       classes_path: "C:/data/classes.json",
       version: "v1",
-      schema_change_sweep: { newly_stamped: {}, warning: null },
+      schema_change_sweep: { newly_stamped: {}, predating_vocabulary: {}, warning: null },
     });
     answerPrompt("  husk  ");
     renderToolbar();
@@ -257,7 +257,7 @@ describe("AnnotateToolbar subject authoring", () => {
       n_subjects: 2,
       classes_path: "C:/data/classes.json",
       version: "v1",
-      schema_change_sweep: { newly_stamped: {}, warning: null },
+      schema_change_sweep: { newly_stamped: {}, predating_vocabulary: {}, warning: null },
     });
     answerPrompt("leaf");
     renderToolbar();
@@ -280,7 +280,7 @@ describe("AnnotateToolbar subject authoring", () => {
       n_subjects: 1,
       classes_path: "C:/data/classes.json",
       version: "v1",
-      schema_change_sweep: { newly_stamped: {}, warning: null },
+      schema_change_sweep: { newly_stamped: {}, predating_vocabulary: {}, warning: null },
     });
     const promptSpy = answerPrompt(null);
     renderToolbar();
@@ -310,7 +310,7 @@ describe("AnnotateToolbar subject authoring", () => {
       n_subjects: 2,
       classes_path: "C:/data/classes.json",
       version: "v2",
-      schema_change_sweep: { newly_stamped: {}, warning: null },
+      schema_change_sweep: { newly_stamped: {}, predating_vocabulary: {}, warning: null },
     });
     answerPrompt("husk");
     renderToolbar();
@@ -379,7 +379,7 @@ describe("AnnotateToolbar subject authoring", () => {
       n_subjects: 2,
       classes_path: "C:/data/classes.json",
       version: "v2",
-      schema_change_sweep: { newly_stamped: { leaf: 3 }, warning: null },
+      schema_change_sweep: { newly_stamped: { leaf: 3 }, predating_vocabulary: {}, warning: null },
     });
     answerPrompt("husk");
     renderToolbar();
@@ -390,6 +390,29 @@ describe("AnnotateToolbar subject authoring", () => {
     });
 
     expect(useStore.getState().toasts.at(-1)?.message).toMatch(/3 of leaf's confirmations/);
+  });
+
+  it("toasts the predating_vocabulary count beside newly_stamped, naming the subject and fact", async () => {
+    seedDataset();
+    act(() => useStore.getState().setRegistry({ leaf: {} }, "v1"));
+    vi.spyOn(classesApi, "save").mockResolvedValue({
+      status: "ok",
+      n_subjects: 2,
+      classes_path: "C:/data/classes.json",
+      version: "v2",
+      schema_change_sweep: { newly_stamped: {}, predating_vocabulary: { leaf: 5 }, warning: null },
+    });
+    answerPrompt("husk");
+    renderToolbar();
+
+    openSubjectMenu();
+    await act(async () => {
+      fireEvent.click(screen.getByText("+ New subject"));
+    });
+
+    expect(useStore.getState().toasts.at(-1)?.message).toMatch(
+      /5 confirmed images of leaf were confirmed under its previous vocabulary\./,
+    );
   });
 });
 

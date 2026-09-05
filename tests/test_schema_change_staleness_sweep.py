@@ -99,6 +99,24 @@ def _confirm_negative_stamped(client: TestClient, root: Path, image_name: str,
     assert resp.status_code == 200, resp.text
 
 
+def _confirm_complete_stamped(client: TestClient, root: Path, image_name: str,
+                              subject: str) -> None:
+    """A Complete confirmation through the GUI route: the sweep's predating-vocabulary count
+    covers every status a bucket holds, not the negatives alone."""
+    resp = client.post(
+        "/api/classes/image_status",
+        json={"project_root": str(root), "dataset_root": str(root), "image_name": image_name,
+              "status": "complete", "subject": subject},
+    )
+    assert resp.status_code == 200, resp.text
+
+
+def _audit_entries(root: Path) -> list[dict]:
+    from tcip_mcp.audit import audit_log_key
+
+    return list(ts.read_log(audit_log_key(root)).records)
+
+
 def _confirm_negative_unstamped(root: Path, image_name: str, subject: str) -> None:
     """A confirmation recorded through the status writer alone, the state a dataset is left in
     whenever the stamp transaction did not follow the status one."""
@@ -197,7 +215,8 @@ def test_a_schema_change_with_nothing_to_stamp_writes_the_registry_and_no_digest
 
     response = _save_via_route(client, dataset, CATKIN_THREE_STATES)
 
-    assert response["schema_change_sweep"] == {"newly_stamped": {}, "warning": None}
+    assert response["schema_change_sweep"] == {
+        "newly_stamped": {}, "predating_vocabulary": {}, "warning": None}
     assert not image_status_digest_path(dataset).exists()
     saved = json.loads(classes_path(dataset).read_text(encoding="utf-8"))
     assert saved["catkin"]["attributes"]["elongation"]["values"] == \
@@ -256,3 +275,79 @@ def test_the_class_map_tool_writes_the_registry_and_reports_a_sweep_it_could_not
     saved = json.loads(classes_path(dataset).read_text(encoding="utf-8"))
     assert saved["catkin"]["attributes"]["elongation"]["values"] == \
         ["dormant", "elongating", "elongated"]
+
+
+def test_a_confirmation_stamped_under_current_code_reads_as_predating_the_next_change(
+    client: TestClient, dataset: Path
+) -> None:
+    """The bug the predating_vocabulary count exists to fix: a confirmation made through the GUI
+    is already stamped with the schema in effect at the time (never unstamped), so a later change
+    left it silently uncounted by newly_stamped. It has to surface here instead."""
+    _save_via_route(client, dataset, CATKIN_TWO_STATES)
+    _confirm_negative_stamped(client, dataset, "img_alpha.jpg", "catkin")
+
+    response = _save_via_route(client, dataset, CATKIN_THREE_STATES)
+
+    assert response["schema_change_sweep"]["newly_stamped"] == {}
+    assert response["schema_change_sweep"]["predating_vocabulary"] == {"catkin": 1}
+
+
+def test_the_class_map_tool_reports_predating_vocabulary_the_same_way(dataset: Path) -> None:
+    """One implementation: the tool's own writer reports the same count for the same case."""
+    _save_via_tool(dataset, CATKIN_TWO_STATES)
+    from tcip_mcp.class_registry import attribute_schema_digest, registry_from_dict
+    from tcip_mcp.dataset_layout import stamp_image_status_digests
+
+    record_image_statuses(dataset, status_bucket("catkin", None), {"img_alpha.jpg": "negative"},
+                          recorded_by="user:breeder")
+    two_state_digest = attribute_schema_digest(
+        registry_from_dict(_subjects(CATKIN_TWO_STATES)), "catkin")
+    stamp_image_status_digests(
+        dataset, status_bucket("catkin", None), ["img_alpha.jpg"], two_state_digest)
+
+    result = _save_via_tool(dataset, CATKIN_THREE_STATES)
+
+    assert result["schema_change_sweep"]["newly_stamped"] == {}
+    assert result["schema_change_sweep"]["predating_vocabulary"] == {"catkin": 1}
+
+
+def test_predating_vocabulary_counts_a_complete_confirmation_too_not_only_negatives(
+    client: TestClient, dataset: Path
+) -> None:
+    """The sweep stamps every status in a subject's buckets, and the predating count follows the
+    same scope: a stale complete confirmation counts exactly like a stale negative."""
+    _save_via_route(client, dataset, CATKIN_TWO_STATES)
+    _confirm_complete_stamped(client, dataset, "img_beta.jpg", "catkin")
+
+    response = _save_via_route(client, dataset, CATKIN_THREE_STATES)
+
+    assert response["schema_change_sweep"]["predating_vocabulary"] == {"catkin": 1}
+
+
+def test_predating_vocabulary_counts_only_the_subject_whose_schema_actually_changed(
+    client: TestClient, dataset: Path
+) -> None:
+    """Another subject's confirmations are neither stamped nor counted by a change they had no
+    part in, the same scoping newly_stamped already applies."""
+    _save_via_route(client, dataset, CATKIN_TWO_STATES)
+    _confirm_negative_stamped(client, dataset, "img_beta.jpg", "bush")
+
+    response = _save_via_route(client, dataset, CATKIN_THREE_STATES)
+
+    assert "bush" not in response["schema_change_sweep"]["predating_vocabulary"]
+
+
+def test_the_save_route_records_predating_vocabulary_in_its_audit_line(
+    client: TestClient, dataset: Path
+) -> None:
+    """The audit line for the change carries the same fact the response and the toast do, beside
+    the existing newly_stamped mapping, rather than recording a change that reads as harmless."""
+    _save_via_route(client, dataset, CATKIN_TWO_STATES)
+    _confirm_negative_stamped(client, dataset, "img_alpha.jpg", "catkin")
+
+    _save_via_route(client, dataset, CATKIN_THREE_STATES)
+
+    entries = _audit_entries(dataset)
+    save_entries = [e for e in entries if e["tool"] == "gui_save_classes"]
+    assert save_entries[-1]["arguments"]["confirmations_predating_vocabulary"] == {"catkin": 1}
+    assert save_entries[-1]["arguments"]["confirmations_stamped_with_outgoing_schema"] == {}
