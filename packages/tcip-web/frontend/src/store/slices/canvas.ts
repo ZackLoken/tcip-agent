@@ -118,6 +118,10 @@ export interface CanvasSlice {
     point: [number, number],
   ) => void;
   deletePolygon: (idx: number) => void;
+  /** Replaces the polygon at `idx` with the two pieces a cut produced: one undo snapshot, the
+   *  first piece selected, the parent's provenance kept on each except the sign-off (dropped),
+   *  and the hover index cleared since every later polygon's index has just shifted by one. */
+  splitPolygon: (idx: number, rings: [[number, number][], [number, number][]]) => void;
   selectPolygon: (idx: number | null) => void;
   /** Point helpers. A point is one coordinate, so it has no vertex/ring variants: it is placed,
    *  dragged (no-undo, like dragBox/dragVertex: one snapshot per drag, taken at drag start),
@@ -297,6 +301,30 @@ export const createCanvasSlice: StateCreator<AppState, [], [], CanvasSlice> = (s
       else if (sel !== null && sel > idx) sel = sel - 1;
       return {
         canvas: withContentDirty({ ...s.canvas, polygons: polys, selectedPolygonIdx: sel }),
+      };
+    });
+  },
+
+  splitPolygon: (idx, rings) => {
+    get().pushUndo();
+    set((s) => {
+      const parent = s.canvas.polygons[idx];
+      if (!parent) return s;
+      const pieces: PolygonShape[] = rings.map((ring) => ({
+        rings: [ring],
+        subject: parent.subject,
+        attributes: { ...parent.attributes },
+        created_by: parent.created_by,
+        created_at: parent.created_at,
+        accepted_by: null,
+        accepted_at: null,
+        authorship: parent.authorship,
+      }));
+      const polys = s.canvas.polygons.slice();
+      polys.splice(idx, 1, ...pieces);
+      return {
+        canvas: withContentDirty({ ...s.canvas, polygons: polys, selectedPolygonIdx: idx }),
+        annotateUi: { ...s.annotateUi, hoveredPolygonIdx: null },
       };
     });
   },
