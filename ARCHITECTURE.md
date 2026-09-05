@@ -967,10 +967,10 @@ registered at HEAD.
 |---|---|---|---|
 | GET | `/load` | `load_classes` | `routes/classes.py:99` |
 | POST | `/save` | `save_classes` | `routes/classes.py:163` |
-| GET | `/image_status` | `get_image_status` | `routes/classes.py:297` |
-| POST | `/image_status` | `set_image_status` | `routes/classes.py:307` |
-| POST | `/image_status/bulk` | `set_image_status_bulk` | `routes/classes.py:338` |
-| POST | `/image_status/derive` | `derive_image_status` | `routes/classes.py:368` |
+| GET | `/image_status` | `get_image_status` | `routes/classes.py:300` |
+| POST | `/image_status` | `set_image_status` | `routes/classes.py:310` |
+| POST | `/image_status/bulk` | `set_image_status_bulk` | `routes/classes.py:341` |
+| POST | `/image_status/derive` | `derive_image_status` | `routes/classes.py:371` |
 
 ### routes/coverage.py, prefix `/api/coverage` (6 routes)
 
@@ -1311,7 +1311,7 @@ agreement; `phase0_implementation: once, shared` for S19 (`tests/test_mcp_tools_
 Path: `<dataset_root>/classes.json`.
 
 Writer: `tcip_mcp.class_registry.replace_registry`,
-`packages/tcip-mcp/src/tcip_mcp/class_registry.py:346`, the one write both registry doors call
+`packages/tcip-mcp/src/tcip_mcp/class_registry.py:372`, the one write both registry doors call
 (the GUI's `save_classes` and the tool's `write_class_map`,
 `packages/tcip-mcp/src/tcip_mcp/tools/annotation_tools.py:488`).
 
@@ -1319,7 +1319,7 @@ Readers: `tcip_mcp.class_registry.read_registry`, `class_registry.py:213`;
 `tcip_mcp.dataset_layout.list_subjects` (delegates to `class_registry`),
 `packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:744`.
 
-`assign_class_ids`, `class_registry.py:445`, derives the training-time name-to-id map from this
+`assign_class_ids`, `class_registry.py:471`, derives the training-time name-to-id map from this
 file's declared attribute order; no integer id is stored in the file itself.
 `attribute_schema_digest`, `class_registry.py:162`, hashes a subject's attribute
 name/type/values for the `image_status_digest.json` staleness stamp (format 6).
@@ -1328,7 +1328,7 @@ Seam S20 ("classes.json class registry"), verdict `both-sides-one-implementation
 `phase0_implementation: once, shared`: `tests/test_name_based_annotation_schema.py:84` writes the
 registry through the real `write_registry` and reads `num_classes` back through the real training
 loader's call to `class_registry.assign_class_ids`,
-`packages/tcip-mcp/src/tcip_mcp/pipelines/data/label_queries.py:112`
+`packages/tcip-mcp/src/tcip_mcp/pipelines/data/label_queries.py:113`
 (`return registry, class_registry.assign_class_ids(registry, subject, attribute)`).
 Gap: no test drives the actual `/api/classes/save` HTTP route in the same test as the training-side
 read.
@@ -1356,8 +1356,8 @@ named third consumer, `scripts/check_dataset_identity.py`, is never executed by 
 Path: `<dataset_root>/.tcip/state/image_status.json`.
 
 Writers: `set_image_status`,
-`packages/tcip-web/src/tcip_web/routes/classes.py:307`; `set_image_status_bulk`,
-`routes/classes.py:338`; `tcip_mcp.tools.data_tools._apply_negative_carry`
+`packages/tcip-web/src/tcip_web/routes/classes.py:310`; `set_image_status_bulk`,
+`routes/classes.py:341`; `tcip_mcp.tools.data_tools._apply_negative_carry`
 (split-materialized copy; every confirmed negative is read by the admission
 (`trainable_stems`) before the split's manifest or file tree is written, then
 attributed to a split by
@@ -1367,7 +1367,7 @@ attributed to a split by
 `packages/tcip-mcp/src/tcip_mcp/tools/data_tools.py:1039`).
 
 Readers: `tcip_mcp.pipelines.data.label_queries.confirmed_negative_names`,
-`packages/tcip-mcp/src/tcip_mcp/pipelines/data/label_queries.py:445`; `_status_bucket_for`,
+`packages/tcip-mcp/src/tcip_mcp/pipelines/data/label_queries.py:465`; `_status_bucket_for`,
 `packages/tcip-web/src/tcip_web/routes/sessions.py:264`;
 `tcip_mcp.class_registry._sweep_schema_change`,
 `packages/tcip-mcp/src/tcip_mcp/class_registry.py:284`, which enumerates every bucket of a
@@ -1395,11 +1395,11 @@ has not been re-verified; MCP-side readers test membership through
 
 Path: `<dataset_root>/.tcip/state/image_status_digest.json`.
 
-Writers: `_stamp_digest`, `packages/tcip-web/src/tcip_web/routes/classes.py:267`, called from
+Writers: `_stamp_digest`, `packages/tcip-web/src/tcip_web/routes/classes.py:270`, called from
 `set_image_status`/`set_image_status_bulk` at confirmation time; and
 `tcip_mcp.class_registry._sweep_schema_change`,
 `packages/tcip-mcp/src/tcip_mcp/class_registry.py:284`, called through `replace_registry`
-(`packages/tcip-mcp/src/tcip_mcp/class_registry.py:346`) by both registry writers,
+(`packages/tcip-mcp/src/tcip_mcp/class_registry.py:372`) by both registry writers,
 `save_classes` (`packages/tcip-web/src/tcip_web/routes/classes.py:163`) and `write_class_map`
 (`packages/tcip-mcp/src/tcip_mcp/tools/annotation_tools.py:488`), before the new registry lands.
 A status and its stamp are two transactions, status first, so unstamped confirmations
@@ -1411,10 +1411,10 @@ vocabulary. Both writers reach the store through the one transactional writer
 the sweep from re-dating a stamp the confirmation-time writer already set.
 
 Reader: `tcip_mcp.pipelines.data.label_queries.confirmed_negative_records`'s quarantine logic,
-`packages/tcip-mcp/src/tcip_mcp/pipelines/data/label_queries.py:589`
-(`quarantined_out.add(name)`); a name whose stamp no longer matches the registry's current
+`packages/tcip-mcp/src/tcip_mcp/pipelines/data/label_queries.py:606`
+(`quarantined_out.update(stale)`); a name whose stamp no longer matches the registry's current
 schema is dropped as `quarantined_stale_definition` rather than trained as a negative,
-`packages/tcip-mcp/src/tcip_mcp/pipelines/data/label_queries.py:351`
+`packages/tcip-mcp/src/tcip_mcp/pipelines/data/label_queries.py:352`
 (`counts["quarantined_stale_definition"] += 1`).
 
 Seam S23 ("image_status_digest.json attribute-schema stamp"), verdict `both-sides-restated`,
@@ -2346,13 +2346,13 @@ Phase 3 verdict: single.
 
 Must agree: the GUI editor, the path resolver, and the training loader read one registry shape.
 Side A: `packages/tcip-mcp/src/tcip_mcp/class_registry.py:4` (`The on-disk registry (`` `<dataset_root>/classes.json` ``) is self-describing and name-based::`).
-Side B: `packages/tcip-web/src/tcip_web/routes/classes.py:178` (`from tcip_mcp.dataset_layout import classes_path`).
+Side B: `packages/tcip-web/src/tcip_web/routes/classes.py:180` (`from tcip_mcp.dataset_layout import classes_path`).
 Phase 3 verdict: single.
 
 ## S21. Training name-to-id assignment versus inference decode map
 
 Must agree: a prediction's integer label decodes to the class name the run trained it as.
-Side A: `packages/tcip-mcp/src/tcip_mcp/class_registry.py:445` (`def assign_class_ids(`, the one assignment, reached by the loader through `pipelines/data/label_queries.py:112` (`return registry, class_registry.assign_class_ids(registry, subject, attribute)`)).
+Side A: `packages/tcip-mcp/src/tcip_mcp/class_registry.py:471` (`def assign_class_ids(`, the one assignment, reached by the loader through `pipelines/data/label_queries.py:113` (`return registry, class_registry.assign_class_ids(registry, subject, attribute)`)).
 Side B: `packages/tcip-mcp/src/tcip_mcp/tools/inference_tools.py:231` (`def resolve_decode_id_map(`, the one resolution every entry point that decodes predictions or reads GT by id calls: the private pass at `packages/tcip-mcp/src/tcip_mcp/tools/inference_tools.py:832` (`id_map = resolve_decode_id_map(predictor, images_dir)`), the raster regime at `packages/tcip-mcp/src/tcip_mcp/tools/inference_tools.py:1592` (`id_map = resolve_decode_id_map(predictor, None)`), the GUI worker at `packages/tcip-web/src/tcip_web/routes/inference.py:281`, and block calibration at `pipelines/block_calibration.py:274`, which hands over the run's own scope rather than restating the prefer-recorded-else-derive rule).
 Phase 3 verdict: single.
 
