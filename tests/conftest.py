@@ -197,40 +197,44 @@ def _pin_platform_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
 
 @pytest.fixture
-def seed_catkin_trait_spec(tmp_path: Path, _pin_platform_root):
-    """Seed a real catkin trait-spec record into this test's pinned platform state root.
+def seed_bud_trait_spec(tmp_path: Path, _pin_platform_root):
+    """Seed a real bud_opening trait-spec record into this test's pinned platform state root.
 
-    There are no built-in traits anymore: ``get_trait("catkin")`` only resolves where a spec
-    record actually exists (``traits.py``). Writing the same values ``tests/_trait_fixtures.CATKIN``
-    holds keeps a test that calls ``get_trait("catkin")``/``registered_traits()`` without authoring
-    its own spec working, the same as when a builtin was unconditionally present. Not autouse:
-    an unrelated test's platform state root should stay empty by default; request this explicitly
-    in a test that actually needs catkin registered.
+    There are no built-in traits anymore: ``get_trait("bud_opening")`` only resolves where a spec
+    record actually exists (``traits.py``). Writing the same values
+    ``tests/_trait_fixtures.BUD_OPENING`` holds keeps a test that calls
+    ``get_trait("bud_opening")``/``registered_traits()`` without authoring its own spec working,
+    the same as when a builtin was unconditionally present. Not autouse: an unrelated test's
+    platform state root should stay empty by default; request this explicitly in a test that
+    actually needs bud_opening registered.
     """
     import dataclasses
 
     import tcip_store as ts
 
     from tcip_mcp import traits
-    from tests._trait_fixtures import CATKIN
+    from tests._trait_fixtures import BUD_OPENING
 
     specs_dir = tmp_path / ".tcip" / "state" / "trait_specs"
-    data = {k: (list(v) if isinstance(v, tuple) else v) for k, v in dataclasses.asdict(CATKIN).items()}
-    ts.replace(traits.trait_spec_key(specs_dir, "catkin"), data, expect=ts.Version.ABSENT)
+    data = {k: (list(v) if isinstance(v, tuple) else v)
+            for k, v in dataclasses.asdict(BUD_OPENING).items()}
+    ts.replace(traits.trait_spec_key(specs_dir, "bud_opening"), data, expect=ts.Version.ABSENT)
 
 
 @pytest.fixture
-def seed_catkin_operationalization(tmp_path: Path, seed_catkin_trait_spec):
-    """Give the seeded catkin spec a confirmed ``state_crossing_dates`` record in the same root.
+def seed_bud_operationalization(tmp_path: Path, seed_bud_trait_spec):
+    """Give the seeded bud_opening spec a confirmed ``state_crossing_dates`` record in the same root.
 
     The crossing delivery doors refuse a trait whose delivered number has no breeder-confirmed
     meaning, so a test whose subject is the delivery itself seeds one here and goes on testing what
-    it was written to test. Requested alongside ``seed_catkin_trait_spec`` rather than autouse, for
+    it was written to test. Requested alongside ``seed_bud_trait_spec`` rather than autouse, for
     the same reason that one is not: a test of the refusal needs the root without a record in it.
+    The trait's own name is not the subject it measures, so the measured subject is named
+    explicitly rather than left to default to the trait name.
     """
     from tests._operationalization_fixtures import seed_confirmed_crossing
 
-    seed_confirmed_crossing(tmp_path, "catkin")
+    seed_confirmed_crossing(tmp_path, "bud_opening", measured_subject="bud")
 
 
 @pytest.fixture
@@ -251,7 +255,7 @@ def real_hpo_base_config(tmp_path: Path) -> dict:
 
 
 #: The single detection subject the canonical test dataset declares (``data_dir``).
-DATA_DIR_SUBJECT = "catkin"
+DATA_DIR_SUBJECT = "bud"
 
 
 @pytest.fixture
@@ -259,7 +263,7 @@ def data_dir(tmp_path: Path) -> Path:
     """A minimal dataset in the canonical layout: name-based per-image labels + a registry.
 
     One file per image under ``annotations/<date>/`` holding every subject (here one detection
-    subject, ``catkin``), predictions under ``predictions/<model>/<date>/``, and one nested
+    subject, ``bud``), predictions under ``predictions/<model>/<date>/``, and one nested
     ``classes.json``. Geometry is two boxes per image on a 640x480 frame, matching the
     count/geometry expectations downstream.
     """
@@ -282,7 +286,7 @@ def data_dir(tmp_path: Path) -> Path:
     # One nested registry travelling with the labels: a single detection subject, no attributes.
     class_registry.write_registry(
         tmp_path / "classes.json",
-        ClassRegistry(subjects=(Subject(name=subject, description="a hazelnut catkin"),)),
+        ClassRegistry(subjects=(Subject(name=subject, description="a bud"),)),
     )
 
     for name in ("img_001", "img_002", "img_003"):
