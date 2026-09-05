@@ -381,6 +381,90 @@ describe("buildAnnotateShapes", () => {
     ).toEqual([]);
   });
 
+  it("a tool's box pushes dashed with the tool pattern, the hover-label suffix, and its authorship", () => {
+    const shapes = buildAnnotateShapes({
+      ...base,
+      mode: "box",
+      polygons: [],
+      boxes: [
+        {
+          x1: 0,
+          y1: 0,
+          x2: 5,
+          y2: 5,
+          subject: "subject_a",
+          attributes: {},
+          authorship: "tool",
+        },
+      ],
+    });
+    expect(shapes).toHaveLength(1);
+    expect(shapes[0]).toMatchObject({
+      dashed: true,
+      dash_kind: "tool",
+      label: "subject_a, tool",
+      authorship: "tool",
+    });
+  });
+
+  it("a person's box pushes solid with no dash_kind", () => {
+    const shapes = buildAnnotateShapes({
+      ...base,
+      mode: "box",
+      polygons: [],
+      boxes: [
+        { x1: 0, y1: 0, x2: 5, y2: 5, subject: "subject_a", attributes: {}, authorship: "person" },
+      ],
+    });
+    expect(shapes[0].dashed).toBeFalsy();
+    expect(shapes[0].dash_kind).toBeUndefined();
+    expect(shapes[0].label).toBe("subject_a");
+  });
+
+  it("a tool's polygon pushes dashed with the tool pattern and its authorship", () => {
+    const shapes = buildAnnotateShapes({
+      ...base,
+      polygons: [{ ...base.polygons[0], authorship: "tool" }],
+    });
+    expect(shapes[0]).toMatchObject({
+      dashed: true,
+      dash_kind: "tool",
+      label: "subject_a, tool",
+      authorship: "tool",
+    });
+  });
+
+  it("a tool's point pushes dashed with the tool pattern and its authorship", () => {
+    const shapes = buildAnnotateShapes({
+      ...base,
+      mode: "point",
+      polygons: [],
+      points: [{ x: 1, y: 1, subject: "subject_a", attributes: {}, authorship: "tool" }],
+    });
+    expect(shapes[0]).toMatchObject({
+      dashed: true,
+      dash_kind: "tool",
+      label: "subject_a, tool",
+      authorship: "tool",
+    });
+  });
+
+  it("a polygon's derived box carries the derived dash_kind and the polygon's own authorship label", () => {
+    const shapes = buildAnnotateShapes({
+      ...base,
+      mode: "box",
+      boxes: [],
+      polygons: [{ ...base.polygons[0], authorship: "tool" }],
+    });
+    const derived = shapes.find((s) => s.kind === "box")!;
+    expect(derived).toMatchObject({
+      dashed: true,
+      dash_kind: "derived", // the derived box's own pattern, never the tool's dots
+      label: "subject_a, tool",
+      authorship: "tool",
+    });
+  });
+
   it("box mode includes the selected polygon and the rubber-band box", () => {
     const shapes = buildAnnotateShapes({
       ...base,
