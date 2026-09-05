@@ -889,6 +889,53 @@ def test_calibrate_classifier_operating_point_passes_for_well_formed_reference(t
     assert reconcile_classifier_validity([str(tmp_path / "out")])["validated"] == VALIDATED_HELD_OUT
 
 
+def test_calibrate_classifier_operating_point_reports_an_undecodable_pred_stamp(
+    tmp_path: Path,
+) -> None:
+    """A prediction bucket whose operating_point.json will not decode refuses through this door
+    with the seam's own message, rather than a raw StoreError escaping it."""
+    cal_gt, cal_pred = tmp_path / "cal_gt", tmp_path / "cal_pred"
+    hold_gt, hold_pred = tmp_path / "hold_gt", tmp_path / "hold_pred"
+    calls = _one_positive_one_negative
+    _write_split(cal_gt, cal_pred, prefix="cal", n_images=2, per_image_calls=calls)
+    _write_split(hold_gt, hold_pred, prefix="hold", n_images=2, per_image_calls=calls, offset=1000)
+
+    import os
+
+    from tcip_mcp.pipelines.resolution import sidecar_key
+    from tcip_store.binding import BACKEND_ENV, DEFAULT_BACKEND, FILE_BACKEND
+
+    key = sidecar_key(cal_pred, "operating_point")
+    ts.replace(key, {"id_map": {"catkin": 0}}, expect=ts.Version.ABSENT)
+    name = os.environ.get(BACKEND_ENV) or DEFAULT_BACKEND
+    if name == FILE_BACKEND:
+        from tcip_store.store import _backend
+
+        _backend().path_for(key).write_bytes(b"{not json")
+    else:
+        import sqlite3
+
+        from tcip_store.sqlite_backend import database_path, encode_parts
+
+        conn = sqlite3.connect(str(database_path(str(key.root))), isolation_level=None)
+        try:
+            conn.execute(
+                "update records set value = ? where store = ? and parts = ?",
+                (b"{not json", key.store, encode_parts(key.parts)),
+            )
+        finally:
+            conn.close()
+
+    res = calibrate_classifier_operating_point(
+        trait_name="catkin", subject="catkin", attribute="elongation",
+        calibration_gt_dir=str(cal_gt), calibration_pred_dir=str(cal_pred),
+        holdout_gt_dir=str(hold_gt), holdout_pred_dir=str(hold_pred),
+        output_dir=str(tmp_path / "out"), dataset_root=str(tmp_path), experiment_id=None,
+    )
+
+    assert "error" in res
+
+
 def test_calibrate_classifier_operating_point_earns_a_record_a_later_bucket_binds_to(
     tmp_path: Path,
 ) -> None:
