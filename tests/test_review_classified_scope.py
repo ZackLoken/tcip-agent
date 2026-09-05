@@ -4,8 +4,8 @@ the confirmed value of an object a person already placed, rather than the object
 Built over a real staged bucket (``stage_prediction_shapes``) and a hand-authored ground-truth
 file in the classified shape (the object class in ``subject``, the confirmed value under
 ``attributes[attribute]``, the same shape a real accept would have written); the bucket's own
-stamp is seeded straight through the store, mirroring ``test_review_verdict_scope.py``'s own
-``_sidecar`` helper, since no producer this family ships mints one for a hand-built scene.
+stamp is seeded through the platform's own writers, ``operating_point_stamp`` and
+``write_sidecar``.
 """
 
 from __future__ import annotations
@@ -13,14 +13,13 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-import tcip_store
 from fastapi.testclient import TestClient
 from PIL import Image
 
 from tcip_annotation.json_io import write_annotations
 from tcip_annotation.state import Annotation, BBox
 from tcip_mcp.dataset_layout import prediction_dir
-from tcip_mcp.pipelines.resolution import sidecar_key
+from tcip_mcp.pipelines.resolution import operating_point_stamp, write_sidecar
 from tcip_mcp.prediction_buckets import stage_prediction_shapes
 from tcip_web.app import app
 
@@ -58,11 +57,14 @@ def _stage_classified_prediction(dataset_root: Path, *, value: str) -> dict:
 
 
 def _stamp_classified_bucket(bucket: Path) -> None:
-    tcip_store.replace(sidecar_key(bucket, "operating_point"), {
-        "id_map": ID_MAP, "subject": SUBJECT, "attribute": ATTRIBUTE,
-        "checkpoint_sha256": "sha-classifier", "experiment_id": None, "validated": False,
-        "operating_point": {"conf": {"value": 0.25}},
-    }, expect=tcip_store.Version.ABSENT)
+    stamp = operating_point_stamp(
+        {"conf": {"value": 0.25}}, validated=False, validated_by=None,
+        tile_size_validated=None, shippable_issues=[], id_map=ID_MAP,
+        subject=SUBJECT, attribute=ATTRIBUTE, trait=ATTRIBUTE, dataset_hash="H",
+        checkpoint="m", checkpoint_sha256="sha-classifier", experiment_id=None,
+        images_dir=None, raster_path=None, produced_at="2026-03-05T00:00:00+00:00",
+    )
+    write_sidecar(bucket, stamp)
 
 
 def _bare_bucket(dataset_root: Path, *, value: str) -> Path:
