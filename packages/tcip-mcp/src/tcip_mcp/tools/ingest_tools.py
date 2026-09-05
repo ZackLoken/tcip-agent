@@ -174,15 +174,17 @@ def _collision_refusal(
 ) -> str | None:
     """The whole-call refusal naming every source that would create a second logical image under
     a stem key another source, an existing raw file, or an existing band-group manifest already
-    holds in its bucket; ``None`` when every source is either a new stem or the exact re-ingest of
-    an existing file under the identical destination filename.
+    holds in its bucket; ``None`` when every source either names a new stem or names the same
+    destination filename an existing raw identity already holds at its key.
 
     Reads each touched bucket's identities once (``bucket_logical_identities``, an absent
     directory answering empty) and adds the batch's own sources as would-be raw identities under
-    their keys, so a key ending up held by more than one identity refuses. A source whose
-    destination filename equals the one existing raw identity already at its key is the exact
-    re-ingest of that file, not a second identity, and is left to the copy loop's own
-    ``dest.exists()`` skip.
+    their keys, so a key ending up held by more than one identity refuses. The carve-out tests the
+    destination filename only, not the source bytes: a source whose destination filename equals
+    the one existing raw identity already at its key is left out of this refusal and out of
+    ``identities``, whether or not its own bytes match that file, and is left to the copy loop's
+    own ``dest.exists()`` skip; two distinct sources in one batch that both name that filename
+    both skip there the same way, since neither is added to ``identities`` either.
     """
     buckets = sorted({bucket for _src, bucket, _unreadable in resolved_sources})
     collisions: dict[str, dict[str, list[Path]]] = {}
