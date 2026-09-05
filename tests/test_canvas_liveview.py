@@ -132,6 +132,19 @@ def test_full_push_writes_geometry_and_meta(client, tmp_path):
     assert _meta(tmp_path)["image_path"] == "C:/img/a.jpg"
 
 
+def test_cut_armed_flag_rides_the_meta_push(client, tmp_path):
+    """A client fact like dirty or mode: the completed-cut and refusal cases both leave the flag
+    set but clear the mirrored pending segment, so the meta document has to carry the flag itself
+    for the mirror to read as armed rather than disarmed."""
+    sel = _select(client, tmp_path)
+    r = client.post(
+        "/api/canvas/state",
+        json=_payload("C:/img/a.jpg", sel["generation"], shapes=SHAPES, cut_armed=True),
+    )
+    assert r.status_code == 200
+    assert _meta(tmp_path)["cut_armed"] is True
+
+
 def test_heartbeat_updates_meta_without_touching_geometry(client, tmp_path):
     sel = _select(client, tmp_path)
     client.post("/api/canvas/state", json=_payload("C:/img/a.jpg", sel["generation"], shapes=SHAPES))
@@ -401,7 +414,8 @@ def test_render_tolerates_malformed_shapes(tmp_path):
 # ── MCP tool ────────────────────────────────────────────────────────────────
 
 def _write_state(tmp_path: Path, img: str, shapes=SHAPES, *, shapes_image: str | None = None,
-                 tab: str = "annotate", shapes_tab: str | None = None) -> None:
+                 tab: str = "annotate", shapes_tab: str | None = None,
+                 cut_armed: bool | None = None) -> None:
     import time
     root = str(tmp_path)
     if shapes is not None:
@@ -413,6 +427,7 @@ def _write_state(tmp_path: Path, img: str, shapes=SHAPES, *, shapes_image: str |
         "received_at": time.time(), "project_root": root, "tab": tab,
         "image": Path(img).name, "image_path": img,
         "viewport": {"x": 0, "y": 0, "w": 200, "h": 100}, "user": "breeder", "mode": "polygon",
+        "cut_armed": cut_armed,
         "classes": [{"id": 0, "name": "catkin", "color": "#FF0000"}],
     })
 
@@ -461,6 +476,20 @@ def test_capture_live_canvas_renders_pushed_state(tmp_path, monkeypatch):
     assert res["shapes_missing"] is False
     assert res["project_root"] == str(tmp_path)
     assert "divergence" not in res
+
+
+def test_capture_live_canvas_names_the_armed_cut(tmp_path, monkeypatch):
+    """The mirror's armed state must be readable beside the mode it names, not just implied by
+    the pending-segment polyline (which a completed cut or a refusal both clear while the flag
+    stays set)."""
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
+    img = _make_image(tmp_path)
+    _write_state(tmp_path, img, cut_armed=True)
+    _mint_binding(tmp_path)
+
+    from tcip_mcp.tools.vision_tools import capture_live_canvas
+    res = capture_live_canvas(refresh=False)
+    assert res["cut_armed"] is True
 
 
 def test_capture_live_canvas_renders_exactly_the_viewport_region(tmp_path, monkeypatch):

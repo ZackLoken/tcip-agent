@@ -772,6 +772,19 @@ describe("createCanvasPusher", () => {
     shapes: [{ kind: "box", xyxy: [0, 0, 1, 1], color: "#fff" }],
   });
 
+  it("carries cut_armed through to the post untouched (the pusher never special-cases it)", () => {
+    const posts: CanvasStateBody[] = [];
+    const p = createCanvasPusher(
+      (b) => {
+        posts.push(b);
+      },
+      { debounceMs: 100, maxWaitMs: 1000 },
+    );
+    p.schedule(() => ({ ...body(), cut_armed: true }), true);
+    vi.advanceTimersByTime(150);
+    expect(posts[0].cut_armed).toBe(true);
+  });
+
   it("coalesces bursts; a full flag anywhere in the burst keeps the geometry", () => {
     const posts: CanvasStateBody[] = [];
     const p = createCanvasPusher(
