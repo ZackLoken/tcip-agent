@@ -358,10 +358,8 @@ def review_to_records(
                 # entry that could never contribute a gt/dt box in the first place.
                 continue
             if verdict.class_id is None:
-                # An unresolved class identity (never recorded, or the producing bucket's own
-                # id_map didn't recognize this verdict's class_name, e.g. an attribute-scoped
-                # bucket, whose id_map is keyed by attribute values, being handed a GT annotation's
-                # raw subject name) must refuse the whole reference, not silently drop this one
+                # An unresolved class identity (never recorded, or foreign to the producing bucket's
+                # own id_map, e.g. a bare hand-split directory) must refuse the whole reference, not silently drop this one
                 # entry or default it to class 0. A partial drop is a fail-open here: dropping a
                 # confirmed-miss (FN) entry while keeping an in-vocabulary accepted-FP entry can
                 # make gt/dt agree by construction and pass the count-bias gate on a reference that

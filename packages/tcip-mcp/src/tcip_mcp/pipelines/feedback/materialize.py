@@ -3,13 +3,17 @@
 Torch-free. Turns review verdicts (per-image shards under ``.tcip/state/review/``) into training data:
   - accepted / edited GT boxes  -> positive name-based per-image JSON labels (the canonical format)
   - rejected-only images        -> confirmed-negative JSON (``{"annotations": []}``) backgrounds
+    for a detector review; under a classified scope a rejected value call names no absence of the
+    object, so every one lands in ``unconfirmed_negatives`` instead
 plus a ``curated_manifest.json`` for provenance. The output layout (``images/`` + ``annotations/``)
 matches ``data_tools._scan_dataset`` so the loop chains straight into ``draw_splits`` /
 ``launch_training`` with no glue.
 
 The verdict log stores normalized center-form boxes (``[cx, cy, w, h]``) plus the class *name*
-(``class_name``, an annotation's subject); positives are denormalized to pixel coordinates using the
-copied image's dimensions (the canonical JSON is pixel-space), no inference re-run.
+(``class_name``, an annotation's subject for a detector review; a classified review's own
+confirmed value instead, written under the reviewed bucket's scope attribute rather than
+``subject``); positives are denormalized to pixel coordinates using the copied image's dimensions
+(the canonical JSON is pixel-space), no inference re-run.
 """
 
 from __future__ import annotations

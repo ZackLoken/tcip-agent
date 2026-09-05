@@ -492,7 +492,8 @@ def test_export_single_component_mask_writes_polygon(tmp_path):
 def test_export_does_not_pollute_annotation_attributes_with_binarize_threshold(tmp_path):
     """Stamping the mask-binarize threshold into Annotation.attributes (the domain trait
     namespace, not a machine-provenance one) would let it survive into GT the moment a breeder
-    accepts the prediction. attributes must stay empty; the threshold travels via
+    accepts the prediction. For a detector run (attribute=None) attributes must stay empty; a
+    classified run's own decoded value would land there instead. The threshold travels via
     mask_binarize_provenance() into the run's operating_point.json instead (see
     test_run_inference_stamps_mask_binarize_provenance_when_masks_present)."""
     from tcip_mcp.pipelines.postprocessing.export import write_predictions_json
