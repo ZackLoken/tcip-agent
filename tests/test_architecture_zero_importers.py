@@ -73,6 +73,26 @@ def test_a_header_count_mismatch_is_reported():
     assert {"kind": "zero_importer_header_mismatch", "header": 5, "real": 1} in findings
 
 
+def test_a_duplicated_row_is_reported_even_when_header_and_membership_both_check_out():
+    """Set-wise membership alone would admit this silently: the same path listed twice still
+    resolves to one member of ``doc_paths``, so a header count that already matches the true
+    zero-importer total hides a physically duplicated row unless it is checked against the row
+    list itself."""
+    checker = _load()
+    md = _section(1, ("scripts", "scripts/named.py"), ("scripts", "scripts/named.py"))
+    header_count, rows = checker.parse_zero_importer_section(md)
+    inventory = _inventory(zero=["scripts/named.py"], nonzero=[])
+
+    findings = checker.check_zero_importers(header_count, rows, inventory)
+
+    assert any(
+        f["kind"] == "zero_importer_duplicate" and f["path"] == "scripts/named.py"
+        for f in findings
+    )
+    assert not any(f["kind"] == "zero_importer_header_mismatch" for f in findings)
+    assert not any(f["kind"] in ("zero_importer_missing", "zero_importer_extra") for f in findings)
+
+
 def test_a_reconciled_list_admits_valid_work():
     checker = _load()
     md = _section(2, ("scripts", "scripts/named.py"), ("scripts", "scripts/other.py"))

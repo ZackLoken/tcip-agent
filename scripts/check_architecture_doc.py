@@ -141,10 +141,14 @@ def parse_zero_importer_section(md_text: str) -> tuple[int | None, list[dict]]:
 
 
 def check_zero_importers(header_count: int | None, rows: list[dict], inventory: dict) -> list[dict]:
-    """The zero-importers list against the regenerated inventory: header count and membership.
+    """The zero-importers list against the regenerated inventory: header count, membership, and
+    each row's own uniqueness.
 
     A module counts as zero-importer exactly when the inventory records imported_by_count 0;
-    the header states how many such modules the table below lists.
+    the header states how many such modules the table below lists. Membership is checked
+    set-wise (missing/extra), which by itself would admit a duplicated row silently: two
+    identical rows still resolve to one member of the set either side compares, so a repeated
+    path is checked separately, against the row list itself rather than its deduplicated set.
     """
     findings: list[dict] = []
     all_records = inventory.get("python_modules", []) + inventory.get("typescript_modules", [])
@@ -155,6 +159,14 @@ def check_zero_importers(header_count: int | None, rows: list[dict], inventory: 
     for r in rows:
         if r["path"] not in real_zero:
             findings.append({"kind": "zero_importer_extra", "line_no": r["line_no"], "path": r["path"]})
+    first_seen: dict[str, int] = {}
+    for r in rows:
+        prior = first_seen.get(r["path"])
+        if prior is not None:
+            findings.append({"kind": "zero_importer_duplicate", "path": r["path"],
+                             "line_no": r["line_no"], "first_line_no": prior})
+        else:
+            first_seen[r["path"]] = r["line_no"]
     if header_count != len(real_zero):
         findings.append(
             {"kind": "zero_importer_header_mismatch", "header": header_count, "real": len(real_zero)}
@@ -241,6 +253,9 @@ def main() -> int:
                 print(f"ZERO-IMPORTER MISSING FROM DOC: {f['path']}")
             elif f["kind"] == "zero_importer_extra":
                 print(f"ZERO-IMPORTER NOT REALLY ZERO ARCHITECTURE.md:{f['line_no']}  {f['path']}")
+            elif f["kind"] == "zero_importer_duplicate":
+                print(f"ZERO-IMPORTER DUPLICATE ROW ARCHITECTURE.md:{f['line_no']}  {f['path']}  "
+                      f"(first listed at line {f['first_line_no']})")
             else:
                 print(f"ZERO-IMPORTER HEADER MISMATCH: header={f['header']} real={f['real']}")
         if not zero_findings:
