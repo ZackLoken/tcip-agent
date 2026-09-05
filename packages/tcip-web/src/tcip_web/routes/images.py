@@ -569,9 +569,12 @@ def serve_image(
     if any(c is None for c in corners) and any(c is not None for c in corners):
         raise HTTPException(400, "a region needs all four of x0, y0, x1, y1, or none of them")
     whole_view = corners[0] is None
-    if not whole_view and not (x0 < x1 and y0 < y1):
-        raise HTTPException(
-            400, f"region [{y0}:{y1}, {x0}:{x1}] is empty; x0 < x1 and y0 < y1 are required")
+    if not whole_view:
+        # the all-or-none guard above already requires every corner set when not whole_view
+        assert x0 is not None and y0 is not None and x1 is not None and y1 is not None
+        if not (x0 < x1 and y0 < y1):
+            raise HTTPException(
+                400, f"region [{y0}:{y1}, {x0}:{x1}] is empty; x0 < x1 and y0 < y1 are required")
 
     band_tokens = _parse_band_tokens(bands) if bands is not None else None
     composite_requested = bands is not None or isinstance(source, BandGroupRef)
@@ -609,8 +612,12 @@ def serve_image(
     try:
         with raster_source.open_raster(source, open_channels) as raster:
             opening = False
-            rect = (raster_source.Rect(0, 0, raster.width, raster.height) if whole_view
-                    else raster_source.Rect(x0, y0, x1, y1))
+            if whole_view:
+                rect = raster_source.Rect(0, 0, raster.width, raster.height)
+            else:
+                # the all-or-none guard above already requires every corner set when not whole_view
+                assert x0 is not None and y0 is not None and x1 is not None and y1 is not None
+                rect = raster_source.Rect(x0, y0, x1, y1)
             if not whole_view and (rect.x1 > raster.width or rect.y1 > raster.height):
                 raise HTTPException(
                     400,
