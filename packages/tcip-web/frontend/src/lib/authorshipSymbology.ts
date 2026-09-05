@@ -14,7 +14,11 @@ export function dashPattern(kind: DashKind, width: number): number[] {
 }
 
 /** A shape's hover label: the subject name, with ", tool" appended for one a tool drew and no
- *  person has accepted, so the same fact the dotted stroke shows is also named on hover. */
+ *  person has accepted (the dotted stroke's own fact, also named on hover) and ", accepted tool"
+ *  for one a person has since accepted (no stroke change; the solid stroke a person's own shape
+ *  also draws stays unchanged, so the suffix is the only mark of the acceptance). */
 export function authorshipLabel(subject: string, authorship?: string | null): string {
-  return authorship === "tool" ? `${subject}, tool` : subject;
+  if (authorship === "tool") return `${subject}, tool`;
+  if (authorship === "tool_accepted") return `${subject}, accepted tool`;
+  return subject;
 }
