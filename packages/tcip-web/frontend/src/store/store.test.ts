@@ -150,6 +150,80 @@ describe("canvas store", () => {
   });
 });
 
+describe("splitPolygon", () => {
+  beforeEach(() => {
+    s().clearCanvas();
+  });
+
+  const PIECE_A: [number, number][] = [
+    [0, 0],
+    [5, 0],
+    [5, 5],
+  ];
+  const PIECE_B: [number, number][] = [
+    [5, 0],
+    [10, 0],
+    [10, 10],
+  ];
+
+  it("replaces one polygon with two at the same index, keeping provenance and dropping the sign-off", () => {
+    s().loadLabelsIntoCanvas({
+      image_path: "x",
+      img_width: 100,
+      img_height: 100,
+      boxes: [],
+      polygons: [
+        {
+          rings: [RING_A],
+          subject: "subject_a",
+          attributes: { health: "good" },
+          created_by: "model:x",
+          created_at: "2024-01-01T00:00:00Z",
+          accepted_by: "user:jordan",
+          accepted_at: "2024-01-02T00:00:00Z",
+          authorship: "tool",
+        },
+      ],
+      points: [],
+      imageAnnotations: [],
+    });
+    // A second polygon after it, so the split's own effect on later indices is checked too.
+    s().addPolygon({ rings: [RING_B], subject: "subject_a", attributes: {} });
+    useStore.setState((st) => ({ annotateUi: { ...st.annotateUi, hoveredPolygonIdx: 1 } }));
+
+    s().splitPolygon(0, [PIECE_A, PIECE_B]);
+
+    expect(s().canvas.polygons).toHaveLength(3);
+    expect(s().canvas.polygons[0].rings).toEqual([PIECE_A]);
+    expect(s().canvas.polygons[1].rings).toEqual([PIECE_B]);
+    expect(s().canvas.polygons[2].rings).toEqual([RING_B]); // the untouched polygon, shifted by one
+    for (const piece of [s().canvas.polygons[0], s().canvas.polygons[1]]) {
+      expect(piece.subject).toBe("subject_a");
+      expect(piece.attributes).toEqual({ health: "good" });
+      expect(piece.created_by).toBe("model:x");
+      expect(piece.created_at).toBe("2024-01-01T00:00:00Z");
+      expect(piece.accepted_by).toBeNull();
+      expect(piece.accepted_at).toBeNull();
+      expect(piece.authorship).toBe("tool");
+    }
+    expect(s().canvas.selectedPolygonIdx).toBe(0); // the first piece
+    expect(s().annotateUi.hoveredPolygonIdx).toBeNull();
+    expect(s().canvas.dirty).toBe(true);
+  });
+
+  it("one undo restores the parent and its selection", () => {
+    loadOnePolygon();
+    s().selectPolygon(0);
+    s().splitPolygon(0, [PIECE_A, PIECE_B]);
+    expect(s().canvas.polygons).toHaveLength(2);
+
+    s().undo();
+    expect(s().canvas.polygons).toHaveLength(1);
+    expect(s().canvas.polygons[0].rings).toEqual([RING_A]);
+    expect(s().canvas.selectedPolygonIdx).toBe(0);
+  });
+});
+
 describe("canvas store points", () => {
   beforeEach(() => {
     s().clearCanvas();

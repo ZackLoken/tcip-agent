@@ -243,6 +243,61 @@ describe("labelSerde authorship", () => {
   });
 });
 
+describe("labelSerde cut pieces", () => {
+  it("two single-ring pieces from a cut serialize as two points records, the parent's provenance, no sign-off", () => {
+    // What splitPolygon hands to save: two PolygonShapes sharing the parent's subject, attributes
+    // and authorship, created_by/created_at kept, accepted_by/accepted_at nulled.
+    const pieceA: [number, number][] = [
+      [0, 0],
+      [5, 0],
+      [5, 5],
+    ];
+    const pieceB: [number, number][] = [
+      [5, 0],
+      [10, 0],
+      [10, 10],
+    ];
+    const saved = canvasToAnnotations({
+      boxes: [],
+      polygons: [
+        {
+          rings: [pieceA],
+          subject: "subject_a",
+          attributes: { health: "good" },
+          created_by: "model:x",
+          created_at: "2024-01-01T00:00:00Z",
+          accepted_by: null,
+          accepted_at: null,
+        },
+        {
+          rings: [pieceB],
+          subject: "subject_a",
+          attributes: { health: "good" },
+          created_by: "model:x",
+          created_at: "2024-01-01T00:00:00Z",
+          accepted_by: null,
+          accepted_at: null,
+        },
+      ],
+      points: [],
+      imageAnnotations: [],
+    });
+    expect(saved).toHaveLength(2);
+    for (const [i, ring] of [pieceA, pieceB].entries()) {
+      expect(saved[i]).toMatchObject({
+        subject: "subject_a",
+        points: ring,
+        attributes: { health: "good" },
+        created_by: "model:x",
+        created_at: "2024-01-01T00:00:00Z",
+        accepted_by: null,
+        accepted_at: null,
+      });
+      expect(saved[i].rings).toBeUndefined();
+    }
+  });
+});
+
 describe("labelSerde points", () => {
   it("loads a point annotation into the points bucket, never a box or a polygon", () => {
     // A point has no extent: bucketing it as a box would hand a fabricated zero-area target to
