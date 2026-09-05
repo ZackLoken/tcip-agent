@@ -7,6 +7,7 @@ subclass and no tensor conversion; those stay in ``datasets.py``.
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping
 from pathlib import Path
 
 from tcip_mcp.pipelines.image_utils import list_logical_images, logical_image_name
@@ -442,6 +443,25 @@ def _raw_status_store(labels_dir) -> object:
     return {} if root is None else read_image_status_store(root)
 
 
+def stale_stamped_names(
+    stamped_by_image: Mapping[str, object], current_digest: str, names: Iterable[str],
+) -> set[str]:
+    """Names among ``names`` whose recorded digest stamp positively disagrees with
+    ``current_digest``.
+
+    The one comparison a stamped confirmation is measured against a schema for: shared by
+    :func:`confirmed_negative_records`'s quarantine of a stale negative and
+    :func:`tcip_mcp.class_registry._sweep_schema_change`'s count of confirmations a vocabulary
+    change left predating the new schema, so the definition of "stale" cannot drift between the
+    two readers. Absence of a stamp is never stale (a rail admits valid work, not only rejects
+    it): only an explicit stamp that disagrees is grounds to call a name out.
+    """
+    return {
+        name for name in names
+        if isinstance(stamped_by_image.get(name), str) and stamped_by_image[name] != current_digest
+    }
+
+
 def confirmed_negative_names(
     labels_dir, *, subject: str | None, date, quarantined_out: set[str] | None = None,
     contradicted_out: set[str] | None = None,
@@ -581,14 +601,10 @@ def confirmed_negative_records(
 
     # A bucket holds every image ever touched under the subject/date: a later unrelated write
     # must not resurrect a different image's stale, never-re-reviewed confirmation.
-    trusted: dict[str, dict[str, str]] = {}
-    for name, record in negatives.items():
-        stamped = stamped_by_image.get(name)
-        if isinstance(stamped, str) and stamped != current_digest:
-            if quarantined_out is not None:
-                quarantined_out.add(name)
-        else:
-            trusted[name] = record
+    stale = stale_stamped_names(stamped_by_image, current_digest, negatives)
+    if quarantined_out is not None:
+        quarantined_out.update(stale)
+    trusted = {name: record for name, record in negatives.items() if name not in stale}
     return _exclude_contradicted(trusted, subject, labels_dir, contradicted_out)
 
 

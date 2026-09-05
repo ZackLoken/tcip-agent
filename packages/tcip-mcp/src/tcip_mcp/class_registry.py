@@ -303,26 +303,40 @@ def _sweep_schema_change(
     reader takes from the store. Already-stamped confirmations, and subjects whose digest is
     unchanged, are left alone.
 
+    Also counts, per affected subject, its confirmations (every status, not the negatives alone)
+    whose stamped digest, once this write's own stamping above has landed, still disagrees with
+    the subject's new digest: a confirmation stamped under an outgoing schema this write just
+    recorded, and one already stamped under a still-earlier schema that a prior sweep never
+    touched because it was not unstamped, read alike as made before the vocabulary in effect now.
+    Computed with :func:`~tcip_mcp.pipelines.data.label_queries.stale_stamped_names`, the same
+    comparison :func:`~tcip_mcp.pipelines.data.label_queries.confirmed_negative_records` quarantines
+    a stale negative by, so the two readers cannot disagree about what "stale" means.
+
     Never blocks the registry write, which has already landed by the time this runs: an absent
     ``outgoing`` is a no-op, and a failing sweep returns a ``warning`` for the caller to surface.
-    Returns ``{"newly_stamped": {subject: count}, "warning": str | None}``.
+    Returns ``{"newly_stamped": {subject: count}, "predating_vocabulary": {subject: count},
+    "warning": str | None}``.
     """
     import tcip_store
 
     from tcip_mcp.dataset_layout import (
-        bucket_subject_date, image_status_key, normalize_status_store, stamp_image_status_digests,
+        bucket_digest_stamps, bucket_subject_date, image_status_digest_key, image_status_key,
+        normalize_status_store, stamp_image_status_digests,
     )
+    from tcip_mcp.pipelines.data.label_queries import stale_stamped_names
 
     newly_stamped: dict[str, int] = {}
+    predating_vocabulary: dict[str, int] = {}
+    empty = {"newly_stamped": newly_stamped, "predating_vocabulary": predating_vocabulary}
     if outgoing is None:
-        return {"newly_stamped": newly_stamped, "warning": None}
+        return {**empty, "warning": None}
     changed = {
         s.name: digest for s in outgoing.subjects
         if (digest := attribute_schema_digest(outgoing, s.name)) is not None
         and digest != attribute_schema_digest(incoming, s.name)
     }
     if not changed:
-        return {"newly_stamped": newly_stamped, "warning": None}
+        return {**empty, "warning": None}
     try:
         statuses = normalize_status_store(
             tcip_store.read(image_status_key(dataset_root), default={}))
@@ -335,12 +349,24 @@ def _sweep_schema_change(
                 dataset_root, bucket, sorted(entries), outgoing_digest, only_unstamped=True)
             if stamped:
                 newly_stamped[subject] = newly_stamped.get(subject, 0) + len(stamped)
+        stamps_after = tcip_store.read(image_status_digest_key(dataset_root), default={})
+        for bucket, entries in statuses.items():
+            subject, _ = bucket_subject_date(bucket)
+            if subject not in changed:
+                continue
+            new_digest = attribute_schema_digest(incoming, subject)
+            if new_digest is None:
+                continue
+            stale = stale_stamped_names(
+                bucket_digest_stamps(stamps_after, bucket), new_digest, entries)
+            if stale:
+                predating_vocabulary[subject] = predating_vocabulary.get(subject, 0) + len(stale)
     except (OSError, tcip_store.StoreError) as exc:
-        return {"newly_stamped": newly_stamped, "warning":
+        return {**empty, "warning":
                 f"could not stamp the outgoing attribute schema onto the confirmations under "
                 f"{dataset_root} ({exc}); the unstamped ones will read as made under the new "
                 f"schema, so re-review them before they train"}
-    return {"newly_stamped": newly_stamped, "warning": None}
+    return {**empty, "warning": None}
 
 
 def replace_registry(
