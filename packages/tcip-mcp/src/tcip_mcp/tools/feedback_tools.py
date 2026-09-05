@@ -13,6 +13,7 @@ instead, and the store it read is reported rather than folded into the derived o
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -248,6 +249,7 @@ def materialize_review_dataset(
     resolved_bucket, refusal = _resolve_review_bucket(engine, bucket)
     if refusal is not None:
         return {"error": refusal}
+    assert resolved_bucket is not None  # _resolve_review_bucket pairs a None refusal with a bucket
     review_state = {"image": engine.image_states(resolved_bucket)}
     state_path = engine.shard_dir
 
@@ -467,7 +469,7 @@ def prioritize_review_queue(
     scored = scorer.score(sources, predictor.model, predictor.device)[:budget]
     calibration_stems, marks_unresolved = _resolve_calibration_ids(
         checkpoint, Path(images_dir), project_path=project_path or None)
-    marks: list[bool | None] = [None] * len(scored)
+    marks: Sequence[bool | None] = [None] * len(scored)
     if calibration_stems is not None:
         marks = _calibration_marks([p for p, _ in scored], calibration_stems)
     queue = []
