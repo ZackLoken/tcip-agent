@@ -177,12 +177,12 @@ def _resolve_verdict_class_id(pred_path: Optional[str], class_name: str) -> Opti
     recorded name->id map: resolved at verdict-record time, from the same ``operating_point.json``
     ``id_map`` field ``phenology.resolve_positive_class_id`` reads for a prediction bucket, never a
     fresh registry re-derivation (the recorded map is what the bucket's predictions were actually
-    decoded through; the registry could have changed since). ``None`` when there is no bucket, no
-    recorded ``id_map`` on it, or ``class_name`` is not one of its keys (e.g. a GT annotation's raw
-    ``subject`` on an attribute-scoped bucket, whose id_map is keyed by attribute values, not the
-    subject name, since class-aware admission does not yet reach that case; see
-    ``review_calibration.review_to_records``, which refuses rather than guesses when this is
-    ``None``). Never defaults to 0: an unresolved identity is an honest fact, not a class.
+    decoded through; the registry could have changed since). Under a classified scope
+    ``class_name`` is the value the verdict confirmed, a genuine key of the bucket's value-keyed
+    map; the case that remains unresolved is a bucket with no recorded ``id_map`` at all (a bare
+    hand-split directory) or ``class_name`` naming a foreign, stale definition. ``None`` in either
+    case; see ``review_calibration.review_to_records``, which refuses rather than guesses when this
+    is ``None``. Never defaults to 0: an unresolved identity is an honest fact, not a class.
     """
     if not pred_path:
         return None
@@ -282,9 +282,58 @@ def _check_classification_scope(subject: Optional[str], attribute: Optional[str]
                                   "was provided to scope which GT instances it applies to")
 
 
+def _review_scope(
+    pred_path: Optional[str], stated_subject: Optional[str], stated_attribute: Optional[str],
+):
+    """The ``(subject, attribute)`` axis this review reads under, resolved from the bucket the
+    prediction file lies in, never the caller's statement alone.
+
+    No prediction file: the caller's own statement governs (``_check_classification_scope`` still
+    refuses a stated attribute with no subject). A bucket with no stamp: a stated attribute refuses
+    (400, the bucket carries no scope of its own to classify along), else a detector review under
+    the caller's own statement. A stamp that will not decode: 400 with the seam's own error. A
+    stamp carrying neither key: 400 naming the conform script. A classified stamp: the bucket's own
+    scope, whether or not the caller stated one; a stated pair that disagrees refuses. A detector
+    stamp: a stated attribute refuses; otherwise a detector review under the bucket's own subject.
+    """
+    from tcip_mcp.pipelines.resolution import BucketScope, StampScopeUnstated, bucket_scope
+    from tcip_store import StoreError
+
+    _check_classification_scope(stated_subject, stated_attribute)
+    if not pred_path:
+        return BucketScope(subject=stated_subject, attribute=stated_attribute)
+    bucket_dir = str(Path(pred_path).parent)
+    try:
+        scope = bucket_scope(bucket_dir)
+    except StampScopeUnstated as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except StoreError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    if scope is None:
+        if stated_attribute is not None:
+            raise HTTPException(
+                400, "this directory carries no stamp and no scope; a classified review reads "
+                     "the bucket's own")
+        return BucketScope(subject=stated_subject, attribute=None)
+    if scope.classified:
+        if stated_attribute is not None and (stated_subject, stated_attribute) != (
+                scope.subject, scope.attribute):
+            raise HTTPException(400, (
+                f"this bucket's stamp records scope (subject={scope.subject!r}, "
+                f"attribute={scope.attribute!r}), not the stated (subject={stated_subject!r}, "
+                f"attribute={stated_attribute!r})"
+            ))
+        return scope
+    if stated_attribute is not None:
+        raise HTTPException(
+            400, "this is a detector bucket, with no attribute to classify along; a classified "
+                 "review needs a classified bucket")
+    return scope
+
+
 def _compute_matches(
     gt: list, preds: list, *, iou_threshold: float, conf_threshold: float,
-    subject: Optional[str], attribute: Optional[str],
+    subject: Optional[str], attribute: Optional[str], vocabulary=None,
 ) -> dict:
     """Dispatch to plain detection matching, or classified-trait matching when the caller names the
     (subject, attribute) axis under review. The one call site both ``/matches`` and ``/action`` use,
@@ -293,7 +342,7 @@ def _compute_matches(
         return compute_matches(gt, preds, iou_threshold, conf_threshold)
     _check_classification_scope(subject, attribute)
     return compute_classified_trait_matches(
-        gt, preds, subject=subject, attribute=attribute,
+        gt, preds, subject=subject, attribute=attribute, vocabulary=vocabulary or set(),
         iou_threshold=iou_threshold, conf_threshold=conf_threshold,
     )
 
@@ -333,11 +382,8 @@ class MatchesRequest(BaseModel):
     conf_threshold: float = 0.25
     filter_type: str = "all"
     filter_class: str = "all"          # a class name (an annotation's subject) or "all"
-    # Reviewing a classified trait rather than plain detection: `subject` names the object type GT
-    # isolates (an enabling/trait subject already annotated), `attribute` the axis whose confirmed/
-    # predicted value is under review. Both, or neither: a bare `attribute` can't scope which GT
-    # instances it applies to. `None`/`None` (the default) is today's detection-only matching,
-    # unchanged.
+    # A fallback only: a classified bucket's own scope (`_review_scope`) always governs pred_path,
+    # whether or not these are given, and a stated pair that disagrees with it refuses.
     subject: Optional[str] = None
     attribute: Optional[str] = None
 
@@ -366,6 +412,9 @@ class MatchesResponse(BaseModel):
     image_status: str   # "not_started" | "started" | "completed"
     n_reviewed: int      # current detections with a stored verdict, review_progress's own count
     n_total: int         # current detections, the same count's denominator
+    # The resolved review scope (`_review_scope`): both None means a bare directory, nothing else.
+    subject: Optional[str] = None
+    attribute: Optional[str] = None
 
 
 def _matches_response(
@@ -377,6 +426,7 @@ def _matches_response(
     bucket: str,
     filter_type: str,
     filter_class: str,
+    scope=None,
 ) -> MatchesResponse:
     """Build the canvas payload (filtered + review-decorated detections, GT/pred annotations, status)
     from an already-computed match set. Shared by /matches and /action so both surfaces return the
@@ -423,7 +473,19 @@ def _matches_response(
         image_status=engine.get_image_review_status(bucket, image_name),
         n_reviewed=n_reviewed,
         n_total=n_total,
+        subject=scope.subject if scope is not None else None,
+        attribute=scope.attribute if scope is not None else None,
     )
+
+
+def _bucket_vocabulary(pred_path: Optional[str]) -> set:
+    """The bucket's own recorded ``id_map`` keys, the vocabulary a classified match holds every
+    prediction record to; empty for no prediction file or no recorded map."""
+    if not pred_path:
+        return set()
+    from tcip_mcp.pipelines.postprocessing.phenology import bucket_id_map
+
+    return set(bucket_id_map(Path(pred_path).parent) or {})
 
 
 @router.post("/matches")
@@ -431,13 +493,20 @@ def compute_image_matches(req: MatchesRequest) -> MatchesResponse:
     """Compute TP/FP/FN, decorate with review status, and return everything the canvas needs."""
     ctx = _load_ctx(req.image_name, req.image_path, gt_path=req.gt_path, pred_path=req.pred_path)
     engine = _get_engine(req.dataset_root)
-    matches = _compute_matches(
-        ctx.gt, ctx.preds, iou_threshold=req.iou_threshold, conf_threshold=req.conf_threshold,
-        subject=req.subject, attribute=req.attribute,
-    )
+    scope = _review_scope(req.pred_path, req.subject, req.attribute)
+    from tcip_annotation.json_io import ClassifiedRecordRefused
+
+    try:
+        matches = _compute_matches(
+            ctx.gt, ctx.preds, iou_threshold=req.iou_threshold, conf_threshold=req.conf_threshold,
+            subject=scope.subject, attribute=scope.attribute,
+            vocabulary=_bucket_vocabulary(req.pred_path),
+        )
+    except ClassifiedRecordRefused as exc:
+        raise HTTPException(400, str(exc)) from exc
     return _matches_response(
         ctx, matches, engine, req.image_name, bucket=_bucket_of_file(req.pred_path),
-        filter_type=req.filter_type, filter_class=req.filter_class,
+        filter_type=req.filter_type, filter_class=req.filter_class, scope=scope,
     )
 
 
@@ -479,36 +548,54 @@ class ActionPayload(BaseModel):
     attribute: Optional[str] = None
 
 
+def _is_reviewer_drawn_new_shape(payload: "ActionPayload") -> bool:
+    """A reviewer drew a brand-new shape from scratch: no matched GT, no matched prediction, and
+    not a sweep attestation (``ReviewTab.tsx``'s missed-object gesture, posted through ``/action``).
+
+    Under a classified scope this is refused by :func:`_apply_gt_mutation`: the tab posts the
+    missed object with ``class_name = dataset.subject`` (the object class), and authoring that as
+    the attribute's value would fabricate a state nobody assessed.
+    """
+    return payload.gt_idx is None and payload.pred_idx is None and payload.action != "swept"
+
+
 def _apply_gt_mutation(
-    ctx: ReviewContext, payload: "ActionPayload", reviewer: str, now_iso: str
+    ctx: ReviewContext, payload: "ActionPayload", reviewer: str, now_iso: str, *, scope,
 ) -> tuple[bool, Optional[int]]:
     """Author GT from a verdict; return ``(gt_changed, index the written annotation landed at in
-    ctx.gt)``: the index is set only for edited/accepted writes. Accept an FP adds the prediction;
-    accept a TP/FN keeps GT; reject a TP/FN deletes that GT; reject an FP is a no-op; edit writes
-    the edited shape (replacing the matched GT, or adding it); ``action="swept"`` (an explicit
+    ctx.gt)``: the index is set only for edited/accepted writes. ``action="swept"`` (an explicit
     "checked this image for missed objects, found none" attestation) matches none of the branches
     below and always no-ops, GT is never mutated by sweeping.
 
-    Provenance (``reviewer`` = ``user:<name>``, ``now_iso`` = UTC): an accepted prediction carries
-    its ``created_by``/``created_at`` into GT (origin travels) and gets ``accepted_by``/``accepted_at``
-    with its ``score`` dropped (it is ground truth now); a reviewer-drawn edit is stamped
-    ``created_by`` = reviewer.
+    ``scope`` is the resolved review scope (``_review_scope``), never ``payload.subject``/
+    ``payload.attribute`` directly. Under a classified scope (``scope.attribute`` set) a verdict
+    judges the *value* of an object a person already placed; under a detector review it judges the
+    object's presence, as it always has.
 
-    Reviewing a classified trait (``payload.attribute`` set): ``payload.class_name`` is the confirmed/
-    predicted *value*, never the GT object identity, so an authored annotation keeps the real object
-    type on ``subject`` (``payload.subject``) and stamps the value onto ``attributes[attribute]``,
-    the same schema every other GT annotation for this subject already carries; plain detection review
-    (``payload.attribute`` is ``None``) is unchanged, ``class_name`` is the object identity itself."""
+    Accept on a false positive: a paired one (``payload.gt_idx`` set, its partner a ground-truth
+    record of the subject whose value differs) replaces the confirmed value on the person's own
+    record, keeping their geometry and authorship; an unpaired one appends a fresh GT record from
+    the prediction, its origin traveling with it. Under a detector review, accept always appends
+    with empty ``attributes``: ``reviewed`` is exactly the attribute values this review adjudicated,
+    none under a detector review, which adjudicated presence and nothing about state. Reject on a
+    false positive leaves ground truth untouched under either regime. Reject on a true positive or
+    false negative under a classified scope refuses: removing the object is a detector-scope act.
+
+    Edit authors the edited geometry onto the record it edits (a true positive/false negative, or a
+    paired false positive) with the reviewer as author, keeping the record's other attribute values
+    and dropping any sign-off; a stated ``gt_idx`` out of range refuses. An unpaired false positive
+    edited into ground truth is a fresh record, no score and no sign-off. A reviewer-drawn new
+    shape (:func:`_is_reviewer_drawn_new_shape`) refuses under a classified scope.
+    """
     dt, act = payload.det_type, payload.action
-    classifying = payload.attribute is not None
+    classifying = scope.attribute is not None
 
-    def _author(base_subject: str, geometry, *, attributes: Optional[dict] = None, **fields) -> Annotation:
-        if classifying:
-            attrs = dict(attributes or {})
-            attrs[payload.attribute] = base_subject
-            return Annotation(subject=payload.subject, geometry=geometry, attributes=attrs, **fields)
-        return Annotation(subject=base_subject, geometry=geometry, attributes=dict(attributes or {}),
-                          **fields)
+    if classifying and _is_reviewer_drawn_new_shape(payload):
+        raise ValueError(
+            "a reviewer-drawn new shape cannot be authored under a classified-trait review: it "
+            "would fabricate a state nobody assessed. Add the object through the Annotate tab, "
+            "then review its value here."
+        )
 
     if act == "edited":
         geom: BBox | Polygon | None = None
@@ -519,33 +606,60 @@ def _apply_gt_mutation(
             geom = Polygon(rings=[[(float(p[0]), float(p[1])) for p in payload.edited_points]])
         if geom is None:
             return False, None
-        new = _author(payload.class_name, geom, created_by=reviewer, created_at=now_iso)
-        if dt in ("tp", "fn") and payload.gt_idx is not None \
-                and 0 <= payload.gt_idx < len(ctx.gt):
-            ctx.gt[payload.gt_idx] = new
+        if payload.gt_idx is not None:
+            if not (0 <= payload.gt_idx < len(ctx.gt)):
+                raise ValueError(
+                    f"gt_idx {payload.gt_idx} is out of range for this image's {len(ctx.gt)} "
+                    "ground-truth record(s): the record this edit targets no longer exists."
+                )
+            existing = ctx.gt[payload.gt_idx]
+            attrs = dict(existing.attributes)
+            if classifying:
+                attrs[scope.attribute] = payload.class_name
+            ctx.gt[payload.gt_idx] = replace(
+                existing, geometry=geom, attributes=attrs, created_by=reviewer,
+                created_at=now_iso, accepted_by=None, accepted_at=None)
             return True, payload.gt_idx
-        ctx.gt.append(new)
+        # An unpaired false positive edited into ground truth: a fresh record.
+        reviewed = {scope.attribute: payload.class_name} if classifying else {}
+        new_subject = scope.subject if classifying else payload.class_name
+        ctx.gt.append(Annotation(subject=new_subject, geometry=geom, attributes=reviewed,
+                                 created_by=reviewer, created_at=now_iso))
         return True, len(ctx.gt) - 1
 
-    if act == "rejected" and dt in ("tp", "fn") and payload.gt_idx is not None \
-            and 0 <= payload.gt_idx < len(ctx.gt):
-        ctx.gt.pop(payload.gt_idx)
-        return True, None
+    if act == "rejected" and dt in ("tp", "fn"):
+        if classifying:
+            raise ValueError(
+                "reject on a true positive or false negative is a detector-scope act: it removes "
+                "the object, and a classified-trait review never adjudicated whether the object "
+                "is present. Review this bucket under its object class, or remove the object "
+                "through the Annotate tab."
+            )
+        if payload.gt_idx is not None and 0 <= payload.gt_idx < len(ctx.gt):
+            ctx.gt.pop(payload.gt_idx)
+            return True, None
+        return False, None
 
     if act == "accepted" and dt == "fp" and payload.pred_idx is not None \
             and 0 <= payload.pred_idx < len(ctx.preds):
         pred = ctx.preds[payload.pred_idx]
         if isinstance(pred.geometry, BBox):
             check_box_extent(pred.geometry, where=f"accepting {payload.class_name!r}")
+        if classifying and payload.gt_idx is not None and 0 <= payload.gt_idx < len(ctx.gt):
+            # A paired false positive: the person's object, a wrong value confirmed. Keep their
+            # geometry and authorship; replace only the confirmed value.
+            existing = ctx.gt[payload.gt_idx]
+            attrs = dict(existing.attributes)
+            attrs[scope.attribute] = payload.class_name
+            ctx.gt[payload.gt_idx] = replace(
+                existing, attributes=attrs, accepted_by=reviewer, accepted_at=now_iso)
+            return True, payload.gt_idx
         if classifying:
-            # `pred.subject` is the model's predicted value (an attribute-scoped detector's own
-            # class space), never the real object type; accepting it as GT means confirming that
-            # value for `payload.subject`'s real instance, not minting a new object of that name.
-            accepted = _author(pred.subject, pred.geometry, attributes=pred.attributes,
-                               created_by=pred.created_by, created_at=pred.created_at,
+            accepted = replace(pred, score=None, attributes={scope.attribute: payload.class_name},
                                accepted_by=reviewer, accepted_at=now_iso)
         else:
-            accepted = replace(pred, score=None, accepted_by=reviewer, accepted_at=now_iso)
+            accepted = replace(pred, score=None, attributes={},
+                               accepted_by=reviewer, accepted_at=now_iso)
         ctx.gt.append(accepted)
         return True, len(ctx.gt) - 1
 
@@ -555,9 +669,12 @@ def _apply_gt_mutation(
 @router.post("/action")
 def record_action(payload: ActionPayload) -> dict:
     """Record a user's accept/reject/edit decision; auto-complete the image when done."""
-    _check_classification_scope(payload.subject, payload.attribute)
+    from tcip_annotation.json_io import ClassifiedRecordRefused
+
     gt_path = _guard_path(payload.gt_path)
     pred_path = _guard_path(payload.pred_path)
+    scope = _review_scope(pred_path, payload.subject, payload.attribute)
+    vocabulary = _bucket_vocabulary(pred_path)
     ctx = _load_ctx(payload.image_name, payload.image_path, gt_path=gt_path, pred_path=pred_path)
     engine = _get_engine(payload.dataset_root)
     # GUI-set reviewer drives both the verdict log (reviewed_by, bare) and the GT provenance
@@ -580,7 +697,7 @@ def record_action(payload: ActionPayload) -> dict:
     # entry is recorded against the pristine ctx (its bbox lookups read gt_idx).
     work = replace(ctx, gt=list(ctx.gt))
     try:
-        changed, landed_idx = _apply_gt_mutation(work, payload, reviewer, now_iso)
+        changed, landed_idx = _apply_gt_mutation(work, payload, reviewer, now_iso, scope=scope)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     if changed and not gt_path:
@@ -616,11 +733,14 @@ def record_action(payload: ActionPayload) -> dict:
 
     # Promote to 'completed' once every detection at these thresholds is reviewed, the only path
     # by which a GUI review reaches 'completed'. Recompute against the (now-authored) GT.
-    matches = _compute_matches(
-        work.gt, ctx.preds,
-        iou_threshold=payload.iou_threshold, conf_threshold=payload.conf_threshold,
-        subject=payload.subject, attribute=payload.attribute,
-    )
+    try:
+        matches = _compute_matches(
+            work.gt, ctx.preds,
+            iou_threshold=payload.iou_threshold, conf_threshold=payload.conf_threshold,
+            subject=scope.subject, attribute=scope.attribute, vocabulary=vocabulary,
+        )
+    except ClassifiedRecordRefused as exc:
+        raise HTTPException(400, str(exc)) from exc
     engine.check_image_review_complete(bucket, work, matches)
     _audit(payload.dataset_root, "gui_review_action", {
         "image_name": payload.image_name,
@@ -633,7 +753,7 @@ def record_action(payload: ActionPayload) -> dict:
     # written GT), so the client installs them without a second /matches round-trip.
     fresh = _matches_response(
         work, matches, engine, payload.image_name, bucket=bucket,
-        filter_type=payload.filter_type, filter_class=payload.filter_class,
+        filter_type=payload.filter_type, filter_class=payload.filter_class, scope=scope,
     )
     return {
         "status": "ok",
@@ -665,21 +785,35 @@ def _is_negative_for_subject(
 
     No prediction bucket at all is unconditionally negative, there is nothing to check against. A
     subject-less Complete checks the whole file (the claim a subject-less Complete makes, about
-    every subject). A named subject is checked against the bucket's own recorded name->id map
-    (``phenology.bucket_id_map``, the same map ``_resolve_verdict_class_id`` reads for a verdict's
-    class identity) only as an admission gate: membership proves the bucket assessed this subject
-    at all (an attribute-scoped bucket's map is keyed by attribute values, not the object's subject
-    name, so it admits no object subject). The comparison itself is by the decoded name
-    (``cached_label_annotations``' own ``subject`` field), never the id, since the bucket's own
-    predictions were already decoded through that same map, and both branches read the file
-    through this one memo so they cannot disagree about its current content. A subject the map
-    does not admit is ``None``: the caller omits the coverage entry rather than guessing one.
+    every subject). A named subject reads the bucket's own recorded scope
+    (``resolution.bucket_scope``) first: a classified stamp admits exactly its own object class and
+    answers ``None`` for any other name, so a value name (a key of the bucket's own value-keyed
+    ``id_map``) can never be recorded as a negative subject. A bare directory or a detector stamp
+    keeps the map-membership admission (``phenology.bucket_id_map``, the same map
+    ``_resolve_verdict_class_id`` reads for a verdict's class identity): membership proves the
+    bucket assessed this subject at all, and the comparison itself is by the decoded name
+    (``cached_label_annotations``' own ``subject`` field), never the id, so the two branches read
+    the file through this one memo and cannot disagree about its current content. A neither-key or
+    undecodable stamp answers ``None`` too, caught here rather than left to the route (whose own
+    catch covers only :class:`~tcip_annotation.json_io.UnreadableLabelDocument`): the Complete and
+    its status write still proceed, with no coverage entry for a subject nothing here can resolve.
     """
     if not pred_dir:
         return True
     pred_file = Path(pred_dir) / f"{Path(image_name).stem}.json"
     if subject is None:
         return not _has_objects(pred_file)
+    from tcip_mcp.pipelines.resolution import StampScopeUnstated, bucket_scope
+    from tcip_store import StoreError
+
+    try:
+        scope = bucket_scope(Path(pred_dir))
+    except (StampScopeUnstated, StoreError):
+        return None
+    if scope is not None and scope.classified:
+        if subject != scope.subject:
+            return None
+        return not any(a.subject == subject for a in cached_label_annotations(pred_file))
     from tcip_mcp.pipelines.postprocessing.phenology import bucket_id_map
 
     id_map = bucket_id_map(Path(pred_dir))
