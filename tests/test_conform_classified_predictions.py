@@ -174,6 +174,31 @@ def test_a_classifier_bucket_is_rewritten_and_stamped(tmp_path):
     assert (total, positive, unclassified) == (1, 1, 0)
 
 
+def test_a_sourced_attribute_with_no_subject_refuses_before_any_write(tmp_path):
+    """The experiment source reads a run's config verbatim, with no validation of its own: a
+    hand-corrupted record naming an attribute under no subject refuses by name before any write,
+    rather than reaching a stamp write the rail would refuse anyway."""
+    bind_default()
+    module = _load_script()
+    project = tmp_path / "project"
+    dataset_root = tmp_path / "dataset"
+    _register(project, dataset_root)
+    bucket = _pre_conform_classified_bucket(dataset_root)
+    _write_experiment_config("exp-classified", project,
+                              {"subject": None, "attribute": ATTRIBUTE, "id_map": VALUE_ID_MAP})
+
+    from tcip_mcp.prediction_buckets import bucket_content_digest
+
+    before = bucket_content_digest(bucket)
+    outcomes, refused = module.process_project_root(
+        project, plan=False, operator_subject=None, operator_attribute=None)
+
+    assert refused is True
+    assert any("no subject" in o for o in outcomes), outcomes
+    assert bucket_content_digest(bucket) == before
+    assert module.read_stamp_state(bucket).kind == "unstated"
+
+
 def test_a_second_run_rewrites_nothing_and_reports_the_same_left_behind_set(tmp_path):
     bind_default()
     module = _load_script()
@@ -397,7 +422,9 @@ def test_the_experiment_source_is_read_under_the_walked_root_when_the_platform_r
         project, plan=False, operator_subject=None, operator_attribute=None)
 
     assert refused is False
-    assert any("rewrote 2 document(s)" in o and "experiment" in o for o in outcomes), outcomes
+    assert any("rewrote 2 document(s)" in o and "experiment" in o and str(project) in o
+              for o in outcomes), outcomes
+    assert not any(str(elsewhere) in o for o in outcomes), outcomes
 
 
 def test_a_bespoke_run_answering_no_scope_falls_through_to_the_operator(tmp_path):
@@ -538,6 +565,36 @@ def test_a_bucket_holding_a_raw_index_or_foreign_value_record_is_reported_and_un
     _write_stamp(bucket, _base_stamp(id_map=VALUE_ID_MAP, experiment_id="exp-foreign"))
     _write_experiment_config("exp-foreign", project,
                               {"subject": SUBJECT, "attribute": ATTRIBUTE, "id_map": VALUE_ID_MAP})
+
+    from tcip_mcp.prediction_buckets import bucket_content_digest
+
+    before = bucket_content_digest(bucket)
+    outcomes, refused = module.process_project_root(
+        project, plan=False, operator_subject=None, operator_attribute=None)
+
+    assert refused is True
+    assert any("unconformable" in o for o in outcomes), outcomes
+    assert bucket_content_digest(bucket) == before
+
+
+def test_a_stale_detector_document_is_unconformable_even_when_a_value_names_the_subject(tmp_path):
+    """The one-key blind spot: a classified map can declare a value spelled like the object class
+    itself. A stale detector document carrying the object class and no value must still be
+    reported unconformable, never mistaken for a rewrite because its bare subject happens to be a
+    key of the map too.
+    """
+    bind_default()
+    module = _load_script()
+    project = tmp_path / "project"
+    dataset_root = tmp_path / "dataset"
+    _register(project, dataset_root)
+    bucket = dataset_root / "predictions" / "classifier" / "stale"
+    coincidental_map = {SUBJECT: 0, "diseased": 1}
+    _write_doc(bucket, "img1", [Annotation(subject=SUBJECT, geometry=BBox(0, 0, 10, 10), score=0.9)])
+    _write_stamp(bucket, _base_stamp(id_map=coincidental_map, experiment_id="exp-coincidental"))
+    _write_experiment_config("exp-coincidental", project,
+                              {"subject": SUBJECT, "attribute": ATTRIBUTE,
+                               "id_map": coincidental_map})
 
     from tcip_mcp.prediction_buckets import bucket_content_digest
 

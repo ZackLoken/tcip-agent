@@ -34,12 +34,14 @@ Per stamped bucket, in order:
    nothing is stamped or rewritten, since the platform never rewrites predictions a human reviewed.
    A bucket under no dataset root has no verdict store to ask, the same inoperative guard
    ``run_inference`` states for such a bucket, and this is reported rather than silently skipped.
-6. Otherwise every document is read whole and every record classified: already carrying the object
-   class with a mapped value under the attribute (conformed); carrying a ``subject`` that is a key
-   of the map (a rewrite); anything else (unconformable). Any unconformable record reports the
-   whole bucket by file and index, re-inference as the remedy, neither rewritten nor stamped. A
-   bucket with none is rewritten (or, if every record was already conformed, left as it is) and
-   stamped.
+6. Otherwise every document is read whole and every record classified, the object-class check made
+   first: already carrying the object class, a mapped value under the attribute settles it
+   conformed, no value settles it unconformable (a stale detector document, never mistaken for a
+   rewrite even when the map declares a value spelled like the object class itself, the one-key
+   blind spot). Everything else carrying a ``subject`` that is a key of the map is a rewrite;
+   anything else (unconformable). Any unconformable record reports the whole bucket by file and
+   index, re-inference as the remedy, neither rewritten nor stamped. A bucket with none is
+   rewritten (or, if every record was already conformed, left as it is) and stamped.
 7. After a rewrite, the new content's binding is checked (``verify_stamp_binding``): a count claim
    the bucket carried floors when its covered digest no longer matches, reported beside the
    stamp's own stored ``validated`` so a stale ``true`` is never read as still validated.
@@ -155,9 +157,11 @@ def read_stamp_state(bucket_dir: Path) -> StampState:
 def _experiment_source(
     stamp: dict, *, root: Path | None,
 ) -> tuple[str, str | None, str | None] | None:
-    """``('experiment', subject, attribute)`` when the run's own experiment record answers both,
-    else ``None``: a bespoke or COCO-sourced run's record, or one with no experiment_id at all,
-    does not answer."""
+    """``('experiment (read under <root>)', subject, attribute)`` when the run's own experiment
+    record answers both, else ``None``: a bespoke or COCO-sourced run's record, or one with no
+    experiment_id at all, does not answer. The label names the root the record was read under,
+    the walked project (``root``) rather than the process's own pinned platform root, so the
+    report is explicit about which project's experiment store answered."""
     experiment_id = stamp.get("experiment_id")
     if not experiment_id:
         return None
@@ -167,7 +171,8 @@ def _experiment_source(
     data_cfg = config.get("data")
     if not isinstance(data_cfg, dict) or "subject" not in data_cfg or "attribute" not in data_cfg:
         return None
-    return "experiment", data_cfg["subject"], data_cfg["attribute"]
+    root_note = root if root is not None else "this process's own pinned platform root"
+    return f"experiment (read under {root_note})", data_cfg["subject"], data_cfg["attribute"]
 
 
 def _like_source(like_dir: Path | None) -> tuple[str, str, str | None, dict[str, int]] | None:
@@ -234,8 +239,16 @@ class RecordVerdict:
 
 
 def classify_record(a: Annotation, *, subject: str, attribute: str, id_map: dict) -> RecordVerdict:
-    if a.subject == subject and a.attributes.get(attribute) in id_map:
-        return RecordVerdict(conformed=True)
+    """A record already carrying the object class (``a.subject == subject``) is conformed when a
+    valid value sits under ``attribute``, unconformable otherwise (a stale detector document
+    carrying the object class and no value, never a rewrite candidate): the object-class check is
+    made first and settles the record either way, so the one-key blind spot (an attribute
+    declaring a value spelled like the object class itself) can never read that stale document's
+    bare object-class subject as a value to rewrite from."""
+    if a.subject == subject:
+        if a.attributes.get(attribute) in id_map:
+            return RecordVerdict(conformed=True)
+        return RecordVerdict(unconformable=True)
     if a.subject in id_map:
         return RecordVerdict(rewrite=a.subject)
     return RecordVerdict(unconformable=True)
@@ -357,6 +370,9 @@ def conform_bucket(
                 "own experiment record, --like, the operator) answered; left as it is",
                 True, None, None)
     source, subject, attribute, like_id_map = sourced
+    if attribute is not None and subject is None:
+        return (f"refused, the {source} names attribute {attribute!r} with no subject: a value "
+                "under no object class cannot be conformed", True, None, None)
 
     if attribute is None:
         recorded_map = stamp.get("id_map")
