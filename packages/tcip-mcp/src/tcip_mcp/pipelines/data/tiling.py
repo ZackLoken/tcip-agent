@@ -16,7 +16,7 @@ without torch. Ported from the chestnut-burr ``CanopyTiler`` /
 from __future__ import annotations
 
 import math
-from typing import NamedTuple
+from typing import NamedTuple, overload
 
 import numpy as np
 
@@ -266,6 +266,18 @@ def dedup_boxes(
     return boxes[keep_idx], labels[keep_idx]
 
 
+@overload
+def reconstruct_core(
+    per_tile_boxes: list[np.ndarray], per_tile_scores: list[np.ndarray],
+    per_tile_labels: list[np.ndarray], tile_info: list[dict], tile_size: int, stride: int,
+    per_tile_masks: None = None,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]: ...
+@overload
+def reconstruct_core(
+    per_tile_boxes: list[np.ndarray], per_tile_scores: list[np.ndarray],
+    per_tile_labels: list[np.ndarray], tile_info: list[dict], tile_size: int, stride: int,
+    per_tile_masks: list[np.ndarray],
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, list[MaskPatch]]: ...
 def reconstruct_core(
     per_tile_boxes: list[np.ndarray], per_tile_scores: list[np.ndarray],
     per_tile_labels: list[np.ndarray], tile_info: list[dict], tile_size: int, stride: int,
@@ -289,7 +301,8 @@ def reconstruct_core(
     collect_masks = per_tile_masks is not None
     out_b, out_s, out_l = [], [], []
     out_m: list[MaskPatch] = []
-    mask_stream = per_tile_masks if collect_masks else [None] * len(per_tile_boxes)
+    mask_stream: list[np.ndarray] | list[None] = (
+        per_tile_masks if per_tile_masks is not None else [None] * len(per_tile_boxes))
     for tb, ts, tl, info, tm in zip(per_tile_boxes, per_tile_scores, per_tile_labels, tile_info, mask_stream):
         if len(tb) == 0:
             continue
@@ -314,6 +327,7 @@ def reconstruct_core(
             out_s.append(float(ts[i]))
             out_l.append(int(tl[i]))
             if collect_masks:
+                assert tm is not None, "mask_stream carries only ndarrays when collect_masks is True"
                 out_m.append(MaskPatch(patch=np.asarray(tm[i]), offset_x=int(tx), offset_y=int(ty)))
     if not out_b:
         empty = (EMPTY_BOXES.copy(), EMPTY_SCORES.copy(), EMPTY_LABELS.copy())
@@ -387,6 +401,18 @@ def _composite_mask_patches(merged_box: np.ndarray, patches: list[MaskPatch]) ->
     return MaskPatch(patch=canvas, offset_x=x0, offset_y=y0)
 
 
+@overload
+def global_merge(
+    boxes: np.ndarray, scores: np.ndarray, labels: np.ndarray,
+    iou_thresh: float, class_aware: bool = True,
+    per_det_masks: None = None,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]: ...
+@overload
+def global_merge(
+    boxes: np.ndarray, scores: np.ndarray, labels: np.ndarray,
+    iou_thresh: float, class_aware: bool = True,
+    *, per_det_masks: list[MaskPatch],
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, list[MaskPatch]]: ...
 def global_merge(
     boxes: np.ndarray, scores: np.ndarray, labels: np.ndarray,
     iou_thresh: float, class_aware: bool = True,
@@ -441,12 +467,16 @@ def global_merge(
                     cur_score = max(cur_score, float(scores[j]))
                     merged = True
                     if collect_masks:
+                        assert members is not None, "members is a list whenever collect_masks is True"
                         members.append(j)
                     break
         m_boxes.append(cur)
         m_scores.append(cur_score)
         m_labels.append(int(labels[i]))
         if collect_masks:
+            assert per_det_masks is not None and members is not None, (
+                "collect_masks is True only when per_det_masks was given, and members is a "
+                "list then too")
             m_masks.append(_composite_mask_patches(cur, [per_det_masks[k] for k in members]))
     result = (np.asarray(m_boxes, dtype=np.float32),
               np.asarray(m_scores, dtype=np.float32),
