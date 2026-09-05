@@ -556,7 +556,7 @@ Non-zero cross-package edge counts at HEAD:
 
 `packages/tcip-web/frontend/src` (`tcip-web-frontend`) has zero in-repo import edges to any Python module in any of the five Python roots: `build_module_inventory.py` resolves a TypeScript specifier only against a relative path or the `@/` alias into `packages/tcip-web/frontend/src` itself (`scripts/build_module_inventory.py:307-327`), so no specifier in the frontend source tree can resolve to a file outside that tree.
 
-## Modules with zero importers (149)
+## Modules with zero importers (164)
 
 A module counts as zero-importer when no other module in its own scanned tree resolves an in-repo import to it (`imported_by_count == 0` in the regenerated inventory). This includes package entry points (`__init__.py`, `__main__.py`), CLI scripts under `scripts/` invoked as processes rather than imported, and every TypeScript `*.test.ts`/`*.test.tsx` file, none of which are expected to have an in-repo importer.
 
@@ -583,6 +583,7 @@ A module counts as zero-importer when no other module in its own scanned tree re
 | tcip-web | packages/tcip-web/src/tcip_web/agent_bash_guard.py |
 | tcip-web | packages/tcip-web/src/tcip_web/agent_powershell_guard.py |
 | tcip-web | packages/tcip-web/src/tcip_web/agent_session_start.py |
+| tcip-web-frontend | packages/tcip-web/frontend/src/App.test.tsx |
 | tcip-web-frontend | packages/tcip-web/frontend/src/api/classes.test.ts |
 | tcip-web-frontend | packages/tcip-web/frontend/src/api/client.test.ts |
 | tcip-web-frontend | packages/tcip-web/frontend/src/api/devProxy.generated.ts |
@@ -623,8 +624,10 @@ A module counts as zero-importer when no other module in its own scanned tree re
 | tcip-web-frontend | packages/tcip-web/frontend/src/hooks/useKeyboardShortcuts.test.tsx |
 | tcip-web-frontend | packages/tcip-web/frontend/src/hooks/useOverviewBuild.test.ts |
 | tcip-web-frontend | packages/tcip-web/frontend/src/hooks/useRegionCompleteness.test.ts |
+| tcip-web-frontend | packages/tcip-web/frontend/src/hooks/useRegionServes.test.ts |
 | tcip-web-frontend | packages/tcip-web/frontend/src/index.css.test.ts |
 | tcip-web-frontend | packages/tcip-web/frontend/src/lib/annotateFocus.test.ts |
+| tcip-web-frontend | packages/tcip-web/frontend/src/lib/authorshipSymbology.test.ts |
 | tcip-web-frontend | packages/tcip-web/frontend/src/lib/bandSelection.test.ts |
 | tcip-web-frontend | packages/tcip-web/frontend/src/lib/canvasSync.test.ts |
 | tcip-web-frontend | packages/tcip-web/frontend/src/lib/coverage.test.ts |
@@ -655,6 +658,7 @@ A module counts as zero-importer when no other module in its own scanned tree re
 | tcip-web-frontend | packages/tcip-web/frontend/src/store/terminalOpenPolicy.test.ts |
 | tcip-web-frontend | packages/tcip-web/frontend/src/tabs/AnnotateTab.test.tsx |
 | tcip-web-frontend | packages/tcip-web/frontend/src/tabs/InferenceTab.test.tsx |
+| tcip-web-frontend | packages/tcip-web/frontend/src/tabs/MetaTab.test.tsx |
 | tcip-web-frontend | packages/tcip-web/frontend/src/tabs/ResultsTab.test.tsx |
 | tcip-web-frontend | packages/tcip-web/frontend/src/tabs/ReviewTab.test.tsx |
 | tcip-web-frontend | packages/tcip-web/frontend/src/tabs/TrainingTab.test.tsx |
@@ -674,6 +678,7 @@ A module counts as zero-importer when no other module in its own scanned tree re
 | scripts | scripts/conform_classified_predictions.py |
 | scripts | scripts/conform_dataset_registry_paths.py |
 | scripts | scripts/conform_delivery_events.py |
+| scripts | scripts/conform_image_stem_collisions.py |
 | scripts | scripts/conform_job_registry_roots.py |
 | scripts | scripts/conform_metrics_marker.py |
 | scripts | scripts/conform_model_registry_paths.py |
