@@ -69,6 +69,10 @@ def test_plan_reports_every_collision_and_creates_no_parking_directory(tmp_path:
     assert "foo.jpg" in out and "foo.png" in out
     assert "bar.jpg" in out and "bar.png" in out
     assert "Baz.jpg" in out and "baz.png" in out
+    assert "(served today)" in out
+    assert "served today: none; every reader already refuses this directory" in out
+    assert "records for 'foo': none" in out
+    assert "records for 'Baz': none" in out
     assert not (root / ".tcip" / "collisions").exists()
 
 
@@ -93,13 +97,33 @@ def test_served_today_is_the_first_by_sorted_filename_among_a_same_stem_duplicat
 
 
 def test_served_today_is_none_for_a_case_variant_pair(tmp_path: Path):
-    module = _load_script()
-    d = tmp_path / "images"
-    d.mkdir()
-    _write(d / "Foo.jpg")
-    _write(d / "foo.png")
+    import tcip_store as ts
+    from tcip_store.file_backend import FileBackend
 
-    assert module.served_today([d / "Foo.jpg", d / "foo.png"]) is None
+    ts.bind(FileBackend())
+    module = _load_script()
+    root = tmp_path / "proj"
+    _scaffold_project(root)
+    _write(root / "images" / "2026-02-11" / "Foo.jpg")
+    _write(root / "images" / "2026-02-11" / "foo.png")
+    keep = root / "images" / "2026-02-11" / "Foo.jpg"
+    other = root / "images" / "2026-02-11" / "foo.png"
+
+    assert module.served_today([keep, other]) is None
+
+    # A record for either exact stem is enough to refuse: no served file distinguishes which
+    # pixels the record was made against.
+    _write(root / "annotations" / "2026-02-11" / "foo.json", b'{"annotations": []}')
+    with_records = module.collect_collisions([root])
+    assert module.apply_collisions(with_records, [keep]) == 2
+    assert keep.is_file()
+    assert other.is_file()
+
+    (root / "annotations" / "2026-02-11" / "foo.json").unlink()
+    without_records = module.collect_collisions([root])
+    assert module.apply_collisions(without_records, [keep]) == 0
+    assert keep.is_file()
+    assert not other.exists()
 
 
 def test_served_today_is_none_when_a_manifest_matches_a_raw_files_exact_stem(tmp_path: Path):
@@ -151,10 +175,13 @@ def test_apply_with_keep_moves_the_other_and_records_the_event(tmp_path: Path):
     assert entry["moved_file"] == str(other)
     assert isinstance(entry["kept_digest"], str) and isinstance(entry["moved_digest"], str)
 
-    from tcip_mcp.pipelines.image_utils import list_logical_images
+    from tcip_mcp.pipelines.image_utils import list_logical_images, resolve_image_source
 
-    logical = list_logical_images(root / "images" / "2026-02-11")
+    bucket_dir = root / "images" / "2026-02-11"
+    logical = list_logical_images(bucket_dir)
     assert set(logical) == {"foo"}
+    for stem in logical:
+        resolve_image_source(bucket_dir, stem)
 
 
 def test_apply_without_a_keep_for_a_key_refuses(tmp_path: Path):
@@ -247,3 +274,125 @@ def test_a_second_plan_over_a_conformed_project_exits_zero(tmp_path: Path):
 
     second = module.collect_collisions([root])
     assert module.report_plan(second) == 0
+
+
+def _project_with_a_manifest_case_variant_collision(root: Path) -> tuple[Path, Path, Path]:
+    """A ``cap.bandgroup`` manifest claiming ``cap_R.tif``, colliding under key ``cap`` with a
+    standalone ``Cap.jpg`` that is no member of it. Returns ``(bucket, manifest, raw)``."""
+    import numpy as np
+    import tifffile
+
+    from tcip_mcp.pipelines.data.band_groups import write_band_group_manifest
+
+    _scaffold_project(root)
+    bucket = root / "images" / "2026-02-11"
+    bucket.mkdir(parents=True)
+    band_r = bucket / "cap_R.tif"
+    tifffile.imwrite(str(band_r), np.zeros((4, 4), dtype=np.uint16))
+    manifest = write_band_group_manifest(bucket, "cap", {"Red": band_r})
+    raw = bucket / "Cap.jpg"
+    _write(raw)
+    return bucket, manifest, raw
+
+
+def test_apply_with_keep_of_the_raw_file_refuses_when_parking_the_manifest(tmp_path: Path):
+    import tcip_store as ts
+    from tcip_store.file_backend import FileBackend
+
+    ts.bind(FileBackend())
+    module = _load_script()
+    root = tmp_path / "proj"
+    _, manifest, raw = _project_with_a_manifest_case_variant_collision(root)
+
+    collisions = module.collect_collisions([root])
+    code = module.apply_collisions(collisions, [raw])
+
+    assert code == 2
+    assert raw.is_file()
+    assert manifest.is_file()
+    assert (manifest.parent / "cap_R.tif").is_file()
+
+
+def test_apply_with_keep_of_the_manifest_moves_the_colliding_raw_file(tmp_path: Path):
+    import tcip_store as ts
+    from tcip_store.file_backend import FileBackend
+
+    ts.bind(FileBackend())
+    module = _load_script()
+    root = tmp_path / "proj"
+    bucket, manifest, raw = _project_with_a_manifest_case_variant_collision(root)
+
+    collisions = module.collect_collisions([root])
+    code = module.apply_collisions(collisions, [manifest])
+
+    assert code == 0
+    assert manifest.is_file()
+    assert (bucket / "cap_R.tif").is_file()
+    assert not raw.exists()
+    assert (root / ".tcip" / "collisions" / "2026-02-11" / "Cap.jpg").is_file()
+
+
+def test_main_plan_is_the_default_and_exits_non_zero_with_a_collision(
+    tmp_path: Path, monkeypatch,
+):
+    module = _load_script()
+    root = tmp_path / "proj"
+    _project_with_dated_collision(root)
+
+    monkeypatch.setattr(sys, "argv", ["conform_image_stem_collisions.py", str(root)])
+    code = module.main()
+
+    assert code == 2
+    assert (root / "images" / "2026-02-11" / "foo.jpg").is_file()
+    assert (root / "images" / "2026-02-11" / "foo.png").is_file()
+    assert not (root / ".tcip" / "collisions").exists()
+
+
+def test_main_plan_exits_zero_without_a_collision(tmp_path: Path, monkeypatch):
+    module = _load_script()
+    root = tmp_path / "proj"
+    _scaffold_project(root)
+    _write(root / "images" / "2026-02-11" / "foo.jpg")
+
+    monkeypatch.setattr(sys, "argv", ["conform_image_stem_collisions.py", str(root)])
+    assert module.main() == 0
+
+
+def test_main_apply_moves_the_other_file(tmp_path: Path, monkeypatch):
+    module = _load_script()
+    root = tmp_path / "proj"
+    _project_with_dated_collision(root)
+    keep = root / "images" / "2026-02-11" / "foo.jpg"
+    other = root / "images" / "2026-02-11" / "foo.png"
+
+    monkeypatch.setattr(
+        sys, "argv",
+        ["conform_image_stem_collisions.py", "--apply", "--keep", str(keep), str(root)],
+    )
+    code = module.main()
+
+    assert code == 0
+    assert keep.is_file()
+    assert not other.exists()
+    assert (root / ".tcip" / "collisions" / "2026-02-11" / "foo.png").is_file()
+
+
+def test_main_plan_and_apply_together_refuses(tmp_path: Path, monkeypatch):
+    module = _load_script()
+    root = tmp_path / "proj"
+    _project_with_dated_collision(root)
+
+    monkeypatch.setattr(
+        sys, "argv", ["conform_image_stem_collisions.py", "--plan", "--apply", str(root)],
+    )
+
+    assert module.main() == 2
+
+
+def test_main_over_a_non_project_root_exits_2(tmp_path: Path, monkeypatch):
+    module = _load_script()
+    root = tmp_path / "not_a_project"
+    root.mkdir()
+
+    monkeypatch.setattr(sys, "argv", ["conform_image_stem_collisions.py", str(root)])
+    assert module.main() == 2
