@@ -121,6 +121,7 @@ def _conform_poisoned_record(
     if raw_bytes is None:
         return f"{label}: no schema_version 2 field, unchanged"
     descriptor = ts.get_descriptor(key.store)
+    assert descriptor.codec is not None, f"{key.store} is a record store; every record declares a codec"
     try:
         decoded = descriptor.codec.decode(raw_bytes)
     except Exception as exc:
