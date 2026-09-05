@@ -227,7 +227,9 @@ def compare_best_route(payload: CompareBestPayload) -> dict:
     marked experiments before anything is derived. Reads the registry index first so a project
     with none never takes the tool's own directory-creating construction: only the reader's own
     empty answer (no index at all) is a 404; a document that exists but will not decode
-    (``DecodeError``) or that this reader does not recognize (``RegistryVersionRefused``) is not
+    (``DecodeError``), that this reader does not recognize (``RegistryVersionRefused``), or whose
+    ``schema_version`` sits above the ceiling this store knows (``SchemaVersionRefused``, a
+    sibling of ``RegistryVersionRefused`` under ``StoreError``, not folded into it) is not
     a project with no models, and answers 409 naming why, the same wording
     ``compare_experiments``'s own ``registry_error`` carries. The tool's own error dicts (a
     required metric, an undeclared direction, no carrier) map to 422 with the whole dict as
@@ -236,7 +238,7 @@ def compare_best_route(payload: CompareBestPayload) -> dict:
     stamped metrics, source, the direction used and its source, and the exclusions; no checkpoint
     path, config or file size leaves this route.
     """
-    from tcip_store.errors import DecodeError
+    from tcip_store.errors import DecodeError, SchemaVersionRefused
 
     from tcip_mcp.model_registry import RegistryEntryPredatesMetricsSource, RegistryVersionRefused, read_registry_index
     from tcip_mcp.project_paths import platform_state_root
@@ -244,7 +246,7 @@ def compare_best_route(payload: CompareBestPayload) -> dict:
 
     try:
         entries = read_registry_index(platform_state_root())
-    except (DecodeError, RegistryVersionRefused) as exc:
+    except (DecodeError, RegistryVersionRefused, SchemaVersionRefused) as exc:
         raise HTTPException(409, f"registry unreadable: {exc}") from exc
     if not entries:
         raise HTTPException(404, "no model registry in this project")
