@@ -63,7 +63,7 @@ def test_every_declared_step_runs_or_is_skipped_by_the_stated_rule():
         "typescript:Install frontend dependencies",
     ]
     run_steps = [
-        "mypy:Type check (mypy, permissive; see mypy.ini)",
+        "mypy:Type check (mypy; see mypy.ini)",
         "python:Lint (ruff) [sqlite]", "python:ARCHITECTURE.md matches the tree [sqlite]",
         "python:ARCHITECTURE.md citations match what they quote [sqlite]",
         "python:Run tests [sqlite]",
@@ -213,7 +213,7 @@ def test_only_accepts_a_stage_key_carrying_a_comma(tmp_path, monkeypatch):
 
     monkeypatch.setattr(gate_baseline.subprocess, "run", lambda *a, **k: _Completed())
     out = tmp_path / "gate-out"
-    key = "mypy:Type check (mypy, permissive; see mypy.ini)"
+    key = "mypy:Type check (mypy; see mypy.ini)"
     monkeypatch.setattr(sys, "argv", ["gate_baseline.py", "--out", str(out), "--only", key])
     assert gate_baseline.main() == 0
     summary = json.loads((out / "summary.json").read_text(encoding="utf-8"))

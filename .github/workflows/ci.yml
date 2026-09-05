@@ -72,7 +72,7 @@ jobs:
           pip install -e "packages/tcip-mcp[dev,hpo]"
           pip install -e "packages/tcip-web[dev]"
 
-      - name: Type check (mypy, permissive; see mypy.ini)
+      - name: Type check (mypy; see mypy.ini)
         # bare mypy: the roots come from mypy.ini's files list, the single source.
         run: mypy
 
