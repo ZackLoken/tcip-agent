@@ -136,6 +136,11 @@ Three seams make bespoke work first-class, and the platform guarantees integrity
   recorded or raised. `ctx.default_train()` is one convenience, not a requirement: call it,
   extend it, or replace it entirely.
 
+  `state` reserves two top-level keys: `schema_version` (the platform's own checkpoint-version
+  field) and `config` (always this run's own launch config, the record every publishing door
+  reads a run's `(subject, attribute, id_map)` scope from). A `state` carrying either refuses;
+  name a bespoke loop's own field something else.
+
   Registration needs one more fact your loop states explicitly. A checkpoint saved via
   `ctx.save_checkpoint(state, "model_best")` or `"model_final"` is found automatically after your
   loop returns; any other tag (or the default, untagged `ctx.save_checkpoint(state)`) is not

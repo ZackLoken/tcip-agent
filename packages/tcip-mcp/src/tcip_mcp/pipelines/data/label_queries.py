@@ -48,6 +48,27 @@ def authored_frame(stem: str, labels_dir, fmt: str, coco=None,
     return image_extent_from_labels(labels_dir, stem)
 
 
+def targets_registry_derived(data_cfg: dict) -> bool:
+    """Whether a run's targets are registry-derived: an image folder plus ``classes.json``, the
+    one shape a run's own recorded ``id_map`` can be trusted to have come from this
+    ``(labels_dir, subject, attribute)`` triple.
+
+    ``False`` for a run trained from a bespoke ``dataset_source``, a pre-built ``coco_json``, or
+    ``label_format="coco"``: none of those routes guarantee their targets came from this triple at
+    all, a COCO file's own category ids can be authored in any order, and a bespoke builder owns
+    its class space entirely. The one predicate ``_resolve_run_id_map``
+    (``pipelines/training/subprocess_worker.py``) records no map by, extracted here so the
+    inference-side door remedy (``unmapped_classified_run``) reads the identical rule rather than
+    a second copy of it.
+    """
+    from tcip_mcp.pipelines.model_build import DATASET_SOURCE_KEY
+
+    return not (
+        data_cfg.get(DATASET_SOURCE_KEY) or data_cfg.get("coco_json")
+        or (data_cfg.get("label_format") or "").lower() == "coco"
+    )
+
+
 def resolved_classes_path(dataset_dir) -> Path | None:
     """The real ``classes.json`` path for the dataset containing ``dataset_dir``, or ``None`` if it
     doesn't exist. The one fact ``resolve_registry_id_map``'s attribute-without-registry refusal
