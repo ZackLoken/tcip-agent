@@ -9,6 +9,7 @@ import {
   type SplitChoices,
   type TrainingRunSummary,
 } from "@/api/training";
+import { UNSET_GLYPH } from "@/lib/glyphs";
 import { useStore } from "@/store";
 import { TrainingTab, dataPickerFor } from "@/tabs/TrainingTab";
 import { RUN_REFRESH_MS } from "@/tabs/trainingMetrics";
@@ -466,6 +467,203 @@ describe("TrainingTab chart accessibility", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "as table" }));
     expect(screen.queryByRole("table")).not.toBeInTheDocument();
+  });
+
+  it("names the table's own container from the as-table toggle", async () => {
+    useStore.setState((s) => ({
+      gui: { ...s.gui, dataset: { ...s.gui.dataset, project_root: "/proj" } },
+    }));
+    vi.spyOn(trainingApi, "listRuns").mockResolvedValue({
+      runs: [run({ run_id: "train-controls", status: "running" })],
+    });
+    vi.spyOn(trainingApi, "getRun").mockReturnValue(new Promise(() => {}));
+    vi.mocked(openTrainingStream).mockImplementation((_root, runId, onMessage) => {
+      onMessage({ type: "metric", run_id: runId, row: { epoch: 1, loss: 0.5 } });
+      return () => {};
+    });
+
+    render(<TrainingTab />);
+    fireEvent.click(await screen.findByText("train-controls"));
+    const toggle = await screen.findByRole("button", { name: "as table" });
+    fireEvent.click(toggle);
+
+    const table = await screen.findByRole("table");
+    expect(toggle.getAttribute("aria-controls")).toBe(table.parentElement?.id);
+  });
+
+  it("marks the metrics placeholder as a live region so its swap to the chart is announced", async () => {
+    useStore.setState((s) => ({
+      gui: { ...s.gui, dataset: { ...s.gui.dataset, project_root: "/proj" } },
+    }));
+    vi.spyOn(trainingApi, "listRuns").mockResolvedValue({
+      runs: [run({ run_id: "train-waiting-live", status: "running" })],
+    });
+    vi.spyOn(trainingApi, "getRun").mockReturnValue(new Promise(() => {}));
+
+    render(<TrainingTab />);
+    fireEvent.click(await screen.findByText("train-waiting-live"));
+
+    expect(await screen.findByRole("status")).toHaveTextContent("Waiting for metrics…");
+  });
+
+  it("names the table's first column the same words as the chart's own axis label", async () => {
+    useStore.setState((s) => ({
+      gui: { ...s.gui, dataset: { ...s.gui.dataset, project_root: "/proj" } },
+    }));
+    vi.spyOn(trainingApi, "listRuns").mockResolvedValue({
+      runs: [run({ run_id: "train-axis-label", status: "running" })],
+    });
+    vi.spyOn(trainingApi, "getRun").mockReturnValue(new Promise(() => {}));
+    vi.mocked(openTrainingStream).mockImplementation((_root, runId, onMessage) => {
+      onMessage({ type: "metric", run_id: runId, row: { epoch: 1, loss: 0.5 } });
+      return () => {};
+    });
+
+    render(<TrainingTab />);
+    fireEvent.click(await screen.findByText("train-axis-label"));
+    fireEvent.click(await screen.findByRole("button", { name: "as table" }));
+
+    const table = await screen.findByRole("table");
+    expect(within(table).getByRole("columnheader", { name: "epoch/step" })).toBeInTheDocument();
+  });
+
+  it("prefers a row's own epoch over its step for the derived ordinal, even when both are present", async () => {
+    useStore.setState((s) => ({
+      gui: { ...s.gui, dataset: { ...s.gui.dataset, project_root: "/proj" } },
+    }));
+    vi.spyOn(trainingApi, "listRuns").mockResolvedValue({
+      runs: [run({ run_id: "train-both-ordinals", status: "running" })],
+    });
+    vi.spyOn(trainingApi, "getRun").mockReturnValue(new Promise(() => {}));
+    vi.mocked(openTrainingStream).mockImplementation((_root, runId, onMessage) => {
+      onMessage({ type: "metric", run_id: runId, row: { epoch: 1, step: 99, loss: 0.5 } });
+      return () => {};
+    });
+
+    render(<TrainingTab />);
+    fireEvent.click(await screen.findByText("train-both-ordinals"));
+    fireEvent.click(await screen.findByRole("button", { name: "as table" }));
+
+    const table = await screen.findByRole("table");
+    expect(within(table).getByText("1")).toBeInTheDocument();
+    expect(within(table).queryByText("99")).not.toBeInTheDocument();
+  });
+
+  it("renders the unset glyph, not the array index, for a row with no epoch or step ordinal", async () => {
+    useStore.setState((s) => ({
+      gui: { ...s.gui, dataset: { ...s.gui.dataset, project_root: "/proj" } },
+    }));
+    vi.spyOn(trainingApi, "listRuns").mockResolvedValue({
+      runs: [run({ run_id: "train-no-ordinal", status: "running" })],
+    });
+    vi.spyOn(trainingApi, "getRun").mockReturnValue(new Promise(() => {}));
+    vi.mocked(openTrainingStream).mockImplementation((_root, runId, onMessage) => {
+      onMessage({ type: "metric", run_id: runId, row: { loss: 0.5 } });
+      return () => {};
+    });
+
+    render(<TrainingTab />);
+    fireEvent.click(await screen.findByText("train-no-ordinal"));
+    fireEvent.click(await screen.findByRole("button", { name: "as table" }));
+
+    const table = await screen.findByRole("table");
+    const dataRow = within(table).getAllByRole("row")[1];
+    expect(within(dataRow).getByText(UNSET_GLYPH)).toBeInTheDocument();
+    expect(within(dataRow).getByText("0.5")).toBeInTheDocument();
+  });
+
+  it("renders the unset glyph for a non-finite metric value, not an empty cell", async () => {
+    useStore.setState((s) => ({
+      gui: { ...s.gui, dataset: { ...s.gui.dataset, project_root: "/proj" } },
+    }));
+    vi.spyOn(trainingApi, "listRuns").mockResolvedValue({
+      runs: [run({ run_id: "train-nonfinite", status: "running" })],
+    });
+    vi.spyOn(trainingApi, "getRun").mockReturnValue(new Promise(() => {}));
+    vi.mocked(openTrainingStream).mockImplementation((_root, runId, onMessage) => {
+      onMessage({ type: "metric", run_id: runId, row: { epoch: 1, loss: 0.5 } });
+      onMessage({ type: "metric", run_id: runId, row: { epoch: 2, loss: null } });
+      return () => {};
+    });
+
+    render(<TrainingTab />);
+    fireEvent.click(await screen.findByText("train-nonfinite"));
+    fireEvent.click(await screen.findByRole("button", { name: "as table" }));
+
+    const table = await screen.findByRole("table");
+    const rows = within(table).getAllByRole("row");
+    expect(within(rows[1]).queryByText(UNSET_GLYPH)).not.toBeInTheDocument();
+    expect(within(rows[2]).getByText(UNSET_GLYPH)).toBeInTheDocument();
+  });
+
+  it("excludes bookkeeping fields the shared metric-key filter defines, not only epoch and step", async () => {
+    useStore.setState((s) => ({
+      gui: { ...s.gui, dataset: { ...s.gui.dataset, project_root: "/proj" } },
+    }));
+    vi.spyOn(trainingApi, "listRuns").mockResolvedValue({
+      runs: [run({ run_id: "train-bookkeeping", status: "running" })],
+    });
+    vi.spyOn(trainingApi, "getRun").mockReturnValue(new Promise(() => {}));
+    vi.mocked(openTrainingStream).mockImplementation((_root, runId, onMessage) => {
+      onMessage({
+        type: "metric",
+        run_id: runId,
+        row: { epoch: 1, loss: 0.5, loss_state: "nan", timestamp: 1735689600 },
+      });
+      return () => {};
+    });
+
+    render(<TrainingTab />);
+    fireEvent.click(await screen.findByText("train-bookkeeping"));
+
+    expect(
+      await screen.findByRole("img", { name: "Live metrics for train-bookkeeping: loss" }),
+    ).toBeInTheDocument();
+  });
+});
+
+describe("TrainingTab status toast", () => {
+  it("does not toast on selecting a run already known to be terminal, only rediscovering its status", async () => {
+    useStore.setState((s) => ({
+      gui: { ...s.gui, dataset: { ...s.gui.dataset, project_root: "/proj" } },
+    }));
+    vi.spyOn(trainingApi, "listRuns").mockResolvedValue({
+      runs: [run({ run_id: "train-old-done", status: "completed" })],
+    });
+    vi.spyOn(trainingApi, "getRun").mockReturnValue(new Promise(() => {}));
+    vi.mocked(openTrainingStream).mockImplementation((_root, runId, onMessage) => {
+      onMessage({ type: "status", run_id: runId, status: { status: "completed" }, error: null });
+      return () => {};
+    });
+    const pushToast = vi.spyOn(useStore.getState(), "pushToast");
+
+    render(<TrainingTab />);
+    fireEvent.click(await screen.findByText("train-old-done"));
+
+    await waitFor(() => expect(trainingApi.listRuns).toHaveBeenCalled());
+    expect(pushToast).not.toHaveBeenCalledWith("Training train-old-done: completed", "info");
+  });
+
+  it("toasts a transition to terminal observed while watching a live run", async () => {
+    useStore.setState((s) => ({
+      gui: { ...s.gui, dataset: { ...s.gui.dataset, project_root: "/proj" } },
+    }));
+    vi.spyOn(trainingApi, "listRuns").mockResolvedValue({
+      runs: [run({ run_id: "train-live-done", status: "running" })],
+    });
+    vi.spyOn(trainingApi, "getRun").mockReturnValue(new Promise(() => {}));
+    vi.mocked(openTrainingStream).mockImplementation((_root, runId, onMessage) => {
+      onMessage({ type: "status", run_id: runId, status: { status: "completed" }, error: null });
+      return () => {};
+    });
+    const pushToast = vi.spyOn(useStore.getState(), "pushToast");
+
+    render(<TrainingTab />);
+    fireEvent.click(await screen.findByText("train-live-done"));
+
+    await waitFor(() =>
+      expect(pushToast).toHaveBeenCalledWith("Training train-live-done: completed", "info"),
+    );
   });
 });
 
