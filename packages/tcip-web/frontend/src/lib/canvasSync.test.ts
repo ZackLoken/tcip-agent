@@ -176,6 +176,39 @@ describe("buildAnnotateShapes", () => {
     expect(shapes.at(-1)).toMatchObject({ kind: "polyline", color: "#FFE7B1" });
   });
 
+  it("a pending cut start rides as an in_progress polyline labelled cut, start and cursor", () => {
+    const shapes = buildAnnotateShapes({
+      ...base,
+      cutStart: { point: [3, 4], color: "#123456" },
+      cursor: [5, 6],
+    });
+    expect(shapes.at(-1)).toMatchObject({
+      kind: "polyline",
+      tag: "in_progress",
+      label: "cut",
+      dashed: true,
+      color: "#123456",
+      points: [
+        [3, 4],
+        [5, 6],
+      ],
+    });
+  });
+
+  it("a pending cut start with no cursor yet rides as the start point alone", () => {
+    const shapes = buildAnnotateShapes({
+      ...base,
+      cutStart: { point: [3, 4], color: "#123456" },
+      cursor: null,
+    });
+    expect(shapes.at(-1)).toMatchObject({ kind: "polyline", label: "cut", points: [[3, 4]] });
+  });
+
+  it("no cut polyline rides when no start is pending", () => {
+    const shapes = buildAnnotateShapes({ ...base, cutStart: null, cursor: [5, 6] });
+    expect(shapes.some((s) => s.label === "cut")).toBe(false);
+  });
+
   it("the labels toggle hides everything, exactly like the canvas", () => {
     expect(buildAnnotateShapes({ ...base, visible: false })).toEqual([]);
   });

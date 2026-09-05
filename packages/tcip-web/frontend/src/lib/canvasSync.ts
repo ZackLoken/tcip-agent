@@ -137,6 +137,10 @@ export function buildAnnotateShapes(args: {
   activeSubject: string;
   visible: boolean;
   colorFor: (subject: string) => string;
+  // The cut tool's pending first click, in the selected polygon's own colour, and the cursor for
+  // its dashed tail (or none, once the start is placed but the pointer hasn't moved yet).
+  cutStart?: { point: [number, number]; color: string } | null;
+  cursor?: [number, number] | null;
 }): CanvasShape[] {
   if (!args.visible) return []; // the GUI's labels toggle hides every committed shape
 
@@ -195,6 +199,19 @@ export function buildAnnotateShapes(args: {
         color: args.activeSubject ? args.colorFor(args.activeSubject) : "#FFE7B1",
         dashed: true,
         label: "drawing",
+        tag: "in_progress",
+      });
+    }
+    if (args.cutStart) {
+      const pts: [number, number][] = args.cursor
+        ? [args.cutStart.point, args.cursor]
+        : [args.cutStart.point];
+      shapes.push({
+        kind: "polyline",
+        points: rPts(pts),
+        color: args.cutStart.color,
+        dashed: true,
+        label: "cut",
         tag: "in_progress",
       });
     }
