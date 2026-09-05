@@ -367,6 +367,41 @@ describe("AnnotateTab subject rendering", () => {
     expect(useStore.getState().canvas.polygons).toHaveLength(1);
   });
 
+  it("a tool-authored polygon's derived box in box mode still names itself by authorship", async () => {
+    useStore.getState().setRegistry({ subject_a: {} });
+    const poly = {
+      rings: [
+        [
+          [0, 0],
+          [10, 0],
+          [10, 10],
+        ],
+      ] as [number, number][][],
+      subject: "subject_a",
+      attributes: {},
+      authorship: "tool",
+    };
+    loadSpy.mockImplementation((imagePath) =>
+      Promise.resolve({ ...labelsFor(imagePath), polygons: [poly] }),
+    );
+    render(<AnnotateTab />);
+    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
+    await flush();
+
+    // Still the derived dash, never the tool's own pattern (one channel can't carry both), but
+    // the hover label still names the polygon's own authorship, like every other shape's does.
+    const rects = screen.getAllByTestId("k-rect");
+    expect(rects).toHaveLength(1);
+    expect(rects[0]).toHaveAttribute("data-dash", "true");
+    fireEvent.mouseMove(screen.getByTestId("canvas-stage"), { clientX: 3, clientY: 3 });
+    await act(async () => void (await new Promise((r) => setTimeout(r, 25))));
+    expect(
+      screen
+        .getAllByTestId("k-text")
+        .some((t) => t.getAttribute("data-text") === "subject_a, tool"),
+    ).toBe(true);
+  });
+
   it("box mode still draws a real editable box solid, distinct from a derived one", async () => {
     useStore.getState().setRegistry({ subject_a: {} });
     render(<AnnotateTab />);
@@ -663,14 +698,41 @@ describe("AnnotateTab point tool", () => {
 });
 
 describe("AnnotateTab AttributePanel", () => {
-  it("collapses to a pill when nothing is selected and there are no image-level ratings", async () => {
+  it("collapses to a pill with no active subject, nothing selected, no image-level ratings", async () => {
     useStore.getState().setRegistry({ subject_a: {} });
+    act(() => useStore.getState().setActiveSubject(null)); // beforeEach's setupDataset sets one
     render(<AnnotateTab />);
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
     await flush();
 
     expect(screen.queryByText("Select a shape to set its attributes.")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Attributes" })).toBeInTheDocument();
+  });
+
+  it("an active subject opens the panel even with nothing selected, showing the subject block", async () => {
+    useStore.getState().setRegistry({ subject_a: {} }); // beforeEach's setupDataset already made it active
+    render(<AnnotateTab />);
+    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
+    await flush();
+
+    expect(screen.getByText("Select a shape to set its attributes.")).toBeInTheDocument();
+    expect(screen.getByText("Attributes for subject_a")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "+ Attribute" })).toBeInTheDocument();
+  });
+
+  it("a locked image mounts the panel with the subject block only", async () => {
+    useStore.getState().setRegistry({ subject_a: {} });
+    useStore.setState((s) => ({
+      imageStatus: { ...s.imageStatus, byImage: { "img1.jpg": "complete" } },
+    }));
+    render(<AnnotateTab />);
+    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
+    await flush();
+
+    expect(screen.getByText("Attributes for subject_a")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "+ Attribute" })).toBeInTheDocument();
+    expect(screen.queryByText("Select a shape to set its attributes.")).not.toBeInTheDocument();
+    expect(screen.queryByText("Ratings for this whole image")).not.toBeInTheDocument();
   });
 
   it("reopens on its own when a shape gets selected, and can be closed manually", async () => {
@@ -724,7 +786,7 @@ describe("AnnotateTab AttributePanel authoring", () => {
       n_subjects: 1,
       classes_path: "C:/data/classes.json",
       version: "v2",
-      schema_change_sweep: { newly_stamped: {}, warning: null },
+      schema_change_sweep: { newly_stamped: {}, predating_vocabulary: {}, warning: null },
     });
 
     await declareAttribute();
@@ -763,7 +825,11 @@ describe("AnnotateTab AttributePanel authoring", () => {
       n_subjects: 1,
       classes_path: "C:/data/classes.json",
       version: "v2",
-      schema_change_sweep: { newly_stamped: { subject_a: 4 }, warning: null },
+      schema_change_sweep: {
+        newly_stamped: { subject_a: 4 },
+        predating_vocabulary: {},
+        warning: null,
+      },
     });
 
     await declareAttribute();
@@ -778,13 +844,108 @@ describe("AnnotateTab AttributePanel authoring", () => {
       n_subjects: 1,
       classes_path: "C:/data/classes.json",
       version: "v2",
-      schema_change_sweep: { newly_stamped: {}, warning: null },
+      schema_change_sweep: { newly_stamped: {}, predating_vocabulary: {}, warning: null },
     });
 
     await declareAttribute();
 
     // The one drawn box carries no value for the attribute just declared.
-    expect(screen.getByText("1 of 1 subject_a shapes carry no size value.")).toBeInTheDocument();
+    expect(
+      screen.getByText("1 of 1 subject_a shapes on this image carry no size value."),
+    ).toBeInTheDocument();
+  });
+
+  it("refuses a name the subject already declares, inline, and posts nothing", async () => {
+    await openPanelOnASelectedBox();
+    const saveSpy = vi.spyOn(classesApi, "save");
+    act(() => {
+      useStore
+        .getState()
+        .setRegistry(
+          { subject_a: { attributes: { size: { type: "categorical", values: ["small"] } } } },
+          "v1",
+        );
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "+ Attribute" }));
+    fireEvent.change(screen.getByPlaceholderText("attribute name"), {
+      target: { value: "size" },
+    });
+    fireEvent.change(screen.getByPlaceholderText(/one value per line/), {
+      target: { value: "large" },
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Add" }));
+    });
+
+    expect(
+      screen.getByText("size is already declared; add values to it with + value."),
+    ).toBeInTheDocument();
+    expect(saveSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe("AnnotateTab AttributePanel accessible names", () => {
+  it("names the value select by the attribute alone, the + value button named and outside it", async () => {
+    useStore.getState().setRegistry({
+      subject_a: { attributes: { ripeness: { type: "ordinal", values: ["green", "ripe"] } } },
+    });
+    render(<AnnotateTab />);
+    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
+    await flush();
+    act(addBox);
+    fireEvent.mouseDown(screen.getByTestId("canvas-stage"), { clientX: 30, clientY: 30 });
+
+    expect(screen.getByRole("combobox", { name: "ripeness" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Add a ripeness value" })).toBeInTheDocument();
+  });
+
+  it("names the new-attribute type select", async () => {
+    useStore.getState().setRegistry({ subject_a: {} });
+    render(<AnnotateTab />);
+    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
+    await flush();
+
+    fireEvent.click(screen.getByRole("button", { name: "+ Attribute" }));
+    expect(screen.getByRole("combobox", { name: "attribute type" })).toBeInTheDocument();
+  });
+});
+
+describe("AnnotateTab legend keyboard access", () => {
+  it("opens the legend by keyboard and reaches a subject row on the following Tab", async () => {
+    useStore.getState().setRegistry({ subject_a: {} });
+    render(<AnnotateTab />);
+    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
+    await flush();
+
+    const legendButton = screen.getByRole("button", { name: "Legend" });
+    expect(legendButton).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(legendButton);
+    expect(legendButton).toHaveAttribute("aria-expanded", "true");
+
+    const subjectRow = screen.getByTitle("Change subject_a's colour (this browser only)");
+    expect(subjectRow).toBeInTheDocument();
+    // DOM order: the panel follows the button, so a forward Tab from it reaches the row.
+    expect(
+      legendButton.compareDocumentPosition(subjectRow) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it("opens the colour picker as a labelled dialog with a named hex input", async () => {
+    useStore.getState().setRegistry({ subject_a: {} });
+    render(<AnnotateTab />);
+    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
+    await flush();
+
+    fireEvent.click(screen.getByRole("button", { name: "Legend" }));
+    fireEvent.click(screen.getByTitle("Change subject_a's colour (this browser only)"));
+
+    const dialog = screen.getByRole("dialog");
+    expect(dialog).toHaveAttribute("aria-modal", "true");
+    expect(dialog).toHaveAccessibleName(
+      "subject_a's colour (this browser only; derives from the name elsewhere)",
+    );
+    expect(screen.getByRole("textbox", { name: "hex colour" })).toBeInTheDocument();
   });
 });
 
