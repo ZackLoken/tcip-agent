@@ -30,7 +30,7 @@ Every count in this section is read from that regenerated inventory, not from an
 snapshot; `scripts/check_architecture_doc.py --inventory-json <path>` re-runs the same generator
 and cross-checks its counts against this document's tables.
 
-HEAD 11e29635 has 400 modules across the six scanned roots (108730 total lines):
+HEAD 11e29635 has 401 modules across the six scanned roots (108953 total lines):
 
 | Package (root) | Modules | Lines |
 |---|---|---|
@@ -202,7 +202,7 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | packages/tcip-store/src/tcip_store/binding.py | Which backend a process binds at its entry point: the database unless `TCIP_STORE_BACKEND` names the file backend, and a refusal for any other name. | 3 | 43 |
 | packages/tcip-store/src/tcip_store/errors.py | Every typed refusal the seam raises, absence and corruption included. | 1 | 19 |
 | packages/tcip-store/src/tcip_store/export.py | Writing a root's database-held records and logs back out as the file layout, and the per-store counters that say when those files are behind. | 4 | 3 |
-| packages/tcip-store/src/tcip_store/file_backend.py | The filesystem backend: identity to path, atomic replace, file locks, append-only logs, blobs, and the conform rail's refusal of record writes, and of a colliding blob write, to a root a database holds. | 5 | 44 |
+| packages/tcip-store/src/tcip_store/file_backend.py | The filesystem backend: identity to path, atomic replace, file locks, append-only logs, blobs, and the conform rail's refusal of record writes, and of a colliding blob write, to a root a database holds. | 5 | 43 |
 | packages/tcip-store/src/tcip_store/layout_claims.py | Which store could own which path under a root, as data: the layout vocabulary, one claim per record and log store, the template-directed walk the conform rail and the adoption planner share, and the anchored match a blob write is checked against. | 3 | 12 |
 | packages/tcip-store/src/tcip_store/model.py | Identity and value types the seam speaks on every backend: Key, Version, Versioned, LogPage, Capabilities. | 0 | 7 |
 | packages/tcip-store/src/tcip_store/registry.py | The store catalogue: kind, key shape, the canonical JSON codec each kind encodes through and the exemption a store must state to carry another, concurrency policy, durability, enumeration, and the layout claim a store outside the platform table must declare, plus whether the store is frozen and its schema_version ceiling. | 4 | 8 |
@@ -480,7 +480,7 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | scripts/check_architecture_citations.py | Verify ARCHITECTURE.md's file:line citations against the code they quote, for CI. | 0 | 0 |
 | scripts/check_architecture_doc.py | Verify ARCHITECTURE.md's module-ownership tables against the tree, for CI. | 0 | 0 |
 | scripts/check_dataset_identity.py | Check a dataset's on-disk content against its recorded identity: detect changed / moved data. | 5 | 0 |
-| scripts/clear_dev_history.py | Remove a root's development-era `friction_reports`/`retrospectives` records and `audit_log`/`learning_capture` log entries before it reaches an alpha tester, reconciling any stale exported loose copy, and record one closing audit line naming the operator and the reason. | 7 | 0 |
+| scripts/clear_dev_history.py | Remove a root's development-era `friction_reports`/`retrospectives` records and `audit_log`/`learning_capture` log entries before it reaches an alpha tester, reconciling any stale exported loose copy, and record one closing audit line naming the operator and the reason. | 6 | 0 |
 | scripts/compute_disagreements.py | Summarize GT-vs-prediction disagreements per image at several conf thresholds. | 1 | 0 |
 | scripts/conform_cal_holdout_locks.py | Conform every pre-existing `cal_holdout_split_lock` record under a root to carry `split_manifest_dir`. | 3 | 0 |
 | scripts/conform_classified_predictions.py | Conform a project's classified prediction buckets to the writer rail's `(subject, attribute)` stamp and to the shape a classified prediction now writes, sourcing an unstated bucket's scope from its own training run, `--like` another bucket, or the operator. | 11 | 0 |
