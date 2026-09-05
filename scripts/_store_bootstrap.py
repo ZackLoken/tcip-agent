@@ -158,10 +158,10 @@ def project_roots(project_root: str | Path) -> tuple[tuple[str, str], ...]:
         if predictions:
             _add_if_dir(roots, seen, Path(predictions).absolute(), PREDICTION_BUCKET)
 
-    for entry in project_tools.read_datasets_raw(root):
-        if not entry.get("path"):
+    for dataset_entry in project_tools.read_datasets_raw(root):
+        if not dataset_entry.get("path"):
             continue
-        dataset_root = project_tools.dataset_entry_path(root, entry).absolute()
+        dataset_root = project_tools.dataset_entry_path(root, dataset_entry).absolute()
         _add(roots, seen, dataset_root, ROOT)
         _add(roots, seen, dataset_root / ".tcip" / "state", STATE)
         for bucket in prediction_bucket_dirs(dataset_root):
