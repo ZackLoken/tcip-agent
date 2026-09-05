@@ -221,6 +221,9 @@ def test_a_same_path_image_regime_export_against_a_completed_experiment_admits_v
     path is unchanged)."""
     from pathlib import Path
 
+    from tcip_mcp.pipelines.resolution import read_operating_point_sidecar
+    from tcip_mcp.prediction_buckets import bucket_stems
+
     ckpt = tmp_path / "m.pt"
     ckpt.write_bytes(b"stub")
     empty_images_dir = tmp_path / "empty_images"
@@ -230,7 +233,7 @@ def test_a_same_path_image_regime_export_against_a_completed_experiment_admits_v
     Image.new("RGB", (100, 100), (120, 120, 120)).save(real_images_dir / "img.png")
     _fake_predictor(monkeypatch)
 
-    from tcip_mcp.experiments import create_experiment, update_status
+    from tcip_mcp.experiments import create_experiment, get_experiment_lineage, update_status
     create_experiment("expImgEmptyFirst", {"model_source": {"builder": "x:y"}})
     update_status("expImgEmptyFirst", "running")
 
@@ -242,6 +245,10 @@ def test_a_same_path_image_regime_export_against_a_completed_experiment_admits_v
     assert "error" not in r1, r1
     assert r1["image_count"] == 0
     assert not (out / "img.json").exists()
+    # The stamp-only boundary the document predicate rests on: a stamp with no document.
+    assert read_operating_point_sidecar(out) is not None
+    assert bucket_stems(out) == set()
+    assert get_experiment_lineage("expImgEmptyFirst")["lineage"]["predictions"] == str(out)
     update_status("expImgEmptyFirst", "completed")
 
     r2 = run_inference(str(ckpt), str(real_images_dir), output_dir=str(out), tile=False,
@@ -256,6 +263,9 @@ def test_a_run_over_an_empty_images_directory_admits_a_second_run_in_place(tmp_p
     second, real run into the same output_dir is admitted: the document predicate's boundary is
     holds documents, not was published before."""
     from pathlib import Path
+
+    from tcip_mcp.pipelines.resolution import read_operating_point_sidecar
+    from tcip_mcp.prediction_buckets import bucket_stems
 
     ckpt = tmp_path / "m.pt"
     ckpt.write_bytes(b"stub")
@@ -273,6 +283,9 @@ def test_a_run_over_an_empty_images_directory_admits_a_second_run_in_place(tmp_p
     assert "error" not in r1, r1
     assert r1["image_count"] == 0
     assert not (out / "img.json").exists()
+    # The stamp-only boundary the document predicate rests on: a stamp with no document.
+    assert read_operating_point_sidecar(out) is not None
+    assert bucket_stems(out) == set()
 
     r2 = run_inference(str(ckpt), str(real_images_dir), output_dir=str(out), tile=False)
     assert "error" not in r2, r2
@@ -545,8 +558,9 @@ def test_run_inference_refuses_a_second_publish_into_a_document_holding_bucket(
 ):
     """Two runs into one output_dir under a dataset root, with no experiment: the second refuses
     naming the document count and the suggested @r2 path, before the checkpoint is read and
-    before any pass runs, leaving the first bucket's own documents and stamp unchanged. The
-    suggested bucket, once written into, admits a real re-run."""
+    before any pass runs, leaving the first bucket's own documents and stamp unchanged (digest
+    and stamp equality prove those two artifacts alone). The suggested bucket, once written
+    into, admits a real re-run."""
     from pathlib import Path
 
     import tcip_mcp.model_registry as model_registry_mod
