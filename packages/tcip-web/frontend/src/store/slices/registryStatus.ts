@@ -1,5 +1,6 @@
 import type { StateCreator } from "zustand";
 
+import { setSubjectColorRegistry } from "@/api/classes";
 import type { AttributeDef, ImageStatus, Registry } from "@/api/classes";
 import type { AppState } from "@/store/appState";
 import type { ReviewImageStatus, ReviewStatusFilter } from "@/store/types";
@@ -153,8 +154,10 @@ export const createRegistryStatusSlice: StateCreator<AppState, [], [], RegistryS
   },
   sessionTracking: EMPTY_SESSION_TRACKING,
 
-  setRegistry: (subjects, version = null) =>
-    set(() => ({ registry: { subjects, loaded: true, version } })),
+  setRegistry: (subjects, version = null) => {
+    setSubjectColorRegistry(Object.keys(subjects));
+    set(() => ({ registry: { subjects, loaded: true, version } }));
+  },
 
   subjectNames: () => Object.keys(get().registry.subjects),
 
