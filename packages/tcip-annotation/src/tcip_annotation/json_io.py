@@ -869,6 +869,62 @@ def target_class_id(a: Annotation, subject: str, attribute: str | None,
     return id_map[key]
 
 
+class ClassifiedRecordRefused(ValueError):
+    """A record under a classified scope carries no usable value: not the object class, no value
+    under the attribute, or a value outside the bucket's own vocabulary.
+
+    Named for one prediction document and record index (``source``); the remedy is
+    ``scripts/conform_classified_predictions.py`` (a ``tcip-mcp`` script) run over the bucket.
+    """
+
+
+def classified_value_of(a: Annotation, *, subject: str, attribute: str) -> str | None:
+    """The value a record carries under ``(subject, attribute)``, or ``None`` when it carries
+    none (a record of a different subject, or one with nothing recorded under ``attribute``).
+
+    The one read every classified-scope reader projects a record through: a prediction's decoded
+    value sits under ``attributes[attribute]`` with ``subject`` the object class (the shape
+    :func:`~tcip_mcp.pipelines.postprocessing.export.write_predictions_json` writes under an
+    attribute), the same shape ground truth carries.
+    """
+    if a.subject != subject:
+        return None
+    return a.attributes.get(attribute)
+
+
+def require_classified_record(
+    a: Annotation, *, subject: str, attribute: str, vocabulary, source: str,
+) -> str:
+    """The value ``a`` carries under ``(subject, attribute)``, held to ``vocabulary`` (the keys of
+    the bucket's own recorded ``id_map``, the vocabulary its producer decoded through).
+
+    Raises :class:`ClassifiedRecordRefused`, naming ``source`` (the document and record index),
+    when ``a.subject`` is not ``subject``, the record carries no value under ``attribute``, or the
+    value is not a member of ``vocabulary``: a classified bucket holds one subject and every
+    record its writer produced carries a value the map declares, so a record that does not is a
+    pre-conform record or a foreign document, never a legitimate gap.
+    """
+    if a.subject != subject:
+        raise ClassifiedRecordRefused(
+            f"{source}: record's subject is {a.subject!r}, not {subject!r}, the object class "
+            "this classified bucket's every record is of. Run "
+            "scripts/conform_classified_predictions.py over this bucket."
+        )
+    value = a.attributes.get(attribute)
+    if value is None:
+        raise ClassifiedRecordRefused(
+            f"{source}: record of {subject!r} carries no value under attribute {attribute!r}. "
+            "Run scripts/conform_classified_predictions.py over this bucket."
+        )
+    if value not in vocabulary:
+        raise ClassifiedRecordRefused(
+            f"{source}: record's value {value!r} is not a member of this bucket's own vocabulary "
+            f"({sorted(vocabulary)}). Run scripts/conform_classified_predictions.py over this "
+            "bucket."
+        )
+    return value
+
+
 # ── dataset-COCO assembly (for training / export) ────────────────────────────
 
 
