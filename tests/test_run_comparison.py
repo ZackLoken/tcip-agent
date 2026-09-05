@@ -494,6 +494,48 @@ def test_compare_best_route_409s_when_the_index_will_not_decode(
     assert "registry unreadable" in resp.json()["detail"]
 
 
+def test_compare_best_route_409s_when_the_index_carries_a_stale_schema_version_two(
+    client: TestClient, tmp_path, monkeypatch,
+):
+    """A dev-era index stamped schema_version 2, predating the version-1 reset, refuses through
+    the seam's own ceiling check (SchemaVersionRefused), a sibling of RegistryVersionRefused
+    under StoreError rather than a subclass of it: before this fix the route's except tuple
+    named only RegistryVersionRefused/DecodeError, so this refusal escaped uncaught."""
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
+    import os
+    import sqlite3
+
+    import tcip_store as ts
+    from tcip_mcp.model_registry import registry_index_key
+    from tcip_store.binding import BACKEND_ENV, DEFAULT_BACKEND, FILE_BACKEND
+    from tcip_store.store import _backend
+
+    _register(tmp_path, "exp-a", 0.7)
+    key = registry_index_key(str(tmp_path))
+    body = ts.read(key)
+    encoded = ts.get_descriptor(key.store).codec.encode({**body, "schema_version": 2})
+    name = os.environ.get(BACKEND_ENV) or DEFAULT_BACKEND
+    if name == FILE_BACKEND:
+        _backend().path_for(key).write_bytes(encoded)
+    else:
+        from tcip_store.sqlite_backend import database_path, encode_parts
+
+        conn = sqlite3.connect(str(database_path(str(key.root))), isolation_level=None)
+        try:
+            conn.execute(
+                "update records set value = ? where store = ? and parts = ?",
+                (encoded, key.store, encode_parts(key.parts)),
+            )
+        finally:
+            conn.close()
+
+    resp = client.post("/api/training/compare/best", json={
+        "experiment_ids": ["exp-a"], "metric": "val_map50",
+    })
+    assert resp.status_code == 409
+    assert "conform_schema_version_reset.py" in resp.json()["detail"]
+
+
 def test_compare_best_route_422s_on_the_tools_own_error(client: TestClient, tmp_path, monkeypatch):
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
     _register(tmp_path, "exp-a", 0.7)

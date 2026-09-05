@@ -997,6 +997,51 @@ def test_import_project_conforms_a_genuinely_unconformed_registry_the_archive_ca
     assert Path(resolved).is_file()
 
 
+def test_import_project_conforms_a_stray_schema_version_two_registry_the_archive_carries(
+    tmp_path: Path,
+):
+    """An archive whose registry.json is ``{"schema_version": 2, "entries": [...]}``, the
+    version-1 reset's own dev-era shape (planted by rewriting the bundled index's bytes, the
+    reset's own raw-bytes technique), must still conform through the import door's own on-disk
+    conform, and land with the field dropped rather than refusing the whole import."""
+    import zipfile
+
+    from tcip_mcp.model_registry import ModelRegistry, read_registry_index, registry_index_key
+
+    src = tmp_path / "src_project"
+    initialize_project(str(src), site="north orchard")
+    ckpt_dir = src / ".tcip" / "models"
+    ckpt_dir.mkdir(parents=True, exist_ok=True)
+    content = b"weights a dev-era writer stamped schema_version 2 onto"
+    ckpt = ckpt_dir / "m.pt"
+    ckpt.write_bytes(content)
+    ModelRegistry(str(src)).register_model("m", str(ckpt), {}, metrics_source=None)
+
+    zip_path = tmp_path / "export.zip"
+    exported = archive_project(str(src), str(zip_path), include_models=True)
+    assert "error" not in exported, exported
+
+    entries = tcip_store.read(registry_index_key(src))["entries"]
+    poisoned = tmp_path / "poisoned.zip"
+    with zipfile.ZipFile(zip_path) as src_zip, zipfile.ZipFile(poisoned, "w") as dst_zip:
+        for item in src_zip.infolist():
+            data = src_zip.read(item.filename)
+            if item.filename.endswith(".tcip/models/registry.json"):
+                data = tcip_store.RECORD_JSON.encode({"schema_version": 2, "entries": entries})
+            dst_zip.writestr(item, data)
+
+    dest = tmp_path / "restored"
+    imported = import_project(str(poisoned), str(dest))
+
+    assert "error" not in imported, imported
+    stored = tcip_store.read(registry_index_key(dest))
+    assert "schema_version" not in stored
+    conformed = read_registry_index(dest)
+    assert conformed[0]["checkpoint_path"] == ".tcip/models/m.pt"
+    resolved = ModelRegistry(str(dest)).get_model("m")["checkpoint_path"]
+    assert Path(resolved).is_file()
+
+
 def test_import_project_discloses_a_designed_external_checkpoint_separately_from_unresolved(
     tmp_path: Path,
 ):
