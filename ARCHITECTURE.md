@@ -1438,8 +1438,9 @@ Path: `<dataset_root>/.tcip/state/view_coverage.json`.
 
 Path/shape definition: `tcip_mcp.dataset_layout.view_coverage_path`, `dataset_layout.py:532`,
 naming the stored record's own shape as `tcip_web.routes._coverage_models.CoverageRecord`.
-Writer and reader: `routes/coverage.py`'s `post_coverage` (`:187`) and `get_coverage` (`:143`),
-each validating the stored record against `CoverageRecord` before merging into or serving it.
+Writer and reader: `routes/coverage.py`'s `post_coverage` (`routes/coverage.py:533`) and
+`get_coverage` (`routes/coverage.py:483`), each validating the stored record against
+`CoverageRecord` before merging into or serving it.
 
 Seam S24 ("view_coverage.json advisory coverage record"), verdict: single. `_coverage_models.py`
 declares `GridGeometry`, `StatsSource`, `WorkingScale`, `CoverageViewing` and `CoverageRecord`
@@ -1490,22 +1491,23 @@ log are one file at one key. That path is what the file backend places the log a
 `scripts/export_store.py` writes back out; on the default database backend the rows live in that
 root's `.tcip/store.db` until they are exported.
 
-Writers: three write paths, `packages/tcip-mcp/src/tcip_mcp/audit.py:282` (`audited`), line 210
-(`record_event`) and line 229 (`record_event_or_raise`), all resolving a caller's scope through
-one shared helper, line 136 (`_stamp_scope`), so the root a line's `scope` field names and the
-root its Key addresses are always the one resolution, never two independently taken. It stamps
+Writers: three write paths, `packages/tcip-mcp/src/tcip_mcp/audit.py:282` (`audited`),
+`audit.py:212` (`record_event`) and `audit.py:231` (`record_event_or_raise`), all resolving a
+caller's scope through one shared helper, `audit.py:140` (`_stamp_scope`), so the root a line's
+`scope` field names and the root its Key addresses are always the one resolution, never two
+independently taken. It stamps
 `entry["schema_version"] = 2` on every line, and `entry["scope"]` with the resolved root only
 when the caller passed one; a call that took the platform default leaves `scope` unset.
 
 `audited` covers the platform's doors (every MCP tool in `tools/`, plus the script-invoked doors
 demoted from them): bare, a platform event; `@audited(scope_arg=...)` names the argument carrying
-a dataset or project location, resolved via `dataset_scope_of`, line 253 (through the tool's own
+a dataset or project location, resolved via `dataset_scope_of` (`audit.py:255`) (through the tool's own
 canonicalizer when the declaration passes one as `scope_via`). Ten doors declare one: eight
-dataset-scoped (`save_annotations`, `tools/annotation_tools.py:133`; `write_class_map`, same
-file, line 470; `redraw_calibration_holdout`, `tools/calibration_tools.py:25`;
+dataset-scoped (`save_annotations`, `tools/annotation_tools.py:133`; `write_class_map`,
+`tools/annotation_tools.py:488`; `redraw_calibration_holdout`, `tools/calibration_tools.py:25`;
 `materialize_review_dataset`, `tools/feedback_tools.py:166`; `run_inference`,
 `tools/inference_tools.py:280`; `register_dataset`, `tools/project_tools.py:190`;
-`propose_annotations`, `tools/proposal_tools.py:182`; `stage_proposals`, same file, line 756)
+`propose_annotations`, `tools/proposal_tools.py:182`; `stage_proposals`, `tools/proposal_tools.py:750`)
 and two project-scoped
 (`state_trait_operationalization`, `tools/operationalization_tools.py:19`; `author_trait_spec`,
 `tools/trait_spec_authoring_tools.py:23`; `dataset_scope_of` admits a `project_root` argument the
@@ -1516,29 +1518,30 @@ refuses the call rather than filing it there.
 `record_event`/`record_event_or_raise` cover code that is neither an MCP tool nor a demoted door.
 Platform-scoped, no `scope` of their own: the training envelope's open/close events
 (`pipelines/training/envelope.py`), the model registry's replace and write-refusal events
-(`model_registry.py:408,424`), `evaluation.py`'s derived-localization-kind record (`:478`),
-`experiments.py`'s post-terminal refusal (`_audit_refused`, `:369`) when its caller names no
+(`model_registry.py:408,424`), `evaluation.py`'s derived-localization-kind record
+(`pipelines/training/evaluation.py:539` (`record_event_or_raise`)),
+`experiments.py`'s post-terminal refusal (`_audit_refused`, `experiments.py:370`) when its caller names no
 project root (the training watchdog passes the launch's own pinned platform root, so its lines
 carry a `scope` equal to the platform root, the presence-never-means-non-platform case), and
-`routes/terminal.py`'s one line per agent-terminal launch (`:83`). The `@audited(scope_arg=...)`
+`routes/terminal.py`'s one line per agent-terminal launch (`agent_terminal_started`, `routes/terminal.py:83`). The `@audited(scope_arg=...)`
 doors span every category by whatever root their declared argument resolves; this paragraph
 names the explicit-emitter files, not a closed census of the decorator's doors.
 Dataset-scoped: three GUI route writers passing the dataset root their own guard resolved
-(`routes/annotate.py`'s `_audit_gui_write`, `:150`; `routes/classes.py`'s `_audit_dataset_write`,
-`:63`, which `routes/inference.py`'s own prediction writer calls too, at `:368`;
-`routes/review.py`'s `_audit`, `:93`), `resolution.py`'s `record_delivery_binding_event`
-(`:1941`, dataset-scoped when a
+(`routes/annotate.py`'s `_audit_gui_write`, `routes/annotate.py:159`; `routes/classes.py`'s `_audit_dataset_write`,
+`routes/classes.py:63`, which `routes/inference.py`'s own prediction writer calls too (`_audit_dataset_write`, `routes/inference.py:385`);
+`routes/review.py`'s `_audit`, `routes/review.py:95`), `resolution.py`'s `record_delivery_binding_event`
+(`resolution.py:2280`, dataset-scoped when a
 delivery's buckets share one dataset root, platform-scoped otherwise), and
-`calibration_tools.py`'s redraw event (`redraw_calibration_holdout_result`, `:214`).
-Project-scoped: `routes/results.py`'s `_audit` (`:151`, its delivery and confirmation routes) and
-`pipelines/postprocessing/plant_mapping.py`'s `persist_mapping` (`:795`), whose two callers file
+`calibration_tools.py`'s redraw event (`redraw_calibration_holdout_result`, `tools/calibration_tools.py:216`).
+Project-scoped: `routes/results.py`'s `_audit` (`routes/results.py:164`, its delivery and confirmation routes) and
+`pipelines/postprocessing/plant_mapping.py`'s `persist_mapping` (`pipelines/postprocessing/plant_mapping.py:1212`), whose two callers file
 its receipt under two different categories: the MCP tool `build_plant_mapping` passes the
 process's own pinned platform root (so the receipt lands in the platform log's own file, a
 project's once that root is an adopted project), while the web build route passes its own guarded
 project root, which can differ.
 
 What a failed append means is where the three write paths part: `record_event` warns and
-returns, through `_write_entry`, line 192, because its callers bracket work rather than follow a
+returns, through `_write_entry`, `audit.py:194`, because its callers bracket work rather than follow a
 mutation; `record_event_or_raise` raises `AuditEntryNotWritten`; the decorator raises
 `MutationCommittedWithoutAuditLine`, because its append runs after the tool body and a warning
 there invites a blind retry of a mutation already on disk.
@@ -1560,7 +1563,7 @@ decoding lines by hand, and both refusing (never scanning past) a page reporting
 unknown `schema_version`. `experiments._index_refused_mutations`,
 `packages/tcip-mcp/src/tcip_mcp/experiments.py:1551`, one scan of the platform audit log
 (`audit_log_key()`, no scope) indexing every `experiment_mutation_refused` entry by
-`arguments.experiment_id`, shared by `compare_experiments`, line 1534, across every experiment it
+`arguments.experiment_id`, shared by `compare_experiments` (`experiments.py:1656`), across every experiment it
 compares in one call; `page.corrupt`/`page.version_refused` both fail the whole call (`None`, not
 a partial index), so a caller who cannot see behind an unreadable entry never reports "no
 refusals" in its place. `plant_mapping._scan_receipts`
@@ -1591,35 +1594,39 @@ are listed here with the rest rather than taking numbers of their own.
   `experiments.py:474` (rewrites only while the record is still pristine, no metrics logged), and
   three best-effort merges the subprocess worker patches into the durable record after a run's
   own resolution is known, each a thin mutator over the one shared terminal-refusing procedure
-  `_patch_experiment_config`, same file line 31: `_patch_experiment_config_tiling`,
+  `_patch_experiment_config`, `packages/tcip-mcp/src/tcip_mcp/pipelines/training/subprocess_worker.py:31`:
+  `_patch_experiment_config_tiling`,
   `packages/tcip-mcp/src/tcip_mcp/pipelines/training/subprocess_worker.py:72`
-  (`def _patch_experiment_config_tiling(`), `_patch_experiment_config_id_map`, same file line 90
-  (`def _patch_experiment_config_id_map(`), and `_patch_experiment_config_split`, same file line
-  113 (`def _patch_experiment_config_split(`). Read by `get_experiment`, `experiments.py:1476`
+  (`def _patch_experiment_config_tiling(`), `_patch_experiment_config_id_map`,
+  `packages/tcip-mcp/src/tcip_mcp/pipelines/training/subprocess_worker.py:90`
+  (`def _patch_experiment_config_id_map(`), and `_patch_experiment_config_split`,
+  `packages/tcip-mcp/src/tcip_mcp/pipelines/training/subprocess_worker.py:113`
+  (`def _patch_experiment_config_split(`). Read by `get_experiment`, `experiments.py:1476`
   (`def get_experiment(`), and `compare_experiments`, `experiments.py:1656`.
-- `status.json` (`status_key`, line 140): written by `create_experiment` (397), `update_status`,
-  `experiments.py:535` (`def update_status(`), `stamp_run_identity` (`experiments.py:668`),
-  `_touch_heartbeat`, `experiments.py:869` (`def _touch_heartbeat(`). Read by `get_experiment`
-  (1288), `reconstruct_run_status`, `experiments.py:816` (`def reconstruct_run_status(`),
-  `resolve_experiment_dir_for_run` (`experiments.py:692`). `state` is terminal-locked once
-  `"completed"`/`"failed"`.
-- `lineage.json` (`lineage_key`, line 164): written by `create_experiment` (397), `complete_run`,
+- `status.json` (`status_key`, `experiments.py:144`): written by `create_experiment` (`experiments.py:408`),
+  `update_status`, `experiments.py:535` (`def update_status(`), `stamp_run_identity`
+  (`experiments.py:668`), `_touch_heartbeat`, `experiments.py:869` (`def _touch_heartbeat(`).
+  Read by `get_experiment` (`experiments.py:1476`), `reconstruct_run_status`, `experiments.py:816`
+  (`def reconstruct_run_status(`), `resolve_experiment_dir_for_run` (`experiments.py:692`).
+  `state` is terminal-locked once `"completed"`/`"failed"`.
+- `lineage.json` (`lineage_key`, `experiments.py:169`): written by `create_experiment` (`experiments.py:408`),
+  `complete_run`,
   `experiments.py:602` (`def complete_run(`, the run's own `model_weights`/`model_weights_sha256`
   digest, sealed into the transaction that completes the run) and `update_lineage`,
   `experiments.py:1191` (every other field; refuses `model_weights`/`model_weights_sha256` as
-  `complete_run`'s alone). Read by `get_experiment` (1288) and `get_experiment_lineage`,
+  `complete_run`'s alone). Read by `get_experiment` (`experiments.py:1476`) and `get_experiment_lineage`,
   `experiments.py:1597`.
-- `artifacts.json` (`artifacts_key`, line 187): written by `create_experiment` (397),
-  `complete_run` (592, the `model_weights` entry: `path`, `sha256`, `recorded`) and
-  `record_artifact`, `experiments.py:1221`. Read by `get_experiment` (1288).
-- `metrics.jsonl` (`metrics_key`, line 254, append-only): written by
+- `artifacts.json` (`artifacts_key`, `experiments.py:193`): written by `create_experiment` (`experiments.py:408`),
+  `complete_run` (`experiments.py:602`, the `model_weights` entry: `path`, `sha256`, `recorded`) and
+  `record_artifact`, `experiments.py:1221`. Read by `get_experiment` (`experiments.py:1476`).
+- `metrics.jsonl` (`metrics_key`, `experiments.py:263`, append-only): written by
   `log_metrics`, `experiments.py:948`. Read by `read_metrics`, `experiments.py:888`, which
-  `get_experiment` (1288, paginated) and `reconstruct_run_status` (770, last row only) go through.
-- `env.json` (`env_key`, line 210): the library versions, seed and model kind a run is
+  `get_experiment` (`experiments.py:1476`, paginated) and `reconstruct_run_status` (`experiments.py:816`, last row only) go through.
+- `env.json` (`env_key`, `experiments.py:217`): the library versions, seed and model kind a run is
   reproducible from, written once by the training envelope,
   `packages/tcip-mcp/src/tcip_mcp/pipelines/training/envelope.py:355`. No accessor in this module
   reads it back; it is provenance a reviewer reads directly.
-- `split.json` (`split_key`, line 232): written by `split_construction.persist_split_manifest`,
+- `split.json` (`split_key`, `experiments.py:240`): written by `split_construction.persist_split_manifest`,
   `packages/tcip-mcp/src/tcip_mcp/pipelines/data/split_construction.py:62`
   (`def persist_split_manifest(`). Read by `read_split_manifest`,
   `experiments.py:1058`, which `pipelines/block_calibration.py` and `pipelines/operating_point.py`
@@ -1642,7 +1649,7 @@ are listed here with the rest rather than taking numbers of their own.
   of the manifest record the run bound to), so a calibration can name a label that moved between
   the draw and now without the durable experiment config, a checkpoint's embedded config or a
   trial's resolved config ever carrying a per-stem digest.
-- `validations.jsonl` (`validations_key`, line 272, append-only): the claims earned against this
+- `validations.jsonl` (`validations_key`, `experiments.py:283`, append-only): the claims earned against this
   run's evidence. Written only by the module-private `_append_validation`, `experiments.py:1053`
   (no public raw appender; the storage seam's generic append remains reachable and is a stated
   residual), which refuses a row missing any of `_VALIDATION_FIELDS` (`experiments.py:1000`),
@@ -1650,8 +1657,8 @@ are listed here with the rest rather than taking numbers of their own.
   documents whose gate runs the check, `null` for `resolve_scale`. `selection_disjointness` is the
   parallel field for whether the calibration used to validate a checkpoint's own reference was kept
   disjoint from that checkpoint's own selection (val) side: `{"applicable": bool, "reason": str |
-  None, "checked": bool, "unresolvable": bool, "leaked_groups": list, "leaked_stems": list,
-  "group_check": str | None, "labels_moved_draw_to_run": list | None, "labels_moved_run_to_now":
+  None, "checked": bool, "unresolvable": bool, "leaked_groups": list, "leaked_stems": list,`
+  `"group_check": str | None, "labels_moved_draw_to_run": list | None, "labels_moved_run_to_now":
   list | None, "calibration_labels_moved": list | None, "manifest_redrawn": bool | None,
   "calibration_labels_dir": str | None}` for the four documents `resolver_selection_disjointness`
   covers, `null` for `resolve_scale`; `applicable` is `False` when no split manifest is in play (no
@@ -1660,12 +1667,12 @@ are listed here with the rest rather than taking numbers of their own.
   all, or a `calibration_date` other than the run's own `split.json` `date`), each such case
   carrying its own `reason`; `unresolvable` marks
   the one case the ruling refuses rather than skips, a named manifest with no experiment record to
-  read a selection side from. `verify_stamp_binding` (line 1399) requires the five label-movement
+  read a selection side from. `verify_stamp_binding` (`packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py:1790`) requires the five label-movement
   keys present, `null` admitted, on an applicable row it would otherwise pass: an applicable,
   checked, no-leak row missing any of them floors, the same as a leak does, so a row earned before
-  the keys existed cannot read as cleared. Read by `read_validations`, `experiments.py:1022`,
-  `find_validation`, `experiments.py:1037` (matching rows by recomputed `validation_digest`,
-  `experiments.py:940`), and included whole by `get_experiment` (1201). The one member appendable
+  the keys existed cannot read as cleared. Read by `read_validations`, `experiments.py:1088`,
+  `find_validation`, `experiments.py:1106` (matching rows by recomputed `validation_digest`,
+  `experiments.py:940`), and included whole by `get_experiment` (`experiments.py:1476`). The one member appendable
   after a terminal state, because a validation is a statement made about a run after it ended.
 
 Seam S07 ("Experiment record .tcip/experiments/<id>/", covering config/status/lineage/artifacts),
@@ -1735,10 +1742,10 @@ unconformed index and respells every entry in one transaction, relocating a move
 checkpoint by content digest when its stored path no longer resolves; `import_project` runs the
 same conform on the staging tree before accounting for it and before the rename.
 
-Readers: `read_registry_index`, `model_registry.py:131`, the read path for anything outside the
+Readers: `read_registry_index`, `model_registry.py:132`, the read path for anything outside the
 module (`scripts/doctor.py:237`, `"metrics_source"`), and the entry-by-entry accessors built on
-it: `ModelRegistry.list_models`, line 826; `get_model`, line 837; `best_model`, line 844;
-`verify_model`, line 800. `best_model` takes `metric_key` and `higher_is_better` as required
+it: `ModelRegistry.list_models`, `model_registry.py:844`; `get_model`, `model_registry.py:855`;
+`best_model`, `model_registry.py:862`; `verify_model`, `model_registry.py:818`. `best_model` takes `metric_key` and `higher_is_better` as required
 keywords, no default and no name heuristic, and by default ranks only entries whose
 `metrics_source` is `"trainer"` (`include_unverified=True` also ranks the rest). The
 `rank_registered_models` tool (`tools/model_tools.py:123`) resolves `higher_is_better` from
@@ -1817,11 +1824,11 @@ of the stamp filenames `tcip_annotation.json_io.SIDECAR_FILENAMES`
 enumeration excludes (format 17).
 
 Writer: `write_sidecar`, `resolution.py:879`, the one write, under the stamp's own lock;
-`update_sidecar`, line 809, is the one merge into an existing stamp, reading and writing inside
+`update_sidecar`, `resolution.py:894`, is the one merge into an existing stamp, reading and writing inside
 one transaction so a promotion cannot drop what the producing run recorded. Both refuse, through
-one shared check (`_check_stamp_claim`, line 768), a stamp claiming validation with no
+one shared check (`_check_stamp_claim`, `resolution.py:785`), a stamp claiming validation with no
 well-formed `validated_by` or no trait, so a producer cannot omit what every reader compares.
-The stamp itself is built by `operating_point_stamp`, line 833, which requires every provenance
+The stamp itself is built by `operating_point_stamp`, `resolution.py:929`, which requires every provenance
 field of every producer, including the `validated_by` pointer with no default, and takes a
 producer's own extras through `**fields`. The producers are the raster
 export (stamped at `tools/inference_tools.py:1044`, written at `tools/inference_tools.py:1081`),
@@ -1836,10 +1843,10 @@ and `claim_scope_validated` when a trait triggered block calibration.
 Reader: `read_operating_point_sidecar`, `resolution.py:1068`, which never raises: an unreadable
 stamp floors the dimension it describes to unvalidated at every reconciler rather than taking down
 a delivery gate. A stamp claiming validation is checked against the record it names by
-`verify_stamp_binding`, line 1399, called from inside every reconciler so no delivery door can
+`verify_stamp_binding`, `resolution.py:1790`, called from inside every reconciler so no delivery door can
 reach a validated result without it; a failed binding floors every dimension that stamp carries
 and the reason lands in the reconciler's `binding_notes`. The claim a stamp asserts is subset by
-`claim_payload`, line 984, the one extractor the minting side and the reading side share. `routes/validation.py:407` merges the review promotion's own validation fields in
+`claim_payload`, `resolution.py:1241`, the one extractor the minting side and the reading side share. `routes/validation.py:407` merges the review promotion's own validation fields in
 through `update_sidecar`. `tools/orthomosaic_tools.py`'s `deliver_orthomosaic_plant_counts` reads
 `raster_content_identity` back and refuses a delivery whose supplied raster does not match it,
 content and georeferencing alike; a bucket recording no identity is refused rather than delivered.
@@ -1852,9 +1859,13 @@ Seam S28 ("operating_point.json prediction-bucket sidecar"), verdict `both-sides
 `tests/test_phenology.py:355,363`, `tests/test_phenology_tools.py:104`,
 `tests/test_review_validation_affordance.py:181`. `tests/test_operating_point_sidecar_seam.py`
 holds the writer and the reader together: the stamp carries the same keys whatever the producer
-supplies (line 55), a write round-trips through the real reader (76), a merge is made against
-what is stored rather than against a pre-lock read (93), and the declared stamp filenames cover
-every declared document (183).
+supplies (`test_stamp_carries_the_same_keys_whatever_the_producer_supplies`,
+`tests/test_operating_point_sidecar_seam.py:66`), a write round-trips through the real reader
+(`test_sidecar_write_and_read_round_trip`, `tests/test_operating_point_sidecar_seam.py:182`), a merge is made against
+what is stored rather than against a pre-lock read (`test_sidecar_update_merges_against_what_is_stored`,
+`tests/test_operating_point_sidecar_seam.py:201`), and the declared stamp filenames cover
+every declared document (`test_declared_stamp_filenames_cover_every_declared_document`,
+`tests/test_operating_point_sidecar_seam.py:298`).
 
 ## 19. `.tcip/state/gui.json`, live GUI state snapshot
 
@@ -2131,11 +2142,11 @@ Path/shape definition: `tcip_mcp.dataset_layout.coverage_grid_zoom_path`, `datas
 Shape: `{subject: {zoom, set_by, set_at}}`, one entry per subject, no default anywhere: a subject
 absent from the store has no coverage lattice until the breeder sets one.
 
-Writer: `routes/coverage.py`'s `post_grid_zoom` (`:397`), replacing one subject's entry wholesale
-under the store's own lock. Readers: `get_grid` (`:262`) and `get_completeness` (`:661`) both read
-it through the shared `_subject_zoom` helper (`:221`); `get_completeness` and `post_completeness`
-(`:786`) render it as the served/stored `WorkingScale` shape through the same `_working_scale_of`
-helper (`:234`), so the lattice a breeder sees and the scale an attestation is judged against can
+Writer: `routes/coverage.py`'s `post_grid_zoom` (`routes/coverage.py:437`), replacing one subject's entry wholesale
+under the store's own lock. Readers: `get_grid` (`routes/coverage.py:305`) and `get_completeness` (`routes/coverage.py:701`) both read
+it through the shared `_subject_zoom` helper (`routes/coverage.py:239`); `get_completeness` and `post_completeness`
+(`routes/coverage.py:828`) render it as the served/stored `WorkingScale` shape through the same `_working_scale_of`
+helper (`routes/coverage.py:277`), so the lattice a breeder sees and the scale an attestation is judged against can
 never read the same entry two different ways.
 
 No seam id in `seam-coverage.json`'s inventory names this record.
