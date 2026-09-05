@@ -205,6 +205,24 @@ def test_the_tree_roots_are_the_dated_dirs_without_their_date() -> None:
     assert prediction_dir("/ds", "m", "2026-03-02").is_relative_to(prediction_root("/ds"))
 
 
+def test_prediction_bucket_dirs_finds_a_dated_and_a_model_directory_bucket(tmp_path: Path) -> None:
+    """Every model directory under predictions/ counts as a bucket in its own right, alongside
+    each of its date subdirectories: the one walk doctor.py's registry check and
+    scripts/_store_bootstrap.py's project_roots both read through, so a directory one calls a
+    bucket is a directory the other calls one too."""
+    from tcip_mcp.dataset_layout import prediction_bucket_dirs
+
+    root = tmp_path
+    prediction_dir(root, "modelA", "2026-03-02").mkdir(parents=True)
+    prediction_dir(root, "modelB", None).mkdir(parents=True)
+
+    found = prediction_bucket_dirs(root)
+
+    assert prediction_dir(root, "modelA", None) in found
+    assert prediction_dir(root, "modelA", "2026-03-02") in found
+    assert prediction_dir(root, "modelB", None) in found
+
+
 def test_a_record_file_name_is_the_stem_the_resolver_would_have_used() -> None:
     """The name a label or prediction record takes, stated once and reused by both path builders."""
     from tcip_mcp.dataset_layout import annotation_path, label_filename, prediction_path
