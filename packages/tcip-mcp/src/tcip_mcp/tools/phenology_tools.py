@@ -383,7 +383,10 @@ def _classification_items(gt_dir: str, pred_dir: str, *, trait_name: str, subjec
     ``pred_dir``'s own recorded scope governs when it has one: no stamp at all (the hand-split
     calibration/holdout workflow) leaves the caller's stated ``(subject, attribute)`` in force; a
     classified stamp must agree with it, else this refuses naming both; a detector stamp refuses
-    outright, a detector bucket carries no value to calibrate.
+    outright, a detector bucket carries no value to calibrate. The vocabulary a bare ``pred_dir``
+    is held to comes from ``gt_dir``'s own dataset registry when it has one, else from the values
+    ``gt_dir`` itself carries under ``attribute`` (plus ``positive_value``), never a registry a
+    loose hand-split pair was never placed under.
 
     ``gt_dir`` is read as a measurement reference, so it goes through
     ``json_io.require_reference_ground_truth`` first: a GT dir pointed at a prediction bucket would
@@ -419,9 +422,22 @@ def _classification_items(gt_dir: str, pred_dir: str, *, trait_name: str, subjec
     else:
         raise ValueError(f"{pred_p} is a detector bucket: it carries no value to calibrate.")
     if vocabulary_map is None:
-        from tcip_mcp.pipelines.data.label_queries import resolve_registry_id_map
+        from tcip_mcp.pipelines.data.label_queries import (
+            resolve_registry_id_map,
+            resolved_classes_path,
+        )
 
-        _reg, vocabulary_map = resolve_registry_id_map(gt_dir, subject, attribute)
+        if resolved_classes_path(gt_dir) is not None:
+            _reg, vocabulary_map = resolve_registry_id_map(gt_dir, subject, attribute)
+        else:
+            observed = {
+                a.attributes[attribute]
+                for gt_file in prediction_documents(gt_p)
+                for a in json_io.read_annotations(str(gt_file))
+                if a.subject == subject and attribute in (a.attributes or {})
+            }
+            observed.add(positive_value)
+            vocabulary_map = {name: i for i, name in enumerate(sorted(observed))}
     vocabulary = set(vocabulary_map or {})
     # gt_dir/pred_dir may themselves be prediction buckets (a calibration/holdout split of one),
     # so both are walked through prediction_documents, their own sidecar stamps excluded.
