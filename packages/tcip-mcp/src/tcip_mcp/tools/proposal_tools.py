@@ -788,6 +788,11 @@ def stage_proposals(
     never overwrites reviewed predictions or orphans their verdicts. Pair with
     ``focus_human_attention(tab='review')`` to send the human straight to the result.
 
+    A staged record's ``subject`` is whatever ``assignments``/``boxes``/``polygons`` named; the
+    platform validates no subject name. A staged bucket carries no ``operating_point.json`` stamp
+    and so no recorded scope, so every reader of it below (the Review routes, the calibrator, the
+    delivery doors) reads its records under the caller's own statement rather than a proven one.
+
     Args:
         image_path: Absolute path to the dataset image (same as propose_annotations, for the
             assignments regime).
