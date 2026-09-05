@@ -17,8 +17,8 @@ def _detection_collate(batch):
 
 def _stack_collate(batch):
     """Classification/ordinal/regression/semantic_seg: stack into tensors."""
-    images, targets = zip(*batch)
-    images = torch.stack(images)
+    raw_images, targets = zip(*batch)
+    images = torch.stack(raw_images)
     # Merge target dicts, stack numeric values
     merged: dict[str, Any] = {}
     for key in targets[0]:
