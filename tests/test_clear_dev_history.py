@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 import tcip_store as ts
-from tcip_store.binding import bind_default
+from tcip_store.binding import BACKEND_ENV, SQLITE_BACKEND, bind_default
 from tcip_store.file_backend import database_file
 
 from tcip_mcp.audit import AuditEntryNotWritten, audit_log_key, record_event_or_raise
@@ -62,7 +62,12 @@ def _seed_other_stores(root: Path) -> None:
     upsert_dataset(root, {"id": "ds-1", "path": ".", "crop": "chestnut"})
 
 
-def test_a_plan_removes_nothing_and_lists_the_counts(tmp_path: Path):
+def test_a_plan_removes_nothing_and_lists_the_counts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A database-backed root, pinned rather than left to the ambient default, since the
+    # stale-export outcome line below only appears once a database exists to leave one behind.
+    monkeypatch.setenv(BACKEND_ENV, SQLITE_BACKEND)
     bind_default()
     module = _load_script()
     _seed_dev_history(tmp_path)
@@ -182,6 +187,9 @@ def test_main_apply_and_plan_together_refuses_before_touching_anything(
 def test_main_apply_over_a_seeded_root_exits_zero_and_records_the_closing_line(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
 ) -> None:
+    # A database-backed root, pinned rather than left to the ambient default, since the
+    # stale-export outcome line below only appears once a database exists to leave one behind.
+    monkeypatch.setenv(BACKEND_ENV, SQLITE_BACKEND)
     bind_default()
     module = _load_script()
     _seed_dev_history(tmp_path)
