@@ -1182,8 +1182,10 @@ def _artifact_write_refused(doc: dict[str, Any], field: str, value: Any) -> bool
 
 def _lineage_write_refused(doc: dict[str, Any], field: str, value: Any) -> bool:
     """The lineage member's additive lock: a populated field freezes unless the write would
-    record the same value it already holds, so a repeat of an idempotent write (the same bucket
-    path exported twice, say) is admitted rather than refused."""
+    record the same value it already holds, so a repeat of an idempotent write is admitted rather
+    than refused (a re-export whose own bucket resolved to no document on its first, empty-input
+    pass, so a second, real pass in place records the same path a terminal experiment already
+    holds)."""
     return _pointer_populated(doc, field) and doc.get(field) != value
 
 

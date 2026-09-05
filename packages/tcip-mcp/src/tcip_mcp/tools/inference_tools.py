@@ -319,6 +319,16 @@ def run_inference(
     unvalidated whatever its operating point cleared, since a count claim outside the dataset
     layout has no dataset-relative key a reader could locate it by.
 
+    A second, narrower immutability applies regardless of a dataset root or a verdict: a bucket
+    that already holds a prediction document from an earlier publish, with no verdict yet
+    recorded against it, refuses this write outright (error names the document count and a
+    suggested fresh bucket), whatever ``overwrite`` says. No publish begins into a bucket that
+    held prediction documents when this door resolved it; it does not guard against two runs
+    racing into one bucket after both resolve it clean, the same window the verdict guard already
+    has. A completed experiment's bucket the pointer below already locks is unreachable through
+    the suggested bucket too, so a completed experiment's predictions publish once through this
+    door with no audited remedy to clear one for republication.
+
     A bucket stamped validated names the validation record its claim was earned from. The gate
     for that record runs before any file is written, and the record is appended over the
     prediction files as they actually landed, so a run that dies partway leaves either
@@ -370,6 +380,8 @@ def run_inference(
             across a tile seam (better for an object straddling a boundary).
         dry_run: Report the effective operating point (conf/tiling/max_dets/postprocess) and the
             bucket the write would resolve to, without loading the model or running inference.
+            Previews the same bucket refusal a real call would hit (verdicts, or a document with
+            none), never a bucket a real call would in fact refuse to write.
         trait: Trait name to derive the confidence operating point per dataset instead of pinning
             a default, the count is the phenotype, so conf must be calibrated. ``images_dir``
             regime: with ``calibration_labels_dir``. ``raster_path`` regime: alone, against the
@@ -419,11 +431,15 @@ def run_inference(
         split_holdout_ratio: ``images_dir`` regime only. Calibration/holdout fraction for the
             locked split, same first-call-only semantics as ``split_seed``.
         overwrite: Write into ``output_dir`` even if it exists. Refused if the bucket has review
-            verdicts; the default (False) auto-redirects to a fresh bucket instead. For a
-            ``raster_path`` pass, also the way out of a bucket carrying another pass' progress
-            (``resume``, below): it discards that progress and starts over. Conflicts with
-            ``resume=True`` (refused by name): the two name opposite ways of handling the same
-            recorded progress.
+            verdicts; the default (False) auto-redirects to a fresh bucket instead. Never
+            overrides the document refusal above: a bucket holding a document with no verdict
+            refuses this write whatever ``overwrite`` says. For a ``raster_path`` pass, also the
+            way out of a bucket carrying another pass' progress (``resume``, below) when that
+            bucket holds no document yet: it discards that progress and starts over. Conflicts
+            with ``resume=True`` (refused by name): the two name opposite ways of handling the
+            same recorded progress. A bucket that already holds both a document and a progress
+            record (a crash between the two) refuses on the document before either ``resume`` or
+            ``overwrite`` is consulted, leaving the progress record in place, inert.
         allow_unvalidated_staging: Write the bucket even when tile_size (a tiled run only) has no
             real basis, stamping ``tile_size_validated=false`` on the sidecar so the
             un-trustworthiness travels with it rather than writing silently. Clears only the
@@ -977,8 +993,11 @@ _NO_DATASET_ROOT_NOTE = (
     "here. The review-verdict immutability guard is inoperative: nothing checks whether a human "
     "has already recorded verdicts against predictions at this path before this run replaced them. "
     "And a count claim earned for these predictions has no dataset-relative key to be recorded "
-    "under, so this bucket is stamped unvalidated whatever its operating point cleared. Write into "
-    "a dataset's own predictions layout (<dataset_root>/predictions/<model>/<date>) for both."
+    "under, so this bucket is stamped unvalidated whatever its operating point cleared. The "
+    "prediction-document refusal is unaffected by either absence: a bucket here that already holds "
+    "a document from a prior run still refuses a second publish the same way one under a dataset "
+    "root does. Write into a dataset's own predictions layout "
+    "(<dataset_root>/predictions/<model>/<date>) for the two absent guarantees."
 )
 """What a door tells its caller about a bucket outside the dataset layout, rather than guarding it
 against a verdict store that holds nothing about it or letting it claim a count nothing can verify."""
@@ -997,17 +1016,22 @@ def _bucket_dataset_root(bucket: Path) -> Path | None:
 def _resolve_writable_bucket_for(output_dir: str, *, overwrite: bool):
     """The bucket a run may write for ``output_dir``, its resolution, and its dataset root.
 
-    Returns ``(out, resolution, dataset_root, refusal)``. ``refusal`` is the door's own error dict
-    when the requested bucket carries review verdicts and the caller asked to overwrite it, and
-    ``None`` otherwise. One resolution for both writers here that persist a bucket, so the canonical
-    ``predictions/<model>/<date>`` redirect (which varies the model segment, the one every
-    date-keyed reader enumerates) and the bespoke last-segment redirect cannot drift apart.
-    ``dataset_root`` is ``None`` for a bucket under no dataset, whose verdict guard is inoperative.
+    Returns ``(out, resolution, dataset_root, refusal)``. ``refusal`` is the door's own error
+    dict, or ``None`` otherwise: raised when the requested bucket carries review verdicts and the
+    caller asked to overwrite it (``BucketHasVerdicts``), or, since both callers of this helper
+    (``run_inference``, ``deliver_per_image_counts``'s live path) opt into the document guard,
+    when the requested bucket already holds a prediction document with no verdict yet recorded
+    against it, whatever ``overwrite`` says (``BucketHoldsDocuments``). One resolution for both
+    writers here that persist a bucket, so the canonical ``predictions/<model>/<date>`` redirect
+    (which varies the model segment, the one every date-keyed reader enumerates) and the bespoke
+    last-segment redirect cannot drift apart, on every branch including the one under no dataset
+    root, whose verdict guard alone is inoperative (the document guard is not, see
+    ``_NO_DATASET_ROOT_NOTE``). ``dataset_root`` is ``None`` for a bucket under no dataset.
     """
     from tcip_mcp.dataset_layout import prediction_dir
     from tcip_mcp.prediction_buckets import (
         BucketHasVerdicts,
-        BucketResolution,
+        BucketHoldsDocuments,
         resolve_prediction_bucket,
         resolve_writable_bucket,
         review_state_dir_of,
@@ -1030,23 +1054,26 @@ def _resolve_writable_bucket_for(output_dir: str, *, overwrite: bool):
         if canonical_dataset_root is not None:
             out, resolution = resolve_prediction_bucket(
                 canonical_dataset_root, parent.name, base_name,
-                review_state_dir=review_state_dir, overwrite=overwrite)
-        elif review_state_dir is not None:
-            resolution = resolve_writable_bucket(
-                review_state_dir, base_name, lambda n: [parent / n], overwrite=overwrite)
-            out = parent / resolution.name
+                review_state_dir=review_state_dir, overwrite=overwrite, refuse_documents=True)
         else:
-            resolution = BucketResolution(name=base_name, redirected=False, verdict_count=0,
-                                          requested=base_name)
-            out = out_path
-    except BucketHasVerdicts as exc:
-        suggested = (
-            str(prediction_dir(canonical_dataset_root, exc.suggested, base_name))
-            if canonical_dataset_root is not None
-            else str(parent / exc.suggested)
-        )
-        return None, None, dataset_root, {
-            "error": str(exc), "verdict_count": exc.count, "suggested_bucket": suggested}
+            resolution = resolve_writable_bucket(
+                review_state_dir, base_name, lambda n: [parent / n],
+                overwrite=overwrite, refuse_documents=True)
+            out = parent / resolution.name
+    except (BucketHasVerdicts, BucketHoldsDocuments) as exc:
+        suggested = None
+        if exc.suggested is not None:
+            suggested = (
+                str(prediction_dir(canonical_dataset_root, exc.suggested, base_name))
+                if canonical_dataset_root is not None
+                else str(parent / exc.suggested)
+            )
+        error: dict = {"error": str(exc), "suggested_bucket": suggested}
+        if isinstance(exc, BucketHasVerdicts):
+            error["verdict_count"] = exc.count
+        else:
+            error["document_stem_count"] = exc.document_stem_count
+        return None, None, dataset_root, error
     return out, resolution, dataset_root, None
 
 
@@ -1160,6 +1187,12 @@ def _publish_image_predictions(out: Path, result: dict, *, checkpoint_path: str,
                                ) -> tuple[list[str], int, dict]:
     """Write one prediction file per image, then earn and stamp over exactly what landed.
 
+    True once the bucket's own document refusal has already run: the resolver refuses a publish
+    into a bucket a prior run's documents already occupy, so by the time this writes, ``out``
+    holds nothing but what this call is about to add, short of the residual race
+    ``resolve_writable_bucket``'s own docstring states (two publishers resolving the same clean
+    bucket before either writes).
+
     The steps ``run_inference`` and ``deliver_per_image_counts`` share once each has resolved its own
     bucket and run its own gate: both persist the same run's per-image detections into a bucket and
     both stamp it, so the file naming, the producer string, the claim payload and the write order
@@ -1221,7 +1254,9 @@ def _publish_bucket_bracket(result: dict, *, out: Path, checkpoint_path: str, tr
     ``run_inference`` does: the authoritative post-inference tile gate, the count claim's own
     gate, the frozen-lineage-pointer refusal, the write, and the post-write lineage link. Shared so
     ``deliver_per_image_counts``' live-with-``predictions_dir`` path publishes under the identical contract
-    rather than a second implementation.
+    rather than a second implementation. ``out`` has already cleared the bucket-immutability
+    resolver (verdicts, and a prior run's own documents) before either caller reaches here; this
+    function does not re-resolve it.
 
     Returns a dict: ``refusal`` (the door's own error dict, or ``None``), ``written``,
     ``dropped_boxes``, ``op_stamp``, ``tile_size_validated`` and ``lineage_linked`` (``True``/
@@ -1909,8 +1944,11 @@ def deliver_per_image_counts(
       operating point. Passing ``predictions_dir`` too persists the run's own predictions into
       that bucket, gated (``allow_unvalidated_staging`` clears only its own tile-scale staging gate,
       never the CSV's own delivery gate below) and linked exactly as ``run_inference`` publishes
-      one (the same frozen-lineage-pointer refusal and lineage link), then reads the CSV's own
-      validity back off the bucket it just wrote. Without ``predictions_dir`` the counts rest on
+      one (the same bucket-immutability resolution, refusing on a verdict or on a document a
+      prior run left with none, the same frozen-lineage-pointer refusal, and the same lineage
+      link), then reads the CSV's own validity back off the bucket it just wrote. A document
+      refusal here is returned before the checkpoint is loaded, the same as ``run_inference``'s
+      own. Without ``predictions_dir`` the counts rest on
       one in-memory pass with nothing a reviewer can re-open, and this door takes no acknowledgement
       to ship an unvalidated CSV anyway, so an unvalidated live pass with no ``predictions_dir``
       cannot be delivered at all; a bucket published this way (or by ``run_inference``) can also be
