@@ -27,7 +27,7 @@ import os
 import shutil
 import sys
 import tempfile
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -40,9 +40,8 @@ for _path in (*_PKG_SRC, _REPO_ROOT):
 from fastapi.testclient import TestClient  # noqa: E402
 from PIL import Image  # noqa: E402
 
-from tcip_annotation import json_io  # noqa: E402
-from tcip_annotation.state import Annotation, BBox  # noqa: E402
-from tcip_mcp.pipelines.resolution import write_sidecar  # noqa: E402
+from tcip_mcp.pipelines.postprocessing.export import write_predictions_json  # noqa: E402
+from tcip_mcp.pipelines.resolution import operating_point_stamp, write_sidecar  # noqa: E402
 from tcip_mcp.tools.phenology_tools import (  # noqa: E402
     build_plant_mapping,
     deliver_phenology_milestones,
@@ -62,7 +61,9 @@ PLANTS = [
 DATES = ["2026-02-11", "2026-02-25", "2026-03-11"]
 FRACTIONS = {"2026-02-11": 0.0, "2026-02-25": 0.4, "2026-03-11": 1.0}
 # The bucket's own recorded id_map: the positive class is resolved from this on disk, never a
-# pinned integer or a magic constant deliver_phenology_milestones reads directly.
+# pinned integer. Keyed by elongation's own value names; every detection here is one subject.
+SUBJECT = "catkin"
+ATTRIBUTE = "elongation"
 ID_MAP = {"dormant": 0, "elongated": 1}
 N_DETECTIONS = 10
 
@@ -103,18 +104,22 @@ def _write_geo_image(path: Path, lat: float, lon: float, when: datetime) -> None
     Image.new("RGB", (8, 8)).save(path, exif=exif)
 
 
-def _pred_boxes(n_elongated: int, n_total: int) -> list[Annotation]:
-    """Per-image classified predictions; first n_elongated decode to 'elongated', rest 'dormant'.
+def _pred_result(n_elongated: int, n_total: int, *, width: int, height: int) -> dict:
+    """One image's raw predictor-shaped result: n_total detections of one subject, the first
+    n_elongated one-indexed to id_map['elongated'], the rest to id_map['dormant'].
 
-    A real prediction's ``.subject`` is the decoded class name directly (write_predictions_json
-    decodes the numeric label through the bucket's id_map straight into ``.subject``, leaving
-    ``.attributes`` empty), not the GT-annotation shape (object-type subject + an attribute value).
+    write_predictions_json decodes each label through this run's own recorded id_map into the
+    shape ground truth carries: the object class in every record's subject, the decoded value
+    under attributes[attribute], never the value alone written straight into subject.
     """
-    anns = []
-    for i in range(n_total):
-        value = "elongated" if i < n_elongated else "dormant"
-        anns.append(Annotation(subject=value, geometry=BBox(1.0, 1.0, 3.0, 3.0), score=0.90))
-    return anns
+    n_dormant = n_total - n_elongated
+    labels = [ID_MAP["elongated"] + 1] * n_elongated + [ID_MAP["dormant"] + 1] * n_dormant
+    return {
+        "width": width, "height": height,
+        "boxes": [[1.0, 1.0, 3.0, 3.0] for _ in range(n_total)],
+        "scores": [0.90] * n_total,
+        "labels": labels,
+    }
 
 
 def _stem(plot: str, date: str) -> str:
@@ -189,13 +194,24 @@ def main() -> int:
                         plant["lat"], plant["lon"], base_time + timedelta(minutes=j),
                     )
                     (preds_root / date).mkdir(parents=True, exist_ok=True)
-                    json_io.write_annotations(
+                    # created_by=None: prediction_producer refuses without a real checkpoint
+                    # digest, and this scene has no checkpoint behind it to name one from.
+                    write_predictions_json(
                         preds_root / date / f"{stem}.json",
-                        _pred_boxes(n_elong, N_DETECTIONS), 8, 8,
+                        _pred_result(n_elong, N_DETECTIONS, width=8, height=8), None,
+                        subject=SUBJECT, attribute=ATTRIBUTE, id_map=ID_MAP,
                     )
-                # The bucket's own recorded id_map, the real shape run_inference stamps,
+                # The bucket's own recorded scope and id_map, the shape run_inference stamps,
                 # written through the store so a database-bound backend's reader can see it.
-                write_sidecar(preds_root / date, {"id_map": ID_MAP}, "operating_point")
+                stamp = operating_point_stamp(
+                    {"conf": {"value": 0.5, "source": "default"}},
+                    validated=False, validated_by=None, tile_size_validated=None,
+                    shippable_issues=[], id_map=ID_MAP, subject=SUBJECT, attribute=ATTRIBUTE,
+                    trait=None, dataset_hash=None, checkpoint=None, checkpoint_sha256=None,
+                    experiment_id=None, images_dir=str(images_root / date), raster_path=None,
+                    produced_at=datetime.now(timezone.utc).isoformat(),
+                )
+                write_sidecar(preds_root / date, stamp, "operating_point")
 
             plant_csv = root / "plants.csv"
             with plant_csv.open("w", newline="", encoding="utf-8") as f:
