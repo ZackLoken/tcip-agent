@@ -738,7 +738,8 @@ def capture_live_canvas(
 
     The GUI continuously pushes its canvas state under ``.tcip/state/``, split into two documents
     so the cadences never contend: ``canvas_live.json``, a meta document written on every push
-    (image, viewport, classes, legend, counts, tab, mode, active_subject, dirty and user), and
+    (image, viewport, classes, legend, counts, tab, mode, active_subject, cut_armed, dirty and
+    user), and
     ``canvas_shapes.json``, the full display-resolved geometry (the shapes with the exact
     colors/tags the canvas renders, including unsaved edits and an in-progress drawing), written
     only when the shapes themselves change. A heartbeat (meta only, no geometry write) fires on
@@ -919,6 +920,7 @@ def capture_live_canvas(
         "image": state.get("image"),
         "tab": state.get("tab"),
         "mode": state.get("mode"),
+        "cut_armed": state.get("cut_armed"),
         "user": state.get("user"),
         "dirty": state.get("dirty"),
         "project_root": state.get("project_root"),

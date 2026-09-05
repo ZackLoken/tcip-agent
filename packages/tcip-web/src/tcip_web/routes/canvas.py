@@ -54,6 +54,8 @@ class CanvasStatePayload(BaseModel):
     viewport: Optional[dict] = None  # {x, y, w, h, scale} in image coords
     mode: Optional[str] = None
     active_subject: Optional[str] = None
+    # Whether the Annotate cut tool is armed (sticky across a completed cut or a refusal alike).
+    cut_armed: Optional[bool] = None
     dirty: Optional[bool] = None
     user: Optional[str] = None
     classes: list[dict] = []  # [{name, color}]
@@ -110,6 +112,7 @@ def push_canvas_state(payload: CanvasStatePayload) -> dict:
         "viewport": payload.viewport,
         "mode": payload.mode,
         "active_subject": payload.active_subject,
+        "cut_armed": payload.cut_armed,
         "dirty": payload.dirty,
         "user": payload.user,
         "classes": payload.classes,

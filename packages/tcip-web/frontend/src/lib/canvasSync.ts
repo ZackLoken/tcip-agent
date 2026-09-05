@@ -68,6 +68,9 @@ export interface CanvasStateBody {
   viewport: CanvasViewport | null;
   mode?: string;
   active_subject?: string;
+  // Stays true across a completed cut and a refusal alike (the flag is sticky), unlike the
+  // pending-segment polyline, which clears on both.
+  cut_armed?: boolean;
   dirty?: boolean;
   user?: string;
   // The dataset's subjects with their GUI-local colours (the registry stores no colour). Sent
