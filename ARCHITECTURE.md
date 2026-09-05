@@ -313,7 +313,7 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | packages/tcip-web/frontend/src/components/SeasonRail.tsx | Season rail: the app's signature. | 0 | 2 |
 | packages/tcip-web/frontend/src/components/StatementPanel.tsx | The generalized confirmation surface for a statement record: the agent states, the breeder confirms or withdraws, and a moved/superseded record re-renders what is on file rather than what was last shown. | 4 | 1 |
 | packages/tcip-web/frontend/src/components/StatusBar.test.tsx | (none found) | 3 | 0 |
-| packages/tcip-web/frontend/src/components/StatusBar.tsx | (none found) | 3 | 2 |
+| packages/tcip-web/frontend/src/components/StatusBar.tsx | (none found) | 4 | 2 |
 | packages/tcip-web/frontend/src/components/TabBanner.test.tsx | (none found) | 2 | 0 |
 | packages/tcip-web/frontend/src/components/TabBanner.tsx | (none found) | 1 | 2 |
 | packages/tcip-web/frontend/src/components/TabHeading.tsx | The one heading element every tab's main panel carries, so a screen reader lands on a named region when the tab mounts. | 2 | 7 |
@@ -399,7 +399,7 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | packages/tcip-web/frontend/src/lib/openProject.test.ts | (none found) | 3 | 0 |
 | packages/tcip-web/frontend/src/lib/openProject.ts | Opening a workspace project = pointing the GUI at it (project root = dataset root) via /dataset/select. | 5 | 4 |
 | packages/tcip-web/frontend/src/lib/paths.test.ts | (none found) | 1 | 0 |
-| packages/tcip-web/frontend/src/lib/paths.ts | Normalize a user-pasted filesystem path. | 1 | 6 |
+| packages/tcip-web/frontend/src/lib/paths.ts | Normalize a user-pasted filesystem path. | 1 | 7 |
 | packages/tcip-web/frontend/src/lib/polygonGeometry.test.ts | (none found) | 1 | 0 |
 | packages/tcip-web/frontend/src/lib/polygonGeometry.ts | Pure hit-testing helpers for the annotate canvas' geometry (polygons and points). | 1 | 4 |
 | packages/tcip-web/frontend/src/lib/recentProjects.ts | The last few projects the user opened, for the status-bar "project name" fast-track. | 0 | 2 |
@@ -430,7 +430,7 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | packages/tcip-web/frontend/src/store/slices/agentActivity.ts | Holds the last agent-pushed panel event from the /ws/panel subscription, sequenced so an effect can react to each new one. | 1 | 2 |
 | packages/tcip-web/frontend/src/store/slices/bandSelection.ts | Holds the breeder's chosen band composite per band-set signature, one entry per distinct band set seen this session. | 2 | 2 |
 | packages/tcip-web/frontend/src/store/slices/banners.ts | Holds the latest agent-pushed banner per tab plus the set of dismissed banner event ids, since the backend replays its whole per-panel event ring on reconnect. | 1 | 2 |
-| packages/tcip-web/frontend/src/store/slices/canvas.ts | Holds the per-image draft canvas state (boxes, polygons, points, image-level ratings, undo/redo stacks, dirty tracking) not synced to the backend until save. | 2 | 2 |
+| packages/tcip-web/frontend/src/store/slices/canvas.ts | Holds the per-image draft canvas state (boxes, polygons, points, image-level ratings, undo/redo stacks, dirty tracking) not synced to the backend until save. | 3 | 3 |
 | packages/tcip-web/frontend/src/store/slices/gui.ts | Holds the server-synchronized GUI state (dataset selection, view, mode, active subject, review filters) plus the ownership-aware snapshot merge that keeps backend- and browser-owned fields apart. | 2 | 4 |
 | packages/tcip-web/frontend/src/store/slices/pendingTerminalMessage.ts | Holds a request staged for the agent terminal until the terminal rail sends it and clears it, so a component can hand the agent a task without exposing the raw control. | 1 | 2 |
 | packages/tcip-web/frontend/src/store/slices/registryStatus.ts | Holds the dataset's subject registry, per-image annotation status, per-image review status, Annotate tab UI flags, and per-image session-timing telemetry. | 3 | 3 |
