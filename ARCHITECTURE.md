@@ -1203,10 +1203,15 @@ from `tcip_mcp.server` and calls it: `packages/tcip-mcp/src/tcip_mcp/server.py:7
 (`python scripts/list_tools.py` lists them; the count is never written down, since it drifts).
 
 `python -m tcip_web`: `packages/tcip-web/src/tcip_web/__main__.py` defines `main()`
-(line 61), reads `TCIP_WEB_HOST` / `TCIP_WEB_PORT` (default `127.0.0.1:8765`, lines 22-23,
-67-68), writes the bound port under the workspace root's `.tcip/state/web_port.txt`
-(`_write_port_file`, line 43), and starts the app via `uvicorn.run("tcip_web.app:app", ...)`
-(line 72). The port write resolves under the workspace root, not the platform-state root, so
+(`packages/tcip-web/src/tcip_web/__main__.py:61`), reads `TCIP_WEB_HOST` / `TCIP_WEB_PORT`
+(default `127.0.0.1:8765`, declared at `packages/tcip-web/src/tcip_web/__main__.py:22-23`
+(`DEFAULT_HOST = "127.0.0.1"`), read at `packages/tcip-web/src/tcip_web/__main__.py:67-68`
+(`host = os.environ.get("TCIP_WEB_HOST", DEFAULT_HOST)`)), writes the bound port under the
+workspace root's `.tcip/state/web_port.txt` (`_write_port_file`,
+`packages/tcip-web/src/tcip_web/__main__.py:43`), and starts the app via
+`uvicorn.run("tcip_web.app:app", host=host, port=port, reload=reload)`
+(`packages/tcip-web/src/tcip_web/__main__.py:72`). The port write resolves under the workspace
+root, not the platform-state root, so
 it needs no pin first; the app pins the platform-state root at the lifespan's startup or,
 when a request is served before the lifespan has run, at that first request, never at import:
 `bind_startup_root` (`packages/tcip-web/src/tcip_web/app.py:178`) reads the workspace's
