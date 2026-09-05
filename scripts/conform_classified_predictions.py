@@ -83,7 +83,7 @@ from tcip_store.binding import bind_default  # noqa: E402
 from tcip_mcp.audit import dataset_scope_of, record_event_or_raise  # noqa: E402
 from tcip_mcp.class_registry import RegistryError, read_registry  # noqa: E402
 from tcip_mcp.dataset_layout import (  # noqa: E402
-    annotation_root, classes_path, is_bucket_name, prediction_root,
+    annotation_root, classes_path, is_bucket_name, prediction_bucket_dirs, prediction_root,
 )
 from tcip_mcp.experiments import config_key, read_member  # noqa: E402
 from tcip_mcp.pipelines.resolution import (  # noqa: E402
@@ -109,21 +109,22 @@ def _looks_like_bucket(d: Path) -> bool:
 
 
 def bucket_dirs_under(dataset_root: Path) -> list[Path]:
-    """Every bucket directory under ``dataset_root``'s own prediction tree: each model directory
-    (a redirected ``<model>@r2`` variant included) and each directory one level below it, the
-    layout's dated form. Mirrors ``tcip_mcp.dataset_layout.prediction_bucket_dirs``, not yet
-    extracted on this tree; the landing's fix-up switches this walk to call that function.
+    """Every bucket directory under ``dataset_root``'s own prediction tree, through the shared
+    walk (``tcip_mcp.dataset_layout.prediction_bucket_dirs``) so this script and every other
+    reader of the layout agree on what a bucket directory is.
+
+    ``prediction_bucket_dirs`` admits every directory one level under a model directory
+    regardless of its own name (it answers "where could a sidecar sit", not "is this a bucket
+    this script can act on"), so a dot-prefixed date directory reaches it; filtered back out here
+    by ``is_bucket_name``, since a hidden directory is never a bucket this script conforms.
+    ``_looks_like_bucket`` then keeps only a directory actually holding a stamp or prediction
+    documents, this script's own definition of a bucket.
     """
     root = prediction_root(dataset_root)
     if not root.is_dir():
         return []
-    found: list[Path] = []
-    for model_dir in sorted(p for p in root.iterdir() if p.is_dir() and is_bucket_name(p.name)):
-        siblings = sorted(p for p in model_dir.iterdir() if p.is_dir() and is_bucket_name(p.name))
-        for candidate in [model_dir, *siblings]:
-            if _looks_like_bucket(candidate):
-                found.append(candidate)
-    return found
+    return [d for d in prediction_bucket_dirs(dataset_root)
+            if is_bucket_name(d.name) and _looks_like_bucket(d)]
 
 
 @dataclass

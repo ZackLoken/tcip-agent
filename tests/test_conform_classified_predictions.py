@@ -106,7 +106,7 @@ def _write_experiment_config(experiment_id: str, root: Path, data: dict) -> None
     ts.replace(config_key(experiment_id, root=root), {"data": data}, expect=ts.Version.ABSENT)
 
 
-def _pre_conform_classified_bucket(root: Path, dataset_root: Path, *, date: str = "2026-01-01") -> Path:
+def _pre_conform_classified_bucket(dataset_root: Path, *, date: str = "2026-01-01") -> Path:
     """A classified bucket in the old shape: the value in ``subject``, a stamp recording the
     value-keyed map but no ``(subject, attribute)`` pair, written before the writer rail existed.
     """
@@ -138,7 +138,7 @@ def test_a_classifier_bucket_is_rewritten_and_stamped(tmp_path):
     project = tmp_path / "project"
     dataset_root = tmp_path / "dataset"
     _register(project, dataset_root)
-    bucket = _pre_conform_classified_bucket(project, dataset_root)
+    bucket = _pre_conform_classified_bucket(dataset_root)
     _write_experiment_config("exp-classified", project,
                               {"subject": SUBJECT, "attribute": ATTRIBUTE, "id_map": VALUE_ID_MAP})
 
@@ -168,7 +168,7 @@ def test_a_second_run_rewrites_nothing_and_reports_the_same_left_behind_set(tmp_
     project = tmp_path / "project"
     dataset_root = tmp_path / "dataset"
     _register(project, dataset_root)
-    _pre_conform_classified_bucket(project, dataset_root)
+    _pre_conform_classified_bucket(dataset_root)
     _write_experiment_config("exp-classified", project,
                               {"subject": SUBJECT, "attribute": ATTRIBUTE, "id_map": VALUE_ID_MAP})
 
@@ -305,7 +305,7 @@ def test_a_reviewed_classified_bucket_is_reported_with_its_verdict_count_and_unt
     project = tmp_path / "project"
     dataset_root = tmp_path / "dataset"
     _register(project, dataset_root)
-    bucket = _pre_conform_classified_bucket(project, dataset_root, date="reviewed")
+    bucket = _pre_conform_classified_bucket(dataset_root, date="reviewed")
     _write_experiment_config("exp-classified", project,
                               {"subject": SUBJECT, "attribute": ATTRIBUTE, "id_map": VALUE_ID_MAP})
     key = ("predictions/classifier/reviewed", "img1.json")
@@ -333,7 +333,7 @@ def test_plan_mode_writes_nothing_and_reports_what_would_change(tmp_path):
     project = tmp_path / "project"
     dataset_root = tmp_path / "dataset"
     _register(project, dataset_root)
-    bucket = _pre_conform_classified_bucket(project, dataset_root)
+    bucket = _pre_conform_classified_bucket(dataset_root)
     _write_experiment_config("exp-classified", project,
                               {"subject": SUBJECT, "attribute": ATTRIBUTE, "id_map": VALUE_ID_MAP})
 
@@ -355,7 +355,7 @@ def test_a_prediction_date_directory_with_no_images_counterpart_is_walked_and_co
     dataset_root = tmp_path / "dataset"
     _register(project, dataset_root)
     assert not (dataset_root / "images").exists()
-    bucket = _pre_conform_classified_bucket(project, dataset_root)
+    bucket = _pre_conform_classified_bucket(dataset_root)
     _write_experiment_config("exp-classified", project,
                               {"subject": SUBJECT, "attribute": ATTRIBUTE, "id_map": VALUE_ID_MAP})
 
@@ -374,7 +374,7 @@ def test_the_experiment_source_is_read_under_the_walked_root_when_the_platform_r
     project = tmp_path / "project"
     dataset_root = tmp_path / "dataset"
     _register(project, dataset_root)
-    _pre_conform_classified_bucket(project, dataset_root)
+    _pre_conform_classified_bucket(dataset_root)
     _write_experiment_config("exp-classified", project,
                               {"subject": SUBJECT, "attribute": ATTRIBUTE, "id_map": VALUE_ID_MAP})
     elsewhere = tmp_path / "elsewhere"
@@ -394,7 +394,7 @@ def test_a_bespoke_run_answering_no_scope_falls_through_to_the_operator(tmp_path
     project = tmp_path / "project"
     dataset_root = tmp_path / "dataset"
     _register(project, dataset_root)
-    bucket = _pre_conform_classified_bucket(project, dataset_root)
+    bucket = _pre_conform_classified_bucket(dataset_root)
     _write_experiment_config("exp-classified", project, {"dataset_source": "bespoke"})
 
     outcomes, refused = module.process_project_root(
@@ -411,7 +411,7 @@ def test_a_scopeless_bucket_with_no_source_is_refused_and_left_alone(tmp_path):
     project = tmp_path / "project"
     dataset_root = tmp_path / "dataset"
     _register(project, dataset_root)
-    bucket = _pre_conform_classified_bucket(project, dataset_root)
+    bucket = _pre_conform_classified_bucket(dataset_root)
     _write_experiment_config("exp-classified", project, {"dataset_source": "bespoke"})
 
     from tcip_mcp.prediction_buckets import bucket_content_digest
@@ -431,7 +431,7 @@ def test_the_like_source_conforms_a_bare_copy(tmp_path):
     project = tmp_path / "project"
     dataset_root = tmp_path / "dataset"
     _register(project, dataset_root)
-    scoped = _pre_conform_classified_bucket(project, dataset_root, date="source")
+    scoped = _pre_conform_classified_bucket(dataset_root, date="source")
     _write_experiment_config("exp-classified", project,
                               {"subject": SUBJECT, "attribute": ATTRIBUTE, "id_map": VALUE_ID_MAP})
     module.process_project_root(project, plan=False, operator_subject=None, operator_attribute=None)
@@ -485,7 +485,7 @@ def test_a_value_keyed_ground_truth_record_is_reported_as_a_candidate(tmp_path):
     project = tmp_path / "project"
     dataset_root = tmp_path / "dataset"
     _register(project, dataset_root)
-    _pre_conform_classified_bucket(project, dataset_root)
+    _pre_conform_classified_bucket(dataset_root)
     _write_experiment_config("exp-classified", project,
                               {"subject": SUBJECT, "attribute": ATTRIBUTE, "id_map": VALUE_ID_MAP})
     gt_dir = dataset_root / "annotations" / "2026-01-01"
@@ -495,3 +495,30 @@ def test_a_value_keyed_ground_truth_record_is_reported_as_a_candidate(tmp_path):
         project, plan=False, operator_subject=None, operator_attribute=None)
 
     assert any("ground-truth candidate" in o and "healthy" in o for o in outcomes), outcomes
+
+
+def test_bucket_dirs_under_agrees_with_the_shared_walk_over_a_dot_prefixed_date_directory(tmp_path):
+    """``bucket_dirs_under`` calls the shared ``prediction_bucket_dirs`` walk rather than holding
+    a second implementation of it: the shared walk admits every date directory regardless of its
+    own name, and a dot-prefixed one is filtered back out here, the one remaining difference
+    between the two.
+    """
+    from tcip_mcp.dataset_layout import prediction_bucket_dirs
+
+    module = _load_script()
+    dataset_root = tmp_path / "dataset"
+    model_dir = dataset_root / "predictions" / "classifier"
+    real_date = model_dir / "2026-01-01"
+    hidden_date = model_dir / ".hidden"
+    _write_doc(real_date, "img1", [Annotation(subject="leaf", geometry=BBox(0, 0, 10, 10))])
+    _write_doc(hidden_date, "img1", [Annotation(subject="leaf", geometry=BBox(0, 0, 10, 10))])
+
+    shared = prediction_bucket_dirs(dataset_root)
+    assert hidden_date in shared, "the shared walk admits a directory without regard to its name"
+
+    found = module.bucket_dirs_under(dataset_root)
+    assert real_date in found
+    assert hidden_date not in found
+    assert set(found) == {
+        d for d in shared if module.is_bucket_name(d.name) and module._looks_like_bucket(d)
+    }
