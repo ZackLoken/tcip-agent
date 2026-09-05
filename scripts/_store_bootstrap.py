@@ -21,15 +21,34 @@ from tcip_mcp import experiments as experiments_module
 from tcip_mcp.dataset_layout import prediction_bucket_dirs
 from tcip_mcp.store_catalogue import bootstrapped_stores  # noqa: F401
 from tcip_mcp.tools import project_tools
+from tcip_mcp.tools.training_tools import hpo_root as project_hpo_root
 
 
-def _add(roots: list[tuple[str, str]], seen: set[str], path: Path, layout: str) -> None:
-    """Append ``(path, layout)`` unless a root at the same filesystem identity is already in."""
-    key = os.path.normcase(str(path))
+def _add(roots: list[tuple[str, str]], seen: set[tuple[str, str]], path: Path, layout: str) -> None:
+    """Append ``(path, layout)`` unless this exact path/layout pair is already in.
+
+    Keyed on the pair rather than the path alone: a directory can be two kinds of root at once
+    (a curated-dataset artifact that also happens to be registered as a dataset), and keying on
+    the path alone would keep whichever layout was added first and silently drop the other.
+    """
+    key = (os.path.normcase(str(path)), layout)
     if key in seen:
         return
     seen.add(key)
     roots.append((str(path), layout))
+
+
+def _add_if_dir(roots: list[tuple[str, str]], seen: set[tuple[str, str]], path: Path,
+                 layout: str) -> None:
+    """Like :func:`_add`, but skips a record-named root whose directory no longer exists.
+
+    A record can outlive the directory it names (a run's output moved, a curated dataset
+    deleted): the record itself is not a fabrication, so it is read without complaint, but
+    turning an absent directory into a root would have ``adopt_store.py`` create it and an empty
+    ``store.db`` under a path the operator never asked for.
+    """
+    if path.is_dir():
+        _add(roots, seen, path, layout)
 
 
 def project_roots(project_root: str | Path) -> tuple[tuple[str, str], ...]:
@@ -51,8 +70,9 @@ def project_roots(project_root: str | Path) -> tuple[tuple[str, str], ...]:
 
     ``ROOT``/``STATE``/``EXPERIMENTS``: the project's own root, plus ``.tcip/state`` and
     ``.tcip/experiments`` under it, the platform's own fixed convention (:mod:`tcip_mcp.
-    project_paths`, :mod:`tcip_mcp.experiments`); the same three for every registered dataset,
-    since a dataset carries its own ``.tcip/state`` (a dataset has no experiments of its own).
+    project_paths`, :mod:`tcip_mcp.experiments`); the same two, ``ROOT`` and ``STATE``, for every
+    registered dataset, since a dataset carries its own ``.tcip/state`` but no experiments of its
+    own.
 
     ``HPO_ROOT``: ``.tcip/hpo`` under the project root, the same fixed convention
     (:func:`tcip_mcp.tools.training_tools.hpo_root`'s own default). A sweep launched with an
@@ -69,19 +89,23 @@ def project_roots(project_root: str | Path) -> tuple[tuple[str, str], ...]:
     ``RUN``: each experiment's own ``status.json["output_dir"]``
     (:func:`tcip_mcp.experiments.stamp_run_identity` is the one writer), read for every id
     :func:`tcip_mcp.experiments.experiment_ids_with_status` names. A pre-created experiment that
-    was never launched carries no ``output_dir`` and contributes no root.
+    was never launched carries no ``output_dir`` and contributes no root; a launched one whose
+    output directory has since been moved or deleted is skipped the same way, its record read
+    without complaint but not turned into a root ``adopt_store.py`` would otherwise recreate.
 
     ``SPLITS``: each experiment's own ``split.json["manifest_binding"]["manifest_dir"]``
     (:mod:`tcip_mcp.pipelines.data.split_construction`'s own field, persisted by
     ``persist_split_manifest``), present only for a run bound to an existing split manifest
     rather than one that drew its own. A manifest ``draw_splits``/``freeze_split_manifest``
     (:mod:`tcip_mcp.tools.data_tools`) wrote but that no run has ever bound to is out of reach:
-    nothing in the project's own records names it.
+    nothing in the project's own records names it. A bound manifest directory that no longer
+    exists is skipped the same way as a moved run output directory.
 
     ``CURATED``: each experiment's own ``artifacts.json["curated_dataset"]["path"]``
     (:func:`tcip_mcp.tools.feedback_tools.materialize_review_dataset` records it there only when
     called with an ``experiment_id``). A curated dataset materialized without naming one is out
-    of reach the same way.
+    of reach the same way; a recorded one since deleted is skipped the same way as a moved run
+    output directory.
 
     ``PREDICTION_BUCKET``: two sources, since a bucket's own directory is never named by a fixed
     convention alone. Every model directory and its date subdirectories under each dataset's own
@@ -89,19 +113,17 @@ def project_roots(project_root: str | Path) -> tuple[tuple[str, str], ...]:
     ``scripts/doctor.py``'s registry check reads through), for a bucket that lives under a
     registered dataset; and each experiment's own ``lineage.json["predictions"]``
     (:mod:`tcip_mcp.tools.inference_tools`'s own ``update_lineage`` call), for a bucket an
-    inference run wrote outside any registered dataset's tree.
+    inference run wrote outside any registered dataset's tree. A recorded lineage bucket since
+    deleted is skipped the same way as a moved run output directory; the walk under a registered
+    dataset's own tree only ever names directories that exist.
     """
     root = Path(project_root).absolute()
     roots: list[tuple[str, str]] = []
-    seen: set[str] = set()
+    seen: set[tuple[str, str]] = set()
 
     _add(roots, seen, root, ROOT)
     _add(roots, seen, root / ".tcip" / "state", STATE)
     _add(roots, seen, root / ".tcip" / "experiments", EXPERIMENTS)
-
-    # Lazy: training_tools imports tcip_mcp.server, which registers the whole MCP tool surface,
-    # far more than this document-shape lookup needs.
-    from tcip_mcp.tools.training_tools import hpo_root as project_hpo_root
 
     hpo_dir = project_hpo_root(root=root)
     _add(roots, seen, hpo_dir, HPO_ROOT)
@@ -114,27 +136,27 @@ def project_roots(project_root: str | Path) -> tuple[tuple[str, str], ...]:
             experiments_module.status_key(exp_id, root=root), {})
         output_dir = status.get("output_dir") if isinstance(status, dict) else None
         if output_dir:
-            _add(roots, seen, Path(output_dir).absolute(), RUN)
+            _add_if_dir(roots, seen, Path(output_dir).absolute(), RUN)
 
         split_doc = experiments_module.read_member(
             experiments_module.split_key(exp_id, root=root), {})
         binding = split_doc.get("manifest_binding") if isinstance(split_doc, dict) else None
         manifest_dir = binding.get("manifest_dir") if isinstance(binding, dict) else None
         if manifest_dir:
-            _add(roots, seen, Path(manifest_dir).absolute(), SPLITS)
+            _add_if_dir(roots, seen, Path(manifest_dir).absolute(), SPLITS)
 
         artifacts = experiments_module.read_member(
             experiments_module.artifacts_key(exp_id, root=root), {})
         curated = artifacts.get("curated_dataset") if isinstance(artifacts, dict) else None
         curated_path = curated.get("path") if isinstance(curated, dict) else None
         if curated_path:
-            _add(roots, seen, Path(curated_path).absolute(), CURATED)
+            _add_if_dir(roots, seen, Path(curated_path).absolute(), CURATED)
 
         lineage = experiments_module.read_member(
             experiments_module.lineage_key(exp_id, root=root), {})
         predictions = lineage.get("predictions") if isinstance(lineage, dict) else None
         if predictions:
-            _add(roots, seen, Path(predictions).absolute(), PREDICTION_BUCKET)
+            _add_if_dir(roots, seen, Path(predictions).absolute(), PREDICTION_BUCKET)
 
     for entry in project_tools.read_datasets_raw(root):
         if not entry.get("path"):

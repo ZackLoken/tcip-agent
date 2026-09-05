@@ -580,9 +580,119 @@ def test_project_roots_names_a_run_output_dir_a_split_manifest_and_a_prediction_
 
     roots = project_roots(project)
 
-    assert (str(run_dir.resolve()), RUN) in roots
-    assert (str(split_dir.resolve()), SPLITS) in roots
-    assert (str(bucket.resolve()), PREDICTION_BUCKET) in roots
+    assert (str(run_dir.absolute()), RUN) in roots
+    assert (str(split_dir.absolute()), SPLITS) in roots
+    assert (str(bucket.absolute()), PREDICTION_BUCKET) in roots
+
+
+def test_project_roots_names_the_hpo_root_and_its_sweeps(tmp_path: Path):
+    """project_roots names the project's own HPO root, the fixed convention
+    training_tools.hpo_root resolves to, and every sweep directory found under it, the same
+    directory training_tools.sweep_dir names a study's own sweep at."""
+    from tcip_store.layout_claims import HPO_ROOT, SWEEP
+
+    from scripts._store_bootstrap import project_roots
+    from tcip_mcp.tools import training_tools
+
+    project = tmp_path / "project"
+    project.mkdir()
+
+    hpo_dir = training_tools.hpo_root(root=project)
+    sweep = training_tools.sweep_dir("study-1", root=project)
+    sweep.mkdir(parents=True)
+
+    roots = project_roots(project)
+
+    assert (str(hpo_dir), HPO_ROOT) in roots
+    assert (str(sweep), SWEEP) in roots
+
+
+def test_project_roots_names_a_curated_artifact_and_a_lineage_prediction_bucket(
+    tmp_path: Path, monkeypatch,
+):
+    """project_roots names a curated-dataset artifact recorded through record_artifact, the way
+    feedback_tools.py's materialize_review_dataset records one, and a prediction bucket an
+    inference run recorded through update_lineage, for a bucket written outside any registered
+    dataset's own tree."""
+    from tcip_store.layout_claims import CURATED, PREDICTION_BUCKET
+
+    from scripts._store_bootstrap import project_roots
+    from tcip_mcp import experiments
+
+    project = tmp_path / "project"
+    project.mkdir()
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(project))
+
+    experiments.create_experiment("exp-artifacts", {"model_source": {}})
+
+    curated_dir = tmp_path / "curated"
+    curated_dir.mkdir()
+    experiments.record_artifact("exp-artifacts", "curated_dataset", str(curated_dir))
+
+    lineage_bucket = tmp_path / "external_predictions" / "run1"
+    lineage_bucket.mkdir(parents=True)
+    experiments.update_lineage("exp-artifacts", predictions=str(lineage_bucket))
+
+    roots = project_roots(project)
+
+    assert (str(curated_dir.absolute()), CURATED) in roots
+    assert (str(lineage_bucket.absolute()), PREDICTION_BUCKET) in roots
+
+
+def test_project_roots_keeps_both_layouts_when_one_directory_is_two_kinds_of_root(
+    tmp_path: Path, monkeypatch,
+):
+    """A directory recorded as a curated-dataset artifact that is also registered as a project
+    dataset keeps both layouts: _add is keyed on the (path, layout) pair, not the path alone, so
+    the dataset-registry add is not silently dropped because the artifact add already claimed
+    that path."""
+    from tcip_store.layout_claims import CURATED, ROOT
+
+    from scripts._store_bootstrap import project_roots
+    from tcip_mcp import experiments
+
+    project = tmp_path / "project"
+    project.mkdir()
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(project))
+
+    experiments.create_experiment("exp-shared", {"model_source": {}})
+
+    shared = tmp_path / "shared"
+    shared.mkdir()
+    _make_dataset(shared)
+    experiments.record_artifact("exp-shared", "curated_dataset", str(shared))
+    register_dataset(str(shared), crop="hazelnut", project_root=str(project))
+
+    roots = project_roots(project)
+
+    assert (str(shared.absolute()), CURATED) in roots
+    assert (str(shared.absolute()), ROOT) in roots
+
+
+def test_project_roots_skips_a_recorded_run_output_dir_that_no_longer_exists(
+    tmp_path: Path, monkeypatch,
+):
+    """A run's own status.json can still name an output directory that has since been moved or
+    deleted; project_roots skips it rather than handing adopt_store.py a path to recreate from
+    nothing."""
+    from tcip_store.layout_claims import RUN
+
+    from scripts._store_bootstrap import project_roots
+    from tcip_mcp import experiments
+
+    project = tmp_path / "project"
+    project.mkdir()
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(project))
+
+    experiments.create_experiment("exp-stale", {"model_source": {}})
+    run_dir = tmp_path / "runs" / "exp-stale"
+    run_dir.mkdir(parents=True)
+    experiments.stamp_run_identity("exp-stale", "exp-stale", str(run_dir))
+    run_dir.rmdir()
+
+    roots = project_roots(project)
+
+    assert not any(layout == RUN for _, layout in roots)
 
 
 def test_external_dataset_paths_admits_a_bare_fingerprint_registry_entry(tmp_path: Path):
