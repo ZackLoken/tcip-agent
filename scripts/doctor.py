@@ -62,8 +62,10 @@ def check_negatives(root: Path, findings: list) -> None:
     rule ``annotations_hold_subject`` applies everywhere else this question is asked.
 
     Reads the status store through the same seam ``check_data_quality`` reads it through, so
-    the two agree on one root under whichever backend the process is bound to; not gated in
-    ``gated_stores`` for that reason, the same as any check reading entirely through the seam.
+    the two agree on one root under whichever backend the process is bound to. Not gated in
+    ``gated_stores`` for that reason: the label files this check also walks are blobs, a real
+    file under both backends, so neither read can be stale relative to the bound backend the way
+    a raw document read would be behind the database.
     """
     from tcip_annotation import json_io
     from tcip_annotation.json_io import UnreadableLabelDocument
@@ -162,8 +164,10 @@ def check_data_quality(root: Path, findings: list) -> None:
     ``check_reserved_names`` carries.
 
     Reads the status store through the same seam ``check_negatives`` reads it through, so the
-    two agree on one root under whichever backend the process is bound to; not gated in
-    ``gated_stores`` for that reason, the same as any check reading entirely through the seam.
+    two agree on one root under whichever backend the process is bound to. Not gated in
+    ``gated_stores`` for that reason: the label files this check reads through ``_scan_dataset``
+    are blobs, a real file under both backends, so neither read can be stale relative to the
+    bound backend the way a raw document read would be behind the database.
     """
     from tcip_annotation.format_io import detect_format
     from tcip_annotation.json_io import (
