@@ -229,6 +229,7 @@ describe("AnnotateToolbar subject authoring", () => {
       n_subjects: 2,
       classes_path: "C:/data/classes.json",
       version: "v1",
+      schema_change_sweep: { newly_stamped: {}, warning: null },
     });
     answerPrompt("  husk  ");
     renderToolbar();
@@ -255,6 +256,7 @@ describe("AnnotateToolbar subject authoring", () => {
       n_subjects: 2,
       classes_path: "C:/data/classes.json",
       version: "v1",
+      schema_change_sweep: { newly_stamped: {}, warning: null },
     });
     answerPrompt("leaf");
     renderToolbar();
@@ -277,6 +279,7 @@ describe("AnnotateToolbar subject authoring", () => {
       n_subjects: 1,
       classes_path: "C:/data/classes.json",
       version: "v1",
+      schema_change_sweep: { newly_stamped: {}, warning: null },
     });
     const promptSpy = answerPrompt(null);
     renderToolbar();
@@ -306,6 +309,7 @@ describe("AnnotateToolbar subject authoring", () => {
       n_subjects: 2,
       classes_path: "C:/data/classes.json",
       version: "v2",
+      schema_change_sweep: { newly_stamped: {}, warning: null },
     });
     answerPrompt("husk");
     renderToolbar();
@@ -364,6 +368,27 @@ describe("AnnotateToolbar subject authoring", () => {
 
     // "husk" was set optimistically as active; the refusal must not leave it active.
     expect(useStore.getState().gui.active_subject).toBe("leaf");
+  });
+
+  it("toasts the schema_change_sweep the save response carries, same as the attribute panel's", async () => {
+    seedDataset();
+    act(() => useStore.getState().setRegistry({ leaf: {} }, "v1"));
+    vi.spyOn(classesApi, "save").mockResolvedValue({
+      status: "ok",
+      n_subjects: 2,
+      classes_path: "C:/data/classes.json",
+      version: "v2",
+      schema_change_sweep: { newly_stamped: { leaf: 3 }, warning: null },
+    });
+    answerPrompt("husk");
+    renderToolbar();
+
+    openSubjectMenu();
+    await act(async () => {
+      fireEvent.click(screen.getByText("+ New subject"));
+    });
+
+    expect(useStore.getState().toasts.at(-1)?.message).toMatch(/3 of leaf's confirmations/);
   });
 });
 

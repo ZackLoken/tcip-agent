@@ -33,6 +33,15 @@ export type Registry = Record<string, SubjectDef>;
 // "unannotated" until that Complete, which is the whole negative-sample rail.
 export type ImageStatus = "complete" | "partial" | "negative" | "unannotated";
 
+/** What a registry save's attribute-vocabulary change did to existing confirmations: for each
+ *  affected subject, how many of its confirmations were stamped with the outgoing schema (so a
+ *  later read tells them apart from ones made under the new vocabulary), and a warning naming any
+ *  the sweep itself could not complete. */
+export interface SchemaChangeSweep {
+  newly_stamped: Record<string, number>;
+  warning: string | null;
+}
+
 export const classesApi = {
   // The registry lives in the dataset (not the project), so a shared image set carries its own
   // subject names; pass the dataset_root.
@@ -56,10 +65,13 @@ export const classesApi = {
     annotations_dir: string | null | undefined,
     version: string | null,
   ) =>
-    postJson<{ status: string; n_subjects: number; classes_path: string; version: string }>(
-      ROUTES.postClassesSave,
-      { project_root, subjects, dataset_root, annotations_dir, version },
-    ),
+    postJson<{
+      status: string;
+      n_subjects: number;
+      classes_path: string;
+      version: string;
+      schema_change_sweep: SchemaChangeSweep;
+    }>(ROUTES.postClassesSave, { project_root, subjects, dataset_root, annotations_dir, version }),
 
   // A Complete is a statement about one subject on one date. Every read and write is scoped to it,
   // so confirming an image while annotating leaf cannot mark it negative for a disease subject

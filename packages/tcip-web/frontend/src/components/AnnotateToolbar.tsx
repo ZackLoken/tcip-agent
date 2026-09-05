@@ -22,6 +22,7 @@ import type { ReplaceRequired } from "@/lib/coverageTracker";
 import { UNSET_GLYPH } from "@/lib/glyphs";
 import { canvasHoldsSubject } from "@/lib/imageStatus";
 import { imagePath } from "@/lib/paths";
+import { schemaChangeSweepToast } from "@/lib/registrySweep";
 import { useStore } from "@/store";
 
 // Progression order (start state first, terminal states last), matches Review's parallel
@@ -192,6 +193,8 @@ export function AnnotateToolbar({
           registryVersion,
         );
         setRegistry(next, saved.version);
+        const toast = schemaChangeSweepToast(saved.schema_change_sweep);
+        if (toast) useStore.getState().pushToast(toast, "info");
       } catch (e) {
         // A refusal means this browser's registry is not trustworthy: reload rather than keep it.
         useStore
