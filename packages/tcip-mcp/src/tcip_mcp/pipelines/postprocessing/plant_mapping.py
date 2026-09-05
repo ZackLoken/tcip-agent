@@ -117,7 +117,7 @@ class Assignment:
     distance_m: Optional[float]  # GPS distance to the matched plant (m); None if unmapped
 
 
-def assignment_is_attributed(assignment: object) -> bool:
+def assignment_is_attributed(assignment: "Assignment | dict") -> bool:
     """Whether ``assignment`` (an :class:`Assignment`, or the plain dict row ``MappingBuild.rows``
     produces) names a real plant: a non-empty ``plot_name``, the one rule a plant CSV's own blank
     name column and an unmapped capture (``plot_name=None``) both fail by, and nowhere else.
@@ -417,7 +417,7 @@ def _capture_row(s: ImageStamp) -> list[object]:
     ]
 
 
-def _row_digest(row: list[object]) -> str:
+def _row_digest(row: Sequence[object]) -> str:
     return hashlib.sha256(json.dumps(row, sort_keys=False).encode("utf-8")).hexdigest()[:16]
 
 
@@ -733,7 +733,7 @@ def haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     return EARTH_RADIUS_M * c
 
 
-def stems_delivery_reads(rows: Iterable[object], pred_dir: Path | str) -> set[str]:
+def stems_delivery_reads(rows: "Iterable[Assignment | dict]", pred_dir: Path | str) -> set[str]:
     """Stems of ``rows`` (one date's assignment rows, :class:`Assignment` objects or the plain
     dict rows :meth:`MappingBuild.rows` produces) :func:`assignment_is_attributed` calls
     attributed, whose stem also carries a prediction document under ``pred_dir``: the one
@@ -922,8 +922,8 @@ def assign_plants(
 
             if best_idx < 0 or best_d is None or best_d > nn_tolerance_m * SEQUENCE_MATCH_FACTOR:
                 # Fall through to plain NN, even if claimed: duplicates can happen
-                plant, d = _nearest_plant(s.lat, s.lon, plants)
-                if plant is None or d is None or d > nn_tolerance_m * NEAREST_MATCH_FACTOR:
+                plant, nn_d = _nearest_plant(s.lat, s.lon, plants)
+                if plant is None or nn_d is None or nn_d > nn_tolerance_m * NEAREST_MATCH_FACTOR:
                     out.append(
                         Assignment(
                             image_path=s.path,
@@ -932,7 +932,7 @@ def assign_plants(
                             plot_name=None,
                             accession_name=None,
                             source="unmapped",
-                            distance_m=d,
+                            distance_m=nn_d,
                         )
                     )
                 else:
@@ -944,7 +944,7 @@ def assign_plants(
                             plot_name=plant.plot_name,
                             accession_name=plant.accession_name,
                             source="nearest_neighbour",
-                            distance_m=d,
+                            distance_m=nn_d,
                         )
                     )
                 continue
