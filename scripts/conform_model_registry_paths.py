@@ -1,11 +1,11 @@
-"""Conform a project's registry index to schema_version 2 and respell every entry's
-``checkpoint_path`` relative to the project root, per the version-2 convention
+"""Conform a project's registry index into the entries-mapping shape and respell every entry's
+``checkpoint_path`` relative to the project root, per the storage convention
 (``tcip_mcp.model_registry``): relative POSIX exactly when the checkpoint lives under the
 registry's own scope root, absolute exactly when external.
 
-For each project root named, in one transaction: a bare top-level array (the frozen version 1
-shape) wraps into ``{schema_version: 2, entries: [...]}``, then every entry whose stored
-``checkpoint_path`` resolves under the root with a matching sha256 is respelled relative;
+For each project root named, in one transaction: a bare top-level array (the shape this store
+carried before the family that wrapped it) wraps into ``{entries: [...]}``, then every entry whose
+stored ``checkpoint_path`` resolves under the root with a matching sha256 is respelled relative;
 one that does not (moved, replaced, or genuinely outside the root) is relocated among the
 project's own checkpoint files by content digest, or, when no file anywhere under the root
 carries that digest, left as an absolute spelling classified external-or-missing. A root already
