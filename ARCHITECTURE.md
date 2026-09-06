@@ -31,7 +31,7 @@ snapshot; `tools/check_architecture_doc.py --inventory-json <path>` re-runs the 
 and cross-checks its counts against this document's tables, this table's own module and line
 totals included.
 
-HEAD 55c44eba has 426 modules across the six scanned roots (136538 total lines):
+HEAD 55c44eba has 426 modules across the six scanned roots (136540 total lines):
 
 | Package (root) | Modules | Lines |
 |---|---|---|
@@ -40,7 +40,7 @@ HEAD 55c44eba has 426 modules across the six scanned roots (136538 total lines):
 | tcip-web | 39 | 13371 |
 | tcip-store | 13 | 5244 |
 | tcip-web-frontend | 211 | 47987 |
-| tools | 17 | 4931 |
+| tools | 17 | 4933 |
 
 `tcip-mcp`, `tcip-annotation`, `tcip-web`, and `tcip-store` are the four Python packages under
 `packages/`; `tools` is `tools/` at the repo root (not an installed package);
