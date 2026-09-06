@@ -83,7 +83,7 @@ function launcherDescription(launchedBy: TrainingRunSummary["launched_by"]): str
       : "This run was launched by an agent through the MCP door.";
   }
   if (launcher === "process") {
-    return "This run was launched by a process with no browser and no agent handshake: a script or a test.";
+    return "This run was launched outside this app's own route and outside the agent, by a script or a test.";
   }
   return `This run's record names its own launcher: ${launcher}.`;
 }
@@ -706,7 +706,7 @@ export function TrainingTab() {
                     <div className="font-mono text-[11px]">
                       {r.run_id}
                       {r.experiment_id && r.experiment_id !== r.run_id && (
-                        <span className="text-tcip-muted break-all"> · {r.experiment_id}</span>
+                        <span className="text-tcip-muted break-words"> · {r.experiment_id}</span>
                       )}
                     </div>
                     <div className="text-[10px] text-tcip-muted flex justify-between">

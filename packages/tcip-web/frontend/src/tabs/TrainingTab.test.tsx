@@ -334,6 +334,29 @@ describe("TrainingTab run launcher mark", () => {
       "This run's record carries no launcher",
     );
   });
+
+  it("describes a process launch by what the record rules out, not a browser claim it can't carry", async () => {
+    vi.spyOn(trainingApi, "listRuns").mockResolvedValue({
+      runs: [
+        run({
+          run_id: "train-process-desc",
+          status: "running",
+          launched_by: { launcher: "process" },
+        }),
+      ],
+    });
+
+    render(<TrainingTab />);
+    const button = await screen.findByRole("button", {
+      name: "train-process-desc running, started by another process",
+    });
+
+    const describedBy = button.getAttribute("aria-describedby");
+    expect(describedBy).toBeTruthy();
+    expect(document.getElementById(describedBy as string)).toHaveTextContent(
+      "This run was launched outside this app's own route and outside the agent, by a script or a test.",
+    );
+  });
 });
 
 describe("TrainingTab heading", () => {
