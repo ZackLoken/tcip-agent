@@ -497,6 +497,7 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | Module path | Ownership (one line) | In-repo imports | Imported by |
 |---|---|---|---|
 | tools/build_module_inventory.py | Builds a module inventory and real import graph for the repo's Python and TypeScript source trees. | 0 | 0 |
+| tools/census_double_published_buckets.py | Census of prediction buckets published more than once before the live-bucket refusal. | 5 | 0 |
 | tools/check_architecture_citations.py | Verify ARCHITECTURE.md's file:line citations against the code they quote, for CI. | 0 | 0 |
 | tools/check_architecture_doc.py | Verify ARCHITECTURE.md's module-ownership tables against the tree, for CI. | 0 | 0 |
 | tools/cross_family_ask.py | Pose one identical question to several agent harnesses and record comparable answers. | 0 | 0 |
