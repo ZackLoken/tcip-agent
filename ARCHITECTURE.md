@@ -909,7 +909,7 @@ registered at HEAD.
 | POST | `/api/state/tab` | `set_active_tab` | `app.py:328` |
 | WS | `/ws/state` | `state_ws` | `app.py:336` |
 | GET | `/health` | `health` | `app.py:431` |
-| GET | `/` | `index` | `app.py:442` |
+| GET | `/` | `index` | `app.py:439` |
 | POST | `/api/events/{panel}` | `post_panel_event` | `app.py:503` |
 | WS | `/ws/panel/{panel}` | `panel_ws` | `app.py:554` |
 
@@ -2158,7 +2158,7 @@ agreement, distinct from Phase 0's own structural "Implementation" label (`once,
 shared` / `written twice` / `mixed`), which described only whether the code was
 physically written once or twice, not whether that code enforces agreement in
 practice. The two fields disagree for several seams (S14, S17, S19, S20, S26, S32,  <!-- queued: P5-275 unify -->
-S33, S40, S59, S60, S66): Phase 0 recorded a single shared implementation at the  <!-- queued: P5-294 unify -->
+S33, S40, S59, S66): Phase 0 recorded a single shared implementation at the  <!-- queued: P5-294 unify -->
 structural level, which the Phase 3 adjudication accepts only when no second,
 unshared restatement of the same fact exists elsewhere, whatever one function is  <!-- queued: P5-293 unify -->
 the primary implementation. Both fields are
@@ -2677,8 +2677,8 @@ Phase 3 verdict: duplicated.
 
 ## Totals
 
-66 of 66 seams from the Phase 0 inventory carry a Phase 3 `single_implementation` verdict.
-By verdict:
+66 of the 67 seams from the Phase 0 inventory carry a Phase 3 `single_implementation` verdict;
+S60 was retired. By verdict:
 
 - `duplicated`: 22 seams.
 - `single`: 42 seams (S01, S02, S03, S06, S07, S08, S12, S13, S14, S15, S16, S17, S18, S19, S20,

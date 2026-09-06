@@ -115,8 +115,9 @@ Calls made for this single-operator desktop GUI:
   The Host header must name this backend as reached (its arrival address, its own hostname, or
   an entry of `TCIP_WEB_ADVERTISED_HOSTS`, consulted only under the opt-in; never a wildcard),
   and every WebSocket connect and every state-changing HTTP request (`POST`/`PUT`/`PATCH`/
-  `DELETE`) must carry an Origin the backend serves: the request's own origin, a loopback
-  origin at any port on a local arrival, or an advertised authority under the opt-in. On a
+  `DELETE`) either carries no Origin at all (the non-browser allowance; the MCP tools send
+  none) or must carry one the backend serves: the request's own origin, a loopback origin at
+  any port on a local arrival, or an advertised authority under the opt-in. On a
   loopback arrival another local server's page is admitted by this layer too; only the
   JSON-body guard's unanswered preflight stops its browser from mutating. The port
   compared is the Origin's own, with its scheme's default port filled in when none is written,
