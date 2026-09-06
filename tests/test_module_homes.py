@@ -392,6 +392,19 @@ def test_redraw_calibration_holdout_has_one_home():
     )
 
 
+def test_applied_operating_point_has_one_home():
+    """``applied_operating_point`` (de-underscored from ``_applied_operating_point``) moved out of
+    ``tools/inference_tools.py`` into ``pipelines/resolution.py``, its callers widening from
+    ``run_inference``'s three internal resolutions (the dry-run preview, the verified body, the
+    raster branch) to every direct resolver of a stated-or-default conf/NMS/max_dets, the
+    full-frame evaluation runner included."""
+    _assert_one_home(
+        {"applied_operating_point"},
+        _module_path("tools/inference_tools.py"),
+        _module_path("pipelines/resolution.py"),
+    )
+
+
 def test_ordinal_regression_calibration_functions_have_one_home():
     """``calibrate_scalar_operating_point`` moved out of
     ``tools/phenology_tools.py`` into ``tools/calibration_tools.py``, name unchanged;
