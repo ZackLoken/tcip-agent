@@ -138,7 +138,7 @@ describe("StatusBar canvas facts", () => {
     render(<StatusBar />);
 
     expect(screen.getByText("Image: 800×600")).toBeInTheDocument();
-    expect(screen.getByText(/boxes/)).toBeInTheDocument();
+    expect(screen.getByText("1 box")).toBeInTheDocument();
   });
 
   it("hides the image size and shape counts for a canvas loaded from another dataset", () => {
@@ -227,7 +227,7 @@ describe("StatusBar shape counts (stored records only, never a derived box)", ()
     }));
     const { container } = render(<StatusBar />);
 
-    expect(screen.getByText("1 polygons")).toBeInTheDocument();
+    expect(screen.getByText("1 polygon")).toBeInTheDocument();
     expect(container.textContent).not.toContain("|");
   });
 
@@ -256,8 +256,40 @@ describe("StatusBar shape counts (stored records only, never a derived box)", ()
 
     // Both counts and the separator sit in one span as sibling text/element nodes, so a
     // whole-string match misses; a substring regex still finds each independently.
-    expect(screen.getByText(/1 polygons/)).toBeInTheDocument();
-    expect(screen.getByText(/1 boxes/)).toBeInTheDocument();
+    expect(screen.getByText(/1 polygon/)).toBeInTheDocument();
+    expect(screen.getByText(/1 box/)).toBeInTheDocument();
     expect(screen.getByText("|")).toBeInTheDocument();
+  });
+
+  it("pluralizes each count on its own value, not the other's", () => {
+    useStore.setState((s) => ({
+      canvas: {
+        ...s.canvas,
+        polygons: [
+          {
+            rings: [
+              [
+                [0, 0],
+                [10, 0],
+                [10, 10],
+                [0, 10],
+              ],
+            ],
+            subject: "bud",
+            attributes: {},
+          },
+        ],
+        boxes: [
+          { x1: 0, y1: 0, x2: 10, y2: 10, subject: "fruit", attributes: {} },
+          { x1: 20, y1: 0, x2: 30, y2: 10, subject: "fruit", attributes: {} },
+        ],
+      },
+    }));
+    render(<StatusBar />);
+
+    // Both counts sit in one span as sibling text/element nodes beside the separator, so a
+    // whole-string match misses; a substring regex still finds each independently.
+    expect(screen.getByText(/1 polygon/)).toBeInTheDocument();
+    expect(screen.getByText(/2 boxes/)).toBeInTheDocument();
   });
 });
