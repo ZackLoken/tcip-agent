@@ -18,12 +18,26 @@ PATH_DECLARATION = FRONTEND_SRC / "lib" / "paths.ts"
 
 _STATUS_UNION_RE = re.compile(r"export type ImageStatus = ([^;]+);")
 _RECORD_EXT_RE = re.compile(r'export const RECORD_EXT = "([^"]+)";')
+_FINISHED_STATUSES_RE = re.compile(
+    r"export const FINISHED_STATUSES: readonly ImageStatus\[\] = \[([^\]]+)\];"
+)
 
 
 def _statuses() -> tuple[str, ...]:
     from tcip_mcp.dataset_layout import IMAGE_STATUSES
 
     return IMAGE_STATUSES
+
+
+def test_the_browsers_finished_statuses_are_the_ones_dataset_layout_declares() -> None:
+    """The frontend's own FINISHED_STATUSES declaration, parsed independently of the wider
+    ImageStatus union check above, holds equal to dataset_layout.FINISHED_STATUSES (coverage)."""
+    from tcip_mcp.dataset_layout import FINISHED_STATUSES
+
+    match = _FINISHED_STATUSES_RE.search(STATUS_DECLARATION.read_text(encoding="utf-8"))
+    assert match is not None, "FINISHED_STATUSES is no longer where this test reads it"
+    declared = tuple(re.findall(r'"([^"]+)"', match.group(1)))
+    assert declared == FINISHED_STATUSES
 
 
 def _frontend_sources(include_tests: bool) -> list[Path]:
