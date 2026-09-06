@@ -171,8 +171,8 @@ the catkin-elongation cautionary tale there). Currant-specific traps:
 - Never substitute a raw RGB color threshold for ripeness. `fruit_ripe_*` depends
   on a breeder-defined eating stage (color + firmness + separation); validate a
   ripeness call against expert-scored fruit before emitting any date.
-- Never regress chemistry from pixels. A confident berry-color-to-brix,
-  -pH, -TA, or -anthocyanin model is precisely the "precise, wrong phenotype" trap
+- Never regress chemistry from pixels. A berry-color-to-brix, -pH, -TA, or
+  -anthocyanin model is not a valid measurement
   (`fruit_juice_brix`, `fruit_juice_pH`, `fruit_juice_TA`,
   `fruit_anthocyanin_content` are lab assays).
 - Disease ordinals map to the breeder's rating scale validated against expert

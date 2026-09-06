@@ -15,7 +15,7 @@ orchard/agroforestry rows, not a bush or hedgerow crop like currant or elderberr
 
 Reproductively it is monoecious and ambophilous, pollinated by both wind and insects (the
 strong floral scent, sticky pollen, and nectar-bearing bisexual catkins point to a substantial
-insect role, revising the older "wind-pollinated" label), with a duodichogamous bloom that
+insect role), with a duodichogamous bloom that
 governs how the floral traits must be imaged:
 
 - Two catkin morphotypes exist: unisexual male catkins and bisexual/androgynous
@@ -25,8 +25,8 @@ governs how the floral traits must be imaged:
 - Predominantly self-incompatible, so nut set needs cross-pollination between compatible
   cultivars nearby.
 
-This two-catkin-type biology is why `catkin_sex_ratio` and `catkin_bloom_date` cannot be read
-off box size or a naive "male vs female" split (see Measurement integrity).
+`catkin_sex_ratio` and `catkin_bloom_date` cannot be read off box size or a naive
+"male vs female" split (see Measurement integrity).
 
 ## Trait authority
 
