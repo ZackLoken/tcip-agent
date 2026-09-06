@@ -2514,11 +2514,12 @@ def _reconcile_validity(
             ref = VALIDATED_FALSE
         per_bucket[str(d)] = ref
         conf_val = ((sc.get("operating_point") or {}).get(param_key) or {}).get("value")
-        bucket_confs[str(d)] = float(conf_val) if isinstance(conf_val, (int, float)) else None
+        conf = float(conf_val) if isinstance(conf_val, (int, float)) else None
+        bucket_confs[str(d)] = conf
         if ref in accepted:
             refs.add(ref)
-            if bucket_confs[str(d)] is not None:
-                confs.append(bucket_confs[str(d)])
+            if conf is not None:
+                confs.append(conf)
         else:
             unvalidated.append(str(d))
             all_validated = False
