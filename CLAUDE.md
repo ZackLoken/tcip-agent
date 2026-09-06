@@ -44,7 +44,7 @@ Codex also through the generated block in `AGENTS.md`; any other client reaches 
 Your default failure is pushing through friction by guessing.
 
 - Scope the project-data ritual before running it. Platform work skips `load_project_memory`,
-  `inspect_project` and `doctor.py` entirely. Project work first confirms the active-project
+  `inspect_project` and `tcip doctor` entirely. Project work first confirms the active-project
   marker names the task's project (`view_gui_state`, cheaply; the marker is rewritten by
   `activate_project` on every project switch and persists across sessions between switches),
   asking when the task names none; then
@@ -210,7 +210,7 @@ python tools/gate_baseline.py --out <dir>   # the CI-parity gate, Git Bash on Wi
 cd packages/tcip-web/frontend && npm run format:check && npm run lint && npm run typecheck && npm test && npm run build
 python -m tcip_web                 # backend plus built UI at http://127.0.0.1:8765
 tcip export-store <root>           # a root's database-held records back out as files
-tcip adopt-store <root>             # a root's loose record files into its database
+tcip adopt-store <root>            # a root's loose record files into its database
 ```
 
 Every process binds one storage backend at its entry point; an unset environment or
@@ -218,7 +218,7 @@ Every process binds one storage backend at its entry point; an unset environment
 `TCIP_STORE_BACKEND=file` the loose-file layout, any other value refuses.
 `tests/test_store_contract.py` runs on both in one run; the rest runs on whichever is bound, so
 run `pytest tests/` both ways when you touch the seam. A root with loose records is
-refused by the database backend until `adopt_store.py` conforms it. The MCP server auto-launches
+refused by the database backend until `tcip adopt-store` conforms it. The MCP server auto-launches
 from `.mcp.json` at the repo root; a stale tool index (an `InputValidationError` for a name you
 expect, or a renamed tool under its old name) means restart the client. Durable state resolves
 via `$TCIP_STATE_ROOT`, pinned at startup by the web backend and every MCP server.

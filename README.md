@@ -168,7 +168,7 @@ only a Results tab delivering route can, through the breeder's own acknowledged 
 
 - Annotations: per-image COCO-shaped JSON (with `created_by`/`accepted_by` provenance), plus the dataset-level COCO assembled from it for training.
 - Experiments: one record per run holding config, metrics, artifacts and lineage, with the run's own files (weights, TensorBoard events, the source snapshot) under `.tcip/experiments/<id>/` beside it.
-- Audit log: all MCP tool calls logged via the `@audited` decorator, into the append-only log under the root each call's scope names, and written out at `.tcip/audit.jsonl` by the file backend and by `export_store.py`. The append runs after the tool body; an entry the decorator cannot append raises.
+- Audit log: all MCP tool calls logged via the `@audited` decorator, into the append-only log under the root each call's scope names, and written out at `.tcip/audit.jsonl` by the file backend and by `tcip export-store`. The append runs after the tool body; an entry the decorator cannot append raises.
 - Lazy imports: within the MCP server's import closure, heavy deps (torch, torchvision) are imported inside function bodies; other modules under `packages/*/src` (the training and inference pipelines, model components) import them at module level.
 - Crop traits: controlled vocabulary defined in `packages/tcip-mcp/src/tcip_mcp/knowledge/crops/`.
 - Measurement-integrity gates: every parameter a delivered phenotype depends on (confidence
