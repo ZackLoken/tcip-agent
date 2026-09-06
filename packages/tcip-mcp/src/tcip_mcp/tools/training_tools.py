@@ -3169,8 +3169,8 @@ def evaluate_model(
             path (classification/ordinal/regression, one row per image stem).
         task: Task type.
         conf_threshold: Operating confidence for P/R/F1. ``None`` (default) resolves to the
-            platform default (``DEFAULT_CONF``) on both regimes; an explicit value is always
-            honored verbatim, on both, a stated value equal to the default included.
+            platform default (``DEFAULT_CONF``) on every regime; an explicit value is always
+            honored verbatim, on every regime, a stated value equal to the default included.
         iou_threshold: Operating IoU (on COCOeval's grid; 0.5 -> index 0).
         iou_type: 'bbox' or 'segm'. Default (None) auto-resolves from the task, 'segm' for
             instance_seg, 'bbox' otherwise, so a mask model isn't silently scored as boxes.
