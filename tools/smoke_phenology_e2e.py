@@ -155,7 +155,7 @@ def _author_bud_opening_trait_spec(root: Path) -> None:
     spec, reason = traits._validate_and_write_spec(key, data, expect=ts.Version.ABSENT)
     if spec is None:
         raise ValueError(f"the fixture trait spec does not clear crops.yml: {reason}")
-    seed_confirmed_crossing(root, data["name"])
+    seed_confirmed_crossing(root, data["name"], measured_subject=SUBJECT)
 
 
 def main() -> int:
@@ -194,7 +194,7 @@ def main() -> int:
             # 1. Scene: geolocated images + per-image classified predictions.
             for date in DATES:
                 base_time = datetime.strptime(date, "%Y-%m-%d").replace(hour=9, minute=30)
-                n_elong = round(FRACTIONS[date] * N_DETECTIONS)
+                n_open = round(FRACTIONS[date] * N_DETECTIONS)
                 for j, plant in enumerate(PLANTS):
                     stem = _stem(plant["plot"], date)
                     _write_geo_image(
@@ -206,7 +206,7 @@ def main() -> int:
                     # digest, and this scene has no checkpoint behind it to name one from.
                     write_predictions_json(
                         preds_root / date / f"{stem}.json",
-                        _pred_result(n_elong, N_DETECTIONS, width=8, height=8), None,
+                        _pred_result(n_open, N_DETECTIONS, width=8, height=8), None,
                         subject=SUBJECT, attribute=ATTRIBUTE, id_map=ID_MAP,
                     )
                 # The bucket's own recorded scope and id_map, the shape run_inference stamps,
