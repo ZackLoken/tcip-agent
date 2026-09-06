@@ -75,7 +75,7 @@ def read_datasets(project_root: str | Path) -> list[dict]:
     here would make the next :func:`upsert_dataset` write a list holding one entry and drop
     every other dataset identity the project had recorded. An entry carrying a non-null
     ``fingerprint`` that names no formula version (a bare value from before the ``v<n>:`` prefix
-    existed) refuses by id, naming ``scripts/restamp_dataset_fingerprint.py`` as the remedy,
+    existed) refuses by id, naming re-registration through ``register_dataset`` as the remedy,
     rather than serving it as that dataset's current identity.
     """
     from tcip_mcp.pipelines.data.dataset_fingerprint import fingerprint_formula_version
@@ -86,9 +86,8 @@ def read_datasets(project_root: str | Path) -> list[dict]:
         if fingerprint is not None and fingerprint_formula_version(fingerprint) is None:
             raise ValueError(
                 f"dataset registry entry {entry.get('id')!r} under {project_root} carries a "
-                f"fingerprint {fingerprint!r} that names no formula version; run "
-                "scripts/restamp_dataset_fingerprint.py against it to bring it to the current "
-                "shape")
+                f"fingerprint {fingerprint!r} that names no formula version; re-register it "
+                "through register_dataset to bring it to the current shape")
     return entries
 
 
@@ -96,9 +95,9 @@ def read_datasets_raw(project_root: str | Path) -> list[dict]:
     """The project's dataset registry entries, whatever fingerprint each one states, never
     refusing on a bare pre-prefix value the way :func:`read_datasets` does.
 
-    For a caller whose job is fixing or diagnosing that very value
-    (``scripts/restamp_dataset_fingerprint.py``, ``scripts/check_dataset_identity.py``) rather
-    than serving it as a dataset's current identity.
+    For a caller whose job is fixing or diagnosing that very value (re-registering through
+    ``register_dataset``, or ``scripts/check_dataset_identity.py``) rather than serving it as a
+    dataset's current identity.
     """
     return _registry_entries(tcip_store.read(dataset_registry_key(project_root), default=[]))
 
@@ -111,9 +110,9 @@ def registry_path_for(dataset_root: str | Path, project_root: str | Path) -> str
     Containment is decided by filesystem identity (``os.path.samefile`` over the resolved
     dataset root's own ancestors), never a string or ``Path.relative_to`` comparison on the
     caller's own spellings, so a case variant, an alias or a junction of either root reads
-    exactly as the filesystem sees it. One implementation, called by :func:`register_dataset`
-    and by ``scripts/conform_dataset_registry_paths.py``, the one-off script that carries an
-    already-registered project onto this rule. Absolute (unchanged) whenever either side is not
+    exactly as the filesystem sees it. One implementation, called only by
+    :func:`register_dataset`, so a registered project's stored path can never disagree with what
+    registration itself would produce. Absolute (unchanged) whenever either side is not
     an existing directory: there is nothing to compare a missing path against. A relative form
     is stored with POSIX separators (``as_posix()``), so a nested dataset's entry (a deeper
     relative form than the project's own ``"."``) reads the same after a cross-machine move;

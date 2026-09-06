@@ -60,19 +60,19 @@ from tcip_web.routes.images import _checked
 router = APIRouter(prefix="/api/coverage", tags=["coverage"])
 
 _CONFORM_HINT = (
-    "run scripts/conform_view_coverage_viewing.py against this dataset to bring it to the "
-    "current shape (--plan first to preview the change)"
+    "no operator door rewrites an existing view-coverage record; this dataset's record must be "
+    "corrected to the current shape before it can be read"
 )
 
 _OLD_WORKING_SCALE_KEY = "working_scale_bar_at_write"
 _WORKING_SCALE_CONFORM_HINT = (
-    "run scripts/conform_working_scale_at_write.py against this dataset to bring it to the "
-    "current shape (--plan first to preview the change)"
+    "no operator door renames the stale key on an existing record; this dataset's record must "
+    "be corrected to the current shape before it can be read"
 )
 
 _ATTESTED_VIEW_CONFORM_HINT = (
-    "run scripts/conform_region_completeness_attested_view.py against this dataset to bring it "
-    "to the current shape (--plan first to preview the change)"
+    "no operator door stamps the missing key onto an existing record; this dataset's record "
+    "must be corrected to the current shape before it can be read"
 )
 
 
@@ -91,8 +91,8 @@ def _refuse_missing_attested_view(image_name: str, record: dict) -> None:
 
 def _refuse_old_working_scale_key(image_name: str, record: dict) -> None:
     """Refuse a stored region-completeness record whose ``cells_attested_view`` still carries
-    the renamed key (``_OLD_WORKING_SCALE_KEY``), naming the conform script rather than serving
-    or merging into a value the current shape no longer reads."""
+    the renamed key (``_OLD_WORKING_SCALE_KEY``), stating the fact rather than serving or
+    merging into a value the current shape no longer reads."""
     attested_view = record.get("cells_attested_view")
     if not isinstance(attested_view, dict):
         return
@@ -136,7 +136,7 @@ def _require_date_matches_path(image_path: str, date: Optional[str]) -> None:
 
 def _validated_record(image_name: str, record: object) -> None:
     """Refuse rather than serve or merge into a stored record that no longer validates as
-    ``CoverageRecord``, naming the conform script instead of silently coercing or dropping it.
+    ``CoverageRecord``, stating the fact instead of silently coercing or dropping it.
     ``record`` need not be a dict at all: a stored document in some other shape is exactly as
     unmergeable as a dict missing a required key, and validates the same way."""
     try:
@@ -488,7 +488,7 @@ def get_coverage(
 ) -> dict:
     """The stored coverage record for one image under one subject/date bucket, or
     ``{"coverage": null}`` when nothing has been recorded. A record stored in an old shape refuses
-    (400), naming ``scripts/conform_view_coverage_viewing.py`` rather than serving it as-is."""
+    (400), naming what it needs rather than serving it as-is."""
     from tcip_mcp.dataset_layout import status_bucket, view_coverage_key
 
     subject = _require_subject(subject)
@@ -543,7 +543,7 @@ def post_coverage(payload: CoveragePayload) -> dict:
     audit line carries ``replace_confirmed``. A first record (no prior record at all) needs no
     flag. Cell names are validated against the posted grid's own cells; unknown names are
     refused. On the merge path the stored record is validated against ``CoverageRecord`` before
-    its cells are folded in, naming the conform script when it no longer holds that shape; the
+    its cells are folded in, naming what it needs when it no longer holds that shape; the
     replace path overwrites it wholesale, since there is nothing to merge into.
 
     A write happens, and is audited, only when the merge actually changes something: a raised or

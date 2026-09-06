@@ -231,7 +231,7 @@ def test_a_registry_carrying_a_bare_fingerprint_raises_naming_the_one_project(
         if Path(root).resolve() == bad.resolve():
             raise ValueError(
                 f"dataset registry entry 'x' under {root} carries a fingerprint 'deadbeef' "
-                "that names no formula version; run scripts/restamp_dataset_fingerprint.py")
+                "that names no formula version; re-register it through register_dataset")
         return real_read_datasets(root)
 
     monkeypatch.setattr(project_tools, "read_datasets", flaky)

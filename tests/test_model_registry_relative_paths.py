@@ -33,8 +33,7 @@ def _plant_registry_schema_version_two(root: Path) -> None:
     """Overwrite an already-written registry index's raw bytes to carry a stray
     ``schema_version: 2``: the on-disk shape a dev-era writer, predating the version-1 reset,
     left behind (the seam's own write-side check refuses the field on any ordinary write, so
-    this is the only way to plant it), following the same technique
-    ``test_conform_schema_version_reset.py``'s own ``_damage_record`` uses.
+    this is the only way to plant it).
     """
     key = registry_index_key(root)
     document = ts.read(key, default={"entries": []})
@@ -62,19 +61,19 @@ def test_absent_registry_answers_empty_for_a_fresh_project(tmp_path: Path):
     assert read_registry_index(tmp_path) == []
 
 
-def test_a_bare_array_refuses_read_naming_the_conform_script(tmp_path: Path):
+def test_a_bare_array_refuses_read_naming_the_archive_import_remedy(tmp_path: Path):
     _seed_v1(tmp_path, [{"name": "legacy", "checkpoint_path": "x.pt"}])
 
-    with pytest.raises(RegistryVersionRefused, match="conform_model_registry_paths"):
+    with pytest.raises(RegistryVersionRefused, match="archive this project"):
         read_registry_index(tmp_path)
 
 
-def test_a_bare_array_refuses_a_write_naming_the_conform_script(tmp_path: Path):
+def test_a_bare_array_refuses_a_write_naming_the_archive_import_remedy(tmp_path: Path):
     _seed_v1(tmp_path, [{"name": "legacy", "checkpoint_path": "x.pt"}])
     ckpt = tmp_path / "m.pt"
     ckpt.write_bytes(b"weights")
 
-    with pytest.raises(RegistryVersionRefused, match="conform_model_registry_paths"):
+    with pytest.raises(RegistryVersionRefused, match="archive this project"):
         ModelRegistry(str(tmp_path)).register_model("m", str(ckpt), {}, metrics_source=None)
 
 
@@ -113,10 +112,10 @@ def test_archive_project_refuses_loudly_on_an_unconformed_registry(tmp_path: Pat
     result = archive_project(str(tmp_path), str(tmp_path.parent / "out.zip"))
 
     assert "error" in result
-    assert "conform_model_registry_paths" in result["error"]
+    assert "archive this project" in result["error"]
 
 
-def test_archive_project_refuses_a_schema_version_two_registry_naming_the_reset_script(
+def test_archive_project_refuses_a_schema_version_two_registry_stating_the_fact(
     tmp_path: Path,
 ):
     """A registry above the ceiling (a stray dev-era ``schema_version: 2``) must refuse the same
@@ -137,7 +136,7 @@ def test_archive_project_refuses_a_schema_version_two_registry_naming_the_reset_
     result = archive_project(str(project), str(out))
 
     assert "error" in result
-    assert "conform_schema_version_reset" in result["error"]
+    assert "nothing currently strips in place" in result["error"]
     assert not out.exists()
 
 

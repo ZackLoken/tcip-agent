@@ -344,8 +344,8 @@ def clear_log(key: Key) -> int:
     """Remove every entry from an append-only log and report how many entries it held.
 
     For a one-off operator clearing development-era history before a root reaches its
-    intended readers (``scripts/clear_dev_history.py``), never a runtime path: nothing in
-    the platform's own doors calls this. Not a format change: the store's kind, codec and
+    intended readers, never a runtime path: nothing in the platform's own doors calls this.
+    Not a format change: the store's kind, codec and
     schema_version ceiling are exactly what they were before and after, since only entries
     are removed and the next ``append`` starts a log identical in shape to the one this
     replaced; ``frozen-formats.json`` names no row for this operation because it changes

@@ -86,7 +86,7 @@ def test_plant_mapping_build_answers_the_named_400_for_a_bare_registry_fingerpri
     def bare(_root):
         raise ValueError(
             "dataset registry entry 'x' carries a fingerprint 'deadbeef' that names no formula "
-            "version; run scripts/restamp_dataset_fingerprint.py against it")
+            "version; re-register it through register_dataset to bring it to the current shape")
 
     monkeypatch.setattr(project_tools, "read_datasets", bare)
     store.open_project(tmp_path.resolve())
@@ -99,7 +99,7 @@ def test_plant_mapping_build_answers_the_named_400_for_a_bare_registry_fingerpri
         },
     )
     assert resp.status_code == 400
-    assert "restamp_dataset_fingerprint.py" in resp.json()["detail"]
+    assert "register_dataset" in resp.json()["detail"]
 
 
 def test_plant_mapping_load_missing_returns_empty(client: TestClient, tmp_path: Path) -> None:

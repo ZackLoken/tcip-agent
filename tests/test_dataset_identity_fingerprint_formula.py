@@ -1,9 +1,9 @@
 """A dataset identity carrying a bare, pre-prefix fingerprint (from before ``dataset_fingerprint``
 started stamping a ``v<n>:`` formula-version prefix) is refused rather than admitted as the
 dataset's current identity, both by the identity decoder and by the project registry reader:
-scripts/restamp_dataset_fingerprint.py is the remedy either names. A fixture registers a dataset
-for real and hand-edits its identity to a bare value afterwards, standing in for a dataset
-registered before this family, the way test_restamp_dataset_fingerprint.py's own fixtures do.
+re-registering through ``register_dataset`` is the remedy either names. A fixture registers a
+dataset for real and hand-edits its identity to a bare value afterwards, standing in for a
+dataset registered before this family.
 """
 
 from __future__ import annotations
@@ -43,7 +43,7 @@ def _bare_the_identity(root: Path) -> str:
     return bare
 
 
-def test_decode_dataset_identity_refuses_a_bare_fingerprint_naming_the_script(tmp_path: Path):
+def test_decode_dataset_identity_refuses_a_bare_fingerprint_naming_register_dataset(tmp_path: Path):
     root = tmp_path / "dataset"
     root.mkdir()
     _real_dataset(root)
@@ -51,7 +51,7 @@ def test_decode_dataset_identity_refuses_a_bare_fingerprint_naming_the_script(tm
     assert "error" not in result, result
     _bare_the_identity(root)
 
-    with pytest.raises(ValueError, match="restamp_dataset_fingerprint.py"):
+    with pytest.raises(ValueError, match="register_dataset"):
         require_dataset_identity(root)
 
 
@@ -83,7 +83,7 @@ def test_decode_dataset_identity_admits_a_null_fingerprint(tmp_path: Path):
 def test_decode_dataset_identity_direct_call_refuses_and_admits(tmp_path: Path):
     """decode_dataset_identity itself, not only through require_dataset_identity."""
     bare_bytes = ts.RECORD_JSON.encode({"crop": "chestnut", "id": "abc", "fingerprint": "f" * 16})
-    with pytest.raises(ValueError, match="restamp_dataset_fingerprint.py"):
+    with pytest.raises(ValueError, match="register_dataset"):
         decode_dataset_identity(bare_bytes, dataset_root=tmp_path)
 
     prefixed_bytes = ts.RECORD_JSON.encode(
@@ -92,7 +92,7 @@ def test_decode_dataset_identity_direct_call_refuses_and_admits(tmp_path: Path):
     assert decoded["fingerprint"] == "v1:" + "f" * 16
 
 
-def test_read_datasets_refuses_an_entry_carrying_a_bare_fingerprint_naming_the_script(
+def test_read_datasets_refuses_an_entry_carrying_a_bare_fingerprint_naming_register_dataset(
     tmp_path: Path,
 ):
     root = tmp_path / "dataset"
@@ -103,7 +103,7 @@ def test_read_datasets_refuses_an_entry_carrying_a_bare_fingerprint_naming_the_s
     upsert_dataset(root, {"id": result["id"], "path": ".", "crop": "chestnut",
                           "fingerprint": "f" * 16})
 
-    with pytest.raises(ValueError, match="restamp_dataset_fingerprint.py"):
+    with pytest.raises(ValueError, match="register_dataset"):
         read_datasets(root)
 
 

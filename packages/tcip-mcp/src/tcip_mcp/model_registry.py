@@ -6,9 +6,12 @@ when the checkpoint lives under the registry's own scope root, absolute exactly 
 so a pre-family absolute-under-root spelling can never read as a designed-external claim. Every
 response surface (``list_models``, ``get_model``, ``best_model``, both ``register_model`` returns)
 answers the resolved absolute path on a copy, never this internal storage spelling.
-``scripts/conform_model_registry_paths.py`` wraps a bare top-level array (the shape this store
-carried before the family that wrapped it) into the mapping shape and respells every entry; a
-document neither shape refuses through :class:`RegistryVersionRefused` naming that script.
+A bare top-level array (the shape this store carried before the family that wrapped it) is
+never accepted for reading; the only door that wraps one into the mapping shape and respells
+every entry is ``import_project``'s own staging conform
+(:func:`~tcip_mcp.model_registry.conform_registry_paths_on_disk`), so a project stuck in the old
+shape is corrected by archiving it with ``archive_project`` and importing the archive back. A
+document neither shape refuses through :class:`RegistryVersionRefused` naming what it found.
 """
 
 from __future__ import annotations
@@ -99,8 +102,10 @@ def _read_registry_document(raw: object) -> dict:
     if isinstance(raw, list):
         raise RegistryVersionRefused(
             "the model registry index is a top-level JSON array, the shape this store carried "
-            "before the family that wrapped it: conform it with "
-            "scripts/conform_model_registry_paths.py before this registry can be read"
+            "before the family that wrapped it into an entries mapping; no door rewraps a live "
+            "project's registry in place, so archive this project with archive_project and "
+            "import the archive back with import_project, which conforms the registry as it "
+            "lands, before this registry can be read"
         )
     if (
         not isinstance(raw, dict)
@@ -144,7 +149,7 @@ def read_registry_index(project_path: str | Path) -> list[dict]:
     registered nothing reads as an empty list; an index that exists but does not decode
     raises ``DecodeError``, because a corrupt registry is not a project with no models.
     Raises :class:`RegistryVersionRefused` for a document this reader does not recognize (a
-    bare top-level array included): conform it with ``scripts/conform_model_registry_paths.py``.
+    bare top-level array included); see the module docstring for the archive/import remedy.
     """
     raw = tcip_store.read(registry_index_key(project_path), default=None)
     return _read_registry_document(raw)["entries"]
@@ -191,18 +196,18 @@ def _resolve_producer(entries: tuple[dict, ...], *, checkpoint_path: Path, diges
     completion through the experiment-mode binding (:func:`_register_entry`) and ``None`` for an
     explicit-mode entry: a verified fact, not a caller assertion (``tags`` carries no producer
     claim any more). Every matched entry must carry the key at all, or the load refuses by name,
-    as ``best_model`` refuses a pre-``metrics_source`` entry: conform the registry with
-    ``scripts/conform_registry_experiment_id.py`` first. An entry naming ``None`` is ignored (not
-    a vote for ``None``); every entry that does name a producer must name the same one, or the
-    load refuses rather than guess a first match.
+    as ``best_model`` refuses a pre-``metrics_source`` entry: no operator door adds the missing
+    key to an existing entry. An entry naming ``None`` is ignored (not a vote for ``None``);
+    every entry that does name a producer must name the same one, or the load refuses rather
+    than guess a first match.
     """
     missing = [str(e.get("name")) for e in entries if "experiment_id" not in e]
     if missing:
         raise UnregisteredCheckpoint(
             f"{checkpoint_path} (sha256 {digest}) is named by registry entries {sorted(missing)!r} "
-            "that carry no experiment_id key (they predate the producer-binding field): conform "
-            "this registry with scripts/conform_registry_experiment_id.py before this checkpoint "
-            "can be loaded."
+            "that carry no experiment_id key (they predate the producer-binding field); no "
+            "operator door adds the missing key to an existing entry, so this checkpoint cannot "
+            "be loaded until those entries are corrected."
         )
     producers = {e["experiment_id"] for e in entries if e["experiment_id"] is not None}
     if len(producers) > 1:
@@ -380,15 +385,15 @@ def _refuse_if_owned_by_another_run(superseded: dict, *, name: str, new_experime
 
     Reads ``experiment_id`` directly, never through ``.get()``, so a pre-field entry (predating
     the producer-binding field) is not silently evictable: the key's absence itself refuses,
-    naming the conform script, exactly as a present-but-different owner does.
+    stating the fact plainly, exactly as a present-but-different owner does.
     """
     try:
         owner = superseded["experiment_id"]
     except KeyError:
         raise EntryOwnedByRun(
             f"registry entry {name!r} carries no experiment_id key (it predates the "
-            "producer-binding field): conform this registry with "
-            "scripts/conform_registry_experiment_id.py before replacing it."
+            "producer-binding field); no operator door adds the missing key to an existing "
+            "entry, so it cannot be replaced by name until it is corrected."
         ) from None
     if owner is not None and owner != new_experiment_id:
         raise EntryOwnedByRun(
@@ -405,7 +410,7 @@ def _write_registry_entry(txn: tcip_store.Txn, key: Key, entry: dict) -> dict | 
     caller to audit once the transaction has closed. Refuses (:class:`EntryOwnedByRun`) a replace
     whose superseded entry names a run other than this write's own. Reads and writes through the
     entries-mapping document pair: an unwrapped bare-array document raises
-    :class:`RegistryVersionRefused` naming the conform script before anything is written.
+    :class:`RegistryVersionRefused` naming what it found before anything is written.
     """
     index = _read_registry_document(txn.read(key, default=None))["entries"]
     superseded = next((e for e in index if e["name"] == entry["name"]), None)
@@ -542,7 +547,7 @@ seam already refuses it, never be silently downgraded by this conform reusing th
 
 
 def _document_entries_for_conform(raw: object) -> tuple[list[dict], bool, bool]:
-    """(entries, was_already_wrapped, had_stray_schema_version_two) for the conform script's own
+    """(entries, was_already_wrapped, had_stray_schema_version_two) for this conform's own
     read.
 
     Unlike :func:`_read_registry_document`, two dev-era shapes are accepted here rather than
@@ -714,8 +719,8 @@ def _wrap_and_drop_lines(*, already_wrapped: bool, had_stray_two: bool, plan: bo
 
 def conform_registry_paths(root: str | Path, *, plan: bool = False) -> list[str]:
     """Wrap ``root``'s registry index into the entries mapping and respell every entry's
-    checkpoint_path relative to ``root``, in one transaction (the same discipline as
-    ``scripts/conform_registry_experiment_id.py``).
+    checkpoint_path relative to ``root``, in one transaction (the same locked read-modify-write
+    discipline ``_register_entry`` uses).
 
     Per entry: a stored path that resolves under ``root`` with a matching ``sha256`` is
     respelled through the checkpoint speller (existence alone never blesses a replaced file). A
@@ -933,10 +938,8 @@ class ModelRegistry:
         entries, whose numbers nothing here verified. An entry carrying no ``metrics_source`` key
         at all is a malformed record predating the field (and, for the same reason, predating
         ``experiment_id``), refused by name rather than silently treated as just another
-        unverified entry: conform it with ``scripts/conform_registry_experiment_id.py`` first (the
-        eviction rail refuses a pre-``experiment_id`` entry's replace by name), then re-register it
-        through ``register_model`` to add ``metrics_source`` (its checkpoint on disk is unchanged;
-        the call re-hashes and rewrites the entry with both fields present). A present
+        unverified entry: no operator door adds either missing field to an existing entry, so a
+        registry carrying one must be corrected before ranking. A present
         ``metrics_source`` of ``None`` is not malformed, it is the honest pairing for an entry with
         no metrics. ``experiment_ids``, when given, narrows ranking to entries whose own
         ``experiment_id`` is in the set (an explicit-mode entry, whose ``experiment_id`` is
@@ -946,8 +949,9 @@ class ModelRegistry:
         if malformed:
             raise RegistryEntryPredatesMetricsSource(
                 f"registry entries {malformed} carry no metrics_source key (they predate the "
-                "field); conform each with scripts/conform_registry_experiment_id.py, then "
-                "re-register each through register_model, before ranking this registry."
+                "field, and the producer-binding field beside it); no operator door adds either "
+                "missing field to an existing entry, so this registry cannot be ranked until "
+                "they are corrected."
             )
         best = None
         best_val: float | None = None

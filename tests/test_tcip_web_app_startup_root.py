@@ -314,7 +314,7 @@ def test_a_refused_rehydrate_does_not_block_the_other_two_registries(tmp_path, m
     real_tuning, real_review = tuning.rehydrate_for_current_root, review.rehydrate_for_current_root
 
     def _fail_inference():
-        raise ValueError("boom; run scripts/conform_job_registry_roots.py against this root")
+        raise ValueError("boom; no operator door stamps the missing field onto this root")
 
     def _record_tuning():
         called.append("tuning")
@@ -335,7 +335,7 @@ def test_a_refused_rehydrate_does_not_block_the_other_two_registries(tmp_path, m
     refusals = jobstore.startup_refusals()
     assert len(refusals) == 1
     assert refusals[0]["registry"] == jobstore.INFERENCE_JOBS
-    assert "conform_job_registry_roots.py" in refusals[0]["error"]
+    assert "no operator door" in refusals[0]["error"]
     assert resp.json()["job_registry_startup_refusals"] == refusals
 
 

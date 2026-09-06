@@ -641,9 +641,8 @@ def verify_registry_csv_bytes(
 def parse_plant_registry_csvs(csv_paths: list[Path]) -> tuple[list[dict], str, int]:
     """Parse ``csv_paths`` into the registry's own ``{path, sha256, n_plants}`` entries, the
     content digest over every parsed row and the total plant count: the read-only half of
-    :func:`register_plant_registry_record` that commits nothing, so a preview
-    (``scripts/conform_plant_mapping_records.py --plan``) can compute exactly what a real
-    registration would write without writing it.
+    :func:`register_plant_registry_record` that commits nothing, so a preview can compute
+    exactly what a real registration would write without writing it.
 
     Raises :class:`NoGeoreferencedPlantsRefusal`, naming every file that parsed no georeferenced,
     named plant, the same check :func:`register_plant_registry_record` runs before it writes.
@@ -1237,9 +1236,9 @@ def persist_mapping(
     as it always has, and records nothing extra.
 
     A rebuild under ``name`` whose *current* record is stored in a shape this reader no longer
-    recognizes also raises :class:`MappingRebuildRefusal`, naming
-    ``scripts/conform_plant_mapping_records.py``: an unparseable existing record cannot be checked
-    for citations, so it can never be safely archived or silently replaced either.
+    recognizes also raises :class:`MappingRebuildRefusal`: an unparseable existing record cannot
+    be checked for citations, so it can never be safely archived or silently replaced either, and
+    no operator door repairs it in place.
     """
     from tcip_mcp.audit import record_event_or_raise
 
@@ -1252,8 +1251,8 @@ def persist_mapping(
             raise MappingRebuildRefusal(
                 f"plant mapping {name!r} under {project_root} is stored in a shape this reader "
                 f"no longer recognizes ({exc}); a rebuild cannot tell whether a delivery event "
-                "still cites it, so conform it with scripts/conform_plant_mapping_records.py "
-                "before rebuilding",
+                "still cites it, and no operator door repairs an existing record in place, so "
+                "this record must be corrected to the current shape before rebuilding",
                 event_ids=[],
             ) from exc
         existing_digest = record_digest(existing_record)
@@ -1352,8 +1351,8 @@ def _validated_record(raw: object, project_root: Path | str, name: str) -> dict:
     """``raw`` as a plant-mapping record, or the ``ValueError`` naming the project, the name and
     the field this reader does not recognize. A rebuild through ``build_plant_mapping`` is not
     named as the remedy here: :func:`persist_mapping` itself refuses a rebuild over a record this
-    function cannot validate, so the real remedy is conforming the stored shape first."""
-    remedy = "conform it with scripts/conform_plant_mapping_records.py"
+    function cannot validate, and no operator door corrects an existing record in place."""
+    remedy = "no operator door corrects an existing record in place"
     if not isinstance(raw, dict):
         raise ValueError(
             f"plant mapping {name!r} under {project_root} is not a record document "
