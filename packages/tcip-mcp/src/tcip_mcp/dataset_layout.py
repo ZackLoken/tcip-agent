@@ -479,7 +479,7 @@ def image_status_path(dataset_root: str | Path) -> Path:
     content (what actually trains), so it travels with the dataset rather than living in whichever
     project's private ``.tcip/`` happens to be an ancestor. The single locator every writer
     (the GUI's review flow, ``materialize_dataset``, ``draw_splits``) and every reader
-    (``confirmed_negative_names``, ``doctor.py``) must call; never reconstruct this path locally.
+    (``confirmed_negative_names``, ``tcip doctor``) must call; never reconstruct this path locally.
     """
     return _entry_path(_STATE_DOC, dataset_root, _IMAGE_STATUS_PARTS)
 

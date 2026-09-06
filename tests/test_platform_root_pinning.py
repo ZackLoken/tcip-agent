@@ -1,7 +1,7 @@
 """Platform-state-root pinning shared by the operator commands that call an ``@audited`` tool
 function outside the MCP server: scan-dataset, inspect-compute-resources,
 render-failure-cases, archive-project, and import-project, all built on
-``tcip_mcp.project_paths.require_platform_root`` so the resolve-or-refuse logic cannot drift
+``tcip_mcp.project_paths.require_and_pin_platform_root`` so the resolve-or-refuse logic cannot drift
 across five copies.
 
 scan-dataset stands in for the shared mechanism, exercised as the real process entry point
@@ -32,12 +32,12 @@ def _run(args: list[str], cwd: Path, platform_root: str | None) -> subprocess.Co
     )
 
 
-def test_require_platform_root_refuses_naming_both_when_neither_is_set(monkeypatch):
+def test_require_and_pin_platform_root_refuses_naming_both_when_neither_is_set(monkeypatch):
     monkeypatch.delenv("TCIP_STATE_ROOT", raising=False)
-    from tcip_mcp.project_paths import require_platform_root
+    from tcip_mcp.project_paths import require_and_pin_platform_root
 
     try:
-        require_platform_root(None)
+        require_and_pin_platform_root(None)
         raised = None
     except SystemExit as exc:
         raised = exc
@@ -47,11 +47,11 @@ def test_require_platform_root_refuses_naming_both_when_neither_is_set(monkeypat
     assert "TCIP_STATE_ROOT" in message
 
 
-def test_require_platform_root_resolves_and_sets_the_environment_variable(monkeypatch, tmp_path):
+def test_require_and_pin_platform_root_resolves_and_sets_the_environment_variable(monkeypatch, tmp_path):
     monkeypatch.delenv("TCIP_STATE_ROOT", raising=False)
-    from tcip_mcp.project_paths import require_platform_root
+    from tcip_mcp.project_paths import require_and_pin_platform_root
 
-    resolved = require_platform_root(str(tmp_path))
+    resolved = require_and_pin_platform_root(str(tmp_path))
 
     assert resolved == tmp_path.resolve()
     assert os.environ["TCIP_STATE_ROOT"] == str(tmp_path.resolve())
@@ -103,13 +103,13 @@ def _resolve_platform_state_root():
     return getattr(pp, "platform_state_root", None) or pp.project_root  # type: ignore[attr-defined]
 
 
-def _require_platform_root():
+def _require_and_pin_platform_root():
     import tcip_mcp.project_paths as pp
 
-    return pp.require_platform_root
+    return pp.require_and_pin_platform_root
 
 
-def test_platform_state_root_ignores_the_old_env_var_name_and_scripts_refuse_it(
+def test_platform_state_root_ignores_the_old_env_var_name_and_commands_refuse_it(
     monkeypatch, tmp_path
 ):
     """Only $TCIP_PROJECT_ROOT set (the retired spelling): the resolver must not honor it
@@ -128,7 +128,7 @@ def test_platform_state_root_ignores_the_old_env_var_name_and_scripts_refuse_it(
     assert resolve() == Path.cwd()
     assert resolve() != old_var_dir
 
-    pin = _require_platform_root()
+    pin = _require_and_pin_platform_root()
     try:
         pin(None)
         raised = None
@@ -146,11 +146,11 @@ def test_platform_state_root_honors_the_new_env_var_name(monkeypatch, tmp_path):
     assert platform_state_root() == tmp_path
 
 
-def test_require_platform_root_resolves_the_new_env_var_name(monkeypatch, tmp_path):
+def test_require_and_pin_platform_root_resolves_the_new_env_var_name(monkeypatch, tmp_path):
     monkeypatch.delenv("TCIP_STATE_ROOT", raising=False)
-    from tcip_mcp.project_paths import require_platform_root
+    from tcip_mcp.project_paths import require_and_pin_platform_root
 
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
-    resolved = require_platform_root(None)
+    resolved = require_and_pin_platform_root(None)
 
     assert resolved == tmp_path.resolve()

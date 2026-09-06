@@ -674,8 +674,8 @@ def record_distillation_pass(project_path: str) -> dict:
     Call this after actually reading a distillation worksheet, not before. It only records that a
     review happened; it never applies, promotes, or writes anything from the worksheet itself:
     turning a recurring theme into a skill line, a CLAUDE.md rule, or a tool change stays your own,
-    separate, explicit edit. ``distill_learnings.py`` itself stays read-only; this is the one
-    audited write in the loop, kept out of the script on purpose.
+    separate, explicit edit. ``tcip distill-learnings`` itself stays read-only; this is the one
+    audited write in the loop, kept out of that command on purpose.
 
     Args:
         project_path: Root directory of the project (or workspace project) reviewed.

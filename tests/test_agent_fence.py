@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -148,6 +149,24 @@ def test_relocating_a_whole_breeder_data_directory_is_denied_in_both_shells():
     # same harm as moving one file out, so a bare directory argument counts as a target too.
     assert _run_guard("mv /c/proj/annotations /tmp/exfil").returncode == 2
     assert _run_ps_guard("Move-Item C:\\proj\\annotations C:\\out").returncode == 2
+
+
+def test_every_console_invocation_the_fence_message_names_is_allow_listed():
+    """``PROTECTED_WRITE_MSG`` names a mandated diagnostic (`` `tcip doctor <root>` ``) as its
+    own example of a read-only command that must never be mistaken for a protected write; every
+    ``tcip <command>`` invocation the message names this way must be on the settings file's own
+    allow list, for both shells, read from the settings file itself rather than a copy of it
+    kept here."""
+    from tcip_web import agent_fence_rules as fr
+
+    named = sorted(set(re.findall(r"`(tcip [a-z-]+)", fr.PROTECTED_WRITE_MSG)))
+    assert named, "the fence message names no console invocation to check"
+
+    data = json.loads(FENCE.read_text(encoding="utf-8"))
+    allow = set(data["permissions"]["allow"])
+    for command in named:
+        assert f"Bash({command}:*)" in allow, f"{command} missing from the Bash allow list"
+        assert f"PowerShell({command}:*)" in allow, f"{command} missing from the PowerShell allow list"
 
 
 # ── the spawn wiring ─────────────────────────────────────────────────────

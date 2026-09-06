@@ -3,7 +3,7 @@
 A plain score (no --trait) needs no platform root at all, since it only reads the image and its
 label/prediction files by path; --trait requires one, since resolving a trait's derived
 localization criterion reads the project's own trait registry, matching the shared
-require_platform_root mechanism test_script_root_pinning.py covers directly.
+require_and_pin_platform_root mechanism test_platform_root_pinning.py covers directly.
 """
 
 from __future__ import annotations

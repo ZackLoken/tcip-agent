@@ -19,7 +19,7 @@ import argparse
 import json
 from pathlib import Path
 
-from tcip_mcp.project_paths import require_platform_root
+from tcip_mcp.project_paths import require_and_pin_platform_root
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -37,7 +37,7 @@ def main(argv: list[str] | None = None) -> int:
                              "never gates, a noisy-but-valid model can fail it.")
     args = parser.parse_args(argv)
 
-    require_platform_root(args.project)
+    require_and_pin_platform_root(args.project)
 
     config = json.loads(Path(args.config).read_text(encoding="utf-8"))
 

@@ -1,7 +1,7 @@
 """tcip preflight-config: the demoted door's own command-line entry point.
 
-Structural validation always runs, root pinning through require_platform_root
-(test_script_root_pinning.py covers the shared mechanism directly), the same pinning
+Structural validation always runs, root pinning through require_and_pin_platform_root
+(test_platform_root_pinning.py covers the shared mechanism directly), the same pinning
 tcip calibrate-operating-point uses.
 """
 

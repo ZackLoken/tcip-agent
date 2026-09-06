@@ -19,7 +19,7 @@ import argparse
 import json
 import sys
 
-from tcip_mcp.project_paths import require_platform_root
+from tcip_mcp.project_paths import require_and_pin_platform_root
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -32,7 +32,7 @@ def main(argv: list[str] | None = None) -> int:
                                              "run's audit line is recorded.")
     args = parser.parse_args(argv)
 
-    require_platform_root(args.destination)
+    require_and_pin_platform_root(args.destination)
 
     # Its own process entry point, so it binds the storage backend the seam has no default for.
     from tcip_store.binding import bind_default

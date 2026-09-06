@@ -51,7 +51,7 @@ def platform_state_root() -> Path:
     return Path(override) if override else Path.cwd()
 
 
-def require_platform_root(explicit: str | None) -> Path:
+def require_and_pin_platform_root(explicit: str | None) -> Path:
     """Resolve and pin ``$TCIP_STATE_ROOT`` to an absolute path, or refuse.
 
     For an operator command that calls an ``@audited`` tool function directly, outside the MCP
