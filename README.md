@@ -44,6 +44,7 @@ CLAUDE.md                      # agent operating contract (persona, invariants, 
 packages/
   tcip-mcp/                    # MCP server (python -m tcip_mcp)
     src/tcip_mcp/
+      cli/                     # operator console commands, behind the tcip dispatcher
       knowledge/               # domain knowledge modules (crops, annotation, training, ...)
       tools/                   # domain tools (repo-root tools/list_tools.py prints the current list)
       pipelines/               # ML: model_build, trainer, predictor (windowed/tiled raster
@@ -55,6 +56,7 @@ packages/
     src/tcip_store/            # the contract (model, errors, registry, store) + file backend
   tcip-web/                    # FastAPI backend + React frontend
     src/tcip_web/
+      cli/                     # the tcip console command's own dispatcher (declared in pyproject.toml)
       routes/                  # annotate, review, training, tuning, inference, results, ...
     frontend/src/              # Vite + React 18 + TypeScript + Tailwind + Konva
 tools/                         # CI + development tooling, never a project-facing command; see tools/README.md

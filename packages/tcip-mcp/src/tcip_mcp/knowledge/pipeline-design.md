@@ -173,8 +173,9 @@ boundary was produced; what it requires is that a person positively stands behin
 
 ## Multi-phase pipelines
 
-When a trait's decomposition needs more than one training phase, write a one-off logged script
-that chains the canonical primitives: one build path, every step audited.
+When a trait's decomposition needs more than one training phase, write a one-off script that
+chains the canonical primitives, in the project's own directory, never in this repository: one
+build path, every step audited.
 Each training phase calls `launch_training` (full audited envelope, leakage-free split,
 tiling persistence) against a `model_source` builder; run each stage's model with
 `run_inference`; then aggregate with the importable postprocessing libs

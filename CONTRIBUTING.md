@@ -55,8 +55,9 @@ change needs to inspect or convert a root's on-disk state.
   the shipped freeze commitment: every store's classification and version ceiling. A format
   bump is a deliberate, reviewed change that states its own obligations (how the new shape
   coexists with what a reader already wrote), never a silent shape change inside a frozen
-  version. There are no runtime migration shims: existing state is conformed by a one-off
-  operator command, not by a fallback the running platform carries forward.
+  version. There are no runtime migration shims: existing state is conformed by a `cli/` command
+  shipped with the bump and deleted once every root that needed it is conformed, not by a
+  fallback the running platform carries forward.
 - A change touching a persisted field, a refusal, an operating-point stamp, or a delivery gate
   takes design review before code. Open an issue describing the change first; do not send a
   pull request for one of these without a design discussion already open.

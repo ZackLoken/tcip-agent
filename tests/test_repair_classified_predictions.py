@@ -540,7 +540,7 @@ def test_the_like_source_conforms_a_bare_copy(tmp_path):
 
 
 def test_a_detector_like_source_refuses_to_conform_a_bare_copy(tmp_path):
-    """A bare directory this script conforms holds a classified bucket's value-in-subject
+    """A bare directory this command repairs holds a classified bucket's value-in-subject
     records: a --like naming a detector bucket (its scope names no attribute) has nothing to move
     the value under, and refuses by name rather than attempting a rewrite with no attribute."""
     bind_default()
@@ -747,9 +747,7 @@ def test_a_classified_rewrite_under_no_dataset_root_writes_one_entry_to_the_plat
 
     Bound to the file backend explicitly: the sqlite backend's own per-root database file would
     otherwise plant a ``.tcip`` under the bucket the moment its stamp is written, which
-    ``dataset_scope_of``'s own fallback then reads as the bucket carrying its own project state,
-    the same disagreement ``test_conform_registry_experiment_id.py`` binds around for its own
-    corruption test.
+    ``dataset_scope_of``'s own fallback then reads as the bucket carrying its own project state.
     """
     import tcip_mcp.audit as audit_module
 
