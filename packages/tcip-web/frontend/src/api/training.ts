@@ -16,8 +16,13 @@ export interface TrainingRunSummary {
   output_dir?: string;
   config_summary?: Record<string, unknown>;
   /** Set on every run reconstructed from a disk record and absent from this process's own run
-   * registry, whatever its status; never a statement about who launched it. */
+   * registry, whatever its status; a process-locality fact only, never a statement about who
+   * launched it (that is ``launched_by``, below). */
   external?: boolean;
+  /** Who launched this run, from the record itself: ``{"launcher": "gui" | "agent" | "process"
+   * | <other>}``, the identity fields alongside ``"agent"`` when an MCP handshake declared them,
+   * or absent when the launch's tracking never reached the stamp, or the stamp failed. */
+  launched_by?: Record<string, unknown> | null;
   /** Set once _ensure_experiment resolves this run's tracked experiment; null until then. */
   experiment_id?: string | null;
   /** Set when experiment tracking itself raised; null when it succeeded or never ran. */

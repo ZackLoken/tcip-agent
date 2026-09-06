@@ -28,6 +28,7 @@ import { defaultTrainingRequest } from "@/tabs/agentPrompts";
 import { CHART, CHART_LINE_COLORS } from "@/tabs/chartTheme";
 import { RunMonitorEmpty, RunMonitorLayout } from "@/tabs/RunMonitorLayout";
 import {
+  defaultChartSeries,
   mergeMetric,
   numericMetricKeys,
   runOrderLine,
@@ -50,26 +51,57 @@ function messageOf(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
+/** What a run's launched_by field says about who started it, from the record alone: never a
+ * guess, and never derived from process locality (external is a separate, unrendered fact). */
+function launcherSentence(launchedBy: TrainingRunSummary["launched_by"]): string {
+  const launcher = typeof launchedBy?.launcher === "string" ? launchedBy.launcher : null;
+  if (launcher === null) return "launcher not recorded";
+  if (launcher === "gui") return "started through this app";
+  if (launcher === "agent") return "started by the agent";
+  if (launcher === "process") return "started by another process";
+  return `started by ${launcher}`;
+}
+
+/** The longer sentence behind a row's launcher mark, reachable by assistive technology through
+ * aria-describedby: what the mark means, with the declared client named for an agent launch. */
+function launcherDescription(launchedBy: TrainingRunSummary["launched_by"]): string {
+  const launcher = typeof launchedBy?.launcher === "string" ? launchedBy.launcher : null;
+  if (launcher === null) {
+    return "This run's record carries no launcher: its tracking never reached the stamp, or the stamp did not land.";
+  }
+  if (launcher === "gui") {
+    return "This run was launched through this app's own route.";
+  }
+  if (launcher === "agent") {
+    const name =
+      typeof launchedBy?.agent_client_name === "string" ? launchedBy.agent_client_name : null;
+    const version =
+      typeof launchedBy?.agent_client_version === "string" ? launchedBy.agent_client_version : null;
+    const client = name ? (version ? `${name} ${version}` : name) : null;
+    return client
+      ? `This run was launched by an agent through the MCP door, declared as ${client}.`
+      : "This run was launched by an agent through the MCP door.";
+  }
+  if (launcher === "process") {
+    return "This run was launched by a process with no browser and no agent handshake: a script or a test.";
+  }
+  return `This run's record names its own launcher: ${launcher}.`;
+}
+
 /** The row's own select control name: id, its experiment id when the two differ (exactly as the
- * visible row states it), status and, for a run this backend process did not launch, the same
- * origin mark the visible row carries, with the best value and its metric appended exactly as
- * the record carries them when both are present. */
+ * visible row states it), status and the record's own launcher sentence, with the best value
+ * and its metric appended exactly as the record carries them when both are present. */
 function runRowLabel(run: TrainingRunSummary): string {
   const idPart =
     run.experiment_id && run.experiment_id !== run.run_id
       ? `${run.run_id} · ${run.experiment_id}`
       : run.run_id;
-  const base = `${idPart} ${run.status}${run.external ? ", started elsewhere" : ""}`;
+  const base = `${idPart} ${run.status}, ${launcherSentence(run.launched_by)}`;
   if (run.best_metric === undefined || run.best_metric === null || !run.best_metric_name) {
     return base;
   }
   return `${base}, best ${run.best_metric_name} ${run.best_metric}`;
 }
-
-/** The sentence a run's origin mark states, in both the pointer's title and the accessible
- * description: what the record can answer for (this process did not launch it), never who did. */
-const ORIGIN_MARK_EXPLANATION =
-  "This app was restarted or another launcher started this run; this app process did not start it.";
 
 const NO_OTHER_PARTITION =
   "this listing found no other recorded partition the config can bind to; the agent can draw one.";
@@ -427,6 +459,8 @@ export function TrainingTab() {
     return Array.from(keys);
   }, [metrics]);
 
+  const chartSeries = useMemo(() => defaultChartSeries(metricKeys, metrics), [metricKeys, metrics]);
+
   return (
     <>
       <TabHeading tab="training" />
@@ -489,7 +523,15 @@ export function TrainingTab() {
                     className="m-0 h-full"
                   >
                     <span id={chartNameId} className="sr-only">
-                      {`for ${selectedRun}: ${metricKeys.join(", ")}`}
+                      {chartSeries.allKeys
+                        ? `for ${selectedRun}: all logged metrics: ${chartSeries.keys.join(", ")}`
+                        : `for ${selectedRun}: ${chartSeries.keys
+                            .map((key) => chartSeries.labels[key] ?? key)
+                            .join(", ")}${
+                            chartSeries.keys.length < metricKeys.length
+                              ? "; every other logged metric is in the table below"
+                              : ""
+                          }`}
                     </span>
                     <ResponsiveContainer width="100%" height="100%">
                       <LineChart data={chartData}>
@@ -515,11 +557,12 @@ export function TrainingTab() {
                           }}
                         />
                         <Legend wrapperStyle={{ fontSize: 11, color: CHART.legendText }} />
-                        {metricKeys.map((key, i) => (
+                        {chartSeries.keys.map((key, i) => (
                           <Line
                             key={key}
                             type="monotone"
                             dataKey={key}
+                            name={chartSeries.labels[key] ?? key}
                             stroke={CHART_LINE_COLORS[i % CHART_LINE_COLORS.length]}
                             dot={false}
                             strokeWidth={1.5}
@@ -652,7 +695,7 @@ export function TrainingTab() {
                     type="button"
                     aria-pressed={selectedRun === r.run_id}
                     aria-label={runRowLabel(r)}
-                    aria-describedby={r.external ? `origin-mark-${r.run_id}` : undefined}
+                    aria-describedby={`origin-mark-${r.run_id}`}
                     className="flex-1 min-w-0 text-left"
                     onClick={() => setSelectedRun(r.run_id)}
                   >
@@ -665,14 +708,12 @@ export function TrainingTab() {
                     <div className="text-[10px] text-tcip-muted flex justify-between">
                       <span>
                         {r.status}
-                        {r.external && (
-                          <>
-                            <span title={ORIGIN_MARK_EXPLANATION}>{" · started elsewhere"}</span>
-                            <span id={`origin-mark-${r.run_id}`} className="sr-only">
-                              {ORIGIN_MARK_EXPLANATION}
-                            </span>
-                          </>
-                        )}
+                        <span title={launcherDescription(r.launched_by)}>
+                          {` · ${launcherSentence(r.launched_by)}`}
+                        </span>
+                        <span id={`origin-mark-${r.run_id}`} className="sr-only">
+                          {launcherDescription(r.launched_by)}
+                        </span>
                       </span>
                       {r.best_metric !== undefined &&
                         r.best_metric !== null &&

@@ -927,7 +927,7 @@ describe("TuningTab list order", () => {
     expect(await screen.findByText("hpo-a")).toBeInTheDocument();
     expect(
       screen.getByText(
-        /Sweeps this app's own launches first, in launch order; every other recorded sweep follows/,
+        /Sweeps this running process itself launched come first, in launch order; every other recorded sweep follows/,
       ),
     ).toBeInTheDocument();
   });

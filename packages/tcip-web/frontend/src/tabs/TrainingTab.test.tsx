@@ -143,7 +143,7 @@ describe("TrainingTab run list", () => {
     expect(await screen.findByText("train-a")).toBeInTheDocument();
     expect(
       screen.getByText(
-        /Runs this app's own launches first, in launch order; every other recorded run follows/,
+        /Runs this running process itself launched come first, in launch order; every other recorded run follows/,
       ),
     ).toBeInTheDocument();
   });
@@ -155,7 +155,9 @@ describe("TrainingTab run list", () => {
 
     render(<TrainingTab />);
     expect(
-      await screen.findByRole("button", { name: "train-named-row · exp-other running" }),
+      await screen.findByRole("button", {
+        name: "train-named-row · exp-other running, launcher not recorded",
+      }),
     ).toBeInTheDocument();
   });
 
@@ -191,7 +193,7 @@ describe("TrainingTab run list", () => {
     render(<TrainingTab />);
     expect(
       await screen.findByRole("button", {
-        name: "train-named-value completed, best loss 0.4130041",
+        name: "train-named-value completed, launcher not recorded, best loss 0.4130041",
       }),
     ).toBeInTheDocument();
   });
@@ -237,51 +239,99 @@ describe("TrainingTab run list", () => {
   });
 });
 
-describe("TrainingTab run origin mark", () => {
-  const ORIGIN_MARK_EXPLANATION =
-    "This app was restarted or another launcher started this run; this app process did not start it.";
-
-  it("states the run's origin on a running and a terminal status, visibly and in the accessible name", async () => {
+describe("TrainingTab run launcher mark", () => {
+  it("states who launched the run from launched_by alone, not from external", async () => {
     vi.spyOn(trainingApi, "listRuns").mockResolvedValue({
       runs: [
-        run({ run_id: "train-live-other", status: "running", external: true }),
+        run({ run_id: "train-gui", status: "running", launched_by: { launcher: "gui" } }),
         run({
-          run_id: "train-done-other",
+          run_id: "train-agent",
+          status: "running",
+          launched_by: {
+            launcher: "agent",
+            agent_client_name: "claude-code",
+            agent_client_version: "2.1.238",
+          },
+        }),
+        run({ run_id: "train-process", status: "running", launched_by: { launcher: "process" } }),
+        run({
+          run_id: "train-done-unrecorded",
           status: "completed",
+          experiment_id: "exp-done-unrecorded",
+          launched_by: null,
+        }),
+        run({
+          run_id: "train-other-value",
+          status: "running",
+          // external true carries no weight on the sentence any more: the record is the fact.
           external: true,
-          experiment_id: "exp-done-other",
+          launched_by: { launcher: "bespoke-cli" },
         }),
       ],
     });
 
     render(<TrainingTab />);
-    await screen.findByText("train-live-other");
+    await screen.findByText("train-gui");
 
     expect(
-      screen.getByRole("button", { name: "train-live-other running, started elsewhere" }),
+      screen.getByRole("button", { name: "train-gui running, started through this app" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "train-agent running, started by the agent" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "train-process running, started by another process" }),
     ).toBeInTheDocument();
     expect(
       screen.getByRole("button", {
-        name: "train-done-other · exp-done-other completed, started elsewhere",
+        name: "train-done-unrecorded · exp-done-unrecorded completed, launcher not recorded",
       }),
     ).toBeInTheDocument();
-    expect(screen.getAllByTitle(ORIGIN_MARK_EXPLANATION)).toHaveLength(2);
+    expect(
+      screen.getByRole("button", { name: "train-other-value running, started by bespoke-cli" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/started elsewhere/)).not.toBeInTheDocument();
   });
 
-  it("makes the origin mark's explanation reachable by assistive technology, not only a pointer title", async () => {
+  it("names the declared client in the agent row's accessible description", async () => {
     vi.spyOn(trainingApi, "listRuns").mockResolvedValue({
-      runs: [run({ run_id: "train-live-other", status: "running", external: true })],
+      runs: [
+        run({
+          run_id: "train-agent-desc",
+          status: "running",
+          launched_by: {
+            launcher: "agent",
+            agent_client_name: "claude-code",
+            agent_client_version: "2.1.238",
+          },
+        }),
+      ],
     });
 
     render(<TrainingTab />);
     const button = await screen.findByRole("button", {
-      name: "train-live-other running, started elsewhere",
+      name: "train-agent-desc running, started by the agent",
+    });
+
+    const describedBy = button.getAttribute("aria-describedby");
+    expect(describedBy).toBeTruthy();
+    expect(document.getElementById(describedBy as string)).toHaveTextContent("claude-code 2.1.238");
+  });
+
+  it("makes an unrecorded launcher's explanation reachable by assistive technology", async () => {
+    vi.spyOn(trainingApi, "listRuns").mockResolvedValue({
+      runs: [run({ run_id: "train-no-launcher", status: "running" })],
+    });
+
+    render(<TrainingTab />);
+    const button = await screen.findByRole("button", {
+      name: "train-no-launcher running, launcher not recorded",
     });
 
     const describedBy = button.getAttribute("aria-describedby");
     expect(describedBy).toBeTruthy();
     expect(document.getElementById(describedBy as string)).toHaveTextContent(
-      ORIGIN_MARK_EXPLANATION,
+      "This run's record carries no launcher",
     );
   });
 });
@@ -618,6 +668,69 @@ describe("TrainingTab chart accessibility", () => {
 
     expect(
       await screen.findByRole("img", { name: "Live metrics for train-bookkeeping: loss" }),
+    ).toBeInTheDocument();
+  });
+});
+
+describe("TrainingTab chart default series", () => {
+  it("plots both loss lines plus the merged selection line for a validated run selecting on loss, with every key still in the table", async () => {
+    useStore.setState((s) => ({
+      gui: { ...s.gui, dataset: { ...s.gui.dataset, project_root: "/proj" } },
+    }));
+    vi.spyOn(trainingApi, "listRuns").mockResolvedValue({
+      runs: [run({ run_id: "train-validated", status: "running" })],
+    });
+    vi.spyOn(trainingApi, "getRun").mockReturnValue(new Promise(() => {}));
+    vi.mocked(openTrainingStream).mockImplementation((_root, runId, onMessage) => {
+      onMessage({
+        type: "metric",
+        run_id: runId,
+        row: {
+          epoch: 1,
+          train_loss: 0.9,
+          val_loss: 0.4,
+          lr: 0.001,
+          selection: 0.4,
+          selection_metric: "loss",
+        },
+      });
+      return () => {};
+    });
+
+    render(<TrainingTab />);
+    fireEvent.click(await screen.findByText("train-validated"));
+
+    expect(
+      await screen.findByRole("img", {
+        name: "Live metrics for train-validated: train_loss, val_loss (selection); every other logged metric is in the table below",
+      }),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "as table" }));
+    const table = await screen.findByRole("table");
+    expect(within(table).getByRole("columnheader", { name: "lr" })).toBeInTheDocument();
+  });
+
+  it("plots every numeric key and says so when the log carries neither a loss key nor selection", async () => {
+    useStore.setState((s) => ({
+      gui: { ...s.gui, dataset: { ...s.gui.dataset, project_root: "/proj" } },
+    }));
+    vi.spyOn(trainingApi, "listRuns").mockResolvedValue({
+      runs: [run({ run_id: "train-no-loss-key", status: "running" })],
+    });
+    vi.spyOn(trainingApi, "getRun").mockReturnValue(new Promise(() => {}));
+    vi.mocked(openTrainingStream).mockImplementation((_root, runId, onMessage) => {
+      onMessage({ type: "metric", run_id: runId, row: { epoch: 1, val_map50: 0.7, lr: 0.001 } });
+      return () => {};
+    });
+
+    render(<TrainingTab />);
+    fireEvent.click(await screen.findByText("train-no-loss-key"));
+
+    expect(
+      await screen.findByRole("img", {
+        name: "Live metrics for train-no-loss-key: all logged metrics: val_map50, lr",
+      }),
     ).toBeInTheDocument();
   });
 });

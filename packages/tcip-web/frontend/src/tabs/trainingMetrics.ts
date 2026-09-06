@@ -9,13 +9,16 @@ export const RUN_REFRESH_MS = 4000;
 /**
  * The sentence both the Training and Tuning list headers state their own ordering with, so the
  * two tabs never drift into naming a different scope (a browser window, say) for the same
- * process-level fact: this app's own launches list first, in launch order, then every other
- * recorded item follows, sorted by the given field. `itemNoun` is the singular ("run", "sweep").
+ * process-level fact: the runs this running process itself launched list first, in launch
+ * order, then every other recorded item follows, sorted by the given field. A row's own launcher
+ * sentence names who started it, not which group it sorts into: a restart moves every run this
+ * process held, whoever launched it, into the second group, so two rows reading the same
+ * launcher can sit in different groups. `itemNoun` is the singular ("run", "sweep").
  */
 export function runOrderLine(itemNoun: string, sortField: string): string {
   const plural = `${itemNoun}s`;
   const capitalized = plural.charAt(0).toUpperCase() + plural.slice(1);
-  return `${capitalized} this app's own launches first, in launch order; every other recorded ${itemNoun} follows, sorted by ${sortField}.`;
+  return `${capitalized} this running process itself launched come first, in launch order; every other recorded ${itemNoun} follows, sorted by ${sortField}.`;
 }
 
 /** The row's identity for de-duplication: epoch if present, else step, else none. */
@@ -50,6 +53,60 @@ export function numericMetricKeys(metrics: Record<string, unknown> | null | unde
     (k) =>
       !NON_METRIC_KEYS.has(k) && !k.endsWith(METRIC_STATE_SUFFIX) && typeof metrics[k] === "number",
   );
+}
+
+/** The chart's default series: which of `metricKeys` it plots, each key's legend/accessible-name
+ * label, and whether the all-numeric-keys fallback applied. */
+export interface ChartSeries {
+  keys: string[];
+  labels: Record<string, string>;
+  /** True only when the log carries neither a key ending in "loss" nor "selection": every
+   * numeric key is plotted, a documented rule rather than a fallback hiding a choice. */
+  allKeys: boolean;
+}
+
+function latestSelectionMetric(rows: MetricRow[]): string | null {
+  for (let i = rows.length - 1; i >= 0; i--) {
+    const value = rows[i]?.selection_metric;
+    if (typeof value === "string" && value) return value;
+  }
+  return null;
+}
+
+/**
+ * The chart's default series: every key of `metricKeys` ending in "loss", in that order, plus
+ * `selection` when the log carries it. When the run's selection metric is itself a plotted loss
+ * (its own name ends in "loss"), the two are merged into one series named for the loss key it
+ * duplicates, resolved as `val_<metric>` when that key is plotted, else the bare metric name
+ * when that key is plotted, else `train_loss`, so the chart never draws the same line twice. The
+ * limit is stated, never widened: a bespoke non-loss key sits in the table, and the all-keys
+ * fallback below applies only when the log carries neither a loss-suffixed key nor `selection`.
+ */
+export function defaultChartSeries(metricKeys: string[], rows: MetricRow[]): ChartSeries {
+  const lossKeys = metricKeys.filter((k) => k.endsWith("loss"));
+  const hasSelection = metricKeys.includes("selection");
+  if (lossKeys.length === 0 && !hasSelection) {
+    return { keys: metricKeys, labels: {}, allKeys: true };
+  }
+
+  const selectionMetric = hasSelection ? latestSelectionMetric(rows) : null;
+  let duplicateLossKey: string | null = null;
+  if (selectionMetric && selectionMetric.endsWith("loss")) {
+    const valKey = VAL_METRIC_PREFIX + selectionMetric;
+    if (lossKeys.includes(valKey)) duplicateLossKey = valKey;
+    else if (lossKeys.includes(selectionMetric)) duplicateLossKey = selectionMetric;
+    else if (lossKeys.includes("train_loss")) duplicateLossKey = "train_loss";
+  }
+
+  const keys = hasSelection && !duplicateLossKey ? [...lossKeys, "selection"] : lossKeys;
+  const labels: Record<string, string> = {};
+  for (const key of keys) {
+    if (key === duplicateLossKey) labels[key] = `${key} (selection)`;
+    else if (key === "selection") {
+      labels[key] = selectionMetric ? `selection (${selectionMetric})` : "selection";
+    }
+  }
+  return { keys, labels, allKeys: false };
 }
 
 /**
