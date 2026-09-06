@@ -188,8 +188,8 @@ def test_golden_plant_milestones_shape_and_values():
     assert ms["bud_05per_date"] == "2026-02-15"
     assert ms["bud_50per_date"] == "2026-03-01"
     assert ms["bud_95per_date"] == "2026-03-12"
-    # crossing-unconfirmed (breeders to confirm): opening == the 95% majority crossing
-    assert ms["bud_opening_date"] == "2026-03-12"
+    # crossing-unconfirmed (breeders to confirm): the majority alias == the 95% crossing
+    assert ms["bud_majority_date"] == "2026-03-12"
 
 
 _ID_MAP = {"closed": 0, "open": 1}

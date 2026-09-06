@@ -5,7 +5,7 @@ positive/measured state, where that state is a classifier call (never a geometri
 tests pin the authoritative trait definitions:
 
     bud_05/50/95per_date  = dates the open fraction crosses 5/50/95%
-    bud_opening_date      = date most buds are open (the majority-label alias) = the 95% crossing
+    bud_majority_date     = date most buds are open (the majority-label alias) = the 95% crossing
 
 and the id_map-key-membership coverage rule that decides whether a prediction
 bucket ever assessed the trait's positive class at all, and the per-detection membership check
@@ -161,8 +161,8 @@ def test_opening_onset_none_when_all_zero():
 def test_plant_milestones_returns_four_dates_and_bounds():
     series = [("2024-05-01", 0.0), ("2024-05-06", 0.04), ("2024-05-11", 0.50), ("2024-05-21", 1.0)]
     m = phenology.plant_milestones(series, BUD_OPENING)
-    assert {"bud_05per_date", "bud_50per_date", "bud_95per_date", "bud_opening_date"} <= set(m)
-    assert m["bud_opening_date"] == m["bud_95per_date"]
+    assert {"bud_05per_date", "bud_50per_date", "bud_95per_date", "bud_majority_date"} <= set(m)
+    assert m["bud_majority_date"] == m["bud_95per_date"]
     assert m["bud_50per_date"] == "2024-05-11"
     assert m["bud_50per_date_bound"] == "exact"
 

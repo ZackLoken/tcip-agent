@@ -289,8 +289,8 @@ def test_phenology_measurement_finds_crossings(client: TestClient, tmp_path: Pat
     assert onset["bud_05per_date"] is not None
     assert onset["bud_50per_date"] is not None
     assert onset["bud_95per_date"] is not None
-    # bud_opening_date = the majority-label alias = the 95% majority crossing.
-    assert onset["bud_opening_date"] == onset["bud_95per_date"]
+    # bud_majority_date = the majority-label alias = the 95% majority crossing.
+    assert onset["bud_majority_date"] == onset["bud_95per_date"]
 
 
 def test_phenology_measurement_ignores_undated_bucket(client: TestClient, tmp_path: Path) -> None:

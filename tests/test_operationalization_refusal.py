@@ -398,9 +398,9 @@ def delivered_golden(body: dict, produced_at: bytes) -> bytes:
            + captures_unverified + b",," + dates_delivered + b",0,image,,\r\n")
     return (
         b"plant_id,accession,n_dates,n_observed_dates,n_dates_unclassified,n_dates_missing_images,"
-        b"bud_opening_date,bud_05per_date,bud_50per_date,bud_95per_date,"
-        b"bud_opening_date_bound,bud_05per_date_bound,bud_50per_date_bound,"
-        b"bud_95per_date_bound,bud_opening_crossing_unconfirmed,operating_point_conf,"
+        b"bud_majority_date,bud_05per_date,bud_50per_date,bud_95per_date,"
+        b"bud_majority_date_bound,bud_05per_date_bound,bud_50per_date_bound,"
+        b"bud_95per_date_bound,bud_majority_crossing_unconfirmed,operating_point_conf,"
         b"operating_point_validated,positive_state_classifier_validated,unvalidated_dimensions,"
         b"producer_model_sha256,"
         b"producing_experiment_id,produced_at,validation_record,plant_mapping_sha256,"
