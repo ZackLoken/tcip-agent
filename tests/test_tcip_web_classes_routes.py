@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import os
-import stat
 from pathlib import Path
 
 import pytest
@@ -526,15 +525,14 @@ def test_get_image_status_reports_stale_definition_after_a_schema_change(
 
 
 def test_reconfirm_with_the_digest_store_obstructed_answers_digest_stamped_false(
-    client: TestClient, tmp_path: Path
+    client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A re-confirm whose restamp fails must not read as resolved: the route still names the
-    image stale, the same obstruction the sweep tests use (file backend)."""
-    import tcip_store as ts
-    from tcip_store.file_backend import FileBackend
-    from tcip_mcp.dataset_layout import image_status_digest_path
+    image stale. The failure is injected by monkeypatching the digest-store writer to raise
+    rather than by manipulating file permissions, so the test holds on both storage backends
+    and both platforms."""
+    from tcip_mcp import dataset_layout
 
-    ts.bind(FileBackend())
     save = client.post(
         "/api/classes/save",
         json={"project_root": str(tmp_path), "dataset_root": str(tmp_path),
@@ -555,26 +553,26 @@ def test_reconfirm_with_the_digest_store_obstructed_answers_digest_stamped_false
               "version": save.json()["version"]},
     )
 
-    # Read-only, not replaced: the earlier real stamp must stay readable (still positively stale
-    # under the new schema) while the restamp write itself fails.
-    digest_path = image_status_digest_path(tmp_path)
-    digest_path.chmod(stat.S_IREAD)
-    try:
-        reconfirm = client.post(
-            "/api/classes/image_status",
-            json={"project_root": str(tmp_path), "dataset_root": str(tmp_path),
-                  "image_name": "IMG_0001.JPG", "status": "complete", "subject": "bud"},
-        )
-        assert reconfirm.json()["digest_stamped"] is False
+    # The earlier real stamp (above) must stay readable and positively stale under the new
+    # schema; only the restamp attempt below fails.
+    def _raise(*args: object, **kwargs: object) -> None:
+        raise OSError("simulated digest-store write failure")
 
-        body = client.get(
-            "/api/classes/image_status",
-            params={"project_root": str(tmp_path), "dataset_root": str(tmp_path),
-                    "subject": "bud"},
-        ).json()
-        assert body["stale_definition"] == ["IMG_0001.JPG"]
-    finally:
-        digest_path.chmod(stat.S_IWRITE | stat.S_IREAD)
+    monkeypatch.setattr(dataset_layout, "stamp_image_status_digests", _raise)
+
+    reconfirm = client.post(
+        "/api/classes/image_status",
+        json={"project_root": str(tmp_path), "dataset_root": str(tmp_path),
+              "image_name": "IMG_0001.JPG", "status": "complete", "subject": "bud"},
+    )
+    assert reconfirm.json()["digest_stamped"] is False
+
+    body = client.get(
+        "/api/classes/image_status",
+        params={"project_root": str(tmp_path), "dataset_root": str(tmp_path),
+                "subject": "bud"},
+    ).json()
+    assert body["stale_definition"] == ["IMG_0001.JPG"]
 
 
 def test_image_status_rejects_invalid(client: TestClient, tmp_path: Path) -> None:
