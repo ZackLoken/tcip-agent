@@ -12,7 +12,7 @@ from tcip_store.file_backend import RootedFileLocator
 # Every box handed to pycocotools goes through this, both sides of a match on the one stored grid.
 from tcip_annotation.json_io import xywh
 
-from tcip_mcp.pipelines.resolution import DEFAULT_CONF, DEFAULT_MAX_DETS, DEFAULT_NMS_IOU
+from tcip_mcp.pipelines.resolution import DEFAULT_CONF
 
 _RESULTS_DOC = RootedFileLocator(suffix=".json")
 
@@ -148,10 +148,10 @@ def run_test_evaluation(
 def run_full_frame_evaluation(
     checkpoint, images_dir: str, labels_dir: str, output_dir: str, *,
     subject: str | None = None, attribute: str | None = None,
-    conf_threshold: float = DEFAULT_CONF, iou_threshold: float = 0.5,
+    conf_threshold: float | None = None, iou_threshold: float = 0.5,
     tile_size: int | None = None, overlap: float | None = None,
-    global_nms_iou: float = DEFAULT_NMS_IOU,
-    max_dets: int = DEFAULT_MAX_DETS, postprocess: str = "nms", device: str | None = None,
+    global_nms_iou: float | None = None,
+    max_dets: int | None = None, postprocess: str = "nms", device: str | None = None,
     trait: str | None = None, date: str | None = None,
 ) -> dict:
     """Delivery-grade detection eval: tiled inference reconstructed to full frame,
@@ -191,16 +191,29 @@ def run_full_frame_evaluation(
     (``predict_tiled(require_masks=False)``), so an instance_seg checkpoint is gated here on its
     boxes/counts, never on its masks. A mask-quality gate is separate work; do not report this
     number as one.
+
+    ``conf_threshold``, ``global_nms_iou`` and ``max_dets`` resolve a stated-or-default value
+    through ``resolution.applied_operating_point`` the same way ``run_inference`` does. The
+    written record's own flat ``conf_threshold``, ``max_dets``, ``tiled`` and ``tile_size`` are
+    this evaluation's identity tuple; ``extra["operating_point"]`` is their provenance, the same
+    mapping vocabulary a prediction bucket's sidecar carries, composed from the same locals.
     """
     from tcip_mcp.pipelines.data.label_queries import json_det_targets, resolve_registry_id_map
     from tcip_mcp.pipelines.inference.predictor import (
         build_predictor, explicit_edge_provenance, resolve_tile_regime,
     )
     from tcip_mcp.pipelines.operating_point import _cap_saturated_frac
-    from tcip_mcp.pipelines.resolution import resolve_tile_size_param
+    from tcip_mcp.pipelines.resolution import applied_operating_point, raw_operating_point
     from tcip_mcp.pipelines.training.evaluation import (
         build_coco_image_record, coco_detection_metrics, governing_counts, resolve_match_criterion,
     )
+
+    # The flat fields below are this record's own identity tuple; the mapping raw_operating_point
+    # builds further down is their provenance, composed from these same locals in one function.
+    conf_stated = conf_threshold is not None
+    max_dets_stated = max_dets is not None
+    conf_threshold, global_nms_iou, max_dets = applied_operating_point(
+        conf_threshold, global_nms_iou, max_dets)
 
     predictor = build_predictor(
         checkpoint, device=device,
@@ -213,11 +226,17 @@ def run_full_frame_evaluation(
     tile_size_derived_from = (
         explicit_edge_provenance(predictor, resolved_tile)
         if tile_size_source == "explicit" and resolved_tile is not None else None)
-    # The shared gate every other door resolves through: acceptance is that vocabulary and nothing
-    # else, never a hand-written tuple of source labels.
-    tile_param = resolve_tile_size_param(
-        resolved_tile, tiled=True, tile_size_source=tile_size_source,
-        tile_size_derived_from=tile_size_derived_from)
+    # The raw regime every other measurement door resolves through, built once right after the
+    # tile regime above: this path always tiles, the caller's own choice of regime (never a default).
+    op_bundle = raw_operating_point(
+        conf=conf_threshold, cross_tile_nms=global_nms_iou, tiled=True, tile_size=resolved_tile,
+        max_dets=max_dets, tile_size_source=tile_size_source,
+        tile_size_derived_from=tile_size_derived_from, tiled_source="explicit",
+        conf_stated=conf_stated, max_dets_stated=max_dets_stated,
+    )
+    # The shared gate every other door resolves through, read off the bundle above instead of a
+    # second, separately-built tuple of source labels: resolve_tile_size_param runs once.
+    tile_param = op_bundle.get("tile_size")
     if not tile_param.is_shippable:
         raise ValueError(
             f"Cannot resolve a trustworthy tile_size for {checkpoint.path}: no explicit tile_size was "
@@ -312,6 +331,10 @@ def run_full_frame_evaluation(
         # Names recorded negative whose label file now holds subject content; scored on that
         # content, not filtered out, but the stale confirmation needs re-review.
         "contradicted_negatives": sorted(contradicted_negatives),
+        # The merge this evaluation ran at (also op_bundle's cross_tile_nms), and the operating
+        # point mapping a bucket stamp carries; never itself a stamp a delivery gate reads.
+        "global_nms_iou": global_nms_iou, "postprocess": postprocess,
+        "operating_point": op_bundle.to_provenance()["operating_point"],
     }
     # For a count trait, the delivery-grade count that gates the phenotype is the derived
     # criterion's tp/fp/fn (center-match, for a trait so configured), not AP@0.5, kept alongside, clearly labeled.
