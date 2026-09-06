@@ -515,9 +515,10 @@ def _bare_the_registry_entry(project_root: Path, entry: dict) -> str:
 
 
 def test_store_bootstrap_project_roots_admits_a_bare_fingerprint_registry_entry(tmp_path: Path):
-    """project_roots is the path adopt_store.py/export_store.py use to reach a project; it must
-    not itself be blocked by the identity problem register_dataset re-registration exists to
-    fix, so it reads locations through read_datasets_raw rather than read_datasets."""
+    """project_roots is the path ``tcip adopt-store``/``tcip export-store`` use to reach a
+    project; it must not itself be blocked by the identity problem register_dataset
+    re-registration exists to fix, so it reads locations through read_datasets_raw rather than
+    read_datasets."""
     from tcip_store.layout_claims import ROOT
 
     from tcip_mcp.store_catalogue import project_roots
@@ -673,8 +674,8 @@ def test_project_roots_skips_a_recorded_run_output_dir_that_no_longer_exists(
     tmp_path: Path, monkeypatch,
 ):
     """A run's own status.json can still name an output directory that has since been moved or
-    deleted; project_roots skips it rather than handing adopt_store.py a path to recreate from
-    nothing."""
+    deleted; project_roots skips it rather than handing ``tcip adopt-store`` a path to recreate
+    from nothing."""
     from tcip_store.layout_claims import RUN
 
     from tcip_mcp.store_catalogue import project_roots

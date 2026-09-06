@@ -67,7 +67,7 @@ def test_session_start_injects_ritual_directive_naming_the_active_project(
     ctx = json.loads(out)["hookSpecificOutput"]["additionalContext"]
     assert json.loads(out)["hookSpecificOutput"]["hookEventName"] == "SessionStart"
     assert "currant_demo" in ctx
-    for step in ("load_project_memory", "inspect_project", "doctor.py"):
+    for step in ("load_project_memory", "inspect_project", "tcip doctor"):
         assert step in ctx
 
 
@@ -204,7 +204,7 @@ def test_session_start_names_the_store_refusal_for_a_loose_file_only_workspace(
     out = _run(monkeypatch, capsys, '{"source":"startup"}')
     ctx = json.loads(out)["hookSpecificOutput"]["additionalContext"]
     assert "could not be adopted" in ctx
-    assert "adopt_store" in ctx
+    assert "tcip adopt-store" in ctx
 
 
 def test_session_start_notes_which_processes_bind_from_the_marker(

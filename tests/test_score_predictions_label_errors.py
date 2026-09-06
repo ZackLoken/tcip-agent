@@ -110,7 +110,7 @@ def test_score_predictions_single_image_refuses_a_neither_key_stamp(tmp_path: Pa
     res = score_predictions(str(img))
 
     assert "error" in res
-    assert "conform_classified_predictions.py" in res["error"]
+    assert "repair-classified-predictions" in res["error"]
 
 
 def test_score_predictions_folder_refuses_an_undecodable_stamp(tmp_path: Path) -> None:

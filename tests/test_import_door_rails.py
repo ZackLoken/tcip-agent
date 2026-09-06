@@ -478,7 +478,7 @@ def test_the_full_round_trip_reads_back_at_once_with_no_hand_adoption(tmp_path, 
     """initialize_project, register_dataset, a confirmed operationalization, an experiment's members,
     an HPO sweep's members and a project-relative splits manifest, all through their own real
     producers; archived, imported into a fresh destination, and read back through the store
-    under the default backend with no adopt_store.py run.
+    under the default backend with no ``tcip adopt-store`` run.
 
     launch_config.json is hand-placed (launch_training itself needs a real training launch to
     produce one), stated as such; every other member here comes from the producer that writes it.

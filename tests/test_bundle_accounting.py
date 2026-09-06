@@ -186,7 +186,7 @@ def test_a_checkpoint_directly_under_tcip_models_is_blob(tmp_path: Path):
 
 def test_account_for_works_with_only_the_package_on_sys_path(tmp_path: Path):
     """Coverage: account_for's store-catalogue import must not need the repository's own
-    ``scripts`` package, which exists only with the repo root on sys.path; an installed
+    ``tools`` package, which exists only with the repo root on sys.path; an installed
     deployment never puts it there."""
     import os
     import subprocess

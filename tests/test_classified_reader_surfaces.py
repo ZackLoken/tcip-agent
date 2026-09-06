@@ -80,7 +80,7 @@ def test_per_plant_series_raises_for_a_neither_key_stamp(tmp_path: Path) -> None
     _seed_sidecar(pred_dir, {"id_map": {"open": 0, "closed": 1}})
     mapping = {"2026-05-01": [_Assignment("s1", "P1")]}
 
-    with pytest.raises(resolution.StampScopeUnstated, match="conform_classified_predictions.py"):
+    with pytest.raises(resolution.StampScopeUnstated, match="repair-classified-predictions"):
         phenology.per_plant_series(mapping, {"2026-05-01": str(pred_dir)}, "open")
 
 

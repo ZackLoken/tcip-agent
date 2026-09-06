@@ -305,7 +305,7 @@ def test_site_fields_names_a_root_the_store_refuses_to_read(tmp_path: Path):
     assert "tcip adopt-store" in fields["site_problem"]
 
 
-def test_site_fields_on_an_unadopted_root_names_adopt_store_py(tmp_path: Path):
+def test_site_fields_on_an_unadopted_root_names_tcip_adopt_store(tmp_path: Path):
     """A root whose records are still loose files: ``tcip adopt-store`` is the state it
     conforms. The file backend legitimately produces that state (``import_project`` no longer
     does: it adopts a fresh root under the database backend), so the unadopted root here is

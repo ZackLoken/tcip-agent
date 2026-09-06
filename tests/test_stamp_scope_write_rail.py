@@ -1,15 +1,16 @@
 """The writer-side scope rail on ``operating_point.json``: every fresh stamp must carry both
 ``subject`` and ``attribute``, and when it also carries an ``id_map`` the pair must agree with it
 through ``scope_consistent_with_map``. Exercised directly at ``write_sidecar``/``update_sidecar``,
-the one choke point every producer and every hand merge passes through; the conform script's own
-rule 3 calls the identical predicate rather than holding the rule a second time
-(``test_conform_classified_predictions.py::test_a_stated_detector_scope_refused_over_a_bucket_whose_map_is_keyed_by_values``
+the one choke point every producer and every hand merge passes through; ``tcip
+repair-classified-predictions``'s own rule 3 calls the identical predicate rather than holding
+the rule a second time
+(``test_repair_classified_predictions.py::test_a_stated_detector_scope_refused_over_a_bucket_whose_map_is_keyed_by_values``
 pins that call site).
 
 A stamp missing the pair entirely has no live producer left to build it through
 (``operating_point_stamp`` requires both keywords with no default), so it is seeded by writing a
 hand-built dict straight through the store, the same posture
-``test_review_negative_coverage.py`` and ``test_conform_classified_predictions.py`` already take
+``test_review_negative_coverage.py`` and ``test_repair_classified_predictions.py`` already take
 for this shape.
 """
 
@@ -132,7 +133,7 @@ def test_write_sidecar_admits_a_pair_with_no_recorded_map_at_all(tmp_path: Path)
     assert read_operating_point_sidecar(bucket)["id_map"] is None
 
 
-def test_update_sidecar_refuses_a_promotion_over_a_stored_stamp_with_no_pair_naming_the_conform_script(
+def test_update_sidecar_refuses_a_promotion_over_a_stored_stamp_with_no_pair_naming_the_repair_command(
     tmp_path: Path,
 ) -> None:
     bucket = tmp_path / "bucket"
@@ -140,7 +141,7 @@ def test_update_sidecar_refuses_a_promotion_over_a_stored_stamp_with_no_pair_nam
     key = sidecar_key(bucket)
     ts.replace(key, neither_key, expect=ts.Version.ABSENT)
 
-    with pytest.raises(ValueError, match="conform_classified_predictions.py"):
+    with pytest.raises(ValueError, match="repair-classified-predictions"):
         update_sidecar(bucket, lambda stored: {**stored, "validated": True})
 
     assert read_operating_point_sidecar(bucket)["validated"] is False

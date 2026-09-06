@@ -959,7 +959,7 @@ def test_materialize_refuses_a_neither_key_stamp(tmp_path):
         str(dataset_root), str(src), str(tmp_path / "out"), bucket=CLASSIFIED_BUCKET)
 
     assert "error" in r
-    assert "conform_classified_predictions.py" in r["error"]
+    assert "repair-classified-predictions" in r["error"]
 
 
 def test_materialize_refuses_an_undecodable_stamp(tmp_path):

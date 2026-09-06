@@ -156,8 +156,8 @@ def test_consolidated_tools_present_and_removed_absent():
     ):
         assert present in registered, f"{present} should be registered"
     removed = {
-        # Demoted to scripts under the admission standard (packages/tcip-mcp/CLAUDE.md): each
-        # function stays importable, only the tool registration is gone.
+        # Demoted to console-command doors under the admission standard (packages/tcip-mcp/CLAUDE.md):
+        # each function stays importable, only the tool registration is gone.
         "scan_dataset", "inspect_compute_resources", "render_failure_cases", "archive_project",
         "import_project",
         "evaluate_detections", "evaluate_dataset", "split_dataset",
@@ -197,22 +197,22 @@ def test_consolidated_tools_present_and_removed_absent():
         "list_registered_models",
         # Merged away: stage_proposals(assignments=...) serves the accepted-candidates regime.
         "stage_accepted_proposals",
-        # Demoted to a library call plus scripts/preflight_config.py: launch_training calls the
+        # Demoted to a library call plus tcip preflight-config: launch_training calls the
         # function directly, no web route calls it.
         "preflight_config",
         # Demoted to a library call: the agent reads a label file through it directly.
         "read_annotations",
-        # Demoted to a library call plus scripts/score_predictions.py.
+        # Demoted to a library call plus tcip score-predictions.
         "score_predictions",
-        # Demoted to a library call plus scripts/triage_predictions.py.
+        # Demoted to a library call plus tcip triage-predictions.
         "triage_predictions",
         # Demoted to a library call: the web compare route calls the function directly.
         "compare_experiments",
-        # Demoted to a library call plus scripts/overlay_reference_grid.py; kept @audited.
+        # Demoted to a library call plus tcip overlay-reference-grid; kept @audited.
         "overlay_reference_grid",
-        # Demoted to a library call plus scripts/visualize.py; kept @audited.
+        # Demoted to a library call plus tcip visualize; kept @audited.
         "visualize",
-        # Folded into scripts/doctor.py's check_data_quality; its own function is deleted.
+        # Folded into tcip doctor's check_data_quality; its own function is deleted.
         "validate_data_quality",
         # Merged into run_inference, which persists the bucket both doors used to.
         "export_predictions",

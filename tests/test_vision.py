@@ -383,7 +383,7 @@ class TestVisualizePredictions:
 
         result = visualize("predictions", img)
         assert "error" in result
-        assert "conform_classified_predictions.py" in result["error"]
+        assert "repair-classified-predictions" in result["error"]
 
     def test_an_undecodable_stamp_refuses_by_name(self, viz_dataset: Path):
         from tcip_mcp.tools.vision_tools import visualize
@@ -441,7 +441,7 @@ class TestVisualizeComparison:
 
         result = visualize("comparison", img)
         assert "error" in result
-        assert "conform_classified_predictions.py" in result["error"]
+        assert "repair-classified-predictions" in result["error"]
 
     def test_an_undecodable_stamp_refuses_by_name(self, viz_dataset: Path):
         from tcip_mcp.tools.vision_tools import visualize
