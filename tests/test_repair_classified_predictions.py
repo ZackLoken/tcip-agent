@@ -20,7 +20,7 @@ from tcip_annotation.review_engine import ReviewEngine
 from tcip_annotation.state import Annotation, BBox
 
 from tcip_mcp.experiments import config_key
-from tcip_mcp.pipelines.resolution import bucket_scope, sidecar_key
+from tcip_mcp.pipelines.resolution import bucket_scope, operating_point_stamp, sidecar_key, write_sidecar
 from tcip_mcp.prediction_buckets import review_state_dir_of
 from tcip_mcp.tools.project_tools import upsert_dataset
 from tests._record_damage_fixtures import damage_record
@@ -51,6 +51,11 @@ def _base_stamp(*, id_map: dict, experiment_id: str = "exp-1", **overrides) -> d
 
 
 def _write_stamp(bucket: Path, stamp: dict) -> None:
+    if "subject" in stamp and "attribute" in stamp:
+        write_sidecar(bucket, operating_point_stamp(**stamp))
+        return
+    # write_sidecar refuses a fresh stamp with no (subject, attribute) pair outright: the
+    # pre-rail shape this file's own repair target predates can only reach disk raw.
     bucket.mkdir(parents=True, exist_ok=True)
     ts.replace(sidecar_key(bucket, "operating_point"), stamp, expect=ts.Version.ABSENT)
 
