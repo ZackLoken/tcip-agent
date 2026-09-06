@@ -162,6 +162,20 @@ def _bucket(tmp_path: Path, date: str) -> Path:
     return _ds_root(tmp_path) / "predictions" / "run" / date
 
 
+def _write_bud_opening_registry(root: Path) -> None:
+    """A ``classes.json`` declaring ``bud``'s ``opening`` axis at ``root``: the vocabulary
+    ``_classification_items`` resolves for a prediction bucket recording no ``id_map`` of its own.
+    """
+    from tcip_mcp import class_registry
+
+    class_registry.write_registry(root / "classes.json", class_registry.ClassRegistry(subjects=(
+        class_registry.Subject(name="bud", attributes=(
+            class_registry.Attribute(name="opening", type="categorical",
+                                     values=("open", "closed")),
+        )),
+    )))
+
+
 def _write_stamp_bypassing_claim_rail(dir_path: Path, stamp: dict, document: str) -> None:
     """Write one bucket's stamp through the storage seam without the writer-side claim check.
 
@@ -941,8 +955,10 @@ def _alternating_calls(i: int) -> list[tuple[bool, bool]]:
 
 
 def test_calibrate_classifier_operating_point_passes_for_well_formed_reference(tmp_path: Path) -> None:
-    cal_gt, cal_pred = tmp_path / "cal_gt", tmp_path / "cal_pred"
-    hold_gt, hold_pred = tmp_path / "hold_gt", tmp_path / "hold_pred"
+    root = _ds_root(tmp_path)
+    _write_bud_opening_registry(root)
+    cal_gt, cal_pred = root / "annotations" / "cal", tmp_path / "cal_pred"
+    hold_gt, hold_pred = root / "annotations" / "hold", tmp_path / "hold_pred"
     # 20 images/split, 2 correctly-classified instances each (1 positive, 1 negative) -> perfect,
     # balanced, disjoint (different stems) references on both sides.
     calls = _one_positive_one_negative
@@ -953,7 +969,7 @@ def test_calibrate_classifier_operating_point_passes_for_well_formed_reference(t
         trait_name="bud_opening", subject="bud", attribute="opening",
         calibration_gt_dir=str(cal_gt), calibration_pred_dir=str(cal_pred),
         holdout_gt_dir=str(hold_gt), holdout_pred_dir=str(hold_pred),
-        output_dir=str(tmp_path / "out"), dataset_root=str(tmp_path), experiment_id=None,
+        output_dir=str(tmp_path / "out"), dataset_root=str(root), experiment_id=None,
     )
 
     assert res["passed"] is True, res
@@ -1023,11 +1039,10 @@ def test_calibrate_classifier_operating_point_reports_an_undecodable_pred_stamp(
 def test_calibrate_classifier_operating_point_earns_a_record_a_later_bucket_binds_to(
     tmp_path: Path,
 ) -> None:
-    """The whole legitimate route for this door: no checkpoint anywhere in its inputs, four
-    directories the dataset layout cannot place, one stated dataset root. The claim it earns is a
-    real record its own stamp verifies against, and a later date's bucket from the same producing
-    run reads that stamp as validated."""
-    from tcip_mcp.dataset_layout import dataset_root_of
+    """The whole legitimate route for this door: no checkpoint anywhere in its inputs, ground
+    truth and predictions placed under one stated dataset root carrying the registry the
+    vocabulary is resolved from. The claim it earns is a real record its own stamp verifies
+    against, and a later date's bucket from the same producing run reads that stamp as validated."""
     from tcip_mcp.pipelines.resolution import (
         VALIDATED_HELD_OUT,
         bind_classifier_validity,
@@ -1037,12 +1052,12 @@ def test_calibrate_classifier_operating_point_earns_a_record_a_later_bucket_bind
     )
 
     root, out = _ds_root(tmp_path), tmp_path / "out"
-    cal_gt, cal_pred = tmp_path / "cal_gt", tmp_path / "cal_pred"
-    hold_gt, hold_pred = tmp_path / "hold_gt", tmp_path / "hold_pred"
+    _write_bud_opening_registry(root)
+    cal_gt, cal_pred = root / "annotations" / "2026-02-11", _bucket(tmp_path, "2026-02-11")
+    hold_gt, hold_pred = root / "annotations" / "2026-03-09", _bucket(tmp_path, "2026-03-09")
     calls = _one_positive_one_negative
     _write_split(cal_gt, cal_pred, prefix="cal", n_images=20, per_image_calls=calls)
     _write_split(hold_gt, hold_pred, prefix="hold", n_images=20, per_image_calls=calls, offset=1000)
-    assert dataset_root_of(cal_gt) is None and dataset_root_of(cal_pred) is None
 
     res = calibrate_classifier_operating_point(
         trait_name="bud_opening", subject="bud", attribute="opening",
@@ -1068,7 +1083,7 @@ def test_calibrate_classifier_operating_point_earns_a_record_a_later_bucket_bind
     assert row["train_disjointness"] is not None
     assert row["selection_disjointness"] is not None
 
-    later = _bucket(tmp_path, "2026-03-09")
+    later = _bucket(tmp_path, "2026-04-06")
     _write_preds(later, "P1_a", ["open"])
     _write_op_sidecar(later, dataset_root=root, validated=True, id_map=ID_MAP, experiment_id=None)
     state = reconcile_classifier_validity([str(out)])["validated"]
@@ -1109,8 +1124,10 @@ def test_calibrate_classifier_operating_point_refuses_genuinely_shared_content_h
     """A holdout whose GT content is cloned from calibration (same classification calls, same
     geometry) must refuse content_shared_with_calibration even under different image ids: the whole
     point of a content hash, not an image-id check."""
-    cal_gt, cal_pred = tmp_path / "cal_gt", tmp_path / "cal_pred"
-    hold_gt, hold_pred = tmp_path / "hold_gt", tmp_path / "hold_pred"
+    root = _ds_root(tmp_path)
+    _write_bud_opening_registry(root)
+    cal_gt, cal_pred = root / "annotations" / "cal", tmp_path / "cal_pred"
+    hold_gt, hold_pred = root / "annotations" / "hold", tmp_path / "hold_pred"
     calls = _alternating_calls
     _write_split(cal_gt, cal_pred, prefix="cal", n_images=20, per_image_calls=calls)
     # Different stems ("dup" vs "cal"), but identical per-image geometry+calls -> disjoint by
@@ -1121,7 +1138,7 @@ def test_calibrate_classifier_operating_point_refuses_genuinely_shared_content_h
         trait_name="bud_opening", subject="bud", attribute="opening",
         calibration_gt_dir=str(cal_gt), calibration_pred_dir=str(cal_pred),
         holdout_gt_dir=str(hold_gt), holdout_pred_dir=str(hold_pred),
-        output_dir=str(tmp_path / "out"), dataset_root=str(tmp_path), experiment_id=None,
+        output_dir=str(tmp_path / "out"), dataset_root=str(root), experiment_id=None,
     )
 
     assert res["passed"] is False
@@ -1134,8 +1151,10 @@ def test_calibrate_classifier_operating_point_partial_flip_fails_compensating_er
     """A classifier that flips a substantial, symmetric fraction of calls (net count-bias ~0)
     must still fail: a bare kappa>0 floor alone would let a 40%-wrong classifier through, since
     symmetric flips cancel out in the net bias."""
-    cal_gt, cal_pred = tmp_path / "cal_gt", tmp_path / "cal_pred"
-    hold_gt, hold_pred = tmp_path / "hold_gt", tmp_path / "hold_pred"
+    root = _ds_root(tmp_path)
+    _write_bud_opening_registry(root)
+    cal_gt, cal_pred = root / "annotations" / "cal", tmp_path / "cal_pred"
+    hold_gt, hold_pred = root / "annotations" / "hold", tmp_path / "hold_pred"
     good = _one_positive_one_negative
     _write_split(cal_gt, cal_pred, prefix="cal", n_images=30, per_image_calls=good)
 
@@ -1151,7 +1170,7 @@ def test_calibrate_classifier_operating_point_partial_flip_fails_compensating_er
         trait_name="bud_opening", subject="bud", attribute="opening",
         calibration_gt_dir=str(cal_gt), calibration_pred_dir=str(cal_pred),
         holdout_gt_dir=str(hold_gt), holdout_pred_dir=str(hold_pred),
-        output_dir=str(tmp_path / "out"), dataset_root=str(tmp_path), experiment_id=None,
+        output_dir=str(tmp_path / "out"), dataset_root=str(root), experiment_id=None,
     )
 
     assert res["passed"] is False
@@ -1546,8 +1565,10 @@ def test_calibrate_classifier_operating_point_foreign_checkpoint_stamp_still_rea
     """experiment_id=None (a foreign/unregistered checkpoint) skips train-disjointness rather than
     failing closed -- the classifier-validity stamp is still reachable for an otherwise clean
     reference."""
-    cal_gt, cal_pred = tmp_path / "cal_gt", tmp_path / "cal_pred"
-    hold_gt, hold_pred = tmp_path / "hold_gt", tmp_path / "hold_pred"
+    root = _ds_root(tmp_path)
+    _write_bud_opening_registry(root)
+    cal_gt, cal_pred = root / "annotations" / "cal", tmp_path / "cal_pred"
+    hold_gt, hold_pred = root / "annotations" / "hold", tmp_path / "hold_pred"
     calls = _one_positive_one_negative
     _write_split(cal_gt, cal_pred, prefix="cal", n_images=20, per_image_calls=calls)
     _write_split(hold_gt, hold_pred, prefix="hold", n_images=20, per_image_calls=calls, offset=1000)
@@ -1556,7 +1577,7 @@ def test_calibrate_classifier_operating_point_foreign_checkpoint_stamp_still_rea
         trait_name="bud_opening", subject="bud", attribute="opening",
         calibration_gt_dir=str(cal_gt), calibration_pred_dir=str(cal_pred),
         holdout_gt_dir=str(hold_gt), holdout_pred_dir=str(hold_pred),
-        output_dir=str(tmp_path / "out"), dataset_root=str(tmp_path), experiment_id=None,
+        output_dir=str(tmp_path / "out"), dataset_root=str(root), experiment_id=None,
     )
 
     assert res["passed"] is True, res
@@ -1571,8 +1592,10 @@ def test_calibrate_classifier_operating_point_unassessed_gt_never_fabricates_a_n
     must be excluded from the reference, never coerced into "not positive". A perfect classifier
     scored against a reference where every image also carries unassessed instances must still pass
     cleanly -- the unassessed instances contribute no fabricated disagreement."""
-    cal_gt, cal_pred = tmp_path / "cal_gt", tmp_path / "cal_pred"
-    hold_gt, hold_pred = tmp_path / "hold_gt", tmp_path / "hold_pred"
+    root = _ds_root(tmp_path)
+    _write_bud_opening_registry(root)
+    cal_gt, cal_pred = root / "annotations" / "cal", tmp_path / "cal_pred"
+    hold_gt, hold_pred = root / "annotations" / "hold", tmp_path / "hold_pred"
 
     def perfect_plus_unassessed(_i: int) -> list[tuple[bool | None, bool]]:
         # 2 correctly-classified instances (1 pos, 1 neg) + 2 never-assessed instances. The
@@ -1589,7 +1612,7 @@ def test_calibrate_classifier_operating_point_unassessed_gt_never_fabricates_a_n
         trait_name="bud_opening", subject="bud", attribute="opening",
         calibration_gt_dir=str(cal_gt), calibration_pred_dir=str(cal_pred),
         holdout_gt_dir=str(hold_gt), holdout_pred_dir=str(hold_pred),
-        output_dir=str(tmp_path / "out"), dataset_root=str(tmp_path), experiment_id=None,
+        output_dir=str(tmp_path / "out"), dataset_root=str(root), experiment_id=None,
     )
 
     assert res["passed"] is True, res
@@ -1609,8 +1632,10 @@ def test_classification_items_derives_center_match_tolerance_across_the_whole_sp
     split's GT, not one image at a time. A small-object image's real pair, offset by more than
     that image's own (too-tight) per-image tolerance but less than the split-wide tolerance
     (pulled up by a large-object image elsewhere in the same split), must still match."""
-    gt_dir, pred_dir = tmp_path / "gt", tmp_path / "pred"
-    gt_dir.mkdir()
+    root = _ds_root(tmp_path)
+    _write_bud_opening_registry(root)
+    gt_dir, pred_dir = root / "annotations" / "date", tmp_path / "pred"
+    gt_dir.mkdir(parents=True)
     pred_dir.mkdir()
     # Precondition guard: this test's math depends on
     # the recorded kind (BUD_OPENING's localization=CENTER_MATCH, seeded by seed_bud_trait_spec)
@@ -1671,8 +1696,10 @@ def test_classification_items_scopes_gt_to_the_run_subject(tmp_path: Path) -> No
     few px off -- if subject weren't scoped, greedy center-match (closest first) would steal the
     match for "bush" and either drop the real bud pair or attribute it to the wrong box/attribute
     entirely."""
-    gt_dir, pred_dir = tmp_path / "gt", tmp_path / "pred"
-    gt_dir.mkdir()
+    root = _ds_root(tmp_path)
+    _write_bud_opening_registry(root)
+    gt_dir, pred_dir = root / "annotations" / "date", tmp_path / "pred"
+    gt_dir.mkdir(parents=True)
     pred_dir.mkdir()
 
     # bud center is ~7px from the prediction, inside tolerance; bush center is an exact match, so
@@ -1694,6 +1721,112 @@ def test_classification_items_scopes_gt_to_the_run_subject(tmp_path: Path) -> No
     assert len(items) == 1
     assert items[0]["bbox"] == [105.0, 105.0, 145.0, 145.0]  # the bud box, not bush's
     assert items[0]["is_true_positive"] is True  # bud's own "open" attribute
+
+
+def _write_pair(gt_dir: Path, pred_dir: Path, *, gt_value: str, pred_value: str = "open") -> Path:
+    """One matched (GT, pred) instance pair, same box, for a refusal test that never reaches
+    the matching machinery's own edge cases. Returns the GT document written."""
+    gt_dir.mkdir(parents=True, exist_ok=True)
+    pred_dir.mkdir(parents=True, exist_ok=True)
+    gt_file = gt_dir / "a.json"
+    json_io.write_annotations(gt_file, [
+        Annotation(subject="bud", geometry=BBox(0.0, 0.0, 10.0, 10.0), attributes={"opening": gt_value}),
+    ], 20, 20)
+    json_io.write_annotations(pred_dir / "a.json", [
+        Annotation(subject="bud", geometry=BBox(0.0, 0.0, 10.0, 10.0), score=0.9,
+                   attributes={"opening": pred_value}),
+    ], 20, 20)
+    return gt_file
+
+
+def test_classification_items_refuses_a_bare_split_with_no_registry(tmp_path: Path) -> None:
+    """A bare prediction bucket (no stamp at all) is held to the registry its ground truth's own
+    dataset root carries; with no such root, this refuses naming both directories and the
+    remedy, never reading a vocabulary off the reference's own values."""
+    gt_dir, pred_dir = tmp_path / "gt", tmp_path / "pred"
+    _write_pair(gt_dir, pred_dir, gt_value="open")
+
+    with pytest.raises(ValueError) as exc:
+        _classification_items(str(gt_dir), str(pred_dir), trait_name="bud_opening", subject="bud",
+                              positive_value="open", attribute="opening")
+
+    message = str(exc.value)
+    assert str(Path(pred_dir)) in message and str(Path(gt_dir)) in message
+    assert "dataset root" in message
+
+
+def test_classification_items_refuses_a_classified_bucket_with_no_map_and_no_registry(
+    tmp_path: Path,
+) -> None:
+    """A classified stamp recording no usable id_map falls to the same registry requirement a
+    bare bucket does; with no registry under the ground truth's own root, this refuses the same
+    way, naming the classified scope's own absent map rather than a bare directory."""
+    from tcip_mcp.pipelines.resolution import operating_point_stamp, write_sidecar
+
+    gt_dir, pred_dir = tmp_path / "gt", tmp_path / "pred"
+    _write_pair(gt_dir, pred_dir, gt_value="open")
+    stamp = operating_point_stamp(
+        {}, validated=False, validated_by=None, tile_size_validated=None, shippable_issues=[],
+        id_map=None, subject="bud", attribute="opening", trait=None, dataset_hash=None,
+        checkpoint=None, checkpoint_sha256=None, experiment_id=None, images_dir=None,
+        raster_path=None, produced_at=None,
+    )
+    write_sidecar(pred_dir, stamp)
+
+    with pytest.raises(ValueError) as exc:
+        _classification_items(str(gt_dir), str(pred_dir), trait_name="bud_opening", subject="bud",
+                              positive_value="open", attribute="opening")
+
+    message = str(exc.value)
+    assert str(Path(pred_dir)) in message and str(Path(gt_dir)) in message
+    assert "classified scope with no usable id_map" in message
+
+
+def test_classification_items_refuses_a_registry_not_declaring_the_positive_value(
+    tmp_path: Path,
+) -> None:
+    """The declared values a classifier is calibrated against must include the trait's own
+    positive value: nothing else checks for it, since require_classified_record only checks
+    predictions against whatever the registry happens to declare."""
+    from tcip_mcp import class_registry
+
+    root = _ds_root(tmp_path)
+    class_registry.write_registry(root / "classes.json", class_registry.ClassRegistry(subjects=(
+        class_registry.Subject(name="bud", attributes=(
+            class_registry.Attribute(name="opening", type="categorical",
+                                     values=("closed", "other")),
+        )),
+    )))
+    gt_dir, pred_dir = root / "annotations" / "date", tmp_path / "pred"
+    _write_pair(gt_dir, pred_dir, gt_value="closed")
+
+    with pytest.raises(ValueError) as exc:
+        _classification_items(str(gt_dir), str(pred_dir), trait_name="bud_opening", subject="bud",
+                              positive_value="open", attribute="opening")
+
+    message = str(exc.value)
+    assert "'open'" in message
+    assert "closed" in message and "other" in message
+
+
+def test_classification_items_refuses_a_ground_truth_value_outside_the_registry(
+    tmp_path: Path,
+) -> None:
+    """A ground-truth value the registry does not declare refuses naming the file and the value,
+    the same fact on the reference side that require_classified_record already checks on the
+    prediction side."""
+    root = _ds_root(tmp_path)
+    _write_bud_opening_registry(root)
+    gt_dir, pred_dir = root / "annotations" / "date", tmp_path / "pred"
+    gt_file = _write_pair(gt_dir, pred_dir, gt_value="budding")
+
+    with pytest.raises(ValueError) as exc:
+        _classification_items(str(gt_dir), str(pred_dir), trait_name="bud_opening", subject="bud",
+                              positive_value="open", attribute="opening")
+
+    message = str(exc.value)
+    assert str(gt_file) in message
+    assert "budding" in message
 
 
 # --------------------------------------------------------------------------
