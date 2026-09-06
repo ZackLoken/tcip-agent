@@ -230,7 +230,7 @@ def test_bind_manifest_stems_refuses_naming_the_quarantine_count_when_it_sits_on
     manifest, root, admitted, counts = _draw_then_quarantine_a(tmp_path)
     _place_member_on(manifest, DATES[0], "a", "train")
 
-    with pytest.raises(ValueError, match="quarantined_stale_definition"):
+    with pytest.raises(ValueError, match="this run's admission quarantined 1 image"):
         bind_manifest_stems(manifest, DATES[0], SUBJECT, None, admitted,
                             images_dir=root / "images" / DATES[0], admission_counts=counts)
 
@@ -243,7 +243,7 @@ def test_bind_manifest_stems_names_reconfirmation_as_the_remedy_for_the_quaranti
     manifest, root, admitted, counts = _draw_then_quarantine_a(tmp_path)
     _place_member_on(manifest, DATES[0], "a", "val")
 
-    with pytest.raises(ValueError, match="re-confirm"):
+    with pytest.raises(ValueError, match="regeneration does not clear a quarantine"):
         bind_manifest_stems(manifest, DATES[0], SUBJECT, None, admitted,
                             images_dir=root / "images" / DATES[0], admission_counts=counts)
 

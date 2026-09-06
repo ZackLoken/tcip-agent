@@ -694,8 +694,9 @@ def bind_manifest_stems(
     side bites, never a training launch.
 
     Because the manifest was drawn through the same admission with the same subject/attribute
-    scope, the train/val refusals fire only when the data moved since the split was drawn, and
-    the remedy they name (regenerate the split) exists.
+    scope, the train/val refusals fire only when the data moved since the split was drawn: the
+    quarantine cause is undone by re-confirming the held-out images, every other cause by
+    regenerating the split over the current data.
     """
     narrowing = require_manifest_scope(
         manifest, manifest_dir=manifest_dir, subject=subject, attribute=attribute, date=date,
@@ -720,9 +721,10 @@ def bind_manifest_stems(
         more = f" (+{len(not_admitted) - 10} more)" if len(not_admitted) > 10 else ""
         quarantined = (admission_counts or {}).get("quarantined_stale_definition", 0)
         remedy = (
-            f"{quarantined} of them sit under quarantined_stale_definition: re-confirm those "
-            f"images, and regenerate the split over the current data for every other membership "
-            f"change."
+            f"this run's admission quarantined {quarantined} image(s) under "
+            f"quarantined_stale_definition (re-confirm those; regeneration does not clear a "
+            f"quarantine), and regenerate the split over the current data for every other "
+            f"membership change."
             if quarantined else
             "regenerate the split over the current data."
         )
