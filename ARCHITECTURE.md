@@ -25,20 +25,20 @@ Sections:
 
 ## Module ownership and dependency graph
 
-Source: the module inventory `tools/build_module_inventory.py` produces, run at HEAD cbec8c02.
+Source: the module inventory `tools/build_module_inventory.py` produces, run at HEAD 6c60a047.
 Every count in this section is read from that regenerated inventory, not from any earlier
 snapshot; `tools/check_architecture_doc.py --inventory-json <path>` re-runs the same generator
 and cross-checks its counts against this document's tables, this table's own module and line
 totals included.
 
-HEAD cbec8c02 has 423 modules across the six scanned roots (133847 total lines):
+HEAD 6c60a047 has 423 modules across the six scanned roots (133943 total lines):
 
 | Package (root) | Modules | Lines |
 |---|---|---|
 | tcip-mcp | 134 | 60261 |
 | tcip-annotation | 12 | 4299 |
-| tcip-web | 39 | 13259 |
-| tcip-store | 13 | 5139 |
+| tcip-web | 39 | 13261 |
+| tcip-store | 13 | 5233 |
 | tcip-web-frontend | 209 | 46200 |
 | tools | 16 | 4689 |
 
@@ -1057,7 +1057,7 @@ registered at HEAD.
 | POST | `/compare` | `compare_runs_route` | `routes/training.py:209` |
 | POST | `/compare/best` | `compare_best_route` | `routes/training.py:223` |
 | GET | `/metric-directions` | `metric_directions_route` | `routes/training.py:276` |
-| WS | `/runs/{run_id}/stream` (full path `/api/training/runs/{run_id}/stream`) | `training_stream_ws` | `routes/training.py:366` |
+| WS | `/runs/{run_id}/stream` (full path `/api/training/runs/{run_id}/stream`) | `training_stream_ws` | `routes/training.py:368` |
 
 ### routes/tuning.py, prefix `/api/tuning` (10 routes)
 
@@ -2239,7 +2239,7 @@ Phase 3 verdict: single.
 
 Must agree: the writer's row shape is what the reader and the stream consumer expect.
 Side A: `packages/tcip-mcp/src/tcip_mcp/experiments.py:965` (`def log_metrics(`, the one writer; the trainer and the envelope hand rows to the context's epoch sink instead of opening the file).
-Side B: `packages/tcip-web/src/tcip_web/routes/training.py:326` (`read_log(key, after=cursor)`, the training stream's incremental tail, pushed as a `TrainingMetricFrame` per row) and `routes/tuning.py:616` (`read_log(trial_metrics_key`, answered in the shape `_metrics_common.metrics_response` builds).
+Side B: `packages/tcip-web/src/tcip_web/routes/training.py:328` (`asyncio.to_thread(read_log, key, after=cursor)`, the training stream's incremental tail read off the event loop, pushed as a `TrainingMetricFrame` per row) and `routes/tuning.py:616` (`read_log(trial_metrics_key`, answered in the shape `_metrics_common.metrics_response` builds).
 Phase 3 verdict: single. An HPO trial with no experiment record still appends to its own trial log, one declared site in the epoch sink, pending the HPO store migration.
 
 ## S09. Web job registries persisted to .tcip/state/<name>.json  <!-- queued: P5-325 unify -->
@@ -2553,7 +2553,7 @@ Phase 3 verdict: duplicated.
 ## S51. Training run stream WebSocket  <!-- queued: P5-297 unify -->
 
 Must agree: the status payload the MCP tool returns is renderable by the browser's training view.
-Side A: `packages/tcip-web/src/tcip_web/routes/training.py:365` (`@router.websocket("/runs/{run_id}/stream")`).
+Side A: `packages/tcip-web/src/tcip_web/routes/training.py:367` (`@router.websocket("/runs/{run_id}/stream")`).
 Side B: `packages/tcip-mcp/src/tcip_mcp/tools/training_tools.py` (`monitor_training` supplies the status payload).
 Phase 3 verdict: duplicated.
 
