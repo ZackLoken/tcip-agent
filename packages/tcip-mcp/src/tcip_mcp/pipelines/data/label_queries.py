@@ -245,11 +245,13 @@ def trainable_stems(
     Returns ``(stems, counts)`` where counts carries ``annotated`` / ``confirmed_negative`` /
     ``skipped_unannotated`` / ``skipped_unconfirmed_empty`` / ``skipped_incomplete_attribute`` /
     ``quarantined_stale_definition`` so a run can record what it dropped.
-    ``quarantined_stale_definition`` is distinct from ``skipped_unconfirmed_empty``: it means
-    a human did confirm the image negative, but the subject's attribute schema has since changed and
-    the confirmation can no longer be trusted as-is, a different situation from nobody ever having
-    looked, and one a reproduce-a-number chain must be able to tell apart (see
-    ``confirmed_negative_names``'s quarantine logic).
+    ``quarantined_stale_definition`` is distinct from ``skipped_unconfirmed_empty``: it means a
+    human did finish the image, complete or negative alike, but the subject's attribute schema has
+    since changed and the confirmation can no longer be trusted as-is, a different situation from
+    nobody ever having looked, and one a reproduce-a-number chain must be able to tell apart (see
+    :func:`confirmed_negative_records`'s and :func:`stale_finished_names`'s shared quarantine
+    logic, :func:`_stale_finished`). A recorded count from before this widening counted negatives
+    alone, so counts across that boundary are not comparable.
 
     ``date`` states which capture date's confirmations this partition may admit, ``None`` for a
     tree that carries no date, and is passed through to ``confirmed_negative_names`` as the bucket
@@ -257,9 +259,28 @@ def trainable_stems(
 
     A confirmed negative whose label file now holds ``subject``, contradicting the store, is
     excluded from ``negatives`` the same way a quarantined one is; the stem still trains, admitted
-    by its real content through the ``has_objects`` branch below rather than as a negative. Pass
-    ``contradicted_out`` to learn which names those were, for a caller to surface as its own
-    warning: the exclusion here is silent about admission only, never about the disagreement.
+    by its real content through the ``has_objects`` branch below rather than as a negative, even
+    when that same negative is also stale-stamped (a stale-and-contradicted negative is not the
+    stale complete the quarantine below exists to catch: real content contradicts a *negative*
+    claim outright, and staleness never overrides that). This function keeps its own set of
+    contradicted names regardless of what the caller passed, updating the caller's ``set`` (via
+    ``contradicted_out``) when given rather than replacing it, so a caller with no set of its own
+    still gets the reorder below right. Pass ``contradicted_out`` to learn which names those were,
+    for a caller to surface as its own warning: the exclusion here is silent about admission only,
+    never about the disagreement.
+
+    A stale-stamped *complete* confirmation is quarantined ahead of the two annotated branches
+    below (``coco_annotated`` and ``has_objects``), never admitted by its real content the way an
+    unconfirmed image with the same content would be: a human's assertion under a since-changed
+    schema is exactly what this count exists to hold back, whether or not the label file happens
+    to carry boxes. Three asymmetries follow from this and stay unresolved by design: a stale
+    finished status with no label file at all counts the quarantine first on the COCO path but
+    ``skipped_unannotated`` first on the direct-JSON path (see the branches below); a materialized
+    split tree carries a negative's stamp and no ``complete``, so it can still train a stale
+    ``complete`` its source dataset would refuse (a residual of this family, not closed here); and
+    a run bound to a split manifest refuses only through its ``train``/``val`` members
+    (:func:`~tcip_mcp.pipelines.data.splits.bind_manifest_stems`), never through a ``calibration``
+    member, which still calibrates on a stale finished image as it always has.
 
     ``skipped_incomplete_attribute`` is the whole-image attribute-completeness rail: with
     ``attribute`` set, an image carrying any instance never assessed for it has incomplete ground
@@ -278,9 +299,12 @@ def trainable_stems(
     names = image_name_map(images_dir)
     candidates = list(stems) if stems is not None else sorted(names)
     quarantined: set[str] = set()
+    contradicted: set[str] = set()
     negatives = confirmed_negative_names(labels_dir, subject=subject, date=date,
                                          quarantined_out=quarantined,
-                                         contradicted_out=contradicted_out)
+                                         contradicted_out=contradicted)
+    if contradicted_out is not None:
+        contradicted_out.update(contradicted)
     counts = {"annotated": 0, "confirmed_negative": 0, "skipped_unannotated": 0,
               "skipped_unconfirmed_empty": 0, "skipped_incomplete_attribute": 0,
               "quarantined_stale_definition": 0}
@@ -326,21 +350,19 @@ def trainable_stems(
             continue
         if coco_names is not None:
             if image_name not in coco_names:
-                # assemble_coco already dropped it, but not why. A quarantined negative is
-                # dropped the same way an unconfirmed one is (assemble_coco's
-                # confirmed_negative_names call never sees a quarantined name as a negative), so
-                # it must be checked here too, or a human-confirmed-but-schema-stale negative
-                # reads as "nobody ever looked" instead of "looked, but the schema changed
-                # since", the exact distinction this count exists to preserve, and the one the
-                # direct-JSON branch below already gets right.
+                # assemble_coco already dropped it, but not why: check quarantine here too, or a
+                # stale confirmation reads as "nobody ever looked" instead of "looked, but stale".
                 if image_name in quarantined:
                     counts["quarantined_stale_definition"] += 1
                     continue
-                # Read the record so the operator is told the truth: "annotate this" and "confirm
-                # this empty one" are different jobs.
+                # "Annotate this" and "confirm this empty one" are different jobs.
                 has_record, _ = _label_record_state(stem, labels_dir, subject)
                 counts["skipped_unconfirmed_empty" if has_record
                        else "skipped_unannotated"] += 1
+            elif image_name in quarantined and image_name not in contradicted:
+                # A stale-stamped complete or negative is quarantined even with real content,
+                # unless that content also contradicts a stored negative claim outright.
+                counts["quarantined_stale_definition"] += 1
             elif image_name in coco_annotated:
                 keep.append(stem)
                 counts["annotated"] += 1
@@ -359,6 +381,8 @@ def trainable_stems(
         has_record, has_objects = _label_record_state(stem, labels_dir, subject)
         if not has_record:
             counts["skipped_unannotated"] += 1
+        elif image_name in quarantined and image_name not in contradicted:
+            counts["quarantined_stale_definition"] += 1
         elif has_objects:
             keep.append(stem)
             counts["annotated"] += 1
@@ -382,8 +406,8 @@ def require_samples(stems: list[str], counts: dict[str, int], labels_dir) -> Non
         return
     quarantined = counts.get("quarantined_stale_definition", 0)
     quarantine_note = (
-        f" {quarantined} more were confirmed negative but quarantined because the subject's "
-        f"attribute schema changed since, re-confirm them or revert the schema edit."
+        f" {quarantined} more were confirmed complete or negative but quarantined because the "
+        f"subject's attribute schema changed since, re-confirm them or revert the schema edit."
         if quarantined else ""
     )
     # Read defensively: this is the refusal path, and a counts dict missing a key here would
@@ -453,7 +477,8 @@ def stale_stamped_names(
     ``current_digest``.
 
     The one comparison a stamped confirmation is measured against a schema for: shared by
-    :func:`confirmed_negative_records`'s quarantine of a stale negative and
+    :func:`_stale_finished` (the quarantine both :func:`confirmed_negative_records` and
+    :func:`stale_finished_names` read) and
     :func:`tcip_mcp.class_registry._sweep_schema_change`'s count of confirmations a vocabulary
     change left predating the new schema, so the definition of "stale" cannot drift between the
     two readers. Absence of a stamp is never stale (a rail admits valid work, not only rejects
@@ -463,6 +488,82 @@ def stale_stamped_names(
         name for name in names
         if isinstance(stamped_by_image.get(name), str) and stamped_by_image[name] != current_digest
     }
+
+
+def _stale_finished(
+    root: Path, bucket_key: str, records: Mapping[str, dict[str, str]], subject: str,
+) -> set[str]:
+    """Names among ``records`` (one bucket's ``{image_name: record}``, already loaded by the
+    caller) whose stored status is finished (:func:`~tcip_mcp.dataset_layout.is_finished_status`,
+    ``complete`` or ``negative``) and whose stamped digest positively disagrees with ``subject``'s
+    current attribute-schema digest, over one read each of the digest store and the registry.
+
+    Shared by :func:`confirmed_negative_records`, which calls it inside its own single read of
+    the status store, and :func:`stale_finished_names`, which calls it after its own: each caller
+    reads the digest store and the registry once for the bucket it already holds, never twice for
+    the same read. The admit rules answer the same question :func:`stale_stamped_names` states:
+    no stamp for an image, no readable or existing registry, or no digest for ``subject`` all
+    admit rather than quarantine, since a rail must admit valid work, not only reject it.
+    """
+    import tcip_store
+
+    from tcip_mcp.class_registry import attribute_schema_digest, read_registry
+    from tcip_mcp.dataset_layout import (
+        bucket_digest_stamps, classes_path, image_status_digest_key, is_finished_status,
+        status_of,
+    )
+
+    finished = {name for name, record in records.items() if is_finished_status(status_of(record))}
+    if not finished:
+        return set()
+    try:
+        stamps = tcip_store.read(image_status_digest_key(root), default={})
+    except tcip_store.DecodeError:
+        stamps = {}
+    stamped_by_image = bucket_digest_stamps(stamps, bucket_key)
+    if not stamped_by_image:
+        return set()
+    cp = classes_path(root)
+    if not cp.is_file():
+        return set()
+    try:
+        current_digest = attribute_schema_digest(read_registry(cp), subject)
+    except (OSError, ValueError):
+        return set()
+    if current_digest is None:
+        return set()
+    return stale_stamped_names(stamped_by_image, current_digest, finished)
+
+
+def stale_finished_names(
+    dataset_root: str | Path | None, *, subject: str | None, date,
+) -> set[str]:
+    """Names in ``status_bucket(subject, date)`` whose stored status is finished and whose
+    stamped digest positively disagrees with ``subject``'s current attribute-schema digest: the
+    public D1 reader over a resolved dataset root, for a caller that has one directly rather than
+    a labels directory to derive it from (the status route holds ``root``;
+    :func:`confirmed_negative_records` already resolves its own and calls :func:`_stale_finished`
+    without going through this wrapper, so the partition it feeds
+    (:func:`trainable_stems`) still reads each store once, as today).
+
+    Reads the status store, then the digest store and the registry through
+    :func:`_stale_finished`, in a call of its own: never the same snapshot
+    :func:`confirmed_negative_records` reads for the same bucket elsewhere, since the two are
+    separate callers at separate times.
+
+    Answers an empty set for ``dataset_root`` unset or ``subject`` unset: no root or no subject
+    names no bucket to read, and for a bucket nothing was ever written under.
+    """
+    if not dataset_root or not subject:
+        return set()
+    from tcip_mcp.dataset_layout import read_image_status_store, status_bucket, status_confirmations
+
+    root = Path(dataset_root)
+    bucket_key = status_bucket(subject, date)
+    bucket = status_confirmations(read_image_status_store(root)).get(bucket_key)
+    if not bucket:
+        return set()
+    return _stale_finished(root, bucket_key, bucket, subject)
 
 
 def confirmed_negative_names(
@@ -530,6 +631,16 @@ def confirmed_negative_records(
     substituting one for the other reads a bucket nobody wrote under, either dropping a human's
     confirmations or answering with another date's. A bucket nothing wrote to is empty here.
 
+    A stale stamp is computed once per call over every finished status in the bucket, complete or
+    negative alike, through :func:`_stale_finished`. ``quarantined_out`` (a set, mutated in place)
+    therefore carries every stale finished name the bucket holds, a stale complete confirmation
+    included even though a complete is never part of this function's own return value; see
+    :func:`trainable_stems`'s ``quarantined_stale_definition`` count, which counts from this wider
+    set. This function's own return value excludes only the stale *negatives* among them, and the
+    contradicted ones: :func:`_exclude_contradicted` runs over every original negative, stale or
+    not, so a negative both stale-stamped and contradicted lands in ``contradicted_out`` too,
+    never swallowed by the stale exclusion first.
+
     A negative is quarantined, excluded from the return value, only when the dataset's
     ``image_status_digest.json`` sidecar carries an explicit stamp for that image (not merely its
     bucket, a bucket holds every image ever touched under the subject/date, so a bucket-wide stamp
@@ -540,9 +651,7 @@ def confirmed_negative_records(
     no sidecar, no stamp for that image, or a dataset that predates this mechanism entirely, is
     not quarantined: a rail must admit valid work, not only reject it, and treating "nobody
     stamped this yet" as "unverifiable, therefore invalid" would silently empty
-    every pre-existing project's confirmed negatives. Pass ``quarantined_out`` (a set, mutated in
-    place) to also learn which names were excluded, see :func:`trainable_stems`'s
-    ``quarantined_stale_definition`` count.
+    every pre-existing project's confirmed negatives.
 
     ``subject`` must be threaded explicitly; there is no per-subject label directory to recover
     it from. When ``subject`` is unthreaded and the dataset holds confirmed negatives, this refuses
@@ -550,12 +659,8 @@ def confirmed_negative_records(
     loop harvested. With no locatable dataset root, no store, or no confirmations for this subject,
     it returns nothing.
     """
-    import tcip_store
-
-    from tcip_mcp.class_registry import attribute_schema_digest, read_registry
     from tcip_mcp.dataset_layout import (
-        bucket_digest_stamps, classes_path, dataset_root_of, image_status_digest_key,
-        is_confirmed_negative, status_confirmations, status_bucket, status_of,
+        dataset_root_of, is_confirmed_negative, status_confirmations, status_bucket, status_of,
     )
 
     root = dataset_root_of(labels_dir)
@@ -583,32 +688,13 @@ def confirmed_negative_records(
     if not negatives:
         return negatives
 
-    try:
-        stamps = tcip_store.read(image_status_digest_key(root), default={})
-    except tcip_store.DecodeError:
-        stamps = {}
-    stamped_by_image = bucket_digest_stamps(stamps, bucket_key)
-    if not stamped_by_image:
-        # nothing stamped -> no quarantine signal -> admit, but still check for contradiction
-        return _exclude_contradicted(negatives, subject, labels_dir, contradicted_out)
-
-    current_digest = None
-    cp = classes_path(root)
-    if cp.is_file():
-        try:
-            current_digest = attribute_schema_digest(read_registry(cp), subject)
-        except (OSError, ValueError):
-            current_digest = None
-    if current_digest is None:
-        return _exclude_contradicted(negatives, subject, labels_dir, contradicted_out)  # admit
-
-    # A bucket holds every image ever touched under the subject/date: a later unrelated write
-    # must not resurrect a different image's stale, never-re-reviewed confirmation.
-    stale = stale_stamped_names(stamped_by_image, current_digest, negatives)
+    stale = _stale_finished(root, bucket_key, bucket, subject)
     if quarantined_out is not None:
         quarantined_out.update(stale)
-    trusted = {name: record for name, record in negatives.items() if name not in stale}
-    return _exclude_contradicted(trusted, subject, labels_dir, contradicted_out)
+    # Runs over the original negatives, not a stale-excluded remainder, so a negative both
+    # stale-stamped and contradicted is named in contradicted_out too.
+    without_contradicted = _exclude_contradicted(negatives, subject, labels_dir, contradicted_out)
+    return {name: r for name, r in without_contradicted.items() if name not in stale}
 
 
 def assemble_coco(
