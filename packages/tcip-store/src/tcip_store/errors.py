@@ -35,10 +35,13 @@ class NotFound(StoreError):
 
 
 class DecodeError(StoreError):
-    """The entry exists but its bytes do not decode.
+    """The entry exists but its bytes do not decode, or a backend's own bookkeeping file
+    holds bytes it cannot make sense of.
 
     Distinct from ``NotFound`` on purpose: an unreadable measurement record must never
-    present as an absent one.
+    present as an absent one. The file backend also raises it out of ``append`` and
+    ``clear_log``, never only out of a read, when a clear-base watermark file it needs to
+    settle does not hold a decimal integer.
     """
 
 
