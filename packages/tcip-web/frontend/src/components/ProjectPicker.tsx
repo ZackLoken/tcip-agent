@@ -259,7 +259,12 @@ export function ProjectPicker() {
                             value={subject}
                             onChange={(e) => setSubject(e.target.value)}
                           >
-                            <option value="">
+                            <option
+                              value=""
+                              aria-label={
+                                subjectsForDate(p, date).length ? "no subject chosen" : undefined
+                              }
+                            >
                               {subjectsForDate(p, date).length ? UNSET_GLYPH : "no labels"}
                             </option>
                             {subjectsForDate(p, date).map((t) => (
@@ -276,7 +281,12 @@ export function ProjectPicker() {
                             value={model}
                             onChange={(e) => setModel(e.target.value)}
                           >
-                            <option value="">
+                            <option
+                              value=""
+                              aria-label={
+                                modelsForDate(p, date).length ? "no model chosen" : undefined
+                              }
+                            >
                               {modelsForDate(p, date).length ? UNSET_GLYPH : "no preds"}
                             </option>
                             {modelsForDate(p, date).map((m) => (
