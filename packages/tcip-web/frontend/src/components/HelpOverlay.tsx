@@ -22,17 +22,7 @@ const ANNOTATE: Shortcut[] = [
   { key: "s", desc: "Toggle vertex snapping (polygon mode)" },
   {
     key: "x",
-    desc:
-      "Arm the cut tool: click two points on either side of the selected polygon, or " +
-      "press Shift+H / Shift+V once a polygon is selected",
-  },
-  {
-    key: "Shift+H",
-    desc: "Cut the selected polygon horizontally through its bounding box's centre (cut tool armed)",
-  },
-  {
-    key: "Shift+V",
-    desc: "Cut the selected polygon vertically through its bounding box's centre (cut tool armed)",
+    desc: "Arm the cut tool: click two points on either side of the selected polygon",
   },
   { key: "0–9", desc: "Select the Nth registered subject (0 is the first)" },
   { key: "Enter", desc: "Close current polygon (or double-click)" },
