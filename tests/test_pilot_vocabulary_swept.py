@@ -2,8 +2,8 @@
 
 CLAUDE.md's "No pilot vocabulary as framing" invariant, and owner-decisions.md Part 30 Q3 and
 Part 31 Q35, rule that a trait's own name or state never names a general mechanism in identifiers,
-comments, or docs; the fixtures under tests/ were swept to neutral names on 2026-09-05. This test
-is coverage: it holds that sweep in CI going forward, and guards no fix of its own.
+comments, or docs; the fixtures under tests/ were swept to neutral names. This test is coverage:
+it holds that sweep in CI, and guards no fix of its own.
 
 The word list is assembled from split string literals so this file's own text never carries the
 words it is checking for; the hook that keeps them out of tests/ elsewhere would otherwise refuse
@@ -49,7 +49,7 @@ def _tracked_test_files() -> list[Path]:
 
 
 def test_pilot_vocabulary_is_swept_from_tests_outside_the_allowed_files() -> None:
-    """Coverage: holds the 2026-09-05 sweep, guards no fix of its own.
+    """Coverage: holds the sweep, guards no fix of its own.
 
     Every tracked file under tests/ is scanned for the words as a case-insensitive substring, so a
     renamed identifier (a plural, a prefix, a compound) cannot hide one; a hit outside the three
@@ -74,7 +74,7 @@ def test_pilot_vocabulary_is_swept_from_tests_outside_the_allowed_files() -> Non
                 hits_outside.append(f"{path.relative_to(REPO).as_posix()}:{line_no}: {line}")
 
     assert not hits_outside, (
-        "pilot-crop trait vocabulary swept out of tests/ on 2026-09-05 has reappeared:\n"
+        "pilot-crop trait vocabulary swept out of tests/ has reappeared:\n"
         + "\n".join(hits_outside)
     )
 
