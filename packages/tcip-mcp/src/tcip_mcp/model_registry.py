@@ -7,11 +7,14 @@ so a pre-family absolute-under-root spelling can never read as a designed-extern
 response surface (``list_models``, ``get_model``, ``best_model``, both ``register_model`` returns)
 answers the resolved absolute path on a copy, never this internal storage spelling.
 A bare top-level array (the shape this store carried before the family that wrapped it) is
-never accepted for reading; the only door that wraps one into the mapping shape and respells
-every entry is ``import_project``'s own staging conform
-(:func:`~tcip_mcp.model_registry.conform_registry_paths_on_disk`), so a project stuck in the old
-shape is corrected by archiving it with ``archive_project`` and importing the archive back. A
-document neither shape refuses through :class:`RegistryVersionRefused` naming what it found.
+never accepted for reading; no operator door rewraps a live project's registry in place, and
+this registry predates the entries-mapping shape the platform writes, so nothing repairs it in
+place. The only door that wraps one into the mapping shape and respells every entry is
+``import_project``'s own staging conform
+(:func:`~tcip_mcp.model_registry.conform_registry_paths_on_disk`), which reads and writes a
+project's staging tree directly rather than through this module's own read path, so it never
+meets the refusal above. A document neither shape refuses through :class:`RegistryVersionRefused`
+naming what it found.
 """
 
 from __future__ import annotations
@@ -102,10 +105,9 @@ def _read_registry_document(raw: object) -> dict:
     if isinstance(raw, list):
         raise RegistryVersionRefused(
             "the model registry index is a top-level JSON array, the shape this store carried "
-            "before the family that wrapped it into an entries mapping; no door rewraps a live "
-            "project's registry in place, so archive this project with archive_project and "
-            "import the archive back with import_project, which conforms the registry as it "
-            "lands, before this registry can be read"
+            "before the family that wrapped it into an entries mapping; no operator door "
+            "rewraps a live project's registry in place, and this registry predates the "
+            "entries-mapping shape the platform writes, so nothing repairs it in place"
         )
     if (
         not isinstance(raw, dict)
@@ -555,10 +557,9 @@ def _document_entries_for_conform(raw: object) -> tuple[list[dict], bool, bool]:
     bare top-level array (the shape this store carried before the family that wrapped it), and a
     mapping still carrying a stray ``schema_version: 2`` from before this store's version-1 reset
     (:func:`conform_registry_paths_on_disk` reads such a document directly, bypassing the seam's
-    own ceiling refusal, precisely to reach this function; the acceptance is
-    :func:`conform_registry_paths_on_disk`'s alone, since :func:`conform_registry_paths`'s ordinary
-    seam read already refuses a stray 2 before this function is ever called with one). Both
-    rewrite through :func:`_write_registry_document`, which carries no ``schema_version`` field, so
+    own ceiling refusal, precisely to reach this function; the seam's own read otherwise refuses a
+    stray 2 outright, so this function is never reached carrying one except through that bypass).
+    Both rewrite through :func:`_write_registry_document`, which carries no ``schema_version`` field, so
     the field is dropped on the same write that wraps or respells; ``had_stray_schema_version_two``
     tells the caller that drop actually happened, so it can be disclosed as its own outcome line
     rather than silently folded into "already wrapped, nothing to say". Anything else refuses,
@@ -640,8 +641,8 @@ def _conform_entries(
     entries: list[dict], root: Path, *, plan: bool, hash_cache: dict[Path, str],
 ) -> tuple[list[dict], list[str]]:
     """Respell every entry's ``checkpoint_path`` relative to ``root``, per
-    :func:`conform_registry_paths`'s own rule. Returns the conformed entries and one outcome
-    line per entry actually changed (or, under ``plan``, that would change)."""
+    :func:`conform_registry_paths_on_disk`'s own rule. Returns the conformed entries and one
+    outcome line per entry actually changed (or, under ``plan``, that would change)."""
     verb = "would respell" if plan else "respelled"
     conformed: list[dict] = []
     lines: list[str] = []
@@ -706,9 +707,7 @@ def _conform_entries(
 def _wrap_and_drop_lines(*, already_wrapped: bool, had_stray_two: bool, plan: bool) -> list[str]:
     """The outcome lines :func:`_document_entries_for_conform`'s own findings earn, in the tense
     ``plan`` calls for: a bare array wrapped into the entries mapping, a stray
-    ``schema_version: 2`` dropped, both, or neither. One implementation shared by
-    :func:`conform_registry_paths` and :func:`conform_registry_paths_on_disk`, so the two
-    conforms cannot silently disagree on what counts as worth disclosing."""
+    ``schema_version: 2`` dropped, both, or neither."""
     lines = []
     if not already_wrapped:
         lines.append(("wrapping" if plan else "wrapped") + " the registry index into the entries mapping")
@@ -717,10 +716,17 @@ def _wrap_and_drop_lines(*, already_wrapped: bool, had_stray_two: bool, plan: bo
     return lines
 
 
-def conform_registry_paths(root: str | Path, *, plan: bool = False) -> list[str]:
+def conform_registry_paths_on_disk(root: str | Path) -> list[str]:
     """Wrap ``root``'s registry index into the entries mapping and respell every entry's
-    checkpoint_path relative to ``root``, in one transaction (the same locked read-modify-write
-    discipline ``_register_entry`` uses).
+    ``checkpoint_path`` relative to ``root``, reading and writing the registry index file
+    directly rather than through the storage seam.
+
+    For a tree the caller already holds exclusive access to but that is not yet a database
+    (``import_project``'s own staging tree, always loose files until adoption runs): a seam
+    transaction there either refuses outright (the database backend refuses a write to an
+    unconformed root) or, once adopted, leaves a cached connection open on a directory the door
+    is about to rename, which Windows refuses. This is the registry's only conform: no operator
+    door repairs a live, already-adopted project's registry in place.
 
     Per entry: a stored path that resolves under ``root`` with a matching ``sha256`` is
     respelled through the checkpoint speller (existence alone never blesses a replaced file). A
@@ -735,46 +741,15 @@ def conform_registry_paths(root: str | Path, *, plan: bool = False) -> list[str]
     line, and leaves an already-relative entry's spelling untouched (the truthful claim stays
     internal-but-absent) rather than ever writing a path under the conform root.
 
-    ``plan=True`` computes every outcome without writing. Idempotent: a second run changes
-    nothing, since an already-correctly-spelled entry's respelled form always equals its stored
-    one. Raises :class:`RegistryVersionRefused` for a document neither a bare array nor a
-    recognized entries mapping.
-    """
-    root_path = Path(root).resolve()
-    key = registry_index_key(root_path)
-    hash_cache: dict[Path, str] = {}
-
-    if plan:
-        entries, already_wrapped, had_stray_two = _document_entries_for_conform(
-            tcip_store.read(key, default=None))
-        _conformed, lines = _conform_entries(entries, root_path, plan=True, hash_cache=hash_cache)
-        prefix = _wrap_and_drop_lines(already_wrapped=already_wrapped, had_stray_two=had_stray_two, plan=True)
-        return prefix + lines
-
-    with tcip_store.transaction(key) as txn:
-        entries, already_wrapped, had_stray_two = _document_entries_for_conform(txn.read(key, default=None))
-        conformed, lines = _conform_entries(entries, root_path, plan=False, hash_cache=hash_cache)
-        txn.write(key, _write_registry_document(conformed))
-    prefix = _wrap_and_drop_lines(already_wrapped=already_wrapped, had_stray_two=had_stray_two, plan=False)
-    return prefix + lines
-
-
-def conform_registry_paths_on_disk(root: str | Path) -> list[str]:
-    """The same conform as :func:`conform_registry_paths`, reading and writing the registry
-    index file directly rather than through the storage seam.
-
-    For a tree the caller already holds exclusive access to but that is not yet a database
-    (``import_project``'s own staging tree, always loose files until adoption runs): a seam
-    transaction there either refuses outright (the database backend refuses a write to an
-    unconformed root) or, once adopted, leaves a cached connection open on a directory the door
-    is about to rename, which Windows refuses. Never used against a live, already-adopted
-    project; :func:`conform_registry_paths` is that entry point.
-
     Reading the raw bytes directly, bypassing the seam's own schema_version ceiling check, is
     what lets this route accept a document still carrying a stray ``schema_version: 2`` from
     before this store's version-1 reset (the seam's own entry point refuses that value outright,
     on read as on write): this is the one conform that accepts it, since ``import_project`` is
     the only door this function serves.
+
+    Idempotent: a second run changes nothing, since an already-correctly-spelled entry's
+    respelled form always equals its stored one. Raises :class:`RegistryVersionRefused` for a
+    document neither a bare array nor a recognized entries mapping.
     """
     root_path = Path(root).resolve()
     path = registry_index_path(root_path)

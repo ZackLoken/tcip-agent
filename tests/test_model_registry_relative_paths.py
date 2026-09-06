@@ -61,19 +61,19 @@ def test_absent_registry_answers_empty_for_a_fresh_project(tmp_path: Path):
     assert read_registry_index(tmp_path) == []
 
 
-def test_a_bare_array_refuses_read_naming_the_archive_import_remedy(tmp_path: Path):
+def test_a_bare_array_refuses_read_stating_nothing_repairs_it_in_place(tmp_path: Path):
     _seed_v1(tmp_path, [{"name": "legacy", "checkpoint_path": "x.pt"}])
 
-    with pytest.raises(RegistryVersionRefused, match="archive this project"):
+    with pytest.raises(RegistryVersionRefused, match="nothing repairs it in place"):
         read_registry_index(tmp_path)
 
 
-def test_a_bare_array_refuses_a_write_naming_the_archive_import_remedy(tmp_path: Path):
+def test_a_bare_array_refuses_a_write_stating_nothing_repairs_it_in_place(tmp_path: Path):
     _seed_v1(tmp_path, [{"name": "legacy", "checkpoint_path": "x.pt"}])
     ckpt = tmp_path / "m.pt"
     ckpt.write_bytes(b"weights")
 
-    with pytest.raises(RegistryVersionRefused, match="archive this project"):
+    with pytest.raises(RegistryVersionRefused, match="nothing repairs it in place"):
         ModelRegistry(str(tmp_path)).register_model("m", str(ckpt), {}, metrics_source=None)
 
 
@@ -112,7 +112,7 @@ def test_archive_project_refuses_loudly_on_an_unconformed_registry(tmp_path: Pat
     result = archive_project(str(tmp_path), str(tmp_path.parent / "out.zip"))
 
     assert "error" in result
-    assert "archive this project" in result["error"]
+    assert "nothing repairs it in place" in result["error"]
 
 
 def test_archive_project_refuses_a_schema_version_two_registry_stating_the_fact(
@@ -176,15 +176,6 @@ def test_doctor_reports_the_refusal_as_its_own_finding(tmp_path: Path):
 
     assert findings and findings[0][0] == "error"
     assert "could not be checked" in findings[0][1]
-
-
-def test_a_conformed_registry_reads_clean(tmp_path: Path):
-    from tcip_mcp.model_registry import conform_registry_paths
-
-    _seed_v1(tmp_path, [])
-    conform_registry_paths(tmp_path)
-
-    assert read_registry_index(tmp_path) == []
 
 
 def test_a_malformed_mapping_refuses_naming_what_it_found():
