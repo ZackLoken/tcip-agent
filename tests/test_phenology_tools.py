@@ -1798,7 +1798,9 @@ def test_classification_items_refuses_a_registry_not_declaring_the_positive_valu
         )),
     )))
     gt_dir, pred_dir = root / "annotations" / "date", tmp_path / "pred"
-    _write_pair(gt_dir, pred_dir, gt_value="closed")
+    # Both sides carry a value the registry does declare, so require_classified_record's own
+    # membership check never fires: only the missing-positive-value check under test can raise.
+    _write_pair(gt_dir, pred_dir, gt_value="closed", pred_value="closed")
 
     with pytest.raises(ValueError) as exc:
         _classification_items(str(gt_dir), str(pred_dir), trait_name="bud_opening", subject="bud",
