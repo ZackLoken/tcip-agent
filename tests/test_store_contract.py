@@ -554,33 +554,42 @@ def test_a_cursor_taken_before_a_clear_reads_only_what_was_appended_after(store)
 
 
 _CLEAR_LOG_RACE = (
-    "clear_log removes the log file and advances the clear-base watermark as two separate "
-    "file changes on the file backend; the database backend has no such pair to race"
+    "clear_log stages a pending watermark, then removes the log file, then installs the "
+    "watermark onto the marker: three file changes on the file backend that a reader or a "
+    "crash can land between; the database backend has no such sequence to race"
 )
 
 
-def test_a_reader_interleaved_between_clear_logs_two_file_changes_reads_consistently(
+def test_a_reader_interleaved_between_staging_and_the_unlink_reads_consistently(
     store, monkeypatch,
 ):
     """A reader that lands at the point clear_log is about to remove the log file (the
     file backend's own lock is thread-reentrant, so a same-thread call from inside that
     window runs rather than blocking) must not replay the cleared entries to the cursor
-    that was current before the clear. Removing the file first and only then advancing
-    the watermark is what keeps this window safe: a reader landing here still finds the
-    watermark unadvanced, so the whole of the old, still-present file reads as bytes it
-    has already seen rather than bytes past its own end."""
+    that was current before the clear. This is the window between the pending watermark's
+    own write and the unlink that commits the clear: the log file is still present with
+    every old entry, the marker is still whatever it held before this clear, and the
+    reader's own read of the marker, never the pending file, is what keeps it from seeing
+    anything that has not committed yet."""
     only_on(store, FILE, _CLEAR_LOG_RACE)
     backend = store.backend
     key = store.key(LOG, "interleaved-clear")
     for i in range(3):
         ts.append(key, {"i": i})
     before = ts.read_log(key)
+    path = store.path(key)
+    old_size = path.stat().st_size
 
     real_remove = backend._remove_entry
-    interleaved: dict[str, object] = {}
+    interleaved: dict[str, ts.LogPage] = {}
+    pending_bytes = b""
+    marker_exists = True
 
     def read_then_remove(path, *, durable):
+        nonlocal pending_bytes, marker_exists
         interleaved["page"] = ts.read_log(key, after=before.cursor)
+        pending_bytes = backend._clear_base_pending_path(path).read_bytes()
+        marker_exists = backend._clear_base_path(path).exists()
         real_remove(path, durable=durable)
 
     monkeypatch.setattr(backend, "_remove_entry", read_then_remove)
@@ -591,41 +600,76 @@ def test_a_reader_interleaved_between_clear_logs_two_file_changes_reads_consiste
     page = interleaved["page"]
     assert page.records == []
     assert page.cursor == before.cursor
+    assert int(pending_bytes) == old_size
+    assert not marker_exists
 
 
-def test_a_crash_between_clear_logs_two_file_changes_replays_no_entry(store, monkeypatch):
-    """A process that dies after the first of clear_log's two file changes completes for
-    real, and before the second one runs at all, must leave a state a later, fully
-    independent read_log call reads correctly for the pre-clear end cursor: nothing new,
-    never every cleared entry replayed. Removing the file before advancing the watermark
-    is what buys this: the crash leaves the watermark unadvanced over an already-vanished
-    file, never advanced over one still holding the bytes it now claims to be past."""
+def test_a_reader_interleaved_between_the_unlink_and_the_watermark_install_reads_consistently(
+    store, monkeypatch,
+):
+    """The other half of the same window: a reader landing after the unlink has committed
+    but before the pending watermark is installed onto the marker. The log file is gone,
+    the marker is still whatever it held before this clear, and the pending file already
+    holds the value the marker is about to become; the reader answers from the marker
+    alone, exactly as it does the instant a real crash lands here."""
+    only_on(store, FILE, _CLEAR_LOG_RACE)
+    backend = store.backend
+    key = store.key(LOG, "interleaved-clear-install")
+    for i in range(3):
+        ts.append(key, {"i": i})
+    before = ts.read_log(key)
+    path = store.path(key)
+    old_size = path.stat().st_size
+
+    real_install = backend._install_pending_clear_base
+    interleaved: dict[str, ts.LogPage] = {}
+    pending_bytes = b""
+    marker_exists = True
+
+    def read_then_install(path, *, durable):
+        nonlocal pending_bytes, marker_exists
+        interleaved["page"] = ts.read_log(key, after=before.cursor)
+        pending_bytes = backend._clear_base_pending_path(path).read_bytes()
+        marker_exists = backend._clear_base_path(path).exists()
+        real_install(path, durable=durable)
+
+    monkeypatch.setattr(backend, "_install_pending_clear_base", read_then_install)
+
+    removed = ts.clear_log(key)
+
+    assert removed == 3
+    page = interleaved["page"]
+    assert page.records == []
+    assert page.cursor == before.cursor
+    assert int(pending_bytes) == old_size
+    assert not marker_exists
+
+
+def test_a_crash_after_the_unlink_replays_no_entry(store, monkeypatch):
+    """A process that dies right after the unlink commits, before the pending watermark is
+    installed onto the marker, must leave a state a later, fully independent read_log call
+    reads correctly for the pre-clear end cursor: nothing new, never every cleared entry
+    replayed. The pending file stays on disk holding the value the next writer will
+    install, and the marker stays exactly where the crash found it."""
     only_on(store, FILE, _CLEAR_LOG_RACE)
     backend = store.backend
     key = store.key(LOG, "crash-mid-clear")
     for i in range(3):
         ts.append(key, {"i": i})
     before = ts.read_log(key)
+    path = store.path(key)
+    old_size = path.stat().st_size
 
     class _SimulatedCrash(Exception):
         pass
 
     real_remove = backend._remove_entry
-    real_write_base = backend._write_clear_base
-    fired = {"done": False}
 
-    def crash_after_first_real_call(real_fn):
-        def wrapper(*args, **kwargs):
-            result = real_fn(*args, **kwargs)
-            if not fired["done"]:
-                fired["done"] = True
-                raise _SimulatedCrash
-            return result
+    def crash_after_remove(*args, **kwargs):
+        real_remove(*args, **kwargs)
+        raise _SimulatedCrash
 
-        return wrapper
-
-    monkeypatch.setattr(backend, "_remove_entry", crash_after_first_real_call(real_remove))
-    monkeypatch.setattr(backend, "_write_clear_base", crash_after_first_real_call(real_write_base))
+    monkeypatch.setattr(backend, "_remove_entry", crash_after_remove)
 
     with pytest.raises(_SimulatedCrash):
         ts.clear_log(key)
@@ -633,34 +677,19 @@ def test_a_crash_between_clear_logs_two_file_changes_replays_no_entry(store, mon
     resumed = ts.read_log(key, after=before.cursor)
     assert resumed.records == []
     assert resumed.cursor == before.cursor
+    assert int(backend._clear_base_pending_path(path).read_bytes()) == old_size
+    assert not backend._clear_base_path(path).exists()
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "open design item, recorded in docs/current-task.md: clear_log's file removal and its "
-        ".clearbase watermark write are two separate files no ordering makes atomic across a "
-        "crash between them. The test above pins the crash's own immediate aftermath (nothing "
-        "replayed from the pre-crash cursor, right after the file vanishes); this one carries "
-        "the same crash one step further, once new entries appended afterward (the watermark "
-        "still unadvanced) push the recreated file's own length past the pre-crash cursor's "
-        "byte offset. A replay from that stale cursor should still see nothing from a log it "
-        "has no relationship to, but instead seeks into the new file's own bytes at an offset "
-        "that shares no entry boundary with them, decoding a real but unrelated fragment and "
-        "reporting it corrupt. The fix is a design decision (a base recorded inside the log "
-        "file's own bytes, atomic with the removal, or some other single-file scheme), not a "
-        "change this test drives; when it lands, this xfail starts passing and must be deleted "
-        "rather than left to mask the fix."
-    ),
-)
-def test_a_crash_between_clear_logs_two_file_changes_then_new_entries_misreads_as_corrupt(
+def test_a_crash_after_the_unlink_then_new_entries_replays_only_the_new_ones(
     store, monkeypatch,
 ):
-    """One step past test_a_crash_between_clear_logs_two_file_changes_replays_no_entry's own
-    claim: after the identical simulated crash (file removed, watermark not advanced), append
-    fresh entries until the recreated file's own length passes the pre-crash cursor's byte
-    offset, then replay from that same pre-crash cursor. Nothing from an unrelated log's own
-    byte stream should ever surface as a decoded (or corrupt) entry; today it does."""
+    """One step past test_a_crash_after_the_unlink_replays_no_entry: the identical crash
+    (file removed, watermark pending), then fresh entries appended until the recreated
+    file's own length passes the pre-crash cursor's byte offset. The first of those appends
+    settles the pending watermark before writing anything, so a replay from the pre-crash
+    cursor lands exactly on the boundary between the cleared entries and the new ones,
+    never inside an entry a stale, unadvanced base would have made it seek into."""
     only_on(store, FILE, _CLEAR_LOG_RACE)
     backend = store.backend
     key = store.key(LOG, "crash-mid-clear-then-new-entries")
@@ -673,37 +702,201 @@ def test_a_crash_between_clear_logs_two_file_changes_then_new_entries_misreads_a
         pass
 
     real_remove = backend._remove_entry
-    real_write_base = backend._write_clear_base
-    fired = {"done": False}
 
-    def crash_after_first_real_call(real_fn):
-        def wrapper(*args, **kwargs):
-            result = real_fn(*args, **kwargs)
-            if not fired["done"]:
-                fired["done"] = True
-                raise _SimulatedCrash
-            return result
+    def crash_after_remove(*args, **kwargs):
+        real_remove(*args, **kwargs)
+        raise _SimulatedCrash
 
-        return wrapper
-
-    monkeypatch.setattr(backend, "_remove_entry", crash_after_first_real_call(real_remove))
-    monkeypatch.setattr(backend, "_write_clear_base", crash_after_first_real_call(real_write_base))
+    monkeypatch.setattr(backend, "_remove_entry", crash_after_remove)
 
     with pytest.raises(_SimulatedCrash):
         ts.clear_log(key)
 
     path = store.path(key)
+    labels: list[str] = []
     for i in range(200):
-        ts.append(key, {"i": f"new-{i}"})
-        if path.stat().st_size > old_end:
+        label = f"new-{i}"
+        ts.append(key, {"i": label})
+        labels.append(label)
+        size = path.stat().st_size
+        assert size != old_end
+        if size > old_end:
             break
     else:
         pytest.fail("could not grow the recreated log past the pre-crash cursor's byte offset")
 
     resumed = ts.read_log(key, after=before.cursor)
 
-    assert resumed.records == []
+    assert [r["i"] for r in resumed.records] == labels
     assert resumed.corrupt == ()
+
+
+def test_a_crash_after_staging_the_pending_watermark_abandons_it_on_the_next_append(
+    store, monkeypatch,
+):
+    """A crash between writing the pending watermark and the unlink that would have made it
+    real: the log file is untouched, the marker is untouched, and the pending file is the
+    only sign anything happened. The clear never took effect, so the next append discards
+    the stale stage rather than mistaking it for a completed clear."""
+    only_on(store, FILE, _CLEAR_LOG_RACE)
+    backend = store.backend
+    key = store.key(LOG, "crash-after-staging")
+    for i in range(3):
+        ts.append(key, {"i": i})
+    path = store.path(key)
+
+    class _SimulatedCrash(Exception):
+        pass
+
+    real_write_pending = backend._write_pending_clear_base
+
+    def crash_after_write(*args, **kwargs):
+        real_write_pending(*args, **kwargs)
+        raise _SimulatedCrash
+
+    monkeypatch.setattr(backend, "_write_pending_clear_base", crash_after_write)
+
+    with pytest.raises(_SimulatedCrash):
+        ts.clear_log(key)
+
+    assert path.is_file()
+    assert [r["i"] for r in ts.read_log(key).records] == [0, 1, 2]
+    assert backend._clear_base_pending_path(path).exists()
+    assert not backend._clear_base_path(path).exists()
+
+    ts.append(key, {"i": "after"})
+
+    assert not backend._clear_base_pending_path(path).exists()
+    page = ts.read_log(key)
+    assert [r["i"] for r in page.records] == [0, 1, 2, "after"]
+    assert page.corrupt == ()
+
+
+def test_settling_through_append_after_a_crash_installs_the_pending_watermark(
+    store, monkeypatch,
+):
+    """The crash test above, carried one step further: instead of reading the log next,
+    append to it. The marker's own crash-recovery path runs first, installing the pending
+    watermark before the new entry is written, so the log holds exactly the one new entry
+    and a replay from the pre-crash cursor returns it rather than a fragment of stale
+    bytes read against an unadvanced base."""
+    only_on(store, FILE, _CLEAR_LOG_RACE)
+    backend = store.backend
+    key = store.key(LOG, "settle-through-append")
+    for i in range(3):
+        ts.append(key, {"i": i})
+    before = ts.read_log(key)
+    path = store.path(key)
+    old_size = path.stat().st_size
+
+    class _SimulatedCrash(Exception):
+        pass
+
+    real_remove = backend._remove_entry
+
+    def crash_after_remove(*args, **kwargs):
+        real_remove(*args, **kwargs)
+        raise _SimulatedCrash
+
+    monkeypatch.setattr(backend, "_remove_entry", crash_after_remove)
+
+    with pytest.raises(_SimulatedCrash):
+        ts.clear_log(key)
+
+    ts.append(key, {"i": "after"})
+
+    assert backend._read_clear_base(path) == old_size
+    assert not backend._clear_base_pending_path(path).exists()
+
+    full = ts.read_log(key)
+    assert [r["i"] for r in full.records] == ["after"]
+
+    resumed = ts.read_log(key, after=before.cursor)
+    assert [r["i"] for r in resumed.records] == ["after"]
+
+
+def test_a_second_clear_log_after_a_crash_settles_and_returns_zero(store, monkeypatch):
+    """The base must never advance twice for one clear: a second clear_log call after the
+    crash above settles the pending watermark itself (there is no file left to clear) and
+    reports nothing removed, rather than computing a fresh base from bytes that are no
+    longer there."""
+    only_on(store, FILE, _CLEAR_LOG_RACE)
+    backend = store.backend
+    key = store.key(LOG, "second-clear-after-crash")
+    for i in range(3):
+        ts.append(key, {"i": i})
+    path = store.path(key)
+    old_size = path.stat().st_size
+
+    class _SimulatedCrash(Exception):
+        pass
+
+    real_remove = backend._remove_entry
+
+    def crash_after_remove(*args, **kwargs):
+        real_remove(*args, **kwargs)
+        raise _SimulatedCrash
+
+    monkeypatch.setattr(backend, "_remove_entry", crash_after_remove)
+
+    with pytest.raises(_SimulatedCrash):
+        ts.clear_log(key)
+
+    monkeypatch.setattr(backend, "_remove_entry", real_remove)
+
+    removed = ts.clear_log(key)
+
+    assert removed == 0
+    assert backend._read_clear_base(path) == old_size
+    assert not backend._clear_base_pending_path(path).exists()
+
+
+def test_a_pending_file_holding_non_integer_bytes_refuses_settling(store):
+    """A pending file nothing on this platform writes: append refuses rather than guessing
+    at the watermark it would install, while read_log keeps answering from the marker,
+    which the pending file's presence or content never changes."""
+    only_on(store, FILE, _CLEAR_LOG_RACE)
+    backend = store.backend
+    key = store.key(LOG, "garbled-pending")
+    ts.append(key, {"i": 0})
+    path = store.path(key)
+    pending_path = backend._clear_base_pending_path(path)
+    path.unlink()
+    pending_path.write_bytes(b"not-a-number")
+
+    with pytest.raises(ts.DecodeError):
+        ts.append(key, {"i": 1})
+
+    page = ts.read_log(key)
+    assert page.records == []
+
+
+def test_a_pending_file_is_invisible_to_enumeration_and_reported_as_bookkeeping(store):
+    """The file a crash can leave beside a log's marker must never surface as an entry: not
+    to the backend's own enumeration, not to adoption's plan or its unaccounted-files check,
+    and reported as bookkeeping rather than something unclaimed when a project tree is
+    bundled."""
+    only_on(store, FILE, _CLEAR_LOG_RACE)
+    from tcip_mcp.tools.bundle import account_for
+    from tcip_store.adoption import plan_root, unaccounted_files
+    from tests._store_worker import CONTRACT_LAYOUT
+
+    backend = store.backend
+    key = store.key(LOG, "pending-visible")
+    ts.append(key, {"i": 0})
+    path = store.path(key)
+    pending_path = backend._clear_base_pending_path(path)
+    pending_path.write_bytes(b"3")
+
+    assert backend.keys(LOG, str(store.root)) == [key]
+
+    plan = plan_root(str(store.root), CONTRACT_LAYOUT)
+    assert pending_path not in plan.claimed
+    assert unaccounted_files((plan,)) == ()
+
+    accounting = account_for(store.root)
+    assert pending_path in accounting.bookkeeping
+    assert pending_path not in accounting.unaccounted
 
 
 _LOG_FILE_MECHANICS = (

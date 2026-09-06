@@ -56,6 +56,11 @@ _LOCK_SUFFIX = ".lock"
 _CLEAR_BASE_SUFFIX = ".clearbase"
 """A cleared log's cursor watermark, so a cursor taken before the clear stays comparable to
 one taken after it even though the file it names started over at byte zero."""
+_CLEAR_BASE_PENDING_SUFFIX = ".clearbase.pending"
+"""The watermark ``clear_log`` stages before it removes the log file, and installs onto the
+marker afterward: a crash between those two commits leaves this file as the one durable
+record of the value the marker is about to become, and installing it twice writes the same
+number."""
 _TAIL_SCAN_BYTES = 8192
 """How far back an append looks for the last entry boundary at a time, so a repair costs the
 size of the tail rather than the size of the log."""
@@ -626,6 +631,7 @@ class FileBackend:
         data = _encode(descriptor, key, record)
         _refuse_embedded_newline(key, data)
         with self._conform_rail([key]), self._locked([key]):
+            self._settle_pending_clear(path, descriptor)
             existed = path.exists()
             self._repair_torn_tail(path)
             with open(path, "ab") as handle:
@@ -670,19 +676,60 @@ class FileBackend:
         """Where a log's cursor watermark sits, hidden beside the log it describes."""
         return path.parent / f".{path.name}{_CLEAR_BASE_SUFFIX}"
 
+    def _clear_base_pending_path(self, path: Path) -> Path:
+        """Where a log's staged clear watermark sits before it is installed onto the marker."""
+        return path.parent / f".{path.name}{_CLEAR_BASE_PENDING_SUFFIX}"
+
     def _read_clear_base(self, path: Path) -> int:
         """The cumulative offset this log's cursor space starts from.
 
         Zero for a log that was never cleared, which is why every cursor computed against it
         below reduces to today's plain byte offset for the overwhelming majority of logs.
         """
-        data = self._read_bytes(self._clear_base_path(path))
-        return int(data) if data else 0
-
-    def _write_clear_base(self, path: Path, base: int, *, durable: bool) -> None:
         marker = self._clear_base_path(path)
-        temp = self._stage_bytes(marker, str(base).encode("ascii"), durable=durable)
-        self._apply_staged(temp, marker, durable=durable)
+        data = self._read_bytes(marker)
+        return _parse_watermark(marker, data) if data else 0
+
+    def _write_pending_clear_base(self, path: Path, value: int, *, durable: bool) -> None:
+        """Stage the watermark a clear is about to commit to, before the unlink that makes
+        the clear itself irreversible."""
+        pending = self._clear_base_pending_path(path)
+        temp = self._stage_bytes(pending, str(value).encode("ascii"), durable=durable)
+        self._apply_staged(temp, pending, durable=durable)
+
+    def _install_pending_clear_base(self, path: Path, *, durable: bool) -> None:
+        """Rename the staged watermark onto the marker, the clear's second and final commit.
+
+        Never removes its source on failure, unlike ``_apply_staged``: an exception here
+        leaves the pending file for the next writer to install rather than losing the
+        watermark it was staged to become.
+        """
+        pending = self._clear_base_pending_path(path)
+        marker = self._clear_base_path(path)
+        retry_while_denied(lambda: os.replace(pending, marker), self.lock_timeout_s)
+        if durable:
+            self._fsync_dir(marker.parent)
+
+    def _settle_pending_clear(self, path: Path, descriptor: StoreDescriptor) -> None:
+        """Finish or abandon a clear an earlier crash left mid-flight, before ``append`` or
+        ``clear_log`` reads anything else about this log.
+
+        A pending watermark beside an absent log file means the unlink already committed and
+        only the watermark's own commit was interrupted: installing the staged value finishes
+        the clear. A pending watermark beside a log file that is still present means the crash
+        landed before the unlink ran: the clear never took effect, so the stale stage is
+        discarded and the marker is left exactly where it was. No pending file means nothing
+        to settle, the case for every log this backend has never cleared.
+        """
+        pending = self._clear_base_pending_path(path)
+        pending_data = self._read_bytes(pending)
+        if pending_data is None:
+            return
+        if path.exists():
+            _remove_quietly(str(pending))
+            return
+        _parse_watermark(pending, pending_data)
+        self._install_pending_clear_base(path, durable=descriptor.durable)
 
     def read_log(self, key: Key, *, after: str | None = None) -> LogPage:
         """A log's entries from ``after`` onward, and the cursor to resume from next.
@@ -691,7 +738,15 @@ class FileBackend:
         ``clear_log`` holds while it moves them, so a reader never pairs a base that
         already reflects a clear with bytes ``clear_log`` has not yet removed (or the
         reverse): either read sees the whole pair from before the clear or the whole
-        pair from after it, never one half of each.
+        pair from after it, never one half of each. The lock is why a file-backend read
+        waits on a writer holding this key, never on another reader: the database backend's
+        read waits on no writer at all.
+
+        Settles nothing. A reader that lands between the unlink that commits a clear and the
+        watermark's own install onto the marker sees the marker unadvanced over an absent
+        file and answers with no records at the pre-clear cursor, which is correct at that
+        instant; deciding what a clear left behind is always the next writer's job, through
+        ``append`` or ``clear_log``, never a reader's.
         """
         descriptor = get_descriptor(key.store)
         path = self.path_for(key)
@@ -732,30 +787,48 @@ class FileBackend:
     def clear_log(self, key: Key) -> int:
         """Remove a log file outright, returning how many entries it held.
 
-        Repairs a torn tail first, so an appender's own in-flight fragment is never counted
-        as a whole entry. Deleting the file rather than truncating it to zero bytes is what
-        keeps an absent log and a never-appended one the same "nothing here" ``read_log``
-        already reports for either.
+        Settles an earlier crash's pending clear first, before this call reads anything
+        else about the log. Repairs a torn tail next, so an appender's own in-flight
+        fragment is never counted as a whole entry. Deleting the file rather than
+        truncating it to zero bytes is what keeps an absent log and a never-appended one
+        the same "nothing here" ``read_log`` already reports for either; a log with
+        nothing to clear is left exactly there and this call returns 0 without writing
+        anything else.
 
-        Removes the file before advancing the cursor watermark, so a crash between the two
-        never leaves the watermark ahead of a file that still holds the bytes it claims to
-        be past: the only observable partial state is the file already gone and the
-        watermark not yet advanced, which ``read_log`` (holding the same lock this method
-        does) reads as "nothing here yet", the same answer it already gives a log that was
-        never appended to, rather than replaying every entry the watermark claims to have
-        already passed.
+        Two commits, not one: the unlink is the clear itself, since absence is the one
+        signal every reader of a log honors without being taught, and it runs first. The
+        watermark that keeps a cursor taken before the clear comparable to one taken after
+        it is staged to a pending file before the unlink and installed onto the marker
+        only once the unlink has committed. A crash between the two never leaves the
+        watermark ahead of a file that still holds the bytes it claims to be past, and it
+        never loses the watermark either: the pending file survives until the next
+        ``append`` or ``clear_log`` on this log installs it, so the base never advances
+        twice for one clear. An exception from staging the pending value or from the
+        unlink leaves the clear uncommitted, and the next writer discards the stale stage;
+        an exception after the unlink leaves the clear committed with its watermark
+        pending, and the next writer installs it before doing anything else. A pending
+        file that will not parse as a decimal integer refuses settling with
+        ``DecodeError`` naming it, so ``append`` and ``clear_log`` on that log refuse until
+        it is removed, while ``read_log`` keeps answering from the marker regardless. The
+        rename that installs the watermark is durable against a process crash on every
+        platform this backend runs on, and against power loss only where
+        ``capabilities().durable_replace`` is true, which is false on Windows.
         """
         descriptor = get_descriptor(key.store)
         path = self.path_for(key)
         with self._conform_rail([key]), self._locked([key]):
+            self._settle_pending_clear(path, descriptor)
             self._repair_torn_tail(path)
             data = self._read_bytes(path)
-            count = 0 if not data else data.count(b"\n")
-            base = self._read_clear_base(path) if data else 0
+            if not data:
+                self._remove_entry(path, durable=descriptor.durable)
+                return 0
+            count = data.count(b"\n")
+            base = self._read_clear_base(path)
+            self._write_pending_clear_base(path, base + len(data), durable=descriptor.durable)
             self._remove_entry(path, durable=descriptor.durable)
-            if data:
-                self._write_clear_base(path, base + len(data), durable=descriptor.durable)
-        return count
+            self._install_pending_clear_base(path, durable=descriptor.durable)
+            return count
 
     # ── blobs ───────────────────────────────────────────────────────────────────
 
@@ -964,6 +1037,16 @@ def _deleted_in_transaction(key: Key) -> NotFound:
     return NotFound(f"{key.store}{list(key.parts)} was deleted by this transaction")
 
 
+def _parse_watermark(path: Path, data: bytes) -> int:
+    """A clear-base marker or pending file's value, or a refusal naming the file that failed
+    to parse: nothing this backend writes ever fails here, so a failure means bytes some
+    other writer produced."""
+    try:
+        return int(data)
+    except ValueError as exc:
+        raise DecodeError(f"{path} does not hold a decimal integer watermark: {exc}") from exc
+
+
 def _refuse_embedded_newline(key: Key, data: bytes) -> None:
     """Refuse an encoded log entry that is more than one line, whatever stores the entry.
 
@@ -991,6 +1074,7 @@ def _is_bookkeeping(name: str) -> bool:
     return (
         name in _DATABASE_ARTIFACTS
         or name.endswith(_LOCK_SUFFIX)
+        or name.endswith(_CLEAR_BASE_PENDING_SUFFIX)
         or name.endswith(_CLEAR_BASE_SUFFIX)
         or (name.startswith(".") and name.endswith(_TEMP_SUFFIX))
     )
