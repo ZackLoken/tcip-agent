@@ -228,7 +228,9 @@ frames → they accept on the canvas → only then does it become GT. See
   than walking any label file; `check_status_tokens` reads the raw store file directly and
   walks it regardless, flagging a status entry in a shape it cannot read and a stored
   `"complete"` whose label file holds no annotation of the confirmed subject. Never delete
-  empty label files without asking.
+  empty label files without asking. A finished status, `"complete"` or `"negative"` alike, whose
+  subject's attribute schema changed since it was recorded is quarantined from training until a
+  human re-confirms it.
 
 ## The coverage lattice and its grid zoom
 
