@@ -95,6 +95,23 @@ class TestBoxRoundtrip:
         read_back = read_annotations(label_path)
         assert len(read_back) == 2
 
+    def test_five_distinct_subjects_survive_the_round_trip(self, img_dir: Path) -> None:
+        """Coverage: five box annotations of five distinct subjects, written and read back
+        through the same per-image label file, all five subjects and the count surviving the
+        round trip."""
+        subjects = ["bud", "shoot", "leaf", "nut", "bush"]
+        annotations = [
+            Annotation(subject=subj, geometry=BBox(x1=i * 100, y1=10, x2=i * 100 + 80, y2=90))
+            for i, subj in enumerate(subjects)
+        ]
+
+        label_path = str(img_dir / "labels" / "test_001.json")
+        write_annotations(label_path, annotations, 640, 480)
+
+        read_back = read_annotations(label_path)
+        assert len(read_back) == 5
+        assert {a.subject for a in read_back} == set(subjects)
+
 
 # ── Polygon roundtrip ──
 
@@ -224,20 +241,3 @@ class TestPredictionOverlay:
         assert len(matches["tp"]) == 1, "Expected 1 TP (overlapping prediction)"
         assert len(matches["fp"]) == 1, "Expected 1 FP (non-overlapping prediction)"
         assert len(matches["fn"]) == 1, "Expected 1 FN (unmatched GT box)"
-
-    def test_five_distinct_subjects_survive_the_round_trip(self, img_dir: Path) -> None:
-        """Coverage: five annotations of five distinct subjects, written and read back through
-        the same per-image label file, all five subjects and the count surviving the round
-        trip."""
-        subjects = ["bud", "shoot", "leaf", "nut", "bush"]
-        annotations = [
-            Annotation(subject=subj, geometry=BBox(x1=i * 100, y1=10, x2=i * 100 + 80, y2=90))
-            for i, subj in enumerate(subjects)
-        ]
-
-        label_path = str(img_dir / "labels" / "test_001.json")
-        write_annotations(label_path, annotations, 640, 480)
-
-        read_back = read_annotations(label_path)
-        assert len(read_back) == 5
-        assert {a.subject for a in read_back} == set(subjects)
