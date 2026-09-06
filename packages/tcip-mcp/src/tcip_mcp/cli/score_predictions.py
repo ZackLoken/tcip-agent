@@ -21,7 +21,7 @@ from __future__ import annotations
 import argparse
 import json
 
-from tcip_mcp.project_paths import require_platform_root
+from tcip_mcp.project_paths import require_and_pin_platform_root
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -47,7 +47,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     if args.trait:
-        require_platform_root(args.project)
+        require_and_pin_platform_root(args.project)
 
     from tcip_store.binding import bind_default
 

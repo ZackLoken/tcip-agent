@@ -5,7 +5,7 @@ loading, never slow work). It spawns no subprocess and imports nothing costly: i
 active-project marker through the platform's own storage seam (``tcip_mcp.workspace``,
 ``tcip_store.binding``), not a loose file that the default backend may not even write, and
 injects an ``additionalContext`` directive telling the agent to run the ritual
-(``load_project_memory``/``inspect_project``/``doctor.py``) as its first actions. A shell hook
+(``load_project_memory``/``inspect_project``/``tcip doctor``) as its first actions. A shell hook
 has no MCP client, so it cannot run those calls itself, it makes them salient and dynamic, which
 prose in a large always-on file does not. ``additionalContext`` lands as a fresh session-start
 reminder at the top of context.

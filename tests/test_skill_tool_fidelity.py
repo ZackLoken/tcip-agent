@@ -128,6 +128,33 @@ def test_fabrication_check_does_not_reach_a_differently_headed_tool_table(tmp_pa
     assert guardrail.fabricated_tool_names([fixture]) == {}
 
 
+def test_fabricated_tool_names_catches_an_invented_console_command(tmp_path):
+    """A `` `tcip <command>` `` cell is never an MCP tool name, so it is checked against
+    ``tcip_web.cli.COMMANDS`` instead of the tool registry: an invented command is reported as a
+    fabrication, and a real one passes clean."""
+    fixture = tmp_path / "SKILL.md"
+    fixture.write_text(
+        "## Tools\n\n"
+        "| Tool | Purpose |\n"
+        "|------|---------|\n"
+        "| `tcip frobnicate` | an invented command |\n",
+        encoding="utf-8",
+    )
+    assert guardrail.fabricated_tool_names([fixture]) == {str(fixture): ["tcip frobnicate"]}
+
+
+def test_fabricated_tool_names_admits_a_real_console_command(tmp_path):
+    fixture = tmp_path / "SKILL.md"
+    fixture.write_text(
+        "## Tools\n\n"
+        "| Tool | Purpose |\n"
+        "|------|---------|\n"
+        "| `tcip doctor` | a real console command |\n",
+        encoding="utf-8",
+    )
+    assert guardrail.fabricated_tool_names([fixture]) == {}
+
+
 def test_orphan_tool_names_catches_a_registered_name_missing_from_every_surface(monkeypatch, tmp_path):
     """A registered tool named nowhere in any surface is reported as an orphan: the shape a
     rename leaves behind when every stale mention of the old name is fixed but the new name is

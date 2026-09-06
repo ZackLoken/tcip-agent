@@ -1,13 +1,12 @@
 """The whole store catalogue in one import: every module that registers a store.
 
 Attributing a file to a store needs that store's descriptor, so a caller that must reason about
-every store (the bundle accounting, the export and adopt scripts) imports this module first: a
-running MCP server already has every store registered through its own tool imports, but a caller
-invoked on its own (a script, a focused test) must not silently see fewer stores than the server
-does. Package-only: nothing here needs the repository's own ``tools`` directory, which exists only
-with the repo root on ``sys.path``, so :func:`tcip_mcp.tools.bundle.account_for` reaches this
-without it. The operator commands that import :func:`bootstrapped_stores` (``export-store``,
-``adopt-store``) and the tests that exercise the catalogue directly import it from here.
+every store (the bundle accounting, the ``tcip export-store``/``tcip adopt-store`` commands)
+imports this module first: a running MCP server already has every store registered through its
+own tool imports, but a caller invoked on its own (a console command, a focused test) must not
+silently see fewer stores than the server does. The operator commands that import
+:func:`bootstrapped_stores` (``export-store``, ``adopt-store``) and the tests that exercise the
+catalogue directly import it from here.
 
 Where each store's entries sit under a root is not here: that is :mod:`tcip_store.layout_claims`,
 which the conform rail reads without importing any owning module.

@@ -305,7 +305,7 @@ def _spec_from_config(data: dict, vocab: set[str]) -> tuple[TraitSpec | None, st
     never introduce a fabricated trait definition. Registering a real new trait means its delivered
     outputs are all in the controlled vocabulary. ``reason`` is the same text logged as a warning,
     the one place that wording is authored, so a caller surfacing it (an API response, a
-    write_trait_spec_fields refusal, doctor.py) never re-derives its own explanation.
+    write_trait_spec_fields refusal, ``tcip doctor``) never re-derives its own explanation.
 
     A ``schema_version`` key is not a ``TraitSpec`` field; the store seam already enforces its
     ceiling on every read (``tcip_store.schema_version.check_schema_version``, run inside

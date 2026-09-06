@@ -89,14 +89,22 @@ def tool_table_first_cells(md_text: str) -> list[str]:
 def extract_tool_name(cell: str) -> str | None:
     """The plain identifier named by a Tools-table cell's first backticked token, or ``None``
     when that token is not a snake_case identifier (a call signature or a keyword note still
-    yields the name; a path fragment like `tools/` yields nothing to check) or is a `tcip
-    <command>` console invocation (never a claimed MCP tool name, so nothing to check either)."""
+    yields the name; a path fragment like `tools/` yields nothing to check).
+
+    A `` `tcip <command>` `` console invocation is never a claimed MCP tool name, so it is
+    validated against ``tcip_web.cli.COMMANDS`` instead of the tool registry: a real command
+    yields ``None`` (nothing left to check), and one that command table does not carry is
+    returned in full (``"tcip <command>"``) so the caller's own "not a registered name" check
+    reports it as a fabrication rather than silently passing an invented command."""
     m = _BACKTICK_SPAN.search(cell)
     if not m:
         return None
     token = m.group(1)
     if token.startswith("tcip "):
-        return None
+        from tcip_web.cli import COMMANDS
+
+        command = token[len("tcip "):].split(None, 1)[0] if token[len("tcip "):].strip() else ""
+        return None if command in COMMANDS else f"tcip {command}"
     for sep in ("(", " "):
         idx = token.find(sep)
         if idx != -1:

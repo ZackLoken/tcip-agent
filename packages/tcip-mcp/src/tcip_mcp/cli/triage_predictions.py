@@ -25,7 +25,7 @@ from __future__ import annotations
 import argparse
 import json
 
-from tcip_mcp.project_paths import require_platform_root
+from tcip_mcp.project_paths import require_and_pin_platform_root
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -57,7 +57,7 @@ def main(argv: list[str] | None = None) -> int:
                         help="A verdict store to read instead of the dataset's own.")
     args = parser.parse_args(argv)
 
-    root = require_platform_root(args.project)
+    root = require_and_pin_platform_root(args.project)
 
     from tcip_store.binding import bind_default
 

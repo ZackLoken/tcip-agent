@@ -67,7 +67,6 @@ dependencies:
       - httpx
       - ruff
       - mypy==2.2.0  # pinned to the version CI's type gate installs
-      - pypdf>=4.0  # verify_citations.py extracts a paper's text to check its quote appears verbatim
       # --- SAM-assisted labeling ---
       # Not on PyPI: distribution `sam-2`, import path `sam2`, built against the torch entry above. Pinned to the commit a working environment resolves; move it with pip freeze in a working environment and copy its sam-2 line here.
       - sam-2 @ git+https://github.com/facebookresearch/sam2.git@2b90b9f5ceec907a1c18123530e92e794ad901a4

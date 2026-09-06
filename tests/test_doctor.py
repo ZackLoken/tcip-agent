@@ -72,6 +72,16 @@ def _run(root: Path, *, file_layout: bool = False):
         [PY_EXE, "-m", "tcip_web.cli", "doctor", str(root)], capture_output=True, text=True, env=env)
 
 
+def test_doctor_help_prints_the_real_invocation():
+    """The dispatcher names ``sys.argv[0]`` for the one command module call it makes, so
+    argparse's own usage line (no command module passes its own ``prog=``) reads ``tcip
+    doctor``, never the dispatcher's own module path."""
+    res = subprocess.run(
+        [PY_EXE, "-m", "tcip_web.cli", "doctor", "--help"], capture_output=True, text=True)
+    assert res.returncode == 0
+    assert "usage: tcip doctor " in res.stdout
+
+
 def test_doctor_flags_the_field_session_bug_family(tmp_path):
     root = _project(tmp_path)
     # registry entry pointing at a pytest temp checkpoint (the leak the field session found)
@@ -141,7 +151,7 @@ def test_doctor_reports_a_stem_collision_and_completes(tmp_path):
 
 def test_doctor_flags_a_trait_spec_that_failed_to_load(tmp_path):
     """A dropped trait spec reads identically to no trait at all from the registry alone;
-    doctor.py is where the agent catches the difference at session start."""
+    ``tcip doctor`` is where the agent catches the difference at session start."""
     import tcip_store as ts
     from tcip_store.file_backend import FileBackend
 
@@ -161,7 +171,7 @@ def test_doctor_flags_a_trait_spec_that_failed_to_load(tmp_path):
 
 def test_doctor_flags_a_stale_region_completeness_attestation(tmp_path):
     """An attested cell whose annotation content has since changed is exactly the data-state
-    inconsistency doctor.py exists to catch (region_completeness.json vs the label file it
+    inconsistency ``tcip doctor`` exists to catch (region_completeness.json vs the label file it
     describes); confirm the ritual surfaces it, not just the route's own read path."""
     from tcip_mcp.dataset_layout import status_bucket
     from tcip_mcp.pipelines.reference_grid import reference_cells
@@ -223,8 +233,8 @@ def test_doctor_flags_an_unrecognized_region_completeness_entry(tmp_path):
 
 def test_doctor_flags_incomplete_source_snapshot(tmp_path):
     """A bespoke run's source snapshot that failed to capture a declared file is
-    self-describing (``missing``/``snapshot_errors``); doctor.py surfaces it rather than the
-    manifest reading as complete."""
+    self-describing (``missing``/``snapshot_errors``); ``tcip doctor`` surfaces it rather than
+    the manifest reading as complete."""
     root = tmp_path / "clean"
     (root / "images" / "d").mkdir(parents=True)
     ann = root / "annotations" / "d"
@@ -282,8 +292,8 @@ def _lines(stdout: str, needle: str) -> list[str]:
 
 
 def test_labels_are_scanned_where_the_layout_resolver_places_them(tmp_path):
-    """The contradiction doctor.py reports is named by the path the resolver builds, so the
-    checker's scan root and the canonical annotations tree cannot drift apart unnoticed."""
+    """The contradiction ``tcip doctor`` reports is named by the path the resolver builds, so
+    the checker's scan root and the canonical annotations tree cannot drift apart unnoticed."""
     date = "2026-03-04"
     root = _layout_project(tmp_path, date)
     Image.new("RGB", (48, 32)).save(image_dir(root, date) / "IMG_R.JPG")
@@ -404,8 +414,8 @@ def test_doctor_flags_a_stale_complete_token(tmp_path):
 
 
 def test_registry_findings_are_read_through_the_registrys_own_entry_shape(tmp_path):
-    """Entries written by ModelRegistry are the shape doctor.py reports on, so an entry whose
-    checkpoint is gone is named with its own name and path rather than read as nothing."""
+    """Entries written by ModelRegistry are the shape ``tcip doctor`` reports on, so an entry
+    whose checkpoint is gone is named with its own name and path rather than read as nothing."""
     root = _layout_project(tmp_path, "2026-03-04")
     ckpt_dir = tmp_path / "checkpoints"
     ckpt_dir.mkdir()
