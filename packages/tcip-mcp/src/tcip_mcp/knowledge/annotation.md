@@ -45,7 +45,7 @@ since that schema is converted once and never read in place.
 
 A collaborator's delivery in some other schema is yours to convert: read a sample, write a
 converter in `scripts/`, and emit the canonical per-image JSON. The platform carries no built-in
-importers, so nothing constrains you to a format someone else's tool happened to use.
+importers.
 
 ## Coordinate frame: upright, EXIF applied once
 
@@ -56,8 +56,7 @@ tiling, and viz all share one pixel space. This matters most for
 Orientation-6 phone/camera JPEGs whose stored frame is transposed (e.g. 5712×4284 ↔
 4284×5712): denormalizing an upright-authored box against the raw sensor frame scatters
 every box. Do not re-open images with a bare `PIL.Image.open` for anything coordinate-
-bearing (denormalizing, cropping, drawing); go through `load_image` so orientation isn't
-applied twice or skipped.
+bearing (denormalizing, cropping, drawing); go through `load_image`.
 
 ## Stages
 

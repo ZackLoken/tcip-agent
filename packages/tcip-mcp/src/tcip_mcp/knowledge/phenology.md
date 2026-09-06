@@ -6,8 +6,7 @@ description: "Compute and deliver bloom phenology: the catkin/pistillate 05/50/9
 # Bloom phenology: the 05/50/95-per-date trait
 
 This is the platform's core repeated trait: the dates a plant reaches bloom milestones,
-delivered one row per plant. Compose the pieces below; do not re-script this per
-project (that fragility is exactly what this skill exists to prevent).
+delivered one row per plant. Compose the pieces below; do not re-script this per project.
 
 ## The authoritative trait definition (do not redefine)
 
@@ -95,9 +94,8 @@ across dates: plant mapping (image → plant_id) ─► per (plant, date) elonga
 | Web Results routes (phenology-specific) | `tcip-web .../routes/results.py` | `/plant_mapping/build`, `/plant_mapping/load`, `/plant_mapping/list`, `/phenology_measurement` (both projections, curve and milestone, from one measurement), `/export_csv` (the door that writes): the human UI; delegates to the same shared modules. Lists only this router's phenology routes; it also carries trait-general routes (operationalization records, trait-spec statements, delivery events, registered models) not enumerated here |
 
 Milestone math lives once, in the `phenology` module; plant mapping lives once, in the
-`plant_mapping` module. The MCP tools and the web routes all call them, so a mapping and a
-milestone date mean the same thing on both surfaces. If you change a definition, change it
-there; never fork a second copy. So the agent composes tools end to end:
+`plant_mapping` module. The MCP tools and the web routes all call them. If you change a
+definition, change it there; never fork a second copy. So the agent composes tools end to end:
 `register_plant_registry` → `build_plant_mapping` → `run_inference` → (elongation call) →
 `deliver_phenology_milestones`.
 
@@ -123,7 +121,7 @@ GIS-rectified plant grid is accurate; the *image* GPS is the fuzzy side. `plant_
 resolves this by ordering each date's images by EXIF capture time (the walker's sequence),
 splitting into row runs on large GPS jumps, and assigning along the row. Each assignment
 records its `source` (`sequence` / `nearest_neighbour` / `unmapped`) and `distance_m`:
-honest, interpretable signals. It deliberately emits no fabricated 0–1 "confidence".
+interpretable signals. It records no 0–1 "confidence" value.
 
 ## Delivery checklist
 
@@ -131,5 +129,5 @@ honest, interpretable signals. It deliberately emits no fabricated 0–1 "confid
 2. Every expected plant has a row; genotype/`accession` is carried through.
 3. Milestones are chronologically sane (`05per` ≤ `50per` ≤ `95per`; `elongation_date`, the
    majority crossing, equals `95per`).
-4. Plants that never reach a level have `null` for that milestone (not a fabricated date).
+4. Plants that never reach a level have `null` for that milestone.
 5. The `undated/` image bucket is excluded from the time series (it has no capture date).

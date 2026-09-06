@@ -95,13 +95,12 @@ universe the manifest drew. The manifest's own subject/attribute must match this
 `evaluate_model` resolve them from the run's own training scope), and `split_manifest_dir`
 conflicts with an explicit `group_by`/`group_key_map`, whose default becomes `None` for this
 reason (resolved to `tile_prefix` when neither was given). `redraw_calibration_holdout`
-additionally requires `labels_dir`, `subject` and `images_dir` alongside `split_manifest_dir`: a
-labels-only universe can include a stem whose image is gone, a lock the redraw exists to fix, so
-it refuses by name without one.
+additionally requires `labels_dir`, `subject` and `images_dir` alongside `split_manifest_dir`: it
+refuses by name without one, since a labels-only universe can include a stem whose image is gone.
 
 A calibration under a named manifest also earns a `selection_disjointness` check: whether the
 cal/holdout stems it drew also sit on the checkpoint being calibrated's own selection (`val`)
-side, the leak this whole family of checks exists to close (a checkpoint chosen on a side, then
+side, the leak this whole family of checks closes (a checkpoint chosen on a side, then
 calibrated over that same side, would otherwise clear every other gate while measuring the
 operating point on exactly the data the shipped weights were picked to fit). It rides beside
 `train_disjointness` in the validation row and floors `verify_stamp_binding` when a manifest-scoped
