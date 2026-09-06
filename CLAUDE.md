@@ -120,7 +120,7 @@ Your default failure is pushing through friction by guessing.
   paths, fallbacks or shims at runtime: existing dev state and the sample projects are conformed by
   one-off operator scripts. The manifest pins declarations only; an undeclared shape change inside
   version 1 is caught by producer-fed round trips and the review shape, not by the manifest.
-- Enumerate the consumers before deleting anything.
+- Enumerate the consumers before deleting anything; a deleted assertion's fact needs a new home.
 - When two code paths must agree, call one from the other. A consistency check whose two sides
   share an implementation proves nothing.
 - A rail must admit valid work, not only reject invalid work: every refusal ships with a test
