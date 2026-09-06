@@ -39,7 +39,7 @@ import tcip_store as ts
 SUBJECT = "subject_under_test"
 REGISTRY_VALUE = {
     SUBJECT: {
-        "description": "a männlich flower",
+        "description": "a description with an ümlaut",
         "defined_by": "breeder",
         "defined_at": "2026-03-04T12:00:00+00:00",
         "attributes": {"state": {"type": "categorical", "values": ["closed", "open"]}},
@@ -48,7 +48,7 @@ REGISTRY_VALUE = {
 REGISTRY_BYTES = (
     '{\n'
     '  "subject_under_test": {\n'
-    '    "description": "a männlich flower",\n'
+    '    "description": "a description with an ümlaut",\n'
     '    "defined_by": "breeder",\n'
     '    "defined_at": "2026-03-04T12:00:00+00:00",\n'
     '    "attributes": {\n'

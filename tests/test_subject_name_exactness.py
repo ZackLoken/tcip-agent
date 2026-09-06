@@ -38,7 +38,7 @@ def test_subject_names_differing_only_by_case_stay_distinct(
             "project_root": str(tmp_path),
             "dataset_root": str(tmp_path),
             "subjects": {
-                "bud": {"description": "the male flower"},
+                "bud": {"description": "the first spelling a human typed"},
                 "Bud": {"description": "a second spelling a human typed"},
                 "bush": {"description": "one plant crown"},
             },
@@ -53,7 +53,7 @@ def test_subject_names_differing_only_by_case_stay_distinct(
         params={"project_root": str(tmp_path), "dataset_root": str(tmp_path)},
     ).json()["subjects"]
     assert set(subjects) == {"bud", "Bud", "bush"}
-    assert subjects["bud"]["description"] == "the male flower"
+    assert subjects["bud"]["description"] == "the first spelling a human typed"
     assert subjects["Bud"]["description"] == "a second spelling a human typed"
     assert set(json.loads((tmp_path / "classes.json").read_text(encoding="utf-8"))) == {
         "bud", "Bud", "bush"}
