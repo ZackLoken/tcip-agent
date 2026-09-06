@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextvars
 import itertools
 import json
 import logging
@@ -9,8 +10,9 @@ import os
 import subprocess
 import sys
 import threading
+from contextlib import contextmanager
 from pathlib import Path, PureWindowsPath
-from typing import Any, Sized
+from typing import Any, Iterator, Sized
 
 from tcip_store import (
     LOG_JSON,
@@ -42,6 +44,44 @@ _OVERFIT_CHECK_LOCK = threading.Lock()
 # A reconstructed non-terminal run reads "running" only while its heartbeat is within this
 # window, past it a live process is presumed dead and it reads "interrupted".
 TCIP_HEARTBEAT_STALE_SECONDS = float(os.environ.get("TCIP_HEARTBEAT_STALE_SECONDS", "600"))
+
+# What the calling route declared about itself, read once by launch_training on the calling
+# thread before create_run/_ensure_experiment run; unset for a caller with nothing to declare.
+declared_launcher: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "declared_launcher", default=None,
+)
+
+
+@contextmanager
+def declare_launcher(name: str) -> Iterator[None]:
+    """Declare ``name`` as this thread's launcher for the one ``launch_training`` call inside the
+    block: the web backend's relaunch route wraps its call in ``with declare_launcher("gui"):``,
+    since the tool's own signature is the MCP schema and cannot carry a declaration as a
+    parameter. Scoped to the calling thread only, so a launch's own background watchdog thread
+    (which never calls this) and the training subprocess (a separate process) never see it.
+    """
+    token = declared_launcher.set(name)
+    try:
+        yield
+    finally:
+        declared_launcher.reset(token)
+
+
+def _resolve_launched_by() -> dict[str, Any]:
+    """The launcher declaration ``launch_training`` stamps on the experiment it creates: the
+    declared name when :func:`declare_launcher` set one, else the connected MCP agent's identity
+    when a handshake is in force, else ``process`` for a caller with neither. Resolved once, on
+    the calling thread, before ``create_run``/``_ensure_experiment`` run.
+    """
+    from tcip_mcp import agent_identity
+
+    name = declared_launcher.get()
+    if name is not None:
+        return {"launcher": name}
+    identity = agent_identity.current()
+    if identity is not None:
+        return {"launcher": "agent", **agent_identity.audit_fields()}
+    return {"launcher": "process"}
 
 _SPLIT_MANIFEST_CONFLICT_KEYS = (
     "group_by", "group_key_map", "val_ratio", "seed", "stratify_foreground",
@@ -733,6 +773,17 @@ def launch_training(
     watch: a run launched with none gets divergence as its only automatic stop, and is worth
     closer agent monitoring than a run early stopping can also catch.
 
+    Stamps the resolved experiment's ``status.json`` with who launched this run
+    (``launched_by``): the name :func:`declare_launcher` declared for this thread (``"gui"`` for
+    the web backend's relaunch route, whatever client actually posted to it, since the route
+    cannot tell a browser from a script), else the connected MCP agent's identity when a
+    handshake is in force, else ``"process"`` for a caller with neither (a bare backend call, a
+    script, a test). A future backend caller of this function outside the wrapped route is
+    stamped ``"process"`` too; telling a browser apart from another client is a later
+    authentication concern, not this field's. Recorded only when experiment tracking below
+    succeeds: a run whose tracking failed has no status record to carry the stamp at all, and
+    reads as no launcher recorded, same as a record with none.
+
     Args:
         config: Full training configuration dict with model_source, data, training sections.
         output_dir: Directory for checkpoints and logs. Empty defaults to the experiment store
@@ -796,6 +847,10 @@ def launch_training(
 
     data_cfg = config.get("data", {})
 
+    # Resolved once, before create_run and _ensure_experiment, so every status write this launch
+    # makes (fresh creation, pristine reuse or a fresh-id conflict) stamps the same declaration.
+    launched_by = _resolve_launched_by()
+
     run = create_run(config, output_dir)
     # Nest each run's artifacts under its run_id. The GUI (and typical callers) pass a
     # shared base such as ``<project>/.tcip/experiments``; without nesting, sequential
@@ -817,7 +872,8 @@ def launch_training(
         ds_id, ds_fp = dataset_identity(data_cfg)
         experiment_id = _ensure_experiment(
             experiment_id, config, data_cfg.get("images_dir"), resume_from, run.run_id,
-            output_dir=run.output_dir, dataset_id=ds_id, dataset_fingerprint=ds_fp,
+            output_dir=run.output_dir, launched_by=launched_by, dataset_id=ds_id,
+            dataset_fingerprint=ds_fp,
         )
         # Thread the resolved id into the live config so the child's checkpoints carry it (the
         # envelope's ctx.save_checkpoint stamps it explicitly).
@@ -1042,7 +1098,10 @@ def _launched_training_runs(*, read_progress: bool) -> list[dict[str, Any]]:
     write was lost still lists, and a pre-created experiment that never launched does not; the
     same predicate :func:`~tcip_mcp.experiments.compare_experiments` consults before deriving a
     heartbeat state at all. Rows come back sorted by
-    experiment id (``experiment_ids_with_status``'s own order), each carrying ``external: True``.
+    experiment id (``experiment_ids_with_status``'s own order), each carrying ``external: True``:
+    a process-locality fact only (this record was reconstructed from disk, not held in this
+    process's own registry), never a statement about who launched it, which is the record's own
+    ``launched_by`` (see :func:`~tcip_mcp.experiments.reconstruct_from_status`).
     ``read_progress`` governs whether ``current_epoch`` costs a metrics-log read per record.
     Cost: one status read and one config read per experiment record on disk, plus, when
     ``read_progress`` is true, one metrics-log read per launched record.
@@ -1087,11 +1146,18 @@ def _all_training_runs(*, read_progress: bool) -> list[dict[str, Any]]:
     copy on disk, so the parent-side in-memory record, ``best_metric`` included, is a stale
     launch-time placeholder past that point); a ``pid``-less one (every synchronous run) is
     reported from its own in-memory record, untouched. Both carry
-    ``external: False`` and an ``experiment_id``: the row's own resolved field
+    ``external: False`` (a process-locality fact, never who launched the run) and an
+    ``experiment_id``: the row's own resolved field
     (``TrainRun.experiment_id``, set by ``launch_training`` once ``_ensure_experiment`` resolves
     it) when it has one, the disk overlay's own id only as a fallback for a row that has none.
+    ``launched_by`` is never carried on ``TrainRun``: every live row reads it fresh from the
+    resolved experiment's own status record (``reconstruct_from_status``), the same source a
+    disk-only row uses, so a row never states a launcher the record itself does not hold; a run
+    whose stamp failed reads ``None`` here exactly as it does on disk, never the caller's
+    in-memory intent.
     Rows: this process's own, in registry order, then the disk-only rows, sorted by experiment id.
     """
+    from tcip_mcp.experiments import read_member, status_key
     from tcip_mcp.pipelines.training.run_registry import list_runs
 
     live = list_runs()
@@ -1114,6 +1180,8 @@ def _all_training_runs(*, read_progress: bool) -> list[dict[str, Any]]:
                 row["best_metric_name"] = overlay["best_metric_name"]
             if not row.get("experiment_id"):
                 row["experiment_id"] = overlay["experiment_id"]
+        exp_id = row.get("experiment_id")
+        row["launched_by"] = read_member(status_key(exp_id), {}).get("launched_by") if exp_id else None
         merged.append(row)
 
     live_run_ids = {r["run_id"] for r in live}
@@ -2918,7 +2986,8 @@ def _preflight_points(param_space: dict) -> list[tuple[str, dict]]:
 
 def _ensure_experiment(
     experiment_id: str, config: dict, data_source, resume_from: str, run_id: str,
-    *, output_dir: str, dataset_id: str | None = None, dataset_fingerprint: str | None = None,
+    *, output_dir: str, launched_by: dict[str, Any], dataset_id: str | None = None,
+    dataset_fingerprint: str | None = None,
 ) -> str:
     """Create or attach the experiment for a run, enforcing experiment immutability.
 
@@ -2932,13 +3001,15 @@ def _ensure_experiment(
     resumed run's own metrics/lineage writes behind the terminal-state lock and letting the model
     registry replace the original's entry by name with no record of what was superseded).
 
-    Every branch below stamps ``run_id``/``output_dir`` into the resolved experiment's
-    ``status.json`` before returning, unconditionally, once, regardless of which branch
-    resolved the id, so a different process can later discover this run's real artifact directory
-    from ``experiment_id`` alone (``resolve_experiment_dir_for_run``/``reconstruct_run_status``/the
-    disk-based ``cancel_run`` fallback all depend on this). Deliberately not a ``create_experiment``
-    param: that would only cover the fresh-creation branch and silently miss the pristine-reuse
-    branch, which never otherwise touches ``status.json`` at all.
+    Every branch below stamps ``run_id``/``output_dir``/``launched_by`` into the resolved
+    experiment's ``status.json`` before returning, unconditionally, once, regardless of which
+    branch resolved the id, so a different process can later discover this run's real artifact
+    directory from ``experiment_id`` alone (``resolve_experiment_dir_for_run``/
+    ``reconstruct_run_status``/the disk-based ``cancel_run`` fallback all depend on this).
+    Deliberately not a ``create_experiment`` param: that would only cover the fresh-creation
+    branch and silently miss the pristine-reuse branch, which never otherwise touches
+    ``status.json`` at all. ``launched_by`` is resolved once by ``launch_training``, before this
+    call, so every branch below stamps the identical declaration.
     """
     from tcip_mcp.experiments import (
         create_experiment, is_pristine, metrics_logged_of, overwrite_config_if_pristine,
@@ -2948,7 +3019,7 @@ def _ensure_experiment(
     created = create_experiment(experiment_id, config, data_source=data_source,
                                 dataset_id=dataset_id, dataset_fingerprint=dataset_fingerprint)
     if "error" not in created:
-        stamp_run_identity(experiment_id, run_id, output_dir)
+        stamp_run_identity(experiment_id, run_id, output_dir, launched_by=launched_by)
         return experiment_id
 
     # is_pristine is the one implementation of the predicate: only attempt the overwrite when it
@@ -2959,7 +3030,7 @@ def _ensure_experiment(
     if is_pristine(state, metrics_logged):
         overwritten = overwrite_config_if_pristine(experiment_id, config)
         if "error" not in overwritten:
-            stamp_run_identity(experiment_id, run_id, output_dir)
+            stamp_run_identity(experiment_id, run_id, output_dir, launched_by=launched_by)
             return experiment_id
 
     fresh_id = f"{experiment_id}_{run_id}"
@@ -2972,7 +3043,7 @@ def _ensure_experiment(
     forked_config = {**config, "experiment_id": fresh_id}
     create_experiment(fresh_id, forked_config, parent_experiment=experiment_id, data_source=data_source,
                       dataset_id=dataset_id, dataset_fingerprint=dataset_fingerprint)
-    stamp_run_identity(fresh_id, run_id, output_dir)
+    stamp_run_identity(fresh_id, run_id, output_dir, launched_by=launched_by)
     return fresh_id
 
 

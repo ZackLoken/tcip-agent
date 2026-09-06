@@ -16,7 +16,7 @@ def _experiment(experiment_id: str, run_id: str, output_dir: str) -> None:
     from tcip_mcp.experiments import create_experiment, stamp_run_identity
 
     create_experiment(experiment_id, {"model_source": {"builder": "my_models:bud_det"}})
-    stamp_run_identity(experiment_id, run_id, output_dir)
+    stamp_run_identity(experiment_id, run_id, output_dir, launched_by={"launcher": "process"})
 
 
 def test_ambiguous_relaunch_suffix_resolves_through_the_stamped_run_id(tmp_path):

@@ -64,7 +64,7 @@ def test_training_stream_serves_a_relaunched_run_from_the_record_that_claims_it(
     run_id = "run-20260401-abcdef"
     experiment_id = f"exp-022-chestnut-burr-det_{run_id}"
     create_experiment(experiment_id, {"model_source": {"builder": "my_models:burr_det"}})
-    stamp_run_identity(experiment_id, run_id, str(tmp_path / "out"))
+    stamp_run_identity(experiment_id, run_id, str(tmp_path / "out"), launched_by={"launcher": "process"})
     log_metrics(experiment_id, 1, {"loss": 1.2})
     update_status(experiment_id, "completed")
 

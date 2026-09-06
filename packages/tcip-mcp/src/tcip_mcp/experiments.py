@@ -142,11 +142,19 @@ STATUS_DOCUMENT = "status"
 
 
 def status_key(experiment_id: str, *, root: Path | str | None = None) -> Key:
-    """The run's state, timestamps and liveness heartbeat.
+    """The run's state, timestamps, liveness heartbeat and launcher declaration.
 
     ``cas``: every writer here reads the document and updates fields inside it, from the
     training subprocess and the tool process at once, so an unconditional write drops the
     heartbeat or the run identity another writer just stamped.
+
+    ``launched_by`` is a mapping naming who launched the run, stamped by
+    :func:`stamp_run_identity`: ``{"launcher": "gui"}`` for a launch through the web app's own
+    route, ``{"launcher": "agent", **agent_identity.audit_fields()}`` for a launch inside an MCP
+    handshake, ``{"launcher": "process"}`` for a launch from neither. Absent on a record whose
+    experiment tracking never reached the stamp, or whose stamp otherwise failed; a reader
+    treats an absent field as "launcher not recorded" rather than guessing. Provenance only:
+    nothing reads it to decide anything.
     """
     return _member_key(EXPERIMENT_STATUS_STORE, experiment_id, STATUS_DOCUMENT, root)
 
@@ -682,8 +690,11 @@ def complete_run(
             "model_weights_sha256": digest}
 
 
-def stamp_run_identity(experiment_id: str, run_id: str, output_dir: str) -> None:
-    """Record which ``run_id``/``output_dir`` produced this experiment, into ``status.json``.
+def stamp_run_identity(
+    experiment_id: str, run_id: str, output_dir: str, *, launched_by: dict[str, Any],
+) -> None:
+    """Record which ``run_id``/``output_dir`` produced this experiment, and who launched it, into
+    ``status.json``.
 
     Best-effort, like ``_touch_heartbeat``, a dropped stamp must not break the launch it's
     recording. Called unconditionally by ``_ensure_experiment`` regardless of which of its three
@@ -692,6 +703,16 @@ def stamp_run_identity(experiment_id: str, run_id: str, output_dir: str) -> None
     is what makes the real artifact directory (``output_dir``, a separately-computed, caller-influenced
     path that only coincides with the experiment directory by convention) discoverable from
     ``experiment_id``/``run_id`` alone by a different process.
+
+    ``launched_by`` is the run currently being stamped, resolved once by ``launch_training``
+    before ``_ensure_experiment`` runs: ``{"launcher": "agent", **agent_identity.audit_fields()}``
+    inside an MCP handshake, ``{"launcher": "gui"}`` for the Training tab's launch route,
+    ``{"launcher": "process"}`` for a caller with neither. Written whole, in the same transaction
+    as ``run_id``/``output_dir``, so a relaunch that re-stamps a pristine id never leaves it
+    disagreeing with the identity it was just re-stamped with. Provenance only: nothing reads it
+    to decide anything, since a best-effort field that can go missing cannot guard a decision. A
+    record with no ``launched_by`` at all is one that predates the field or whose stamp was
+    dropped; every reader treats the two cases the same, as "launcher not recorded".
     """
     key = status_key(experiment_id)
     if not store.exists(key):
@@ -701,6 +722,7 @@ def stamp_run_identity(experiment_id: str, run_id: str, output_dir: str) -> None
             status = txn.read(key, default={})
             status["run_id"] = run_id
             status["output_dir"] = output_dir
+            status["launched_by"] = launched_by
             txn.write(key, status)
     except Exception:
         logger.warning("stamp_run_identity failed for %s/%s", experiment_id, run_id, exc_info=True)
@@ -810,6 +832,10 @@ def reconstruct_from_status(
     cost one metrics-log read and are included only when ``read_progress`` is true, read back
     through :func:`best_selection_from_log` from what the run itself stamped, never re-derived
     from the config.
+
+    ``launched_by`` carries the record's own stamped declaration (see :func:`stamp_run_identity`)
+    whole, or ``None`` for a record that predates the field or whose stamp was dropped; a reader
+    treats both the same way, as "launcher not recorded".
     """
     current_epoch = None
     best_metric_name = None
@@ -827,6 +853,7 @@ def reconstruct_from_status(
         "best_metric_name": best_metric_name,
         "output_dir": status.get("output_dir"),
         "error": status.get("error"),
+        "launched_by": status.get("launched_by"),
     }
 
 
