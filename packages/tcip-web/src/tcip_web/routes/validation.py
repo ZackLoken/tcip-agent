@@ -95,6 +95,12 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
     The promotion verifies before it decides. A bucket whose stamp claims validation that no record
     answers for is treated as unvalidated and is promotable over, and a review whose prediction
     documents are no longer the ones the reviewer saw earns nothing at all.
+
+    A bucket carrying no ``operating_point.json`` stamp at all, or one with no usable
+    ``(subject, attribute)`` pair, is refused here before the review's operating point is
+    resolved: no producer ever named a checkpoint, an experiment or a generation conf for such a
+    bucket to validate. A raw store write straight to the stamp's key can still manufacture one
+    past this refusal, the accepted limit of the scope rail itself (``resolution._check_stamp_claim``).
     """
     if not req.subject:
         raise HTTPException(
@@ -112,8 +118,14 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
             buckets_stamped=[])
     assert pred_dir is not None  # bucket_dirs is non-empty only when pred_dir was truthy above
 
-    from tcip_mcp.pipelines.resolution import read_operating_point_sidecar, verify_stamp_binding
+    from tcip_mcp.pipelines.resolution import (
+        StampScopeUnstated,
+        read_operating_point_sidecar,
+        scope_of_stamp,
+        verify_stamp_binding,
+    )
     from tcip_mcp.prediction_buckets import bucket_stems
+    from tcip_store.errors import DecodeError, SchemaVersionRefused, StoreBusy
 
     # A bucket answering a different root than the stated one is another dataset's evidence.
     named_root = _dataset_root_of_all(bucket_dirs)
@@ -137,8 +149,14 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
     completed = {name: data for name, data in reviewed.items() if Path(name).stem in stems}
     n = len(completed)
 
-    # A claim no record answers for is an assertion: unvalidated, and promotable over.
-    sidecars = {d: (read_operating_point_sidecar(d) or {}) for d in bucket_dirs}
+    # A claim no record answers for is an assertion: unvalidated, and promotable over. Strict: an
+    # undecodable stamp is never one a review answers for the same way an absent one is.
+    try:
+        sidecars = {d: (read_operating_point_sidecar(d, strict=True) or {}) for d in bucket_dirs}
+    except StoreBusy as exc:
+        raise HTTPException(503, str(exc)) from exc
+    except (DecodeError, SchemaVersionRefused) as exc:
+        raise HTTPException(400, str(exc)) from None
     digest_memo: dict[str, str] = {}
     bindings = {d: verify_stamp_binding(sc, d, document="operating_point", digest_memo=digest_memo)
                 for d, sc in sidecars.items()}
@@ -156,6 +174,19 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
             reason="No completed reviews yet for this model on this date. Review the predictions and "
                    "mark the images Reviewed, then try again.",
             buckets_stamped=[])
+
+    for d, sc in sidecars.items():
+        if not sc:
+            raise HTTPException(
+                400,
+                f"{d} carries no operating_point.json stamp: no producer wrote a checkpoint, "
+                "experiment or generation conf this validation could rest on. A staged bucket is "
+                "reviewed through the accept path and is never promoted to a validation reference."
+            )
+        try:
+            scope_of_stamp(sc, d)
+        except StampScopeUnstated as exc:
+            raise HTTPException(400, str(exc)) from None
 
     # A prediction document that changed, appeared or vanished since review is evidence for nothing.
     diverged = sorted(
@@ -337,9 +368,7 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
         seal_validation,
         update_sidecar,
     )
-    from tcip_annotation.json_io import UnreadableLabelDocument
     from tcip_mcp.prediction_buckets import review_state_dir_of
-    from tcip_store.errors import DecodeError, SchemaVersionRefused, StoreBusy
 
     op_prov = bundle.to_provenance()["operating_point"]
     ref_hash = review_reference_hash(
@@ -369,47 +398,18 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from None
 
-    def _require_bare_bucket_subject(bucket_dir: str, subject: str) -> None:
-        """A bare directory (no stamp at all) has no recorded map to carry a promoted stamp's
-        subject claim, so every prediction record in it must positively carry ``subject``.
-
-        Walks the directory the same way ``require_reference_ground_truth`` does
-        (``prediction_documents``, each document's own annotations); a directory holding another
-        subject refuses by name: a review reference is one subject's, and a staged bucket holding
-        several is promoted by staging one subject per bucket.
-        """
-        from tcip_annotation.json_io import prediction_documents, read_annotations
-
-        others: set[str] = set()
-        for path in prediction_documents(Path(bucket_dir)):
-            for a in read_annotations(str(path)):
-                if a.subject != subject:
-                    others.add(a.subject)
-        if others:
-            raise ValueError(
-                f"{bucket_dir} holds annotations of {sorted(others)} besides {subject!r}: a "
-                "review reference is one subject's. Stage one subject per bucket before "
-                "promoting it."
-            )
-
     def _stamp_body(stored: dict) -> dict:
         """This promotion merged over whatever the producing run left in ``stored``.
 
         The trait is written only when a gate was cleared, so a bucket carries the trait its claim
         was earned for and an honest placeholder claims no scope at all.
 
-        A bare directory (``stored`` empty, no producer ever stamped it) has no pair of its own to
-        carry forward: the review it promotes was a detector review (a bare directory admits no
-        classified one), so this writes ``subject=req.subject``/``attribute=None``, after the
-        caller has verified every record in the directory positively carries that subject
-        (``_require_bare_bucket_subject``). A stored stamp's own pair (present or, for a pre-key
+        ``stored`` is never empty here: a bucket with no stamp of its own was already refused
+        before the review's operating point was resolved. Its own pair (present or, for a pre-key
         stamp, absent) is carried forward unchanged by the plain ``dict(stored)`` below; the rail
         refuses a merge that ends up with neither key.
         """
         merged = dict(stored)
-        if not stored:
-            merged["subject"] = req.subject
-            merged["attribute"] = None
         merged.update({
             "operating_point": op_prov,
             "validated": result["validated"],
@@ -458,8 +458,6 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
             if bindings[d].claimed and bindings[d].ok:
                 continue  # a mixed set: a bucket whose validation a record answers for is left alone
             Path(d).mkdir(parents=True, exist_ok=True)
-            if not sidecars[d]:
-                _require_bare_bucket_subject(d, req.subject)
             # Sealed outside the stamp's lock: no store write may open inside another's transaction.
             earned = _stamp_body(sidecars[d])
             if draft is not None:
@@ -472,7 +470,7 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
         # Contention is a retryable infrastructure fault, never a malformed request; the
         # dataset select route's own StoreBusy handling is the platform's precedent.
         raise HTTPException(503, str(exc)) from exc
-    except (ValueError, SchemaVersionRefused, DecodeError, UnreadableLabelDocument) as exc:
+    except (ValueError, SchemaVersionRefused, DecodeError) as exc:
         raise HTTPException(400, str(exc)) from None
 
     # The sidecar this stamps sits in the prediction bucket, which travels with the dataset.
