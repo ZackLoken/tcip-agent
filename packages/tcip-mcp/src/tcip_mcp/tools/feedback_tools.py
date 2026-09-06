@@ -277,7 +277,15 @@ def materialize_review_dataset(
         if scope is not None and scope.classified:
             from tcip_mcp.pipelines.postprocessing.phenology import bucket_id_map
 
-            vocabulary = set(bucket_id_map(scope_dir) or {})
+            id_map = bucket_id_map(scope_dir)
+            if id_map is None:
+                return {"error": (
+                    f"{scope_dir} records no id_map: a classified scope's confirmed values need "
+                    "the bucket's own recorded vocabulary to check them against, and this bucket's "
+                    "stamp carries none. Re-infer this run or repair its stamp before "
+                    "materializing its review."
+                )}
+            vocabulary = set(id_map)
 
     try:
         result = materialize_dataset(

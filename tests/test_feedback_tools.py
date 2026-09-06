@@ -877,6 +877,61 @@ def test_materialize_writes_positives_under_a_classified_scope_in_the_ground_tru
     assert anns[0].attributes == {CLASSIFIED_ATTRIBUTE: "healthy"}
 
 
+def test_materialize_refuses_a_classified_scope_bucket_recording_no_id_map(tmp_path):
+    """The tool's own pre-check refuses by name before any write when the reviewed bucket's
+    stamp records no id_map at all: a classified scope's confirmed values have nothing to check
+    against, and passing an empty vocabulary through unchecked would let the write rail refuse
+    every value with a bare ``[]`` instead of naming the bucket that lacks a map. The admitting
+    case (a bucket whose stamp records a real map) is
+    test_materialize_writes_positives_under_a_classified_scope_in_the_ground_truth_shape."""
+    from tcip_mcp.pipelines.resolution import write_sidecar
+
+    dataset_root = tmp_path / "dataset"
+    _seed_classified_verdicts(_own_store(dataset_root))
+    bucket_dir = dataset_root / CLASSIFIED_BUCKET
+    write_sidecar(bucket_dir, {"id_map": None,
+                              "subject": CLASSIFIED_SUBJECT, "attribute": CLASSIFIED_ATTRIBUTE})
+    source = _source_dataset_with_registry(tmp_path)
+    out = tmp_path / "out"
+
+    r = materialize_review_dataset(
+        str(dataset_root), str(source / "images"), str(out), bucket=CLASSIFIED_BUCKET)
+
+    assert "error" in r
+    assert "records no id_map" in r["error"]
+    assert not out.exists()
+
+
+def test_materialize_refuses_a_positive_under_a_classified_scope_with_an_empty_id_map(tmp_path):
+    """An empty recorded id_map names no vocabulary either: ``write_sidecar``'s own
+    ``scope_consistent_with_map`` rail refuses an empty id_map outright, so no live producer can
+    stamp this shape, and the bucket here is seeded through a raw store write instead. The tool's
+    own pre-check only refuses an absent map (``bucket_id_map`` answering ``None``); an empty one
+    reaches ``materialize_dataset``'s own write rail (``_write_positive_label``), which refuses
+    each accepted verdict's positive the same way an absent vocabulary refuses. The admitting
+    case is test_materialize_writes_positives_under_a_classified_scope_in_the_ground_truth_shape."""
+    import tcip_store
+    from tcip_mcp.pipelines.resolution import sidecar_key
+
+    dataset_root = tmp_path / "dataset"
+    _seed_classified_verdicts(_own_store(dataset_root))
+    bucket_dir = dataset_root / CLASSIFIED_BUCKET
+    tcip_store.replace(sidecar_key(bucket_dir, "operating_point"),
+                       {"id_map": {}, "subject": CLASSIFIED_SUBJECT,
+                        "attribute": CLASSIFIED_ATTRIBUTE},
+                       expect=tcip_store.Version.ABSENT)
+    source = _source_dataset_with_registry(tmp_path)
+    out = tmp_path / "out"
+
+    r = materialize_review_dataset(
+        str(dataset_root), str(source / "images"), str(out), bucket=CLASSIFIED_BUCKET)
+
+    assert "error" not in r
+    assert r["positive"] == 0
+    assert [e["image"] for e in r["boundary_refused"]] == ["imgA.png"]
+    assert "requires the bucket's own recorded vocabulary" in r["boundary_refused"][0]["reason"]
+
+
 def test_materialize_never_confirms_a_negative_under_a_classified_scope(tmp_path):
     """A rejected value call names the model's wrong-state guess, never the object's absence, so
     the rejected-only image is named in unconfirmed_negatives and no confirmed-negative status
