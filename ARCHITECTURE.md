@@ -31,7 +31,7 @@ snapshot; `tools/check_architecture_doc.py --inventory-json <path>` re-runs the 
 and cross-checks its counts against this document's tables, this table's own module and line
 totals included.
 
-HEAD e4c558bf has 426 modules across the six scanned roots (136645 total lines):
+HEAD e4c558bf has 426 modules across the six scanned roots (136257 total lines):
 
 | Package (root) | Modules | Lines |
 |---|---|---|
@@ -39,7 +39,7 @@ HEAD e4c558bf has 426 modules across the six scanned roots (136645 total lines):
 | tcip-annotation | 12 | 4299 |
 | tcip-web | 39 | 13371 |
 | tcip-store | 13 | 5244 |
-| tcip-web-frontend | 211 | 48092 |
+| tcip-web-frontend | 211 | 47704 |
 | tools | 17 | 4933 |
 
 `tcip-mcp`, `tcip-annotation`, `tcip-web`, and `tcip-store` are the four Python packages under
@@ -2583,7 +2583,7 @@ Phase 3 verdict: duplicated.
 
 Must agree: the token the browser echoes is the same token the backend minted for that label file.
 Side A: `packages/tcip-web/src/tcip_web/routes/annotate.py:198` (`"base_mtime": token,`, the token the load route mints; the save route compares the echoed one at `routes/annotate.py:200`).
-Side B: `packages/tcip-web/frontend/src/tabs/AnnotateTab.tsx:474` (`base_mtime: paths.mtime,`).
+Side B: `packages/tcip-web/frontend/src/tabs/AnnotateTab.tsx:472` (`base_mtime: paths.mtime,`).
 Phase 3 verdict: single.
 
 ## S54. Built frontend bundle location  <!-- queued: P5-305 unify -->
