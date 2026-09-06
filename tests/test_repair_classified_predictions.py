@@ -93,8 +93,6 @@ def _scoped_like_bucket(dataset_root: Path, *, id_map: dict, date: str = "like")
     """A fully scoped bucket (a real ``--like`` source): its own stamp already carries the
     ``(subject, attribute)`` pair and ``id_map``, a shape a live classifier run mints, seeded
     through the same producer, ``operating_point_stamp`` and ``write_sidecar``."""
-    from tcip_mcp.pipelines.resolution import operating_point_stamp, write_sidecar
-
     bucket = dataset_root / "predictions" / "classifier" / date
     value = next(iter(id_map))
     _write_doc(bucket, "imgA",
@@ -113,8 +111,6 @@ def _scoped_like_bucket(dataset_root: Path, *, id_map: dict, date: str = "like")
 def _scoped_detector_like_bucket(dataset_root: Path, *, date: str = "like") -> Path:
     """A fully scoped detector bucket (a real ``--like`` source with no attribute), the shape a
     live detector run mints, seeded through the same producer."""
-    from tcip_mcp.pipelines.resolution import operating_point_stamp, write_sidecar
-
     bucket = dataset_root / "predictions" / "detector" / date
     _write_doc(bucket, "imgA", [Annotation(subject=SUBJECT, geometry=BBox(0, 0, 10, 10))])
     stamp = operating_point_stamp(
