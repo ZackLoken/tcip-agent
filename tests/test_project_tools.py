@@ -19,7 +19,7 @@ from tcip_mcp.tools.project_tools import (
     upsert_dataset,
     _external_dataset_paths,
 )
-from tests._store_damage import damage_record
+from tests._record_damage_fixtures import damage_record
 
 
 def _make_dataset(root: Path) -> None:
@@ -1362,7 +1362,6 @@ def test_initialize_project_refuses_a_present_but_invalid_record(tmp_path: Path,
 def test_initialize_project_refuses_an_undecodable_record(tmp_path: Path, monkeypatch):
     """The store's own DecodeError is a StoreError, caught and returned as the door's error."""
     from tcip_mcp.project_record import project_record_key
-    from tests._record_damage_fixtures import damage_record
 
     monkeypatch.setenv("TCIP_WORKSPACE", str(tmp_path / "unused_workspace"))
     key = project_record_key(str(tmp_path))

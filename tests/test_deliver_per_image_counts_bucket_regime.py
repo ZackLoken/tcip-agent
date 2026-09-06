@@ -16,7 +16,7 @@ import pytest
 from tcip_mcp.pipelines.resolution import VALIDATED_FALSE, VALIDATED_HELD_OUT
 from tests import _operationalization_fixtures as fx
 from tests._binding_fixtures import calibrated_run_fields, write_bound_sidecar, write_prediction
-from tests._store_damage import damage_record
+from tests._record_damage_fixtures import damage_record
 
 
 @pytest.fixture(autouse=True)
