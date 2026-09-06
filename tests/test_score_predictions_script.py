@@ -1,9 +1,9 @@
-"""scripts/score_predictions.py: the demoted door's own command-line entry point.
+"""tcip score-predictions: the demoted door's own command-line entry point.
 
 A plain score (no --trait) needs no platform root at all, since it only reads the image and its
 label/prediction files by path; --trait requires one, since resolving a trait's derived
 localization criterion reads the project's own trait registry, matching the shared
-require_platform_root mechanism scripts/test_script_root_pinning.py covers directly.
+require_platform_root mechanism test_script_root_pinning.py covers directly.
 """
 
 from __future__ import annotations
@@ -18,9 +18,6 @@ from PIL import Image
 
 from tcip_annotation.json_io import write_annotations
 from tcip_annotation.state import Annotation, BBox
-
-REPO_ROOT = Path(__file__).resolve().parent.parent
-SCRIPT = REPO_ROOT / "scripts" / "score_predictions.py"
 
 
 def _write_image(path: Path) -> None:
@@ -50,7 +47,7 @@ def _run(args: list[str], cwd: Path, platform_root: str | None) -> subprocess.Co
     else:
         env["TCIP_STATE_ROOT"] = platform_root
     return subprocess.run(
-        [sys.executable, str(SCRIPT), *args],
+        [sys.executable, "-m", "tcip_web.cli", "score-predictions", *args],
         cwd=str(cwd), env=env, capture_output=True, text=True, timeout=60,
     )
 

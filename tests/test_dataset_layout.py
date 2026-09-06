@@ -207,8 +207,8 @@ def test_the_tree_roots_are_the_dated_dirs_without_their_date() -> None:
 
 def test_prediction_bucket_dirs_finds_a_dated_and_a_model_directory_bucket(tmp_path: Path) -> None:
     """Every model directory under predictions/ counts as a bucket in its own right, alongside
-    each of its date subdirectories: the one walk doctor.py's registry check and
-    scripts/_store_bootstrap.py's project_roots both read through, so a directory one calls a
+    each of its date subdirectories: the one walk the doctor command's registry check and
+    tcip_mcp.store_catalogue.project_roots both read through, so a directory one calls a
     bucket is a directory the other calls one too."""
     from tcip_mcp.dataset_layout import prediction_bucket_dirs
 

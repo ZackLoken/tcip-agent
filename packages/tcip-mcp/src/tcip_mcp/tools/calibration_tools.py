@@ -481,7 +481,7 @@ def calibrate_count_operating_point(
     ``pred_dir`` only when the earned conf is the conf its stored detections were produced at.
 
     Runs :func:`tcip_mcp.pipelines.count_calibration.resolve_count_operating_point` unchanged
-    (the same resolution ``scripts/calibrate_operating_point.py`` prints and writes nothing for):
+    (the same resolution ``tcip calibrate-operating-point`` prints and writes nothing for):
     one low-threshold model pass over a disjoint, locked calibration/holdout split of
     ``labels_dir``, resolved into the count-unbiased conf and its held-out count-bias gate. That
     pass runs at a floor far below any production conf and proves the resolved conf against

@@ -1,4 +1,4 @@
-"""``scripts/plant_aware_group_splits.py``: plant/plot-identity group keys for ``draw_splits``.
+"""``tcip plant-aware-group-splits``: plant/plot-identity group keys for ``draw_splits``.
 
 Builds synthetic per-stem georeferenced GeoTIFFs (the same tiepoint + pixel-scale + GeoKeyDirectory
 tag pattern ``test_orthomosaic_mapping.py`` uses) at known real-world offsets from two plants, and
@@ -18,7 +18,7 @@ import pytest
 import tifffile
 
 import tcip_store as ts
-from scripts.plant_aware_group_splits import derive_plant_group_key_map, main
+from tcip_mcp.cli.plant_aware_group_splits import derive_plant_group_key_map, main
 
 UTM_15N_EPSG = 32615
 PIXEL_SCALE = 1.0

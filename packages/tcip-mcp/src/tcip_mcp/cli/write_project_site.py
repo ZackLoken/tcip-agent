@@ -2,7 +2,7 @@
 themselves cannot reach for a project whose name does not fit the workspace scheme, and the one
 deliberate overwrite for a site typed wrong once or a record damaged by hand.
 
-    python scripts/conform_project_site.py <project_root> <site> [--replace]
+    tcip write-project-site <project_root> <site> [--replace]
 
 Without ``--replace`` this is the same create-only write ``tcip_mcp.project_record.record_site``
 always is: an absent record is written, a present record with the same site is left alone, and a
@@ -24,7 +24,7 @@ from tcip_store.errors import StoreError
 from tcip_mcp.project_record import record_site
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("project_root", help="project directory holding .tcip/")
     ap.add_argument("site", help="the orchard or station this project's plants stand in")
@@ -32,7 +32,7 @@ def main() -> int:
         "--replace", action="store_true",
         help="overwrite a present record unconditionally, valid or not",
     )
-    args = ap.parse_args()
+    args = ap.parse_args(argv)
     root = Path(args.project_root)
     if not root.is_dir():
         print(f"error: not a directory: {root}")

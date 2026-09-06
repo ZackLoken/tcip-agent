@@ -1,4 +1,4 @@
-"""scripts/doctor.py: the data-state doctor catches the field-session bug family."""
+"""tcip doctor: the data-state doctor catches the field-session bug family."""
 
 from __future__ import annotations
 
@@ -26,7 +26,6 @@ from tcip_mcp.dataset_layout import (
 from tcip_mcp.model_registry import ModelRegistry
 
 PY_EXE = sys.executable
-DOCTOR = str(Path(__file__).parent.parent / "scripts" / "doctor.py")
 
 
 def _project(tmp_path: Path) -> Path:
@@ -69,7 +68,8 @@ def _run(root: Path, *, file_layout: bool = False):
     outer test run selects.
     """
     env = {**os.environ, "TCIP_STORE_BACKEND": "file"} if file_layout else None
-    return subprocess.run([PY_EXE, DOCTOR, str(root)], capture_output=True, text=True, env=env)
+    return subprocess.run(
+        [PY_EXE, "-m", "tcip_web.cli", "doctor", str(root)], capture_output=True, text=True, env=env)
 
 
 def test_doctor_flags_the_field_session_bug_family(tmp_path):
@@ -483,7 +483,7 @@ def _dir_outside_any_temp_tree() -> Path:
     import os
     import tempfile
 
-    from scripts.doctor import TEMP_TREE_MARKERS
+    from tcip_mcp.cli.doctor import TEMP_TREE_MARKERS
 
     candidates = [Path(tempfile.gettempdir()), Path(Path.cwd().anchor)]
     for base in candidates:
@@ -501,7 +501,7 @@ def _dir_outside_any_temp_tree() -> Path:
 def test_image_census_counts_every_capture_the_loaders_admit(tmp_path):
     """The doctor's image census reads the platform's own extension set, so an .npz capture or a
     band-group manifest is matched to its label rather than reported missing."""
-    from scripts.doctor import _image_stems
+    from tcip_mcp.cli.doctor import _image_stems
 
     images = tmp_path / "images" / "2026-03-04"
     images.mkdir(parents=True)
@@ -686,7 +686,7 @@ def test_a_seam_written_confirmation_is_seen_by_check_negatives_and_check_data_q
     """One confirmation written through replace_image_status_store is the single fact both the
     doctor's negatives check and its data-quality check read, on one root under the same
     backend."""
-    from scripts import doctor
+    from tcip_mcp.cli import doctor
 
     date = "2026-03-04"
     root = _layout_project(tmp_path, date)
@@ -710,7 +710,7 @@ def test_an_unreadable_status_store_is_its_own_error_not_a_false_negative_sweep(
     """A status store the backend cannot read must surface as its own refusal finding, never as
     an empty negatives set: falling through with no negatives would report every empty label on
     the dataset as an unconfirmed negative, a false positive sweep hiding the real failure."""
-    from scripts import doctor
+    from tcip_mcp.cli import doctor
     from tcip_store import StoreError
 
     date = "2026-03-04"

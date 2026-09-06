@@ -12,7 +12,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 
 import tcip_store as ts
-from scripts import doctor
+from tcip_mcp.cli import doctor
 from tcip_mcp import dataset_layout
 from tcip_store.file_backend import FileBackend
 from tcip_store.sqlite_backend import SqliteBackend
@@ -165,7 +165,7 @@ def test_the_doctor_run_reports_the_invalid_check_and_exits_nonzero(tmp_path, mo
 
     assert code == 2
     assert "check_status_tokens" in printed
-    assert "scripts/export_store.py" in printed
+    assert "tcip export-store" in printed
     assert "invalid, not clean" in printed
 
 

@@ -1,6 +1,6 @@
-"""scripts/visualize.py: the demoted door's own command-line entry point.
+"""tcip visualize: the demoted door's own command-line entry point.
 
-Like overlay_reference_grid.py, --project (or $TCIP_STATE_ROOT) is required unconditionally:
+Like tcip overlay-reference-grid, --project (or $TCIP_STATE_ROOT) is required unconditionally:
 the door writes an artifact and carries a platform audit line (bare @audited, no scope_arg).
 """
 
@@ -17,9 +17,6 @@ from PIL import Image
 from tcip_annotation.json_io import write_annotations
 from tcip_annotation.state import Annotation, BBox
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
-SCRIPT = REPO_ROOT / "scripts" / "visualize.py"
-
 
 def _run(args: list[str], cwd: Path, platform_root: str | None) -> subprocess.CompletedProcess:
     env = dict(os.environ)
@@ -28,7 +25,7 @@ def _run(args: list[str], cwd: Path, platform_root: str | None) -> subprocess.Co
     else:
         env["TCIP_STATE_ROOT"] = platform_root
     return subprocess.run(
-        [sys.executable, str(SCRIPT), *args],
+        [sys.executable, "-m", "tcip_web.cli", "visualize", *args],
         cwd=str(cwd), env=env, capture_output=True, text=True, timeout=60,
     )
 

@@ -6,7 +6,7 @@ platform-level file: this capture feeds platform improvement, not any one projec
 Each entry stamps the workspace's active project (when one is adopted) so a distill pass can
 group entries by project without sharding the file. The genuine learnings still come from the
 agent following the ``self-improvement`` skill and the per-project ``.tcip/reports/`` and
-``.tcip/retrospectives/``, which ``scripts/distill_learnings.py`` gathers from each project;
+``.tcip/retrospectives/``, which ``tcip distill-learnings`` gathers from each project;
 this only guarantees a record of the session exists.
 
 Non-blocking + best-effort: any error is swallowed and the hook exits 0. A capture backstop must
@@ -69,7 +69,7 @@ def main() -> None:
             "session_id": payload.get("session_id"),
             "reason": payload.get("reason"),
             "active_project": active_project,
-            "note": "session ended; run scripts/distill_learnings.py to review the workspace "
+            "note": "session ended; run tcip distill-learnings to review the workspace "
                     "projects' reports and retrospectives",
         }
         append(learning_capture_key(payload.get("cwd") or "."), entry)

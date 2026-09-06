@@ -234,7 +234,7 @@ def visualize(
 ) -> dict:
     """Render annotations, predictions, a GT-vs-prediction comparison, or a sample grid.
 
-    Not an MCP tool: run through ``scripts/visualize.py``, per the admission standard
+    Not an MCP tool: run through ``tcip visualize``, per the admission standard
     (packages/tcip-mcp/CLAUDE.md), while staying importable for its own tests.
 
     One entry point for the common renders (replaces the former visualize_annotations /
@@ -557,7 +557,7 @@ def render_failure_cases(
 ) -> dict:
     """Find and render the worst predictions for failure analysis.
 
-    Not an MCP tool: run through ``scripts/render_failure_cases.py``, per the admission standard
+    Not an MCP tool: run through ``tcip render-failure-cases``, per the admission standard
     (packages/tcip-mcp/CLAUDE.md), while staying importable for its own tests.
 
     Ranks by a count-mismatch + low-confidence heuristic (`get_worst_predictions`); no IoU
@@ -954,7 +954,7 @@ def overlay_reference_grid(
 ) -> dict:
     """Render image with a labeled reference-grid overlay for spatial referencing.
 
-    Not an MCP tool: run through ``scripts/overlay_reference_grid.py``, per the admission standard
+    Not an MCP tool: run through ``tcip overlay-reference-grid``, per the admission standard
     (packages/tcip-mcp/CLAUDE.md), while staying importable for its own tests and for
     ``segment_prompt(grid_cells=...)``, which shares its underlying grid geometry
     (``reference_grid.reference_cells``) without calling this function itself.

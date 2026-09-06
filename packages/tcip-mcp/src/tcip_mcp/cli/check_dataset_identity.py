@@ -34,12 +34,12 @@ from tcip_mcp.pipelines.data.dataset_fingerprint import (
 from tcip_mcp.tools.project_tools import dataset_entry_path, read_datasets_raw
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("dataset_root", type=Path)
     ap.add_argument("--project", type=Path, default=None,
                     help="project root holding .tcip/datasets.json (default: dataset_root)")
-    args = ap.parse_args()
+    args = ap.parse_args(argv)
 
     # Its own process entry point, so it binds the storage backend the seam has no default for.
     from tcip_store.binding import bind_default

@@ -272,13 +272,13 @@ def _call_arg_blocks(text: str, name: str) -> list[str]:
 
 def test_no_build_plant_mapping_call_site_names_the_retired_plant_csv_paths_argument() -> None:
     """Collection-time guard against smoke_phenology_e2e.py's own regression: every
-    build_plant_mapping( call site under scripts/ and packages/ passes plant_registry and never
-    the retired plant_csv_paths keyword, so a fresh script cannot silently reintroduce it."""
+    build_plant_mapping( call site under tools/ and packages/ passes plant_registry and never
+    the retired plant_csv_paths keyword, so a fresh command cannot silently reintroduce it."""
     import subprocess
 
     repo_root = Path(__file__).resolve().parents[1]
     tracked = subprocess.run(
-        ["git", "ls-files", "scripts", "packages"], cwd=repo_root, capture_output=True,
+        ["git", "ls-files", "tools", "packages"], cwd=repo_root, capture_output=True,
         text=True, check=True,
     ).stdout.splitlines()
 

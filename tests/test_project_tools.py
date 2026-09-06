@@ -317,7 +317,7 @@ def test_inspect_project_reports_the_workspace_store_refusal_for_a_loose_marker(
     tmp_path: Path, monkeypatch
 ):
     """A workspace holding a loose ``.active`` with no database is what precedes
-    ``python scripts/adopt_store.py``; the divergence check must name that refusal rather
+    ``tcip adopt-store``; the divergence check must name that refusal rather
     than let it raise out of ``inspect_project``."""
     from tcip_store.sqlite_backend import SqliteBackend
 
@@ -520,7 +520,7 @@ def test_store_bootstrap_project_roots_admits_a_bare_fingerprint_registry_entry(
     fix, so it reads locations through read_datasets_raw rather than read_datasets."""
     from tcip_store.layout_claims import ROOT
 
-    from scripts._store_bootstrap import project_roots
+    from tcip_mcp.store_catalogue import project_roots
 
     project = tmp_path / "project"
     dataset = tmp_path / "dataset"
@@ -548,7 +548,7 @@ def test_project_roots_names_a_run_output_dir_a_split_manifest_and_a_prediction_
 
     from tcip_store.layout_claims import PREDICTION_BUCKET, RUN, SPLITS
 
-    from scripts._store_bootstrap import project_roots
+    from tcip_mcp.store_catalogue import project_roots
     from tcip_mcp import experiments
     from tcip_mcp.dataset_layout import prediction_dir
     from tcip_mcp.pipelines.data.split_construction import persist_split_manifest
@@ -591,7 +591,7 @@ def test_project_roots_names_the_hpo_root_and_its_sweeps(tmp_path: Path):
     directory training_tools.sweep_dir names a study's own sweep at."""
     from tcip_store.layout_claims import HPO_ROOT, SWEEP
 
-    from scripts._store_bootstrap import project_roots
+    from tcip_mcp.store_catalogue import project_roots
     from tcip_mcp.tools import training_tools
 
     project = tmp_path / "project"
@@ -616,7 +616,7 @@ def test_project_roots_names_a_curated_artifact_and_a_lineage_prediction_bucket(
     dataset's own tree."""
     from tcip_store.layout_claims import CURATED, PREDICTION_BUCKET
 
-    from scripts._store_bootstrap import project_roots
+    from tcip_mcp.store_catalogue import project_roots
     from tcip_mcp import experiments
 
     project = tmp_path / "project"
@@ -648,7 +648,7 @@ def test_project_roots_keeps_both_layouts_when_one_directory_is_two_kinds_of_roo
     that path."""
     from tcip_store.layout_claims import CURATED, ROOT
 
-    from scripts._store_bootstrap import project_roots
+    from tcip_mcp.store_catalogue import project_roots
     from tcip_mcp import experiments
 
     project = tmp_path / "project"
@@ -677,7 +677,7 @@ def test_project_roots_skips_a_recorded_run_output_dir_that_no_longer_exists(
     nothing."""
     from tcip_store.layout_claims import RUN
 
-    from scripts._store_bootstrap import project_roots
+    from tcip_mcp.store_catalogue import project_roots
     from tcip_mcp import experiments
 
     project = tmp_path / "project"
@@ -1405,7 +1405,7 @@ def test_initialize_project_refuses_an_undecodable_record(tmp_path: Path, monkey
 
 def test_initialize_project_refuses_an_unadopted_root(tmp_path: Path, monkeypatch):
     """A root whose records are still loose files: the store's conform rail refuses
-    initialize_project's site write there until scripts/adopt_store.py has run, the same rule every
+    initialize_project's site write there until tcip adopt-store has run, the same rule every
     other record store under that root already obeys. The file backend legitimately produces
     that state (import_project no longer does: it adopts a fresh root under the database
     backend), so the unadopted root here is built by writing through the file backend directly
@@ -1438,7 +1438,7 @@ def test_initialize_project_refuses_an_unadopted_root(tmp_path: Path, monkeypatc
         backend.close()
 
     assert "error" in result
-    assert "scripts/adopt_store.py" in result["error"]
+    assert "tcip adopt-store" in result["error"]
 
 
 def test_initialize_project_records_the_site_on_a_directory_that_gained_tcip_with_no_creating_door(

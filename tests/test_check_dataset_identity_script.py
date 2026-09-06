@@ -1,4 +1,4 @@
-"""Tests for scripts/check_dataset_identity.py's CHANGED branch: a bare recorded fingerprint
+"""Tests for tcip check-dataset-identity's CHANGED branch: a bare recorded fingerprint
 compared against a prefixed recompute must report formula-unrecorded with the re-register
 remedy, never CHANGED, since the two were never computed under the same formula.
 """
@@ -15,12 +15,10 @@ import tcip_store as ts
 from tcip_mcp.dataset_layout import dataset_identity_key, require_dataset_identity
 from tcip_mcp.tools.project_tools import register_dataset, upsert_dataset
 
-_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "check_dataset_identity.py"
-
 
 def _run_script(*args: str) -> subprocess.CompletedProcess:
     return subprocess.run(
-        [sys.executable, str(_SCRIPT), *args],
+        [sys.executable, "-m", "tcip_web.cli", "check-dataset-identity", *args],
         capture_output=True, text=True, timeout=60,
     )
 

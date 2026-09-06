@@ -1,6 +1,6 @@
-"""Tests for scripts/conform_project_site.py, run by subprocess against a project on disk.
+"""Tests for tcip write-project-site, run by subprocess against a project on disk.
 
-The script is the one door that records a site for a project whose name the scheme refuses, and
+The command is the one door that records a site for a project whose name the scheme refuses, and
 the sanctioned path for conforming a project that predates the record; every project here is
 scaffolded through the platform's own doors first.
 """
@@ -11,12 +11,10 @@ import subprocess
 import sys
 from pathlib import Path
 
-_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "conform_project_site.py"
-
 
 def _run_script(*args: str) -> subprocess.CompletedProcess:
     return subprocess.run(
-        [sys.executable, str(_SCRIPT), *args],
+        [sys.executable, "-m", "tcip_web.cli", "write-project-site", *args],
         capture_output=True, text=True, timeout=60,
     )
 

@@ -7,7 +7,7 @@ call to whoever launches the next one. Wraps
 ``tcip_mcp.tools.training_tools.inspect_compute_resources`` with no MCP tool registration; run
 it before ``launch_training``/``run_hyperparameter_search`` when compute headroom is the open question.
 
-    python scripts/inspect_compute_resources.py --project <project_root>
+    tcip inspect-compute-resources --project <project_root>
 
 ``--project`` (or an already-set ``$TCIP_STATE_ROOT``) names the project this run's active-run
 count and audit line resolve against; without it the answer resolves against the process cwd,
@@ -19,11 +19,8 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent))
-
-from _script_root import require_platform_root  # noqa: E402
+from tcip_mcp.project_paths import require_platform_root
 
 
 def main(argv: list[str] | None = None) -> int:

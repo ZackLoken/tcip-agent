@@ -1,5 +1,5 @@
 """Data management tools: census a dataset, split data. Per-file quality checks live in
-scripts/doctor.py's ``check_data_quality``, the retired per-file quality tool folded in there."""
+the ``doctor`` command's ``check_data_quality``, the retired per-file quality tool folded in there."""
 
 from __future__ import annotations
 
@@ -439,7 +439,7 @@ def _scan_dataset(root: str) -> dict:
     bucket raises :class:`~tcip_mcp.pipelines.image_utils.AmbiguousImageStem` rather than this
     census silently keeping one raw file of the pair, and a grouped capture counts once, its own
     manifest, never once per band file. Walks one level under ``images/``: the flat root itself
-    plus each direct date-bucket subdirectory (the same shape ``scripts/doctor.py``'s own
+    plus each direct date-bucket subdirectory (the same shape the ``doctor`` command's own
     ``_image_stems`` walks), never a deeper recursive descent. Falls back to a raw walk of the
     whole dataset root only when there is no canonical ``images/`` tree to route through at all.
     """
@@ -523,7 +523,7 @@ def _scan_dataset(root: str) -> dict:
 def scan_dataset(folder_path: str) -> dict:
     """Scan a folder for images, labels, and predictions.
 
-    Not an MCP tool: run through ``scripts/scan_dataset.py``, per the admission standard
+    Not an MCP tool: run through ``tcip scan-dataset``, per the admission standard
     (packages/tcip-mcp/CLAUDE.md), while staying importable for its in-package callers.
 
     Reads the name-based per-image JSON labels (one file per image, all subjects), or an assembled

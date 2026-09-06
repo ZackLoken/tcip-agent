@@ -96,7 +96,7 @@ def read_datasets_raw(project_root: str | Path) -> list[dict]:
     refusing on a bare pre-prefix value the way :func:`read_datasets` does.
 
     For a caller whose job is fixing or diagnosing that very value (re-registering through
-    ``register_dataset``, or ``scripts/check_dataset_identity.py``) rather than serving it as a
+    ``register_dataset``, or ``tcip check-dataset-identity``) rather than serving it as a
     dataset's current identity.
     """
     return _registry_entries(tcip_store.read(dataset_registry_key(project_root), default=[]))
@@ -585,7 +585,7 @@ def _export_stores(root: Path) -> None:
     reads: an archive ships audit logs, experiment members and registry state too, and a bundle
     whose confirmed negatives restore as absent is the failure this exists to prevent. So the
     doors that create a project (which write the project record through a database) archive
-    without an operator having run ``scripts/export_store.py`` first.
+    without an operator having run ``tcip export-store`` first.
     """
     from tcip_store.export import export_root
 
@@ -652,7 +652,7 @@ def archive_project(
     """Export an annotation project as a portable bundle: a ZIP file, or, given ``output_dir``
     instead of ``output_path``, the identical bundle written as a directory tree.
 
-    Not an MCP tool: run through ``scripts/archive_project.py``, per the admission standard
+    Not an MCP tool: run through ``tcip archive-project``, per the admission standard
     (packages/tcip-mcp/CLAUDE.md), while staying importable for its own tests.
 
     Composes the bundle from the shared membership accounting
@@ -673,9 +673,9 @@ def archive_project(
     same non-merge rule ``import_project`` holds its own ``destination`` to.
 
     Every database under the tree is exported to its loose files first, through the same
-    :func:`tcip_store.export.export_root` ``scripts/export_store.py`` uses, so a project either
+    :func:`tcip_store.export.export_root` ``tcip export-store`` uses, so a project either
     creating door stood up (which writes the project record through a database) archives without
-    an operator having run that script by hand. The archive refuses only when that export fails,
+    an operator having run that command by hand. The archive refuses only when that export fails,
     a store becomes unreadable, or a split/curated manifest sits somewhere the derivation
     constraints exclude, never merely because a database was behind.
 
@@ -957,7 +957,7 @@ def import_project(bundle_path: str, destination: str) -> dict:
     """Import an annotation project from a bundle ``archive_project`` wrote: a ZIP archive, or a
     directory tree written by its ``output_dir`` mode.
 
-    Not an MCP tool: run through ``scripts/import_project.py``, per the admission standard
+    Not an MCP tool: run through ``tcip import-project``, per the admission standard
     (packages/tcip-mcp/CLAUDE.md), while staying importable for its own tests.
 
     One bundle layout, two containers: a directory bundle is staged through the identical walker
@@ -972,8 +972,8 @@ def import_project(bundle_path: str, destination: str) -> dict:
     database when this process is bound to the database backend (skipping any derived root whose
     plan is empty) or leaves the loose layout as is under the file backend, and only then renames
     the staged tree onto ``destination``. A root imported under the default backend is therefore
-    usable at once, with no operator ``scripts/adopt_store.py`` run; a root imported under the
-    file backend meets that script's own conform rail the same as any other unconformed layout.
+    usable at once, with no operator ``tcip adopt-store`` run; a root imported under the
+    file backend meets that command's own conform rail the same as any other unconformed layout.
 
     ``destination`` must not already exist, or must be an empty directory: this door merges
     nothing into a live project, since even adoption's supplement path would merge

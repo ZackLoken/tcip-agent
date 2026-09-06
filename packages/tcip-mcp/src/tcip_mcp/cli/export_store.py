@@ -4,8 +4,8 @@ Every tool that reads TCIP's state off disk rather than through the storage seam
 data-state doctor, an archive, an auditor tailing ``.tcip/audit.jsonl``) reads what this
 produces. Run it for a root, or for a whole project's roots at once:
 
-    python scripts/export_store.py <root> [<root> ...]
-    python scripts/export_store.py --project <project_root>
+    tcip export-store <root> [<root> ...]
+    tcip export-store --project <project_root>
 
 Exit codes: 0 everything stamped, 1 a store's counter moved while its files were being written
 (rerun), 2 an export refused.
@@ -18,16 +18,14 @@ import os
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent))
+from tcip_mcp.store_catalogue import project_roots
 
-from _store_bootstrap import project_roots  # noqa: E402
-
-from tcip_store.errors import StoreError  # noqa: E402
-from tcip_store.export import export_root  # noqa: E402
-from tcip_store.file_backend import FileBackend, database_file  # noqa: E402
+from tcip_store.errors import StoreError
+from tcip_store.export import export_root
+from tcip_store.file_backend import FileBackend, database_file
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("roots", nargs="*", help="root directories whose databases to write out")
     ap.add_argument(
@@ -35,7 +33,7 @@ def main() -> int:
         default="",
         help="a project root: exports its own roots and its registered datasets' roots",
     )
-    args = ap.parse_args()
+    args = ap.parse_args(argv)
 
     roots = [str(Path(root).absolute()) for root in args.roots]
     if args.project:

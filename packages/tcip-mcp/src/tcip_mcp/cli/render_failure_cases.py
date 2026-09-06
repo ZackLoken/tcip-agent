@@ -7,7 +7,7 @@ itself is the question. Wraps ``tcip_mcp.tools.vision_tools.render_failure_cases
 tool registration; the agent reads the grid image this prints the path to with its own
 image-capable tool, then describes and recommends.
 
-    python scripts/render_failure_cases.py <predictions_dir> <labels_dir> --project <project_root>
+    tcip render-failure-cases <predictions_dir> <labels_dir> --project <project_root>
         [--images-dir DIR] [--task detect|segment] [--top-k N] [--class-names NAMES]
 
 ``--project`` (or an already-set ``$TCIP_STATE_ROOT``) names where this run's audit line and
@@ -19,11 +19,8 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent))
-
-from _script_root import require_platform_root  # noqa: E402
+from tcip_mcp.project_paths import require_platform_root
 
 
 def main(argv: list[str] | None = None) -> int:

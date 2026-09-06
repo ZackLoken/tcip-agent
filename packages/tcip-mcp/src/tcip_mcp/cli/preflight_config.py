@@ -9,7 +9,7 @@ operator validating a config outside any agent session, before ``launch_training
 identical check itself.
 
 Usage:
-    python scripts/preflight_config.py --config <path.json> --project <platform_root> \
+    tcip preflight-config --config <path.json> --project <platform_root> \
         [--smoke] [--overfit]
 """
 
@@ -17,12 +17,9 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent))
-
-from _script_root import require_platform_root  # noqa: E402
+from tcip_mcp.project_paths import require_platform_root
 
 
 def main(argv: list[str] | None = None) -> int:

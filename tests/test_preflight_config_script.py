@@ -1,8 +1,8 @@
-"""scripts/preflight_config.py: the demoted door's own command-line entry point.
+"""tcip preflight-config: the demoted door's own command-line entry point.
 
 Structural validation always runs, root pinning through require_platform_root
-(scripts/test_script_root_pinning.py covers the shared mechanism directly), matching the
-Batch 7 script precedent (scripts/calibrate_operating_point.py).
+(test_script_root_pinning.py covers the shared mechanism directly), the same pinning
+tcip calibrate-operating-point uses.
 """
 
 from __future__ import annotations
@@ -12,9 +12,6 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-
-REPO_ROOT = Path(__file__).resolve().parent.parent
-SCRIPT = REPO_ROOT / "scripts" / "preflight_config.py"
 
 
 def _fixture_config(tmp_path: Path) -> Path:
@@ -41,7 +38,7 @@ def _run(args: list[str], cwd: Path, platform_root: str | None) -> subprocess.Co
     else:
         env["TCIP_STATE_ROOT"] = platform_root
     return subprocess.run(
-        [sys.executable, str(SCRIPT), *args],
+        [sys.executable, "-m", "tcip_web.cli", "preflight-config", *args],
         cwd=str(cwd), env=env, capture_output=True, text=True, timeout=60,
     )
 

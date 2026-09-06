@@ -86,7 +86,7 @@ _INTERP_NAMES = ("python3", "python", "node", "perl", "ruby", "deno", "bun")
 PROTECTED_WRITE_MSG = (
     "Writing into platform internals via the shell is blocked, the agent edits projects, not "
     "platform code. If this was a read-only diagnostic that got mis-flagged (e.g. "
-    "`python scripts/doctor.py <root>`), that's a fence false-positive: file it with the "
+    "`tcip doctor <root>`), that's a fence false-positive: file it with the "
     "report_friction tool (category unexpected_behavior; include the exact command) so the fence "
     "can be fixed, do not route around it by editing platform files."
 )
@@ -422,7 +422,7 @@ def inline_exec(cmd: str) -> bool:
 
     Recognises the code-execution flag anywhere before a ``-m`` module or a script path, so an
     interposed flag (``python -X utf8 -c``) is caught while ``python -m pytest -c cfg`` and
-    ``python scripts/x.py`` stay free.
+    ``python tools/x.py`` stay free.
     """
     if re.search(SPAWNED_INTERPRETER, cmd, re.IGNORECASE):
         return True

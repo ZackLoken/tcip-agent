@@ -39,18 +39,18 @@ router = APIRouter(prefix="/api/images", tags=["images"])
 RENDER_CACHE_VERSION = 2
 """Bumped whenever the render cache key's inputs or the served headers' shape changes, so a
 warm entry written under the old shape is served by neither the disk cache nor conditional
-revalidation. Read by ``scripts/generate_frontend_types.py`` and carried on every image URL the
+revalidation. Read by ``tools/generate_frontend_types.py`` and carried on every image URL the
 browser builds (``api.images.url``), so a browser cache entry from before the bump is never the
 response to a request built after it either.
 """
 
 IMAGE_ERROR_HEADER = "X-TCIP-Image-Error"
 """The response header a refusal here names its condition through, since a DOM ``Image`` sees
-only that a load failed. Read by ``scripts/generate_frontend_types.py``."""
+only that a load failed. Read by ``tools/generate_frontend_types.py``."""
 
 OVERVIEWS_REQUIRED = "overviews_required"
 """The one condition this header carries: a read that needs a raster's overview pyramid and
-has none. Read by ``scripts/generate_frontend_types.py``."""
+has none. Read by ``tools/generate_frontend_types.py``."""
 
 _CACHE_BUDGET_DIVISOR = 20
 """The rendered-variant cache's byte budget is the cache volume's free space divided by this.

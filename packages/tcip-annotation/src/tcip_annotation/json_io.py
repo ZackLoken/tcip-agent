@@ -874,7 +874,7 @@ class ClassifiedRecordRefused(ValueError):
     under the attribute, or a value outside the bucket's own vocabulary.
 
     Named for one prediction document and record index (``source``); the remedy is
-    ``scripts/conform_classified_predictions.py`` (a ``tcip-mcp`` script) run over the bucket.
+    ``tcip repair-classified-predictions`` (a ``tcip-mcp`` command) run over the bucket.
     """
 
 
@@ -908,18 +908,18 @@ def require_classified_record(
         raise ClassifiedRecordRefused(
             f"{source}: record's subject is {a.subject!r}, not {subject!r}, the object class "
             "this classified bucket's every record is of. Run "
-            "scripts/conform_classified_predictions.py over this bucket."
+            "tcip repair-classified-predictions over this bucket."
         )
     value = a.attributes.get(attribute)
     if value is None:
         raise ClassifiedRecordRefused(
             f"{source}: record of {subject!r} carries no value under attribute {attribute!r}. "
-            "Run scripts/conform_classified_predictions.py over this bucket."
+            "Run tcip repair-classified-predictions over this bucket."
         )
     if value not in vocabulary:
         raise ClassifiedRecordRefused(
             f"{source}: record's value {value!r} is not a member of this bucket's own vocabulary "
-            f"({sorted(vocabulary)}). Run scripts/conform_classified_predictions.py over this "
+            f"({sorted(vocabulary)}). Run tcip repair-classified-predictions over this "
             "bucket."
         )
     return value

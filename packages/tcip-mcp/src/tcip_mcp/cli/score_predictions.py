@@ -3,12 +3,12 @@
 The demoted twin of ``annotation_tools.score_predictions``: a single image file returns
 per-box matches (plus an optional per-detection breakdown with ``detail``) for a human to read;
 a dataset directory returns aggregate metrics plus per-image TP/FP/FN. Both regimes share
-``coco_detection_metrics``. It is a script, not an MCP tool, per CLAUDE.md: it only reads, and an
+``coco_detection_metrics``. It is a command, not an MCP tool, per CLAUDE.md: it only reads, and an
 agent that already has the MCP server up calls the library function directly; this is the door
 for a harness with no MCP tool for it, or an operator scoring a batch outside any agent session.
 
 Usage:
-    python scripts/score_predictions.py --path <image_or_dataset_dir> \
+    tcip score-predictions --path <image_or_dataset_dir> \
         [--project <platform_root>] [--iou-threshold 0.5] [--conf-threshold <default>] \
         [--detail] [--trait <trait_name>]
 
@@ -20,12 +20,8 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
-from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent))
-
-from _script_root import require_platform_root  # noqa: E402
+from tcip_mcp.project_paths import require_platform_root
 
 
 def main(argv: list[str] | None = None) -> int:

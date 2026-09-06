@@ -8,7 +8,7 @@ geometry (a polygon's own centroid), and validates its own output by reading it 
 ``read_plant_csvs`` before reporting success.
 
 Usage:
-    python scripts/shp_to_plant_csv.py <plants.shp> <plants.csv> \
+    tcip shp-to-plant-csv <plants.shp> <plants.csv> \
         [--plot-name-field FIELD] [--accession-name-field FIELD] \
         [--plot-number-field FIELD] [--row-number-field FIELD] [--col-number-field FIELD]
 """

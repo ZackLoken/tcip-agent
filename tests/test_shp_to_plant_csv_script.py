@@ -1,4 +1,4 @@
-"""``scripts/shp_to_plant_csv.py``: shapefile -> ``read_plant_csvs`` CSV, with correct WGS84 axis
+"""``tcip shp-to-plant-csv``: shapefile -> ``read_plant_csvs`` CSV, with correct WGS84 axis
 order and point/polygon geometry handling.
 
 EPSG:4326's authority-declared axis order is (lat, lon); a converter that reprojects without
@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from scripts.shp_to_plant_csv import _validate_round_trip, convert_shp_to_plant_csv, main
+from tcip_mcp.cli.shp_to_plant_csv import _validate_round_trip, convert_shp_to_plant_csv, main
 
 UTM_15N_EPSG = 32615
 

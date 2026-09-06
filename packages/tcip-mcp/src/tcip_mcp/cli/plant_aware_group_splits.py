@@ -21,7 +21,7 @@ group_key}`` map to ``draw_splits(group_key_map=...)``, which already refuses lo
 per-subject admission and refuses to write a manifest without one.
 
 Usage:
-    python scripts/plant_aware_group_splits.py <dataset_root> --plant-csv <plants.csv> \
+    tcip plant-aware-group-splits <dataset_root> --plant-csv <plants.csv> \
         [--plant-csv <more_plants.csv> ...] --subject <subject> [--attribute <attribute>] \
         --train-ratio <ratio> --val-ratio <ratio> --calibration-ratio <ratio> [--seed 42] \
         [--tolerance-m 5.0] [--output-path <dir>] [--materialize] [--no-copy]

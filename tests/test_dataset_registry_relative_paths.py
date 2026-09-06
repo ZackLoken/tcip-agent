@@ -24,9 +24,6 @@ from tcip_mcp.tools.project_tools import read_datasets, register_dataset
 # dataset_entry_path is imported inside each test that needs it, not at module scope, so this
 # module still collects at the pre-row baseline (where it does not exist yet).
 
-_CHECK_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "check_dataset_identity.py"
-
-
 def _make_dataset(root: Path) -> None:
     """A minimal nested-schema dataset (image + label + registry), so its fingerprint is real
     rather than the ``None`` a check_dataset_identity.py run reads as bespoke-or-empty."""
@@ -42,7 +39,7 @@ def _make_dataset(root: Path) -> None:
 
 def _run_check(*args: str) -> subprocess.CompletedProcess:
     return subprocess.run(
-        [sys.executable, str(_CHECK_SCRIPT), *args],
+        [sys.executable, "-m", "tcip_web.cli", "check-dataset-identity", *args],
         capture_output=True, text=True, timeout=60,
     )
 
@@ -145,14 +142,14 @@ def test_registry_path_for_recognizes_containment_through_a_symlinked_project_ro
     assert registry_path_for(dataset, alias) == "datasets/main"
 
 
-# ── project_roots (scripts/_store_bootstrap.py): reaches a relatively-registered dataset ───
+# ── project_roots (tcip_mcp.store_catalogue): reaches a relatively-registered dataset ───
 
 
 def test_project_roots_reaches_a_relatively_registered_datasets_state(tmp_path: Path):
     """The dataset is registered under a subdirectory of the project, not the project's own
     tree, so a resolved entry can only come from the registry-driven root project_roots adds,
     never from the project root project_roots always adds regardless of the registry."""
-    from scripts._store_bootstrap import project_roots
+    from tcip_mcp.store_catalogue import project_roots
     from tcip_store.layout_claims import ROOT
 
     project = tmp_path / "proj"

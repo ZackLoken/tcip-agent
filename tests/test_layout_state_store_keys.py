@@ -4,7 +4,6 @@ confirmed-negatives store that decides what trains as empty."""
 
 from __future__ import annotations
 
-import importlib.util
 from pathlib import Path
 
 import numpy as np
@@ -23,16 +22,15 @@ from tcip_mcp.dataset_layout import (
 )
 from tcip_web.app import app
 
-DOCTOR_PATH = Path(__file__).parent.parent / "scripts" / "doctor.py"
+DOCTOR_PATH = (Path(__file__).parent.parent / "packages" / "tcip-mcp" / "src" / "tcip_mcp"
+               / "cli" / "doctor.py")
 
 
 def _doctor():
     """The data-state doctor loaded as a module, for its own inverse of the bucket key."""
-    spec = importlib.util.spec_from_file_location("tcip_data_state_doctor", DOCTOR_PATH)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    from tcip_mcp.cli import doctor
+
+    return doctor
 
 
 @pytest.mark.parametrize(

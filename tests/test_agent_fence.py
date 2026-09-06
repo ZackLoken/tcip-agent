@@ -46,7 +46,7 @@ _EXPECTED_DENY = {
     "Edit(packages/**)",
     "Edit(tests/**)",
     "Edit(.github/**)",
-    "Edit(scripts/**)",
+    "Edit(tools/**)",
     "Edit(.claude/**)",
     "Edit(CLAUDE.md)",
     "Edit(.mcp.json)",
@@ -243,12 +243,11 @@ def _run_guard(command: str) -> subprocess.CompletedProcess:
         "echo x > agent_bash_guard.py",  # self-modify (even relative, after a cd)
         'bash -c "echo hi > packages/x"',  # nested shell
         "powershell -e U2V0",  # nested encoded shell from Bash
-        # a redirect/tee whose resolved target is protected still blocks, even
-        # when a protected token also appears as a mere exec argument (scripts/) or beside an
-        # fd-dup (2>&1); these must stay denied.
-        "python scripts/foo.py > packages/out.txt",  # exec arg scripts/, real write to packages/
+        # a redirect/tee whose resolved target is protected still blocks, even when a protected
+        # token also appears as a mere exec argument (tools/) or beside an fd-dup (2>&1).
+        "python tools/foo.py > packages/out.txt",  # exec arg tools/, real write to packages/
         "echo x > packages/y.py 2>&1",  # fd-dup present, but the > target is protected
-        "python scripts/doctor.py /c/p 2>&1 | tee packages/x",  # tee target protected
+        "tcip doctor /c/p 2>&1 | tee packages/x",  # tee target protected
         # find's own write actions carry no >/tee at all: caught by target, not by shape.
         "find . -maxdepth 1 -fprintf packages/tcip-mcp/evil.py '%p'",
         "find . -maxdepth 1 -fls packages/tcip-mcp/evil.txt",
@@ -319,11 +318,11 @@ def test_both_guards_deny_delete_on_every_path_kind(path_kind):
         "echo hello > /tmp/scratch.txt",  # a write, but not into repo internals
         # fd redirects / non-protected targets are not writes into internals: the mandated
         # diagnostics and their redirect variants must fall through.
-        "python scripts/doctor.py C:/Users/breeder/tcip-projects/currant 2>&1",  # mandated command
-        "python scripts/doctor.py /c/proj 2>/dev/null",
-        "python scripts/list_tools.py",  # no redirect at all
-        "python scripts/list_tools.py > /tmp/tools.txt",  # real redirect, non-protected target
-        "python scripts/doctor.py /c/proj 2>&1 | tee /tmp/doctor.log",
+        "tcip doctor C:/Users/breeder/tcip-projects/currant 2>&1",  # mandated command
+        "tcip doctor /c/proj 2>/dev/null",
+        "python tools/list_tools.py",  # no redirect at all
+        "python tools/list_tools.py > /tmp/tools.txt",  # real redirect, non-protected target
+        "tcip doctor /c/proj 2>&1 | tee /tmp/doctor.log",
         "ls packages 2>&1",  # fd-dup while reading a protected dir
         "find . -printf '%p\\n'",  # -printf (no leading f) writes to stdout, not a file
     ],
@@ -446,7 +445,7 @@ def test_guard_denies_deletion_and_truncation(cmd):
         "grep -rn truncate packages",
         "cat elderberry-rm-notes.txt",
         "ls /c/proj/rm-backup",
-        "python scripts/doctor.py /c/proj",  # contains no delete verb at all
+        "tcip doctor /c/proj",  # contains no delete verb at all
         "find /c/proj/annotations -name '*.json'",  # find without -delete/-exec rm is a plain read
         "find /c/proj -type f -name 'truncate_report.json'",
     ],
@@ -528,8 +527,8 @@ def _run_ps_guard(command: str) -> subprocess.CompletedProcess:
         'git commit -m "x"',
         "git reset --hard HEAD~1",
         # a redirect whose resolved target is protected still blocks, even with
-        # scripts/ present only as an exec argument. Must stay denied.
-        "python scripts/foo.py > packages\\out.txt",
+        # tools/ present only as an exec argument. Must stay denied.
+        "python tools/foo.py > packages\\out.txt",
     ],
 )
 def test_ps_guard_denies_mutations_and_dangerous(cmd):
@@ -632,9 +631,9 @@ def test_ps_guard_still_denies_move_and_rename_of_breeder_data(cmd):
         "git status",
         "git log --oneline -5",
         # fd redirects / non-protected targets are not writes into internals (standing checks).
-        "python scripts/doctor.py C:\\Users\\breeder\\proj 2>&1",  # mandated command, redirect form
-        "python scripts/list_tools.py 2>$null",
-        "python scripts/list_tools.py > $env:TEMP\\tools.txt",  # real redirect, non-protected
+        "tcip doctor C:\\Users\\breeder\\proj 2>&1",  # mandated command, redirect form
+        "python tools/list_tools.py 2>$null",
+        "python tools/list_tools.py > $env:TEMP\\tools.txt",  # real redirect, non-protected
         "Get-ChildItem packages 2>&1",  # fd-dup while reading a protected dir
     ],
 )

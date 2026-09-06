@@ -508,7 +508,7 @@ def triage_predictions(
 ) -> dict:
     """Sort a checkpoint's own predictions by confidence into auto-accept, needs-review and unscoreable queues.
 
-    Not an MCP tool: run through ``scripts/triage_predictions.py``, per the admission standard
+    Not an MCP tool: run through ``tcip triage-predictions``, per the admission standard
     (packages/tcip-mcp/CLAUDE.md), while staying importable for its own tests.
 
     Returns predictions at or above ``auto_threshold`` as the confident set for a caller to accept

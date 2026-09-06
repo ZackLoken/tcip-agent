@@ -17,7 +17,7 @@ and ``capabilities()`` says which of the two guarantees follow.
 
 A root whose records are still files is refused rather than answered about: an empty database
 beside a populated layout would report every one of those entries as absent. Moving them in is
-``scripts/adopt_store.py``, and writing them back out again is :mod:`tcip_store.export`.
+``tcip adopt-store``, and writing them back out again is :mod:`tcip_store.export`.
 
 Every operation says which stores it is serving, and their layouts are what the rail reasons
 about: which files under the root would be those stores' own. A directory serves whatever
@@ -534,7 +534,7 @@ class SqliteBackend:
             raise StoreError(
                 f"{root} holds record or log files but no {DATABASE_FILENAME}, so its state "
                 f"is still in the file layout: {listed}. Move it in with "
-                "python scripts/adopt_store.py before this backend touches the root; an empty "
+                "tcip adopt-store before this backend touches the root; an empty "
                 "database beside those files would read every one of them as absent."
             )
 
@@ -576,7 +576,7 @@ class SqliteBackend:
             raise StoreError(
                 f"{root} holds a database that has never held the stores claiming these files, "
                 f"so their state is still in the file layout beside it: {listed}. Take them in "
-                "with python scripts/adopt_store.py, which loads exactly the stores this "
+                "with tcip adopt-store, which loads exactly the stores this "
                 "database has no record of; reading past them would answer every one of them "
                 "with absence."
             )
@@ -633,7 +633,7 @@ class SqliteBackend:
                     f"{first[0].path} is a file {store} owns, and this database has never held "
                     f"{store}, so this would be its first write here and the file would then "
                     "read as its own export rather than as state nothing took in. Take the file "
-                    "in with python scripts/adopt_store.py, or remove it if it is not this "
+                    "in with tcip adopt-store, or remove it if it is not this "
                     "store's."
                 )
 

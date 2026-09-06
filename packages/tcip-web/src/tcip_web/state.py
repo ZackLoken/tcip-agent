@@ -29,7 +29,7 @@ class GuiMutationInvalid(ValueError):
 
 class GuiVocabulary(BaseModel):
     """``active_tab`` and ``mode``, held together as one small model rather than the whole of
-    :class:`GuiState`, for ``scripts/generate_frontend_types.py`` to project into
+    :class:`GuiState`, for ``tools/generate_frontend_types.py`` to project into
     ``frontend/src/api/types.generated.ts``. ``store/types.ts``'s ``Mode`` takes the ``mode``
     field's type from the generated module instead of restating the literal union by hand.
     """

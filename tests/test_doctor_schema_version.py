@@ -1,4 +1,4 @@
-"""scripts/doctor.py reads state as raw files and reports a version finding rather than
+"""tcip doctor reads state as raw files and reports a version finding rather than
 refusing: a soft rail, the same posture as adoption's preflight, since the doctor never acts on
 a document's content.
 """
@@ -18,12 +18,13 @@ from tcip_mcp.traits import trait_spec_key, trait_specs_dir
 from tcip_store.file_backend import FileBackend
 
 PY_EXE = sys.executable
-DOCTOR = str(Path(__file__).parent.parent / "scripts" / "doctor.py")
 
 
 def _run(root: Path):
     env = {**os.environ, "TCIP_STORE_BACKEND": "file"}
-    return subprocess.run([PY_EXE, DOCTOR, str(root)], capture_output=True, text=True, env=env)
+    return subprocess.run(
+        [PY_EXE, "-m", "tcip_web.cli", "doctor", str(root)],
+        capture_output=True, text=True, env=env)
 
 
 def _plant(key: ts.Key, doc: dict) -> None:

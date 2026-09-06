@@ -10,8 +10,8 @@ Every project gets exactly one record, written the first time either creating do
 project: :func:`record_site` is a create-only write, so a second season of the same site is the
 same call again, agreeing with what is already there, and a different site refuses rather than
 silently overwriting one project's identity with another's. The one deliberate correction path is
-``scripts/conform_project_site.py --replace``, for a site typed wrong once or a record damaged by
-hand; nothing else in this module overwrites a present record.
+``tcip write-project-site --replace``, for a site typed wrong once or a record damaged by hand;
+nothing else in this module overwrites a present record.
 """
 
 from __future__ import annotations
@@ -127,8 +127,8 @@ def read_record(project_path: str | Path) -> dict:
 
     Reads with ``default=None`` rather than pre-checking whether the root holds a store: the
     store's own read already answers absence without creating one (a root with no database and
-    no unconformed files returns ``None`` under the database binding, the same read
-    ``scripts/doctor.py`` relies on to ask without creating one), and a root the conform rail
+    no unconformed files returns ``None`` under the database binding, the same read the
+    ``doctor`` command relies on to ask without creating one), and a root the conform rail
     refuses raises its own ``StoreError`` before this function does anything with it. So a
     project with no record is never the reason a database gets published under it.
     """
@@ -136,11 +136,11 @@ def read_record(project_path: str | Path) -> dict:
     if raw is None:
         raise ProjectRecordMissing(
             "No site recorded yet: record it with initialize_project(<path>, site=<site>) or "
-            f"scripts/conform_project_site.py, for {project_path}"
+            f"tcip write-project-site, for {project_path}"
         )
     if not isinstance(raw, dict) or not isinstance(raw.get("site"), str) or not raw["site"]:
         raise ProjectRecordInvalid(
-            "Repair the record with scripts/conform_project_site.py --replace: it does not "
+            "Repair the record with tcip write-project-site --replace: it does not "
             f"hold a site (found {raw!r}), for {project_path}"
         )
     return raw
@@ -190,7 +190,7 @@ def record_site(project_path: str | Path, site: str, *, replace: bool = False) -
     ``previous_record_problem`` is set when a prior record existed: ``previous_site`` when it
     held a readable site, ``previous_record_problem`` (the prior record's own reading exception)
     when it did not; both are ``None`` for a new project with no prior record at all. Only
-    ``scripts/conform_project_site.py`` passes ``replace=True``, so a site typed wrong once, or a
+    ``tcip write-project-site`` passes ``replace=True``, so a site typed wrong once, or a
     record damaged by hand, has exactly one correction path and it is a deliberate one.
     """
     text = validate_site(site)
@@ -224,7 +224,7 @@ def record_site(project_path: str | Path, site: str, *, replace: bool = False) -
         raise SiteConflict(
             f"{project_path} already records site {existing['site']!r}; the offered site "
             f"{text!r} does not match, so nothing was written. Run "
-            "scripts/conform_project_site.py --replace to correct it deliberately."
+            "tcip write-project-site --replace to correct it deliberately."
         ) from None
 
 

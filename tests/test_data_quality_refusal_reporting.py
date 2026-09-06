@@ -1,4 +1,4 @@
-"""scripts/doctor.py's check_data_quality: what it reports, and what it must never quietly claim.
+"""tcip doctor's check_data_quality: what it reports, and what it must never quietly claim.
 
 Folded in from the retired per-file quality tool. Two standing facts the caller relies on.
 First, a label store whose format the detector refused is a distinct finding from a dataset that
@@ -14,7 +14,7 @@ from pathlib import Path
 from tcip_annotation import json_io
 from tcip_annotation.state import Annotation, BBox
 
-from scripts import doctor
+from tcip_mcp.cli import doctor
 
 DATE = "2-11-26"
 

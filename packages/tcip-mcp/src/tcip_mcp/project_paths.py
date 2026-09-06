@@ -51,6 +51,35 @@ def platform_state_root() -> Path:
     return Path(override) if override else Path.cwd()
 
 
+def require_platform_root(explicit: str | None) -> Path:
+    """Resolve and pin ``$TCIP_STATE_ROOT`` to an absolute path, or refuse.
+
+    For an operator command that calls an ``@audited`` tool function directly, outside the MCP
+    server or web backend, so its resolution and its audit line land under the intended project
+    root rather than the process cwd. Neither entry point pins ``$TCIP_STATE_ROOT`` for a bare
+    command, so left alone :func:`resolve_state` and the audit log both fall back to the process
+    cwd: a command run from any directory other than the target project would read state, and
+    write its audit line and a fresh ``.tcip/store.db``, wherever the operator happened to be
+    standing rather than under the platform state root.
+
+    ``explicit`` is the command's own project-root argument, when the operator passed one; an
+    already-set ``$TCIP_STATE_ROOT`` is the fallback. Refuses, naming both, when neither names a
+    root, rather than silently defaulting to the current directory. Pins the environment variable
+    before the caller imports or calls its tool function, so that resolution and every later one
+    in the process, including a store bound after this call, land under the platform state root.
+    """
+    root = explicit or os.environ.get(ENV_VAR)
+    if not root:
+        raise SystemExit(
+            f"no platform state root: pass --project <path> or set ${ENV_VAR} before running "
+            "this command, so its audit line and any state it reads or writes land under the "
+            "platform state root rather than the current directory."
+        )
+    resolved = Path(root).resolve()
+    os.environ[ENV_VAR] = str(resolved)
+    return resolved
+
+
 def resolve_output_path(path: "str | Path") -> Path:
     """An output-artifact path (weights, prediction buckets, delivery CSVs, curated datasets)
     anchored to the platform state root.

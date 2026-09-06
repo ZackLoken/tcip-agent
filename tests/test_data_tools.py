@@ -9,7 +9,7 @@ from tcip_annotation.state import Annotation, BBox
 
 from pathlib import Path
 
-from scripts import doctor
+from tcip_mcp.cli import doctor
 from tcip_mcp.tools.data_tools import (
     read_split_manifest_dir,
     scan_dataset,

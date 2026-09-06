@@ -1,6 +1,6 @@
 """The view-coverage record's viewing context, declared once so ``routes/coverage.py`` (the
 record's writer and reader) and ``routes/images.py`` (the header values the browser folds into
-that context) agree on its shape, and so ``scripts/generate_frontend_types.py`` can render it for
+that context) agree on its shape, and so ``tools/generate_frontend_types.py`` can render it for
 the browser instead of the browser hand-transcribing it.
 
 Every model here forbids an undeclared key: a viewing context or a stored record carrying one is

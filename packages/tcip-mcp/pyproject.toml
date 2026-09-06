@@ -31,10 +31,10 @@ dependencies = [
 # [default] adds the dashboard's own deps (aiohttp, grpcio); hpo._ray_session only requests it when importable.
 hpo = ["ray[default,tune]>=2.9", "optuna>=3.0", "hyperopt", "bayesian-optimization",
        "nevergrad", "ax-platform"]
-# fiona is the vector reader and scipy the convex-hull geometry scripts/foreground_fn_candidates.py
-# uses; no shipped module imports either, so both belong here rather than in the runtime deps.
+# fiona is the vector reader tcip_mcp.cli.shp_to_plant_csv uses; no shipped module imports it
+# at runtime, so it belongs here rather than the runtime deps.
 dev = ["pytest>=7.0", "pytest-asyncio>=0.21", "pytest-timeout>=2.0", "pytest-xdist>=3.0",
-       "fiona>=1.9", "scipy>=1.10"]
+       "fiona>=1.9"]
 
 [build-system]
 requires = ["hatchling"]

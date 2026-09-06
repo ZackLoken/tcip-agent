@@ -397,7 +397,7 @@ class FileBackend:
                         f"{db_path} exists, so this root's records and logs live in the "
                         "database and a file written beside it would be lost with nothing to "
                         "detect it by. Write through the database backend, or write the files "
-                        "out with python scripts/export_store.py and bind the file backend "
+                        "out with tcip export-store and bind the file backend "
                         "deliberately with TCIP_STORE_BACKEND=file."
                     )
             yield

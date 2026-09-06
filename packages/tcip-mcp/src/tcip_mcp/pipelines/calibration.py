@@ -168,7 +168,7 @@ def calibrate_operating_point(predictor, trait, labels_dir, images_dir, *,
         for s in stems
     }
     # Detector-cap censoring: derive the collection-pass cap from this split's own density (same
-    # formula scripts/calibrate_operating_point.py uses), not the caller's possibly-unrelated max_dets.
+    # formula tcip calibrate-operating-point uses), not the caller's possibly-unrelated max_dets.
     density_cap = derive_max_dets_from_counts(list(annotation_counts.values()))
     locked = resolve_locked_cal_holdout_split(
         stems, identity_hash=dh, scope_root=cal_holdout_scope_root(labels_dir),

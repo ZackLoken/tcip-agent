@@ -6,30 +6,26 @@ The demoted twin of ``feedback_tools.triage_predictions``: returns predictions a
 nothing itself. ``--auto-threshold`` keeps the tool's own refusal: omitted, it refuses to
 auto-accept anything, since turning predictions into GT at a pinned threshold fabricates labels
 the model was never confirmed to get right; derive it from the model's validated confidence
-distribution and a breeder spot-check first. It is a script, not an MCP tool, per CLAUDE.md:
+distribution and a breeder spot-check first. It is a command, not an MCP tool, per CLAUDE.md:
 this is the door for a harness with no MCP tool for it, or an operator triaging a batch outside
 any agent session.
 
 Usage:
-    python scripts/triage_predictions.py --checkpoint <ckpt.pt> --images-dir <dir> \
+    tcip triage-predictions --checkpoint <ckpt.pt> --images-dir <dir> \
         --project <platform_root> [--dataset-root <dir>] [--no-skip-reviewed] \
         [--low 0.3] [--high 0.8] [--auto-threshold <conf>] [--bucket <name>] \
         [--review-state-dir <dir>]
 
 The checkpoint must be named by a registry entry under --project (register it with
-register_model first); this script refuses one it is not, naming the digest and the root.
+register_model first); this command refuses one it is not, naming the digest and the root.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
-import sys
-from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent))
-
-from _script_root import require_platform_root  # noqa: E402
+from tcip_mcp.project_paths import require_platform_root
 
 
 def main(argv: list[str] | None = None) -> int:

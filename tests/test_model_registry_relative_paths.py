@@ -165,18 +165,11 @@ def test_archive_project_accounts_for_a_registered_checkpoint_outside_models_whe
 
 
 def test_doctor_reports_the_refusal_as_its_own_finding(tmp_path: Path):
-    import importlib.util
-
+    from tcip_mcp.cli import doctor
     from tcip_mcp.tools.project_tools import initialize_project
 
     initialize_project(str(tmp_path), site="north orchard")
     _seed_v1(tmp_path, [{"name": "legacy", "checkpoint_path": "x.pt"}])
-
-    doctor_path = Path(__file__).resolve().parent.parent / "scripts" / "doctor.py"
-    spec = importlib.util.spec_from_file_location("tcip_doctor_under_test", doctor_path)
-    assert spec and spec.loader
-    doctor = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(doctor)
 
     findings: list[tuple[str, str]] = []
     doctor.check_registry(tmp_path, findings)

@@ -379,7 +379,7 @@ def member_identity(date: str | None, stem: str) -> str:
     A stem is unique only within one capture date (cameras reuse names across dates), so a
     manifest spanning more than one date needs this to keep two same-named images from two dates
     apart; :func:`~tcip_mcp.tools.data_tools.draw_splits` and
-    ``scripts/plant_aware_group_splits.py`` both key their members this way, through this one
+    ``tcip plant-aware-group-splits`` both key their members this way, through this one
     function.
     """
     return f"{date}/{stem}" if date else stem
@@ -771,7 +771,7 @@ def refuse_if_images_root_moved(
     caller stated. ``label`` is how the caller names its own side in the message
     (``"images_dir"`` for a bare tool argument, ``"data.images_dir"`` for a run config field);
     every entry point this backs (preflight, the training child, both inference entry points, and
-    ``scripts/calibrate_operating_point.py``) reads it identically, one implementation rather
+    ``tcip calibrate-operating-point``) reads it identically, one implementation rather
     than each re-deriving the comparison.
     """
     if not images_dir or not manifest_images_root:
@@ -1364,7 +1364,7 @@ def resolve_manifest_calibration_universe(
     (:func:`~tcip_mcp.dataset_layout.annotation_date`) must be one the manifest holds members
     under, and the manifest's ``images_root`` for that date must be the door's ``images_dir``,
     each refusing by name. Called from ``calibrate_operating_point``, ``evaluate_model``,
-    ``redraw_calibration_holdout`` and ``scripts/calibrate_operating_point.py`` so none of
+    ``redraw_calibration_holdout`` and ``tcip calibrate-operating-point`` so none of
     the four drift into disagreeing about what a manifest-restricted read reads.
 
     ``min_foreground_groups`` is forwarded to :func:`calibration_universe_from_manifest`
