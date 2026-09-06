@@ -1,7 +1,5 @@
 """Web job lifecycle: memory cap, persistence, and inference cancellation."""
 
-from pathlib import Path
-
 import pytest
 
 
@@ -746,10 +744,7 @@ def test_job_registry_persist_refuses_to_overwrite_a_document_it_could_not_fully
 ):
     """A rehydrate refused by one bad summary must not let ordinary new-job registration
     silently rewrite the document down to just the summaries that did load: the stored document
-    survives byte-for-byte until the conform script has stamped the missing key and this
-    process is restarted against a conformed document."""
-    import importlib.util
-
+    survives byte-for-byte, since no operator door repairs the missing key in place."""
     monkeypatch.chdir(tmp_path)
     from tcip_store import read, replace
     from tcip_web.jobstore import JobRegistry, job_registry_key, require_platform_root
@@ -783,52 +778,3 @@ def test_job_registry_persist_refuses_to_overwrite_a_document_it_could_not_fully
     with pytest.raises(ValueError, match="no operator door"):
         registry.register("new", J("new", "pending", root), job_root=root)
     assert read(job_registry_key("inference_jobs"), default=[]) == stored
-
-    script = Path(__file__).parent.parent / "scripts" / "conform_job_registry_roots.py"
-    spec = importlib.util.spec_from_file_location("conform_job_registry_roots_under_test", script)
-    assert spec and spec.loader
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    outcomes, refused = module.conform_root(tmp_path, plan=False)
-    assert refused is False
-
-    fresh = JobRegistry("inference_jobs", to_summary=to_summary, from_summary=from_summary)
-    fresh.rehydrate()  # no longer raises: this instance never marked the root refused
-    fresh.register("new2", J("new2", "pending", root), job_root=root)
-
-    final = read(job_registry_key("inference_jobs"), default=[])
-    assert {d["job_id"] for d in final} == {"old-good", "old-bad", "new2"}
-
-
-def test_a_conformed_summary_rehydrates(tmp_path, monkeypatch):
-    """conform_job_registry_roots.py's stamp is what makes a pre-field document rehydratable
-    again: the same summary that refuses above, once the conform script has stamped its
-    platform_root, loads back into the live registry."""
-    import importlib.util
-
-    monkeypatch.chdir(tmp_path)
-    from tcip_store import replace
-    from tcip_web.jobstore import job_registry_key
-    from tcip_web.routes import inference
-
-    (tmp_path / ".tcip").mkdir()
-    replace(job_registry_key("inference_jobs"), [
-        {"job_id": "old", "status": "completed", "done": 1, "total": 1,
-         "images_dir": "i", "output_dir": "o", "error": None},
-    ], expect=None)
-
-    script = Path(__file__).parent.parent / "scripts" / "conform_job_registry_roots.py"
-    spec = importlib.util.spec_from_file_location("conform_job_registry_roots_under_test", script)
-    assert spec and spec.loader
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    outcomes, refused = module.conform_root(tmp_path, plan=False)
-    assert refused is False
-
-    inference._registry.jobs.clear()
-    try:
-        inference.rehydrate_for_current_root()
-        jobs = {j["job_id"]: j for j in inference.list_jobs()["jobs"]}
-        assert jobs["old"]["status"] == "completed"
-    finally:
-        inference._registry.jobs.clear()
