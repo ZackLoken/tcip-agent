@@ -198,7 +198,7 @@ def test_calibrate_operating_point_script_refuses_an_unregistered_checkpoint(tmp
             str(labels_dir / f"img{i}.json"),
             [Annotation(subject="bud", geometry=BBox(10, 10, 40, 40))], 100, 100)
 
-    from scripts.calibrate_operating_point import main
+    from tcip_mcp.cli.calibrate_operating_point import main
 
     rc = main([
         "--checkpoint", ckpt, "--trait", "bud",
@@ -876,12 +876,7 @@ def test_doctor_lists_a_prerail_bucket_and_stays_silent_on_a_registered_one(tmp_
     _bespoke_checkpoint(undated_replacement, tile_size=144)
     _register(tmp_path, str(undated_replacement), name="undated-model")
 
-    import importlib.util
-
-    doctor_path = Path(__file__).resolve().parents[1] / "scripts" / "doctor.py"
-    spec = importlib.util.spec_from_file_location("tcip_digest_rail_doctor", doctor_path)
-    doctor_module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(doctor_module)
+    from tcip_mcp.cli import doctor as doctor_module
 
     findings: list = []
     doctor_module.check_registry(tmp_path, findings)

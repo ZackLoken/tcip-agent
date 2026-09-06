@@ -8,7 +8,7 @@ evidence for inspection. It writes nothing: a validated claim is minted only by 
 and a script writing into the experiment record would route that mutation around the audit log.
 
 Usage:
-    python scripts/calibrate_operating_point.py \
+    tcip calibrate-operating-point \
         --checkpoint <ckpt.pt> --trait <trait_name> \
         --labels-dir <labeled_dir> --images-dir <images_dir> \
         --dataset-root <dataset_root> --project-root <project_root> \

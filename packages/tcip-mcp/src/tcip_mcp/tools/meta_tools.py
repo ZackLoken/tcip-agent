@@ -669,7 +669,7 @@ def write_retrospective(
 @audited
 def record_distillation_pass(project_path: str) -> dict:
     """Record that you reviewed this project's friction/retrospectives (e.g. via
-    ``scripts/distill_learnings.py``); resets its distillation-backlog counters.
+    ``tcip distill-learnings``); resets its distillation-backlog counters.
 
     Call this after actually reading a distillation worksheet, not before. It only records that a
     review happened; it never applies, promotes, or writes anything from the worksheet itself:

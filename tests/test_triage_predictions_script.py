@@ -1,7 +1,7 @@
-"""scripts/triage_predictions.py: the demoted door's own command-line entry point.
+"""tcip triage-predictions: the demoted door's own command-line entry point.
 
---project (or $TCIP_STATE_ROOT) is required unconditionally, unlike score_predictions.py's
-script: the checkpoint verification this door always runs reads the registry under it, so an
+--project (or $TCIP_STATE_ROOT) is required unconditionally, unlike tcip score-predictions:
+the checkpoint verification this door always runs reads the registry under it, so an
 unpinned root is always the wrong root to search, never only for one optional feature.
 """
 
@@ -14,9 +14,6 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
-SCRIPT = REPO_ROOT / "scripts" / "triage_predictions.py"
-
 
 def _run(args: list[str], cwd: Path, platform_root: str | None) -> subprocess.CompletedProcess:
     env = dict(os.environ)
@@ -25,7 +22,7 @@ def _run(args: list[str], cwd: Path, platform_root: str | None) -> subprocess.Co
     else:
         env["TCIP_STATE_ROOT"] = platform_root
     return subprocess.run(
-        [sys.executable, str(SCRIPT), *args],
+        [sys.executable, "-m", "tcip_web.cli", "triage-predictions", *args],
         cwd=str(cwd), env=env, capture_output=True, text=True, timeout=60,
     )
 
@@ -48,7 +45,7 @@ def test_refuses_from_an_unpinned_cwd_and_plants_no_store(tmp_path):
 
 def test_triages_over_a_fixture_root_with_the_checkpoint_registered(tmp_path, monkeypatch, capsys):
     import tcip_mcp.pipelines.inference.predictor as predmod
-    from scripts.triage_predictions import main
+    from tcip_mcp.cli.triage_predictions import main
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
     monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))

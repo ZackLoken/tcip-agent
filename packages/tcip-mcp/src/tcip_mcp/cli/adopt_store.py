@@ -9,8 +9,8 @@ checkpoints, hand-authored documents) stay exactly where they are under every ba
 A root that already holds a database is planned too: a store whose files arrived after that
 database was built is one the database has never held, and this takes exactly those in.
 
-    python scripts/adopt_store.py --project <project_root>
-    python scripts/adopt_store.py --layout <layout> <root> [<root> ...]
+    tcip adopt-store --project <project_root>
+    tcip adopt-store --layout <layout> <root> [<root> ...]
 
 The layout names what kind of directory a root is, because a store's file layout is only
 meaningful under the kind of root it was written for. ``--project`` supplies them for a whole
@@ -25,24 +25,22 @@ import argparse
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent))
+from tcip_mcp.store_catalogue import project_roots
 
-from _store_bootstrap import project_roots  # noqa: E402
-
-from tcip_store.adoption import AdoptionPlan, adopt_root, plan_root, unaccounted_files  # noqa: E402
-from tcip_store.errors import StoreError  # noqa: E402
-from tcip_store.file_backend import FileBackend  # noqa: E402
-from tcip_store.layout_claims import LAYOUTS  # noqa: E402
-from tcip_store.store import bind  # noqa: E402
+from tcip_store.adoption import AdoptionPlan, adopt_root, plan_root, unaccounted_files
+from tcip_store.errors import StoreError
+from tcip_store.file_backend import FileBackend
+from tcip_store.layout_claims import LAYOUTS
+from tcip_store.store import bind
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("roots", nargs="*", help="root directories to adopt")
     ap.add_argument("--layout", default="", choices=("", *LAYOUTS), help="what kind of directory the named roots are")
     ap.add_argument("--project", default="", help="a project root: adopts its own roots and its registered datasets'")
     ap.add_argument("--plan", action="store_true", help="report what would be adopted and write nothing")
-    args = ap.parse_args()
+    args = ap.parse_args(argv)
 
     # The registry naming the project's datasets is still a file at this point, so it is read
     # through the backend that still owns it.

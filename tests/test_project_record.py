@@ -153,7 +153,7 @@ def test_record_site_refuses_writing_over_an_unadopted_root(tmp_path: Path):
         record_site(str(tmp_path), "north orchard")
 
     with bound(SqliteBackend()):
-        with pytest.raises(ts.StoreError, match="scripts/adopt_store.py"):
+        with pytest.raises(ts.StoreError, match="tcip adopt-store"):
             record_site(str(tmp_path), "north orchard")
 
 
@@ -219,7 +219,7 @@ def test_read_record_raises_missing_and_publishes_no_database_for_a_root_with_no
 
     with pytest.raises(ProjectRecordMissing, match="initialize_project") as raised:
         read_record(str(tmp_path))
-    assert "scripts/conform_project_site.py" in str(raised.value)
+    assert "tcip write-project-site" in str(raised.value)
 
     assert not database_file(str(tmp_path.absolute())).is_file()
 
@@ -250,7 +250,7 @@ def test_site_fields_names_the_absent_record(tmp_path: Path):
 
     assert fields["site"] is None
     assert "initialize_project" in fields["site_problem"]
-    assert "scripts/conform_project_site.py" in fields["site_problem"]
+    assert "tcip write-project-site" in fields["site_problem"]
 
 
 def test_site_fields_names_a_present_but_invalid_record(tmp_path: Path):
@@ -302,11 +302,11 @@ def test_site_fields_names_a_root_the_store_refuses_to_read(tmp_path: Path):
         fields = site_fields(str(tmp_path))
 
     assert fields["site"] is None
-    assert "scripts/adopt_store.py" in fields["site_problem"]
+    assert "tcip adopt-store" in fields["site_problem"]
 
 
 def test_site_fields_on_an_unadopted_root_names_adopt_store_py(tmp_path: Path):
-    """A root whose records are still loose files: ``scripts/adopt_store.py`` is the state it
+    """A root whose records are still loose files: ``tcip adopt-store`` is the state it
     conforms. The file backend legitimately produces that state (``import_project`` no longer
     does: it adopts a fresh root under the database backend), so the unadopted root here is
     built by writing through the file backend directly, through ``initialize_project``, never by
@@ -322,7 +322,7 @@ def test_site_fields_on_an_unadopted_root_names_adopt_store_py(tmp_path: Path):
         fields = site_fields(str(dest))
 
     assert fields["site"] is None
-    assert "scripts/adopt_store.py" in fields["site_problem"]
+    assert "tcip adopt-store" in fields["site_problem"]
 
 
 def test_site_fields_on_a_bare_directory_that_gained_tcip_with_no_creating_door(

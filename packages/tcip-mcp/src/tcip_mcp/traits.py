@@ -356,7 +356,7 @@ def trait_specs_dir(project_root: str | Path | None = None) -> Path:
     """Where a project's trait specs live: ``<root>/.tcip/state/trait_specs``.
 
     The one implementation of that placement. ``project_root`` names the project explicitly, for a
-    caller (the web backend, ``scripts/doctor.py``) that serves more than one project per process;
+    caller (the web backend, the ``doctor`` command) that serves more than one project per process;
     omitting it resolves against this process's pinned platform root.
     """
     if project_root is not None:
@@ -433,7 +433,7 @@ def load_trait_specs_with_errors(
     """Same scan as :func:`load_trait_specs`, plus the file/reason for every spec skipped.
 
     This is the one place that detail exists; a caller that needs to tell a breeder or the agent
-    which spec is broken and why (the Results API, ``scripts/doctor.py``) reads it from here
+    which spec is broken and why (the Results API, the ``doctor`` command) reads it from here
     rather than re-deriving its own explanation or grepping logs. Either name the project whose
     registry to read (``project_root``) or the directory itself; the placement is resolved here.
     """

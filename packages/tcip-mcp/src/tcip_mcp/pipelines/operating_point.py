@@ -349,7 +349,7 @@ def derive_max_dets_from_counts(counts: list[int], floor: int = 100) -> int:
     """A generous cap = ~1.5x the p99 object count, so dense scenes aren't truncated.
 
     Shared by ``_max_dets_from_density`` (per-record GT counts, over already-collected records) and
-    ``scripts/calibrate_operating_point.py`` (raw per-stem label-line counts, known before any model
+    ``tcip calibrate-operating-point`` (raw per-stem label-line counts, known before any model
     pass) so the record-collection cap and the eventually-resolved ``max_dets`` agree on one formula
     rather than two independently-typed derivations that could drift apart.
     """

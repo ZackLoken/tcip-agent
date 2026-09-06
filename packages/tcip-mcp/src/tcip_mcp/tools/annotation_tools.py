@@ -469,7 +469,7 @@ def score_predictions(
 ) -> dict:
     """Score on-disk predictions against on-disk ground truth (COCOeval).
 
-    Not an MCP tool: run through ``scripts/score_predictions.py``, per the admission standard
+    Not an MCP tool: run through ``tcip score-predictions``, per the admission standard
     (packages/tcip-mcp/CLAUDE.md), while staying importable for its own tests.
 
     Dispatches on the input: a single image file returns per-box ``matches`` (plus an optional

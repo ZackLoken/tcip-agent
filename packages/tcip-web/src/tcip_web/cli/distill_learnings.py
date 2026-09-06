@@ -6,8 +6,8 @@ reports via ``report_friction``, and end-of-work findings to the retrospectives 
 cheap and nothing is dropped.
 
     conda activate tcip-agent
-    python scripts/distill_learnings.py [--project <root>]
-    python scripts/distill_learnings.py --workspace
+    tcip distill-learnings [--project <root>]
+    tcip distill-learnings --workspace
 
 Output is a Markdown worksheet: recurring themes across the project's reports and retrospectives,
 then the records themselves. It *gathers*: nothing is written, applied, or promoted anywhere; this
@@ -24,10 +24,18 @@ from __future__ import annotations
 
 import argparse
 import re
+import sys
 from collections import Counter
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
+
+def _find_repo_root(start: Path) -> Path | None:
+    cur = start
+    while cur != cur.parent:
+        if (cur / ".git").exists():
+            return cur
+        cur = cur.parent
+    return None
 
 # Generic English function words, filtered out so recurrence-counting surfaces whatever
 # actually recurs in a project's own reports/retrospectives, not a fixed, maintained,
@@ -174,7 +182,7 @@ def _read_captures(project_root: Path) -> list[dict]:
     (`agent_learning_capture.py`) appends through, under whichever backend this process bound.
 
     Importing the hook's module registers the log's store descriptor as a side effect, the
-    same way ``scripts/_store_bootstrap.py`` does for the tools that must cover every store.
+    same way ``tcip_mcp.store_catalogue`` does for the commands that must cover every store.
     An undecodable entry is excluded from what ``read_log`` returns here exactly as the old
     direct file read skipped one it could not parse; that page also carries a `corrupt` count
     of such entries this worksheet does not otherwise surface.
@@ -237,15 +245,15 @@ def build_worksheet(project_root: Path) -> str:
     return "\n".join(lines) + "\n"
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="Gather learning-review material into one worksheet.")
-    ap.add_argument("--project", default=str(REPO_ROOT),
+    ap.add_argument("--project", default=None,
                     help="project root holding the friction reports and retrospectives "
-                         "(default: repo root)")
+                         "(default: this platform checkout's own repo root)")
     ap.add_argument("--workspace", action="store_true",
                     help="cross-project mode: gather across every project under the TCIP workspace "
                          "(TCIP_WORKSPACE, default ~/tcip-projects/) instead of one --project root")
-    args = ap.parse_args()
+    args = ap.parse_args(argv)
 
     # Its own process entry point, so it binds the storage backend the seam has no default for.
     from tcip_store.binding import bind_default
@@ -256,9 +264,19 @@ def main() -> None:
         from tcip_mcp.workspace import workspace_root
 
         print(build_workspace_worksheet(workspace_root()))
-    else:
-        print(build_worksheet(Path(args.project)))
+        return 0
+
+    project = args.project
+    if project is None:
+        repo_root = _find_repo_root(Path(__file__).resolve())
+        if repo_root is None:
+            print("error: --project not given and no repo root (.git ancestor) found to "
+                  "default to; name a project root explicitly")
+            return 2
+        project = str(repo_root)
+    print(build_worksheet(Path(project)))
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

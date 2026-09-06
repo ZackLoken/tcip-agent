@@ -170,8 +170,9 @@ def _collect(conn: sqlite3.Connection, root: str) -> tuple[_Collected, ...]:
         except UnknownStore as exc:
             raise StoreError(
                 f"{root} holds rows for store {store!r}, which nothing has registered, so "
-                "there is no locator to write them back out with. Import the module that "
-                "declares it in scripts/_store_bootstrap.py before exporting."
+                "there is no locator to write them back out with. Import "
+                "tcip_mcp.store_catalogue, which imports the module that declares it, before "
+                "exporting."
             ) from exc
         records = tuple(
             (decode_parts(parts), value)

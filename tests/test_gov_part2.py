@@ -8,21 +8,16 @@ stays human).
 
 from __future__ import annotations
 
-import importlib.util
 import io
 import json
 import sys
 from pathlib import Path
 
-REPO = Path(__file__).resolve().parent.parent
-
 
 def _load_distill():
-    spec = importlib.util.spec_from_file_location(
-        "distill_learnings", REPO / "scripts" / "distill_learnings.py")
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
+    from tcip_web.cli import distill_learnings
+
+    return distill_learnings
 
 
 def _seed_report(project_root: Path, report_id: str, entry: dict) -> None:

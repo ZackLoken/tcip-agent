@@ -3,11 +3,11 @@ identical bundle written as a directory tree.
 
 The operator/agent entry point for packaging a project (images, ground truth, class registry,
 ``.tcip`` state, experiments and their claimed manifests, plus every recognized blob home) into
-one bundle an ``import_project`` run can restore from elsewhere. Wraps
+one bundle an ``import-project`` run can restore from elsewhere. Wraps
 ``tcip_mcp.tools.project_tools.archive_project`` with no MCP tool registration.
 
-    python scripts/archive_project.py <project_path> --output-path PATH [--include-models]
-    python scripts/archive_project.py <project_path> --output-dir DIR [--include-models]
+    tcip archive-project <project_path> --output-path PATH [--include-models]
+    tcip archive-project <project_path> --output-dir DIR [--include-models]
 
 Exactly one of --output-path/--output-dir is required. This run's audit line is recorded under
 ``<project_path>/.tcip``, the project being archived, not the process cwd.
@@ -18,11 +18,8 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent))
-
-from _script_root import require_platform_root  # noqa: E402
+from tcip_mcp.project_paths import require_platform_root
 
 
 def main(argv: list[str] | None = None) -> int:

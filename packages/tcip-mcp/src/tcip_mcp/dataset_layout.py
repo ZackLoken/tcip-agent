@@ -462,7 +462,7 @@ def read_dataset_identity_document(dataset_root: str | Path) -> dict:
     """:func:`require_dataset_identity`, but through :func:`decode_dataset_identity_document`:
     the identity record whatever its ``fingerprint`` states, never refusing on a bare pre-prefix
     value. For a caller re-registering through ``register_dataset`` (fixing that very value) and
-    ``scripts/check_dataset_identity.py`` (diagnosing it), whose jobs are seeing the value
+    ``tcip check-dataset-identity`` (diagnosing it), whose jobs are seeing the value
     rather than being refused before either can act on it.
     """
     return _read_dataset_identity(dataset_root, decode=decode_dataset_identity_document)
@@ -1180,9 +1180,9 @@ def prediction_bucket_dirs(dataset_root: str | Path) -> list[Path]:
     """Every directory under ``predictions/`` a bucket's own sidecar could sit in: each model's
     own directory, and each of its date subdirectories, whether or not either actually holds one.
 
-    The one walk ``doctor.py``'s registry check and ``scripts/_store_bootstrap.py``'s
-    ``project_roots`` both read through, so a directory one calls a bucket is a directory the
-    other calls one too.
+    The one walk the ``doctor`` command's registry check and
+    :func:`~tcip_mcp.store_catalogue.project_roots` both read through, so a directory one calls
+    a bucket is a directory the other calls one too.
     """
     pred_root = prediction_root(dataset_root)
     if not pred_root.is_dir():

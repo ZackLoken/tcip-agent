@@ -55,7 +55,7 @@ const PROJECTS: ProjectSummary[] = [
     site: null,
     site_problem:
       "No site recorded yet: record it with initialize_project(<path>, site=<site>) or " +
-      "scripts/conform_project_site.py, for /ws/crop_b_burr_site-b",
+      "tcip write-project-site, for /ws/crop_b_burr_site-b",
     label_problem: null,
   },
 ];
@@ -127,7 +127,7 @@ describe("ProjectPicker", () => {
     expect(
       await screen.findByText(
         "No site recorded yet: record it with initialize_project(<path>, site=<site>) or " +
-          "scripts/conform_project_site.py, for /ws/crop_b_burr_site-b",
+          "tcip write-project-site, for /ws/crop_b_burr_site-b",
       ),
     ).toBeInTheDocument();
   });

@@ -1,7 +1,7 @@
 """The registry, the breeder's trait picker, and the data-state doctor read one spec directory.
 
 ``traits`` owns where a project's trait specs live. The Results tab's trait list and
-``scripts/doctor.py`` both report on that same directory, and each of them looking somewhere else
+``tcip doctor`` both report on that same directory, and each of them looking somewhere else
 fails the same silent way: zero traits and zero broken-spec findings, which is exactly what a
 project with nothing authored looks like. So the two surfaces are checked against the registry's
 own resolution rather than against a path spelled out beside them.
@@ -21,9 +21,6 @@ from tcip_web.app import app
 
 from tcip_mcp import traits
 from tcip_mcp.traits import load_trait_specs_with_errors, registered_traits_for
-
-DOCTOR = str(Path(__file__).parent.parent / "scripts" / "doctor.py")
-
 
 @pytest.fixture
 def client() -> TestClient:
@@ -73,7 +70,9 @@ def test_the_doctor_reports_every_spec_the_registry_could_not_load(tmp_path: Pat
         specs_dir=tmp_path / traits._TRAIT_SPECS_RELPATH)
     assert errors, "the seeded registry must contain a spec that fails to load"
 
-    res = subprocess.run([sys.executable, DOCTOR, str(tmp_path)], capture_output=True, text=True)
+    res = subprocess.run(
+        [sys.executable, "-m", "tcip_web.cli", "doctor", str(tmp_path)],
+        capture_output=True, text=True)
     assert res.returncode == 2, res.stdout
     for e in errors:
         assert e["file"] in res.stdout
@@ -81,13 +80,9 @@ def test_the_doctor_reports_every_spec_the_registry_could_not_load(tmp_path: Pat
 
 
 def _load_doctor():
-    import importlib.util
+    from tcip_mcp.cli import doctor
 
-    spec = importlib.util.spec_from_file_location("doctor_under_test", DOCTOR)
-    assert spec and spec.loader
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    return doctor
 
 
 def test_the_traits_route_follows_the_registry_when_the_registry_moves(
@@ -138,7 +133,8 @@ def test_the_doctor_names_a_broken_spec_without_touching_it(tmp_path: Path):
     # directly; the database backend refuses to read a root holding files it did not write.
     env = {**os.environ, "TCIP_STORE_BACKEND": "file"}
     res = subprocess.run(
-        [sys.executable, DOCTOR, str(tmp_path)], capture_output=True, text=True, env=env)
+        [sys.executable, "-m", "tcip_web.cli", "doctor", str(tmp_path)],
+        capture_output=True, text=True, env=env)
 
     assert res.returncode == 2, f"the doctor did not report the broken spec: {res.stdout}"
     assert "broken.json" in res.stdout
@@ -166,5 +162,7 @@ def test_a_registry_with_nothing_broken_reports_nothing_broken(client: TestClien
     assert body["traits"] == ["leaf"]
     assert body["invalid_specs"] == []
 
-    res = subprocess.run([sys.executable, DOCTOR, str(tmp_path)], capture_output=True, text=True)
+    res = subprocess.run(
+        [sys.executable, "-m", "tcip_web.cli", "doctor", str(tmp_path)],
+        capture_output=True, text=True)
     assert "trait spec" not in res.stdout, res.stdout

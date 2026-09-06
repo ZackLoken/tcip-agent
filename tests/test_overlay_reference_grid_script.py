@@ -1,6 +1,6 @@
-"""scripts/overlay_reference_grid.py: the demoted door's own command-line entry point.
+"""tcip overlay-reference-grid: the demoted door's own command-line entry point.
 
-Unlike score_predictions.py, --project (or $TCIP_STATE_ROOT) is required unconditionally: the
+Unlike tcip score-predictions, --project (or $TCIP_STATE_ROOT) is required unconditionally: the
 door writes an artifact and carries a platform audit line (bare @audited, no scope_arg), so an
 unpinned root is always the wrong root for both to land under.
 """
@@ -15,9 +15,6 @@ from pathlib import Path
 
 from PIL import Image
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
-SCRIPT = REPO_ROOT / "scripts" / "overlay_reference_grid.py"
-
 
 def _run(args: list[str], cwd: Path, platform_root: str | None) -> subprocess.CompletedProcess:
     env = dict(os.environ)
@@ -26,7 +23,7 @@ def _run(args: list[str], cwd: Path, platform_root: str | None) -> subprocess.Co
     else:
         env["TCIP_STATE_ROOT"] = platform_root
     return subprocess.run(
-        [sys.executable, str(SCRIPT), *args],
+        [sys.executable, "-m", "tcip_web.cli", "overlay-reference-grid", *args],
         cwd=str(cwd), env=env, capture_output=True, text=True, timeout=60,
     )
 

@@ -164,7 +164,7 @@ def test_max_dets_from_density_floors_sparse_scenes():
 
 
 def test_derive_max_dets_from_counts_is_the_shared_formula_records_delegate_to():
-    # scripts/calibrate_operating_point.py derives its collection-pass cap from raw label counts
+    # tcip calibrate-operating-point derives its collection-pass cap from raw label counts
     # (known before any model pass), not from already-collected records: this is the same ~1.5x
     # p99 formula _max_dets_from_density applies over per-record GT counts, exposed directly so the
     # two callers share one implementation.

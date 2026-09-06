@@ -1,4 +1,4 @@
-"""``scripts/conform_classified_predictions.py``: stamping a scope onto a classified prediction
+"""``tcip repair-classified-predictions``: stamping a scope onto a classified prediction
 bucket that predates the writer rail, and rewriting a bucket's own documents from the old
 value-in-subject shape into the shape ``write_predictions_json`` now writes.
 
@@ -10,8 +10,6 @@ outright, so there is no producer left to build them through.
 
 from __future__ import annotations
 
-import importlib.util
-import sys
 from pathlib import Path
 
 import tcip_store as ts
@@ -26,8 +24,6 @@ from tcip_mcp.pipelines.resolution import bucket_scope, sidecar_key
 from tcip_mcp.prediction_buckets import review_state_dir_of
 from tcip_mcp.tools.project_tools import upsert_dataset
 
-SCRIPT = Path(__file__).parent.parent / "scripts" / "conform_classified_predictions.py"
-
 SUBJECT = "leaf"
 ATTRIBUTE = "condition"
 VALUE_ID_MAP = {"healthy": 0, "diseased": 1}
@@ -35,13 +31,9 @@ DETECTOR_ID_MAP = {SUBJECT: 0}
 
 
 def _load_script():
-    spec = importlib.util.spec_from_file_location(
-        "conform_classified_predictions_under_test", SCRIPT)
-    assert spec and spec.loader
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-    return module
+    from tcip_mcp.cli import repair_classified_predictions
+
+    return repair_classified_predictions
 
 
 def _base_stamp(*, id_map: dict, experiment_id: str = "exp-1", **overrides) -> dict:
@@ -703,7 +695,7 @@ def test_a_value_keyed_ground_truth_record_is_reported_as_a_candidate(tmp_path):
     assert any("ground-truth candidate" in o and "healthy" in o for o in outcomes), outcomes
 
 
-def _platform_audit_entries(tool: str = "conform_classified_predictions") -> list[dict]:
+def _platform_audit_entries(tool: str = "repair_classified_predictions") -> list[dict]:
     from tcip_mcp.tools.meta_tools import read_audit_log
 
     return read_audit_log(scope=None, tool=tool)["entries"]

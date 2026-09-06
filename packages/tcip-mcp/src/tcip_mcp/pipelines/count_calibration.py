@@ -1,6 +1,6 @@
 """Resolve the count operating point over a locked, disjoint calibration/holdout split of a
 labeled directory: one bundle, read by the offline inspector
-(``scripts/calibrate_operating_point.py``, which prints it and writes nothing) and earned into a
+(``tcip calibrate-operating-point``, which prints it and writes nothing) and earned into a
 validation record by :func:`tcip_mcp.tools.calibration_tools.calibrate_count_operating_point`.
 
 Distinct from :func:`tcip_mcp.pipelines.calibration.calibrate_operating_point`, which resolves the

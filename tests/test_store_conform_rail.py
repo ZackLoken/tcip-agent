@@ -110,7 +110,7 @@ def test_a_root_whose_records_are_still_files_is_refused_rather_than_read_as_emp
             ts.read(_key(LWW, tmp_path, "already_here"), default=None)
 
     message = str(raised.value)
-    assert "scripts/adopt_store.py" in message
+    assert "tcip adopt-store" in message
     assert "already_here.json" in message
 
 
@@ -124,7 +124,7 @@ def test_a_write_to_a_root_whose_records_are_still_files_is_refused_before_it_la
         with pytest.raises(ts.StoreError) as raised:
             ts.replace(_key(LWW, tmp_path, "another"), {"n": 2})
 
-    assert "scripts/adopt_store.py" in str(raised.value)
+    assert "tcip adopt-store" in str(raised.value)
     assert not (tmp_path / ".tcip" / "store.db").exists()
 
 
@@ -177,7 +177,7 @@ def test_a_file_written_after_this_backend_last_looked_still_refuses(tmp_path):
         with pytest.raises(ts.StoreError) as raised:
             ts.replace(_key(LWW, tmp_path, "not_yet"), {"n": 2})
 
-    assert "scripts/adopt_store.py" in str(raised.value)
+    assert "tcip adopt-store" in str(raised.value)
     assert "arrived_late.json" in str(raised.value)
     assert not (tmp_path / ".tcip" / "store.db").exists()
 
@@ -185,7 +185,7 @@ def test_a_file_written_after_this_backend_last_looked_still_refuses(tmp_path):
 def test_a_restored_archive_reads_back_at_once_with_no_hand_adoption(tmp_path, monkeypatch):
     """An import extracts a project's files into a fresh directory and, bound to the database
     backend, adopts them into a database itself: the root is usable at once, with no operator
-    scripts/adopt_store.py run between the two doors and no window where a confirmed negative
+    tcip adopt-store run between the two doors and no window where a confirmed negative
     would otherwise read as absent.
 
     The two phases take separate platform roots. The archive and the import are audited calls
@@ -253,7 +253,7 @@ def test_a_record_write_beside_a_database_that_owns_the_root_is_refused(tmp_path
             ts.replace(_key(LWW, tmp_path, "owned"), {"n": 2})
 
     message = str(raised.value)
-    assert "scripts/export_store.py" in message
+    assert "tcip export-store" in message
     assert "TCIP_STORE_BACKEND=file" in message
     assert not (tmp_path / "lww" / "owned.json").exists()
 
@@ -268,7 +268,7 @@ def test_an_append_beside_a_database_that_owns_the_root_is_refused(tmp_path):
         with pytest.raises(ts.StoreError) as raised:
             ts.append(_key(LOG, tmp_path, "trail"), {"event": "two"})
 
-    assert "scripts/export_store.py" in str(raised.value)
+    assert "tcip export-store" in str(raised.value)
 
 
 def test_reads_and_blobs_stay_open_on_a_root_a_database_owns(tmp_path):
@@ -354,7 +354,7 @@ def test_every_rail_path_refuses_a_root_whose_records_are_still_files(tmp_path):
         refused = _refuses_on_every_path(tmp_path)
 
     assert sorted(refused) == _EVERY_PATH
-    assert all("scripts/adopt_store.py" in message for message in refused.values())
+    assert all("tcip adopt-store" in message for message in refused.values())
     assert not database_path(str(tmp_path)).exists()
 
 

@@ -953,7 +953,7 @@ def test_the_live_regimes_export_detection_csv_stamp_scope_unstated_becomes_the_
     def _raise(*a, **kw):
         raise StampScopeUnstated(
             "bucket: operating_point.json carries no subject/attribute pair. Run "
-            "scripts/conform_classified_predictions.py over this bucket before reading its scope."
+            "tcip repair-classified-predictions over this bucket before reading its scope."
         )
 
     monkeypatch.setattr(itools, "export_detection_csv", _raise)
@@ -964,7 +964,7 @@ def test_the_live_regimes_export_detection_csv_stamp_scope_unstated_becomes_the_
                                predictions_dir=str(bucket))
 
     assert "error" in r
-    assert "scripts/conform_classified_predictions.py" in r["error"]
+    assert "tcip repair-classified-predictions" in r["error"]
 
 
 def test_per_image_counts_from_bucket_converts_export_detection_csvs_stamp_scope_unstated(
@@ -987,7 +987,7 @@ def test_per_image_counts_from_bucket_converts_export_detection_csvs_stamp_scope
     def _raise(*a, **kw):
         raise StampScopeUnstated(
             f"{bucket}: operating_point.json carries no subject/attribute pair. Run "
-            "scripts/conform_classified_predictions.py over this bucket before reading its scope."
+            "tcip repair-classified-predictions over this bucket before reading its scope."
         )
 
     monkeypatch.setattr(itools, "export_detection_csv", _raise)
@@ -996,4 +996,4 @@ def test_per_image_counts_from_bucket_converts_export_detection_csvs_stamp_scope
         itools.per_image_counts_from_bucket(
             str(bucket), str(tmp_path / "o.csv"), trait=fx.COUNT_TRAIT)
 
-    assert "scripts/conform_classified_predictions.py" in str(excinfo.value)
+    assert "tcip repair-classified-predictions" in str(excinfo.value)

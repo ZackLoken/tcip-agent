@@ -22,8 +22,8 @@ DEFAULT_BACKEND = SQLITE_BACKEND
 """What an unset environment binds: one database per root, at ``<root>/.tcip/store.db``.
 
 A root whose records and logs are still loose files is refused rather than read as empty, so a
-layout that predates its database is conformed with ``scripts/adopt_store.py`` before a process
-on this default touches it. ``scripts/export_store.py`` writes the files back out, which is what
+layout that predates its database is conformed with ``tcip adopt-store`` before a process
+on this default touches it. ``tcip export-store`` writes the files back out, which is what
 ``TCIP_STORE_BACKEND=file`` then reads.
 """
 

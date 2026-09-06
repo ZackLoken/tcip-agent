@@ -4,7 +4,7 @@ Checks the bug family found in field sessions: status-store vs disk disagreement
 on negatives, registry entries pointing at missing/test-fixture checkpoints, provenance smells,
 and orphaned labels. Read-only. Run at session start:
 
-    python scripts/doctor.py <project_root>
+    tcip doctor <project_root>
 
 Exit codes: 0 clean, 1 warnings only, 2 errors.
 """
@@ -409,12 +409,11 @@ def check_registry(root: Path, findings: list) -> None:
         if "metrics_source" not in m:
             findings.append(("warn", f"{m.get('name')!r} in the model registry carries no "
                             "metrics_source (predates the field, and experiment_id with it); "
-                            "conform it with scripts/conform_registry_experiment_id.py, then "
-                            "re-register it through register_model"))
+                            "no operator door adds either missing field to an existing entry"))
         if "experiment_id" not in m:
             findings.append(("warn", f"{m.get('name')!r} in the model registry carries no "
-                            "experiment_id (predates the producer-binding field); conform it "
-                            "with scripts/conform_registry_experiment_id.py"))
+                            "experiment_id (predates the producer-binding field); no operator "
+                            "door adds the missing field to an existing entry"))
         if not ckpt_raw:
             continue
         # Existence resolves first; the temp-tree marker scan runs over the resolved string.
@@ -700,10 +699,10 @@ def staleness_findings(root: Path) -> dict[str, str]:
     return invalid
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("project_root", help="project directory holding images/ annotations/ .tcip/")
-    args = ap.parse_args()
+    args = ap.parse_args(argv)
     root = Path(args.project_root)
     if not root.is_dir():
         print(f"error: not a directory: {root}")
@@ -728,7 +727,7 @@ def main() -> int:
             findings.append(("error", f"{check.__name__} reads state as files and those files "
                             f"are behind the database that holds it ({reason}). This check is "
                             "invalid, not clean: write the files out with "
-                            "'python scripts/export_store.py' and run the doctor again."))
+                            "'tcip export-store' and run the doctor again."))
             continue
         if check in checks_taking_seen:
             check(root, findings, seen=ambiguous_seen)

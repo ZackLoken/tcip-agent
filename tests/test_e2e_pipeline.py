@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
-from scripts import doctor
+from tcip_mcp.cli import doctor
 from tcip_mcp.tools.project_tools import (
     initialize_project,
     inspect_project,

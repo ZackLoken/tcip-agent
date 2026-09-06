@@ -122,7 +122,7 @@ def _active_context(proj: str) -> str:
         f"Active project: {name} ({proj}).\n\n"
         f"{_root_divergence_note(proj)}"
         "If this session continues work on that project, run the ritual first: load_project_memory "
-        "(kind='reports' and kind='retrospectives'), inspect_project, then python scripts/doctor.py <project_root>.\n"
+        "(kind='reports' and kind='retrospectives'), inspect_project, then tcip doctor <project_root>.\n"
         "If the user's task is to create or switch to a different project, do that first "
         "(initialize_project(<path>, site=<site>) then activate_project), then run the ritual on the "
         "project you end up in, do not run it on a stale active project.\n"
@@ -138,7 +138,7 @@ def _no_project_context() -> str:
         "make it active (activate_project sets the marker the GUI + ritual read).\n"
         "  • Resume existing work → activate_project(<name>) (or open it in the GUI).\n"
         "Once a project is active, run the ritual: load_project_memory (kind='reports' and "
-        "kind='retrospectives') + inspect_project, then python scripts/doctor.py <project_root>.\n"
+        "kind='retrospectives') + inspect_project, then tcip doctor <project_root>.\n"
         "If any mandated action is blocked or errors, that itself is a report_friction, never a silent skip."
     )
 
@@ -150,7 +150,7 @@ def _unreadable_context(detail: str) -> str:
         "This is a mandated action that failed, so file it with report_friction once an MCP client "
         "is available, rather than treating it as no active project. If the detail names a "
         "workspace holding loose files with no database, conform it with "
-        "python scripts/adopt_store.py before trusting the marker again."
+        "tcip adopt-store before trusting the marker again."
     )
 
 

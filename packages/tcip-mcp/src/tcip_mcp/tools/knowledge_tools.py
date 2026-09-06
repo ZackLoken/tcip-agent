@@ -3,7 +3,7 @@ a client with no skill or instruction-file mechanism of its own.
 
 Claude Code reaches the same documents through the generated skills under ``.claude/skills/``;
 Codex and Antigravity reach them under ``.agents/skills/`` and, for Codex, the generated block in
-``AGENTS.md`` too (``scripts/generate_harness_discovery.py`` renders all three); any other
+``AGENTS.md`` too (``tools/generate_harness_discovery.py`` renders all three); any other
 client, and a harness with neither a skill nor an instruction-file mechanism, reaches them here.
 Unlike every other tool in this package, its client-visible description is composed at import
 time from the knowledge corpus itself (``tcip_mcp.knowledge.list_documents``) rather than left

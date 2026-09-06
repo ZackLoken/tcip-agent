@@ -227,7 +227,7 @@ def _demoted_tool_table_sites(name: str, files: list[str]) -> list[str]:
     `` `name` `` cell is. A same-shaped row in an unrelated table (ARCHITECTURE.md's own
     re-exports or module inventories) has a different header and is not flagged; ordinary prose
     quoting the name never takes a table shape at all."""
-    from scripts.verify_skill_tools import extract_tool_name, tool_table_first_cells
+    from tools.verify_skill_tools import extract_tool_name, tool_table_first_cells
 
     hits = []
     for rel in files:

@@ -1,4 +1,4 @@
-"""``scripts/conform_classified_predictions.py`` rule 7: rewriting a bucket's documents changes its
+"""``tcip repair-classified-predictions`` rule 7: rewriting a bucket's documents changes its
 content digest, so a count claim sealed over the bucket's old bytes floors the moment the rewrite
 lands. The report names the floor beside the stamp's own stored ``validated`` so a stale ``true``
 is never read as still validated, and names ``calibrate_count_operating_point`` as how to re-earn
@@ -7,8 +7,6 @@ the claim over the rewritten content.
 
 from __future__ import annotations
 
-import importlib.util
-import sys
 from pathlib import Path
 
 import tcip_store as ts
@@ -21,21 +19,15 @@ from tcip_mcp.experiments import config_key
 from tcip_mcp.pipelines.resolution import sidecar_key, verify_stamp_binding
 from tcip_mcp.tools.project_tools import upsert_dataset
 
-SCRIPT = Path(__file__).parent.parent / "scripts" / "conform_classified_predictions.py"
-
 SUBJECT = "bud"
 ATTRIBUTE = "opening"
 VALUE_ID_MAP = {"open": 0, "closed": 1}
 
 
 def _load_script():
-    spec = importlib.util.spec_from_file_location(
-        "conform_classified_predictions_floored_claim_under_test", SCRIPT)
-    assert spec and spec.loader
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-    return module
+    from tcip_mcp.cli import repair_classified_predictions
+
+    return repair_classified_predictions
 
 
 def _base_stamp(*, id_map: dict, experiment_id: str = "exp-classified", **overrides) -> dict:

@@ -1,4 +1,4 @@
-"""``scripts/calibrate_operating_point.py``'s calibration-pass detection cap and conf-floor threading.
+"""``tcip calibrate-operating-point``'s calibration-pass detection cap and conf-floor threading.
 
 The script's in-model detection cap must match the already-safe MCP path (``run_inference`` ->
 ``calibrate_operating_point``, which passes ``max_dets=DEFAULT_MAX_DETS`` to ``build_predictor``
@@ -92,7 +92,7 @@ def test_script_and_mcp_path_share_the_same_cap_constant(monkeypatch, tmp_path):
                         lambda b, locked: None)
     monkeypatch.setattr("tcip_mcp.project_paths.platform_state_root", lambda: tmp_path)
 
-    from scripts.calibrate_operating_point import main
+    from tcip_mcp.cli.calibrate_operating_point import main
 
     rc = main(["--checkpoint", "x.pt", "--trait", "bud_opening",
               "--labels-dir", str(tmp_path / "labels"), "--images-dir", str(tmp_path / "images"),
@@ -160,7 +160,7 @@ def test_script_threads_applied_floor_and_shared_cap(monkeypatch, tmp_path):
                         lambda b, locked: None)
     monkeypatch.setattr("tcip_mcp.project_paths.platform_state_root", lambda: tmp_path)
 
-    from scripts.calibrate_operating_point import main
+    from tcip_mcp.cli.calibrate_operating_point import main
 
     rc = main(["--checkpoint", "x.pt", "--trait", "bud_opening",
               "--labels-dir", str(tmp_path / "labels"), "--images-dir", str(tmp_path / "images"),
@@ -225,7 +225,7 @@ def test_script_collection_cap_is_density_derived_not_the_flat_default(monkeypat
                         lambda b, locked: None)
     monkeypatch.setattr("tcip_mcp.project_paths.platform_state_root", lambda: tmp_path)
 
-    from scripts.calibrate_operating_point import main
+    from tcip_mcp.cli.calibrate_operating_point import main
 
     rc = main(["--checkpoint", "x.pt", "--trait", "bud_opening",
               "--labels-dir", str(tmp_path / "labels"), "--images-dir", str(tmp_path / "images"),
@@ -275,7 +275,7 @@ def test_script_writes_nothing_into_the_experiment_record(monkeypatch, tmp_path,
                         lambda b, locked: None)
     monkeypatch.setattr("tcip_mcp.project_paths.platform_state_root", lambda: tmp_path)
 
-    from scripts.calibrate_operating_point import main
+    from tcip_mcp.cli.calibrate_operating_point import main
 
     rc = main(["--checkpoint", "x.pt", "--trait", "bud_opening",
               "--labels-dir", str(tmp_path / "labels"), "--images-dir", str(tmp_path / "images"),
@@ -302,7 +302,7 @@ def test_script_refuses_an_agent_authored_reference_before_touching_a_model(monk
 
     monkeypatch.setattr("tcip_mcp.pipelines.inference.predictor.build_predictor", _never)
 
-    from scripts.calibrate_operating_point import main
+    from tcip_mcp.cli.calibrate_operating_point import main
 
     with pytest.raises(ValueError) as refused:
         main(["--checkpoint", "x.pt", "--trait", "bud_opening",
@@ -332,7 +332,7 @@ def test_script_prints_and_exits_cleanly_for_fewer_than_two_labeled_stems(monkey
     monkeypatch.setattr("tcip_mcp.pipelines.data.datasets.build_dataset", lambda *a, **kw: _Probe())
     monkeypatch.setattr("tcip_mcp.project_paths.platform_state_root", lambda: tmp_path)
 
-    from scripts.calibrate_operating_point import main
+    from tcip_mcp.cli.calibrate_operating_point import main
 
     rc = main(["--checkpoint", "x.pt", "--trait", "bud_opening",
               "--labels-dir", str(tmp_path / "labels"), "--images-dir", str(tmp_path / "images"),
@@ -345,7 +345,7 @@ def test_script_prints_and_exits_cleanly_for_fewer_than_two_labeled_stems(monkey
 def test_script_split_manifest_dir_requires_subject(tmp_path):
     """--split-manifest-dir needs --subject to check the manifest's own subject against; this
     refuses before touching a checkpoint or a dataset."""
-    from scripts.calibrate_operating_point import main
+    from tcip_mcp.cli.calibrate_operating_point import main
 
     rc = main(["--checkpoint", "x.pt", "--trait", "bud_opening",
               "--labels-dir", str(tmp_path / "labels"), "--images-dir", str(tmp_path / "images"),
@@ -358,7 +358,7 @@ def test_script_split_manifest_dir_requires_subject(tmp_path):
 def test_script_split_manifest_dir_conflicts_with_group_by(tmp_path):
     """A drawn split's own parameter beside a recorded partition is a conflict, not a silent
     choice between the two."""
-    from scripts.calibrate_operating_point import main
+    from tcip_mcp.cli.calibrate_operating_point import main
 
     rc = main(["--checkpoint", "x.pt", "--trait", "bud_opening",
               "--labels-dir", str(tmp_path / "labels"), "--images-dir", str(tmp_path / "images"),
@@ -392,7 +392,7 @@ def test_script_runs_end_to_end_with_a_checkpoint_registered_under_project_root(
             str(labels_dir / f"img{i}.json"),
             [Annotation(subject="bud", geometry=BBox(10, 10, 40, 40))], 64, 64)
 
-    from scripts.calibrate_operating_point import main
+    from tcip_mcp.cli.calibrate_operating_point import main
 
     rc = main([
         "--checkpoint", ckpt, "--trait", "bud_opening", "--subject", "bud",

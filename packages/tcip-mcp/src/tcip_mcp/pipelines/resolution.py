@@ -792,7 +792,7 @@ class StampScopeUnstated(ValueError):
     pair: either key absent, or one present with a type other than ``str`` or ``None``.
 
     Raised by :func:`bucket_scope` for a stamp written before this platform recorded the pair;
-    the remedy is ``scripts/conform_classified_predictions.py`` over the bucket, named in the
+    the remedy is ``tcip repair-classified-predictions`` over the bucket, named in the
     message every time this is raised.
     """
 
@@ -852,7 +852,7 @@ def _check_stamp_claim(
             raise ValueError(
                 f"{document}.json at {str(pred_dir)!r} has a stored stamp with no subject/"
                 "attribute pair, written before this platform recorded the pair. Run "
-                "scripts/conform_classified_predictions.py over this bucket before merging "
+                "tcip repair-classified-predictions over this bucket before merging "
                 "into its stamp."
             )
         subject, attribute = stamp.get("subject"), stamp.get("attribute")
@@ -1110,7 +1110,7 @@ def bucket_scope(pred_dir: str | Path) -> BucketScope | None:
     if "subject" not in stamp or "attribute" not in stamp:
         raise StampScopeUnstated(
             f"{pred_dir}: operating_point.json carries no subject/attribute pair. Run "
-            "scripts/conform_classified_predictions.py over this bucket before reading its scope."
+            "tcip repair-classified-predictions over this bucket before reading its scope."
         )
     subject, attribute = stamp["subject"], stamp["attribute"]
     if (subject is not None and not isinstance(subject, str)) or (
@@ -1118,7 +1118,7 @@ def bucket_scope(pred_dir: str | Path) -> BucketScope | None:
     ):
         raise StampScopeUnstated(
             f"{pred_dir}: operating_point.json's subject/attribute pair is not a string or None. "
-            "Run scripts/conform_classified_predictions.py over this bucket."
+            "Run tcip repair-classified-predictions over this bucket."
         )
     return BucketScope(subject=subject, attribute=attribute)
 

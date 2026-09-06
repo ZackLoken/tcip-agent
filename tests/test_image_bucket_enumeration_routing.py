@@ -141,7 +141,7 @@ def test_reserve_calibration_feasibility_stems_refuses_a_stem_collision(tmp_path
 
 
 def test_doctor_image_stems_refuses_a_stem_collision(tmp_path):
-    from scripts.doctor import _image_stems
+    from tcip_mcp.cli.doctor import _image_stems
 
     bucket = _ingested_bucket(tmp_path)
     _collide(bucket)
@@ -174,9 +174,9 @@ def test_doctor_script_reports_a_stem_collision_with_no_label_file_instead_of_cr
     _collide(bucket)
     project_root = bucket.parent.parent
 
-    doctor = str(Path(__file__).parent.parent / "scripts" / "doctor.py")
-    res = subprocess.run([sys.executable, doctor, str(project_root)],
-                        capture_output=True, text=True)
+    res = subprocess.run(
+        [sys.executable, "-m", "tcip_web.cli", "doctor", str(project_root)],
+        capture_output=True, text=True)
 
     assert "Traceback" not in res.stderr, res.stderr
     assert res.returncode == 2
@@ -194,9 +194,9 @@ def test_doctor_script_reports_a_stem_collision_once_not_once_per_check(tmp_path
     _collide(bucket)
     project_root = bucket.parent.parent
 
-    doctor = str(Path(__file__).parent.parent / "scripts" / "doctor.py")
-    res = subprocess.run([sys.executable, doctor, str(project_root)],
-                        capture_output=True, text=True)
+    res = subprocess.run(
+        [sys.executable, "-m", "tcip_web.cli", "doctor", str(project_root)],
+        capture_output=True, text=True)
 
     assert "Traceback" not in res.stderr, res.stderr
     assert res.stdout.count("name more than one logical image") == 1, res.stdout
@@ -263,7 +263,7 @@ def test_reserve_calibration_feasibility_admits_a_clean_multi_image_bucket(tmp_p
 
 
 def test_doctor_image_stems_admits_a_clean_multi_image_bucket(tmp_path):
-    from scripts.doctor import _image_stems
+    from tcip_mcp.cli.doctor import _image_stems
 
     bucket = _ingested_bucket_of(tmp_path, ["shoot_001", "shoot_002"])
     project_root = bucket.parent.parent

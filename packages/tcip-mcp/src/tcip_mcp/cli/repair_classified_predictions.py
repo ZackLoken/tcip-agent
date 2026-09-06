@@ -3,7 +3,7 @@
 that carry the decoded value under ``attributes[attribute]`` with the object class in ``subject``,
 the shape ``write_predictions_json`` now writes and every reader now holds a bucket to.
 
-A logged operator script in the shape of ``conform_delivery_events.py``: bind, walk, one outcome
+A logged operator command in the same shape as every conform this platform has run: bind, walk, one outcome
 line per unit, exit 2 on any refusal. Its units are prediction buckets. For each named project
 root, every registered dataset (``read_datasets``) is walked and, under each dataset's own
 prediction tree, every model directory and every directory one level below it that holds a stamp
@@ -59,9 +59,9 @@ one apart from an accept made through the Review tab before this platform record
 ``--plan`` previews every outcome without writing anything; a bucket that would change under a
 real run counts toward the exit code the same way an unconformed one does.
 
-    python scripts/conform_classified_predictions.py <project_root> [<project_root> ...]
-    python scripts/conform_classified_predictions.py --plan <project_root>
-    python scripts/conform_classified_predictions.py --bucket <dir> --like <scoped_dir>
+    tcip repair-classified-predictions <project_root> [<project_root> ...]
+    tcip repair-classified-predictions --plan <project_root>
+    tcip repair-classified-predictions --bucket <dir> --like <scoped_dir>
 
 Exit codes: 0 when every stamped bucket in every named root (and every named ``--bucket``) is
 already conformed or was just conformed; 2 if any bucket refuses, cannot be conformed, or (under
@@ -75,32 +75,28 @@ import sys
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent / "packages" / "tcip-mcp" / "src"))
-sys.path.insert(0, str(Path(__file__).parent.parent / "packages" / "tcip-annotation" / "src"))
-sys.path.insert(0, str(Path(__file__).parent.parent / "packages" / "tcip-store" / "src"))
+from tcip_annotation import json_io
+from tcip_annotation.json_io import UnreadableLabelDocument
+from tcip_annotation.state import Annotation
+from tcip_store import StoreError
+from tcip_store.binding import bind_default
 
-from tcip_annotation import json_io  # noqa: E402
-from tcip_annotation.json_io import UnreadableLabelDocument  # noqa: E402
-from tcip_annotation.state import Annotation  # noqa: E402
-from tcip_store import StoreError  # noqa: E402
-from tcip_store.binding import bind_default  # noqa: E402
-
-from tcip_mcp.audit import dataset_scope_of, record_event_or_raise  # noqa: E402
-from tcip_mcp.class_registry import RegistryError, read_registry  # noqa: E402
-from tcip_mcp.dataset_layout import (  # noqa: E402
+from tcip_mcp.audit import dataset_scope_of, record_event_or_raise
+from tcip_mcp.class_registry import RegistryError, read_registry
+from tcip_mcp.dataset_layout import (
     annotation_root, classes_path, is_bucket_name, prediction_bucket_dirs, prediction_root,
 )
-from tcip_mcp.experiments import config_key, read_member  # noqa: E402
-from tcip_mcp.pipelines.resolution import (  # noqa: E402
+from tcip_mcp.experiments import config_key, read_member
+from tcip_mcp.pipelines.resolution import (
     BucketScope, StampScopeUnstated, bucket_scope, read_operating_point_sidecar,
     scope_consistent_with_map, update_sidecar, verify_stamp_binding,
 )
-from tcip_mcp.prediction_buckets import (  # noqa: E402
+from tcip_mcp.prediction_buckets import (
     bucket_content_digest, bucket_key_of, bucket_stems, review_state_dir_of, verdict_count,
 )
-from tcip_mcp.tools.project_tools import dataset_entry_path, read_datasets  # noqa: E402
+from tcip_mcp.tools.project_tools import dataset_entry_path, read_datasets
 
-TOOL_NAME = "conform_classified_predictions"
+TOOL_NAME = "repair_classified_predictions"
 
 
 def _looks_like_bucket(d: Path) -> bool:
@@ -602,7 +598,7 @@ def process_project_root(
     return outcomes, refused
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("roots", nargs="*", type=Path)
     ap.add_argument("--plan", action="store_true", help="preview only; nothing is written")
@@ -613,7 +609,7 @@ def main() -> int:
     ap.add_argument("--subject", default=None, help="operator-stated subject for an unsourced pair")
     ap.add_argument("--attribute", default=None,
                     help="operator-stated attribute for an unsourced pair (omit for a detector pair)")
-    args = ap.parse_args()
+    args = ap.parse_args(argv)
 
     if args.like and len(args.like) != len(args.bucket):
         ap.error("--like must be given once per --bucket, in the same order")

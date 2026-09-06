@@ -3,11 +3,11 @@ command line.
 
 The demoted twin of ``vision_tools.visualize``: one entry point for the common renders, saved to
 ``.tcip/artifacts/viz/``, path returned for a human to read. It writes an artifact and carries a
-platform audit line, so it stays a script rather than a bare library call: --project (or
+platform audit line, so it stays a command rather than a bare library call: --project (or
 $TCIP_STATE_ROOT) is required, since both land under it.
 
 Usage:
-    python scripts/visualize.py --source annotations --path <image.jpg> \
+    tcip visualize --source annotations --path <image.jpg> \
         --project <platform_root> [--task detect] [--class-names leaf,fruit,bud] \
         [--conf-threshold <default>] [--iou-threshold 0.5] [--n 16]
 
@@ -20,12 +20,8 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
-from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent))
-
-from _script_root import require_platform_root  # noqa: E402
+from tcip_mcp.project_paths import require_platform_root
 
 
 def main(argv: list[str] | None = None) -> int:

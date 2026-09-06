@@ -21,7 +21,6 @@ from pathlib import Path
 import pytest
 
 import tcip_store as ts
-from scripts._store_bootstrap import bootstrapped_stores
 from tcip_store.layout_claims import (
     ANY,
     LAYOUTS,
@@ -33,6 +32,9 @@ from tcip_store.layout_claims import (
     literal,
     matches_template,
 )
+
+from tcip_mcp.store_catalogue import bootstrapped_stores
+
 from tests.test_store_contract import REGISTERED
 
 _PACKAGES = Path(__file__).resolve().parent.parent / "packages"

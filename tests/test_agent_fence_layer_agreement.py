@@ -187,8 +187,8 @@ _INTENTS = [
     ),
     (
         "send a diagnostic to a scratch file",
-        "python scripts/doctor.py /c/proj > /tmp/fence-check.log",
-        "python scripts/doctor.py C:\\proj > $env:TEMP\\fence-check.log",
+        "tcip doctor /c/proj > /tmp/fence-check.log",
+        "tcip doctor C:\\proj > $env:TEMP\\fence-check.log",
         ALLOW,
     ),
     (

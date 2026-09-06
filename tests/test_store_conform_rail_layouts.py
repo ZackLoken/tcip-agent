@@ -25,9 +25,10 @@ from pathlib import Path
 import pytest
 
 import tcip_store as ts
-from scripts import _store_bootstrap  # noqa: F401
 from tcip_store.file_backend import FileBackend
 from tcip_store.sqlite_backend import SqliteBackend, database_path
+
+import tcip_mcp.store_catalogue  # noqa: F401
 
 
 @contextmanager
@@ -147,7 +148,7 @@ def test_a_second_kinds_files_refuse_on_the_connection_that_already_served_the_f
 
     message = str(raised.value)
     assert "curated_manifest" in message
-    assert "scripts/adopt_store.py" in message
+    assert "tcip adopt-store" in message
 
 
 def test_a_file_two_kinds_of_root_claim_equally_refuses_naming_every_claimant(tmp_path):
@@ -187,7 +188,7 @@ def test_a_file_of_a_store_the_database_never_held_refuses_beside_it(tmp_path):
             ts.read(_image_status(tmp_path), default=None)
 
     assert "view_coverage" in str(raised.value)
-    assert "scripts/adopt_store.py" in str(raised.value)
+    assert "tcip adopt-store" in str(raised.value)
 
 
 def test_a_process_that_imported_one_owning_module_still_sees_another_stores_files(tmp_path):
@@ -302,7 +303,7 @@ def test_a_stores_first_write_is_refused_while_a_file_it_claims_predates_it(tmp_
 
     message = str(raised.value)
     assert "view_coverage.json" in message
-    assert "scripts/adopt_store.py" in message
+    assert "tcip adopt-store" in message
 
 
 def test_a_stores_first_write_lands_when_no_file_of_its_own_predates_it(tmp_path):

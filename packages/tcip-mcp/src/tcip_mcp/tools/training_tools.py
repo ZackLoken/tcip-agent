@@ -289,7 +289,7 @@ def candidate_config_with_manifest(config: dict, manifest_dir: str) -> dict:
 def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -> dict:
     """Validate a training configuration before launching.
 
-    Not an MCP tool: run through ``scripts/preflight_config.py``, per the admission standard
+    Not an MCP tool: run through ``tcip preflight-config``, per the admission standard
     (packages/tcip-mcp/CLAUDE.md), while staying importable for its own tests and for
     ``launch_training``, which calls this function directly before spawning the training thread.
 
@@ -1389,7 +1389,7 @@ def inspect_compute_resources() -> dict:
     """Report the host's current compute headroom, a fact to reason with before launching
     another concurrent training/HPO run, not an enforced cap.
 
-    Not an MCP tool: run through ``scripts/inspect_compute_resources.py``, per the admission
+    Not an MCP tool: run through ``tcip inspect-compute-resources``, per the admission
     standard (packages/tcip-mcp/CLAUDE.md), while staying importable for its own tests. This
     platform doesn't cap memory/CPU per run (no portable, non-pinned way to do that across
     POSIX/Windows without guessing a number that's wrong on the next host); it gives you the

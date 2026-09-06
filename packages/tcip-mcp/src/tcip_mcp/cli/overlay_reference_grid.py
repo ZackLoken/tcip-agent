@@ -6,11 +6,11 @@ native pixels named spreadsheet-style ('A1' top-left), rendered in yellow on the
 boundaries. Every response echoes the full grid geometry (tile_size, overlap, cols, rows,
 width, height): pass the echoed tile_size/overlap to ``segment_prompt(grid_cells=...)`` so a
 cell name resolves against the grid that was actually rendered. It writes an artifact and
-carries an audit line, so it stays a script rather than a bare library call: --project (or
+carries an audit line, so it stays a command rather than a bare library call: --project (or
 $TCIP_STATE_ROOT) is required, since the artifact and the audit line land under it.
 
 Usage:
-    python scripts/overlay_reference_grid.py --image <path> --project <platform_root> \
+    tcip overlay-reference-grid --image <path> --project <platform_root> \
         [--tile-size <native_pixels>] [--overlap 0.0]
 """
 
@@ -18,12 +18,8 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
-from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent))
-
-from _script_root import require_platform_root  # noqa: E402
+from tcip_mcp.project_paths import require_platform_root
 
 
 def main(argv: list[str] | None = None) -> int:

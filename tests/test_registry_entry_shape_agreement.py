@@ -10,7 +10,6 @@ as a reader going quiet rather than as a check still passing against a hand-writ
 from __future__ import annotations
 
 import hashlib
-import importlib.util
 import re
 from pathlib import Path
 
@@ -21,7 +20,6 @@ from tcip_mcp.model_registry import (
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-DOCTOR_PATH = REPO_ROOT / "scripts" / "doctor.py"
 FRONTEND_SRC = REPO_ROOT / "packages" / "tcip-web" / "frontend" / "src"
 ENTRY_DECLARATION = FRONTEND_SRC / "api" / "inference.ts"
 
@@ -38,11 +36,9 @@ _RUNS = {
 
 def _doctor():
     """The data-state doctor loaded as a module, for its own read of the registry index."""
-    spec = importlib.util.spec_from_file_location("tcip_data_state_doctor", DOCTOR_PATH)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    from tcip_mcp.cli import doctor
+
+    return doctor
 
 
 @pytest.fixture()

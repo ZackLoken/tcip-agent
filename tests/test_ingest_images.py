@@ -777,7 +777,7 @@ def test_ingest_refuses_an_undecodable_record(tmp_path):
 
 def test_ingest_refuses_an_unadopted_root(tmp_path, monkeypatch):
     """A root whose records are still loose files: the store's conform rail refuses
-    ingest_images's site write there until scripts/adopt_store.py has run. The file backend
+    ingest_images's site write there until tcip adopt-store has run. The file backend
     legitimately produces that state (import_project no longer does: it adopts a fresh root
     under the database backend), so the unadopted root here is built by writing through the
     file backend directly, through initialize_project, and then judged under the database backend
@@ -817,12 +817,12 @@ def test_ingest_refuses_an_unadopted_root(tmp_path, monkeypatch):
         backend.close()
 
     assert "error" in manifest
-    assert "scripts/adopt_store.py" in manifest["error"]
+    assert "tcip adopt-store" in manifest["error"]
 
 
 def test_ingest_after_import_and_adopt_admits_a_second_date(tmp_path, _isolate_workspace):
     """The import door adopts a fresh root itself when the process is bound to the database
-    backend, so a project it lands is usable at once: no operator ``scripts/adopt_store.py``
+    backend, so a project it lands is usable at once: no operator ``tcip adopt-store``
     run sits between ``import_project`` and ``ingest_images``. Import, ingest is the admit case.
     Bound to the database backend explicitly, since that is what the door's own adoption step
     is conditional on."""

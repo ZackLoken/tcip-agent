@@ -1,6 +1,6 @@
 """``calibrate_count_operating_point``: the re-admitted count calibrator earns (or honestly
 declines) a validation claim over an already-published prediction bucket, running the identical
-resolution ``scripts/calibrate_operating_point.py`` prints and writes nothing for.
+resolution ``tcip calibrate-operating-point`` prints and writes nothing for.
 """
 
 from __future__ import annotations
@@ -628,7 +628,7 @@ def test_script_and_tool_call_the_same_count_calibration_function(monkeypatch, t
 
     monkeypatch.setattr("tcip_mcp.pipelines.count_calibration.resolve_count_operating_point", _stub)
 
-    from scripts.calibrate_operating_point import main
+    from tcip_mcp.cli.calibrate_operating_point import main
 
     with pytest.raises(RuntimeError, match="stub-count-calibration-called"):
         main(["--checkpoint", "x.pt", "--trait", "bud",
