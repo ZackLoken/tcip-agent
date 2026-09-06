@@ -18,12 +18,10 @@ Some of this leaves without the agent choosing to read anything. The session-sta
 active project's name into the first model turn, so project identity reaches the provider on turn one
 by construction.
 
-This is the largest egress channel and the platform does not control it. It is not a defect in the
-usual sense; it is the direct consequence of the platform's premise that the agent is the operator.
-But an adopter must be told plainly: when you let the agent work, the breeding data it reads goes to
-the model provider, the same as if you pasted that data into a chat. The provider is whoever the
-operator authenticated Claude Code against; the platform holds no provider key of its own, so it
-inherits the operator's authentication.
+This is the largest egress channel and the platform does not control it. When you let the agent
+work, the breeding data it reads goes to the model provider, the same as if you pasted that data
+into a chat. The provider is whoever the operator authenticated Claude Code against; the platform
+holds no provider key of its own, so it inherits the operator's authentication.
 
 Two adjacent channels widen this. The fenced agent is allow-listed for `WebSearch` with no query
 constraint, so an agent-composed query can carry a crop, site, cultivar, or trait name to a search
@@ -43,7 +41,7 @@ Anthropic by default, and OpenAI plus Google through this developer script.
 
 `run_hyperparameter_search` starts a Ray cluster whose usage-statistics reporter is enabled by default and posts
 periodically to `https://usage-stats.ray.io/`. The payload is machine and cluster metadata, not
-project data. It is the platform's one genuine phone-home, and it is disabled with a single
+project data. It is the platform's one phone-home, and it is disabled with a single
 environment variable, `RAY_USAGE_STATS_ENABLED=0`, which the platform does not set for you. An
 adopter running hyperparameter optimization behind a firewall must either allow that host or set that
 variable.
@@ -58,8 +56,6 @@ restrictive firewall needs these hosts allow-listed, or the platform will fail a
 first model build.
 
 ## What does not phone home
-
-An adopter needs the assurances as much as the warnings, and these were checked, not assumed:
 
 - The platform's own code carries no telemetry vendor, analytics, crash reporter, or update check.
 - The only HTTP client between platform components is the panel push from the MCP tools to the web
@@ -116,8 +112,7 @@ Include what you would for any bug report plus what makes this one security-rele
 affected component or file, the egress channel or trust boundary involved if one of the above,
 reproduction steps, and what you were able to observe or access as a result.
 
-There is no bug bounty; this is a small, single-maintainer project. Expect acknowledgement within
-7 days of the report landing.
+There is no bug bounty. Expect acknowledgement within 7 days of the report landing.
 
 ## In one paragraph
 
