@@ -43,5 +43,5 @@ def check_schema_version(descriptor: StoreDescriptor, doc: Any) -> None:
             f"{descriptor.name} document is schema_version {version}, above the "
             f"{descriptor.schema_version} this reader knows: a newer writer produced it than "
             "this code understands, or it predates this store's version-1 reset and still "
-            "carries a stale 2 that scripts/conform_schema_version_reset.py strips"
+            "carries a stale 2 that nothing currently strips in place"
         )

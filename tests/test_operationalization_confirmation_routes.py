@@ -894,7 +894,7 @@ def test_delivery_events_route_refuses_a_stored_event_whose_plant_mapping_predat
     assert resp.status_code == 400
     detail = resp.json()["detail"]
     assert event_id in detail
-    assert "scripts/conform_delivery_events.py" in detail
+    assert "no operator door rewrites an existing delivery_events record" in detail
 
 
 def test_delivery_events_route_serves_a_real_plant_mapping_disclosure_with_all_three_keys(

@@ -406,10 +406,11 @@ def decode_dataset_identity_document(data: bytes, *, dataset_root: str | Path) -
 def decode_dataset_identity(data: bytes, *, dataset_root: str | Path) -> dict:
     """:func:`decode_dataset_identity_document`, plus a refusal for a non-null ``fingerprint``
     naming no formula version (a bare value from before the ``v<n>:`` prefix existed):
-    ``scripts/restamp_dataset_fingerprint.py`` is the remedy, never a reader that admits the bare
-    value as the dataset's current identity. A null ``fingerprint`` (a dataset with no images or
-    labels) is not this case. :func:`require_dataset_identity` is the one caller; a re-register
-    read that must see the document's fingerprint whatever it states uses the raw layer instead.
+    re-registering through ``register_dataset`` is the remedy, never a reader that admits the
+    bare value as the dataset's current identity. A null ``fingerprint`` (a dataset with no
+    images or labels) is not this case. :func:`require_dataset_identity` is the one caller; a
+    re-register read that must see the document's fingerprint whatever it states uses the raw
+    layer instead.
     """
     from tcip_mcp.pipelines.data.dataset_fingerprint import fingerprint_formula_version
 
@@ -418,8 +419,8 @@ def decode_dataset_identity(data: bytes, *, dataset_root: str | Path) -> dict:
     if fingerprint is not None and fingerprint_formula_version(fingerprint) is None:
         raise ValueError(
             f"{dataset_identity_path(dataset_root)} carries a fingerprint {fingerprint!r} that "
-            "names no formula version; run scripts/restamp_dataset_fingerprint.py against this "
-            "dataset to bring it to the current shape")
+            "names no formula version; re-register this dataset through register_dataset to "
+            "bring it to the current shape")
     return identity
 
 
@@ -460,7 +461,7 @@ def require_dataset_identity(dataset_root: str | Path) -> dict:
 def read_dataset_identity_document(dataset_root: str | Path) -> dict:
     """:func:`require_dataset_identity`, but through :func:`decode_dataset_identity_document`:
     the identity record whatever its ``fingerprint`` states, never refusing on a bare pre-prefix
-    value. For ``scripts/restamp_dataset_fingerprint.py`` (fixing that very value) and
+    value. For a caller re-registering through ``register_dataset`` (fixing that very value) and
     ``scripts/check_dataset_identity.py`` (diagnosing it), whose jobs are seeing the value
     rather than being refused before either can act on it.
     """

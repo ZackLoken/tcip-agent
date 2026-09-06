@@ -210,7 +210,7 @@ def test_supersede_delivery_refuses_an_event_missing_the_acknowledgement_keys(
 
     assert "error" in res
     assert "does not validate" in res["error"]
-    assert "conform_delivery_events.py" in res["error"]
+    assert "no operator door rewrites an existing delivery_events record" in res["error"]
     assert not ts.exists(resolution.delivery_supersession_key(scope, event_id))
 
 

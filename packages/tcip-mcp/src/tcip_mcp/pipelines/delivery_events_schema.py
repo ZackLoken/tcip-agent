@@ -1,7 +1,7 @@
 """The ``delivery_events`` record's declared shape, so its writer (``resolution.py``'s
-``record_delivery_binding_event``) and its readers (``tcip_web``'s ``list_delivery_events`` route,
-``scripts/conform_delivery_events.py``) agree on one shape rather than each independently
-tolerating whatever the others happen to have written.
+``record_delivery_binding_event``) and its reader (``tcip_web``'s ``list_delivery_events`` route)
+agree on one shape rather than each independently tolerating whatever the other happens to have
+written.
 
 A sibling module to ``resolution.py`` rather than a class inside it, the same split
 ``pipelines/schemas.py`` already draws for its own pydantic models: ``resolution.py`` states its
@@ -250,9 +250,9 @@ def with_supersessions(
 
 
 def validation_error_detail(exc: ValidationError) -> str:
-    """``exc``'s errors rendered as one line, the one rendering both the results route's refusal
-    and ``scripts/conform_delivery_events.py``'s outcome lines share, so a record's shape errors
-    never break a caller's one-line-per-outcome rendering with pydantic's own multi-line dump."""
+    """``exc``'s errors rendered as one line, the one rendering ``resolution.py``'s own refusal
+    uses, so a record's shape error never breaks its one-line-per-outcome rendering with
+    pydantic's own multi-line dump."""
     return "; ".join(
         f"{'.'.join(str(p) for p in error['loc']) or 'record'}: {error['msg']}"
         for error in exc.errors()

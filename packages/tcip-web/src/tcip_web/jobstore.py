@@ -99,18 +99,18 @@ def require_platform_root(summary: dict, *, name: str, root: str) -> str:
 
     A summary carrying no ``platform_root`` predates the field, so ``root`` (the caller's
     current process root, or the registry document's own root at load time) would stand in as a
-    guess for the summary's actual launch root, not a derived fact.
-    ``scripts/conform_job_registry_roots.py`` stamps the true value, the registry document's own
-    root, onto every summary a persisted registry holds before this refusal admits it again.
+    guess for the summary's actual launch root, not a derived fact. No operator door stamps the
+    missing field onto an existing summary; a persisted registry holding one keeps refusing here
+    until it is corrected.
     """
     value = summary.get("platform_root")
     if value:
         return value
     job_id = summary.get("job_id") or summary.get("sweep_id") or "<unknown>"
     raise ValueError(
-        f"{name} summary {job_id!r} under {root} carries no platform_root; run "
-        "scripts/conform_job_registry_roots.py against this platform root to bring its "
-        "persisted registries to the current shape (--plan first to preview the change)"
+        f"{name} summary {job_id!r} under {root} carries no platform_root; no operator door "
+        "stamps the missing field onto an existing summary, so this platform root's persisted "
+        "registries stay unreadable here until they are corrected"
     )
 
 
@@ -138,9 +138,9 @@ def persist_grouped(
     ``refused_roots`` names a root whose stored document this process could not fully
     rehydrate (:meth:`JobRegistry.rehydrate`, on a summary with no ``platform_root``): its own
     group is skipped rather than written, so the untouched document survives on disk, and this
-    call raises naming the conform script once every other root's group has landed, rather than
-    silently dropping the caller's own new work for that root or letting it overwrite the
-    document with only the summaries that did rehydrate.
+    call raises naming the fact once every other root's group has landed, rather than silently
+    dropping the caller's own new work for that root or letting it overwrite the document with
+    only the summaries that did rehydrate.
     """
     this_root = current_root()
     groups: dict[str, list[dict]] = {}
@@ -156,8 +156,9 @@ def persist_grouped(
         raise ValueError(
             f"{name} document(s) under {', '.join(blocked)} were not fully rehydrated this "
             "process (a stored summary carries no platform_root) and this write would destroy "
-            "the summaries it never loaded; run scripts/conform_job_registry_roots.py against "
-            "each root first (--plan to preview), then restart this process"
+            "the summaries it never loaded; no operator door stamps the missing field onto an "
+            "existing summary, so each blocked root's document must be corrected before this "
+            "write can proceed"
         )
 
 

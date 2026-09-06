@@ -533,7 +533,7 @@ def test_compare_best_route_409s_when_the_index_carries_a_stale_schema_version_t
         "experiment_ids": ["exp-a"], "metric": "val_map50",
     })
     assert resp.status_code == 409
-    assert "conform_schema_version_reset.py" in resp.json()["detail"]
+    assert "nothing currently strips in place" in resp.json()["detail"]
 
 
 def test_compare_best_route_422s_on_the_tools_own_error(client: TestClient, tmp_path, monkeypatch):

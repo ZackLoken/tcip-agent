@@ -506,18 +506,18 @@ def test_export_import_roundtrip(tmp_path: Path):
 def _bare_the_registry_entry(project_root: Path, entry: dict) -> str:
     """Overwrite a real registration's project-registry entry with its bare-hex fingerprint,
     standing in for a dataset registered under a project before the formula-version prefix
-    existed: the project-registry counterpart to test_restamp_dataset_fingerprint.py's own
-    _bare_the_identity, which does this to the dataset's own identity document instead."""
+    existed: the project-registry counterpart to
+    test_dataset_identity_fingerprint_formula.py's own _bare_the_identity, which does this to
+    the dataset's own identity document instead."""
     bare = entry["fingerprint"].split(":", 1)[1]
     upsert_dataset(project_root, {**entry, "fingerprint": bare})
     return bare
 
 
 def test_store_bootstrap_project_roots_admits_a_bare_fingerprint_registry_entry(tmp_path: Path):
-    """project_roots is the path adopt_store.py/export_store.py use to reach a project, the
-    conform script's own way in; it must not itself be blocked by the identity problem a
-    conform script exists to fix, so it reads locations through read_datasets_raw rather than
-    read_datasets."""
+    """project_roots is the path adopt_store.py/export_store.py use to reach a project; it must
+    not itself be blocked by the identity problem register_dataset re-registration exists to
+    fix, so it reads locations through read_datasets_raw rather than read_datasets."""
     from tcip_store.layout_claims import ROOT
 
     from scripts._store_bootstrap import project_roots
@@ -530,7 +530,7 @@ def test_store_bootstrap_project_roots_admits_a_bare_fingerprint_registry_entry(
     register_dataset(str(dataset), crop="currant", project_root=str(project))
     _bare_the_registry_entry(project, read_datasets(project)[0])
 
-    with pytest.raises(ValueError, match="restamp_dataset_fingerprint.py"):
+    with pytest.raises(ValueError, match="register_dataset"):
         read_datasets(project)
 
     roots = project_roots(project)
@@ -710,7 +710,7 @@ def test_external_dataset_paths_admits_a_bare_fingerprint_registry_entry(tmp_pat
     assert entry["path"] == str(dataset.resolve())  # external entries store absolute
     _bare_the_registry_entry(project, entry)
 
-    with pytest.raises(ValueError, match="restamp_dataset_fingerprint.py"):
+    with pytest.raises(ValueError, match="register_dataset"):
         read_datasets(project)
 
     assert _external_dataset_paths(project) == [str(dataset.resolve())]

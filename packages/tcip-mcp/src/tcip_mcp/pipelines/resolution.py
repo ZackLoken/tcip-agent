@@ -2201,10 +2201,10 @@ class DeliveryEventShapeError(ValueError):
 def _validated_delivery_event(record: Any, event_id: str | None, scope: Path) -> None:
     """Validate one stored ``delivery_events`` record against
     :class:`~tcip_mcp.pipelines.delivery_events_schema.DeliveryEventRecord`, raising
-    :class:`DeliveryEventShapeError` naming ``event_id`` and the conform-script remedy on a shape
-    error. The one check :func:`read_delivery_events` and :func:`read_one_delivery_event` both
-    run, so a record either reader meets refuses the same way rather than one tolerating what the
-    other would refuse."""
+    :class:`DeliveryEventShapeError` naming ``event_id`` on a shape error. The one check
+    :func:`read_delivery_events` and :func:`read_one_delivery_event` both run, so a record
+    either reader meets refuses the same way rather than one tolerating what the other would
+    refuse."""
     from pydantic import ValidationError
 
     from tcip_mcp.pipelines.delivery_events_schema import (
@@ -2217,12 +2217,9 @@ def _validated_delivery_event(record: Any, event_id: str | None, scope: Path) ->
     except ValidationError as exc:
         raise DeliveryEventShapeError(
             f"delivery event {event_id!r} under {scope} does not validate against the "
-            f"current delivery_events shape: {validation_error_detail(exc)}; run "
-            "scripts/conform_delivery_events.py against this project to see which stored "
-            "events do not validate and why (--plan previews; a record missing only "
-            "acknowledged_by and acknowledgement_reason is write-forwarded to null, their "
-            "true value for a delivery predating those keys; every other missing key is "
-            "named, never rewritten, since its value was never computed for that delivery)",
+            f"current delivery_events shape: {validation_error_detail(exc)}; no operator door "
+            "rewrites an existing delivery_events record, so this project's stored events must "
+            "be corrected to the current shape before they can be read",
             event_id=event_id,
         ) from exc
 
@@ -2231,14 +2228,13 @@ def read_delivery_events(project_root: str | Path | None = None) -> list[dict]:
     """Every ``delivery_events`` record stored under this project, each validated against
     :class:`~tcip_mcp.pipelines.delivery_events_schema.DeliveryEventRecord`.
 
-    Raises :class:`DeliveryEventShapeError`, naming the offending ``event_id`` and
-    ``scripts/conform_delivery_events.py`` as the remedy, on the first stored record that does not
-    validate, rather than silently dropping or half-trusting it. The Results tab's delivery panel
-    (``routes/results.py``'s ``list_delivery_events``),
-    :func:`~tcip_mcp.pipelines.postprocessing.plant_mapping._citing_delivery_event_ids` and
-    ``scripts/conform_plant_mapping_records.py`` all read delivery events through this one
-    function, so a shape refusal reads the same wherever it is met, and a rebuild's own citing-
-    events check can never silently skip a record it cannot decode.
+    Raises :class:`DeliveryEventShapeError`, naming the offending ``event_id``, on the first
+    stored record that does not validate, rather than silently dropping or half-trusting it. The
+    Results tab's delivery panel (``routes/results.py``'s ``list_delivery_events``) and
+    :func:`~tcip_mcp.pipelines.postprocessing.plant_mapping._citing_delivery_event_ids` both read
+    delivery events through this one function, so a shape refusal reads the same wherever it is
+    met, and a rebuild's own citing-events check can never silently skip a record it cannot
+    decode.
     """
     scope = delivery_events_scope(project_root)
     records: list[dict] = []

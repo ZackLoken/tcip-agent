@@ -90,7 +90,7 @@ def test_persist_grouped_refuses_a_summary_carrying_no_platform_root(tmp_path, m
     monkeypatch.chdir(tmp_path)
     from tcip_web.jobstore import persist_grouped
 
-    with pytest.raises(ValueError, match="conform_job_registry_roots.py"):
+    with pytest.raises(ValueError, match="no operator door"):
         persist_grouped("inference_jobs", [{"job_id": "a", "status": "completed"}])
 
 
@@ -656,7 +656,7 @@ def test_inference_rehydrate_refuses_a_summary_carrying_no_platform_root(tmp_pat
          "images_dir": "i", "output_dir": "o", "error": None},
     ], expect=None)
 
-    with pytest.raises(ValueError, match="conform_job_registry_roots.py"):
+    with pytest.raises(ValueError, match="no operator door"):
         inference.rehydrate_for_current_root()
 
 
@@ -673,7 +673,7 @@ def test_review_priority_queue_rehydrate_refuses_a_summary_carrying_no_platform_
          "total_candidates": 0, "reviewed_skipped": 0, "marks_unresolved": None},
     ], expect=None)
 
-    with pytest.raises(ValueError, match="conform_job_registry_roots.py"):
+    with pytest.raises(ValueError, match="no operator door"):
         review.rehydrate_for_current_root()
 
 
@@ -687,7 +687,7 @@ def test_tuning_rehydrate_refuses_a_summary_carrying_no_platform_root(tmp_path, 
         {"sweep_id": "old", "status": "completed", "error": None, "has_result": False},
     ], expect=None)
 
-    with pytest.raises(ValueError, match="conform_job_registry_roots.py"):
+    with pytest.raises(ValueError, match="no operator door"):
         tuning.rehydrate_for_current_root()
 
 
@@ -776,11 +776,11 @@ def test_job_registry_persist_refuses_to_overwrite_a_document_it_could_not_fully
     replace(job_registry_key("inference_jobs"), stored, expect=None)
 
     registry = JobRegistry("inference_jobs", to_summary=to_summary, from_summary=from_summary)
-    with pytest.raises(ValueError, match="conform_job_registry_roots.py"):
+    with pytest.raises(ValueError, match="no operator door"):
         registry.rehydrate()
     assert read(job_registry_key("inference_jobs"), default=[]) == stored
 
-    with pytest.raises(ValueError, match="conform_job_registry_roots.py"):
+    with pytest.raises(ValueError, match="no operator door"):
         registry.register("new", J("new", "pending", root), job_root=root)
     assert read(job_registry_key("inference_jobs"), default=[]) == stored
 

@@ -990,7 +990,7 @@ class TestCoverageRecord:
         resp = client.get("/api/coverage", params={
             "path": path, "subject": "bush", "date": "2026-03-01"})
         assert resp.status_code == 400
-        assert "conform_view_coverage_viewing.py" in resp.json()["detail"]
+        assert "no operator door rewrites an existing view-coverage record" in resp.json()["detail"]
 
     def test_post_coverage_merge_path_refuses_an_old_shape_stored_record(
         self, client, dated_dataset,
@@ -1001,7 +1001,7 @@ class TestCoverageRecord:
 
         resp = client.post("/api/coverage", json=_post_body(path, ["B1"], grid))
         assert resp.status_code == 400
-        assert "conform_view_coverage_viewing.py" in resp.json()["detail"]
+        assert "no operator door rewrites an existing view-coverage record" in resp.json()["detail"]
 
     def test_post_coverage_replace_path_over_an_old_shape_record_succeeds(
         self, client, dated_dataset,
@@ -1345,11 +1345,11 @@ class TestCompletenessRoute:
 
         got = client.get("/api/coverage/completeness", params={"path": path})
         assert got.status_code == 400
-        assert "conform_region_completeness_attested_view.py" in got.json()["detail"]
+        assert "no operator door stamps the missing key onto an existing record" in got.json()["detail"]
 
         resp = self._toggle(client, path, grid, "B2", view_scale=0.5)
         assert resp.status_code == 400
-        assert "conform_region_completeness_attested_view.py" in resp.json()["detail"]
+        assert "no operator door stamps the missing key onto an existing record" in resp.json()["detail"]
 
     def test_get_completeness_serves_a_conformed_record_with_an_empty_attested_view(
         self, client, dated_dataset,
@@ -1404,11 +1404,11 @@ class TestCompletenessRoute:
 
         got = client.get("/api/coverage/completeness", params={"path": path})
         assert got.status_code == 400
-        assert "conform_region_completeness_attested_view.py" in got.json()["detail"]
+        assert "no operator door stamps the missing key onto an existing record" in got.json()["detail"]
 
         resp = self._toggle(client, path, grid, "B2", view_scale=0.5)
         assert resp.status_code == 400
-        assert "conform_region_completeness_attested_view.py" in resp.json()["detail"]
+        assert "no operator door stamps the missing key onto an existing record" in resp.json()["detail"]
 
     def test_attest_on_a_new_lattice_returns_and_audits_the_replaced_cells(
         self, client, dated_dataset,
@@ -1673,7 +1673,7 @@ class TestCompletenessRoute:
 
         got = client.get("/api/coverage/completeness", params={"path": path})
         assert got.status_code == 400
-        assert "conform_working_scale_at_write.py" in got.json()["detail"]
+        assert "no operator door renames the stale key on an existing record" in got.json()["detail"]
 
     def test_post_completeness_refuses_merging_into_a_record_with_the_old_key(
         self, client, dated_dataset,
@@ -1698,7 +1698,7 @@ class TestCompletenessRoute:
 
         resp = self._toggle(client, path, grid, "B1")
         assert resp.status_code == 400
-        assert "conform_working_scale_at_write.py" in resp.json()["detail"]
+        assert "no operator door renames the stale key on an existing record" in resp.json()["detail"]
 
     def test_attesting_reads_seen_on_record_from_the_matching_coverage_bucket(
         self, client, dated_dataset,
