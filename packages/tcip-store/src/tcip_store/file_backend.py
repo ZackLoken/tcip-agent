@@ -738,9 +738,10 @@ class FileBackend:
         ``clear_log`` holds while it moves them, so a reader never pairs a base that
         already reflects a clear with bytes ``clear_log`` has not yet removed (or the
         reverse): either read sees the whole pair from before the clear or the whole
-        pair from after it, never one half of each. The lock is why a file-backend read
-        waits on a writer holding this key, never on another reader: the database backend's
-        read waits on no writer at all.
+        pair from after it, never one half of each. The lock is exclusive, so a
+        file-backend read waits on any other holder of this key, another reader
+        included, and can raise ``StoreBusy`` if that holder keeps the key past the
+        timeout; the database backend's read waits on no writer at all.
 
         Settles nothing. A reader that lands between the unlink that commits a clear and the
         watermark's own install onto the marker sees the marker unadvanced over an absent
@@ -792,8 +793,9 @@ class FileBackend:
         fragment is never counted as a whole entry. Deleting the file rather than
         truncating it to zero bytes is what keeps an absent log and a never-appended one
         the same "nothing here" ``read_log`` already reports for either; a log with
-        nothing to clear is left exactly there and this call returns 0 without writing
-        anything else.
+        nothing left to clear returns 0. Settling may already have installed an earlier,
+        interrupted clear's watermark before this branch runs, so a 0 return says only
+        that this call's own base did not move, not that settling wrote nothing.
 
         Two commits, not one: the unlink is the clear itself, since absence is the one
         signal every reader of a log honors without being taught, and it runs first. The
@@ -807,10 +809,13 @@ class FileBackend:
         unlink leaves the clear uncommitted, and the next writer discards the stale stage;
         an exception after the unlink leaves the clear committed with its watermark
         pending, and the next writer installs it before doing anything else. A pending
-        file that will not parse as a decimal integer refuses settling with
-        ``DecodeError`` naming it, so ``append`` and ``clear_log`` on that log refuse until
-        it is removed, while ``read_log`` keeps answering from the marker regardless. The
-        rename that installs the watermark is durable against a process crash on every
+        file beside an absent log that will not parse as a decimal integer refuses
+        settling with ``DecodeError`` naming it, so ``append`` and ``clear_log`` on that
+        log refuse until it is removed, while ``read_log`` keeps answering from the
+        marker regardless. A pending file beside a log that is still present is
+        discarded without being read: the clear it staged never committed, so its bytes
+        never held a watermark worth parsing. The rename that installs the watermark is
+        durable against a process crash on every
         platform this backend runs on, and against power loss only where
         ``capabilities().durable_replace`` is true, which is false on Windows.
         """

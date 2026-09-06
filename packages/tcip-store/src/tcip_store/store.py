@@ -335,9 +335,9 @@ def read_log(key: Key, *, after: str | None = None) -> LogPage:
     opaque: a byte offset here, a commit-ordered sequence number under a database, which is
     what lets an incremental metrics tail survive a backend change.
 
-    On the file backend this waits for a writer holding the same key, an append in flight
-    or a clear, never for another reader; the database backend's read waits on no writer
-    at all.
+    On the file backend this waits for any other holder of the same key: an append in
+    flight, a clear, or another reader, since the key's lock is exclusive. The database
+    backend's read waits on no writer at all.
     """
     backend = _backend()
     validate_key(key, expect_kind="log", operation="read_log")
@@ -360,11 +360,14 @@ def clear_log(key: Key) -> int:
     clear, never the cleared ones and never a misreading of new bytes as damaged, on either
     backend.
 
-    An exception from this call on the file backend can still have removed the log's
-    entries: the unlink is the clear's own commit, and it can run before the exception is
-    raised. What may still be pending is only the cursor watermark, which the next append
-    or clear_log on this log installs before doing anything else, so a caller that retries
-    or moves on sees a log consistent with the entries already being gone either way.
+    An exception from this call on the file backend leaves the log in one of two states,
+    never something between them. Raised before the unlink (staging the pending watermark,
+    or the unlink itself failing) leaves every entry exactly where it was: the clear never
+    committed, and the next append or clear_log on this log discards the stale stage it
+    left behind. Raised after the unlink leaves the entries gone and only the cursor
+    watermark pending, and the next append or clear_log installs it before doing anything
+    else. Either way a caller that retries or moves on sees a log consistent with which of
+    the two already happened.
 
     Raises ``TransactionMisuse`` if the calling thread holds an open transaction, checked
     here in the seam before either backend is called, matching ``append``: a log is not

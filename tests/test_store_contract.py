@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sqlite3
 import subprocess
 import sys
@@ -772,6 +773,42 @@ def test_a_crash_after_staging_the_pending_watermark_abandons_it_on_the_next_app
     assert page.corrupt == ()
 
 
+def test_a_second_clear_log_after_a_crash_mid_staging_clears_normally(store, monkeypatch):
+    """The crash-after-staging window above, met by a clear_log call instead of an append:
+    the log is still present, so settling discards the stale pending stage unread and
+    this call clears the log exactly as an uninterrupted clear would, staging and
+    installing a watermark of its own."""
+    only_on(store, FILE, _CLEAR_LOG_RACE)
+    backend = store.backend
+    key = store.key(LOG, "crash-after-staging-then-clear")
+    for i in range(3):
+        ts.append(key, {"i": i})
+    path = store.path(key)
+    old_size = path.stat().st_size
+
+    class _SimulatedCrash(Exception):
+        pass
+
+    real_write_pending = backend._write_pending_clear_base
+
+    def crash_after_write(*args, **kwargs):
+        real_write_pending(*args, **kwargs)
+        raise _SimulatedCrash
+
+    monkeypatch.setattr(backend, "_write_pending_clear_base", crash_after_write)
+
+    with pytest.raises(_SimulatedCrash):
+        ts.clear_log(key)
+
+    monkeypatch.setattr(backend, "_write_pending_clear_base", real_write_pending)
+
+    removed = ts.clear_log(key)
+
+    assert removed == 3
+    assert not path.exists()
+    assert backend._read_clear_base(path) == old_size
+
+
 def test_settling_through_append_after_a_crash_installs_the_pending_watermark(
     store, monkeypatch,
 ):
@@ -779,7 +816,10 @@ def test_settling_through_append_after_a_crash_installs_the_pending_watermark(
     append to it. The marker's own crash-recovery path runs first, installing the pending
     watermark before the new entry is written, so the log holds exactly the one new entry
     and a replay from the pre-crash cursor returns it rather than a fragment of stale
-    bytes read against an unadvanced base."""
+    bytes read against an unadvanced base. The guard is the marker assertion below: at
+    baseline the crash leaves the marker at the old base rather than the pending value.
+    The pending-file-gone assertion beside it holds even at baseline, since nothing
+    writes a pending file there; it documents the state rather than guarding anything."""
     only_on(store, FILE, _CLEAR_LOG_RACE)
     backend = store.backend
     key = store.key(LOG, "settle-through-append")
@@ -852,9 +892,10 @@ def test_a_second_clear_log_after_a_crash_settles_and_returns_zero(store, monkey
 
 
 def test_a_pending_file_holding_non_integer_bytes_refuses_settling(store):
-    """A pending file nothing on this platform writes: append refuses rather than guessing
-    at the watermark it would install, while read_log keeps answering from the marker,
-    which the pending file's presence or content never changes."""
+    """A pending file nothing on this platform writes, beside a log that is absent: append
+    refuses rather than guessing at the watermark it would install, naming the pending
+    file in the refusal, while read_log keeps answering from the marker, which the
+    pending file's presence or content never changes."""
     only_on(store, FILE, _CLEAR_LOG_RACE)
     backend = store.backend
     key = store.key(LOG, "garbled-pending")
@@ -864,18 +905,45 @@ def test_a_pending_file_holding_non_integer_bytes_refuses_settling(store):
     path.unlink()
     pending_path.write_bytes(b"not-a-number")
 
-    with pytest.raises(ts.DecodeError):
+    with pytest.raises(ts.DecodeError, match=re.escape(str(pending_path))):
         ts.append(key, {"i": 1})
 
     page = ts.read_log(key)
     assert page.records == []
 
 
+def test_a_pending_file_beside_a_present_log_is_discarded_unread_on_append(store):
+    """A pending file left behind by a crash between staging and the unlink finds the log
+    still present: the clear it staged never committed, so append discards it without
+    trying to parse it, whatever garbage it holds, and the marker is untouched."""
+    only_on(store, FILE, _CLEAR_LOG_RACE)
+    backend = store.backend
+    key = store.key(LOG, "garbled-pending-log-present")
+    for i in range(2):
+        ts.append(key, {"i": i})
+    path = store.path(key)
+    marker_path = backend._clear_base_path(path)
+    pending_path = backend._clear_base_pending_path(path)
+    pending_path.write_bytes(b"not-a-number")
+    assert not marker_path.exists()
+
+    ts.append(key, {"i": "after"})
+
+    assert not pending_path.exists()
+    assert not marker_path.exists()
+    page = ts.read_log(key)
+    assert [r["i"] for r in page.records] == [0, 1, "after"]
+    assert page.corrupt == ()
+
+
 def test_a_pending_file_is_invisible_to_enumeration_and_reported_as_bookkeeping(store):
-    """The file a crash can leave beside a log's marker must never surface as an entry: not
-    to the backend's own enumeration, not to adoption's plan or its unaccounted-files check,
-    and reported as bookkeeping rather than something unclaimed when a project tree is
-    bundled."""
+    """A pending clear-base watermark must never surface as a log entry: not to the
+    backend's own enumeration, not to adoption's plan. Both already exclude it through
+    this store's own ``.jsonl`` suffix match, a fact independent of the file backend's
+    bookkeeping predicate. What that predicate actually guards is ``account_for``, which
+    walks every file unconditionally rather than matching a store's own shape: without
+    the predicate naming the pending suffix, it would report the file as unaccounted
+    instead of sorting it into bookkeeping."""
     only_on(store, FILE, _CLEAR_LOG_RACE)
     from tcip_mcp.tools.bundle import account_for
     from tcip_store.adoption import plan_root, unaccounted_files
