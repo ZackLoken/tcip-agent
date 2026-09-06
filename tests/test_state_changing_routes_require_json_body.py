@@ -1,12 +1,13 @@
 """A state-changing route must declare a JSON body model.
 
-CORS is disabled on this backend, so nothing here checks origin: that is a separate,
-not-yet-built authentication concern. What this guards is narrower: a route with no body
-parameter at all is reachable as a browser simple request (a cross-origin HTML form
-submission, for instance), which never triggers a CORS preflight. Requiring a JSON body, even
-an empty one, makes the server refuse every content type a simple request can send, on every
-POST/PUT/PATCH/DELETE route with no exemption; only application/json, which a browser sends
-only from a preflighted request, still reaches the handler.
+CORS is disabled on this backend; nothing here checks origin, which is covered separately
+(``test_state_changing_routes_require_same_origin.py``) by the check
+``TrustBoundaryMiddleware`` applies ahead of every route. What this guards is narrower: a route
+with no body parameter at all is reachable as a browser simple request (a cross-origin HTML
+form submission, for instance), which never triggers a CORS preflight. Requiring a JSON body,
+even an empty one, makes the server refuse every content type a simple request can send, on
+every POST/PUT/PATCH/DELETE route with no exemption; only application/json, which a browser
+sends only from a preflighted request, still reaches the handler.
 """
 
 from __future__ import annotations
@@ -20,11 +21,10 @@ from fastapi.testclient import TestClient
 from pydantic import BaseModel
 
 from tcip_web.app import app
+from tcip_web.trust_boundary import STATE_CHANGING_METHODS
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 GENERATOR = REPO_ROOT / "tools" / "generate_frontend_routes.py"
-
-_STATE_CHANGING_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 
 
 class _ProbePayload(BaseModel):
@@ -69,7 +69,7 @@ def _state_changing_routes(target=app) -> list[APIRoute]:
         route
         for route in gen.iter_api_routes(target)
         if isinstance(route, APIRoute)
-        and (route.methods - {"HEAD", "OPTIONS"}) & _STATE_CHANGING_METHODS
+        and (route.methods - {"HEAD", "OPTIONS"}) & STATE_CHANGING_METHODS
     ]
 
 

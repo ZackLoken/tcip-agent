@@ -166,9 +166,11 @@ def test_ws_rejects_unknown_session(client):
 
 
 def test_ws_rejects_cross_site_origin(client):
+    # A live session id, so a foreign origin is what refuses this connect, not an unknown one.
+    sid = client.post("/api/terminal/sessions", json={}).json()["session_id"]
     with pytest.raises(Exception):
         with client.websocket_connect(
-            "ws://127.0.0.1/api/terminal/ws/whatever", headers={"origin": "https://evil.example"}
+            f"ws://127.0.0.1/api/terminal/ws/{sid}", headers={"origin": "https://evil.example"}
         ):
             pass
 

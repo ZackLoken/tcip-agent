@@ -17,6 +17,24 @@ def client() -> TestClient:
     return TestClient(app, base_url="http://127.0.0.1")
 
 
+class _RawHeaderList(list):
+    """A duplicate-preserving stand-in for the mapping ``websocket_connect`` expects.
+
+    Passing a plain list of (name, value) pairs keeps two same-named header lines distinct
+    through the request encoding, where an ``httpx.Headers`` instance built the same way is
+    merged into one comma-joined value before it reaches the ASGI scope. ``setdefault`` is the
+    one mapping method the test transport calls, to fill in the WebSocket upgrade headers.
+    """
+
+    def setdefault(self, key: str, value: str) -> str:
+        low = key.lower()
+        for k, v in self:
+            if k.lower() == low:
+                return v
+        self.append((key, value))
+        return value
+
+
 def test_trusted_host_rejects_foreign_host(client: TestClient) -> None:
     # The Host naming the arrival (127.0.0.1) is served; a foreign Host (DNS-rebinding) is not.
     assert client.get("/health").status_code == 200
@@ -60,8 +78,29 @@ def test_ws_state_allows_local_origin(client: TestClient) -> None:
 
 def test_ws_state_rejects_cross_site_origin(client: TestClient) -> None:
     # A page on another site must not be able to open a state socket and read paths.
-    with pytest.raises(WebSocketDisconnect):
+    with pytest.raises(WebSocketDisconnect) as closed:
         with client.websocket_connect("ws://127.0.0.1/ws/state", headers={"origin": "http://evil.example.com"}):
+            pass
+    assert closed.value.code == 1008
+    assert closed.value.reason == "origin not allowed"
+
+
+def test_ws_state_rejects_duplicate_origin(client: TestClient) -> None:
+    # A duplicated Origin header is refused outright, the same way a duplicated Host is.
+    duplicated = _RawHeaderList([("origin", "http://127.0.0.1"), ("origin", "http://127.0.0.1")])
+    with pytest.raises(WebSocketDisconnect) as closed:
+        with client.websocket_connect("ws://127.0.0.1/ws/state", headers=duplicated):
+            pass
+    assert closed.value.code == 1008
+    assert closed.value.reason == "origin not allowed"
+
+
+def test_ws_panel_rejects_cross_site_origin(client: TestClient) -> None:
+    # The panel event socket has no origin test today; it is Origin-checked like every other.
+    with pytest.raises(WebSocketDisconnect):
+        with client.websocket_connect(
+            "ws://127.0.0.1/ws/panel/meta", headers={"origin": "http://evil.example.com"}
+        ):
             pass
 
 
@@ -96,12 +135,11 @@ def test_ws_inference_stream_rejects_cross_site_origin(client: TestClient) -> No
             pass
 
 
-def test_ws_training_stream_rejects_cross_site_origin(client: TestClient) -> None:
-    # The training metrics stream takes a project_root and tails metrics.jsonl: a
-    # path-shaped cross-site file read if left ungated.
+def test_ws_training_stream_rejects_cross_site_origin(client: TestClient, tmp_path) -> None:
+    # project_root is confined so the origin, not the path guard, refuses this connect.
     with pytest.raises(WebSocketDisconnect):
         with client.websocket_connect(
-            "ws://127.0.0.1/api/training/runs/does-not-exist/stream?project_root=/tmp",
+            f"ws://127.0.0.1/api/training/runs/does-not-exist/stream?project_root={tmp_path}",
             headers={"origin": "http://evil.example.com"},
         ):
             pass

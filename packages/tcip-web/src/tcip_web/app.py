@@ -38,7 +38,7 @@ from tcip_mcp.web_client import (
     VALID_PANELS,
 )
 from tcip_mcp.workspace import configured_workspace
-from tcip_web.trust_boundary import TrustBoundaryMiddleware, log_exposure_opt_in, origin_allowed
+from tcip_web.trust_boundary import TrustBoundaryMiddleware, log_exposure_opt_in
 
 logger = logging.getLogger(__name__)
 
@@ -252,7 +252,7 @@ app = FastAPI(title="TCIP Pipeline", version="0.1.0", lifespan=_lifespan)
 # Serving the frontend elsewhere would add fastapi.middleware.cors.CORSMiddleware here.
 
 # Exposure is decided per connection from its arrival address and the Host must name this
-# backend (tcip_web.trust_boundary); the WebSocket routes apply the Origin policy before accept.
+# backend; the middleware also applies the Origin policy before a route runs (trust_boundary).
 app.add_middleware(TrustBoundaryMiddleware)
 
 # Compress JSON/text responses above ~1KB. The /api/review/matches payload scales with
@@ -337,9 +337,6 @@ async def state_ws(websocket: WebSocket) -> None:
     """Push live GuiState snapshots to the browser; replays the current snapshot on connect.
     One-directional: the client never sends a payload over this socket, and an inbound frame,
     if one ever arrived, is read and discarded, only to detect disconnect."""
-    if not origin_allowed(websocket.headers.get("origin"), websocket.scope):
-        await websocket.close(code=1008, reason="origin not allowed")
-        return
     await websocket.accept()
     _state_watchers.add(websocket)
     try:
@@ -556,9 +553,6 @@ async def post_panel_event(panel: str, event: PanelEvent, request: Request):
 @app.websocket("/ws/panel/{panel}")
 async def panel_ws(websocket: WebSocket, panel: str):
     """Stream panel events to a browser client."""
-    if not origin_allowed(websocket.headers.get("origin"), websocket.scope):
-        await websocket.close(code=1008, reason="origin not allowed")
-        return
     if panel not in VALID_PANELS:
         await websocket.close(code=1008, reason=f"unknown panel: {panel}")
         return
