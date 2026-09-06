@@ -32,8 +32,15 @@ Per stamped bucket, in order:
    re-inference as the remedy; nothing is stamped or rewritten.
 5. A sourced classified pair over a bucket carrying review verdicts is reported with the count;
    nothing is stamped or rewritten, since the platform never rewrites predictions a human reviewed.
-   A bucket under no dataset root has no verdict store to ask, the same inoperative guard
-   ``run_inference`` states for such a bucket, and this is reported rather than silently skipped.
+   The verdict store is asked only when the bucket resolves under a real dataset root
+   (``dataset_layout.dataset_root_of``, the canonical-segment test, not
+   ``dataset_scope_of``'s own bucket-itself fallback). On the file backend, a bucket outside any
+   dataset's canonical layout resolves to no root at all, so the guard is inoperative by
+   construction. On the database backend, such a bucket's own stamp write plants
+   ``<bucket>/.tcip/store.db``, so ``dataset_scope_of`` answers the bucket itself, a root no
+   ``ReviewEngine`` ever writes to; the guard is inoperative there too, for the same reason. Either
+   way the no-verdict-store note is reported rather than silently skipped, the same inoperative
+   guard ``run_inference`` states for such a bucket.
 6. Otherwise every document is read whole and every record classified, the object-class check made
    first: already carrying the object class, a mapped value under the attribute settles it
    conformed, no value settles it unconformable (a stale detector document, never mistaken for a
@@ -45,11 +52,14 @@ Per stamped bucket, in order:
 7. After a rewrite, the new content's binding is checked (``verify_stamp_binding``): a count claim
    the bucket carried floors when its covered digest no longer matches, reported beside the
    stamp's own stored ``validated`` so a stale ``true`` is never read as still validated.
-8. One audit entry per bucket whose documents or stamp were actually written, under its dataset
-   root or the platform log for a bucket under none, carrying the documents rewritten, whether the
-   stamp was written, the scope pair and its source, the free-text outcome line, and, for a
-   rewrite under a stamp, the content digest before and after. A refusal, a no-op ("already
-   conformed", "no stamp"), or a ``--plan`` preview writes no entry.
+8. One audit entry per bucket whose documents or stamp were actually written, filed under the
+   bucket's own resolved scope (``dataset_scope_of``): a real dataset root on the file backend, the
+   bucket itself on the database backend when it sits outside any dataset's canonical layout (its
+   own stamp write already planted ``<bucket>/.tcip/store.db``), or the platform log when no root
+   resolves at all. The entry carries the documents rewritten, whether the stamp was written, the
+   scope pair and its source, the free-text outcome line, and, for a rewrite under a stamp, the
+   content digest before and after. A refusal, a no-op ("already conformed", "no stamp"), or a
+   ``--plan`` preview writes no entry.
 
 For each dataset root walked, this command also reports, never rewrites, ground-truth records whose
 ``subject`` is a key of a conformed bucket's ``id_map`` or a declared attribute value of the
@@ -84,7 +94,8 @@ from tcip_store.binding import bind_default
 from tcip_mcp.audit import dataset_scope_of, record_event_or_raise
 from tcip_mcp.class_registry import RegistryError, read_registry
 from tcip_mcp.dataset_layout import (
-    annotation_root, classes_path, is_bucket_name, prediction_bucket_dirs, prediction_root,
+    annotation_root, classes_path, dataset_root_of, is_bucket_name, prediction_bucket_dirs,
+    prediction_root,
 )
 from tcip_mcp.experiments import config_key, read_member
 from tcip_mcp.pipelines.resolution import (
@@ -328,9 +339,10 @@ def _emit_conform_audit(
 
     ``scope`` is the caller's own ``dataset_scope_of(bucket_dir)``, resolved once before the first
     write into the bucket and passed in rather than re-resolved here: under the database backend a
-    stamp or document write plants ``<bucket>/.tcip/store.db``, so a ``dataset_scope_of`` read
-    taken after that write answers the bucket as its own dataset root, which is the seam's own
-    behaviour, not this command's to change. ``outcome`` is the free-text line the caller is about
+    stamp write plants ``<bucket>/.tcip/store.db`` (a document write goes through ``put_blob`` to
+    the file backend and plants nothing), so a ``dataset_scope_of`` read taken after the stamp
+    write answers the bucket as its own dataset root, which is the seam's own behaviour, not this
+    command's to change. ``outcome`` is the free-text line the caller is about
     to return, carried on the entry beside its structured fields rather than left to reach only
     stdout. ``digest_before``/``digest_after`` are given only for the one branch that rewrites
     documents under a stamp (rule 7's binding check runs there); a stamp-only completion or a bare
@@ -498,7 +510,7 @@ def conform_bucket(
 
     dataset_root = dataset_scope_of(bucket_dir)
     no_dataset_note = ""
-    if dataset_root is not None:
+    if dataset_root is not None and dataset_root_of(bucket_dir) is not None:
         vcount = verdict_count(review_state_dir_of(dataset_root), bucket_key_of(bucket_dir),
                                 bucket_stems(bucket_dir))
         if vcount:

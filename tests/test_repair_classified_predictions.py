@@ -744,21 +744,31 @@ def test_a_bare_like_rewrite_writes_one_audit_entry_with_its_structured_fields(
 def test_a_classified_rewrite_under_no_dataset_root_writes_one_entry_consistent_with_dataset_scope_of(
     tmp_path, monkeypatch,
 ):
-    """A bucket outside any dataset root's canonical layout (no predictions/images/annotations
-    segment in its path) is filed wherever ``dataset_scope_of`` resolves for it: the same value,
-    computed once before any write into the bucket and reused for both the outcome note and the
-    audit entry's own scope, never re-derived afterward from a state this run's own write changed.
+    """Coverage of the scope-consistency invariant: a bucket outside any dataset root's canonical
+    layout (no predictions/images/annotations segment in its path) files its one audit entry
+    wherever ``dataset_scope_of`` resolves for it, computed once before any write into the bucket
+    and reused for both the outcome note and the audit entry's own scope, never re-derived
+    afterward from a state this run's own write changed.
 
     On the file backend that resolves to ``None`` (a genuinely bare directory carries no ``.tcip``
-    of its own): the entry lands in the platform log, and the outcome note says so. On the
-    database backend, a bucket that already carries a stamp of its own answers to itself
-    (``dataset_scope_of``'s own ``.tcip`` fallback cannot tell a bucket's own prior stamp from a
-    genuine dataset marker, the seam's known behaviour documented on ``_emit_conform_audit``, not
-    this command's to change): the entry lands under that resolved root's own log instead, and the
-    outcome note carries no no-dataset-root claim. Either way, the outcome text and the entry's
-    filed scope never disagree, which is the bug this pin guards: the two used to be read from
-    ``dataset_scope_of`` at two different times (once before the rewrite, once after), and the
-    stamp write in between could make the second read answer differently from the first.
+    of its own): the entry lands in the platform log. On the database backend, a bucket that
+    already carries a stamp of its own answers to itself (``dataset_scope_of``'s own ``.tcip``
+    fallback cannot tell a bucket's own prior stamp from a genuine dataset marker, the seam's
+    known behaviour documented on ``_emit_conform_audit``, not this command's to change): the
+    entry lands under that resolved root's own log instead. Either way the outcome text and the
+    entry's filed scope never disagree, which is the scope-consistency bug this pin guards: the
+    two used to be read from ``dataset_scope_of`` at two different times (once before the rewrite,
+    once after), and the stamp write in between could make the second read answer differently
+    from the first.
+
+    Fails at the baseline on ``entry["outcome"]``/``outcome`` itself, on the sqlite leg only: this
+    bucket resolves under no real dataset root (``dataset_layout.dataset_root_of`` finds no
+    canonical segment in its path) on both backends, so the no-verdict-store note belongs in the
+    outcome regardless of backend; the unfixed code omitted it on the database backend, where
+    ``dataset_scope_of`` answers the bucket itself and the old code read that alone as a real
+    dataset root. The scope-consistency assertions below (where the entry is filed) pass against
+    the unfixed source too; they are coverage of a fact this fix leaves untouched, not this pin's
+    own claim.
     """
     import tcip_mcp.audit as audit_module
     from tcip_mcp.audit import dataset_scope_of
@@ -782,7 +792,7 @@ def test_a_classified_rewrite_under_no_dataset_root_writes_one_entry_consistent_
     assert refused is False
     assert changed is True
     assert id_map == VALUE_ID_MAP
-    assert ("this bucket sits under no dataset root" in outcome) == (resolved_scope is None)
+    assert "this bucket sits under no dataset root" in outcome
     if resolved_scope is None:
         filed_entries = _platform_audit_entries()
     else:
