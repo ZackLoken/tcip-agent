@@ -1067,6 +1067,10 @@ def test_calibrate_classifier_operating_point_reports_an_undecodable_pred_stamp(
     )
 
     assert "error" in res
+    # the seam's own DecodeError wording (tcip_store.file_backend._decode), pinning this as the
+    # decode refusal and not the registry refusal the family added on the same code path.
+    assert "exists but does not decode" in res["error"]
+    assert "dataset root" not in res["error"]
 
 
 def test_calibrate_classifier_operating_point_earns_a_record_a_later_bucket_binds_to(
