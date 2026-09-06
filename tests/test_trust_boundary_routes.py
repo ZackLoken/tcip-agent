@@ -15,6 +15,7 @@ from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
 from tcip_web.app import app
+from tcip_web.trust_boundary import TrustBoundaryMiddleware
 
 LAN = "http://192.168.1.23:8765"
 TERMINAL_WORDS = "interactive agent terminal"
@@ -119,3 +120,20 @@ def test_the_lifespan_runs_with_no_arrival_to_classify(monkeypatch: pytest.Monke
     monkeypatch.delenv("TCIP_WEB_ALLOW_INSECURE", raising=False)
     with TestClient(app, base_url="http://127.0.0.1:8765") as running:
         assert running.get("/health").status_code == 200
+
+
+async def _accepting_ws_app(scope, receive, send) -> None:
+    """A minimal ASGI app with no origin check of its own, so wrapping it in the
+    middleware isolates the middleware's own Origin enforcement from any route."""
+    await send({"type": "websocket.accept"})
+    await send({"type": "websocket.send", "text": "hello"})
+
+
+def test_the_middleware_itself_refuses_a_foreign_origin_websocket() -> None:
+    wrapped = TrustBoundaryMiddleware(_accepting_ws_app)
+    client = TestClient(wrapped, base_url="http://127.0.0.1")
+    with pytest.raises(WebSocketDisconnect) as closed:
+        with client.websocket_connect("ws://127.0.0.1/anything", headers={"origin": "http://evil.example"}):
+            pass
+    assert closed.value.code == 1008
+    assert closed.value.reason == "origin not allowed"

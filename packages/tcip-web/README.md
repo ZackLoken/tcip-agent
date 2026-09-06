@@ -116,7 +116,9 @@ Calls made for this single-operator desktop GUI:
   an entry of `TCIP_WEB_ADVERTISED_HOSTS`, consulted only under the opt-in; never a wildcard),
   and every WebSocket connect and every state-changing HTTP request (`POST`/`PUT`/`PATCH`/
   `DELETE`) must carry an Origin the backend serves: the request's own origin, a loopback
-  origin at any port on a local arrival, or an advertised authority under the opt-in. The port
+  origin at any port on a local arrival, or an advertised authority under the opt-in. On a
+  loopback arrival another local server's page is admitted by this layer too; only the
+  JSON-body guard's unanswered preflight stops its browser from mutating. The port
   compared is the Origin's own, with its scheme's default port filled in when none is written,
   so a same-machine reverse proxy that terminates HTTPS and forwards a bare `Host: gui.example`
   needs two `TCIP_WEB_ADVERTISED_HOSTS` entries (`gui.example:80` for the Host check,
