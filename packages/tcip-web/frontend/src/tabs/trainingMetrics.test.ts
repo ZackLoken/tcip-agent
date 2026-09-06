@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import { mergeMetric, metricKey, numericMetricKeys, runOrderLine } from "@/tabs/trainingMetrics";
+import {
+  defaultChartSeries,
+  mergeMetric,
+  metricKey,
+  numericMetricKeys,
+  runOrderLine,
+} from "@/tabs/trainingMetrics";
 
 describe("mergeMetric (training stream de-dup)", () => {
   it("appends rows with distinct epochs", () => {
@@ -55,13 +61,68 @@ describe("numericMetricKeys (the rank chooser and the logged table's shared filt
   });
 });
 
+describe("defaultChartSeries (the live metrics chart's default series rule)", () => {
+  it("plots both loss keys plus the selection line, unmerged, when selection is not a loss", () => {
+    const rows = [
+      { epoch: 0, train_loss: 0.9, val_loss: 0.8, selection: 0.5, selection_metric: "map50" },
+      { epoch: 1, train_loss: 0.7, val_loss: 0.6, selection: 0.6, selection_metric: "map50" },
+    ];
+    const series = defaultChartSeries(["train_loss", "val_loss", "selection"], rows);
+    expect(series.allKeys).toBe(false);
+    expect(series.keys).toEqual(["train_loss", "val_loss", "selection"]);
+    expect(series.labels.selection).toBe("selection (map50)");
+    expect(series.labels.train_loss).toBeUndefined();
+  });
+
+  it("merges selection into val_loss when a validated run selects on loss", () => {
+    const rows = [
+      { epoch: 0, train_loss: 0.9, val_loss: 0.4, selection: 0.4, selection_metric: "loss" },
+    ];
+    const series = defaultChartSeries(["train_loss", "val_loss", "selection"], rows);
+    expect(series.keys).toEqual(["train_loss", "val_loss"]);
+    expect(series.labels.val_loss).toBe("val_loss (selection)");
+    expect(series.labels.train_loss).toBeUndefined();
+  });
+
+  it("merges selection into train_loss when there is no validation loader", () => {
+    const rows = [{ epoch: 0, train_loss: 0.27, selection: 0.27, selection_metric: "loss" }];
+    const series = defaultChartSeries(["train_loss", "selection"], rows);
+    expect(series.keys).toEqual(["train_loss"]);
+    expect(series.labels.train_loss).toBe("train_loss (selection)");
+  });
+
+  it("falls back to every numeric key only when the log has neither a loss key nor selection", () => {
+    const rows = [{ epoch: 0, val_map50: 0.7, lr: 0.001 }];
+    const series = defaultChartSeries(["val_map50", "lr"], rows);
+    expect(series.allKeys).toBe(true);
+    expect(series.keys).toEqual(["val_map50", "lr"]);
+  });
+
+  it("leaves a bespoke non-loss key out of the default series and merges nothing on it", () => {
+    const rows = [
+      { epoch: 0, train_loss: 0.5, loss_total: 1.2, selection: 0.5, selection_metric: "loss" },
+    ];
+    const series = defaultChartSeries(["train_loss", "loss_total", "selection"], rows);
+    // loss_total does not end in "loss", so it never joins the default series or the merge.
+    expect(series.keys).toEqual(["train_loss"]);
+    expect(series.labels.train_loss).toBe("train_loss (selection)");
+  });
+
+  it("plots selection alone, unmerged, when no row names a selection_metric", () => {
+    const rows = [{ epoch: 0, train_loss: 0.5, selection: 0.5 }];
+    const series = defaultChartSeries(["train_loss", "selection"], rows);
+    expect(series.keys).toEqual(["train_loss", "selection"]);
+    expect(series.labels.selection).toBe("selection");
+  });
+});
+
 describe("runOrderLine (the Training/Tuning tabs' shared order sentence)", () => {
-  it("names the app, not a browser window, for both a run and a sweep noun", () => {
+  it("names the running process, not a browser window, for both a run and a sweep noun", () => {
     expect(runOrderLine("run", "experiment id")).toBe(
-      "Runs this app's own launches first, in launch order; every other recorded run follows, sorted by experiment id.",
+      "Runs this running process itself launched come first, in launch order; every other recorded run follows, sorted by experiment id.",
     );
     expect(runOrderLine("sweep", "sweep id")).toBe(
-      "Sweeps this app's own launches first, in launch order; every other recorded sweep follows, sorted by sweep id.",
+      "Sweeps this running process itself launched come first, in launch order; every other recorded sweep follows, sorted by sweep id.",
     );
   });
 });
