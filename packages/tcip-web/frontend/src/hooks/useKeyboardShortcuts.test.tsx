@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render } from "@testing-library/react";
+import { cleanup, fireEvent, render } from "@testing-library/react";
 
-import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
+import { useKeyboardShortcuts, type Shortcut } from "@/hooks/useKeyboardShortcuts";
 
 afterEach(() => {
   cleanup();
@@ -47,5 +47,71 @@ describe("useKeyboardShortcuts", () => {
 
     expect(onEnter).not.toHaveBeenCalled();
     expect(event.defaultPrevented).toBe(false);
+  });
+});
+
+function PassthroughHarness({ shortcuts }: { shortcuts: Shortcut[] }) {
+  useKeyboardShortcuts(shortcuts);
+  return (
+    <div>
+      <button data-testid="plain-button">Plain</button>
+      <button data-testid="passthrough-button" data-keyboard-passthrough="">
+        Passthrough
+      </button>
+      <select data-testid="a-select">
+        <option value="">x</option>
+      </select>
+      <input data-testid="an-input" />
+    </div>
+  );
+}
+
+describe("useKeyboardShortcuts whileFocused exemption", () => {
+  it("fires a whileFocused shortcut when focus sits on the one control marked data-keyboard-passthrough", () => {
+    const action = vi.fn();
+    const { getByTestId } = render(
+      <PassthroughHarness shortcuts={[{ keys: "shift+h", action, whileFocused: true }]} />,
+    );
+
+    fireEvent.keyDown(getByTestId("passthrough-button"), { key: "H", shiftKey: true });
+    expect(action).toHaveBeenCalledTimes(1);
+  });
+
+  it("still swallows the same shortcut on an ordinary button with no passthrough attribute", () => {
+    const action = vi.fn();
+    const { getByTestId } = render(
+      <PassthroughHarness shortcuts={[{ keys: "shift+h", action, whileFocused: true }]} />,
+    );
+
+    fireEvent.keyDown(getByTestId("plain-button"), { key: "H", shiftKey: true });
+    expect(action).not.toHaveBeenCalled();
+  });
+
+  it("never exempts a select, even with whileFocused set", () => {
+    const action = vi.fn();
+    const { getByTestId } = render(
+      <PassthroughHarness shortcuts={[{ keys: "shift+h", action, whileFocused: true }]} />,
+    );
+
+    fireEvent.keyDown(getByTestId("a-select"), { key: "H", shiftKey: true });
+    expect(action).not.toHaveBeenCalled();
+  });
+
+  it("never exempts a text input, even with whileFocused set", () => {
+    const action = vi.fn();
+    const { getByTestId } = render(
+      <PassthroughHarness shortcuts={[{ keys: "shift+h", action, whileFocused: true }]} />,
+    );
+
+    fireEvent.keyDown(getByTestId("an-input"), { key: "H", shiftKey: true });
+    expect(action).not.toHaveBeenCalled();
+  });
+
+  it("fires normally on the window for a shortcut with no whileFocused flag", () => {
+    const action = vi.fn();
+    render(<PassthroughHarness shortcuts={[{ keys: "a", action }]} />);
+
+    fireEvent.keyDown(window, { key: "a" });
+    expect(action).toHaveBeenCalledTimes(1);
   });
 });
