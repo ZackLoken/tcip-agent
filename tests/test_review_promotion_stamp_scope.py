@@ -6,7 +6,7 @@ producer already stamped carries its pair forward through the promotion untouche
 A stamp lacking the pair, or one that will not decode, predates the writer rail: no live
 producer mints either shape, and ``/api/review/action`` itself now refuses to record a fresh
 verdict against one (``_review_scope``'s own strict read). Its verdict is therefore seeded
-straight through the review store, the same posture ``test_conform_classified_predictions.py``
+straight through the review store, the same posture ``test_repair_classified_predictions.py``
 takes for a bucket the rail would otherwise refuse to build.
 """
 
@@ -139,7 +139,7 @@ def _damage_stamp(bucket: Path) -> None:
 
 
 @pytest.mark.usefixtures("seed_bud_trait_spec")
-def test_promotion_over_a_neither_key_stamp_refuses_naming_the_conform_script(
+def test_promotion_over_a_neither_key_stamp_refuses_naming_the_repair_command(
     client: TestClient, tmp_path: Path,
 ) -> None:
     dataset_root = tmp_path / "data"
@@ -155,7 +155,7 @@ def test_promotion_over_a_neither_key_stamp_refuses_naming_the_conform_script(
         "subject": SUBJECT})
 
     assert resp.status_code == 400
-    assert "conform_classified_predictions.py" in resp.json()["detail"]
+    assert "repair-classified-predictions" in resp.json()["detail"]
     assert "subject" not in (read_operating_point_sidecar(bucket) or {})
 
 

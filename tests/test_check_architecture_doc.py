@@ -64,7 +64,7 @@ def test_a_tree_every_file_of_which_is_named_passes(tmp_path):
 
 def test_build_artifacts_and_caches_are_outside_the_covered_set(tmp_path):
     checker = _load()
-    cache = tmp_path / "scripts" / "__pycache__"
+    cache = tmp_path / "tools" / "__pycache__"
     cache.mkdir(parents=True)
     (cache / "stale.py").write_text("", encoding="utf-8")
     modules = tmp_path / "packages" / "tcip-web" / "frontend" / "src" / "node_modules" / "x"
@@ -102,7 +102,7 @@ def _summary(mcp_modules: int, mcp_lines: int, *, sentence_modules: int, sentenc
         "| tcip-web | 0 | 0 |\n"
         "| tcip-store | 0 | 0 |\n"
         "| tcip-web-frontend | 0 | 0 |\n"
-        "| scripts | 0 | 0 |\n"
+        "| tools | 0 | 0 |\n"
     )
 
 
@@ -111,7 +111,7 @@ _ONE_MCP_MODULE_INVENTORY = {
     "typescript_modules": [],
     "counts": {
         "python_by_root": {
-            "tcip-mcp": 1, "tcip-annotation": 0, "tcip-web": 0, "tcip-store": 0, "scripts": 0,
+            "tcip-mcp": 1, "tcip-annotation": 0, "tcip-web": 0, "tcip-store": 0, "tools": 0,
         },
         "typescript_total": 0,
     },
@@ -184,7 +184,7 @@ def test_a_summary_table_row_naming_an_unknown_package_is_reported():
     renamed row) is its own finding, not silently skipped because no real root answers it."""
     checker = _load()
     md_text = _summary(1, 5, sentence_modules=1, sentence_lines=5).replace(
-        "| scripts | 0 | 0 |\n", "| scripts | 0 | 0 |\n| tcip-nonexistent | 1 | 0 |\n"
+        "| tools | 0 | 0 |\n", "| tools | 0 | 0 |\n| tcip-nonexistent | 1 | 0 |\n"
     )
 
     sentence, rows = checker.parse_module_count_summary(md_text)

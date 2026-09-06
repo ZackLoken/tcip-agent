@@ -256,7 +256,7 @@ def test_count_by_class_foreign_record_within_classified_bucket_refuses(tmp_path
     )
     id_map = {"closed": 0, "open": 1}
     scope = resolution.BucketScope(subject="bud", attribute="opening")
-    with pytest.raises(ClassifiedRecordRefused, match="conform_classified_predictions"):
+    with pytest.raises(ClassifiedRecordRefused, match="repair-classified-predictions"):
         phenology.count_by_class(p, id_map, "open", scope=scope)
 
 

@@ -980,7 +980,7 @@ class TestCoverageRecord:
         ts.replace(view_coverage_key(root), {bucket: {image_name: old_record}},
                   expect=ts.Version.ABSENT)
 
-    def test_get_coverage_refuses_an_old_shape_stored_record_naming_the_conform_script(
+    def test_get_coverage_refuses_an_old_shape_stored_record_stating_the_fact(
         self, client, dated_dataset,
     ):
         root, path = dated_dataset
@@ -1323,8 +1323,9 @@ class TestCompletenessRoute:
         self, client, dated_dataset,
     ):
         """A record from before this field existed (no ``cells_attested_view`` key at all)
-        refuses by name rather than being served or merged into: conform_region_completeness_
-        attested_view.py write-forwards it to an empty map before the record is usable again."""
+        refuses by name rather than being served or merged into: no operator door stamps the
+        missing key onto an existing record, so this dataset's record must be corrected to the
+        current shape before it is usable again."""
         import tcip_store as ts
 
         from tcip_mcp.dataset_layout import region_completeness_key

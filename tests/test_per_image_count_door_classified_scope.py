@@ -62,7 +62,7 @@ def test_a_classified_bucket_delivers_its_object_count_not_its_value_count(tmp_p
     assert int(rows[0]["detection_count"]) == 2  # both records counted as the object class
 
 
-def test_a_neither_key_stamp_refuses_naming_the_conform_script(tmp_path: Path) -> None:
+def test_a_neither_key_stamp_refuses_naming_the_repair_command(tmp_path: Path) -> None:
     import tcip_store
 
     from tcip_mcp.tools.inference_tools import per_image_counts_from_bucket
@@ -89,6 +89,6 @@ def test_a_neither_key_stamp_refuses_naming_the_conform_script(tmp_path: Path) -
 
     from tcip_mcp.pipelines.resolution import CountDeliveryRefused
 
-    with pytest.raises(CountDeliveryRefused, match="conform_classified_predictions.py"):
+    with pytest.raises(CountDeliveryRefused, match="repair-classified-predictions"):
         per_image_counts_from_bucket(str(bucket), str(out), trait=fx.COUNT_TRAIT,
                                      project_root=tmp_path)

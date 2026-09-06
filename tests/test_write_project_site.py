@@ -12,67 +12,67 @@ import sys
 from pathlib import Path
 
 
-def _run_script(*args: str) -> subprocess.CompletedProcess:
+def _run_command(*args: str) -> subprocess.CompletedProcess:
     return subprocess.run(
         [sys.executable, "-m", "tcip_web.cli", "write-project-site", *args],
         capture_output=True, text=True, timeout=60,
     )
 
 
-def test_conform_script_writes_a_fresh_site_for_a_project_with_no_record(tmp_path: Path):
+def test_write_project_site_writes_a_fresh_site_for_a_project_with_no_record(tmp_path: Path):
     from tcip_mcp.tools.meta_tools import report_friction
 
     project = tmp_path / "bare"
     project.mkdir()
     report_friction(str(project), category="missing_tool", detail="probe")
 
-    result = _run_script(str(project), "north orchard")
+    result = _run_command(str(project), "north orchard")
 
     assert result.returncode == 0, result.stdout + result.stderr
     assert "written" in result.stdout
 
 
-def test_conform_script_reports_already_recorded_the_same(tmp_path: Path):
+def test_write_project_site_reports_already_recorded_the_same(tmp_path: Path):
     from tcip_mcp.tools.project_tools import initialize_project
 
     project = tmp_path / "proj"
     initialize_project(str(project), site="north orchard")
 
-    result = _run_script(str(project), "north orchard")
+    result = _run_command(str(project), "north orchard")
 
     assert result.returncode == 0, result.stdout + result.stderr
     assert "already recorded the same" in result.stdout
 
 
-def test_conform_script_refuses_a_conflicting_site_without_replace(tmp_path: Path):
+def test_write_project_site_refuses_a_conflicting_site_without_replace(tmp_path: Path):
     from tcip_mcp.project_record import read_record
     from tcip_mcp.tools.project_tools import initialize_project
 
     project = tmp_path / "proj"
     initialize_project(str(project), site="north orchard")
 
-    result = _run_script(str(project), "south orchard")
+    result = _run_command(str(project), "south orchard")
 
     assert result.returncode != 0
     assert "refused" in result.stdout
     assert read_record(str(project))["site"] == "north orchard"  # nothing written
 
 
-def test_conform_script_replaces_a_conflicting_site(tmp_path: Path):
+def test_write_project_site_replaces_a_conflicting_site(tmp_path: Path):
     from tcip_mcp.project_record import read_record
     from tcip_mcp.tools.project_tools import initialize_project
 
     project = tmp_path / "proj"
     initialize_project(str(project), site="north orchard")
 
-    result = _run_script(str(project), "south orchard", "--replace")
+    result = _run_command(str(project), "south orchard", "--replace")
 
     assert result.returncode == 0, result.stdout + result.stderr
     assert "replaced" in result.stdout
     assert read_record(str(project))["site"] == "south orchard"
 
 
-def test_conform_script_replaces_a_damaged_record_naming_it_replaced_not_written(
+def test_write_project_site_replaces_a_damaged_record_naming_it_replaced_not_written(
     tmp_path: Path,
 ):
     """A prior record that existed but could not be read as a site is a replacement, not a
@@ -88,7 +88,7 @@ def test_conform_script_replaces_a_damaged_record_naming_it_replaced_not_written
     current = tcip_store.read_versioned(key).version
     tcip_store.replace(key, {"not_site": "x"}, expect=current)
 
-    result = _run_script(str(project), "south orchard", "--replace")
+    result = _run_command(str(project), "south orchard", "--replace")
 
     assert result.returncode == 0, result.stdout + result.stderr
     assert "replaced" in result.stdout

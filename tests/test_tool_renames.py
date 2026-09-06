@@ -220,7 +220,7 @@ DEMOTED = [
 
 def _demoted_tool_table_sites(name: str, files: list[str]) -> list[str]:
     """Every file whose Tools table still names ``name`` in its first cell, read through
-    ``scripts.verify_skill_tools``'s own ``tool_table_first_cells``/``extract_tool_name``: the
+    ``tools.verify_skill_tools``'s own ``tool_table_first_cells``/``extract_tool_name``: the
     one implementation of "what counts as a Tools table row" and "what name does this cell
     claim" the fabrication check itself uses, so a documented call signature like
     ``visualize(source="annotations", path=<image>)`` is caught the same way a bare
