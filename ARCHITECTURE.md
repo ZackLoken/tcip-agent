@@ -25,21 +25,21 @@ Sections:
 
 ## Module ownership and dependency graph
 
-Source: the module inventory `tools/build_module_inventory.py` produces, run at HEAD 5836b884.
+Source: the module inventory `tools/build_module_inventory.py` produces, run at HEAD 4e810820.
 Every count in this section is read from that regenerated inventory, not from any earlier
 snapshot; `tools/check_architecture_doc.py --inventory-json <path>` re-runs the same generator
 and cross-checks its counts against this document's tables, this table's own module and line
 totals included.
 
-HEAD 5836b884 has 424 modules across the six scanned roots (134223 total lines):
+HEAD 4e810820 has 424 modules across the six scanned roots (134826 total lines):
 
 | Package (root) | Modules | Lines |
 |---|---|---|
-| tcip-mcp | 134 | 60300 |
+| tcip-mcp | 134 | 60301 |
 | tcip-annotation | 12 | 4299 |
-| tcip-web | 39 | 13261 |
+| tcip-web | 39 | 13321 |
 | tcip-store | 13 | 5244 |
-| tcip-web-frontend | 209 | 46200 |
+| tcip-web-frontend | 209 | 46742 |
 | tools | 17 | 4919 |
 
 `tcip-mcp`, `tcip-annotation`, `tcip-web`, and `tcip-store` are the four Python packages under
@@ -975,10 +975,10 @@ registered at HEAD.
 
 | method | path | handler | line |
 |---|---|---|---|
-| POST | `/launch` | `launch_inference` | `routes/inference.py:434` |
-| GET | `/jobs` | `list_jobs` | `routes/inference.py:533` |
-| POST | `/jobs/{job_id}/cancel` | `cancel_job` | `routes/inference.py:538` |
-| WS | `/jobs/{job_id}/stream` | `stream_job` | `routes/inference.py:548` |
+| POST | `/launch` | `launch_inference` | `routes/inference.py:445` |
+| GET | `/jobs` | `list_jobs` | `routes/inference.py:593` |
+| POST | `/jobs/{job_id}/cancel` | `cancel_job` | `routes/inference.py:598` |
+| WS | `/jobs/{job_id}/stream` | `stream_job` | `routes/inference.py:608` |
 
 ### routes/meta.py, prefix `/api/meta` (2 routes)
 
@@ -1497,7 +1497,7 @@ doors span every category by whatever root their declared argument resolves; thi
 names the explicit-emitter files, not a closed census of the decorator's doors.
 Dataset-scoped: three GUI route writers passing the dataset root their own guard resolved
 (`routes/annotate.py`'s `_audit_gui_write`, `routes/annotate.py:159`; `routes/classes.py`'s `_audit_dataset_write`,
-`routes/classes.py:63`, which `routes/inference.py`'s own prediction writer calls too (`_audit_dataset_write`, `routes/inference.py:385`);
+`routes/classes.py:63`, which `routes/inference.py`'s own prediction writer calls too (`_audit_dataset_write`, `routes/inference.py:391`);
 `routes/review.py`'s `_audit`, `routes/review.py:95`), `resolution.py`'s `record_delivery_binding_event`
 (`resolution.py:2285`, dataset-scoped when a
 delivery's buckets share one dataset root, platform-scoped otherwise), and
@@ -2430,7 +2430,7 @@ Phase 3 verdict: single.
 
 Must agree: the MCP entry point and the GUI entry point start from the same unresolved defaults, and both read a caller's unstated parameter off the `None` sentinel rather than off equality with the default, so a caller who states the default value is honored as an override instead of being resolved as if they had stated nothing.
 Side A: `packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py:159` (`DEFAULT_CONF = 0.5`, with `DEFAULT_NMS_IOU`, `DEFAULT_OVERLAP` and `DEFAULT_MAX_DETS` declared beside it).
-Side B: `packages/tcip-web/src/tcip_web/routes/inference.py:32` (import; the sentinel form is `resolved_iou = DEFAULT_NMS_IOU if payload.iou is None else payload.iou`, `routes/inference.py:489`) and `packages/tcip-mcp/src/tcip_mcp/pipelines/training/eval_runners.py:15` (the delivery-grade evaluation binds the same constants, so the point a run is selected at starts where the point it ships at does). `packages/tcip-mcp/src/tcip_mcp/tools/inference_tools.py:582` is the same form for `run_inference` and `deliver_per_image_counts`, whose cap parameters default to `None`: the shared constant supplies the pass, and the unstated parameter travels to the resolver as unstated so it can derive one from the data.
+Side B: `packages/tcip-web/src/tcip_web/routes/inference.py:32` (import; the sentinel form is `resolved_iou = DEFAULT_NMS_IOU if payload.iou is None else payload.iou`, `routes/inference.py:546`) and `packages/tcip-mcp/src/tcip_mcp/pipelines/training/eval_runners.py:15` (the delivery-grade evaluation binds the same constants, so the point a run is selected at starts where the point it ships at does). `packages/tcip-mcp/src/tcip_mcp/tools/inference_tools.py:582` is the same form for `run_inference` and `deliver_per_image_counts`, whose cap parameters default to `None`: the shared constant supplies the pass, and the unstated parameter travels to the resolver as unstated so it can derive one from the data.
 Phase 3 verdict: single. One value is still spelled as a literal rather than bound: `predict_tiled`'s overlap default, `packages/tcip-mcp/src/tcip_mcp/pipelines/inference/generic_predictor.py:422`.
 
 ## S34. check_delivery_gate behind every delivery path
@@ -2549,7 +2549,7 @@ Phase 3 verdict: duplicated.
 ## S50. Inference job stream WebSocket  <!-- queued: P5-304 unify -->
 
 Must agree: the browser recognizes the terminal frame and the status vocabulary the backend uses.
-Side A: `packages/tcip-web/src/tcip_web/routes/inference.py:547` (`@router.websocket("/jobs/{job_id}/stream")`).
+Side A: `packages/tcip-web/src/tcip_web/routes/inference.py:607` (`@router.websocket("/jobs/{job_id}/stream")`).
 Side B: `packages/tcip-web/src/tcip_web/jobstore.py:122` (`TERMINAL_STATUSES = frozenset({"completed", "failed", "cancelled", "interrupted"})`).
 Phase 3 verdict: duplicated.
 
