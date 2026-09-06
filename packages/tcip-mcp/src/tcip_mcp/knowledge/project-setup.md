@@ -191,7 +191,8 @@ explicit `project_path` only to reach a *different* project's registry: that hol
 mode. `register_model`'s experiment mode binds only in the experiment's own root; a
 `project_path` there must name that same root or the call refuses by name. The repin reaches
 only the calling process, so a training run in flight keeps writing to the project it started
-under even if you (or the human, in the GUI) adopt another one meanwhile. The web backend converges on your adopt as soon as it delivers; an MCP server
+under even if you (or the human, in the GUI) adopt another one meanwhile. The web backend
+converges on your adopt as soon as it delivers; an MCP server
 you are already running converges only at its next start inside the platform's own agent
 terminal, so `inspect_project`'s divergence report is the guard in between.
 

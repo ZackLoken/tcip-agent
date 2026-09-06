@@ -146,8 +146,8 @@ later run to a partition an earlier run already drew, not for drawing the first 
 | `evaluate_model(run_id_or_ckpt, images_dir)` | Evaluates a trained checkpoint on a held-out dataset and writes `test_results.json`. |
 
 Before any number can ship, its confidence operating point needs validating against held-out
-ground truth: `scripts/calibrate_operating_point.py` runs one
-model pass over a disjoint calibration/holdout split, derives a count-unbiased detection
+ground truth: `scripts/calibrate_operating_point.py` runs one model pass over a disjoint
+calibration/holdout split, derives a count-unbiased detection
 operating point, and checks its held-out count bias (a trait whose delivery reads a classified
 positive state, such as a phenology milestone, instead calibrates through the
 `calibrate_classifier_operating_point` MCP tool; see the `evaluation` and `phenology` skills).
@@ -216,10 +216,10 @@ Working now:
   kept as small tile-local patches with a full-raster offset rather than one full-raster-sized
   array per detection.
 - Each detection resolves to a real-world coordinate and is matched to the nearest plant in a
-  plant-locations CSV (`assign_detections_to_plants`, which records the match source and
-  distance for each detection); an unmatched detection stays unmatched. Two MCP tools compose
-  the whole path end to end
-  the same way `build_plant_mapping` → `deliver_phenology_milestones` do for the per-photo case:
+  plant-locations CSV (`assign_detections_to_plants`, which records each detection's `source`
+  and `distance_m` and no confidence value); an unmatched detection stays unmatched. Two MCP
+  tools compose the whole path end to end the same way `build_plant_mapping` →
+  `deliver_phenology_milestones` do for the per-photo case:
   `run_inference`'s `raster_path` regime (tile, persist a prediction bucket) and
   `deliver_orthomosaic_plant_counts` (map detections to plants, aggregate, deliver through the
   same measurement-integrity gate every other per-plant CSV goes through).
