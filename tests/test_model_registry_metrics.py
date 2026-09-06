@@ -160,7 +160,7 @@ def test_best_model_lower_is_better_for_loss(tmp_path):
 
 def test_best_model_refuses_an_entry_with_no_metrics_source_key(tmp_path):
     """An entry predating the field is malformed, not just unverified: best_model refuses by
-    name and names the remedy (conform, then re-register through register_model), rather than
+    name and says no operator door adds the missing field to an existing entry, rather than
     silently skipping it like a legitimate metrics-less entry."""
     import pytest as _pytest
 
@@ -180,7 +180,7 @@ def test_best_model_refuses_an_entry_with_no_metrics_source_key(tmp_path):
         del document["entries"][0]["metrics_source"]
         txn.write(key, document)
 
-    with _pytest.raises(ValueError, match="re-register"):
+    with _pytest.raises(ValueError, match="no operator door adds either missing field"):
         ModelRegistry(str(tmp_path)).best_model("val_loss", higher_is_better=False)
 
 
