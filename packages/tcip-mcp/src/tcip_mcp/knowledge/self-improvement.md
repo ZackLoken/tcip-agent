@@ -41,7 +41,7 @@ Call `report_friction` when you notice any of these. One line is enough in the m
   or nowhere.
 - Environment / setup friction: a missing dependency, a stale path, a slow default.
 - A blocked or failed mandated action: a ritual call that errored, a guard that denied a
-  read-only command, `doctor.py` refusing to run. Never skip one silently.
+  read-only command, `tcip doctor` refusing to run. Never skip one silently.
 
 Over-report.
 

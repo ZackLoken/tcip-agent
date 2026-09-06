@@ -24,7 +24,7 @@ python tools/gate_baseline.py --out <dir>   # the CI-parity gate, Git Bash on Wi
 cd packages/tcip-web/frontend && npm run format:check && npm run lint && npm run typecheck && npm test && npm run build
 python -m tcip_web                 # backend plus built UI at http://127.0.0.1:8765
 tcip export-store <root>           # a root's database-held records back out as files
-tcip adopt-store <root>             # a root's loose record files into its database
+tcip adopt-store <root>            # a root's loose record files into its database
 ```
 
 `conda activate tcip-agent` is the environment every other line below runs inside, not a gate of
