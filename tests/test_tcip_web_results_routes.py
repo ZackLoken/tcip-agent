@@ -779,6 +779,30 @@ def test_web_and_mcp_export_csv_join_confs_the_same_way(
     assert all(row["operating_point_conf"] == "0.4;0.6" for row in web_rows)
 
 
+def test_export_csv_joins_confs_in_dates_delivered_order_not_the_requests_key_order(
+    client: TestClient, tmp_path: Path,
+) -> None:
+    """A request body naming the later date first in ``predictions_by_date`` still delivers the
+    joined ``operating_point_conf`` cell in sorted ``dates_delivered`` order, the order the cell
+    beside it is always joined in."""
+    body = _phenology_fixture(
+        tmp_path, validated=True, fractions=(0.5, 1.0), detections=4,
+        confs={"2026-02-11": 0.4, "2026-02-25": 0.6})
+    reordered = dict(reversed(list(body["predictions_by_date"].items())))
+    body = {**body, "predictions_by_date": reordered}
+
+    resp = client.post("/api/results/export_csv",
+                       json={**body, "payload": "milestones", "filename": "web.csv"})
+    assert resp.status_code == 200, resp.text[:300]
+
+    import csv as _csv
+
+    web_rows = list(_csv.DictReader(resp.text.splitlines()))
+    assert web_rows
+    assert all(row["operating_point_conf"] == "0.4;0.6" for row in web_rows)
+    assert all(row["dates_delivered"] == "2026-02-11;2026-02-25" for row in web_rows)
+
+
 def _rewrite_classifier_sidecars(body: dict, **overrides) -> None:
     """A genuine classifier record, so a wrong-trait/wrong-experiment refusal comes from the
     disagreement a real record surfaces rather than from an absent one. ``experiment_id`` here is

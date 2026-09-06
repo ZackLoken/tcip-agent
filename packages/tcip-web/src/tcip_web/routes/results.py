@@ -793,7 +793,7 @@ def export_csv(payload: ExportCsvPayload) -> Response:
             "results.export_csv", rows, saved_path, measurement.spec,
             flags=measurement.flags, acknowledgement=acknowledgement, basis=measurement.basis,
             operating_point_confs=measurement.validity["operating_point_confs"], producer=producer,
-            bindings=measurement.bindings, pred_dirs=measurement.pred_dirs,
+            bindings=measurement.bindings, predictions_by_date=measurement.predictions_by_date,
             project_root=measurement.project_root,
             plant_mapping=measurement.plant_mapping_disclosure)
     except AuditEntryNotWritten as exc:

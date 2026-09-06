@@ -353,6 +353,39 @@ def test_deliver_phenology_milestones_joins_confs_from_dates_calibrated_apart(tm
     assert all(row["operating_point_conf"] == "0.4;0.6" for row in rows)
 
 
+def test_deliver_phenology_milestones_joins_confs_in_dates_delivered_order_not_the_callers_dict_order(
+    tmp_path: Path,
+) -> None:
+    """The conf cell follows the sorted delivered-date order, not the caller's dict order: a
+    ``predictions_by_date`` passed with the later date first still delivers the earlier date's
+    conf first, matching the sorted ``dates_delivered`` cell beside it."""
+    root = _ds_root(tmp_path)
+    d1, d2 = _bucket(tmp_path, "2026-02-11"), _bucket(tmp_path, "2026-03-09")
+    _write_preds(d1, "P1_a", ["closed"])
+    _write_preds(d2, "P1_b", ["open"])
+    _write_op_sidecar(d1, dataset_root=root, validated=True, id_map=ID_MAP, conf=0.4)
+    _write_op_sidecar(d2, dataset_root=root, validated=True, id_map=ID_MAP, conf=0.6)
+    _write_classifier_sidecar(d1, dataset_root=root, validated=True, trait="bud_opening")
+    mapping_name = "valley"
+    _write_mapping(tmp_path, mapping_name, {
+        "2026-02-11": [{"stem": "P1_a", "plot_name": "P1", "accession_name": "acc-9"}],
+        "2026-03-09": [{"stem": "P1_b", "plot_name": "P1", "accession_name": "acc-9"}],
+    })
+    out_csv = tmp_path / "out" / "bud_phenology.csv"
+
+    res = deliver_phenology_milestones(
+        trait="bud_opening", mapping_name=mapping_name,
+        predictions_by_date={"2026-03-09": str(d2), "2026-02-11": str(d1)},
+        output_csv_path=str(out_csv), classifier_pred_dirs=[str(d1)],
+    )
+
+    assert "error" not in res, res
+    rows = _delivered_rows(out_csv)
+    assert rows
+    assert all(row["operating_point_conf"] == "0.4;0.6" for row in rows)
+    assert all(row["dates_delivered"] == "2026-02-11;2026-03-09" for row in rows)
+
+
 def test_deliver_phenology_milestones_blanks_a_bucket_with_no_numeric_conf_in_the_joined_cell(
     tmp_path: Path,
 ) -> None:
@@ -674,7 +707,7 @@ def _deliver_via_writer(
         "test", result["rows"], Path(output_csv_path), spec, flags=flags,
         acknowledgement=acknowledgement, basis=stated.basis,
         operating_point_confs=recon["confs"],
-        producer={}, bindings=recon["bindings"], pred_dirs=pred_dirs,
+        producer={}, bindings=recon["bindings"], predictions_by_date=predictions_by_date,
         project_root=platform_root, plant_mapping=disclosure)
 
 
