@@ -251,7 +251,7 @@ def test_a_trait_authored_and_confirmed_through_this_surface_delivers_end_to_end
         majority_provisional=True,
         majority_label="opening",
         notes=BUD_OPENING.notes,
-        rationale="the breeder called opening the frilled/salt-and-peppery texture change, "
+        rationale="the breeder called open a texture change on the object itself, "
                   "never a bbox-ratio proxy, and wants the 5/50/95% crossings of that call",
     )
     seen = traits.trait_spec_statement_seen_hash(statement)

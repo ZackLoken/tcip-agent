@@ -53,7 +53,7 @@ def _save_registry(client: TestClient, root: Path, bud_attributes: dict) -> None
             "project_root": str(root),
             "dataset_root": str(root),
             "subjects": {
-                "bud": {"description": "the male flower", "attributes": bud_attributes},
+                "bud": {"description": "a bud", "attributes": bud_attributes},
                 "bush": {"description": "one plant crown"},
             },
             "version": version,

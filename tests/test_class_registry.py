@@ -191,7 +191,7 @@ def test_a_copied_registry_declares_the_same_document_in_the_same_order(tmp_path
     source.mkdir()
     destination.mkdir()
     write_registry(source / "classes.json", ClassRegistry(subjects=(
-        Subject(name="bud", description="a männlich flower"),
+        Subject(name="bud", description="a description with an ümlaut"),
         Subject(name="bush"),
     )))
 

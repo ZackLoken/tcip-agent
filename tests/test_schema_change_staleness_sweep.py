@@ -45,7 +45,7 @@ def _subjects(bud_attributes: dict, bush_attributes: dict | None = None) -> dict
     bush: dict = {"description": "one plant crown"}
     if bush_attributes is not None:
         bush["attributes"] = bush_attributes
-    return {"bud": {"description": "the male flower", "attributes": bud_attributes},
+    return {"bud": {"description": "a bud", "attributes": bud_attributes},
             "bush": bush}
 
 

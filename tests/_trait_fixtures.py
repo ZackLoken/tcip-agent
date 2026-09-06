@@ -1,7 +1,7 @@
 """Shared test-only trait fixture.
 
-``BUD_OPENING`` used to be a hardcoded builtin in ``tcip_mcp.traits`` (under the pilot crop's own
-vocabulary) that every trait-consuming test imported directly. There are no built-ins anymore;
+``BUD_OPENING`` used to be a hardcoded builtin in ``tcip_mcp.traits`` that every trait-consuming
+test imported directly. There are no built-ins anymore;
 every trait is authored as a per-project ``.tcip/state/trait_specs/*.yml`` file, so it is
 registered only where that file actually exists. This module is that same value, reconstructed
 locally with neutral names (a mechanism fixture, not a crop's own trait) so the existing test suite
@@ -36,6 +36,6 @@ BUD_OPENING = TraitSpec(
     sliver_policy="class_avg_size",
     sliver_frac=0.5,
     delivers=("leaf_out_05per_date", "leaf_out_50per_date"),
-    notes="Bloom = fraction of a plant's buds that are open. Open is a texture call "
-          "(frilled/salt-and-peppery), never a bbox-ratio proxy.",
+    notes="The fraction of a plant's bud objects that are open: a texture call on the object "
+          "itself, never a bbox-ratio proxy.",
 )
