@@ -263,13 +263,111 @@ def test_deliver_phenology_milestones_delivers_when_both_validated(tmp_path: Pat
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv),
         classifier_pred_dirs=[str(d1)],
-        operating_point_conf=0.4,
-        operating_point_validated="held_out_annotations",
     )
 
     assert "error" not in res, res
     assert res["positive_class_assessed"] is True
     assert out_csv.exists()
+
+
+def test_deliver_phenology_milestones_signature_names_neither_retired_parameter() -> None:
+    """The two caller-stated operating-point parameters are gone; nothing replaces them."""
+    import inspect
+
+    names = set(inspect.signature(deliver_phenology_milestones).parameters)
+    assert "operating_point_conf" not in names
+    assert "operating_point_validated" not in names
+
+
+def test_deliver_phenology_milestones_derives_one_conf_from_two_stamps_with_no_caller_parameter(
+    tmp_path: Path,
+) -> None:
+    """Coverage: two validated stamps recording the same conf write it into every row, with no
+    operating-point parameter this door no longer accepts."""
+    root = _ds_root(tmp_path)
+    d1, d2 = _bucket(tmp_path, "2026-02-11"), _bucket(tmp_path, "2026-03-09")
+    _write_preds(d1, "P1_a", ["closed"])
+    _write_preds(d2, "P1_b", ["open"])
+    _write_op_sidecar(d1, dataset_root=root, validated=True, id_map=ID_MAP, conf=0.4)
+    _write_op_sidecar(d2, dataset_root=root, validated=True, id_map=ID_MAP, conf=0.4)
+    _write_classifier_sidecar(d1, dataset_root=root, validated=True, trait="bud_opening")
+    mapping_name = "valley"
+    _write_mapping(tmp_path, mapping_name, {
+        "2026-02-11": [{"stem": "P1_a", "plot_name": "P1", "accession_name": "acc-9"}],
+        "2026-03-09": [{"stem": "P1_b", "plot_name": "P1", "accession_name": "acc-9"}],
+    })
+    out_csv = tmp_path / "out" / "bud_phenology.csv"
+
+    res = deliver_phenology_milestones(
+        trait="bud_opening", mapping_name=mapping_name,
+        predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
+        output_csv_path=str(out_csv), classifier_pred_dirs=[str(d1)],
+    )
+
+    assert "error" not in res, res
+    rows = _delivered_rows(out_csv)
+    assert rows
+    assert all(row["operating_point_conf"] == "0.4" for row in rows)
+
+
+def test_deliver_phenology_milestones_joins_confs_from_dates_calibrated_apart(tmp_path: Path) -> None:
+    """GUARDS: two validated stamps recording different confs deliver the joined cell, in
+    dates_delivered order, rather than the blank cell a caller-agreement rule once produced."""
+    root = _ds_root(tmp_path)
+    d1, d2 = _bucket(tmp_path, "2026-02-11"), _bucket(tmp_path, "2026-03-09")
+    _write_preds(d1, "P1_a", ["closed"])
+    _write_preds(d2, "P1_b", ["open"])
+    _write_op_sidecar(d1, dataset_root=root, validated=True, id_map=ID_MAP, conf=0.4)
+    _write_op_sidecar(d2, dataset_root=root, validated=True, id_map=ID_MAP, conf=0.6)
+    _write_classifier_sidecar(d1, dataset_root=root, validated=True, trait="bud_opening")
+    mapping_name = "valley"
+    _write_mapping(tmp_path, mapping_name, {
+        "2026-02-11": [{"stem": "P1_a", "plot_name": "P1", "accession_name": "acc-9"}],
+        "2026-03-09": [{"stem": "P1_b", "plot_name": "P1", "accession_name": "acc-9"}],
+    })
+    out_csv = tmp_path / "out" / "bud_phenology.csv"
+
+    res = deliver_phenology_milestones(
+        trait="bud_opening", mapping_name=mapping_name,
+        predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
+        output_csv_path=str(out_csv), classifier_pred_dirs=[str(d1)],
+    )
+
+    assert "error" not in res, res
+    rows = _delivered_rows(out_csv)
+    assert rows
+    assert all(row["operating_point_conf"] == "0.4;0.6" for row in rows)
+
+
+def test_deliver_phenology_milestones_blanks_a_bucket_with_no_numeric_conf_in_the_joined_cell(
+    tmp_path: Path,
+) -> None:
+    """GUARDS: a validated stamp with no numeric conf beside one at 0.4 delivers "0.4;" rather
+    than the scalar 0.4 the baseline's reconciler answered for both."""
+    root = _ds_root(tmp_path)
+    d1, d2 = _bucket(tmp_path, "2026-02-11"), _bucket(tmp_path, "2026-03-09")
+    _write_preds(d1, "P1_a", ["closed"])
+    _write_preds(d2, "P1_b", ["open"])
+    _write_op_sidecar(d1, dataset_root=root, validated=True, id_map=ID_MAP, conf=0.4)
+    _write_op_sidecar(d2, dataset_root=root, validated=True, id_map=ID_MAP, conf=None)
+    _write_classifier_sidecar(d1, dataset_root=root, validated=True, trait="bud_opening")
+    mapping_name = "valley"
+    _write_mapping(tmp_path, mapping_name, {
+        "2026-02-11": [{"stem": "P1_a", "plot_name": "P1", "accession_name": "acc-9"}],
+        "2026-03-09": [{"stem": "P1_b", "plot_name": "P1", "accession_name": "acc-9"}],
+    })
+    out_csv = tmp_path / "out" / "bud_phenology.csv"
+
+    res = deliver_phenology_milestones(
+        trait="bud_opening", mapping_name=mapping_name,
+        predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
+        output_csv_path=str(out_csv), classifier_pred_dirs=[str(d1)],
+    )
+
+    assert "error" not in res, res
+    rows = _delivered_rows(out_csv)
+    assert rows
+    assert all(row["operating_point_conf"] == "0.4;" for row in rows)
 
 
 def test_deliver_phenology_milestones_reports_an_unreadable_prediction_by_name(tmp_path: Path) -> None:
@@ -297,8 +395,6 @@ def test_deliver_phenology_milestones_reports_an_unreadable_prediction_by_name(t
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv),
         classifier_pred_dirs=[str(d1)],
-        operating_point_conf=0.4,
-        operating_point_validated="held_out_annotations",
     )
 
     assert "error" in res
@@ -350,8 +446,6 @@ def test_deliver_phenology_milestones_re_reads_the_registry_at_the_second_check(
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv),
         classifier_pred_dirs=[str(d1)],
-        operating_point_conf=0.4,
-        operating_point_validated="held_out_annotations",
     )
 
     assert calls["n"] >= 2
@@ -383,8 +477,6 @@ def test_deliver_phenology_milestones_floors_a_count_stamp_earned_for_a_differen
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv),
         classifier_pred_dirs=[str(d1)],
-        operating_point_conf=0.4,
-        operating_point_validated="held_out_annotations",
     )
 
     assert "error" in res
@@ -455,8 +547,6 @@ def test_deliver_phenology_milestones_rejects_classifier_stamp_from_unrelated_ru
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv),
         classifier_pred_dirs=[str(other_trait_dir)],
-        operating_point_conf=0.4,
-        operating_point_validated="held_out_annotations",
     )
 
     assert "error" in res
@@ -492,8 +582,6 @@ def test_deliver_phenology_milestones_rejects_classifier_stamp_with_no_trait_rec
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv),
         classifier_pred_dirs=[str(d1)],
-        operating_point_conf=0.4,
-        operating_point_validated="held_out_annotations",
     )
 
     assert "error" in res
@@ -529,7 +617,6 @@ def test_deliver_phenology_milestones_refuses_unvalidated_classifier(tmp_path: P
 def _deliver_via_writer(
     *, trait: str, mapping_name: str, predictions_by_date: dict[str, str],
     output_csv_path: Path, classifier_pred_dirs: list[str] | None = None,
-    operating_point_conf: float | None = None, operating_point_validated: str | None = None,
     acknowledgement,
 ) -> dict:
     """Deliver through the canonical writer directly, built from the same reconciliation, basis
@@ -556,8 +643,7 @@ def _deliver_via_writer(
     disclosure = mapping_build.delivery_disclosure(verified, list(predictions_by_date))
 
     pred_dirs = list(predictions_by_date.values())
-    recon = reconcile_operating_point_validity(
-        pred_dirs, trait=trait, asserted=operating_point_validated)
+    recon = reconcile_operating_point_validity(pred_dirs, trait=trait)
     classifier_recon = reconcile_classifier_validity(classifier_pred_dirs or [])
     classifier_state, _note = bind_classifier_validity(
         classifier_recon["validated"], classifier_pred_dirs, pred_dirs, trait=trait)
@@ -573,8 +659,7 @@ def _deliver_via_writer(
     return phenology.write_phenology_csv(
         "test", result["rows"], Path(output_csv_path), spec, flags=flags,
         acknowledgement=acknowledgement, basis=stated.basis,
-        operating_point_conf=(operating_point_conf if operating_point_conf is not None
-                              else recon["conf"]),
+        operating_point_confs=recon["confs"],
         producer={}, bindings=recon["bindings"], pred_dirs=pred_dirs,
         project_root=platform_root, plant_mapping=disclosure)
 
@@ -653,7 +738,6 @@ def test_writer_acknowledge_stamps_each_dimension_independently(tmp_path: Path) 
         mapping_name=mapping_name,
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=out_csv,
-        operating_point_validated="held_out_annotations",
         acknowledgement=Acknowledgement(acknowledged_by="user:tester", reason="test acknowledgement"),
     )
     assert cells["positive_state_classifier_validated"] == "false"  # never upgraded
@@ -1914,7 +1998,6 @@ def test_deliver_phenology_milestones_names_the_record_and_producer_a_bound_buck
         trait="bud_opening", mapping_name=mapping_name,
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv), classifier_pred_dirs=[str(d1)],
-        operating_point_conf=0.4, operating_point_validated="held_out_annotations",
     )
 
     assert "error" not in res, res
@@ -1955,7 +2038,6 @@ def test_writer_delivers_a_forged_stamp_acknowledged_with_no_producer_names(
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=out_csv,
         classifier_pred_dirs=[str(d1)],
-        operating_point_conf=0.4,
         acknowledgement=Acknowledgement(acknowledged_by="user:tester", reason="test acknowledgement"),
     )
 
@@ -1984,7 +2066,6 @@ def test_deliver_phenology_milestones_records_what_verification_found_in_the_dat
         trait="bud_opening", mapping_name=mapping_name,
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv), classifier_pred_dirs=[str(d1)],
-        operating_point_conf=0.4, operating_point_validated="held_out_annotations",
     )
 
     assert "error" not in res, res

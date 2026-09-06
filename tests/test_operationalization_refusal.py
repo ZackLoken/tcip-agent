@@ -444,8 +444,6 @@ def _validated_call(body: dict) -> dict:
     """The arguments that clear every evidence dimension for a fully stamped fixture."""
     return {
         "classifier_pred_dirs": list(body["predictions_by_date"].values()),
-        "operating_point_conf": 0.4,
-        "operating_point_validated": "held_out_annotations",
     }
 
 

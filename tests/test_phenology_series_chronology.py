@@ -299,7 +299,6 @@ def test_delivered_csv_marks_a_milestone_the_first_capture_only_bounds(tmp_path)
         predictions_by_date={d: str(buckets[d]) for d in counts},
         output_csv_path=str(out_csv),
         classifier_pred_dirs=[str(buckets["2026-03-01"])],
-        operating_point_validated="held_out_annotations",
     )
 
     assert "error" not in res, res

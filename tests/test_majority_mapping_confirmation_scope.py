@@ -143,7 +143,6 @@ def _deliver(tmp_path: Path, spec: dict, *, validated: bool) -> dict:
         predictions_by_date=dirs,
         output_csv_path=str(out_csv),
         classifier_pred_dirs=classifier_dirs,
-        operating_point_validated="held_out_annotations",
     )
     if not validated:
         return res
