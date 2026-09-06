@@ -936,25 +936,93 @@ def test_bucket_regime_delivers_validated_after_the_stamp_is_promoted(tmp_path):
     assert rows[0]["validation_record"] == f"{pointer['experiment_id']}:{pointer['record_digest']}"
 
 
+def _write_raw_stamp(bucket, stamp: dict) -> None:
+    """A bucket's own ``operating_point.json``, written straight through the store, bypassing
+    ``write_sidecar``'s rail: the only way to mint a stamp that decodes with no usable
+    ``(subject, attribute)`` pair, the shape a live producer can no longer write."""
+    from pathlib import Path
+
+    import tcip_store as ts
+    from tcip_mcp.pipelines.resolution import sidecar_key
+
+    Path(bucket).mkdir(parents=True, exist_ok=True)
+    ts.replace(sidecar_key(bucket, "operating_point"), stamp, expect=ts.Version.ABSENT)
+
+
+def _damage_stamp_bytes(bucket) -> None:
+    """Corrupt ``bucket``'s already-written stamp bytes in place, wherever the bound backend
+    keeps them, so a strict read raises a real ``StoreError`` (mirrors
+    test_repair_classified_predictions.py's own ``_damage_record`` helper)."""
+    import os
+
+    from tcip_mcp.pipelines.resolution import sidecar_key
+    from tcip_store.binding import BACKEND_ENV, DEFAULT_BACKEND, FILE_BACKEND
+    from tcip_store.store import _backend
+
+    key = sidecar_key(bucket, "operating_point")
+    name = os.environ.get(BACKEND_ENV) or DEFAULT_BACKEND
+    if name == FILE_BACKEND:
+        _backend().path_for(key).write_bytes(b"{not json")
+        return
+    import sqlite3
+
+    from tcip_store.sqlite_backend import database_path, encode_parts
+
+    conn = sqlite3.connect(str(database_path(str(key.root))), isolation_level=None)
+    try:
+        conn.execute(
+            "update records set value = ? where store = ? and parts = ?",
+            (b"{not json", key.store, encode_parts(key.parts)),
+        )
+    finally:
+        conn.close()
+
+
+def _real_stamp_scope_unstated(tmp_path, name: str):
+    """A real ``StampScopeUnstated``, earned from an actual ``bucket_scope`` call over a bucket
+    whose stamp decodes with no pair: a raw sidecar write is the only producer of that shape."""
+    from tcip_mcp.pipelines.resolution import StampScopeUnstated, bucket_scope
+
+    scratch = tmp_path / name
+    _write_raw_stamp(scratch, {"checkpoint_sha256": "f" * 64})
+    with pytest.raises(StampScopeUnstated) as excinfo:
+        bucket_scope(scratch)
+    return excinfo.value
+
+
+def _real_store_error(tmp_path, name: str):
+    """A real ``StoreError``, earned from an actual ``bucket_scope`` call over a bucket whose
+    stamp will not decode at all."""
+    from tcip_store import StoreError
+    from tcip_mcp.pipelines.resolution import bucket_scope
+
+    scratch = tmp_path / name
+    _write_raw_stamp(scratch, {"checkpoint_sha256": "f" * 64, "subject": "s", "attribute": None})
+    _damage_stamp_bytes(scratch)
+    with pytest.raises(StoreError) as excinfo:
+        bucket_scope(scratch)
+    return excinfo.value
+
+
 def test_the_live_regimes_export_detection_csv_stamp_scope_unstated_becomes_the_tools_own_error(
     tmp_path, monkeypatch,
 ):
-    """A no-pair stamp survives no live publish (``operating_point_stamp`` requires the pair with
-    no default), so this call site's own conversion has no naturally reachable shape to test
-    through: ``export_detection_csv`` is monkeypatched directly to raise ``StampScopeUnstated``,
+    """This conversion is defence in depth behind an identical earlier check: the fresh stamp
+    ``_publish_bucket_bracket`` writes at this live site always carries the pair
+    (``operating_point_stamp`` requires it with no default), so a no-pair stamp never survives a
+    live publish and this call site's own conversion has no naturally reachable shape to test
+    through. A real ``StampScopeUnstated``, earned from an actual ``bucket_scope`` call rather
+    than a test-written message, is raised from the monkeypatched ``export_detection_csv``,
     pinning that this ``{"error": ...}`` conversion names the conform script rather than
     surfacing the seam's own error bare."""
     import tcip_mcp.tools.inference_tools as itools
-    from tcip_mcp.pipelines.resolution import StampScopeUnstated
 
     monkeypatch.setattr(itools, "_run_inference_verified",
                         lambda *a, **kw: _unvalidated_run_result())
+    real_exc = _real_stamp_scope_unstated(tmp_path, "no_pair_stamp")
 
     def _raise(*a, **kw):
-        raise StampScopeUnstated(
-            "bucket: operating_point.json carries no subject/attribute pair. Run "
-            "tcip repair-classified-predictions over this bucket before reading its scope."
-        )
+        raise real_exc
 
     monkeypatch.setattr(itools, "export_detection_csv", _raise)
 
@@ -967,14 +1035,45 @@ def test_the_live_regimes_export_detection_csv_stamp_scope_unstated_becomes_the_
     assert "tcip repair-classified-predictions" in r["error"]
 
 
+def test_the_live_regimes_export_detection_csv_store_error_becomes_the_tools_own_error(
+    tmp_path, monkeypatch,
+):
+    """This call site's other conversion arm, defence in depth for the same reason as the
+    ``StampScopeUnstated`` arm above: the fresh stamp ``_publish_bucket_bracket`` writes at this
+    live site is always readable, so an undecodable stamp never survives a live publish. A real
+    ``StoreError``, earned from an actual ``bucket_scope`` call over an undecodable stamp, converts
+    to the same ``{"error": ...}`` shape."""
+    import tcip_mcp.tools.inference_tools as itools
+
+    monkeypatch.setattr(itools, "_run_inference_verified",
+                        lambda *a, **kw: _unvalidated_run_result())
+    real_exc = _real_store_error(tmp_path, "undecodable_stamp")
+
+    def _raise(*a, **kw):
+        raise real_exc
+
+    monkeypatch.setattr(itools, "export_detection_csv", _raise)
+
+    bucket = tmp_path / "ds" / "predictions" / "baseline" / "2026-01-01"
+    r = itools.deliver_per_image_counts(_dummy_checkpoint(tmp_path), str(tmp_path),
+                               str(tmp_path / "o.csv"), trait=fx.COUNT_TRAIT,
+                               predictions_dir=str(bucket))
+
+    assert "error" in r
+    assert str(real_exc) in r["error"]
+
+
 def test_per_image_counts_from_bucket_converts_export_detection_csvs_stamp_scope_unstated(
     tmp_path, monkeypatch,
 ):
-    """The bucket regime's own core converts the same raise into ``CountDeliveryRefused``: the
-    door's pre-check already refuses a no-pair stamp before this call site is ever reached, so
-    ``export_detection_csv`` is monkeypatched directly to pin the conversion itself."""
+    """This conversion is defence in depth behind an identical earlier check:
+    ``per_image_counts_from_bucket``'s own ``bucket_scope`` call at the bucket site already
+    refuses a no-pair stamp before this call site is ever reached, so the bucket under test here
+    carries a real, fully scoped stamp and a real ``StampScopeUnstated``, earned from a separate
+    scratch bucket's actual ``bucket_scope`` call, is raised from the monkeypatched
+    ``export_detection_csv`` to pin the conversion at this call site specifically."""
     import tcip_mcp.tools.inference_tools as itools
-    from tcip_mcp.pipelines.resolution import CountDeliveryRefused, StampScopeUnstated
+    from tcip_mcp.pipelines.resolution import CountDeliveryRefused
 
     dataset_root = tmp_path / "ds"
     bucket = dataset_root / "predictions" / "baseline" / "2026-01-01"
@@ -983,12 +1082,10 @@ def test_per_image_counts_from_bucket_converts_export_detection_csvs_stamp_scope
              "trait": fx.COUNT_TRAIT, "images_dir": str(tmp_path), "raster_path": None,
              "operating_point": {"conf": {"value": 0.5, "validated_against": VALIDATED_HELD_OUT}}}
     write_bound_sidecar(bucket, stamp, dataset_root=dataset_root)
+    real_exc = _real_stamp_scope_unstated(tmp_path, "no_pair_stamp")
 
     def _raise(*a, **kw):
-        raise StampScopeUnstated(
-            f"{bucket}: operating_point.json carries no subject/attribute pair. Run "
-            "tcip repair-classified-predictions over this bucket before reading its scope."
-        )
+        raise real_exc
 
     monkeypatch.setattr(itools, "export_detection_csv", _raise)
 
@@ -997,3 +1094,35 @@ def test_per_image_counts_from_bucket_converts_export_detection_csvs_stamp_scope
             str(bucket), str(tmp_path / "o.csv"), trait=fx.COUNT_TRAIT)
 
     assert "tcip repair-classified-predictions" in str(excinfo.value)
+
+
+def test_per_image_counts_from_bucket_converts_export_detection_csvs_store_error(
+    tmp_path, monkeypatch,
+):
+    """This call site's other conversion arm, defence in depth for the same reason as the
+    ``StampScopeUnstated`` arm above: ``per_image_counts_from_bucket``'s own ``bucket_scope`` call
+    at the bucket site already refuses an undecodable stamp before this call site is reached. A
+    real ``StoreError``, earned from an actual ``bucket_scope`` call over an undecodable stamp on
+    a separate scratch bucket, converts to the same ``CountDeliveryRefused`` shape."""
+    import tcip_mcp.tools.inference_tools as itools
+    from tcip_mcp.pipelines.resolution import CountDeliveryRefused
+
+    dataset_root = tmp_path / "ds"
+    bucket = dataset_root / "predictions" / "baseline" / "2026-01-01"
+    _write_real_prediction(bucket, "a")
+    stamp = {"subject": fx.COUNT_SUBJECT, "attribute": None, "validated": True,
+             "trait": fx.COUNT_TRAIT, "images_dir": str(tmp_path), "raster_path": None,
+             "operating_point": {"conf": {"value": 0.5, "validated_against": VALIDATED_HELD_OUT}}}
+    write_bound_sidecar(bucket, stamp, dataset_root=dataset_root)
+    real_exc = _real_store_error(tmp_path, "undecodable_stamp")
+
+    def _raise(*a, **kw):
+        raise real_exc
+
+    monkeypatch.setattr(itools, "export_detection_csv", _raise)
+
+    with pytest.raises(CountDeliveryRefused) as excinfo:
+        itools.per_image_counts_from_bucket(
+            str(bucket), str(tmp_path / "o.csv"), trait=fx.COUNT_TRAIT)
+
+    assert str(real_exc) in str(excinfo.value)
