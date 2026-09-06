@@ -1844,6 +1844,35 @@ def test_classification_items_refuses_a_registry_not_declaring_the_positive_valu
     assert "closed" in message and "other" in message
 
 
+def test_classification_items_refuses_an_id_map_not_declaring_the_positive_value(
+    tmp_path: Path,
+) -> None:
+    """A classified bucket's own recorded id_map, not any registry, is the vocabulary a
+    calibration against it is held to: the refusal names the bucket and its id_map, never a
+    registry that was never consulted."""
+    from tcip_mcp.pipelines.resolution import operating_point_stamp, write_sidecar
+
+    gt_dir, pred_dir = tmp_path / "gt", tmp_path / "pred"
+    _write_pair(gt_dir, pred_dir, gt_value="closed", pred_value="closed")
+    stamp = operating_point_stamp(
+        {}, validated=False, validated_by=None, tile_size_validated=None, shippable_issues=[],
+        id_map={"closed": 0, "other": 1}, subject="bud", attribute="opening", trait=None,
+        dataset_hash=None, checkpoint=None, checkpoint_sha256=None, experiment_id=None,
+        images_dir=None, raster_path=None, produced_at=None,
+    )
+    write_sidecar(pred_dir, stamp)
+
+    with pytest.raises(ValueError) as exc:
+        _classification_items(str(gt_dir), str(pred_dir), trait_name="bud_opening", subject="bud",
+                              positive_value="open", attribute="opening")
+
+    message = str(exc.value)
+    assert str(Path(pred_dir)) in message
+    assert "id_map" in message
+    assert "'open'" in message
+    assert "registry" not in message
+
+
 def test_classification_items_refuses_a_ground_truth_value_outside_the_registry(
     tmp_path: Path,
 ) -> None:
