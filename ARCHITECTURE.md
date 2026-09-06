@@ -1345,7 +1345,11 @@ Readers: `tcip_mcp.pipelines.data.label_queries.confirmed_negative_names`,
 `tcip_mcp.class_registry._sweep_schema_change`,
 `packages/tcip-mcp/src/tcip_mcp/class_registry.py:287`, which enumerates every bucket of a
 subject whose attribute schema is about to change so the confirmations under it can be stamped
-before the outgoing digest is gone.
+before the outgoing digest is gone; `routes.classes.get_image_status`,
+`packages/tcip-web/src/tcip_web/routes/classes.py:308`, through
+`tcip_mcp.pipelines.data.label_queries.stale_finished_names`,
+`packages/tcip-mcp/src/tcip_mcp/pipelines/data/label_queries.py:539`, the public D1 reader over a
+resolved dataset root.
 
 `IMAGE_STATUSES = ("complete", "partial", CONFIRMED_NEGATIVE, "unannotated")`,
 `packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:871`, imported by the web route module.
@@ -1383,11 +1387,12 @@ vocabulary. Both writers reach the store through the one transactional writer
 `packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:1023`, whose `only_unstamped` argument keeps
 the sweep from re-dating a stamp the confirmation-time writer already set.
 
-Reader: `tcip_mcp.pipelines.data.label_queries.confirmed_negative_records`'s quarantine logic,
-`packages/tcip-mcp/src/tcip_mcp/pipelines/data/label_queries.py:609`
-(`quarantined_out.update(stale)`); a name whose stamp no longer matches the registry's current
-schema is dropped as `quarantined_stale_definition` rather than trained as a negative,
-`packages/tcip-mcp/src/tcip_mcp/pipelines/data/label_queries.py:355`
+Reader: `tcip_mcp.pipelines.data.label_queries._stale_finished`,
+`packages/tcip-mcp/src/tcip_mcp/pipelines/data/label_queries.py:493`, the quarantine logic
+shared by `confirmed_negative_records` and the public `stale_finished_names`; a name whose stamp
+no longer matches the registry's current schema is dropped as `quarantined_stale_definition`
+rather than trained by its stored confirmation, complete or negative alike,
+`packages/tcip-mcp/src/tcip_mcp/pipelines/data/label_queries.py:365`
 (`counts["quarantined_stale_definition"] += 1`).
 
 Seam S23 ("image_status_digest.json attribute-schema stamp"), verdict `both-sides-restated`,
@@ -2282,7 +2287,7 @@ and nothing ever read it back out: the dataset's real confirmed-negative store i
 `image_status.json`, addressed by `image_status_key`, the seam this entry once asked to agree
 with. The key stopped being written; a project's existing record still carrying it was corrected
 by a one-off operator script, since applied and retired.
-Side A: `packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:903` (`def is_confirmed_negative(`, the one membership predicate; `normalize_status_store` is the one store guard, called by `confirmed_negative_names` and the resolver's confirmations term instead of inline re-implementations).
+Side A: `packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:911` (`def is_confirmed_negative(`, the one membership predicate, beside `is_finished_status` at `:919` for the wider complete-or-negative pair; `normalize_status_store` is the one store guard, called by `confirmed_negative_names` and the resolver's confirmations term instead of inline re-implementations).
 Side B: `packages/tcip-web/src/tcip_web/routes/classes.py` (`set_image_status`, writing through the registered store).
 Phase 3 verdict: single. `packages/tcip-web/src/tcip_web/routes/sessions.py:316` (`if is_confirmed_negative(status):`, session time classification) calls the same predicate against the real `image_status.json` rather than restating it.
 
