@@ -84,5 +84,4 @@ newest entries first; a corrupt or unreadable page is refused rather than answer
 
 ## Honesty
 
-Report what you actually did. If you skipped a capture, say so. A learning record that pretends to
-have learned is worse than none.
+Report what you actually did. If you skipped a capture, say so.
