@@ -404,10 +404,12 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
         The trait is written only when a gate was cleared, so a bucket carries the trait its claim
         was earned for and an honest placeholder claims no scope at all.
 
-        ``stored`` is never empty here: a bucket with no stamp of its own was already refused
-        before the review's operating point was resolved. Its own pair (present or, for a pre-key
-        stamp, absent) is carried forward unchanged by the plain ``dict(stored)`` below; the rail
-        refuses a merge that ends up with neither key.
+        ``stored`` is never empty for the body this route read and refused on before taking the
+        lock: a bucket with no stamp of its own was already refused before the review's operating
+        point was resolved. The in-lock read in ``_promote`` below can still be empty, if the
+        stamp was deleted between that read and this one; ``update_sidecar``'s own rail refuses a
+        merge that ends up with neither key. Its own pair (present or, for a pre-key stamp,
+        absent) is carried forward unchanged by the plain ``dict(stored)`` below.
         """
         merged = dict(stored)
         merged.update({
