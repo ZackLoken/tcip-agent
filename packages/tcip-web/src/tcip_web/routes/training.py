@@ -86,11 +86,17 @@ def relaunch_config_route(payload: RelaunchConfigPayload) -> dict:
     carries ``data.split`` replaced wholesale by ``{"manifest_dir": chosen}`` with any
     ``data.val_images_dir`` removed; ``auto_train_val`` clears the previous binding's own stamps
     on its way to a fresh one.
+
+    The launch is wrapped in ``declare_launcher("gui")``, so the run's status record stamps
+    ``launched_by: {"launcher": "gui"}``: the fact this route started it, true of whatever client
+    actually posted here (a browser, a script, another agent), since nothing here tells them
+    apart; that distinction is a later authentication concern, not this route's.
     """
     from tcip_mcp.experiments import config_key, read_member, status_key
     from tcip_mcp.pipelines.model_build import MODEL_SOURCE_KEY
     from tcip_mcp.tools.training_tools import (
-        candidate_config_with_manifest, launch_training, list_split_choices, split_dir_identity,
+        candidate_config_with_manifest, declare_launcher, launch_training, list_split_choices,
+        split_dir_identity,
     )
 
     config = read_member(config_key(payload.experiment_id), None)
@@ -114,7 +120,8 @@ def relaunch_config_route(payload: RelaunchConfigPayload) -> dict:
             )
         config = candidate_config_with_manifest(config, payload.split_manifest_dir)
     try:
-        result = launch_training(config)
+        with declare_launcher("gui"):
+            result = launch_training(config)
     except Exception as exc:
         raise HTTPException(500, str(exc)) from exc
     if result.get("error"):
