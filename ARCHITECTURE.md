@@ -186,7 +186,7 @@ under a covered root that no row names.
 | packages/tcip-mcp/src/tcip_mcp/tools/operationalization_tools.py | The agent's statement tool for trait operationalizations; it can state, never confirm. | 4 | 1 |
 | packages/tcip-mcp/src/tcip_mcp/tools/orthomosaic_tools.py | Orthomosaic MCP tools: per-plant delivery from a persisted whole-raster prediction bucket plus a plant-locations CSV. | 14 | 2 |
 | packages/tcip-mcp/src/tcip_mcp/tools/phenology_tools.py | Phenology MCP tools, the agent-facing surface for the per-plant phenology pipeline: plant mapping, the positive-state classifier's own calibration gate, and deliver_phenology_milestones. | 21 | 5 |
-| packages/tcip-mcp/src/tcip_mcp/tools/project_tools.py | Project management tools. | 19 | 12 |
+| packages/tcip-mcp/src/tcip_mcp/tools/project_tools.py | Project management tools. | 19 | 11 |
 | packages/tcip-mcp/src/tcip_mcp/tools/proposal_tools.py | Proposal-workflow tools: turn a chosen auto-labeling engine's output into predictions for canvas review. | 19 | 2 |
 | packages/tcip-mcp/src/tcip_mcp/tools/scale_tools.py | Physical per-pixel scale calibration: the delivery-gating producer for ``resolve_scale.json``. | 10 | 1 |
 | packages/tcip-mcp/src/tcip_mcp/tools/training_tools.py | Training MCP tools, config validation, launch training, HPO, status. | 31 | 11 |
@@ -497,7 +497,7 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | Module path | Ownership (one line) | In-repo imports | Imported by |
 |---|---|---|---|
 | tools/build_module_inventory.py | Builds a module inventory and real import graph for the repo's Python and TypeScript source trees. | 0 | 0 |
-| tools/census_double_published_buckets.py | Census of prediction buckets published more than once before the live-bucket refusal. | 9 | 0 |
+| tools/census_double_published_buckets.py | A one-off for this remediation: census of prediction buckets published more than once before the live-bucket refusal, run once over the workspace projects and deleted when the census closes. | 8 | 0 |
 | tools/check_architecture_citations.py | Verify ARCHITECTURE.md's file:line citations against the code they quote, for CI. | 0 | 0 |
 | tools/check_architecture_doc.py | Verify ARCHITECTURE.md's module-ownership tables against the tree, for CI. | 0 | 0 |
 | tools/cross_family_ask.py | Pose one identical question to several agent harnesses and record comparable answers. | 0 | 0 |
