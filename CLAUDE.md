@@ -228,9 +228,11 @@ via `$TCIP_STATE_ROOT`, pinned at startup by the web backend and every MCP serve
 ## Conventions
 
 - Lazy-import torch and torchvision inside function bodies. MCP tools live in
-  `packages/tcip-mcp/src/tcip_mcp/tools/`, decorated `@mcp.tool()` and `@audited`. Prefer a
-  console-command door in the package's own `cli/` module over a new MCP tool; add a tool only
-  for an audit seam, long-running infrastructure, or domain knowledge the agent lacks.
+  `packages/tcip-mcp/src/tcip_mcp/tools/`, decorated `@mcp.tool()` and `@audited`. A one-off
+  script the agent writes for one project lives with that project, in the project's own
+  directory, never in this repository. A standing operator capability is a `cli/` console
+  command. Add a tool only for an audit seam, long-running infrastructure, or domain knowledge
+  the agent lacks.
 - Crop traits are controlled vocabulary in `packages/tcip-mcp/src/tcip_mcp/knowledge/crops/`;
   verify there before asserting.
 - The word provisional is reserved for the delivery gate's acknowledged-unvalidated sense

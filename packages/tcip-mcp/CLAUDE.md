@@ -63,8 +63,10 @@ doc or comment.
   model spec or component registry; see the `toolkit-inventory` skill for the full composition
   surface (`build_detector`/`build_loss` task strings, heads/necks/backbones, derivations, the `ctx`
   craft library, and the `model_source`/`training_source`/`dataset_source` seams).
-- Prefer a console-command door in `cli/` over a new tool here. Add a tool only for an audit seam,
-  long-running infrastructure, or domain knowledge the agent lacks that a console command can't carry.
+- A one-off script the agent writes for one project lives with that project, in the project's own
+  directory, never in this repository. A standing operator capability is a console-command door in
+  `cli/`. Add a tool only for an audit seam, long-running infrastructure, or domain knowledge the
+  agent lacks that a console command can't carry.
 - State mutations route through `@audited` doors only: the MCP tools and the console-command doors
   demoted from them; the record is `audit_log`, one store addressed by `audit.audit_log_key` under
   three kinds of root (the platform's own, a dataset's own, a project's own), held by whichever
