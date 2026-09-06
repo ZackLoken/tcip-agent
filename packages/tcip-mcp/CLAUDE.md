@@ -51,22 +51,20 @@ whose `@mcp.tool(description=...)` composes its client-visible description from 
 corpus at import time rather than leaving it as the bare docstring. A door demoted from tool
 status (run only through its own `scripts/` entry point) keeps `@audited` without registering.
 Run `python scripts/list_tools.py` for the current tool list/count; never hardcode a count in a
-doc or comment, since it drifts.
+doc or comment.
 
 ## Conventions specific to this package
 
 - `tools/` lazy-imports torch/torchvision and the `pipelines/` modules that carry them, inside
-  function bodies: the MCP server must start fast, and most tool calls never touch the model
-  layer. `pipelines/` itself imports torch at module level; a pipeline module only loads when a
-  tool reaches into it.
+  function bodies. `pipelines/` itself imports torch at module level; a pipeline module only
+  loads when a tool reaches into it.
 - Detectors are built via the plain `build_detector` (+ `_build_faster_rcnn` / `_build_fcos` /
   `_build_retinanet` / `_build_mask_rcnn`); bespoke model code imports these directly. There is no
   model spec or component registry; see the `toolkit-inventory` skill for the full composition
   surface (`build_detector`/`build_loss` task strings, heads/necks/backbones, derivations, the `ctx`
   craft library, and the `model_source`/`training_source`/`dataset_source` seams).
-- Prefer a logged script in `scripts/` over a new tool here. This package already has tool
-  bloat, not tool shortage; add a tool only for an audit seam, long-running infrastructure, or
-  domain knowledge the agent lacks that a script can't carry.
+- Prefer a logged script in `scripts/` over a new tool here. Add a tool only for an audit seam,
+  long-running infrastructure, or domain knowledge the agent lacks that a script can't carry.
 - State mutations route through `@audited` doors only: the MCP tools and the script-invoked doors
   demoted from them; the record is `audit_log`, one store addressed by `audit.audit_log_key` under
   three kinds of root (the platform's own, a dataset's own, a project's own), held by whichever

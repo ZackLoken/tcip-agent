@@ -39,13 +39,10 @@ ritual-injection hook, `SessionEnd` learning capture) scoped to that breeder-fac
 write that is neither denied nor allow-listed reaches a human approval prompt rather than being
 auto-denied. `--settings` merges its permission lists (union) with the repo root's own,
 gitignored, developer-local `.claude/settings.json` and the user's own settings rather than
-replacing them (Claude Code's own configuration documentation,
-code.claude.com/docs/en/configuration, states that list-valued settings keys merge across
-sources); a broad allow entry in the developer's own user settings therefore widens the
-breeder-lane fence too, which is why the fence is deny-list first. The developer's own `claude`
-session (this one, launched with no `--settings` flag at all) is simply a different process,
-unaffected by the fence file by design. Don't extend or edit that fence file without calling it
-out explicitly; it's a security boundary, not incidental config.
+replacing them: list-valued settings keys merge across sources. A broad allow entry in the
+developer's own user settings therefore widens the breeder-lane fence too. The fence is
+deny-list first. A `claude` session launched without `--settings` is unaffected by the fence
+file. Don't extend or edit that fence file without calling it out explicitly.
 
 Each launch records what it ran: the session answers `launched` (the executable, `argv[0]`, and
 the version it declares to `--version`, probed once per process on the resolved CLI only and never
@@ -60,8 +57,7 @@ That file's `Edit(...)` deny rules are the one declaration of the platform-prote
 guards classify each write target through `agent_fence_rules.classify()`, which derives the protected
 directories, single files, and project-data segments from those deny rules
 (`_declared_targets()`), so a path added there fences both shells and neither guard carries a path
-list to keep in step. A guard that cannot read the declaration denies rather than falling through, so
-the terminal stops visibly instead of silently unfencing.
+list to keep in step. A guard that cannot read the declaration denies rather than falling through.
 
 The classifier normalizes a target (strips shell quotes, unifies separators, collapses `..`,
 handles Windows drive-relative forms) and anchors the repo rules to the repo root, so a breeder's own
@@ -77,8 +73,8 @@ human approval prompt, and a `cd`-then-relative write is an accepted residual of
 - Path access from routes goes through `assert_path_allowed`, which is always on: the allow-set is
   derived from the workspace, every workspace project and its registered dataset roots, plus the
   additive `TCIP_IMAGE_ROOTS` list, and containment is by filesystem identity. Every route uses the
-  resolved path the guard returns, never the client's string. A 403 on escape is the rail working,
-  not a bug to route around. The Results doors go further: they serve only the project the GUI has
+  resolved path the guard returns, never the client's string. A 403 on escape is not routed
+  around. The Results doors go further: they serve only the project the GUI has
   open (`StateStore.project_root`, set by the guarded `/dataset/select`) and refuse evidence that
   does not belong to it.
 - A path a route reads out of the platform's own records (a manifest directory an experiment
@@ -90,7 +86,7 @@ human approval prompt, and a `cd`-then-relative write is an accepted residual of
   `TCIP_STATE_ROOT` to scratch directories before starting one.
 - Review save formats mirror the annotation-engine's `{json, coco}` scope (see
   `packages/tcip-annotation/CLAUDE.md`); don't add a frontend format option the backend can't read.
-- The GUI follows minimalist design without dropping functionality (Zack's standing preference):
-  prefer nesting related actions into one structure (a menu, a split button, a grouped control)
+- The GUI follows minimalist design without dropping functionality: prefer nesting related
+  actions into one structure (a menu, a split button, a grouped control)
   over adding sibling buttons, and combine existing buttons into nested structures where the
-  grouping is natural. Density of controls is a cost; capability is not the thing to cut.
+  grouping is natural.
