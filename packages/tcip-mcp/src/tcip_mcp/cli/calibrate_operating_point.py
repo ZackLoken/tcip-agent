@@ -26,8 +26,8 @@ import json
 import sys
 
 
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__, prog=prog)
     parser.add_argument("--checkpoint", required=True, help="Path to the model .pt checkpoint.")
     parser.add_argument("--trait", required=True, help="Trait name (defines the count objective).")
     parser.add_argument("--labels-dir", required=True, help="Labeled dir (per-image JSON).")

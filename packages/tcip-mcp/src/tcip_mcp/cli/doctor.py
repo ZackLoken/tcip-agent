@@ -699,8 +699,8 @@ def staleness_findings(root: Path) -> dict[str, str]:
     return invalid
 
 
-def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0], prog=prog)
     ap.add_argument("project_root", help="project directory holding images/ annotations/ .tcip/")
     args = ap.parse_args(argv)
     root = Path(args.project_root)

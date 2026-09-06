@@ -25,8 +25,8 @@ from tcip_store.export import export_root
 from tcip_store.file_backend import FileBackend, database_file
 
 
-def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0], prog=prog)
     ap.add_argument("roots", nargs="*", help="root directories whose databases to write out")
     ap.add_argument(
         "--project",

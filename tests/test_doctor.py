@@ -8,6 +8,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
 from PIL import Image
 
 from tcip_annotation import json_io
@@ -72,14 +73,18 @@ def _run(root: Path, *, file_layout: bool = False):
         [PY_EXE, "-m", "tcip_web.cli", "doctor", str(root)], capture_output=True, text=True, env=env)
 
 
-def test_doctor_help_prints_the_real_invocation():
-    """The dispatcher names ``sys.argv[0]`` for the one command module call it makes, so
-    argparse's own usage line (no command module passes its own ``prog=``) reads ``tcip
-    doctor``, never the dispatcher's own module path."""
-    res = subprocess.run(
-        [PY_EXE, "-m", "tcip_web.cli", "doctor", "--help"], capture_output=True, text=True)
-    assert res.returncode == 0
-    assert "usage: tcip doctor " in res.stdout
+def test_doctor_help_prints_the_dispatchers_prog_argument(capsys):
+    """The dispatcher passes ``prog=f"tcip {command}"`` into ``doctor.main``'s own keyword
+    argument, which threads straight to its ``ArgumentParser``; this calls the module directly
+    with that argument, so the usage line proves the parser's own ``prog``, never a global
+    argv mutation."""
+    from tcip_mcp.cli import doctor
+
+    with pytest.raises(SystemExit) as exc:
+        doctor.main(["--help"], prog="tcip doctor")
+
+    assert exc.value.code == 0
+    assert "usage: tcip doctor " in capsys.readouterr().out
 
 
 def test_doctor_flags_the_field_session_bug_family(tmp_path):

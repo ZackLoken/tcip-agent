@@ -34,8 +34,8 @@ from tcip_mcp.pipelines.data.dataset_fingerprint import (
 from tcip_mcp.tools.project_tools import dataset_entry_path, read_datasets_raw
 
 
-def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(description=__doc__)
+def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
+    ap = argparse.ArgumentParser(description=__doc__, prog=prog)
     ap.add_argument("dataset_root", type=Path)
     ap.add_argument("--project", type=Path, default=None,
                     help="project root holding .tcip/datasets.json (default: dataset_root)")
