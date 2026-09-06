@@ -225,16 +225,19 @@ class TestPredictionOverlay:
         assert len(matches["fp"]) == 1, "Expected 1 FP (non-overlapping prediction)"
         assert len(matches["fn"]) == 1, "Expected 1 FN (unmatched GT box)"
 
-    def test_class_color_assignment(self) -> None:
-        """Verify different classes get distinct subject names for color mapping."""
-        state = AnnotationState(img_width=640, img_height=480)
-
+    def test_five_distinct_subjects_survive_the_round_trip(self, img_dir: Path) -> None:
+        """Coverage: five annotations of five distinct subjects, written and read back through
+        the same per-image label file, all five subjects and the count surviving the round
+        trip."""
         subjects = ["bud", "shoot", "leaf", "nut", "bush"]
-        for i, subj in enumerate(subjects):
-            state.annotations.append(
-                Annotation(subject=subj, geometry=BBox(x1=i * 100, y1=10, x2=i * 100 + 80, y2=90)))
+        annotations = [
+            Annotation(subject=subj, geometry=BBox(x1=i * 100, y1=10, x2=i * 100 + 80, y2=90))
+            for i, subj in enumerate(subjects)
+        ]
 
-        assert len(state.annotations) == 5
-        seen = {a.subject for a in state.annotations}
-        assert len(seen) == 5
-        assert seen == set(subjects)
+        label_path = str(img_dir / "labels" / "test_001.json")
+        write_annotations(label_path, annotations, 640, 480)
+
+        read_back = read_annotations(label_path)
+        assert len(read_back) == 5
+        assert {a.subject for a in read_back} == set(subjects)
