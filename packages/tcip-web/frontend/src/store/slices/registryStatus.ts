@@ -50,9 +50,10 @@ interface PerImageStatusState {
   byImage: Record<string, ImageStatus>;
   /** Filter applied in top bar. */
   activeFilter: "all" | ImageStatus;
-  /** Confirmed names (complete/negative) whose derived token disagrees with the stored one: the
-   *  label file changed since a human finished the image, so it needs a fresh look rather than a
-   *  silent rewrite. Populated by the hydrate reconcile, cleared name-by-name as each is written. */
+  /** Confirmed names (complete/negative) needing a fresh look: the label file's content changed
+   *  since a human finished the image, or the subject's attribute schema did. Populated by the
+   *  hydrate reconcile (content) unioned with the status route's stale_definition (schema),
+   *  cleared name-by-name as each is written. */
   staleMarks: string[];
 }
 

@@ -156,7 +156,7 @@ beforeEach(() => {
     .spyOn(api.annotate, "load")
     .mockImplementation((imagePath) => Promise.resolve(labelsFor(imagePath)));
   saveSpy = vi.spyOn(api.annotate, "save").mockResolvedValue({ status: "ok", base_mtime: "1" });
-  vi.spyOn(classesApi, "setImageStatus").mockResolvedValue({});
+  vi.spyOn(classesApi, "setImageStatus").mockResolvedValue({ status: "ok", digest_stamped: true });
   vi.spyOn(sessionsApi, "imageEvent").mockResolvedValue({});
   // Default: a standard 3-band RGB image; the band picker's own describe block overrides this
   // per-case to exercise the >3-band path.

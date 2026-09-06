@@ -7,8 +7,10 @@ export interface ImageStatusReconcile {
    *  since nobody has asserted anything about them yet. */
   writes: Record<string, ImageStatus>;
   /** Confirmed names (stored `complete` or `negative`) whose derived token now disagrees, in
-   *  either direction: the label file changed since a human finished the image, so the mark
-   *  needs a fresh look rather than a silent rewrite. */
+   *  either direction: the label file's content changed since a human finished the image, so the
+   *  mark needs a fresh look rather than a silent rewrite. A name whose content is unchanged but
+   *  whose subject's attribute schema moved under it is a separate, digest-stale cause the
+   *  hydrate hook unions in from the status route, not this reconcile. */
   staleMarks: string[];
 }
 

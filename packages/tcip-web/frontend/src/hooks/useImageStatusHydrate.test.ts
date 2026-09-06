@@ -28,12 +28,15 @@ describe("useImageStatusHydrate", () => {
   it("flags a stored complete whose derived token is negative as stale, never writes it", async () => {
     vi.spyOn(classesApi, "loadImageStatus").mockResolvedValue({
       statuses: { "img1.jpg": "complete" },
+      stale_definition: [],
     });
     vi.spyOn(classesApi, "deriveImageStatus").mockResolvedValue({
       statuses: { "img1.jpg": "negative" },
       unreadable: [],
     });
-    const bulk = vi.spyOn(classesApi, "setImageStatusBulk").mockResolvedValue({});
+    const bulk = vi
+      .spyOn(classesApi, "setImageStatusBulk")
+      .mockResolvedValue({ status: "ok", n: 0, digest_stamped: [] });
 
     renderHook(() => useImageStatusHydrate(PARAMS));
 
@@ -45,12 +48,15 @@ describe("useImageStatusHydrate", () => {
   it("heals an unconfirmed name from unannotated to partial and writes it", async () => {
     vi.spyOn(classesApi, "loadImageStatus").mockResolvedValue({
       statuses: { "img1.jpg": "unannotated" },
+      stale_definition: [],
     });
     vi.spyOn(classesApi, "deriveImageStatus").mockResolvedValue({
       statuses: { "img1.jpg": "partial" },
       unreadable: [],
     });
-    const bulk = vi.spyOn(classesApi, "setImageStatusBulk").mockResolvedValue({});
+    const bulk = vi
+      .spyOn(classesApi, "setImageStatusBulk")
+      .mockResolvedValue({ status: "ok", n: 1, digest_stamped: [] });
 
     renderHook(() => useImageStatusHydrate(PARAMS));
 
@@ -67,6 +73,69 @@ describe("useImageStatusHydrate", () => {
       "C:/data/annotations/2026-01-01",
       undefined,
     );
+  });
+
+  it("flags a digest-stale name with no content disagreement", async () => {
+    vi.spyOn(classesApi, "loadImageStatus").mockResolvedValue({
+      statuses: { "img1.jpg": "complete" },
+      stale_definition: ["img1.jpg"],
+    });
+    vi.spyOn(classesApi, "deriveImageStatus").mockResolvedValue({
+      statuses: { "img1.jpg": "complete" },
+      unreadable: [],
+    });
+    vi.spyOn(classesApi, "setImageStatusBulk").mockResolvedValue({
+      status: "ok",
+      n: 0,
+      digest_stamped: [],
+    });
+
+    renderHook(() => useImageStatusHydrate(PARAMS));
+
+    await waitFor(() => expect(useStore.getState().imageStatus.staleMarks).toEqual(["img1.jpg"]));
+  });
+
+  it("unions a digest-stale name with a separately content-stale name", async () => {
+    const params = { ...PARAMS, imageList: ["img1.jpg", "img2.jpg"] };
+    vi.spyOn(classesApi, "loadImageStatus").mockResolvedValue({
+      statuses: { "img1.jpg": "complete", "img2.jpg": "complete" },
+      stale_definition: ["img2.jpg"],
+    });
+    vi.spyOn(classesApi, "deriveImageStatus").mockResolvedValue({
+      statuses: { "img1.jpg": "negative", "img2.jpg": "complete" },
+      unreadable: [],
+    });
+    vi.spyOn(classesApi, "setImageStatusBulk").mockResolvedValue({
+      status: "ok",
+      n: 0,
+      digest_stamped: [],
+    });
+
+    renderHook(() => useImageStatusHydrate(params));
+
+    await waitFor(() =>
+      expect(useStore.getState().imageStatus.staleMarks).toEqual(["img1.jpg", "img2.jpg"]),
+    );
+  });
+
+  it("leaves a digest-stale name out of staleMarks when it is not in the loaded image list", async () => {
+    vi.spyOn(classesApi, "loadImageStatus").mockResolvedValue({
+      statuses: { "img1.jpg": "complete" },
+      stale_definition: ["img1.jpg", "img_outside.jpg"],
+    });
+    vi.spyOn(classesApi, "deriveImageStatus").mockResolvedValue({
+      statuses: { "img1.jpg": "complete" },
+      unreadable: [],
+    });
+    vi.spyOn(classesApi, "setImageStatusBulk").mockResolvedValue({
+      status: "ok",
+      n: 0,
+      digest_stamped: [],
+    });
+
+    renderHook(() => useImageStatusHydrate(PARAMS));
+
+    await waitFor(() => expect(useStore.getState().imageStatus.staleMarks).toEqual(["img1.jpg"]));
   });
 
   it("does nothing with no subject selected: nothing to scope image status to yet", () => {
