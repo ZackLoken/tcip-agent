@@ -59,6 +59,15 @@ state root (`register_model`, explicit mode for a foreign or bespoke checkpoint)
 refuses
 before loading an unregistered one.
 
+The full-frame result records `global_nms_iou`, `postprocess` and an `operating_point` mapping in
+the vocabulary a bucket stamp carries: `conf` and `max_dets` read `explicit` when the caller
+stated them (a stated value equal to the platform default included) and `default` otherwise;
+`cross_tile_nms` always reads `default` in the mapping, with the merge's own value recorded
+beside it as the flat `global_nms_iou` field; `tile_size` reads whatever its own regime resolved.
+An unstated `conf_threshold` or `global_nms_iou` resolves to the platform default and is recorded
+as one, never a silent gap. This `conf` is never validated: a fact about calibration, not about
+the metrics computed at it. The record binds to no delivery bucket, and no delivery gate reads it.
+
 `rank_registered_models` requires a `metric` (no default) and resolves its ranking direction from
 `evaluation.HIGHER_IS_BETTER_BY_METRIC` (keyed by the metric with any `val_` prefix stripped);
 `higher_is_better` overrides the declaration when a caller states one, required for a metric the

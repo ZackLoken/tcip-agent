@@ -2428,7 +2428,7 @@ Phase 3 verdict: single.
 
 Must agree: the same model and images yield the same conf/NMS/max_dets/tile whichever entry point asks for them.
 Side A: `packages/tcip-mcp/src/tcip_mcp/pipelines/operating_point.py:802` (`def resolve_operating_point(`, the calibrated regime; a caller-supplied `max_dets` earns a derivation label only by naming where it came from, and otherwise records itself as a caller override).
-Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py:446` (`raw_operating_point`) and `resolution.py:518` (`block_calibrated_export_operating_point`), the two uncalibrated regimes. Every entry point takes its bundle from one of the three: `tools/inference_tools.py:304,797,982,1001`, `packages/tcip-web/src/tcip_web/routes/inference.py:234`, `pipelines/training/envelope.py:213`.
+Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py:446` (`raw_operating_point`) and `resolution.py:518` (`block_calibrated_export_operating_point`), the two uncalibrated regimes. Every entry point takes its bundle from one of the three: `tools/inference_tools.py:304,797,982,1001`, `packages/tcip-web/src/tcip_web/routes/inference.py:234`, `pipelines/training/envelope.py:213`, `pipelines/training/eval_runners.py:231` (the full-frame regime).
 Phase 3 verdict: single.
 
 ## S33. Shared inference defaults DEFAULT_CONF / DEFAULT_NMS_IOU / DEFAULT_MAX_DETS

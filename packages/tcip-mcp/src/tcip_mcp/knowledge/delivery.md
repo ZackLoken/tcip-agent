@@ -170,10 +170,10 @@ unaffected by a caller's project root.
   carries the same schema and the same composition. The delivery event is a best-effort second
   write after the CSV already exists, so an already-delivered file can outlive a failed event
   write; the web export route's own `X-TCIP-Delivery-Event-Recorded` response header says whether
-  this delivery's event actually landed. The MCP door alone can carry a caller-stated
-  `operating_point_conf` and a caller-asserted validity floor (`phenology_tools.py`),
-  fields the web door has none for. The producer tail (`producer_model_sha256`,
-  `producing_experiment_id`, `validation_record`) is filled from the verified bindings, so a
+  this delivery's event actually landed. Both phenology doors derive the count's conf and
+  validity from the buckets' own stamps and take neither from a caller. The producer tail
+  (`producer_model_sha256`, `producing_experiment_id`, `validation_record`) is filled from the
+  verified bindings, so a
   bucket whose claim no record answers for delivers those cells blank rather than repeating the
   names its stamp asserted; `produced_at` is always the write's own timestamp, never blank and
   never read from the bindings. Both writers also carry `dates_delivered` and
