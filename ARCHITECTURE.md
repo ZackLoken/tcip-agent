@@ -25,21 +25,21 @@ Sections:
 
 ## Module ownership and dependency graph
 
-Source: the module inventory `tools/build_module_inventory.py` produces, run at HEAD 4526cdf9.
+Source: the module inventory `tools/build_module_inventory.py` produces, run at HEAD e95f8911.
 Every count in this section is read from that regenerated inventory, not from any earlier
 snapshot; `tools/check_architecture_doc.py --inventory-json <path>` re-runs the same generator
 and cross-checks its counts against this document's tables, this table's own module and line
 totals included.
 
-HEAD 4526cdf9 has 424 modules across the six scanned roots (135440 total lines):
+HEAD e95f8911 has 425 modules across the six scanned roots (135491 total lines):
 
 | Package (root) | Modules | Lines |
 |---|---|---|
-| tcip-mcp | 134 | 60583 |
+| tcip-mcp | 134 | 60585 |
 | tcip-annotation | 12 | 4299 |
-| tcip-web | 39 | 13355 |
+| tcip-web | 39 | 13362 |
 | tcip-store | 13 | 5244 |
-| tcip-web-frontend | 209 | 47028 |
+| tcip-web-frontend | 210 | 47070 |
 | tools | 17 | 4931 |
 
 `tcip-mcp`, `tcip-annotation`, `tcip-web`, and `tcip-store` are the four Python packages under
@@ -432,7 +432,8 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | packages/tcip-web/frontend/src/lib/recentProjects.ts | The last few projects the user opened, for the status-bar "project name" fast-track. | 0 | 2 |
 | packages/tcip-web/frontend/src/lib/reconnectingSocket.test.ts | (none found) | 1 | 0 |
 | packages/tcip-web/frontend/src/lib/reconnectingSocket.ts | One reconnecting-WebSocket shape, shared by every socket this app opens. | 0 | 5 |
-| packages/tcip-web/frontend/src/lib/registrySweep.ts | (none found) | 1 | 2 |
+| packages/tcip-web/frontend/src/lib/registrySweep.test.ts | (none found) | 1 | 0 |
+| packages/tcip-web/frontend/src/lib/registrySweep.ts | (none found) | 1 | 3 |
 | packages/tcip-web/frontend/src/lib/reviewColors.ts | (none found) | 0 | 6 |
 | packages/tcip-web/frontend/src/lib/reviewFocus.test.ts | (none found) | 3 | 0 |
 | packages/tcip-web/frontend/src/lib/reviewFocus.ts | Drive the Review tab to a model's predictions on a specific frame/detection in response to the agent's `review_focus` event. | 3 | 3 |
@@ -537,7 +538,7 @@ Non-zero cross-package edge counts at HEAD:
 
 `packages/tcip-web/frontend/src` (`tcip-web-frontend`) has zero in-repo import edges to any Python module in any of the five Python roots: `build_module_inventory.py` resolves a TypeScript specifier only against a relative path or the `@/` alias into `packages/tcip-web/frontend/src` itself (`tools/build_module_inventory.py:307-327`), so no specifier in the frontend source tree can resolve to a file outside that tree.
 
-## Modules with zero importers (143)
+## Modules with zero importers (144)
 
 A module counts as zero-importer when no other module in its own scanned tree resolves an in-repo import to it (`imported_by_count == 0` in the regenerated inventory). This includes package entry points (`__init__.py`, `__main__.py`), CLI scripts under `tools/` invoked as processes, package `cli/` command modules invoked by name through the `tcip` dispatcher rather than imported, and every TypeScript `*.test.ts`/`*.test.tsx` file, none of which are expected to have an in-repo importer.
 
@@ -646,6 +647,7 @@ A module counts as zero-importer when no other module in its own scanned tree re
 | tcip-web-frontend | packages/tcip-web/frontend/src/lib/paths.test.ts |
 | tcip-web-frontend | packages/tcip-web/frontend/src/lib/polygonGeometry.test.ts |
 | tcip-web-frontend | packages/tcip-web/frontend/src/lib/reconnectingSocket.test.ts |
+| tcip-web-frontend | packages/tcip-web/frontend/src/lib/registrySweep.test.ts |
 | tcip-web-frontend | packages/tcip-web/frontend/src/lib/reviewFocus.test.ts |
 | tcip-web-frontend | packages/tcip-web/frontend/src/lib/runStatus.test.ts |
 | tcip-web-frontend | packages/tcip-web/frontend/src/lib/statementFields.test.ts |
@@ -932,10 +934,10 @@ registered at HEAD.
 |---|---|---|---|
 | GET | `/load` | `load_classes` | `routes/classes.py:99` |
 | POST | `/save` | `save_classes` | `routes/classes.py:163` |
-| GET | `/image_status` | `get_image_status` | `routes/classes.py:308` |
-| POST | `/image_status` | `set_image_status` | `routes/classes.py:323` |
-| POST | `/image_status/bulk` | `set_image_status_bulk` | `routes/classes.py:354` |
-| POST | `/image_status/derive` | `derive_image_status` | `routes/classes.py:385` |
+| GET | `/image_status` | `get_image_status` | `routes/classes.py:310` |
+| POST | `/image_status` | `set_image_status` | `routes/classes.py:325` |
+| POST | `/image_status/bulk` | `set_image_status_bulk` | `routes/classes.py:359` |
+| POST | `/image_status/derive` | `derive_image_status` | `routes/classes.py:392` |
 
 ### routes/coverage.py, prefix `/api/coverage` (6 routes)
 
@@ -1332,8 +1334,8 @@ named third consumer, `tcip check-dataset-identity`, is never executed by any te
 Path: `<dataset_root>/.tcip/state/image_status.json`.
 
 Writers: `set_image_status`,
-`packages/tcip-web/src/tcip_web/routes/classes.py:323`; `set_image_status_bulk`,
-`routes/classes.py:354`; `tcip_mcp.tools.data_tools._apply_negative_carry`
+`packages/tcip-web/src/tcip_web/routes/classes.py:325`; `set_image_status_bulk`,
+`routes/classes.py:359`; `tcip_mcp.tools.data_tools._apply_negative_carry`
 (split-materialized copy; every confirmed negative is read by the admission
 (`trainable_stems`) before the split's manifest or file tree is written, then
 attributed to a split by
@@ -1349,7 +1351,7 @@ Readers: `tcip_mcp.pipelines.data.label_queries.confirmed_negative_names`,
 `packages/tcip-mcp/src/tcip_mcp/class_registry.py:287`, which enumerates every bucket of a
 subject whose attribute schema is about to change so the confirmations under it can be stamped
 before the outgoing digest is gone; `routes.classes.get_image_status`,
-`packages/tcip-web/src/tcip_web/routes/classes.py:308`, through
+`packages/tcip-web/src/tcip_web/routes/classes.py:310`, through
 `tcip_mcp.pipelines.data.label_queries.stale_finished_names`,
 `packages/tcip-mcp/src/tcip_mcp/pipelines/data/label_queries.py:539`, the public reader over a
 resolved dataset root.
@@ -1391,11 +1393,11 @@ vocabulary. Both writers reach the store through the one transactional writer
 the sweep from re-dating a stamp the confirmation-time writer already set.
 
 Reader: `tcip_mcp.pipelines.data.label_queries._stale_finished`,
-`packages/tcip-mcp/src/tcip_mcp/pipelines/data/label_queries.py:493`, the quarantine logic
+`packages/tcip-mcp/src/tcip_mcp/pipelines/data/label_queries.py:492`, the quarantine logic
 shared by `confirmed_negative_records` and the public `stale_finished_names`; a name whose stamp
 no longer matches the registry's current schema is dropped as `quarantined_stale_definition`
 rather than trained by its stored confirmation, complete or negative alike,
-`packages/tcip-mcp/src/tcip_mcp/pipelines/data/label_queries.py:365`
+`packages/tcip-mcp/src/tcip_mcp/pipelines/data/label_queries.py:364`
 (`counts["quarantined_stale_definition"] += 1`).
 
 Seam S23 ("image_status_digest.json attribute-schema stamp"), verdict `both-sides-restated`,
@@ -2079,10 +2081,10 @@ No seam id in `seam-coverage.json`'s inventory names this record: it is new, and
 ## 27. `cal_holdout_split_lock`, `.tcip/artifacts/cal_holdout_split_<hash>.json`
 
 Path: named for the identity hash it locks rather than a directory of its own, addressed by
-`cal_holdout_lock_key`, `packages/tcip-mcp/src/tcip_mcp/pipelines/data/splits.py:1188`, under the
+`cal_holdout_lock_key`, `packages/tcip-mcp/src/tcip_mcp/pipelines/data/splits.py:1190`, under the
 scope root the split was drawn over (`cal_holdout_scope_root`).
 
-Writer: `resolve_locked_cal_holdout_split`, `splits.py:1426`, locking on first draw for a given
+Writer: `resolve_locked_cal_holdout_split`, `splits.py:1428`, locking on first draw for a given
 identity hash; every later call for the same identity answers from the lock unchanged unless
 `force_redraw=True`. The record carries `identity_hash`, `calibration`, `holdout`, `group_by`,
 `group_key_map`, `seed`, `holdout_ratio`, `split_manifest_dir` (`null` for a whole-directory draw,
