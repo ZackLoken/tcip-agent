@@ -368,9 +368,9 @@ export interface BucketHoldsDocumentsRefusal {
   kind: "bucket_holds_documents";
   message: string;
   date: string | null;
-  requested_model_name: string;
-  requested_output_dir: string;
-  document_stem_count: number;
+  requested_model_name: string | null;
+  requested_output_dir: string | null;
+  document_stem_count: number | null;
   suggested_model_name: string | null;
   suggested_output_dir: string | null;
 }
@@ -381,8 +381,8 @@ export interface BucketInFlightRefusal {
   kind: "bucket_in_flight";
   message: string;
   date: string | null;
-  requested_output_dir: string;
-  job_id: string;
+  requested_output_dir: string | null;
+  job_id: string | null;
 }
 
 export type BucketRefusal = BucketHoldsDocumentsRefusal | BucketInFlightRefusal;
@@ -392,7 +392,9 @@ export type BucketRefusal = BucketHoldsDocumentsRefusal | BucketInFlightRefusal;
  * failure (including the verdict-exhaustion 409, whose detail is a plain string).
  *
  * Read by kind off the parsed detail, the same dispatch `deliveryGateRefusalOf` uses for its own
- * family, so a bucket refusal is never matched by a prose regex either.
+ * family, so a bucket refusal is never matched by a prose regex either. The route sends every
+ * field below on both refusal kinds; null here is the honest read of one that, despite that,
+ * a given detail does not carry.
  */
 export function bucketRefusalOf(e: unknown): BucketRefusal | null {
   if (!(e instanceof StructuredRefusalError)) return null;
@@ -404,10 +406,12 @@ export function bucketRefusalOf(e: unknown): BucketRefusal | null {
       kind: "bucket_holds_documents",
       message,
       date,
-      requested_model_name: String(detail.requested_model_name ?? ""),
-      requested_output_dir: String(detail.requested_output_dir ?? ""),
+      requested_model_name:
+        typeof detail.requested_model_name === "string" ? detail.requested_model_name : null,
+      requested_output_dir:
+        typeof detail.requested_output_dir === "string" ? detail.requested_output_dir : null,
       document_stem_count:
-        typeof detail.document_stem_count === "number" ? detail.document_stem_count : 0,
+        typeof detail.document_stem_count === "number" ? detail.document_stem_count : null,
       suggested_model_name:
         typeof detail.suggested_model_name === "string" ? detail.suggested_model_name : null,
       suggested_output_dir:
@@ -419,8 +423,9 @@ export function bucketRefusalOf(e: unknown): BucketRefusal | null {
       kind: "bucket_in_flight",
       message,
       date,
-      requested_output_dir: String(detail.requested_output_dir ?? ""),
-      job_id: String(detail.job_id ?? ""),
+      requested_output_dir:
+        typeof detail.requested_output_dir === "string" ? detail.requested_output_dir : null,
+      job_id: typeof detail.job_id === "string" ? detail.job_id : null,
     };
   }
   return null;
