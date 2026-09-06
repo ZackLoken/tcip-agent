@@ -6,6 +6,7 @@ import {
   inferenceApi,
   openInferenceStream,
   resultsApi,
+  type BucketInFlightRefusal,
   type BucketRefusal,
   type InferenceJob,
   type InferenceStatus,
@@ -21,7 +22,6 @@ const CANCELLABLE: ReadonlySet<InferenceStatus> = new Set(["pending", "running"]
  *  action re-posts the same checkpoint and date rather than the select's current choice. */
 interface RefusedLaunch {
   date: string;
-  modelName: string;
   checkpointPath: string;
   refusal: BucketRefusal;
 }
@@ -37,7 +37,7 @@ function RefusedLaunchEntry({
 }: {
   entry: RefusedLaunch;
   onRunSuggestion: (entry: RefusedLaunch, suggestedModelName: string) => void;
-  onWatch: (jobId: string) => void;
+  onWatch: (refusal: BucketInFlightRefusal) => void;
   onDismiss: (date: string) => void;
 }) {
   const { refusal, date } = entry;
@@ -46,39 +46,54 @@ function RefusedLaunchEntry({
       {refusal.kind === "bucket_holds_documents" ? (
         <>
           <p>
-            {date}: {refusal.requested_output_dir} already holds {refusal.document_stem_count}{" "}
-            prediction document(s).
+            {date}: {refusal.document_stem_count !== null && `${refusal.document_stem_count} `}
+            prediction document(s) already in{" "}
+            <span className="font-mono">{refusal.requested_output_dir}</span>.
+            {refusal.suggested_model_name && (
+              <>
+                {" "}
+                Nothing was written; a run into {refusal.suggested_model_name} lists under that name
+                for this date.
+              </>
+            )}
           </p>
           {refusal.suggested_model_name ? (
             <button
               className="tcip-btn text-[11px] self-start"
+              aria-label={`Run into ${refusal.suggested_model_name} instead for ${date}`}
               onClick={() => onRunSuggestion(entry, refusal.suggested_model_name as string)}
             >
-              {`Run into ${refusal.suggested_model_name} instead for ${date}`}
+              {`Run into ${refusal.suggested_model_name}`}
             </button>
           ) : (
             <p>
-              Every {refusal.requested_model_name}@r&lt;n&gt; variant up to the ceiling already
-              holds a verdict or a document: ask the agent to publish this model under another
-              bucket name through run_inference&apos;s own output_dir.
+              {`Every bucket name this app can offer for ${refusal.requested_model_name} on this date (${refusal.requested_model_name}@r2 and up) already holds a review verdict or a prediction document, so there is no fresh bucket to offer here. Ask the agent in the terminal to publish this model into a bucket you name: its run_inference door takes an output_dir.`}
             </p>
           )}
         </>
       ) : (
         <>
           <p>
-            {date}: job {refusal.job_id} is already writing to {refusal.requested_output_dir}.
+            {date}: {refusal.job_id && `job ${refusal.job_id} `}
+            is still writing to <span className="font-mono">{refusal.requested_output_dir}</span>.
           </p>
-          <button
-            className="tcip-btn text-[11px] self-start"
-            onClick={() => onWatch(refusal.job_id)}
-          >
-            {`Watch job ${refusal.job_id} for ${date}`}
-          </button>
+          {refusal.job_id && (
+            <button
+              className="tcip-btn text-[11px] self-start"
+              aria-label={`Watch job ${refusal.job_id} for ${date}`}
+              onClick={() => onWatch(refusal)}
+            >
+              {`Watch job ${refusal.job_id}`}
+            </button>
+          )}
         </>
       )}
-      <button className="tcip-btn text-[11px] self-start" onClick={() => onDismiss(date)}>
-        {`Dismiss refusal for ${date}`}
+      <button
+        className="tcip-btn text-[11px] self-start"
+        aria-label={`Dismiss refusal for ${date}`}
+        onClick={() => onDismiss(date)}
+      >
+        Dismiss
       </button>
     </li>
   );
@@ -112,7 +127,20 @@ export function InferenceTab() {
   const [refusedLaunches, setRefusedLaunches] = useState<Record<string, RefusedLaunch>>({});
   const [launching, setLaunching] = useState(false);
   const streamRef = useRef<(() => void) | null>(null);
+  const launchButtonRef = useRef<HTMLButtonElement>(null);
+  const prevRefusedDatesRef = useRef<string[]>([]);
   const activeJobId = activeJob?.job_id ?? null;
+
+  // A refused entry's control can unmount while focused (Dismiss, or its action succeeding),
+  // dropping focus to body; restore it to the launch button instead of stranding it there.
+  useEffect(() => {
+    const dates = Object.keys(refusedLaunches);
+    const anyRemoved = prevRefusedDatesRef.current.some((d) => !dates.includes(d));
+    prevRefusedDatesRef.current = dates;
+    if (anyRemoved && document.activeElement === document.body) {
+      launchButtonRef.current?.focus();
+    }
+  }, [refusedLaunches]);
 
   // A refused entry names a bucket of the previous choice: neither survives a model or dataset
   // change.
@@ -168,6 +196,22 @@ export function InferenceTab() {
         .then((r) => {
           setJobs(r.jobs);
           setJobsError(null);
+          // A bucket_in_flight entry names a job that may have finished since it was refused:
+          // drop it once that job is no longer pending/running, or no longer listed at all.
+          setRefusedLaunches((prev) => {
+            const stillLive = (jobId: string | null) => {
+              const row = jobId ? r.jobs.find((j) => j.job_id === jobId) : undefined;
+              return row !== undefined && CANCELLABLE.has(row.status);
+            };
+            const stale = Object.entries(prev).filter(
+              ([, entry]) =>
+                entry.refusal.kind === "bucket_in_flight" && !stillLive(entry.refusal.job_id),
+            );
+            if (stale.length === 0) return prev;
+            const next = { ...prev };
+            for (const [d] of stale) delete next[d];
+            return next;
+          });
           if (activeJobId) {
             const row = r.jobs.find((j) => j.job_id === activeJobId);
             setActiveJobListed(row !== undefined);
@@ -278,7 +322,7 @@ export function InferenceTab() {
       if (refusal) {
         setRefusedLaunches((prev) => ({
           ...prev,
-          [date]: { date, modelName, checkpointPath, refusal },
+          [date]: { date, checkpointPath, refusal },
         }));
         return;
       }
@@ -314,17 +358,18 @@ export function InferenceTab() {
     void launchOne(entry.checkpointPath, suggestedModelName, entry.date);
   }
 
-  function onWatchRefusedJob(jobId: string) {
-    const row = jobs.find((j) => j.job_id === jobId);
+  function onWatchRefusedJob(refusal: BucketInFlightRefusal) {
+    const row = refusal.job_id ? jobs.find((j) => j.job_id === refusal.job_id) : undefined;
     setActiveJob(
       row ??
         ({
-          job_id: jobId,
+          job_id: refusal.job_id ?? "",
           status: "running",
           done: 0,
           total: 0,
+          // Nothing the refusal carries names the images dir; left empty rather than fabricated.
           images_dir: "",
-          output_dir: "",
+          output_dir: refusal.requested_output_dir ?? "",
           error: null,
           warning: null,
         } as InferenceJob),
@@ -428,6 +473,7 @@ export function InferenceTab() {
         </p>
 
         <button
+          ref={launchButtonRef}
           className="tcip-btn-primary w-full"
           onClick={onLaunch}
           disabled={launching || !modelPath || selectedDates.length === 0}
@@ -435,22 +481,22 @@ export function InferenceTab() {
           ▶&nbsp;&nbsp;Launch inference
         </button>
 
-        {Object.keys(refusedLaunches).length > 0 && (
-          <div className="mt-3">
+        <div className="mt-3">
+          {Object.keys(refusedLaunches).length > 0 && (
             <div className="tcip-heading mb-1">Refused launches</div>
-            <ul aria-live="polite" className="flex flex-col gap-1">
-              {Object.values(refusedLaunches).map((entry) => (
-                <RefusedLaunchEntry
-                  key={entry.date}
-                  entry={entry}
-                  onRunSuggestion={onRunSuggestion}
-                  onWatch={onWatchRefusedJob}
-                  onDismiss={dropRefusal}
-                />
-              ))}
-            </ul>
-          </div>
-        )}
+          )}
+          <ul aria-live="polite" className="flex flex-col gap-1">
+            {Object.values(refusedLaunches).map((entry) => (
+              <RefusedLaunchEntry
+                key={entry.date}
+                entry={entry}
+                onRunSuggestion={onRunSuggestion}
+                onWatch={onWatchRefusedJob}
+                onDismiss={dropRefusal}
+              />
+            ))}
+          </ul>
+        </div>
       </div>
 
       <div className="p-4 overflow-auto">

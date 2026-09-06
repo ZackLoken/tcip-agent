@@ -64,6 +64,13 @@ function selectBaseline() {
   });
 }
 
+// The refusal's path renders in its own <span>, so the sentence's default per-node text (which
+// excludes nested elements) never carries it whole; match on a <p>'s full textContent instead.
+function paragraphMatching(pattern: RegExp) {
+  return (_content: string, element: Element | null) =>
+    element?.tagName === "P" && pattern.test(element.textContent ?? "");
+}
+
 function documentsRefusal(
   overrides: Partial<BucketHoldsDocumentsRefusal> = {},
 ): StructuredRefusalError {
@@ -327,7 +334,9 @@ describe("InferenceTab bucket refusals", () => {
 
     expect(
       await screen.findByText(
-        /C:\/data\/predictions\/baseline\/2026-01-01 already holds 1 prediction document/,
+        paragraphMatching(
+          /1 prediction document\(s\) already in C:\/data\/predictions\/baseline\/2026-01-01\. Nothing was written; a run into baseline@r2 lists under that name for this date\./,
+        ),
       ),
     ).toBeInTheDocument();
     expect(
@@ -577,6 +586,69 @@ describe("InferenceTab bucket refusals", () => {
     expect(list).toHaveAttribute("aria-live", "polite");
     expect(screen.getByText("Refused launches").tagName).not.toBe("H1");
     expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
+  });
+
+  it("mounts the aria-live region before any refusal, with the entry appearing inside it once refused", async () => {
+    vi.spyOn(inferenceApi, "launch").mockRejectedValue(documentsRefusal());
+    render(<InferenceTab />);
+    await waitFor(() => expect(screen.getByText("2026-01-01")).toBeInTheDocument());
+
+    const list = screen.getByRole("list");
+    expect(list).toHaveAttribute("aria-live", "polite");
+    expect(screen.queryAllByRole("listitem")).toHaveLength(0);
+
+    selectBaseline();
+    fireEvent.click(screen.getByRole("checkbox", { name: "2026-01-01" }));
+    fireEvent.click(screen.getByRole("button", { name: /launch inference/i }));
+
+    await waitFor(() => expect(screen.getAllByRole("listitem")).toHaveLength(1));
+    expect(screen.getByRole("list")).toHaveAttribute("aria-live", "polite");
+  });
+
+  it("moves focus to the launch button when Dismiss unmounts the entry that held it", async () => {
+    vi.spyOn(inferenceApi, "launch").mockRejectedValue(documentsRefusal());
+    await launchOneRefused();
+
+    const dismiss = await screen.findByRole("button", { name: "Dismiss refusal for 2026-01-01" });
+    dismiss.focus();
+    fireEvent.click(dismiss);
+
+    await waitFor(() =>
+      expect(document.activeElement).toBe(
+        screen.getByRole("button", { name: /launch inference/i }),
+      ),
+    );
+  });
+
+  it("seeds the watched stub's output_dir from the in-flight refusal when the poll hasn't listed the job yet", async () => {
+    vi.spyOn(inferenceApi, "launch").mockRejectedValue(inFlightRefusal());
+    await launchOneRefused();
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Watch job inf-live for 2026-01-01" }),
+    );
+
+    expect(await screen.findByText("C:/data/predictions/baseline/2026-01-01")).toBeInTheDocument();
+  });
+
+  it("renders without a count and offers no launch action for a detail missing document_stem_count", async () => {
+    vi.spyOn(inferenceApi, "launch").mockRejectedValue(
+      documentsRefusal({
+        document_stem_count: null,
+        suggested_model_name: null,
+        suggested_output_dir: null,
+      }),
+    );
+    await launchOneRefused();
+
+    expect(
+      await screen.findByText(
+        paragraphMatching(
+          /prediction document\(s\) already in C:\/data\/predictions\/baseline\/2026-01-01\./,
+        ),
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Run into/ })).not.toBeInTheDocument();
   });
 });
 
