@@ -1820,6 +1820,51 @@ def test_inference_launch_refuses_a_second_launch_while_the_first_still_writes(
     assert third.status_code == 200, third.text
 
 
+def test_inference_launch_in_flight_check_resolves_a_differently_spelled_dataset_root(
+    client: TestClient, tmp_path: Path, monkeypatch,
+) -> None:
+    """A guard: the in-flight key compares dataset_root by resolved filesystem identity, so a
+    trailing-separator spelling of the same directory still names the first job's own launch
+    rather than reaching the resolver as an apparently distinct request."""
+    import os
+    import threading
+    import time
+
+    ckpt, dataset_root, date, inference_routes = _launch_setup(tmp_path, monkeypatch)
+    event = threading.Event()
+
+    def _wait_worker(job) -> None:
+        job.status = "running"
+        event.wait(timeout=5)
+        job.status = "completed"
+
+    monkeypatch.setattr(inference_routes, "_worker", _wait_worker)
+
+    first = client.post("/api/inference/launch", json={
+        "checkpoint_path": ckpt, "dataset_root": dataset_root,
+        "model_name": "baseline", "date": date,
+    })
+    assert first.status_code == 200, first.text
+    job_id = first.json()["job_id"]
+
+    second = client.post("/api/inference/launch", json={
+        "checkpoint_path": ckpt, "dataset_root": dataset_root + os.sep,
+        "model_name": "baseline", "date": date,
+    })
+    assert second.status_code == 409, second.text
+    detail = second.json()["detail"]
+    assert detail["kind"] == "bucket_in_flight"
+    assert detail["job_id"] == job_id
+
+    event.set()
+    job = inference_routes._get(job_id)
+    for _ in range(100):
+        if job.status not in ("pending", "running"):
+            break
+        time.sleep(0.05)
+    assert job.status == "completed"
+
+
 def test_inference_launch_refuses_by_the_requested_name_though_the_redirected_bucket_moved(
     client: TestClient, tmp_path: Path, monkeypatch,
 ) -> None:

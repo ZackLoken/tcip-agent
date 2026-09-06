@@ -102,7 +102,7 @@ class InferenceJob:
     platform_root: str = field(default_factory=_current_root)
     # The launch this job answers, held only for the in-flight refusal: never in _summary, so
     # a rehydrated job (whose worker is gone) never answers an in-flight match.
-    dataset_root: str = ""
+    requested_dataset_root: str = ""
     requested_model_name: str = ""
     date: Optional[str] = None
 
@@ -481,11 +481,12 @@ def launch_inference(payload: LaunchInferencePayload) -> dict:
 
     # Keyed on what was requested, not a resolved path a moving document count could shift: a
     # second launch of this (dataset, model, date) while the first still writes names that job.
+    requested_dataset_root = Path(payload.dataset_root).resolve()  # two spellings, one match
     live_job = next(
         (
             j for j in _list_jobs()
             if j.status in ("pending", "running")
-            and j.dataset_root == payload.dataset_root
+            and Path(j.requested_dataset_root).resolve() == requested_dataset_root
             and j.requested_model_name == payload.model_name
             and j.date == payload.date
         ),
@@ -557,7 +558,7 @@ def launch_inference(payload: LaunchInferencePayload) -> dict:
         checkpoint_path=payload.checkpoint_path,
         images_dir=str(images_dir),
         output_dir=resolved_output_dir,
-        dataset_root=payload.dataset_root,
+        requested_dataset_root=payload.dataset_root,
         requested_model_name=payload.model_name,
         date=payload.date,
         tile=payload.tile,
