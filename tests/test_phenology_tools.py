@@ -325,8 +325,8 @@ def test_deliver_phenology_milestones_derives_one_conf_from_two_stamps_with_no_c
 
 
 def test_deliver_phenology_milestones_joins_confs_from_dates_calibrated_apart(tmp_path: Path) -> None:
-    """GUARDS: two validated stamps recording different confs deliver the joined cell, in
-    dates_delivered order, rather than the blank cell a caller-agreement rule once produced."""
+    """Two validated stamps recording different confs deliver both, joined, in delivered-date
+    order, rather than a blank cell."""
     root = _ds_root(tmp_path)
     d1, d2 = _bucket(tmp_path, "2026-02-11"), _bucket(tmp_path, "2026-03-09")
     _write_preds(d1, "P1_a", ["closed"])
@@ -389,8 +389,8 @@ def test_deliver_phenology_milestones_joins_confs_in_dates_delivered_order_not_t
 def test_deliver_phenology_milestones_blanks_a_bucket_with_no_numeric_conf_in_the_joined_cell(
     tmp_path: Path,
 ) -> None:
-    """GUARDS: a validated stamp with no numeric conf beside one at 0.4 delivers "0.4;" rather
-    than the scalar 0.4 the baseline's reconciler answered for both."""
+    """A validated stamp with no numeric conf beside one at 0.4 delivers "0.4;", an empty entry
+    for the bucket with no conf, rather than the scalar for both."""
     root = _ds_root(tmp_path)
     d1, d2 = _bucket(tmp_path, "2026-02-11"), _bucket(tmp_path, "2026-03-09")
     _write_preds(d1, "P1_a", ["closed"])
