@@ -2,9 +2,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { api } from "@/api/client";
 import {
+  bucketRefusalOf,
   inferenceApi,
   openInferenceStream,
   resultsApi,
+  type BucketRefusal,
   type InferenceJob,
   type InferenceStatus,
   type RegisteredModel,
@@ -14,6 +16,73 @@ import { useStore } from "@/store";
 
 // A job can still be stopped only while it is pending/running.
 const CANCELLABLE: ReadonlySet<InferenceStatus> = new Set(["pending", "running"]);
+
+/** A launch refused for one date, holding what it was refused for so its own remediation
+ *  action re-posts the same checkpoint and date rather than the select's current choice. */
+interface RefusedLaunch {
+  date: string;
+  modelName: string;
+  checkpointPath: string;
+  refusal: BucketRefusal;
+}
+
+/** One refused-launch entry: the facts the response carried, its one remediation action (a
+ *  fresh-bucket relaunch or watching the in-flight job), and a dismissal. Every accessible name
+ *  below is date-qualified so two entries' controls are distinguishable. */
+function RefusedLaunchEntry({
+  entry,
+  onRunSuggestion,
+  onWatch,
+  onDismiss,
+}: {
+  entry: RefusedLaunch;
+  onRunSuggestion: (entry: RefusedLaunch, suggestedModelName: string) => void;
+  onWatch: (jobId: string) => void;
+  onDismiss: (date: string) => void;
+}) {
+  const { refusal, date } = entry;
+  return (
+    <li className="border border-tcip-border rounded p-2 flex flex-col gap-1 text-[11px]">
+      {refusal.kind === "bucket_holds_documents" ? (
+        <>
+          <p>
+            {date}: {refusal.requested_output_dir} already holds {refusal.document_stem_count}{" "}
+            prediction document(s).
+          </p>
+          {refusal.suggested_model_name ? (
+            <button
+              className="tcip-btn text-[11px] self-start"
+              onClick={() => onRunSuggestion(entry, refusal.suggested_model_name as string)}
+            >
+              {`Run into ${refusal.suggested_model_name} instead for ${date}`}
+            </button>
+          ) : (
+            <p>
+              Every {refusal.requested_model_name}@r&lt;n&gt; variant up to the ceiling already
+              holds a verdict or a document: ask the agent to publish this model under another
+              bucket name through run_inference&apos;s own output_dir.
+            </p>
+          )}
+        </>
+      ) : (
+        <>
+          <p>
+            {date}: job {refusal.job_id} is already writing to {refusal.requested_output_dir}.
+          </p>
+          <button
+            className="tcip-btn text-[11px] self-start"
+            onClick={() => onWatch(refusal.job_id)}
+          >
+            {`Watch job ${refusal.job_id} for ${date}`}
+          </button>
+        </>
+      )}
+      <button className="tcip-btn text-[11px] self-start" onClick={() => onDismiss(date)}>
+        {`Dismiss refusal for ${date}`}
+      </button>
+    </li>
+  );
+}
 
 function statusBadgeClass(status: InferenceStatus): string {
   if (status === "completed") return "bg-tcip-tp/20 text-tcip-tp";
@@ -39,8 +108,17 @@ export function InferenceTab() {
   // Whether the watched job still appeared in the last poll: false once a job is delisted, so
   // the panel shows its last error alone rather than a status line frozen on a job that is gone.
   const [activeJobListed, setActiveJobListed] = useState(true);
+  // A bucket_holds_documents or bucket_in_flight refusal, keyed by the date it was refused for.
+  const [refusedLaunches, setRefusedLaunches] = useState<Record<string, RefusedLaunch>>({});
+  const [launching, setLaunching] = useState(false);
   const streamRef = useRef<(() => void) | null>(null);
   const activeJobId = activeJob?.job_id ?? null;
+
+  // A refused entry names a bucket of the previous choice: neither survives a model or dataset
+  // change.
+  useEffect(() => {
+    setRefusedLaunches({});
+  }, [modelPath, datasetRoot]);
 
   const refreshModels = useCallback(() => {
     if (!projectRoot) return;
@@ -152,50 +230,106 @@ export function InferenceTab() {
     );
   }
 
+  function dropRefusal(date: string) {
+    setRefusedLaunches((prev) => {
+      const next = { ...prev };
+      delete next[date];
+      return next;
+    });
+  }
+
+  // One date's launch body: onLaunch supplies the select's own model, a refused entry's own
+  // action its own checkpoint and the suggested model name, so the action never reads the select.
+  async function launchOne(checkpointPath: string, modelName: string, date: string) {
+    if (!datasetRoot) return;
+    try {
+      const res = await inferenceApi.launch({
+        checkpoint_path: checkpointPath,
+        dataset_root: datasetRoot,
+        model_name: modelName,
+        date,
+      });
+      if (res.job_id) {
+        const stub: InferenceJob = {
+          job_id: res.job_id,
+          status: "pending",
+          done: 0,
+          total: 0,
+          images_dir: res.images_dir,
+          output_dir: res.output_dir,
+          error: null,
+          warning: null,
+        };
+        setJobs((prev) => [stub, ...prev]);
+        setActiveJob(stub);
+        setActiveJobListed(true);
+        dropRefusal(date);
+        if (res.bucket_redirected) {
+          useStore
+            .getState()
+            .pushToast(
+              `${date}: the requested bucket has review verdicts, so this run writes to ${res.output_dir}.`,
+              "info",
+            );
+        }
+      }
+    } catch (e) {
+      const refusal = bucketRefusalOf(e);
+      if (refusal) {
+        setRefusedLaunches((prev) => ({
+          ...prev,
+          [date]: { date, modelName, checkpointPath, refusal },
+        }));
+        return;
+      }
+      dropRefusal(date);
+      useStore
+        .getState()
+        .pushToast(
+          `Inference launch failed for ${date}: ${e instanceof Error ? e.message : String(e)}`,
+        );
+    }
+  }
+
   async function onLaunch() {
     const model = models.find((m) => m.checkpoint_path === modelPath);
     if (!model || !datasetRoot || selectedDates.length === 0) return;
-    // One job per date: each date is its own prediction bucket, and the jobs table already
-    // reports them one per row.
-    for (const date of selectedDates) {
-      try {
-        const res = await inferenceApi.launch({
-          checkpoint_path: model.checkpoint_path,
-          dataset_root: datasetRoot,
-          model_name: model.name,
-          date,
-        });
-        if (res.job_id) {
-          const stub: InferenceJob = {
-            job_id: res.job_id,
-            status: "pending",
-            done: 0,
-            total: 0,
-            images_dir: res.images_dir,
-            output_dir: res.output_dir,
-            error: null,
-            warning: null,
-          };
-          setJobs((prev) => [stub, ...prev]);
-          setActiveJob(stub);
-          setActiveJobListed(true);
-          if (res.bucket_redirected) {
-            useStore
-              .getState()
-              .pushToast(
-                `${date}: the requested bucket has review verdicts, so this run writes to ${res.output_dir}.`,
-                "info",
-              );
-          }
-        }
-      } catch (e) {
-        useStore
-          .getState()
-          .pushToast(
-            `Inference launch failed for ${date}: ${e instanceof Error ? e.message : String(e)}`,
-          );
+    setRefusedLaunches((prev) => {
+      const next = { ...prev };
+      for (const date of selectedDates) delete next[date];
+      return next;
+    });
+    setLaunching(true);
+    try {
+      // One job per date: each date is its own prediction bucket, one job row per date.
+      for (const date of selectedDates) {
+        await launchOne(model.checkpoint_path, model.name, date);
       }
+    } finally {
+      setLaunching(false);
     }
+  }
+
+  function onRunSuggestion(entry: RefusedLaunch, suggestedModelName: string) {
+    void launchOne(entry.checkpointPath, suggestedModelName, entry.date);
+  }
+
+  function onWatchRefusedJob(jobId: string) {
+    const row = jobs.find((j) => j.job_id === jobId);
+    setActiveJob(
+      row ??
+        ({
+          job_id: jobId,
+          status: "running",
+          done: 0,
+          total: 0,
+          images_dir: "",
+          output_dir: "",
+          error: null,
+          warning: null,
+        } as InferenceJob),
+    );
+    setActiveJobListed(row !== undefined);
   }
 
   async function onCancel(jobId: string) {
@@ -296,10 +430,27 @@ export function InferenceTab() {
         <button
           className="tcip-btn-primary w-full"
           onClick={onLaunch}
-          disabled={!modelPath || selectedDates.length === 0}
+          disabled={launching || !modelPath || selectedDates.length === 0}
         >
           ▶&nbsp;&nbsp;Launch inference
         </button>
+
+        {Object.keys(refusedLaunches).length > 0 && (
+          <div className="mt-3">
+            <div className="tcip-heading mb-1">Refused launches</div>
+            <ul aria-live="polite" className="flex flex-col gap-1">
+              {Object.values(refusedLaunches).map((entry) => (
+                <RefusedLaunchEntry
+                  key={entry.date}
+                  entry={entry}
+                  onRunSuggestion={onRunSuggestion}
+                  onWatch={onWatchRefusedJob}
+                  onDismiss={dropRefusal}
+                />
+              ))}
+            </ul>
+          </div>
+        )}
       </div>
 
       <div className="p-4 overflow-auto">
