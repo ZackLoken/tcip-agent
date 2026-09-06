@@ -502,9 +502,10 @@ def _stale_finished(
     the status store, and :func:`stale_finished_names`, which calls it after its own: each caller
     reads the digest store and the registry once for the bucket it already holds, never twice for
     the same read. The admit rules answer the same question :func:`stale_stamped_names` states:
-    no readable digest store, no stamp for an image, no readable or existing registry, or no
-    digest for ``subject`` all admit rather than quarantine, since a rail must admit valid work,
-    not only reject it.
+    no digest store at all, one whose bytes cannot be decoded, no stamp for an image, no readable
+    or existing registry, or no digest for ``subject`` all admit rather than quarantine, since a
+    rail must admit valid work, not only reject it; a digest store present but unreadable is
+    reported by raising, never admitted.
     """
     import tcip_store
 
@@ -519,7 +520,7 @@ def _stale_finished(
         return set()
     try:
         stamps = tcip_store.read(image_status_digest_key(root), default={})
-    except (tcip_store.DecodeError, OSError):
+    except tcip_store.DecodeError:
         stamps = {}
     stamped_by_image = bucket_digest_stamps(stamps, bucket_key)
     if not stamped_by_image:
