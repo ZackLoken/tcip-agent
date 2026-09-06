@@ -14,7 +14,7 @@ answerable by file reads alone, with any material to review given as files insid
 working tree it is pointed at.
 
 Runs on the standard library alone, so it needs no project environment and should be invoked as
-``python scripts/cross_family_ask.py``. Wrapping it in ``conda run`` buys nothing and fails
+``python tools/cross_family_ask.py``. Wrapping it in ``conda run`` buys nothing and fails
 outright wherever conda is absent from PATH, which reports a launched-nothing run as exit 0.
 """
 

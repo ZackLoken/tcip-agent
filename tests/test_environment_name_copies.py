@@ -76,9 +76,9 @@ _EXPECTED_COUNTS = {
     "environment.yml": 2,
     "packages/tcip-web/README.md": 2,
     "scripts/distill_learnings.py": 1,
-    "scripts/smoke_fence_e2e.py": 1,
-    "scripts/smoke_phenology_e2e.py": 1,
-    "scripts/smoke_terminal_e2e.py": 1,
+    "tools/smoke_fence_e2e.py": 1,
+    "tools/smoke_phenology_e2e.py": 1,
+    "tools/smoke_terminal_e2e.py": 1,
 }
 
 

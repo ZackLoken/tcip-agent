@@ -1,7 +1,7 @@
 """Baseline-resident guards for the version-field family's reader branch.
 
 Every import and assertion here names only symbols that predate the family, so
-scripts/prove_test_fails_before.py can observe each test failing at the pre-family
+tools/prove_test_fails_before.py can observe each test failing at the pre-family
 baseline. The family's own test files import the refusal class the family introduces
 and cannot be collected at that baseline; these tests pin the same behaviors through
 message text and returned content instead.

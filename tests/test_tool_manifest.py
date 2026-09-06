@@ -221,7 +221,7 @@ def test_consolidated_tools_present_and_removed_absent():
 
 
 def test_docs_do_not_hardcode_tool_count():
-    """Docs must point at scripts/list_tools.py, not cite a literal count.
+    """Docs must point at tools/list_tools.py, not cite a literal count.
 
     The regex allows an optional run of adjectives before "tool(s)" so the
     project's idiomatic phrasings are all caught: "57 MCP tools",
@@ -240,5 +240,5 @@ def test_docs_do_not_hardcode_tool_count():
             offenders[str(doc.relative_to(REPO_ROOT))] = hits
     assert not offenders, (
         f"docs hard-code a tool count {offenders}; "
-        "remove the number and reference `python scripts/list_tools.py` instead"
+        "remove the number and reference `python tools/list_tools.py` instead"
     )

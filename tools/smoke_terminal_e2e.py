@@ -7,7 +7,7 @@ response streams back. This is the scenario that silently failed in the old chat
 implementation; run it after any change to the terminal stack.
 
 Usage (from the repo root, tcip-agent env):
-    python scripts/smoke_terminal_e2e.py
+    python tools/smoke_terminal_e2e.py
 
 Costs one trivial model turn on the machine's Claude Code account.
 """

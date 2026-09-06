@@ -1,6 +1,6 @@
 """The browser and the backend meet on one declaration of the API's paths.
 
-The FastAPI app registers the paths; ``scripts/generate_frontend_routes.py`` projects them into
+The FastAPI app registers the paths; ``tools/generate_frontend_routes.py`` projects them into
 ``frontend/src/api/routes.ts``. These tests hold that projection to the routes the app really has,
 keep the frontend from writing a path of its own beside it, and check that every path the browser
 asks for is one the dev server forwards.
@@ -22,7 +22,7 @@ FRONTEND_SRC = REPO_ROOT / "packages" / "tcip-web" / "frontend" / "src"
 GENERATED = FRONTEND_SRC / "api" / "routes.ts"
 PROXY_GENERATED = FRONTEND_SRC / "api" / "devProxy.generated.ts"
 VITE_CONFIG = REPO_ROOT / "packages" / "tcip-web" / "frontend" / "vite.config.ts"
-GENERATOR = REPO_ROOT / "scripts" / "generate_frontend_routes.py"
+GENERATOR = REPO_ROOT / "tools" / "generate_frontend_routes.py"
 
 _LITERAL_RE = re.compile(r"""["'`](/(?:api|ws)/[^"'`]*)["'`]""")
 _ROUTES_USE_RE = re.compile(r"\bROUTES\.([A-Za-z0-9_]+)")
@@ -59,7 +59,7 @@ def test_the_generated_path_module_is_what_the_registered_routes_produce() -> No
     generated = _generator().render(app)
     assert GENERATED.read_text(encoding="utf-8") == generated, (
         "packages/tcip-web/frontend/src/api/routes.ts is out of date; "
-        "run python scripts/generate_frontend_routes.py"
+        "run python tools/generate_frontend_routes.py"
     )
 
 
@@ -95,7 +95,7 @@ def test_the_generated_proxy_module_is_what_the_registered_routes_produce() -> N
     generated = _generator().render_proxy(app)
     assert PROXY_GENERATED.read_text(encoding="utf-8") == generated, (
         "packages/tcip-web/frontend/src/api/devProxy.generated.ts is out of date; "
-        "run python scripts/generate_frontend_routes.py"
+        "run python tools/generate_frontend_routes.py"
     )
 
 

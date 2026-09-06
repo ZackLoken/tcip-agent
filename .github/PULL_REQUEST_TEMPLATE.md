@@ -6,19 +6,19 @@
       change's own new/changed test files)
 - [ ] `ruff check .` passes
 - [ ] `mypy` passes
-- [ ] `python scripts/list_tools.py` was not hardcoded anywhere as a count in a doc, comment,
+- [ ] `python tools/list_tools.py` was not hardcoded anywhere as a count in a doc, comment,
       or commit message
-- [ ] `python scripts/gate_baseline.py --out <dir>` passes, or CI ran the equivalent
+- [ ] `python tools/gate_baseline.py --out <dir>` passes, or CI ran the equivalent
 - [ ] Frontend gate (`npm run format:check && npm run lint && npm run typecheck && npm test &&
       npm run build`) run if a frontend file changed
 - [ ] A new or changed test constructs its input through the platform's own producer, not a
       hand-built fixture standing in for one
 - [ ] A test that guards a fix was shown failing without it
-      (`python scripts/prove_test_fails_before.py <testfile> -k <expr>`, verdict `GUARDS`)
+      (`python tools/prove_test_fails_before.py <testfile> -k <expr>`, verdict `GUARDS`)
 - [ ] If this touches a persisted format, a refusal, an operating-point stamp, or a delivery
       gate: a design issue was opened and discussed before this pull request
 - [ ] If this touches a store's on-disk shape: `frozen-formats.json` was regenerated
-      (`python scripts/generate_frozen_manifest.py`) and `tests/test_frozen_manifest.py` passes
+      (`python tools/generate_frozen_manifest.py`) and `tests/test_frozen_manifest.py` passes
 - [ ] Commits are one concern each, in dependency order, with LF line endings, and each message
       states the standing constraint the change installs
 - [ ] No new or renamed crop trait vocabulary outside `crops.yml` and

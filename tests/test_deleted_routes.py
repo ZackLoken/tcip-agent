@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import pytest
 
-from scripts.generate_frontend_routes import iter_api_routes
+from tools.generate_frontend_routes import iter_api_routes
 from tcip_web.app import app
 
 DELETED_ROUTES = [

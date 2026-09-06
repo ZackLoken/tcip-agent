@@ -7,7 +7,7 @@ import pathlib
 import sys
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
-SCRIPT = REPO_ROOT / "scripts" / "build_module_inventory.py"
+SCRIPT = REPO_ROOT / "tools" / "build_module_inventory.py"
 
 
 def _load():
@@ -51,7 +51,7 @@ def test_build_inventory_counts_an_edge_through_a_wrapped_import(tmp_path, monke
 
     monkeypatch.setattr(mod, "REPO_ROOT", tmp_path)
     monkeypatch.setattr(mod, "PY_PACKAGE_ROOTS", [])
-    monkeypatch.setattr(mod, "SCRIPTS_ROOT", tmp_path / "no_scripts_here")
+    monkeypatch.setattr(mod, "TOOLS_ROOT", tmp_path / "no_tools_here")
     monkeypatch.setattr(mod, "TS_ROOT", src)
 
     inventory = mod.build_inventory()

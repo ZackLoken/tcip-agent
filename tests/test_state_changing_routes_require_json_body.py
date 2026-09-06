@@ -22,7 +22,7 @@ from pydantic import BaseModel
 from tcip_web.app import app
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-GENERATOR = REPO_ROOT / "scripts" / "generate_frontend_routes.py"
+GENERATOR = REPO_ROOT / "tools" / "generate_frontend_routes.py"
 
 _STATE_CHANGING_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 

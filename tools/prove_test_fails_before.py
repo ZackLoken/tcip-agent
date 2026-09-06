@@ -9,11 +9,11 @@ the current ``tests/`` directory so the test's own conftest and helpers travel w
 baseline's own source is what gets imported, runs pytest there, and reads pytest's per-test outcome
 rather than its exit code.
 
-    python scripts/prove_test_fails_before.py tests/test_foo.py
-    python scripts/prove_test_fails_before.py tests/test_foo.py -k "new_behaviour"
-    python scripts/prove_test_fails_before.py tests/test_foo.py --baseline 196eedf1~1
-    python scripts/prove_test_fails_before.py tests/test_foo.py --json out.json
-    python scripts/prove_test_fails_before.py tests/test_foo.py --test-rev 8b09bd17 --baseline ae3dbbb8
+    python tools/prove_test_fails_before.py tests/test_foo.py
+    python tools/prove_test_fails_before.py tests/test_foo.py -k "new_behaviour"
+    python tools/prove_test_fails_before.py tests/test_foo.py --baseline 196eedf1~1
+    python tools/prove_test_fails_before.py tests/test_foo.py --json out.json
+    python tools/prove_test_fails_before.py tests/test_foo.py --test-rev 8b09bd17 --baseline ae3dbbb8
 
 Four verdicts, four exit codes, because an exit code alone cannot carry this:
 
@@ -166,7 +166,7 @@ def _test_file_relative_to_repo(raw: str) -> tuple[str | None, str]:
     tree gets materialized rather than an absolute path that names the working checkout's file
     regardless of ``cwd``. A relative path is resolved against the repository root, never the
     caller's ``cwd``, and either spelling's ``..`` segments are collapsed before the ``tests/``
-    check, so a path that only reads as inside ``tests/`` before normalizing (``tests/../scripts/
+    check, so a path that only reads as inside ``tests/`` before normalizing (``tests/../tools/
     x.py``) is refused rather than admitted. Returns ``(None, reason)`` when ``raw`` resolves
     outside ``tests/``.
     """

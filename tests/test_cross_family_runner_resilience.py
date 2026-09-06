@@ -17,7 +17,7 @@ import sys
 
 import pytest
 
-SCRIPT = pathlib.Path(__file__).resolve().parents[1] / "scripts" / "cross_family_ask.py"
+SCRIPT = pathlib.Path(__file__).resolve().parents[1] / "tools" / "cross_family_ask.py"
 
 
 def _load():

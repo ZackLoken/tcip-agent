@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """Guardrail: hold every tool name in agent-facing prose to the registry.
 
-Two independent checks, mirroring `scripts/verify_skill_traits.py`'s split between a
+Two independent checks, mirroring `tools/verify_skill_traits.py`'s split between a
 fabrication check and a membership check, for tool names instead of trait names:
 
 - `fabricated_tool_names` (fabrication detection) reads every Tools table (a table whose
@@ -9,7 +9,7 @@ fabrication check and a membership check, for tool names instead of trait names:
   token of each row's first cell (the identifier up to the first `(`, space or backtick, so a
   documented call signature or a keyword note still yields the plain name). A name that is not
   in `list_registered_tools()` is fabricated or retired. A first cell whose backticked token
-  is not a plain identifier (`scripts/`) is skipped rather than reported, since it never claimed
+  is not a plain identifier (`tools/`) is skipped rather than reported, since it never claimed
   to be a tool name.
 - `orphan_tool_names` (rename/omission detection) searches every surface's whole text for each
   registered tool name as `` `name` `` or `` `name( `` (tools are documented with their call
@@ -30,7 +30,7 @@ named in a `->` chain) mostly catches legitimate non-tool identifiers (`train(ct
 `grid_to_pixel`, `plant_id`, ...) rather than real fabrications, so it also stays out of scope;
 the orphan check is what catches a rename missed everywhere, table or prose alike.
 
-CLI: `python scripts/verify_skill_tools.py`, exit 0 clean, 1 fabricated or orphaned names found.
+CLI: `python tools/verify_skill_tools.py`, exit 0 clean, 1 fabricated or orphaned names found.
 """
 
 from __future__ import annotations
@@ -89,7 +89,7 @@ def tool_table_first_cells(md_text: str) -> list[str]:
 def extract_tool_name(cell: str) -> str | None:
     """The plain identifier named by a Tools-table cell's first backticked token, or ``None``
     when that token is not a snake_case identifier (a call signature or a keyword note still
-    yields the name; a path fragment like `scripts/` yields nothing to check)."""
+    yields the name; a path fragment like `tools/` yields nothing to check)."""
     m = _BACKTICK_SPAN.search(cell)
     if not m:
         return None

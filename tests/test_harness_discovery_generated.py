@@ -2,7 +2,7 @@
 `AGENTS.md`'s generated block are what the canonical knowledge documents currently produce, not
 a hand-edited or stale copy.
 
-`scripts/generate_harness_discovery.py` renders one `.claude/skills/<name>/SKILL.md` and one
+`tools/generate_harness_discovery.py` renders one `.claude/skills/<name>/SKILL.md` and one
 `.agents/skills/<name>/SKILL.md` per document under `packages/tcip-mcp/src/tcip_mcp/knowledge/`,
 plus the block between markers in `AGENTS.md`; this holds every checked-in generated file to
 that projection, the same shape `tests/test_generated_frontend_types.py` holds the frontend's
@@ -18,7 +18,7 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-GENERATOR = REPO_ROOT / "scripts" / "generate_harness_discovery.py"
+GENERATOR = REPO_ROOT / "tools" / "generate_harness_discovery.py"
 
 
 def _generator():
@@ -37,7 +37,7 @@ def _documents():
 
 def test_every_generated_claude_skill_matches_the_canonical_frontmatter():
     """Fails when a checked-in Claude Code skill is stale: a document renamed, re-described, or
-    added since the last `python scripts/generate_harness_discovery.py` run would leave Claude
+    added since the last `python tools/generate_harness_discovery.py` run would leave Claude
     Code reading a selection hint the canonical document no longer carries."""
     generator = _generator()
     documents = _documents()
@@ -46,7 +46,7 @@ def test_every_generated_claude_skill_matches_the_canonical_frontmatter():
     stale = generator.stale_skills(generator.CLAUDE_SKILLS_DIR, generator.render_skill, documents)
     assert not stale, (
         f"{stale} out of date under {generator.CLAUDE_SKILLS_DIR}; "
-        "run python scripts/generate_harness_discovery.py"
+        "run python tools/generate_harness_discovery.py"
     )
 
 
@@ -59,7 +59,7 @@ def test_every_generated_agents_skill_matches_the_canonical_frontmatter():
     stale = generator.stale_skills(generator.AGENTS_SKILLS_DIR, generator.render_agents_skill, documents)
     assert not stale, (
         f"{stale} out of date under {generator.AGENTS_SKILLS_DIR}; "
-        "run python scripts/generate_harness_discovery.py"
+        "run python tools/generate_harness_discovery.py"
     )
 
 
@@ -117,7 +117,7 @@ def test_agents_md_generated_block_matches_the_canonical_documents():
     expected_block = generator.render_agents_block(documents)
     assert actual_block == expected_block, (
         "AGENTS.md's generated block is out of date; run "
-        "python scripts/generate_harness_discovery.py"
+        "python tools/generate_harness_discovery.py"
     )
 
 

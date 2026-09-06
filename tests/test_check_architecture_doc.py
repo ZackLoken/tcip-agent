@@ -10,8 +10,8 @@ import sys
 import pytest
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
-SCRIPT = REPO_ROOT / "scripts" / "check_architecture_doc.py"
-INVENTORY_SCRIPT = REPO_ROOT / "scripts" / "build_module_inventory.py"
+SCRIPT = REPO_ROOT / "tools" / "check_architecture_doc.py"
+INVENTORY_SCRIPT = REPO_ROOT / "tools" / "build_module_inventory.py"
 
 
 def _load():

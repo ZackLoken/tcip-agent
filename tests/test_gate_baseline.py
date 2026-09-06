@@ -1,4 +1,4 @@
-"""``scripts/gate_baseline.py`` runs the steps ``.github/workflows/ci.yml`` actually declares.
+"""``tools/gate_baseline.py`` runs the steps ``.github/workflows/ci.yml`` actually declares.
 
 These tests hold the parsed plan to the workflow file itself, loaded independently here, so a
 job or step CI gains that the script silently drops (or wrongly skips) is caught rather than
@@ -17,7 +17,7 @@ import pytest
 import yaml
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
-SCRIPT = REPO_ROOT / "scripts" / "gate_baseline.py"
+SCRIPT = REPO_ROOT / "tools" / "gate_baseline.py"
 CI_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "ci.yml"
 
 

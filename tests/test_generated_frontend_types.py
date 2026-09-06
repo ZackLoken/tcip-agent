@@ -1,6 +1,6 @@
 """The browser's coverage-record types are a projection of the pydantic models that declare them.
 
-``scripts/generate_frontend_types.py`` renders ``frontend/src/api/types.generated.ts`` from
+``tools/generate_frontend_types.py`` renders ``frontend/src/api/types.generated.ts`` from
 ``routes/_coverage_models.py``, ``routes/coverage.py``, ``routes/review.py``,
 ``routes/training.py``, ``routes/terminal.py`` and ``tcip_web.state.GuiVocabulary`` (the declared
 pydantic models), plus a handful of runtime constants from ``routes/images.py``,
@@ -23,7 +23,7 @@ from pydantic import BaseModel
 REPO_ROOT = Path(__file__).resolve().parents[1]
 FRONTEND_SRC = REPO_ROOT / "packages" / "tcip-web" / "frontend" / "src"
 GENERATED = FRONTEND_SRC / "api" / "types.generated.ts"
-GENERATOR = REPO_ROOT / "scripts" / "generate_frontend_types.py"
+GENERATOR = REPO_ROOT / "tools" / "generate_frontend_types.py"
 
 _TS_BLOCK_RE = re.compile(r"(?:interface|type)\s+\w+\s*=?\s*\{(.*?)\n\}", re.S)
 _TS_FIELD_RE = re.compile(r"^\s+(\w+)(\??):", re.M)
@@ -50,7 +50,7 @@ def test_the_generated_types_module_is_what_the_declared_models_produce() -> Non
     generated = _generator().render()
     assert GENERATED.read_text(encoding="utf-8") == generated, (
         "packages/tcip-web/frontend/src/api/types.generated.ts is out of date; "
-        "run python scripts/generate_frontend_types.py"
+        "run python tools/generate_frontend_types.py"
     )
 
 

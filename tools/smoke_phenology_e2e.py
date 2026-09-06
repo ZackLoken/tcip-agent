@@ -14,7 +14,7 @@ delivery event, driven through the web app's own route with a TestClient rather 
 hand-rolled measurement. No served backend or network.
 
 Usage (repo root, tcip-agent env):
-    python scripts/smoke_phenology_e2e.py
+    python tools/smoke_phenology_e2e.py
 
 Exits non-zero on the first failed assertion.
 """
