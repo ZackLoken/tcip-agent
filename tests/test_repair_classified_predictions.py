@@ -23,7 +23,7 @@ from tcip_mcp.experiments import config_key
 from tcip_mcp.pipelines.resolution import bucket_scope, sidecar_key
 from tcip_mcp.prediction_buckets import review_state_dir_of
 from tcip_mcp.tools.project_tools import upsert_dataset
-from tests._store_damage import damage_record
+from tests._record_damage_fixtures import damage_record
 
 SUBJECT = "leaf"
 ATTRIBUTE = "condition"

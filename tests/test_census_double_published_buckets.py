@@ -186,7 +186,7 @@ def test_a_stamp_that_will_not_decode_is_read_refused_and_exits_two(tmp_path, mo
     """Coverage of the read-refusal exit-2 arm, not a guard: distinct from the exit-2 arm for a
     named root that is not a project, a stamp whose bytes are corrupted in place is reported
     READ-REFUSED and the census continues over the remaining roots."""
-    from tests._store_damage import damage_record
+    from tests._record_damage_fixtures import damage_record
     from tcip_mcp.pipelines.resolution import sidecar_key
 
     project = _project(tmp_path, monkeypatch)
