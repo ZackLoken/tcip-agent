@@ -245,8 +245,9 @@ def build_worksheet(project_root: Path) -> str:
     return "\n".join(lines) + "\n"
 
 
-def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(description="Gather learning-review material into one worksheet.")
+def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
+    ap = argparse.ArgumentParser(
+        description="Gather learning-review material into one worksheet.", prog=prog)
     ap.add_argument("--project", default=None,
                     help="project root holding the friction reports and retrospectives "
                          "(default: this platform checkout's own repo root)")

@@ -158,8 +158,8 @@ def convert_shp_to_plant_csv(
     }
 
 
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__, prog=prog)
     parser.add_argument("shp_path")
     parser.add_argument("csv_path")
     parser.add_argument("--plot-name-field", default=None)

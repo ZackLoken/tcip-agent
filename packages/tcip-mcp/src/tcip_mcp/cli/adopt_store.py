@@ -34,8 +34,8 @@ from tcip_store.layout_claims import LAYOUTS
 from tcip_store.store import bind
 
 
-def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0], prog=prog)
     ap.add_argument("roots", nargs="*", help="root directories to adopt")
     ap.add_argument("--layout", default="", choices=("", *LAYOUTS), help="what kind of directory the named roots are")
     ap.add_argument("--project", default="", help="a project root: adopts its own roots and its registered datasets'")

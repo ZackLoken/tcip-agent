@@ -23,8 +23,8 @@ import sys
 from tcip_mcp.project_paths import require_and_pin_platform_root
 
 
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__, prog=prog)
     parser.add_argument("--project", default="",
                          help="Project root this run resolves against; falls back to "
                               "$TCIP_STATE_ROOT.")

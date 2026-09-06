@@ -24,8 +24,8 @@ from tcip_store.errors import StoreError
 from tcip_mcp.project_record import record_site
 
 
-def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0], prog=prog)
     ap.add_argument("project_root", help="project directory holding .tcip/")
     ap.add_argument("site", help="the orchard or station this project's plants stand in")
     ap.add_argument(

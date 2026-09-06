@@ -61,13 +61,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"tcip: unknown command {command!r}\n\n{_usage()}", file=sys.stderr)
         return 2
     module = importlib.import_module(module_name)
-    # No command module passes prog= to its own ArgumentParser, so this stands in for that.
-    original_argv0 = sys.argv[0]
-    sys.argv[0] = f"tcip {command}"
-    try:
-        return module.main(rest)
-    finally:
-        sys.argv[0] = original_argv0
+    return module.main(rest, prog=f"tcip {command}")
 
 
 if __name__ == "__main__":

@@ -598,8 +598,8 @@ def process_project_root(
     return outcomes, refused
 
 
-def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0], prog=prog)
     ap.add_argument("roots", nargs="*", type=Path)
     ap.add_argument("--plan", action="store_true", help="preview only; nothing is written")
     ap.add_argument("--bucket", action="append", default=[], type=Path,
