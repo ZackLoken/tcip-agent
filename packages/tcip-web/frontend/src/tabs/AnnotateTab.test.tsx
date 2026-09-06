@@ -1288,7 +1288,8 @@ describe("Cut gesture", () => {
     act(() => useStore.getState().setCut(true));
     fireEvent.click(stage, { clientX: 500, clientY: 500, button: 0 });
     expect(useStore.getState().toasts.at(-1)?.message).toBe(
-      "Select a polygon to cut, then click two points on either side of it.",
+      "Select a polygon first by clicking it, then click two points on either side of it or " +
+        "press Shift+H / Shift+V.",
     );
   });
 
@@ -1527,14 +1528,16 @@ describe("Cut keyboard path (Shift+H / Shift+V)", () => {
     expect(useStore.getState().toasts.at(-1)?.message).toContain("separate parts of one object");
   });
 
-  it("leaves a pending click-cut start alone", async () => {
+  it("leaves a pending click-cut start alone but says why nothing happened", async () => {
     const stage = await renderPolygonCanvas();
     armAndSelectPolyA();
     fireEvent.click(stage, { clientX: 105, clientY: 0, button: 0 });
     fireEvent.keyDown(window, { key: "H", shiftKey: true });
 
     expect(useStore.getState().canvas.polygons).toHaveLength(2);
-    expect(useStore.getState().toasts).toHaveLength(0);
+    expect(useStore.getState().toasts.at(-1)?.message).toBe(
+      "A cut is half-placed. Press Esc to clear it, then x to re-arm.",
+    );
   });
 
   it("pushes the selection-required notice, not silence, with nothing selected", async () => {
@@ -1543,7 +1546,8 @@ describe("Cut keyboard path (Shift+H / Shift+V)", () => {
     fireEvent.keyDown(window, { key: "H", shiftKey: true });
 
     expect(useStore.getState().toasts.at(-1)?.message).toBe(
-      "Select a polygon to cut, then click two points on either side of it.",
+      "Select a polygon first by clicking it, then click two points on either side of it or " +
+        "press Shift+H / Shift+V.",
     );
   });
 
