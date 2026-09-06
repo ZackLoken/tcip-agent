@@ -1095,44 +1095,6 @@ const POLY_B = {
   attributes: {},
 };
 
-// A concave outline (the same U shape polygonGeometry.test.ts cuts, offset into the image): a
-// centred axis cut crosses it more than twice, so both keyboard axes refuse it.
-const CONCAVE_POLY = {
-  rings: [
-    [
-      [400, 400],
-      [430, 400],
-      [430, 430],
-      [420, 430],
-      [420, 410],
-      [410, 410],
-      [410, 430],
-      [400, 430],
-    ] as [number, number][],
-  ],
-  subject: "subject_a",
-  attributes: {},
-};
-
-const MULTI_RING_POLY = {
-  rings: [
-    [
-      [500, 500],
-      [520, 500],
-      [520, 520],
-      [500, 520],
-    ] as [number, number][],
-    [
-      [540, 500],
-      [560, 500],
-      [560, 520],
-      [540, 520],
-    ] as [number, number][],
-  ],
-  subject: "subject_a",
-  attributes: {},
-};
-
 function seedPolygons(polygons: (typeof POLY_A)[]) {
   useStore.getState().loadLabelsIntoCanvas({
     image_path: "C:/data/images/2026-01-01/img1.jpg",
@@ -1288,8 +1250,7 @@ describe("Cut gesture", () => {
     act(() => useStore.getState().setCut(true));
     fireEvent.click(stage, { clientX: 500, clientY: 500, button: 0 });
     expect(useStore.getState().toasts.at(-1)?.message).toBe(
-      "Select a polygon first by clicking it, then click two points on either side of it or " +
-        "press Shift+H / Shift+V.",
+      "Select a polygon to cut, then click two points on either side of it.",
     );
   });
 
@@ -1445,145 +1406,6 @@ describe("Cut gesture", () => {
     });
     fireEvent.click(stage, { clientX: 105, clientY: 250, button: 0 }); // a fresh first click, not a cut
     expect(useStore.getState().canvas.polygons).toHaveLength(2);
-  });
-});
-
-describe("Cut keyboard path (Shift+H / Shift+V)", () => {
-  function xs(ring: [number, number][]): number[] {
-    return ring.map(([x]) => x);
-  }
-  function ys(ring: [number, number][]): number[] {
-    return ring.map(([, y]) => y);
-  }
-  function armAndSelectPolyA(): void {
-    act(() => {
-      useStore.getState().selectPolygon(0);
-      useStore.getState().setCut(true);
-    });
-  }
-
-  it("Shift+V splits the selected convex polygon through the vertical centre of its bounding box", async () => {
-    await renderPolygonCanvas();
-    armAndSelectPolyA();
-    fireEvent.keyDown(window, { key: "V", shiftKey: true });
-
-    expect(useStore.getState().canvas.polygons).toHaveLength(3);
-    const pieces = useStore.getState().canvas.polygons.slice(0, 2);
-    const byMinX = [...pieces].sort(
-      (p, q) => Math.min(...xs(p.rings[0])) - Math.min(...xs(q.rings[0])),
-    );
-    expect(Math.max(...xs(byMinX[0].rings[0]))).toBeLessThanOrEqual(105);
-    expect(Math.min(...xs(byMinX[1].rings[0]))).toBeGreaterThanOrEqual(105);
-  });
-
-  it("Shift+H splits the selected convex polygon through the horizontal centre of its bounding box", async () => {
-    await renderPolygonCanvas();
-    armAndSelectPolyA();
-    fireEvent.keyDown(window, { key: "H", shiftKey: true });
-
-    expect(useStore.getState().canvas.polygons).toHaveLength(3);
-    const pieces = useStore.getState().canvas.polygons.slice(0, 2);
-    const byMinY = [...pieces].sort(
-      (p, q) => Math.min(...ys(p.rings[0])) - Math.min(...ys(q.rings[0])),
-    );
-    expect(Math.max(...ys(byMinY[0].rings[0]))).toBeLessThanOrEqual(105);
-    expect(Math.min(...ys(byMinY[1].rings[0]))).toBeGreaterThanOrEqual(105);
-  });
-
-  it("undoes an axis cut in one step", async () => {
-    await renderPolygonCanvas();
-    armAndSelectPolyA();
-    fireEvent.keyDown(window, { key: "H", shiftKey: true });
-    expect(useStore.getState().canvas.polygons).toHaveLength(3);
-
-    fireEvent.keyDown(window, { key: "z", ctrlKey: true });
-    expect(useStore.getState().canvas.polygons).toHaveLength(2);
-  });
-
-  it("refuses a concave shape with the keyboard's own sentence, one toast", async () => {
-    await renderPolygonCanvas([POLY_A, CONCAVE_POLY]);
-    act(() => {
-      useStore.getState().selectPolygon(1);
-      useStore.getState().setCut(true);
-    });
-    fireEvent.keyDown(window, { key: "H", shiftKey: true });
-
-    expect(useStore.getState().canvas.polygons).toHaveLength(2);
-    expect(useStore.getState().toasts).toHaveLength(1);
-    expect(useStore.getState().toasts[0].message).toBe(
-      "A centred straight cut does not divide this shape into two pieces; cut it through one " +
-        "part with the pointer, or redraw it as two shapes.",
-    );
-  });
-
-  it("refuses a multi-ring shape with the tab's own multi-ring sentence", async () => {
-    await renderPolygonCanvas([MULTI_RING_POLY]);
-    act(() => {
-      useStore.getState().selectPolygon(0);
-      useStore.getState().setCut(true);
-    });
-    fireEvent.keyDown(window, { key: "V", shiftKey: true });
-
-    expect(useStore.getState().canvas.polygons).toHaveLength(1);
-    expect(useStore.getState().toasts.at(-1)?.message).toContain("separate parts of one object");
-  });
-
-  it("leaves a pending click-cut start alone but says why nothing happened", async () => {
-    const stage = await renderPolygonCanvas();
-    armAndSelectPolyA();
-    fireEvent.click(stage, { clientX: 105, clientY: 0, button: 0 });
-    fireEvent.keyDown(window, { key: "H", shiftKey: true });
-
-    expect(useStore.getState().canvas.polygons).toHaveLength(2);
-    expect(useStore.getState().toasts.at(-1)?.message).toBe(
-      "A cut is half-placed. Press Esc to clear it, then x to re-arm.",
-    );
-  });
-
-  it("pushes the selection-required notice, not silence, with nothing selected", async () => {
-    await renderPolygonCanvas();
-    act(() => useStore.getState().setCut(true));
-    fireEvent.keyDown(window, { key: "H", shiftKey: true });
-
-    expect(useStore.getState().toasts.at(-1)?.message).toBe(
-      "Select a polygon first by clicking it, then click two points on either side of it or " +
-        "press Shift+H / Shift+V.",
-    );
-  });
-
-  it("does nothing on a locked image", async () => {
-    await renderPolygonCanvas();
-    armAndSelectPolyA();
-    act(() => {
-      useStore.setState((s) => ({
-        imageStatus: { ...s.imageStatus, byImage: { "img1.jpg": "complete" } },
-      }));
-    });
-    fireEvent.keyDown(window, { key: "H", shiftKey: true });
-
-    expect(useStore.getState().canvas.polygons).toHaveLength(2);
-  });
-
-  it("does nothing while the cut tool is disarmed", async () => {
-    await renderPolygonCanvas();
-    act(() => useStore.getState().selectPolygon(0));
-    fireEvent.keyDown(window, { key: "H", shiftKey: true });
-
-    expect(useStore.getState().canvas.polygons).toHaveLength(2);
-  });
-
-  it("fires while focus sits on a control marked data-keyboard-passthrough", async () => {
-    await renderPolygonCanvas();
-    armAndSelectPolyA();
-    const cutButtonStandIn = document.createElement("button");
-    cutButtonStandIn.setAttribute("data-keyboard-passthrough", "");
-    document.body.appendChild(cutButtonStandIn);
-    try {
-      fireEvent.keyDown(cutButtonStandIn, { key: "H", shiftKey: true });
-      expect(useStore.getState().canvas.polygons).toHaveLength(3);
-    } finally {
-      cutButtonStandIn.remove();
-    }
   });
 });
 
