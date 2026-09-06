@@ -502,8 +502,9 @@ def _stale_finished(
     the status store, and :func:`stale_finished_names`, which calls it after its own: each caller
     reads the digest store and the registry once for the bucket it already holds, never twice for
     the same read. The admit rules answer the same question :func:`stale_stamped_names` states:
-    no stamp for an image, no readable or existing registry, or no digest for ``subject`` all
-    admit rather than quarantine, since a rail must admit valid work, not only reject it.
+    no readable digest store, no stamp for an image, no readable or existing registry, or no
+    digest for ``subject`` all admit rather than quarantine, since a rail must admit valid work,
+    not only reject it.
     """
     import tcip_store
 
@@ -518,7 +519,7 @@ def _stale_finished(
         return set()
     try:
         stamps = tcip_store.read(image_status_digest_key(root), default={})
-    except tcip_store.DecodeError:
+    except (tcip_store.DecodeError, OSError):
         stamps = {}
     stamped_by_image = bucket_digest_stamps(stamps, bucket_key)
     if not stamped_by_image:
@@ -685,12 +686,13 @@ def confirmed_negative_records(
     if not bucket:
         return {}  # nothing was ever written under the key this caller stated
     negatives = {name: r for name, r in bucket.items() if is_confirmed_negative(status_of(r))}
-    if not negatives:
-        return negatives
-
+    # Computed over the whole bucket, never only ``negatives``: a stale complete confirmation
+    # has to reach quarantined_out even in a bucket with no negative in it at all.
     stale = _stale_finished(root, bucket_key, bucket, subject)
     if quarantined_out is not None:
         quarantined_out.update(stale)
+    if not negatives:
+        return negatives
     # Runs over the original negatives, not a stale-excluded remainder, so a negative both
     # stale-stamped and contradicted is named in contradicted_out too.
     without_contradicted = _exclude_contradicted(negatives, subject, labels_dir, contradicted_out)
