@@ -248,8 +248,16 @@ def test_a_prediction_a_reviewer_accepted_still_calibrates(tmp_path):
 
 def test_the_classifier_reference_admits_ground_truth_beside_a_scored_prediction_bucket(tmp_path):
     """Only the GT side is held to the rule: the prediction side is predictions by definition."""
+    from tcip_mcp import class_registry
+
     stems = ["a", "b"]
-    gt_dir = tmp_path / "gt" / "labels"
+    gt_root = tmp_path / "gt"
+    class_registry.write_registry(gt_root / "classes.json", class_registry.ClassRegistry(subjects=(
+        class_registry.Subject(name="bud", attributes=(
+            class_registry.Attribute(name="state", type="categorical", values=("open", "closed")),
+        )),
+    )))
+    gt_dir = gt_root / "labels"
     gt_dir.mkdir(parents=True, exist_ok=True)
     for stem in stems:
         json_io.write_annotations(
