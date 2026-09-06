@@ -91,7 +91,8 @@ def test_relaunch_route_409s_for_a_pristine_config_with_an_attached_run(
     from tcip_mcp.experiments import create_experiment, stamp_run_identity
 
     create_experiment("exp-attached", {"model_source": {"builder": "m:f"}, "data": {}})
-    stamp_run_identity("exp-attached", "run_123", str(tmp_path / "out"))
+    stamp_run_identity("exp-attached", "run_123", str(tmp_path / "out"),
+                       launched_by={"launcher": "process"})
 
     resp = client.post("/api/training/runs", json={"experiment_id": "exp-attached"})
     assert resp.status_code == 409
@@ -358,7 +359,7 @@ def test_tensorboard_route_404s_with_no_logs_carrying_the_recorded_error(
     output_dir = tmp_path / "out"
     output_dir.mkdir()
     create_experiment(run_id, {"model_source": {"builder": "m:f"}})
-    stamp_run_identity(run_id, run_id, str(output_dir))
+    stamp_run_identity(run_id, run_id, str(output_dir), launched_by={"launcher": "process"})
     update_status(run_id, "failed", error="could not open the dataset's images_dir")
 
     resp = client.post(f"/api/training/runs/{run_id}/tensorboard", json={})
@@ -462,6 +463,60 @@ def test_relaunch_route_launches_a_pristine_config_as_its_own_first_run(
     assert snapshot["experiment_id"] == "exp-pristine-relaunch"
     lineage = read_member(lineage_key("exp-pristine-relaunch"))
     assert lineage["parent_experiment"] is None
+
+
+def test_relaunch_route_stamps_the_run_as_launched_through_this_app(
+    tmp_path, monkeypatch, client: TestClient
+) -> None:
+    """The route wraps its call in declare_launcher('gui'), so the run it starts through the
+    browser-facing door reads back as launched by this app, not by a bare process. Mocks
+    subprocess.Popen so the assertion runs against the resolved status record without waiting
+    on a real child (test_relaunch_route_launches_a_pristine_config_as_its_own_first_run already
+    covers the real subprocess path)."""
+    import subprocess
+
+    from PIL import Image
+    from tcip_annotation import json_io
+    from tcip_annotation.state import Annotation, BBox
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("TCIP_STATE_ROOT", str(tmp_path))
+    monkeypatch.setattr(
+        "tcip_mcp.pipelines.training.tensorboard_manager.launch_tensorboard", lambda *a, **k: {})
+
+    # Forces the mcp package's own real import before Popen is replaced below: the route
+    # imports training_tools lazily inside the request, too late to see a real Popen.
+    import tcip_mcp.tools.training_tools  # noqa: F401
+
+    class _FakeProc:
+        pid = 424242
+
+    monkeypatch.setattr(subprocess, "Popen", lambda *a, **k: _FakeProc())
+
+    from tcip_mcp.experiments import create_experiment, read_member, status_key
+
+    images_dir, labels_dir = tmp_path / "images", tmp_path / "labels"
+    images_dir.mkdir()
+    labels_dir.mkdir()
+    Image.new("RGB", (32, 32)).save(images_dir / "img0.png")
+    json_io.write_annotations(str(labels_dir / "img0.json"),
+                              [Annotation(subject="bud", geometry=BBox(1, 1, 9, 9))], 32, 32)
+
+    cfg = {
+        "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
+                         "builder_kwargs": {"num_classes": 1, "min_size": 64, "max_size": 128},
+                         "task": "detection"},
+        "data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "bud"},
+        "training": {"batch_size": 1, "stages": [{"freeze_to": -1, "epochs": 1}],
+                     "mixed_precision": False, "device": "cpu"},
+    }
+    create_experiment("exp-gui-relaunch", cfg)
+
+    resp = client.post("/api/training/runs", json={"experiment_id": "exp-gui-relaunch"})
+    assert resp.status_code == 200, resp.json()
+
+    status = read_member(status_key(resp.json()["experiment_id"]))
+    assert status["launched_by"] == {"launcher": "gui"}
 
 
 def test_relaunch_route_forks_a_run_s_config_and_names_the_parent(
