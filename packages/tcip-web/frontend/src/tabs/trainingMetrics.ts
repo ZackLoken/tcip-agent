@@ -81,6 +81,9 @@ function latestSelectionMetric(rows: MetricRow[]): string | null {
  * when that key is plotted, else `train_loss`, so the chart never draws the same line twice. The
  * limit is stated, never widened: a bespoke non-loss key sits in the table, and the all-keys
  * fallback below applies only when the log carries neither a loss-suffixed key nor `selection`.
+ * The merge fires only when a row names the selection metric, which the stock trainer always
+ * does alongside the value; a bespoke loop that logs `selection` without `selection_metric`
+ * plots it as its own duplicate line.
  */
 export function defaultChartSeries(metricKeys: string[], rows: MetricRow[]): ChartSeries {
   const lossKeys = metricKeys.filter((k) => k.endsWith("loss"));
