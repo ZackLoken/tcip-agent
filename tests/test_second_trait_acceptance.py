@@ -44,7 +44,7 @@ def _seed_currant_bloom_trait(tmp_path: Path) -> None:
         "milestone_fractions": [0.05, 0.50, 0.95],
         "milestone_on": "positive_fraction",
         # No majority alias: crops.yml names no single "most blooms open" date for currant, unlike
-        # bud_opening's bud_opening_date. Left empty rather than copied from bud_opening.
+        # bud_opening's bud_majority_date. Left empty rather than copied from bud_opening.
         "majority_milestone": "",
         "majority_provisional": False,
         "phenology_prefix": "bloom",
@@ -169,7 +169,7 @@ def test_currant_bloom_json_doors_deliver_its_own_schema_when_validated(
     onset = next(r for r in out["milestones"]["rows"] if r["plant_id"] == "BUSH_A")
     # currant_bloom's own column names, not bud_opening's, and no majority alias column at all.
     assert "bloom_05per_date" in onset and "bloom_50per_date" in onset and "bloom_95per_date" in onset
-    assert "bud_opening_date" not in onset
+    assert "bud_majority_date" not in onset
     assert "bloom_opening_date" not in onset  # no phantom majority column either
 
 
