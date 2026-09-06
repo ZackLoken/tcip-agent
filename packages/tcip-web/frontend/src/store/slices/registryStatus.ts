@@ -110,8 +110,9 @@ export interface RegistryStatusSlice {
   /** Drops every stale mark, e.g. on dataset selection so a prior dataset's marks are never read
    *  against a same-named image in the newly selected one. */
   clearStaleMarks: () => void;
-  /** Re-adds a name to `staleMarks`, for a re-confirm write that failed to persist: the mark it
-   *  was about to clear still describes reality, since nothing was actually confirmed. */
+  /** Re-adds a name to `staleMarks`: used both when a write's confirmation never reached the
+   *  server and when it landed but its schema stamp did not, since either way the mark it was
+   *  about to clear still describes reality. */
   markStale: (image: string) => void;
 
   /** Review-status helpers (image-level Reviewed/Unreviewed navigation). */
