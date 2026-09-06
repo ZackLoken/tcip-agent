@@ -7,9 +7,9 @@ description: "The one build path, the bespoke seams, and what the platform can i
 
 ## No pipeline shape is supplied
 
-This skill deliberately gives you no pattern to match a trait against. How many stages a trait
+This skill gives you no pattern to match a trait against. How many stages a trait
 needs, what each one does, and whether it is one model or several is your decomposition to derive
-from the data in hand, and it is the decision this platform exists to have you make.
+from the data in hand.
 
 Derive it by measuring the dataset, not by classifying the trait:
 
@@ -19,7 +19,7 @@ Derive it by measuring the dataset, not by classifying the trait:
   actually occurs here, rather than an assumed shape.
 - Object scale against your tile size: whether objects survive tiling, and whether a seam cuts
   them. `pipelines.derivations.derive_cross_tile_nms` returns `None` when the GT gives no basis
-  for a threshold; that `None` is the honest answer, not a failure.
+  for a threshold; that `None` is expected, not a failure.
 - Capture-date bucketing from `ingest_images`: whether a time series exists at all, and at what
   cadence.
 
@@ -28,8 +28,7 @@ Those readings are facts about *this* dataset. A trait category is not.
 ## What the platform can ingest today
 
 Interface constraints you cannot read off the toolkit. If a trait needs something in the second
-list, say so plainly rather than approximating it: the platform not being able to measure a trait
-yet is an honest answer, and a manufactured number is not.
+list, say so plainly rather than approximating it.
 
 Buildable now:
 
@@ -46,9 +45,8 @@ Not buildable now (no loader, no task type, no scaffolding carried):
 - Non-imagery spectral readings (a bare NIR / hyperspectral sample, not a raster). The dataset
   layer reads 2D imagery; there is no loader for a spectrum.
 - A *learned* contextual-ranking task: a model that scores a plant relative to its plot or
-  block neighbours. No task type or loader exists for it. Note this is narrower than it sounds:
-  ranking plants by a measurement you already produced is ordinary postprocessing over the
-  per-plant table, and is available now.
+  block neighbours. No task type or loader exists for it. Ranking plants by a measurement you
+  already produced is ordinary postprocessing over the per-plant table, and is available now.
 
 ## Conditions in this domain's imagery
 
@@ -68,7 +66,7 @@ them costs you depends on what you are measuring and how; that part is yours to 
 
 ## You own the model and the training loop
 
-The platform is a toolkit you build with, not a mold you fill. You are the CV scientist:
+You are the CV scientist:
 for every trait you write a bespoke `nn.Module`, from scratch or by importing the plain
 building blocks (FPN/PAN necks, the classification/ordinal/regression/semantic-seg heads, the
 losses, backbone wrappers, and `build_detector` + the `_build_*` detector functions), and,
@@ -102,7 +100,7 @@ Tailor the architecture to the data in hand (CLAUDE.md: derive, don't pin):
   statistics are unreliable; prefer `GroupNorm` (or another batch-independent norm).
 - Activations / layers where the data warrants it: this is engineering judgment, not a menu.
 
-Three seams make bespoke work first-class, and the platform guarantees integrity around it:
+Three seams support bespoke work; the platform guarantees integrity around it:
 
 - `pipelines.data.datasets.build_dataset(task, dataset_source, **kwargs)` builds from a
   `dataset_source` when the task string isn't one of the known loaders: an *importable* builder you
@@ -113,8 +111,8 @@ Three seams make bespoke work first-class, and the platform guarantees integrity
   `exec`'d.
 - `pipelines.model_build.build_model(config)` builds from a `model_source`: an *importable*
   builder you wrote (`{"builder": "my_module:build_net", "builder_kwargs": {...},
-  "source_files": [...], "task": "detection", "in_chans": 3}`). It is imported, never `exec`'d,
-  so the run is reproducible from source. `pipelines.model_contract`
+  "source_files": [...], "task": "detection", "in_chans": 3}`). It is imported, never `exec`'d.
+  `pipelines.model_contract`
   states the *only* model-side contract, the measurement boundary: your model must train (finite
   gradient loss) and emit inference output the library scorers consume. `launch_training` runs this
   contract for you: `preflight_config(smoke=True)` builds the model and smokes it at the *resolved*
@@ -226,5 +224,4 @@ mechanics are identical for one stage or four, and there is no fixed phase vocab
 - Write a retrospective (`write_retrospective`) when you finish. Record what you measured
   about *this* dataset and what it implied: object scale, capture cadence, class imbalance, where
   the operating point resolved and why. Not a reusable pipeline shape: the next dataset re-derives
-  its own decomposition, and a shape recorded here would become a recipe for a problem it was never
-  measured against.
+  its own decomposition.

@@ -48,8 +48,7 @@ not always "lower wins": selecting on `f1` keeps the highest-F1 checkpoint, sele
 keeps the lowest-loss one. A `selection_metric` with no declared direction is refused. For a
 count trait with a center-match criterion, an explicit `selection_metric` must be one of the
 trait's own governing metrics (`objective`/`f1`/`precision`/`recall`/`loss`); the map50-family
-comparability metrics are rejected, since selecting checkpoints by a metric the trait doesn't
-trust is a defensibility regression:
+comparability metrics are rejected:
 
 ```yaml
 evaluation:

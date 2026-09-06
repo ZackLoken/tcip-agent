@@ -14,9 +14,7 @@ It has three parts, and the third is not optional.
 RESEARCH (academic sources)  →  IMPLEMENT (platform toolkit)  →  VALIDATE (beats baseline on the measured phenotype)
 ```
 
-Skipping straight to IMPLEMENT is how you adopt a fashionable method that helps a benchmark and
-hurts your trait. Skipping VALIDATE is how a plausible technique becomes silent institutional truth
-the next session inherits. Neither is allowed.
+Neither RESEARCH nor VALIDATE is optional.
 
 ## 1. Research: academic sources only
 
@@ -48,8 +46,7 @@ Search discipline:
   reference implementation is a lower-risk port than last month's state-of-the-art. Progressive
   disclosure applies to methods too.
 - Capture provenance. When you adopt a technique, record the source (title, venue, arXiv id) in
-  the experiment lineage / retrospective, so the next session can trace *why* the model is shaped the
-  way it is.
+  the experiment lineage / retrospective.
 
 If a technique lives only behind a paywalled journal the fence can't reach, do not guess its
 internals from a blog summary; file a `report_friction` note describing the gap rather than
@@ -71,32 +68,27 @@ at batch 2; adapt the mechanism to that reality or expect it to fail.
 
 ## 3. Validate: beats a baseline on the *measured phenotype*
 
-This is the part that makes it science. A technique is not adopted because a paper reports a gain,
-because it is elegant, or because it improved a proxy metric. It is adopted only after you measure
-that it beats the current baseline on the phenotype the breeder actually needs. Implement-and-measure,
-never adopt-on-faith.
+A technique is not adopted because a paper reports a gain, because it is elegant, or because it
+improved a proxy metric. It is adopted only after you measure that it beats the current baseline on
+the phenotype the breeder actually needs. Implement-and-measure, never adopt-on-faith.
 
 The discipline:
 
 1. Fix a baseline first. Run the current best model and record its score *as an immutable
-   experiment*. You cannot claim an improvement without the number you improved on.
+   experiment*.
 2. Change one thing. Introduce the researched technique as a new experiment against the same
-   splits, same eval, same seed policy. Confounded comparisons prove nothing.
+   splits, same eval, same seed policy.
 3. Measure on the phenotype, not a surrogate. A better mAP that does not move the *measured
    trait* (the count, the date, the dimensional measurement the breeder scores) is not an
    improvement for this platform; it is a benchmark artifact. Validate against a reference sized to
    the trait: GT annotations, or a breeder-confirmed sample of the model's own outputs
    (review-confirmation), not dense GT for every trait, the same bar every measurement faces (either
    reference passes the identical disjoint-split + count-bias gate). This is the
-   measurement-integrity invariant
-   (CLAUDE.md): a confident, precise, wrong phenotype is the worst thing this platform can produce,
-   and a new technique gets no exemption from that bar.
-4. Keep it only if it wins, and say so honestly. If it ties or loses, discard it and record why
-   in a retrospective; a negative result is real knowledge and stops the next session re-trying it.
+   measurement-integrity invariant (CLAUDE.md); a new technique gets no exemption from it.
+4. Keep it only if it wins. If it ties or loses, discard it and record why in a retrospective.
    If it wins, it becomes the new baseline; log the source and the delta in the experiment lineage.
-5. Never let a researched-but-unvalidated method harden into a definition. Until it clears step 3
-   it stays labeled not-yet-validated; it must not become the default the next session reuses
-   without seeing the evidence.
+5. Until a researched technique clears step 3 it stays labeled not-yet-validated and must not
+   become the default the next session reuses without seeing the evidence.
 
 If validation is impossible because the phenotype itself can't yet be measured validly from pixels,
 that is the finding; surface it with `report_friction`. Do not manufacture a number so the new

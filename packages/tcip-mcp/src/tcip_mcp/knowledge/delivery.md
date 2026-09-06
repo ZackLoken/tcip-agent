@@ -9,8 +9,8 @@ description: "How to deliver phenotyping results: the per-plant CSV schema, per-
 
 The final deliverable is a CSV with one row per plant per trait:
 
-Columns, in the order `export_aggregated_csv` writes them (its `fieldnames` is the authority; check
-it in `pipelines/postprocessing/aggregation.py` if this table looks stale):
+Columns, in the order `export_aggregated_csv` writes them (its `fieldnames` is the authority; see
+`pipelines/postprocessing/aggregation.py`):
 
 | Column | Type | Description |
 |--------|------|-------------|
@@ -18,7 +18,7 @@ it in `pipelines/postprocessing/aggregation.py` if this table looks stale):
 | crop | string | Crop species |
 | delivered_phenotype | string | Delivered phenotype name (from crop skill) |
 | value | float/string | Measurement value |
-| units | string | Physical unit implied by the value's own `value_key`, blank for a count trait or a trait crops.yml declares no unit for. Under `operating_point`, a unit-declared trait's `value_key` must itself imply a unit; a px-space value refuses rather than shipping blank. Under a scalar head (`ordinal_operating_point`/`regression_operating_point`), a `value_key` implying no unit takes the trait's own declared unit from `crops.yml` instead of blank, since a calibrated head predicts in that unit by construction |
+| units | string | Physical unit implied by the value's own `value_key`, blank for a count trait or a trait crops.yml declares no unit for. Under `operating_point`, a unit-declared trait's `value_key` must itself imply a unit; a px-space value refuses rather than shipping blank. Under a scalar head (`ordinal_operating_point`/`regression_operating_point`), a `value_key` implying no unit takes the trait's own declared unit from `crops.yml` instead of blank |
 | value_key | string | Which aggregated field `value` came from (e.g. `count`, `area_mm2`), so a reader can detect a px/mm mismatch independently |
 | measurement_document | string | Which sidecar document (`operating_point`, `ordinal_operating_point`, `regression_operating_point`) answers for the measurement that produced `value`, stated by the caller's records and checked against every named bucket |
 | scale_document | string | `resolve_scale` when a per-pixel physical scale produced `value`, blank otherwise |
@@ -68,7 +68,7 @@ Examples use real `crops.yml` trait names; verify any trait against `crops.yml` 
 | `deliver_per_plant_csv` | The general per-plant CSV door: takes `aggregate_per_plant`'s own output (a caller's own composition of buckets plus a plant mapping) and calls `export_aggregated_csv` directly, for the case neither specialist door's own composition covers; `predictions_by_date` names the buckets a delivery reads, whether or not a mapping is named; a named `plant_mapping` requires it in the same call and is resolved, refused by name when unknown, when it does not cover a delivered date, when it was built over a different dataset than the buckets belong to, or when its own recorded inputs no longer verify, through the same preamble the phenology doors share; every delivered `plant_id` must also appear among a plot the mapping actually assigned on the delivered dates; a delivery either fully verifies the mapping it names or names none |
 | `supersede_delivery` | Records that an already-shipped delivery's number is withdrawn or replaced (`delivery_supersessions`, keyed by the superseded event's id, naming its `output_sha256`, the replacement event when one exists, and the reason); never deletes or rewrites the file or the event |
 | `calibrate_scalar_operating_point` | Calibrate and validate a continuous or ordinal trait's prediction against a disjoint held-out split; stamps `ordinal_operating_point.json` / `regression_operating_point.json`, the on-disk producer `export_aggregated_csv` reconciles against |
-| `calibrate_count_operating_point` | Calibrate and validate a count trait's confidence operating point against a disjoint held-out split, and merge the earned `conf` and validation pointer into an already-published bucket's own `operating_point.json`, the on-disk producer every count reconciler reads; a calibration that does not clear its gate merges an honest `validated=false` and earns nothing; refuses a bucket that already carries a validated stamp |
+| `calibrate_count_operating_point` | Calibrate and validate a count trait's confidence operating point against a disjoint held-out split, and merge the earned `conf` and validation pointer into an already-published bucket's own `operating_point.json`, the on-disk producer every count reconciler reads; a calibration that does not clear its gate merges `validated=false` and earns nothing; refuses a bucket that already carries a validated stamp |
 | `calibrate_physical_scale` | Derive and validate a per-pixel physical scale against a breeder-supplied reference, and stamp it into a bucket's `resolve_scale.json`, the `scale_document` cell's producer |
 | `materialize_review_dataset` | Turn human review verdicts into a curated training set for re-delivery after correction; see `annotation` skill |
 
@@ -85,8 +85,8 @@ no GPU, reading an existing reviewed bucket's own stamp), exactly one stated.
 
 ### Per-Image CSV Schema
 
-Columns, in the order `export_detection_csv` writes them (its `fieldnames` is the authority; check
-it in `pipelines/postprocessing/export.py` if this table looks stale):
+Columns, in the order `export_detection_csv` writes them (its `fieldnames` is the authority; see
+`pipelines/postprocessing/export.py`):
 
 | Column | Type | Description |
 |--------|------|-------------|
@@ -144,16 +144,15 @@ operating_point/classifier dimensions, held-out GT or a breeder-confirmed output
 physical measurement, and no kind stands in for another), reading the predictions' own sidecar,
 one of the five measurement-document kinds a bucket can carry (`operating_point.json`,
 `classifier_operating_point.json`, `ordinal_operating_point.json`, `regression_operating_point.json`,
-`resolve_scale.json`), rather than trusting a caller-asserted string, then hands the resolved states to one shared
+`resolve_scale.json`), then hands the resolved states to one shared
 `check_delivery_gate`, which does no I/O of its own: it judges the already-resolved dict and ships
 only when every dimension it was handed clears, or two independent escapes cover what didn't. An
 `Acknowledgement` (a real name and a non-empty reason, built only by a web delivering route)
-clears any dimension, stamped false so the un-trustworthiness travels with the CSV. The
+clears any dimension, stamped false. The
 phenology writer, `export_detection_csv` and `export_aggregated_csv` all take one now, each from
 the web results route that composes it for its own delivery kind (`/export_csv` for phenology,
 `/export_count_csv` for the per-image bucket regime and the per-plant orthomosaic composition);
-no MCP tool builds one, since an agent acknowledging its own unvalidated output would be
-attesting to a breeder's judgment it never obtained.
+no MCP tool builds one.
 `allow_unvalidated_staging` clears only `tile_size`/`claim_scope`, the pre-pass gate a raw
 prediction bucket is written under, and can never clear a phenotype's own delivered dimension
 (`operating_point`, `classifier`, `scale`).
@@ -172,7 +171,7 @@ unaffected by a caller's project root.
   write after the CSV already exists, so an already-delivered file can outlive a failed event
   write; the web export route's own `X-TCIP-Delivery-Event-Recorded` response header says whether
   this delivery's event actually landed. The MCP door alone can carry a caller-stated
-  `operating_point_conf` and a caller-asserted validity floor (`phenology_tools.py:543`, `:545`),
+  `operating_point_conf` and a caller-asserted validity floor (`phenology_tools.py`),
   fields the web door has none for. The producer tail (`producer_model_sha256`,
   `producing_experiment_id`, `validation_record`) is filled from the verified bindings, so a
   bucket whose claim no record answers for delivers those cells blank rather than repeating the
@@ -210,8 +209,8 @@ unaffected by a caller's project root.
   `predictions_dir`, the door calls the writer with no bucket at all, and the writer's own
   no-`pred_dirs` floor always refuses: an acknowledgement clears an unvalidated dimension, never
   the absence of a bucket to reconcile one from at all. The door's own
-  response then reports the live run's own narrowed conf reference honestly under
-  `run_conf_validated_against` (accepted-or-false by construction), a different fact from
+  response then reports the live run's own narrowed conf reference under
+  `run_conf_validated_against` (accepted-or-false), a different fact from
   `operating_point_validated`, which floors false on this path since nothing on disk backs it
   without a bucket for a second gate call to reconcile against. With a bucket (either regime),
   `operating_point_validated`/`tile_size_validated` instead quote the writer's own returned
@@ -222,8 +221,8 @@ unaffected by a caller's project root.
   tile-scale flag, which never passed the gate. The bucket regime (`predictions_dir` alone) reads an
   existing bucket's own stamp and hands the writer that same bucket, with no run at all standing
   behind it. `export_detection_csv` and `export_aggregated_csv` both gate at the writer the same
-  way: pass `pred_dirs` so the validity is reconciled from each bucket's own sidecar rather than
-  trusting a bare caller string. Without `pred_dirs`, either writer floors
+  way: pass `pred_dirs` so the validity is reconciled from each bucket's own sidecar. Without
+  `pred_dirs`, either writer floors
   `operating_point_validated` to unvalidated regardless of what the caller asserted; there is no
   carve-out. A continuous or
   ordinal trait's on-disk measurement-validity producer is
@@ -246,16 +245,14 @@ unaffected by a caller's project root.
 - To ship a provisional result, the web `/export_csv` route (phenology) or `/export_count_csv`
   route (the per-image bucket regime and the per-plant orthomosaic composition) builds a real
   `Acknowledgement` from the breeder's own reason and identity; the door writes but stamps
-  `operating_point_validated=false` (and every other unvalidated dimension the same way) so the
-  un-trustworthiness travels with the CSV. This is for an honest, breeder-attested provisional
-  delivery, never for silently shipping a bare number. No MCP tool builds an `Acknowledgement`
-  itself; the ordinal and regression aggregates have no acknowledged route since their per-plant
-  strategy is the agent's own choice, reached only through `deliver_per_plant_csv`, which accepts
-  a caller-composed table the principle above refuses a web route for; nor does a per-plant count
-  aggregate over walked captures, since no structured field states its across-dates aggregation
-  strategy for a breeder to confirm, and a door fixing one would prescribe it.
+  `operating_point_validated=false` (and every other unvalidated dimension the same way). No MCP
+  tool builds an `Acknowledgement` itself; the ordinal and regression aggregates have no
+  acknowledged route since their per-plant strategy is the agent's own choice, reached only
+  through `deliver_per_plant_csv`, which accepts a caller-composed table the principle above
+  refuses a web route for; nor does a per-plant count aggregate over walked captures, since no
+  structured field states its across-dates aggregation strategy for a breeder to confirm.
 
-The private pass beneath `run_inference` stays fully ungated but honestly stamped: the review loop
+The private pass beneath `run_inference` stays fully ungated: the review loop
 must be able to produce unvalidated predictions to *reach* a validated measurement, so it never
 refuses on conf; it does refuse (unconditionally, no staging escape) when tiling is requested and
 the checkpoint's tile scale has no real basis at all, since there is no number to tile at.

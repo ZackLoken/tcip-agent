@@ -8,8 +8,8 @@ description: "Cross-cutting domain context for TCIP's six perennial tree-crop br
 General ground for phenotyping the Savanna Institute's six perennial tree crops. This is
 the shared context; per-crop detail lives in the per-crop documents, the trait vocabulary in
 `packages/tcip-mcp/src/tcip_mcp/knowledge/crops/crops.yml` (the authority), and bloom-milestone
-math in the `phenology` skill. This skill exists to answer one recurring question honestly: given the
-physics of the sensor, can this trait even be observed, and if so, at what perspective?
+math in the `phenology` skill. The recurring question: given the physics of the sensor, can this
+trait even be observed, and if so, at what perspective?
 
 ## The six crops at a glance
 
@@ -65,7 +65,7 @@ distance (GSD), spectral range/resolution, and standoff/perspective set a *hard 
 what is physically observable. That bound is a constraint, not a prescription: it says a
 2–3 mm pistillate flower cannot be measured at 2 cm GSD by any model, and that kernel oil
 content is unreachable from an RGB photo; it does not say "sensor X is the pipeline for
-trait Y." crops.yml deliberately omits sensor/task/perspective assignments; do not
+trait Y." crops.yml omits sensor/task/perspective assignments; do not
 reintroduce a fixed sensor→trait or task→trait map. Within the feasible set a modality
 permits, the CV approach for each trait is still derived and validated per trait against
 real imagery and expert ground truth.
@@ -139,12 +139,10 @@ field-imageable; internal chemistry (`kernel_perc_oil`) and precise mass are not
 force- or sensory-based traits (`cluster_detachment_force`, `flavor_rating`) and destructive
 sample counts (`nut_perc_blanks`) are not imaging traits at all; do not force them into a
 pixel pipeline. The exact per-crop partition lives in each per-crop document; this skill only
-fixes the principle. When a trait can't be validly measured from the available pixels, say
-so: an honest "not observable by this modality" beats a confident, wrong number.
+fixes the principle. When a trait can't be validly measured from the available pixels, report
+"not observable by this modality."
 
 ## The breeding-program workflow this serves
-
-The sensing exists to produce trustworthy per-plant phenotypes that breeders select on:
 
 1. Collect at the right phenophase: GDD-informed scheduling, repeated visits bracketing
    any milestone, matched to the modality that can physically resolve the target structure.
@@ -155,9 +153,7 @@ The sensing exists to produce trustworthy per-plant phenotypes that breeders sel
    points (conf, IoU-for-a-hit, NMS, tile size, thresholds) are derived from the data in hand at
    runtime, not pinned.
 3. Deliver per-genotype / per-plant values: carry accession/genotype through so breeders
-   select on genotype, not `plant_id`. Genomic/phenomic selection depends on trustworthy
-   per-plant phenotypes, which is exactly why a confident-but-wrong measurement is the worst
-   output; it corrupts selection across long perennial cycles.
+   select on genotype, not `plant_id`.
 
 ## Measurement-integrity guards specific to sensing
 

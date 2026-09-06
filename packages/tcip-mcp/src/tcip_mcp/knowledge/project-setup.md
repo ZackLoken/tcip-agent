@@ -26,8 +26,8 @@ it (ambiguous goal, unconfirmed format).
 Projects live under the workspace (`TCIP_WORKSPACE`, default `~/tcip-projects/`), one
 folder per project. The shape is declared once, in `workspace.format_project_name`/
 `parse_project_name`: three lowercase segments joined by underscores, hyphens allowed
-within a segment. Neither function checks a segment against a vocabulary (tentative,
-per the owner's naming ruling); `ingest_images`, `initialize_project` and
+within a segment. Neither function checks a segment against a vocabulary (tentative);
+`ingest_images`, `initialize_project` and
 `scripts/import_project.py` refuse a non-conforming name when the directory they create lands
 under the workspace.
 
@@ -161,7 +161,7 @@ side and an `origin` naming the run, and the calibration doors refuse it by thei
 
 `prioritize_review_queue` to focus the breeder's attention on the model's weakest
 predictions, then deliver per `packages/tcip-mcp/src/tcip_mcp/knowledge/delivery.md`. Set the
-workspace's active project so the GUI opens what you built, closing the loop for the human.
+workspace's active project so the GUI opens what you built.
 
 ## Reading the live session: `view_gui_state`
 
@@ -189,10 +189,9 @@ training run auto-registers there, so the model you trained is the one you retri
 explicit `project_path` only to reach a *different* project's registry: that holds for
 `inspect_project`, `rank_registered_models`, and `register_model`'s explicit
 mode. `register_model`'s experiment mode binds only in the experiment's own root; a
-`project_path` there must name that same root or the call refuses by name. The repin is a
-deliberate action and reaches only the calling process, so a training run in flight keeps
-writing to the project it started under even if you (or the human, in the GUI) adopt another
-one meanwhile. The web backend converges on your adopt as soon as it delivers; an MCP server
+`project_path` there must name that same root or the call refuses by name. The repin reaches
+only the calling process, so a training run in flight keeps writing to the project it started
+under even if you (or the human, in the GUI) adopt another one meanwhile. The web backend converges on your adopt as soon as it delivers; an MCP server
 you are already running converges only at its next start inside the platform's own agent
 terminal, so `inspect_project`'s divergence report is the guard in between.
 

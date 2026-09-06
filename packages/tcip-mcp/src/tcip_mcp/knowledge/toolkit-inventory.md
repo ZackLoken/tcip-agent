@@ -5,13 +5,12 @@ description: "The composition vocabulary for the whole library: the string names
 
 # Toolkit inventory: the pieces to compose
 
-This is a library you compose, not a menu you pick from. The platform hands you plain
-importable PyTorch primitives, a few name→builder factories, and open seams for the parts you
-write yourself. The tables below inventory what exists so nothing is rediscovered or rebuilt;
-they are a map, not a fixed set. Adding a primitive (a new head, a new proposal engine, a new
+The platform hands you plain importable PyTorch primitives, a few name→builder factories, and
+open seams for the parts you write yourself. The tables below inventory what exists; they are a
+map, not a fixed set. Adding a primitive (a new head, a new proposal engine, a new
 acquisition scorer) is expected; it extends the map, it does not close it. For the build path, the
 bespoke seams, and what the platform can ingest today see the `pipeline-design` skill; it supplies
-no pipeline shape on purpose; this skill is the name-and-location reference its import block points at.
+no pipeline shape; this skill is the name-and-location reference its import block points at.
 
 `build_detector` and `build_loss` already self-document at runtime: an unknown name raises
 `KeyError: Unknown … Available: [...]`. The heads, necks, backbones, and ctx methods have no
@@ -26,7 +25,7 @@ such factory, so this skill is where their names live.
 | `build_loss(name, ...)` | `pipelines.components.losses` | names: `cross_entropy`, `weighted_ce`, `focal`, `smooth_l1`, `huber`, `bce`, `dice`, `giou`, `corn`, `coral`. Compose terms with `+` (e.g. `"bce+dice"` → `CombinedLoss`). A weightable loss (`cross_entropy`/`weighted_ce`/`focal`) auto-injects inverse-frequency weights when given `class_distribution`. `compute_class_weights` is the standalone weigher. |
 | Heads (no factory, import the class) | `pipelines.components.heads` | `ClassificationHead` (task `classification`, default loss `cross_entropy`), `OrdinalHead` (task `ordinal`, `corn`), `RegressionHead` (task `regression`, `smooth_l1`), `SemanticSegHead` (task `semantic_seg`, blends CE+Dice internally). Each implements `forward` / `compute_loss` / `decode`. |
 | Necks (no factory, import the class) | `pipelines.components.necks` | `FPN`, `PAN` (both take `add_p2` for a finer level), `IdentityNeck` (pass-through), `GlobalAvgPoolNeck` (→ flat `[B, C]` vector for classification/ordinal/regression heads). |
-| Backbones | `pipelines.components.backbones` | `BackboneWrapper` is the whole surface: wrap a module that already emits a list/tuple/dict of feature maps (timm `features_only=True`, torchvision `create_feature_extractor`, or your own staged module, finest stage first) to get `s0..sN` naming, a declared `out_channels`, and per-stage `freeze_to`. It does not turn a classifier into a feature extractor. There is no build helper on purpose: `out_indices` decides whether you get a pyramid at all, so it is yours to choose. See the module docstring for the two-line wrap. |
+| Backbones | `pipelines.components.backbones` | `BackboneWrapper` is the whole surface: wrap a module that already emits a list/tuple/dict of feature maps (timm `features_only=True`, torchvision `create_feature_extractor`, or your own staged module, finest stage first) to get `s0..sN` naming, a declared `out_channels`, and per-stage `freeze_to`. It does not turn a classifier into a feature extractor. There is no build helper: `out_indices` decides whether you get a pyramid at all, so it is yours to choose. See the module docstring for the two-line wrap. |
 
 `task` strings (the `model_source["task"]` value; also the `build_dataset` task keys and the
 head `task_type`s): `detection`, `instance_seg`, `semantic_seg`, `classification`, `ordinal`,
@@ -40,7 +39,7 @@ head `task_type`s): `detection`, `instance_seg`, `semantic_seg`, `classification
 | `probe_channels(image_path)` | `pipelines.derivations` | band count of *this* raster (RGB→3, N-band GeoTIFF→N); feed `in_chans`. |
 | `num_classes_from_distribution(dist)` | `pipelines.derivations` | `max class id + 1` from *this* label set. |
 | `gt_aspect_ratios(boxes)` | `pipelines.derivations` | anchor aspect ratios spanning *this* dataset's GT box shapes (elongated organs a default `(0.5,1,2)` can't match), or `None` when the GT gives no basis. |
-| `derive_cross_tile_nms(gt_boxes_per_image)` | `pipelines.derivations` | cross-tile NMS IoU from the GT neighbor-overlap tail, or `None` (underivable → honest placeholder). |
+| `derive_cross_tile_nms(gt_boxes_per_image)` | `pipelines.derivations` | cross-tile NMS IoU from the GT neighbor-overlap tail, or `None` when underivable. |
 | `derive_localization_tolerance_frac(gt_boxes_per_image)` | `pipelines.derivations` | center-match tolerance, as a fraction of `gt_class_avg_size`, from the GT's own nearest-neighbor spacing, or `None` when no image has two-or-more of the class. `resolve_operating_point` derives this once per calibration reference and reuses it for the holdout tolerance too; `TraitSpec.localization_tolerance_frac` is only the fallback when it can't. |
 | `derive_sliver_frac(char_sizes)` | `pipelines.derivations` | tile-seam sliver cutoff, as a fraction of the class's characteristic size, from the GT's own size spread, or `None` below `min_samples` (default 5; too few boxes to measure a spread from). `TiledDetectionDataset` derives this itself when the caller doesn't pass an explicit `sliver_frac`. |
 | `band_normalization_stats(image_paths, num_channels)` | `pipelines.derivations` | per-band `(mean, std, paths_read)` over the tensors the loader actually yields, or `None` when no raster could be read. Required for a detector at `in_chans != 3`: torchvision's 3-element ImageNet stats silently broadcast a 1-channel image to 3 and raise at any other count, so `build_detector` refuses rather than picking numbers. Pass `mean`/`std` via `builder_kwargs`, and render this result (or `band_normalization_stats_sampled`'s) through `image_stats_provenance(result)` into `model_source.image_stats_sampling` (see below), never hand-assembled: the values are not in the checkpoint, so a builder that re-derives them at load time normalizes differently at inference, and `preflight_config` refuses `image_mean`/`image_std` with no provenance record beside them. |
@@ -135,8 +134,7 @@ deduce which serves a task best by how well each engine's high-conf proposals su
 review. `available_engines()` is the discovery call: it lists every name
 `register_proposal_engine` has registered (SAM included unconditionally; SAM's own import is
 lazy, attempted only when the engine actually runs), so presence there means registration, not
-a per-machine importability probe, and never a table this doc would have to keep in step with
-the registry.
+a per-machine importability probe.
 
 Candidates use a neutral schema (`candidate_id` / `bbox` / `area` / `rings` / `score` / `engine`
 / `engine_meta`) so the shared review/staging path stays method-agnostic. `rings` is `Polygon.rings`
@@ -154,7 +152,7 @@ factory)`. `resolve_scorer(method, task)` resolves a built-in name, a registered
 dotted `module:factory` you wrote; an unresolvable name raises `ValueError` naming the
 built-ins itself, rather than silently substituting one.
 
-`require_composed_detector` (`active_learning.helpers`) is the honest guard the logit-reading
+`require_composed_detector` (`active_learning.helpers`) is the guard the logit-reading
 scorers use: it returns an error rather than reading logits off a non-`nn.Module` model, and
 `feedback_tools.triage_predictions` (run through `scripts/triage_predictions.py`) is the
 kind-agnostic fallback.
@@ -177,4 +175,4 @@ If no existing piece fits, write the primitive: a new head, a bespoke `train(ctx
 proposal engine, a novel acquisition scorer, and register or import it. When the plain blocks and
 your own primitives both plateau on a trait, research the literature (see `cv-research`) and prove
 the new method beats the baseline on the measured phenotype before trusting it. Capture what you
-built in a `write_retrospective` so the next session finds it on the map.
+built in a `write_retrospective`.
