@@ -680,8 +680,11 @@ def bind_manifest_stems(
       ``calibration`` (training it would put it on a side the manifest never chose; the remedy is
       regenerating the split over the current data, which draws through the same admission);
     - a ``train`` or ``val`` member under ``date`` the run does not admit (the data moved under
-      the manifest: a label emptied, a confirmation withdrawn, an assessment removed), naming
-      ``admission_counts`` when the caller supplied it;
+      the manifest: a label emptied, a confirmation withdrawn, an assessment removed, or the
+      subject's attribute schema changed since), naming ``admission_counts`` when the caller
+      supplied it; the remedy it names is conditional on ``admission_counts``'s
+      ``quarantined_stale_definition``, since that one cause is undone by re-confirming the
+      quarantined images rather than by regenerating the split;
     - an empty ``train`` or ``val`` side once narrowed to ``date`` (:func:`empty_side_issue`).
 
     A ``calibration`` member is never a reason to refuse: it is held out from training and from
@@ -715,13 +718,21 @@ def bind_manifest_stems(
     if not_admitted:
         preview = [member_identity_parts(i)[1] for i in not_admitted[:10]]
         more = f" (+{len(not_admitted) - 10} more)" if len(not_admitted) > 10 else ""
+        quarantined = (admission_counts or {}).get("quarantined_stale_definition", 0)
+        remedy = (
+            f"{quarantined} of them sit under quarantined_stale_definition: re-confirm those "
+            f"images, and regenerate the split over the current data for every other membership "
+            f"change."
+            if quarantined else
+            "regenerate the split over the current data."
+        )
         counts_note = f" This run's own admission counts: {admission_counts}." \
             if admission_counts is not None else ""
         raise ValueError(
             f"{len(not_admitted)} member(s) the split manifest assigned under date {date!r} are "
             f"not in this run's admitted samples: {preview}{more}. The data changed since the "
             f"split was drawn (a label emptied, a confirmation withdrawn, an assessment "
-            f"removed); regenerate the split over the current data.{counts_note}"
+            f"removed, or the subject's attribute schema changed since); {remedy}{counts_note}"
         )
 
     empty = empty_side_issue(narrowing, date)
