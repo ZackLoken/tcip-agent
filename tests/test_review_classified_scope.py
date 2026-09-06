@@ -244,7 +244,8 @@ def test_action_refusal_leaves_the_label_file_unchanged(client: TestClient, tmp_
     vocabulary, so an in-vocabulary ``class_name`` admits it and the mutation appends a GT record;
     the post-mutation recompute then holds every prediction record positively to the object class
     and refuses this one. The GT file on disk is exactly what it was before the call, never a
-    write behind the 400."""
+    write behind the 400, and neither the engine's verdict store nor its coverage entry for this
+    image is touched either."""
     dataset_root = tmp_path / "data"
     img = _image(dataset_root)
     staged = stage_prediction_shapes(
@@ -268,6 +269,11 @@ def test_action_refusal_leaves_the_label_file_unchanged(client: TestClient, tmp_
 
     assert resp.status_code == 400
     assert gt.read_bytes() == before
+    from tcip_annotation.review_engine import ReviewEngine
+    from tcip_mcp.prediction_buckets import bucket_key_of, review_state_dir_of
+
+    engine = ReviewEngine(str(review_state_dir_of(dataset_root)))
+    assert engine.image_states(bucket_key_of(bucket)) == {}
 
 
 def test_accept_paired_to_a_foreign_subject_record_refuses(
@@ -342,7 +348,9 @@ def test_accept_with_an_out_of_vocabulary_value_refuses_with_nothing_written(
     client: TestClient, tmp_path: Path,
 ) -> None:
     """An unpaired accept's ``class_name`` is checked against the bucket's own vocabulary before
-    anything is written: a value the id_map never declares refuses, leaving the GT file untouched."""
+    anything is written: a value the id_map never declares refuses, leaving the GT file untouched,
+    and neither the engine's verdict store nor its coverage entry for this image is touched
+    either, the way the ordering guard above does."""
     dataset_root = tmp_path / "data"
     img = _image(dataset_root)
     staged = _stage_classified_prediction(dataset_root, value="healthy")
@@ -365,6 +373,11 @@ def test_accept_with_an_out_of_vocabulary_value_refuses_with_nothing_written(
     assert resp.status_code == 400
     assert "not a value this bucket's own id_map declares" in resp.json()["detail"]
     assert gt.read_bytes() == before
+    from tcip_annotation.review_engine import ReviewEngine
+    from tcip_mcp.prediction_buckets import bucket_key_of, review_state_dir_of
+
+    engine = ReviewEngine(str(review_state_dir_of(dataset_root)))
+    assert engine.image_states(bucket_key_of(bucket)) == {}
 
 
 def test_edit_under_a_classified_scope_with_an_in_vocabulary_value_replaces_geometry_and_value(
