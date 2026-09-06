@@ -1,8 +1,8 @@
 """Shared test-only trait fixture.
 
-``BUD_OPENING`` used to be a hardcoded builtin in ``tcip_mcp.traits`` that every trait-consuming
-test imported directly. There are no built-ins anymore;
-every trait is authored as a per-project ``.tcip/state/trait_specs/*.yml`` file, so it is
+``BUD_OPENING`` used to be a hardcoded builtin in ``tcip_mcp.traits`` that every
+trait-consuming test imported directly. There are no built-ins anymore; every trait is
+authored as a per-project ``.tcip/state/trait_specs/*.yml`` file, so it is
 registered only where that file actually exists. This module is that same value, reconstructed
 locally with neutral names (a mechanism fixture, not a crop's own trait) so the existing test suite
 keeps exercising trait-consuming code paths without depending on any specific project's config
