@@ -36,7 +36,7 @@ describe("useImageStatusHydrate", () => {
     });
     const bulk = vi
       .spyOn(classesApi, "setImageStatusBulk")
-      .mockResolvedValue({ status: "ok", n: 0, digest_stamped: [] });
+      .mockResolvedValue({ status: "ok", n: 0, digest_unstamped: [] });
 
     renderHook(() => useImageStatusHydrate(PARAMS));
 
@@ -56,7 +56,7 @@ describe("useImageStatusHydrate", () => {
     });
     const bulk = vi
       .spyOn(classesApi, "setImageStatusBulk")
-      .mockResolvedValue({ status: "ok", n: 1, digest_stamped: [] });
+      .mockResolvedValue({ status: "ok", n: 1, digest_unstamped: [] });
 
     renderHook(() => useImageStatusHydrate(PARAMS));
 
@@ -87,7 +87,7 @@ describe("useImageStatusHydrate", () => {
     vi.spyOn(classesApi, "setImageStatusBulk").mockResolvedValue({
       status: "ok",
       n: 0,
-      digest_stamped: [],
+      digest_unstamped: [],
     });
 
     renderHook(() => useImageStatusHydrate(PARAMS));
@@ -108,7 +108,7 @@ describe("useImageStatusHydrate", () => {
     vi.spyOn(classesApi, "setImageStatusBulk").mockResolvedValue({
       status: "ok",
       n: 0,
-      digest_stamped: [],
+      digest_unstamped: [],
     });
 
     renderHook(() => useImageStatusHydrate(params));
@@ -130,7 +130,7 @@ describe("useImageStatusHydrate", () => {
     vi.spyOn(classesApi, "setImageStatusBulk").mockResolvedValue({
       status: "ok",
       n: 0,
-      digest_stamped: [],
+      digest_unstamped: [],
     });
 
     renderHook(() => useImageStatusHydrate(PARAMS));

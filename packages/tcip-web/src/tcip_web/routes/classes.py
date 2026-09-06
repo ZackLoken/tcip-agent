@@ -377,7 +377,7 @@ def set_image_status_bulk(payload: ImageStatusBulkPayload) -> dict:
             "gui_set_image_status_bulk",
             {"statuses": applied, "subject": payload.subject, "date": payload.date},
         )
-    return {"status": "ok", "n": len(payload.statuses), "digest_stamped": not_stamped}
+    return {"status": "ok", "n": len(payload.statuses), "digest_unstamped": not_stamped}
 
 
 class DerivePayload(BaseModel):
