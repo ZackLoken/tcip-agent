@@ -607,10 +607,11 @@ def process_project_root(
     changed_count = 0
     unchanged_count = 0
     if not (root / ".tcip").is_dir():
-        return ([f"{root}: refused, no .tcip directory found; not a project root"], True)
+        return ([f"{root}: refused, no .tcip directory found; not a project root; no summary "
+                 "applies"], True)
     datasets = read_datasets(root)
     if not datasets:
-        return ([f"{root}: no registered datasets"], False)
+        return ([f"{root}: no registered datasets; no summary applies"], False)
     for entry in datasets:
         dataset_root = dataset_entry_path(root, entry)
         conformed_id_maps: list[dict] = []
@@ -667,17 +668,26 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
         for line in outcomes:
             print(line)
 
+    bucket_changed_count = 0
+    bucket_unchanged_count = 0
     for i, bucket_dir in enumerate(args.bucket):
         bucket_dir = bucket_dir.resolve()
         like_dir = args.like[i].resolve() if args.like else None
         # The audit entry for a changed bucket is written inside conform_bucket itself.
-        outcome, this_refused, _id_map, _changed = conform_bucket(
+        outcome, this_refused, _id_map, changed = conform_bucket(
             bucket_dir, root=None, plan=args.plan, like_dir=like_dir,
             operator_subject=args.subject, operator_attribute=args.attribute, is_bare_named=True,
         )
         print(f"{bucket_dir}: {outcome}")
+        if changed:
+            bucket_changed_count += 1
+        else:
+            bucket_unchanged_count += 1
         if this_refused:
             refused_any = True
+    if args.bucket:
+        print(f"--bucket: {bucket_changed_count} bucket(s) changed, "
+              f"{bucket_unchanged_count} left as they were")
 
     return 2 if refused_any else 0
 

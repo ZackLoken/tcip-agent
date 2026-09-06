@@ -1015,3 +1015,51 @@ def test_bucket_dirs_under_agrees_with_the_shared_walk_over_a_dot_prefixed_date_
     assert set(found) == {
         d for d in shared if module.is_bucket_name(d.name) and module._looks_like_bucket(d)
     }
+
+
+def test_process_project_root_early_returns_say_no_summary_applies(tmp_path):
+    """``process_project_root``'s two early returns (no ``.tcip``, no registered datasets) return
+    before the changed/unchanged summary line every other path appends; each says so rather than
+    leaving the summary's absence unstated."""
+    module = _load_script()
+    bind_default()
+
+    no_tcip_outcomes, no_tcip_refused = module.process_project_root(
+        tmp_path / "not_a_project", plan=False, operator_subject=None, operator_attribute=None)
+    assert no_tcip_refused is True
+    assert any("no summary applies" in o for o in no_tcip_outcomes), no_tcip_outcomes
+
+    project = tmp_path / "project"
+    (project / ".tcip").mkdir(parents=True)
+    no_datasets_outcomes, no_datasets_refused = module.process_project_root(
+        project, plan=False, operator_subject=None, operator_attribute=None)
+    assert no_datasets_refused is False
+    assert any("no summary applies" in o for o in no_datasets_outcomes), no_datasets_outcomes
+
+
+def test_main_prints_a_bucket_changed_unchanged_summary_for_the_bucket_path(tmp_path, capsys):
+    """``main``'s ``--bucket`` loop has the same ``changed`` value ``process_project_root``'s own
+    walk already summarizes; it must print the same kind of summary rather than discarding it."""
+    bind_default()
+    module = _load_script()
+    dataset_root = tmp_path / "dataset"
+    scoped = _scoped_like_bucket(dataset_root, id_map=VALUE_ID_MAP, date="source")
+
+    bare_copy = tmp_path / "hand_split" / "calibration"
+    _write_doc(bare_copy, "imgA", [Annotation(subject="healthy", geometry=BBox(0, 0, 10, 10))])
+
+    already_scoped = tmp_path / "hand_split" / "already_scoped"
+    _write_doc(already_scoped, "imgB",
+              [Annotation(subject=SUBJECT, geometry=BBox(0, 0, 10, 10),
+                         attributes={ATTRIBUTE: "healthy"})])
+    _write_stamp(already_scoped, _base_stamp(id_map=VALUE_ID_MAP, subject=SUBJECT,
+                                             attribute=ATTRIBUTE))
+
+    exit_code = module.main([
+        "--bucket", str(bare_copy), "--like", str(scoped),
+        "--bucket", str(already_scoped), "--like", str(scoped),
+    ])
+
+    out = capsys.readouterr().out
+    assert exit_code == 0
+    assert "--bucket: 1 bucket(s) changed, 1 left as they were" in out
