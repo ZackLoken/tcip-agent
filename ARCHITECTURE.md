@@ -25,13 +25,13 @@ Sections:
 
 ## Module ownership and dependency graph
 
-Source: the module inventory `tools/build_module_inventory.py` produces, run at HEAD 05b8d1c4.
+Source: the module inventory `tools/build_module_inventory.py` produces, run at HEAD 77bfa24d.
 Every count in this section is read from that regenerated inventory, not from any earlier
 snapshot; `tools/check_architecture_doc.py --inventory-json <path>` re-runs the same generator
 and cross-checks its counts against this document's tables, this table's own module and line
 totals included.
 
-HEAD 05b8d1c4 has 426 modules across the six scanned roots (136257 total lines):
+HEAD 77bfa24d has 426 modules across the six scanned roots (136257 total lines):
 
 | Package (root) | Modules | Lines |
 |---|---|---|
