@@ -838,6 +838,10 @@ def _check_stamp_claim(
     claim (:data:`_CLAIM_KEYS` does not carry it), so a stamp's scope can still be edited by the
     conform script without flooring a sealed count claim.
 
+    Both rails above hold only at :func:`write_sidecar` and :func:`update_sidecar`, the two
+    functions that call this one: a raw store write straight to a key from :func:`sidecar_key`
+    bypasses every check here. That is the seam's accepted limit, not a gap this rail closes.
+
     A validated stamp also names the record it was earned from and the trait it was earned for.
     Neither is defaultable: a pointer this writer filled in would point at nothing, and a trait it
     guessed would be a claim nobody made. Both rails are writer-side and close nothing on their own,
@@ -909,7 +913,7 @@ def write_sidecar(pred_dir: str | Path, stamp: dict, document: str = "operating_
 
     A stamp is assembled by its producer, and ``operating_point_stamp`` carries a producer's
     own extra fields through ``**fields``, so what it holds is checked here, where every
-    sidecar write passes, rather than at each producer.
+    write through this seam passes, rather than at each producer.
     """
     check_json_value(stamp, path="stamp")
     _check_stamp_claim(stamp, document, pred_dir)
@@ -1084,9 +1088,16 @@ declaration; a new producer addition is admitted by declaring it here, not by th
 accepting whatever a caller assembled."""
 
 
-def read_operating_point_sidecar(pred_dir: str | Path) -> dict | None:
-    """The bucket's ``operating_point.json`` stamp, or ``None`` if absent/unreadable (never raises)."""
-    return _read_sidecar(pred_dir, "operating_point")
+def read_operating_point_sidecar(pred_dir: str | Path, *, strict: bool = False) -> dict | None:
+    """The bucket's ``operating_point.json`` stamp, or ``None`` if absent (or unreadable, at the
+    default ``strict=False``, which never raises).
+
+    ``strict=True`` propagates the seam's own decode error (``StoreError``, covering
+    ``DecodeError``/``SchemaVersionRefused``) instead of folding it into ``None``, the same
+    distinction :func:`_read_sidecar` documents: a caller that must tell an absent stamp from one
+    that will not decode, such as the review-promotion route, cannot read the second as the first.
+    """
+    return _read_sidecar(pred_dir, "operating_point", strict=strict)
 
 
 @dataclass(frozen=True)
@@ -1105,21 +1116,15 @@ class BucketScope:
         return self.attribute is not None
 
 
-def bucket_scope(pred_dir: str | Path) -> BucketScope | None:
-    """A prediction bucket's own recorded scope, or ``None`` for a bucket with no stamp at all.
+def scope_of_stamp(stamp: dict, pred_dir: str | Path) -> BucketScope:
+    """The ``(subject, attribute)`` pair an already-read stamp body records, or the refusal.
 
-    ``None`` means a bare directory (a staged bucket, a hand-split copy, a directory under no
-    producer's own layout): its records are read under the caller's own statement, never as a
-    proven detector bucket. A stamp that decodes but carries no usable ``(subject, attribute)``
-    pair raises :class:`StampScopeUnstated`, naming the conform script; a stamp that will not
-    decode at all propagates the seam's own error (the strict read, :func:`_read_sidecar`). Both
-    are refusals rather than a bare-directory read: an undecodable or pre-scope classified stamp
-    read as a bare directory would let its value-keyed records be reviewed as object classes, the
-    laundering this function exists to remove.
+    The pair rule :func:`bucket_scope` applies once its own strict read has returned a stamp:
+    split out so a caller that already holds the stamp body (the review-promotion route, which
+    reads it once for several purposes) checks the same rule without a second read. Raises
+    :class:`StampScopeUnstated` for a stamp carrying no usable pair, naming the conform script,
+    the same refusal :func:`bucket_scope` raises for that case.
     """
-    stamp = _read_sidecar(pred_dir, "operating_point", strict=True)
-    if stamp is None:
-        return None
     if "subject" not in stamp or "attribute" not in stamp:
         raise StampScopeUnstated(
             f"{pred_dir}: operating_point.json carries no subject/attribute pair. Run "
@@ -1134,6 +1139,25 @@ def bucket_scope(pred_dir: str | Path) -> BucketScope | None:
             "Run tcip repair-classified-predictions over this bucket."
         )
     return BucketScope(subject=subject, attribute=attribute)
+
+
+def bucket_scope(pred_dir: str | Path) -> BucketScope | None:
+    """A prediction bucket's own recorded scope, or ``None`` for a bucket with no stamp at all.
+
+    ``None`` means a bare directory (a staged bucket, a hand-split copy, a directory under no
+    producer's own layout): its records are read under the caller's own statement, never as a
+    proven detector bucket. A stamp that decodes but carries no usable ``(subject, attribute)``
+    pair raises :class:`StampScopeUnstated` (:func:`scope_of_stamp`, the pair rule this function
+    applies over its own read), naming the conform script; a stamp that will not decode at all
+    propagates the seam's own error (the strict read, :func:`_read_sidecar`). Both are refusals
+    rather than a bare-directory read: an undecodable or pre-scope classified stamp read as a bare
+    directory would let its value-keyed records be reviewed as object classes, the laundering this
+    function exists to remove.
+    """
+    stamp = _read_sidecar(pred_dir, "operating_point", strict=True)
+    if stamp is None:
+        return None
+    return scope_of_stamp(stamp, pred_dir)
 
 
 def read_classifier_operating_point_sidecar(pred_dir: str | Path) -> dict | None:
