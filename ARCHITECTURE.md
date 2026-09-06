@@ -25,17 +25,17 @@ Sections:
 
 ## Module ownership and dependency graph
 
-Source: the module inventory `tools/build_module_inventory.py` produces, run at HEAD 6c60a047.
+Source: the module inventory `tools/build_module_inventory.py` produces, run at HEAD ef33929e.
 Every count in this section is read from that regenerated inventory, not from any earlier
 snapshot; `tools/check_architecture_doc.py --inventory-json <path>` re-runs the same generator
 and cross-checks its counts against this document's tables, this table's own module and line
 totals included.
 
-HEAD 6c60a047 has 423 modules across the six scanned roots (133943 total lines):
+HEAD ef33929e has 423 modules across the six scanned roots (133982 total lines):
 
 | Package (root) | Modules | Lines |
 |---|---|---|
-| tcip-mcp | 134 | 60261 |
+| tcip-mcp | 134 | 60300 |
 | tcip-annotation | 12 | 4299 |
 | tcip-web | 39 | 13261 |
 | tcip-store | 13 | 5233 |
@@ -730,7 +730,7 @@ Docstring is the function's docstring first line, verbatim.
 | tool | line | audited | docstring first line |
 |---|---|---|---|
 | `materialize_review_dataset` | `feedback_tools.py:167` | yes | Build a curated detection dataset from human review verdicts. |
-| `prioritize_review_queue` | `feedback_tools.py:386` | yes | Rank un-reviewed images by active-learning informativeness for the next review batch. |
+| `prioritize_review_queue` | `feedback_tools.py:394` | yes | Rank un-reviewed images by active-learning informativeness for the next review batch. |
 
 ### gui_tools.py (2 tools)
 
