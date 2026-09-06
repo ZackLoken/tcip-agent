@@ -674,8 +674,6 @@ def deliver_phenology_milestones(
     predictions_by_date: dict[str, str],
     output_csv_path: str,
     classifier_pred_dirs: list[str] | None = None,
-    operating_point_conf: float | None = None,
-    operating_point_validated: str | None = None,
 ) -> dict:
     """Per-plant phenology milestones from classified predictions + a plant mapping.
 
@@ -710,16 +708,12 @@ def deliver_phenology_milestones(
             (``classifier_operating_point.json``, written by ``calibrate_classifier_operating_point``)
 , reconciled from disk, never trusted from a caller-asserted string. ``None``
             or a bucket with no such stamp floors the classifier dimension to unvalidated.
-        operating_point_conf: The count operating point (conf) the predictions were produced
-            at, stamped into the CSV; the on-disk sidecar value is preferred when present.
-        operating_point_validated: An optional caller assertion of the count operating point's
-            validity. It only *lowers* the result: the real state is read from each bucket's
-            ``operating_point.json`` and floored against this (a missing/unvalidated sidecar
-            floors the curve to ``false``). Must reconcile to a reference
-            ``accepted_references("annotations")`` recognizes to deliver: this tool takes no
-            acknowledgement, so an unvalidated dimension always refuses here. Only the Results
-            tab's ``export_csv`` route can deliver this trait's ``state_crossing_dates`` unvalidated,
-            through a breeder's own acknowledged act.
+
+    The count operating point's confidence and validity are both read from each prediction
+    bucket's own ``operating_point.json``, never from a caller: this tool takes no
+    acknowledgement, so an unvalidated dimension always refuses here. Only the Results tab's
+    ``export_csv`` route can deliver this trait's ``state_crossing_dates`` unvalidated, through a
+    breeder's own acknowledged act.
 
     A bucket produced by a tiled run also gates on its ``tile_size``: the tile edge scales the
     per-image counts the positive fraction is built from, so a run with no persisted training
