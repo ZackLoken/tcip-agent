@@ -30,7 +30,6 @@ from tcip_store.file_backend import RootedFileLocator
 
 from tcip_mcp.server import mcp
 from tcip_mcp.audit import audited
-from tcip_mcp.pipelines.resolution import DEFAULT_CONF, DEFAULT_NMS_IOU
 
 logger = logging.getLogger(__name__)
 
@@ -3123,13 +3122,13 @@ def evaluate_model(
     images_dir: str,
     labels_dir: str = "",
     task: str = "detection",
-    conf_threshold: float = DEFAULT_CONF,  # report/select at the ship point
+    conf_threshold: float | None = None,  # report/select at the ship point
     iou_threshold: float = 0.5,
     iou_type: str | None = None,
     max_dets: int | None = None,
     tiling: dict | None = None,
     use_tiled_inference: bool = False,
-    global_nms_iou: float = DEFAULT_NMS_IOU,
+    global_nms_iou: float | None = None,
     postprocess: str = "nms",
     trait: str | None = None,
     subject: str | None = None,
@@ -3169,7 +3168,9 @@ def evaluate_model(
         labels_dir: Labels dir (detection/instance_seg), masks dir (semantic_seg), or the GT CSV
             path (classification/ordinal/regression, one row per image stem).
         task: Task type.
-        conf_threshold: Operating confidence for P/R/F1.
+        conf_threshold: Operating confidence for P/R/F1. ``None`` (default) resolves to the
+            platform default (``DEFAULT_CONF``) on both regimes; an explicit value is always
+            honored verbatim, on both, a stated value equal to the default included.
         iou_threshold: Operating IoU (on COCOeval's grid; 0.5 -> index 0).
         iou_type: 'bbox' or 'segm'. Default (None) auto-resolves from the task, 'segm' for
             instance_seg, 'bbox' otherwise, so a mask model isn't silently scored as boxes.
@@ -3184,7 +3185,9 @@ def evaluate_model(
             tile-level eval. None + a run id reuses the run's training tiling; None + a
             checkpoint path stays untiled.
         use_tiled_inference: Score the delivery regime (full-frame via tiled inference).
-        global_nms_iou: Cross-tile global NMS IoU threshold (tiled paths only).
+        global_nms_iou: Cross-tile global NMS IoU threshold (tiled paths only). ``None``
+            (default) resolves to the platform default (``DEFAULT_NMS_IOU``); an explicit value
+            is always honored verbatim.
         postprocess: Cross-tile merge, "nms" suppresses overlaps, "nmm" unions boxes split
             across a tile seam.
         trait: When set, the trait's derived localization criterion (traits.py, e.g. a count
@@ -3221,7 +3224,12 @@ def evaluate_model(
         run_full_frame_evaluation, run_test_evaluation,
     )
     from tcip_mcp.pipelines.data.datasets import build_dataset
-    from tcip_mcp.pipelines.resolution import DEFAULT_MAX_DETS
+    from tcip_mcp.pipelines.resolution import applied_operating_point
+
+    # The tile-level/single-pass paths apply this directly below; the full-frame path resolves
+    # its own sentinels internally, so its own caller passes the raw arguments through unchanged.
+    applied_conf, _applied_nms_iou, _applied_max_dets = applied_operating_point(
+        conf_threshold, global_nms_iou, None)
 
     ckpt = run_id_or_ckpt
     run = None
@@ -3285,12 +3293,10 @@ def evaluate_model(
                              "read under the same one."}
         date = cal_date
 
-    # Delivery-grade full-frame path (tiled inference + full-frame GT matching).
+    # Delivery-grade full-frame path: conf_threshold/global_nms_iou/max_dets pass through exactly
+    # as given, run_full_frame_evaluation resolves its own sentinels (a direct caller's record).
     if use_tiled_inference and task == "detection":
         tcfg = tiling or run_tiling or {}
-        # An explicit caller max_dets is honored verbatim (no rescuing sentinel);
-        # None resolves to the delivery-grade default (dense full-frame scenes aren't truncated).
-        resolved_max_dets = DEFAULT_MAX_DETS if max_dets is None else max_dets
         # tile_size/overlap pass through as None-if-absent: run_full_frame_evaluation itself
         # resolves them from persisted training geometry (or refuses), never this wrapper fabricating.
         from tcip_annotation.json_io import UnreadableLabelDocument
@@ -3302,7 +3308,7 @@ def evaluate_model(
                 conf_threshold=conf_threshold, iou_threshold=iou_threshold,
                 tile_size=tcfg.get("tile_size"), overlap=tcfg.get("overlap"),
                 global_nms_iou=global_nms_iou, postprocess=postprocess,
-                max_dets=resolved_max_dets, trait=trait, date=date,
+                max_dets=max_dets, trait=trait, date=date,
             )
         except (ValueError, UnreadableLabelDocument) as exc:
             return {"error": str(exc)}
@@ -3351,7 +3357,7 @@ def evaluate_model(
     resolved_max_dets = 100 if max_dets is None else max_dets
     return run_test_evaluation(
         checkpoint, loader, device, task, str(Path(ckpt).parent),
-        conf_threshold=conf_threshold, iou_threshold=iou_threshold,
+        conf_threshold=applied_conf, iou_threshold=iou_threshold,
         iou_type=iou_type, max_dets=resolved_max_dets, tiling=tiling, trait=trait,
         split_manifest_dir=split_manifest_dir,
         evaluated_stem_count=evaluated_stem_count,
