@@ -134,8 +134,9 @@ export const classesApi = {
     annotations_dir?: string | null,
     user?: string,
   ) =>
-    // digest_stamped names the statuses passed that were left unstamped, empty once every one lands.
-    postJson<{ status: string; n: number; digest_stamped: string[] }>(
+    // digest_unstamped names the statuses passed whose digest stamp did not land, empty once
+    // every one does.
+    postJson<{ status: string; n: number; digest_unstamped: string[] }>(
       ROUTES.postClassesImageStatusBulk,
       { project_root, statuses, subject, date, dataset_root, annotations_dir, user },
     ),
