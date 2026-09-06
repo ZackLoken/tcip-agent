@@ -157,12 +157,14 @@ def test_rgb_nested_dataset_fingerprints_byte_identically_before_and_after_the_e
     """The images term's extension set widened from a photographic-only set to
     ``image_utils.IMAGE_EXTS`` (adding ``.heic``/``.npy``/``.npz``/``.bandgroup``); ``.jpg`` was a
     member of both the old and the new set, so an RGB-only dataset under ``images/<date>/`` walks
-    the identical file list and hashes to the identical value either side of the change.
+    the identical file list either side of that change.
 
     ``_images_term`` hashes each file's raw bytes, never decoded pixels, so the image is written
     as fixed literal bytes here rather than through Pillow's JPEG encoder: the literal below then
     depends on nothing but those fixed bytes and the label/registry writers below, not on
-    Pillow/libjpeg's own encoder version or settings.
+    Pillow/libjpeg's own encoder version or settings. The golden pins the current implementation's
+    own determinism, not a byte anchor carried over from an earlier revision: it was derived by
+    running ``dataset_fingerprint`` once against these fixed inputs and recording what it returned.
     """
     date = "2026-02-11"
     (tmp_path / "images" / date).mkdir(parents=True)
