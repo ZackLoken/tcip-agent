@@ -25,19 +25,19 @@ Sections:
 
 ## Module ownership and dependency graph
 
-Source: the module inventory `tools/build_module_inventory.py` produces, run at HEAD b60982aa.
+Source: the module inventory `tools/build_module_inventory.py` produces, run at HEAD dcde0973.
 Every count in this section is read from that regenerated inventory, not from any earlier
 snapshot; `tools/check_architecture_doc.py --inventory-json <path>` re-runs the same generator
 and cross-checks its counts against this document's tables, this table's own module and line
 totals included.
 
-HEAD b60982aa has 423 modules across the six scanned roots (133852 total lines):
+HEAD dcde0973 has 423 modules across the six scanned roots (133847 total lines):
 
 | Package (root) | Modules | Lines |
 |---|---|---|
 | tcip-mcp | 134 | 60261 |
 | tcip-annotation | 12 | 4299 |
-| tcip-web | 39 | 13264 |
+| tcip-web | 39 | 13259 |
 | tcip-store | 13 | 5139 |
 | tcip-web-frontend | 209 | 46200 |
 | tools | 16 | 4689 |
@@ -513,7 +513,7 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | tools/verify_skill_tools.py | Guardrail: hold every tool name in agent-facing prose to the registry. | 3 | 0 |
 | tools/verify_skill_traits.py | Guardrail: flag every trait-like token in a crop/domain knowledge document that is not in crops.yml. | 1 | 0 |
 
-## Package-level dependency rules holding at HEAD 2670cebf
+## Package-level dependency rules holding at HEAD dcde0973
 
 The following sentences are checked against every in-repo Python import edge in the regenerated module inventory (an edge is counted only when both the importing file and the imported file resolve to a file inside this repo; stdlib and third-party imports are excluded by `build_module_inventory.py`, see docstring at `tools/build_module_inventory.py:9-20`).
 
