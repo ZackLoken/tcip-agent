@@ -163,7 +163,10 @@ dataset-scoped audit-log line files under the buckets' own shared dataset root r
 unaffected by a caller's project root.
 
 - `deliver_phenology_milestones` and the web `/export_csv` phenology branch both reconcile the positive-state
-  classifier (from `classifier_operating_point.json`, see `calibrate_classifier_operating_point`)
+  classifier (from `classifier_operating_point.json`, see `calibrate_classifier_operating_point`,
+  which holds a prediction bucket to its own recorded `id_map` when it has one and, for a bucket
+  that records none, to the registry its ground truth's own dataset root carries, refusing a split
+  under no such root)
   and the count operating point, then hand the reconciled state to `write_phenology_csv` /
   `write_phenology_curve_csv` (`phenology.py`), the one writer both doors share: it runs the gate
   itself, composes every provenance cell and records the delivery event, so a CSV from either door
