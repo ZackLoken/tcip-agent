@@ -584,7 +584,7 @@ def image_status_digest_path(dataset_root: str | Path) -> Path:
     one subject/date, so a bucket-wide stamp would be silently overwritten by the next unrelated
     write to that bucket, un-quarantining a stale confirmation nobody re-reviewed. Lets a reader tell
     a confirmation made under a since-changed attribute schema from one still valid, see
-    ``confirmed_negative_names``'s quarantine logic. Absence of a stamp is not evidence of staleness
+    ``stale_finished_names``'s quarantine logic. Absence of a stamp is not evidence of staleness
     (a rail must admit valid work, not only reject it): only a stamp that positively disagrees with
     the current schema is grounds to quarantine that one image.
     """
@@ -876,6 +876,14 @@ image, and they differ on whether anything of the subject is on it. Anything rea
 as a confirmed negative trains populated images as empty.
 """
 
+FINISHED_STATUSES = ("complete", CONFIRMED_NEGATIVE)
+"""The two statuses a human's own confirmation ends on, as opposed to
+:func:`status_confirmations`'s wider sense of every stored record: a ``partial`` or
+``unannotated`` status is not a person's assertion about the subject. ``is_finished_status`` is
+the membership predicate; the same pair the frontend declares as ``FINISHED_STATUSES`` in
+``api/classes.ts``, held equal to this one by ``tests/test_frontend_dataset_vocabulary.py``.
+"""
+
 
 def derive_status(*, completed: bool, has_content: bool) -> str:
     """The status one image holds for one subject, from the human's Complete and what is labeled.
@@ -906,6 +914,15 @@ def is_confirmed_negative(status: object) -> bool:
     One predicate, so no reader can widen it to include ``"complete"``, which is its opposite.
     """
     return status == CONFIRMED_NEGATIVE
+
+
+def is_finished_status(status: object) -> bool:
+    """Whether a stored status is one of the two a human's own confirmation ends on (``complete``
+    or ``negative``), as opposed to :func:`status_confirmations`'s wider sense of every stored
+    record. A ``partial`` or ``unannotated`` status is not a person's assertion and is never
+    finished.
+    """
+    return status in FINISHED_STATUSES
 
 
 def confirmed_negative_names_any_subject(by_bucket: Mapping[str, Mapping[str, str]]) -> set[str]:
